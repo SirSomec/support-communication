@@ -61,7 +61,7 @@ const reportBars = [
   ["VK", 16]
 ];
 
-const initialTemplates = [
+export const initialTemplates = [
   {
     id: "delay",
     title: "Задержка доставки",
@@ -260,8 +260,10 @@ export function ClientsScreen({ conversations, onBack, onToast }) {
   );
 }
 
-export function TemplatesScreen({ onBack, onToast }) {
-  const [items, setItems] = useState(initialTemplates);
+export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange }) {
+  const [localItems, setLocalItems] = useState(initialTemplates);
+  const items = templates ?? localItems;
+  const setItems = onTemplatesChange ?? setLocalItems;
   const [selectedId, setSelectedId] = useState("delay");
   const [query, setQuery] = useState("");
   const selected = items.find((template) => template.id === selectedId) ?? items[0];

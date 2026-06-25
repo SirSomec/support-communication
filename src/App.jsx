@@ -37,7 +37,7 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { ClientsScreen, PanelScreen, ReportsScreen, SettingsScreen, TemplatesScreen } from "./sections.jsx";
+import { ClientsScreen, PanelScreen, ReportsScreen, SettingsScreen, TemplatesScreen, initialTemplates } from "./sections.jsx";
 
 const conversations = [
   {
@@ -213,12 +213,6 @@ const navItems = [
   { key: "settings", label: "Настройки", icon: Settings }
 ];
 
-const templates = [
-  { title: "Задержка доставки", text: "Понимаю ожидание. Проверю статус заказа и вернусь с точным временем доставки." },
-  { title: "Передан курьеру", text: "Заказ передан курьеру и будет доставлен сегодня до 18:00." },
-  { title: "Запрос телефона", text: "Напишите, пожалуйста, номер телефона, указанный в заказе." }
-];
-
 const topicOptions = [
   "Доставка / Статус заказа",
   "Доставка / Адрес",
@@ -236,6 +230,8 @@ function App() {
   const [composeMode, setComposeMode] = useState("reply");
   const [draft, setDraft] = useState("");
   const [isOutboundOpen, setOutboundOpen] = useState(false);
+  const [templateLibrary, setTemplateLibrary] = useState(initialTemplates);
+  const [saveTemplateDraft, setSaveTemplateDraft] = useState(null);
   const [topics, setTopics] = useState(() =>
     Object.fromEntries(conversations.map((conversation) => [conversation.id, conversation.topic]))
   );
@@ -296,6 +292,34 @@ function App() {
     setToast(`Исходящий диалог создан: ${outbound.phone}`);
   }
 
+  function handleOpenTemplateSave() {
+    if (!draft.trim()) {
+      setToast("Введите текст ответа перед сохранением шаблона.");
+      return;
+    }
+
+    setSaveTemplateDraft({
+      title: selectedTopic ? selectedTopic.split(" / ").at(-1) : "Новый шаблон",
+      scope: "Личный",
+      channel: selected.channel,
+      topic: selectedTopic || "Без тематики",
+      text: draft.trim()
+    });
+  }
+
+  function handleTemplateSave(template) {
+    const next = {
+      id: `chat-template-${Date.now()}`,
+      usage: 0,
+      updated: "только что",
+      ...template
+    };
+
+    setTemplateLibrary((current) => [next, ...current]);
+    setSaveTemplateDraft(null);
+    setToast(`Шаблон сохранен: ${next.title}`);
+  }
+
   function handleClose() {
     if (!selectedTopic) {
       setToast("Для закрытия диалога выберите тематику.");
@@ -346,6 +370,8 @@ function App() {
               draft={draft}
               setDraft={setDraft}
               onSend={handleSend}
+              templates={templateLibrary}
+              onSaveTemplate={handleOpenTemplateSave}
               isClosed={isClosed}
             />
             <CustomerPanel
@@ -354,6 +380,7 @@ function App() {
               onTopic={(value) => setTopics((current) => ({ ...current, [selected.id]: value }))}
               draft={draft}
               setDraft={setDraft}
+              templates={templateLibrary}
               onClose={handleClose}
               isClosed={isClosed}
             />
@@ -363,6 +390,8 @@ function App() {
             section={section}
             onBack={() => setSection("dialogs")}
             conversations={conversationItems}
+            templates={templateLibrary}
+            onTemplatesChange={setTemplateLibrary}
             onToast={setToast}
           />
         )}
@@ -373,6 +402,13 @@ function App() {
           onClose={() => setOutboundOpen(false)}
           onCreate={handleOutboundCreate}
           onToast={setToast}
+        />
+      ) : null}
+      {saveTemplateDraft ? (
+        <SaveTemplateDialog
+          draft={saveTemplateDraft}
+          onClose={() => setSaveTemplateDraft(null)}
+          onSave={handleTemplateSave}
         />
       ) : null}
       {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
@@ -544,6 +580,80 @@ function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast }) {
   );
 }
 
+function SaveTemplateDialog({ draft, onClose, onSave }) {
+  const [form, setForm] = useState(draft);
+
+  function update(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleSave() {
+    onSave({
+      ...form,
+      title: form.title.trim() || "Новый шаблон",
+      text: form.text.trim()
+    });
+  }
+
+  return (
+    <div className="template-save-overlay" role="presentation">
+      <section className="template-save-panel" aria-label="Сохранить как шаблон" aria-modal="true" role="dialog">
+        <header>
+          <div>
+            <span>Личная база оператора</span>
+            <h2>Сохранить как шаблон</h2>
+          </div>
+          <button aria-label="Закрыть" className="icon-button" onClick={onClose} title="Закрыть" type="button">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="template-save-grid">
+          <label>
+            <span>Название</span>
+            <input value={form.title} onChange={(event) => update("title", event.target.value)} />
+          </label>
+          <label>
+            <span>Доступ</span>
+            <select value={form.scope} onChange={(event) => update("scope", event.target.value)}>
+              {["Личный", "Командный", "Глобальный"].map((option) => <option key={option}>{option}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Канал</span>
+            <select value={form.channel} onChange={(event) => update("channel", event.target.value)}>
+              {["Все", "SDK", "Telegram", "MAX", "VK"].map((option) => <option key={option}>{option}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Тематика</span>
+            <input value={form.topic} onChange={(event) => update("topic", event.target.value)} />
+          </label>
+        </div>
+
+        <label className="template-save-text">
+          <span>Текст шаблона</span>
+          <textarea value={form.text} onChange={(event) => update("text", event.target.value)} />
+        </label>
+
+        <div className="variable-row compact">
+          {["{client_name}", "{operator_name}", "{ticket_id}", "{topic}"].map((variable) => (
+            <button key={variable} onClick={() => update("text", `${form.text} ${variable}`.trim())} type="button">{variable}</button>
+          ))}
+        </div>
+
+        <footer>
+          <button onClick={onClose} type="button">Отмена</button>
+          <button className="primary-action" disabled={!form.text.trim()} onClick={handleSave} type="button">
+            <BookOpen size={17} />
+            Сохранить шаблон
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function ConversationList({ conversations, allConversations, selectedId, onSelect, filter, onFilter, query, onQuery, topics, closedIds }) {
   const counters = {
     waiting: allConversations.filter((item) => ["waiting", "breached"].includes(item.status)).length,
@@ -619,7 +729,7 @@ function Avatar({ conversation }) {
   return <span className={`avatar avatar-fallback ${conversation.channel.toLowerCase()}`}>{conversation.initials}</span>;
 }
 
-function ChatPane({ conversation, topic, onTopic, composeMode, setComposeMode, draft, setDraft, onSend, isClosed }) {
+function ChatPane({ conversation, topic, onTopic, composeMode, setComposeMode, draft, setDraft, onSend, templates, onSaveTemplate, isClosed }) {
   return (
     <section className="chat-pane" aria-label="Окно чата">
       <header className="chat-header">
@@ -658,6 +768,8 @@ function ChatPane({ conversation, topic, onTopic, composeMode, setComposeMode, d
         draft={draft}
         setDraft={setDraft}
         onSend={onSend}
+        templates={templates}
+        onSaveTemplate={onSaveTemplate}
         disabled={isClosed}
       />
     </section>
@@ -695,7 +807,9 @@ function MessageBubble({ message }) {
   );
 }
 
-function Composer({ mode, setMode, draft, setDraft, onSend, disabled }) {
+function Composer({ mode, setMode, draft, setDraft, onSend, templates, onSaveTemplate, disabled }) {
+  const primaryTemplate = templates[0];
+
   return (
     <section className={`composer ${mode === "internal" ? "internal-mode" : ""}`}>
       <div className="composer-tabs">
@@ -707,7 +821,7 @@ function Composer({ mode, setMode, draft, setDraft, onSend, disabled }) {
           <Info size={17} />
           Внутренний комментарий
         </button>
-        <button onClick={() => setDraft(templates[0].text)} disabled={disabled}>
+        <button onClick={() => primaryTemplate && setDraft(primaryTemplate.text)} disabled={disabled || !primaryTemplate} type="button">
           <BookOpen size={17} />
           Шаблоны
         </button>
@@ -722,7 +836,7 @@ function Composer({ mode, setMode, draft, setDraft, onSend, disabled }) {
         <div className="composer-tools">
           <button aria-label="Прикрепить файл" disabled={disabled}><Paperclip size={18} /></button>
           <button aria-label="Добавить эмодзи" disabled={disabled}>☺</button>
-          <button aria-label="Сохранить как шаблон" disabled={disabled}><BookOpen size={18} /></button>
+          <button aria-label="Сохранить как шаблон" disabled={disabled} onClick={onSaveTemplate} title="Сохранить как шаблон" type="button"><BookOpen size={18} /></button>
           <button aria-label="ИИ-подсказка" disabled={disabled}><Sparkles size={18} /></button>
         </div>
         <button className="send-button" onClick={onSend} disabled={disabled}>
@@ -734,7 +848,7 @@ function Composer({ mode, setMode, draft, setDraft, onSend, disabled }) {
   );
 }
 
-function CustomerPanel({ conversation, topic, onTopic, setDraft, onClose, isClosed }) {
+function CustomerPanel({ conversation, topic, onTopic, setDraft, templates, onClose, isClosed }) {
   return (
     <aside className="customer-panel" aria-label="Карточка клиента">
       <PanelSection title="О клиенте" action={<button aria-label="Копировать"><Copy size={18} /></button>}>
@@ -775,11 +889,11 @@ function CustomerPanel({ conversation, topic, onTopic, setDraft, onClose, isClos
 
       <PanelSection title="Рекомендуемые шаблоны">
         <div className="template-list">
-          {templates.slice(0, 2).map((template) => (
-            <button key={template.title} onClick={() => setDraft(template.text)}>
+          {templates.slice(0, 3).map((template) => (
+            <button key={template.id} onClick={() => setDraft(template.text)}>
               <span>
                 <strong>{template.title}</strong>
-                <small>Ответ клиенту</small>
+                <small>{template.scope} · {template.channel}</small>
               </span>
               <b>Вставить</b>
             </button>
@@ -848,8 +962,8 @@ function InfoRow({ label, value, icon }) {
   );
 }
 
-function SectionPlaceholder({ section, onBack, conversations, onToast }) {
-  const screenProps = { onBack, conversations, onToast };
+function SectionPlaceholder({ section, onBack, conversations, templates, onTemplatesChange, onToast }) {
+  const screenProps = { onBack, conversations, templates, onTemplatesChange, onToast };
 
   if (section === "panel") {
     return <PanelScreen {...screenProps} />;

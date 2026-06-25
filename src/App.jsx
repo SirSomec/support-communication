@@ -55,6 +55,78 @@ const modalFocusableSelector = [
   "[tabindex]:not([tabindex='-1'])"
 ].join(",");
 
+const roleModes = ["Сотрудник", "Старший сотрудник", "Администратор"];
+
+const roleAccessProfiles = {
+  "Сотрудник": {
+    sections: ["dialogs", "clients", "templates"],
+    canOutbound: false,
+    canManageDialogs: false,
+    canViewSensitive: false,
+    canManageSettings: false,
+    canExportReports: false,
+    canRedistribute: false,
+    reason: "Доступно старшему сотруднику или администратору"
+  },
+  "Старший сотрудник": {
+    sections: ["dialogs", "panel", "clients", "templates", "visitors", "reports", "quality", "settings"],
+    canOutbound: true,
+    canManageDialogs: true,
+    canViewSensitive: true,
+    canManageSettings: false,
+    canExportReports: true,
+    canRedistribute: true,
+    reason: "Глобальные настройки доступны только администратору"
+  },
+  "Администратор": {
+    sections: navItems.map((item) => item.key),
+    canOutbound: true,
+    canManageDialogs: true,
+    canViewSensitive: true,
+    canManageSettings: true,
+    canExportReports: true,
+    canRedistribute: true,
+    reason: "Полный доступ"
+  }
+};
+
+const queueFilterDefaults = {
+  channel: "all",
+  topic: "all",
+  status: "all",
+  sort: "time",
+  onlyInternal: false
+};
+
+const statusLabels = {
+  active: "В работе",
+  waiting: "Ожидает оператора",
+  sla: "SLA риск",
+  breached: "SLA просрочен",
+  closed: "Закрыт"
+};
+
+const slaSortRank = {
+  danger: 0,
+  warn: 1,
+  hold: 2,
+  ok: 3,
+  closed: 4
+};
+
+function getConversationTimeValue(time) {
+  if (time === "сейчас") {
+    return 24 * 60;
+  }
+
+  const [hours, minutes] = String(time).split(":").map(Number);
+  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : 0;
+}
+
+function maskPhone(phone) {
+  return phone.replace(/(\+7)\s(\d{3})\s(\d{3})-(\d{2})-(\d{2})/, "$1 *** ***-**-$5");
+}
+
 function useModalA11y(onClose) {
   const panelRef = useRef(null);
 
@@ -112,8 +184,10 @@ function useModalA11y(onClose) {
 function App() {
   const [conversationItems, setConversationItems] = useState(conversations);
   const [section, setSection] = useState("dialogs");
+  const [roleMode, setRoleMode] = useState("Администратор");
   const [selectedId, setSelectedId] = useState("maria");
   const [filter, setFilter] = useState("mine");
+  const [queueFilters, setQueueFilters] = useState(queueFilterDefaults);
   const [query, setQuery] = useState("");
   const [composeMode, setComposeMode] = useState("reply");
   const [transcriptMode, setTranscriptMode] = useState("all");
@@ -128,24 +202,80 @@ function App() {
   const [toast, setToast] = useState("");
 
   const selected = conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0];
+  const access = roleAccessProfiles[roleMode];
   const selectedTopic = topics[selected.id] ?? "";
   const isClosed = closedIds.has(selected.id);
 
+  useEffect(() => {
+    if (!access.sections.includes(section)) {
+      setSection("dialogs");
+      setToast(`${roleMode}: ${access.reason}`);
+    }
+
+    if (!access.canOutbound && isOutboundOpen) {
+      setOutboundOpen(false);
+    }
+  }, [access, isOutboundOpen, roleMode, section]);
+
   const filtered = useMemo(() => {
-    return conversationItems.filter((conversation) => {
-      const matchesQuery = `${conversation.name} ${conversation.phone} ${conversation.preview} ${conversation.channel}`
-        .toLowerCase()
-        .includes(query.toLowerCase());
-      const matchesFilter =
-        filter === "mine" ||
-        (filter === "waiting" && ["waiting", "breached"].includes(conversation.status)) ||
-        (filter === "sla" && ["sla", "breached"].includes(conversation.status)) ||
-        (filter === "rescue" && (!topics[conversation.id] || conversation.slaTone === "danger")) ||
-        (filter === "quality" && conversation.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))) ||
-        filter === "all";
-      return matchesQuery && matchesFilter;
-    });
-  }, [conversationItems, filter, query, topics]);
+    return conversationItems
+      .filter((conversation) => {
+        const topic = topics[conversation.id] ?? "";
+        const hasInternalComment = conversation.messages.some((message) => message.type === "internal");
+        const matchesQuery = `${conversation.name} ${conversation.phone} ${conversation.preview} ${conversation.channel} ${topic} ${conversation.status}`
+          .toLowerCase()
+          .includes(query.toLowerCase());
+        const matchesFilter =
+          filter === "mine" ||
+          (filter === "waiting" && ["waiting", "breached"].includes(conversation.status)) ||
+          (filter === "sla" && ["sla", "breached"].includes(conversation.status)) ||
+          (filter === "rescue" && (!topic || conversation.slaTone === "danger")) ||
+          (filter === "quality" && conversation.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))) ||
+          filter === "all";
+        const matchesChannel = queueFilters.channel === "all" || conversation.channel === queueFilters.channel;
+        const matchesTopic =
+          queueFilters.topic === "all" ||
+          (queueFilters.topic === "none" && !topic) ||
+          topic === queueFilters.topic;
+        const matchesStatus = queueFilters.status === "all" || conversation.status === queueFilters.status;
+        const matchesInternal = !queueFilters.onlyInternal || hasInternalComment;
+
+        return matchesQuery && matchesFilter && matchesChannel && matchesTopic && matchesStatus && matchesInternal;
+      })
+      .sort((left, right) => {
+        if (queueFilters.sort === "sla") {
+          return (slaSortRank[left.slaTone] ?? 5) - (slaSortRank[right.slaTone] ?? 5);
+        }
+
+        if (queueFilters.sort === "status") {
+          return left.status.localeCompare(right.status, "ru");
+        }
+
+        if (queueFilters.sort === "channel") {
+          return left.channel.localeCompare(right.channel, "ru");
+        }
+
+        return getConversationTimeValue(right.time) - getConversationTimeValue(left.time);
+      });
+  }, [conversationItems, filter, query, queueFilters, topics]);
+
+  function handleQueueFilterChange(field, value) {
+    setQueueFilters((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleRoleModeChange(nextRole) {
+    setRoleMode(nextRole);
+    setToast(`Режим прав: ${nextRole}`);
+  }
+
+  function handleSectionSelect(nextSection) {
+    if (!access.sections.includes(nextSection)) {
+      setToast(`${roleMode}: ${access.reason}`);
+      return;
+    }
+
+    setSection(nextSection);
+  }
 
   function handleOutboundCreate(outbound) {
     const id = `outbound-${Date.now()}`;
@@ -215,6 +345,11 @@ function App() {
   }
 
   function handleDialogAction(action) {
+    if (!access.canManageDialogs) {
+      setToast(access.reason);
+      return;
+    }
+
     appendMessage(selected.id, {
       type: "event",
       text: `${action}: Иван П.`,
@@ -305,9 +440,21 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar active={section} onSelect={setSection} />
+      <Sidebar active={section} access={access} onSelect={handleSectionSelect} />
       <main className="workspace">
-        <TopBar onOutbound={() => setOutboundOpen(true)} />
+        <TopBar
+          access={access}
+          onOutbound={() => {
+            if (!access.canOutbound) {
+              setToast(access.reason);
+              return;
+            }
+
+            setOutboundOpen(true);
+          }}
+          onRoleMode={handleRoleModeChange}
+          roleMode={roleMode}
+        />
         {section === "dialogs" ? (
           <div className="cockpit">
             <ConversationList
@@ -317,6 +464,9 @@ function App() {
               onSelect={setSelectedId}
               filter={filter}
               onFilter={setFilter}
+              queueFilters={queueFilters}
+              onQueueFilterChange={handleQueueFilterChange}
+              onQueueFiltersReset={() => setQueueFilters(queueFilterDefaults)}
               query={query}
               onQuery={setQuery}
               topics={topics}
@@ -337,6 +487,7 @@ function App() {
               onSaveTemplate={handleOpenTemplateSave}
               onDialogAction={handleDialogAction}
               onCloseDialog={handleClose}
+              access={access}
               isClosed={isClosed}
             />
             <CustomerPanel
@@ -347,6 +498,7 @@ function App() {
               setDraft={setDraft}
               templates={templateLibrary}
               onClose={handleClose}
+              access={access}
               isClosed={isClosed}
             />
           </div>
@@ -358,6 +510,9 @@ function App() {
             templates={templateLibrary}
             onTemplatesChange={setTemplateLibrary}
             onToast={setToast}
+            access={access}
+            roleMode={roleMode}
+            onRoleMode={handleRoleModeChange}
           />
         )}
       </main>
@@ -381,26 +536,31 @@ function App() {
   );
 }
 
-function Sidebar({ active, onSelect }) {
+function Sidebar({ active, access, onSelect }) {
   return (
     <aside className="sidebar">
       <div className="brand-mark">
         <Headphones size={22} />
       </div>
       <nav className="nav-list" aria-label="Главная навигация">
-        {navItems.map(({ key, label, icon: Icon }) => (
-          <button
-            aria-label={label}
-            className={`nav-item ${active === key ? "active" : ""}`}
-            key={key}
-            onClick={() => onSelect(key)}
-            title={label}
-            type="button"
-          >
-            <Icon size={20} />
-            <span>{label}</span>
-          </button>
-        ))}
+        {navItems.map(({ key, label, icon: Icon }) => {
+          const isAllowed = access.sections.includes(key);
+
+          return (
+            <button
+              aria-label={isAllowed ? label : `${label}: ${access.reason}`}
+              className={`nav-item ${active === key ? "active" : ""}`}
+              disabled={!isAllowed}
+              key={key}
+              onClick={() => onSelect(key)}
+              title={isAllowed ? label : access.reason}
+              type="button"
+            >
+              <Icon size={20} />
+              <span>{label}</span>
+            </button>
+          );
+        })}
       </nav>
       <div className="operator-card">
         <img
@@ -417,7 +577,7 @@ function Sidebar({ active, onSelect }) {
   );
 }
 
-function TopBar({ onOutbound }) {
+function TopBar({ access, onOutbound, onRoleMode, roleMode }) {
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -431,6 +591,12 @@ function TopBar({ onOutbound }) {
           7 / 12 чатов
           <ChevronDown size={16} />
         </button>
+        <label className="role-switcher">
+          <ShieldCheck size={17} />
+          <select value={roleMode} onChange={(event) => onRoleMode(event.target.value)} aria-label="Режим проверки прав">
+            {roleModes.map((role) => <option key={role}>{role}</option>)}
+          </select>
+        </label>
       </div>
       <div className="topbar-right">
         <button className="icon-button has-badge" aria-label="Уведомления" title="Уведомления" type="button">
@@ -440,7 +606,8 @@ function TopBar({ onOutbound }) {
         <button className="icon-button" aria-label="Поиск" title="Поиск" type="button">
           <Search size={20} />
         </button>
-        <button className="quick-action" onClick={onOutbound} type="button">
+        {!access.canOutbound ? <span className="topbar-access-note">{access.reason}</span> : null}
+        <button className="quick-action" disabled={!access.canOutbound} onClick={onOutbound} title={access.canOutbound ? "Быстрые действия" : access.reason} type="button">
           <Zap size={17} />
           Быстрые действия
           <ChevronDown size={16} />
@@ -621,7 +788,30 @@ function SaveTemplateDialog({ draft, onClose, onSave }) {
   );
 }
 
-function ConversationList({ conversations, allConversations, selectedId, onSelect, filter, onFilter, query, onQuery, topics, closedIds }) {
+function ConversationList({
+  conversations,
+  allConversations,
+  selectedId,
+  onSelect,
+  filter,
+  onFilter,
+  queueFilters,
+  onQueueFilterChange,
+  onQueueFiltersReset,
+  query,
+  onQuery,
+  topics,
+  closedIds
+}) {
+  const [isFilterPanelOpen, setFilterPanelOpen] = useState(false);
+  const channelOptions = Array.from(new Set(allConversations.map((conversation) => conversation.channel)));
+  const activeFilterCount = [
+    queueFilters.channel !== "all",
+    queueFilters.topic !== "all",
+    queueFilters.status !== "all",
+    queueFilters.sort !== "time",
+    queueFilters.onlyInternal
+  ].filter(Boolean).length;
   const counters = {
     waiting: allConversations.filter((item) => ["waiting", "breached"].includes(item.status)).length,
     sla: allConversations.filter((item) => ["sla", "breached"].includes(item.status)).length,
@@ -639,12 +829,75 @@ function ConversationList({ conversations, allConversations, selectedId, onSelec
         <TabButton id="quality" active={filter} onClick={onFilter} label="Оценки" count={counters.quality} tone="warn" />
         <TabButton id="all" active={filter} onClick={onFilter} label="Все" />
       </div>
-      <div className="queue-search">
-        <Search size={19} />
-        <input aria-label="Поиск по диалогам" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Поиск по диалогам" />
-        <button aria-label="Фильтры" title="Фильтры" type="button">
-          <SlidersHorizontal size={19} />
-        </button>
+      <div className="queue-controls">
+        <div className="queue-search">
+          <Search size={19} />
+          <input aria-label="Поиск по диалогам" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Поиск по диалогам" />
+          <button
+            aria-expanded={isFilterPanelOpen}
+            aria-label="Расширенные фильтры"
+            className={isFilterPanelOpen ? "active" : ""}
+            onClick={() => setFilterPanelOpen((current) => !current)}
+            title="Расширенные фильтры"
+            type="button"
+          >
+            <SlidersHorizontal size={19} />
+            {activeFilterCount ? <span>{activeFilterCount}</span> : null}
+          </button>
+        </div>
+        {isFilterPanelOpen ? (
+          <div className="queue-filter-panel">
+            <label>
+              <span>Канал</span>
+              <select value={queueFilters.channel} onChange={(event) => onQueueFilterChange("channel", event.target.value)}>
+                <option value="all">Все каналы</option>
+                {channelOptions.map((channel) => <option value={channel} key={channel}>{channel}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Тематика</span>
+              <select value={queueFilters.topic} onChange={(event) => onQueueFilterChange("topic", event.target.value)}>
+                <option value="all">Все тематики</option>
+                <option value="none">Без тематики</option>
+                {topicOptions.map((topic) => <option value={topic} key={topic}>{topic}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Статус</span>
+              <select value={queueFilters.status} onChange={(event) => onQueueFilterChange("status", event.target.value)}>
+                <option value="all">Все статусы</option>
+                {Object.entries(statusLabels).map(([status, label]) => <option value={status} key={status}>{label}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Сортировка</span>
+              <select value={queueFilters.sort} onChange={(event) => onQueueFilterChange("sort", event.target.value)}>
+                <option value="time">Последнее сообщение</option>
+                <option value="sla">SLA сначала</option>
+                <option value="status">Статус</option>
+                <option value="channel">Канал</option>
+              </select>
+            </label>
+            <label className="queue-filter-check">
+              <input
+                type="checkbox"
+                checked={queueFilters.onlyInternal}
+                onChange={(event) => onQueueFilterChange("onlyInternal", event.target.checked)}
+              />
+              <span>Есть внутренний комментарий</span>
+            </label>
+            <button className="queue-filter-reset" onClick={onQueueFiltersReset} type="button">Сбросить</button>
+          </div>
+        ) : null}
+        {activeFilterCount ? (
+          <div className="active-filter-chips" aria-label="Активные фильтры">
+            {queueFilters.channel !== "all" ? <span>Канал: {queueFilters.channel}</span> : null}
+            {queueFilters.topic !== "all" ? <span>{queueFilters.topic === "none" ? "Без тематики" : queueFilters.topic}</span> : null}
+            {queueFilters.status !== "all" ? <span>Статус: {statusLabels[queueFilters.status]}</span> : null}
+            {queueFilters.sort !== "time" ? <span>Сортировка: {queueFilters.sort === "sla" ? "SLA" : queueFilters.sort === "status" ? "статус" : "канал"}</span> : null}
+            {queueFilters.onlyInternal ? <span>Внутренние комментарии</span> : null}
+          </div>
+        ) : null}
       </div>
       <div className="queue-items">
         {conversations.map((conversation) => (
@@ -680,7 +933,7 @@ function ConversationList({ conversations, allConversations, selectedId, onSelec
         ) : null}
       </div>
       <footer className="queue-footer">
-        <span>Показано 1-20 из 48</span>
+        <span>Показано {conversations.length} из {allConversations.length}</span>
         <div>
           <button aria-label="Назад" title="Назад" type="button"><ChevronLeft size={18} /></button>
           <button aria-label="Вперед" title="Вперед" type="button"><ChevronRight size={18} /></button>
@@ -722,6 +975,7 @@ function ChatPane({
   onSaveTemplate,
   onDialogAction,
   onCloseDialog,
+  access,
   isClosed
 }) {
   const [isActionPanelOpen, setActionPanelOpen] = useState(false);
@@ -761,6 +1015,7 @@ function ChatPane({
         </div>
         {isActionPanelOpen ? (
           <div className="chat-action-menu">
+            {!access.canManageDialogs ? <p className="disabled-reason">{access.reason}</p> : null}
             {[
               ["Передать старшему", "Старший сотрудник увидит диалог в панели"],
               ["Вернуть в очередь", "Диалог станет доступен свободным операторам"],
@@ -768,7 +1023,7 @@ function ChatPane({
               ["Поставить паузу SLA", "Причина попадет в audit trail"]
             ].map(([title, description]) => (
               <button
-                disabled={isClosed}
+                disabled={isClosed || !access.canManageDialogs}
                 key={title}
                 onClick={() => {
                   onDialogAction(title);
@@ -816,6 +1071,12 @@ function ChatPane({
           {isClosed ? "Закрыт" : "Закрыть"}
         </button>
       </div>
+      {!topic && !isClosed ? (
+        <div className="inline-disabled-reason">
+          <AlertTriangle size={15} />
+          Для закрытия выберите тематику. Это правило действует во всех ролях и каналах.
+        </div>
+      ) : null}
 
       <div className="chat-transcript">
         <div className="day-divider">Сегодня</div>
@@ -950,11 +1211,11 @@ function Composer({ mode, setMode, draft, setDraft, onSend, templates, onSaveTem
   );
 }
 
-function CustomerPanel({ conversation, topic, onTopic, setDraft, templates, onClose, isClosed }) {
+function CustomerPanel({ conversation, topic, onTopic, setDraft, templates, onClose, access, isClosed }) {
   return (
     <aside className="customer-panel" aria-label="Карточка клиента">
       <PanelSection title="О клиенте" action={<button aria-label="Копировать"><Copy size={18} /></button>}>
-        <InfoRow label="Телефон" value={conversation.phone} />
+        <InfoRow label="Телефон" value={access.canViewSensitive ? conversation.phone : maskPhone(conversation.phone)} />
         <InfoRow label="Устройство" value={conversation.device} icon={<Smartphone size={15} />} />
         <InfoRow label="Точка входа" value={conversation.entry} />
         <InfoRow label="Клиент с" value={conversation.clientSince} />
@@ -1064,8 +1325,8 @@ function InfoRow({ label, value, icon }) {
   );
 }
 
-function SectionPlaceholder({ section, onBack, conversations, templates, onTemplatesChange, onToast }) {
-  const screenProps = { onBack, conversations, templates, onTemplatesChange, onToast };
+function SectionPlaceholder({ section, onBack, conversations, templates, onTemplatesChange, onToast, access, roleMode, onRoleMode }) {
+  const screenProps = { onBack, conversations, templates, onTemplatesChange, onToast, access, roleMode, onRoleMode };
 
   if (section === "panel") {
     return <PanelScreen {...screenProps} />;

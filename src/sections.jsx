@@ -55,7 +55,7 @@ import {
   sdkEvents
 } from "./data.js";
 
-export function PanelScreen({ onBack, onToast }) {
+export function PanelScreen({ onBack, onToast, access }) {
   const [channel, setChannel] = useState("Все каналы");
   const visibleQueues = channel === "Все каналы" ? queues : queues.filter((queue) => queue.name === channel);
   const activeChats = visibleQueues.reduce((sum, queue) => sum + queue.active, 0);
@@ -73,7 +73,7 @@ export function PanelScreen({ onBack, onToast }) {
             <option>Все каналы</option>
             {queues.map((queue) => <option key={queue.name}>{queue.name}</option>)}
           </select>
-          <button className="primary-action" onClick={() => onToast("Очереди перераспределены по текущим лимитам.")}>
+          <button className="primary-action" disabled={!access.canRedistribute} onClick={() => onToast("Очереди перераспределены по текущим лимитам.")} title={access.canRedistribute ? "Перераспределить очереди" : access.reason}>
             <Workflow size={17} />
             Перераспределить
           </button>
@@ -289,7 +289,7 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
   );
 }
 
-export function VisitorsScreen({ onBack, onToast }) {
+export function VisitorsScreen({ onBack, onToast, access }) {
   const [selectedVisitorId, setSelectedVisitorId] = useState(activeVisitors[0].id);
   const selectedVisitor = activeVisitors.find((visitor) => visitor.id === selectedVisitorId) ?? activeVisitors[0];
   const typingCount = activeVisitors.filter((visitor) => visitor.typing).length;
@@ -306,7 +306,7 @@ export function VisitorsScreen({ onBack, onToast }) {
             <Zap size={17} />
             Обновить правила
           </button>
-          <button className="primary-action" onClick={() => onToast(`Диалог с ${selectedVisitor.name} инициирован через ${selectedVisitor.channel}.`)} type="button">
+          <button className="primary-action" disabled={!access.canOutbound} onClick={() => onToast(`Диалог с ${selectedVisitor.name} инициирован через ${selectedVisitor.channel}.`)} title={access.canOutbound ? "Начать диалог" : access.reason} type="button">
             <MessageSquareWarning size={17} />
             Начать диалог
           </button>
@@ -575,7 +575,7 @@ export function AutomationScreen({ onBack, onToast }) {
   );
 }
 
-export function ReportsScreen({ onBack, onToast }) {
+export function ReportsScreen({ onBack, onToast, access }) {
   const [period, setPeriod] = useState("Сегодня");
   const [channel, setChannel] = useState("Все каналы");
   const [reportType, setReportType] = useState("Ежедневный");
@@ -593,7 +593,7 @@ export function ReportsScreen({ onBack, onToast }) {
           <select className="inline-select" value={reportType} onChange={(event) => setReportType(event.target.value)} aria-label="Тип отчета">
             {["Ежедневный", "Дайджест", "CSAT/CSI", "SLA", "Операторы"].map((option) => <option key={option}>{option}</option>)}
           </select>
-          <button className="primary-action" onClick={() => onToast(`Выгрузка XLSX за период "${period}" поставлена в очередь.`)}>
+          <button className="primary-action" disabled={!access.canExportReports} onClick={() => onToast(`Выгрузка XLSX за период "${period}" поставлена в очередь.`)} title={access.canExportReports ? "Экспорт XLSX" : access.reason}>
             <Download size={17} />
             Экспорт XLSX
           </button>
@@ -679,10 +679,9 @@ export function ReportsScreen({ onBack, onToast }) {
   );
 }
 
-export function SettingsScreen({ onBack, onToast }) {
+export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }) {
   const [channels, setChannels] = useState(channelSettings);
-  const [roleMode, setRoleMode] = useState("Администратор");
-  const canEditSettings = roleMode.includes("Администратор");
+  const canEditSettings = access.canManageSettings;
 
   function toggleChannel(name) {
     setChannels((current) => current.map((channel) => channel.name === name ? { ...channel, enabled: !channel.enabled } : channel));
@@ -711,12 +710,12 @@ export function SettingsScreen({ onBack, onToast }) {
         </div>
         <div className="segmented-control" role="group" aria-label="Текущая роль">
           {["Сотрудник", "Старший сотрудник", "Администратор"].map((role) => (
-            <button
-              className={roleMode === role ? "active" : ""}
-              key={role}
-              onClick={() => setRoleMode(role)}
-              type="button"
-            >
+              <button
+                className={roleMode === role ? "active" : ""}
+                key={role}
+                onClick={() => onRoleMode(role)}
+                type="button"
+              >
               {role}
             </button>
           ))}
@@ -817,7 +816,7 @@ export function SettingsScreen({ onBack, onToast }) {
                 <div className="health-bar"><i style={{ width: `${integration.health}%` }} /></div>
                 <footer>
                   <span>{integration.health}% health</span>
-                  <button onClick={() => onToast(`${integration.name}: проверка подключения запущена.`)} type="button">Проверить</button>
+                  <button disabled={!canEditSettings} onClick={() => onToast(`${integration.name}: проверка подключения запущена.`)} title={canEditSettings ? "Проверить подключение" : access.reason} type="button">Проверить</button>
                 </footer>
               </article>
             ))}
@@ -828,7 +827,7 @@ export function SettingsScreen({ onBack, onToast }) {
           <SectionTitle title="SDK-консоль" action="Ключи, события, точки входа" />
           <div className="sdk-code">
             <code>{`SupportSDK.init({ appId: "gig-app", channels: ["SDK", "Telegram", "MAX", "VK"] })`}</code>
-            <button onClick={() => onToast("SDK snippet скопирован.")} type="button">Копировать</button>
+            <button disabled={!canEditSettings} onClick={() => onToast("SDK snippet скопирован.")} title={canEditSettings ? "Копировать SDK snippet" : access.reason} type="button">Копировать</button>
           </div>
           <div className="sdk-event-list">
             {sdkEvents.map(([event, description]) => (

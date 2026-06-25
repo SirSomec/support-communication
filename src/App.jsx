@@ -22,6 +22,7 @@ import {
   Paperclip,
   PhoneCall,
   Plus,
+  RotateCcw,
   Search,
   Send,
   ShieldCheck,
@@ -30,6 +31,8 @@ import {
   Smartphone,
   Sparkles,
   Tag,
+  Trash2,
+  UploadCloud,
   UsersRound,
   X,
   Zap
@@ -114,6 +117,66 @@ const slaSortRank = {
   closed: 4
 };
 
+const attachmentStatusLabels = {
+  ready: "Готово",
+  uploading: "Загрузка",
+  error: "Ошибка"
+};
+
+const maxAttachmentSizeBytes = 20 * 1024 * 1024;
+const allowedAttachmentExtensions = ["pdf", "png", "jpg", "jpeg", "webp"];
+const imageAttachmentExtensions = ["png", "jpg", "jpeg", "webp"];
+
+function getFileExtension(fileName) {
+  const parts = fileName.toLowerCase().split(".");
+  return parts.length > 1 ? parts.at(-1) : "";
+}
+
+function formatFileSize(bytes) {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+  }
+
+  return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
+}
+
+function createComposerAttachment(file, index, channel) {
+  const extension = getFileExtension(file.name);
+  const errors = [];
+
+  if (!allowedAttachmentExtensions.includes(extension)) {
+    errors.push("Недоступный тип файла: PDF, PNG, JPG или WEBP");
+  }
+
+  if (file.size > maxAttachmentSizeBytes) {
+    errors.push("Файл больше 20 МБ");
+  }
+
+  const isImage = imageAttachmentExtensions.includes(extension) && !errors.length;
+
+  return {
+    id: `${file.name}-${file.lastModified}-${index}-${Date.now()}`,
+    name: file.name,
+    type: extension ? extension.toUpperCase() : "FILE",
+    size: formatFileSize(file.size),
+    status: errors.length ? "error" : "uploading",
+    progress: errors.length ? 100 : 64,
+    preview: isImage ? "Превью изображения" : "Файл",
+    previewUrl: isImage ? URL.createObjectURL(file) : "",
+    channel,
+    retryable: false,
+    error: errors.join(". ")
+  };
+}
+
+function releaseAttachmentPreviews(attachments) {
+  attachments.forEach((attachment) => {
+    if (attachment.previewUrl?.startsWith("blob:")) {
+      URL.revokeObjectURL(attachment.previewUrl);
+    }
+  });
+}
+
 function getConversationTimeValue(time) {
   if (time === "сейчас") {
     return 24 * 60;
@@ -192,6 +255,9 @@ function App() {
   const [composeMode, setComposeMode] = useState("reply");
   const [transcriptMode, setTranscriptMode] = useState("all");
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState([]);
+  const attachmentsRef = useRef([]);
+  const [pendingConversationId, setPendingConversationId] = useState(null);
   const [isOutboundOpen, setOutboundOpen] = useState(false);
   const [templateLibrary, setTemplateLibrary] = useState(initialTemplates);
   const [saveTemplateDraft, setSaveTemplateDraft] = useState(null);
@@ -202,9 +268,13 @@ function App() {
   const [toast, setToast] = useState("");
 
   const selected = conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0];
+  const pendingConversation = pendingConversationId
+    ? conversationItems.find((conversation) => conversation.id === pendingConversationId)
+    : null;
   const access = roleAccessProfiles[roleMode];
   const selectedTopic = topics[selected.id] ?? "";
   const isClosed = closedIds.has(selected.id);
+  const hasUnsentComposerContent = Boolean(draft.trim() || attachments.length);
 
   useEffect(() => {
     if (!access.sections.includes(section)) {
@@ -216,6 +286,34 @@ function App() {
       setOutboundOpen(false);
     }
   }, [access, isOutboundOpen, roleMode, section]);
+
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
+  useEffect(() => () => releaseAttachmentPreviews(attachmentsRef.current), []);
+
+  useEffect(() => {
+    if (!attachments.some((attachment) => attachment.status === "uploading")) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setAttachments((current) =>
+        current.map((attachment) =>
+          attachment.status === "uploading"
+            ? {
+                ...attachment,
+                status: "ready",
+                progress: 100
+              }
+            : attachment
+        )
+      );
+    }, 1200);
+
+    return () => window.clearTimeout(timer);
+  }, [attachments]);
 
   const filtered = useMemo(() => {
     return conversationItems
@@ -277,6 +375,89 @@ function App() {
     setSection(nextSection);
   }
 
+  function handleConversationSelect(nextConversationId) {
+    if (nextConversationId === selectedId) {
+      return;
+    }
+
+    if (hasUnsentComposerContent) {
+      setPendingConversationId(nextConversationId);
+      return;
+    }
+
+    setSelectedId(nextConversationId);
+  }
+
+  function handleStayOnConversation() {
+    setPendingConversationId(null);
+  }
+
+  function handleDiscardDraftAndSwitch() {
+    if (!pendingConversationId) {
+      return;
+    }
+
+    setSelectedId(pendingConversationId);
+    setDraft("");
+    releaseAttachmentPreviews(attachments);
+    setAttachments([]);
+    setPendingConversationId(null);
+    setToast("Черновик и очередь вложений сброшены.");
+  }
+
+  function handleAttachFiles(fileList) {
+    const files = Array.from(fileList ?? []);
+
+    if (!files.length) {
+      return;
+    }
+
+    setAttachments((current) => [
+      ...current,
+      ...files.map((file, index) => createComposerAttachment(file, index, selected.channel))
+    ]);
+    setToast(`Вложения добавлены в очередь: ${files.length}`);
+  }
+
+  function handleCompleteAttachment(attachmentId) {
+    setAttachments((current) =>
+      current.map((attachment) =>
+        attachment.id === attachmentId
+          ? {
+              ...attachment,
+              status: "ready",
+              progress: 100,
+              error: ""
+            }
+          : attachment
+      )
+    );
+  }
+
+  function handleRetryAttachment(attachmentId) {
+    setAttachments((current) =>
+      current.map((attachment) =>
+        attachment.id === attachmentId
+          ? {
+              ...attachment,
+              status: "uploading",
+              progress: 54,
+              error: ""
+            }
+          : attachment
+      )
+    );
+  }
+
+  function handleRemoveAttachment(attachmentId) {
+    const removed = attachments.find((attachment) => attachment.id === attachmentId);
+    if (removed) {
+      releaseAttachmentPreviews([removed]);
+    }
+
+    setAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
+  }
+
   function handleOutboundCreate(outbound) {
     const id = `outbound-${Date.now()}`;
     const newConversation = {
@@ -308,6 +489,9 @@ function App() {
     setConversationItems((current) => [newConversation, ...current]);
     setTopics((current) => ({ ...current, [id]: outbound.topic }));
     setSelectedId(id);
+    setDraft("");
+    releaseAttachmentPreviews(attachments);
+    setAttachments([]);
     setSection("dialogs");
     setOutboundOpen(false);
     setToast(`Исходящий диалог создан: ${outbound.phone}`);
@@ -323,7 +507,7 @@ function App() {
         return {
           ...conversation,
           messages: [...conversation.messages, { id: Date.now(), ...message }],
-          preview: message.text ?? conversation.preview,
+          preview: message.text ?? (message.attachments?.length ? `Вложение: ${message.attachments[0].name}` : conversation.preview),
           time: "сейчас"
         };
       })
@@ -422,19 +606,29 @@ function App() {
   }
 
   function handleSend() {
-    if (!draft.trim()) {
-      setToast("Введите сообщение перед отправкой.");
+    const readyAttachments = attachments.filter((attachment) => attachment.status === "ready");
+    const hasAttachmentIssues = attachments.some((attachment) => attachment.status !== "ready");
+
+    if (hasAttachmentIssues) {
+      setToast("Завершите загрузку или удалите вложения с ошибками перед отправкой.");
+      return;
+    }
+
+    if (!draft.trim() && !readyAttachments.length) {
+      setToast("Введите сообщение или прикрепите готовое вложение перед отправкой.");
       return;
     }
 
     appendMessage(selected.id, {
       type: composeMode === "internal" ? "internal" : undefined,
       side: composeMode === "internal" ? undefined : "agent",
-      text: draft.trim(),
+      text: draft.trim() || "Отправлено вложение",
+      attachments: readyAttachments,
       author: composeMode === "internal" ? "Иван П." : undefined,
       time: "сейчас"
     });
     setDraft("");
+    setAttachments([]);
     setToast(composeMode === "internal" ? "Внутренний комментарий сохранен в истории чата." : "Ответ отправлен клиенту.");
   }
 
@@ -461,7 +655,7 @@ function App() {
               conversations={filtered}
               allConversations={conversationItems}
               selectedId={selectedId}
-              onSelect={setSelectedId}
+              onSelect={handleConversationSelect}
               filter={filter}
               onFilter={setFilter}
               queueFilters={queueFilters}
@@ -482,6 +676,11 @@ function App() {
               setTranscriptMode={setTranscriptMode}
               draft={draft}
               setDraft={setDraft}
+              attachments={attachments}
+              onAttachFiles={handleAttachFiles}
+              onAttachmentComplete={handleCompleteAttachment}
+              onAttachmentRetry={handleRetryAttachment}
+              onAttachmentRemove={handleRemoveAttachment}
               onSend={handleSend}
               templates={templateLibrary}
               onSaveTemplate={handleOpenTemplateSave}
@@ -529,6 +728,16 @@ function App() {
           draft={saveTemplateDraft}
           onClose={() => setSaveTemplateDraft(null)}
           onSave={handleTemplateSave}
+        />
+      ) : null}
+      {pendingConversation ? (
+        <DraftSwitchDialog
+          attachments={attachments}
+          currentConversation={selected}
+          draft={draft}
+          onCancel={handleStayOnConversation}
+          onConfirm={handleDiscardDraftAndSwitch}
+          targetConversation={pendingConversation}
         />
       ) : null}
       {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
@@ -788,6 +997,48 @@ function SaveTemplateDialog({ draft, onClose, onSave }) {
   );
 }
 
+function DraftSwitchDialog({ attachments, currentConversation, draft, onCancel, onConfirm, targetConversation }) {
+  const dialogRef = useModalA11y(onCancel);
+  const draftPreview = draft.trim() ? draft.trim().slice(0, 120) : "Текст не набран";
+
+  return (
+    <div className="draft-switch-overlay" role="presentation">
+      <section className="draft-switch-panel" aria-labelledby="draft-switch-title" aria-modal="true" ref={dialogRef} role="dialog">
+        <header>
+          <div>
+            <span>Несохраненный черновик</span>
+            <h2 id="draft-switch-title">Перейти в другой диалог?</h2>
+          </div>
+          <button aria-label="Закрыть" className="icon-button" onClick={onCancel} title="Закрыть" type="button">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="draft-switch-body">
+          <p>
+            Сейчас открыт диалог с <strong>{currentConversation.name}</strong>. При переходе к <strong>{targetConversation.name}</strong> текущий черновик и очередь вложений будут очищены.
+          </p>
+          <div className="draft-switch-summary">
+            <span>
+              <strong>Черновик</strong>
+              {draftPreview}
+            </span>
+            <span>
+              <strong>Вложения</strong>
+              {attachments.length ? `${attachments.length} в очереди` : "Нет вложений"}
+            </span>
+          </div>
+        </div>
+        <footer>
+          <button onClick={onCancel} type="button">Остаться</button>
+          <button className="danger-action" onClick={onConfirm} type="button">
+            Сбросить и перейти
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function ConversationList({
   conversations,
   allConversations,
@@ -970,6 +1221,11 @@ function ChatPane({
   setTranscriptMode,
   draft,
   setDraft,
+  attachments,
+  onAttachFiles,
+  onAttachmentComplete,
+  onAttachmentRetry,
+  onAttachmentRemove,
   onSend,
   templates,
   onSaveTemplate,
@@ -1091,6 +1347,11 @@ function ChatPane({
         setMode={setComposeMode}
         draft={draft}
         setDraft={setDraft}
+        attachments={attachments}
+        onAttachFiles={onAttachFiles}
+        onAttachmentComplete={onAttachmentComplete}
+        onAttachmentRetry={onAttachmentRetry}
+        onAttachmentRemove={onAttachmentRemove}
         onSend={onSend}
         templates={templates}
         onSaveTemplate={onSaveTemplate}
@@ -1115,6 +1376,13 @@ function MessageBubble({ message, onSaveTemplate }) {
       <article className="internal-note">
         <strong>Внутренний комментарий</strong>
         <p>{message.text}</p>
+        {message.attachments?.length ? (
+          <div className="message-attachments">
+            {message.attachments.map((attachment) => (
+              <AttachmentPreview attachment={attachment} compact key={attachment.id} />
+            ))}
+          </div>
+        ) : null}
         <footer>
           <span>{message.author}</span>
           <time>{message.time}</time>
@@ -1126,6 +1394,13 @@ function MessageBubble({ message, onSaveTemplate }) {
   return (
     <article className={`message-bubble ${message.side}`}>
       <p>{message.text}</p>
+      {message.attachments?.length ? (
+        <div className="message-attachments">
+          {message.attachments.map((attachment) => (
+            <AttachmentPreview attachment={attachment} compact key={attachment.id} />
+          ))}
+        </div>
+      ) : null}
       <footer>
         {message.side === "agent" ? (
           <button
@@ -1143,13 +1418,58 @@ function MessageBubble({ message, onSaveTemplate }) {
   );
 }
 
-function Composer({ mode, setMode, draft, setDraft, onSend, templates, onSaveTemplate, disabled }) {
+function AttachmentPreview({ attachment, compact = false }) {
+  return (
+    <span className={`attachment-preview ${compact ? "compact" : ""}`}>
+      <span className="attachment-thumb">
+        {attachment.previewUrl ? (
+          <img alt={`Превью ${attachment.name}`} src={attachment.previewUrl} />
+        ) : (
+          <FileText size={compact ? 16 : 18} />
+        )}
+      </span>
+      <span className="attachment-meta">
+        <strong>{attachment.name}</strong>
+        <small>{attachment.type} · {attachment.size}</small>
+      </span>
+    </span>
+  );
+}
+
+function Composer({
+  mode,
+  setMode,
+  draft,
+  setDraft,
+  attachments,
+  onAttachFiles,
+  onAttachmentComplete,
+  onAttachmentRetry,
+  onAttachmentRemove,
+  onSend,
+  templates,
+  onSaveTemplate,
+  disabled
+}) {
   const primaryTemplate = templates[0];
+  const fileInputRef = useRef(null);
   const [isTemplatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const blockingAttachment = attachments.find((attachment) => attachment.status !== "ready");
+  const sendDisabled = disabled || Boolean(blockingAttachment);
+  const attachmentReason = blockingAttachment
+    ? blockingAttachment.status === "uploading"
+      ? "Дождитесь завершения загрузки вложений."
+      : "Удалите вложение с ошибкой или повторите загрузку."
+    : "";
   const aiDraft =
     mode === "internal"
       ? "Клиент эмоционален, перед закрытием проверьте статус доставки и добавьте ссылку на заказ во внутренний комментарий."
       : "Понимаю ожидание. Я проверю статус заказа и вернусь с точным временем доставки в этом диалоге.";
+
+  function handleFileInputChange(event) {
+    onAttachFiles(event.target.files);
+    event.target.value = "";
+  }
 
   return (
     <section className={`composer ${mode === "internal" ? "internal-mode" : ""}`}>
@@ -1195,14 +1515,63 @@ function Composer({ mode, setMode, draft, setDraft, onSend, templates, onSaveTem
         placeholder={disabled ? "Диалог закрыт" : mode === "internal" ? "Текст увидят только сотрудники..." : "Введите сообщение..."}
         disabled={disabled}
       />
+      <input
+        accept=".pdf,.png,.jpg,.jpeg,.webp"
+        aria-label="Выбор вложений"
+        className="visually-hidden-file-input"
+        disabled={disabled}
+        multiple
+        onChange={handleFileInputChange}
+        ref={fileInputRef}
+        type="file"
+      />
+      {attachments.length ? (
+        <div className="attachment-queue" aria-label="Очередь вложений">
+          {attachments.map((attachment) => (
+            <article className={`attachment-card ${attachment.status}`} key={attachment.id}>
+              <AttachmentPreview attachment={attachment} />
+              <span className={`attachment-status ${attachment.status}`}>
+                {attachment.status === "uploading" ? <UploadCloud size={14} /> : null}
+                {attachment.status === "error" ? <AlertTriangle size={14} /> : null}
+                {attachmentStatusLabels[attachment.status]}
+              </span>
+              <div className="attachment-progress" aria-hidden="true">
+                <i style={{ width: `${attachment.progress}%` }} />
+              </div>
+              {attachment.error ? <p>{attachment.error}</p> : null}
+              <div className="attachment-actions">
+                {attachment.status === "uploading" ? (
+                  <button disabled={disabled} onClick={() => onAttachmentComplete(attachment.id)} type="button">Завершить</button>
+                ) : null}
+                {attachment.status === "error" && attachment.retryable ? (
+                  <button disabled={disabled} onClick={() => onAttachmentRetry(attachment.id)} type="button">
+                    <RotateCcw size={14} />
+                    Повторить
+                  </button>
+                ) : null}
+                <button aria-label={`Удалить ${attachment.name}`} disabled={disabled} onClick={() => onAttachmentRemove(attachment.id)} title="Удалить вложение" type="button">
+                  <Trash2 size={14} />
+                  Удалить
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {attachmentReason ? (
+        <div className="composer-warning">
+          <AlertTriangle size={15} />
+          {attachmentReason}
+        </div>
+      ) : null}
       <footer className="composer-footer">
         <div className="composer-tools">
-          <button aria-label="Прикрепить файл" disabled={disabled} onClick={() => setDraft(`${draft}\n[Вложение: чек.pdf]`.trim())} type="button"><Paperclip size={18} /></button>
+          <button aria-label="Прикрепить файл" disabled={disabled} onClick={() => fileInputRef.current?.click()} title="Прикрепить файл" type="button"><Paperclip size={18} /></button>
           <button aria-label="Добавить реакцию" disabled={disabled} onClick={() => setDraft(`${draft} Спасибо.`.trim())} type="button"><Smile size={18} /></button>
           <button aria-label="Сохранить как шаблон" disabled={disabled} onClick={onSaveTemplate} title="Сохранить как шаблон" type="button"><BookOpen size={18} /></button>
           <button aria-label="ИИ-подсказка" disabled={disabled} onClick={() => setDraft(aiDraft)} title="ИИ-подсказка" type="button"><Sparkles size={18} /></button>
         </div>
-        <button className="send-button" onClick={onSend} disabled={disabled}>
+        <button className="send-button" onClick={onSend} disabled={sendDisabled} title={attachmentReason || undefined}>
           <Send size={18} />
           {mode === "internal" ? "Сохранить" : "Отправить"}
         </button>

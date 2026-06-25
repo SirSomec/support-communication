@@ -35,6 +35,7 @@ import {
   UsersRound,
   Zap
 } from "lucide-react";
+import { ClientsScreen, PanelScreen, ReportsScreen, SettingsScreen, TemplatesScreen } from "./sections.jsx";
 
 const conversations = [
   {
@@ -318,7 +319,12 @@ function App() {
             />
           </div>
         ) : (
-          <SectionPlaceholder section={section} onBack={() => setSection("dialogs")} />
+          <SectionPlaceholder
+            section={section}
+            onBack={() => setSection("dialogs")}
+            conversations={conversations}
+            onToast={setToast}
+          />
         )}
       </main>
       {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
@@ -334,7 +340,14 @@ function Sidebar({ active, onSelect }) {
       </div>
       <nav className="nav-list" aria-label="Главная навигация">
         {navItems.map(({ key, label, icon: Icon }) => (
-          <button className={`nav-item ${active === key ? "active" : ""}`} key={key} onClick={() => onSelect(key)}>
+          <button
+            aria-label={label}
+            className={`nav-item ${active === key ? "active" : ""}`}
+            key={key}
+            onClick={() => onSelect(key)}
+            title={label}
+            type="button"
+          >
             <Icon size={20} />
             <span>{label}</span>
           </button>
@@ -692,7 +705,29 @@ function InfoRow({ label, value, icon }) {
   );
 }
 
-function SectionPlaceholder({ section, onBack }) {
+function SectionPlaceholder({ section, onBack, conversations, onToast }) {
+  const screenProps = { onBack, conversations, onToast };
+
+  if (section === "panel") {
+    return <PanelScreen {...screenProps} />;
+  }
+
+  if (section === "clients") {
+    return <ClientsScreen {...screenProps} />;
+  }
+
+  if (section === "templates") {
+    return <TemplatesScreen {...screenProps} />;
+  }
+
+  if (section === "reports") {
+    return <ReportsScreen {...screenProps} />;
+  }
+
+  if (section === "settings") {
+    return <SettingsScreen {...screenProps} />;
+  }
+
   const labels = {
     panel: "Панель смены",
     clients: "Клиенты",

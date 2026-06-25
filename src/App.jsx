@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -30,6 +30,7 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  Smile,
   Smartphone,
   Sparkles,
   Tag,
@@ -37,7 +38,17 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { ClientsScreen, PanelScreen, ReportsScreen, SettingsScreen, TemplatesScreen, initialTemplates } from "./sections.jsx";
+import {
+  AutomationScreen,
+  ClientsScreen,
+  PanelScreen,
+  QualityScreen,
+  ReportsScreen,
+  SettingsScreen,
+  TemplatesScreen,
+  VisitorsScreen,
+  initialTemplates
+} from "./sections.jsx";
 
 const conversations = [
   {
@@ -209,7 +220,10 @@ const navItems = [
   { key: "panel", label: "Панель", icon: LayoutDashboard },
   { key: "clients", label: "Клиенты", icon: UsersRound },
   { key: "templates", label: "Шаблоны", icon: ClipboardList },
+  { key: "visitors", label: "Визиты", icon: Zap },
   { key: "reports", label: "Отчеты", icon: BarChart3 },
+  { key: "quality", label: "Качество", icon: ShieldCheck },
+  { key: "automation", label: "Боты", icon: Bot },
   { key: "settings", label: "Настройки", icon: Settings }
 ];
 
@@ -221,6 +235,69 @@ const topicOptions = [
   "Товар / Несоответствие"
 ];
 
+const modalFocusableSelector = [
+  "button:not(:disabled)",
+  "input:not(:disabled)",
+  "select:not(:disabled)",
+  "textarea:not(:disabled)",
+  "a[href]",
+  "[tabindex]:not([tabindex='-1'])"
+].join(",");
+
+function useModalA11y(onClose) {
+  const panelRef = useRef(null);
+
+  useEffect(() => {
+    const previousElement = document.activeElement;
+    const panel = panelRef.current;
+    const focusable = panel ? Array.from(panel.querySelectorAll(modalFocusableSelector)) : [];
+
+    focusable[0]?.focus();
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab" || !panel) {
+        return;
+      }
+
+      const visibleFocusable = Array.from(panel.querySelectorAll(modalFocusableSelector)).filter(
+        (element) => element.offsetParent !== null || element === document.activeElement
+      );
+
+      if (!visibleFocusable.length) {
+        event.preventDefault();
+        return;
+      }
+
+      const firstElement = visibleFocusable[0];
+      const lastElement = visibleFocusable.at(-1);
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      if (previousElement instanceof HTMLElement) {
+        previousElement.focus();
+      }
+    };
+  }, [onClose]);
+
+  return panelRef;
+}
+
 function App() {
   const [conversationItems, setConversationItems] = useState(conversations);
   const [section, setSection] = useState("dialogs");
@@ -228,6 +305,7 @@ function App() {
   const [filter, setFilter] = useState("mine");
   const [query, setQuery] = useState("");
   const [composeMode, setComposeMode] = useState("reply");
+  const [transcriptMode, setTranscriptMode] = useState("all");
   const [draft, setDraft] = useState("");
   const [isOutboundOpen, setOutboundOpen] = useState(false);
   const [templateLibrary, setTemplateLibrary] = useState(initialTemplates);
@@ -251,10 +329,12 @@ function App() {
         filter === "mine" ||
         (filter === "waiting" && ["waiting", "breached"].includes(conversation.status)) ||
         (filter === "sla" && ["sla", "breached"].includes(conversation.status)) ||
+        (filter === "rescue" && (!topics[conversation.id] || conversation.slaTone === "danger")) ||
+        (filter === "quality" && conversation.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))) ||
         filter === "all";
       return matchesQuery && matchesFilter;
     });
-  }, [conversationItems, filter, query]);
+  }, [conversationItems, filter, query, topics]);
 
   function handleOutboundCreate(outbound) {
     const id = `outbound-${Date.now()}`;
@@ -280,7 +360,7 @@ function App() {
       previous: outbound.existing ? outbound.existing.previous : [],
       messages: [
         { id: 1, type: "event", text: `Диалог инициирован через ${outbound.channel} по номеру телефона`, time: "сейчас" },
-        { id: 2, side: "operator", text: outbound.message, time: "сейчас" }
+        { id: 2, side: "agent", text: outbound.message, time: "сейчас" }
       ]
     };
 
@@ -292,8 +372,50 @@ function App() {
     setToast(`Исходящий диалог создан: ${outbound.phone}`);
   }
 
-  function handleOpenTemplateSave() {
-    if (!draft.trim()) {
+  function appendMessage(conversationId, message) {
+    setConversationItems((current) =>
+      current.map((conversation) => {
+        if (conversation.id !== conversationId) {
+          return conversation;
+        }
+
+        return {
+          ...conversation,
+          messages: [...conversation.messages, { id: Date.now(), ...message }],
+          preview: message.text ?? conversation.preview,
+          time: "сейчас"
+        };
+      })
+    );
+  }
+
+  function handleTopicChange(value) {
+    const previousTopic = topics[selected.id] ?? "";
+    setTopics((current) => ({ ...current, [selected.id]: value }));
+
+    if (value && value !== previousTopic) {
+      appendMessage(selected.id, {
+        type: "event",
+        text: previousTopic ? `Тематика изменена: ${previousTopic} -> ${value}` : `Проставлена тематика: ${value}`,
+        time: "сейчас"
+      });
+      setToast("Тематика сохранена и попадет в audit trail.");
+    }
+  }
+
+  function handleDialogAction(action) {
+    appendMessage(selected.id, {
+      type: "event",
+      text: `${action}: Иван П.`,
+      time: "сейчас"
+    });
+    setToast(`${action} зафиксировано в истории диалога.`);
+  }
+
+  function handleOpenTemplateSave(source) {
+    const sourceText = typeof source === "string" ? source : draft;
+
+    if (!sourceText.trim()) {
       setToast("Введите текст ответа перед сохранением шаблона.");
       return;
     }
@@ -303,7 +425,7 @@ function App() {
       scope: "Личный",
       channel: selected.channel,
       topic: selectedTopic || "Без тематики",
-      text: draft.trim()
+      text: sourceText.trim()
     });
   }
 
@@ -329,6 +451,27 @@ function App() {
     const next = new Set(closedIds);
     next.add(selected.id);
     setClosedIds(next);
+    setConversationItems((current) =>
+      current.map((conversation) =>
+        conversation.id === selected.id
+          ? {
+              ...conversation,
+              status: "closed",
+              sla: "Закрыт",
+              slaTone: "closed",
+              messages: [
+                ...conversation.messages,
+                {
+                  id: Date.now(),
+                  type: "event",
+                  text: `Диалог закрыт с тематикой ${selectedTopic}`,
+                  time: "сейчас"
+                }
+              ]
+            }
+          : conversation
+      )
+    );
     setToast("Диалог закрыт и попадет в ежедневный отчет.");
   }
 
@@ -338,8 +481,15 @@ function App() {
       return;
     }
 
+    appendMessage(selected.id, {
+      type: composeMode === "internal" ? "internal" : undefined,
+      side: composeMode === "internal" ? undefined : "agent",
+      text: draft.trim(),
+      author: composeMode === "internal" ? "Иван П." : undefined,
+      time: "сейчас"
+    });
     setDraft("");
-    setToast(composeMode === "internal" ? "Внутренний комментарий сохранен." : "Ответ отправлен клиенту.");
+    setToast(composeMode === "internal" ? "Внутренний комментарий сохранен в истории чата." : "Ответ отправлен клиенту.");
   }
 
   return (
@@ -364,20 +514,24 @@ function App() {
             <ChatPane
               conversation={selected}
               topic={selectedTopic}
-              onTopic={(value) => setTopics((current) => ({ ...current, [selected.id]: value }))}
+              onTopic={handleTopicChange}
               composeMode={composeMode}
               setComposeMode={setComposeMode}
+              transcriptMode={transcriptMode}
+              setTranscriptMode={setTranscriptMode}
               draft={draft}
               setDraft={setDraft}
               onSend={handleSend}
               templates={templateLibrary}
               onSaveTemplate={handleOpenTemplateSave}
+              onDialogAction={handleDialogAction}
+              onCloseDialog={handleClose}
               isClosed={isClosed}
             />
             <CustomerPanel
               conversation={selected}
               topic={selectedTopic}
-              onTopic={(value) => setTopics((current) => ({ ...current, [selected.id]: value }))}
+              onTopic={handleTopicChange}
               draft={draft}
               setDraft={setDraft}
               templates={templateLibrary}
@@ -468,11 +622,11 @@ function TopBar({ onOutbound }) {
         </button>
       </div>
       <div className="topbar-right">
-        <button className="icon-button has-badge" aria-label="Уведомления">
+        <button className="icon-button has-badge" aria-label="Уведомления" title="Уведомления" type="button">
           <Bell size={20} />
           <span>3</span>
         </button>
-        <button className="icon-button" aria-label="Поиск">
+        <button className="icon-button" aria-label="Поиск" title="Поиск" type="button">
           <Search size={20} />
         </button>
         <button className="quick-action" onClick={onOutbound} type="button">
@@ -486,6 +640,7 @@ function TopBar({ onOutbound }) {
 }
 
 function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast }) {
+  const dialogRef = useModalA11y(onClose);
   const [phone, setPhone] = useState("+7 ");
   const [clientName, setClientName] = useState("");
   const [channel, setChannel] = useState("SDK");
@@ -516,11 +671,11 @@ function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast }) {
 
   return (
     <div className="outbound-overlay" role="presentation">
-      <section className="outbound-panel" aria-label="Новый исходящий диалог" aria-modal="true" role="dialog">
+      <section className="outbound-panel" aria-labelledby="outbound-dialog-title" aria-modal="true" ref={dialogRef} role="dialog">
         <header>
           <div>
             <span>SDK contact center</span>
-            <h2>Новый исходящий диалог</h2>
+            <h2 id="outbound-dialog-title">Новый исходящий диалог</h2>
           </div>
           <button aria-label="Закрыть" className="icon-button" onClick={onClose} title="Закрыть" type="button">
             <X size={18} />
@@ -570,7 +725,7 @@ function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast }) {
 
         <footer>
           <button onClick={onClose} type="button">Отмена</button>
-          <button className="primary-action" onClick={handleCreate} type="button">
+          <button className="primary-action" disabled={!canCreate} onClick={handleCreate} type="button">
             <Send size={17} />
             Создать диалог
           </button>
@@ -581,6 +736,7 @@ function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast }) {
 }
 
 function SaveTemplateDialog({ draft, onClose, onSave }) {
+  const dialogRef = useModalA11y(onClose);
   const [form, setForm] = useState(draft);
 
   function update(field, value) {
@@ -597,11 +753,11 @@ function SaveTemplateDialog({ draft, onClose, onSave }) {
 
   return (
     <div className="template-save-overlay" role="presentation">
-      <section className="template-save-panel" aria-label="Сохранить как шаблон" aria-modal="true" role="dialog">
+      <section className="template-save-panel" aria-labelledby="save-template-title" aria-modal="true" ref={dialogRef} role="dialog">
         <header>
           <div>
             <span>Личная база оператора</span>
-            <h2>Сохранить как шаблон</h2>
+            <h2 id="save-template-title">Сохранить как шаблон</h2>
           </div>
           <button aria-label="Закрыть" className="icon-button" onClick={onClose} title="Закрыть" type="button">
             <X size={18} />
@@ -657,7 +813,9 @@ function SaveTemplateDialog({ draft, onClose, onSave }) {
 function ConversationList({ conversations, allConversations, selectedId, onSelect, filter, onFilter, query, onQuery, topics, closedIds }) {
   const counters = {
     waiting: allConversations.filter((item) => ["waiting", "breached"].includes(item.status)).length,
-    sla: allConversations.filter((item) => ["sla", "breached"].includes(item.status)).length
+    sla: allConversations.filter((item) => ["sla", "breached"].includes(item.status)).length,
+    rescue: allConversations.filter((item) => !topics[item.id] || item.slaTone === "danger").length,
+    quality: allConversations.filter((item) => item.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))).length
   };
 
   return (
@@ -666,18 +824,21 @@ function ConversationList({ conversations, allConversations, selectedId, onSelec
         <TabButton id="mine" active={filter} onClick={onFilter} label="Мои" />
         <TabButton id="waiting" active={filter} onClick={onFilter} label="Ожидают" count={counters.waiting} tone="danger" />
         <TabButton id="sla" active={filter} onClick={onFilter} label="SLA" count={counters.sla} tone="warn" />
+        <TabButton id="rescue" active={filter} onClick={onFilter} label="Спасти" count={counters.rescue} tone="danger" />
+        <TabButton id="quality" active={filter} onClick={onFilter} label="Оценки" count={counters.quality} tone="warn" />
         <TabButton id="all" active={filter} onClick={onFilter} label="Все" />
       </div>
       <div className="queue-search">
         <Search size={19} />
-        <input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Поиск по диалогам" />
-        <button aria-label="Фильтры">
+        <input aria-label="Поиск по диалогам" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Поиск по диалогам" />
+        <button aria-label="Фильтры" title="Фильтры" type="button">
           <SlidersHorizontal size={19} />
         </button>
       </div>
       <div className="queue-items">
         {conversations.map((conversation) => (
           <button
+            aria-current={selectedId === conversation.id ? "true" : undefined}
             className={`queue-row ${selectedId === conversation.id ? "selected" : ""} ${conversation.slaTone === "danger" ? "danger" : ""}`}
             key={conversation.id}
             onClick={() => onSelect(conversation.id)}
@@ -700,12 +861,18 @@ function ConversationList({ conversations, allConversations, selectedId, onSelec
             {conversation.unread ? <span className="unread-dot" /> : null}
           </button>
         ))}
+        {!conversations.length ? (
+          <div className="queue-empty">
+            <strong>Нет диалогов</strong>
+            <span>Измените фильтр или поисковый запрос.</span>
+          </div>
+        ) : null}
       </div>
       <footer className="queue-footer">
         <span>Показано 1-20 из 48</span>
         <div>
-          <button aria-label="Назад"><ChevronLeft size={18} /></button>
-          <button aria-label="Вперед"><ChevronRight size={18} /></button>
+          <button aria-label="Назад" title="Назад" type="button"><ChevronLeft size={18} /></button>
+          <button aria-label="Вперед" title="Вперед" type="button"><ChevronRight size={18} /></button>
         </div>
       </footer>
     </section>
@@ -714,7 +881,7 @@ function ConversationList({ conversations, allConversations, selectedId, onSelec
 
 function TabButton({ id, active, onClick, label, count, tone }) {
   return (
-    <button className={`queue-tab ${active === id ? "active" : ""}`} onClick={() => onClick(id)}>
+    <button aria-pressed={active === id} className={`queue-tab ${active === id ? "active" : ""}`} onClick={() => onClick(id)} type="button">
       {label}
       {count ? <span className={`tab-count ${tone ?? ""}`}>{count}</span> : null}
     </button>
@@ -729,7 +896,36 @@ function Avatar({ conversation }) {
   return <span className={`avatar avatar-fallback ${conversation.channel.toLowerCase()}`}>{conversation.initials}</span>;
 }
 
-function ChatPane({ conversation, topic, onTopic, composeMode, setComposeMode, draft, setDraft, onSend, templates, onSaveTemplate, isClosed }) {
+function ChatPane({
+  conversation,
+  topic,
+  onTopic,
+  composeMode,
+  setComposeMode,
+  transcriptMode,
+  setTranscriptMode,
+  draft,
+  setDraft,
+  onSend,
+  templates,
+  onSaveTemplate,
+  onDialogAction,
+  onCloseDialog,
+  isClosed
+}) {
+  const [isActionPanelOpen, setActionPanelOpen] = useState(false);
+  const visibleMessages = conversation.messages.filter((message) => {
+    if (transcriptMode === "internal") {
+      return message.type === "internal";
+    }
+
+    if (transcriptMode === "events") {
+      return message.type === "event";
+    }
+
+    return true;
+  });
+
   return (
     <section className="chat-pane" aria-label="Окно чата">
       <header className="chat-header">
@@ -741,9 +937,40 @@ function ChatPane({ conversation, topic, onTopic, composeMode, setComposeMode, d
           </div>
         </div>
         <div className="chat-actions">
-          <button aria-label="Дополнительно"><MoreHorizontal size={21} /></button>
-          <button aria-label="Информация"><Info size={20} /></button>
+          <button
+            aria-expanded={isActionPanelOpen}
+            aria-label="Действия с диалогом"
+            onClick={() => setActionPanelOpen((current) => !current)}
+            title="Действия с диалогом"
+            type="button"
+          >
+            <MoreHorizontal size={21} />
+          </button>
+          <button aria-label="Информация" title="Информация" type="button"><Info size={20} /></button>
         </div>
+        {isActionPanelOpen ? (
+          <div className="chat-action-menu">
+            {[
+              ["Передать старшему", "Старший сотрудник увидит диалог в панели"],
+              ["Вернуть в очередь", "Диалог станет доступен свободным операторам"],
+              ["Запустить спасение", "Сработает таймер и приоритет в очереди"],
+              ["Поставить паузу SLA", "Причина попадет в audit trail"]
+            ].map(([title, description]) => (
+              <button
+                disabled={isClosed}
+                key={title}
+                onClick={() => {
+                  onDialogAction(title);
+                  setActionPanelOpen(false);
+                }}
+                type="button"
+              >
+                <strong>{title}</strong>
+                <span>{description}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         <label className="topic-select">
           <span>Тематика:</span>
           <select value={topic} onChange={(event) => onTopic(event.target.value)}>
@@ -755,11 +982,36 @@ function ChatPane({ conversation, topic, onTopic, composeMode, setComposeMode, d
         </label>
       </header>
 
+      <div className="transcript-toolbar" aria-label="Фильтр истории чата">
+        <div className="transcript-filter-buttons" role="group" aria-label="Тип записей">
+          {[
+            ["all", "Все"],
+            ["internal", "Комментарии"],
+            ["events", "Audit"]
+          ].map(([id, label]) => (
+            <button
+              aria-pressed={transcriptMode === id}
+              className={transcriptMode === id ? "active" : ""}
+              key={id}
+              onClick={() => setTranscriptMode(id)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button className="compact-close-button" disabled={isClosed || !topic} onClick={onCloseDialog} type="button">
+          {isClosed ? <ShieldCheck size={16} /> : <Lock size={16} />}
+          {isClosed ? "Закрыт" : "Закрыть"}
+        </button>
+      </div>
+
       <div className="chat-transcript">
         <div className="day-divider">Сегодня</div>
-        {conversation.messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
+        {visibleMessages.map((message) => (
+          <MessageBubble key={message.id} message={message} onSaveTemplate={onSaveTemplate} />
         ))}
+        {!visibleMessages.length ? <div className="empty-transcript">Нет записей для выбранного фильтра</div> : null}
       </div>
 
       <Composer
@@ -776,7 +1028,7 @@ function ChatPane({ conversation, topic, onTopic, composeMode, setComposeMode, d
   );
 }
 
-function MessageBubble({ message }) {
+function MessageBubble({ message, onSaveTemplate }) {
   if (message.type === "event") {
     return (
       <div className="system-event">
@@ -802,13 +1054,30 @@ function MessageBubble({ message }) {
   return (
     <article className={`message-bubble ${message.side}`}>
       <p>{message.text}</p>
-      <time>{message.time}</time>
+      <footer>
+        {message.side === "agent" ? (
+          <button
+            aria-label="Сохранить сообщение как шаблон"
+            onClick={() => onSaveTemplate(message.text)}
+            title="Сохранить как шаблон"
+            type="button"
+          >
+            <BookOpen size={14} />
+          </button>
+        ) : null}
+        <time>{message.time}</time>
+      </footer>
     </article>
   );
 }
 
 function Composer({ mode, setMode, draft, setDraft, onSend, templates, onSaveTemplate, disabled }) {
   const primaryTemplate = templates[0];
+  const [isTemplatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const aiDraft =
+    mode === "internal"
+      ? "Клиент эмоционален, перед закрытием проверьте статус доставки и добавьте ссылку на заказ во внутренний комментарий."
+      : "Понимаю ожидание. Я проверю статус заказа и вернусь с точным временем доставки в этом диалоге.";
 
   return (
     <section className={`composer ${mode === "internal" ? "internal-mode" : ""}`}>
@@ -821,11 +1090,33 @@ function Composer({ mode, setMode, draft, setDraft, onSend, templates, onSaveTem
           <Info size={17} />
           Внутренний комментарий
         </button>
-        <button onClick={() => primaryTemplate && setDraft(primaryTemplate.text)} disabled={disabled || !primaryTemplate} type="button">
+        <button
+          aria-expanded={isTemplatePickerOpen}
+          onClick={() => setTemplatePickerOpen((current) => !current)}
+          disabled={disabled || !primaryTemplate}
+          type="button"
+        >
           <BookOpen size={17} />
           Шаблоны
         </button>
       </div>
+      {isTemplatePickerOpen ? (
+        <div className="composer-template-picker">
+          {templates.slice(0, 4).map((template) => (
+            <button
+              key={template.id}
+              onClick={() => {
+                setDraft(template.text);
+                setTemplatePickerOpen(false);
+              }}
+              type="button"
+            >
+              <strong>{template.title}</strong>
+              <span>{template.scope} · {template.channel} · {template.topic}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       <textarea
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
@@ -834,10 +1125,10 @@ function Composer({ mode, setMode, draft, setDraft, onSend, templates, onSaveTem
       />
       <footer className="composer-footer">
         <div className="composer-tools">
-          <button aria-label="Прикрепить файл" disabled={disabled}><Paperclip size={18} /></button>
-          <button aria-label="Добавить эмодзи" disabled={disabled}>☺</button>
+          <button aria-label="Прикрепить файл" disabled={disabled} onClick={() => setDraft(`${draft}\n[Вложение: чек.pdf]`.trim())} type="button"><Paperclip size={18} /></button>
+          <button aria-label="Добавить реакцию" disabled={disabled} onClick={() => setDraft(`${draft} Спасибо.`.trim())} type="button"><Smile size={18} /></button>
           <button aria-label="Сохранить как шаблон" disabled={disabled} onClick={onSaveTemplate} title="Сохранить как шаблон" type="button"><BookOpen size={18} /></button>
-          <button aria-label="ИИ-подсказка" disabled={disabled}><Sparkles size={18} /></button>
+          <button aria-label="ИИ-подсказка" disabled={disabled} onClick={() => setDraft(aiDraft)} title="ИИ-подсказка" type="button"><Sparkles size={18} /></button>
         </div>
         <button className="send-button" onClick={onSend} disabled={disabled}>
           <Send size={18} />
@@ -977,8 +1268,20 @@ function SectionPlaceholder({ section, onBack, conversations, templates, onTempl
     return <TemplatesScreen {...screenProps} />;
   }
 
+  if (section === "visitors") {
+    return <VisitorsScreen {...screenProps} />;
+  }
+
   if (section === "reports") {
     return <ReportsScreen {...screenProps} />;
+  }
+
+  if (section === "quality") {
+    return <QualityScreen {...screenProps} />;
+  }
+
+  if (section === "automation") {
+    return <AutomationScreen {...screenProps} />;
   }
 
   if (section === "settings") {
@@ -989,7 +1292,10 @@ function SectionPlaceholder({ section, onBack, conversations, templates, onTempl
     panel: "Панель смены",
     clients: "Клиенты",
     templates: "Шаблоны",
+    visitors: "Визиты",
     reports: "Отчеты",
+    quality: "Качество",
+    automation: "Боты",
     settings: "Настройки"
   };
 

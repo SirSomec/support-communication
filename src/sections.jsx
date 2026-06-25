@@ -6,7 +6,6 @@ import {
   Bot,
   CalendarDays,
   CheckCircle2,
-  ChevronLeft,
   ClipboardList,
   Clock3,
   Download,
@@ -15,14 +14,17 @@ import {
   Gauge,
   Inbox,
   KeyRound,
+  ListChecks,
   LayoutDashboard,
   MessageSquareWarning,
   Pencil,
+  PlayCircle,
   Plus,
   Search,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Star,
   Tag,
   ToggleLeft,
   ToggleRight,
@@ -30,6 +32,19 @@ import {
   Workflow,
   Zap
 } from "lucide-react";
+import { ChannelBadge, ChannelList, MetricTile, Permission, ProductScreen, SectionTitle } from "./ui.jsx";
+import {
+  activeVisitors,
+  aiSuggestions,
+  auditEvents,
+  botScenarios,
+  employeeChannelRules,
+  exportJobs,
+  knowledgeArticles,
+  proactiveRules,
+  qualityScores,
+  rescueChats
+} from "./data.js";
 
 const operators = [
   { name: "Иван П.", status: "online", chats: 7, limit: 12, avg: "01:18", sla: 96, channels: ["SDK", "Telegram"] },
@@ -365,8 +380,296 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
   );
 }
 
+export function VisitorsScreen({ onBack, onToast }) {
+  const [selectedVisitorId, setSelectedVisitorId] = useState(activeVisitors[0].id);
+  const selectedVisitor = activeVisitors.find((visitor) => visitor.id === selectedVisitorId) ?? activeVisitors[0];
+  const typingCount = activeVisitors.filter((visitor) => visitor.typing).length;
+  const criticalRescue = rescueChats.filter((chat) => chat.priority === "Критичный").length;
+
+  return (
+    <ProductScreen
+      title="Активные визиты и спасение"
+      subtitle="Наблюдение SDK/VK-сессий до начала чата, proactive-приглашения и очередь спасения диалогов с таймерами."
+      onBack={onBack}
+      actions={
+        <>
+          <button onClick={() => onToast("Правила proactive-приглашений обновлены для активных посетителей.")} type="button">
+            <Zap size={17} />
+            Обновить правила
+          </button>
+          <button className="primary-action" onClick={() => onToast(`Диалог с ${selectedVisitor.name} инициирован через ${selectedVisitor.channel}.`)} type="button">
+            <MessageSquareWarning size={17} />
+            Начать диалог
+          </button>
+        </>
+      }
+    >
+      <div className="metric-strip">
+        <MetricTile icon={<UsersRound size={21} />} label="Активные визиты" value={activeVisitors.length} detail="SDK и внешние каналы" />
+        <MetricTile icon={<Pencil size={21} />} label="Печатает до чата" value={typingCount} detail="только контекст без текста ввода" />
+        <MetricTile icon={<AlertTriangle size={21} />} label="Спасение" value={rescueChats.length} detail={`${criticalRescue} критичных`} tone="danger" />
+        <MetricTile icon={<Zap size={21} />} label="Proactive" value={`${proactiveRules[0].acceptanceRate}%`} detail="принятие лучшего правила" />
+      </div>
+
+      <div className="visitors-layout">
+        <section className="work-panel">
+          <SectionTitle title="Посетители сейчас" action="контекст до обращения" />
+          <div className="visitor-list">
+            {activeVisitors.map((visitor) => (
+              <button
+                className={`visitor-row ${selectedVisitor.id === visitor.id ? "selected" : ""}`}
+                key={visitor.id}
+                onClick={() => setSelectedVisitorId(visitor.id)}
+                type="button"
+              >
+                <span>
+                  <strong>{visitor.name}</strong>
+                  <small>{visitor.phone || "телефон еще не передан"} · {visitor.device}</small>
+                </span>
+                <ChannelBadge channel={visitor.channel} />
+                <b>{visitor.activeFor}</b>
+                <em>{visitor.typing ? "печатает" : visitor.segment}</em>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="work-panel visitor-detail">
+          <SectionTitle title="Контекст визита" action={selectedVisitor.privacy} />
+          <div className="detail-stack">
+            <InfoPill label="Страница" value={selectedVisitor.page} />
+            <InfoPill label="Точка входа" value={selectedVisitor.entry} />
+            <InfoPill label="Последнее событие" value={selectedVisitor.lastEvent} />
+            <InfoPill label="Маршрут" value={selectedVisitor.operatorHint} />
+          </div>
+          <div className="sdk-timeline">
+            {["identifyUser", "trackEntryPoint", "viewScreen", "openSupport"].map((event, index) => (
+              <div className="timeline-row" key={event}>
+                <span>{`11:${24 + index}`}</span>
+                <strong>{event}</strong>
+                <small>{index === 0 ? selectedVisitor.phone || "anonymous" : selectedVisitor.page}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="visitors-layout">
+        <section className="work-panel">
+          <SectionTitle title="Очередь спасения" action="возврат в очередь и контроль старшего" />
+          <div className="rescue-list">
+            {rescueChats.map((chat) => (
+              <article className="rescue-row" key={chat.id}>
+                <header>
+                  <ChannelBadge channel={chat.channel} />
+                  <strong>{chat.client}</strong>
+                  <b>{chat.timer}</b>
+                </header>
+                <p>{chat.reason}</p>
+                <footer>
+                  <span>{chat.operator}</span>
+                  <button onClick={() => onToast(`${chat.client}: ${chat.nextAction}`)} type="button">Выполнить</button>
+                </footer>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="work-panel">
+          <SectionTitle title="Proactive-правила" action="A/B, cooldown, privacy" />
+          <div className="proactive-list">
+            {proactiveRules.map((rule) => (
+              <article className="proactive-row" key={rule.id}>
+                <header>
+                  <strong>{rule.name}</strong>
+                  <span>{rule.status}</span>
+                </header>
+                <p>{rule.segment}</p>
+                <small>{rule.message}</small>
+                <footer>
+                  <ChannelList channels={rule.channels} />
+                  <b>{rule.acceptanceRate}%</b>
+                </footer>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    </ProductScreen>
+  );
+}
+
+export function QualityScreen({ onBack, onToast }) {
+  const lowScores = qualityScores.filter((item) => Number(item.score) < 4 || item.status.includes("Низкая"));
+  const averageCsat = Math.round(
+    qualityScores
+      .filter((item) => item.scale === "CSAT")
+      .reduce((sum, item, _, list) => sum + (Number(item.score) / 5) * 100 / list.length, 0)
+  );
+
+  return (
+    <ProductScreen
+      title="Качество, CSAT и AI"
+      subtitle="Оценки клиентов, ручной QA, низкие оценки, AI-подсказки и управление статьями базы знаний."
+      onBack={onBack}
+      actions={
+        <>
+          <button onClick={() => onToast("Фильтр низких оценок применен к очереди старшего сотрудника.")} type="button">
+            <Filter size={17} />
+            Низкие оценки
+          </button>
+          <button className="primary-action" onClick={() => onToast("AI-проверка диалогов поставлена в очередь.")} type="button">
+            <Sparkles size={17} />
+            AI-проверка
+          </button>
+        </>
+      }
+    >
+      <div className="metric-strip">
+        <MetricTile icon={<Star size={21} />} label="CSAT" value={`${averageCsat}%`} detail="по закрытым диалогам" />
+        <MetricTile icon={<AlertTriangle size={21} />} label="Низкие оценки" value={lowScores.length} detail="нужна проверка старшего" tone="danger" />
+        <MetricTile icon={<Sparkles size={21} />} label="AI-подсказки" value={aiSuggestions.length} detail="accept / edit / reject" />
+        <MetricTile icon={<BookOpen size={21} />} label="Статьи" value={knowledgeArticles.length} detail="рекомендации в чате" />
+      </div>
+
+      <div className="quality-layout">
+        <section className="work-panel">
+          <SectionTitle title="Оценки и ручной QA" action="после закрытия и выборочная проверка" />
+          <div className="quality-list">
+            {qualityScores.map((score) => (
+              <article className={`quality-row ${Number(score.score) < 4 ? "danger" : ""}`} key={score.id}>
+                <header>
+                  <strong>{score.client}</strong>
+                  <ChannelBadge channel={score.channel} />
+                  <b>{score.scale}: {score.score}</b>
+                </header>
+                <p>{score.comment}</p>
+                <footer>
+                  <span>{score.operator} · {score.topic}</span>
+                  <button onClick={() => onToast(`${score.client}: ${score.status}`)} type="button">Проверить</button>
+                </footer>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="work-panel">
+          <SectionTitle title="AI-помощник оператора" action="контролируемые действия" />
+          <div className="ai-suggestion-list">
+            {aiSuggestions.map((suggestion) => (
+              <article className="ai-suggestion" key={suggestion.id}>
+                <header>
+                  <Sparkles size={17} />
+                  <strong>{suggestion.title}</strong>
+                  <span>{suggestion.confidence}%</span>
+                </header>
+                <p>{suggestion.text}</p>
+                <small>{suggestion.suggestedTopic} · {suggestion.risk}</small>
+                <footer>
+                  {suggestion.actions.map((action) => (
+                    <button key={action} onClick={() => onToast(`${suggestion.title}: ${action}`)} type="button">{action}</button>
+                  ))}
+                </footer>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <section className="work-panel">
+        <SectionTitle title="База знаний" action="редактор и публикация статей" />
+        <div className="knowledge-table">
+          {knowledgeArticles.map((article) => (
+            <button className="knowledge-row" key={article.id} onClick={() => onToast(`Открыт редактор статьи: ${article.title}`)} type="button">
+              <strong>{article.title}</strong>
+              <span>{article.category}</span>
+              <span>{article.status}</span>
+              <ChannelList channels={article.channels} />
+              <b>{article.helpfulRate}% полезность</b>
+            </button>
+          ))}
+        </div>
+      </section>
+    </ProductScreen>
+  );
+}
+
+export function AutomationScreen({ onBack, onToast }) {
+  const enabledScenarios = botScenarios.filter((scenario) => scenario.status.includes("Включ") || scenario.status.includes("Р’РєР»")).length;
+  const enabledProactive = proactiveRules.filter((rule) => rule.status.includes("Включ") || rule.status.includes("Р’РєР»")).length;
+
+  return (
+    <ProductScreen
+      title="Боты и автоматизация"
+      subtitle="Сценарии AI-оператора, proactive-приглашения, handoff в очереди и audit действий автоматики."
+      onBack={onBack}
+      actions={
+        <>
+          <button onClick={() => onToast("Черновик сценария создан в конструкторе.")} type="button">
+            <Plus size={17} />
+            Новый сценарий
+          </button>
+          <button className="primary-action" onClick={() => onToast("Тестовый прогон сценариев запущен.")} type="button">
+            <PlayCircle size={17} />
+            Прогнать тест
+          </button>
+        </>
+      }
+    >
+      <div className="metric-strip">
+        <MetricTile icon={<Bot size={21} />} label="Сценарии" value={botScenarios.length} detail={`${enabledScenarios} включены`} />
+        <MetricTile icon={<Zap size={21} />} label="Proactive" value={proactiveRules.length} detail={`${enabledProactive} активны`} />
+        <MetricTile icon={<Workflow size={21} />} label="Handoff" value="4" detail="очереди назначения" />
+        <MetricTile icon={<ListChecks size={21} />} label="Audit" value={auditEvents.length} detail="последние события" />
+      </div>
+
+      <div className="automation-layout">
+        <section className="work-panel">
+          <SectionTitle title="Конструктор сценариев" action="триггер -> шаги -> handoff" />
+          <div className="scenario-list">
+            {botScenarios.map((scenario) => (
+              <article className="scenario-card" key={scenario.id}>
+                <header>
+                  <Bot size={18} />
+                  <strong>{scenario.name}</strong>
+                  <span>{scenario.status}</span>
+                </header>
+                <p>{scenario.trigger}</p>
+                <ol>
+                  {scenario.steps.map((step) => <li key={step}>{step}</li>)}
+                </ol>
+                <footer>
+                  <ChannelList channels={scenario.channels} />
+                  <b>{scenario.successRate}%</b>
+                  <button onClick={() => onToast(`Открыт сценарий: ${scenario.name}`)} type="button">Редактировать</button>
+                </footer>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="work-panel">
+          <SectionTitle title="Audit автоматизации" action="экспорт, лимиты, rescue" />
+          <div className="audit-list">
+            {auditEvents.map((event) => (
+              <article className="audit-row" key={event.id}>
+                <time>{event.time}</time>
+                <strong>{event.action}</strong>
+                <span>{event.actor} · {event.role}</span>
+                <p>{event.target}: {event.detail}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    </ProductScreen>
+  );
+}
+
 export function ReportsScreen({ onBack, onToast }) {
   const [period, setPeriod] = useState("Сегодня");
+  const [channel, setChannel] = useState("Все каналы");
+  const [reportType, setReportType] = useState("Ежедневный");
 
   return (
     <ProductScreen
@@ -377,6 +680,9 @@ export function ReportsScreen({ onBack, onToast }) {
         <>
           <select className="inline-select" value={period} onChange={(event) => setPeriod(event.target.value)}>
             {["Сегодня", "Вчера", "7 дней", "30 дней"].map((option) => <option key={option}>{option}</option>)}
+          </select>
+          <select className="inline-select" value={reportType} onChange={(event) => setReportType(event.target.value)} aria-label="Тип отчета">
+            {["Ежедневный", "Дайджест", "CSAT/CSI", "SLA", "Операторы"].map((option) => <option key={option}>{option}</option>)}
           </select>
           <button className="primary-action" onClick={() => onToast(`Выгрузка XLSX за период "${period}" поставлена в очередь.`)}>
             <Download size={17} />
@@ -390,6 +696,14 @@ export function ReportsScreen({ onBack, onToast }) {
         <MetricTile icon={<CheckCircle2 size={21} />} label="Закрыто" value="451" detail="93% обработано" />
         <MetricTile icon={<Clock3 size={21} />} label="Первый ответ" value="01:36" detail="лучше на 16 сек" />
         <MetricTile icon={<Gauge size={21} />} label="SLA" value="91%" detail="+4 п.п." />
+      </div>
+
+      <div className="screen-toolbar">
+        <select className="inline-select" value={channel} onChange={(event) => setChannel(event.target.value)} aria-label="Канал отчета">
+          {["Все каналы", "SDK", "Telegram", "MAX", "VK"].map((option) => <option key={option}>{option}</option>)}
+        </select>
+        <button onClick={() => onToast(`Фильтр применен: ${reportType}, ${period}, ${channel}`)} type="button"><Filter size={17} /> Применить</button>
+        <button onClick={() => onToast("История экспортов открыта.")} type="button"><CalendarDays size={17} /> История</button>
       </div>
 
       <div className="reports-layout">
@@ -433,12 +747,33 @@ export function ReportsScreen({ onBack, onToast }) {
           </div>
         ))}
       </div>
+
+      <section className="work-panel export-queue-panel">
+        <SectionTitle title="Очередь и история выгрузок" action="каждый экспорт фиксируется в audit" />
+        <div className="export-job-list">
+          {exportJobs.map((job) => (
+            <article className={`export-job ${job.status.includes("Ошибка") ? "danger" : ""}`} key={job.id}>
+              <header>
+                <strong>{job.name}</strong>
+                <span>{job.status}</span>
+              </header>
+              <div className="health-bar"><i style={{ width: `${job.progress}%` }} /></div>
+              <footer>
+                <span>{job.format} · {job.period} · {job.rows} строк</span>
+                <button onClick={() => onToast(`${job.name}: audit ${job.auditId}`)} type="button">Audit</button>
+              </footer>
+            </article>
+          ))}
+        </div>
+      </section>
     </ProductScreen>
   );
 }
 
 export function SettingsScreen({ onBack, onToast }) {
   const [channels, setChannels] = useState(channelSettings);
+  const [roleMode, setRoleMode] = useState("Администратор");
+  const canEditSettings = roleMode.includes("Администратор");
 
   function toggleChannel(name) {
     setChannels((current) => current.map((channel) => channel.name === name ? { ...channel, enabled: !channel.enabled } : channel));
@@ -454,12 +789,31 @@ export function SettingsScreen({ onBack, onToast }) {
       subtitle="Права, каналы, лимиты операторов, маршрутизация и обязательные правила закрытия."
       onBack={onBack}
       actions={
-        <button className="primary-action" onClick={() => onToast("Настройки сохранены и попадут в аудит.")}>
+        <button className="primary-action" disabled={!canEditSettings} onClick={() => onToast("Настройки сохранены и попадут в аудит.")}>
           <ShieldCheck size={17} />
           Сохранить
         </button>
       }
     >
+      <div className="role-mode-panel">
+        <div>
+          <strong>Проверка интерфейса по роли</strong>
+          <span>{canEditSettings ? "Полный доступ к общим настройкам" : "Общие настройки доступны только на чтение"}</span>
+        </div>
+        <div className="segmented-control" role="group" aria-label="Текущая роль">
+          {["Сотрудник", "Старший сотрудник", "Администратор"].map((role) => (
+            <button
+              className={roleMode === role ? "active" : ""}
+              key={role}
+              onClick={() => setRoleMode(role)}
+              type="button"
+            >
+              {role}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="settings-layout">
         <section className="work-panel">
           <SectionTitle title="Матрица ролей" action="Серверная проверка прав" />
@@ -492,6 +846,7 @@ export function SettingsScreen({ onBack, onToast }) {
                   aria-label={`Переключить ${channel.name}`}
                   aria-pressed={channel.enabled}
                   className="toggle-button"
+                  disabled={!canEditSettings}
                   onClick={() => toggleChannel(channel.name)}
                   title={`Переключить ${channel.name}`}
                   type="button"
@@ -507,6 +862,7 @@ export function SettingsScreen({ onBack, onToast }) {
                     min="1"
                     max="30"
                     value={channel.limit}
+                    disabled={!canEditSettings}
                     onChange={(event) => updateLimit(channel.name, Number(event.target.value))}
                   />
                 </label>
@@ -515,6 +871,27 @@ export function SettingsScreen({ onBack, onToast }) {
           </div>
         </section>
       </div>
+
+      <section className="work-panel employee-rules-panel">
+        <SectionTitle title="Каналы и лимиты по сотрудникам" action="исключения и маскирование данных" />
+        <div className="employee-rule-list">
+          {employeeChannelRules.map((rule) => (
+            <article className="employee-rule" key={rule.id}>
+              <header>
+                <strong>{rule.employee}</strong>
+                <span>{rule.role}</span>
+                <b>{rule.chatLimit} чатов</b>
+              </header>
+              <ChannelList channels={rule.channels} />
+              <p>{rule.exceptions.join("; ")}</p>
+              <footer>
+                <span>{rule.canOverride ? "может override" : "без override"}</span>
+                <span>{rule.sensitiveData ? "видит чувствительные данные" : "данные маскированы"}</span>
+              </footer>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <div className="integration-layout">
         <section className="work-panel">
@@ -575,54 +952,11 @@ export function SettingsScreen({ onBack, onToast }) {
   );
 }
 
-function ProductScreen({ title, subtitle, onBack, actions, children }) {
+function InfoPill({ label, value }) {
   return (
-    <section className="product-screen">
-      <header className="product-header">
-        <div>
-          <button className="back-link" onClick={onBack}><ChevronLeft size={18} /> Диалоги</button>
-          <h1>{title}</h1>
-          <p>{subtitle}</p>
-        </div>
-        <div className="product-actions">{actions}</div>
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function MetricTile({ icon, label, value, detail, tone }) {
-  return (
-    <article className={`metric-tile ${tone ?? ""}`}>
-      <div>{icon}</div>
+    <div className="info-pill">
       <span>{label}</span>
       <strong>{value}</strong>
-      <small>{detail}</small>
-    </article>
-  );
-}
-
-function SectionTitle({ title, action }) {
-  return (
-    <header className="section-title">
-      <h2>{title}</h2>
-      <span>{action}</span>
-    </header>
-  );
-}
-
-function ChannelBadge({ channel }) {
-  return <span className={`channel-chip ${channel.toLowerCase()}`}>{channel}</span>;
-}
-
-function ChannelList({ channels }) {
-  return (
-    <div className="mini-channel-list">
-      {channels.map((channel) => <ChannelBadge channel={channel} key={channel} />)}
     </div>
   );
-}
-
-function Permission({ enabled }) {
-  return enabled ? <span className="permission yes">Да</span> : <span className="permission no">Нет</span>;
 }

@@ -38,113 +38,22 @@ import {
   aiSuggestions,
   auditEvents,
   botScenarios,
+  channelSettings,
   employeeChannelRules,
   exportJobs,
+  initialTemplates,
+  integrationCards,
   knowledgeArticles,
+  operators,
   proactiveRules,
   qualityScores,
-  rescueChats
+  queues,
+  reportBars,
+  reportRows,
+  rescueChats,
+  roles,
+  sdkEvents
 } from "./data.js";
-
-const operators = [
-  { name: "Иван П.", status: "online", chats: 7, limit: 12, avg: "01:18", sla: 96, channels: ["SDK", "Telegram"] },
-  { name: "Анна Р.", status: "online", chats: 10, limit: 12, avg: "01:42", sla: 91, channels: ["MAX", "VK"] },
-  { name: "Кирилл М.", status: "break", chats: 3, limit: 8, avg: "02:11", sla: 88, channels: ["Telegram"] },
-  { name: "Елена С.", status: "online", chats: 5, limit: 10, avg: "01:05", sla: 98, channels: ["SDK"] },
-  { name: "Олег Н.", status: "offline", chats: 0, limit: 8, avg: "03:20", sla: 82, channels: ["VK"] }
-];
-
-const queues = [
-  { name: "SDK", active: 42, waiting: 8, overdue: 2, limit: 12, health: 82 },
-  { name: "Telegram", active: 35, waiting: 11, overdue: 3, limit: 8, health: 74 },
-  { name: "MAX", active: 24, waiting: 5, overdue: 1, limit: 8, health: 89 },
-  { name: "VK", active: 25, waiting: 9, overdue: 4, limit: 8, health: 68 }
-];
-
-const reportRows = [
-  { metric: "Новые обращения", today: "486", previous: "438", delta: "+11%", status: "Рост нагрузки" },
-  { metric: "Закрытые обращения", today: "451", previous: "429", delta: "+5%", status: "В норме" },
-  { metric: "Среднее время первого ответа", today: "01:36", previous: "01:52", delta: "-14%", status: "Лучше" },
-  { metric: "SLA выполнен", today: "91%", previous: "87%", delta: "+4 п.п.", status: "Лучше" },
-  { metric: "Без тематики", today: "0", previous: "3", delta: "-3", status: "Контроль работает" }
-];
-
-const reportBars = [
-  ["SDK", 38],
-  ["Telegram", 28],
-  ["MAX", 18],
-  ["VK", 16]
-];
-
-export const initialTemplates = [
-  {
-    id: "delay",
-    title: "Задержка доставки",
-    scope: "Командный",
-    channel: "SDK",
-    topic: "Доставка",
-    usage: 184,
-    updated: "Сегодня, 11:04",
-    text: "Понимаю ожидание. Проверю статус заказа и вернусь с точным временем доставки."
-  },
-  {
-    id: "courier",
-    title: "Передан курьеру",
-    scope: "Личный",
-    channel: "Telegram",
-    topic: "Доставка",
-    usage: 97,
-    updated: "Вчера, 18:20",
-    text: "Заказ передан курьеру и будет доставлен сегодня до 18:00."
-  },
-  {
-    id: "phone",
-    title: "Запрос телефона",
-    scope: "Глобальный",
-    channel: "Все",
-    topic: "Идентификация",
-    usage: 241,
-    updated: "22 июня",
-    text: "Напишите, пожалуйста, номер телефона, указанный в заказе."
-  },
-  {
-    id: "refund",
-    title: "Возврат средств",
-    scope: "Командный",
-    channel: "VK",
-    topic: "Оплата",
-    usage: 73,
-    updated: "20 июня",
-    text: "Проверю статус возврата и уточню срок зачисления средств."
-  }
-];
-
-const roles = [
-  { name: "Сотрудник", panel: false, settings: false, reset: false, reports: "Личные" },
-  { name: "Старший сотрудник", panel: true, settings: false, reset: true, reports: "Команда" },
-  { name: "Администратор", panel: true, settings: true, reset: true, reports: "Все" }
-];
-
-const channelSettings = [
-  { name: "SDK", enabled: true, staff: 18, limit: 12 },
-  { name: "Telegram", enabled: true, staff: 14, limit: 8 },
-  { name: "MAX", enabled: true, staff: 9, limit: 8 },
-  { name: "VK", enabled: true, staff: 11, limit: 8 }
-];
-
-const integrationCards = [
-  { name: "SDK Web / Mobile", channel: "SDK", status: "Активен", detail: "2 приложения, 14 680 сессий сегодня", health: 98 },
-  { name: "Telegram Bot", channel: "Telegram", status: "Активен", detail: "Webhook 200 OK, 28% новых обращений", health: 94 },
-  { name: "MAX Business", channel: "MAX", status: "Тестовый контур", detail: "9 операторов, лимит 8 чатов", health: 82 },
-  { name: "VK Сообщества", channel: "VK", status: "Требует внимания", detail: "SLA 68%, очередь перегружена", health: 68 }
-];
-
-const sdkEvents = [
-  ["identifyUser", "Передает телефон, устройство и ID гигера"],
-  ["initConversation", "Инициирует диалог по номеру телефона"],
-  ["trackEntryPoint", "Фиксирует SDK, Telegram, MAX или VK"],
-  ["syncTopic", "Синхронизирует тематику и запрет закрытия"]
-];
 
 export function PanelScreen({ onBack, onToast }) {
   const [channel, setChannel] = useState("Все каналы");

@@ -272,9 +272,10 @@ select:disabled {
 }
 
 .queue-tabs {
-  display: flex;
-  overflow-x: auto;
-  min-height: 48px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  min-height: 80px;
   border-bottom: 1px solid var(--line);
   background: #ffffff;
 }
@@ -283,13 +284,16 @@ select:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  min-width: 78px;
+  gap: 5px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 8px;
   border-bottom: 3px solid transparent;
   background: transparent;
   color: #3c465a;
+  font-size: 13px;
   font-weight: 650;
+  white-space: nowrap;
 }
 
 .queue-tab.active {
@@ -2742,15 +2746,6 @@ textarea:focus-visible {
 
   .cockpit {
     grid-template-columns: 1fr;
-  }
-
-  .queue-tabs {
-    display: flex;
-    overflow-x: auto;
-  }
-
-  .queue-tab {
-    min-width: 92px;
   }
 
   .conversation-list,

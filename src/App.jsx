@@ -101,13 +101,22 @@ const queueFilterDefaults = {
   onlyInternal: false
 };
 
-const statusLabels = {
-  active: "В работе",
-  waiting: "Ожидает оператора",
-  sla: "SLA риск",
-  breached: "SLA просрочен",
-  closed: "Закрыт"
+const conversationStatusMeta = {
+  new: { label: "Новое", tone: "info", sla: "Новое" },
+  queued: { label: "В очереди", tone: "hold", sla: "Ожидает" },
+  assigned: { label: "Назначено", tone: "ok", sla: "Назначено" },
+  active: { label: "В работе", tone: "ok", sla: "В работе" },
+  waiting_client: { label: "Ожидает клиента", tone: "hold", sla: "Ожидает клиента" },
+  waiting_operator: { label: "Ожидает оператора", tone: "hold", sla: "Ожидает оператора" },
+  transferred: { label: "Передано", tone: "warn", sla: "Передано" },
+  paused: { label: "На паузе", tone: "hold", sla: "SLA пауза" },
+  closed: { label: "Закрыто", tone: "closed", sla: "Закрыт" },
+  reopened: { label: "Переоткрыто", tone: "warn", sla: "Переоткрыто" }
 };
+
+const statusLabels = Object.fromEntries(
+  Object.entries(conversationStatusMeta).map(([status, meta]) => [status, meta.label])
+);
 
 const slaSortRank = {
   danger: 0,
@@ -116,6 +125,54 @@ const slaSortRank = {
   ok: 3,
   closed: 4
 };
+
+const queueWaitingStatuses = ["queued", "waiting_client", "waiting_operator"];
+const queueSlaTones = ["warn", "danger"];
+
+const dialogActionConfigs = [
+  {
+    title: "Передать старшему",
+    description: "Старший сотрудник увидит диалог в панели",
+    nextStatus: "transferred"
+  },
+  {
+    title: "Вернуть в очередь",
+    description: "Диалог станет доступен свободным операторам",
+    nextStatus: "queued"
+  },
+  {
+    title: "Запустить спасение",
+    description: "Сработает таймер и приоритет в очереди",
+    nextStatus: "assigned"
+  },
+  {
+    title: "Поставить паузу SLA",
+    description: "Причина попадет в audit trail",
+    nextStatus: "paused"
+  }
+];
+
+function createAuditEvent({
+  actor = "Иван П.",
+  detail,
+  eventKind = "status",
+  fromStatus,
+  text,
+  time = "сейчас",
+  toStatus
+}) {
+  return {
+    id: Date.now(),
+    type: "event",
+    actor,
+    detail,
+    eventKind,
+    fromStatus,
+    text: text ?? detail,
+    time,
+    toStatus
+  };
+}
 
 const attachmentStatusLabels = {
   ready: "Готово",
@@ -188,6 +245,10 @@ function getConversationTimeValue(time) {
 
 function maskPhone(phone) {
   return phone.replace(/(\+7)\s(\d{3})\s(\d{3})-(\d{2})-(\d{2})/, "$1 *** ***-**-$5");
+}
+
+function getStatusMeta(status) {
+  return conversationStatusMeta[status] ?? conversationStatusMeta.active;
 }
 
 function useModalA11y(onClose) {
@@ -273,7 +334,8 @@ function App() {
     : null;
   const access = roleAccessProfiles[roleMode];
   const selectedTopic = topics[selected.id] ?? "";
-  const isClosed = closedIds.has(selected.id);
+  const selectedStatus = selected.status ?? "active";
+  const isClosed = closedIds.has(selected.id) || selectedStatus === "closed";
   const hasUnsentComposerContent = Boolean(draft.trim() || attachments.length);
 
   useEffect(() => {
@@ -325,8 +387,8 @@ function App() {
           .includes(query.toLowerCase());
         const matchesFilter =
           filter === "mine" ||
-          (filter === "waiting" && ["waiting", "breached"].includes(conversation.status)) ||
-          (filter === "sla" && ["sla", "breached"].includes(conversation.status)) ||
+          (filter === "waiting" && queueWaitingStatuses.includes(conversation.status)) ||
+          (filter === "sla" && queueSlaTones.includes(conversation.slaTone)) ||
           (filter === "rescue" && (!topic || conversation.slaTone === "danger")) ||
           (filter === "quality" && conversation.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))) ||
           filter === "all";
@@ -514,32 +576,115 @@ function App() {
     );
   }
 
+  function applyConversationStatus(conversationId, nextStatus, eventPayload) {
+    const meta = getStatusMeta(nextStatus);
+
+    setConversationItems((current) =>
+      current.map((conversation) => {
+        if (conversation.id !== conversationId) {
+          return conversation;
+        }
+
+        const previousStatus = conversation.status ?? "active";
+        const auditEvent = eventPayload
+          ? createAuditEvent({
+              eventKind: "status",
+              fromStatus: previousStatus,
+              toStatus: nextStatus,
+              ...(typeof eventPayload === "string" ? { detail: eventPayload } : eventPayload)
+            })
+          : null;
+
+        return {
+          ...conversation,
+          status: nextStatus,
+          sla: meta.sla,
+          slaTone: meta.tone,
+          messages: auditEvent ? [...conversation.messages, auditEvent] : conversation.messages,
+          time: "сейчас"
+        };
+      })
+    );
+  }
+
   function handleTopicChange(value) {
     const previousTopic = topics[selected.id] ?? "";
     setTopics((current) => ({ ...current, [selected.id]: value }));
 
     if (value && value !== previousTopic) {
       appendMessage(selected.id, {
-        type: "event",
+        actor: "Иван П.",
+        detail: previousTopic ? `Тематика изменена: ${previousTopic} -> ${value}` : `Проставлена тематика: ${value}`,
+        eventKind: "topic",
+        fromTopic: previousTopic || "Не выбрана",
         text: previousTopic ? `Тематика изменена: ${previousTopic} -> ${value}` : `Проставлена тематика: ${value}`,
+        toTopic: value,
+        type: "event",
         time: "сейчас"
       });
       setToast("Тематика сохранена и попадет в audit trail.");
     }
   }
 
-  function handleDialogAction(action) {
+  function handleStatusChange(nextStatus) {
     if (!access.canManageDialogs) {
       setToast(access.reason);
       return;
     }
 
-    appendMessage(selected.id, {
-      type: "event",
-      text: `${action}: Иван П.`,
-      time: "сейчас"
-    });
-    setToast(`${action} зафиксировано в истории диалога.`);
+    if (nextStatus === selectedStatus) {
+      return;
+    }
+
+    if (nextStatus === "closed") {
+      handleClose();
+      return;
+    }
+
+    if (isClosed && nextStatus !== "reopened") {
+      setToast("Закрытый диалог можно только переоткрыть.");
+      return;
+    }
+
+    if (nextStatus === "reopened") {
+      const nextClosedIds = new Set(closedIds);
+      nextClosedIds.delete(selected.id);
+      setClosedIds(nextClosedIds);
+    }
+
+    applyConversationStatus(
+      selected.id,
+      nextStatus,
+      {
+        detail: `Статус изменен: ${statusLabels[selectedStatus] ?? selectedStatus} -> ${statusLabels[nextStatus]}`,
+        eventKind: nextStatus === "reopened" ? "reopen" : "status"
+      }
+    );
+    setToast(`Статус: ${statusLabels[nextStatus]}`);
+  }
+
+  function handleDialogAction(actionConfig) {
+    if (!access.canManageDialogs) {
+      setToast(access.reason);
+      return;
+    }
+
+    if (actionConfig.nextStatus) {
+      applyConversationStatus(selected.id, actionConfig.nextStatus, {
+        detail: `${actionConfig.title}: ${statusLabels[actionConfig.nextStatus]}`,
+        eventKind: "action"
+      });
+    } else {
+      appendMessage(selected.id, {
+        actor: "Иван П.",
+        detail: `${actionConfig.title}: Иван П.`,
+        eventKind: "action",
+        type: "event",
+        text: `${actionConfig.title}: Иван П.`,
+        time: "сейчас"
+      });
+    }
+    setToast(`${actionConfig.title} зафиксировано в истории диалога.`);
   }
 
   function handleOpenTemplateSave(source) {
@@ -581,27 +726,10 @@ function App() {
     const next = new Set(closedIds);
     next.add(selected.id);
     setClosedIds(next);
-    setConversationItems((current) =>
-      current.map((conversation) =>
-        conversation.id === selected.id
-          ? {
-              ...conversation,
-              status: "closed",
-              sla: "Закрыт",
-              slaTone: "closed",
-              messages: [
-                ...conversation.messages,
-                {
-                  id: Date.now(),
-                  type: "event",
-                  text: `Диалог закрыт с тематикой ${selectedTopic}`,
-                  time: "сейчас"
-                }
-              ]
-            }
-          : conversation
-      )
-    );
+    applyConversationStatus(selected.id, "closed", {
+      detail: `Диалог закрыт с тематикой ${selectedTopic}`,
+      eventKind: "close"
+    });
     setToast("Диалог закрыт и попадет в ежедневный отчет.");
   }
 
@@ -686,8 +814,10 @@ function App() {
               onSaveTemplate={handleOpenTemplateSave}
               onDialogAction={handleDialogAction}
               onCloseDialog={handleClose}
+              onStatusChange={handleStatusChange}
               access={access}
               isClosed={isClosed}
+              status={selectedStatus}
             />
             <CustomerPanel
               conversation={selected}
@@ -1064,8 +1194,8 @@ function ConversationList({
     queueFilters.onlyInternal
   ].filter(Boolean).length;
   const counters = {
-    waiting: allConversations.filter((item) => ["waiting", "breached"].includes(item.status)).length,
-    sla: allConversations.filter((item) => ["sla", "breached"].includes(item.status)).length,
+    waiting: allConversations.filter((item) => queueWaitingStatuses.includes(item.status)).length,
+    sla: allConversations.filter((item) => queueSlaTones.includes(item.slaTone)).length,
     rescue: allConversations.filter((item) => !topics[item.id] || item.slaTone === "danger").length,
     quality: allConversations.filter((item) => item.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))).length
   };
@@ -1165,11 +1295,12 @@ function ConversationList({
                 <time>{conversation.time}</time>
               </span>
               <span className={`channel-chip ${conversation.channel.toLowerCase()}`}>{conversation.channel}</span>
+              <span className={`status-chip ${getStatusMeta(conversation.status).tone}`}>{statusLabels[conversation.status] ?? conversation.status}</span>
               <span className="queue-preview">{conversation.preview}</span>
               <span className={`queue-meta ${conversation.slaTone}`}>
                 {conversation.slaTone === "danger" ? <AlertTriangle size={15} /> : null}
                 {conversation.slaTone === "warn" || conversation.slaTone === "hold" ? <Clock3 size={15} /> : null}
-                {closedIds.has(conversation.id) ? "Закрыт" : conversation.sla}
+                {closedIds.has(conversation.id) || conversation.status === "closed" ? "Закрыт" : conversation.sla}
               </span>
               {!topics[conversation.id] ? <span className="topic-warning">Для закрытия укажите тематику</span> : null}
             </span>
@@ -1231,10 +1362,13 @@ function ChatPane({
   onSaveTemplate,
   onDialogAction,
   onCloseDialog,
+  onStatusChange,
   access,
-  isClosed
+  isClosed,
+  status
 }) {
   const [isActionPanelOpen, setActionPanelOpen] = useState(false);
+  const statusMeta = getStatusMeta(status);
   const visibleMessages = conversation.messages.filter((message) => {
     if (transcriptMode === "internal") {
       return message.type === "internal";
@@ -1271,28 +1405,39 @@ function ChatPane({
         </div>
         {isActionPanelOpen ? (
           <div className="chat-action-menu">
+            <div className="chat-action-status">
+              <span>Текущий статус</span>
+              <strong>{statusMeta.label}</strong>
+            </div>
             {!access.canManageDialogs ? <p className="disabled-reason">{access.reason}</p> : null}
-            {[
-              ["Передать старшему", "Старший сотрудник увидит диалог в панели"],
-              ["Вернуть в очередь", "Диалог станет доступен свободным операторам"],
-              ["Запустить спасение", "Сработает таймер и приоритет в очереди"],
-              ["Поставить паузу SLA", "Причина попадет в audit trail"]
-            ].map(([title, description]) => (
+            {dialogActionConfigs.map((action) => (
               <button
                 disabled={isClosed || !access.canManageDialogs}
-                key={title}
+                key={action.title}
                 onClick={() => {
-                  onDialogAction(title);
+                  onDialogAction(action);
                   setActionPanelOpen(false);
                 }}
                 type="button"
               >
-                <strong>{title}</strong>
-                <span>{description}</span>
+                <strong>{action.title}</strong>
+                <span>{action.description}</span>
               </button>
             ))}
           </div>
         ) : null}
+        <label className="status-select-inline">
+          <span>Статус:</span>
+          <select
+            disabled={!access.canManageDialogs || (isClosed && status !== "closed")}
+            onChange={(event) => onStatusChange(event.target.value)}
+            value={status}
+          >
+            {Object.entries(statusLabels).map(([key, label]) => (
+              <option disabled={isClosed && !["closed", "reopened"].includes(key)} key={key} value={key}>{label}</option>
+            ))}
+          </select>
+        </label>
         <label className="topic-select">
           <span>Тематика:</span>
           <select value={topic} onChange={(event) => onTopic(event.target.value)}>
@@ -1363,12 +1508,7 @@ function ChatPane({
 
 function MessageBubble({ message, onSaveTemplate }) {
   if (message.type === "event") {
-    return (
-      <div className="system-event">
-        <span>{message.text}</span>
-        <time>{message.time}</time>
-      </div>
-    );
+    return <AuditEventCard message={message} />;
   }
 
   if (message.type === "internal") {
@@ -1413,6 +1553,38 @@ function MessageBubble({ message, onSaveTemplate }) {
           </button>
         ) : null}
         <time>{message.time}</time>
+      </footer>
+    </article>
+  );
+}
+
+function AuditEventCard({ message }) {
+  const fromStatusLabel = message.fromStatus ? statusLabels[message.fromStatus] ?? message.fromStatus : "";
+  const toStatusLabel = message.toStatus ? statusLabels[message.toStatus] ?? message.toStatus : "";
+
+  return (
+    <article className={`audit-event-card ${message.eventKind ?? "legacy"}`}>
+      <header>
+        <span>{message.eventKind ? "Audit" : "Событие"}</span>
+        <time>{message.time}</time>
+      </header>
+      <p>{message.detail ?? message.text}</p>
+      <footer>
+        {message.actor ? <span>{message.actor}</span> : null}
+        {fromStatusLabel || toStatusLabel ? (
+          <b>
+            {fromStatusLabel ? <i>{fromStatusLabel}</i> : null}
+            {fromStatusLabel && toStatusLabel ? " -> " : null}
+            {toStatusLabel ? <i>{toStatusLabel}</i> : null}
+          </b>
+        ) : null}
+        {message.fromTopic || message.toTopic ? (
+          <b>
+            {message.fromTopic ? <i>{message.fromTopic}</i> : null}
+            {message.fromTopic && message.toTopic ? " -> " : null}
+            {message.toTopic ? <i>{message.toTopic}</i> : null}
+          </b>
+        ) : null}
       </footer>
     </article>
   );

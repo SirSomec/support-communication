@@ -23,6 +23,7 @@ import {
   MoreHorizontal,
   PanelRightOpen,
   Paperclip,
+  PhoneCall,
   Plus,
   Search,
   Send,
@@ -33,6 +34,7 @@ import {
   Sparkles,
   Tag,
   UsersRound,
+  X,
   Zap
 } from "lucide-react";
 import { ClientsScreen, PanelScreen, ReportsScreen, SettingsScreen, TemplatesScreen } from "./sections.jsx";
@@ -226,24 +228,26 @@ const topicOptions = [
 ];
 
 function App() {
+  const [conversationItems, setConversationItems] = useState(conversations);
   const [section, setSection] = useState("dialogs");
   const [selectedId, setSelectedId] = useState("maria");
   const [filter, setFilter] = useState("mine");
   const [query, setQuery] = useState("");
   const [composeMode, setComposeMode] = useState("reply");
   const [draft, setDraft] = useState("");
+  const [isOutboundOpen, setOutboundOpen] = useState(false);
   const [topics, setTopics] = useState(() =>
     Object.fromEntries(conversations.map((conversation) => [conversation.id, conversation.topic]))
   );
   const [closedIds, setClosedIds] = useState(() => new Set(conversations.filter((item) => item.status === "closed").map((item) => item.id)));
   const [toast, setToast] = useState("");
 
-  const selected = conversations.find((conversation) => conversation.id === selectedId) ?? conversations[0];
+  const selected = conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0];
   const selectedTopic = topics[selected.id] ?? "";
   const isClosed = closedIds.has(selected.id);
 
   const filtered = useMemo(() => {
-    return conversations.filter((conversation) => {
+    return conversationItems.filter((conversation) => {
       const matchesQuery = `${conversation.name} ${conversation.phone} ${conversation.preview} ${conversation.channel}`
         .toLowerCase()
         .includes(query.toLowerCase());
@@ -254,7 +258,43 @@ function App() {
         filter === "all";
       return matchesQuery && matchesFilter;
     });
-  }, [filter, query]);
+  }, [conversationItems, filter, query]);
+
+  function handleOutboundCreate(outbound) {
+    const id = `outbound-${Date.now()}`;
+    const newConversation = {
+      id,
+      name: outbound.clientName || "Новый клиент",
+      initials: outbound.clientName ? outbound.clientName.split(" ").map((part) => part[0]).join("").slice(0, 2) : "НК",
+      avatar: "",
+      channel: outbound.channel,
+      phone: outbound.phone,
+      time: "сейчас",
+      preview: outbound.message,
+      status: "active",
+      sla: "00:00",
+      slaTone: "ok",
+      topic: outbound.topic,
+      unread: false,
+      device: outbound.device,
+      entry: outbound.channel,
+      language: "Русский",
+      clientSince: outbound.existing ? outbound.existing.clientSince : "Новый контакт",
+      tags: ["исходящий", outbound.channel.toLowerCase()],
+      previous: outbound.existing ? outbound.existing.previous : [],
+      messages: [
+        { id: 1, type: "event", text: `Диалог инициирован через ${outbound.channel} по номеру телефона`, time: "сейчас" },
+        { id: 2, side: "operator", text: outbound.message, time: "сейчас" }
+      ]
+    };
+
+    setConversationItems((current) => [newConversation, ...current]);
+    setTopics((current) => ({ ...current, [id]: outbound.topic }));
+    setSelectedId(id);
+    setSection("dialogs");
+    setOutboundOpen(false);
+    setToast(`Исходящий диалог создан: ${outbound.phone}`);
+  }
 
   function handleClose() {
     if (!selectedTopic) {
@@ -282,12 +322,12 @@ function App() {
     <div className="app-shell">
       <Sidebar active={section} onSelect={setSection} />
       <main className="workspace">
-        <TopBar />
+        <TopBar onOutbound={() => setOutboundOpen(true)} />
         {section === "dialogs" ? (
           <div className="cockpit">
             <ConversationList
               conversations={filtered}
-              allConversations={conversations}
+              allConversations={conversationItems}
               selectedId={selectedId}
               onSelect={setSelectedId}
               filter={filter}
@@ -322,11 +362,19 @@ function App() {
           <SectionPlaceholder
             section={section}
             onBack={() => setSection("dialogs")}
-            conversations={conversations}
+            conversations={conversationItems}
             onToast={setToast}
           />
         )}
       </main>
+      {isOutboundOpen ? (
+        <OutboundDialogLauncher
+          conversations={conversationItems}
+          onClose={() => setOutboundOpen(false)}
+          onCreate={handleOutboundCreate}
+          onToast={setToast}
+        />
+      ) : null}
       {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
     </div>
   );
@@ -368,7 +416,7 @@ function Sidebar({ active, onSelect }) {
   );
 }
 
-function TopBar() {
+function TopBar({ onOutbound }) {
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -391,13 +439,108 @@ function TopBar() {
         <button className="icon-button" aria-label="Поиск">
           <Search size={20} />
         </button>
-        <button className="quick-action">
+        <button className="quick-action" onClick={onOutbound} type="button">
           <Zap size={17} />
           Быстрые действия
           <ChevronDown size={16} />
         </button>
       </div>
     </header>
+  );
+}
+
+function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast }) {
+  const [phone, setPhone] = useState("+7 ");
+  const [clientName, setClientName] = useState("");
+  const [channel, setChannel] = useState("SDK");
+  const [topic, setTopic] = useState(topicOptions[0]);
+  const [message, setMessage] = useState("Здравствуйте! Пишем по вашему обращению, готовы помочь в этом диалоге.");
+
+  const normalizedPhone = phone.replace(/\D/g, "");
+  const existing = conversations.find((conversation) => conversation.phone.replace(/\D/g, "") === normalizedPhone);
+  const device = channel === "SDK" ? "Android / iOS из SDK" : "Определится каналом";
+  const canCreate = normalizedPhone.length >= 11 && message.trim().length > 0;
+
+  function handleCreate() {
+    if (!canCreate) {
+      onToast("Укажите телефон и стартовое сообщение для исходящего диалога.");
+      return;
+    }
+
+    onCreate({
+      phone,
+      clientName: existing?.name ?? clientName.trim(),
+      channel,
+      topic,
+      message: message.trim(),
+      device,
+      existing
+    });
+  }
+
+  return (
+    <div className="outbound-overlay" role="presentation">
+      <section className="outbound-panel" aria-label="Новый исходящий диалог" aria-modal="true" role="dialog">
+        <header>
+          <div>
+            <span>SDK contact center</span>
+            <h2>Новый исходящий диалог</h2>
+          </div>
+          <button aria-label="Закрыть" className="icon-button" onClick={onClose} title="Закрыть" type="button">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="outbound-grid">
+          <label>
+            <span>Телефон клиента</span>
+            <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+7 999 000-00-00" />
+          </label>
+          <label>
+            <span>Имя, если новый клиент</span>
+            <input value={clientName} onChange={(event) => setClientName(event.target.value)} placeholder="Новый клиент" disabled={Boolean(existing)} />
+          </label>
+          <label>
+            <span>Канал запуска</span>
+            <select value={channel} onChange={(event) => setChannel(event.target.value)}>
+              {["SDK", "Telegram", "MAX", "VK"].map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Тематика</span>
+            <select value={topic} onChange={(event) => setTopic(event.target.value)}>
+              {topicOptions.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <label className="outbound-message">
+          <span>Стартовое сообщение</span>
+          <textarea value={message} onChange={(event) => setMessage(event.target.value)} />
+        </label>
+
+        <div className="sdk-preview">
+          <div>
+            <PhoneCall size={18} />
+            <strong>{existing ? `Найден профиль: ${existing.name}` : "Будет создан новый профиль"}</strong>
+            <span>{phone} · {channel} · {device}</span>
+          </div>
+          <div>
+            <Smartphone size={18} />
+            <strong>SDK-событие</strong>
+            <span>initConversation(phone, channel, topic, operatorId)</span>
+          </div>
+        </div>
+
+        <footer>
+          <button onClick={onClose} type="button">Отмена</button>
+          <button className="primary-action" onClick={handleCreate} type="button">
+            <Send size={17} />
+            Создать диалог
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

@@ -117,6 +117,20 @@ const channelSettings = [
   { name: "VK", enabled: true, staff: 11, limit: 8 }
 ];
 
+const integrationCards = [
+  { name: "SDK Web / Mobile", channel: "SDK", status: "Активен", detail: "2 приложения, 14 680 сессий сегодня", health: 98 },
+  { name: "Telegram Bot", channel: "Telegram", status: "Активен", detail: "Webhook 200 OK, 28% новых обращений", health: 94 },
+  { name: "MAX Business", channel: "MAX", status: "Тестовый контур", detail: "9 операторов, лимит 8 чатов", health: 82 },
+  { name: "VK Сообщества", channel: "VK", status: "Требует внимания", detail: "SLA 68%, очередь перегружена", health: 68 }
+];
+
+const sdkEvents = [
+  ["identifyUser", "Передает телефон, устройство и ID гигера"],
+  ["initConversation", "Инициирует диалог по номеру телефона"],
+  ["trackEntryPoint", "Фиксирует SDK, Telegram, MAX или VK"],
+  ["syncTopic", "Синхронизирует тематику и запрет закрытия"]
+];
+
 export function PanelScreen({ onBack, onToast }) {
   const [channel, setChannel] = useState("Все каналы");
   const visibleQueues = channel === "Все каналы" ? queues : queues.filter((queue) => queue.name === channel);
@@ -495,6 +509,46 @@ export function SettingsScreen({ onBack, onToast }) {
                   />
                 </label>
               </article>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="integration-layout">
+        <section className="work-panel">
+          <SectionTitle title="Подключения" action="Мониторинг каналов" />
+          <div className="integration-cards">
+            {integrationCards.map((integration) => (
+              <article className="integration-card" key={integration.name}>
+                <header>
+                  <ChannelBadge channel={integration.channel} />
+                  <strong>{integration.name}</strong>
+                  <span>{integration.status}</span>
+                </header>
+                <p>{integration.detail}</p>
+                <div className="health-bar"><i style={{ width: `${integration.health}%` }} /></div>
+                <footer>
+                  <span>{integration.health}% health</span>
+                  <button onClick={() => onToast(`${integration.name}: проверка подключения запущена.`)} type="button">Проверить</button>
+                </footer>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="work-panel sdk-console">
+          <SectionTitle title="SDK-консоль" action="Ключи, события, точки входа" />
+          <div className="sdk-code">
+            <code>{`SupportSDK.init({ appId: "gig-app", channels: ["SDK", "Telegram", "MAX", "VK"] })`}</code>
+            <button onClick={() => onToast("SDK snippet скопирован.")} type="button">Копировать</button>
+          </div>
+          <div className="sdk-event-list">
+            {sdkEvents.map(([event, description]) => (
+              <div className="sdk-event-row" key={event}>
+                <Zap size={17} />
+                <strong>{event}</strong>
+                <span>{description}</span>
+              </div>
             ))}
           </div>
         </section>

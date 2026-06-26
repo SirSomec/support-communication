@@ -94,6 +94,21 @@ const exportStatusClasses = {
   expired: "closed"
 };
 
+function createScreenStateItems({
+  loading = "готово",
+  total = 1,
+  empty = "данные есть",
+  emptyWhenZero = "нет данных",
+  errors = 0,
+  errorLabel = "нет ошибок"
+}) {
+  return [
+    { label: "Загрузка", value: loading, tone: "ok" },
+    { label: total ? "Данные" : "Пусто", value: total ? empty : emptyWhenZero, tone: total ? "ok" : "empty" },
+    { label: "Ошибки", value: errors ? `${errors} требуют внимания` : errorLabel, tone: errors ? "error" : "ok" }
+  ];
+}
+
 export function PanelScreen({ onBack, onToast, access }) {
   const [channel, setChannel] = useState("Все каналы");
   const visibleQueues = channel === "Все каналы" ? queues : queues.filter((queue) => queue.name === channel);
@@ -106,6 +121,13 @@ export function PanelScreen({ onBack, onToast, access }) {
       title="Панель смены"
       subtitle="Операторы, очереди, активные диалоги и SLA-риски в одном рабочем окне."
       onBack={onBack}
+      stateItems={createScreenStateItems({
+        total: visibleQueues.length,
+        empty: `${visibleQueues.length} очередей`,
+        emptyWhenZero: "очередей нет",
+        errors: overdueChats,
+        errorLabel: "SLA без ошибок"
+      })}
       actions={
         <>
           <select className="inline-select" value={channel} onChange={(event) => setChannel(event.target.value)}>
@@ -222,6 +244,13 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
       title="Клиенты"
       subtitle="Единые профили с телефонами, устройствами, точками входа и историей обращений."
       onBack={onBack}
+      stateItems={createScreenStateItems({
+        total: clients.length,
+        empty: `${clients.length} профилей`,
+        emptyWhenZero: "поиск без результатов",
+        errors: duplicateCandidates.filter((candidate) => candidate.score >= 90 && !mergedIds.includes(candidate.id)).length,
+        errorLabel: "дублей нет"
+      })}
       actions={
         <button className="primary-action" disabled={!canMergeProfiles} onClick={() => duplicateCandidates[0] ? mergeClient(duplicateCandidates[0]) : onToast("Потенциальных дублей не найдено.")} title={canMergeProfiles ? "Объединить ближайший дубль" : access.reason}>
           <Sparkles size={17} />
@@ -383,6 +412,12 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
       title="Шаблоны"
       subtitle="Личные, командные и глобальные ответы с каналами, тематиками и переменными."
       onBack={onBack}
+      stateItems={createScreenStateItems({
+        total: visibleItems.length,
+        empty: `${visibleItems.length} шаблонов`,
+        emptyWhenZero: "поиск без шаблонов",
+        errorLabel: "ошибок редактора нет"
+      })}
       actions={
         <button className="primary-action" onClick={createTemplate}>
           <Plus size={17} />
@@ -502,6 +537,13 @@ export function VisitorsScreen({ onBack, onToast, access }) {
       title="Активные визиты и спасение"
       subtitle="Наблюдение SDK/VK-сессий до начала чата, proactive-приглашения и очередь спасения диалогов с таймерами."
       onBack={onBack}
+      stateItems={createScreenStateItems({
+        total: activeVisitors.length,
+        empty: `${activeVisitors.length} активных визитов`,
+        emptyWhenZero: "активных визитов нет",
+        errors: criticalRescue,
+        errorLabel: "критичных rescue нет"
+      })}
       actions={
         <>
           <button
@@ -725,6 +767,13 @@ export function QualityScreen({ onBack, onToast }) {
       title="Качество, CSAT и AI"
       subtitle="Оценки клиентов, ручной QA, низкие оценки, AI-подсказки и управление статьями базы знаний."
       onBack={onBack}
+      stateItems={createScreenStateItems({
+        total: qualityScores.length + aiSuggestions.length + knowledgeArticles.length,
+        empty: `${qualityScores.length} оценок, ${aiSuggestions.length} AI`,
+        emptyWhenZero: "качество без данных",
+        errors: lowScores.length,
+        errorLabel: "низких оценок нет"
+      })}
       actions={
         <>
           <button onClick={() => onToast("Фильтр низких оценок применен к очереди старшего сотрудника.")} type="button">
@@ -1006,6 +1055,13 @@ export function AutomationScreen({ onBack, onToast, access }) {
       title="Боты и автоматизация"
       subtitle="Сценарии AI-оператора, proactive-приглашения, handoff в очереди и audit действий автоматики."
       onBack={onBack}
+      stateItems={createScreenStateItems({
+        total: scenarioItems.length,
+        empty: `${scenarioItems.length} сценариев`,
+        emptyWhenZero: "сценариев нет",
+        errors: importError ? 1 : 0,
+        errorLabel: "ошибок flow нет"
+      })}
       actions={
         <>
           <button disabled={!canManageAutomation} onClick={handleScenarioCreate} title={canManageAutomation ? "Создать сценарий" : access.reason} type="button">
@@ -1270,6 +1326,13 @@ export function ReportsScreen({ onBack, onToast, access }) {
       title="Отчеты"
       subtitle="Ежедневный отчет, дайджест и выгрузка всех показателей, которые видны в интерфейсе."
       onBack={onBack}
+      stateItems={createScreenStateItems({
+        total: reportRows.length,
+        empty: `${reportRows.length} метрик`,
+        emptyWhenZero: "метрик нет",
+        errors: reportExportJobs.filter((job) => job.statusKey === "error").length,
+        errorLabel: "ошибок экспорта нет"
+      })}
       actions={
         <>
           <select className="inline-select" value={period} onChange={(event) => setPeriod(event.target.value)}>
@@ -1797,6 +1860,13 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
       title="Настройки"
       subtitle="Права, каналы, лимиты операторов, маршрутизация и обязательные правила закрытия."
       onBack={onBack}
+      stateItems={createScreenStateItems({
+        total: channels.length,
+        empty: `${channels.length} каналов`,
+        emptyWhenZero: "каналы не настроены",
+        errors: channelDetails.flatMap((channel) => channel.logs).filter((log) => log.severity === "error").length,
+        errorLabel: "критичных ошибок нет"
+      })}
       actions={
         <button className="primary-action" disabled={!canEditSettings} onClick={() => onToast("Настройки сохранены и попадут в аудит.")}>
           <ShieldCheck size={17} />

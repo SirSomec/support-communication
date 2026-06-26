@@ -1839,6 +1839,67 @@ select:disabled {
   color: var(--muted);
 }
 
+.screen-state-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.screen-state-item {
+  display: grid;
+  grid-template-columns: 24px auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #34445e;
+}
+
+.screen-state-item svg {
+  color: var(--teal);
+}
+
+.screen-state-item span,
+.screen-state-item strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-state-item span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.screen-state-item strong {
+  justify-self: end;
+  color: #1d2d46;
+  font-size: 12px;
+}
+
+.screen-state-item.empty {
+  border-color: #dbeafe;
+  background: #f8fbff;
+}
+
+.screen-state-item.warn,
+.screen-state-item.error {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.screen-state-item.warn svg,
+.screen-state-item.error svg {
+  color: #cf3d4a;
+}
+
 .back-link {
   display: inline-flex;
   align-items: center;
@@ -5003,6 +5064,10 @@ textarea:focus-visible {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .screen-state-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .report-chart-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5295,6 +5360,14 @@ textarea:focus-visible {
   .report-toolbar button {
     flex: 1 1 100%;
     width: 100%;
+  }
+
+  .screen-state-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .screen-state-item strong {
+    justify-self: start;
   }
 
   .toolbar-search {

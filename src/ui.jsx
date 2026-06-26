@@ -1,7 +1,15 @@
 import React from "react";
-import { ChevronLeft } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, Inbox, LoaderCircle } from "lucide-react";
 
-export function ProductScreen({ title, subtitle, onBack, actions, children }) {
+const stateIcons = {
+  loading: LoaderCircle,
+  ok: CheckCircle2,
+  empty: Inbox,
+  error: AlertTriangle,
+  warn: AlertTriangle
+};
+
+export function ProductScreen({ title, subtitle, onBack, actions, stateItems = [], children }) {
   return (
     <section className="product-screen">
       <header className="product-header">
@@ -15,8 +23,27 @@ export function ProductScreen({ title, subtitle, onBack, actions, children }) {
         </div>
         <div className="product-actions">{actions}</div>
       </header>
+      {stateItems.length ? <ScreenStateStrip items={stateItems} /> : null}
       {children}
     </section>
+  );
+}
+
+export function ScreenStateStrip({ items }) {
+  return (
+    <div className="screen-state-strip" aria-label="Состояния экрана">
+      {items.map((item) => {
+        const Icon = stateIcons[item.tone] ?? CheckCircle2;
+
+        return (
+          <article className={`screen-state-item ${item.tone ?? "ok"}`} key={item.label}>
+            <Icon size={16} />
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 

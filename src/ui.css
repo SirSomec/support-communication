@@ -103,6 +103,30 @@
   color: var(--text);
 }
 
+.segmented-control {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.segmented-control button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 5px;
+  background: transparent;
+  color: #46546b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.segmented-control button.active {
+  background: var(--blue);
+  color: #ffffff;
+}
+
 .permission {
   width: max-content;
   padding: 4px 8px;
@@ -124,5 +148,9 @@
 @media (max-width: 820px) {
   .toolbar-search {
     flex: 1 1 100%;
+  }
+
+  .segmented-control {
+    overflow-x: auto;
   }
 }

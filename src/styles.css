@@ -832,8 +832,7 @@ select:disabled {
   flex: 0 0 auto;
 }
 
-.transcript-filter-buttons,
-.segmented-control {
+.transcript-filter-buttons {
   display: inline-flex;
   gap: 4px;
   padding: 3px;
@@ -842,8 +841,7 @@ select:disabled {
   background: #ffffff;
 }
 
-.transcript-filter-buttons button,
-.segmented-control button {
+.transcript-filter-buttons button {
   min-height: 28px;
   padding: 0 9px;
   border-radius: 5px;
@@ -853,8 +851,7 @@ select:disabled {
   font-weight: 800;
 }
 
-.transcript-filter-buttons button.active,
-.segmented-control button.active {
+.transcript-filter-buttons button.active {
   background: var(--blue);
   color: #ffffff;
 }
@@ -4417,10 +4414,6 @@ textarea:focus-visible {
   .role-mode-panel {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .segmented-control {
-    overflow-x: auto;
   }
 
   .secondary-grid {

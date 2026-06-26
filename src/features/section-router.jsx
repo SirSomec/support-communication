@@ -5,9 +5,9 @@ import { ClientsScreen } from "./clients/ClientsScreen.jsx";
 import { PanelScreen } from "./panel/PanelScreen.jsx";
 import { QualityScreen } from "./quality/QualityScreen.jsx";
 import { ReportsScreen } from "./reports/ReportsScreen.jsx";
+import { SettingsScreen } from "./settings/SettingsScreen.jsx";
 import { TemplatesScreen } from "./templates/TemplatesScreen.jsx";
 import { VisitorsScreen } from "./visitors/VisitorsScreen.jsx";
-import { SettingsScreen } from "../sections.jsx";
 
 export function SectionPlaceholder({
   section,

@@ -12,7 +12,7 @@ import {
   ToggleRight,
   Zap
 } from "lucide-react";
-import { ChannelBadge, ChannelList, Permission, ProductScreen, SectionTitle, SegmentedControl, ToolbarSearch } from "./ui.jsx";
+import { ChannelBadge, ChannelList, Permission, ProductScreen, SectionTitle, SegmentedControl, ToolbarSearch } from "../../ui.jsx";
 import {
   channelDetails,
   channelSettings,
@@ -21,8 +21,8 @@ import {
   roles,
   sdkEvents,
   topicDirectorySeed
-} from "./data.js";
-import { createScreenStateItems } from "./app/screenState.js";
+} from "../../data.js";
+import { createScreenStateItems } from "../../app/screenState.js";
 
 const topicStatusFilters = ["Все", "Активные", "Архив"];
 export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }) {

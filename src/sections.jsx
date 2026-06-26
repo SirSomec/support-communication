@@ -755,12 +755,41 @@ export function VisitorsScreen({ onBack, onToast, access }) {
 }
 
 export function QualityScreen({ onBack, onToast }) {
+  const [selectedArticleId, setSelectedArticleId] = useState(knowledgeArticles[0]?.id ?? "");
+  const [articleDrafts, setArticleDrafts] = useState(() =>
+    Object.fromEntries(knowledgeArticles.map((article) => [
+      article.id,
+      {
+        ...article,
+        body: `${article.title}: актуальная инструкция для операторов и self-service. Свяжите статью с тематикой ${article.topics.join(", ")} и проверьте формулировки перед публикацией.`
+      }
+    ]))
+  );
   const lowScores = qualityScores.filter((item) => Number(item.score) < 4 || item.status.includes("Низкая"));
   const averageCsat = Math.round(
     qualityScores
       .filter((item) => item.scale === "CSAT")
       .reduce((sum, item, _, list) => sum + (Number(item.score) / 5) * 100 / list.length, 0)
   );
+  const selectedArticle = articleDrafts[selectedArticleId] ?? Object.values(articleDrafts)[0];
+
+  function updateArticleDraft(field, value) {
+    setArticleDrafts((current) => ({
+      ...current,
+      [selectedArticle.id]: {
+        ...current[selectedArticle.id],
+        [field]: value
+      }
+    }));
+  }
+
+  function toggleArticleChannel(channel) {
+    const nextChannels = selectedArticle.channels.includes(channel)
+      ? selectedArticle.channels.filter((item) => item !== channel)
+      : [...selectedArticle.channels, channel];
+
+    updateArticleDraft("channels", nextChannels);
+  }
 
   return (
     <ProductScreen
@@ -840,16 +869,73 @@ export function QualityScreen({ onBack, onToast }) {
 
       <section className="work-panel">
         <SectionTitle title="База знаний" action="редактор и публикация статей" />
-        <div className="knowledge-table">
-          {knowledgeArticles.map((article) => (
-            <button className="knowledge-row" key={article.id} onClick={() => onToast(`Открыт редактор статьи: ${article.title}`)} type="button">
-              <strong>{article.title}</strong>
-              <span>{article.category}</span>
-              <span>{article.status}</span>
-              <ChannelList channels={article.channels} />
-              <b>{article.helpfulRate}% полезность</b>
-            </button>
-          ))}
+        <div className="knowledge-workspace">
+          <div className="knowledge-table">
+            {Object.values(articleDrafts).map((article) => (
+              <button
+                className={`knowledge-row ${selectedArticle.id === article.id ? "selected" : ""}`}
+                key={article.id}
+                onClick={() => setSelectedArticleId(article.id)}
+                type="button"
+              >
+                <strong>{article.title}</strong>
+                <span>{article.category}</span>
+                <span>{article.status}</span>
+                <ChannelList channels={article.channels} />
+                <b>{article.helpfulRate}% полезность</b>
+              </button>
+            ))}
+          </div>
+
+          <div className="knowledge-editor">
+            <div className="knowledge-editor-form">
+              <label>
+                <span>Название</span>
+                <input value={selectedArticle.title} onChange={(event) => updateArticleDraft("title", event.target.value)} />
+              </label>
+              <label>
+                <span>Статус</span>
+                <select value={selectedArticle.status} onChange={(event) => updateArticleDraft("status", event.target.value)}>
+                  <option>Черновик</option>
+                  <option>На проверке</option>
+                  <option>Опубликована</option>
+                </select>
+              </label>
+              <label>
+                <span>Текст статьи</span>
+                <textarea value={selectedArticle.body} onChange={(event) => updateArticleDraft("body", event.target.value)} />
+              </label>
+              <div className="knowledge-channel-picker" aria-label="Каналы статьи">
+                {["SDK", "Telegram", "MAX", "VK"].map((channel) => (
+                  <button
+                    className={selectedArticle.channels.includes(channel) ? "active" : ""}
+                    key={channel}
+                    onClick={() => toggleArticleChannel(channel)}
+                    type="button"
+                  >
+                    {channel}
+                  </button>
+                ))}
+              </div>
+              <footer>
+                <button onClick={() => onToast(`${selectedArticle.title}: черновик сохранен.`)} type="button">
+                  <Pencil size={16} />
+                  Сохранить
+                </button>
+                <button className="primary-action" onClick={() => updateArticleDraft("status", "На проверке")} type="button">
+                  <CheckCircle2 size={16} />
+                  На проверку
+                </button>
+              </footer>
+            </div>
+            <article className="knowledge-preview">
+              <span>{selectedArticle.category} · {selectedArticle.status}</span>
+              <h3>{selectedArticle.title}</h3>
+              <p>{selectedArticle.body}</p>
+              <ChannelList channels={selectedArticle.channels} />
+              <small>Тематики: {selectedArticle.topics.join(", ")} · полезность {selectedArticle.helpfulRate}%</small>
+            </article>
+          </div>
         </div>
       </section>
     </ProductScreen>
@@ -867,6 +953,24 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const canManageAutomation = access.canManageSettings;
   const enabledScenarios = scenarioItems.filter((scenario) => scenario.status.includes("Включ") || scenario.status.includes("Р’РєР»")).length;
   const enabledProactive = proactiveRules.filter((rule) => rule.status.includes("Включ") || rule.status.includes("Р’РєР»")).length;
+  const automationChannels = ["SDK", "Telegram", "MAX", "VK"];
+  const channelAssignments = automationChannels.map((channel) => ({
+    channel,
+    scenario: scenarioItems.find((scenario) => scenario.channels.includes(channel))
+  }));
+  const botMetricRows = [
+    { label: "Диалогов с ботом", value: "312", detail: "24 часа" },
+    { label: "Успешно без оператора", value: "41%", detail: "по выбранным сценариям" },
+    { label: "Handoff rate", value: "37%", detail: selectedScenario.handoff },
+    { label: "Fallback", value: "8%", detail: "нет intent или данных" }
+  ];
+  const afterHoursPolicy = {
+    name: "Нерабочее время",
+    window: "21:00-09:00",
+    channels: selectedScenario.channels,
+    behavior: "Собрать телефон, тему, номер заказа и создать обращение без ожидания оператора",
+    fallback: "Если клиент просит человека, показать срок ответа и поставить SLA-таймер"
+  };
   const exportPayload = JSON.stringify({
     schemaVersion: selectedScenario.schemaVersion,
     exportVersion: selectedScenario.exportVersion,
@@ -987,6 +1091,24 @@ export function AutomationScreen({ onBack, onToast, access }) {
     onToast("Черновик сценария создан в конструкторе.");
   }
 
+  function handleAssignChannel(channel, scenarioId) {
+    if (!canManageAutomation) {
+      onToast(access.reason);
+      return;
+    }
+
+    const targetScenario = scenarioItems.find((scenario) => scenario.id === scenarioId);
+
+    setScenarioItems((current) => current.map((scenario) => {
+      const nextChannels = scenario.id === scenarioId
+        ? Array.from(new Set([...scenario.channels, channel]))
+        : scenario.channels.filter((item) => item !== channel);
+
+      return { ...scenario, channels: nextChannels };
+    }));
+    onToast(`${channel}: назначен бот "${targetScenario?.name ?? "сценарий"}".`);
+  }
+
   function handleImportFlow() {
     if (!canManageAutomation) {
       onToast(access.reason);
@@ -1080,6 +1202,56 @@ export function AutomationScreen({ onBack, onToast, access }) {
         <MetricTile icon={<Zap size={21} />} label="Proactive" value={proactiveRules.length} detail={`${enabledProactive} активны`} />
         <MetricTile icon={<Workflow size={21} />} label="Handoff" value="4" detail="очереди назначения" />
         <MetricTile icon={<ListChecks size={21} />} label="Audit" value={auditEvents.length} detail="последние события" />
+      </div>
+
+      <div className="automation-insight-grid">
+        <section className="work-panel bot-assignment-panel">
+          <SectionTitle title="Боты по каналам" action="один активный сценарий на канал" />
+          <div className="bot-assignment-list">
+            {channelAssignments.map(({ channel, scenario }) => (
+              <label key={channel}>
+                <span><ChannelBadge channel={channel} /> {scenario?.status ?? "Не назначен"}</span>
+                <select
+                  disabled={!canManageAutomation}
+                  onChange={(event) => handleAssignChannel(channel, event.target.value)}
+                  value={scenario?.id ?? ""}
+                >
+                  <option value="" disabled>Выберите сценарий</option>
+                  {scenarioItems.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className="work-panel after-hours-card">
+          <SectionTitle title="Нерабочее время" action={afterHoursPolicy.window} />
+          <p>{afterHoursPolicy.behavior}</p>
+          <small>{afterHoursPolicy.fallback}</small>
+          <ChannelList channels={afterHoursPolicy.channels} />
+        </section>
+
+        <section className="work-panel bot-metrics-card">
+          <SectionTitle title="Метрики ботов" action="срез демо-данных" />
+          <div className="bot-metric-list">
+            {botMetricRows.map((metric) => (
+              <span key={metric.label}>
+                <b>{metric.value}</b>
+                <strong>{metric.label}</strong>
+                <small>{metric.detail}</small>
+              </span>
+            ))}
+          </div>
+        </section>
+
+        <section className="work-panel bot-handoff-card">
+          <SectionTitle title="Handoff summary" action={selectedScenario.handoff} />
+          <p>Оператор получает trigger, собранные поля, последний ответ бота и причину передачи до первого ручного сообщения.</p>
+          <div>
+            <span>Поля: {selectedScenario.validationRules.join(", ")}</span>
+            <span>Последний тест: {selectedScenario.testCases[0]?.expected ?? "handoff"}</span>
+          </div>
+        </section>
       </div>
 
       <div className="automation-layout">

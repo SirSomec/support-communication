@@ -12,9 +12,7 @@ import {
   Clock3,
   Copy,
   FileText,
-  Gauge,
   Headphones,
-  Inbox,
   Info,
   Lock,
   MessageCircle,
@@ -39,315 +37,38 @@ import {
   X,
   Zap
 } from "lucide-react";
+import { roleAccessProfiles, roleModes } from "./app/access.js";
 import {
-  AutomationScreen,
-  ClientsScreen,
-  PanelScreen,
-  QualityScreen,
-  ReportsScreen,
-  SettingsScreen,
-  TemplatesScreen,
-  VisitorsScreen
-} from "./sections.jsx";
-import { aiSuggestions, conversations, initialTemplates, navItems, topicOptions } from "./data.js";
-
-const modalFocusableSelector = [
-  "button:not(:disabled)",
-  "input:not(:disabled)",
-  "select:not(:disabled)",
-  "textarea:not(:disabled)",
-  "a[href]",
-  "[tabindex]:not([tabindex='-1'])"
-].join(",");
-
-const roleModes = ["Сотрудник", "Старший сотрудник", "Администратор"];
-
-const roleAccessProfiles = {
-  "Сотрудник": {
-    sections: ["dialogs", "clients", "templates"],
-    canOutbound: false,
-    canManageDialogs: false,
-    canViewSensitive: false,
-    canManageSettings: false,
-    canExportReports: false,
-    canRedistribute: false,
-    reason: "Доступно старшему сотруднику или администратору"
-  },
-  "Старший сотрудник": {
-    sections: ["dialogs", "panel", "clients", "templates", "visitors", "reports", "quality", "settings"],
-    canOutbound: true,
-    canManageDialogs: true,
-    canViewSensitive: true,
-    canManageSettings: false,
-    canExportReports: true,
-    canRedistribute: true,
-    reason: "Глобальные настройки доступны только администратору"
-  },
-  "Администратор": {
-    sections: navItems.map((item) => item.key),
-    canOutbound: true,
-    canManageDialogs: true,
-    canViewSensitive: true,
-    canManageSettings: true,
-    canExportReports: true,
-    canRedistribute: true,
-    reason: "Полный доступ"
-  }
-};
-
-const queueFilterDefaults = {
-  channel: "all",
-  topic: "all",
-  status: "all",
-  sort: "time",
-  onlyInternal: false
-};
-
-const conversationStatusMeta = {
-  new: { label: "Новое", tone: "info", sla: "Новое" },
-  queued: { label: "В очереди", tone: "hold", sla: "Ожидает" },
-  assigned: { label: "Назначено", tone: "ok", sla: "Назначено" },
-  active: { label: "В работе", tone: "ok", sla: "В работе" },
-  waiting_client: { label: "Ожидает клиента", tone: "hold", sla: "Ожидает клиента" },
-  waiting_operator: { label: "Ожидает оператора", tone: "hold", sla: "Ожидает оператора" },
-  transferred: { label: "Передано", tone: "warn", sla: "Передано" },
-  paused: { label: "На паузе", tone: "hold", sla: "SLA пауза" },
-  closed: { label: "Закрыто", tone: "closed", sla: "Закрыт" },
-  reopened: { label: "Переоткрыто", tone: "warn", sla: "Переоткрыто" }
-};
-
-const statusLabels = Object.fromEntries(
-  Object.entries(conversationStatusMeta).map(([status, meta]) => [status, meta.label])
-);
-
-const slaSortRank = {
-  danger: 0,
-  warn: 1,
-  hold: 2,
-  ok: 3,
-  closed: 4
-};
-
-const queueWaitingStatuses = ["queued", "waiting_client", "waiting_operator"];
-const queueSlaTones = ["warn", "danger"];
-
-const aiActionLabels = {
-  accept: "принята",
-  edit: "открыта на редактирование",
-  reject: "отклонена"
-};
-
-const aiSuggestionStatusLabels = {
-  idle: "Новая",
-  accepted: "Принята",
-  editing: "Редактируется",
-  rejected: "Отклонена"
-};
-
-const dialogActionConfigs = [
-  {
-    title: "Передать старшему",
-    description: "Старший сотрудник увидит диалог в панели",
-    nextStatus: "transferred"
-  },
-  {
-    title: "Вернуть в очередь",
-    description: "Диалог станет доступен свободным операторам",
-    nextStatus: "queued"
-  },
-  {
-    id: "rescue",
-    title: "Запустить спасение",
-    description: "Сработает таймер и приоритет в очереди",
-    nextStatus: "assigned"
-  },
-  {
-    title: "Поставить паузу SLA",
-    description: "Причина попадет в audit trail",
-    nextStatus: "paused"
-  }
-];
-
-function createAuditEvent({
-  actor = "Иван П.",
-  detail,
-  eventKind = "status",
-  fromStatus,
-  text,
-  time = "сейчас",
-  toStatus
-}) {
-  return {
-    id: Date.now(),
-    type: "event",
-    actor,
-    detail,
-    eventKind,
-    fromStatus,
-    text: text ?? detail,
-    time,
-    toStatus
-  };
-}
-
-const attachmentStatusLabels = {
-  ready: "Готово",
-  uploading: "Загрузка",
-  error: "Ошибка"
-};
-
-const maxAttachmentSizeBytes = 20 * 1024 * 1024;
-const allowedAttachmentExtensions = ["pdf", "png", "jpg", "jpeg", "webp"];
-const imageAttachmentExtensions = ["png", "jpg", "jpeg", "webp"];
-const rescueDurationSeconds = 4 * 60;
-
-function getFileExtension(fileName) {
-  const parts = fileName.toLowerCase().split(".");
-  return parts.length > 1 ? parts.at(-1) : "";
-}
-
-function formatFileSize(bytes) {
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
-  }
-
-  return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
-}
-
-function formatRescueTimer(totalSeconds) {
-  const safeSeconds = Math.max(0, totalSeconds);
-  const minutes = Math.floor(safeSeconds / 60).toString().padStart(2, "0");
-  const seconds = (safeSeconds % 60).toString().padStart(2, "0");
-  return `${minutes}:${seconds}`;
-}
-
-function getRescueRemainingSeconds(rescue, now) {
-  if (!rescue?.deadlineAt) {
-    return rescue?.remainingSeconds ?? 0;
-  }
-
-  return Math.max(0, Math.ceil((rescue.deadlineAt - now) / 1000));
-}
-
-function createComposerAttachment(file, index, channel) {
-  const extension = getFileExtension(file.name);
-  const errors = [];
-
-  if (!allowedAttachmentExtensions.includes(extension)) {
-    errors.push("Недоступный тип файла: PDF, PNG, JPG или WEBP");
-  }
-
-  if (file.size > maxAttachmentSizeBytes) {
-    errors.push("Файл больше 20 МБ");
-  }
-
-  const isImage = imageAttachmentExtensions.includes(extension) && !errors.length;
-
-  return {
-    id: `${file.name}-${file.lastModified}-${index}-${Date.now()}`,
-    name: file.name,
-    type: extension ? extension.toUpperCase() : "FILE",
-    size: formatFileSize(file.size),
-    status: errors.length ? "error" : "uploading",
-    progress: errors.length ? 100 : 64,
-    preview: isImage ? "Превью изображения" : "Файл",
-    previewUrl: isImage ? URL.createObjectURL(file) : "",
-    channel,
-    retryable: false,
-    error: errors.join(". ")
-  };
-}
-
-function releaseAttachmentPreviews(attachments) {
-  attachments.forEach((attachment) => {
-    if (attachment.previewUrl?.startsWith("blob:")) {
-      URL.revokeObjectURL(attachment.previewUrl);
-    }
-  });
-}
-
-function getConversationTimeValue(time) {
-  if (time === "сейчас") {
-    return 24 * 60;
-  }
-
-  const [hours, minutes] = String(time).split(":").map(Number);
-  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : 0;
-}
-
-function maskPhone(phone) {
-  return phone.replace(/(\+7)\s(\d{3})\s(\d{3})-(\d{2})-(\d{2})/, "$1 *** ***-**-$5");
-}
-
-function getStatusMeta(status) {
-  return conversationStatusMeta[status] ?? conversationStatusMeta.active;
-}
-
-function getAiSuggestionDraft(suggestion) {
-  if (suggestion.type === "article") {
-    return `Рекомендуемая статья: ${suggestion.text}`;
-  }
-
-  return suggestion.text;
-}
-
-function getAiSuggestionMode(suggestion) {
-  return suggestion.type === "summary" ? "internal" : "reply";
-}
-
-function useModalA11y(onClose) {
-  const panelRef = useRef(null);
-
-  useEffect(() => {
-    const previousElement = document.activeElement;
-    const panel = panelRef.current;
-    const focusable = panel ? Array.from(panel.querySelectorAll(modalFocusableSelector)) : [];
-
-    focusable[0]?.focus();
-
-    function handleKeyDown(event) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-
-      if (event.key !== "Tab" || !panel) {
-        return;
-      }
-
-      const visibleFocusable = Array.from(panel.querySelectorAll(modalFocusableSelector)).filter(
-        (element) => element.offsetParent !== null || element === document.activeElement
-      );
-
-      if (!visibleFocusable.length) {
-        event.preventDefault();
-        return;
-      }
-
-      const firstElement = visibleFocusable[0];
-      const lastElement = visibleFocusable.at(-1);
-
-      if (event.shiftKey && document.activeElement === firstElement) {
-        event.preventDefault();
-        lastElement.focus();
-      } else if (!event.shiftKey && document.activeElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      if (previousElement instanceof HTMLElement) {
-        previousElement.focus();
-      }
-    };
-  }, [onClose]);
-
-  return panelRef;
-}
+  aiActionLabels,
+  aiSuggestionStatusLabels,
+  attachmentStatusLabels,
+  createAuditEvent,
+  createComposerAttachment,
+  dialogActionConfigs,
+  formatRescueTimer,
+  getAiSuggestionDraft,
+  getAiSuggestionMode,
+  getConversationTimeValue,
+  getRescueRemainingSeconds,
+  getStatusMeta,
+  maskPhone,
+  queueFilterDefaults,
+  queueSlaTones,
+  queueWaitingStatuses,
+  releaseAttachmentPreviews,
+  rescueDurationSeconds,
+  slaSortRank,
+  statusLabels
+} from "./app/dialogModel.js";
+import { useModalA11y } from "./app/useModalA11y.js";
+import { SectionPlaceholder } from "./features/section-router.jsx";
+import {
+  aiSuggestions,
+  conversations,
+  initialTemplates,
+  navItems,
+  topicOptions
+} from "./data.js";
 
 function App() {
   const [conversationItems, setConversationItems] = useState(conversations);
@@ -922,6 +643,7 @@ function App() {
       <main className="workspace">
         <TopBar
           access={access}
+          activeSection={section}
           onOutbound={() => {
             if (!access.canOutbound) {
               setToast(access.reason);
@@ -931,6 +653,7 @@ function App() {
             setOutboundOpen(true);
           }}
           onRoleMode={handleRoleModeChange}
+          onToast={setToast}
           roleMode={roleMode}
         />
         {section === "dialogs" ? (
@@ -1074,7 +797,60 @@ function Sidebar({ active, access, onSelect }) {
   );
 }
 
-function TopBar({ access, onOutbound, onRoleMode, roleMode }) {
+const notificationItems = [
+  {
+    id: "sla-vladimir",
+    type: "SLA",
+    title: "Владимир Б. без тематики",
+    detail: "Закрытие заблокировано, SLA просрочен",
+    meta: "Telegram · очередь спасения",
+    action: "Открыть диалог",
+    tone: "danger"
+  },
+  {
+    id: "mention-anna",
+    type: "Mention",
+    title: "Анна Р. упомянула вас",
+    detail: "Нужна проверка возврата до закрытия",
+    meta: "MAX · старший сотрудник",
+    action: "Посмотреть",
+    tone: "warn"
+  },
+  {
+    id: "channel-vk",
+    type: "Channel",
+    title: "VK: рост ошибок webhook",
+    detail: "3 ошибки доставки за последние 15 минут",
+    meta: "Интеграции · требует администратора",
+    action: "Открыть канал",
+    tone: "info"
+  },
+  {
+    id: "export-ready",
+    type: "Export",
+    title: "Ежедневный отчет готов",
+    detail: "XLSX, 486 строк, audit export-2418",
+    meta: "Отчеты · сегодня 11:30",
+    action: "Скачать",
+    tone: "ok"
+  }
+];
+
+function TopBar({ access, activeSection, onOutbound, onRoleMode, onToast, roleMode }) {
+  const [isNotificationsOpen, setNotificationsOpen] = useState(false);
+  const [readNotificationIds, setReadNotificationIds] = useState([]);
+  const unreadNotifications = notificationItems.filter((item) => !readNotificationIds.includes(item.id));
+
+  useEffect(() => {
+    setNotificationsOpen(false);
+  }, [activeSection]);
+
+  function handleNotificationAction(item) {
+    setReadNotificationIds((current) => current.includes(item.id) ? current : [...current, item.id]);
+    setNotificationsOpen(false);
+    onToast(`${item.type}: ${item.action}`);
+  }
+
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -1096,10 +872,52 @@ function TopBar({ access, onOutbound, onRoleMode, roleMode }) {
         </label>
       </div>
       <div className="topbar-right">
-        <button className="icon-button has-badge" aria-label="Уведомления" title="Уведомления" type="button">
-          <Bell size={20} />
-          <span>3</span>
-        </button>
+        <div className="notification-center">
+          <button
+            aria-expanded={isNotificationsOpen}
+            aria-label="Уведомления"
+            className={`icon-button has-badge ${isNotificationsOpen ? "active" : ""}`}
+            onClick={() => setNotificationsOpen((current) => !current)}
+            title="Уведомления"
+            type="button"
+          >
+            <Bell size={20} />
+            {unreadNotifications.length ? <span>{unreadNotifications.length}</span> : null}
+          </button>
+          {isNotificationsOpen ? (
+            <section className="notification-drawer" aria-label="Центр уведомлений">
+              <header>
+                <div>
+                  <strong>Уведомления</strong>
+                  <span>{unreadNotifications.length} новых из {notificationItems.length}</span>
+                </div>
+                <button
+                  onClick={() => setReadNotificationIds(notificationItems.map((item) => item.id))}
+                  type="button"
+                >
+                  Все прочитаны
+                </button>
+              </header>
+              <div className="notification-list">
+                {notificationItems.map((item) => {
+                  const isRead = readNotificationIds.includes(item.id);
+
+                  return (
+                    <article className={`notification-item ${item.tone} ${isRead ? "read" : ""}`} key={item.id}>
+                      <span className="notification-type">{item.type}</span>
+                      <div>
+                        <strong>{item.title}</strong>
+                        <p>{item.detail}</p>
+                        <small>{item.meta}</small>
+                      </div>
+                      <button onClick={() => handleNotificationAction(item)} type="button">{item.action}</button>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+        </div>
         <button className="icon-button" aria-label="Поиск" title="Поиск" type="button">
           <Search size={20} />
         </button>
@@ -1533,6 +1351,12 @@ function ChatPane({
   const activeRescue = conversation.rescue?.state === "active" && !isClosed ? conversation.rescue : null;
   const rescueRemainingSeconds = activeRescue ? getRescueRemainingSeconds(activeRescue, rescueNow) : 0;
   const isRescueExpired = Boolean(activeRescue && rescueRemainingSeconds === 0);
+  const botHandoffSummary = {
+    scenario: topic?.includes("Авторизация") ? "Код подтверждения" : topic?.includes("Оплата") ? "Первичный возврат" : "Статус доставки",
+    asked: ["подтверждение телефона", "последний заказ", "согласие на подключение оператора"],
+    received: [conversation.phone, conversation.topic || "тематика не выбрана", conversation.entry],
+    reason: conversation.slaTone === "danger" ? "бот передал из-за SLA-риска" : "бот передал после запроса человека"
+  };
   const visibleMessages = conversation.messages.filter((message) => {
     if (transcriptMode === "internal") {
       return message.type === "internal";
@@ -1669,6 +1493,27 @@ function ChatPane({
           Для закрытия выберите тематику. Это правило действует во всех ролях и каналах.
         </div>
       ) : null}
+      <section className="bot-handoff-summary" aria-label="Резюме бота перед передачей оператору">
+        <header>
+          <Bot size={17} />
+          <strong>Handoff summary: {botHandoffSummary.scenario}</strong>
+          <span>{botHandoffSummary.reason}</span>
+        </header>
+        <div>
+          <span>
+            <b>Бот спросил</b>
+            {botHandoffSummary.asked.join(", ")}
+          </span>
+          <span>
+            <b>Получено</b>
+            {botHandoffSummary.received.join(" · ")}
+          </span>
+          <span>
+            <b>Дальше</b>
+            Ответить оператору без повторного сбора данных
+          </span>
+        </div>
+      </section>
 
       <div className="chat-transcript">
         <div className="day-divider">Сегодня</div>
@@ -2121,95 +1966,6 @@ function InfoRow({ label, value, icon }) {
       <strong>{value}</strong>
       {icon}
     </div>
-  );
-}
-
-function SectionPlaceholder({ section, onBack, conversations, templates, onTemplatesChange, onToast, access, roleMode, onRoleMode }) {
-  const screenProps = { onBack, conversations, templates, onTemplatesChange, onToast, access, roleMode, onRoleMode };
-
-  if (section === "panel") {
-    return <PanelScreen {...screenProps} />;
-  }
-
-  if (section === "clients") {
-    return <ClientsScreen {...screenProps} />;
-  }
-
-  if (section === "templates") {
-    return <TemplatesScreen {...screenProps} />;
-  }
-
-  if (section === "visitors") {
-    return <VisitorsScreen {...screenProps} />;
-  }
-
-  if (section === "reports") {
-    return <ReportsScreen {...screenProps} />;
-  }
-
-  if (section === "quality") {
-    return <QualityScreen {...screenProps} />;
-  }
-
-  if (section === "automation") {
-    return <AutomationScreen {...screenProps} />;
-  }
-
-  if (section === "settings") {
-    return <SettingsScreen {...screenProps} />;
-  }
-
-  const labels = {
-    panel: "Панель смены",
-    clients: "Клиенты",
-    templates: "Шаблоны",
-    visitors: "Визиты",
-    reports: "Отчеты",
-    quality: "Качество",
-    automation: "Боты",
-    settings: "Настройки"
-  };
-
-  return (
-    <section className="secondary-screen">
-      <div className="secondary-header">
-        <button onClick={onBack}><ChevronLeft size={18} /> Диалоги</button>
-        <h1>{labels[section]}</h1>
-        <p>Раздел подготовлен как часть навигации первого фронтенд-среза.</p>
-      </div>
-      <div className="secondary-grid">
-        <MetricCard icon={<Gauge size={22} />} label="Операторы онлайн" value="18" trend="+3 к часу назад" />
-        <MetricCard icon={<Clock3 size={22} />} label="В перерыве" value="4" trend="среднее 12 мин" />
-        <MetricCard icon={<Inbox size={22} />} label="Активные диалоги" value="126" trend="82% в SLA" />
-        <MetricCard icon={<Bot size={22} />} label="Обработано ботом" value="37" trend="за смену" />
-      </div>
-      <div className="secondary-table">
-        <header>
-          <h2>Очереди и каналы</h2>
-          <button><Plus size={16} /> Добавить настройку</button>
-        </header>
-        {["SDK", "Telegram", "MAX", "VK"].map((channel, index) => (
-          <div className="table-row" key={channel}>
-            <span className={`channel-chip ${channel.toLowerCase()}`}>{channel}</span>
-            <b>{42 - index * 7} активных</b>
-            <span>{8 + index} ожидают</span>
-            <span>{index === 0 ? "лимит 12 на оператора" : "лимит 8 на оператора"}</span>
-            <button><SlidersHorizontal size={16} /> Настроить</button>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function MetricCard({ icon, label, value, trend }) {
-  return (
-    <article className="metric-card">
-      <div>{icon}</div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{trend}</small>
-    </article>
   );
 }
 

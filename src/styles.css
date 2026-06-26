@@ -284,6 +284,136 @@ select:disabled {
   font-weight: 800;
 }
 
+.notification-center {
+  position: relative;
+  display: inline-flex;
+}
+
+.icon-button.active {
+  background: #eaf2ff;
+  color: var(--blue);
+}
+
+.notification-drawer {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(560px, calc(100vh - 84px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(21, 32, 54, 0.18);
+}
+
+.notification-drawer > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.notification-drawer > header div {
+  display: grid;
+  gap: 3px;
+}
+
+.notification-drawer > header strong {
+  font-size: 15px;
+}
+
+.notification-drawer > header span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.notification-drawer > header button,
+.notification-item button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.notification-list {
+  display: grid;
+  max-height: 460px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.notification-item {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border-radius: 7px;
+  border-left: 3px solid var(--blue);
+}
+
+.notification-item + .notification-item {
+  border-top: 1px solid #eef2f7;
+}
+
+.notification-item.danger {
+  border-left-color: var(--red);
+}
+
+.notification-item.warn {
+  border-left-color: #f59e0b;
+}
+
+.notification-item.ok {
+  border-left-color: var(--green);
+}
+
+.notification-item.read {
+  opacity: 0.64;
+}
+
+.notification-type {
+  display: inline-flex;
+  justify-content: center;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.notification-item strong,
+.notification-item p,
+.notification-item small {
+  display: block;
+}
+
+.notification-item strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.notification-item p {
+  margin: 3px 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.notification-item small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
 .cockpit {
   display: grid;
   grid-template-columns: minmax(280px, 350px) minmax(480px, 1fr) minmax(300px, 360px);
@@ -709,7 +839,7 @@ select:disabled {
 
 .chat-pane {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) minmax(206px, auto);
+  grid-template-rows: auto auto auto minmax(0, 1fr) minmax(206px, auto);
   overflow: hidden;
   background: #ffffff;
 }
@@ -938,6 +1068,51 @@ select:disabled {
 .segmented-control button.active {
   background: var(--blue);
   color: #ffffff;
+}
+
+.bot-handoff-summary {
+  display: grid;
+  gap: 9px;
+  padding: 10px 18px;
+  border-bottom: 1px solid #d9e7fb;
+  background: #f8fbff;
+}
+
+.bot-handoff-summary header,
+.bot-handoff-summary > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.bot-handoff-summary header {
+  color: #17233a;
+}
+
+.bot-handoff-summary header span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.bot-handoff-summary > div span {
+  display: grid;
+  min-width: min(220px, 100%);
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid #dce8f8;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #33445c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.bot-handoff-summary b {
+  color: #17233a;
+  font-size: 11px;
+  text-transform: uppercase;
 }
 
 .compact-close-button {
@@ -3864,6 +4039,13 @@ textarea:focus-visible {
   margin-bottom: 14px;
 }
 
+.automation-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
 .visitor-list,
 .rescue-list,
 .proactive-list,
@@ -3897,6 +4079,11 @@ textarea:focus-visible {
   box-shadow: inset 3px 0 0 var(--blue);
 }
 
+.knowledge-row.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
 .visitor-row span,
 .visitor-row small,
 .knowledge-row span {
@@ -3917,6 +4104,123 @@ textarea:focus-visible {
   color: var(--teal);
   font-style: normal;
   font-weight: 800;
+}
+
+.knowledge-workspace,
+.knowledge-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.knowledge-workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.knowledge-editor {
+  grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
+  align-items: start;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.knowledge-editor-form {
+  display: grid;
+  gap: 10px;
+}
+
+.knowledge-editor-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.knowledge-editor-form label span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.knowledge-editor-form input,
+.knowledge-editor-form select,
+.knowledge-editor-form textarea {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  outline: 0;
+}
+
+.knowledge-editor-form textarea {
+  min-height: 130px;
+  padding: 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.knowledge-channel-picker,
+.knowledge-editor-form footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.knowledge-channel-picker button,
+.knowledge-editor-form footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #2e3d56;
+  font-weight: 800;
+}
+
+.knowledge-channel-picker button.active {
+  border-color: #b7d7ff;
+  background: #edf5ff;
+  color: var(--blue);
+}
+
+.knowledge-editor-form footer .primary-action {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.knowledge-preview {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid #d9e7fb;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.knowledge-preview span,
+.knowledge-preview small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.knowledge-preview h3,
+.knowledge-preview p {
+  margin: 0;
+}
+
+.knowledge-preview h3 {
+  color: #16243b;
+  font-size: 17px;
+}
+
+.knowledge-preview p {
+  color: #2f3d52;
+  line-height: 1.5;
 }
 
 .detail-stack {
@@ -4274,6 +4578,87 @@ textarea:focus-visible {
 .scenario-card.selected {
   background: var(--surface-selected);
   box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.bot-assignment-list,
+.bot-metric-list,
+.after-hours-card,
+.bot-handoff-card {
+  display: grid;
+  gap: 10px;
+}
+
+.bot-assignment-list label {
+  display: grid;
+  gap: 6px;
+}
+
+.bot-assignment-list label > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bot-assignment-list select {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  outline: 0;
+}
+
+.after-hours-card p,
+.bot-handoff-card p {
+  margin: 0;
+  color: #33445c;
+  line-height: 1.45;
+}
+
+.after-hours-card small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.bot-metric-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.bot-metric-list span,
+.bot-handoff-card div span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fbff;
+}
+
+.bot-metric-list b {
+  color: var(--blue);
+  font-size: 18px;
+}
+
+.bot-metric-list strong,
+.bot-handoff-card div span {
+  color: #17233a;
+  font-size: 12px;
+}
+
+.bot-metric-list small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bot-handoff-card div {
+  display: grid;
+  gap: 8px;
 }
 
 .bot-builder-panel {
@@ -5052,7 +5437,9 @@ textarea:focus-visible {
   .visitors-layout,
   .proactive-builder-grid,
   .quality-layout,
-  .automation-layout {
+  .automation-layout,
+  .automation-insight-grid,
+  .knowledge-editor {
     grid-template-columns: 1fr;
   }
 
@@ -5238,7 +5625,7 @@ textarea:focus-visible {
   }
 
   .chat-pane {
-    grid-template-rows: auto auto minmax(360px, 1fr) minmax(230px, auto);
+    grid-template-rows: auto auto auto minmax(360px, 1fr) minmax(230px, auto);
   }
 
   .chat-header {
@@ -5302,6 +5689,7 @@ textarea:focus-visible {
   .detail-stack,
   .visitor-row,
   .knowledge-row,
+  .bot-metric-list,
   .timeline-row,
   .audit-row {
     grid-template-columns: 1fr;

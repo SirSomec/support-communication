@@ -4,15 +4,15 @@
 
 **Goal:** Довести фронтенд омниканальной платформы поддержки до полноценного продукта уровня Usedesk/Jivo, покрывающего все функциональные требования и конкурентные механики.
 
-**Architecture:** Текущий интерфейс остается React/Vite single-page app с локальной навигацией и общей дизайн-системой. Следующий этап постепенно выделяет feature-модули, сервисные адаптеры под API, доменные data-файлы и переиспользуемые UI-примитивы без переписывания уже работающих сценариев.
+**Architecture:** Текущий интерфейс остается React/Vite single-page app с локальной навигацией и общей дизайн-системой. Архитектура постепенно выделяется в доменные data-файлы, app-модули, feature-router, сервисные адаптеры под API и переиспользуемые UI-примитивы без переписывания уже работающих сценариев.
 
 **Tech Stack:** React 19, Vite, `lucide-react`, CSS, in-app Browser smoke QA, future service adapters for backend/API integration.
 
 ---
 
-Версия: 1.8
+Версия: 1.9
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после реализации proactive visual builder, rescue timer, bot flow-builder, системных loading/data/empty/error states и smoke/e2e QA
+Статус: актуализированный рабочий план после реализации notification center, редактора базы знаний, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -26,14 +26,14 @@
 - React 19 + Vite.
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
-- Основной cockpit находится в `src/App.jsx`.
-- Продуктовые разделы находятся в `src/sections.jsx`.
+- Основной cockpit пока находится в `src/App.jsx`, но доменная модель диалогов и правила доступа вынесены в `src/app/*`.
+- Продуктовые разделы находятся в `src/sections.jsx`; маршрутизация разделов вынесена в `src/features/section-router.jsx`.
 - Общие UI-примитивы вынесены в `src/ui.jsx`.
-- Seed-данные централизованы в `src/data.js`.
+- Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
 - Стили находятся в `src/styles.css`.
 - Dev server: `http://127.0.0.1:5173/`.
 - Все продуктовые разделы на `ProductScreen` имеют единый `ScreenStateStrip`: загрузка, данные/пусто и ошибки с локальными счетчиками.
-- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, rescue timer, bot builder import validation и responsive matrix 390/768/1024/1440.
+- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, rescue timer, notification/handoff summary, knowledge editor, bot builder/import/channel assignment и responsive matrix 390/768/1024/1440.
 - Дизайн-система: темная левая навигация, белые рабочие панели, синие primary actions, компактные таблицы, радиус 8px, без hero/landing-композиции.
 
 ## 3. Фактически реализовано во фронтенде
@@ -61,6 +61,8 @@
 - AI-действия не отправляют сообщение автоматически: они вставляют текст в черновик или скрывают подсказку и записываются в audit history диалога.
 - При смене диалога с несохраненным текстом или вложениями показывается warning-modal: можно остаться или сбросить черновик и перейти.
 - Сообщение оператора можно сохранить как шаблон одной кнопкой из истории.
+- В topbar реализован notification center: SLA-alert, mention, channel error, export-ready, счетчик непрочитанных, mark-all-read и действия по каждому уведомлению.
+- В живом чате показан bot handoff summary: сценарий, что бот спросил, что получил и почему передал оператору.
 
 ### 3.2. Клиентский контекст
 
@@ -142,6 +144,7 @@
 - Есть AI-помощник с summary/reply/article, confidence, suggested topic, risk и действиями accept/edit/reject в разделе качества и inline в composer чата.
 - AI-действия в чате пишутся в audit-фильтр transcript как события `eventKind: ai`.
 - Есть таблица базы знаний со статусами публикации, каналами и полезностью.
+- Есть встроенный редактор базы знаний: выбор статьи, название, статус `Черновик/На проверке/Опубликована`, текст, каналы, сохранение, отправка на проверку и live preview.
 
 ### 3.11. Боты, автоматизация и audit
 
@@ -151,6 +154,8 @@
 - Есть transcript preview тестового прогона сценария без отправки клиенту.
 - Есть import/export JSON flow со `schemaVersion`, `flowNodes`, `flowEdges`, validation и inline ошибкой при невалидном JSON.
 - Есть тестовый прогон сценариев как UI-сценарий.
+- Есть привязка ботов к каналам SDK/Telegram/MAX/VK с role-aware disabled state.
+- Есть after-hours policy card для нерабочего времени, bot metrics card и отдельная handoff summary card.
 - Есть audit автоматизации: экспорт, изменение лимита, rescue timer.
 
 ## 4. Матрица покрытия функциональных требований
@@ -176,17 +181,17 @@
 | Поиск и фильтры | Частично: поиск диалогов, клиентов, шаблонов, отчеты; очередь поддерживает фильтры по каналу, тематике, статусу, внутренним комментариям и сортировки | Довести фильтры до production-набора: дата, оператор, телефон, клиентский ID, сохраненные пресеты и backend-пагинация |
 | Статусы обращений | Реализованы workflow-статусы в очереди, шапке чата, фильтре и действиях диалога | Backend transitions, transition guards по роли/каналу, системные назначения и массовые операции |
 | Вложения | Реализован upload/preview/error UI в composer, inline-ошибки размера/типа, блокировка отправки при uploading/error и отображение готовых вложений в transcript | Реальный upload API, storage, antivirus/scan, delivery/read states и тонкие ограничения по каждому каналу |
-| Уведомления | Частично: toast и счетчики | Центр уведомлений, mentions, channel errors, SLA alerts |
+| Уведомления | Реализован topbar notification center: непрочитанные, SLA, mentions, channel errors, export-ready и действия по уведомлениям | Реальные источники событий, настройки подписок, push/browser notifications и backend audit |
 | SLA | Отражен в очереди, панели, отчетах | Настройка правил SLA по каналу/тематике/расписанию |
 | Audit | Есть фильтр в чате, structured audit timeline для статусов, действий, тематик и закрытия, export audit | Единый audit log с фильтрами, деталкой события, retention и backend-событиями |
-| База знаний | Частично: рекомендации и таблица статей | Полный редактор, preview, публикация, self-service виджет |
+| База знаний | Реализованы рекомендации, таблица статей, встроенный редактор, preview, статус публикации и каналы | Approval history, вложения, версии статьи и self-service виджет |
 | CSAT/CSI | Частично реализован раздел качества и отчетный тип | Настройка отправки оценки по каналам, карточка оценки, динамика по операторам |
 | AI-помощь | Реализована inline panel в чате, AI-подсказка в composer, раздел качества и audit AI-действий accept/edit/reject | Explainability, pre-send quality check, backend-модели подсказок и оценка эффективности |
 | Proactive invites | Реализованы список правил, visual builder условий, preview приглашения, A/B управление и метрики принятия/конверсии/отказов | Backend delivery, серверные frequency caps, персистентность экспериментов, таргетинг и аналитика эффективности |
 | Активные посетители | Реализован отдельный раздел | Права, обезличивание, ручная инициация с проверками, город/источник |
 | Спасение чатов | Реализованы очередь спасения, фильтр, действие запуска, rescue timer в чате, audit запуска и отчет спасенных/пропущенных | Серверный countdown, автоматический возврат, настройки rescue по каналу/очереди/роли и backend outcome analytics |
-| Сценарные боты и AI-оператор | Реализованы список сценариев, canvas/flow-builder, canonical node types, flow edges, inspector, transcript preview и JSON import/export | Backend runtime, публикация/версии сценариев, after-hours сценарий, реальные bot metrics, audit import/export/test/publish и handoff summary в живом чате |
-| UI/UX продукта | Реализована базовая дизайн-система, единый ScreenStateStrip и Playwright smoke/e2e для state strip, rescue, bot builder и responsive 390/768/1024/1440 | Keyboard nav, visual regression и backend partial/loading/error states |
+| Сценарные боты и AI-оператор | Реализованы список сценариев, canvas/flow-builder, canonical node types, flow edges, inspector, transcript preview, JSON import/export, after-hours policy, channel assignment, bot metrics и handoff summary в живом чате | Backend runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events |
+| UI/UX продукта | Реализована базовая дизайн-система, единый ScreenStateStrip и Playwright smoke/e2e для state strip, rescue, notifications, knowledge editor, bot builder и responsive 390/768/1024/1440 | Keyboard nav, visual regression и backend partial/loading/error states |
 
 Вывод после сверки: все ключевые функциональные направления из спецификации представлены во frontend-плане и имеют хотя бы одну запланированную UI-поверхность. Большинство критичных требований уже отражены в текущем интерфейсе как интерактивные frontend-сценарии; оставшаяся работа связана с глубиной production-поведения, правами, детализацией, API-интеграцией и QA.
 
@@ -197,7 +202,10 @@
 Уже сделано:
 
 - Общие UI-примитивы вынесены в `src/ui.jsx`.
-- Основные seed-данные вынесены в `src/data.js`.
+- Основные seed-данные разнесены в `src/data/*.js`, а `src/data.js` оставлен публичным barrel-агрегатором.
+- Ролевая модель и доменная модель диалогов вынесены в `src/app/access.js` и `src/app/dialogModel.js`.
+- Focus trap для модальных окон вынесен в `src/app/useModalA11y.js`.
+- Роутер продуктовых экранов вынесен в `src/features/section-router.jsx`.
 - Навигация и продуктовые массивы используют единый источник данных.
 
 Дальше:
@@ -212,13 +220,7 @@
   - `src/features/visitors/`
   - `src/features/quality/`
   - `src/features/automation/`
-- Разделить `src/data.js` на доменные файлы:
-  - `src/data/conversations.js`
-  - `src/data/operators.js`
-  - `src/data/reports.js`
-  - `src/data/templates.js`
-  - `src/data/integrations.js`
-  - `src/data/automation.js`
+- Продолжить разнос `src/App.jsx`, `src/sections.jsx` и `src/styles.css` без изменения пользовательских сценариев.
 - Вынести общие компоненты:
   - `Modal`
   - `Toast`
@@ -406,6 +408,7 @@ Acceptance criteria:
 - Добавить ручную оценку ответа старшим сотрудником по критериям.
 - Добавить AI explainability: почему предложена тематика/ответ/статья.
 - Добавлен audit AI-действий: принять, редактировать, отклонить.
+- Реализовано: встроенный редактор базы знаний со статусом публикации, каналами и preview.
 - Добавить pre-send quality check в composer.
 
 Acceptance criteria:
@@ -444,12 +447,12 @@ Acceptance criteria:
 - Реализовано: canvas/flow-builder сценариев.
 - Реализовано: ноды `message`, `quick_replies`, `condition`, `contact_request`, `webhook`, `handoff`, `fallback`.
 - Реализовано частично: validation rules для сценариев и inline import validation; email/custom fields остаются backend/runtime задачей.
-- Добавить сценарий для нерабочего времени.
-- Добавить назначение разных ботов на разные каналы.
+- Реализовано: frontend-карточка сценария для нерабочего времени.
+- Реализовано: назначение разных ботов на разные каналы как UI-сценарий.
 - Реализовано: тестовый запуск с transcript preview как frontend preview.
 - Реализовано: импорт/экспорт сценариев JSON со schema/version/nodes/edges.
-- Добавить статистику диалогов с ботом.
-- Добавить прозрачный handoff: оператор видит резюме того, что бот уже спросил и получил.
+- Реализовано: frontend-статистика диалогов с ботом.
+- Реализовано: прозрачный handoff, оператор видит резюме того, что бот уже спросил и получил, в разделе ботов и живом чате.
 
 Acceptance criteria:
 
@@ -467,7 +470,7 @@ Acceptance criteria:
 - Проверить keyboard navigation и focus states.
 - Проверить `aria-label`, `aria-modal`, `role="dialog"`, таблицы и кнопки.
 - Реализовано: empty/loading/error states для product-разделов через единый `ScreenStateStrip`.
-- Реализовано: smoke/e2e сценарии для state strip, rescue timer, bot builder import validation и responsive overflow.
+- Реализовано: smoke/e2e сценарии для state strip, rescue timer, notification center, live handoff summary, knowledge editor, bot builder import/channel assignment validation и responsive overflow.
 - Добавить visual regression checklist.
 - Разделить CSS на feature-файлы или CSS modules, если файл станет плохо поддерживаемым.
 - Подготовить Storybook или внутреннюю страницу UI-kit, если компонентная база продолжит расти.
@@ -481,19 +484,28 @@ Acceptance criteria:
 
 ## 7. Приоритетный backlog следующего этапа
 
+### 7.1. Frontend UI и архитектура
+
+1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения.
+2. Вынести общие компоненты `Modal`, `Toast`, `ToolbarSearch`, `EntityTable`, `SegmentedControl`, `StatusBadge`, `AuditTimeline`, `ActionMenu`.
+3. Довести базу знаний до расширенного UI: approval history, версии статьи, вложения и preview self-service виджета.
+4. Добавить AI explainability и pre-send quality check к уже реализованной inline AI-панели.
+5. Расширить notification center: фильтры, настройки подписок, группировка по SLA/channel/mention/export и просмотр истории.
+6. Довести QA до production-уровня: keyboard navigation, focus map, visual regression checklist и UI-kit/Storybook при росте компонентной базы.
+
+### 7.2. Backend/service integration backlog
+
 1. Довести ролевую модель до backend-ready permission model: права на каждое действие, аудит отказов, серверная валидация, сотрудники и группы.
 2. Довести клиентские профили до backend merge graph, conflict resolution, source profile IDs и audit объединения.
-3. Добавить детальные страницы каналов с логами ошибок, тестом сообщения и raw IDs.
-4. Расширить фильтры очереди до даты, оператора, телефона, клиентского ID, сохраненных пресетов и backend-пагинации.
-5. Довести вложения до backend upload/storage, antivirus/scan, delivery states и канальных ограничений на API.
-6. Довести workflow-статусы до backend transitions, transition guards и массовых операций.
-7. Подключить отчеты к реальным файлам выгрузок, сохраненным шаблонам отчетов, backend-очереди и единым определениям метрик.
-8. Добавить AI explainability и pre-send quality check к уже реализованной inline AI-панели.
-9. Довести rescue до production-контура: серверный countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
-10. Довести proactive до production-контура: backend delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитику эффективности.
-11. Довести ботов до production-контура: backend runtime, публикация/версии сценариев, after-hours сценарий, bot metrics, audit import/export/test/publish и handoff summary в живом чате.
-12. Разнести `App.jsx`, `sections.jsx`, `data.js` по feature-модулям.
-13. Довести QA до production-уровня: keyboard nav, visual regression и backend partial/loading/error states после сервисного слоя.
+3. Расширить фильтры очереди до даты, оператора, телефона, клиентского ID, сохраненных пресетов и backend-пагинации.
+4. Довести вложения до backend upload/storage, antivirus/scan, delivery states и канальных ограничений на API.
+5. Довести workflow-статусы до backend transitions, transition guards и массовых операций.
+6. Подключить отчеты к реальным файлам выгрузок, сохраненным шаблонам отчетов, backend-очереди и единым определениям метрик.
+7. Подключить каналы Telegram/MAX/VK/SDK к реальным webhook/API операциям, токенам, retry delivery и backend-аудиту тестов.
+8. Довести rescue до production-контура: серверный countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
+9. Довести proactive до production-контура: backend delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитику эффективности.
+10. Довести ботов до production-контура: backend runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
+11. Добавить backend partial/loading/error states после сервисного слоя.
 
 ## 8. QA-gates для каждой frontend-итерации
 
@@ -539,7 +551,9 @@ Acceptance criteria:
 - [x] Реализовать active visitors, proactive rules и rescue queue как UI-поверхности.
 - [x] Реализовать CSAT/CSI, AI-подсказки и базу знаний как UI-поверхности.
 - [x] Реализовать сценарии ботов, proactive/handoff и audit автоматизации как UI-поверхности.
-- [ ] Разнести `App.jsx`, `sections.jsx`, `data.js` на feature-модули и доменные data-файлы.
+- [x] Разнести `src/data.js` на доменные data-файлы и оставить `src/data.js` barrel-агрегатором.
+- [x] Вынести app-модули доступа, модели диалогов, modal a11y hook и section router.
+- [ ] Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям.
 - [x] Добавить расширенные фильтры и сортировки очереди диалогов.
 - [x] Добавить полноценные статусы обращения и audit timeline.
 - [x] Добавить upload/preview/error UI для вложений.
@@ -552,12 +566,16 @@ Acceptance criteria:
 - [x] Добавить управление сотрудниками, группами, паролями и каналами сотрудника.
 - [x] Расширить отчеты chart-блоками, настройкой колонок, retry/download states.
 - [x] Добавить inline AI-панель в чат и audit AI-действий.
+- [x] Добавить topbar notification center с SLA, mention, channel error и export-ready уведомлениями.
+- [x] Добавить live bot handoff summary в чат оператора.
+- [x] Добавить редактор базы знаний со статусом публикации, каналами и preview.
 - [x] Добавить visual builder proactive-правил с preview и A/B управлением.
-- [ ] Довести proactive до production-контура: backend delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитику эффективности.
+- [ ] Backend integration: proactive delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитика эффективности.
 - [x] Добавить rescue timer в чат и отчет спасенных/пропущенных диалогов.
-- [ ] Довести rescue до production-контура: серверный countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
+- [ ] Backend integration: rescue server countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
 - [x] Добавить canvas/flow-builder ботов с нодами, тестовым transcript preview и импортом/экспортом.
-- [ ] Довести ботов до production-контура: backend runtime, публикация/версии сценариев, after-hours сценарий, bot metrics, audit import/export/test/publish и handoff summary в живом чате.
+- [x] Добавить bot after-hours policy, channel assignment, bot metrics и handoff summary UI.
+- [ ] Backend integration: bot runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
 - [x] Добавить системные loading/empty/error states для всех разделов.
-- [x] Добавить smoke/e2e сценарии для критичных flows.
+- [x] Добавить smoke/e2e сценарии для критичных flows: states, rescue, notifications, knowledge editor, bot builder/channel assignment и responsive.
 - [x] Провести responsive QA на 390, 768, 1024 и 1440 px.

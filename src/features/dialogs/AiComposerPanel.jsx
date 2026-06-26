@@ -2,6 +2,7 @@ import React from "react";
 import { CheckCircle2, Pencil, Sparkles, X } from "lucide-react";
 import { getAiSuggestionExplanation } from "../../app/aiQualityModel.js";
 import { aiSuggestionStatusLabels } from "../../app/dialogModel.js";
+import { StatusBadge } from "../../ui.jsx";
 
 export function AiComposerPanel({ suggestions = [], disabled, onAction }) {
   if (!suggestions.length) {
@@ -32,9 +33,9 @@ export function AiComposerPanel({ suggestions = [], disabled, onAction }) {
             </ul>
           </details>
           <footer>
-            <span className={`status-chip ${suggestion.state === "idle" ? "info" : suggestion.state === "rejected" ? "closed" : "ok"}`}>
+            <StatusBadge tone={suggestion.state === "idle" ? "info" : suggestion.state === "rejected" ? "closed" : "ok"}>
               {aiSuggestionStatusLabels[suggestion.state] ?? aiSuggestionStatusLabels.idle}
-            </span>
+            </StatusBadge>
             <div>
               <button disabled={disabled} onClick={() => onAction(suggestion, "accept")} type="button">
                 <CheckCircle2 size={15} />

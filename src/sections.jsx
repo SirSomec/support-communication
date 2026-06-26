@@ -32,7 +32,7 @@ import {
   Workflow,
   Zap
 } from "lucide-react";
-import { ChannelBadge, ChannelList, MetricTile, Permission, ProductScreen, SectionTitle } from "./ui.jsx";
+import { ChannelBadge, ChannelList, MetricTile, Permission, ProductScreen, SectionTitle, StatusBadge } from "./ui.jsx";
 import {
   activeVisitors,
   aiSuggestions,
@@ -1626,7 +1626,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
               </div>
               <ChannelBadge channel={row.channel} />
               <b>{row.timer}</b>
-              <span className={`status-chip ${row.outcome === "Пропущен" ? "warn" : "ok"}`}>{row.outcome}</span>
+              <StatusBadge tone={row.outcome === "Пропущен" ? "warn" : "ok"}>{row.outcome}</StatusBadge>
               <p>{row.resolution}<small>{row.digest}</small></p>
             </article>
           ))}
@@ -1669,7 +1669,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
             <article className={`export-job ${job.statusKey === "error" ? "danger" : ""}`} key={job.id}>
               <header>
                 <strong>{job.name}</strong>
-                <span className={`status-chip ${exportStatusClasses[job.statusKey] ?? "info"}`}>{job.status}</span>
+                <StatusBadge tone={exportStatusClasses[job.statusKey] ?? "info"}>{job.status}</StatusBadge>
               </header>
               <div className="health-bar"><i style={{ width: `${job.progress}%` }} /></div>
               <footer>

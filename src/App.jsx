@@ -53,7 +53,7 @@ import { AttachmentPreview } from "./features/dialogs/AttachmentPreview.jsx";
 import { Composer } from "./features/dialogs/Composer.jsx";
 import { NotificationCenter } from "./features/notifications/NotificationCenter.jsx";
 import { SectionPlaceholder } from "./features/section-router.jsx";
-import { Toast } from "./ui.jsx";
+import { StatusBadge, Toast } from "./ui.jsx";
 import {
   aiSuggestions,
   conversations,
@@ -1165,7 +1165,7 @@ function ConversationList({
                 <time>{conversation.time}</time>
               </span>
               <span className={`channel-chip ${conversation.channel.toLowerCase()}`}>{conversation.channel}</span>
-              <span className={`status-chip ${getStatusMeta(conversation.status).tone}`}>{statusLabels[conversation.status] ?? conversation.status}</span>
+              <StatusBadge tone={getStatusMeta(conversation.status).tone}>{statusLabels[conversation.status] ?? conversation.status}</StatusBadge>
               <span className="queue-preview">{conversation.preview}</span>
               <span className={`queue-meta ${conversation.slaTone}`}>
                 {conversation.slaTone === "danger" ? <AlertTriangle size={15} /> : null}

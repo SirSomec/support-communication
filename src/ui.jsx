@@ -83,6 +83,10 @@ export function Permission({ enabled }) {
   return enabled ? <span className="permission yes">Да</span> : <span className="permission no">Нет</span>;
 }
 
+export function StatusBadge({ children, tone = "info" }) {
+  return <span className={`status-chip ${tone}`}>{children}</span>;
+}
+
 export function Toast({ message, onClose }) {
   return (
     <button aria-live="polite" className="toast" onClick={onClose} role="status" type="button">

@@ -367,6 +367,32 @@ test("settings expose webhooks api keys and security controls", async ({ page })
   await expectHealthyPage(page);
 });
 
+test("settings access panel keeps role matrix and channel limit permissions", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await openSection(page, "Настройки");
+
+  await expect(page.locator(".role-mode-panel")).toContainText("Полный доступ к общим настройкам");
+  await expect(page.locator(".role-table")).toContainText("Администратор");
+  await expect(page.locator(".role-table")).toContainText("Все");
+
+  const telegramChannel = page.locator(".channel-settings article").filter({ hasText: "Telegram" });
+  await telegramChannel.locator("input").fill("9");
+  await expect(telegramChannel.locator("input")).toHaveValue("9");
+
+  const maxToggle = page.getByRole("button", { name: "Переключить MAX" });
+  await expect(maxToggle).toHaveAttribute("aria-pressed", "true");
+  await maxToggle.click();
+  await expect(maxToggle).toHaveAttribute("aria-pressed", "false");
+
+  await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
+  await expect(page.locator(".role-mode-panel")).toContainText("Общие настройки доступны только на чтение");
+  await expect(telegramChannel.locator("input")).toBeDisabled();
+  await expect(maxToggle).toBeDisabled();
+  await expectNoElementOverflow(page, ".settings-layout");
+  await expectHealthyPage(page);
+});
+
 test("settings employee management preserves edit and role permissions", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");

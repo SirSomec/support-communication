@@ -1,15 +1,13 @@
 import React from "react";
 import { Bot, ChevronLeft, Clock3, Gauge, Inbox, Plus, SlidersHorizontal } from "lucide-react";
+import { AutomationScreen } from "./automation/AutomationScreen.jsx";
 import { ClientsScreen } from "./clients/ClientsScreen.jsx";
 import { PanelScreen } from "./panel/PanelScreen.jsx";
 import { QualityScreen } from "./quality/QualityScreen.jsx";
 import { ReportsScreen } from "./reports/ReportsScreen.jsx";
 import { TemplatesScreen } from "./templates/TemplatesScreen.jsx";
 import { VisitorsScreen } from "./visitors/VisitorsScreen.jsx";
-import {
-  AutomationScreen,
-  SettingsScreen,
-} from "../sections.jsx";
+import { SettingsScreen } from "../sections.jsx";
 
 export function SectionPlaceholder({
   section,

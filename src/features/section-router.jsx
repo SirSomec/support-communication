@@ -1,5 +1,6 @@
 import React from "react";
 import { Bot, ChevronLeft, Clock3, Gauge, Inbox, Plus, SlidersHorizontal } from "lucide-react";
+import { AuditScreen } from "./audit/AuditScreen.jsx";
 import { AutomationScreen } from "./automation/AutomationScreen.jsx";
 import { ClientsScreen } from "./clients/ClientsScreen.jsx";
 import { PanelScreen } from "./panel/PanelScreen.jsx";
@@ -21,6 +22,18 @@ export function SectionPlaceholder({
   onRoleMode
 }) {
   const screenProps = { onBack, conversations, templates, onTemplatesChange, onToast, access, roleMode, onRoleMode };
+
+  if (!access.sections.includes(section)) {
+    return (
+      <section className="secondary-screen" aria-label="Доступ ограничен">
+        <div className="secondary-header">
+          <button onClick={onBack} type="button"><ChevronLeft size={18} /> Диалоги</button>
+          <h1>Доступ ограничен</h1>
+          <p>{access.reason}</p>
+        </div>
+      </section>
+    );
+  }
 
   if (section === "panel") {
     return <PanelScreen {...screenProps} />;
@@ -50,6 +63,10 @@ export function SectionPlaceholder({
     return <AutomationScreen {...screenProps} />;
   }
 
+  if (section === "audit") {
+    return <AuditScreen {...screenProps} />;
+  }
+
   if (section === "settings") {
     return <SettingsScreen {...screenProps} />;
   }
@@ -62,6 +79,7 @@ export function SectionPlaceholder({
     reports: "Отчеты",
     quality: "Качество",
     automation: "Боты",
+    audit: "Audit",
     settings: "Настройки"
   };
 

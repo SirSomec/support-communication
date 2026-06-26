@@ -8,3 +8,4 @@ export * from "./data/settings.js";
 export * from "./data/visitors.js";
 export * from "./data/quality.js";
 export * from "./data/automation.js";
+export * from "./data/audit.js";

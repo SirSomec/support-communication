@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bot,
   ClipboardList,
+  FileClock,
   LayoutDashboard,
   MessageCircle,
   Settings,
@@ -19,5 +20,6 @@ export const navItems = [
   { key: "reports", label: "Отчеты", icon: BarChart3 },
   { key: "quality", label: "Качество", icon: ShieldCheck },
   { key: "automation", label: "Боты", icon: Bot },
+  { key: "audit", label: "Audit", icon: FileClock },
   { key: "settings", label: "Настройки", icon: Settings }
 ];

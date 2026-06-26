@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.28
+Версия: 2.29
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -27,7 +27,7 @@
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
 - Основной cockpit пока находится в `src/App.jsx`, но app shell (`Sidebar`/`TopBar`) вынесен в `src/features/app-shell/AppShell.jsx`, notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, ConversationList, ChatPane, CustomerPanel, DialogModals, composer/AI panel/attachment preview/ChatHeader/TranscriptToolbar/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
-- Продуктовые разделы находятся в `src/features/*`: `PanelScreen`, `ClientsScreen`, `ReportsScreen`, `TemplatesScreen`, `QualityScreen`, `VisitorsScreen`, `AutomationScreen` и `SettingsScreen` подключаются через `src/features/section-router.jsx`; legacy `src/sections.jsx` больше не используется, расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`, а AI scoring/coaching workspace — в `src/features/quality/AiQualityWorkspace.jsx`.
+- Продуктовые разделы находятся в `src/features/*`: `PanelScreen`, `ClientsScreen`, `ReportsScreen`, `TemplatesScreen`, `QualityScreen`, `VisitorsScreen`, `AutomationScreen`, `AuditScreen` и `SettingsScreen` подключаются через `src/features/section-router.jsx`; legacy `src/sections.jsx` больше не используется, расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`, а AI scoring/coaching workspace — в `src/features/quality/AiQualityWorkspace.jsx`.
 - Общие UI-примитивы, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable вынесены в `src/ui.jsx`.
 - Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
 - Стили находятся в `src/styles.css`.
@@ -166,6 +166,15 @@
 - Есть after-hours policy card для нерабочего времени, bot metrics card и отдельная handoff summary card.
 - Есть audit автоматизации: экспорт, изменение лимита, rescue timer.
 
+### 3.12. Единый Audit
+
+- Раздел `Audit` доступен администратору как отдельная продуктовая поверхность.
+- Есть фильтры по источнику, severity, типу объекта, периоду и поиску по actor/action/object/event id.
+- Есть единый список событий из диалогов, отчетов, настроек, каналов, AI и ботов.
+- Есть деталка события: actor, object, source, channel, IP, retention, immutable event id, result и related object.
+- Есть retention policy panel по диалогам/rescue, экспортам, AI-подсказкам, правам и безопасности.
+- Есть UI-сценарии export CSV, открыть связанный объект и JSON события.
+
 ## 4. Матрица покрытия функциональных требований
 
 | Требование из спецификации | Текущий frontend-статус | Что еще нужно довести |
@@ -192,7 +201,7 @@
 | Вложения | Реализован upload/preview/error UI в composer, inline-ошибки размера/типа, блокировка отправки при uploading/error и отображение готовых вложений в transcript | Реальный upload API, storage, antivirus/scan, delivery/read states и тонкие ограничения по каждому каналу |
 | Уведомления | Реализован topbar notification center: непрочитанные, SLA, mentions, channel errors, export-ready, фильтры, группы, настройки подписок, history и действия по уведомлениям | Реальные источники событий, push/browser notifications, звуковые правила, внешние каналы критических ошибок админов и backend audit |
 | SLA | Отражен в очереди, панели, отчетах | Настройка правил SLA по каналу/тематике/расписанию |
-| Audit | Есть фильтр в чате, structured audit timeline для статусов, действий, тематик и закрытия, export audit | Отдельный админский audit log с фильтрами user/action/object/period, деталкой события, retention и backend-событиями |
+| Audit | Есть фильтр в чате, structured audit timeline для статусов, действий, тематик и закрытия, export audit и отдельный админский AuditScreen с фильтрами source/severity/object/period/search, деталкой события, retention и export controls | Backend audit service, immutable storage, redaction, server-side filters и реальные event ids |
 | Security/admin controls | Частично: роли, reset password, маскирование sensitive fields и disabled states | 2FA, активные сессии, API-key protection, IP allowlist, security alerts и audit отказов |
 | База знаний | Реализованы рекомендации, таблица статей, встроенный редактор, preview, статус публикации, каналы, видимость, approval history, вложения, версии статьи и self-service preview виджета | Backend CRUD, полнотекстовый поиск, storage, approval workflow API, публикация версий и аналитика self-service |
 | CSAT/CSI | Частично реализован раздел качества и отчетный тип | Настройка отправки оценки по каналам, карточка оценки, динамика по операторам |
@@ -226,6 +235,7 @@
 - VisitorsScreen вынесен в `src/features/visitors/VisitorsScreen.jsx` вместе с proactive builder helper `InfoPill` и локальным списком каналов proactive.
 - AutomationScreen вынесен в `src/features/automation/AutomationScreen.jsx` вместе с bot flow node dictionary, import/export flow logic и channel assignment state.
 - SettingsScreen вынесен в `src/features/settings/SettingsScreen.jsx`; legacy `src/sections.jsx` удален из активной архитектуры.
+- AuditScreen добавлен в `src/features/audit/AuditScreen.jsx` вместе с отдельными audit seed-данными `src/data/audit.js`.
 - Topbar notification center вынесен в `src/features/notifications/NotificationCenter.jsx` без изменения CSS-контрактов и smoke-селекторов.
 - ConversationList/TabButton, ChatPane, CustomerPanel/PanelSection/InfoRow, DialogModals, Composer, inline AI panel и attachment preview вынесены в `src/features/dialogs/*` без изменения CSS-контрактов и smoke-селекторов.
 - Toast вынесен в `src/ui.jsx` и получил `aria-live="polite"`/`role="status"`.
@@ -292,7 +302,7 @@
 - Добавлен rescue timer прямо в transcript toolbar чата.
 - Добавлена inline AI-панель рядом с composer: summary/reply/article, suggested topic, tone, risk, accept/edit/reject и audit AI-действий.
 - Реализовано: pre-send quality check в composer.
-- Добавить отдельный админский AuditScreen: фильтры user/action/object/period, деталка события, retention, export и связь с текущими audit-событиями чата/экспортов/ботов.
+- Реализовано: отдельный админский AuditScreen с фильтрами source/severity/object/period/search, деталкой события, retention, export и связью с текущими audit-событиями чата/экспортов/ботов.
 
 Acceptance criteria:
 
@@ -521,7 +531,7 @@ Acceptance criteria:
 2. Реализовано: общий `Modal`; `Toast`, `StatusBadge`, `ToolbarSearch`, `SegmentedControl`, `EntityTable` и `Modal` уже вынесены в `src/ui.jsx`, `DialogActionMenu` и `AuditTimeline` — в `src/features/dialogs/*`.
 3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Реализовано во frontend: AI real-time scoring, операторские подсказки исправления и аналитика эффективности подсказок. Осталось подключить production scoring service, реальные repair actions и backend-телеметрию.
-5. Добавить отдельный `AuditScreen` для администраторов: user/action/object/period filters, severity, source, event detail drawer, retention/export controls и ссылки на связанные диалоги/экспорты/ботов.
+5. Реализовано: отдельный `AuditScreen` для администраторов с source/severity/object/period/search filters, event detail, retention/export controls и ссылками на связанные диалоги/экспорты/ботов.
 6. Расширить Settings до явных workspaces `Webhooks/API keys` и `Security`: environment keys, signed webhooks, retries, delivery log, manual replay, changelog, 2FA, active sessions, API-key protection, IP allowlist и security alerts.
 7. Расширить notification center до push/browser notifications, звуковых правил, внешних каналов критических ошибок админов и серверных источников после подключения backend event stream.
 8. Довести QA до production-уровня: keyboard navigation, focus map, semantic table/grid для динамической таблицы отчетов, visual regression checklist и UI-kit/Storybook при росте компонентной базы.
@@ -614,7 +624,7 @@ Acceptance criteria:
 - [x] Вынести SettingsScreen из `src/sections.jsx` в `src/features/settings/*`.
 - [ ] Продолжить разнос `App.jsx`, `src/styles.css` и крупных feature-экранов на подмодули.
 - [x] Закрыть role-aware маскирование телефона в chat header и bot handoff summary.
-- [ ] Реализовать отдельный AuditScreen для администраторов с фильтрами, деталкой события, retention и export controls.
+- [x] Реализовать отдельный AuditScreen для администраторов с фильтрами, деталкой события, retention и export controls.
 - [ ] Добавить Settings workspaces для Webhooks/API keys и Security/admin controls.
 - [ ] Расширить уведомления звуковыми правилами, push/browser и внешними каналами критических ошибок.
 - [x] Добавить расширенные фильтры и сортировки очереди диалогов.

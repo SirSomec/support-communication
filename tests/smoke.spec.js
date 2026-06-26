@@ -18,7 +18,7 @@ test("product sections expose loading/data/error states", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");
 
-  for (const section of ["Панель", "Клиенты", "Шаблоны", "Визиты", "Отчеты", "Качество", "Боты", "Настройки"]) {
+  for (const section of ["Панель", "Клиенты", "Шаблоны", "Визиты", "Отчеты", "Качество", "Боты", "Audit", "Настройки"]) {
     await openSection(page, section);
     await expect(page.locator(".screen-state-item")).toHaveCount(3);
     await expect(page.locator(".screen-state-strip")).toContainText("Загрузка");
@@ -33,6 +33,7 @@ test("app shell enforces role access and closes notifications on section change"
   await expect(page.locator(".quick-action")).toBeDisabled();
   await expect(page.locator(".topbar-access-note")).toContainText("Доступно старшему сотруднику или администратору");
   await expect(page.locator("nav button").filter({ hasText: "Панель" })).toBeDisabled();
+  await expect(page.locator("nav button").filter({ hasText: "Audit" })).toBeDisabled();
   await expect(page.locator("nav button").filter({ hasText: "Клиенты" })).toBeEnabled();
 
   await selectRole(page, "Администратор");
@@ -293,6 +294,31 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   await expectHealthyPage(page);
 });
 
+test("audit screen filters events and exposes event detail", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await openSection(page, "Audit");
+
+  await expect(page.getByRole("heading", { name: "Audit" })).toBeVisible();
+  await expect(page.locator(".audit-log-row")).toHaveCount(3);
+  await page.locator(".product-actions select").selectOption("30 дней");
+  await expect(page.locator(".audit-log-row")).toHaveCount(6);
+  await page.locator(".audit-toolbar select").first().selectOption("Каналы");
+  await expect(page.locator(".audit-log-row")).toHaveCount(1);
+  await expect(page.locator(".audit-event-detail")).toContainText("evt_hook_9006");
+  await page.locator(".audit-log-row").click();
+  await expect(page.locator(".audit-event-detail")).toContainText("Ошибка подписи");
+  await page.locator(".audit-event-detail footer button").filter({ hasText: "Открыть объект" }).click();
+  await expect(page.locator(".toast")).toContainText("channel/vk/main");
+  await page.locator(".product-actions button").filter({ hasText: "Экспорт CSV" }).click();
+  await expect(page.locator(".toast")).toContainText("Audit export: 1 событие");
+  await selectRole(page, "Сотрудник");
+  await expect(page.locator(".audit-log-row")).toHaveCount(0);
+  await expect(page.locator("nav button").filter({ hasText: "Audit" })).toBeDisabled();
+  await expect(page.locator(".conversation-list")).toBeVisible();
+  await expectHealthyPage(page);
+});
+
 test("critical sections do not overflow responsive viewports", async ({ page }) => {
   for (const viewport of [
     { width: 390, height: 844 },
@@ -304,7 +330,7 @@ test("critical sections do not overflow responsive viewports", async ({ page }) 
     await page.goto("/");
     await selectRole(page, "Администратор");
 
-    for (const section of ["Отчеты", "Боты", "Визиты", "Качество"]) {
+    for (const section of ["Отчеты", "Боты", "Визиты", "Качество", "Audit"]) {
       await openSection(page, section);
       await expectHealthyPage(page);
     }

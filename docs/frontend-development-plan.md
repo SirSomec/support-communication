@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.10
+Версия: 2.11
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса notification center, composer, AI composer panel, attachment preview, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability и pre-send quality check, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса notification center, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability и pre-send quality check, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -26,7 +26,7 @@
 - React 19 + Vite.
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
-- Основной cockpit пока находится в `src/App.jsx`, но notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, composer/AI panel/attachment preview/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
+- Основной cockpit пока находится в `src/App.jsx`, но notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, composer/AI panel/attachment preview/ChatHeader/TranscriptToolbar/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
 - Продуктовые разделы находятся в `src/sections.jsx`; маршрутизация разделов вынесена в `src/features/section-router.jsx`, а расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`.
 - Общие UI-примитивы, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable вынесены в `src/ui.jsx`.
 - Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
@@ -498,7 +498,7 @@ Acceptance criteria:
 
 ### 7.1. Frontend UI и архитектура
 
-1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; notification center, composer, DialogActionMenu, AuditTimeline и Modal уже вынесены, следующий безопасный кандидат — header/toolbar слой или таблицы/toolbar из `sections.jsx`.
+1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; notification center, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar и Modal уже вынесены, следующий безопасный кандидат — дальнейший `ChatPane` state split или таблицы/toolbar из `sections.jsx`.
 2. Реализовано: общий `Modal`; `Toast`, `StatusBadge`, `ToolbarSearch`, `SegmentedControl`, `EntityTable` и `Modal` уже вынесены в `src/ui.jsx`, `DialogActionMenu` и `AuditTimeline` — в `src/features/dialogs/*`.
 3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Расширить AI-контур до real-time scoring, операторских подсказок исправления и аналитики эффективности подсказок.
@@ -574,6 +574,7 @@ Acceptance criteria:
 - [x] Вынести EntityTable в `src/ui.jsx`.
 - [x] Вынести Modal в `src/ui.jsx` и подключить outbound/save-template/draft-switch dialog shell.
 - [x] Вынести DialogActionMenu и AuditTimeline из `src/App.jsx` в `src/features/dialogs/*`.
+- [x] Вынести ChatHeader, TranscriptToolbar и Avatar из `src/App.jsx` в `src/features/dialogs/*`.
 - [ ] Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям.
 - [x] Добавить расширенные фильтры и сортировки очереди диалогов.
 - [x] Добавить полноценные статусы обращения и audit timeline.

@@ -9,10 +9,8 @@ import {
   Copy,
   FileText,
   Headphones,
-  Info,
   Lock,
   MessageCircle,
-  MoreHorizontal,
   PanelRightOpen,
   PhoneCall,
   Plus,
@@ -46,8 +44,10 @@ import {
   statusLabels
 } from "./app/dialogModel.js";
 import { AuditTimeline, BotHandoffSummary } from "./features/dialogs/AuditTimeline.jsx";
+import { Avatar } from "./features/dialogs/Avatar.jsx";
+import { ChatHeader } from "./features/dialogs/ChatHeader.jsx";
 import { Composer } from "./features/dialogs/Composer.jsx";
-import { DialogActionMenu } from "./features/dialogs/DialogActionMenu.jsx";
+import { TranscriptToolbar } from "./features/dialogs/TranscriptToolbar.jsx";
 import { NotificationCenter } from "./features/notifications/NotificationCenter.jsx";
 import { SectionPlaceholder } from "./features/section-router.jsx";
 import { Modal, StatusBadge, Toast } from "./ui.jsx";
@@ -1188,14 +1188,6 @@ function TabButton({ id, active, onClick, label, count, tone }) {
   );
 }
 
-function Avatar({ conversation }) {
-  if (conversation.avatar) {
-    return <img className="avatar" src={conversation.avatar} alt="" />;
-  }
-
-  return <span className={`avatar avatar-fallback ${conversation.channel.toLowerCase()}`}>{conversation.initials}</span>;
-}
-
 function ChatPane({
   conversation,
   topic,
@@ -1223,7 +1215,6 @@ function ChatPane({
   isClosed,
   status
 }) {
-  const [isActionPanelOpen, setActionPanelOpen] = useState(false);
   const [rescueNow, setRescueNow] = useState(Date.now());
   const activeRescue = conversation.rescue?.state === "active" && !isClosed ? conversation.rescue : null;
   const rescueRemainingSeconds = activeRescue ? getRescueRemainingSeconds(activeRescue, rescueNow) : 0;
@@ -1247,102 +1238,28 @@ function ChatPane({
 
   return (
     <section className="chat-pane" aria-label="Окно чата">
-      <header className="chat-header">
-        <div className="chat-identity">
-          <Avatar conversation={conversation} />
-          <div>
-            <h1>{conversation.name}</h1>
-            <span>{conversation.phone}</span>
-          </div>
-        </div>
-        <div className="chat-actions">
-          <button
-            aria-expanded={isActionPanelOpen}
-            aria-label="Действия с диалогом"
-            onClick={() => setActionPanelOpen((current) => !current)}
-            title="Действия с диалогом"
-            type="button"
-          >
-            <MoreHorizontal size={21} />
-          </button>
-          <button aria-label="Информация" title="Информация" type="button"><Info size={20} /></button>
-        </div>
-        {isActionPanelOpen ? (
-          <DialogActionMenu
-            access={access}
-            activeRescue={activeRescue}
-            isClosed={isClosed}
-            onAction={(action) => {
-              onDialogAction(action);
-              setActionPanelOpen(false);
-            }}
-            status={status}
-          />
-        ) : null}
-        <label className="status-select-inline">
-          <span>Статус:</span>
-          <select
-            disabled={!access.canManageDialogs || (isClosed && status !== "closed")}
-            onChange={(event) => onStatusChange(event.target.value)}
-            value={status}
-          >
-            {Object.entries(statusLabels).map(([key, label]) => (
-              <option disabled={isClosed && !["closed", "reopened"].includes(key)} key={key} value={key}>{label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="topic-select">
-          <span>Тематика:</span>
-          <select value={topic} onChange={(event) => onTopic(event.target.value)}>
-            <option value="">Не выбрана</option>
-            {topicOptions.map((option) => (
-              <option value={option} key={option}>{option}</option>
-            ))}
-          </select>
-        </label>
-      </header>
+      <ChatHeader
+        access={access}
+        activeRescue={activeRescue}
+        conversation={conversation}
+        isClosed={isClosed}
+        onDialogAction={onDialogAction}
+        onStatusChange={onStatusChange}
+        onTopic={onTopic}
+        status={status}
+        topic={topic}
+      />
 
-      <div className="transcript-toolbar" aria-label="Фильтр истории чата">
-        <div className="transcript-toolbar-left">
-          <div className="transcript-filter-buttons" role="group" aria-label="Тип записей">
-            {[
-              ["all", "Все"],
-              ["internal", "Комментарии"],
-              ["events", "Audit"]
-            ].map(([id, label]) => (
-              <button
-                aria-pressed={transcriptMode === id}
-                className={transcriptMode === id ? "active" : ""}
-                key={id}
-                onClick={() => setTranscriptMode(id)}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {activeRescue ? (
-            <div className={`rescue-timer-chip ${isRescueExpired ? "expired" : rescueRemainingSeconds <= 60 ? "danger" : ""}`}>
-              <Clock3 size={16} />
-              <strong>{formatRescueTimer(rescueRemainingSeconds)}</strong>
-              <span>{isRescueExpired ? "Время вышло" : activeRescue.reason}</span>
-              <b>{activeRescue.nextAction}</b>
-            </div>
-          ) : null}
-        </div>
-        <div className="transcript-toolbar-actions">
-          <button className="compact-close-button" disabled={isClosed || !topic} onClick={onCloseDialog} type="button">
-            {isClosed ? <ShieldCheck size={16} /> : <Lock size={16} />}
-            {isClosed ? "Закрыт" : "Закрыть"}
-          </button>
-        </div>
-      </div>
-      {!topic && !isClosed ? (
-        <div className="inline-disabled-reason">
-          <AlertTriangle size={15} />
-          Для закрытия выберите тематику. Это правило действует во всех ролях и каналах.
-        </div>
-      ) : null}
+      <TranscriptToolbar
+        activeRescue={activeRescue}
+        isClosed={isClosed}
+        isRescueExpired={isRescueExpired}
+        onCloseDialog={onCloseDialog}
+        onTranscriptModeChange={setTranscriptMode}
+        rescueRemainingSeconds={rescueRemainingSeconds}
+        topic={topic}
+        transcriptMode={transcriptMode}
+      />
       <BotHandoffSummary summary={botHandoffSummary} />
 
       <AuditTimeline messages={conversation.messages} onSaveTemplate={onSaveTemplate} transcriptMode={transcriptMode} />

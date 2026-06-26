@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.1
+Версия: 2.2
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса notification center в feature-компонент, расширения уведомлений фильтрами/подписками/history, добавления AI explainability и pre-send quality check, редактора базы знаний, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса notification center, composer, AI composer panel и attachment preview в feature-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability и pre-send quality check, редактора базы знаний, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -26,7 +26,7 @@
 - React 19 + Vite.
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
-- Основной cockpit пока находится в `src/App.jsx`, но notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
+- Основной cockpit пока находится в `src/App.jsx`, но notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, composer/AI panel/attachment preview вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
 - Продуктовые разделы находятся в `src/sections.jsx`; маршрутизация разделов вынесена в `src/features/section-router.jsx`.
 - Общие UI-примитивы вынесены в `src/ui.jsx`.
 - Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
@@ -209,6 +209,7 @@
 - Модель уведомлений вынесена в `src/app/notificationModel.js`.
 - Правила AI explainability и pre-send quality check вынесены в `src/app/aiQualityModel.js`.
 - Topbar notification center вынесен в `src/features/notifications/NotificationCenter.jsx` без изменения CSS-контрактов и smoke-селекторов.
+- Composer, inline AI panel и attachment preview вынесены в `src/features/dialogs/*` без изменения CSS-контрактов и smoke-селекторов.
 - Focus trap для модальных окон вынесен в `src/app/useModalA11y.js`.
 - Роутер продуктовых экранов вынесен в `src/features/section-router.jsx`.
 - Навигация и продуктовые массивы используют единый источник данных.
@@ -491,7 +492,7 @@ Acceptance criteria:
 
 ### 7.1. Frontend UI и архитектура
 
-1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; notification center уже вынесен, следующий безопасный кандидат — `Composer`/AI panel или общий modal/toast слой.
+1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; notification center и composer уже вынесены, следующий безопасный кандидат — общий modal/toast слой или таблицы/toolbar из `sections.jsx`.
 2. Вынести общие компоненты `Modal`, `Toast`, `ToolbarSearch`, `EntityTable`, `SegmentedControl`, `StatusBadge`, `AuditTimeline`, `ActionMenu`.
 3. Довести базу знаний до расширенного UI: approval history, версии статьи, вложения и preview self-service виджета.
 4. Расширить AI-контур до real-time scoring, операторских подсказок исправления и аналитики эффективности подсказок.
@@ -559,6 +560,7 @@ Acceptance criteria:
 - [x] Разнести `src/data.js` на доменные data-файлы и оставить `src/data.js` barrel-агрегатором.
 - [x] Вынести app-модули доступа, модели диалогов, modal a11y hook и section router.
 - [x] Вынести topbar notification center в `src/features/notifications/NotificationCenter.jsx`.
+- [x] Вынести composer, inline AI panel и attachment preview в `src/features/dialogs/*`.
 - [ ] Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям.
 - [x] Добавить расширенные фильтры и сортировки очереди диалогов.
 - [x] Добавить полноценные статусы обращения и audit timeline.

@@ -41,6 +41,13 @@ test("app shell enforces role access and closes notifications on section change"
   await expect(page.locator("nav button").filter({ hasText: "Клиенты" })).toBeEnabled();
 
   await selectRole(page, "Администратор");
+  await page.locator(".quick-action").click();
+  await expect(page.locator(".outbound-panel")).toBeVisible();
+  await page.locator(".role-switcher select").selectOption({ label: "Сотрудник" }, { force: true });
+  await expect(page.locator(".outbound-panel")).toHaveCount(0);
+  await expect(page.locator(".quick-action")).toBeDisabled();
+
+  await selectRole(page, "Администратор");
   await page.getByRole("button", { name: "Уведомления" }).click();
   await expect(page.locator(".notification-drawer")).toBeVisible();
   await openSection(page, "Клиенты");

@@ -265,7 +265,7 @@
   - `src/features/quality/`
   - `src/features/automation/`
 - Реализовано: Settings access matrix/channel limits вынесены в `SettingsAccessPanel`, admin workspace вынесен из `SettingsScreen` в `AdminWorkspaces`, `ApiGovernancePanel`, `SecurityControlsPanel`, `AdminLockedPanel`, управление сотрудниками — в `EmployeeManagementPanel`, канальные подключения — в `ChannelConnectionsPanel`, SDK playground — в `SdkConsolePanel`, справочник тематик — в `TopicDirectoryPanel`, а Webhooks/API/Security CSS вынесен в `src/features/settings/settings.css` без изменения smoke-селекторов.
-- Продолжить разнос `src/App.jsx`, оставшихся блоков `src/styles.css` и крупных feature-экранов на подмодули без изменения пользовательских сценариев; следующий безопасный кандидат — app-state hooks из `App.jsx` или дальнейшее разбиение `src/styles.css` на feature CSS.
+- Продолжить разнос `src/App.jsx`, оставшихся блоков `src/styles.css` и крупных feature-экранов на подмодули без изменения пользовательских сценариев; navigation/role/outbound guard уже вынесен в `src/app/useAppNavigation.js`, следующий безопасный кандидат — оставшиеся app-state hooks из `App.jsx` или дальнейшее разбиение `src/styles.css` на feature CSS.
 - Вынести общие компоненты:
   - `Modal`
   - `Toast`
@@ -533,7 +533,7 @@ Acceptance criteria:
 
 ### 7.1. Frontend UI и архитектура
 
-1. Продолжить разнос `App.jsx`, `styles.css` и крупных feature-экранов на подмодули без изменения поведения; app shell, PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar, Modal, `useComposerAttachments`, `useDialogQueueFilters`, `SettingsAccessPanel`, admin settings workspace, `EmployeeManagementPanel`, `ChannelConnectionsPanel`, `SdkConsolePanel` и `TopicDirectoryPanel` уже вынесены. Следующий безопасный кандидат — дальнейшие app-state hooks из `App.jsx` или разбиение `src/styles.css`.
+1. Продолжить разнос `App.jsx`, `styles.css` и крупных feature-экранов на подмодули без изменения поведения; app shell, PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar, Modal, `useComposerAttachments`, `useDialogQueueFilters`, `useAppNavigation`, `SettingsAccessPanel`, admin settings workspace, `EmployeeManagementPanel`, `ChannelConnectionsPanel`, `SdkConsolePanel` и `TopicDirectoryPanel` уже вынесены. Следующий безопасный кандидат — оставшиеся app-state hooks из `App.jsx` или разбиение `src/styles.css`.
 2. Реализовано: общий `Modal`; `Toast`, `StatusBadge`, `ToolbarSearch`, `SegmentedControl`, `EntityTable` и `Modal` уже вынесены в `src/ui.jsx`, `DialogActionMenu` и `AuditTimeline` — в `src/features/dialogs/*`.
 3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Реализовано во frontend: AI real-time scoring, операторские подсказки исправления и аналитика эффективности подсказок. Осталось подключить production scoring service, реальные repair actions и backend-телеметрию.
@@ -621,6 +621,7 @@ Acceptance criteria:
 - [x] Вынести OutboundDialogLauncher, SaveTemplateDialog и DraftSwitchDialog из `src/App.jsx` в `src/features/dialogs/*`.
 - [x] Вынести lifecycle вложений composer из `src/App.jsx` в `src/app/useComposerAttachments.js`.
 - [x] Вынести state/filtering очереди диалогов из `src/App.jsx` в `src/app/useDialogQueueFilters.js`.
+- [x] Вынести navigation/role/outbound guard из `src/App.jsx` в `src/app/useAppNavigation.js`.
 - [x] Вынести Sidebar и TopBar из `src/App.jsx` в `src/features/app-shell/*`.
 - [x] Вынести ClientsScreen из `src/sections.jsx` в `src/features/clients/*` и общий `createScreenStateItems` в `src/app/*`.
 - [x] Вынести PanelScreen из `src/sections.jsx` в `src/features/panel/*`.

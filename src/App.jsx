@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from "react";
-import { roleAccessProfiles } from "./app/access.js";
+import React, { useState } from "react";
 import {
   aiActionLabels,
   createAuditEvent,
@@ -11,6 +10,7 @@ import {
   statusLabels
 } from "./app/dialogModel.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
+import { useAppNavigation } from "./app/useAppNavigation.js";
 import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
 import { ChatPane } from "./features/dialogs/ChatPane.jsx";
 import { ConversationList } from "./features/dialogs/ConversationList.jsx";
@@ -27,8 +27,6 @@ import {
 
 function App() {
   const [conversationItems, setConversationItems] = useState(conversations);
-  const [section, setSection] = useState("dialogs");
-  const [roleMode, setRoleMode] = useState("Администратор");
   const [selectedId, setSelectedId] = useState("maria");
   const [composeMode, setComposeMode] = useState("reply");
   const [transcriptMode, setTranscriptMode] = useState("all");
@@ -43,6 +41,21 @@ function App() {
   );
   const [closedIds, setClosedIds] = useState(() => new Set(conversations.filter((item) => item.status === "closed").map((item) => item.id)));
   const [toast, setToast] = useState("");
+  const {
+    access,
+    section,
+    roleMode,
+    handleRoleModeChange,
+    handleSectionSelect,
+    handleBackToDialogs,
+    handleOutboundRequest
+  } = useAppNavigation({
+    initialSection: "dialogs",
+    initialRoleMode: "Администратор",
+    isOutboundOpen,
+    setOutboundOpen,
+    setToast
+  });
   const {
     addFiles: addAttachments,
     attachments,
@@ -67,7 +80,6 @@ function App() {
   const pendingConversation = pendingConversationId
     ? conversationItems.find((conversation) => conversation.id === pendingConversationId)
     : null;
-  const access = roleAccessProfiles[roleMode];
   const selectedTopic = topics[selected.id] ?? "";
   const selectedStatus = selected.status ?? "active";
   const isClosed = closedIds.has(selected.id) || selectedStatus === "closed";
@@ -78,31 +90,6 @@ function App() {
       ...suggestion,
       state: aiSuggestionStates[suggestion.id] ?? "idle"
     }));
-
-  useEffect(() => {
-    if (!access.sections.includes(section)) {
-      setSection("dialogs");
-      setToast(`${roleMode}: ${access.reason}`);
-    }
-
-    if (!access.canOutbound && isOutboundOpen) {
-      setOutboundOpen(false);
-    }
-  }, [access, isOutboundOpen, roleMode, section]);
-
-  function handleRoleModeChange(nextRole) {
-    setRoleMode(nextRole);
-    setToast(`Режим прав: ${nextRole}`);
-  }
-
-  function handleSectionSelect(nextSection) {
-    if (!access.sections.includes(nextSection)) {
-      setToast(`${roleMode}: ${access.reason}`);
-      return;
-    }
-
-    setSection(nextSection);
-  }
 
   function handleConversationSelect(nextConversationId) {
     if (nextConversationId === selectedId) {
@@ -173,7 +160,7 @@ function App() {
     setSelectedId(id);
     setDraft("");
     clearAttachments();
-    setSection("dialogs");
+    handleBackToDialogs();
     setOutboundOpen(false);
     setToast(`Исходящий диалог создан: ${outbound.phone}`);
   }
@@ -491,14 +478,7 @@ function App() {
         <TopBar
           access={access}
           activeSection={section}
-          onOutbound={() => {
-            if (!access.canOutbound) {
-              setToast(access.reason);
-              return;
-            }
-
-            setOutboundOpen(true);
-          }}
+          onOutbound={handleOutboundRequest}
           onRoleMode={handleRoleModeChange}
           onToast={setToast}
           roleMode={roleMode}
@@ -561,7 +541,7 @@ function App() {
         ) : (
           <SectionPlaceholder
             section={section}
-            onBack={() => setSection("dialogs")}
+            onBack={handleBackToDialogs}
             conversations={conversationItems}
             templates={templateLibrary}
             onTemplatesChange={setTemplateLibrary}

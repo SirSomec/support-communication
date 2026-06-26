@@ -40,7 +40,7 @@ export function ChatPane({
   const botHandoffSummary = {
     scenario: topic?.includes("Авторизация") ? "Код подтверждения" : topic?.includes("Оплата") ? "Первичный возврат" : "Статус доставки",
     asked: ["подтверждение телефона", "последний заказ", "согласие на подключение оператора"],
-    received: [visiblePhone, conversation.topic || "тематика не выбрана", conversation.entry],
+    received: [visiblePhone, topic || "тематика не выбрана", conversation.entry],
     reason: conversation.slaTone === "danger" ? "бот передал из-за SLA-риска" : "бот передал после запроса человека"
   };
 

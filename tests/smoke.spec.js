@@ -106,6 +106,7 @@ test("customer panel inserts templates and enforces close topic", async ({ page 
 
   await page.locator(".customer-panel .close-topic select").selectOption({ label: "Товар / Несоответствие" });
   await expect(page.locator(".customer-panel .close-button")).toBeEnabled();
+  await expect(page.locator(".bot-handoff-summary")).toContainText("Товар / Несоответствие");
 
   await page.locator(".customer-panel .template-list button").filter({ hasText: "Передан курьеру" }).click();
   await expect(page.locator(".composer textarea")).toHaveValue(/Заказ передан курьеру/);

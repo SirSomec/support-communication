@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.39
+Версия: 2.40
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, lifecycle вложений composer в `useComposerAttachments`, state/filtering очереди диалогов в `useDialogQueueFilters`, расширения уведомлений фильтрами/подписками/history/browser push/звуковыми правилами/внешними critical channels, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, Settings access matrix/channel limits в `SettingsAccessPanel`, Settings workspaces для Webhooks/API keys и Security controls с выносом admin workspace в `AdminWorkspaces`/`ApiGovernancePanel`/`SecurityControlsPanel`/`AdminLockedPanel`, управления сотрудниками в `EmployeeManagementPanel` с явным permission-prop для сброса пароля и smoke-покрытием, каналов в `ChannelConnectionsPanel`, SDK playground в `SdkConsolePanel`, справочника тематик в `TopicDirectoryPanel` и feature CSS, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, lifecycle вложений composer в `useComposerAttachments`, state/filtering очереди диалогов в `useDialogQueueFilters`, navigation/role/outbound guard в `useAppNavigation`, расширения уведомлений фильтрами/подписками/history/browser push/звуковыми правилами/внешними critical channels, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, синхронизации live bot handoff summary с текущей тематикой из `topics` state, Settings access matrix/channel limits в `SettingsAccessPanel`, Settings workspaces для Webhooks/API keys и Security controls с выносом admin workspace в `AdminWorkspaces`/`ApiGovernancePanel`/`SecurityControlsPanel`/`AdminLockedPanel`, управления сотрудниками в `EmployeeManagementPanel` с явным permission-prop для сброса пароля и smoke-покрытием, каналов в `ChannelConnectionsPanel`, SDK playground в `SdkConsolePanel`, справочника тематик в `TopicDirectoryPanel` и feature CSS, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -554,7 +554,7 @@ Acceptance criteria:
 8. Довести rescue до production-контура: серверный countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
 9. Довести proactive до production-контура: backend delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитику эффективности.
 10. Довести ботов до production-контура: backend runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
-11. Синхронизировать live bot handoff summary с текущей выбранной тематикой из `topics` state, а не только с seed-значением диалога.
+11. Реализовано во frontend: live bot handoff summary синхронизирован с текущей выбранной тематикой из `topics` state, а не только с seed-значением диалога.
 12. Добавить backend partial/loading/error states после сервисного слоя.
 13. Подключить AuditScreen к единому audit service: retention policy, event detail, export, redaction, server-side filters и immutable event ids.
 14. Подключить Webhooks/API/Security settings к backend: key rotation, signature validation, replay endpoint, session revoke, 2FA enrollment и security event stream.
@@ -662,6 +662,7 @@ Acceptance criteria:
 - [x] Расширить AI-контур до real-time scoring, coaching queue и analytics UI.
 - [x] Добавить topbar notification center с SLA, mention, channel error, export-ready, фильтрами, подписками и history.
 - [x] Добавить live bot handoff summary в чат оператора.
+- [x] Синхронизировать live bot handoff summary с текущей выбранной тематикой из `topics` state.
 - [x] Добавить редактор базы знаний со статусом публикации, каналами и preview.
 - [x] Расширить базу знаний до approval history, версий статьи, вложений и self-service preview.
 - [x] Добавить visual builder proactive-правил с preview и A/B управлением.

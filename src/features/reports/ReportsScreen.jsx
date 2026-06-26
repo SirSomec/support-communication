@@ -13,6 +13,7 @@ import {
   rescueReportRows,
   topicOptions
 } from "../../data.js";
+import "./reports.css";
 
 const reportTeamOptions = ["Все команды", "1-я линия", "Старшие смены", "Финансы", "Администраторы"];
 const reportStatusOptions = ["Все статусы", "Новые", "В работе", "Закрытые", "Ожидают", "Спасение"];

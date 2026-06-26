@@ -1262,6 +1262,95 @@ select:disabled {
   white-space: nowrap;
 }
 
+.inline-ai-panel {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 10px;
+}
+
+.inline-ai-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d9e7fb;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.inline-ai-card.accepted,
+.inline-ai-card.editing {
+  border-color: #cdebdc;
+  background: #f5fcf8;
+}
+
+.inline-ai-card header,
+.inline-ai-card footer,
+.inline-ai-card header span,
+.inline-ai-card footer div,
+.inline-ai-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-ai-card header,
+.inline-ai-card footer {
+  justify-content: space-between;
+}
+
+.inline-ai-card header span {
+  min-width: 0;
+  color: var(--blue);
+}
+
+.inline-ai-card header strong,
+.inline-ai-card p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.inline-ai-card header b {
+  color: var(--teal);
+  font-size: 12px;
+}
+
+.inline-ai-card p {
+  margin: 0;
+  color: #263248;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.inline-ai-meta span {
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #506078;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inline-ai-card footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #2d405f;
+  font-weight: 800;
+}
+
+.inline-ai-card footer button:disabled {
+  color: #8792a6;
+  cursor: not-allowed;
+}
+
 .composer textarea {
   display: block;
   width: calc(100% - 24px);
@@ -4462,6 +4551,7 @@ textarea:focus-visible {
 
   .chat-action-menu,
   .attachment-queue,
+  .inline-ai-card footer,
   .composer-template-picker,
   .draft-switch-summary,
   .detail-stack,
@@ -4484,6 +4574,11 @@ textarea:focus-visible {
 
   .composer-tools button {
     flex: 0 0 34px;
+  }
+
+  .inline-ai-card footer div,
+  .inline-ai-card footer button {
+    width: 100%;
   }
 
   .send-button {

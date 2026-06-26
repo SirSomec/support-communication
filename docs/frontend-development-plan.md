@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 1.2
+Версия: 1.3
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после реализации расширенного UI отчетов и сверки с функциональными требованиями
+Статус: актуализированный рабочий план после реализации расширенного UI отчетов и inline AI-панели в чате
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -53,7 +53,9 @@
 - Закрытие без тематики заблокировано в UI и объяснено предупреждением.
 - Смена тематики добавляет audit-событие в историю.
 - Действия над диалогом: передать старшему, вернуть в очередь, запустить спасение, поставить паузу SLA.
-- Composer поддерживает ответ клиенту, внутренний комментарий, вставку шаблонов, upload/preview/error UI вложений, AI-подсказку и сохранение текста как шаблона.
+- Composer поддерживает ответ клиенту, внутренний комментарий, вставку шаблонов, upload/preview/error UI вложений, inline AI-панель и сохранение текста как шаблона.
+- Inline AI-панель в чате показывает summary/reply/article-подсказки по выбранному диалогу, confidence, suggested topic, tone, risk и действия accept/edit/reject.
+- AI-действия не отправляют сообщение автоматически: они вставляют текст в черновик или скрывают подсказку и записываются в audit history диалога.
 - При смене диалога с несохраненным текстом или вложениями показывается warning-modal: можно остаться или сбросить черновик и перейти.
 - Сообщение оператора можно сохранить как шаблон одной кнопкой из истории.
 
@@ -131,7 +133,8 @@
 - Раздел `Качество` показывает CSAT, низкие оценки, AI-подсказки и статьи.
 - Есть список оценок с баллом, каналом, оператором, тематикой и комментарием клиента.
 - Есть фильтр низких оценок как UI-сценарий.
-- Есть AI-помощник с summary/reply/article, confidence, suggested topic, risk и действиями accept/edit/reject.
+- Есть AI-помощник с summary/reply/article, confidence, suggested topic, risk и действиями accept/edit/reject в разделе качества и inline в composer чата.
+- AI-действия в чате пишутся в audit-фильтр transcript как события `eventKind: ai`.
 - Есть таблица базы знаний со статусами публикации, каналами и полезностью.
 
 ### 3.11. Боты, автоматизация и audit
@@ -169,7 +172,7 @@
 | Audit | Есть фильтр в чате, structured audit timeline для статусов, действий, тематик и закрытия, export audit | Единый audit log с фильтрами, деталкой события, retention и backend-событиями |
 | База знаний | Частично: рекомендации и таблица статей | Полный редактор, preview, публикация, self-service виджет |
 | CSAT/CSI | Частично реализован раздел качества и отчетный тип | Настройка отправки оценки по каналам, карточка оценки, динамика по операторам |
-| AI-помощь | Частично реализована в composer и разделе качества | Inline panel в чате, explainability, audit AI-действий, pre-send quality check |
+| AI-помощь | Реализована inline panel в чате, AI-подсказка в composer, раздел качества и audit AI-действий accept/edit/reject | Explainability, pre-send quality check, backend-модели подсказок и оценка эффективности |
 | Proactive invites | Частично реализованы правила и метрики | Visual builder условий, preview приглашения, frequency caps, A/B управление |
 | Активные посетители | Реализован отдельный раздел | Права, обезличивание, ручная инициация с проверками, город/источник |
 | Спасение чатов | Частично: очередь спасения, фильтр и действия | Реальный таймер в чате, автоматический возврат, отчет спасенных/пропущенных |
@@ -247,7 +250,8 @@
 - Довести вложения после текущего upload/preview/error UI до реального upload API, storage, antivirus/scan и delivery/read states.
 - Расширить текущий warning о несохраненном черновике на будущие автопереходы, поиск и системные назначения после подключения backend-событий.
 - Добавить rescue timer прямо в шапку или transcript toolbar чата.
-- Добавить inline AI-панель рядом с composer: summary, suggested reply, suggested topic, risk, pre-send quality check.
+- Добавлена inline AI-панель рядом с composer: summary/reply/article, suggested topic, tone, risk, accept/edit/reject и audit AI-действий.
+- Добавить pre-send quality check в composer.
 - Расширить текущий audit timeline до единого audit log с фильтрами, деталкой события, retention и backend-событиями.
 
 Acceptance criteria:
@@ -391,7 +395,7 @@ Acceptance criteria:
 - Добавить динамику качества по оператору, каналу и тематике.
 - Добавить ручную оценку ответа старшим сотрудником по критериям.
 - Добавить AI explainability: почему предложена тематика/ответ/статья.
-- Добавить audit AI-действий: принять, вставить, редактировать, отклонить.
+- Добавлен audit AI-действий: принять, редактировать, отклонить.
 - Добавить pre-send quality check в composer.
 
 Acceptance criteria:
@@ -474,7 +478,7 @@ Acceptance criteria:
 5. Довести вложения до backend upload/storage, antivirus/scan, delivery states и канальных ограничений на API.
 6. Довести workflow-статусы до backend transitions, transition guards и массовых операций.
 7. Подключить отчеты к реальным файлам выгрузок, сохраненным шаблонам отчетов, backend-очереди и единым определениям метрик.
-8. Добавить inline AI-панель в чат с accept/edit/reject и audit.
+8. Добавить AI explainability и pre-send quality check к уже реализованной inline AI-панели.
 9. Добавить rescue timer в сам чат и настройки rescue по каналу/очереди/роли.
 10. Добавить visual builder proactive-правил с preview и A/B управлением.
 11. Добавить canvas/flow-builder ботов с тестовым transcript preview.
@@ -536,7 +540,7 @@ Acceptance criteria:
 - [x] Применить role switcher и disabled states ко всем разделам.
 - [x] Добавить управление сотрудниками, группами, паролями и каналами сотрудника.
 - [x] Расширить отчеты chart-блоками, настройкой колонок, retry/download states.
-- [ ] Добавить inline AI-панель в чат и audit AI-действий.
+- [x] Добавить inline AI-панель в чат и audit AI-действий.
 - [ ] Добавить visual builder proactive-правил с preview и A/B управлением.
 - [ ] Добавить rescue timer в чат и отчет спасенных/пропущенных диалогов.
 - [ ] Добавить canvas/flow-builder ботов с нодами, тестовым transcript preview и импортом/экспортом.

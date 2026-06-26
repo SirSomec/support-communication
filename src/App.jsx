@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CheckCircle2,
   CircleGauge,
   Clock3,
   Copy,
@@ -21,6 +22,7 @@ import {
   PanelRightOpen,
   Paperclip,
   PhoneCall,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
@@ -47,7 +49,7 @@ import {
   TemplatesScreen,
   VisitorsScreen
 } from "./sections.jsx";
-import { conversations, initialTemplates, navItems, topicOptions } from "./data.js";
+import { aiSuggestions, conversations, initialTemplates, navItems, topicOptions } from "./data.js";
 
 const modalFocusableSelector = [
   "button:not(:disabled)",
@@ -128,6 +130,19 @@ const slaSortRank = {
 
 const queueWaitingStatuses = ["queued", "waiting_client", "waiting_operator"];
 const queueSlaTones = ["warn", "danger"];
+
+const aiActionLabels = {
+  accept: "принята",
+  edit: "открыта на редактирование",
+  reject: "отклонена"
+};
+
+const aiSuggestionStatusLabels = {
+  idle: "Новая",
+  accepted: "Принята",
+  editing: "Редактируется",
+  rejected: "Отклонена"
+};
 
 const dialogActionConfigs = [
   {
@@ -251,6 +266,18 @@ function getStatusMeta(status) {
   return conversationStatusMeta[status] ?? conversationStatusMeta.active;
 }
 
+function getAiSuggestionDraft(suggestion) {
+  if (suggestion.type === "article") {
+    return `Рекомендуемая статья: ${suggestion.text}`;
+  }
+
+  return suggestion.text;
+}
+
+function getAiSuggestionMode(suggestion) {
+  return suggestion.type === "summary" ? "internal" : "reply";
+}
+
 function useModalA11y(onClose) {
   const panelRef = useRef(null);
 
@@ -322,6 +349,7 @@ function App() {
   const [isOutboundOpen, setOutboundOpen] = useState(false);
   const [templateLibrary, setTemplateLibrary] = useState(initialTemplates);
   const [saveTemplateDraft, setSaveTemplateDraft] = useState(null);
+  const [aiSuggestionStates, setAiSuggestionStates] = useState({});
   const [topics, setTopics] = useState(() =>
     Object.fromEntries(conversations.map((conversation) => [conversation.id, conversation.topic]))
   );
@@ -337,6 +365,12 @@ function App() {
   const selectedStatus = selected.status ?? "active";
   const isClosed = closedIds.has(selected.id) || selectedStatus === "closed";
   const hasUnsentComposerContent = Boolean(draft.trim() || attachments.length);
+  const visibleAiSuggestions = aiSuggestions
+    .filter((suggestion) => suggestion.conversationId === selected.id && aiSuggestionStates[suggestion.id] !== "rejected")
+    .map((suggestion) => ({
+      ...suggestion,
+      state: aiSuggestionStates[suggestion.id] ?? "idle"
+    }));
 
   useEffect(() => {
     if (!access.sections.includes(section)) {
@@ -717,6 +751,34 @@ function App() {
     setToast(`Шаблон сохранен: ${next.title}`);
   }
 
+  function handleAiSuggestionAction(suggestion, action) {
+    if (isClosed) {
+      setToast("Диалог закрыт, AI-подсказки доступны только для просмотра.");
+      return;
+    }
+
+    const nextState = action === "reject" ? "rejected" : action === "edit" ? "editing" : "accepted";
+    setAiSuggestionStates((current) => ({ ...current, [suggestion.id]: nextState }));
+
+    if (action !== "reject") {
+      const suggestionDraft = getAiSuggestionDraft(suggestion);
+      const nextMode = getAiSuggestionMode(suggestion);
+      setComposeMode(nextMode);
+      setDraft((current) => [current.trim(), suggestionDraft].filter(Boolean).join("\n\n"));
+    }
+
+    appendMessage(selected.id, {
+      actor: "AI copilot",
+      detail: `AI-подсказка ${aiActionLabels[action]}: ${suggestion.title}`,
+      eventKind: "ai",
+      id: `ai-audit-${suggestion.id}-${action}-${Date.now()}`,
+      text: `AI-подсказка ${aiActionLabels[action]}: ${suggestion.title}`,
+      type: "event",
+      time: "сейчас"
+    });
+    setToast(`AI-действие записано в audit: ${suggestion.title}.`);
+  }
+
   function handleClose() {
     if (!selectedTopic) {
       setToast("Для закрытия диалога выберите тематику.");
@@ -804,6 +866,8 @@ function App() {
               setTranscriptMode={setTranscriptMode}
               draft={draft}
               setDraft={setDraft}
+              aiSuggestions={visibleAiSuggestions}
+              onAiSuggestionAction={handleAiSuggestionAction}
               attachments={attachments}
               onAttachFiles={handleAttachFiles}
               onAttachmentComplete={handleCompleteAttachment}
@@ -1352,6 +1416,8 @@ function ChatPane({
   setTranscriptMode,
   draft,
   setDraft,
+  aiSuggestions: inlineAiSuggestions,
+  onAiSuggestionAction,
   attachments,
   onAttachFiles,
   onAttachmentComplete,
@@ -1492,6 +1558,8 @@ function ChatPane({
         setMode={setComposeMode}
         draft={draft}
         setDraft={setDraft}
+        aiSuggestions={inlineAiSuggestions}
+        onAiSuggestionAction={onAiSuggestionAction}
         attachments={attachments}
         onAttachFiles={onAttachFiles}
         onAttachmentComplete={onAttachmentComplete}
@@ -1608,11 +1676,60 @@ function AttachmentPreview({ attachment, compact = false }) {
   );
 }
 
+function AiComposerPanel({ suggestions = [], disabled, onAction }) {
+  if (!suggestions.length) {
+    return null;
+  }
+
+  return (
+    <div className="inline-ai-panel" aria-label="AI-подсказки в чате">
+      {suggestions.map((suggestion) => (
+        <article className={`inline-ai-card ${suggestion.state}`} key={suggestion.id}>
+          <header>
+            <span>
+              <Sparkles size={16} />
+              <strong>{suggestion.title}</strong>
+            </span>
+            <b>{suggestion.confidence}%</b>
+          </header>
+          <p>{suggestion.text}</p>
+          <div className="inline-ai-meta">
+            <span>{suggestion.suggestedTopic}</span>
+            <span>Тон: {suggestion.tone}</span>
+            <span>Риск: {suggestion.risk}</span>
+          </div>
+          <footer>
+            <span className={`status-chip ${suggestion.state === "idle" ? "info" : suggestion.state === "rejected" ? "closed" : "ok"}`}>
+              {aiSuggestionStatusLabels[suggestion.state] ?? aiSuggestionStatusLabels.idle}
+            </span>
+            <div>
+              <button disabled={disabled} onClick={() => onAction(suggestion, "accept")} type="button">
+                <CheckCircle2 size={15} />
+                Принять
+              </button>
+              <button disabled={disabled} onClick={() => onAction(suggestion, "edit")} type="button">
+                <Pencil size={15} />
+                Редактировать
+              </button>
+              <button disabled={disabled} onClick={() => onAction(suggestion, "reject")} type="button">
+                <X size={15} />
+                Отклонить
+              </button>
+            </div>
+          </footer>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function Composer({
   mode,
   setMode,
   draft,
   setDraft,
+  aiSuggestions: inlineAiSuggestions,
+  onAiSuggestionAction,
   attachments,
   onAttachFiles,
   onAttachmentComplete,
@@ -1681,6 +1798,7 @@ function Composer({
           ))}
         </div>
       ) : null}
+      <AiComposerPanel suggestions={inlineAiSuggestions} disabled={disabled} onAction={onAiSuggestionAction} />
       <textarea
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
@@ -1741,7 +1859,22 @@ function Composer({
           <button aria-label="Прикрепить файл" disabled={disabled} onClick={() => fileInputRef.current?.click()} title="Прикрепить файл" type="button"><Paperclip size={18} /></button>
           <button aria-label="Добавить реакцию" disabled={disabled} onClick={() => setDraft(`${draft} Спасибо.`.trim())} type="button"><Smile size={18} /></button>
           <button aria-label="Сохранить как шаблон" disabled={disabled} onClick={onSaveTemplate} title="Сохранить как шаблон" type="button"><BookOpen size={18} /></button>
-          <button aria-label="ИИ-подсказка" disabled={disabled} onClick={() => setDraft(aiDraft)} title="ИИ-подсказка" type="button"><Sparkles size={18} /></button>
+          <button
+            aria-label="ИИ-подсказка"
+            disabled={disabled}
+            onClick={() => {
+              if (inlineAiSuggestions.length) {
+                onAiSuggestionAction(inlineAiSuggestions[0], "edit");
+                return;
+              }
+
+              setDraft((current) => [current.trim(), aiDraft].filter(Boolean).join("\n\n"));
+            }}
+            title="ИИ-подсказка"
+            type="button"
+          >
+            <Sparkles size={18} />
+          </button>
         </div>
         <button className="send-button" onClick={onSend} disabled={sendDisabled} title={attachmentReason || undefined}>
           <Send size={18} />

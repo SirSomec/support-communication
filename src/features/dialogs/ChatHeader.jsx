@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Info, MoreHorizontal } from "lucide-react";
-import { statusLabels } from "../../app/dialogModel.js";
+import { maskPhone, statusLabels } from "../../app/dialogModel.js";
 import { topicOptions } from "../../data.js";
 import { Avatar } from "./Avatar.jsx";
 import { DialogActionMenu } from "./DialogActionMenu.jsx";
@@ -17,6 +17,7 @@ export function ChatHeader({
   topic
 }) {
   const [isActionPanelOpen, setActionPanelOpen] = useState(false);
+  const visiblePhone = access.canViewSensitive ? conversation.phone : maskPhone(conversation.phone);
 
   return (
     <header className="chat-header">
@@ -24,7 +25,7 @@ export function ChatHeader({
         <Avatar conversation={conversation} />
         <div>
           <h1>{conversation.name}</h1>
-          <span>{conversation.phone}</span>
+          <span>{visiblePhone}</span>
         </div>
       </div>
       <div className="chat-actions">

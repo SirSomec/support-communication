@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.27
+Версия: 2.28
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -63,6 +63,7 @@
 - Composer показывает pre-send quality check: пустой ответ, короткий ответ, отсутствие эмпатии, отсутствие следующего шага, риск формулировки и состояние `готово`.
 - При смене диалога с несохраненным текстом или вложениями показывается warning-modal: можно остаться или сбросить черновик и перейти.
 - Сообщение оператора можно сохранить как шаблон одной кнопкой из истории.
+- Chat header и bot handoff summary соблюдают role-aware маскирование телефона, как и карточка клиента.
 - В topbar реализован notification center: SLA-alert, mention, channel error, export-ready, счетчик непрочитанных, mark-all-read, фильтры, группы, настройки подписок, history и действия по каждому уведомлению.
 - В живом чате показан bot handoff summary: сценарий, что бот спросил, что получил и почему передал оператору.
 
@@ -175,22 +176,24 @@
 | Запрет закрытия без тематики | Реализован disabled state и warning | Серверная валидация после подключения API |
 | Выгрузка отчетов по всем показателям | Есть таблица метрик, chart-блоки, расширенные фильтры, настройка колонок, export queue и действия download/retry/regenerate | Реальные файлы выгрузок, сохраненные шаблоны отчетов, backend-очередь и единые определения метрик |
 | SDK-подключение | Есть SDK-консоль, события, snippet и playground с live raw payload preview, validation/result state и role-aware запуском события | Ключи окружений, реальные delivery/read/attachment события, backend-тестовый стенд и changelog |
+| Webhooks/API и ключи | Частично: SDK playground, channel logs и webhook-нода в bot builder | Отдельная Settings-поверхность: environment keys, signed webhooks, retries, delivery log, ручной replay, changelog |
 | Telegram, MAX, VK | Есть каналы, статусы, health, настройки; добавлена детальная поверхность канала с несколькими подключениями, raw IDs, журналом ошибок, фильтрами и тестом приема/отправки | Реальные webhook/API операции, управление токенами, retry delivery и backend-аудит тестов |
 | Инициация диалога по телефону через SDK | Реализован modal исходящего диалога | Проверка прав, согласий, доступности канала, дублей и юридических ограничений |
 | Панель: онлайн, перерыв, активные, ожидание | Реализована | Drill-down оператора, bulk actions, preview перераспределения |
-| Роли сотрудник/старший/администратор | Есть глобальный role switcher, матрица, role-aware navigation/action disabled states и маскирование телефона для сотрудника | Довести до backend-ready permission model: права на каждое действие, аудит отказов, серверная валидация и управление группами |
+| Роли сотрудник/старший/администратор | Есть глобальный role switcher, матрица, role-aware navigation/action disabled states и маскирование телефона для сотрудника в карточке, списке клиентов, chat header и bot handoff summary | Довести до backend-ready permission model: права на каждое действие, аудит отказов, серверная валидация и управление группами |
 | База шаблонов оператора | Реализована отдельная вкладка и editor | Архивирование, копирование, approval flow, расширенная аналитика использования |
 | Сохранение шаблона из чата | Реализовано из composer и сообщения | Сохранение из выделенного фрагмента текста |
-| Телефон, устройство, точка входа | Реализовано в карточке клиента и SDK/visitor данных, телефон маскируется по роли | Device timeline и полная детальная страница клиента |
+| Телефон, устройство, точка входа | Реализовано в карточке клиента, chat header, bot handoff summary и SDK/visitor данных, телефон маскируется по роли | Device timeline и полная детальная страница клиента |
 | Лимит чатов на оператора | Реализован в панели и настройках | Симуляция маршрутизации и hard validation при назначении |
 | Каналы каждому сотруднику | Реализован интерактивный редактор сотрудника: роль, группа, каналы, лимит, override, чувствительные данные, парольный статус и сброс пароля для старшего/админа | Массовое назначение, backend-аудит изменений, серверная модель групп |
 | Клиентские профили и объединение | Реализованы список, детальная панель клиента, маскирование sensitive fields по роли, кандидаты дублей и локальный merge/unmerge UI | Backend merge graph, conflict resolution, source profile IDs и audit объединения |
 | Поиск и фильтры | Частично: поиск диалогов, клиентов, шаблонов, отчеты; очередь поддерживает фильтры по каналу, тематике, статусу, внутренним комментариям и сортировки | Довести фильтры до production-набора: дата, оператор, телефон, клиентский ID, сохраненные пресеты и backend-пагинация |
 | Статусы обращений | Реализованы workflow-статусы в очереди, шапке чата, фильтре и действиях диалога | Backend transitions, transition guards по роли/каналу, системные назначения и массовые операции |
 | Вложения | Реализован upload/preview/error UI в composer, inline-ошибки размера/типа, блокировка отправки при uploading/error и отображение готовых вложений в transcript | Реальный upload API, storage, antivirus/scan, delivery/read states и тонкие ограничения по каждому каналу |
-| Уведомления | Реализован topbar notification center: непрочитанные, SLA, mentions, channel errors, export-ready, фильтры, группы, настройки подписок, history и действия по уведомлениям | Реальные источники событий, push/browser notifications и backend audit |
+| Уведомления | Реализован topbar notification center: непрочитанные, SLA, mentions, channel errors, export-ready, фильтры, группы, настройки подписок, history и действия по уведомлениям | Реальные источники событий, push/browser notifications, звуковые правила, внешние каналы критических ошибок админов и backend audit |
 | SLA | Отражен в очереди, панели, отчетах | Настройка правил SLA по каналу/тематике/расписанию |
-| Audit | Есть фильтр в чате, structured audit timeline для статусов, действий, тематик и закрытия, export audit | Единый audit log с фильтрами, деталкой события, retention и backend-событиями |
+| Audit | Есть фильтр в чате, structured audit timeline для статусов, действий, тематик и закрытия, export audit | Отдельный админский audit log с фильтрами user/action/object/period, деталкой события, retention и backend-событиями |
+| Security/admin controls | Частично: роли, reset password, маскирование sensitive fields и disabled states | 2FA, активные сессии, API-key protection, IP allowlist, security alerts и audit отказов |
 | База знаний | Реализованы рекомендации, таблица статей, встроенный редактор, preview, статус публикации, каналы, видимость, approval history, вложения, версии статьи и self-service preview виджета | Backend CRUD, полнотекстовый поиск, storage, approval workflow API, публикация версий и аналитика self-service |
 | CSAT/CSI | Частично реализован раздел качества и отчетный тип | Настройка отправки оценки по каналам, карточка оценки, динамика по операторам |
 | AI-помощь | Реализована inline panel в чате, AI-подсказка в composer, explainability, pre-send quality check, раздел качества, audit AI-действий accept/edit/reject, AI real-time scoring workspace, coaching queue и метрики эффективности подсказок | Backend-модели подсказок, production scoring service, реальные repair actions и телеметрия эффективности |
@@ -289,7 +292,7 @@
 - Добавлен rescue timer прямо в transcript toolbar чата.
 - Добавлена inline AI-панель рядом с composer: summary/reply/article, suggested topic, tone, risk, accept/edit/reject и audit AI-действий.
 - Реализовано: pre-send quality check в composer.
-- Расширить текущий audit timeline до единого audit log с фильтрами, деталкой события, retention и backend-событиями.
+- Добавить отдельный админский AuditScreen: фильтры user/action/object/period, деталка события, retention, export и связь с текущими audit-событиями чата/экспортов/ботов.
 
 Acceptance criteria:
 
@@ -518,8 +521,10 @@ Acceptance criteria:
 2. Реализовано: общий `Modal`; `Toast`, `StatusBadge`, `ToolbarSearch`, `SegmentedControl`, `EntityTable` и `Modal` уже вынесены в `src/ui.jsx`, `DialogActionMenu` и `AuditTimeline` — в `src/features/dialogs/*`.
 3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Реализовано во frontend: AI real-time scoring, операторские подсказки исправления и аналитика эффективности подсказок. Осталось подключить production scoring service, реальные repair actions и backend-телеметрию.
-5. Расширить notification center до push/browser notifications и серверных источников после подключения backend event stream.
-6. Довести QA до production-уровня: keyboard navigation, focus map, semantic table/grid для динамической таблицы отчетов, visual regression checklist и UI-kit/Storybook при росте компонентной базы.
+5. Добавить отдельный `AuditScreen` для администраторов: user/action/object/period filters, severity, source, event detail drawer, retention/export controls и ссылки на связанные диалоги/экспорты/ботов.
+6. Расширить Settings до явных workspaces `Webhooks/API keys` и `Security`: environment keys, signed webhooks, retries, delivery log, manual replay, changelog, 2FA, active sessions, API-key protection, IP allowlist и security alerts.
+7. Расширить notification center до push/browser notifications, звуковых правил, внешних каналов критических ошибок админов и серверных источников после подключения backend event stream.
+8. Довести QA до production-уровня: keyboard navigation, focus map, semantic table/grid для динамической таблицы отчетов, visual regression checklist и UI-kit/Storybook при росте компонентной базы.
 
 ### 7.2. Backend/service integration backlog
 
@@ -535,6 +540,8 @@ Acceptance criteria:
 10. Довести ботов до production-контура: backend runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
 11. Синхронизировать live bot handoff summary с текущей выбранной тематикой из `topics` state, а не только с seed-значением диалога.
 12. Добавить backend partial/loading/error states после сервисного слоя.
+13. Подключить AuditScreen к единому audit service: retention policy, event detail, export, redaction, server-side filters и immutable event ids.
+14. Подключить Webhooks/API/Security settings к backend: key rotation, signature validation, replay endpoint, session revoke, 2FA enrollment и security event stream.
 
 ## 8. QA-gates для каждой frontend-итерации
 
@@ -606,6 +613,10 @@ Acceptance criteria:
 - [x] Вынести AutomationScreen из `src/sections.jsx` в `src/features/automation/*`.
 - [x] Вынести SettingsScreen из `src/sections.jsx` в `src/features/settings/*`.
 - [ ] Продолжить разнос `App.jsx`, `src/styles.css` и крупных feature-экранов на подмодули.
+- [x] Закрыть role-aware маскирование телефона в chat header и bot handoff summary.
+- [ ] Реализовать отдельный AuditScreen для администраторов с фильтрами, деталкой события, retention и export controls.
+- [ ] Добавить Settings workspaces для Webhooks/API keys и Security/admin controls.
+- [ ] Расширить уведомления звуковыми правилами, push/browser и внешними каналами критических ошибок.
 - [x] Добавить расширенные фильтры и сортировки очереди диалогов.
 - [x] Добавить полноценные статусы обращения и audit timeline.
 - [x] Добавить upload/preview/error UI для вложений.

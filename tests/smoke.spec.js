@@ -98,10 +98,14 @@ test("customer panel inserts templates and enforces close topic", async ({ page 
   await expectHealthyPage(page);
 });
 
-test("customer panel masks phone for employee role", async ({ page }) => {
+test("employee role masks phone in chat context", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Сотрудник");
 
+  await expect(page.locator(".chat-identity")).toContainText("+7 *** ***-**-44");
+  await expect(page.locator(".chat-identity")).not.toContainText("+7 999 204-18-44");
+  await expect(page.locator(".bot-handoff-summary")).toContainText("+7 *** ***-**-44");
+  await expect(page.locator(".bot-handoff-summary")).not.toContainText("+7 999 204-18-44");
   await expect(page.locator(".customer-panel")).toContainText("+7 *** ***-**-44");
   await expect(page.locator(".customer-panel")).not.toContainText("+7 999 204-18-44");
   await expectHealthyPage(page);

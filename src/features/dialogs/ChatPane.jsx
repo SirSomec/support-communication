@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getRescueRemainingSeconds } from "../../app/dialogModel.js";
+import { getRescueRemainingSeconds, maskPhone } from "../../app/dialogModel.js";
 import { AuditTimeline, BotHandoffSummary } from "./AuditTimeline.jsx";
 import { ChatHeader } from "./ChatHeader.jsx";
 import { Composer } from "./Composer.jsx";
@@ -36,10 +36,11 @@ export function ChatPane({
   const activeRescue = conversation.rescue?.state === "active" && !isClosed ? conversation.rescue : null;
   const rescueRemainingSeconds = activeRescue ? getRescueRemainingSeconds(activeRescue, rescueNow) : 0;
   const isRescueExpired = Boolean(activeRescue && rescueRemainingSeconds === 0);
+  const visiblePhone = access.canViewSensitive ? conversation.phone : maskPhone(conversation.phone);
   const botHandoffSummary = {
     scenario: topic?.includes("Авторизация") ? "Код подтверждения" : topic?.includes("Оплата") ? "Первичный возврат" : "Статус доставки",
     asked: ["подтверждение телефона", "последний заказ", "согласие на подключение оператора"],
-    received: [conversation.phone, conversation.topic || "тематика не выбрана", conversation.entry],
+    received: [visiblePhone, conversation.topic || "тематика не выбрана", conversation.entry],
     reason: conversation.slaTone === "danger" ? "бот передал из-за SLA-риска" : "бот передал после запроса человека"
   };
 

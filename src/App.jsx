@@ -52,14 +52,14 @@ function App() {
     setToast
   });
   const {
-    addFiles: addAttachments,
     attachments,
     clearAttachments,
     completeAttachment: handleCompleteAttachment,
+    handleAttachFiles,
     hasAttachments,
     removeAttachment: handleRemoveAttachment,
     retryAttachment: handleRetryAttachment
-  } = useComposerAttachments();
+  } = useComposerAttachments({ setToast });
   const {
     filter,
     filtered,
@@ -149,13 +149,6 @@ function App() {
     setToast,
     setTopics
   });
-
-  function handleAttachFiles(fileList) {
-    const added = addAttachments(fileList, selected.channel);
-    if (added) {
-      setToast(`Вложения добавлены в очередь: ${added}`);
-    }
-  }
 
   return (
     <div className="app-shell">

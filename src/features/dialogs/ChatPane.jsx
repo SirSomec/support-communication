@@ -90,7 +90,7 @@ export function ChatPane({
         aiSuggestions={inlineAiSuggestions}
         onAiSuggestionAction={onAiSuggestionAction}
         attachments={attachments}
-        onAttachFiles={onAttachFiles}
+        onAttachFiles={(fileList) => onAttachFiles(fileList, conversation.channel)}
         onAttachmentComplete={onAttachmentComplete}
         onAttachmentRetry={onAttachmentRetry}
         onAttachmentRemove={onAttachmentRemove}

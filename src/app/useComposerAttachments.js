@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createComposerAttachment, releaseAttachmentPreviews } from "./dialogModel.js";
 
-export function useComposerAttachments() {
+export function useComposerAttachments({ setToast } = {}) {
   const [attachments, setAttachments] = useState([]);
   const attachmentsRef = useRef([]);
 
@@ -46,6 +46,18 @@ export function useComposerAttachments() {
     ]);
     return files.length;
   }, []);
+
+  const handleAttachFiles = useCallback(
+    (fileList, channel) => {
+      const added = addFiles(fileList, channel);
+      if (added) {
+        setToast?.(`Вложения добавлены в очередь: ${added}`);
+      }
+
+      return added;
+    },
+    [addFiles, setToast]
+  );
 
   const completeAttachment = useCallback((attachmentId) => {
     setAttachments((current) =>
@@ -103,6 +115,7 @@ export function useComposerAttachments() {
     attachments,
     clearAttachments,
     completeAttachment,
+    handleAttachFiles,
     hasAttachments: Boolean(attachments.length),
     hasPending: attachments.some((attachment) => attachment.status !== "ready"),
     retryAttachment,

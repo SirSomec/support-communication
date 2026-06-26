@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CircleGauge,
   Clock3,
   Copy,
   FileText,
@@ -54,6 +53,7 @@ import { AttachmentPreview } from "./features/dialogs/AttachmentPreview.jsx";
 import { Composer } from "./features/dialogs/Composer.jsx";
 import { NotificationCenter } from "./features/notifications/NotificationCenter.jsx";
 import { SectionPlaceholder } from "./features/section-router.jsx";
+import { Toast } from "./ui.jsx";
 import {
   aiSuggestions,
   conversations,
@@ -1633,15 +1633,6 @@ function InfoRow({ label, value, icon }) {
       <strong>{value}</strong>
       {icon}
     </div>
-  );
-}
-
-function Toast({ message, onClose }) {
-  return (
-    <button className="toast" onClick={onClose}>
-      <CircleGauge size={18} />
-      {message}
-    </button>
   );
 }
 

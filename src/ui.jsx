@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, CheckCircle2, ChevronLeft, Inbox, LoaderCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, CircleGauge, Inbox, LoaderCircle } from "lucide-react";
 
 const stateIcons = {
   loading: LoaderCircle,
@@ -81,4 +81,13 @@ export function ChannelList({ channels }) {
 
 export function Permission({ enabled }) {
   return enabled ? <span className="permission yes">Да</span> : <span className="permission no">Нет</span>;
+}
+
+export function Toast({ message, onClose }) {
+  return (
+    <button aria-live="polite" className="toast" onClick={onClose} role="status" type="button">
+      <CircleGauge size={18} />
+      {message}
+    </button>
+  );
 }

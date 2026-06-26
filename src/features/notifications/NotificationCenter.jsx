@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Bell } from "lucide-react";
+import "./notifications.css";
 import {
   externalCriticalChannels,
   filterNotifications,

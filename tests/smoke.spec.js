@@ -240,15 +240,24 @@ test("draft switch warning preserves or discards unsent draft", async ({ page })
   await page.goto("/");
   await selectRole(page, "Администратор");
 
+  await page.getByLabel("Выбор вложений").setInputFiles({
+    name: "pending-switch.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("draft switch attachment")
+  });
+  await expect(page.locator(".attachment-queue")).toContainText("pending-switch.txt");
+
   await page.locator(".composer textarea").fill("Черновик перед переключением");
   await page.locator(".queue-row").filter({ hasText: "Владимир Б." }).click();
 
   await expect(page.getByRole("dialog", { name: "Перейти в другой диалог?" })).toBeVisible();
   await expect(page.locator(".draft-switch-panel")).toContainText("Черновик перед переключением");
+  await expect(page.locator(".draft-switch-panel")).toContainText("1 в очереди");
   await page.locator(".draft-switch-panel > footer button").filter({ hasText: "Остаться" }).click();
   await expect(page.locator(".draft-switch-panel")).toHaveCount(0);
   await expect(page.locator(".chat-identity")).toContainText("Мария К.");
   await expect(page.locator(".composer textarea")).toHaveValue("Черновик перед переключением");
+  await expect(page.locator(".attachment-queue")).toContainText("pending-switch.txt");
 
   await page.locator(".queue-row").filter({ hasText: "Владимир Б." }).click();
   await expect(page.getByRole("dialog", { name: "Перейти в другой диалог?" })).toBeVisible();
@@ -256,6 +265,8 @@ test("draft switch warning preserves or discards unsent draft", async ({ page })
   await expect(page.locator(".draft-switch-panel")).toHaveCount(0);
   await expect(page.locator(".chat-identity")).toContainText("Владимир Б.");
   await expect(page.locator(".composer textarea")).toHaveValue("");
+  await expect(page.locator(".attachment-queue")).toHaveCount(0);
+  await expect(page.locator(".toast")).toContainText("Черновик и очередь вложений сброшены.");
   await expectHealthyPage(page);
 });
 

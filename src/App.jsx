@@ -10,6 +10,7 @@ import {
   statusLabels
 } from "./app/dialogModel.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
+import { useConversationSelection } from "./app/useConversationSelection.js";
 import { useAppNavigation } from "./app/useAppNavigation.js";
 import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
 import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
@@ -27,11 +28,9 @@ import {
 
 function App() {
   const [conversationItems, setConversationItems] = useState(conversations);
-  const [selectedId, setSelectedId] = useState("maria");
   const [composeMode, setComposeMode] = useState("reply");
   const [transcriptMode, setTranscriptMode] = useState("all");
   const [draft, setDraft] = useState("");
-  const [pendingConversationId, setPendingConversationId] = useState(null);
   const [isOutboundOpen, setOutboundOpen] = useState(false);
   const [aiSuggestionStates, setAiSuggestionStates] = useState({});
   const [topics, setTopics] = useState(() =>
@@ -73,11 +72,23 @@ function App() {
     setQuery,
     updateQueueFilter
   } = useDialogQueueFilters({ conversationItems, topics });
-
-  const selected = conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0];
-  const pendingConversation = pendingConversationId
-    ? conversationItems.find((conversation) => conversation.id === pendingConversationId)
-    : null;
+  const {
+    handleConversationSelect,
+    handleDiscardDraftAndSwitch,
+    handleStayOnConversation,
+    pendingConversation,
+    selected,
+    selectedId,
+    setSelectedId
+  } = useConversationSelection({
+    conversationItems,
+    draft,
+    hasAttachments,
+    clearAttachments,
+    setDraft,
+    setToast,
+    initialSelectedId: "maria"
+  });
   const selectedTopic = topics[selected.id] ?? "";
   const {
     closeSaveTemplateDialog,
@@ -94,42 +105,12 @@ function App() {
   });
   const selectedStatus = selected.status ?? "active";
   const isClosed = closedIds.has(selected.id) || selectedStatus === "closed";
-  const hasUnsentComposerContent = Boolean(draft.trim() || hasAttachments);
   const visibleAiSuggestions = aiSuggestions
     .filter((suggestion) => suggestion.conversationId === selected.id && aiSuggestionStates[suggestion.id] !== "rejected")
     .map((suggestion) => ({
       ...suggestion,
       state: aiSuggestionStates[suggestion.id] ?? "idle"
     }));
-
-  function handleConversationSelect(nextConversationId) {
-    if (nextConversationId === selectedId) {
-      return;
-    }
-
-    if (hasUnsentComposerContent) {
-      setPendingConversationId(nextConversationId);
-      return;
-    }
-
-    setSelectedId(nextConversationId);
-  }
-
-  function handleStayOnConversation() {
-    setPendingConversationId(null);
-  }
-
-  function handleDiscardDraftAndSwitch() {
-    if (!pendingConversationId) {
-      return;
-    }
-
-    setSelectedId(pendingConversationId);
-    setDraft("");
-    clearAttachments();
-    setPendingConversationId(null);
-    setToast("Черновик и очередь вложений сброшены.");
-  }
 
   function handleAttachFiles(fileList) {
     const added = addAttachments(fileList, selected.channel);

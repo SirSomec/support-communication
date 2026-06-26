@@ -6,8 +6,8 @@ import { useConversationSelection } from "./app/useConversationSelection.js";
 import { useAppNavigation } from "./app/useAppNavigation.js";
 import { useDialogActions } from "./app/useDialogActions.js";
 import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
+import { useOutboundConversation } from "./app/useOutboundConversation.js";
 import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
-import { createOutboundConversation } from "./app/dialogModel.js";
 import { ChatPane } from "./features/dialogs/ChatPane.jsx";
 import { ConversationList } from "./features/dialogs/ConversationList.jsx";
 import { CustomerPanel } from "./features/dialogs/CustomerPanel.jsx";
@@ -139,25 +139,22 @@ function App() {
     setTopics,
     topics
   });
+  const { handleOutboundClose, handleOutboundCreate } = useOutboundConversation({
+    clearAttachments,
+    handleBackToDialogs,
+    setConversationItems,
+    setDraft,
+    setOutboundOpen,
+    setSelectedId,
+    setToast,
+    setTopics
+  });
 
   function handleAttachFiles(fileList) {
     const added = addAttachments(fileList, selected.channel);
     if (added) {
       setToast(`Вложения добавлены в очередь: ${added}`);
     }
-  }
-
-  function handleOutboundCreate(outbound) {
-    const newConversation = createOutboundConversation(outbound);
-
-    setConversationItems((current) => [newConversation, ...current]);
-    setTopics((current) => ({ ...current, [newConversation.id]: newConversation.topic }));
-    setSelectedId(newConversation.id);
-    setDraft("");
-    clearAttachments();
-    handleBackToDialogs();
-    setOutboundOpen(false);
-    setToast(`Исходящий диалог создан: ${outbound.phone}`);
   }
 
   return (
@@ -244,7 +241,7 @@ function App() {
       {isOutboundOpen ? (
         <OutboundDialogLauncher
           conversations={conversationItems}
-          onClose={() => setOutboundOpen(false)}
+          onClose={handleOutboundClose}
           onCreate={handleOutboundCreate}
           onToast={setToast}
         />

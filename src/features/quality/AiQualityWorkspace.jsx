@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Gauge, Sparkles, TrendingUp } from "lucide-react";
 import { ChannelBadge, SegmentedControl, StatusBadge } from "../../ui.jsx";
+import "./ai-quality.css";
 
 const coachingFilters = ["Все", "Риски", "SLA", "База знаний"];
 const stateTone = {

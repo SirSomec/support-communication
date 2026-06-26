@@ -1,6 +1,7 @@
 import React from "react";
 import { AlertTriangle, CheckCircle2, ChevronLeft, CircleGauge, Inbox, LoaderCircle, Search, X } from "lucide-react";
 import { useModalA11y } from "./app/useModalA11y.js";
+import "./ui.css";
 
 const stateIcons = {
   loading: LoaderCircle,

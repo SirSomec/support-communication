@@ -33,9 +33,13 @@ import {
   Zap
 } from "lucide-react";
 import { ChannelBadge, ChannelList, EntityTable, MetricTile, Permission, ProductScreen, SectionTitle, SegmentedControl, StatusBadge, ToolbarSearch } from "./ui.jsx";
+import { AiQualityWorkspace } from "./features/quality/AiQualityWorkspace.jsx";
 import { KnowledgeBaseWorkspace } from "./features/quality/KnowledgeBaseWorkspace.jsx";
 import {
   activeVisitors,
+  aiCoachingQueue,
+  aiEffectivenessMetrics,
+  aiRealtimeChecks,
   aiSuggestions,
   auditEvents,
   botScenarios,
@@ -758,8 +762,8 @@ export function QualityScreen({ onBack, onToast }) {
       subtitle="Оценки клиентов, ручной QA, низкие оценки, AI-подсказки и управление статьями базы знаний."
       onBack={onBack}
       stateItems={createScreenStateItems({
-        total: qualityScores.length + aiSuggestions.length + knowledgeArticles.length,
-        empty: `${qualityScores.length} оценок, ${aiSuggestions.length} AI`,
+        total: qualityScores.length + aiSuggestions.length + aiRealtimeChecks.length + aiCoachingQueue.length + knowledgeArticles.length,
+        empty: `${qualityScores.length} оценок, ${aiSuggestions.length} AI, ${aiCoachingQueue.length} coaching`,
         emptyWhenZero: "качество без данных",
         errors: lowScores.length,
         errorLabel: "низких оценок нет"
@@ -827,6 +831,16 @@ export function QualityScreen({ onBack, onToast }) {
           </div>
         </section>
       </div>
+
+      <section className="work-panel">
+        <SectionTitle title="AI real-time scoring" action="исправления до отправки и эффективность подсказок" />
+        <AiQualityWorkspace
+          coachingQueue={aiCoachingQueue}
+          effectivenessMetrics={aiEffectivenessMetrics}
+          onToast={onToast}
+          realtimeChecks={aiRealtimeChecks}
+        />
+      </section>
 
       <section className="work-panel">
         <SectionTitle title="База знаний" action="редактор и публикация статей" />

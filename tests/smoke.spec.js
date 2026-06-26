@@ -130,6 +130,24 @@ test("knowledge editor supports article draft status and preview", async ({ page
   await expectHealthyPage(page);
 });
 
+test("quality AI workspace exposes real-time scoring and coaching", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await openSection(page, "Качество");
+
+  await expect(page.locator(".ai-quality-workspace")).toContainText("Real-time scoring");
+  await expect(page.locator(".ai-quality-workspace")).toContainText("Риск формулировки");
+  await expect(page.locator(".ai-effectiveness-grid")).toContainText("Принято без правок");
+
+  await page.locator(".ai-coaching-filters button").filter({ hasText: "SLA" }).click();
+  await expect(page.locator(".ai-coaching-list")).toContainText("SLA риск");
+  await expect(page.locator(".ai-coaching-list")).not.toContainText("Нужна статья");
+
+  await page.locator(".ai-coaching-card button").filter({ hasText: "Применить исправление" }).click();
+  await expect(page.locator(".toast")).toContainText("AI coaching: SLA риск");
+  await expectHealthyPage(page);
+});
+
 test("bot builder supports canonical nodes and import validation", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");

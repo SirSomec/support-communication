@@ -76,6 +76,108 @@ export const aiSuggestions = [
   }
 ];
 
+export const aiRealtimeChecks = [
+  {
+    id: "tone-empathy",
+    label: "Эмпатия и тон",
+    score: 92,
+    state: "ok",
+    detail: "Ответ признает ожидание клиента и не перекладывает ответственность.",
+    correction: "Сохранить текущую формулировку приветствия."
+  },
+  {
+    id: "next-step",
+    label: "Следующий шаг",
+    score: 61,
+    state: "warn",
+    detail: "В 4 активных черновиках нет конкретного срока возврата с ответом.",
+    correction: "Добавить срок: вернусь с точным статусом до 18:00."
+  },
+  {
+    id: "topic-match",
+    label: "Тематика и база знаний",
+    score: 88,
+    state: "ok",
+    detail: "AI нашел совпадение с тематиками и статьями для 9 из 11 диалогов.",
+    correction: "Прикрепить статью, если клиент просит инструкцию."
+  },
+  {
+    id: "risk-language",
+    label: "Риск формулировки",
+    score: 43,
+    state: "danger",
+    detail: "Обнаружены 2 ответа с обвинительной формулировкой перед отправкой.",
+    correction: "Заменить на нейтральную формулировку с извинением и действием."
+  }
+];
+
+export const aiCoachingQueue = [
+  {
+    id: "coach-vladimir-next-step",
+    client: "Владимир Б.",
+    channel: "Telegram",
+    topic: "Товар / Несоответствие",
+    trigger: "Нет следующего шага",
+    severity: "warn",
+    segment: "Риски",
+    recommendation: "Добавьте срок следующего ответа и номер обращения перед отправкой.",
+    draft: "Проверю заказ и вернусь с вариантом возврата до 18:00. Номер обращения: {ticket_id}."
+  },
+  {
+    id: "coach-maria-article",
+    client: "Мария К.",
+    channel: "SDK",
+    topic: "Доставка / Статус заказа",
+    trigger: "Нужна статья",
+    severity: "ok",
+    segment: "База знаний",
+    recommendation: "Прикрепите статью «Отслеживание заказа», чтобы клиент не повторял вопрос.",
+    draft: "Прикладываю инструкцию по отслеживанию и проверяю актуальный статус заказа."
+  },
+  {
+    id: "coach-sla-risk",
+    client: "Ольга Н.",
+    channel: "VK",
+    topic: "Оплата / Возврат",
+    trigger: "SLA риск",
+    severity: "danger",
+    segment: "SLA",
+    recommendation: "Ответьте до истечения SLA или передайте старшему сотруднику с summary.",
+    draft: "Понимаю ожидание. Проверяю возврат у финансов и вернусь с точным сроком сегодня."
+  }
+];
+
+export const aiEffectivenessMetrics = [
+  {
+    id: "accepted-rate",
+    label: "Принято без правок",
+    value: "64%",
+    delta: "+8 п.п.",
+    detail: "reply и article подсказки за 7 дней"
+  },
+  {
+    id: "edited-rate",
+    label: "Отредактировано",
+    value: "21%",
+    delta: "-3 п.п.",
+    detail: "операторы правят тон и сроки"
+  },
+  {
+    id: "resolution-lift",
+    label: "Влияние на решение",
+    value: "+12%",
+    delta: "к FCR",
+    detail: "диалоги с принятой подсказкой"
+  },
+  {
+    id: "false-positive",
+    label: "Ложные срабатывания",
+    value: "5%",
+    delta: "-2 п.п.",
+    detail: "отклоненные senior QA"
+  }
+];
+
 export const knowledgeArticles = [
   {
     id: "kb-delivery-tracking",

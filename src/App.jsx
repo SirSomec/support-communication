@@ -7,6 +7,7 @@ import { useAppNavigation } from "./app/useAppNavigation.js";
 import { useDialogActions } from "./app/useDialogActions.js";
 import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
 import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
+import { createOutboundConversation } from "./app/dialogModel.js";
 import { ChatPane } from "./features/dialogs/ChatPane.jsx";
 import { ConversationList } from "./features/dialogs/ConversationList.jsx";
 import { CustomerPanel } from "./features/dialogs/CustomerPanel.jsx";
@@ -147,36 +148,11 @@ function App() {
   }
 
   function handleOutboundCreate(outbound) {
-    const id = `outbound-${Date.now()}`;
-    const newConversation = {
-      id,
-      name: outbound.clientName || "Новый клиент",
-      initials: outbound.clientName ? outbound.clientName.split(" ").map((part) => part[0]).join("").slice(0, 2) : "НК",
-      avatar: "",
-      channel: outbound.channel,
-      phone: outbound.phone,
-      time: "сейчас",
-      preview: outbound.message,
-      status: "active",
-      sla: "00:00",
-      slaTone: "ok",
-      topic: outbound.topic,
-      unread: false,
-      device: outbound.device,
-      entry: outbound.channel,
-      language: "Русский",
-      clientSince: outbound.existing ? outbound.existing.clientSince : "Новый контакт",
-      tags: ["исходящий", outbound.channel.toLowerCase()],
-      previous: outbound.existing ? outbound.existing.previous : [],
-      messages: [
-        { id: 1, type: "event", text: `Диалог инициирован через ${outbound.channel} по номеру телефона`, time: "сейчас" },
-        { id: 2, side: "agent", text: outbound.message, time: "сейчас" }
-      ]
-    };
+    const newConversation = createOutboundConversation(outbound);
 
     setConversationItems((current) => [newConversation, ...current]);
-    setTopics((current) => ({ ...current, [id]: outbound.topic }));
-    setSelectedId(id);
+    setTopics((current) => ({ ...current, [newConversation.id]: newConversation.topic }));
+    setSelectedId(newConversation.id);
     setDraft("");
     clearAttachments();
     handleBackToDialogs();

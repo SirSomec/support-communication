@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { BookOpen, PhoneCall, Send, Smartphone } from "lucide-react";
 import { topicOptions } from "../../data.js";
 import { Modal } from "../../ui.jsx";
+import "./dialog-modals.css";
 
 export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast }) {
   const [phone, setPhone] = useState("+7 ");

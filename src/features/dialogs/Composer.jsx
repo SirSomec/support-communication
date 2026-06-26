@@ -17,6 +17,7 @@ import { getPreSendQualityChecks } from "../../app/aiQualityModel.js";
 import { attachmentStatusLabels } from "../../app/dialogModel.js";
 import { AiComposerPanel } from "./AiComposerPanel.jsx";
 import { AttachmentPreview } from "./AttachmentPreview.jsx";
+import "./dialog-composer.css";
 
 export function Composer({
   mode,

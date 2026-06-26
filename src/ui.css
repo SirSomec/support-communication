@@ -49,3 +49,21 @@
   background: #edf1f6;
   color: #647087;
 }
+
+.permission {
+  width: max-content;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.permission.yes {
+  background: #ddf7e9;
+  color: #127c48;
+}
+
+.permission.no {
+  background: #f2f4f8;
+  color: #758198;
+}

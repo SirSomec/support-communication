@@ -192,6 +192,9 @@ test("composer exposes AI explainability and pre-send quality checks", async ({ 
 
   await page.locator(".inline-ai-card button").filter({ hasText: "Редактировать" }).click();
   await expect(page.locator(".composer textarea")).toHaveValue(/Клиент ждет заказ/);
+  await expect(page.locator(".toast")).toContainText("AI-действие записано в audit: Краткое резюме.");
+  await page.locator(".transcript-filter-buttons button").filter({ hasText: "Audit" }).click();
+  await expect(page.locator(".chat-transcript")).toContainText("AI-подсказка открыта на редактирование: Краткое резюме");
   await expectHealthyPage(page);
 });
 

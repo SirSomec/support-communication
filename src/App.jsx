@@ -1,14 +1,12 @@
 import React, { useState } from "react";
 import {
-  aiActionLabels,
   createAuditEvent,
   formatRescueTimer,
-  getAiSuggestionDraft,
-  getAiSuggestionMode,
   getStatusMeta,
   rescueDurationSeconds,
   statusLabels
 } from "./app/dialogModel.js";
+import { useAiSuggestions } from "./app/useAiSuggestions.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
 import { useConversationSelection } from "./app/useConversationSelection.js";
 import { useAppNavigation } from "./app/useAppNavigation.js";
@@ -32,7 +30,6 @@ function App() {
   const [transcriptMode, setTranscriptMode] = useState("all");
   const [draft, setDraft] = useState("");
   const [isOutboundOpen, setOutboundOpen] = useState(false);
-  const [aiSuggestionStates, setAiSuggestionStates] = useState({});
   const [topics, setTopics] = useState(() =>
     Object.fromEntries(conversations.map((conversation) => [conversation.id, conversation.topic]))
   );
@@ -105,12 +102,15 @@ function App() {
   });
   const selectedStatus = selected.status ?? "active";
   const isClosed = closedIds.has(selected.id) || selectedStatus === "closed";
-  const visibleAiSuggestions = aiSuggestions
-    .filter((suggestion) => suggestion.conversationId === selected.id && aiSuggestionStates[suggestion.id] !== "rejected")
-    .map((suggestion) => ({
-      ...suggestion,
-      state: aiSuggestionStates[suggestion.id] ?? "idle"
-    }));
+  const { handleAiSuggestionAction, visibleAiSuggestions } = useAiSuggestions({
+    suggestions: aiSuggestions,
+    selectedId: selected.id,
+    isClosed,
+    appendMessage,
+    setComposeMode,
+    setDraft,
+    setToast
+  });
 
   function handleAttachFiles(fileList) {
     const added = addAttachments(fileList, selected.channel);
@@ -360,34 +360,6 @@ function App() {
       });
     }
     setToast(`${actionConfig.title} зафиксировано в истории диалога.`);
-  }
-
-  function handleAiSuggestionAction(suggestion, action) {
-    if (isClosed) {
-      setToast("Диалог закрыт, AI-подсказки доступны только для просмотра.");
-      return;
-    }
-
-    const nextState = action === "reject" ? "rejected" : action === "edit" ? "editing" : "accepted";
-    setAiSuggestionStates((current) => ({ ...current, [suggestion.id]: nextState }));
-
-    if (action !== "reject") {
-      const suggestionDraft = getAiSuggestionDraft(suggestion);
-      const nextMode = getAiSuggestionMode(suggestion);
-      setComposeMode(nextMode);
-      setDraft((current) => [current.trim(), suggestionDraft].filter(Boolean).join("\n\n"));
-    }
-
-    appendMessage(selected.id, {
-      actor: "AI copilot",
-      detail: `AI-подсказка ${aiActionLabels[action]}: ${suggestion.title}`,
-      eventKind: "ai",
-      id: `ai-audit-${suggestion.id}-${action}-${Date.now()}`,
-      text: `AI-подсказка ${aiActionLabels[action]}: ${suggestion.title}`,
-      type: "event",
-      time: "сейчас"
-    });
-    setToast(`AI-действие записано в audit: ${suggestion.title}.`);
   }
 
   function handleClose() {

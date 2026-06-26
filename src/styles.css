@@ -4079,6 +4079,380 @@ select:disabled {
   color: var(--muted);
 }
 
+.admin-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.api-governance-panel,
+.security-controls-panel {
+  min-width: 0;
+}
+
+.api-key-grid,
+.security-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.api-key-card,
+.security-control-card {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.api-key-card.rotated {
+  border-color: #a9dec1;
+  background: #f3fbf7;
+}
+
+.api-key-card header {
+  display: grid;
+  gap: 4px;
+}
+
+.api-key-card header span,
+.api-key-card footer small,
+.security-control-card span,
+.webhook-endpoint small,
+.webhook-detail header span,
+.webhook-meta-grid span,
+.webhook-delivery-row small,
+.api-changelog small,
+.security-session-row small,
+.security-alert span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.api-key-card strong,
+.security-control-card strong,
+.webhook-endpoint strong,
+.webhook-detail strong,
+.api-changelog strong,
+.security-session-row strong,
+.security-alert strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #17233a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-key-card b,
+.security-control-card b {
+  color: var(--teal);
+  font-size: 12px;
+}
+
+.security-control-card.warn b {
+  color: var(--orange);
+}
+
+.api-key-card code,
+.security-session-row code {
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid #dce7f5;
+  border-radius: 7px;
+  background: #f8fbff;
+  color: #20304a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-key-card p {
+  margin: 0;
+  color: #46546b;
+  font-size: 13px;
+}
+
+.api-key-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.api-key-card button,
+.webhook-delivery-row button,
+.security-session-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #31415b;
+  font-weight: 800;
+}
+
+.webhook-workspace {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+
+.webhook-endpoint-list {
+  display: grid;
+  align-content: start;
+  border-right: 1px solid var(--line);
+}
+
+.webhook-endpoint {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 70px;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  text-align: left;
+}
+
+.webhook-endpoint.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.webhook-endpoint span,
+.webhook-delivery-row span,
+.api-changelog span,
+.security-session-row span {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.webhook-detail {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+}
+
+.webhook-detail > header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.webhook-detail header div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.webhook-detail header b {
+  color: var(--blue);
+  font-size: 12px;
+}
+
+.webhook-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.webhook-meta-grid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.webhook-meta-grid strong {
+  overflow: hidden;
+  color: #20304a;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.webhook-delivery-log,
+.api-changelog,
+.security-session-list,
+.security-alert-list {
+  display: grid;
+}
+
+.webhook-delivery-row,
+.security-session-row {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr) minmax(88px, auto);
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.webhook-delivery-row {
+  grid-template-areas:
+    "time event status"
+    ". meta action";
+}
+
+.webhook-delivery-row time {
+  grid-area: time;
+}
+
+.webhook-delivery-row > span:first-of-type {
+  grid-area: event;
+}
+
+.webhook-delivery-row > b {
+  grid-area: status;
+  justify-self: end;
+}
+
+.webhook-delivery-row > span:last-of-type {
+  grid-area: meta;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.webhook-delivery-row > button {
+  grid-area: action;
+  justify-self: end;
+}
+
+.security-session-row {
+  grid-template-areas:
+    "user status action"
+    "ip time action";
+}
+
+.security-session-row > span {
+  grid-area: user;
+}
+
+.security-session-row > code {
+  grid-area: ip;
+}
+
+.security-session-row > b {
+  grid-area: status;
+  justify-self: end;
+}
+
+.security-session-row > time {
+  grid-area: time;
+  justify-self: end;
+}
+
+.security-session-row > button {
+  grid-area: action;
+  justify-self: end;
+}
+
+.webhook-delivery-row b,
+.security-session-row b {
+  color: #20304a;
+  font-size: 12px;
+}
+
+.webhook-delivery-row.signature_failed b,
+.security-alert.critical strong {
+  color: var(--red);
+}
+
+.webhook-delivery-row.retry_scheduled b,
+.security-alert.warn strong {
+  color: var(--orange);
+}
+
+.webhook-delivery-row time,
+.security-session-row time,
+.security-alert time {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.security-session-row.revoked {
+  background: #f8fafc;
+  color: var(--muted);
+}
+
+.api-changelog article,
+.security-alert {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 52px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.api-changelog article:last-child,
+.security-alert:last-child,
+.webhook-delivery-row:last-child,
+.security-session-row:last-child {
+  border-bottom: 0;
+}
+
+.api-changelog b {
+  color: var(--blue);
+  font-size: 12px;
+}
+
+.security-control-card {
+  min-height: 110px;
+}
+
+.admin-locked-panel {
+  display: grid;
+  margin-bottom: 14px;
+}
+
+.admin-locked-panel > div {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+  padding: 18px 14px;
+}
+
+.admin-locked-panel svg {
+  grid-row: span 2;
+  color: var(--blue);
+}
+
+.admin-locked-panel strong {
+  color: #17233a;
+}
+
+.admin-locked-panel span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .template-save-overlay,
 .draft-switch-overlay {
   position: fixed;
@@ -6406,6 +6780,7 @@ textarea:focus-visible {
   .quality-layout,
   .automation-layout,
   .audit-layout,
+  .admin-workspace-layout,
   .automation-insight-grid,
   .ai-quality-workspace,
   .knowledge-editor,
@@ -6994,21 +7369,62 @@ textarea:focus-visible {
   .sdk-event-row,
   .employee-management,
   .employee-editor-grid,
+  .api-key-grid,
+  .security-control-grid,
+  .webhook-workspace,
+  .webhook-meta-grid,
   .channel-detail-grid,
   .connection-row,
   .channel-log-toolbar,
   .channel-log-row,
   .channel-test-grid,
   .sdk-playground-grid,
-  .sdk-payload-preview {
+  .sdk-payload-preview,
+  .webhook-delivery-row,
+  .security-session-row,
+  .api-changelog article,
+  .security-alert {
     grid-template-columns: 1fr;
   }
 
   .sdk-event-row,
   .connection-row,
-  .channel-log-row {
+  .channel-log-row,
+  .webhook-delivery-row,
+  .security-session-row {
     align-items: start;
     padding-block: 12px;
+  }
+
+  .webhook-endpoint-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .webhook-delivery-row {
+    grid-template-areas:
+      "time"
+      "event"
+      "status"
+      "meta"
+      "action";
+  }
+
+  .security-session-row {
+    grid-template-areas:
+      "user"
+      "ip"
+      "status"
+      "time"
+      "action";
+  }
+
+  .webhook-delivery-row > b,
+  .webhook-delivery-row > button,
+  .security-session-row > b,
+  .security-session-row > time,
+  .security-session-row > button {
+    justify-self: start;
   }
 
   .sdk-code code,
@@ -7036,7 +7452,10 @@ textarea:focus-visible {
 
   .channel-detail-head button,
   .channel-test-grid button,
-  .sdk-playground-actions button {
+  .sdk-playground-actions button,
+  .api-key-card button,
+  .webhook-delivery-row button,
+  .security-session-row button {
     width: 100%;
   }
 

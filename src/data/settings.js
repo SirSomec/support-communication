@@ -122,6 +122,99 @@ export const sdkEvents = [
   ["syncTopic", "Синхронизирует тематику и запрет закрытия"]
 ];
 
+export const apiEnvironmentKeys = [
+  {
+    id: "prod-key",
+    env: "production",
+    name: "Production SDK key",
+    keyPreview: "sk_live_****_8Q2M",
+    status: "Protected",
+    scopes: ["identifyUser", "initConversation", "webhook:send"],
+    lastRotated: "2026-06-10",
+    owner: "Администратор",
+    protection: "2FA + IP allowlist"
+  },
+  {
+    id: "stage-key",
+    env: "stage",
+    name: "Stage sandbox key",
+    keyPreview: "sk_test_****_44ST",
+    status: "Active",
+    scopes: ["identifyUser", "trackEntryPoint", "syncTopic"],
+    lastRotated: "2026-06-22",
+    owner: "QA команда",
+    protection: "2FA"
+  }
+];
+
+export const webhookEndpoints = [
+  {
+    id: "vk-inbound",
+    name: "VK inbound signed webhook",
+    channel: "VK",
+    url: "https://api.support.local/webhooks/vk",
+    status: "Signature warning",
+    signature: "HMAC SHA-256",
+    retries: "3 попытки / 30 сек",
+    lastDelivery: "12:10",
+    failureRate: "2.4%"
+  },
+  {
+    id: "telegram-main",
+    name: "Telegram bot delivery",
+    channel: "Telegram",
+    url: "https://api.support.local/webhooks/tg",
+    status: "OK",
+    signature: "Bot token + secret",
+    retries: "5 попыток / backoff",
+    lastDelivery: "12:14",
+    failureRate: "0.3%"
+  },
+  {
+    id: "sdk-events",
+    name: "SDK event stream",
+    channel: "SDK",
+    url: "https://api.support.local/webhooks/sdk-events",
+    status: "OK",
+    signature: "HMAC SHA-256",
+    retries: "4 попытки / 60 сек",
+    lastDelivery: "12:15",
+    failureRate: "0.1%"
+  }
+];
+
+export const webhookDeliveryLog = [
+  { id: "dlv-441", endpointId: "vk-inbound", time: "12:10", event: "message_new", status: "signature_failed", attempts: 1, httpStatus: "401", traceId: "hook_vk_441" },
+  { id: "dlv-438", endpointId: "telegram-main", time: "12:08", event: "message", status: "delivered", attempts: 1, httpStatus: "200", traceId: "hook_tg_438" },
+  { id: "dlv-432", endpointId: "sdk-events", time: "12:04", event: "identifyUser", status: "delivered", attempts: 1, httpStatus: "202", traceId: "hook_sdk_432" },
+  { id: "dlv-429", endpointId: "vk-inbound", time: "11:58", event: "photo_upload", status: "retry_scheduled", attempts: 2, httpStatus: "504", traceId: "hook_vk_429" }
+];
+
+export const apiChangelog = [
+  { version: "2026-06-26.1", title: "Webhook replay audit id", detail: "Manual replay теперь пишет immutable event id." },
+  { version: "2026-06-20.2", title: "SDK initConversation consent", detail: "Добавлена проверка consent/legal для исходящих диалогов." },
+  { version: "2026-06-12.4", title: "Signature rotation", detail: "Поддержана ротация HMAC ключей без остановки webhook." }
+];
+
+export const securityControls = [
+  { id: "mfa", title: "2FA для администраторов", state: "Включено", detail: "3 из 3 администраторов подключили TOTP", tone: "ok" },
+  { id: "sessions", title: "Активные сессии", state: "7 сессий", detail: "1 сессия требует перепроверки IP", tone: "warn" },
+  { id: "api-protection", title: "API-key protection", state: "Protected", detail: "Ключи показываются только после 2FA и пишутся в audit", tone: "ok" },
+  { id: "ip-allowlist", title: "IP allowlist", state: "4 сети", detail: "Office VPN, CI/CD, staging, support ops", tone: "ok" }
+];
+
+export const activeSecuritySessions = [
+  { id: "sess-ivan", user: "Иван П.", role: "Сотрудник", device: "Chrome / Windows", ip: "10.12.9.44", lastSeen: "12:15", status: "OK" },
+  { id: "sess-anna", user: "Анна Р.", role: "Администратор", device: "Safari / macOS", ip: "10.12.4.18", lastSeen: "12:18", status: "2FA OK" },
+  { id: "sess-risk", user: "Сервисный ключ", role: "API", device: "CI runner", ip: "185.17.32.90", lastSeen: "12:10", status: "Требует проверки" }
+];
+
+export const securityAlerts = [
+  { id: "sec-91", time: "12:10", level: "critical", text: "VK inbound webhook: signature mismatch", route: "Audit -> evt_hook_9006" },
+  { id: "sec-88", time: "11:44", level: "warn", text: "Новая сессия администратора из нестандартной сети", route: "Security -> sess-anna" },
+  { id: "sec-80", time: "10:52", level: "info", text: "Stage key rotated by QA команда", route: "API keys -> stage-key" }
+];
+
 export const employeeChannelRules = [
   {
     id: "rule-ivan",

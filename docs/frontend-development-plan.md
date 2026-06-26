@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.29
+Версия: 2.30
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, Settings workspaces для Webhooks/API keys и Security controls, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -125,6 +125,8 @@
 - Есть настройки каналов и лимитов по сотрудникам, override, маскирование чувствительных данных, группы, парольный статус и role-aware сброс пароля.
 - Есть карточки подключений SDK, Telegram, MAX, VK с health/status.
 - Есть SDK-консоль со snippet и событиями `identifyUser`, `initConversation`, `trackEntryPoint`, `syncTopic`.
+- Есть Settings workspace `Webhooks / API keys`: environment keys, protected key preview, scopes, rotation queue, signed webhook endpoints, retries, delivery log, manual replay и API changelog.
+- Есть Settings workspace `Security controls`: 2FA, active sessions, API-key protection, IP allowlist, security alerts и revoke session UI.
 - Есть критичные правила: запрет закрытия без тематики, внутренний комментарий не отправляется клиенту, лимиты, аудит экспортов.
 
 ### 3.9. Активные визиты, proactive и rescue
@@ -185,7 +187,7 @@
 | Запрет закрытия без тематики | Реализован disabled state и warning | Серверная валидация после подключения API |
 | Выгрузка отчетов по всем показателям | Есть таблица метрик, chart-блоки, расширенные фильтры, настройка колонок, export queue и действия download/retry/regenerate | Реальные файлы выгрузок, сохраненные шаблоны отчетов, backend-очередь и единые определения метрик |
 | SDK-подключение | Есть SDK-консоль, события, snippet и playground с live raw payload preview, validation/result state и role-aware запуском события | Ключи окружений, реальные delivery/read/attachment события, backend-тестовый стенд и changelog |
-| Webhooks/API и ключи | Частично: SDK playground, channel logs и webhook-нода в bot builder | Отдельная Settings-поверхность: environment keys, signed webhooks, retries, delivery log, ручной replay, changelog |
+| Webhooks/API и ключи | Реализована Settings-поверхность: environment keys, protected key preview, scopes, signed webhooks, retries, delivery log, manual replay, changelog; также есть SDK playground, channel logs и webhook-нода в bot builder | Backend key rotation, signature validation, replay endpoint, token storage и audit service |
 | Telegram, MAX, VK | Есть каналы, статусы, health, настройки; добавлена детальная поверхность канала с несколькими подключениями, raw IDs, журналом ошибок, фильтрами и тестом приема/отправки | Реальные webhook/API операции, управление токенами, retry delivery и backend-аудит тестов |
 | Инициация диалога по телефону через SDK | Реализован modal исходящего диалога | Проверка прав, согласий, доступности канала, дублей и юридических ограничений |
 | Панель: онлайн, перерыв, активные, ожидание | Реализована | Drill-down оператора, bulk actions, preview перераспределения |
@@ -202,7 +204,7 @@
 | Уведомления | Реализован topbar notification center: непрочитанные, SLA, mentions, channel errors, export-ready, фильтры, группы, настройки подписок, history и действия по уведомлениям | Реальные источники событий, push/browser notifications, звуковые правила, внешние каналы критических ошибок админов и backend audit |
 | SLA | Отражен в очереди, панели, отчетах | Настройка правил SLA по каналу/тематике/расписанию |
 | Audit | Есть фильтр в чате, structured audit timeline для статусов, действий, тематик и закрытия, export audit и отдельный админский AuditScreen с фильтрами source/severity/object/period/search, деталкой события, retention и export controls | Backend audit service, immutable storage, redaction, server-side filters и реальные event ids |
-| Security/admin controls | Частично: роли, reset password, маскирование sensitive fields и disabled states | 2FA, активные сессии, API-key protection, IP allowlist, security alerts и audit отказов |
+| Security/admin controls | Реализована Settings-поверхность: 2FA, активные сессии, API-key protection, IP allowlist, security alerts, revoke session UI; также есть роли, reset password, маскирование sensitive fields и disabled states | Backend 2FA enrollment, session revoke, IP policy enforcement, security event stream и audit отказов |
 | База знаний | Реализованы рекомендации, таблица статей, встроенный редактор, preview, статус публикации, каналы, видимость, approval history, вложения, версии статьи и self-service preview виджета | Backend CRUD, полнотекстовый поиск, storage, approval workflow API, публикация версий и аналитика self-service |
 | CSAT/CSI | Частично реализован раздел качества и отчетный тип | Настройка отправки оценки по каналам, карточка оценки, динамика по операторам |
 | AI-помощь | Реализована inline panel в чате, AI-подсказка в composer, explainability, pre-send quality check, раздел качества, audit AI-действий accept/edit/reject, AI real-time scoring workspace, coaching queue и метрики эффективности подсказок | Backend-модели подсказок, production scoring service, реальные repair actions и телеметрия эффективности |
@@ -532,7 +534,7 @@ Acceptance criteria:
 3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Реализовано во frontend: AI real-time scoring, операторские подсказки исправления и аналитика эффективности подсказок. Осталось подключить production scoring service, реальные repair actions и backend-телеметрию.
 5. Реализовано: отдельный `AuditScreen` для администраторов с source/severity/object/period/search filters, event detail, retention/export controls и ссылками на связанные диалоги/экспорты/ботов.
-6. Расширить Settings до явных workspaces `Webhooks/API keys` и `Security`: environment keys, signed webhooks, retries, delivery log, manual replay, changelog, 2FA, active sessions, API-key protection, IP allowlist и security alerts.
+6. Реализовано: Settings workspaces `Webhooks/API keys` и `Security` с environment keys, signed webhooks, retries, delivery log, manual replay, changelog, 2FA, active sessions, API-key protection, IP allowlist и security alerts.
 7. Расширить notification center до push/browser notifications, звуковых правил, внешних каналов критических ошибок админов и серверных источников после подключения backend event stream.
 8. Довести QA до production-уровня: keyboard navigation, focus map, semantic table/grid для динамической таблицы отчетов, visual regression checklist и UI-kit/Storybook при росте компонентной базы.
 
@@ -625,7 +627,7 @@ Acceptance criteria:
 - [ ] Продолжить разнос `App.jsx`, `src/styles.css` и крупных feature-экранов на подмодули.
 - [x] Закрыть role-aware маскирование телефона в chat header и bot handoff summary.
 - [x] Реализовать отдельный AuditScreen для администраторов с фильтрами, деталкой события, retention и export controls.
-- [ ] Добавить Settings workspaces для Webhooks/API keys и Security/admin controls.
+- [x] Добавить Settings workspaces для Webhooks/API keys и Security/admin controls.
 - [ ] Расширить уведомления звуковыми правилами, push/browser и внешними каналами критических ошибок.
 - [x] Добавить расширенные фильтры и сортировки очереди диалогов.
 - [x] Добавить полноценные статусы обращения и audit timeline.

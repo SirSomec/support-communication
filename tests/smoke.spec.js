@@ -14,6 +14,10 @@ async function expectHealthyPage(page) {
   await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
 }
 
+async function expectNoElementOverflow(page, selector) {
+  await expect.poll(async () => page.locator(selector).evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBeTruthy();
+}
+
 test("product sections expose loading/data/error states", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");
@@ -319,6 +323,41 @@ test("audit screen filters events and exposes event detail", async ({ page }) =>
   await expectHealthyPage(page);
 });
 
+test("settings expose webhooks api keys and security controls", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await openSection(page, "Настройки");
+
+  await expect(page.locator(".api-governance-panel")).toContainText("Webhooks / API keys");
+  await expect(page.locator(".security-controls-panel")).toContainText("Security controls");
+  await page.locator(".api-key-card").filter({ hasText: "Production SDK key" }).locator("button").click();
+  await expect(page.locator(".api-key-card").filter({ hasText: "Production SDK key" })).toContainText("Rotation queued");
+  await expect(page.locator(".toast")).toContainText("prod-key");
+
+  await page.locator(".webhook-endpoint").filter({ hasText: "VK inbound" }).click();
+  await expect(page.locator(".webhook-detail")).toContainText("HMAC SHA-256");
+  await page.locator(".webhook-delivery-row").filter({ hasText: "signature_failed" }).locator("button").click();
+  await expect(page.locator(".webhook-delivery-row").filter({ hasText: "message_new" })).toContainText("replay_queued");
+  await expect(page.locator(".toast")).toContainText("manual replay");
+
+  await page.locator(".security-session-row").filter({ hasText: "Сервисный ключ" }).locator("button").click();
+  await expect(page.locator(".security-session-row").filter({ hasText: "Сервисный ключ" })).toContainText("Отозвана");
+  await expect(page.locator(".toast")).toContainText("security audit");
+  await expectNoElementOverflow(page, ".admin-workspace-layout");
+  await expectNoElementOverflow(page, ".api-governance-panel");
+  await expectNoElementOverflow(page, ".webhook-workspace");
+  await expectNoElementOverflow(page, ".security-controls-panel");
+
+  await selectRole(page, "Старший сотрудник");
+  await expect(page.locator(".admin-locked-panel")).toContainText("Админские настройки скрыты");
+  await expect(page.locator(".api-governance-panel")).toHaveCount(0);
+  await expect(page.locator(".security-controls-panel")).toHaveCount(0);
+  await expect(page.locator(".product-screen")).not.toContainText("sk_test_****_44ST");
+  await expect(page.locator(".product-screen")).not.toContainText("https://api.support.local/webhooks/vk");
+  await expect(page.locator(".product-screen")).not.toContainText("185.17.32.90");
+  await expectHealthyPage(page);
+});
+
 test("critical sections do not overflow responsive viewports", async ({ page }) => {
   for (const viewport of [
     { width: 390, height: 844 },
@@ -330,7 +369,7 @@ test("critical sections do not overflow responsive viewports", async ({ page }) 
     await page.goto("/");
     await selectRole(page, "Администратор");
 
-    for (const section of ["Отчеты", "Боты", "Визиты", "Качество", "Audit"]) {
+    for (const section of ["Отчеты", "Боты", "Визиты", "Качество", "Audit", "Настройки"]) {
       await openSection(page, section);
       await expectHealthyPage(page);
     }

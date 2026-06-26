@@ -14,13 +14,20 @@ import {
 } from "lucide-react";
 import { ChannelBadge, ChannelList, Permission, ProductScreen, SectionTitle, SegmentedControl, ToolbarSearch } from "../../ui.jsx";
 import {
+  activeSecuritySessions,
+  apiChangelog,
+  apiEnvironmentKeys,
   channelDetails,
   channelSettings,
   employeeChannelRules,
   employeeGroups,
   roles,
+  securityAlerts,
+  securityControls,
   sdkEvents,
-  topicDirectorySeed
+  topicDirectorySeed,
+  webhookDeliveryLog,
+  webhookEndpoints
 } from "../../data.js";
 import { createScreenStateItems } from "../../app/screenState.js";
 
@@ -47,12 +54,18 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
   const [sdkPlaygroundPhone, setSdkPlaygroundPhone] = useState("+7 985 430-09-40");
   const [sdkPlaygroundMessage, setSdkPlaygroundMessage] = useState("Здравствуйте, проверяем запуск диалога из SDK.");
   const [sdkPlaygroundResult, setSdkPlaygroundResult] = useState(null);
+  const [selectedWebhookId, setSelectedWebhookId] = useState(webhookEndpoints[0].id);
+  const [rotatedKeyIds, setRotatedKeyIds] = useState([]);
+  const [replayedDeliveryIds, setReplayedDeliveryIds] = useState([]);
+  const [revokedSessionIds, setRevokedSessionIds] = useState([]);
   const canEditSettings = access.canManageSettings;
   const canEditEmployeeDirectory = canEditSettings;
   const canResetEmployeePassword = canEditSettings || roleMode === "Старший сотрудник";
   const normalizedTopicQuery = topicQuery.trim().toLowerCase();
   const selectedChannel = channelDetails.find((channel) => channel.id === selectedChannelId) ?? channelDetails[0];
   const selectedEmployee = employeeRules.find((employee) => employee.id === selectedEmployeeId) ?? employeeRules[0];
+  const selectedWebhook = webhookEndpoints.find((endpoint) => endpoint.id === selectedWebhookId) ?? webhookEndpoints[0];
+  const visibleWebhookDeliveries = webhookDeliveryLog.filter((entry) => entry.endpointId === selectedWebhook.id);
 
   const topicTotals = useMemo(() => {
     return topicDirectory.reduce((totals, group) => {
@@ -343,6 +356,33 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
       response: JSON.stringify(response, null, 2)
     });
     onToast(`SDK playground: ${sdkPlaygroundEvent} выполнен в ${sdkPlaygroundEnv}.`);
+  }
+
+  function handleRotateApiKey(keyId) {
+    if (!canEditSettings) {
+      return;
+    }
+
+    setRotatedKeyIds((current) => current.includes(keyId) ? current : [...current, keyId]);
+    onToast(`${keyId}: ключ поставлен на ротацию, audit event подготовлен.`);
+  }
+
+  function handleReplayWebhook(delivery) {
+    if (!canEditSettings) {
+      return;
+    }
+
+    setReplayedDeliveryIds((current) => current.includes(delivery.id) ? current : [...current, delivery.id]);
+    onToast(`${delivery.traceId}: manual replay поставлен в очередь.`);
+  }
+
+  function handleRevokeSession(sessionId) {
+    if (!canEditSettings) {
+      return;
+    }
+
+    setRevokedSessionIds((current) => current.includes(sessionId) ? current : [...current, sessionId]);
+    onToast(`${sessionId}: сессия отозвана и попадет в security audit.`);
   }
 
   return (
@@ -931,6 +971,155 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
           </div>
         </section>
       </div>
+
+      {canEditSettings ? (
+      <div className="admin-workspace-layout">
+        <section className="work-panel api-governance-panel">
+          <SectionTitle title="Webhooks / API keys" action="signed delivery, replay, changelog" />
+          <div className="api-key-grid">
+            {apiEnvironmentKeys.map((key) => {
+              const isRotated = rotatedKeyIds.includes(key.id);
+
+              return (
+                <article className={`api-key-card ${isRotated ? "rotated" : ""}`} key={key.id}>
+                  <header>
+                    <span>{key.env}</span>
+                    <strong>{key.name}</strong>
+                    <b>{isRotated ? "Rotation queued" : key.status}</b>
+                  </header>
+                  <code>{key.keyPreview}</code>
+                  <p>{key.protection}</p>
+                  <footer>
+                    <small>{key.scopes.join(", ")}</small>
+                    <button disabled={!canEditSettings} onClick={() => handleRotateApiKey(key.id)} title={canEditSettings ? "Поставить ключ на ротацию" : access.reason} type="button">
+                      Rotate key
+                    </button>
+                  </footer>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="webhook-workspace">
+            <div className="webhook-endpoint-list">
+              {webhookEndpoints.map((endpoint) => (
+                <button
+                  aria-pressed={selectedWebhook.id === endpoint.id}
+                  className={`webhook-endpoint ${selectedWebhook.id === endpoint.id ? "selected" : ""}`}
+                  key={endpoint.id}
+                  onClick={() => setSelectedWebhookId(endpoint.id)}
+                  type="button"
+                >
+                  <ChannelBadge channel={endpoint.channel} />
+                  <span>
+                    <strong>{endpoint.name}</strong>
+                    <small>{endpoint.status} · {endpoint.failureRate} failures</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="webhook-detail">
+              <header>
+                <div>
+                  <strong>{selectedWebhook.name}</strong>
+                  <span>{selectedWebhook.url}</span>
+                </div>
+                <b>{selectedWebhook.signature}</b>
+              </header>
+              <div className="webhook-meta-grid">
+                <div><span>Retries</span><strong>{selectedWebhook.retries}</strong></div>
+                <div><span>Last delivery</span><strong>{selectedWebhook.lastDelivery}</strong></div>
+                <div><span>Failure rate</span><strong>{selectedWebhook.failureRate}</strong></div>
+              </div>
+              <div className="webhook-delivery-log">
+                {visibleWebhookDeliveries.map((delivery) => {
+                  const isReplayed = replayedDeliveryIds.includes(delivery.id);
+
+                  return (
+                    <div className={`webhook-delivery-row ${delivery.status}`} key={delivery.id}>
+                      <time>{delivery.time}</time>
+                      <span>
+                        <strong>{delivery.event}</strong>
+                        <small>{delivery.traceId}</small>
+                      </span>
+                      <b>{isReplayed ? "replay_queued" : delivery.status}</b>
+                      <span>{delivery.httpStatus} · {delivery.attempts} попытки</span>
+                      <button disabled={!canEditSettings} onClick={() => handleReplayWebhook(delivery)} title={canEditSettings ? "Повторить доставку" : access.reason} type="button">
+                        Replay
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="api-changelog">
+            {apiChangelog.map((entry) => (
+              <article key={entry.version}>
+                <b>{entry.version}</b>
+                <span>
+                  <strong>{entry.title}</strong>
+                  <small>{entry.detail}</small>
+                </span>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="work-panel security-controls-panel">
+          <SectionTitle title="Security controls" action="2FA, sessions, IP allowlist" />
+          <div className="security-control-grid">
+            {securityControls.map((control) => (
+              <article className={`security-control-card ${control.tone}`} key={control.id}>
+                <strong>{control.title}</strong>
+                <b>{control.state}</b>
+                <span>{control.detail}</span>
+              </article>
+            ))}
+          </div>
+          <div className="security-session-list">
+            {activeSecuritySessions.map((session) => {
+              const isRevoked = revokedSessionIds.includes(session.id);
+
+              return (
+                <div className={`security-session-row ${isRevoked ? "revoked" : ""}`} key={session.id}>
+                  <span>
+                    <strong>{session.user}</strong>
+                    <small>{session.role} · {session.device}</small>
+                  </span>
+                  <code>{session.ip}</code>
+                  <b>{isRevoked ? "Отозвана" : session.status}</b>
+                  <time>{session.lastSeen}</time>
+                  <button disabled={!canEditSettings || isRevoked} onClick={() => handleRevokeSession(session.id)} title={canEditSettings ? "Отозвать сессию" : access.reason} type="button">
+                    Revoke
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="security-alert-list">
+            {securityAlerts.map((alert) => (
+              <article className={`security-alert ${alert.level}`} key={alert.id}>
+                <time>{alert.time}</time>
+                <strong>{alert.text}</strong>
+                <span>{alert.route}</span>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+      ) : (
+        <section className="work-panel admin-locked-panel" aria-label="Админские настройки скрыты">
+          <SectionTitle title="Webhooks, API keys и Security" action="только администратор" />
+          <div>
+            <ShieldCheck size={22} />
+            <strong>Админские настройки скрыты</strong>
+            <span>{access.reason}. API ключи, webhook URL, trace ID, IP-адреса сессий и security alerts не отображаются в режиме {roleMode}.</span>
+          </div>
+        </section>
+      )}
 
       <div className="rules-panel">
         <SectionTitle title="Критичные правила" action="Включены" />

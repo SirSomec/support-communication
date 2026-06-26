@@ -70,6 +70,28 @@ test("app shell enforces role access and closes notifications on section change"
   await expectHealthyPage(page);
 });
 
+test("reports metrics table exposes semantic headers and keyboard column controls", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await openSection(page, "Отчеты");
+
+  const reportTable = page.getByRole("table", { name: "Показатели отчета" });
+  await expect(reportTable).toBeVisible();
+  await expect(reportTable.getByRole("columnheader", { name: "Показатель" })).toBeVisible();
+  await expect(reportTable.getByRole("columnheader", { name: "Текущий период" })).toBeVisible();
+  await expect(reportTable.getByRole("rowheader", { name: "Новые обращения" })).toBeVisible();
+  await expect(reportTable.getByRole("cell", { name: "+11%" })).toBeVisible();
+
+  const previousPeriodToggle = page.getByRole("checkbox", { name: "Сравнение" });
+  await previousPeriodToggle.focus();
+  await expect(previousPeriodToggle).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(reportTable.getByRole("columnheader", { name: "Сравнение" })).toHaveCount(0);
+  await page.keyboard.press("Space");
+  await expect(reportTable.getByRole("columnheader", { name: "Сравнение" })).toBeVisible();
+  await expectHealthyPage(page);
+});
+
 test("keyboard navigation exposes focus states and modal trap", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");

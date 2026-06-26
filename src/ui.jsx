@@ -10,6 +10,18 @@ const stateIcons = {
   warn: AlertTriangle
 };
 
+const visuallyHiddenStyle = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0 0 0 0)",
+  whiteSpace: "nowrap",
+  border: 0
+};
+
 export function ProductScreen({ title, subtitle, onBack, actions, stateItems = [], children }) {
   return (
     <section className="product-screen">
@@ -70,6 +82,7 @@ export function SectionTitle({ title, action }) {
 
 export function EntityTable({
   as: Component = "section",
+  caption,
   children,
   className = "",
   columns,
@@ -77,6 +90,26 @@ export function EntityTable({
   headClassName = "",
   headStyle
 }) {
+  if (Component === "table") {
+    return (
+      <table className={["entity-table", className].filter(Boolean).join(" ")} style={{ width: "100%" }}>
+        {caption ? <caption style={visuallyHiddenStyle}>{caption}</caption> : null}
+        <thead>
+          <tr className={["entity-head", headClassName].filter(Boolean).join(" ")} style={headStyle}>
+            {columns.map((column) => {
+              const key = typeof column === "string" ? column : column.id;
+              const label = typeof column === "string" ? column : column.label;
+
+              return <th key={key} scope="col" style={{ textAlign: "left" }}>{label}</th>;
+            })}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+        {empty}
+      </table>
+    );
+  }
+
   return (
     <Component className={["entity-table", className].filter(Boolean).join(" ")}>
       <div className={["entity-head", headClassName].filter(Boolean).join(" ")} style={headStyle}>

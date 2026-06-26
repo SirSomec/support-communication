@@ -2,12 +2,12 @@ import React, { useState } from "react";
 import {
   createAuditEvent,
   formatRescueTimer,
-  getStatusMeta,
   rescueDurationSeconds,
   statusLabels
 } from "./app/dialogModel.js";
 import { useAiSuggestions } from "./app/useAiSuggestions.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
+import { useConversationMutations } from "./app/useConversationMutations.js";
 import { useConversationSelection } from "./app/useConversationSelection.js";
 import { useAppNavigation } from "./app/useAppNavigation.js";
 import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
@@ -25,16 +25,21 @@ import {
 } from "./data.js";
 
 function App() {
-  const [conversationItems, setConversationItems] = useState(conversations);
   const [composeMode, setComposeMode] = useState("reply");
   const [transcriptMode, setTranscriptMode] = useState("all");
   const [draft, setDraft] = useState("");
   const [isOutboundOpen, setOutboundOpen] = useState(false);
-  const [topics, setTopics] = useState(() =>
-    Object.fromEntries(conversations.map((conversation) => [conversation.id, conversation.topic]))
-  );
-  const [closedIds, setClosedIds] = useState(() => new Set(conversations.filter((item) => item.status === "closed").map((item) => item.id)));
   const [toast, setToast] = useState("");
+  const {
+    appendMessage,
+    applyConversationStatus,
+    closedIds,
+    conversationItems,
+    setClosedIds,
+    setConversationItems,
+    setTopics,
+    topics
+  } = useConversationMutations({ initialConversations: conversations });
   const {
     access,
     section,
@@ -155,64 +160,6 @@ function App() {
     handleBackToDialogs();
     setOutboundOpen(false);
     setToast(`Исходящий диалог создан: ${outbound.phone}`);
-  }
-
-  function appendMessage(conversationId, message) {
-    setConversationItems((current) =>
-      current.map((conversation) => {
-        if (conversation.id !== conversationId) {
-          return conversation;
-        }
-
-        return {
-          ...conversation,
-          messages: [...conversation.messages, { id: Date.now(), ...message }],
-          preview: message.text ?? (message.attachments?.length ? `Вложение: ${message.attachments[0].name}` : conversation.preview),
-          time: "сейчас"
-        };
-      })
-    );
-  }
-
-  function applyConversationStatus(conversationId, nextStatus, eventPayload) {
-    const meta = getStatusMeta(nextStatus);
-
-    setConversationItems((current) =>
-      current.map((conversation) => {
-        if (conversation.id !== conversationId) {
-          return conversation;
-        }
-
-        const previousStatus = conversation.status ?? "active";
-        const auditEvent = eventPayload
-          ? createAuditEvent({
-              eventKind: "status",
-              fromStatus: previousStatus,
-              toStatus: nextStatus,
-              ...(typeof eventPayload === "string" ? { detail: eventPayload } : eventPayload)
-            })
-          : null;
-
-        const rescueState = nextStatus === "closed" && conversation.rescue
-          ? {
-              ...conversation.rescue,
-              completedAt: Date.now(),
-              outcome: "saved",
-              state: "saved"
-            }
-          : conversation.rescue;
-
-        return {
-          ...conversation,
-          status: nextStatus,
-          sla: meta.sla,
-          slaTone: meta.tone,
-          ...(rescueState ? { rescue: rescueState } : {}),
-          messages: auditEvent ? [...conversation.messages, auditEvent] : conversation.messages,
-          time: "сейчас"
-        };
-      })
-    );
   }
 
   function handleTopicChange(value) {

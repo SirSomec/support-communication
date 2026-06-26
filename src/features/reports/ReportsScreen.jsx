@@ -267,16 +267,21 @@ export function ReportsScreen({ onBack, onToast, access }) {
       </section>
 
       <EntityTable
-        as="div"
+        as="table"
+        caption="Показатели отчета"
         className="report-table"
         columns={visibleReportColumns}
         headClassName="report-dynamic-row"
         headStyle={{ gridTemplateColumns: `minmax(220px, 1fr) repeat(${Math.max(0, visibleReportColumns.length - 1)}, minmax(110px, 0.7fr))` }}
       >
         {reportRows.map((row) => (
-          <div className="entity-row report-dynamic-row" key={row.metric} style={{ gridTemplateColumns: `minmax(220px, 1fr) repeat(${Math.max(0, visibleReportColumns.length - 1)}, minmax(110px, 0.7fr))` }}>
-            {visibleReportColumns.map((column) => <React.Fragment key={column.id}>{getReportCell(row, column.id)}</React.Fragment>)}
-          </div>
+          <tr className="entity-row report-dynamic-row" key={row.metric} style={{ gridTemplateColumns: `minmax(220px, 1fr) repeat(${Math.max(0, visibleReportColumns.length - 1)}, minmax(110px, 0.7fr))` }}>
+            {visibleReportColumns.map((column) => (
+              column.id === "metric"
+                ? <th key={column.id} scope="row" style={{ textAlign: "left" }}>{getReportCell(row, column.id)}</th>
+                : <td key={column.id}>{getReportCell(row, column.id)}</td>
+            ))}
+          </tr>
         ))}
       </EntityTable>
 

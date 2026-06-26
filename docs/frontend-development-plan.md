@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 1.7
+Версия: 1.8
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после реализации proactive visual builder, rescue timer, bot flow-builder и системных loading/data/empty/error states
+Статус: актуализированный рабочий план после реализации proactive visual builder, rescue timer, bot flow-builder, системных loading/data/empty/error states и smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -33,6 +33,7 @@
 - Стили находятся в `src/styles.css`.
 - Dev server: `http://127.0.0.1:5173/`.
 - Все продуктовые разделы на `ProductScreen` имеют единый `ScreenStateStrip`: загрузка, данные/пусто и ошибки с локальными счетчиками.
+- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, rescue timer, bot builder import validation и responsive matrix 390/768/1024/1440.
 - Дизайн-система: темная левая навигация, белые рабочие панели, синие primary actions, компактные таблицы, радиус 8px, без hero/landing-композиции.
 
 ## 3. Фактически реализовано во фронтенде
@@ -185,7 +186,7 @@
 | Активные посетители | Реализован отдельный раздел | Права, обезличивание, ручная инициация с проверками, город/источник |
 | Спасение чатов | Реализованы очередь спасения, фильтр, действие запуска, rescue timer в чате, audit запуска и отчет спасенных/пропущенных | Серверный countdown, автоматический возврат, настройки rescue по каналу/очереди/роли и backend outcome analytics |
 | Сценарные боты и AI-оператор | Реализованы список сценариев, canvas/flow-builder, canonical node types, flow edges, inspector, transcript preview и JSON import/export | Backend runtime, публикация/версии сценариев, after-hours сценарий, реальные bot metrics, audit import/export/test/publish и handoff summary в живом чате |
-| UI/UX продукта | Реализована базовая дизайн-система, responsive smoke, единый ScreenStateStrip для loading/data/empty/error состояний product-разделов | Системный QA на 390/768/1024/1440, keyboard nav, visual regression и backend partial/loading/error states |
+| UI/UX продукта | Реализована базовая дизайн-система, единый ScreenStateStrip и Playwright smoke/e2e для state strip, rescue, bot builder и responsive 390/768/1024/1440 | Keyboard nav, visual regression и backend partial/loading/error states |
 
 Вывод после сверки: все ключевые функциональные направления из спецификации представлены во frontend-плане и имеют хотя бы одну запланированную UI-поверхность. Большинство критичных требований уже отражены в текущем интерфейсе как интерактивные frontend-сценарии; оставшаяся работа связана с глубиной production-поведения, правами, детализацией, API-интеграцией и QA.
 
@@ -462,11 +463,11 @@ Acceptance criteria:
 
 Задачи:
 
-- Ввести responsive QA для 390, 768, 1024, 1440 px.
+- Реализовано: responsive smoke QA для 390, 768, 1024, 1440 px в `npm run test:smoke`.
 - Проверить keyboard navigation и focus states.
 - Проверить `aria-label`, `aria-modal`, `role="dialog"`, таблицы и кнопки.
 - Реализовано: empty/loading/error states для product-разделов через единый `ScreenStateStrip`.
-- Добавить smoke/e2e сценарии для критичных flows.
+- Реализовано: smoke/e2e сценарии для state strip, rescue timer, bot builder import validation и responsive overflow.
 - Добавить visual regression checklist.
 - Разделить CSS на feature-файлы или CSS modules, если файл станет плохо поддерживаемым.
 - Подготовить Storybook или внутреннюю страницу UI-kit, если компонентная база продолжит расти.
@@ -492,11 +493,12 @@ Acceptance criteria:
 10. Довести proactive до production-контура: backend delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитику эффективности.
 11. Довести ботов до production-контура: backend runtime, публикация/версии сценариев, after-hours сценарий, bot metrics, audit import/export/test/publish и handoff summary в живом чате.
 12. Разнести `App.jsx`, `sections.jsx`, `data.js` по feature-модулям.
-13. Добавить smoke/e2e сценарии для критичных flows и довести backend partial/loading/error states после сервисного слоя.
+13. Довести QA до production-уровня: keyboard nav, visual regression и backend partial/loading/error states после сервисного слоя.
 
 ## 8. QA-gates для каждой frontend-итерации
 
 - `npm run build` проходит.
+- `npm run test:smoke` проходит.
 - Browser/IAB smoke-test: page identity, not blank, no framework overlay, console без релевантных `error/warn`.
 - Проверен основной interaction path новой функциональности.
 - Проверены desktop и mobile viewport.
@@ -557,5 +559,5 @@ Acceptance criteria:
 - [x] Добавить canvas/flow-builder ботов с нодами, тестовым transcript preview и импортом/экспортом.
 - [ ] Довести ботов до production-контура: backend runtime, публикация/версии сценариев, after-hours сценарий, bot metrics, audit import/export/test/publish и handoff summary в живом чате.
 - [x] Добавить системные loading/empty/error states для всех разделов.
-- [ ] Добавить smoke/e2e сценарии для критичных flows.
-- [ ] Провести responsive QA на 390, 768, 1024 и 1440 px.
+- [x] Добавить smoke/e2e сценарии для критичных flows.
+- [x] Провести responsive QA на 390, 768, 1024 и 1440 px.

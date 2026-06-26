@@ -50,6 +50,38 @@
   color: #647087;
 }
 
+.channel-chip {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.channel-chip.sdk {
+  background: #dcecff;
+  color: #0b61d8;
+}
+
+.channel-chip.telegram {
+  background: #dff4ff;
+  color: #117eb1;
+}
+
+.channel-chip.max {
+  background: #ece8ff;
+  color: #5c48dc;
+}
+
+.channel-chip.vk {
+  background: #e6efff;
+  color: #1857b4;
+}
+
 .permission {
   width: max-content;
   padding: 4px 8px;

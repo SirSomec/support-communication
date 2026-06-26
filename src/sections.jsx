@@ -32,7 +32,7 @@ import {
   Workflow,
   Zap
 } from "lucide-react";
-import { ChannelBadge, ChannelList, MetricTile, Permission, ProductScreen, SectionTitle, StatusBadge } from "./ui.jsx";
+import { ChannelBadge, ChannelList, MetricTile, Permission, ProductScreen, SectionTitle, StatusBadge, ToolbarSearch } from "./ui.jsx";
 import {
   activeVisitors,
   aiSuggestions,
@@ -259,10 +259,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
       }
     >
       <div className="screen-toolbar">
-        <label className="toolbar-search">
-          <Search size={18} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по телефону, имени или каналу" />
-        </label>
+        <ToolbarSearch value={query} onChange={setQuery} placeholder="Поиск по телефону, имени или каналу" />
         <button><Filter size={17} /> Сегмент</button>
         <button><Download size={17} /> Экспорт</button>
       </div>
@@ -428,10 +425,7 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
       <div className="templates-workspace">
         <section className="template-browser">
           <div className="screen-toolbar compact">
-            <label className="toolbar-search">
-              <Search size={18} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти шаблон" />
-            </label>
+            <ToolbarSearch value={query} onChange={setQuery} placeholder="Найти шаблон" />
           </div>
           <div className="template-cards">
             {visibleItems.map((template) => (
@@ -2127,15 +2121,14 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
         <SectionTitle title="Каналы и лимиты по сотрудникам" action="исключения и маскирование данных" />
         <div className="employee-management">
           <div className="employee-directory">
-            <label className="toolbar-search employee-search">
-              <Search size={17} />
-              <input
-                aria-label="Поиск сотрудника"
-                placeholder="Сотрудник, роль, группа, канал"
-                value={employeeQuery}
-                onChange={(event) => setEmployeeQuery(event.target.value)}
-              />
-            </label>
+            <ToolbarSearch
+              ariaLabel="Поиск сотрудника"
+              className="employee-search"
+              iconSize={17}
+              placeholder="Сотрудник, роль, группа, канал"
+              value={employeeQuery}
+              onChange={setEmployeeQuery}
+            />
             <div className="employee-selector-list">
               {visibleEmployees.map((employee) => (
                 <button
@@ -2276,15 +2269,14 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
       <section className="work-panel topic-directory-panel">
         <SectionTitle title="Справочник тематик" action={`${topicTotals.active} активных / ${topicTotals.archived} архив`} />
         <div className="topic-directory-toolbar">
-          <label className="toolbar-search topic-search">
-            <Search size={17} />
-            <input
-              aria-label="Поиск по справочнику тематик"
-              placeholder="Поиск по теме, каналу, владельцу"
-              value={topicQuery}
-              onChange={(event) => setTopicQuery(event.target.value)}
-            />
-          </label>
+          <ToolbarSearch
+            ariaLabel="Поиск по справочнику тематик"
+            className="topic-search"
+            iconSize={17}
+            placeholder="Поиск по теме, каналу, владельцу"
+            value={topicQuery}
+            onChange={setTopicQuery}
+          />
           <div className="segmented-control topic-filter" role="group" aria-label="Статус тематики">
             {topicStatusFilters.map((filter) => (
               <button

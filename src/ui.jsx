@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, CheckCircle2, ChevronLeft, CircleGauge, Inbox, LoaderCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, CircleGauge, Inbox, LoaderCircle, Search } from "lucide-react";
 
 const stateIcons = {
   loading: LoaderCircle,
@@ -93,5 +93,19 @@ export function Toast({ message, onClose }) {
       <CircleGauge size={18} />
       {message}
     </button>
+  );
+}
+
+export function ToolbarSearch({ ariaLabel, className = "", iconSize = 18, onChange, placeholder, value }) {
+  return (
+    <label className={["toolbar-search", className].filter(Boolean).join(" ")}>
+      <Search size={iconSize} />
+      <input
+        aria-label={ariaLabel}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+      />
+    </label>
   );
 }

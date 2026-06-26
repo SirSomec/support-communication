@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useAiSuggestions } from "./app/useAiSuggestions.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
+import { useComposerState } from "./app/useComposerState.js";
 import { useConversationMutations } from "./app/useConversationMutations.js";
 import { useConversationSelection } from "./app/useConversationSelection.js";
 import { useAppNavigation } from "./app/useAppNavigation.js";
@@ -21,11 +22,16 @@ import {
 } from "./data.js";
 
 function App() {
-  const [composeMode, setComposeMode] = useState("reply");
-  const [transcriptMode, setTranscriptMode] = useState("all");
-  const [draft, setDraft] = useState("");
   const [isOutboundOpen, setOutboundOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const {
+    composeMode,
+    draft,
+    setComposeMode,
+    setDraft,
+    setTranscriptMode,
+    transcriptMode
+  } = useComposerState();
   const {
     appendMessage,
     applyConversationStatus,

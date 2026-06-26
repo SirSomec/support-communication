@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.22
+Версия: 2.23
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), ClientsScreen, ReportsScreen, TemplatesScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -27,7 +27,7 @@
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
 - Основной cockpit пока находится в `src/App.jsx`, но app shell (`Sidebar`/`TopBar`) вынесен в `src/features/app-shell/AppShell.jsx`, notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, ConversationList, ChatPane, CustomerPanel, DialogModals, composer/AI panel/attachment preview/ChatHeader/TranscriptToolbar/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
-- Продуктовые разделы находятся в `src/sections.jsx`, но `ClientsScreen` уже вынесен в `src/features/clients/ClientsScreen.jsx`, `ReportsScreen` — в `src/features/reports/ReportsScreen.jsx`, а `TemplatesScreen` — в `src/features/templates/TemplatesScreen.jsx`; маршрутизация разделов вынесена в `src/features/section-router.jsx`, расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`, а AI scoring/coaching workspace — в `src/features/quality/AiQualityWorkspace.jsx`.
+- Продуктовые разделы находятся в `src/sections.jsx`, но `PanelScreen` уже вынесен в `src/features/panel/PanelScreen.jsx`, `ClientsScreen` — в `src/features/clients/ClientsScreen.jsx`, `ReportsScreen` — в `src/features/reports/ReportsScreen.jsx`, а `TemplatesScreen` — в `src/features/templates/TemplatesScreen.jsx`; маршрутизация разделов вынесена в `src/features/section-router.jsx`, расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`, а AI scoring/coaching workspace — в `src/features/quality/AiQualityWorkspace.jsx`.
 - Общие UI-примитивы, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable вынесены в `src/ui.jsx`.
 - Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
 - Стили находятся в `src/styles.css`.
@@ -85,6 +85,7 @@
 - Раздел `Панель` показывает online/break/offline операторов, активные диалоги, ожидание, SLA-риски.
 - Есть фильтр по каналу.
 - Есть таблица операторов с лимитами, текущей нагрузкой, средним временем ответа, SLA и доступными каналами.
+- Таблица операторов адаптируется без горизонтального скролла: каналы переносятся внутри строки, а на узких экранах строка перестраивается в компактный двухстрочный layout.
 - Есть health-блок очередей по SDK, Telegram, MAX, VK.
 - Есть действие перераспределения очередей как UI-сценарий.
 
@@ -214,6 +215,7 @@
 - Модель уведомлений вынесена в `src/app/notificationModel.js`.
 - Правила AI explainability и pre-send quality check вынесены в `src/app/aiQualityModel.js`.
 - Sidebar и TopBar вынесены в `src/features/app-shell/AppShell.jsx` без изменения CSS-контрактов, topbar notification center и quick action flow.
+- PanelScreen вынесен в `src/features/panel/PanelScreen.jsx`; section-router подключает его напрямую, а данные операторов/очередей больше не импортируются в общий `sections.jsx`.
 - ClientsScreen вынесен в `src/features/clients/ClientsScreen.jsx`; section-router подключает его напрямую, а `sections.jsx` продолжает хранить остальные продуктовые экраны до следующих срезов.
 - ReportsScreen вынесен в `src/features/reports/ReportsScreen.jsx` вместе с report-only фильтрами, export status classes и данными таблиц/графиков.
 - TemplatesScreen вынесен в `src/features/templates/TemplatesScreen.jsx` с сохранением fallback-режима локальных шаблонов и подключения к общей базе шаблонов через `onTemplatesChange`.
@@ -508,7 +510,7 @@ Acceptance criteria:
 
 ### 7.1. Frontend UI и архитектура
 
-1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; app shell, ClientsScreen, ReportsScreen, TemplatesScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar и Modal уже вынесены, следующий безопасный кандидат — PanelScreen или VisitorsScreen из `sections.jsx`, либо CSS-разделение для стабильных feature-блоков.
+1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; app shell, PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar и Modal уже вынесены, следующий безопасный кандидат — VisitorsScreen, QualityScreen или AutomationScreen из `sections.jsx`, либо CSS-разделение для стабильных feature-блоков.
 2. Реализовано: общий `Modal`; `Toast`, `StatusBadge`, `ToolbarSearch`, `SegmentedControl`, `EntityTable` и `Modal` уже вынесены в `src/ui.jsx`, `DialogActionMenu` и `AuditTimeline` — в `src/features/dialogs/*`.
 3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Реализовано во frontend: AI real-time scoring, операторские подсказки исправления и аналитика эффективности подсказок. Осталось подключить production scoring service, реальные repair actions и backend-телеметрию.
@@ -592,6 +594,7 @@ Acceptance criteria:
 - [x] Вынести OutboundDialogLauncher, SaveTemplateDialog и DraftSwitchDialog из `src/App.jsx` в `src/features/dialogs/*`.
 - [x] Вынести Sidebar и TopBar из `src/App.jsx` в `src/features/app-shell/*`.
 - [x] Вынести ClientsScreen из `src/sections.jsx` в `src/features/clients/*` и общий `createScreenStateItems` в `src/app/*`.
+- [x] Вынести PanelScreen из `src/sections.jsx` в `src/features/panel/*`.
 - [x] Вынести ReportsScreen из `src/sections.jsx` в `src/features/reports/*`.
 - [x] Вынести TemplatesScreen из `src/sections.jsx` в `src/features/templates/*`.
 - [ ] Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям.

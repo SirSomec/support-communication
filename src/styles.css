@@ -2473,8 +2473,8 @@ select:disabled {
 
 .operator-row {
   display: grid;
-  grid-template-columns: 12px 110px 78px minmax(110px, 1fr) 58px 60px 72px minmax(108px, auto);
-  gap: 10px;
+  grid-template-columns: 12px minmax(78px, 1fr) minmax(66px, 0.75fr) minmax(88px, 1fr) minmax(48px, auto) minmax(48px, auto) minmax(58px, auto) minmax(0, 1.1fr);
+  gap: 8px;
   align-items: center;
   min-height: 58px;
   padding: 0 14px;
@@ -2540,6 +2540,10 @@ select:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+}
+
+.operator-row .mini-channel-list {
+  min-width: 0;
 }
 
 .queue-health {
@@ -6211,14 +6215,61 @@ textarea:focus-visible {
     grid-column: 1 / -1;
   }
 
-  .operator-table,
   .entity-table,
   .role-table {
     overflow-x: auto;
   }
 
+  .operator-table {
+    overflow-x: visible;
+  }
+
   .operator-row {
-    min-width: 760px;
+    grid-template-areas:
+      "presence name status"
+      ". meter load"
+      ". time sla"
+      ". channels channels";
+    grid-template-columns: 12px minmax(0, 1fr) minmax(76px, auto);
+    gap: 8px 10px;
+    min-width: 0;
+    min-height: 0;
+    padding-block: 12px;
+  }
+
+  .operator-row .operator-presence {
+    grid-area: presence;
+  }
+
+  .operator-row .operator-name {
+    grid-area: name;
+  }
+
+  .operator-row .operator-status {
+    grid-area: status;
+    justify-self: end;
+  }
+
+  .operator-row .load-meter {
+    grid-area: meter;
+  }
+
+  .operator-row .operator-load {
+    grid-area: load;
+    justify-self: end;
+  }
+
+  .operator-row .operator-time {
+    grid-area: time;
+  }
+
+  .operator-row .operator-sla {
+    grid-area: sla;
+    justify-self: end;
+  }
+
+  .operator-row .mini-channel-list {
+    grid-area: channels;
   }
 
   .clients-table .entity-head,

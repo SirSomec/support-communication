@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React from "react";
 import { useAiSuggestions } from "./app/useAiSuggestions.js";
+import { useAppTransientState } from "./app/useAppTransientState.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
 import { useComposerState } from "./app/useComposerState.js";
 import { useConversationMutations } from "./app/useConversationMutations.js";
@@ -22,8 +23,13 @@ import {
 } from "./data.js";
 
 function App() {
-  const [isOutboundOpen, setOutboundOpen] = useState(false);
-  const [toast, setToast] = useState("");
+  const {
+    handleToastClose,
+    isOutboundOpen,
+    setOutboundOpen,
+    setToast,
+    toast
+  } = useAppTransientState();
   const {
     composeMode,
     draft,
@@ -262,7 +268,7 @@ function App() {
           targetConversation={pendingConversation}
         />
       ) : null}
-      {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
+      {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
     </div>
   );
 }

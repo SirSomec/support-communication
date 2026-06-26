@@ -11,6 +11,7 @@ import {
   X
 } from "lucide-react";
 import { ChannelList, SegmentedControl, StatusBadge, ToolbarSearch } from "../../ui.jsx";
+import "./knowledge-base.css";
 
 const articleChannels = ["SDK", "Telegram", "MAX", "VK"];
 const previewModes = [

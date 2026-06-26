@@ -1703,20 +1703,17 @@ select:disabled {
 }
 
 .operator-row:last-child,
-.entity-row:last-child,
 .role-row:last-child {
   border-bottom: 0;
 }
 
 .operator-row span,
 .queue-health-grid span,
-.role-row span,
-.entity-row span {
+.role-row span {
   color: var(--muted);
 }
 
-.operator-row b,
-.entity-row b {
+.operator-row b {
   color: #223049;
 }
 
@@ -1817,43 +1814,6 @@ select:disabled {
   flex: 1 1 150px;
 }
 
-.entity-table {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.entity-head,
-.entity-row {
-  display: grid;
-  gap: 12px;
-  align-items: center;
-  min-height: 52px;
-  padding: 0 14px;
-}
-
-.entity-head {
-  border-bottom: 1px solid var(--line);
-  background: #f8fafc;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 850;
-  text-transform: uppercase;
-}
-
-.entity-row {
-  width: 100%;
-  border-bottom: 1px solid var(--line);
-  background: #ffffff;
-  color: var(--text);
-  text-align: left;
-}
-
-.entity-row:hover {
-  background: #f8fbff;
-}
-
 .clients-table .entity-head,
 .clients-table .entity-row {
   grid-template-columns: 1fr 150px 96px 96px minmax(160px, 1fr) 90px;
@@ -1873,19 +1833,6 @@ select:disabled {
 .clients-table .entity-row.selected {
   background: var(--surface-selected);
   box-shadow: inset 3px 0 0 var(--blue);
-}
-
-.entity-empty {
-  display: grid;
-  gap: 4px;
-  min-height: 120px;
-  place-items: center;
-  color: var(--muted);
-  text-align: center;
-}
-
-.entity-empty strong {
-  color: #223049;
 }
 
 .client-detail-panel {
@@ -2070,9 +2017,7 @@ select:disabled {
 }
 
 .template-card strong,
-.template-card p,
-.entity-row strong,
-.entity-row span {
+.template-card p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4130,7 +4075,6 @@ textarea:focus-visible {
     justify-content: flex-start;
   }
 
-  .entity-table,
   .role-table {
     overflow-x: auto;
   }

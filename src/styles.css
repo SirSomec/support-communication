@@ -3241,6 +3241,233 @@ textarea:focus-visible {
   padding-block: 10px;
 }
 
+.topic-directory-panel {
+  margin-bottom: 14px;
+}
+
+.topic-directory-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.topic-search {
+  flex: 1 1 280px;
+  min-width: min(320px, 100%);
+}
+
+.topic-filter {
+  flex: 0 1 auto;
+}
+
+.topic-add-button,
+.topic-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #31415b;
+  font-weight: 800;
+}
+
+.topic-add-button {
+  background: #edf5ff;
+  color: var(--blue);
+}
+
+.topic-rights-note {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfe;
+  color: #46546a;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.topic-rights-note svg {
+  color: var(--teal);
+}
+
+.topic-tree-list {
+  display: grid;
+}
+
+.topic-group {
+  display: grid;
+  border-bottom: 1px solid var(--line);
+}
+
+.topic-group:last-child {
+  border-bottom: 0;
+}
+
+.topic-group > header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 14px;
+  background: #f8fafc;
+}
+
+.topic-group > header div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.topic-group > header strong {
+  color: #18243a;
+  font-size: 15px;
+}
+
+.topic-group > header span,
+.topic-group-meta span,
+.topic-branch-title small,
+.topic-path span,
+.topic-state small,
+.topic-routing span,
+.topic-empty span {
+  color: var(--muted);
+}
+
+.topic-group-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.topic-group-meta b {
+  color: var(--blue);
+}
+
+.topic-branch {
+  display: grid;
+}
+
+.topic-branch-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px 0 30px;
+  border-top: 1px solid #edf1f7;
+  color: #283852;
+  font-weight: 850;
+}
+
+.topic-row-list {
+  display: grid;
+}
+
+.topic-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.25fr) minmax(140px, 0.7fr) minmax(112px, 0.45fr) minmax(170px, 0.8fr) minmax(210px, auto);
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  min-height: 68px;
+  padding: 10px 14px 10px 30px;
+  border-top: 1px solid #edf1f7;
+}
+
+.topic-row.archived {
+  background: #fbfcfe;
+}
+
+.topic-row.archived .topic-path strong {
+  color: #6c788d;
+}
+
+.topic-path {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.topic-path svg {
+  color: var(--blue);
+}
+
+.topic-path div,
+.topic-state,
+.topic-routing {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.topic-path strong,
+.topic-path span,
+.topic-routing strong,
+.topic-routing span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-state span {
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.topic-state span.active {
+  background: #eaf8f3;
+  color: var(--teal);
+}
+
+.topic-state span.archived {
+  background: #eef2f7;
+  color: #6b7484;
+}
+
+.topic-routing strong {
+  color: #20304a;
+}
+
+.topic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.topic-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 14px;
+  color: #20304a;
+  text-align: center;
+}
+
+.topic-empty svg {
+  color: var(--muted);
+}
+
 .role-mode-panel {
   display: flex;
   align-items: center;
@@ -3413,6 +3640,8 @@ textarea:focus-visible {
 
   .workspace {
     grid-template-rows: auto auto;
+    height: auto;
+    overflow: visible;
   }
 
   .product-screen {
@@ -3580,6 +3809,30 @@ textarea:focus-visible {
 
   .toolbar-search {
     flex: 1 1 100%;
+  }
+
+  .topic-directory-toolbar {
+    align-items: stretch;
+  }
+
+  .topic-filter,
+  .topic-add-button {
+    flex: 1 1 100%;
+  }
+
+  .topic-group > header,
+  .topic-row {
+    grid-template-columns: 1fr;
+  }
+
+  .topic-group-meta,
+  .topic-actions {
+    justify-content: flex-start;
+  }
+
+  .topic-branch-title,
+  .topic-row {
+    padding-inline: 14px;
   }
 
   .queue-health-grid,

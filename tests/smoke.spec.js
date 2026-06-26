@@ -79,6 +79,22 @@ test("composer exposes AI explainability and pre-send quality checks", async ({ 
   await expectHealthyPage(page);
 });
 
+test("composer save-template modal keeps dialog semantics", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+
+  await page.locator(".composer textarea").fill("Проверю заказ и вернусь с точным сроком доставки.");
+  await page.locator(".composer-tools button[aria-label='Сохранить как шаблон']").click();
+
+  await expect(page.getByRole("dialog", { name: "Сохранить как шаблон" })).toBeVisible();
+  await expect(page.locator(".template-save-panel")).toHaveAttribute("aria-modal", "true");
+  await page.locator(".template-save-panel .variable-row button").filter({ hasText: "{client_name}" }).click();
+  await expect(page.locator(".template-save-text textarea")).toHaveValue(/client_name/);
+  await page.locator(".template-save-panel > footer button").filter({ hasText: "Сохранить шаблон" }).click();
+  await expect(page.locator(".toast")).toContainText("Шаблон сохранен");
+  await expectHealthyPage(page);
+});
+
 test("knowledge editor supports article draft status and preview", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");

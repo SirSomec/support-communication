@@ -1,5 +1,6 @@
 import React from "react";
-import { AlertTriangle, CheckCircle2, ChevronLeft, CircleGauge, Inbox, LoaderCircle, Search } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, CircleGauge, Inbox, LoaderCircle, Search, X } from "lucide-react";
+import { useModalA11y } from "./app/useModalA11y.js";
 
 const stateIcons = {
   loading: LoaderCircle,
@@ -154,6 +155,38 @@ export function SegmentedControl({ ariaLabel, className = "", onChange, options,
           </button>
         );
       })}
+    </div>
+  );
+}
+
+export function Modal({
+  children,
+  closeLabel = "Закрыть",
+  eyebrow,
+  footer,
+  onClose,
+  overlayClassName,
+  panelClassName,
+  title,
+  titleId
+}) {
+  const dialogRef = useModalA11y(onClose);
+
+  return (
+    <div className={overlayClassName} role="presentation">
+      <section className={panelClassName} aria-labelledby={titleId} aria-modal="true" ref={dialogRef} role="dialog">
+        <header>
+          <div>
+            {eyebrow ? <span>{eyebrow}</span> : null}
+            <h2 id={titleId}>{title}</h2>
+          </div>
+          <button aria-label={closeLabel} className="icon-button" onClick={onClose} title={closeLabel} type="button">
+            <X size={18} />
+          </button>
+        </header>
+        {children}
+        {footer ? <footer>{footer}</footer> : null}
+      </section>
     </div>
   );
 }

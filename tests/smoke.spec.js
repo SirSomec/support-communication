@@ -41,6 +41,27 @@ test("rescue timer starts from chat action and writes audit", async ({ page }) =
   await expectHealthyPage(page);
 });
 
+test("conversation queue filters remain actionable", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+
+  await page.getByRole("button", { name: "Расширенные фильтры" }).click();
+  await expect(page.locator(".queue-filter-panel")).toBeVisible();
+
+  await page.locator(".queue-filter-panel select").nth(0).selectOption("Telegram");
+  await page.locator(".queue-filter-panel select").nth(1).selectOption("none");
+  await page.locator(".queue-filter-check input").check();
+  await expect(page.locator(".active-filter-chips")).toContainText("Канал: Telegram");
+  await expect(page.locator(".active-filter-chips")).toContainText("Без тематики");
+  await expect(page.locator(".active-filter-chips")).toContainText("Внутренние комментарии");
+
+  await page.locator(".queue-tab").filter({ hasText: "SLA" }).click();
+  await expect(page.locator(".queue-tab").filter({ hasText: "SLA" })).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".queue-filter-reset").click();
+  await expect(page.locator(".active-filter-chips")).toHaveCount(0);
+  await expectHealthyPage(page);
+});
+
 test("topbar notifications and live bot handoff summary are actionable", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");

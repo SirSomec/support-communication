@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { roleAccessProfiles } from "./app/access.js";
 import {
   aiActionLabels,
@@ -6,16 +6,12 @@ import {
   formatRescueTimer,
   getAiSuggestionDraft,
   getAiSuggestionMode,
-  getConversationTimeValue,
   getStatusMeta,
-  queueFilterDefaults,
-  queueSlaTones,
-  queueWaitingStatuses,
   rescueDurationSeconds,
-  slaSortRank,
   statusLabels
 } from "./app/dialogModel.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
+import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
 import { ChatPane } from "./features/dialogs/ChatPane.jsx";
 import { ConversationList } from "./features/dialogs/ConversationList.jsx";
 import { CustomerPanel } from "./features/dialogs/CustomerPanel.jsx";
@@ -34,9 +30,6 @@ function App() {
   const [section, setSection] = useState("dialogs");
   const [roleMode, setRoleMode] = useState("Администратор");
   const [selectedId, setSelectedId] = useState("maria");
-  const [filter, setFilter] = useState("mine");
-  const [queueFilters, setQueueFilters] = useState(queueFilterDefaults);
-  const [query, setQuery] = useState("");
   const [composeMode, setComposeMode] = useState("reply");
   const [transcriptMode, setTranscriptMode] = useState("all");
   const [draft, setDraft] = useState("");
@@ -59,6 +52,16 @@ function App() {
     removeAttachment: handleRemoveAttachment,
     retryAttachment: handleRetryAttachment
   } = useComposerAttachments();
+  const {
+    filter,
+    filtered,
+    query,
+    queueFilters,
+    resetQueueFilters,
+    setFilter,
+    setQuery,
+    updateQueueFilter
+  } = useDialogQueueFilters({ conversationItems, topics });
 
   const selected = conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0];
   const pendingConversation = pendingConversationId
@@ -86,52 +89,6 @@ function App() {
       setOutboundOpen(false);
     }
   }, [access, isOutboundOpen, roleMode, section]);
-
-  const filtered = useMemo(() => {
-    return conversationItems
-      .filter((conversation) => {
-        const topic = topics[conversation.id] ?? "";
-        const hasInternalComment = conversation.messages.some((message) => message.type === "internal");
-        const matchesQuery = `${conversation.name} ${conversation.phone} ${conversation.preview} ${conversation.channel} ${topic} ${conversation.status}`
-          .toLowerCase()
-          .includes(query.toLowerCase());
-        const matchesFilter =
-          filter === "mine" ||
-          (filter === "waiting" && queueWaitingStatuses.includes(conversation.status)) ||
-          (filter === "sla" && queueSlaTones.includes(conversation.slaTone)) ||
-          (filter === "rescue" && (!topic || conversation.slaTone === "danger")) ||
-          (filter === "quality" && conversation.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))) ||
-          filter === "all";
-        const matchesChannel = queueFilters.channel === "all" || conversation.channel === queueFilters.channel;
-        const matchesTopic =
-          queueFilters.topic === "all" ||
-          (queueFilters.topic === "none" && !topic) ||
-          topic === queueFilters.topic;
-        const matchesStatus = queueFilters.status === "all" || conversation.status === queueFilters.status;
-        const matchesInternal = !queueFilters.onlyInternal || hasInternalComment;
-
-        return matchesQuery && matchesFilter && matchesChannel && matchesTopic && matchesStatus && matchesInternal;
-      })
-      .sort((left, right) => {
-        if (queueFilters.sort === "sla") {
-          return (slaSortRank[left.slaTone] ?? 5) - (slaSortRank[right.slaTone] ?? 5);
-        }
-
-        if (queueFilters.sort === "status") {
-          return left.status.localeCompare(right.status, "ru");
-        }
-
-        if (queueFilters.sort === "channel") {
-          return left.channel.localeCompare(right.channel, "ru");
-        }
-
-        return getConversationTimeValue(right.time) - getConversationTimeValue(left.time);
-      });
-  }, [conversationItems, filter, query, queueFilters, topics]);
-
-  function handleQueueFilterChange(field, value) {
-    setQueueFilters((current) => ({ ...current, [field]: value }));
-  }
 
   function handleRoleModeChange(nextRole) {
     setRoleMode(nextRole);
@@ -556,8 +513,8 @@ function App() {
               filter={filter}
               onFilter={setFilter}
               queueFilters={queueFilters}
-              onQueueFilterChange={handleQueueFilterChange}
-              onQueueFiltersReset={() => setQueueFilters(queueFilterDefaults)}
+              onQueueFilterChange={updateQueueFilter}
+              onQueueFiltersReset={resetQueueFilters}
               query={query}
               onQuery={setQuery}
               topics={topics}

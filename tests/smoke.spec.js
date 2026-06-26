@@ -56,6 +56,7 @@ test("rescue timer starts from chat action and writes audit", async ({ page }) =
   await page.locator(".chat-action-menu button").filter({ hasText: "Запустить спасение" }).click();
 
   await expect(page.locator(".rescue-timer-chip")).toContainText("Ответить клиенту");
+  await expect(page.locator(".queue-tab").filter({ hasText: "Спасти" })).toHaveAttribute("aria-pressed", "true");
   await page.locator(".transcript-filter-buttons button").filter({ hasText: "Audit" }).click();
   await expect(page.locator(".chat-transcript")).toContainText("Запущен rescue timer");
   await page.getByRole("button", { name: "Действия с диалогом" }).click();
@@ -72,10 +73,14 @@ test("conversation queue filters remain actionable", async ({ page }) => {
 
   await page.locator(".queue-filter-panel select").nth(0).selectOption("Telegram");
   await page.locator(".queue-filter-panel select").nth(1).selectOption("none");
-  await page.locator(".queue-filter-check input").check();
   await expect(page.locator(".active-filter-chips")).toContainText("Канал: Telegram");
   await expect(page.locator(".active-filter-chips")).toContainText("Без тематики");
+  await expect(page.locator(".queue-row")).toHaveCount(1);
+  await expect(page.locator(".queue-row")).toContainText("Владимир Б.");
+  await expect(page.locator(".queue-row")).not.toContainText("Дмитрий С.");
+  await page.locator(".queue-filter-check input").check();
   await expect(page.locator(".active-filter-chips")).toContainText("Внутренние комментарии");
+  await expect(page.locator(".queue-empty")).toContainText("Нет диалогов");
 
   await page.locator(".queue-tab").filter({ hasText: "SLA" }).click();
   await expect(page.locator(".queue-tab").filter({ hasText: "SLA" })).toHaveAttribute("aria-pressed", "true");

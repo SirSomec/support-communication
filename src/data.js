@@ -970,10 +970,21 @@ export const proactiveRules = [
     status: "Включено",
     segment: "Ошибка оплаты или 2 минуты на экране оплаты",
     channels: ["SDK"],
+    screen: "app://checkout/payment",
+    triggerDelay: "120 сек",
     cooldown: "24 часа",
+    workHours: "09:00-21:00",
+    offlineForm: "Показать форму контакта после 21:00",
     message: "Вижу, что с оплатой может быть проблема. Помочь оформить заказ?",
     abTest: "A: короткий текст / B: с промокодом",
     acceptanceRate: 18,
+    conversionRate: 11,
+    dismissRate: 42,
+    activeVariant: "A",
+    variants: [
+      { id: "A", label: "A", text: "Вижу, что с оплатой может быть проблема. Помочь оформить заказ?", conversion: 11, dismiss: 42 },
+      { id: "B", label: "B", text: "Поможем завершить оплату и проверим, доступен ли промокод.", conversion: 14, dismiss: 36 }
+    ],
     privacyNotice: "Не показывать текст ввода до начала чата"
   },
   {
@@ -982,10 +993,21 @@ export const proactiveRules = [
     status: "Тест",
     segment: "Открыт заказ с просроченной доставкой",
     channels: ["SDK", "Telegram"],
+    screen: "app://orders/delayed",
+    triggerDelay: "30 сек",
     cooldown: "7 дней",
+    workHours: "Круглосуточно",
+    offlineForm: "Не показывать, сразу создать обращение",
     message: "Можем быстро проверить доставку и связаться с курьером.",
     abTest: "Без A/B",
     acceptanceRate: 26,
+    conversionRate: 19,
+    dismissRate: 31,
+    activeVariant: "A",
+    variants: [
+      { id: "A", label: "A", text: "Можем быстро проверить доставку и связаться с курьером.", conversion: 19, dismiss: 31 },
+      { id: "B", label: "B", text: "Похоже, доставка задерживается. Проверить статус заказа сейчас?", conversion: 22, dismiss: 28 }
+    ],
     privacyNotice: "Показывать только номер заказа и статус"
   },
   {
@@ -994,10 +1016,21 @@ export const proactiveRules = [
     status: "Пауза",
     segment: "Просмотр правил возврата больше 90 секунд",
     channels: ["SDK", "VK"],
+    screen: "web://help/returns",
+    triggerDelay: "90 сек",
     cooldown: "14 дней",
+    workHours: "10:00-20:00",
+    offlineForm: "Собрать телефон и номер заказа",
     message: "Подскажем, как оформить возврат без лишних шагов.",
     abTest: "A: вопрос / B: кнопка начать возврат",
     acceptanceRate: 0,
+    conversionRate: 0,
+    dismissRate: 0,
+    activeVariant: "A",
+    variants: [
+      { id: "A", label: "A", text: "Подскажем, как оформить возврат без лишних шагов.", conversion: 0, dismiss: 0 },
+      { id: "B", label: "B", text: "Начать возврат сейчас и получить инструкцию?", conversion: 0, dismiss: 0 }
+    ],
     privacyNotice: "Контекст страницы без персональных данных"
   }
 ];

@@ -3836,6 +3836,189 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
+.proactive-row {
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+}
+
+.proactive-row.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.proactive-builder-panel {
+  margin-bottom: 14px;
+}
+
+.proactive-builder-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(360px, 1.05fr);
+  gap: 14px;
+  padding: 14px;
+}
+
+.proactive-rule-form,
+.proactive-preview-panel,
+.proactive-ab-list,
+.proactive-rule-summary {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.proactive-rule-form label,
+.proactive-field-row label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.proactive-rule-form span,
+.proactive-field-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.proactive-rule-form input,
+.proactive-rule-form textarea,
+.proactive-ab-list textarea {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: var(--text);
+  outline: 0;
+}
+
+.proactive-rule-form textarea,
+.proactive-ab-list textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.proactive-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.proactive-channel-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.proactive-channel-editor button,
+.proactive-ab-list button,
+.proactive-widget-preview footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #2e3d56;
+  font-weight: 800;
+}
+
+.proactive-channel-editor button.selected,
+.proactive-ab-list article.active button {
+  background: #edf5ff;
+  color: var(--blue);
+}
+
+.proactive-widget-preview {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d9e7fb;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f8fbff, #ffffff);
+}
+
+.proactive-widget-preview header,
+.proactive-widget-preview footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.proactive-widget-preview header span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e9f3ff;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.proactive-widget-preview header b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.proactive-widget-preview strong {
+  color: #17233a;
+  font-size: 17px;
+}
+
+.proactive-widget-preview p {
+  margin: 0;
+  color: #2f3d52;
+  line-height: 1.45;
+}
+
+.proactive-widget-preview footer button:first-child {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.proactive-rule-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.proactive-ab-list article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.proactive-ab-list article.active {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.proactive-ab-list header,
+.proactive-ab-list footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.proactive-ab-list footer span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .quality-row.danger,
 .export-job.danger {
   background: #fff8f8;
@@ -4349,6 +4532,7 @@ textarea:focus-visible {
   .integration-layout,
   .templates-workspace,
   .visitors-layout,
+  .proactive-builder-grid,
   .quality-layout,
   .automation-layout {
     grid-template-columns: 1fr;
@@ -4646,6 +4830,18 @@ textarea:focus-visible {
 
   .topic-directory-toolbar {
     align-items: stretch;
+  }
+
+  .proactive-field-row,
+  .proactive-rule-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .proactive-channel-editor button,
+  .proactive-widget-preview footer button,
+  .proactive-ab-list button {
+    flex: 1 1 100%;
+    width: 100%;
   }
 
   .topic-filter,

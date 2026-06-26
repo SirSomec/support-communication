@@ -73,6 +73,7 @@ const reportTeamOptions = ["Все команды", "1-я линия", "Стар
 const reportStatusOptions = ["Все статусы", "Новые", "В работе", "Закрытые", "Ожидают", "Спасение"];
 const reportSlaOptions = ["Все SLA", "В норме", "Риск", "Просрочено"];
 const reportDialogTypeOptions = ["Все типы", "Входящие", "Исходящие", "Proactive", "Бот"];
+const proactiveChannelOptions = ["SDK", "Telegram", "MAX", "VK"];
 const exportStatusClasses = {
   ready: "ok",
   running: "info",
@@ -443,9 +444,46 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
 
 export function VisitorsScreen({ onBack, onToast, access }) {
   const [selectedVisitorId, setSelectedVisitorId] = useState(activeVisitors[0].id);
+  const [proactiveRuleItems, setProactiveRuleItems] = useState(proactiveRules);
+  const [selectedRuleId, setSelectedRuleId] = useState(proactiveRules[0].id);
   const selectedVisitor = activeVisitors.find((visitor) => visitor.id === selectedVisitorId) ?? activeVisitors[0];
+  const selectedRule = proactiveRuleItems.find((rule) => rule.id === selectedRuleId) ?? proactiveRuleItems[0];
+  const activeVariant = selectedRule.variants.find((variant) => variant.id === selectedRule.activeVariant) ?? selectedRule.variants[0];
   const typingCount = activeVisitors.filter((visitor) => visitor.typing).length;
   const criticalRescue = rescueChats.filter((chat) => chat.priority === "Критичный").length;
+  const canManageProactive = access.canManageSettings;
+
+  function updateProactiveRule(field, value) {
+    setProactiveRuleItems((current) => current.map((rule) => rule.id === selectedRule.id ? { ...rule, [field]: value } : rule));
+  }
+
+  function toggleProactiveChannel(channel) {
+    const nextChannels = selectedRule.channels.includes(channel)
+      ? selectedRule.channels.filter((item) => item !== channel)
+      : [...selectedRule.channels, channel];
+    updateProactiveRule("channels", nextChannels.length ? nextChannels : [channel]);
+  }
+
+  function updateProactiveVariant(variantId, text) {
+    setProactiveRuleItems((current) => current.map((rule) => {
+      if (rule.id !== selectedRule.id) {
+        return rule;
+      }
+
+      return {
+        ...rule,
+        variants: rule.variants.map((variant) => variant.id === variantId ? { ...variant, text } : variant),
+        message: rule.activeVariant === variantId ? text : rule.message
+      };
+    }));
+  }
+
+  function selectProactiveVariant(variant) {
+    setProactiveRuleItems((current) => current.map((rule) => rule.id === selectedRule.id
+      ? { ...rule, activeVariant: variant.id, message: variant.text }
+      : rule
+    ));
+  }
 
   return (
     <ProductScreen
@@ -454,9 +492,14 @@ export function VisitorsScreen({ onBack, onToast, access }) {
       onBack={onBack}
       actions={
         <>
-          <button onClick={() => onToast("Правила proactive-приглашений обновлены для активных посетителей.")} type="button">
+          <button
+            disabled={!canManageProactive}
+            onClick={() => onToast(`Правило "${selectedRule.name}" сохранено для ${selectedRule.channels.join(", ")}.`)}
+            title={canManageProactive ? "Сохранить proactive-правило" : access.reason}
+            type="button"
+          >
             <Zap size={17} />
-            Обновить правила
+            Сохранить правило
           </button>
           <button className="primary-action" disabled={!access.canOutbound} onClick={() => onToast(`Диалог с ${selectedVisitor.name} инициирован через ${selectedVisitor.channel}.`)} title={access.canOutbound ? "Начать диалог" : access.reason} type="button">
             <MessageSquareWarning size={17} />
@@ -469,7 +512,7 @@ export function VisitorsScreen({ onBack, onToast, access }) {
         <MetricTile icon={<UsersRound size={21} />} label="Активные визиты" value={activeVisitors.length} detail="SDK и внешние каналы" />
         <MetricTile icon={<Pencil size={21} />} label="Печатает до чата" value={typingCount} detail="только контекст без текста ввода" />
         <MetricTile icon={<AlertTriangle size={21} />} label="Спасение" value={rescueChats.length} detail={`${criticalRescue} критичных`} tone="danger" />
-        <MetricTile icon={<Zap size={21} />} label="Proactive" value={`${proactiveRules[0].acceptanceRate}%`} detail="принятие лучшего правила" />
+        <MetricTile icon={<Zap size={21} />} label="Proactive" value={`${Math.max(...proactiveRuleItems.map((rule) => rule.acceptanceRate))}%`} detail="принятие лучшего правила" />
       </div>
 
       <div className="visitors-layout">
@@ -539,8 +582,8 @@ export function VisitorsScreen({ onBack, onToast, access }) {
         <section className="work-panel">
           <SectionTitle title="Proactive-правила" action="A/B, cooldown, privacy" />
           <div className="proactive-list">
-            {proactiveRules.map((rule) => (
-              <article className="proactive-row" key={rule.id}>
+            {proactiveRuleItems.map((rule) => (
+              <button className={`proactive-row ${selectedRule.id === rule.id ? "selected" : ""}`} key={rule.id} onClick={() => setSelectedRuleId(rule.id)} type="button">
                 <header>
                   <strong>{rule.name}</strong>
                   <span>{rule.status}</span>
@@ -551,11 +594,108 @@ export function VisitorsScreen({ onBack, onToast, access }) {
                   <ChannelList channels={rule.channels} />
                   <b>{rule.acceptanceRate}%</b>
                 </footer>
-              </article>
+              </button>
             ))}
           </div>
         </section>
       </div>
+
+      <section className="work-panel proactive-builder-panel">
+        <SectionTitle title="Visual builder proactive" action={`${selectedRule.name} · ${selectedRule.status}`} />
+        <div className="proactive-builder-grid">
+          <div className="proactive-rule-form">
+            <label>
+              <span>Название правила</span>
+              <input disabled={!canManageProactive} value={selectedRule.name} onChange={(event) => updateProactiveRule("name", event.target.value)} />
+            </label>
+            <label>
+              <span>Условие / сегмент</span>
+              <textarea disabled={!canManageProactive} value={selectedRule.segment} onChange={(event) => updateProactiveRule("segment", event.target.value)} />
+            </label>
+            <label>
+              <span>Экран или URL</span>
+              <input disabled={!canManageProactive} value={selectedRule.screen} onChange={(event) => updateProactiveRule("screen", event.target.value)} />
+            </label>
+            <div className="proactive-field-row">
+              <label>
+                <span>Задержка показа</span>
+                <input disabled={!canManageProactive} value={selectedRule.triggerDelay} onChange={(event) => updateProactiveRule("triggerDelay", event.target.value)} />
+              </label>
+              <label>
+                <span>Cooldown</span>
+                <input disabled={!canManageProactive} value={selectedRule.cooldown} onChange={(event) => updateProactiveRule("cooldown", event.target.value)} />
+              </label>
+            </div>
+            <div className="proactive-field-row">
+              <label>
+                <span>Рабочее время</span>
+                <input disabled={!canManageProactive} value={selectedRule.workHours} onChange={(event) => updateProactiveRule("workHours", event.target.value)} />
+              </label>
+              <label>
+                <span>Offline form</span>
+                <input disabled={!canManageProactive} value={selectedRule.offlineForm} onChange={(event) => updateProactiveRule("offlineForm", event.target.value)} />
+              </label>
+            </div>
+            <label>
+              <span>Privacy</span>
+              <input disabled={!canManageProactive} value={selectedRule.privacyNotice} onChange={(event) => updateProactiveRule("privacyNotice", event.target.value)} />
+            </label>
+            <div className="proactive-channel-editor" aria-label="Каналы proactive-правила">
+              {proactiveChannelOptions.map((channel) => (
+                <button
+                  className={selectedRule.channels.includes(channel) ? "selected" : ""}
+                  disabled={!canManageProactive}
+                  key={channel}
+                  onClick={() => toggleProactiveChannel(channel)}
+                  type="button"
+                >
+                  {selectedRule.channels.includes(channel) ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                  {channel}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <aside className="proactive-preview-panel">
+            <div className="proactive-widget-preview">
+              <header>
+                <span>{selectedVisitor.channel}</span>
+                <b>{selectedRule.screen}</b>
+              </header>
+              <strong>{selectedRule.name}</strong>
+              <p>{activeVariant.text}</p>
+              <footer>
+                <button type="button">Написать</button>
+                <button type="button">Не сейчас</button>
+              </footer>
+            </div>
+            <div className="proactive-rule-summary">
+              <InfoPill label="Показ" value={`${selectedRule.triggerDelay} · ${selectedRule.workHours}`} />
+              <InfoPill label="Cooldown" value={selectedRule.cooldown} />
+              <InfoPill label="Принятие" value={`${selectedRule.acceptanceRate}%`} />
+              <InfoPill label="Конверсия / отказ" value={`${selectedRule.conversionRate}% / ${selectedRule.dismissRate}%`} />
+            </div>
+            <div className="proactive-ab-list">
+              {selectedRule.variants.map((variant) => (
+                <article className={selectedRule.activeVariant === variant.id ? "active" : ""} key={variant.id}>
+                  <header>
+                    <strong>Вариант {variant.label}</strong>
+                    <button disabled={!canManageProactive} onClick={() => selectProactiveVariant(variant)} type="button">
+                      {selectedRule.activeVariant === variant.id ? <CheckCircle2 size={15} /> : <PlayCircle size={15} />}
+                      {selectedRule.activeVariant === variant.id ? "Активен" : "Сделать активным"}
+                    </button>
+                  </header>
+                  <textarea disabled={!canManageProactive} value={variant.text} onChange={(event) => updateProactiveVariant(variant.id, event.target.value)} />
+                  <footer>
+                    <span>Конверсия {variant.conversion}%</span>
+                    <span>Отказы {variant.dismiss}%</span>
+                  </footer>
+                </article>
+              ))}
+            </div>
+          </aside>
+        </div>
+      </section>
     </ProductScreen>
   );
 }

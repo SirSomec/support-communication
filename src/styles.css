@@ -1972,11 +1972,6 @@ select:disabled {
   align-items: center;
 }
 
-.report-table .entity-head,
-.report-table .entity-row {
-  grid-template-columns: minmax(220px, 1fr) 130px 120px 90px minmax(160px, 1fr);
-}
-
 .templates-workspace {
   display: grid;
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
@@ -4134,11 +4129,6 @@ textarea:focus-visible {
   .clients-table .entity-head,
   .clients-table .entity-row {
     min-width: 760px;
-  }
-
-  .report-table .entity-head,
-  .report-table .entity-row {
-    min-width: 720px;
   }
 
   .role-head,

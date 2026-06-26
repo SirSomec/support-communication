@@ -26,6 +26,23 @@ test("product sections expose loading/data/error states", async ({ page }) => {
   }
 });
 
+test("app shell enforces role access and closes notifications on section change", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Сотрудник");
+
+  await expect(page.locator(".quick-action")).toBeDisabled();
+  await expect(page.locator(".topbar-access-note")).toContainText("Доступно старшему сотруднику или администратору");
+  await expect(page.locator("nav button").filter({ hasText: "Панель" })).toBeDisabled();
+  await expect(page.locator("nav button").filter({ hasText: "Клиенты" })).toBeEnabled();
+
+  await selectRole(page, "Администратор");
+  await page.getByRole("button", { name: "Уведомления" }).click();
+  await expect(page.locator(".notification-drawer")).toBeVisible();
+  await openSection(page, "Клиенты");
+  await expect(page.locator(".notification-drawer")).toHaveCount(0);
+  await expectHealthyPage(page);
+});
+
 test("rescue timer starts from chat action and writes audit", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");

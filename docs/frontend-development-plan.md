@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.17
+Версия: 2.19
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -26,14 +26,14 @@
 - React 19 + Vite.
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
-- Основной cockpit пока находится в `src/App.jsx`, но notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, ConversationList, ChatPane, CustomerPanel, DialogModals, composer/AI panel/attachment preview/ChatHeader/TranscriptToolbar/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
+- Основной cockpit пока находится в `src/App.jsx`, но app shell (`Sidebar`/`TopBar`) вынесен в `src/features/app-shell/AppShell.jsx`, notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, ConversationList, ChatPane, CustomerPanel, DialogModals, composer/AI panel/attachment preview/ChatHeader/TranscriptToolbar/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
 - Продуктовые разделы находятся в `src/sections.jsx`; маршрутизация разделов вынесена в `src/features/section-router.jsx`, расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`, а AI scoring/coaching workspace — в `src/features/quality/AiQualityWorkspace.jsx`.
 - Общие UI-примитивы, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable вынесены в `src/ui.jsx`.
 - Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
 - Стили находятся в `src/styles.css`.
 - Dev server: `http://127.0.0.1:5173/`.
 - Все продуктовые разделы на `ProductScreen` имеют единый `ScreenStateStrip`: загрузка, данные/пусто и ошибки с локальными счетчиками.
-- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check, AI real-time scoring/coaching/effectiveness, handoff summary, расширенный knowledge editor с версиями/approval/вложениями/self-service, bot builder/import/channel assignment и responsive matrix 390/768/1024/1440.
+- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check, AI real-time scoring/coaching/effectiveness, handoff summary, расширенный knowledge editor с версиями/approval/вложениями/self-service, bot builder/import/channel assignment и responsive matrix 390/768/1024/1440.
 - Дизайн-система: темная левая навигация, белые рабочие панели, синие primary actions, компактные таблицы, радиус 8px, без hero/landing-композиции.
 
 ## 3. Фактически реализовано во фронтенде
@@ -212,6 +212,7 @@
 - Ролевая модель и доменная модель диалогов вынесены в `src/app/access.js` и `src/app/dialogModel.js`.
 - Модель уведомлений вынесена в `src/app/notificationModel.js`.
 - Правила AI explainability и pre-send quality check вынесены в `src/app/aiQualityModel.js`.
+- Sidebar и TopBar вынесены в `src/features/app-shell/AppShell.jsx` без изменения CSS-контрактов, topbar notification center и quick action flow.
 - Topbar notification center вынесен в `src/features/notifications/NotificationCenter.jsx` без изменения CSS-контрактов и smoke-селекторов.
 - ConversationList/TabButton, ChatPane, CustomerPanel/PanelSection/InfoRow, DialogModals, Composer, inline AI panel и attachment preview вынесены в `src/features/dialogs/*` без изменения CSS-контрактов и smoke-селекторов.
 - Toast вынесен в `src/ui.jsx` и получил `aria-live="polite"`/`role="status"`.
@@ -487,7 +488,7 @@ Acceptance criteria:
 - Проверить keyboard navigation и focus states.
 - Проверить `aria-label`, `aria-modal`, `role="dialog"`, таблицы и кнопки.
 - Реализовано: empty/loading/error states для product-разделов через единый `ScreenStateStrip`.
-- Реализовано: smoke/e2e сценарии для state strip, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check, AI real-time scoring/coaching, live handoff summary, knowledge editor, bot builder import/channel assignment validation и responsive overflow.
+- Реализовано: smoke/e2e сценарии для state strip, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check, AI real-time scoring/coaching, live handoff summary, knowledge editor, bot builder import/channel assignment validation и responsive overflow.
 - Добавить visual regression checklist.
 - Разделить CSS на feature-файлы или CSS modules, если файл станет плохо поддерживаемым.
 - Подготовить Storybook или внутреннюю страницу UI-kit, если компонентная база продолжит расти.
@@ -503,7 +504,7 @@ Acceptance criteria:
 
 ### 7.1. Frontend UI и архитектура
 
-1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar и Modal уже вынесены, следующий безопасный кандидат — `Sidebar`/`TopBar` app shell или таблицы/toolbar из `sections.jsx`.
+1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; app shell, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar и Modal уже вынесены, следующий безопасный кандидат — таблицы/toolbar из `sections.jsx` или CSS-разделение для стабильных feature-блоков.
 2. Реализовано: общий `Modal`; `Toast`, `StatusBadge`, `ToolbarSearch`, `SegmentedControl`, `EntityTable` и `Modal` уже вынесены в `src/ui.jsx`, `DialogActionMenu` и `AuditTimeline` — в `src/features/dialogs/*`.
 3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Реализовано во frontend: AI real-time scoring, операторские подсказки исправления и аналитика эффективности подсказок. Осталось подключить production scoring service, реальные repair actions и backend-телеметрию.
@@ -585,6 +586,7 @@ Acceptance criteria:
 - [x] Вынести ChatPane из `src/App.jsx` в `src/features/dialogs/*`.
 - [x] Вынести CustomerPanel, PanelSection и InfoRow из `src/App.jsx` в `src/features/dialogs/*`.
 - [x] Вынести OutboundDialogLauncher, SaveTemplateDialog и DraftSwitchDialog из `src/App.jsx` в `src/features/dialogs/*`.
+- [x] Вынести Sidebar и TopBar из `src/App.jsx` в `src/features/app-shell/*`.
 - [ ] Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям.
 - [x] Добавить расширенные фильтры и сортировки очереди диалогов.
 - [x] Добавить полноценные статусы обращения и audit timeline.
@@ -612,5 +614,5 @@ Acceptance criteria:
 - [x] Добавить bot after-hours policy, channel assignment, bot metrics и handoff summary UI.
 - [ ] Backend integration: bot runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
 - [x] Добавить системные loading/empty/error states для всех разделов.
-- [x] Добавить smoke/e2e сценарии для критичных flows: states, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue, notification filters/subscriptions/history, AI explainability/pre-send, AI scoring/coaching, knowledge editor, bot builder/channel assignment и responsive.
+- [x] Добавить smoke/e2e сценарии для критичных flows: states, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue, notification filters/subscriptions/history, AI explainability/pre-send, AI scoring/coaching, knowledge editor, bot builder/channel assignment и responsive.
 - [x] Провести responsive QA на 390, 768, 1024 и 1440 px.

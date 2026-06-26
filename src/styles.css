@@ -2756,6 +2756,17 @@ select:disabled {
   background: #ffffff;
 }
 
+.channel-card {
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+}
+
+.channel-card.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
 .integration-card header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -2786,6 +2797,281 @@ select:disabled {
 .integration-card footer span {
   color: var(--teal);
   font-weight: 850;
+}
+
+.integration-card footer b {
+  color: #4c5870;
+  font-size: 12px;
+}
+
+.channel-detail-surface {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.channel-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfe;
+}
+
+.channel-detail-head > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.channel-detail-head strong {
+  color: #18243a;
+}
+
+.channel-detail-head span {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.channel-detail-head button,
+.channel-test-grid button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #31415b;
+  font-weight: 800;
+}
+
+.channel-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border-bottom: 1px solid var(--line);
+  background: var(--line);
+}
+
+.channel-detail-grid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  min-height: 76px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.channel-detail-grid span,
+.channel-test-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.channel-detail-grid strong,
+.connection-row strong,
+.connection-row span,
+.channel-log-row strong,
+.channel-log-row span,
+.channel-log-row code,
+.channel-test-result code {
+  overflow-wrap: anywhere;
+}
+
+.channel-group-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.channel-group-list span {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #edf5ff;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.channel-detail-section {
+  display: grid;
+  border-bottom: 1px solid var(--line);
+}
+
+.compact-title {
+  min-height: 42px;
+}
+
+.compact-title h3 {
+  margin: 0;
+  color: #18243a;
+  font-size: 14px;
+}
+
+.connection-list,
+.channel-log-list {
+  display: grid;
+}
+
+.connection-row,
+.channel-log-row {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  min-height: 56px;
+  padding: 10px 14px;
+  border-top: 1px solid #edf1f7;
+}
+
+.connection-row {
+  grid-template-columns: minmax(220px, 1fr) 76px 72px minmax(120px, 0.7fr);
+}
+
+.connection-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.connection-row span,
+.channel-log-row span,
+.channel-log-row code {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.connection-row b,
+.channel-log-row b {
+  width: fit-content;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #eaf8f3;
+  color: var(--teal);
+  font-size: 12px;
+}
+
+.connection-row.warn b,
+.channel-log-row.warn b {
+  background: #fff5e8;
+  color: #b56900;
+}
+
+.connection-row.paused b,
+.channel-log-row.error b {
+  background: #fff0f0;
+  color: var(--red);
+}
+
+.channel-log-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.35fr) minmax(120px, 0.25fr);
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.channel-log-toolbar .compact-title {
+  border-bottom: 0;
+}
+
+.channel-log-toolbar select {
+  min-height: 34px;
+  margin-right: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 9px;
+  color: var(--text);
+  outline: 0;
+}
+
+.channel-log-row {
+  grid-template-columns: 58px 64px minmax(120px, 0.55fr) minmax(0, 1fr) minmax(120px, 0.45fr);
+}
+
+.channel-log-row time {
+  color: #34435c;
+  font-weight: 800;
+}
+
+.channel-log-empty,
+.channel-test-empty {
+  padding: 16px 14px;
+  color: var(--muted);
+}
+
+.channel-test-panel {
+  display: grid;
+}
+
+.channel-test-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.45fr) minmax(180px, 0.65fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.channel-test-grid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.channel-test-grid input,
+.channel-test-grid select,
+.channel-test-grid textarea {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  outline: 0;
+}
+
+.channel-test-grid textarea {
+  min-height: 76px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.channel-test-result {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.channel-test-result strong {
+  color: var(--teal);
+}
+
+.channel-test-result.error strong {
+  color: var(--red);
+}
+
+.channel-test-result code {
+  display: block;
+  padding: 12px;
+  border: 1px solid #dce7f5;
+  border-radius: 7px;
+  background: #f8fbff;
+  color: #20304a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 
 .sdk-console {
@@ -3882,11 +4168,18 @@ textarea:focus-visible {
   }
 
   .sdk-code,
-  .sdk-event-row {
+  .sdk-event-row,
+  .channel-detail-grid,
+  .connection-row,
+  .channel-log-toolbar,
+  .channel-log-row,
+  .channel-test-grid {
     grid-template-columns: 1fr;
   }
 
-  .sdk-event-row {
+  .sdk-event-row,
+  .connection-row,
+  .channel-log-row {
     align-items: start;
     padding-block: 12px;
   }
@@ -3894,6 +4187,29 @@ textarea:focus-visible {
   .sdk-code code,
   .sdk-preview span {
     white-space: normal;
+  }
+
+  .channel-log-toolbar {
+    padding: 12px 14px;
+  }
+
+  .channel-log-toolbar .compact-title {
+    padding: 0;
+  }
+
+  .channel-log-toolbar select {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .channel-detail-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .channel-detail-head button,
+  .channel-test-grid button {
+    width: 100%;
   }
 
   .template-card {

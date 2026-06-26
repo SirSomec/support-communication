@@ -156,6 +156,7 @@ const dialogActionConfigs = [
     nextStatus: "queued"
   },
   {
+    id: "rescue",
     title: "Запустить спасение",
     description: "Сработает таймер и приоритет в очереди",
     nextStatus: "assigned"
@@ -198,6 +199,7 @@ const attachmentStatusLabels = {
 const maxAttachmentSizeBytes = 20 * 1024 * 1024;
 const allowedAttachmentExtensions = ["pdf", "png", "jpg", "jpeg", "webp"];
 const imageAttachmentExtensions = ["png", "jpg", "jpeg", "webp"];
+const rescueDurationSeconds = 4 * 60;
 
 function getFileExtension(fileName) {
   const parts = fileName.toLowerCase().split(".");
@@ -210,6 +212,21 @@ function formatFileSize(bytes) {
   }
 
   return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
+}
+
+function formatRescueTimer(totalSeconds) {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const minutes = Math.floor(safeSeconds / 60).toString().padStart(2, "0");
+  const seconds = (safeSeconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+function getRescueRemainingSeconds(rescue, now) {
+  if (!rescue?.deadlineAt) {
+    return rescue?.remainingSeconds ?? 0;
+  }
+
+  return Math.max(0, Math.ceil((rescue.deadlineAt - now) / 1000));
 }
 
 function createComposerAttachment(file, index, channel) {
@@ -629,11 +646,21 @@ function App() {
             })
           : null;
 
+        const rescueState = nextStatus === "closed" && conversation.rescue
+          ? {
+              ...conversation.rescue,
+              completedAt: Date.now(),
+              outcome: "saved",
+              state: "saved"
+            }
+          : conversation.rescue;
+
         return {
           ...conversation,
           status: nextStatus,
           sla: meta.sla,
           slaTone: meta.tone,
+          ...(rescueState ? { rescue: rescueState } : {}),
           messages: auditEvent ? [...conversation.messages, auditEvent] : conversation.messages,
           time: "сейчас"
         };
@@ -697,9 +724,76 @@ function App() {
     setToast(`Статус: ${statusLabels[nextStatus]}`);
   }
 
+  function handleRescueStart(actionConfig) {
+    if (!access.canManageDialogs) {
+      setToast(access.reason);
+      return;
+    }
+
+    if (isClosed) {
+      setToast("Закрытый диалог нельзя поставить на rescue.");
+      return;
+    }
+
+    if (selected.rescue?.state === "active") {
+      setToast("Rescue timer уже запущен для этого диалога.");
+      return;
+    }
+
+    const startedAt = Date.now();
+    const deadlineAt = startedAt + rescueDurationSeconds * 1000;
+    const nextStatus = actionConfig.nextStatus ?? "assigned";
+    const rescue = {
+      state: "active",
+      startedAt,
+      deadlineAt,
+      durationSeconds: rescueDurationSeconds,
+      reason: "Ручной запуск: диалог требует ответа или возврата в очередь",
+      nextAction: "Ответить клиенту или вернуть в SLA-очередь",
+      owner: "Иван П.",
+      source: actionConfig.title
+    };
+
+    setConversationItems((current) =>
+      current.map((conversation) => {
+        if (conversation.id !== selected.id) {
+          return conversation;
+        }
+
+        const previousStatus = conversation.status ?? "active";
+        const auditEvent = createAuditEvent({
+          eventKind: "rescue",
+          fromStatus: previousStatus,
+          toStatus: nextStatus,
+          detail: `Запущен rescue timer ${formatRescueTimer(rescueDurationSeconds)}: ${rescue.nextAction}`,
+          text: `Запущен rescue timer ${formatRescueTimer(rescueDurationSeconds)}: ${rescue.nextAction}`
+        });
+
+        return {
+          ...conversation,
+          status: nextStatus,
+          sla: `Rescue ${formatRescueTimer(rescueDurationSeconds)}`,
+          slaTone: "danger",
+          rescue,
+          messages: [...conversation.messages, auditEvent],
+          preview: "Запущен rescue timer: нужен ответ или возврат в очередь",
+          time: "сейчас"
+        };
+      })
+    );
+
+    setFilter("rescue");
+    setToast(`${actionConfig.title}: таймер ${formatRescueTimer(rescueDurationSeconds)} запущен, диалог добавлен в фильтр "Спасти".`);
+  }
+
   function handleDialogAction(actionConfig) {
     if (!access.canManageDialogs) {
       setToast(access.reason);
+      return;
+    }
+
+    if (actionConfig.id === "rescue") {
+      handleRescueStart(actionConfig);
       return;
     }
 
@@ -1434,7 +1528,11 @@ function ChatPane({
   status
 }) {
   const [isActionPanelOpen, setActionPanelOpen] = useState(false);
+  const [rescueNow, setRescueNow] = useState(Date.now());
   const statusMeta = getStatusMeta(status);
+  const activeRescue = conversation.rescue?.state === "active" && !isClosed ? conversation.rescue : null;
+  const rescueRemainingSeconds = activeRescue ? getRescueRemainingSeconds(activeRescue, rescueNow) : 0;
+  const isRescueExpired = Boolean(activeRescue && rescueRemainingSeconds === 0);
   const visibleMessages = conversation.messages.filter((message) => {
     if (transcriptMode === "internal") {
       return message.type === "internal";
@@ -1446,6 +1544,16 @@ function ChatPane({
 
     return true;
   });
+
+  useEffect(() => {
+    if (!activeRescue) {
+      return undefined;
+    }
+
+    setRescueNow(Date.now());
+    const timer = window.setInterval(() => setRescueNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeRescue?.deadlineAt]);
 
   return (
     <section className="chat-pane" aria-label="Окно чата">
@@ -1476,20 +1584,25 @@ function ChatPane({
               <strong>{statusMeta.label}</strong>
             </div>
             {!access.canManageDialogs ? <p className="disabled-reason">{access.reason}</p> : null}
-            {dialogActionConfigs.map((action) => (
-              <button
-                disabled={isClosed || !access.canManageDialogs}
-                key={action.title}
-                onClick={() => {
-                  onDialogAction(action);
-                  setActionPanelOpen(false);
-                }}
-                type="button"
-              >
-                <strong>{action.title}</strong>
-                <span>{action.description}</span>
-              </button>
-            ))}
+            {dialogActionConfigs.map((action) => {
+              const rescueAlreadyActive = action.id === "rescue" && Boolean(activeRescue);
+              const actionDisabled = isClosed || !access.canManageDialogs || rescueAlreadyActive;
+
+              return (
+                <button
+                  disabled={actionDisabled}
+                  key={action.title}
+                  onClick={() => {
+                    onDialogAction(action);
+                    setActionPanelOpen(false);
+                  }}
+                  type="button"
+                >
+                  <strong>{action.title}</strong>
+                  <span>{rescueAlreadyActive ? "Rescue timer уже запущен" : action.description}</span>
+                </button>
+              );
+            })}
           </div>
         ) : null}
         <label className="status-select-inline">
@@ -1516,27 +1629,39 @@ function ChatPane({
       </header>
 
       <div className="transcript-toolbar" aria-label="Фильтр истории чата">
-        <div className="transcript-filter-buttons" role="group" aria-label="Тип записей">
-          {[
-            ["all", "Все"],
-            ["internal", "Комментарии"],
-            ["events", "Audit"]
-          ].map(([id, label]) => (
-            <button
-              aria-pressed={transcriptMode === id}
-              className={transcriptMode === id ? "active" : ""}
-              key={id}
-              onClick={() => setTranscriptMode(id)}
-              type="button"
-            >
-              {label}
-            </button>
-          ))}
+        <div className="transcript-toolbar-left">
+          <div className="transcript-filter-buttons" role="group" aria-label="Тип записей">
+            {[
+              ["all", "Все"],
+              ["internal", "Комментарии"],
+              ["events", "Audit"]
+            ].map(([id, label]) => (
+              <button
+                aria-pressed={transcriptMode === id}
+                className={transcriptMode === id ? "active" : ""}
+                key={id}
+                onClick={() => setTranscriptMode(id)}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {activeRescue ? (
+            <div className={`rescue-timer-chip ${isRescueExpired ? "expired" : rescueRemainingSeconds <= 60 ? "danger" : ""}`}>
+              <Clock3 size={16} />
+              <strong>{formatRescueTimer(rescueRemainingSeconds)}</strong>
+              <span>{isRescueExpired ? "Время вышло" : activeRescue.reason}</span>
+              <b>{activeRescue.nextAction}</b>
+            </div>
+          ) : null}
         </div>
-        <button className="compact-close-button" disabled={isClosed || !topic} onClick={onCloseDialog} type="button">
-          {isClosed ? <ShieldCheck size={16} /> : <Lock size={16} />}
-          {isClosed ? "Закрыт" : "Закрыть"}
-        </button>
+        <div className="transcript-toolbar-actions">
+          <button className="compact-close-button" disabled={isClosed || !topic} onClick={onCloseDialog} type="button">
+            {isClosed ? <ShieldCheck size={16} /> : <Lock size={16} />}
+            {isClosed ? "Закрыт" : "Закрыть"}
+          </button>
+        </div>
       </div>
       {!topic && !isClosed ? (
         <div className="inline-disabled-reason">

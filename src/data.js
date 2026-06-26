@@ -417,6 +417,60 @@ export const reportChartBlocks = [
   }
 ];
 
+export const rescueOutcomeSummary = [
+  { label: "Спасено", value: "18", detail: "78% rescue-сценариев", tone: "ok" },
+  { label: "Пропущено", value: "5", detail: "нужен разбор старшего", tone: "danger" },
+  { label: "Средний timer", value: "02:16", detail: "до ответа или возврата", tone: "hold" },
+  { label: "Автовозврат", value: "9", detail: "в SLA-очередь", tone: "info" }
+];
+
+export const rescueReportRows = [
+  {
+    id: "rescue-report-vladimir",
+    client: "Владимир Б.",
+    channel: "Telegram",
+    operator: "Кирилл М.",
+    timer: "00:42",
+    reason: "Принят, но нет ответа оператора",
+    outcome: "Спасен",
+    resolution: "Вернулся в очередь, ответ за 01:12",
+    digest: "Попал в ежедневный отчет"
+  },
+  {
+    id: "rescue-report-olga",
+    client: "Ольга Л.",
+    channel: "SDK",
+    operator: "Иван П.",
+    timer: "01:18",
+    reason: "Низкая оценка после прошлого диалога",
+    outcome: "Спасен",
+    resolution: "Ответ проверен старшим перед закрытием",
+    digest: "В дайджест качества"
+  },
+  {
+    id: "rescue-report-vk",
+    client: "Очередь VK",
+    channel: "VK",
+    operator: "Не назначен",
+    timer: "00:00",
+    reason: "Очередь перегружена, SLA 68%",
+    outcome: "Пропущен",
+    resolution: "Timer истек без перераспределения",
+    digest: "Требует разбора"
+  },
+  {
+    id: "rescue-report-max",
+    client: "Мария Н.",
+    channel: "MAX",
+    operator: "Анна Р.",
+    timer: "02:04",
+    reason: "Жалоба и повторное обращение",
+    outcome: "Спасен",
+    resolution: "Старший подключился в чате",
+    digest: "Попал в ежедневный отчет"
+  }
+];
+
 export const reportColumnOptions = [
   { id: "metric", label: "Показатель", locked: true },
   { id: "today", label: "Текущий период" },

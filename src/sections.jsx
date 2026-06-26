@@ -54,6 +54,8 @@ import {
   reportBars,
   reportRows,
   rescueChats,
+  rescueOutcomeSummary,
+  rescueReportRows,
   roles,
   sdkEvents,
   topicOptions,
@@ -1044,6 +1046,40 @@ export function ReportsScreen({ onBack, onToast, access }) {
               <footer>
                 {chart.legend.map((item) => <span key={item}>{item}</span>)}
               </footer>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="work-panel rescue-report-panel">
+        <SectionTitle title="Спасенные и пропущенные" action="rescue timer outcomes" />
+        <div className="rescue-outcome-summary">
+          {rescueOutcomeSummary.map((item) => (
+            <article className={`rescue-outcome-card ${item.tone}`} key={item.label}>
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <p>{item.detail}</p>
+            </article>
+          ))}
+        </div>
+        <div className="rescue-report-list">
+          <div className="rescue-report-head">
+            <span>Клиент</span>
+            <span>Канал</span>
+            <span>Timer</span>
+            <span>Outcome</span>
+            <span>Решение</span>
+          </div>
+          {rescueReportRows.map((row) => (
+            <article className={`rescue-report-row ${row.outcome === "Пропущен" ? "missed" : "saved"}`} key={row.id}>
+              <div>
+                <strong>{row.client}</strong>
+                <small>{row.operator} · {row.reason}</small>
+              </div>
+              <ChannelBadge channel={row.channel} />
+              <b>{row.timer}</b>
+              <span className={`status-chip ${row.outcome === "Пропущен" ? "warn" : "ok"}`}>{row.outcome}</span>
+              <p>{row.resolution}<small>{row.digest}</small></p>
             </article>
           ))}
         </div>

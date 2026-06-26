@@ -3903,13 +3903,18 @@ select:disabled {
   color: var(--muted);
 }
 
+.channel-connections-panel,
+.sdk-console {
+  min-width: 0;
+}
+
 .channel-test-panel {
   display: grid;
 }
 
 .channel-test-grid {
   display: grid;
-  grid-template-columns: minmax(120px, 0.45fr) minmax(180px, 0.65fr) minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(96px, 0.45fr) minmax(140px, 0.65fr) minmax(0, 1fr) minmax(118px, auto);
   gap: 12px;
   align-items: end;
   padding: 14px;
@@ -3943,6 +3948,7 @@ select:disabled {
 .channel-test-result {
   display: grid;
   gap: 8px;
+  min-width: 0;
   padding: 14px;
 }
 
@@ -3956,6 +3962,7 @@ select:disabled {
 
 .channel-test-result code {
   display: block;
+  min-width: 0;
   padding: 12px;
   border: 1px solid #dce7f5;
   border-radius: 7px;

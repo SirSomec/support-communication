@@ -406,6 +406,78 @@ test("settings employee management preserves edit and role permissions", async (
   await expectHealthyPage(page);
 });
 
+test("settings channel connections keep logs tests and permissions", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await openSection(page, "Настройки");
+
+  const channelPanel = page.locator(".channel-connections-panel");
+  await channelPanel.locator("[data-channel-card='vk']").click();
+  await expect(channelPanel.locator(".channel-detail-head")).toContainText("VK Сообщества");
+  await expect(channelPanel.locator(".channel-detail-head")).toContainText("Требует внимания");
+
+  await channelPanel.getByLabel("Фильтр логов по уровню").selectOption("error");
+  await expect(channelPanel.locator(".channel-log-row")).toHaveCount(1);
+  await expect(channelPanel.locator(".channel-log-list")).toContainText("Ошибка отправки вложения");
+  await channelPanel.getByLabel("Фильтр логов по подключению").selectOption("vk-test");
+  await expect(channelPanel.locator(".channel-log-empty")).toContainText("По выбранным фильтрам событий нет.");
+
+  await channelPanel.getByLabel("Фильтр логов по подключению").selectOption("all");
+  await channelPanel.getByLabel("Фильтр логов по уровню").selectOption("all");
+  await channelPanel.locator(".channel-test-grid label").filter({ hasText: "Адресат" }).locator("input").fill("");
+  await channelPanel.locator(".channel-test-message textarea").fill("");
+  await channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить тест" }).click();
+  await expect(channelPanel.locator(".channel-test-result")).toContainText("Заполните адресата и сообщение");
+
+  await channelPanel.locator(".channel-test-grid label").filter({ hasText: "Адресат" }).locator("input").fill("+7 900 123-45-67");
+  await channelPanel.locator(".channel-test-message textarea").fill("Проверка канального теста");
+  await channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить тест" }).click();
+  await expect(channelPanel.locator(".channel-test-result")).toContainText("Входящее тестовое сообщение принято");
+  await expect(page.locator(".toast")).toContainText("VK: тест приема выполнен.");
+
+  await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
+  await expect(channelPanel.locator("[data-channel-card='telegram']")).toBeEnabled();
+  await expect(channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить тест" })).toBeDisabled();
+  await expect(channelPanel.locator(".channel-detail-head button").filter({ hasText: "Проверить канал" })).toBeDisabled();
+  await expectNoElementOverflow(page, ".channel-connections-panel");
+  await expectHealthyPage(page);
+});
+
+test("settings sdk console keeps payload preview run states and permissions", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await openSection(page, "Настройки");
+
+  const sdkPanel = page.locator(".sdk-console");
+  await sdkPanel.getByLabel("Событие").selectOption("initConversation");
+  await sdkPanel.getByLabel("Окружение").selectOption("stage");
+  await sdkPanel.getByLabel("Канал").selectOption("Telegram");
+  await sdkPanel.getByLabel("User ID").fill("gig-test-100");
+  await sdkPanel.getByLabel("Телефон").fill("");
+  await sdkPanel.locator(".sdk-message-field textarea").fill("");
+  await expect(sdkPanel.locator(".sdk-payload-preview")).toContainText('"appId": "gig-app-stage"');
+  await expect(sdkPanel.locator(".sdk-payload-preview")).toContainText('"channel": "Telegram"');
+  await expect(sdkPanel.locator(".sdk-payload-preview")).toContainText('"userId": "gig-test-100"');
+
+  await sdkPanel.locator(".sdk-playground-actions button").filter({ hasText: "Запустить событие" }).click();
+  await expect(sdkPanel.locator(".sdk-playground-actions")).toContainText("Payload не прошел валидацию");
+
+  await sdkPanel.getByLabel("Телефон").fill("+7 900 333-22-11");
+  await sdkPanel.locator(".sdk-message-field textarea").fill("Проверка SDK initConversation.");
+  await sdkPanel.locator(".sdk-playground-actions button").filter({ hasText: "Запустить событие" }).click();
+  await expect(sdkPanel.locator(".sdk-playground-actions")).toContainText("Payload принят тестовым стендом");
+  await expect(sdkPanel.locator(".sdk-payload-preview")).toContainText('"route": "outbound_queue"');
+  await expect(page.locator(".toast")).toContainText("SDK playground: initConversation выполнен в stage.");
+
+  await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
+  await expect(sdkPanel.locator(".sdk-code button").filter({ hasText: "Копировать" })).toBeDisabled();
+  await expect(sdkPanel.locator(".sdk-playground-actions button").filter({ hasText: "Запустить событие" })).toBeDisabled();
+  await expect(sdkPanel.getByLabel("Событие")).toBeDisabled();
+  await expect(sdkPanel.locator(".sdk-event-list")).toContainText("identifyUser");
+  await expectNoElementOverflow(page, ".sdk-console");
+  await expectHealthyPage(page);
+});
+
 test("critical sections do not overflow responsive viewports", async ({ page }) => {
   for (const viewport of [
     { width: 390, height: 844 },

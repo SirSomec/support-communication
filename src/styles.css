@@ -4361,6 +4361,12 @@ textarea:focus-visible {
   gap: 10px;
 }
 
+.knowledge-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .knowledge-editor-form label {
   display: grid;
   gap: 6px;
@@ -4425,6 +4431,17 @@ textarea:focus-visible {
   color: #ffffff;
 }
 
+.knowledge-preview-stack {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.knowledge-preview-toolbar {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .knowledge-preview {
   display: grid;
   gap: 9px;
@@ -4454,6 +4471,251 @@ textarea:focus-visible {
 .knowledge-preview p {
   color: #2f3d52;
   line-height: 1.5;
+}
+
+.knowledge-self-service-preview header,
+.knowledge-self-service-preview footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.knowledge-self-service-preview header strong {
+  color: #17233a;
+  font-size: 15px;
+}
+
+.knowledge-self-service-preview .toolbar-search {
+  width: 100%;
+}
+
+.knowledge-widget-results {
+  display: grid;
+  gap: 8px;
+}
+
+.knowledge-widget-results button {
+  display: grid;
+  gap: 3px;
+  min-height: 52px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--text);
+  text-align: left;
+}
+
+.knowledge-widget-results button.selected {
+  border-color: #b7d7ff;
+  background: var(--surface-selected);
+}
+
+.knowledge-widget-results button strong,
+.knowledge-widget-results button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-widget-results button span,
+.knowledge-widget-results p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.knowledge-self-service-preview footer button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 10px;
+  background: var(--blue);
+  color: #ffffff;
+  font-weight: 850;
+}
+
+.knowledge-governance-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.85fr) minmax(260px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.knowledge-governance-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  align-content: start;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.knowledge-governance-panel > header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  color: #17233a;
+}
+
+.knowledge-governance-panel > header strong {
+  margin-right: auto;
+}
+
+.knowledge-governance-panel > header button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 9px;
+  background: #ffffff;
+  color: #2e3d56;
+  font-weight: 800;
+}
+
+.knowledge-version-list,
+.knowledge-attachment-list,
+.knowledge-approval-list {
+  display: grid;
+  gap: 8px;
+}
+
+.knowledge-version-list button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  min-height: 52px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--text);
+  text-align: left;
+}
+
+.knowledge-version-list button.selected {
+  border-color: #b7d7ff;
+  background: var(--surface-selected);
+}
+
+.knowledge-version-list button span,
+.knowledge-version-list button strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-version-list button small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.knowledge-version-note {
+  margin: 0;
+  color: #3a485e;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.knowledge-attachment-list article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 52px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fbff;
+}
+
+.knowledge-attachment-list article strong,
+.knowledge-attachment-list article span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-attachment-list article span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.knowledge-attachment-list article button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #526078;
+}
+
+.knowledge-approval-panel {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.knowledge-approval-list article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.knowledge-approval-list i {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 99px;
+  background: var(--blue);
+}
+
+.knowledge-approval-list article.ok i {
+  background: var(--teal);
+}
+
+.knowledge-approval-list article.warn i {
+  background: var(--orange);
+}
+
+.knowledge-approval-list article strong,
+.knowledge-approval-list article span,
+.knowledge-approval-list article p {
+  display: block;
+  min-width: 0;
+}
+
+.knowledge-approval-list article strong {
+  color: #17233a;
+}
+
+.knowledge-approval-list article span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.knowledge-approval-list article p {
+  margin: 4px 0 0;
+  color: #3a485e;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .detail-stack {
@@ -5672,7 +5934,8 @@ textarea:focus-visible {
   .quality-layout,
   .automation-layout,
   .automation-insight-grid,
-  .knowledge-editor {
+  .knowledge-editor,
+  .knowledge-governance-grid {
     grid-template-columns: 1fr;
   }
 
@@ -5739,7 +6002,7 @@ textarea:focus-visible {
   }
 
   .knowledge-row {
-    min-width: 820px;
+    min-width: 0;
   }
 }
 
@@ -5946,6 +6209,7 @@ textarea:focus-visible {
   .composer-template-picker,
   .draft-switch-summary,
   .detail-stack,
+  .knowledge-form-grid,
   .visitor-row,
   .knowledge-row,
   .bot-metric-list,

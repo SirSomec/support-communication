@@ -85,11 +85,32 @@ test("knowledge editor supports article draft status and preview", async ({ page
   await openSection(page, "Качество");
 
   await page.locator(".knowledge-row").filter({ hasText: "Сроки возврата средств" }).click();
+  await expect(page.locator(".knowledge-version-list")).toContainText("v2.0");
+  await expect(page.locator(".knowledge-approval-list")).toContainText("Отправила на проверку");
+
   await page.locator(".knowledge-editor-form input").fill("Сроки возврата средств v2");
+  await page.locator(".knowledge-editor-form button").filter({ hasText: "Сохранить" }).click();
+  await expect(page.locator(".knowledge-version-list")).toContainText("draft");
+  await expect(page.locator(".knowledge-approval-list")).toContainText("Сохранил версию");
+
   await page.locator(".knowledge-editor-form button").filter({ hasText: "На проверку" }).click();
 
   await expect(page.locator(".knowledge-preview")).toContainText("Сроки возврата средств v2");
   await expect(page.locator(".knowledge-preview")).toContainText("На проверке");
+  await expect(page.locator(".knowledge-approval-list")).toContainText("Отправил на проверку");
+
+  await page.locator(".knowledge-governance-panel").filter({ hasText: "Вложения" }).getByRole("button", { name: /Добавить/ }).click();
+  await expect(page.locator(".knowledge-attachment-list")).toContainText("Регламент: Оплата.docx");
+  await expect(page.locator(".knowledge-channel-picker button").filter({ hasText: "SDK" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.locator(".knowledge-preview-toolbar button").filter({ hasText: "Self-service" }).click();
+  await page.locator(".knowledge-self-service-preview input").fill("возврат");
+  await expect(page.locator(".knowledge-widget-results")).not.toContainText("Сроки возврата средств v2");
+  await expect(page.locator(".knowledge-widget-results")).toContainText("Публичные статьи не найдены");
+  await expect(page.locator(".knowledge-self-service-preview")).toContainText("Текущая статья скрыта до публикации");
+  await page.locator(".knowledge-self-service-preview input").fill("заказ");
+  await expect(page.locator(".knowledge-widget-results")).toContainText("Отслеживание заказа");
+  await expect(page.locator(".knowledge-self-service-preview")).toContainText("Написать оператору");
   await expectHealthyPage(page);
 });
 

@@ -33,6 +33,7 @@ import {
   Zap
 } from "lucide-react";
 import { ChannelBadge, ChannelList, EntityTable, MetricTile, Permission, ProductScreen, SectionTitle, SegmentedControl, StatusBadge, ToolbarSearch } from "./ui.jsx";
+import { KnowledgeBaseWorkspace } from "./features/quality/KnowledgeBaseWorkspace.jsx";
 import {
   activeVisitors,
   aiSuggestions,
@@ -744,41 +745,12 @@ export function VisitorsScreen({ onBack, onToast, access }) {
 }
 
 export function QualityScreen({ onBack, onToast }) {
-  const [selectedArticleId, setSelectedArticleId] = useState(knowledgeArticles[0]?.id ?? "");
-  const [articleDrafts, setArticleDrafts] = useState(() =>
-    Object.fromEntries(knowledgeArticles.map((article) => [
-      article.id,
-      {
-        ...article,
-        body: `${article.title}: актуальная инструкция для операторов и self-service. Свяжите статью с тематикой ${article.topics.join(", ")} и проверьте формулировки перед публикацией.`
-      }
-    ]))
-  );
   const lowScores = qualityScores.filter((item) => Number(item.score) < 4 || item.status.includes("Низкая"));
   const averageCsat = Math.round(
     qualityScores
       .filter((item) => item.scale === "CSAT")
       .reduce((sum, item, _, list) => sum + (Number(item.score) / 5) * 100 / list.length, 0)
   );
-  const selectedArticle = articleDrafts[selectedArticleId] ?? Object.values(articleDrafts)[0];
-
-  function updateArticleDraft(field, value) {
-    setArticleDrafts((current) => ({
-      ...current,
-      [selectedArticle.id]: {
-        ...current[selectedArticle.id],
-        [field]: value
-      }
-    }));
-  }
-
-  function toggleArticleChannel(channel) {
-    const nextChannels = selectedArticle.channels.includes(channel)
-      ? selectedArticle.channels.filter((item) => item !== channel)
-      : [...selectedArticle.channels, channel];
-
-    updateArticleDraft("channels", nextChannels);
-  }
 
   return (
     <ProductScreen
@@ -858,74 +830,7 @@ export function QualityScreen({ onBack, onToast }) {
 
       <section className="work-panel">
         <SectionTitle title="База знаний" action="редактор и публикация статей" />
-        <div className="knowledge-workspace">
-          <div className="knowledge-table">
-            {Object.values(articleDrafts).map((article) => (
-              <button
-                className={`knowledge-row ${selectedArticle.id === article.id ? "selected" : ""}`}
-                key={article.id}
-                onClick={() => setSelectedArticleId(article.id)}
-                type="button"
-              >
-                <strong>{article.title}</strong>
-                <span>{article.category}</span>
-                <span>{article.status}</span>
-                <ChannelList channels={article.channels} />
-                <b>{article.helpfulRate}% полезность</b>
-              </button>
-            ))}
-          </div>
-
-          <div className="knowledge-editor">
-            <div className="knowledge-editor-form">
-              <label>
-                <span>Название</span>
-                <input value={selectedArticle.title} onChange={(event) => updateArticleDraft("title", event.target.value)} />
-              </label>
-              <label>
-                <span>Статус</span>
-                <select value={selectedArticle.status} onChange={(event) => updateArticleDraft("status", event.target.value)}>
-                  <option>Черновик</option>
-                  <option>На проверке</option>
-                  <option>Опубликована</option>
-                </select>
-              </label>
-              <label>
-                <span>Текст статьи</span>
-                <textarea value={selectedArticle.body} onChange={(event) => updateArticleDraft("body", event.target.value)} />
-              </label>
-              <div className="knowledge-channel-picker" aria-label="Каналы статьи">
-                {["SDK", "Telegram", "MAX", "VK"].map((channel) => (
-                  <button
-                    className={selectedArticle.channels.includes(channel) ? "active" : ""}
-                    key={channel}
-                    onClick={() => toggleArticleChannel(channel)}
-                    type="button"
-                  >
-                    {channel}
-                  </button>
-                ))}
-              </div>
-              <footer>
-                <button onClick={() => onToast(`${selectedArticle.title}: черновик сохранен.`)} type="button">
-                  <Pencil size={16} />
-                  Сохранить
-                </button>
-                <button className="primary-action" onClick={() => updateArticleDraft("status", "На проверке")} type="button">
-                  <CheckCircle2 size={16} />
-                  На проверку
-                </button>
-              </footer>
-            </div>
-            <article className="knowledge-preview">
-              <span>{selectedArticle.category} · {selectedArticle.status}</span>
-              <h3>{selectedArticle.title}</h3>
-              <p>{selectedArticle.body}</p>
-              <ChannelList channels={selectedArticle.channels} />
-              <small>Тематики: {selectedArticle.topics.join(", ")} · полезность {selectedArticle.helpfulRate}%</small>
-            </article>
-          </div>
-        </div>
+        <KnowledgeBaseWorkspace articles={knowledgeArticles} onToast={onToast} />
       </section>
     </ProductScreen>
   );

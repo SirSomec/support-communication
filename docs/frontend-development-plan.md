@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.7
+Версия: 2.8
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса notification center, composer, AI composer panel, attachment preview, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability и pre-send quality check, редактора базы знаний, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса notification center, composer, AI composer panel, attachment preview, KnowledgeBaseWorkspace, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability и pre-send quality check, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -27,13 +27,13 @@
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
 - Основной cockpit пока находится в `src/App.jsx`, но notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, composer/AI panel/attachment preview вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
-- Продуктовые разделы находятся в `src/sections.jsx`; маршрутизация разделов вынесена в `src/features/section-router.jsx`.
+- Продуктовые разделы находятся в `src/sections.jsx`; маршрутизация разделов вынесена в `src/features/section-router.jsx`, а расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`.
 - Общие UI-примитивы, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable вынесены в `src/ui.jsx`.
 - Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
 - Стили находятся в `src/styles.css`.
 - Dev server: `http://127.0.0.1:5173/`.
 - Все продуктовые разделы на `ProductScreen` имеют единый `ScreenStateStrip`: загрузка, данные/пусто и ошибки с локальными счетчиками.
-- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check, handoff summary, knowledge editor, bot builder/import/channel assignment и responsive matrix 390/768/1024/1440.
+- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check, handoff summary, расширенный knowledge editor с версиями/approval/вложениями/self-service, bot builder/import/channel assignment и responsive matrix 390/768/1024/1440.
 - Дизайн-система: темная левая навигация, белые рабочие панели, синие primary actions, компактные таблицы, радиус 8px, без hero/landing-композиции.
 
 ## 3. Фактически реализовано во фронтенде
@@ -145,8 +145,9 @@
 - Есть фильтр низких оценок как UI-сценарий.
 - Есть AI-помощник с summary/reply/article, confidence, suggested topic, risk и действиями accept/edit/reject в разделе качества и inline в composer чата.
 - AI-действия в чате пишутся в audit-фильтр transcript как события `eventKind: ai`.
-- Есть таблица базы знаний со статусами публикации, каналами и полезностью.
-- Есть встроенный редактор базы знаний: выбор статьи, название, статус `Черновик/На проверке/Опубликована`, текст, каналы, сохранение, отправка на проверку и live preview.
+- Есть таблица базы знаний со статусами публикации, каналами, видимостью, версиями, вложениями, полезностью и публичностью для self-service.
+- Есть встроенный редактор базы знаний: выбор статьи, название, статус `Черновик/На проверке/Опубликована`, видимость `Публичная/Только оператор`, текст, каналы, сохранение версии, отправка на проверку, публикация, возврат на доработку и live preview.
+- Есть governance-блок базы знаний: approval history, список версий, attachments panel с добавлением/удалением вложения и self-service preview SDK/виджета с поиском и переходом к оператору.
 
 ### 3.11. Боты, автоматизация и audit
 
@@ -186,7 +187,7 @@
 | Уведомления | Реализован topbar notification center: непрочитанные, SLA, mentions, channel errors, export-ready, фильтры, группы, настройки подписок, history и действия по уведомлениям | Реальные источники событий, push/browser notifications и backend audit |
 | SLA | Отражен в очереди, панели, отчетах | Настройка правил SLA по каналу/тематике/расписанию |
 | Audit | Есть фильтр в чате, structured audit timeline для статусов, действий, тематик и закрытия, export audit | Единый audit log с фильтрами, деталкой события, retention и backend-событиями |
-| База знаний | Реализованы рекомендации, таблица статей, встроенный редактор, preview, статус публикации и каналы | Approval history, вложения, версии статьи и self-service виджет |
+| База знаний | Реализованы рекомендации, таблица статей, встроенный редактор, preview, статус публикации, каналы, видимость, approval history, вложения, версии статьи и self-service preview виджета | Backend CRUD, полнотекстовый поиск, storage, approval workflow API, публикация версий и аналитика self-service |
 | CSAT/CSI | Частично реализован раздел качества и отчетный тип | Настройка отправки оценки по каналам, карточка оценки, динамика по операторам |
 | AI-помощь | Реализована inline panel в чате, AI-подсказка в composer, explainability, pre-send quality check, раздел качества и audit AI-действий accept/edit/reject | Backend-модели подсказок, real-time scoring и оценка эффективности |
 | Proactive invites | Реализованы список правил, visual builder условий, preview приглашения, A/B управление и метрики принятия/конверсии/отказов | Backend delivery, серверные frequency caps, персистентность экспериментов, таргетинг и аналитика эффективности |
@@ -315,9 +316,9 @@ Acceptance criteria:
 - Добавить сохранение шаблона из выделенного фрагмента сообщения.
 - Добавить preview шаблона с подстановкой переменных.
 - Добавить аналитику использования шаблонов по оператору, каналу и тематике.
-- Добавить редактор базы знаний: статьи, черновики, публикация, вложения, публичность/внутренность.
+- Реализовано: редактор базы знаний со статьями, черновиками, публикацией, вложениями, публичностью/внутренностью, версиями и approval history.
 - Добавить вставку статьи или ссылки на статью в ответ оператором.
-- Добавить self-service preview для SDK/виджета.
+- Реализовано: self-service preview для SDK/виджета с поиском публичных статей и переходом к оператору.
 
 Acceptance criteria:
 
@@ -419,7 +420,7 @@ Acceptance criteria:
 - Добавить ручную оценку ответа старшим сотрудником по критериям.
 - Реализовано: AI explainability, почему предложена тематика/ответ/статья.
 - Добавлен audit AI-действий: принять, редактировать, отклонить.
-- Реализовано: встроенный редактор базы знаний со статусом публикации, каналами и preview.
+- Реализовано: встроенный редактор базы знаний со статусом публикации, каналами, версиями, approval history, вложениями и self-service preview.
 - Реализовано: pre-send quality check в composer.
 
 Acceptance criteria:
@@ -499,7 +500,7 @@ Acceptance criteria:
 
 1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; notification center и composer уже вынесены, следующий безопасный кандидат — общий modal/toast слой или таблицы/toolbar из `sections.jsx`.
 2. Вынести общие компоненты `Modal`, `AuditTimeline`, `ActionMenu`; `Toast`, `StatusBadge`, `ToolbarSearch`, `SegmentedControl` и `EntityTable` уже вынесены в `src/ui.jsx`.
-3. Довести базу знаний до расширенного UI: approval history, версии статьи, вложения и preview self-service виджета.
+3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Расширить AI-контур до real-time scoring, операторских подсказок исправления и аналитики эффективности подсказок.
 5. Расширить notification center до push/browser notifications и серверных источников после подключения backend event stream.
 6. Довести QA до production-уровня: keyboard navigation, focus map, visual regression checklist и UI-kit/Storybook при росте компонентной базы.
@@ -588,6 +589,7 @@ Acceptance criteria:
 - [x] Добавить topbar notification center с SLA, mention, channel error, export-ready, фильтрами, подписками и history.
 - [x] Добавить live bot handoff summary в чат оператора.
 - [x] Добавить редактор базы знаний со статусом публикации, каналами и preview.
+- [x] Расширить базу знаний до approval history, версий статьи, вложений и self-service preview.
 - [x] Добавить visual builder proactive-правил с preview и A/B управлением.
 - [ ] Backend integration: proactive delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитика эффективности.
 - [x] Добавить rescue timer в чат и отчет спасенных/пропущенных диалогов.

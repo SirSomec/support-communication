@@ -828,6 +828,13 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
   const [channelTestRecipient, setChannelTestRecipient] = useState("+7 999 000-00-00");
   const [channelTestMessage, setChannelTestMessage] = useState("Тестовое сообщение из панели канала");
   const [channelTestResult, setChannelTestResult] = useState(null);
+  const [sdkPlaygroundEvent, setSdkPlaygroundEvent] = useState(sdkEvents[0][0]);
+  const [sdkPlaygroundEnv, setSdkPlaygroundEnv] = useState("production");
+  const [sdkPlaygroundChannel, setSdkPlaygroundChannel] = useState("SDK");
+  const [sdkPlaygroundUser, setSdkPlaygroundUser] = useState("gig-olga-0940");
+  const [sdkPlaygroundPhone, setSdkPlaygroundPhone] = useState("+7 985 430-09-40");
+  const [sdkPlaygroundMessage, setSdkPlaygroundMessage] = useState("Здравствуйте, проверяем запуск диалога из SDK.");
+  const [sdkPlaygroundResult, setSdkPlaygroundResult] = useState(null);
   const canEditSettings = access.canManageSettings;
   const normalizedTopicQuery = topicQuery.trim().toLowerCase();
   const selectedChannel = channelDetails.find((channel) => channel.id === selectedChannelId) ?? channelDetails[0];
@@ -893,6 +900,59 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
       return severityMatches && connectionMatches;
     });
   }, [channelLogConnection, channelLogSeverity, selectedChannel]);
+
+  const sdkPayloadPreview = useMemo(() => {
+    const base = {
+      appId: sdkPlaygroundEnv === "production" ? "gig-app-prod" : "gig-app-stage",
+      event: sdkPlaygroundEvent,
+      channel: sdkPlaygroundChannel,
+      userId: sdkPlaygroundUser,
+      timestamp: "2026-06-26T12:00:00+03:00"
+    };
+
+    if (sdkPlaygroundEvent === "identifyUser") {
+      return {
+        ...base,
+        payload: {
+          phone: sdkPlaygroundPhone,
+          device: sdkPlaygroundChannel === "SDK" ? "iOS 17" : "external",
+          entryPoint: sdkPlaygroundChannel
+        }
+      };
+    }
+
+    if (sdkPlaygroundEvent === "initConversation") {
+      return {
+        ...base,
+        payload: {
+          phone: sdkPlaygroundPhone,
+          topic: "Оплата / Возврат",
+          message: sdkPlaygroundMessage,
+          operatorId: "auto"
+        }
+      };
+    }
+
+    if (sdkPlaygroundEvent === "trackEntryPoint") {
+      return {
+        ...base,
+        payload: {
+          source: sdkPlaygroundChannel,
+          screen: "order_status",
+          utm: "support_entry"
+        }
+      };
+    }
+
+    return {
+      ...base,
+      payload: {
+        topic: "Оплата / Возврат",
+        requiredForClose: true,
+        source: sdkPlaygroundChannel
+      }
+    };
+  }, [sdkPlaygroundChannel, sdkPlaygroundEnv, sdkPlaygroundEvent, sdkPlaygroundMessage, sdkPlaygroundPhone, sdkPlaygroundUser]);
 
   function toggleChannel(name) {
     setChannels((current) => current.map((channel) => channel.name === name ? { ...channel, enabled: !channel.enabled } : channel));
@@ -984,6 +1044,38 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
       raw: JSON.stringify(raw, null, 2)
     });
     onToast(`${selectedChannel.channel}: тест ${channelTestMode === "receive" ? "приема" : "отправки"} выполнен.`);
+  }
+
+  function handleSdkPlaygroundRun() {
+    if (!canEditSettings) {
+      return;
+    }
+
+    const requiresPhone = ["identifyUser", "initConversation"].includes(sdkPlaygroundEvent);
+    const requiresMessage = sdkPlaygroundEvent === "initConversation";
+    if ((requiresPhone && !sdkPlaygroundPhone.trim()) || (requiresMessage && !sdkPlaygroundMessage.trim())) {
+      setSdkPlaygroundResult({
+        tone: "error",
+        title: "Payload не прошел валидацию",
+        response: "{ \"ok\": false, \"error\": \"phone_or_message_required\" }"
+      });
+      return;
+    }
+
+    const response = {
+      ok: true,
+      event: sdkPlaygroundEvent,
+      environment: sdkPlaygroundEnv,
+      requestId: `sdk_${sdkPlaygroundEvent}_${Date.now().toString().slice(-5)}`,
+      acceptedAt: "2026-06-26T12:00:02+03:00",
+      route: sdkPlaygroundEvent === "initConversation" ? "outbound_queue" : "event_stream"
+    };
+    setSdkPlaygroundResult({
+      tone: "success",
+      title: "Payload принят тестовым стендом",
+      response: JSON.stringify(response, null, 2)
+    });
+    onToast(`SDK playground: ${sdkPlaygroundEvent} выполнен в ${sdkPlaygroundEnv}.`);
   }
 
   return (
@@ -1378,6 +1470,66 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
           <div className="sdk-code">
             <code>{`SupportSDK.init({ appId: "gig-app", channels: ["SDK", "Telegram", "MAX", "VK"] })`}</code>
             <button disabled={!canEditSettings} onClick={() => onToast("SDK snippet скопирован.")} title={canEditSettings ? "Копировать SDK snippet" : access.reason} type="button">Копировать</button>
+          </div>
+          <div className="sdk-playground">
+            <div className="section-title compact-title">
+              <h3>Playground payload</h3>
+              <span>{canEditSettings ? "raw preview и тестовый стенд" : "только администратор"}</span>
+            </div>
+            <div className="sdk-playground-grid">
+              <label>
+                <span>Событие</span>
+                <select disabled={!canEditSettings} value={sdkPlaygroundEvent} onChange={(event) => setSdkPlaygroundEvent(event.target.value)} title={canEditSettings ? "Выберите SDK событие" : access.reason}>
+                  {sdkEvents.map(([event]) => <option value={event} key={event}>{event}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Окружение</span>
+                <select disabled={!canEditSettings} value={sdkPlaygroundEnv} onChange={(event) => setSdkPlaygroundEnv(event.target.value)} title={canEditSettings ? "Выберите окружение" : access.reason}>
+                  <option value="production">production</option>
+                  <option value="stage">stage</option>
+                </select>
+              </label>
+              <label>
+                <span>Канал</span>
+                <select disabled={!canEditSettings} value={sdkPlaygroundChannel} onChange={(event) => setSdkPlaygroundChannel(event.target.value)} title={canEditSettings ? "Выберите канал" : access.reason}>
+                  {["SDK", "Telegram", "MAX", "VK"].map((channel) => <option value={channel} key={channel}>{channel}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>User ID</span>
+                <input disabled={!canEditSettings} value={sdkPlaygroundUser} onChange={(event) => setSdkPlaygroundUser(event.target.value)} title={canEditSettings ? "ID гигера" : access.reason} />
+              </label>
+              <label>
+                <span>Телефон</span>
+                <input disabled={!canEditSettings} value={sdkPlaygroundPhone} onChange={(event) => setSdkPlaygroundPhone(event.target.value)} title={canEditSettings ? "Телефон гигера" : access.reason} />
+              </label>
+              <label className="sdk-message-field">
+                <span>Сообщение</span>
+                <textarea disabled={!canEditSettings} value={sdkPlaygroundMessage} onChange={(event) => setSdkPlaygroundMessage(event.target.value)} title={canEditSettings ? "Текст стартового сообщения" : access.reason} />
+              </label>
+            </div>
+            <div className="sdk-payload-preview">
+              <div>
+                <strong>Raw payload</strong>
+                <code>{JSON.stringify(sdkPayloadPreview, null, 2)}</code>
+              </div>
+              <div>
+                <strong>Response</strong>
+                {sdkPlaygroundResult ? (
+                  <code className={sdkPlaygroundResult.tone}>{sdkPlaygroundResult.response}</code>
+                ) : (
+                  <span>Запустите событие, чтобы увидеть ответ тестового стенда.</span>
+                )}
+              </div>
+            </div>
+            <div className="sdk-playground-actions">
+              {sdkPlaygroundResult ? <span className={sdkPlaygroundResult.tone}>{sdkPlaygroundResult.title}</span> : <span>Payload обновляется при изменении полей.</span>}
+              <button disabled={!canEditSettings} onClick={handleSdkPlaygroundRun} title={canEditSettings ? "Запустить SDK событие" : access.reason} type="button">
+                <PlayCircle size={16} />
+                Запустить событие
+              </button>
+            </div>
           </div>
           <div className="sdk-event-list">
             {sdkEvents.map(([event, description]) => (

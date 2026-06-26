@@ -3103,6 +3103,125 @@ select:disabled {
   display: grid;
 }
 
+.sdk-playground {
+  display: grid;
+  border-bottom: 1px solid var(--line);
+}
+
+.sdk-playground-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sdk-playground-grid label,
+.sdk-message-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sdk-playground-grid span,
+.sdk-playground-actions span,
+.sdk-payload-preview span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.sdk-playground-grid input,
+.sdk-playground-grid select,
+.sdk-playground-grid textarea {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  outline: 0;
+}
+
+.sdk-playground-grid textarea {
+  min-height: 86px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.sdk-message-field {
+  grid-column: span 2;
+}
+
+.sdk-payload-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sdk-payload-preview > div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sdk-payload-preview strong {
+  color: #20304a;
+}
+
+.sdk-payload-preview code {
+  display: block;
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #dce7f5;
+  border-radius: 7px;
+  background: #f8fbff;
+  color: #20304a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.sdk-payload-preview code.error {
+  border-color: #ffd1d5;
+  background: #fff8f8;
+}
+
+.sdk-playground-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.sdk-playground-actions span.success {
+  color: var(--teal);
+}
+
+.sdk-playground-actions span.error {
+  color: var(--red);
+}
+
+.sdk-playground-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #31415b;
+  font-weight: 800;
+}
+
 .sdk-event-row {
   display: grid;
   grid-template-columns: 24px minmax(120px, 0.45fr) minmax(0, 1fr);
@@ -4173,7 +4292,9 @@ textarea:focus-visible {
   .connection-row,
   .channel-log-toolbar,
   .channel-log-row,
-  .channel-test-grid {
+  .channel-test-grid,
+  .sdk-playground-grid,
+  .sdk-payload-preview {
     grid-template-columns: 1fr;
   }
 
@@ -4208,8 +4329,18 @@ textarea:focus-visible {
   }
 
   .channel-detail-head button,
-  .channel-test-grid button {
+  .channel-test-grid button,
+  .sdk-playground-actions button {
     width: 100%;
+  }
+
+  .sdk-message-field {
+    grid-column: auto;
+  }
+
+  .sdk-playground-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .template-card {

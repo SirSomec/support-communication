@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BookOpen,
-  Bot,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -32,7 +31,6 @@ import {
   aiActionLabels,
   createAuditEvent,
   createComposerAttachment,
-  dialogActionConfigs,
   formatRescueTimer,
   getAiSuggestionDraft,
   getAiSuggestionMode,
@@ -49,8 +47,9 @@ import {
   statusLabels
 } from "./app/dialogModel.js";
 import { useModalA11y } from "./app/useModalA11y.js";
-import { AttachmentPreview } from "./features/dialogs/AttachmentPreview.jsx";
+import { AuditTimeline, BotHandoffSummary } from "./features/dialogs/AuditTimeline.jsx";
 import { Composer } from "./features/dialogs/Composer.jsx";
+import { DialogActionMenu } from "./features/dialogs/DialogActionMenu.jsx";
 import { NotificationCenter } from "./features/notifications/NotificationCenter.jsx";
 import { SectionPlaceholder } from "./features/section-router.jsx";
 import { StatusBadge, Toast } from "./ui.jsx";
@@ -1241,7 +1240,6 @@ function ChatPane({
 }) {
   const [isActionPanelOpen, setActionPanelOpen] = useState(false);
   const [rescueNow, setRescueNow] = useState(Date.now());
-  const statusMeta = getStatusMeta(status);
   const activeRescue = conversation.rescue?.state === "active" && !isClosed ? conversation.rescue : null;
   const rescueRemainingSeconds = activeRescue ? getRescueRemainingSeconds(activeRescue, rescueNow) : 0;
   const isRescueExpired = Boolean(activeRescue && rescueRemainingSeconds === 0);
@@ -1251,17 +1249,6 @@ function ChatPane({
     received: [conversation.phone, conversation.topic || "тематика не выбрана", conversation.entry],
     reason: conversation.slaTone === "danger" ? "бот передал из-за SLA-риска" : "бот передал после запроса человека"
   };
-  const visibleMessages = conversation.messages.filter((message) => {
-    if (transcriptMode === "internal") {
-      return message.type === "internal";
-    }
-
-    if (transcriptMode === "events") {
-      return message.type === "event";
-    }
-
-    return true;
-  });
 
   useEffect(() => {
     if (!activeRescue) {
@@ -1296,32 +1283,16 @@ function ChatPane({
           <button aria-label="Информация" title="Информация" type="button"><Info size={20} /></button>
         </div>
         {isActionPanelOpen ? (
-          <div className="chat-action-menu">
-            <div className="chat-action-status">
-              <span>Текущий статус</span>
-              <strong>{statusMeta.label}</strong>
-            </div>
-            {!access.canManageDialogs ? <p className="disabled-reason">{access.reason}</p> : null}
-            {dialogActionConfigs.map((action) => {
-              const rescueAlreadyActive = action.id === "rescue" && Boolean(activeRescue);
-              const actionDisabled = isClosed || !access.canManageDialogs || rescueAlreadyActive;
-
-              return (
-                <button
-                  disabled={actionDisabled}
-                  key={action.title}
-                  onClick={() => {
-                    onDialogAction(action);
-                    setActionPanelOpen(false);
-                  }}
-                  type="button"
-                >
-                  <strong>{action.title}</strong>
-                  <span>{rescueAlreadyActive ? "Rescue timer уже запущен" : action.description}</span>
-                </button>
-              );
-            })}
-          </div>
+          <DialogActionMenu
+            access={access}
+            activeRescue={activeRescue}
+            isClosed={isClosed}
+            onAction={(action) => {
+              onDialogAction(action);
+              setActionPanelOpen(false);
+            }}
+            status={status}
+          />
         ) : null}
         <label className="status-select-inline">
           <span>Статус:</span>
@@ -1387,35 +1358,9 @@ function ChatPane({
           Для закрытия выберите тематику. Это правило действует во всех ролях и каналах.
         </div>
       ) : null}
-      <section className="bot-handoff-summary" aria-label="Резюме бота перед передачей оператору">
-        <header>
-          <Bot size={17} />
-          <strong>Handoff summary: {botHandoffSummary.scenario}</strong>
-          <span>{botHandoffSummary.reason}</span>
-        </header>
-        <div>
-          <span>
-            <b>Бот спросил</b>
-            {botHandoffSummary.asked.join(", ")}
-          </span>
-          <span>
-            <b>Получено</b>
-            {botHandoffSummary.received.join(" · ")}
-          </span>
-          <span>
-            <b>Дальше</b>
-            Ответить оператору без повторного сбора данных
-          </span>
-        </div>
-      </section>
+      <BotHandoffSummary summary={botHandoffSummary} />
 
-      <div className="chat-transcript">
-        <div className="day-divider">Сегодня</div>
-        {visibleMessages.map((message) => (
-          <MessageBubble key={message.id} message={message} onSaveTemplate={onSaveTemplate} />
-        ))}
-        {!visibleMessages.length ? <div className="empty-transcript">Нет записей для выбранного фильтра</div> : null}
-      </div>
+      <AuditTimeline messages={conversation.messages} onSaveTemplate={onSaveTemplate} transcriptMode={transcriptMode} />
 
       <Composer
         mode={composeMode}
@@ -1435,90 +1380,6 @@ function ChatPane({
         disabled={isClosed}
       />
     </section>
-  );
-}
-
-function MessageBubble({ message, onSaveTemplate }) {
-  if (message.type === "event") {
-    return <AuditEventCard message={message} />;
-  }
-
-  if (message.type === "internal") {
-    return (
-      <article className="internal-note">
-        <strong>Внутренний комментарий</strong>
-        <p>{message.text}</p>
-        {message.attachments?.length ? (
-          <div className="message-attachments">
-            {message.attachments.map((attachment) => (
-              <AttachmentPreview attachment={attachment} compact key={attachment.id} />
-            ))}
-          </div>
-        ) : null}
-        <footer>
-          <span>{message.author}</span>
-          <time>{message.time}</time>
-        </footer>
-      </article>
-    );
-  }
-
-  return (
-    <article className={`message-bubble ${message.side}`}>
-      <p>{message.text}</p>
-      {message.attachments?.length ? (
-        <div className="message-attachments">
-          {message.attachments.map((attachment) => (
-            <AttachmentPreview attachment={attachment} compact key={attachment.id} />
-          ))}
-        </div>
-      ) : null}
-      <footer>
-        {message.side === "agent" ? (
-          <button
-            aria-label="Сохранить сообщение как шаблон"
-            onClick={() => onSaveTemplate(message.text)}
-            title="Сохранить как шаблон"
-            type="button"
-          >
-            <BookOpen size={14} />
-          </button>
-        ) : null}
-        <time>{message.time}</time>
-      </footer>
-    </article>
-  );
-}
-
-function AuditEventCard({ message }) {
-  const fromStatusLabel = message.fromStatus ? statusLabels[message.fromStatus] ?? message.fromStatus : "";
-  const toStatusLabel = message.toStatus ? statusLabels[message.toStatus] ?? message.toStatus : "";
-
-  return (
-    <article className={`audit-event-card ${message.eventKind ?? "legacy"}`}>
-      <header>
-        <span>{message.eventKind ? "Audit" : "Событие"}</span>
-        <time>{message.time}</time>
-      </header>
-      <p>{message.detail ?? message.text}</p>
-      <footer>
-        {message.actor ? <span>{message.actor}</span> : null}
-        {fromStatusLabel || toStatusLabel ? (
-          <b>
-            {fromStatusLabel ? <i>{fromStatusLabel}</i> : null}
-            {fromStatusLabel && toStatusLabel ? " -> " : null}
-            {toStatusLabel ? <i>{toStatusLabel}</i> : null}
-          </b>
-        ) : null}
-        {message.fromTopic || message.toTopic ? (
-          <b>
-            {message.fromTopic ? <i>{message.fromTopic}</i> : null}
-            {message.fromTopic && message.toTopic ? " -> " : null}
-            {message.toTopic ? <i>{message.toTopic}</i> : null}
-          </b>
-        ) : null}
-      </footer>
-    </article>
   );
 }
 

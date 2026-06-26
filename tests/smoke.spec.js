@@ -90,6 +90,25 @@ test("customer panel masks phone for employee role", async ({ page }) => {
   await expectHealthyPage(page);
 });
 
+test("outbound SDK dialog can be created from quick actions", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+
+  await page.locator(".quick-action").click();
+  await expect(page.getByRole("dialog", { name: "Новый исходящий диалог" })).toBeVisible();
+  await expect(page.locator(".outbound-panel")).toHaveAttribute("aria-modal", "true");
+
+  await page.locator(".outbound-grid input").first().fill("+7 999 777-66-55");
+  await page.locator(".outbound-grid input").nth(1).fill("Тестовый клиент");
+  await page.locator(".outbound-message textarea").fill("Здравствуйте! Проверяем исходящий SDK диалог.");
+  await page.locator(".outbound-panel > footer button").filter({ hasText: "Создать диалог" }).click();
+
+  await expect(page.locator(".toast")).toContainText("Исходящий диалог создан: +7 999 777-66-55");
+  await expect(page.locator(".chat-identity")).toContainText("Тестовый клиент");
+  await expect(page.locator(".customer-panel")).toContainText("+7 999 777-66-55");
+  await expectHealthyPage(page);
+});
+
 test("topbar notifications and live bot handoff summary are actionable", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");
@@ -141,6 +160,29 @@ test("composer save-template modal keeps dialog semantics", async ({ page }) => 
   await expect(page.locator(".template-save-text textarea")).toHaveValue(/client_name/);
   await page.locator(".template-save-panel > footer button").filter({ hasText: "Сохранить шаблон" }).click();
   await expect(page.locator(".toast")).toContainText("Шаблон сохранен");
+  await expectHealthyPage(page);
+});
+
+test("draft switch warning preserves or discards unsent draft", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+
+  await page.locator(".composer textarea").fill("Черновик перед переключением");
+  await page.locator(".queue-row").filter({ hasText: "Владимир Б." }).click();
+
+  await expect(page.getByRole("dialog", { name: "Перейти в другой диалог?" })).toBeVisible();
+  await expect(page.locator(".draft-switch-panel")).toContainText("Черновик перед переключением");
+  await page.locator(".draft-switch-panel > footer button").filter({ hasText: "Остаться" }).click();
+  await expect(page.locator(".draft-switch-panel")).toHaveCount(0);
+  await expect(page.locator(".chat-identity")).toContainText("Мария К.");
+  await expect(page.locator(".composer textarea")).toHaveValue("Черновик перед переключением");
+
+  await page.locator(".queue-row").filter({ hasText: "Владимир Б." }).click();
+  await expect(page.getByRole("dialog", { name: "Перейти в другой диалог?" })).toBeVisible();
+  await page.locator(".draft-switch-panel > footer button").filter({ hasText: "Сбросить и перейти" }).click();
+  await expect(page.locator(".draft-switch-panel")).toHaveCount(0);
+  await expect(page.locator(".chat-identity")).toContainText("Владимир Б.");
+  await expect(page.locator(".composer textarea")).toHaveValue("");
   await expectHealthyPage(page);
 });
 

@@ -148,6 +148,15 @@ test("topbar notifications and live bot handoff summary are actionable", async (
   await page.locator(".notification-filters button").filter({ hasText: "Все" }).click();
   await page.locator(".notification-settings label").filter({ hasText: "Channel errors" }).locator("input").uncheck();
   await expect(page.locator(".notification-groups")).toContainText("выключено");
+  await page.locator(".browser-push-card button").click();
+  await expect(page.locator(".browser-push-card")).toContainText("Включено");
+  await expect(page.locator(".toast")).toContainText("Browser push включен");
+  await page.locator(".notification-sound-rules label").filter({ hasText: "Ошибки каналов" }).locator("input").uncheck();
+  await expect(page.locator(".notification-sound-rules label").filter({ hasText: "Ошибки каналов" }).locator("input")).not.toBeChecked();
+  await page.locator(".notification-external-channels label").filter({ hasText: "Email digest" }).locator("input").check();
+  await expect(page.locator(".notification-external-channels label").filter({ hasText: "Email digest" }).locator("input")).toBeChecked();
+  await page.locator(".notification-test-route").click();
+  await expect(page.locator(".toast")).toContainText("внешних каналов получат тест critical alert");
   await page.locator(".notification-item").filter({ hasText: "Ежедневный отчет готов" }).getByRole("button", { name: "Скачать" }).click();
   await expect(page.locator(".toast")).toContainText("Export: Скачать");
   await page.getByRole("button", { name: "Уведомления" }).click();

@@ -61,6 +61,18 @@ export const notificationSubscriptionOptions = [
   { id: "export", label: "Exports", description: "Готовность, ошибки и истечение файлов" }
 ];
 
+export const notificationSoundRules = [
+  { id: "sound-sla", typeKey: "sla", label: "SLA и rescue", description: "Короткий сигнал для просрочек и спасения" },
+  { id: "sound-channel", typeKey: "channel", label: "Ошибки каналов", description: "Отдельный тон для webhook/token ошибок" },
+  { id: "sound-mention", typeKey: "mention", label: "Упоминания", description: "Мягкий сигнал без перебивания ввода" }
+];
+
+export const externalCriticalChannels = [
+  { id: "admin-telegram", label: "Admin Telegram", detail: "Критичные webhook/security события" },
+  { id: "email-digest", label: "Email digest", detail: "Сводка ошибок за 15 минут" },
+  { id: "incident-webhook", label: "Incident webhook", detail: "POST в внешний мониторинг" }
+];
+
 export function filterNotifications(items, filter, readIds, mutedTypes) {
   return items.filter((item) => {
     if (mutedTypes.includes(item.typeKey)) {

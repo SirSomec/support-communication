@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { Bell } from "lucide-react";
 import {
+  externalCriticalChannels,
   filterNotifications,
   getNotificationGroupSummary,
   notificationFilterOptions,
   notificationItems,
+  notificationSoundRules,
   notificationSubscriptionOptions
 } from "../../app/notificationModel.js";
 
@@ -13,6 +15,9 @@ export function NotificationCenter({ activeSection, onToast }) {
   const [readNotificationIds, setReadNotificationIds] = useState([]);
   const [notificationFilter, setNotificationFilter] = useState("all");
   const [mutedNotificationTypes, setMutedNotificationTypes] = useState([]);
+  const [isBrowserPushEnabled, setBrowserPushEnabled] = useState(false);
+  const [mutedSoundRuleIds, setMutedSoundRuleIds] = useState([]);
+  const [enabledExternalChannelIds, setEnabledExternalChannelIds] = useState(["admin-telegram", "incident-webhook"]);
   const subscribedNotifications = notificationItems.filter((item) => !mutedNotificationTypes.includes(item.typeKey));
   const unreadNotifications = subscribedNotifications.filter((item) => !readNotificationIds.includes(item.id));
   const visibleNotifications = filterNotifications(
@@ -41,6 +46,18 @@ export function NotificationCenter({ activeSection, onToast }) {
     if (notificationFilter === typeKey) {
       setNotificationFilter("all");
     }
+  }
+
+  function toggleSoundRule(ruleId) {
+    setMutedSoundRuleIds((current) =>
+      current.includes(ruleId) ? current.filter((item) => item !== ruleId) : [...current, ruleId]
+    );
+  }
+
+  function toggleExternalChannel(channelId) {
+    setEnabledExternalChannelIds((current) =>
+      current.includes(channelId) ? current.filter((item) => item !== channelId) : [...current, channelId]
+    );
   }
 
   return (
@@ -134,6 +151,53 @@ export function NotificationCenter({ activeSection, onToast }) {
                 </span>
               </label>
             ))}
+          </div>
+          <div className="notification-delivery-settings" aria-label="Push, звук и внешние каналы">
+            <strong>Доставка</strong>
+            <article className="browser-push-card">
+              <span>
+                <b>Browser push</b>
+                <small>{isBrowserPushEnabled ? "Включено для SLA, channel errors и export-ready" : "Ожидает разрешения браузера"}</small>
+              </span>
+              <button
+                onClick={() => {
+                  setBrowserPushEnabled((current) => !current);
+                  onToast(isBrowserPushEnabled ? "Browser push выключен." : "Browser push включен для критичных событий.");
+                }}
+                type="button"
+              >
+                {isBrowserPushEnabled ? "Выключить" : "Включить"}
+              </button>
+            </article>
+            <div className="notification-sound-rules">
+              {notificationSoundRules.map((rule) => (
+                <label key={rule.id}>
+                  <input checked={!mutedSoundRuleIds.includes(rule.id)} onChange={() => toggleSoundRule(rule.id)} type="checkbox" />
+                  <span>
+                    <b>{rule.label}</b>
+                    <small>{rule.description}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="notification-external-channels">
+              {externalCriticalChannels.map((channel) => (
+                <label key={channel.id}>
+                  <input checked={enabledExternalChannelIds.includes(channel.id)} onChange={() => toggleExternalChannel(channel.id)} type="checkbox" />
+                  <span>
+                    <b>{channel.label}</b>
+                    <small>{channel.detail}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <button
+              className="notification-test-route"
+              onClick={() => onToast(`${enabledExternalChannelIds.length} внешних каналов получат тест critical alert.`)}
+              type="button"
+            >
+              Тест critical alert
+            </button>
           </div>
           <div className="notification-history" aria-label="История уведомлений">
             <strong>История</strong>

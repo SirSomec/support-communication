@@ -1,9 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { roleAccessProfiles } from "./app/access.js";
 import {
   aiActionLabels,
   createAuditEvent,
-  createComposerAttachment,
   formatRescueTimer,
   getAiSuggestionDraft,
   getAiSuggestionMode,
@@ -12,11 +11,11 @@ import {
   queueFilterDefaults,
   queueSlaTones,
   queueWaitingStatuses,
-  releaseAttachmentPreviews,
   rescueDurationSeconds,
   slaSortRank,
   statusLabels
 } from "./app/dialogModel.js";
+import { useComposerAttachments } from "./app/useComposerAttachments.js";
 import { ChatPane } from "./features/dialogs/ChatPane.jsx";
 import { ConversationList } from "./features/dialogs/ConversationList.jsx";
 import { CustomerPanel } from "./features/dialogs/CustomerPanel.jsx";
@@ -41,8 +40,6 @@ function App() {
   const [composeMode, setComposeMode] = useState("reply");
   const [transcriptMode, setTranscriptMode] = useState("all");
   const [draft, setDraft] = useState("");
-  const [attachments, setAttachments] = useState([]);
-  const attachmentsRef = useRef([]);
   const [pendingConversationId, setPendingConversationId] = useState(null);
   const [isOutboundOpen, setOutboundOpen] = useState(false);
   const [templateLibrary, setTemplateLibrary] = useState(initialTemplates);
@@ -53,6 +50,15 @@ function App() {
   );
   const [closedIds, setClosedIds] = useState(() => new Set(conversations.filter((item) => item.status === "closed").map((item) => item.id)));
   const [toast, setToast] = useState("");
+  const {
+    addFiles: addAttachments,
+    attachments,
+    clearAttachments,
+    completeAttachment: handleCompleteAttachment,
+    hasAttachments,
+    removeAttachment: handleRemoveAttachment,
+    retryAttachment: handleRetryAttachment
+  } = useComposerAttachments();
 
   const selected = conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0];
   const pendingConversation = pendingConversationId
@@ -62,7 +68,7 @@ function App() {
   const selectedTopic = topics[selected.id] ?? "";
   const selectedStatus = selected.status ?? "active";
   const isClosed = closedIds.has(selected.id) || selectedStatus === "closed";
-  const hasUnsentComposerContent = Boolean(draft.trim() || attachments.length);
+  const hasUnsentComposerContent = Boolean(draft.trim() || hasAttachments);
   const visibleAiSuggestions = aiSuggestions
     .filter((suggestion) => suggestion.conversationId === selected.id && aiSuggestionStates[suggestion.id] !== "rejected")
     .map((suggestion) => ({
@@ -80,34 +86,6 @@ function App() {
       setOutboundOpen(false);
     }
   }, [access, isOutboundOpen, roleMode, section]);
-
-  useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
-
-  useEffect(() => () => releaseAttachmentPreviews(attachmentsRef.current), []);
-
-  useEffect(() => {
-    if (!attachments.some((attachment) => attachment.status === "uploading")) {
-      return undefined;
-    }
-
-    const timer = window.setTimeout(() => {
-      setAttachments((current) =>
-        current.map((attachment) =>
-          attachment.status === "uploading"
-            ? {
-                ...attachment,
-                status: "ready",
-                progress: 100
-              }
-            : attachment
-        )
-      );
-    }, 1200);
-
-    return () => window.clearTimeout(timer);
-  }, [attachments]);
 
   const filtered = useMemo(() => {
     return conversationItems
@@ -193,63 +171,16 @@ function App() {
 
     setSelectedId(pendingConversationId);
     setDraft("");
-    releaseAttachmentPreviews(attachments);
-    setAttachments([]);
+    clearAttachments();
     setPendingConversationId(null);
     setToast("Черновик и очередь вложений сброшены.");
   }
 
   function handleAttachFiles(fileList) {
-    const files = Array.from(fileList ?? []);
-
-    if (!files.length) {
-      return;
+    const added = addAttachments(fileList, selected.channel);
+    if (added) {
+      setToast(`Вложения добавлены в очередь: ${added}`);
     }
-
-    setAttachments((current) => [
-      ...current,
-      ...files.map((file, index) => createComposerAttachment(file, index, selected.channel))
-    ]);
-    setToast(`Вложения добавлены в очередь: ${files.length}`);
-  }
-
-  function handleCompleteAttachment(attachmentId) {
-    setAttachments((current) =>
-      current.map((attachment) =>
-        attachment.id === attachmentId
-          ? {
-              ...attachment,
-              status: "ready",
-              progress: 100,
-              error: ""
-            }
-          : attachment
-      )
-    );
-  }
-
-  function handleRetryAttachment(attachmentId) {
-    setAttachments((current) =>
-      current.map((attachment) =>
-        attachment.id === attachmentId
-          ? {
-              ...attachment,
-              status: "uploading",
-              progress: 54,
-              error: ""
-            }
-          : attachment
-      )
-    );
-  }
-
-  function handleRemoveAttachment(attachmentId) {
-    const removed = attachments.find((attachment) => attachment.id === attachmentId);
-    if (removed) {
-      releaseAttachmentPreviews([removed]);
-    }
-
-    setAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
   }
 
   function handleOutboundCreate(outbound) {
@@ -284,8 +215,7 @@ function App() {
     setTopics((current) => ({ ...current, [id]: outbound.topic }));
     setSelectedId(id);
     setDraft("");
-    releaseAttachmentPreviews(attachments);
-    setAttachments([]);
+    clearAttachments();
     setSection("dialogs");
     setOutboundOpen(false);
     setToast(`Исходящий диалог создан: ${outbound.phone}`);
@@ -593,7 +523,7 @@ function App() {
       time: "сейчас"
     });
     setDraft("");
-    setAttachments([]);
+    clearAttachments({ releasePreviews: false });
     setToast(composeMode === "internal" ? "Внутренний комментарий сохранен в истории чата." : "Ответ отправлен клиенту.");
   }
 

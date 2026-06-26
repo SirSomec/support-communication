@@ -198,6 +198,27 @@ test("composer save-template modal keeps dialog semantics", async ({ page }) => 
   await expectHealthyPage(page);
 });
 
+test("composer attachment queue sends ready files", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+
+  await page.getByLabel("Выбор вложений").setInputFiles({
+    name: "receipt.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("test attachment")
+  });
+  await expect(page.locator(".toast")).toContainText("Вложения добавлены в очередь: 1");
+  await expect(page.locator(".attachment-queue")).toContainText("receipt.pdf");
+  await page.locator(".attachment-card").filter({ hasText: "receipt.pdf" }).getByRole("button", { name: "Завершить" }).click();
+  await expect(page.locator(".attachment-card").filter({ hasText: "receipt.pdf" })).toContainText("Готово");
+
+  await page.locator(".send-button").click();
+  await expect(page.locator(".attachment-queue")).toHaveCount(0);
+  await expect(page.locator(".chat-transcript")).toContainText("receipt.pdf");
+  await expect(page.locator(".toast")).toContainText("Ответ отправлен клиенту.");
+  await expectHealthyPage(page);
+});
+
 test("draft switch warning preserves or discards unsent draft", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");

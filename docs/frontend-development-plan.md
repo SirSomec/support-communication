@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.13
+Версия: 2.14
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса notification center, ConversationList, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса notification center, ConversationList, ChatPane, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -26,7 +26,7 @@
 - React 19 + Vite.
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
-- Основной cockpit пока находится в `src/App.jsx`, но notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, ConversationList, composer/AI panel/attachment preview/ChatHeader/TranscriptToolbar/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
+- Основной cockpit пока находится в `src/App.jsx`, но notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, ConversationList, ChatPane, composer/AI panel/attachment preview/ChatHeader/TranscriptToolbar/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
 - Продуктовые разделы находятся в `src/sections.jsx`; маршрутизация разделов вынесена в `src/features/section-router.jsx`, расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`, а AI scoring/coaching workspace — в `src/features/quality/AiQualityWorkspace.jsx`.
 - Общие UI-примитивы, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable вынесены в `src/ui.jsx`.
 - Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
@@ -213,7 +213,7 @@
 - Модель уведомлений вынесена в `src/app/notificationModel.js`.
 - Правила AI explainability и pre-send quality check вынесены в `src/app/aiQualityModel.js`.
 - Topbar notification center вынесен в `src/features/notifications/NotificationCenter.jsx` без изменения CSS-контрактов и smoke-селекторов.
-- ConversationList/TabButton, Composer, inline AI panel и attachment preview вынесены в `src/features/dialogs/*` без изменения CSS-контрактов и smoke-селекторов.
+- ConversationList/TabButton, ChatPane, Composer, inline AI panel и attachment preview вынесены в `src/features/dialogs/*` без изменения CSS-контрактов и smoke-селекторов.
 - Toast вынесен в `src/ui.jsx` и получил `aria-live="polite"`/`role="status"`.
 - StatusBadge вынесен в `src/ui.jsx`; все текущие `status-chip` JSX-вхождения используют единый компонент.
 - ToolbarSearch вынесен в `src/ui.jsx`; текущие `toolbar-search` JSX-вхождения используют единый компонент.
@@ -503,7 +503,7 @@ Acceptance criteria:
 
 ### 7.1. Frontend UI и архитектура
 
-1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; notification center, ConversationList, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar и Modal уже вынесены, следующий безопасный кандидат — `ChatPane` или таблицы/toolbar из `sections.jsx`.
+1. Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям без изменения поведения; notification center, ConversationList, ChatPane, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar и Modal уже вынесены, следующий безопасный кандидат — `CustomerPanel`/панель клиента или таблицы/toolbar из `sections.jsx`.
 2. Реализовано: общий `Modal`; `Toast`, `StatusBadge`, `ToolbarSearch`, `SegmentedControl`, `EntityTable` и `Modal` уже вынесены в `src/ui.jsx`, `DialogActionMenu` и `AuditTimeline` — в `src/features/dialogs/*`.
 3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Реализовано во frontend: AI real-time scoring, операторские подсказки исправления и аналитика эффективности подсказок. Осталось подключить production scoring service, реальные repair actions и backend-телеметрию.
@@ -522,7 +522,8 @@ Acceptance criteria:
 8. Довести rescue до production-контура: серверный countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
 9. Довести proactive до production-контура: backend delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитику эффективности.
 10. Довести ботов до production-контура: backend runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
-11. Добавить backend partial/loading/error states после сервисного слоя.
+11. Синхронизировать live bot handoff summary с текущей выбранной тематикой из `topics` state, а не только с seed-значением диалога.
+12. Добавить backend partial/loading/error states после сервисного слоя.
 
 ## 8. QA-gates для каждой frontend-итерации
 
@@ -581,6 +582,7 @@ Acceptance criteria:
 - [x] Вынести DialogActionMenu и AuditTimeline из `src/App.jsx` в `src/features/dialogs/*`.
 - [x] Вынести ChatHeader, TranscriptToolbar и Avatar из `src/App.jsx` в `src/features/dialogs/*`.
 - [x] Вынести ConversationList и TabButton из `src/App.jsx` в `src/features/dialogs/*`.
+- [x] Вынести ChatPane из `src/App.jsx` в `src/features/dialogs/*`.
 - [ ] Продолжить разнос `App.jsx`, `sections.jsx` и `styles.css` по feature-модулям.
 - [x] Добавить расширенные фильтры и сортировки очереди диалогов.
 - [x] Добавить полноценные статусы обращения и audit timeline.

@@ -32,7 +32,7 @@ import {
   Workflow,
   Zap
 } from "lucide-react";
-import { ChannelBadge, ChannelList, MetricTile, Permission, ProductScreen, SectionTitle, StatusBadge, ToolbarSearch } from "./ui.jsx";
+import { ChannelBadge, ChannelList, MetricTile, Permission, ProductScreen, SectionTitle, SegmentedControl, StatusBadge, ToolbarSearch } from "./ui.jsx";
 import {
   activeVisitors,
   aiSuggestions,
@@ -2045,18 +2045,12 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
           <strong>Проверка интерфейса по роли</strong>
           <span>{canEditSettings ? "Полный доступ к общим настройкам" : "Общие настройки доступны только на чтение"}</span>
         </div>
-        <div className="segmented-control" role="group" aria-label="Текущая роль">
-          {["Сотрудник", "Старший сотрудник", "Администратор"].map((role) => (
-              <button
-                className={roleMode === role ? "active" : ""}
-                key={role}
-                onClick={() => onRoleMode(role)}
-                type="button"
-              >
-              {role}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          ariaLabel="Текущая роль"
+          options={["Сотрудник", "Старший сотрудник", "Администратор"]}
+          value={roleMode}
+          onChange={onRoleMode}
+        />
       </div>
 
       <div className="settings-layout">
@@ -2277,19 +2271,13 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
             value={topicQuery}
             onChange={setTopicQuery}
           />
-          <div className="segmented-control topic-filter" role="group" aria-label="Статус тематики">
-            {topicStatusFilters.map((filter) => (
-              <button
-                aria-pressed={topicStatusFilter === filter}
-                className={topicStatusFilter === filter ? "active" : ""}
-                key={filter}
-                onClick={() => setTopicStatusFilter(filter)}
-                type="button"
-              >
-                {filter}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            ariaLabel="Статус тематики"
+            className="topic-filter"
+            options={topicStatusFilters}
+            value={topicStatusFilter}
+            onChange={setTopicStatusFilter}
+          />
           <button
             className="topic-add-button"
             disabled={!canEditSettings}

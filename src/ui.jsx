@@ -109,3 +109,26 @@ export function ToolbarSearch({ ariaLabel, className = "", iconSize = 18, onChan
     </label>
   );
 }
+
+export function SegmentedControl({ ariaLabel, className = "", onChange, options, value }) {
+  return (
+    <div className={["segmented-control", className].filter(Boolean).join(" ")} role="group" aria-label={ariaLabel}>
+      {options.map((option) => {
+        const optionValue = typeof option === "string" ? option : option.value;
+        const label = typeof option === "string" ? option : option.label;
+
+        return (
+          <button
+            aria-pressed={value === optionValue}
+            className={value === optionValue ? "active" : ""}
+            key={optionValue}
+            onClick={() => onChange(optionValue)}
+            type="button"
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

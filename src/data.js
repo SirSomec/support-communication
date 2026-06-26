@@ -838,32 +838,48 @@ export const employeeChannelRules = [
     id: "rule-ivan",
     employee: "Иван П.",
     role: "Сотрудник",
+    group: "1-я линия",
     channels: ["SDK", "Telegram"],
     chatLimit: 12,
     exceptions: ["Можно принимать VIP сверх лимита с подтверждением старшего"],
     canOverride: false,
-    sensitiveData: false
+    sensitiveData: false,
+    passwordStatus: "Активен",
+    lastLogin: "Сегодня, 11:48"
   },
   {
     id: "rule-anna",
     employee: "Анна Р.",
     role: "Старший сотрудник",
+    group: "Старшие смены",
     channels: ["MAX", "VK", "Telegram"],
     chatLimit: 10,
     exceptions: ["Может перераспределять очередь VK", "Может сбрасывать пароль сотруднику"],
     canOverride: true,
-    sensitiveData: true
+    sensitiveData: true,
+    passwordStatus: "Требует смены через 9 дней",
+    lastLogin: "Сегодня, 12:02"
   },
   {
     id: "rule-admin",
     employee: "Администратор",
     role: "Администратор",
+    group: "Администраторы",
     channels: ["SDK", "Telegram", "MAX", "VK"],
     chatLimit: 30,
     exceptions: ["Полный доступ к настройкам каналов и аудиту"],
     canOverride: true,
-    sensitiveData: true
+    sensitiveData: true,
+    passwordStatus: "MFA включена",
+    lastLogin: "Сегодня, 12:16"
   }
+];
+
+export const employeeGroups = [
+  { id: "line-1", name: "1-я линия", members: 18, scope: "SDK, Telegram" },
+  { id: "senior-shifts", name: "Старшие смены", members: 5, scope: "Очереди, пароли, перераспределение" },
+  { id: "finance", name: "Финансы", members: 4, scope: "Возвраты и платежи" },
+  { id: "admins", name: "Администраторы", members: 3, scope: "Полные настройки" }
 ];
 
 export const proactiveRules = [

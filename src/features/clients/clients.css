@@ -19,6 +19,143 @@
   box-shadow: inset 3px 0 0 var(--blue);
 }
 
+.client-detail-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.client-profile-head {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.client-profile-head .avatar {
+  width: 48px;
+  height: 48px;
+}
+
+.client-profile-head div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.client-profile-head strong,
+.client-profile-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-profile-head strong {
+  color: #16243b;
+  font-size: 17px;
+}
+
+.client-profile-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-stack.compact {
+  gap: 8px;
+}
+
+.client-privacy-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px solid #d7e6fb;
+  border-radius: 7px;
+  background: #f8fbff;
+  color: #536179;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.duplicate-list,
+.client-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.duplicate-row,
+.client-history-list article {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.duplicate-row.merged {
+  border-color: #a9dec1;
+  background: #f2fbf6;
+}
+
+.duplicate-row header,
+.duplicate-row footer,
+.client-history-list article {
+  min-width: 0;
+}
+
+.duplicate-row header,
+.duplicate-row footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.duplicate-row strong,
+.duplicate-row span,
+.duplicate-row small,
+.client-history-list strong,
+.client-history-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicate-row b {
+  color: var(--blue);
+  font-size: 12px;
+}
+
+.duplicate-row span,
+.duplicate-row small,
+.client-history-list span,
+.client-history-list time {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.duplicate-row button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #31415b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.client-history-list article {
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
 @media (max-width: 1180px) {
   .clients-table .entity-head,
   .clients-table .entity-row {
@@ -28,6 +165,10 @@
 
 @media (max-width: 820px) {
   .clients-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .client-history-list article {
     grid-template-columns: 1fr;
   }
 }

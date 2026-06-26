@@ -2,12 +2,12 @@ import React from "react";
 import { Bot, ChevronLeft, Clock3, Gauge, Inbox, Plus, SlidersHorizontal } from "lucide-react";
 import { ClientsScreen } from "./clients/ClientsScreen.jsx";
 import { ReportsScreen } from "./reports/ReportsScreen.jsx";
+import { TemplatesScreen } from "./templates/TemplatesScreen.jsx";
 import {
   AutomationScreen,
   PanelScreen,
   QualityScreen,
   SettingsScreen,
-  TemplatesScreen,
   VisitorsScreen
 } from "../sections.jsx";
 

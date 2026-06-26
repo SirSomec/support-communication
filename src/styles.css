@@ -591,40 +591,6 @@ select:disabled {
   color: #1857b4;
 }
 
-.status-chip {
-  display: inline-flex;
-  width: max-content;
-  max-width: 100%;
-  align-items: center;
-  min-height: 20px;
-  padding: 2px 7px;
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 850;
-  line-height: 1;
-}
-
-.status-chip.ok,
-.status-chip.info {
-  background: #e7f7ef;
-  color: #0d7a52;
-}
-
-.status-chip.hold {
-  background: #fff4d9;
-  color: #98610d;
-}
-
-.status-chip.warn {
-  background: #fff0e5;
-  color: #b45e1b;
-}
-
-.status-chip.closed {
-  background: #edf1f6;
-  color: #647087;
-}
-
 .queue-preview {
   display: -webkit-box;
   overflow: hidden;

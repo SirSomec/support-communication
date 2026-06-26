@@ -32,7 +32,7 @@ import {
   Workflow,
   Zap
 } from "lucide-react";
-import { ChannelBadge, ChannelList, MetricTile, Permission, ProductScreen, SectionTitle, SegmentedControl, StatusBadge, ToolbarSearch } from "./ui.jsx";
+import { ChannelBadge, ChannelList, EntityTable, MetricTile, Permission, ProductScreen, SectionTitle, SegmentedControl, StatusBadge, ToolbarSearch } from "./ui.jsx";
 import {
   activeVisitors,
   aiSuggestions,
@@ -265,15 +265,16 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
       </div>
 
       <div className="clients-workspace">
-        <section className="entity-table clients-table">
-          <div className="entity-head">
-            <span>Клиент</span>
-            <span>Телефон</span>
-            <span>Канал</span>
-            <span>Устройство</span>
-            <span>Тематика</span>
-            <span>История</span>
-          </div>
+        <EntityTable
+          className="clients-table"
+          columns={["Клиент", "Телефон", "Канал", "Устройство", "Тематика", "История"]}
+          empty={!clients.length ? (
+            <div className="entity-empty">
+              <strong>Клиенты не найдены</strong>
+              <span>Измените поисковый запрос или фильтр сегмента.</span>
+            </div>
+          ) : null}
+        >
           {clients.map((client) => (
             <button className={`entity-row ${selected.id === client.id ? "selected" : ""}`} key={client.id} onClick={() => setSelectedId(client.id)}>
               <strong>{client.name}</strong>
@@ -284,13 +285,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
               <span>{client.previous.length} закрытых</span>
             </button>
           ))}
-          {!clients.length ? (
-            <div className="entity-empty">
-              <strong>Клиенты не найдены</strong>
-              <span>Измените поисковый запрос или фильтр сегмента.</span>
-            </div>
-          ) : null}
-        </section>
+        </EntityTable>
 
         <aside className="client-detail-panel">
           <section className="work-panel">
@@ -1645,16 +1640,19 @@ export function ReportsScreen({ onBack, onToast, access }) {
         </div>
       </section>
 
-      <div className="entity-table report-table">
-        <div className="entity-head report-dynamic-row" style={{ gridTemplateColumns: `minmax(220px, 1fr) repeat(${Math.max(0, visibleReportColumns.length - 1)}, minmax(110px, 0.7fr))` }}>
-          {visibleReportColumns.map((column) => <span key={column.id}>{column.label}</span>)}
-        </div>
+      <EntityTable
+        as="div"
+        className="report-table"
+        columns={visibleReportColumns}
+        headClassName="report-dynamic-row"
+        headStyle={{ gridTemplateColumns: `minmax(220px, 1fr) repeat(${Math.max(0, visibleReportColumns.length - 1)}, minmax(110px, 0.7fr))` }}
+      >
         {reportRows.map((row) => (
           <div className="entity-row report-dynamic-row" key={row.metric} style={{ gridTemplateColumns: `minmax(220px, 1fr) repeat(${Math.max(0, visibleReportColumns.length - 1)}, minmax(110px, 0.7fr))` }}>
             {visibleReportColumns.map((column) => <React.Fragment key={column.id}>{getReportCell(row, column.id)}</React.Fragment>)}
           </div>
         ))}
-      </div>
+      </EntityTable>
 
       <section className="work-panel export-queue-panel">
         <SectionTitle title="Очередь и история выгрузок" action="каждый экспорт фиксируется в audit" />

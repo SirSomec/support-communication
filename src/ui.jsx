@@ -67,6 +67,31 @@ export function SectionTitle({ title, action }) {
   );
 }
 
+export function EntityTable({
+  as: Component = "section",
+  children,
+  className = "",
+  columns,
+  empty,
+  headClassName = "",
+  headStyle
+}) {
+  return (
+    <Component className={["entity-table", className].filter(Boolean).join(" ")}>
+      <div className={["entity-head", headClassName].filter(Boolean).join(" ")} style={headStyle}>
+        {columns.map((column) => {
+          const key = typeof column === "string" ? column : column.id;
+          const label = typeof column === "string" ? column : column.label;
+
+          return <span key={key}>{label}</span>;
+        })}
+      </div>
+      {children}
+      {empty}
+    </Component>
+  );
+}
+
 export function ChannelBadge({ channel }) {
   return <span className={`channel-chip ${String(channel).toLowerCase()}`}>{channel}</span>;
 }

@@ -5,10 +5,10 @@ import { PanelScreen } from "./panel/PanelScreen.jsx";
 import { QualityScreen } from "./quality/QualityScreen.jsx";
 import { ReportsScreen } from "./reports/ReportsScreen.jsx";
 import { TemplatesScreen } from "./templates/TemplatesScreen.jsx";
+import { VisitorsScreen } from "./visitors/VisitorsScreen.jsx";
 import {
   AutomationScreen,
   SettingsScreen,
-  VisitorsScreen
 } from "../sections.jsx";
 
 export function SectionPlaceholder({

@@ -61,6 +61,14 @@ import {
   statusLabels
 } from "./app/dialogModel.js";
 import { useModalA11y } from "./app/useModalA11y.js";
+import {
+  filterNotifications,
+  getNotificationGroupSummary,
+  notificationFilterOptions,
+  notificationItems,
+  notificationSubscriptionOptions
+} from "./app/notificationModel.js";
+import { getAiSuggestionExplanation, getPreSendQualityChecks } from "./app/aiQualityModel.js";
 import { SectionPlaceholder } from "./features/section-router.jsx";
 import {
   aiSuggestions,
@@ -797,49 +805,21 @@ function Sidebar({ active, access, onSelect }) {
   );
 }
 
-const notificationItems = [
-  {
-    id: "sla-vladimir",
-    type: "SLA",
-    title: "Владимир Б. без тематики",
-    detail: "Закрытие заблокировано, SLA просрочен",
-    meta: "Telegram · очередь спасения",
-    action: "Открыть диалог",
-    tone: "danger"
-  },
-  {
-    id: "mention-anna",
-    type: "Mention",
-    title: "Анна Р. упомянула вас",
-    detail: "Нужна проверка возврата до закрытия",
-    meta: "MAX · старший сотрудник",
-    action: "Посмотреть",
-    tone: "warn"
-  },
-  {
-    id: "channel-vk",
-    type: "Channel",
-    title: "VK: рост ошибок webhook",
-    detail: "3 ошибки доставки за последние 15 минут",
-    meta: "Интеграции · требует администратора",
-    action: "Открыть канал",
-    tone: "info"
-  },
-  {
-    id: "export-ready",
-    type: "Export",
-    title: "Ежедневный отчет готов",
-    detail: "XLSX, 486 строк, audit export-2418",
-    meta: "Отчеты · сегодня 11:30",
-    action: "Скачать",
-    tone: "ok"
-  }
-];
-
 function TopBar({ access, activeSection, onOutbound, onRoleMode, onToast, roleMode }) {
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const [readNotificationIds, setReadNotificationIds] = useState([]);
-  const unreadNotifications = notificationItems.filter((item) => !readNotificationIds.includes(item.id));
+  const [notificationFilter, setNotificationFilter] = useState("all");
+  const [mutedNotificationTypes, setMutedNotificationTypes] = useState([]);
+  const subscribedNotifications = notificationItems.filter((item) => !mutedNotificationTypes.includes(item.typeKey));
+  const unreadNotifications = subscribedNotifications.filter((item) => !readNotificationIds.includes(item.id));
+  const visibleNotifications = filterNotifications(
+    notificationItems,
+    notificationFilter,
+    readNotificationIds,
+    mutedNotificationTypes
+  );
+  const notificationGroups = getNotificationGroupSummary(notificationItems, readNotificationIds, mutedNotificationTypes);
+  const notificationHistory = notificationItems.filter((item) => readNotificationIds.includes(item.id));
 
   useEffect(() => {
     setNotificationsOpen(false);
@@ -849,6 +829,15 @@ function TopBar({ access, activeSection, onOutbound, onRoleMode, onToast, roleMo
     setReadNotificationIds((current) => current.includes(item.id) ? current : [...current, item.id]);
     setNotificationsOpen(false);
     onToast(`${item.type}: ${item.action}`);
+  }
+
+  function toggleNotificationType(typeKey) {
+    setMutedNotificationTypes((current) =>
+      current.includes(typeKey) ? current.filter((item) => item !== typeKey) : [...current, typeKey]
+    );
+    if (notificationFilter === typeKey) {
+      setNotificationFilter("all");
+    }
   }
 
   return (
@@ -885,21 +874,47 @@ function TopBar({ access, activeSection, onOutbound, onRoleMode, onToast, roleMo
             {unreadNotifications.length ? <span>{unreadNotifications.length}</span> : null}
           </button>
           {isNotificationsOpen ? (
-            <section className="notification-drawer" aria-label="Центр уведомлений">
+            <section className="notification-drawer" aria-label="Центр уведомлений" role="region">
               <header>
                 <div>
                   <strong>Уведомления</strong>
-                  <span>{unreadNotifications.length} новых из {notificationItems.length}</span>
+                  <span>{unreadNotifications.length} новых из {subscribedNotifications.length}</span>
                 </div>
                 <button
-                  onClick={() => setReadNotificationIds(notificationItems.map((item) => item.id))}
+                  onClick={() => setReadNotificationIds(subscribedNotifications.map((item) => item.id))}
                   type="button"
                 >
                   Все прочитаны
                 </button>
               </header>
+              <div className="notification-filters" aria-label="Фильтры уведомлений">
+                {notificationFilterOptions.map((filterOption) => (
+                  <button
+                    aria-pressed={notificationFilter === filterOption.id}
+                    className={notificationFilter === filterOption.id ? "active" : ""}
+                    key={filterOption.id}
+                    onClick={() => setNotificationFilter(filterOption.id)}
+                    type="button"
+                  >
+                    {filterOption.label}
+                  </button>
+                ))}
+              </div>
+              <div className="notification-groups" aria-label="Группы уведомлений">
+                {notificationGroups.map((group) => (
+                  <button
+                    className={group.muted ? "muted" : ""}
+                    key={group.id}
+                    onClick={() => setNotificationFilter(group.id)}
+                    type="button"
+                  >
+                    <strong>{group.label}</strong>
+                    <span>{group.muted ? "выключено" : `${group.unread}/${group.count}`}</span>
+                  </button>
+                ))}
+              </div>
               <div className="notification-list">
-                {notificationItems.map((item) => {
+                {visibleNotifications.map((item) => {
                   const isRead = readNotificationIds.includes(item.id);
 
                   return (
@@ -914,6 +929,37 @@ function TopBar({ access, activeSection, onOutbound, onRoleMode, onToast, roleMo
                     </article>
                   );
                 })}
+                {!visibleNotifications.length ? (
+                  <div className="notification-empty">
+                    <strong>Нет уведомлений</strong>
+                    <span>Измените фильтр или включите подписку на тип события.</span>
+                  </div>
+                ) : null}
+              </div>
+              <div className="notification-settings" aria-label="Настройки подписок">
+                <strong>Подписки</strong>
+                {notificationSubscriptionOptions.map((option) => (
+                  <label key={option.id}>
+                    <input
+                      checked={!mutedNotificationTypes.includes(option.id)}
+                      onChange={() => toggleNotificationType(option.id)}
+                      type="checkbox"
+                    />
+                    <span>
+                      <b>{option.label}</b>
+                      <small>{option.description}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="notification-history" aria-label="История уведомлений">
+                <strong>История</strong>
+                {notificationHistory.length ? notificationHistory.map((item) => (
+                  <span key={`history-${item.id}`}>
+                    <b>{item.type}</b>
+                    {item.history}
+                  </span>
+                )) : <span>Прочитанных уведомлений пока нет</span>}
               </div>
             </section>
           ) : null}
@@ -1668,6 +1714,12 @@ function AiComposerPanel({ suggestions = [], disabled, onAction }) {
             <span>Тон: {suggestion.tone}</span>
             <span>Риск: {suggestion.risk}</span>
           </div>
+          <details className="ai-explainability">
+            <summary>Почему предложено</summary>
+            <ul>
+              {getAiSuggestionExplanation(suggestion).map((reason) => <li key={reason}>{reason}</li>)}
+            </ul>
+          </details>
           <footer>
             <span className={`status-chip ${suggestion.state === "idle" ? "info" : suggestion.state === "rejected" ? "closed" : "ok"}`}>
               {aiSuggestionStatusLabels[suggestion.state] ?? aiSuggestionStatusLabels.idle}
@@ -1713,6 +1765,7 @@ function Composer({
   const primaryTemplate = templates[0];
   const fileInputRef = useRef(null);
   const [isTemplatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [isQualityOpen, setQualityOpen] = useState(true);
   const blockingAttachment = attachments.find((attachment) => attachment.status !== "ready");
   const sendDisabled = disabled || Boolean(blockingAttachment);
   const attachmentReason = blockingAttachment
@@ -1724,6 +1777,12 @@ function Composer({
     mode === "internal"
       ? "Клиент эмоционален, перед закрытием проверьте статус доставки и добавьте ссылку на заказ во внутренний комментарий."
       : "Понимаю ожидание. Я проверю статус заказа и вернусь с точным временем доставки в этом диалоге.";
+  const preSendChecks = getPreSendQualityChecks({ draft, mode, attachments, suggestions: inlineAiSuggestions });
+  const preSendTone = preSendChecks.some((check) => check.tone === "danger")
+    ? "danger"
+    : preSendChecks.some((check) => check.tone === "warn")
+      ? "warn"
+      : "ok";
 
   function handleFileInputChange(event) {
     onAttachFiles(event.target.files);
@@ -1824,6 +1883,29 @@ function Composer({
           {attachmentReason}
         </div>
       ) : null}
+      <section className={`pre-send-quality ${preSendTone}`} aria-label="Проверка качества перед отправкой">
+        <button
+          aria-expanded={isQualityOpen}
+          onClick={() => setQualityOpen((current) => !current)}
+          type="button"
+        >
+          <span>
+            <ShieldCheck size={16} />
+            Pre-send check
+          </span>
+          <b>{preSendTone === "ok" ? "готово" : preSendTone === "warn" ? "есть замечания" : "нужна проверка"}</b>
+        </button>
+        {isQualityOpen ? (
+          <div className="pre-send-check-list">
+            {preSendChecks.map((check) => (
+              <span className={check.tone} key={check.id}>
+                <strong>{check.label}</strong>
+                <small>{check.detail}</small>
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </section>
       <footer className="composer-footer">
         <div className="composer-tools">
           <button aria-label="Прикрепить файл" disabled={disabled} onClick={() => fileInputRef.current?.click()} title="Прикрепить файл" type="button"><Paperclip size={18} /></button>

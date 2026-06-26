@@ -48,8 +48,34 @@ test("topbar notifications and live bot handoff summary are actionable", async (
   await expect(page.locator(".bot-handoff-summary")).toContainText("Handoff summary");
   await page.getByRole("button", { name: "Уведомления" }).click();
   await expect(page.locator(".notification-drawer")).toContainText("VK: рост ошибок webhook");
+  await page.locator(".notification-filters button").filter({ hasText: "SLA" }).click();
+  await expect(page.locator(".notification-list")).toContainText("Владимир Б. без тематики");
+  await expect(page.locator(".notification-list")).not.toContainText("Ежедневный отчет готов");
+  await page.locator(".notification-filters button").filter({ hasText: "Все" }).click();
+  await page.locator(".notification-settings label").filter({ hasText: "Channel errors" }).locator("input").uncheck();
+  await expect(page.locator(".notification-groups")).toContainText("выключено");
   await page.locator(".notification-item").filter({ hasText: "Ежедневный отчет готов" }).getByRole("button", { name: "Скачать" }).click();
   await expect(page.locator(".toast")).toContainText("Export: Скачать");
+  await page.getByRole("button", { name: "Уведомления" }).click();
+  await page.locator(".notification-drawer > header button").filter({ hasText: "Все прочитаны" }).click();
+  await expect(page.locator(".notification-history")).toContainText("export queue завершила задачу");
+  await expectHealthyPage(page);
+});
+
+test("composer exposes AI explainability and pre-send quality checks", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+
+  await page.locator(".ai-explainability summary").click();
+  await expect(page.locator(".ai-explainability")).toContainText("Совпадает с тематикой");
+  await expect(page.locator(".pre-send-quality")).toContainText("Ответ пустой");
+
+  await page.locator(".composer textarea").fill("Вы сами виноваты, невозможно помочь самостоятельно.");
+  await expect(page.locator(".pre-send-quality")).toContainText("Риск формулировки");
+  await expect(page.locator(".pre-send-quality")).toContainText("Не указан следующий шаг");
+
+  await page.locator(".inline-ai-card button").filter({ hasText: "Редактировать" }).click();
+  await expect(page.locator(".composer textarea")).toHaveValue(/Клиент ждет заказ/);
   await expectHealthyPage(page);
 });
 

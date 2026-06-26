@@ -12,6 +12,7 @@ import {
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
 import { useAppNavigation } from "./app/useAppNavigation.js";
 import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
+import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
 import { ChatPane } from "./features/dialogs/ChatPane.jsx";
 import { ConversationList } from "./features/dialogs/ConversationList.jsx";
 import { CustomerPanel } from "./features/dialogs/CustomerPanel.jsx";
@@ -21,8 +22,7 @@ import { SectionPlaceholder } from "./features/section-router.jsx";
 import { Toast } from "./ui.jsx";
 import {
   aiSuggestions,
-  conversations,
-  initialTemplates
+  conversations
 } from "./data.js";
 
 function App() {
@@ -33,8 +33,6 @@ function App() {
   const [draft, setDraft] = useState("");
   const [pendingConversationId, setPendingConversationId] = useState(null);
   const [isOutboundOpen, setOutboundOpen] = useState(false);
-  const [templateLibrary, setTemplateLibrary] = useState(initialTemplates);
-  const [saveTemplateDraft, setSaveTemplateDraft] = useState(null);
   const [aiSuggestionStates, setAiSuggestionStates] = useState({});
   const [topics, setTopics] = useState(() =>
     Object.fromEntries(conversations.map((conversation) => [conversation.id, conversation.topic]))
@@ -81,6 +79,19 @@ function App() {
     ? conversationItems.find((conversation) => conversation.id === pendingConversationId)
     : null;
   const selectedTopic = topics[selected.id] ?? "";
+  const {
+    closeSaveTemplateDialog,
+    handleOpenTemplateSave,
+    handleTemplateSave,
+    saveTemplateDraft,
+    setTemplateLibrary,
+    templateLibrary
+  } = useTemplateLibrary({
+    draft,
+    selectedChannel: selected.channel,
+    selectedTopic,
+    setToast
+  });
   const selectedStatus = selected.status ?? "active";
   const isClosed = closedIds.has(selected.id) || selectedStatus === "closed";
   const hasUnsentComposerContent = Boolean(draft.trim() || hasAttachments);
@@ -370,36 +381,6 @@ function App() {
     setToast(`${actionConfig.title} зафиксировано в истории диалога.`);
   }
 
-  function handleOpenTemplateSave(source) {
-    const sourceText = typeof source === "string" ? source : draft;
-
-    if (!sourceText.trim()) {
-      setToast("Введите текст ответа перед сохранением шаблона.");
-      return;
-    }
-
-    setSaveTemplateDraft({
-      title: selectedTopic ? selectedTopic.split(" / ").at(-1) : "Новый шаблон",
-      scope: "Личный",
-      channel: selected.channel,
-      topic: selectedTopic || "Без тематики",
-      text: sourceText.trim()
-    });
-  }
-
-  function handleTemplateSave(template) {
-    const next = {
-      id: `chat-template-${Date.now()}`,
-      usage: 0,
-      updated: "только что",
-      ...template
-    };
-
-    setTemplateLibrary((current) => [next, ...current]);
-    setSaveTemplateDraft(null);
-    setToast(`Шаблон сохранен: ${next.title}`);
-  }
-
   function handleAiSuggestionAction(suggestion, action) {
     if (isClosed) {
       setToast("Диалог закрыт, AI-подсказки доступны только для просмотра.");
@@ -563,7 +544,7 @@ function App() {
       {saveTemplateDraft ? (
         <SaveTemplateDialog
           draft={saveTemplateDraft}
-          onClose={() => setSaveTemplateDraft(null)}
+          onClose={closeSaveTemplateDialog}
           onSave={handleTemplateSave}
         />
       ) : null}

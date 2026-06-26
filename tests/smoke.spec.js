@@ -208,6 +208,10 @@ test("composer save-template modal keeps dialog semantics", async ({ page }) => 
   await expect(page.locator(".template-save-text textarea")).toHaveValue(/client_name/);
   await page.locator(".template-save-panel > footer button").filter({ hasText: "Сохранить шаблон" }).click();
   await expect(page.locator(".toast")).toContainText("Шаблон сохранен");
+  await page.locator(".composer-tabs button").filter({ hasText: "Шаблоны" }).click();
+  await expect(page.locator(".composer-template-picker button").first()).toContainText("Статус заказа");
+  await page.locator(".composer-template-picker button").first().click();
+  await expect(page.locator(".composer textarea")).toHaveValue(/Проверю заказ и вернусь с точным сроком доставки/);
   await expectHealthyPage(page);
 });
 

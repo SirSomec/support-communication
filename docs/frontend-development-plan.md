@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.42
+Версия: 2.43
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, lifecycle вложений composer в `useComposerAttachments`, state/filtering очереди диалогов в `useDialogQueueFilters`, state библиотеки шаблонов и save-template dialog в `useTemplateLibrary`, navigation/role/outbound guard в `useAppNavigation`, выбор активного диалога и draft-switch guard в `useConversationSelection`, state/actions AI-подсказок в `useAiSuggestions`, расширения уведомлений фильтрами/подписками/history/browser push/звуковыми правилами/внешними critical channels, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, синхронизации live bot handoff summary с текущей тематикой из `topics` state, Settings access matrix/channel limits в `SettingsAccessPanel`, Settings workspaces для Webhooks/API keys и Security controls с выносом admin workspace в `AdminWorkspaces`/`ApiGovernancePanel`/`SecurityControlsPanel`/`AdminLockedPanel`, управления сотрудниками в `EmployeeManagementPanel` с явным permission-prop для сброса пароля и smoke-покрытием, каналов в `ChannelConnectionsPanel`, SDK playground в `SdkConsolePanel`, справочника тематик в `TopicDirectoryPanel` и feature CSS, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, lifecycle вложений composer в `useComposerAttachments`, state/filtering очереди диалогов в `useDialogQueueFilters`, state библиотеки шаблонов и save-template dialog в `useTemplateLibrary`, navigation/role/outbound guard в `useAppNavigation`, выбор активного диалога и draft-switch guard в `useConversationSelection`, state/actions AI-подсказок в `useAiSuggestions`, keyboard/focus smoke QA и visual regression checklist, расширения уведомлений фильтрами/подписками/history/browser push/звуковыми правилами/внешними critical channels, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, синхронизации live bot handoff summary с текущей тематикой из `topics` state, Settings access matrix/channel limits в `SettingsAccessPanel`, Settings workspaces для Webhooks/API keys и Security controls с выносом admin workspace в `AdminWorkspaces`/`ApiGovernancePanel`/`SecurityControlsPanel`/`AdminLockedPanel`, управления сотрудниками в `EmployeeManagementPanel` с явным permission-prop для сброса пароля и smoke-покрытием, каналов в `ChannelConnectionsPanel`, SDK playground в `SdkConsolePanel`, справочника тематик в `TopicDirectoryPanel` и feature CSS, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -33,7 +33,7 @@
 - Базовые стили находятся в `src/styles.css`; admin Webhooks/API/Security стили настроек вынесены в `src/features/settings/settings.css`.
 - Dev server: `http://127.0.0.1:5173/`.
 - Все продуктовые разделы на `ProductScreen` имеют единый `ScreenStateStrip`: загрузка, данные/пусто и ошибки с локальными счетчиками.
-- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, attachment queue/send, draft-switch warning, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check с audit assertion, AI real-time scoring/coaching/effectiveness, handoff summary, settings access/channel limit permissions, settings employee management permissions, settings channel connections и SDK playground, расширенный knowledge editor с версиями/approval/вложениями/self-service, bot builder/import/channel assignment и responsive matrix 390/768/1024/1440.
+- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, app shell role access/notification drawer close, keyboard navigation/focus/modal trap, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, attachment queue/send, draft-switch warning, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check с audit assertion, AI real-time scoring/coaching/effectiveness, handoff summary, settings access/channel limit permissions, settings employee management permissions, settings channel connections и SDK playground, расширенный knowledge editor с версиями/approval/вложениями/self-service, bot builder/import/channel assignment и responsive matrix 390/768/1024/1440.
 - Дизайн-система: темная левая навигация, белые рабочие панели, синие primary actions, компактные таблицы, радиус 8px, без hero/landing-композиции.
 
 ## 3. Фактически реализовано во фронтенде
@@ -516,11 +516,11 @@ Acceptance criteria:
 Задачи:
 
 - Реализовано: responsive smoke QA для 390, 768, 1024, 1440 px в `npm run test:smoke`.
-- Проверить keyboard navigation и focus states.
-- Проверить `aria-label`, `aria-modal`, `role="dialog"`, таблицы и кнопки.
+- Реализовано: keyboard navigation/focus smoke проверяет nav focus ring, keyboard-open notification drawer, Escape-close drawer, modal focus trap и возврат фокуса.
+- Реализовано: `aria-label`, `aria-modal`, `role="dialog"`, таблицы и кнопки закреплены smoke/QA-gates для новых поверхностей.
 - Реализовано: empty/loading/error states для product-разделов через единый `ScreenStateStrip`.
 - Реализовано: smoke/e2e сценарии для state strip, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, attachment queue/send, draft-switch warning, rescue timer, notification filters/subscriptions/history, Settings access/channel limit permissions, Settings employee management permissions, Settings channel connections/SDK playground, AI explainability/pre-send check, AI real-time scoring/coaching, live handoff summary, knowledge editor, bot builder import/channel assignment validation и responsive overflow.
-- Добавить visual regression checklist.
+- Реализовано: visual regression checklist добавлен в [visual-regression-checklist.md](design/visual-regression-checklist.md).
 - Разделить CSS на feature-файлы или CSS modules, если файл станет плохо поддерживаемым.
 - Подготовить Storybook или внутреннюю страницу UI-kit, если компонентная база продолжит расти.
 
@@ -542,7 +542,7 @@ Acceptance criteria:
 5. Реализовано: отдельный `AuditScreen` для администраторов с source/severity/object/period/search filters, event detail, retention/export controls и ссылками на связанные диалоги/экспорты/ботов.
 6. Реализовано: Settings workspaces `Webhooks/API keys` и `Security` с environment keys, signed webhooks, retries, delivery log, manual replay, changelog, 2FA, active sessions, API-key protection, IP allowlist и security alerts.
 7. Реализовано: notification center расширен до browser push toggle, звуковых правил и внешних каналов критических ошибок. Осталось подключить реальные browser Push API, sound playback, external delivery integrations и серверные источники после backend event stream.
-8. Довести QA до production-уровня: keyboard navigation, focus map, semantic table/grid для динамической таблицы отчетов, visual regression checklist и UI-kit/Storybook при росте компонентной базы.
+8. Довести QA до production-уровня: keyboard navigation/focus smoke и visual regression checklist реализованы; дальше остаются semantic table/grid для динамической таблицы отчетов и UI-kit/Storybook при росте компонентной базы.
 
 ### 7.2. Backend/service integration backlog
 
@@ -569,6 +569,7 @@ Acceptance criteria:
 - Проверен основной interaction path новой функциональности.
 - Проверены desktop и mobile viewport.
 - Проверен screenshot против текущей дизайн-системы.
+- Для визуальных изменений применен [visual-regression-checklist.md](design/visual-regression-checklist.md).
 - Нет горизонтального overflow.
 - Нет clipped text в основных controls.
 - Icon-only controls имеют `aria-label`, `title` и понятную область клика.
@@ -678,5 +679,6 @@ Acceptance criteria:
 - [x] Добавить bot after-hours policy, channel assignment, bot metrics и handoff summary UI.
 - [ ] Backend integration: bot runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
 - [x] Добавить системные loading/empty/error states для всех разделов.
-- [x] Добавить smoke/e2e сценарии для критичных flows: states, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, attachment queue/send, draft-switch warning, rescue, notification filters/subscriptions/history, Settings employee/channel/SDK permissions, AI explainability/pre-send, AI scoring/coaching, knowledge editor, bot builder/channel assignment и responsive.
+- [x] Добавить smoke/e2e сценарии для критичных flows: states, app shell role access/notification drawer close, keyboard navigation/focus/modal trap, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, attachment queue/send, draft-switch warning, rescue, notification filters/subscriptions/history, Settings employee/channel/SDK permissions, AI explainability/pre-send, AI scoring/coaching, knowledge editor, bot builder/channel assignment и responsive.
 - [x] Провести responsive QA на 390, 768, 1024 и 1440 px.
+- [x] Добавить visual regression checklist для core screens, viewports, states и evidence.

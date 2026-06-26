@@ -18,6 +18,21 @@ async function expectNoElementOverflow(page, selector) {
   await expect.poll(async () => page.locator(selector).evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBeTruthy();
 }
 
+async function activeElementSnapshot(page) {
+  return page.evaluate(() => {
+    const element = document.activeElement;
+    const style = element ? window.getComputedStyle(element) : null;
+
+    return {
+      className: element?.className?.toString() ?? "",
+      label: element?.getAttribute("aria-label") ?? element?.innerText ?? "",
+      outlineStyle: style?.outlineStyle ?? "",
+      outlineWidth: style?.outlineWidth ?? "",
+      tagName: element?.tagName ?? ""
+    };
+  });
+}
+
 test("product sections expose loading/data/error states", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");
@@ -52,6 +67,44 @@ test("app shell enforces role access and closes notifications on section change"
   await expect(page.locator(".notification-drawer")).toBeVisible();
   await openSection(page, "Клиенты");
   await expect(page.locator(".notification-drawer")).toHaveCount(0);
+  await expectHealthyPage(page);
+});
+
+test("keyboard navigation exposes focus states and modal trap", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await page.locator(".role-switcher select").blur();
+
+  await page.keyboard.press("Tab");
+  const firstFocus = await activeElementSnapshot(page);
+  expect(firstFocus.className).toContain("nav-item");
+  expect(firstFocus.label).toContain("Диалоги");
+  expect(firstFocus.outlineStyle).not.toBe("none");
+  expect(firstFocus.outlineWidth).not.toBe("0px");
+
+  for (let step = 0; step < 20; step += 1) {
+    const active = await activeElementSnapshot(page);
+    if (active.label.includes("Уведомления")) {
+      break;
+    }
+    await page.keyboard.press("Tab");
+  }
+
+  await expect(page.getByRole("button", { name: "Уведомления" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".notification-drawer")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".notification-drawer")).toHaveCount(0);
+
+  await page.locator(".quick-action").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "Новый исходящий диалог" })).toBeVisible();
+  await expect(page.locator(".outbound-panel").getByRole("button", { name: "Закрыть" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.locator(".outbound-panel > footer button").filter({ hasText: "Отмена" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".outbound-panel")).toHaveCount(0);
+  await expect(page.locator(".quick-action")).toBeFocused();
   await expectHealthyPage(page);
 });
 

@@ -33,6 +33,21 @@ export function NotificationCenter({ activeSection, onToast }) {
     setNotificationsOpen(false);
   }, [activeSection]);
 
+  useEffect(() => {
+    if (!isNotificationsOpen) {
+      return undefined;
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setNotificationsOpen(false);
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isNotificationsOpen]);
+
   function handleNotificationAction(item) {
     setReadNotificationIds((current) => current.includes(item.id) ? current : [...current, item.id]);
     setNotificationsOpen(false);

@@ -1820,27 +1820,6 @@ select:disabled {
   flex: 1 1 150px;
 }
 
-.toolbar-search {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  min-width: min(460px, 100%);
-  min-height: 38px;
-  padding: 0 11px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #ffffff;
-  color: var(--muted);
-}
-
-.toolbar-search input {
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  color: var(--text);
-}
-
 .entity-table {
   overflow: hidden;
   border: 1px solid var(--line);
@@ -4472,10 +4451,6 @@ textarea:focus-visible {
 
   .screen-state-item strong {
     justify-self: start;
-  }
-
-  .toolbar-search {
-    flex: 1 1 100%;
   }
 
   .export-actions {

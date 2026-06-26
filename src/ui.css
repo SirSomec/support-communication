@@ -82,6 +82,27 @@
   color: #1857b4;
 }
 
+.toolbar-search {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: min(460px, 100%);
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--muted);
+}
+
+.toolbar-search input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+}
+
 .permission {
   width: max-content;
   padding: 4px 8px;
@@ -98,4 +119,10 @@
 .permission.no {
   background: #f2f4f8;
   color: #758198;
+}
+
+@media (max-width: 820px) {
+  .toolbar-search {
+    flex: 1 1 100%;
+  }
 }

@@ -10,7 +10,7 @@ import { SettingsScreen } from "./settings/SettingsScreen.jsx";
 import { TemplatesScreen } from "./templates/TemplatesScreen.jsx";
 import { VisitorsScreen } from "./visitors/VisitorsScreen.jsx";
 
-export function SectionPlaceholder({
+export function SectionRouter({
   section,
   onBack,
   conversations,

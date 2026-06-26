@@ -12,7 +12,7 @@ import { ConversationList } from "./features/dialogs/ConversationList.jsx";
 import { CustomerPanel } from "./features/dialogs/CustomerPanel.jsx";
 import { DraftSwitchDialog, OutboundDialogLauncher, SaveTemplateDialog } from "./features/dialogs/DialogModals.jsx";
 import { Sidebar, TopBar } from "./features/app-shell/AppShell.jsx";
-import { SectionPlaceholder } from "./features/section-router.jsx";
+import { SectionRouter } from "./features/section-router.jsx";
 import { Toast } from "./ui.jsx";
 import {
   aiSuggestions,
@@ -252,7 +252,7 @@ function App() {
             />
           </div>
         ) : (
-          <SectionPlaceholder
+          <SectionRouter
             section={section}
             onBack={handleBackToDialogs}
             conversations={conversationItems}

@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 1.5
+Версия: 1.6
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после реализации proactive visual builder, rescue timer в чате и отчета спасенных/пропущенных диалогов
+Статус: актуализированный рабочий план после реализации proactive visual builder, rescue timer, отчета спасенных/пропущенных диалогов и bot flow-builder
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -145,6 +145,9 @@
 
 - Раздел `Боты` показывает сценарии AI-оператора, proactive, handoff и audit.
 - Есть конструктор сценариев как UI-поверхность: триггер, шаги, каналы, success rate, редактирование.
+- Есть canvas/flow-builder сценариев: ноды `message`, `quick_replies`, `condition`, `contact_request`, `webhook`, `handoff`, `fallback`, связи, inspector выбранной ноды, validation rules и test cases.
+- Есть transcript preview тестового прогона сценария без отправки клиенту.
+- Есть import/export JSON flow со `schemaVersion`, `flowNodes`, `flowEdges`, validation и inline ошибкой при невалидном JSON.
 - Есть тестовый прогон сценариев как UI-сценарий.
 - Есть audit автоматизации: экспорт, изменение лимита, rescue timer.
 
@@ -180,7 +183,7 @@
 | Proactive invites | Реализованы список правил, visual builder условий, preview приглашения, A/B управление и метрики принятия/конверсии/отказов | Backend delivery, серверные frequency caps, персистентность экспериментов, таргетинг и аналитика эффективности |
 | Активные посетители | Реализован отдельный раздел | Права, обезличивание, ручная инициация с проверками, город/источник |
 | Спасение чатов | Реализованы очередь спасения, фильтр, действие запуска, rescue timer в чате, audit запуска и отчет спасенных/пропущенных | Серверный countdown, автоматический возврат, настройки rescue по каналу/очереди/роли и backend outcome analytics |
-| Сценарные боты и AI-оператор | Частично: раздел сценариев | Canvas/flow-builder нод, валидация контактов, импорт/экспорт сценариев |
+| Сценарные боты и AI-оператор | Реализованы список сценариев, canvas/flow-builder, canonical node types, flow edges, inspector, transcript preview и JSON import/export | Backend runtime, публикация/версии сценариев, after-hours сценарий, реальные bot metrics, audit import/export/test/publish и handoff summary в живом чате |
 | UI/UX продукта | Базовая система реализована, responsive проверялся | Системный QA на 390/768/1024/1440, keyboard nav, empty/loading/error states |
 
 Вывод после сверки: все ключевые функциональные направления из спецификации представлены во frontend-плане и имеют хотя бы одну запланированную UI-поверхность. Большинство критичных требований уже отражены в текущем интерфейсе как интерактивные frontend-сценарии; оставшаяся работа связана с глубиной production-поведения, правами, детализацией, API-интеграцией и QA.
@@ -436,13 +439,13 @@ Acceptance criteria:
 
 Задачи:
 
-- Добавить canvas/flow-builder сценариев.
-- Добавить ноды: сообщение, быстрые ответы, условие, запрос контакта, webhook, handoff, fallback.
-- Добавить валидацию имени, телефона, email и пользовательских полей.
+- Реализовано: canvas/flow-builder сценариев.
+- Реализовано: ноды `message`, `quick_replies`, `condition`, `contact_request`, `webhook`, `handoff`, `fallback`.
+- Реализовано частично: validation rules для сценариев и inline import validation; email/custom fields остаются backend/runtime задачей.
 - Добавить сценарий для нерабочего времени.
 - Добавить назначение разных ботов на разные каналы.
-- Добавить тестовый запуск с transcript preview.
-- Добавить импорт/экспорт сценариев.
+- Реализовано: тестовый запуск с transcript preview как frontend preview.
+- Реализовано: импорт/экспорт сценариев JSON со schema/version/nodes/edges.
 - Добавить статистику диалогов с ботом.
 - Добавить прозрачный handoff: оператор видит резюме того, что бот уже спросил и получил.
 
@@ -486,7 +489,7 @@ Acceptance criteria:
 8. Добавить AI explainability и pre-send quality check к уже реализованной inline AI-панели.
 9. Довести rescue до production-контура: серверный countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
 10. Довести proactive до production-контура: backend delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитику эффективности.
-11. Добавить canvas/flow-builder ботов с тестовым transcript preview.
+11. Довести ботов до production-контура: backend runtime, публикация/версии сценариев, after-hours сценарий, bot metrics, audit import/export/test/publish и handoff summary в живом чате.
 12. Разнести `App.jsx`, `sections.jsx`, `data.js` по feature-модулям.
 13. Добавить системные empty/loading/error states и smoke/e2e для критичных flows.
 
@@ -550,7 +553,8 @@ Acceptance criteria:
 - [ ] Довести proactive до production-контура: backend delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитику эффективности.
 - [x] Добавить rescue timer в чат и отчет спасенных/пропущенных диалогов.
 - [ ] Довести rescue до production-контура: серверный countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
-- [ ] Добавить canvas/flow-builder ботов с нодами, тестовым transcript preview и импортом/экспортом.
+- [x] Добавить canvas/flow-builder ботов с нодами, тестовым transcript preview и импортом/экспортом.
+- [ ] Довести ботов до production-контура: backend runtime, публикация/версии сценариев, after-hours сценарий, bot metrics, audit import/export/test/publish и handoff summary в живом чате.
 - [ ] Добавить системные loading/empty/error states для всех разделов.
 - [ ] Добавить smoke/e2e сценарии для критичных flows.
 - [ ] Провести responsive QA на 390, 768, 1024 и 1440 px.

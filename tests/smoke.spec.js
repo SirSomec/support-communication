@@ -367,6 +367,45 @@ test("settings expose webhooks api keys and security controls", async ({ page })
   await expectHealthyPage(page);
 });
 
+test("settings employee management preserves edit and role permissions", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await openSection(page, "Настройки");
+
+  const employeePanel = page.locator(".employee-rules-panel");
+  await expect(employeePanel).toContainText("Каналы и лимиты по сотрудникам");
+  await employeePanel.getByLabel("Поиск сотрудника").fill("Анна");
+  await expect(employeePanel.locator("[data-employee-id='rule-anna']")).toBeVisible();
+  await expect(employeePanel.locator("[data-employee-id='rule-ivan']")).toHaveCount(0);
+  await employeePanel.locator("[data-employee-id='rule-anna']").click();
+
+  await employeePanel.locator(".employee-editor-grid select").first().selectOption({ label: "Администратор" });
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("Администратор");
+  await employeePanel.locator(".employee-editor-grid select").nth(1).selectOption({ label: "Финансы" });
+  await employeePanel.locator(".employee-editor-grid input").fill("14");
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("14 чатов");
+  await employeePanel.locator(".employee-channel-editor label").filter({ hasText: "SDK" }).locator("input").check();
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("SDK");
+  await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Override" }).locator("input").uncheck();
+  await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Чувствительные" }).locator("input").uncheck();
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("без override");
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("данные маскированы");
+  await employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" }).click();
+  await expect(page.locator(".toast")).toContainText("Анна Р.: настройки сотрудника сохранены.");
+
+  await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
+  await expect(employeePanel.locator(".employee-editor-grid select").first()).toBeDisabled();
+  await expect(employeePanel.locator(".employee-editor-grid input")).toBeDisabled();
+  await expect(employeePanel.locator(".employee-channel-editor label").filter({ hasText: "VK" }).locator("input")).toBeDisabled();
+  await expect(employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" })).toBeDisabled();
+  await expect(employeePanel.locator(".employee-editor header button").filter({ hasText: "Сбросить пароль" })).toBeEnabled();
+  await employeePanel.locator(".employee-editor header button").filter({ hasText: "Сбросить пароль" }).click();
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("Сброс отправлен");
+  await expect(page.locator(".toast")).toContainText("Анна Р.: ссылка для смены пароля отправлена");
+  await expectNoElementOverflow(page, ".employee-rules-panel");
+  await expectHealthyPage(page);
+});
+
 test("critical sections do not overflow responsive viewports", async ({ page }) => {
   for (const viewport of [
     { width: 390, height: 844 },

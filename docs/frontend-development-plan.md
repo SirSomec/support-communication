@@ -10,9 +10,9 @@
 
 ---
 
-Версия: 2.33
+Версия: 2.35
 Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history/browser push/звуковыми правилами/внешними critical channels, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, Settings workspaces для Webhooks/API keys и Security controls с выносом admin workspace в `AdminWorkspaces`/`ApiGovernancePanel`/`SecurityControlsPanel`/`AdminLockedPanel`, справочника тематик в `TopicDirectoryPanel` и feature CSS, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, расширения уведомлений фильтрами/подписками/history/browser push/звуковыми правилами/внешними critical channels, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, Settings workspaces для Webhooks/API keys и Security controls с выносом admin workspace в `AdminWorkspaces`/`ApiGovernancePanel`/`SecurityControlsPanel`/`AdminLockedPanel`, управления сотрудниками в `EmployeeManagementPanel` с явным permission-prop для сброса пароля и smoke-покрытием, справочника тематик в `TopicDirectoryPanel` и feature CSS, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -27,13 +27,13 @@
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
 - Основной cockpit пока находится в `src/App.jsx`, но app shell (`Sidebar`/`TopBar`) вынесен в `src/features/app-shell/AppShell.jsx`, notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, ConversationList, ChatPane, CustomerPanel, DialogModals, composer/AI panel/attachment preview/ChatHeader/TranscriptToolbar/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, уведомлений, AI quality check и правила доступа вынесены в `src/app/*`.
-- Продуктовые разделы находятся в `src/features/*`: `PanelScreen`, `ClientsScreen`, `ReportsScreen`, `TemplatesScreen`, `QualityScreen`, `VisitorsScreen`, `AutomationScreen`, `AuditScreen` и `SettingsScreen` подключаются через `src/features/section-router.jsx`; legacy `src/sections.jsx` больше не используется, расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`, AI scoring/coaching workspace — в `src/features/quality/AiQualityWorkspace.jsx`, admin settings workspace — в `src/features/settings/AdminWorkspaces.jsx` и подпанели, справочник тематик — в `src/features/settings/TopicDirectoryPanel.jsx`.
+- Продуктовые разделы находятся в `src/features/*`: `PanelScreen`, `ClientsScreen`, `ReportsScreen`, `TemplatesScreen`, `QualityScreen`, `VisitorsScreen`, `AutomationScreen`, `AuditScreen` и `SettingsScreen` подключаются через `src/features/section-router.jsx`; legacy `src/sections.jsx` больше не используется, расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`, AI scoring/coaching workspace — в `src/features/quality/AiQualityWorkspace.jsx`, admin settings workspace — в `src/features/settings/AdminWorkspaces.jsx` и подпанели, управление сотрудниками — в `src/features/settings/EmployeeManagementPanel.jsx`, справочник тематик — в `src/features/settings/TopicDirectoryPanel.jsx`.
 - Общие UI-примитивы, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable вынесены в `src/ui.jsx`.
 - Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
 - Базовые стили находятся в `src/styles.css`; admin Webhooks/API/Security стили настроек вынесены в `src/features/settings/settings.css`.
 - Dev server: `http://127.0.0.1:5173/`.
 - Все продуктовые разделы на `ProductScreen` имеют единый `ScreenStateStrip`: загрузка, данные/пусто и ошибки с локальными счетчиками.
-- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check, AI real-time scoring/coaching/effectiveness, handoff summary, расширенный knowledge editor с версиями/approval/вложениями/self-service, bot builder/import/channel assignment и responsive matrix 390/768/1024/1440.
+- Добавлен Playwright smoke suite `npm run test:smoke`: state strip по разделам, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check, AI real-time scoring/coaching/effectiveness, handoff summary, settings employee management permissions, расширенный knowledge editor с версиями/approval/вложениями/self-service, bot builder/import/channel assignment и responsive matrix 390/768/1024/1440.
 - Дизайн-система: темная левая навигация, белые рабочие панели, синие primary actions, компактные таблицы, радиус 8px, без hero/landing-композиции.
 
 ## 3. Фактически реализовано во фронтенде
@@ -123,6 +123,7 @@
 - Есть настройки каналов и лимитов на оператора.
 - Есть детальная поверхность канала: несколько подключений, raw IDs, маршрутизация, лимиты, группы, журнал событий/ошибок и тест приема/отправки.
 - Есть настройки каналов и лимитов по сотрудникам, override, маскирование чувствительных данных, группы, парольный статус и role-aware сброс пароля.
+- Role-aware сброс пароля сотрудников завязан на permission model (`access.canResetPasswords`), а не на локальное сравнение названия роли внутри settings-компонента.
 - Есть карточки подключений SDK, Telegram, MAX, VK с health/status.
 - Есть SDK-консоль со snippet и событиями `identifyUser`, `initConversation`, `trackEntryPoint`, `syncTopic`.
 - Есть Settings workspace `Webhooks / API keys`: environment keys, protected key preview, scopes, rotation queue, signed webhook endpoints, retries, delivery log, manual replay и API changelog.
@@ -261,8 +262,8 @@
   - `src/features/visitors/`
   - `src/features/quality/`
   - `src/features/automation/`
-- Реализовано: Settings admin workspace вынесен из `SettingsScreen` в `AdminWorkspaces`, `ApiGovernancePanel`, `SecurityControlsPanel`, `AdminLockedPanel`, справочник тематик — в `TopicDirectoryPanel`, а Webhooks/API/Security CSS вынесен в `src/features/settings/settings.css` без изменения smoke-селекторов.
-- Продолжить разнос `src/App.jsx`, оставшихся блоков `src/styles.css` и крупных feature-экранов на подмодули без изменения пользовательских сценариев; следующий безопасный кандидат — role/channel/employee/SDK части `SettingsScreen` или app-state hooks из `App.jsx`.
+- Реализовано: Settings admin workspace вынесен из `SettingsScreen` в `AdminWorkspaces`, `ApiGovernancePanel`, `SecurityControlsPanel`, `AdminLockedPanel`, управление сотрудниками — в `EmployeeManagementPanel`, справочник тематик — в `TopicDirectoryPanel`, а Webhooks/API/Security CSS вынесен в `src/features/settings/settings.css` без изменения smoke-селекторов.
+- Продолжить разнос `src/App.jsx`, оставшихся блоков `src/styles.css` и крупных feature-экранов на подмодули без изменения пользовательских сценариев; следующий безопасный кандидат — role/channel/SDK части `SettingsScreen` или app-state hooks из `App.jsx`.
 - Вынести общие компоненты:
   - `Modal`
   - `Toast`
@@ -514,7 +515,7 @@ Acceptance criteria:
 - Проверить keyboard navigation и focus states.
 - Проверить `aria-label`, `aria-modal`, `role="dialog"`, таблицы и кнопки.
 - Реализовано: empty/loading/error states для product-разделов через единый `ScreenStateStrip`.
-- Реализовано: smoke/e2e сценарии для state strip, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue timer, notification filters/subscriptions/history, AI explainability/pre-send check, AI real-time scoring/coaching, live handoff summary, knowledge editor, bot builder import/channel assignment validation и responsive overflow.
+- Реализовано: smoke/e2e сценарии для state strip, app shell role access/notification drawer close, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, draft-switch warning, rescue timer, notification filters/subscriptions/history, Settings employee management permissions, AI explainability/pre-send check, AI real-time scoring/coaching, live handoff summary, knowledge editor, bot builder import/channel assignment validation и responsive overflow.
 - Добавить visual regression checklist.
 - Разделить CSS на feature-файлы или CSS modules, если файл станет плохо поддерживаемым.
 - Подготовить Storybook или внутреннюю страницу UI-kit, если компонентная база продолжит расти.
@@ -530,7 +531,7 @@ Acceptance criteria:
 
 ### 7.1. Frontend UI и архитектура
 
-1. Продолжить разнос `App.jsx`, `styles.css` и крупных feature-экранов на подмодули без изменения поведения; app shell, PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar, Modal, admin settings workspace и `TopicDirectoryPanel` уже вынесены. Следующий безопасный кандидат — декомпозиция role matrix/channel settings/employee management/SDK workspace или app-state hooks из `App.jsx`.
+1. Продолжить разнос `App.jsx`, `styles.css` и крупных feature-экранов на подмодули без изменения поведения; app shell, PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, DialogActionMenu, AuditTimeline, ChatHeader, TranscriptToolbar, Modal, admin settings workspace, `EmployeeManagementPanel` и `TopicDirectoryPanel` уже вынесены. Следующий безопасный кандидат — декомпозиция role matrix/channel settings/SDK workspace или app-state hooks из `App.jsx`.
 2. Реализовано: общий `Modal`; `Toast`, `StatusBadge`, `ToolbarSearch`, `SegmentedControl`, `EntityTable` и `Modal` уже вынесены в `src/ui.jsx`, `DialogActionMenu` и `AuditTimeline` — в `src/features/dialogs/*`.
 3. Реализовано: база знаний доведена до расширенного UI с approval history, версиями статьи, вложениями и preview self-service виджета.
 4. Реализовано во frontend: AI real-time scoring, операторские подсказки исправления и аналитика эффективности подсказок. Осталось подключить production scoring service, реальные repair actions и backend-телеметрию.
@@ -627,6 +628,8 @@ Acceptance criteria:
 - [x] Вынести SettingsScreen из `src/sections.jsx` в `src/features/settings/*`.
 - [x] Вынести Settings admin workspace и Webhooks/API/Security CSS в `src/features/settings/*`.
 - [x] Вынести Settings topic directory в `src/features/settings/TopicDirectoryPanel.jsx`.
+- [x] Вынести Settings employee management в `src/features/settings/EmployeeManagementPanel.jsx`.
+- [x] Добавить smoke-сценарий Settings employee management: поиск сотрудника, редактирование, save, read-only для старшего сотрудника и сброс пароля.
 - [ ] Продолжить разнос `App.jsx`, `src/styles.css` и крупных feature-экранов на подмодули.
 - [x] Закрыть role-aware маскирование телефона в chat header и bot handoff summary.
 - [x] Реализовать отдельный AuditScreen для администраторов с фильтрами, деталкой события, retention и export controls.

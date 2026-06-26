@@ -9,6 +9,7 @@ export const roleAccessProfiles = {
     canManageDialogs: false,
     canViewSensitive: false,
     canManageSettings: false,
+    canResetPasswords: false,
     canExportReports: false,
     canRedistribute: false,
     reason: "Доступно старшему сотруднику или администратору"
@@ -19,6 +20,7 @@ export const roleAccessProfiles = {
     canManageDialogs: true,
     canViewSensitive: true,
     canManageSettings: false,
+    canResetPasswords: true,
     canExportReports: true,
     canRedistribute: true,
     reason: "Глобальные настройки доступны только администратору"
@@ -29,6 +31,7 @@ export const roleAccessProfiles = {
     canManageDialogs: true,
     canViewSensitive: true,
     canManageSettings: true,
+    canResetPasswords: true,
     canExportReports: true,
     canRedistribute: true,
     reason: "Полный доступ"

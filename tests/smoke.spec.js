@@ -62,6 +62,34 @@ test("conversation queue filters remain actionable", async ({ page }) => {
   await expectHealthyPage(page);
 });
 
+test("customer panel inserts templates and enforces close topic", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+
+  await page.locator(".queue-row").filter({ hasText: "Владимир Б." }).click();
+  await expect(page.locator(".customer-panel")).toContainText("Для закрытия укажите тематику");
+  await expect(page.locator(".customer-panel .close-button")).toBeDisabled();
+
+  await page.locator(".customer-panel .close-topic select").selectOption({ label: "Товар / Несоответствие" });
+  await expect(page.locator(".customer-panel .close-button")).toBeEnabled();
+
+  await page.locator(".customer-panel .template-list button").filter({ hasText: "Передан курьеру" }).click();
+  await expect(page.locator(".composer textarea")).toHaveValue(/Заказ передан курьеру/);
+  await page.locator(".customer-panel .close-button").click();
+  await expect(page.locator(".customer-panel .close-button")).toContainText("Закрыт");
+  await expect(page.locator(".toast")).toContainText("Диалог закрыт и попадет в ежедневный отчет.");
+  await expectHealthyPage(page);
+});
+
+test("customer panel masks phone for employee role", async ({ page }) => {
+  await page.goto("/");
+  await selectRole(page, "Сотрудник");
+
+  await expect(page.locator(".customer-panel")).toContainText("+7 *** ***-**-44");
+  await expect(page.locator(".customer-panel")).not.toContainText("+7 999 204-18-44");
+  await expectHealthyPage(page);
+});
+
 test("topbar notifications and live bot handoff summary are actionable", async ({ page }) => {
   await page.goto("/");
   await selectRole(page, "Администратор");

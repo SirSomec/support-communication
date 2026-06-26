@@ -1,0 +1,33 @@
+.clients-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.clients-table {
+  min-width: 0;
+}
+
+.clients-table .entity-head,
+.clients-table .entity-row {
+  grid-template-columns: 1fr 150px 96px 96px minmax(160px, 1fr) 90px;
+}
+
+.clients-table .entity-row.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+@media (max-width: 1180px) {
+  .clients-table .entity-head,
+  .clients-table .entity-row {
+    min-width: 760px;
+  }
+}
+
+@media (max-width: 820px) {
+  .clients-workspace {
+    grid-template-columns: 1fr;
+  }
+}

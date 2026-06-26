@@ -3,6 +3,7 @@ import { Download, Filter, ShieldCheck, Sparkles, Tag } from "lucide-react";
 import { maskPhone } from "../../app/dialogModel.js";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { ChannelBadge, EntityTable, ProductScreen, SectionTitle, ToolbarSearch } from "../../ui.jsx";
+import "./clients.css";
 
 function getClientId(client) {
   return `gig-${client.id}-${client.phone.replace(/\D/g, "").slice(-4)}`;

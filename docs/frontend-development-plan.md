@@ -10,14 +10,15 @@
 
 ---
 
-Версия: 2.70
+Версия: 2.71
 Дата актуализации: 2026-06-27
 Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, Toast/StatusBadge/Permission/ChannelBadge/ToolbarSearch/SegmentedControl/EntityTable CSS в `src/ui.css`, transient UI state toast/outbound modal в `useAppTransientState`, state mode/draft/transcript composer в `useComposerState`, lifecycle/toast wrapper вложений composer в `useComposerAttachments`, state/filtering очереди диалогов в `useDialogQueueFilters`, state библиотеки шаблонов и save-template dialog в `useTemplateLibrary`, navigation/role/outbound guard в `useAppNavigation`, выбор активного диалога и draft-switch guard в `useConversationSelection`, state/mutations списка диалогов в `useConversationMutations`, dialog action handlers в `useDialogActions`, state/actions AI-подсказок в `useAiSuggestions`, outbound conversation factory в `createOutboundConversation`, orchestration исходящих диалогов в `useOutboundConversation`, keyboard/focus smoke QA, semantic reports table smoke QA и visual regression checklist, расширения уведомлений фильтрами/подписками/history/browser push/звуковыми правилами/внешними critical channels, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, синхронизации live bot handoff summary с текущей тематикой из `topics` state, Settings access matrix/channel limits в `SettingsAccessPanel`, Settings workspaces для Webhooks/API keys и Security controls с выносом admin workspace в `AdminWorkspaces`/`ApiGovernancePanel`/`BackendIntegrationPanel`/`SecurityControlsPanel`/`AdminLockedPanel`, управления сотрудниками в `EmployeeManagementPanel` с явным permission-prop для сброса пароля и smoke-покрытием, каналов в `ChannelConnectionsPanel`, SDK playground в `SdkConsolePanel`, справочника тематик в `TopicDirectoryPanel`, clients profile/table/duplicates/history CSS, reports table/chart/rescue/column CSS, settings CSS, notifications CSS, dialog modals CSS, composer CSS, Automation bot builder CSS, KnowledgeBaseWorkspace CSS, AiQualityWorkspace CSS, TemplatesScreen editor/browser CSS и VisitorsScreen proactive/rescue CSS как feature CSS, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, frontend service layer `src/services/` для backend/API integration contracts, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Статус дополнен: в план добавлены публичный лендинг, авторизация, onboarding организации, service admin / super admin контур, tenants, тарифы, биллинг, мониторинг платформы, incident management и отдельные frontend service adapters для этих зон.
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
 
-Собрать полноценный рабочий интерфейс омниканальной платформы поддержки уровня Usedesk/Jivo: операторский cockpit, панель старшего сотрудника, клиентские профили, шаблоны, отчеты, настройки прав, каналов, SDK, автоматизацию, контроль качества, активные визиты и конкурентные механики proactive/rescue/bots.
+Собрать полноценный рабочий интерфейс омниканальной платформы поддержки уровня Usedesk/Jivo: операторский cockpit, панель старшего сотрудника, клиентские профили, шаблоны, отчеты, настройки прав, каналов, SDK, автоматизацию, контроль качества, активные визиты, конкурентные механики proactive/rescue/bots, публичный лендинг, авторизацию, onboarding организации и администрирование сервиса.
 
 Фронтенд не должен быть MVP или набором демо-страниц. Каждый раздел проектируется как рабочая поверхность для ежедневного использования: плотная, сканируемая, с ясными состояниями, быстрыми действиями, понятной навигацией и проверяемыми пользовательскими сценариями.
 
@@ -26,8 +27,10 @@
 - React 19 + Vite.
 - `lucide-react` для иконок.
 - Локальная навигация через состояние `section`; полноценный роутинг пока не введен.
+- Следующий архитектурный шаг: разделить навигацию на `public`, `auth`, `app` и `service-admin` пространства с guards по сессии, организации, роли и тарифу.
 - Основной cockpit пока находится в `src/App.jsx`, но app shell (`Sidebar`/`TopBar`) вынесен в `src/features/app-shell/AppShell.jsx`, notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, ConversationList, ChatPane, CustomerPanel, DialogModals, composer/AI panel/attachment preview/ChatHeader/TranscriptToolbar/DialogActionMenu/AuditTimeline вынесены в `src/features/dialogs/*`, а доменная модель диалогов, transient UI state, state/filtering очереди, state/mutations списка диалогов, библиотека шаблонов/save-template dialog, уведомлений, AI quality check, state composer, lifecycle вложений composer, state/actions AI-подсказок, выбор активного диалога/draft-switch guard, orchestration исходящих диалогов и правила доступа вынесены в `src/app/*`.
 - Продуктовые разделы находятся в `src/features/*`: `PanelScreen`, `ClientsScreen`, `ReportsScreen`, `TemplatesScreen`, `QualityScreen`, `VisitorsScreen`, `AutomationScreen`, `AuditScreen` и `SettingsScreen` подключаются через `src/features/section-router.jsx`; legacy `src/sections.jsx` больше не используется, расширенный workspace базы знаний вынесен в `src/features/quality/KnowledgeBaseWorkspace.jsx`, AI scoring/coaching workspace — в `src/features/quality/AiQualityWorkspace.jsx`, Settings access matrix/channel limits — в `src/features/settings/SettingsAccessPanel.jsx`, admin settings workspace — в `src/features/settings/AdminWorkspaces.jsx` и подпанели, управление сотрудниками — в `src/features/settings/EmployeeManagementPanel.jsx`, канальные подключения — в `src/features/settings/ChannelConnectionsPanel.jsx`, SDK playground — в `src/features/settings/SdkConsolePanel.jsx`, справочник тематик — в `src/features/settings/TopicDirectoryPanel.jsx`.
+- Запланированные новые поверхности: `src/features/public/LandingPage.jsx`, `src/features/auth/AuthPage.jsx`, `src/features/onboarding/OrganizationOnboarding.jsx`, `src/features/service-admin/ServiceAdminDashboard.jsx`, `TenantManagementWorkspace`, `ServiceUserSupportWorkspace`, `BillingTariffWorkspace` и `IncidentMonitoringWorkspace`.
 - Общие UI-примитивы, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable вынесены в `src/ui.jsx`.
 - Seed-данные разнесены по доменным файлам `src/data/*.js`; `src/data.js` оставлен публичным barrel-агрегатором.
 - Базовые стили находятся в `src/styles.css`; shared Toast/StatusBadge/Permission/ChannelBadge/ToolbarSearch/SegmentedControl/EntityTable CSS вынесен в `src/ui.css`, clients profile/table/duplicates/history CSS — в `src/features/clients/clients.css`, admin Webhooks/API/Security стили настроек вынесены в `src/features/settings/settings.css`, table/chart/rescue/column controls отчетов — в `src/features/reports/reports.css`, стили notification center — в `src/features/notifications/notifications.css`, CSS модалок диалога — в `src/features/dialogs/dialog-modals.css`, CSS composer surface — в `src/features/dialogs/dialog-composer.css`, CSS bot builder — в `src/features/automation/automation.css`, CSS KnowledgeBaseWorkspace — в `src/features/quality/knowledge-base.css`, CSS AiQualityWorkspace — в `src/features/quality/ai-quality.css`, CSS TemplatesScreen editor/browser — в `src/features/templates/templates.css`, CSS VisitorsScreen proactive/rescue — в `src/features/visitors/visitors.css`.
@@ -217,9 +220,15 @@
 | Активные посетители | Реализован отдельный раздел | Права, обезличивание, ручная инициация с проверками, город/источник |
 | Спасение чатов | Реализованы очередь спасения, фильтр, действие запуска, rescue timer в чате, audit запуска и отчет спасенных/пропущенных | Серверный countdown, автоматический возврат, настройки rescue по каналу/очереди/роли и backend outcome analytics |
 | Сценарные боты и AI-оператор | Реализованы список сценариев, canvas/flow-builder, canonical node types, flow edges, inspector, transcript preview, JSON import/export, after-hours policy, channel assignment, bot metrics и handoff summary в живом чате | Backend runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events |
+| Публичный лендинг продукта | Не реализован; добавлен в план как отдельный public surface вне app shell | `LandingPage` с первым экраном продукта, CTA входа/демо/trial, тарифами, интеграциями, SDK, безопасностью, trust/status-блоком и responsive без горизонтального скролла |
+| Авторизация и восстановление доступа | Не реализована отдельной страницей; текущая смена роли остается mock-инструментом разработки | `AuthPage`: email/password, SSO, 2FA, recovery, invite activation, выбор организации, состояния blocked/expired/maintenance и возврат в предыдущий контекст после re-login |
+| Onboarding организации | Не реализован; добавлен в план как отдельный workspace после регистрации или invite | Чеклист создания tenant, выбора тарифа/trial, приглашения первого администратора, подключения SDK/канала, настройки лимитов, сотрудников и тестового сообщения |
+| Service admin / super admin | Не реализован; текущий администратор управляет только своей организацией | Отдельный `ServiceAdminDashboard` с tenants, поддержкой пользователей сервиса, account actions, safe impersonation, тарифами, квотами, мониторингом платформы, инцидентами, feature flags и отдельным audit stream |
+| Тарифы, биллинг и лимиты сервиса | Не реализованы как service-admin контур; внутри организации есть только лимиты операторов/каналов | `BillingTariffWorkspace`: планы, квоты, подписки, trial, задолженность, заморозка, скидки, история изменений и preview влияния изменения тарифа |
+| Мониторинг платформы и incident management | Частично есть health каналов и backend integration panel внутри настроек организации | Platform-wide health/load по компонентам, очередям, SDK, webhooks, отчетам, ботам, AI, storage, tenant drill-down, incident timeline, maintenance windows и affected tenants |
 | UI/UX продукта | Реализована базовая дизайн-система, единый ScreenStateStrip и Playwright smoke/e2e для state strip, rescue, notifications, AI checks, knowledge editor, bot builder и responsive 390/768/1024/1440 | Keyboard nav, visual regression и backend partial/loading/error states |
 
-Вывод после сверки: все ключевые функциональные направления из спецификации представлены во frontend-плане и имеют хотя бы одну запланированную UI-поверхность. Большинство критичных требований уже отражены в текущем интерфейсе как интерактивные frontend-сценарии; оставшаяся работа связана с глубиной production-поведения, правами, детализацией, API-интеграцией и QA.
+Вывод после сверки: все ключевые функциональные направления из расширенной спецификации представлены во frontend-плане и имеют хотя бы одну запланированную UI-поверхность. Большинство требований поддержки уже отражены в текущем интерфейсе как интерактивные frontend-сценарии; публичный контур, авторизация, onboarding, service admin, тарифы, биллинг и мониторинг платформы зафиксированы как следующий крупный блок реализации. Оставшаяся работа связана с production-поведением, правами, детализацией, API-интеграцией и QA.
 
 ## 5. Архитектурный план фронтенда
 
@@ -293,8 +302,17 @@
   - `automationService`
   - `qualityService`
   - `auditService`
+- Следующий пакет service adapters для публичного контура и service admin:
+  - `authService`: login, SSO, 2FA, recovery, invite activation, session refresh, logout everywhere, organization selection.
+  - `tenantService`: tenants list, tenant detail, organization status, modules, owners, channels, usage, limits and tenant audit.
+  - `billingService`: tariffs, subscriptions, quotas, trial, debt, freeze, discounts, payment state and change preview.
+  - `platformMonitoringService`: platform health, component load, queues, SDK/webhooks/reports/bots/AI/storage metrics and drill-down.
+  - `supportAdminService`: user lookup, account status, session control, resend invite, reset 2FA, forced logout and safe impersonation.
+  - `incidentService`: incidents, affected components, affected tenants, timeline, maintenance windows and customer communication state.
+  - `featureFlagService`: flags, rollout rules by tenant/tariff/segment/percentage, internal tests and audit metadata.
 - Для каждого сервиса есть backend envelope: `service`, `operation`, `status`, `traceId`, `states`, `meta`, `data`, `error`.
 - Новые UI-поверхности и backend-looking actions не привязывать напрямую к seed-массивам; использовать service adapters и затем менять адаптеры на реальные API clients.
+- Service-admin действия всегда проектировать через reason/confirmation/audit metadata; impersonation по умолчанию read-only, с таймером и заметным режимом выхода.
 
 ## 6. Актуальный roadmap frontend-разработки
 
@@ -511,7 +529,37 @@ Acceptance criteria:
 - У клиента есть понятный путь к человеку, если это разрешено правилами.
 - Оператор при подключении видит краткое резюме бота.
 
-### Фаза 11. Production readiness и QA
+### Фаза 11. Публичный контур, авторизация и администрирование сервиса
+
+Цель: сделать продукт полноценным SaaS-сервисом, который можно показать, продать, безопасно авторизовать и сопровождать на уровне всей платформы.
+
+Задачи:
+
+- Добавить public routing namespace и `LandingPage` вне app shell: первый экран с продуктовым сигналом, CTA входа/демо/trial, блоки возможностей, интеграций, SDK, тарифов, безопасности, SLA/status и документации.
+- Добавить `AuthPage` с состояниями login, SSO, 2FA, password recovery, invite activation, blocked account, expired invite, maintenance и выбором организации для multi-tenant пользователя.
+- Добавить `OrganizationOnboarding`: создание организации, выбор тарифа или trial, приглашение первого администратора, подключение SDK/канала, настройка лимитов, сотрудников и тестового сообщения.
+- Ввести route guards: public pages без сессии, auth pages без app shell, app namespace для пользователей организации, service-admin namespace только для внутренней роли администратора сервиса.
+- Добавить `ServiceAdminDashboard`: здоровье платформы, активные инциденты, деградации компонентов, нагрузка по очередям/каналам/SDK/webhooks/отчетам/ботам/AI/storage и список организаций с риском.
+- Добавить `TenantManagementWorkspace`: tenants table, карточка организации, тариф, лимиты, включенные модули, владельцы, администраторы, каналы, usage, последние инциденты и tenant audit.
+- Добавить `ServiceUserSupportWorkspace`: поиск пользователя по email/телефону/ID/организации, статус учетной записи, сессии, роли, resend invite, reset 2FA, forced logout, block/unblock и safe impersonation.
+- Добавить `BillingTariffWorkspace`: планы, квоты, подписки, trial, задолженность, заморозка, ручные скидки, история изменений и preview влияния изменения тарифа на функции/лимиты.
+- Добавить `IncidentMonitoringWorkspace`: компоненты сервиса, инциденты, affected tenants, severity, timeline, maintenance windows, коммуникация клиентам и postmortem state.
+- Добавить `FeatureFlagWorkspace` или панель в service admin: rollout по tenant, тарифу, сегменту, проценту пользователей и внутреннему тесту.
+- Добавить отдельный service-admin audit stream с immutable event ids, фильтрами и reason/confirmation UI для критичных действий.
+- Подготовить `authService`, `tenantService`, `billingService`, `platformMonitoringService`, `supportAdminService`, `incidentService` и `featureFlagService` в том же envelope-формате, что текущие `src/services/`.
+
+Acceptance criteria:
+
+- Public pages не используют внутренний app shell и не показывают клиентские данные.
+- Auth flow позволяет пройти login, 2FA, recovery, invite activation, organization selection и понятные error states.
+- После истечения сессии пользователь возвращается в предыдущий рабочий контекст, если права сохранились.
+- Администратор организации не видит service-admin навигацию и не может открыть service-admin route.
+- Администратор сервиса видит drill-down: платформа -> компонент -> tenant -> событие.
+- Любое impersonation состояние заметно в UI, имеет таймер, причину, быстрый выход и audit event.
+- Тарифные и account-действия показывают область влияния до подтверждения.
+- Landing/auth/service-admin проходят responsive QA на 390/768/1024/1440 без горизонтального overflow.
+
+### Фаза 12. Production readiness и QA
 
 Цель: довести интерфейс до стабильного продукта.
 
@@ -545,6 +593,12 @@ Acceptance criteria:
 6. Реализовано: Settings workspaces `Webhooks/API keys` и `Security` с environment keys, signed webhooks, retries, delivery log, manual replay, changelog, 2FA, active sessions, API-key protection, IP allowlist и security alerts.
 7. Реализовано: notification center расширен до browser push toggle, звуковых правил и внешних каналов критических ошибок. Осталось подключить реальные browser Push API, sound playback, external delivery integrations и серверные источники после backend event stream.
 8. Довести QA до production-уровня: keyboard navigation/focus smoke, visual regression checklist и semantic table/grid для динамической таблицы отчетов реализованы; дальше остается UI-kit/Storybook при росте компонентной базы.
+9. Добавить `public/auth/app/service-admin` route namespaces и access guards по сессии, tenant, роли, тарифу и maintenance state.
+10. Реализовать `LandingPage` как продуктовую витрину с реальными интерфейсными сигналами, тарифами, интеграциями, SDK, безопасностью, SLA/status и CTA.
+11. Реализовать `AuthPage` и multi-step auth flow: login, SSO, 2FA, recovery, invite activation, organization selection, blocked/expired/maintenance states.
+12. Реализовать `OrganizationOnboarding` для самостоятельной регистрации или invite-first сценария: tenant, тариф/trial, первый администратор, каналы, SDK, лимиты, сотрудники, тестовое сообщение.
+13. Реализовать service-admin feature namespace: dashboard, tenants, users, billing/tariffs, platform monitoring, incidents, feature flags и service-admin audit.
+14. Добавить UI-паттерны service admin: reason modal, confirmation preview, read-only impersonation mode, timer, visible exit, dangerous action review и отдельный audit drawer.
 
 ### 7.2. Backend/service integration backlog
 
@@ -562,6 +616,12 @@ Acceptance criteria:
 12. Реализовано во frontend: backend partial/loading/error states есть в service envelope и видимы в `BackendIntegrationPanel`.
 13. Frontend service layer реализован: `auditService` возвращает retention policy, export, redaction и immutable event ids; AuditScreen export идет через service. Production backend: immutable storage, server-side filters и redaction enforcement.
 14. Frontend service layer реализован: Webhooks/API/Security settings используют `integrationService` для key rotation, replay и session revoke. Production backend: signature validation, token storage, 2FA enrollment и security event stream.
+15. Запланировать `authService` contract: login, SSO, 2FA challenge, recovery, invite activation, organization selection, session refresh, logout everywhere and auth audit.
+16. Запланировать `tenantService` contract: tenants, tenant detail, status, owners/admins, modules, channels, usage, quotas, limits and tenant audit.
+17. Запланировать `billingService` contract: tariffs, subscriptions, quotas, trial, debt, freeze, discounts, payment states, invoice history and tariff change preview.
+18. Запланировать `platformMonitoringService` contract: component health, load, queues, SDK/webhooks/reports/bots/AI/storage metrics, tenant drill-down and degradation states.
+19. Запланировать `supportAdminService` contract: user lookup, account status, roles, sessions, resend invite, reset 2FA, forced logout, block/unblock and safe impersonation metadata.
+20. Запланировать `incidentService` and `featureFlagService` contracts: incident lifecycle, affected tenants/components, maintenance windows, rollout rules, internal tests and immutable audit events.
 
 ## 8. QA-gates для каждой frontend-итерации
 
@@ -578,6 +638,8 @@ Acceptance criteria:
 - Новые модальные окна имеют `role="dialog"` и `aria-modal="true"`.
 - Новые empty/error/loading states описаны или явно отложены в backlog.
 - Если меняется план, матрица покрытия требований должна быть актуализирована вместе с roadmap.
+- Public/auth pages проверены отдельно от app shell: нет внутренней навигации, нет tenant-данных, CTA и auth states доступны на mobile.
+- Service-admin changes проверены на route guards, reason/confirmation UI, impersonation banner/timer/exit и отдельный audit event.
 
 ## 9. Definition of Done для frontend-фичи
 
@@ -591,6 +653,7 @@ Acceptance criteria:
 - данные и компоненты не создают дублирующую логику, если уже есть общий state;
 - есть понятный путь будущего подключения API;
 - требование из функциональной спецификации отмечено в матрице покрытия;
+- для auth/service-admin сценариев есть явные states доступа, отказа, истечения сессии и аудита критичных действий;
 - изменение зафиксировано в git отдельным коммитом.
 
 ## 10. Исполнительный чеклист
@@ -703,6 +766,19 @@ Acceptance criteria:
 - [x] Добавить bot after-hours policy, channel assignment, bot metrics и handoff summary UI.
 - [x] Frontend backend integration layer: bot import validation, test run, runtime metadata и audit ids.
 - [ ] Production backend integration: bot runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
+- [ ] Добавить route namespaces `public`, `auth`, `app`, `service-admin` и guards по сессии, tenant, роли, тарифу и maintenance state.
+- [ ] Реализовать `LandingPage` с product hero, CTA входа/демо/trial, возможностями, интеграциями, SDK, тарифами, безопасностью и trust/status-блоком.
+- [ ] Реализовать `AuthPage`: email/password, SSO, 2FA, recovery, invite activation, organization selection, blocked/expired/maintenance states.
+- [ ] Реализовать `OrganizationOnboarding`: tenant, тариф/trial, первый администратор, каналы, SDK, лимиты, сотрудники и тестовое сообщение.
+- [ ] Реализовать `ServiceAdminDashboard`: здоровье платформы, активные инциденты, нагрузка компонентов, очереди, SDK/webhooks/reports/bots/AI/storage и организации с риском.
+- [ ] Реализовать `TenantManagementWorkspace`: tenants table, карточка организации, тариф, лимиты, модули, владельцы, администраторы, каналы, usage и tenant audit.
+- [ ] Реализовать `ServiceUserSupportWorkspace`: поиск пользователя, статус учетной записи, роли, сессии, resend invite, reset 2FA, forced logout, block/unblock и safe impersonation.
+- [ ] Реализовать `BillingTariffWorkspace`: планы, квоты, подписки, trial, задолженность, заморозка, скидки, история изменений и tariff impact preview.
+- [ ] Реализовать `IncidentMonitoringWorkspace`: компоненты сервиса, инциденты, affected tenants, severity, timeline, maintenance windows, коммуникация и postmortem state.
+- [ ] Реализовать service-admin feature flags/rollout UI по tenant, тарифу, сегменту, проценту пользователей и внутреннему тесту.
+- [ ] Реализовать service-admin audit stream, reason modal, confirmation preview, impersonation banner/timer/exit и dangerous action review.
+- [ ] Добавить service adapters: `authService`, `tenantService`, `billingService`, `platformMonitoringService`, `supportAdminService`, `incidentService`, `featureFlagService`.
+- [ ] Добавить smoke/e2e для landing/auth/onboarding/service-admin: route guards, responsive 390/768/1024/1440, no tenant leakage, impersonation audit и critical action confirmations.
 - [x] Добавить системные loading/empty/error states для всех разделов.
 - [x] Добавить smoke/e2e сценарии для критичных flows: states, app shell role access/notification drawer close, keyboard navigation/focus/modal trap, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, attachment queue/send, draft-switch warning, rescue, notification filters/subscriptions/history, Settings employee/channel/SDK permissions, AI explainability/pre-send, AI scoring/coaching, knowledge editor, bot builder/channel assignment и responsive.
 - [x] Провести responsive QA на 390, 768, 1024 и 1440 px.

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { PlayCircle } from "lucide-react";
 import { ChannelBadge, SectionTitle } from "../../ui.jsx";
 import { channelDetails } from "../../data.js";
+import { integrationService } from "../../services/index.js";
 
 export function ChannelConnectionsPanel({ access, canEditSettings, onToast }) {
   const [selectedChannelId, setSelectedChannelId] = useState(channelDetails[0].id);
@@ -28,7 +29,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onToast }) {
     setChannelTestResult(null);
   }
 
-  function handleChannelTest() {
+  async function handleChannelTest() {
     if (!canEditSettings) {
       return;
     }
@@ -44,14 +45,17 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onToast }) {
       return;
     }
 
+    const response = await integrationService.testChannelConnection({
+      channel: selectedChannel,
+      message,
+      mode: channelTestMode,
+      recipient
+    });
     const raw = {
-      ok: true,
-      channel: selectedChannel.channel,
-      direction: channelTestMode,
-      connection: selectedChannel.connections[0].rawId,
-      recipient,
-      requestId: `test_${selectedChannel.id}_${Date.now().toString().slice(-5)}`,
-      status: channelTestMode === "receive" ? "accepted_to_queue" : "sent_to_channel"
+      ok: response.status === "ok",
+      traceId: response.traceId,
+      auditId: response.data.auditId,
+      ...response.data.delivery
     };
     setChannelTestResult({
       tone: "success",
@@ -59,6 +63,20 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onToast }) {
       raw: JSON.stringify(raw, null, 2)
     });
     onToast(`${selectedChannel.channel}: тест ${channelTestMode === "receive" ? "приема" : "отправки"} выполнен.`);
+  }
+
+  async function handleChannelHealthCheck() {
+    if (!canEditSettings) {
+      return;
+    }
+
+    await integrationService.testChannelConnection({
+      channel: selectedChannel,
+      message: "healthcheck",
+      mode: "receive",
+      recipient: selectedChannel.rawId
+    });
+    onToast(`${selectedChannel.name}: проверка подключения запущена.`);
   }
 
   return (
@@ -97,7 +115,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onToast }) {
           </div>
           <button
             disabled={!canEditSettings}
-            onClick={() => onToast(`${selectedChannel.name}: проверка подключения запущена.`)}
+            onClick={handleChannelHealthCheck}
             title={canEditSettings ? "Проверить канал" : access.reason}
             type="button"
           >

@@ -6,13 +6,13 @@
 
 **Architecture:** Текущий интерфейс остается React/Vite single-page app с локальной навигацией и общей дизайн-системой. Архитектура постепенно выделяется в доменные data-файлы, app-модули, feature-router, сервисные адаптеры под API и переиспользуемые UI-примитивы без переписывания уже работающих сценариев.
 
-**Tech Stack:** React 19, Vite, `lucide-react`, CSS, in-app Browser smoke QA, future service adapters for backend/API integration.
+**Tech Stack:** React 19, Vite, `lucide-react`, CSS, in-app Browser smoke QA, frontend service adapters for future backend/API integration.
 
 ---
 
-Версия: 2.69
-Дата актуализации: 2026-06-26
-Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, Toast/StatusBadge/Permission/ChannelBadge/ToolbarSearch/SegmentedControl/EntityTable CSS в `src/ui.css`, transient UI state toast/outbound modal в `useAppTransientState`, state mode/draft/transcript composer в `useComposerState`, lifecycle/toast wrapper вложений composer в `useComposerAttachments`, state/filtering очереди диалогов в `useDialogQueueFilters`, state библиотеки шаблонов и save-template dialog в `useTemplateLibrary`, navigation/role/outbound guard в `useAppNavigation`, выбор активного диалога и draft-switch guard в `useConversationSelection`, state/mutations списка диалогов в `useConversationMutations`, dialog action handlers в `useDialogActions`, state/actions AI-подсказок в `useAiSuggestions`, outbound conversation factory в `createOutboundConversation`, orchestration исходящих диалогов в `useOutboundConversation`, keyboard/focus smoke QA, semantic reports table smoke QA и visual regression checklist, расширения уведомлений фильтрами/подписками/history/browser push/звуковыми правилами/внешними critical channels, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, синхронизации live bot handoff summary с текущей тематикой из `topics` state, Settings access matrix/channel limits в `SettingsAccessPanel`, Settings workspaces для Webhooks/API keys и Security controls с выносом admin workspace в `AdminWorkspaces`/`ApiGovernancePanel`/`SecurityControlsPanel`/`AdminLockedPanel`, управления сотрудниками в `EmployeeManagementPanel` с явным permission-prop для сброса пароля и smoke-покрытием, каналов в `ChannelConnectionsPanel`, SDK playground в `SdkConsolePanel`, справочника тематик в `TopicDirectoryPanel`, clients profile/table/duplicates/history CSS, reports table/chart/rescue/column CSS, settings CSS, notifications CSS, dialog modals CSS, composer CSS, Automation bot builder CSS, KnowledgeBaseWorkspace CSS, AiQualityWorkspace CSS, TemplatesScreen editor/browser CSS и VisitorsScreen proactive/rescue CSS как feature CSS, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
+Версия: 2.70
+Дата актуализации: 2026-06-27
+Статус: актуализированный рабочий план после выноса app shell (`Sidebar`/`TopBar`), PanelScreen, ClientsScreen, ReportsScreen, TemplatesScreen, QualityScreen, VisitorsScreen, AutomationScreen, SettingsScreen, AuditScreen, notification center, ConversationList, ChatPane, CustomerPanel, DialogModals, composer, AI composer panel, attachment preview, ChatHeader, TranscriptToolbar, DialogActionMenu, AuditTimeline, KnowledgeBaseWorkspace, AiQualityWorkspace, Modal, Toast, StatusBadge, ToolbarSearch, SegmentedControl и EntityTable в feature/shared-компоненты, Toast/StatusBadge/Permission/ChannelBadge/ToolbarSearch/SegmentedControl/EntityTable CSS в `src/ui.css`, transient UI state toast/outbound modal в `useAppTransientState`, state mode/draft/transcript composer в `useComposerState`, lifecycle/toast wrapper вложений composer в `useComposerAttachments`, state/filtering очереди диалогов в `useDialogQueueFilters`, state библиотеки шаблонов и save-template dialog в `useTemplateLibrary`, navigation/role/outbound guard в `useAppNavigation`, выбор активного диалога и draft-switch guard в `useConversationSelection`, state/mutations списка диалогов в `useConversationMutations`, dialog action handlers в `useDialogActions`, state/actions AI-подсказок в `useAiSuggestions`, outbound conversation factory в `createOutboundConversation`, orchestration исходящих диалогов в `useOutboundConversation`, keyboard/focus smoke QA, semantic reports table smoke QA и visual regression checklist, расширения уведомлений фильтрами/подписками/history/browser push/звуковыми правилами/внешними critical channels, role-aware маскирования телефона в клиентской карточке, клиентском списке, chat header и bot handoff summary, синхронизации live bot handoff summary с текущей тематикой из `topics` state, Settings access matrix/channel limits в `SettingsAccessPanel`, Settings workspaces для Webhooks/API keys и Security controls с выносом admin workspace в `AdminWorkspaces`/`ApiGovernancePanel`/`BackendIntegrationPanel`/`SecurityControlsPanel`/`AdminLockedPanel`, управления сотрудниками в `EmployeeManagementPanel` с явным permission-prop для сброса пароля и smoke-покрытием, каналов в `ChannelConnectionsPanel`, SDK playground в `SdkConsolePanel`, справочника тематик в `TopicDirectoryPanel`, clients profile/table/duplicates/history CSS, reports table/chart/rescue/column CSS, settings CSS, notifications CSS, dialog modals CSS, composer CSS, Automation bot builder CSS, KnowledgeBaseWorkspace CSS, AiQualityWorkspace CSS, TemplatesScreen editor/browser CSS и VisitorsScreen proactive/rescue CSS как feature CSS, добавления AI explainability, pre-send quality check, AI real-time scoring/coaching/effectiveness UI, расширенного редактора базы знаний с approval history/версиями/вложениями/self-service preview, bot channel assignment/after-hours/metrics/handoff summary, единого audit log UI, frontend service layer `src/services/` для backend/API integration contracts, разбиения seed-данных, app-модулей и расширенного smoke/e2e QA
 Основание: [functional-requirements-support-communication-platform.md](functional-requirements-support-communication-platform.md)
 
 ## 1. Цель фронтенда
@@ -281,9 +281,10 @@
 
 ### 5.2. Состояние и будущая интеграция API
 
-- Пока использовать локальный state для интерактивных сценариев.
-- Подготовить слой `src/services/` с мок-адаптерами под будущий backend:
+- Пока использовать локальный state для интерактивных сценариев, но новые backend-shaped действия проводить через `src/services/`.
+- Реализован слой `src/services/` с мок-адаптерами под будущий backend:
   - `dialogService`
+  - `clientService`
   - `templateService`
   - `reportService`
   - `integrationService`
@@ -291,8 +292,9 @@
   - `visitorService`
   - `automationService`
   - `qualityService`
-- Для каждого сервиса описать loading, empty, error, partial states.
-- Не привязывать новые UI-поверхности напрямую к seed-массивам.
+  - `auditService`
+- Для каждого сервиса есть backend envelope: `service`, `operation`, `status`, `traceId`, `states`, `meta`, `data`, `error`.
+- Новые UI-поверхности и backend-looking actions не привязывать напрямую к seed-массивам; использовать service adapters и затем менять адаптеры на реальные API clients.
 
 ## 6. Актуальный roadmap frontend-разработки
 
@@ -546,20 +548,20 @@ Acceptance criteria:
 
 ### 7.2. Backend/service integration backlog
 
-1. Довести ролевую модель до backend-ready permission model: права на каждое действие, аудит отказов, серверная валидация, сотрудники и группы.
-2. Довести клиентские профили до backend merge graph, conflict resolution, source profile IDs и audit объединения.
-3. Расширить фильтры очереди до даты, оператора, телефона, клиентского ID, сохраненных пресетов и backend-пагинации.
-4. Довести вложения до backend upload/storage, antivirus/scan, delivery states и канальных ограничений на API.
-5. Довести workflow-статусы до backend transitions, transition guards и массовых операций.
-6. Подключить отчеты к реальным файлам выгрузок, сохраненным шаблонам отчетов, backend-очереди и единым определениям метрик.
-7. Подключить каналы Telegram/MAX/VK/SDK к реальным webhook/API операциям, токенам, retry delivery и backend-аудиту тестов.
-8. Довести rescue до production-контура: серверный countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
-9. Довести proactive до production-контура: backend delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитику эффективности.
-10. Довести ботов до production-контура: backend runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
+1. Frontend service layer реализован: `permissionService` возвращает backend-ready permission decision, serverValidated flag и denial audit metadata. Production backend: права на каждое действие, реальные сотрудники/группы и серверная валидация.
+2. Frontend service layer реализован: `clientService` возвращает merge graph, conflict resolution, source profile IDs и audit объединения. Production backend: персистентный merge graph и обработка конфликтов.
+3. Frontend service layer частично реализован: `dialogService.fetchDialogs` поддерживает backend pagination shape. Production backend: дата, оператор, телефон, client ID, saved presets и реальная пагинация.
+4. Frontend service layer частично реализован: `dialogService.uploadAttachment` возвращает upload/storage, antivirus/scan и delivery states. Production backend: storage, scan pipeline и channel API limits.
+5. Frontend service layer частично реализован: `dialogService.transitionConversationStatus` возвращает transition id, guard и audit id. Production backend: transition guards и массовые операции.
+6. Frontend service layer реализован: `reportService` возвращает export queue job, metricDefinitionVersion и file descriptor. Production backend: реальные файлы выгрузок, saved report templates и shared metric definitions.
+7. Frontend service layer реализован: `integrationService` подключен к ChannelConnections, SDK playground, Webhooks/API/Security actions. Production backend: реальные webhook/API операции, токены, retry delivery и audit service.
+8. Frontend service layer реализован: `visitorService.triggerRescueReturn` возвращает server countdown, autoReturn policy и outcome analytics key. Production backend: автоматический возврат и настройки по каналу/очереди/роли.
+9. Frontend service layer реализован: `visitorService.saveProactiveRule` возвращает frequency cap, experiment id и targeting. Production backend: delivery, persistence, experiments и effectiveness analytics.
+10. Frontend service layer частично реализован: `automationService` валидирует import, запускает test run и возвращает runtime/audit metadata. Production backend: runtime, publish/version API, реальные bot metrics и handoff events.
 11. Реализовано во frontend: live bot handoff summary синхронизирован с текущей выбранной тематикой из `topics` state, а не только с seed-значением диалога.
-12. Добавить backend partial/loading/error states после сервисного слоя.
-13. Подключить AuditScreen к единому audit service: retention policy, event detail, export, redaction, server-side filters и immutable event ids.
-14. Подключить Webhooks/API/Security settings к backend: key rotation, signature validation, replay endpoint, session revoke, 2FA enrollment и security event stream.
+12. Реализовано во frontend: backend partial/loading/error states есть в service envelope и видимы в `BackendIntegrationPanel`.
+13. Frontend service layer реализован: `auditService` возвращает retention policy, export, redaction и immutable event ids; AuditScreen export идет через service. Production backend: immutable storage, server-side filters и redaction enforcement.
+14. Frontend service layer реализован: Webhooks/API/Security settings используют `integrationService` для key rotation, replay и session revoke. Production backend: signature validation, token storage, 2FA enrollment и security event stream.
 
 ## 8. QA-gates для каждой frontend-итерации
 
@@ -692,12 +694,15 @@ Acceptance criteria:
 - [x] Добавить редактор базы знаний со статусом публикации, каналами и preview.
 - [x] Расширить базу знаний до approval history, версий статьи, вложений и self-service preview.
 - [x] Добавить visual builder proactive-правил с preview и A/B управлением.
-- [ ] Backend integration: proactive delivery, серверные frequency caps, сохранение экспериментов, таргетинг и аналитика эффективности.
+- [x] Frontend backend integration layer: proactive service contract для frequency caps, experiments, targeting и audit metadata.
+- [ ] Production backend integration: proactive delivery, сохранение экспериментов, таргетинг и аналитика эффективности.
 - [x] Добавить rescue timer в чат и отчет спасенных/пропущенных диалогов.
-- [ ] Backend integration: rescue server countdown, автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
+- [x] Frontend backend integration layer: rescue server countdown, autoReturn policy и outcome analytics key.
+- [ ] Production backend integration: rescue автоматический возврат, настройки по каналу/очереди/роли и backend outcome analytics.
 - [x] Добавить canvas/flow-builder ботов с нодами, тестовым transcript preview и импортом/экспортом.
 - [x] Добавить bot after-hours policy, channel assignment, bot metrics и handoff summary UI.
-- [ ] Backend integration: bot runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
+- [x] Frontend backend integration layer: bot import validation, test run, runtime metadata и audit ids.
+- [ ] Production backend integration: bot runtime, публикация/версии сценариев, реальные bot metrics, audit import/export/test/publish и production handoff events.
 - [x] Добавить системные loading/empty/error states для всех разделов.
 - [x] Добавить smoke/e2e сценарии для критичных flows: states, app shell role access/notification drawer close, keyboard navigation/focus/modal trap, queue filters/tabs, customer panel template/close-topic guard, outbound quick action, save-template modal semantics, attachment queue/send, draft-switch warning, rescue, notification filters/subscriptions/history, Settings employee/channel/SDK permissions, AI explainability/pre-send, AI scoring/coaching, knowledge editor, bot builder/channel assignment и responsive.
 - [x] Провести responsive QA на 390, 768, 1024 и 1440 px.

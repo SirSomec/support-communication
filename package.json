@@ -7,6 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "test:services": "node --test tests/backend-services.test.js",
     "test:smoke": "playwright test tests/smoke.spec.js"
   },
   "dependencies": {

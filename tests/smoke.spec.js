@@ -466,6 +466,10 @@ test("settings expose webhooks api keys and security controls", async ({ page })
 
   await expect(page.locator(".api-governance-panel")).toContainText("Webhooks / API keys");
   await expect(page.locator(".security-controls-panel")).toContainText("Security controls");
+  await expect(page.locator(".backend-integration-panel")).toContainText("Backend integration");
+  await expect(page.locator("[data-service-id='reportService']")).toContainText("requestReportExport");
+  await expect(page.locator("[data-service-id='clientService']")).toContainText("mergeClientProfiles");
+  await expect(page.locator("[data-service-id='auditService']")).toContainText("redactAuditEvent");
   await page.locator(".api-key-card").filter({ hasText: "Production SDK key" }).locator("button").click();
   await expect(page.locator(".api-key-card").filter({ hasText: "Production SDK key" })).toContainText("Rotation queued");
   await expect(page.locator(".toast")).toContainText("prod-key");
@@ -481,12 +485,14 @@ test("settings expose webhooks api keys and security controls", async ({ page })
   await expect(page.locator(".toast")).toContainText("security audit");
   await expectNoElementOverflow(page, ".admin-workspace-layout");
   await expectNoElementOverflow(page, ".api-governance-panel");
+  await expectNoElementOverflow(page, ".backend-integration-panel");
   await expectNoElementOverflow(page, ".webhook-workspace");
   await expectNoElementOverflow(page, ".security-controls-panel");
 
   await selectRole(page, "Старший сотрудник");
   await expect(page.locator(".admin-locked-panel")).toContainText("Админские настройки скрыты");
   await expect(page.locator(".api-governance-panel")).toHaveCount(0);
+  await expect(page.locator(".backend-integration-panel")).toHaveCount(0);
   await expect(page.locator(".security-controls-panel")).toHaveCount(0);
   await expect(page.locator(".product-screen")).not.toContainText("sk_test_****_44ST");
   await expect(page.locator(".product-screen")).not.toContainText("https://api.support.local/webhooks/vk");

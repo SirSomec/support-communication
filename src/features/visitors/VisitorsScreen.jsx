@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { activeVisitors, proactiveRules, rescueChats } from "../../data.js";
+import { visitorService } from "../../services/index.js";
 import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
 import "./visitors.css";
 
@@ -60,6 +61,20 @@ export function VisitorsScreen({ onBack, onToast, access }) {
     ));
   }
 
+  async function handleSaveProactiveRule() {
+    if (!canManageProactive) {
+      return;
+    }
+
+    const response = await visitorService.saveProactiveRule(selectedRule);
+    onToast(`Правило "${selectedRule.name}" сохранено: ${response.data.frequencyCap.id}, ${response.data.experiment.id}.`);
+  }
+
+  async function handleRescueAction(chat) {
+    const response = await visitorService.triggerRescueReturn(chat);
+    onToast(`${chat.client}: ${chat.nextAction}. ${response.data.outcome.status}`);
+  }
+
   return (
     <ProductScreen
       title="Активные визиты и спасение"
@@ -76,7 +91,7 @@ export function VisitorsScreen({ onBack, onToast, access }) {
         <>
           <button
             disabled={!canManageProactive}
-            onClick={() => onToast(`Правило "${selectedRule.name}" сохранено для ${selectedRule.channels.join(", ")}.`)}
+            onClick={handleSaveProactiveRule}
             title={canManageProactive ? "Сохранить proactive-правило" : access.reason}
             type="button"
           >
@@ -154,7 +169,7 @@ export function VisitorsScreen({ onBack, onToast, access }) {
                 <p>{chat.reason}</p>
                 <footer>
                   <span>{chat.operator}</span>
-                  <button onClick={() => onToast(`${chat.client}: ${chat.nextAction}`)} type="button">Выполнить</button>
+                  <button onClick={() => handleRescueAction(chat)} type="button">Выполнить</button>
                 </footer>
               </article>
             ))}

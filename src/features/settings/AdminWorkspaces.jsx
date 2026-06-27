@@ -10,7 +10,9 @@ import {
 } from "../../data.js";
 import { AdminLockedPanel } from "./AdminLockedPanel.jsx";
 import { ApiGovernancePanel } from "./ApiGovernancePanel.jsx";
+import { BackendIntegrationPanel } from "./BackendIntegrationPanel.jsx";
 import { SecurityControlsPanel } from "./SecurityControlsPanel.jsx";
+import { integrationService } from "../../services/index.js";
 import "./settings.css";
 
 export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) {
@@ -25,29 +27,32 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) 
     [selectedWebhook.id]
   );
 
-  function handleRotateApiKey(keyId) {
+  async function handleRotateApiKey(keyId) {
     if (!canEditSettings) {
       return;
     }
 
+    await integrationService.rotateApiKey(keyId);
     setRotatedKeyIds((current) => current.includes(keyId) ? current : [...current, keyId]);
     onToast(`${keyId}: ключ поставлен на ротацию, audit event подготовлен.`);
   }
 
-  function handleReplayWebhook(delivery) {
+  async function handleReplayWebhook(delivery) {
     if (!canEditSettings) {
       return;
     }
 
+    await integrationService.replayWebhookDelivery(delivery);
     setReplayedDeliveryIds((current) => current.includes(delivery.id) ? current : [...current, delivery.id]);
     onToast(`${delivery.traceId}: manual replay поставлен в очередь.`);
   }
 
-  function handleRevokeSession(sessionId) {
+  async function handleRevokeSession(sessionId) {
     if (!canEditSettings) {
       return;
     }
 
+    await integrationService.revokeSecuritySession(sessionId);
     setRevokedSessionIds((current) => current.includes(sessionId) ? current : [...current, sessionId]);
     onToast(`${sessionId}: сессия отозвана и попадет в security audit.`);
   }
@@ -77,6 +82,7 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) 
         securityAlerts={securityAlerts}
         securityControls={securityControls}
       />
+      <BackendIntegrationPanel />
     </div>
   );
 }

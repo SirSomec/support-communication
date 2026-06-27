@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { auditEvents, botScenarios, proactiveRules } from "../../data.js";
+import { automationService } from "../../services/index.js";
 import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
 
 const botNodeTypeOptions = [
@@ -196,7 +197,17 @@ export function AutomationScreen({ onBack, onToast, access }) {
     onToast(`${channel}: назначен бот "${targetScenario?.name ?? "сценарий"}".`);
   }
 
-  function handleImportFlow() {
+  async function handleScenarioTest() {
+    if (!canManageAutomation) {
+      onToast(access.reason);
+      return;
+    }
+
+    const response = await automationService.testBotScenario(selectedScenario);
+    onToast(`Тестовый прогон "${selectedScenario.name}" запущен: ${response.data.testRunId}.`);
+  }
+
+  async function handleImportFlow() {
     if (!canManageAutomation) {
       onToast(access.reason);
       return;
@@ -212,6 +223,11 @@ export function AutomationScreen({ onBack, onToast, access }) {
         (Array.isArray(payload.flowEdges) && payload.flowEdges.every((edge) => edge.from && edge.to));
 
       if (!payload.name || !hasValidNodes || !hasValidEdges) {
+        throw new Error("JSON должен содержать name, flowNodes с валидными type и корректные flowEdges.");
+      }
+
+      const backendValidation = await automationService.validateBotFlowImport(payload);
+      if (backendValidation.status !== "ok") {
         throw new Error("JSON должен содержать name, flowNodes с валидными type и корректные flowEdges.");
       }
 
@@ -277,7 +293,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
             <Plus size={17} />
             Новый сценарий
           </button>
-          <button className="primary-action" disabled={!canManageAutomation} onClick={() => onToast(`Тестовый прогон "${selectedScenario.name}" запущен.`)} title={canManageAutomation ? "Прогнать тест" : access.reason} type="button">
+          <button className="primary-action" disabled={!canManageAutomation} onClick={handleScenarioTest} title={canManageAutomation ? "Прогнать тест" : access.reason} type="button">
             <PlayCircle size={17} />
             Прогнать тест
           </button>

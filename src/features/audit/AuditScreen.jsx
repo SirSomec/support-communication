@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Archive, Download, FileClock, Filter, KeyRound, Link2, ShieldAlert } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { auditLogEvents, auditRetentionPolicies } from "../../data.js";
+import { auditService } from "../../services/index.js";
 import { MetricTile, ProductScreen, SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
 
 const auditSourceOptions = ["Все источники", "Диалоги", "Отчеты", "Настройки", "Каналы", "Качество", "Боты"];
@@ -70,11 +71,12 @@ export function AuditScreen({ onBack, onToast, access }) {
   const warningCount = auditLogEvents.filter((event) => event.severity === "warning").length;
   const visibleCriticalCount = visibleEvents.filter((event) => event.severity === "critical").length;
 
-  function handleExport() {
+  async function handleExport() {
     if (!access.canManageSettings) {
       return;
     }
 
+    await auditService.exportAuditEvents({ format: "CSV", source: sourceFilter });
     onToast(`Audit export: ${formatAuditEventCount(visibleEvents.length)} за период "${periodFilter}" поставлены в очередь.`);
   }
 

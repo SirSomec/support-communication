@@ -13,6 +13,7 @@ import {
   rescueReportRows,
   topicOptions
 } from "../../data.js";
+import { reportService } from "../../services/index.js";
 import "./reports.css";
 
 const reportTeamOptions = ["Все команды", "1-я линия", "Старшие смены", "Финансы", "Администраторы"];
@@ -54,51 +55,61 @@ export function ReportsScreen({ onBack, onToast, access }) {
     );
   }
 
-  function handleCreateExport() {
+  async function handleCreateExport() {
     if (!access.canExportReports) {
       return;
     }
 
-    const nextJob = {
-      id: `export-${Date.now()}`,
-      name: `${reportType}: ${channel}`,
-      format: "XLSX",
+    const response = await reportService.requestReportExport({
+      channel,
+      columns: selectedColumns,
+      filters: {
+        operator: operatorFilter,
+        topic: topicFilter,
+        team: teamFilter,
+        status: statusFilter,
+        sla: slaFilter,
+        dialogType: dialogTypeFilter
+      },
       period,
-      statusKey: "queued",
+      reportType
+    });
+    const nextJob = {
+      ...response.data.job,
       status: "В очереди",
-      progress: 8,
       requestedBy: "Текущий оператор",
-      createdAt: "сейчас",
-      rows: 0,
-      auditId: `audit-${Math.floor(9000 + Math.random() * 900)}`
+      createdAt: "сейчас"
     };
 
     setReportExportJobs((current) => [nextJob, ...current]);
-    onToast(`Выгрузка XLSX за период "${period}" поставлена в очередь.`);
+    onToast(`Выгрузка XLSX за период "${period}" поставлена в очередь: ${nextJob.backendQueueId}.`);
   }
 
   function handleApplyFilters() {
     onToast(`Фильтр применен: ${reportType}, ${period}, ${channel}, ${operatorFilter}, ${topicFilter}, ${teamFilter}, ${statusFilter}, ${slaFilter}, ${dialogTypeFilter}.`);
   }
 
-  function handleExportRetry(jobId) {
+  async function handleExportRetry(jobId) {
     if (!access.canExportReports) {
       return;
     }
 
+    const jobToRetry = reportExportJobs.find((job) => job.id === jobId);
+    const response = await reportService.retryReportExport(jobToRetry);
     setReportExportJobs((current) => current.map((job) => job.id === jobId
-      ? { ...job, statusKey: "running", status: "Повторная подготовка", progress: 28, rows: job.rows || 486 }
+      ? { ...job, ...response.data.job, status: "Повторная подготовка" }
       : job
     ));
     onToast("Экспорт поставлен на повторную подготовку.");
   }
 
-  function handleExportDownload(job) {
+  async function handleExportDownload(job) {
     if (!access.canExportReports) {
       return;
     }
 
-    onToast(`${job.name}: файл ${job.format} готов к скачиванию.`);
+    const response = await reportService.getExportFileDescriptor(job);
+    onToast(`${job.name}: файл ${job.format} готов к скачиванию (${response.data.fileName}).`);
   }
 
   function getReportCell(row, columnId) {

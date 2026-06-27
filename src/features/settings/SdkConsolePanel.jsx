@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { PlayCircle, Zap } from "lucide-react";
 import { SectionTitle } from "../../ui.jsx";
 import { sdkEvents } from "../../data.js";
+import { dialogService, integrationService } from "../../services/index.js";
 
 export function SdkConsolePanel({ access, canEditSettings, onToast }) {
   const [sdkPlaygroundEvent, setSdkPlaygroundEvent] = useState(sdkEvents[0][0]);
@@ -65,7 +66,7 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
     };
   }, [sdkPlaygroundChannel, sdkPlaygroundEnv, sdkPlaygroundEvent, sdkPlaygroundMessage, sdkPlaygroundPhone, sdkPlaygroundUser]);
 
-  function handleSdkPlaygroundRun() {
+  async function handleSdkPlaygroundRun() {
     if (!canEditSettings) {
       return;
     }
@@ -81,11 +82,26 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
       return;
     }
 
+    const serviceResponse = sdkPlaygroundEvent === "initConversation"
+      ? await dialogService.createOutboundConversationRequest({
+          channel: sdkPlaygroundChannel,
+          environment: sdkPlaygroundEnv,
+          message: sdkPlaygroundMessage,
+          phone: sdkPlaygroundPhone,
+          userId: sdkPlaygroundUser
+        })
+      : await integrationService.testChannelConnection({
+          channel: { id: sdkPlaygroundChannel.toLowerCase(), channel: sdkPlaygroundChannel, connections: [{ rawId: sdkPlaygroundEnv }] },
+          message: sdkPlaygroundEvent,
+          mode: "receive",
+          recipient: sdkPlaygroundPhone || sdkPlaygroundUser
+        });
     const response = {
       ok: true,
       event: sdkPlaygroundEvent,
       environment: sdkPlaygroundEnv,
-      requestId: `sdk_${sdkPlaygroundEvent}_${Date.now().toString().slice(-5)}`,
+      traceId: serviceResponse.traceId,
+      requestId: serviceResponse.data.backendQueueId ?? serviceResponse.data.delivery?.requestId,
       acceptedAt: "2026-06-26T12:00:02+03:00",
       route: sdkPlaygroundEvent === "initConversation" ? "outbound_queue" : "event_stream"
     };

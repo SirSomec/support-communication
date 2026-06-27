@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Download, Filter, ShieldCheck, Sparkles, Tag } from "lucide-react";
 import { maskPhone } from "../../app/dialogModel.js";
 import { createScreenStateItems } from "../../app/screenState.js";
+import { clientService } from "../../services/index.js";
 import { ChannelBadge, EntityTable, ProductScreen, SectionTitle, ToolbarSearch } from "../../ui.jsx";
 import "./clients.css";
 
@@ -29,7 +30,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     .sort((left, right) => right.score - left.score)
     .slice(0, 3);
 
-  function mergeClient(candidate) {
+  async function mergeClient(candidate) {
     if (!canMergeProfiles) {
       onToast(access.reason);
       return;
@@ -39,16 +40,18 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
       return;
     }
 
+    await clientService.mergeClientProfiles({ candidate, primary: selected });
     setMergedIds((current) => [...current, candidate.id]);
     onToast(`${candidate.name} объединен с профилем ${selected.name}.`);
   }
 
-  function unmergeClient(candidate) {
+  async function unmergeClient(candidate) {
     if (!canMergeProfiles) {
       onToast(access.reason);
       return;
     }
 
+    await clientService.unmergeClientProfile({ candidate, primary: selected });
     setMergedIds((current) => current.filter((id) => id !== candidate.id));
     onToast(`${candidate.name} вынесен в отдельный профиль.`);
   }

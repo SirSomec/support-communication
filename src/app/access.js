@@ -52,5 +52,5 @@ export const serviceAdminAccessProfile = {
   canExportReports: true,
   canRedistribute: false,
   canServiceAdmin: true,
-  reason: "Внутренний service-admin доступ отделен от ролей организации"
+  reason: "Внутренний доступ администратора сервиса отделен от ролей организации"
 };

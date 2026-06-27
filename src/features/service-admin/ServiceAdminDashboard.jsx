@@ -37,16 +37,24 @@ import { IncidentMonitoringWorkspace } from "./IncidentMonitoringWorkspace.jsx";
 import { ServiceAdminAuditStream } from "./ServiceAdminAuditStream.jsx";
 import { ServiceUserSupportWorkspace } from "./ServiceUserSupportWorkspace.jsx";
 import { TenantManagementWorkspace } from "./TenantManagementWorkspace.jsx";
-import { envelopeToAuditEntry, formatTimer, getStatusTone, noop } from "./serviceAdminUtils.js";
+import {
+  envelopeToAuditEntry,
+  formatAction,
+  formatLabel,
+  formatResult,
+  formatTimer,
+  getStatusTone,
+  noop
+} from "./serviceAdminUtils.js";
 import "./service-admin.css";
 
 const workspaceOptions = [
-  { label: "Tenants", value: "tenants" },
-  { label: "Users", value: "users" },
-  { label: "Billing", value: "billing" },
-  { label: "Incidents", value: "incidents" },
-  { label: "Flags", value: "flags" },
-  { label: "Audit", value: "audit" }
+  { label: "Организации", value: "tenants" },
+  { label: "Пользователи", value: "users" },
+  { label: "Биллинг", value: "billing" },
+  { label: "Инциденты", value: "incidents" },
+  { label: "Флаги", value: "flags" },
+  { label: "Аудит", value: "audit" }
 ];
 
 export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
@@ -82,7 +90,7 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
       result: entry.result,
       traceId: entry.traceId
     });
-    onToast(`${entry.action}: ${entry.result} (${entry.traceId})`);
+    onToast(`${formatAction(entry.action)}: ${formatResult(entry.result)} (${entry.traceId})`);
   }, [onToast]);
 
   const handleImpersonationStart = useCallback((envelope) => {
@@ -97,7 +105,7 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
 
     const envelope = await supportAdminService.stopImpersonation({
       impersonationId: impersonation.id,
-      reason: "Exited from service-admin banner"
+      reason: "Выход из режима доступа администратора сервиса"
     });
     setImpersonation(null);
     recordEnvelope(envelope, { action: "impersonation.stop" });
@@ -111,7 +119,7 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
       result: envelope.data.authenticated ? envelope.data.session.authState : "anonymous",
       traceId: envelope.traceId
     });
-    onToast(`Auth state refreshed: ${envelope.traceId}`);
+    onToast(`Состояние входа обновлено: ${envelope.traceId}`);
   }
 
   useEffect(() => {
@@ -129,7 +137,7 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
       setImpersonation(null);
       supportAdminService.stopImpersonation({
         impersonationId: expiredImpersonation.id,
-        reason: "Expired after service-admin timer"
+        reason: "Время доступа администратора сервиса истекло"
       }).then((envelope) => {
         recordEnvelope(envelope, { action: "impersonation.expired", severity: "warn" });
       });
@@ -138,19 +146,19 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
 
   return (
     <ProductScreen
-      title="Service admin"
-      subtitle="Tenant operations, account support, billing changes, platform incidents, flags and audited privileged actions."
+      title="Администрирование сервиса"
+      subtitle="Операции с организациями, поддержка учетных записей, биллинг, инциденты платформы, флаги и аудит привилегированных действий."
       onBack={onBack}
       stateItems={[
-        { label: "tenants", value: serviceAdminTenants.length, tone: "ok" },
-        { label: "open incidents", value: openIncidentCount, tone: openIncidentCount ? "warn" : "ok" },
-        { label: "risky users", value: riskyUsers, tone: riskyUsers ? "warn" : "ok" },
-        { label: "degraded components", value: degradedComponents, tone: degradedComponents ? "error" : "ok" }
+        { label: "организации", value: serviceAdminTenants.length, tone: "ok" },
+        { label: "открытые инциденты", value: openIncidentCount, tone: openIncidentCount ? "warn" : "ok" },
+        { label: "рисковые пользователи", value: riskyUsers, tone: riskyUsers ? "warn" : "ok" },
+        { label: "деградации компонентов", value: degradedComponents, tone: degradedComponents ? "error" : "ok" }
       ]}
       actions={
         <>
           <select
-            aria-label="Service admin workspace"
+            aria-label="Рабочая зона администратора сервиса"
             className="inline-select"
             onChange={(event) => setActiveWorkspace(event.target.value)}
             value={activeWorkspace}
@@ -159,7 +167,7 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
           </select>
           <button onClick={handleRefreshAuthState} type="button">
             <RefreshCw size={17} />
-            Auth state
+            Состояние входа
           </button>
         </>
       }
@@ -173,10 +181,10 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
       ) : null}
 
       <div className="metric-strip service-admin-metrics">
-        <MetricTile icon={<Building2 size={21} />} label="Tenants" value={serviceAdminTenants.length} detail="active service accounts" />
-        <MetricTile icon={<Users size={21} />} label="Users" value={serviceAdminUsers.length} detail={`${riskyUsers} high-risk profiles`} tone={riskyUsers ? "danger" : ""} />
-        <MetricTile icon={<Siren size={21} />} label="Incidents" value={openIncidentCount} detail="open platform events" tone={openIncidentCount ? "danger" : ""} />
-        <MetricTile icon={<Flag size={21} />} label="Kill switches" value={guardedFlags} detail="feature flags guarded" />
+        <MetricTile icon={<Building2 size={21} />} label="Организации" value={serviceAdminTenants.length} detail="активные аккаунты сервиса" />
+        <MetricTile icon={<Users size={21} />} label="Пользователи" value={serviceAdminUsers.length} detail={`${riskyUsers} профиля с высоким риском`} tone={riskyUsers ? "danger" : ""} />
+        <MetricTile icon={<Siren size={21} />} label="Инциденты" value={openIncidentCount} detail="открытые события платформы" tone={openIncidentCount ? "danger" : ""} />
+        <MetricTile icon={<Flag size={21} />} label="Стоп-флаги" value={guardedFlags} detail="флаги с защитным выключателем" />
       </div>
 
       <PlatformSnapshotPanel onEnvelope={recordEnvelope} />
@@ -184,10 +192,10 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
       <section className="work-panel service-admin-workspace-shell">
         <header className="service-admin-workspace-header">
           <div>
-            <SectionTitle title="Service-admin workspaces" action="privileged actions require reason and audit feedback" />
+            <SectionTitle title="Рабочие зоны администратора сервиса" action="привилегированные действия требуют причины и аудита" />
           </div>
           <SegmentedControl
-            ariaLabel="Service-admin workspace tabs"
+            ariaLabel="Вкладки администратора сервиса"
             className="service-admin-tabs"
             onChange={setActiveWorkspace}
             options={workspaceOptions}
@@ -198,8 +206,8 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
         {feedback ? (
           <div className="service-admin-feedback" role="status">
             <CheckCircle2 size={17} />
-            <span>{feedback.action}</span>
-            <strong>{feedback.result}</strong>
+            <span>{formatAction(feedback.action)}</span>
+            <strong>{formatResult(feedback.result)}</strong>
             <code>{feedback.traceId}</code>
           </div>
         ) : null}
@@ -226,12 +234,12 @@ function ServiceAdminImpersonationBanner({ impersonation, onExit, remainingSecon
       <TimerReset size={20} />
       <div>
         <strong>{impersonation.tenantName}</strong>
-        <span>{impersonation.mode} access expires in {formatTimer(remainingSeconds)}</span>
+        <span>{formatLabel(impersonation.mode)} - доступ истечет через {formatTimer(remainingSeconds)}</span>
       </div>
       <code>{impersonation.id}</code>
       <button onClick={onExit} type="button">
         <DoorOpen size={17} />
-        Exit
+        Выйти
       </button>
     </section>
   );
@@ -241,7 +249,7 @@ function PlatformSnapshotPanel({ onEnvelope }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedComponentId, setSelectedComponentId] = useState(serviceAdminPlatformComponents[0].id);
   const [componentDetail, setComponentDetail] = useState(null);
-  const [reason, setReason] = useState("Acknowledged from service-admin platform snapshot");
+  const [reason, setReason] = useState("Подтверждение из панели состояния платформы");
   const [confirmed, setConfirmed] = useState(false);
 
   const visibleComponents = useMemo(() => (
@@ -281,22 +289,22 @@ function PlatformSnapshotPanel({ onEnvelope }) {
 
   return (
     <section className="work-panel service-admin-platform">
-      <SectionTitle title="Platform snapshot" action="component health and drilldown" />
+      <SectionTitle title="Состояние платформы" action="здоровье компонентов и детализация" />
       <div className="service-admin-platform-toolbar">
         <select
-          aria-label="Filter platform components by status"
+          aria-label="Фильтр компонентов платформы по статусу"
           className="inline-select"
           onChange={(event) => setStatusFilter(event.target.value)}
           value={statusFilter}
         >
-          <option value="all">All statuses</option>
-          <option value="operational">Operational</option>
-          <option value="degraded">Degraded</option>
-          <option value="partial_outage">Partial outage</option>
+          <option value="all">Все статусы</option>
+          <option value="operational">Работает</option>
+          <option value="degraded">Деградация</option>
+          <option value="partial_outage">Частичный сбой</option>
         </select>
         <button onClick={() => handleSelectComponent(selectedComponent.id)} type="button">
           <Eye size={17} />
-          Drilldown
+          Детали
         </button>
       </div>
 
@@ -314,7 +322,7 @@ function PlatformSnapshotPanel({ onEnvelope }) {
                 <strong>{component.name}</strong>
                 <small>{component.ownerTeam} - {component.region}</small>
               </span>
-              <StatusBadge tone={getStatusTone(component.status)}>{component.status}</StatusBadge>
+              <StatusBadge tone={getStatusTone(component.status)}>{formatLabel(component.status)}</StatusBadge>
             </button>
           ))}
         </div>
@@ -325,13 +333,13 @@ function PlatformSnapshotPanel({ onEnvelope }) {
               <span>{detail.component.ownerTeam}</span>
               <h3>{detail.component.name}</h3>
             </div>
-            <StatusBadge tone={getStatusTone(detail.component.status)}>{detail.component.status}</StatusBadge>
+            <StatusBadge tone={getStatusTone(detail.component.status)}>{formatLabel(detail.component.status)}</StatusBadge>
           </header>
           <div className="service-admin-signal-grid">
-            <span><Gauge size={17} /> {detail.component.latencyMs} ms p95</span>
-            <span><AlertTriangle size={17} /> {detail.component.errorRate}% errors</span>
-            <span><ShieldCheck size={17} /> {detail.component.uptime}% uptime</span>
-            <span><RadioTower size={17} /> {detail.affectedTenants.length} tenants</span>
+            <span><Gauge size={17} /> {detail.component.latencyMs} мс p95</span>
+            <span><AlertTriangle size={17} /> {detail.component.errorRate}% ошибок</span>
+            <span><ShieldCheck size={17} /> {detail.component.uptime}% аптайм</span>
+            <span><RadioTower size={17} /> {detail.affectedTenants.length} организаций</span>
           </div>
           <div className="service-admin-mini-list">
             {detail.component.signals.map((signal) => (
@@ -342,18 +350,18 @@ function PlatformSnapshotPanel({ onEnvelope }) {
             ))}
           </div>
           <label className="service-admin-reason-field">
-            <span>Acknowledge reason</span>
+            <span>Причина подтверждения</span>
             <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={2} />
           </label>
           <label className="service-admin-confirm">
             <input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />
-            <span>I confirm this platform alert acknowledgement is approved and audited.</span>
+            <span>Подтверждаю, что алерт платформы согласован и будет записан в аудит.</span>
           </label>
           <footer>
-            <span>{detail.incidents.length} linked incidents</span>
+            <span>{detail.incidents.length} связанных инцидентов</span>
             <button disabled={reason.trim().length < 8 || !confirmed} onClick={handleAcknowledge} type="button">
               <Clock3 size={17} />
-              Acknowledge
+              Подтвердить
             </button>
           </footer>
         </div>

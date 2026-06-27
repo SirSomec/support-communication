@@ -1,7 +1,7 @@
 export const serviceAdminSession = {
   id: "svc-session-current",
   adminId: "svc-admin-001",
-  adminName: "Nadia Orlova",
+  adminName: "Надя Орлова",
   role: "service_admin",
   authState: "mfa_verified",
   allowedActions: [
@@ -21,11 +21,11 @@ export const serviceAdminTenants = [
   {
     id: "tenant-northstar",
     name: "Northstar Retail",
-    legalName: "Northstar Retail LLC",
+    legalName: "ООО Northstar Retail",
     status: "active",
     planId: "business",
     region: "eu-central",
-    owner: "Mira Volkova",
+    owner: "Мира Волкова",
     ownerEmail: "mira@northstar.example",
     workspaces: 8,
     users: 146,
@@ -38,16 +38,16 @@ export const serviceAdminTenants = [
     domains: ["northstar.example", "support.northstar.example"],
     flags: ["ff-ai-replies", "ff-billing-v2"],
     incidentIds: ["inc-search-latency"],
-    notes: "Key account. Billing owner requested tariff review next week."
+    notes: "Ключевой клиент. Владелец биллинга запросил пересмотр тарифа на следующей неделе."
   },
   {
     id: "tenant-volga",
     name: "Volga Logistics",
-    legalName: "Volga Logistics JSC",
+    legalName: "АО Volga Logistics",
     status: "watch",
     planId: "scale",
     region: "ru-west",
-    owner: "Sergey Markin",
+    owner: "Сергей Маркин",
     ownerEmail: "sergey@volga.example",
     workspaces: 14,
     users: 312,
@@ -60,7 +60,7 @@ export const serviceAdminTenants = [
     domains: ["volga.example"],
     flags: ["ff-priority-routing"],
     incidentIds: ["inc-webhook-retry"],
-    notes: "High webhook volume. Keep incident notifications visible."
+    notes: "Высокий объем вебхуков. Уведомления по инциденту должны оставаться видимыми."
   },
   {
     id: "tenant-aurora",
@@ -69,7 +69,7 @@ export const serviceAdminTenants = [
     status: "restricted",
     planId: "enterprise",
     region: "eu-west",
-    owner: "Elena Moroz",
+    owner: "Елена Мороз",
     ownerEmail: "ops@aurora.example",
     workspaces: 22,
     users: 487,
@@ -82,7 +82,7 @@ export const serviceAdminTenants = [
     domains: ["aurora.example", "secure.aurora.example"],
     flags: ["ff-ai-replies", "ff-risk-rules"],
     incidentIds: ["inc-auth-degrade", "inc-search-latency"],
-    notes: "Restricted after repeated risky admin sessions. Require reason for support actions."
+    notes: "Ограничен после повторяющихся рисковых админских сессий. Для действий поддержки обязательна причина."
   },
   {
     id: "tenant-lumen",
@@ -91,7 +91,7 @@ export const serviceAdminTenants = [
     status: "trial",
     planId: "starter",
     region: "us-east",
-    owner: "Anna Weiss",
+    owner: "Анна Вайс",
     ownerEmail: "admin@lumen.example",
     workspaces: 2,
     users: 24,
@@ -104,7 +104,7 @@ export const serviceAdminTenants = [
     domains: ["lumen.example"],
     flags: ["ff-billing-v2"],
     incidentIds: [],
-    notes: "Trial closes in 9 days. Candidate for Business tariff."
+    notes: "Пробный период завершается через 9 дней. Кандидат на тариф Бизнес."
   }
 ];
 
@@ -112,7 +112,7 @@ export const serviceAdminUsers = [
   {
     id: "usr-ns-owner",
     tenantId: "tenant-northstar",
-    name: "Mira Volkova",
+    name: "Мира Волкова",
     email: "mira@northstar.example",
     role: "Owner",
     status: "active",
@@ -122,12 +122,12 @@ export const serviceAdminUsers = [
     sessions: 2,
     risk: "low",
     device: "Chrome, macOS",
-    supportNotes: "Primary billing approver."
+    supportNotes: "Основной согласующий по биллингу."
   },
   {
     id: "usr-ns-agent",
     tenantId: "tenant-northstar",
-    name: "Pavel Antonov",
+    name: "Павел Антонов",
     email: "pavel@northstar.example",
     role: "Senior operator",
     status: "active",
@@ -137,12 +137,12 @@ export const serviceAdminUsers = [
     sessions: 1,
     risk: "medium",
     device: "Edge, Windows",
-    supportNotes: "Asked for MFA reset after phone replacement."
+    supportNotes: "Запросил сброс 2FA после замены телефона."
   },
   {
     id: "usr-volga-admin",
     tenantId: "tenant-volga",
-    name: "Sergey Markin",
+    name: "Сергей Маркин",
     email: "sergey@volga.example",
     role: "Admin",
     status: "active",
@@ -152,12 +152,12 @@ export const serviceAdminUsers = [
     sessions: 4,
     risk: "high",
     device: "Chrome, Windows",
-    supportNotes: "Four parallel sessions during webhook incident."
+    supportNotes: "Четыре параллельные сессии во время инцидента вебхуков."
   },
   {
     id: "usr-aurora-risk",
     tenantId: "tenant-aurora",
-    name: "Elena Moroz",
+    name: "Елена Мороз",
     email: "ops@aurora.example",
     role: "Owner",
     status: "blocked",
@@ -166,13 +166,13 @@ export const serviceAdminUsers = [
     lastActiveAt: "2026-06-26T21:12:00.000Z",
     sessions: 0,
     risk: "critical",
-    device: "Unknown VPN",
-    supportNotes: "Blocked after impossible travel signal."
+    device: "Неизвестный VPN",
+    supportNotes: "Заблокирована после сигнала невозможного перемещения."
   },
   {
     id: "usr-lumen-invite",
     tenantId: "tenant-lumen",
-    name: "Nikolai R.",
+    name: "Николай Р.",
     email: "nikolai@lumen.example",
     role: "Operator",
     status: "invited",
@@ -181,64 +181,64 @@ export const serviceAdminUsers = [
     lastActiveAt: null,
     sessions: 0,
     risk: "low",
-    device: "No device",
-    supportNotes: "Needs invite resend before onboarding call."
+    device: "Устройство не найдено",
+    supportNotes: "Нужно повторить приглашение перед вводным звонком."
   }
 ];
 
 export const serviceAdminTariffs = [
   {
     id: "starter",
-    name: "Starter",
+    name: "Старт",
     priceMonthly: 39000,
     includedUsers: 25,
     workspaceLimit: 3,
     retentionDays: 30,
     automationRuns: 20000,
-    features: ["Shared inbox", "Basic reports", "Email support"],
-    changePolicy: "Immediate downgrade allowed only while trial is active."
+    features: ["Общий входящий поток", "Базовые отчеты", "Поддержка по почте"],
+    changePolicy: "Мгновенное понижение доступно только во время пробного периода."
   },
   {
     id: "business",
-    name: "Business",
+    name: "Бизнес",
     priceMonthly: 129000,
     includedUsers: 150,
     workspaceLimit: 10,
     retentionDays: 180,
     automationRuns: 150000,
-    features: ["SLA routing", "AI suggestions", "Audit export", "Priority support"],
-    changePolicy: "Change applies at next billing period unless explicitly confirmed."
+    features: ["SLA-маршрутизация", "AI-подсказки", "Экспорт аудита", "Приоритетная поддержка"],
+    changePolicy: "Изменение применяется со следующего биллингового периода, если не подтверждено явно."
   },
   {
     id: "scale",
-    name: "Scale",
+    name: "Масштаб",
     priceMonthly: 380000,
     includedUsers: 350,
     workspaceLimit: 20,
     retentionDays: 365,
     automationRuns: 600000,
-    features: ["Webhook replay", "Advanced routing", "Feature gates", "Dedicated CSM"],
-    changePolicy: "Requires reason and billing approval preview."
+    features: ["Повтор вебхуков", "Расширенная маршрутизация", "Функциональные флаги", "Выделенный CSM"],
+    changePolicy: "Требует причину и предпросмотр согласования биллинга."
   },
   {
     id: "enterprise",
-    name: "Enterprise",
+    name: "Корпоративный",
     priceMonthly: 990000,
     includedUsers: 700,
     workspaceLimit: 40,
     retentionDays: 1095,
     automationRuns: 2500000,
-    features: ["SAML", "Data residency", "Custom limits", "24/7 incident bridge"],
-    changePolicy: "Requires written confirmation and service-admin audit."
+    features: ["SAML", "Хранение данных в выбранном регионе", "Индивидуальные лимиты", "Инцидентный мост 24/7"],
+    changePolicy: "Требует письменное подтверждение и аудит администратора сервиса."
   }
 ];
 
 export const serviceAdminPlatformComponents = [
   {
     id: "cmp-api",
-    name: "Public API",
+    name: "Публичный API",
     status: "operational",
-    ownerTeam: "Platform Edge",
+    ownerTeam: "Платформенный контур",
     region: "global",
     latencyMs: 91,
     errorRate: 0.04,
@@ -246,17 +246,17 @@ export const serviceAdminPlatformComponents = [
     tenantImpact: 0,
     dependencies: ["cmp-auth", "cmp-events"],
     signals: [
-      { label: "p95 latency", value: "91 ms", tone: "ok" },
+      { label: "p95 задержка", value: "91 мс", tone: "ok" },
       { label: "4xx/5xx", value: "0.04%", tone: "ok" },
-      { label: "deploy", value: "stable", tone: "ok" }
+      { label: "релиз", value: "стабилен", tone: "ok" }
     ],
-    recentEvents: ["Canary promoted at 06:20", "No rate-limit spikes"]
+    recentEvents: ["Канареечный релиз продвинут в 06:20", "Всплесков лимита запросов нет"]
   },
   {
     id: "cmp-auth",
-    name: "Auth and sessions",
+    name: "Авторизация и сессии",
     status: "degraded",
-    ownerTeam: "Identity",
+    ownerTeam: "Идентификация",
     region: "eu-west",
     latencyMs: 280,
     errorRate: 1.8,
@@ -264,17 +264,17 @@ export const serviceAdminPlatformComponents = [
     tenantImpact: 3,
     dependencies: ["cmp-api"],
     signals: [
-      { label: "MFA challenge", value: "+31%", tone: "warn" },
-      { label: "session revoke", value: "slower", tone: "warn" },
-      { label: "risk rules", value: "active", tone: "ok" }
+      { label: "2FA-проверка", value: "+31%", tone: "warn" },
+      { label: "отзыв сессии", value: "медленнее", tone: "warn" },
+      { label: "правила риска", value: "активны", tone: "ok" }
     ],
-    recentEvents: ["Risk rule update at 07:10", "Aurora restricted after high-risk login"]
+    recentEvents: ["Правило риска обновлено в 07:10", "Aurora ограничена после рискового входа"]
   },
   {
     id: "cmp-webhooks",
-    name: "Webhook delivery",
+    name: "Доставка вебхуков",
     status: "partial_outage",
-    ownerTeam: "Integrations",
+    ownerTeam: "Интеграции",
     region: "ru-west",
     latencyMs: 640,
     errorRate: 5.3,
@@ -282,17 +282,17 @@ export const serviceAdminPlatformComponents = [
     tenantImpact: 12,
     dependencies: ["cmp-events"],
     signals: [
-      { label: "retry queue", value: "8.2k", tone: "danger" },
-      { label: "signature fails", value: "34", tone: "warn" },
-      { label: "DLQ", value: "119", tone: "danger" }
+      { label: "очередь повторов", value: "8.2k", tone: "danger" },
+      { label: "ошибки подписи", value: "34", tone: "warn" },
+      { label: "очередь ошибок", value: "119", tone: "danger" }
     ],
-    recentEvents: ["Manual replay window opened", "Volga retry queue above threshold"]
+    recentEvents: ["Открыто окно ручного повтора", "Очередь повторов Volga выше порога"]
   },
   {
     id: "cmp-search",
-    name: "Conversation search",
+    name: "Поиск по диалогам",
     status: "degraded",
-    ownerTeam: "Data Experience",
+    ownerTeam: "Поиск и данные",
     region: "global",
     latencyMs: 510,
     errorRate: 0.9,
@@ -300,17 +300,17 @@ export const serviceAdminPlatformComponents = [
     tenantImpact: 7,
     dependencies: ["cmp-api", "cmp-events"],
     signals: [
-      { label: "index lag", value: "14 min", tone: "warn" },
-      { label: "p95 latency", value: "510 ms", tone: "warn" },
-      { label: "backfill", value: "running", tone: "ok" }
+      { label: "лаг индекса", value: "14 мин", tone: "warn" },
+      { label: "p95 задержка", value: "510 мс", tone: "warn" },
+      { label: "догрузка", value: "идет", tone: "ok" }
     ],
-    recentEvents: ["Backfill started at 06:44", "Northstar search ticket linked"]
+    recentEvents: ["Догрузка запущена в 06:44", "Связан тикет поиска Northstar"]
   },
   {
     id: "cmp-events",
-    name: "Event pipeline",
+    name: "Поток событий",
     status: "operational",
-    ownerTeam: "Data Platform",
+    ownerTeam: "Платформа данных",
     region: "global",
     latencyMs: 122,
     errorRate: 0.08,
@@ -318,64 +318,64 @@ export const serviceAdminPlatformComponents = [
     tenantImpact: 0,
     dependencies: [],
     signals: [
-      { label: "ingest lag", value: "22 sec", tone: "ok" },
-      { label: "audit stream", value: "healthy", tone: "ok" },
-      { label: "schema", value: "v18", tone: "ok" }
+      { label: "лаг приема", value: "22 сек", tone: "ok" },
+      { label: "поток аудита", value: "здоров", tone: "ok" },
+      { label: "схема", value: "v18", tone: "ok" }
     ],
-    recentEvents: ["Audit consumer caught up", "No schema violations"]
+    recentEvents: ["Потребитель аудита догнал поток", "Нарушений схемы нет"]
   }
 ];
 
 export const serviceAdminIncidents = [
   {
     id: "inc-webhook-retry",
-    title: "Webhook retry queue above threshold",
+    title: "Очередь повторов вебхуков выше порога",
     status: "investigating",
     severity: "sev2",
     componentId: "cmp-webhooks",
-    owner: "Integrations on-call",
+    owner: "Дежурный интеграций",
     startedAt: "2026-06-27T06:55:00.000Z",
     updatedAt: "2026-06-27T07:34:00.000Z",
     affectedTenantIds: ["tenant-volga"],
-    impact: "Delayed delivery for high-volume webhook endpoints in ru-west.",
-    customerMessage: "Webhook delivery is delayed. Messages are queued and will be retried.",
+    impact: "Задержка доставки для высоконагруженных конечных точек вебхуков в ru-west.",
+    customerMessage: "Доставка вебхуков задерживается. Сообщения стоят в очереди и будут повторены.",
     updates: [
-      { at: "07:34", author: "on-call", text: "DLQ drain started for Volga endpoints." },
-      { at: "07:12", author: "support", text: "Incident linked to Volga account timeline." }
+      { at: "07:34", author: "дежурный", text: "Запущена очистка очереди ошибок для конечных точек Volga." },
+      { at: "07:12", author: "поддержка", text: "Инцидент связан с таймлайном аккаунта Volga." }
     ]
   },
   {
     id: "inc-auth-degrade",
-    title: "Elevated MFA challenge latency",
+    title: "Повышенная задержка 2FA-проверки",
     status: "monitoring",
     severity: "sev3",
     componentId: "cmp-auth",
-    owner: "Identity on-call",
+    owner: "Дежурный идентификации",
     startedAt: "2026-06-27T07:05:00.000Z",
     updatedAt: "2026-06-27T07:42:00.000Z",
     affectedTenantIds: ["tenant-aurora"],
-    impact: "Service admins may wait longer for session revoke and MFA reset actions.",
-    customerMessage: "Authentication remains available with increased latency.",
+    impact: "Администраторы сервиса могут дольше ждать отзыв сессий и сброс 2FA.",
+    customerMessage: "Авторизация доступна, но работает с повышенной задержкой.",
     updates: [
-      { at: "07:42", author: "identity", text: "Latency returned below alert threshold." },
-      { at: "07:21", author: "risk", text: "No new impossible travel alerts." }
+      { at: "07:42", author: "идентификация", text: "Задержка вернулась ниже порога алерта." },
+      { at: "07:21", author: "риск", text: "Новых алертов невозможного перемещения нет." }
     ]
   },
   {
     id: "inc-search-latency",
-    title: "Search index lag for conversation history",
+    title: "Лаг индекса поиска по истории диалогов",
     status: "identified",
     severity: "sev3",
     componentId: "cmp-search",
-    owner: "Data Experience",
+    owner: "Поиск и данные",
     startedAt: "2026-06-27T06:44:00.000Z",
     updatedAt: "2026-06-27T07:28:00.000Z",
     affectedTenantIds: ["tenant-northstar", "tenant-aurora"],
-    impact: "Recent messages may appear in search up to 14 minutes late.",
-    customerMessage: "Conversation search is delayed while live chats remain unaffected.",
+    impact: "Новые сообщения могут появляться в поиске с задержкой до 14 минут.",
+    customerMessage: "Поиск по диалогам задерживается, живые чаты не затронуты.",
     updates: [
-      { at: "07:28", author: "data", text: "Backfill reached 71% completion." },
-      { at: "06:58", author: "support", text: "Added status note to Northstar tenant." }
+      { at: "07:28", author: "данные", text: "Догрузка дошла до 71%." },
+      { at: "06:58", author: "поддержка", text: "Добавлена статусная заметка для Northstar." }
     ]
   }
 ];
@@ -384,12 +384,12 @@ export const serviceAdminFeatureFlags = [
   {
     id: "flag-ai-replies",
     key: "ff-ai-replies",
-    name: "AI reply assistant",
+    name: "AI-ассистент ответов",
     status: "on",
     environment: "production",
     scope: "tenant",
     rollout: 72,
-    owner: "AI Experience",
+    owner: "AI-команда",
     segments: ["business", "enterprise"],
     enabledTenantIds: ["tenant-northstar", "tenant-aurora"],
     variants: [
@@ -402,12 +402,12 @@ export const serviceAdminFeatureFlags = [
   {
     id: "flag-billing-v2",
     key: "ff-billing-v2",
-    name: "Billing tariff v2",
+    name: "Биллинг тарифов v2",
     status: "gradual",
     environment: "production",
     scope: "plan",
     rollout: 35,
-    owner: "Billing",
+    owner: "Биллинг",
     segments: ["starter", "business"],
     enabledTenantIds: ["tenant-northstar", "tenant-lumen"],
     variants: [
@@ -420,12 +420,12 @@ export const serviceAdminFeatureFlags = [
   {
     id: "flag-priority-routing",
     key: "ff-priority-routing",
-    name: "Priority routing engine",
+    name: "Движок приоритетной маршрутизации",
     status: "on",
     environment: "production",
     scope: "tenant",
     rollout: 100,
-    owner: "Routing",
+    owner: "Маршрутизация",
     segments: ["scale", "enterprise"],
     enabledTenantIds: ["tenant-volga", "tenant-aurora"],
     variants: [
@@ -437,12 +437,12 @@ export const serviceAdminFeatureFlags = [
   {
     id: "flag-risk-rules",
     key: "ff-risk-rules",
-    name: "Adaptive risk rules",
+    name: "Адаптивные правила риска",
     status: "guarded",
     environment: "production",
     scope: "tenant",
     rollout: 18,
-    owner: "Identity",
+    owner: "Идентификация",
     segments: ["enterprise"],
     enabledTenantIds: ["tenant-aurora"],
     variants: [
@@ -458,48 +458,48 @@ export const serviceAdminAuditEvents = [
   {
     id: "svc-audit-1001",
     at: "2026-06-27T07:42:00.000Z",
-    actor: "Nadia Orlova",
+    actor: "Надя Орлова",
     action: "incident.monitor",
     target: "inc-auth-degrade",
     tenantId: "tenant-aurora",
     severity: "info",
-    reason: "Monitoring identity recovery after risk rule update",
+    reason: "Мониторинг восстановления идентификации после обновления правила риска",
     result: "ok",
     traceId: "trc_service_admin_incident_1001"
   },
   {
     id: "svc-audit-1002",
     at: "2026-06-27T07:34:00.000Z",
-    actor: "Nadia Orlova",
+    actor: "Надя Орлова",
     action: "user.block",
     target: "usr-aurora-risk",
     tenantId: "tenant-aurora",
     severity: "critical",
-    reason: "Impossible travel signal confirmed by support",
+    reason: "Поддержка подтвердила сигнал невозможного перемещения",
     result: "ok",
     traceId: "trc_service_admin_user_1002"
   },
   {
     id: "svc-audit-1003",
     at: "2026-06-27T07:20:00.000Z",
-    actor: "Billing Ops",
+    actor: "Биллинг Ops",
     action: "tariff.preview",
     target: "tenant-lumen",
     tenantId: "tenant-lumen",
     severity: "info",
-    reason: "Trial conversion estimate",
+    reason: "Оценка конверсии пробного периода",
     result: "ok",
     traceId: "trc_service_admin_billing_1003"
   },
   {
     id: "svc-audit-1004",
     at: "2026-06-27T07:12:00.000Z",
-    actor: "Nadia Orlova",
+    actor: "Надя Орлова",
     action: "impersonation.start",
     target: "tenant-volga",
     tenantId: "tenant-volga",
     severity: "warn",
-    reason: "Customer approved webhook replay check",
+    reason: "Клиент согласовал проверку повторов вебхуков",
     result: "ok",
     traceId: "trc_service_admin_impersonation_1004"
   }

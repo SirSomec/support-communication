@@ -9,7 +9,7 @@ import {
   serviceAdminUsers
 } from "../../data/serviceAdmin.js";
 import { tenantService } from "../../services/tenantService.js";
-import { formatCurrency, formatDateTime, getStatusTone } from "./serviceAdminUtils.js";
+import { formatCurrency, formatDateTime, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
 
 const tenantStatusOptions = ["all", "active", "watch", "restricted", "trial"];
 const nextStatusOptions = ["active", "watch", "restricted"];
@@ -20,7 +20,7 @@ export function TenantManagementWorkspace({ onAudit }) {
   const [selectedTenantId, setSelectedTenantId] = useState(serviceAdminTenants[0].id);
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [nextStatus, setNextStatus] = useState("watch");
-  const [reason, setReason] = useState("Support-admin review after customer escalation");
+  const [reason, setReason] = useState("Проверка администратора сервиса после эскалации клиента");
   const [confirmed, setConfirmed] = useState(false);
   const [statusOverrides, setStatusOverrides] = useState({});
 
@@ -74,19 +74,19 @@ export function TenantManagementWorkspace({ onAudit }) {
       <section className="service-admin-list-panel">
         <header className="service-admin-panel-toolbar">
           <ToolbarSearch
-            ariaLabel="Search tenants"
+            ariaLabel="Поиск организаций"
             iconSize={17}
             onChange={setQuery}
-            placeholder="Search tenant, owner, domain"
+            placeholder="Организация, владелец, домен"
             value={query}
           />
           <select
-            aria-label="Tenant status filter"
+            aria-label="Фильтр организаций по статусу"
             className="inline-select"
             onChange={(event) => setStatusFilter(event.target.value)}
             value={statusFilter}
           >
-            {tenantStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+            {tenantStatusOptions.map((status) => <option key={status} value={status}>{formatLabel(status)}</option>)}
           </select>
         </header>
 
@@ -101,52 +101,52 @@ export function TenantManagementWorkspace({ onAudit }) {
               <Building2 size={18} />
               <span>
                 <strong>{tenant.name}</strong>
-                <small>{tenant.region} - {tenant.users} users - {formatCurrency(tenant.monthlyRevenue)}</small>
+                <small>{tenant.region} - {tenant.users} пользователей - {formatCurrency(tenant.monthlyRevenue)}</small>
               </span>
-              <StatusBadge tone={getStatusTone(tenant.status)}>{tenant.status}</StatusBadge>
+              <StatusBadge tone={getStatusTone(tenant.status)}>{formatLabel(tenant.status)}</StatusBadge>
             </button>
           ))}
         </div>
       </section>
 
       <section className="service-admin-detail-panel">
-        <SectionTitle title="Tenant detail" action={selectedTenant.id} />
+        <SectionTitle title="Карточка организации" action={selectedTenant.id} />
         <div className="service-admin-detail-head">
           <div>
             <span>{selectedTenant.legalName}</span>
             <h3>{selectedTenant.name}</h3>
             <p>{selectedTenant.notes}</p>
           </div>
-          <StatusBadge tone={getStatusTone(selectedTenant.status)}>{selectedTenant.status}</StatusBadge>
+          <StatusBadge tone={getStatusTone(selectedTenant.status)}>{formatLabel(selectedTenant.status)}</StatusBadge>
         </div>
 
         <div className="service-admin-stat-grid">
-          <span><b>{selectedTenant.healthScore}</b> health</span>
+          <span><b>{selectedTenant.healthScore}</b> здоровье</span>
           <span><b>{selectedTenant.sla}%</b> SLA</span>
-          <span><b>{selectedTenant.workspaces}</b> workspaces</span>
-          <span><b>{formatDateTime(selectedTenant.lastSeenAt)}</b> last seen</span>
+          <span><b>{selectedTenant.workspaces}</b> рабочих пространств</span>
+          <span><b>{formatDateTime(selectedTenant.lastSeenAt)}</b> последняя активность</span>
         </div>
 
         <div className="service-admin-linked-grid">
           <article>
-            <strong>Users</strong>
-            <span>{detail.users.length} total</span>
-            <small>{detail.users.filter((user) => user.risk !== "low").length} require support attention</small>
+            <strong>Пользователи</strong>
+            <span>{detail.users.length} всего</span>
+            <small>{detail.users.filter((user) => user.risk !== "low").length} требуют внимания поддержки</small>
           </article>
           <article>
-            <strong>Tariff</strong>
-            <span>{detail.tariff?.name ?? "Unknown"}</span>
-            <small>{detail.tariff?.retentionDays ?? 0} days retention</small>
+            <strong>Тариф</strong>
+            <span>{detail.tariff?.name ?? "Неизвестно"}</span>
+            <small>{detail.tariff?.retentionDays ?? 0} дней хранения</small>
           </article>
           <article>
-            <strong>Incidents</strong>
-            <span>{detail.incidents.length} linked</span>
-            <small>{detail.incidents.map((incident) => incident.severity).join(", ") || "none"}</small>
+            <strong>Инциденты</strong>
+            <span>{detail.incidents.length} связано</span>
+            <small>{detail.incidents.map((incident) => formatLabel(incident.severity)).join(", ") || "нет"}</small>
           </article>
           <article>
-            <strong>Flags</strong>
-            <span>{detail.flags.length} enabled</span>
-            <small>{detail.flags.map((flag) => flag.key).join(", ") || "none"}</small>
+            <strong>Флаги</strong>
+            <span>{detail.flags.length} включено</span>
+            <small>{detail.flags.map((flag) => flag.key).join(", ") || "нет"}</small>
           </article>
         </div>
 
@@ -154,31 +154,31 @@ export function TenantManagementWorkspace({ onAudit }) {
           <header>
             <ShieldAlert size={18} />
             <div>
-              <strong>Status action preview</strong>
-              <span>{selectedTenant.status} to {nextStatus}</span>
+              <strong>Предпросмотр изменения статуса</strong>
+              <span>{formatLabel(selectedTenant.status)} → {formatLabel(nextStatus)}</span>
             </div>
           </header>
           <div className="service-admin-action-grid">
             <label>
-              <span>Next status</span>
+              <span>Новый статус</span>
               <select value={nextStatus} onChange={(event) => setNextStatus(event.target.value)}>
-                {nextStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+                {nextStatusOptions.map((status) => <option key={status} value={status}>{formatLabel(status)}</option>)}
               </select>
             </label>
             <label>
-              <span>Reason</span>
+              <span>Причина</span>
               <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} />
             </label>
           </div>
           <label className="service-admin-confirm">
             <input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />
-            <span>I confirm this customer-impacting tenant status change.</span>
+            <span>Подтверждаю изменение статуса, которое влияет на клиента.</span>
           </label>
           <footer>
-            <span>{actionDisabled ? "Reason and confirmation required" : "Ready to send audited status update"}</span>
+            <span>{actionDisabled ? "Нужны причина и подтверждение" : "Готово к аудируемому изменению статуса"}</span>
             <button disabled={actionDisabled} onClick={handleStatusChange} type="button">
               {nextStatus === "restricted" ? <Ban size={17} /> : <CheckCircle2 size={17} />}
-              Apply status
+              Применить статус
             </button>
           </footer>
         </div>

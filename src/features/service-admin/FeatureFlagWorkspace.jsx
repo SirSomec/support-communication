@@ -3,7 +3,7 @@ import { Eye, Flag, ShieldAlert, SlidersHorizontal } from "lucide-react";
 import { SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
 import { serviceAdminFeatureFlags, serviceAdminTenants } from "../../data/serviceAdmin.js";
 import { featureFlagService } from "../../services/featureFlagService.js";
-import { getStatusTone } from "./serviceAdminUtils.js";
+import { formatLabel, getStatusTone } from "./serviceAdminUtils.js";
 
 const flagStatuses = ["all", "on", "off", "gradual", "guarded"];
 const flagScopes = ["all", "tenant", "plan"];
@@ -17,7 +17,7 @@ export function FeatureFlagWorkspace({ onAudit }) {
   const [nextStatus, setNextStatus] = useState("gradual");
   const [rollout, setRollout] = useState(50);
   const [selectedTenantIds, setSelectedTenantIds] = useState([]);
-  const [reason, setReason] = useState("Controlled rollout requested by feature owner");
+  const [reason, setReason] = useState("Контролируемая раскатка согласована владельцем функции");
   const [preview, setPreview] = useState(null);
   const [confirmationText, setConfirmationText] = useState("");
   const [flagOverrides, setFlagOverrides] = useState({});
@@ -91,27 +91,27 @@ export function FeatureFlagWorkspace({ onAudit }) {
       <section className="service-admin-list-panel">
         <header className="service-admin-panel-toolbar">
           <ToolbarSearch
-            ariaLabel="Search feature flags"
+            ariaLabel="Поиск функциональных флагов"
             iconSize={17}
             onChange={setQuery}
-            placeholder="Search key, owner"
+            placeholder="Ключ или владелец"
             value={query}
           />
           <select
-            aria-label="Flag status filter"
+            aria-label="Фильтр флагов по статусу"
             className="inline-select"
             onChange={(event) => setStatusFilter(event.target.value)}
             value={statusFilter}
           >
-            {flagStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+            {flagStatuses.map((status) => <option key={status} value={status}>{formatLabel(status)}</option>)}
           </select>
           <select
-            aria-label="Flag scope filter"
+            aria-label="Фильтр флагов по области"
             className="inline-select"
             onChange={(event) => setScopeFilter(event.target.value)}
             value={scopeFilter}
           >
-            {flagScopes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
+            {flagScopes.map((scope) => <option key={scope} value={scope}>{formatLabel(scope)}</option>)}
           </select>
         </header>
         <div className="service-admin-flag-list">
@@ -134,50 +134,50 @@ export function FeatureFlagWorkspace({ onAudit }) {
                 <strong>{flag.name}</strong>
                 <small>{flag.key} - {flag.owner} - {flag.rollout}%</small>
               </span>
-              <StatusBadge tone={getStatusTone(flag.status)}>{flag.status}</StatusBadge>
+              <StatusBadge tone={getStatusTone(flag.status)}>{formatLabel(flag.status)}</StatusBadge>
             </button>
           ))}
         </div>
       </section>
 
       <section className="service-admin-detail-panel">
-        <SectionTitle title="Feature flag control" action={selectedFlag.key} />
+        <SectionTitle title="Управление флагом" action={selectedFlag.key} />
         <div className="service-admin-detail-head">
           <div>
-            <span>{selectedFlag.owner} - {selectedFlag.environment}</span>
+            <span>{selectedFlag.owner} - {formatLabel(selectedFlag.environment)}</span>
             <h3>{selectedFlag.name}</h3>
-            <p>{selectedFlag.scope} scoped rollout across {selectedFlag.segments.join(", ")}</p>
+            <p>Область: {formatLabel(selectedFlag.scope)}. Сегменты: {selectedFlag.segments.map(formatLabel).join(", ")}</p>
           </div>
-          <StatusBadge tone={getStatusTone(selectedFlag.status)}>{selectedFlag.status}</StatusBadge>
+          <StatusBadge tone={getStatusTone(selectedFlag.status)}>{formatLabel(selectedFlag.status)}</StatusBadge>
         </div>
 
         <div className="service-admin-stat-grid">
-          <span><b>{selectedFlag.rollout}%</b> rollout</span>
-          <span><b>{selectedFlag.enabledTenantIds.length}</b> tenants</span>
-          <span><b>{selectedFlag.killSwitch ? "yes" : "no"}</b> kill switch</span>
-          <span><b>{selectedFlag.variants.length}</b> variants</span>
+          <span><b>{selectedFlag.rollout}%</b> раскатка</span>
+          <span><b>{selectedFlag.enabledTenantIds.length}</b> организаций</span>
+          <span><b>{selectedFlag.killSwitch ? "да" : "нет"}</b> стоп-флаг</span>
+          <span><b>{selectedFlag.variants.length}</b> вариантов</span>
         </div>
 
         <div className="service-admin-action-box">
           <header>
             <ShieldAlert size={18} />
             <div>
-              <strong>Rollout preview</strong>
-              <span>Changes are previewed before an audited update.</span>
+              <strong>Предпросмотр раскатки</strong>
+              <span>Изменения проверяются перед аудируемым обновлением.</span>
             </div>
           </header>
           <div className="service-admin-action-grid">
             <label>
-              <span>Next status</span>
+              <span>Новый статус</span>
               <select value={nextStatus} onChange={(event) => {
                 setNextStatus(event.target.value);
                 setPreview(null);
               }}>
-                {nextFlagStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                {nextFlagStatuses.map((status) => <option key={status} value={status}>{formatLabel(status)}</option>)}
               </select>
             </label>
             <label>
-              <span>Rollout: {rollout}%</span>
+              <span>Раскатка: {rollout}%</span>
               <input
                 max="100"
                 min="0"
@@ -190,12 +190,12 @@ export function FeatureFlagWorkspace({ onAudit }) {
               />
             </label>
             <label>
-              <span>Reason</span>
+              <span>Причина</span>
               <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={2} />
             </label>
           </div>
 
-          <div className="service-admin-tenant-checks" aria-label="Tenant flag targeting">
+          <div className="service-admin-tenant-checks" aria-label="Таргетинг флага по организациям">
             {serviceAdminTenants.map((tenant) => (
               <label key={tenant.id}>
                 <input
@@ -211,26 +211,26 @@ export function FeatureFlagWorkspace({ onAudit }) {
           <div className="service-admin-action-buttons">
             <button disabled={reason.trim().length < 8} onClick={handlePreview} type="button">
               <Eye size={17} />
-              Preview
+              Предпросмотр
             </button>
             <button disabled={!canApply} onClick={handleApply} type="button">
               <SlidersHorizontal size={17} />
-              Apply flag
+              Применить флаг
             </button>
           </div>
 
           {currentPreview ? (
             <div className="service-admin-preview">
-              <span><b>Blast radius</b>{currentPreview.blastRadius} tenants</span>
-              <span><b>Risk</b>{currentPreview.risk}</span>
-              <span><b>Status</b>{currentPreview.nextStatus}</span>
-              <span><b>Rollout</b>{currentPreview.nextRollout}%</span>
+              <span><b>Охват</b>{currentPreview.blastRadius} организаций</span>
+              <span><b>Риск</b>{formatLabel(currentPreview.risk)}</span>
+              <span><b>Статус</b>{formatLabel(currentPreview.nextStatus)}</span>
+              <span><b>Раскатка</b>{currentPreview.nextRollout}%</span>
             </div>
           ) : null}
 
           {confirmationRequired ? (
             <label className="service-admin-reason-field">
-              <span>Type confirmation: {currentPreview.confirmation.expectedText}</span>
+              <span>Введите подтверждение: {currentPreview.confirmation.expectedText}</span>
               <input value={confirmationText} onChange={(event) => setConfirmationText(event.target.value)} />
             </label>
           ) : null}

@@ -677,15 +677,15 @@ test("route namespaces keep public auth and service admin isolated", async ({ pa
 
   await page.goto("/#/service-admin");
   await expect(page.getByTestId("route-service-admin")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Service admin" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Администрирование сервиса" })).toBeVisible();
   await expect(page.locator(".role-switcher")).toHaveCount(0);
   await expectHealthyPage(page);
 
   await page.goto("/");
   await page.locator(".service-admin-entry").click();
   await expect(page.getByTestId("route-service-admin")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Service admin" })).toBeVisible();
-  await expect(page.locator(".service-admin-workspace-shell")).toContainText("Service-admin workspaces");
+  await expect(page.getByRole("heading", { name: "Администрирование сервиса" })).toBeVisible();
+  await expect(page.locator(".service-admin-workspace-shell")).toContainText("Рабочие зоны администратора сервиса");
   await expect(page.locator(".role-switcher")).toHaveCount(0);
   await expectHealthyPage(page);
 });
@@ -756,32 +756,32 @@ test("service admin critical actions require reason confirmation and audit", asy
   await page.locator(".service-admin-entry").click();
   await expect(page.getByTestId("route-service-admin")).toBeVisible();
 
-  await page.locator(".service-admin-tabs button").filter({ hasText: "Users" }).click();
-  await expect(page.locator(".user-support-workspace")).toContainText("Customer identity verified");
-  await page.locator(".service-admin-action-box textarea").fill("Customer approved webhook replay check");
-  await page.locator(".service-admin-action-picker button").filter({ hasText: "Impersonate" }).click();
+  await page.locator(".service-admin-tabs button").filter({ hasText: "Пользователи" }).click();
+  await expect(page.locator(".user-support-workspace")).toContainText("Личность клиента");
+  await page.locator(".service-admin-action-box textarea").fill("Клиент согласовал проверку повторов вебхуков");
+  await page.locator(".service-admin-action-picker button").filter({ hasText: "Войти от имени" }).click();
   await page.locator(".user-support-workspace .service-admin-confirm input").check();
   await page.locator(".user-support-workspace .service-admin-action-box footer button").click();
-  await expect(page.locator(".service-admin-impersonation")).toContainText("read_only_by_default");
-  await expect(page.locator(".service-admin-feedback")).toContainText("impersonation.start");
+  await expect(page.locator(".service-admin-impersonation")).toContainText("только чтение");
+  await expect(page.locator(".service-admin-feedback")).toContainText("Вход от имени пользователя");
 
   await page.locator(".service-admin-impersonation button").click();
   await expect(page.locator(".service-admin-impersonation")).toHaveCount(0);
-  await expect(page.locator(".service-admin-feedback")).toContainText("impersonation.stop");
+  await expect(page.locator(".service-admin-feedback")).toContainText("Выход из режима доступа");
 
-  await page.locator(".service-admin-tabs button").filter({ hasText: "Billing" }).click();
+  await page.locator(".service-admin-tabs button").filter({ hasText: "Биллинг" }).click();
   await page.locator(".service-admin-tenant-list button").filter({ hasText: "Volga Logistics" }).click();
-  await page.locator(".tariff-card-grid button").filter({ hasText: "Starter" }).click();
-  await page.locator(".billing-workspace textarea").fill("QA downgrade impact review");
-  await page.locator(".billing-workspace button").filter({ hasText: "Preview" }).click();
-  await expect(page.locator(".service-admin-preview")).toContainText("Approval");
+  await page.locator(".tariff-card-grid button").filter({ hasText: "Старт" }).click();
+  await page.locator(".billing-workspace textarea").fill("QA проверка влияния понижения тарифа");
+  await page.locator(".billing-workspace button").filter({ hasText: "Предпросмотр" }).click();
+  await expect(page.locator(".service-admin-preview")).toContainText("Согласование");
   await page.locator(".billing-workspace input").fill("CHANGE tenant-volga TO starter");
-  await page.locator(".billing-workspace button").filter({ hasText: "Apply" }).click();
-  await expect(page.locator(".service-admin-feedback")).toContainText("tenant.tariff.change");
+  await page.locator(".billing-workspace button").filter({ hasText: "Применить" }).click();
+  await expect(page.locator(".service-admin-feedback")).toContainText("Изменение тарифа");
 
-  await page.locator(".service-admin-tabs button").filter({ hasText: "Audit" }).click();
-  await expect(page.locator(".audit-workspace")).toContainText("impersonation.start");
-  await expect(page.locator(".audit-workspace")).toContainText("tenant.tariff.change");
+  await page.locator(".service-admin-tabs button").filter({ hasText: "Аудит" }).click();
+  await expect(page.locator(".audit-workspace")).toContainText("Вход от имени пользователя");
+  await expect(page.locator(".audit-workspace")).toContainText("Изменение тарифа");
   await expectHealthyPage(page);
 });
 

@@ -31,7 +31,7 @@ export const authService = {
           authState: "anonymous",
           nextStep: "password"
         },
-        error: { code: "password_required", message: "Password is required for mock login." }
+        error: { code: "password_required", message: "Для входа в демо-режиме нужен пароль." }
       });
     }
 
@@ -72,7 +72,7 @@ export const authService = {
     });
   },
 
-  async logout({ reason = "Service admin signed out" } = {}) {
+  async logout({ reason = "Администратор сервиса вышел из системы" } = {}) {
     return createEnvelope({
       service: SERVICE,
       operation: "logout",
@@ -97,7 +97,7 @@ export const authService = {
       operations: ["getAuthState", "login", "logout"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["anonymous", "password_verified", "mfa_required", "mfa_verified"],
-      note: "Mock service-admin auth states use the shared backend envelope."
+      note: "Демо-состояния входа администратора сервиса используют общий конверт бекенда."
     };
   }
 };

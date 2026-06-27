@@ -3,13 +3,13 @@ import { CreditCard, Eye, ShieldAlert, WalletCards } from "lucide-react";
 import { SectionTitle, StatusBadge } from "../../ui.jsx";
 import { serviceAdminTariffs, serviceAdminTenants } from "../../data/serviceAdmin.js";
 import { billingService } from "../../services/billingService.js";
-import { formatCurrency, getStatusTone } from "./serviceAdminUtils.js";
+import { formatCurrency, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
 
 export function BillingTariffWorkspace({ onAudit }) {
   const [tenantFilter, setTenantFilter] = useState("all");
   const [selectedTenantId, setSelectedTenantId] = useState(serviceAdminTenants[0].id);
   const [selectedPlanId, setSelectedPlanId] = useState("scale");
-  const [reason, setReason] = useState("Commercial approval received in billing ticket");
+  const [reason, setReason] = useState("Коммерческое согласование получено в тикете по биллингу");
   const [preview, setPreview] = useState(null);
   const [confirmationText, setConfirmationText] = useState("");
   const [planOverrides, setPlanOverrides] = useState({});
@@ -61,16 +61,16 @@ export function BillingTariffWorkspace({ onAudit }) {
       <section className="service-admin-list-panel">
         <header className="service-admin-panel-toolbar">
           <select
-            aria-label="Billing tenant filter"
+            aria-label="Фильтр организаций в биллинге"
             className="inline-select"
             onChange={(event) => setTenantFilter(event.target.value)}
             value={tenantFilter}
           >
-            <option value="all">all tenants</option>
-            <option value="active">active</option>
-            <option value="watch">watch</option>
-            <option value="trial">trial</option>
-            <option value="restricted">restricted</option>
+            <option value="all">все организации</option>
+            <option value="active">активные</option>
+            <option value="watch">под наблюдением</option>
+            <option value="trial">{formatLabel("trial")}</option>
+            <option value="restricted">ограниченные</option>
           </select>
         </header>
         <div className="service-admin-tenant-list">
@@ -91,9 +91,9 @@ export function BillingTariffWorkspace({ onAudit }) {
                 <CreditCard size={18} />
                 <span>
                   <strong>{tenant.name}</strong>
-                  <small>{tariff?.name} - {tenant.users} users - {tenant.workspaces} workspaces</small>
+                  <small>{tariff?.name} - {tenant.users} пользователей - {tenant.workspaces} пространств</small>
                 </span>
-                <StatusBadge tone={getStatusTone(tenant.status)}>{tenant.status}</StatusBadge>
+                <StatusBadge tone={getStatusTone(tenant.status)}>{formatLabel(tenant.status)}</StatusBadge>
               </button>
             );
           })}
@@ -101,14 +101,14 @@ export function BillingTariffWorkspace({ onAudit }) {
       </section>
 
       <section className="service-admin-detail-panel">
-        <SectionTitle title="Tariff preview and change" action={selectedTenant.name} />
+        <SectionTitle title="Предпросмотр и смена тарифа" action={selectedTenant.name} />
         <div className="service-admin-detail-head">
           <div>
-            <span>Current: {currentTariff?.name}</span>
-            <h3>{formatCurrency(currentTariff?.priceMonthly ?? 0)} / month</h3>
+            <span>Текущий: {currentTariff?.name}</span>
+            <h3>{formatCurrency(currentTariff?.priceMonthly ?? 0)} / мес.</h3>
             <p>{currentTariff?.changePolicy}</p>
           </div>
-          <StatusBadge tone={getStatusTone(selectedTenant.status)}>{selectedTenant.status}</StatusBadge>
+          <StatusBadge tone={getStatusTone(selectedTenant.status)}>{formatLabel(selectedTenant.status)}</StatusBadge>
         </div>
 
         <div className="tariff-card-grid">
@@ -126,7 +126,7 @@ export function BillingTariffWorkspace({ onAudit }) {
               <WalletCards size={18} />
               <strong>{tariff.name}</strong>
               <span>{formatCurrency(tariff.priceMonthly)}</span>
-              <small>{tariff.includedUsers} users - {tariff.workspaceLimit} workspaces</small>
+              <small>{tariff.includedUsers} пользователей - {tariff.workspaceLimit} пространств</small>
             </button>
           ))}
         </div>
@@ -135,37 +135,37 @@ export function BillingTariffWorkspace({ onAudit }) {
           <header>
             <ShieldAlert size={18} />
             <div>
-              <strong>Billing change preview</strong>
-              <span>{currentTariff?.name} to {nextTariff.name}</span>
+              <strong>Предпросмотр изменения биллинга</strong>
+              <span>{currentTariff?.name} → {nextTariff.name}</span>
             </div>
           </header>
           <label className="service-admin-reason-field">
-            <span>Reason</span>
+            <span>Причина</span>
             <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={2} />
           </label>
           <div className="service-admin-action-buttons">
             <button disabled={reason.trim().length < 8 || currentTariff?.id === nextTariff.id} onClick={handlePreview} type="button">
               <Eye size={17} />
-              Preview
+              Предпросмотр
             </button>
             <button disabled={!canApply} onClick={handleApply} type="button">
               <CreditCard size={17} />
-              Apply change
+              Применить
             </button>
           </div>
 
           {currentPreview ? (
             <div className="service-admin-preview">
-              <span><b>Monthly delta</b>{formatCurrency(currentPreview.monthlyDelta)}</span>
-              <span><b>Users</b>{currentPreview.capacityCheck.users} ({currentPreview.capacityCheck.seatDelta})</span>
-              <span><b>Workspaces</b>{currentPreview.capacityCheck.workspaces} ({currentPreview.capacityCheck.workspaceDelta})</span>
-              <span><b>Approval</b>{currentPreview.approval.required ? "required" : "not required"}</span>
+              <span><b>Дельта в месяц</b>{formatCurrency(currentPreview.monthlyDelta)}</span>
+              <span><b>Пользователи</b>{formatLabel(currentPreview.capacityCheck.users)} ({currentPreview.capacityCheck.seatDelta})</span>
+              <span><b>Пространства</b>{formatLabel(currentPreview.capacityCheck.workspaces)} ({currentPreview.capacityCheck.workspaceDelta})</span>
+              <span><b>Согласование</b>{currentPreview.approval.required ? "требуется" : "не требуется"}</span>
             </div>
           ) : null}
 
           {confirmationRequired ? (
             <label className="service-admin-reason-field">
-              <span>Type confirmation: {currentPreview.confirmation.expectedText}</span>
+              <span>Введите подтверждение: {currentPreview.confirmation.expectedText}</span>
               <input value={confirmationText} onChange={(event) => setConfirmationText(event.target.value)} />
             </label>
           ) : null}

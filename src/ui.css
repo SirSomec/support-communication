@@ -229,3 +229,208 @@
     overflow-x: auto;
   }
 }
+
+/* Product screen primitives */
+.product-screen {
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  padding: 22px 24px 28px;
+  background: var(--bg);
+}
+
+.product-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.product-header h1 {
+  margin: 8px 0 4px;
+  color: #132037;
+  font-size: 25px;
+  line-height: 1.15;
+}
+
+.product-header p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.screen-state-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.screen-state-item {
+  display: grid;
+  grid-template-columns: 24px auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #34445e;
+}
+
+.screen-state-item svg {
+  color: var(--teal);
+}
+
+.screen-state-item span,
+.screen-state-item strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-state-item span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.screen-state-item strong {
+  justify-self: end;
+  color: #1d2d46;
+  font-size: 12px;
+}
+
+.screen-state-item.empty {
+  border-color: #dbeafe;
+  background: #f8fbff;
+}
+
+.screen-state-item.warn,
+.screen-state-item.error {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.screen-state-item.warn svg,
+.screen-state-item.error svg {
+  color: #cf3d4a;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 9px;
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.product-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.primary-action,
+.product-actions button,
+.screen-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #31415b;
+  font-weight: 800;
+}
+
+.primary-action {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.primary-action:hover {
+  background: var(--blue-dark);
+}
+
+.inline-select {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 34px 0 11px;
+  background: #ffffff;
+  color: #263248;
+  font-weight: 700;
+}
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.metric-tile {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon value"
+    "icon detail";
+  gap: 2px 12px;
+  min-height: 104px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.metric-tile > div {
+  display: grid;
+  grid-area: icon;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 8px;
+  background: #edf5ff;
+  color: var(--blue);
+}
+
+.metric-tile.danger > div {
+  background: #fff0f0;
+  color: var(--red);
+}
+
+.metric-tile span {
+  grid-area: label;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.metric-tile strong {
+  grid-area: value;
+  color: #142037;
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.metric-tile small {
+  grid-area: detail;
+  color: var(--teal);
+  font-weight: 750;
+}

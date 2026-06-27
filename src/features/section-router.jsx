@@ -9,6 +9,7 @@ import { ReportsScreen } from "./reports/ReportsScreen.jsx";
 import { SettingsScreen } from "./settings/SettingsScreen.jsx";
 import { TemplatesScreen } from "./templates/TemplatesScreen.jsx";
 import { VisitorsScreen } from "./visitors/VisitorsScreen.jsx";
+import "./workspace-sections.css";
 
 export function SectionRouter({
   section,

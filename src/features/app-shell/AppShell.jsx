@@ -3,6 +3,7 @@ import { ChevronDown, Globe2, Headphones, LogIn, Search, ServerCog, ShieldCheck,
 import { roleModes } from "../../app/access.js";
 import { navItems } from "../../data.js";
 import { NotificationCenter } from "../notifications/NotificationCenter.jsx";
+import "./app-shell.css";
 
 export function Sidebar({ active, access, onSelect }) {
   return (

@@ -9,12 +9,11 @@ import { useAppNavigation } from "./app/useAppNavigation.js";
 import { useDialogActions } from "./app/useDialogActions.js";
 import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
 import { useOutboundConversation } from "./app/useOutboundConversation.js";
+import { RouteLoading } from "./app/RouteLoading.jsx";
 import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
 import { useWorkspaceRoute } from "./app/useWorkspaceRoute.js";
 import { serviceAdminAccessProfile, serviceAdminRole } from "./app/access.js";
-import { ChatPane } from "./features/dialogs/ChatPane.jsx";
-import { ConversationList } from "./features/dialogs/ConversationList.jsx";
-import { CustomerPanel } from "./features/dialogs/CustomerPanel.jsx";
+import { DialogWorkspace } from "./features/dialogs/DialogWorkspace.jsx";
 import { DraftSwitchDialog, OutboundDialogLauncher, SaveTemplateDialog } from "./features/dialogs/DialogModals.jsx";
 import { Sidebar, TopBar } from "./features/app-shell/AppShell.jsx";
 import { SectionRouter } from "./features/section-router.jsx";
@@ -270,60 +269,46 @@ function App() {
           roleMode={roleMode}
         />
         {section === "dialogs" ? (
-          <div className="cockpit">
-            <ConversationList
-              conversations={filtered}
-              allConversations={conversationItems}
-              selectedId={selectedId}
-              onSelect={handleConversationSelect}
-              filter={filter}
-              onFilter={setFilter}
-              queueFilters={queueFilters}
-              onQueueFilterChange={updateQueueFilter}
-              onQueueFiltersReset={resetQueueFilters}
-              query={query}
-              onQuery={setQuery}
-              topics={topics}
-              closedIds={closedIds}
-            />
-            <ChatPane
-              conversation={selected}
-              topic={selectedTopic}
-              onTopic={handleTopicChange}
-              composeMode={composeMode}
-              setComposeMode={setComposeMode}
-              transcriptMode={transcriptMode}
-              setTranscriptMode={setTranscriptMode}
-              draft={draft}
-              setDraft={setDraft}
-              aiSuggestions={visibleAiSuggestions}
-              onAiSuggestionAction={handleAiSuggestionAction}
-              attachments={attachments}
-              onAttachFiles={handleAttachFiles}
-              onAttachmentComplete={handleCompleteAttachment}
-              onAttachmentRetry={handleRetryAttachment}
-              onAttachmentRemove={handleRemoveAttachment}
-              onSend={handleSend}
-              templates={templateLibrary}
-              onSaveTemplate={handleOpenTemplateSave}
-              onDialogAction={handleDialogAction}
-              onCloseDialog={handleClose}
-              onStatusChange={handleStatusChange}
-              access={access}
-              isClosed={isClosed}
-              status={selectedStatus}
-            />
-            <CustomerPanel
-              conversation={selected}
-              topic={selectedTopic}
-              onTopic={handleTopicChange}
-              setDraft={setDraft}
-              templates={templateLibrary}
-              onClose={handleClose}
-              access={access}
-              isClosed={isClosed}
-            />
-          </div>
+          <DialogWorkspace
+            access={access}
+            aiSuggestions={visibleAiSuggestions}
+            allConversations={conversationItems}
+            attachments={attachments}
+            closedIds={closedIds}
+            composeMode={composeMode}
+            conversation={selected}
+            conversations={filtered}
+            draft={draft}
+            filter={filter}
+            isClosed={isClosed}
+            onAiSuggestionAction={handleAiSuggestionAction}
+            onAttachFiles={handleAttachFiles}
+            onAttachmentComplete={handleCompleteAttachment}
+            onAttachmentRemove={handleRemoveAttachment}
+            onAttachmentRetry={handleRetryAttachment}
+            onCloseDialog={handleClose}
+            onConversationSelect={handleConversationSelect}
+            onDialogAction={handleDialogAction}
+            onFilter={setFilter}
+            onQuery={setQuery}
+            onQueueFilterChange={updateQueueFilter}
+            onQueueFiltersReset={resetQueueFilters}
+            onSaveTemplate={handleOpenTemplateSave}
+            onSend={handleSend}
+            onStatusChange={handleStatusChange}
+            onTopic={handleTopicChange}
+            query={query}
+            queueFilters={queueFilters}
+            selectedId={selectedId}
+            setComposeMode={setComposeMode}
+            setDraft={setDraft}
+            setTranscriptMode={setTranscriptMode}
+            status={selectedStatus}
+            templates={templateLibrary}
+            topic={selectedTopic}
+            topics={topics}
+            transcriptMode={transcriptMode}
+          />
         ) : (
           <SectionRouter
             section={section}
@@ -365,14 +350,6 @@ function App() {
       ) : null}
       {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
     </div>
-  );
-}
-
-function RouteLoading({ label }) {
-  return (
-    <main className="route-loading" role="status">
-      <span>{label}</span>
-    </main>
   );
 }
 

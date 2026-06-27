@@ -1,0 +1,62 @@
+import React from "react";
+import { AlertTriangle, Clock3, Lock, ShieldCheck } from "lucide-react";
+import { formatRescueTimer } from "../../app/dialogModel.js";
+
+const transcriptModes = [
+  ["all", "Все"],
+  ["internal", "Комментарии"],
+  ["events", "Audit"]
+];
+
+export function TranscriptToolbar({
+  activeRescue,
+  isClosed,
+  isRescueExpired,
+  onCloseDialog,
+  onTranscriptModeChange,
+  rescueRemainingSeconds,
+  topic,
+  transcriptMode
+}) {
+  return (
+    <>
+      <div className="transcript-toolbar" aria-label="Фильтр истории чата">
+        <div className="transcript-toolbar-left">
+          <div className="transcript-filter-buttons" role="group" aria-label="Тип записей">
+            {transcriptModes.map(([id, label]) => (
+              <button
+                aria-pressed={transcriptMode === id}
+                className={transcriptMode === id ? "active" : ""}
+                key={id}
+                onClick={() => onTranscriptModeChange(id)}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {activeRescue ? (
+            <div className={`rescue-timer-chip ${isRescueExpired ? "expired" : rescueRemainingSeconds <= 60 ? "danger" : ""}`}>
+              <Clock3 size={16} />
+              <strong>{formatRescueTimer(rescueRemainingSeconds)}</strong>
+              <span>{isRescueExpired ? "Время вышло" : activeRescue.reason}</span>
+              <b>{activeRescue.nextAction}</b>
+            </div>
+          ) : null}
+        </div>
+        <div className="transcript-toolbar-actions">
+          <button className="compact-close-button" disabled={isClosed || !topic} onClick={onCloseDialog} type="button">
+            {isClosed ? <ShieldCheck size={16} /> : <Lock size={16} />}
+            {isClosed ? "Закрыт" : "Закрыть"}
+          </button>
+        </div>
+      </div>
+      {!topic && !isClosed ? (
+        <div className="inline-disabled-reason">
+          <AlertTriangle size={15} />
+          Для закрытия выберите тематику. Это правило действует во всех ролях и каналах.
+        </div>
+      ) : null}
+    </>
+  );
+}

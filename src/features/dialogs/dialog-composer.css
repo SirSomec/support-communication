@@ -1,0 +1,476 @@
+.composer {
+  width: calc(100% - 32px);
+  margin: 0 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+}
+
+.composer.internal-mode {
+  border-color: #e5bd57;
+  background: #fffdf5;
+}
+
+.composer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px 8px;
+}
+
+.composer-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 6px;
+  background: #f1f4f8;
+  color: #46546b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.composer-tabs button.active {
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.composer.internal-mode .composer-tabs button.active {
+  background: #8a6315;
+}
+
+.composer-template-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 12px 10px;
+}
+
+.composer-template-picker button {
+  display: grid;
+  gap: 3px;
+  min-height: 52px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fbff;
+  color: #24334c;
+  text-align: left;
+}
+
+.composer-template-picker span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-ai-panel {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 10px;
+}
+
+.inline-ai-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d9e7fb;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.inline-ai-card.accepted,
+.inline-ai-card.editing {
+  border-color: #cdebdc;
+  background: #f5fcf8;
+}
+
+.inline-ai-card header,
+.inline-ai-card footer,
+.inline-ai-card header span,
+.inline-ai-card footer div,
+.inline-ai-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-ai-card header,
+.inline-ai-card footer {
+  justify-content: space-between;
+}
+
+.inline-ai-card header span {
+  min-width: 0;
+  color: var(--blue);
+}
+
+.inline-ai-card header strong,
+.inline-ai-card p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.inline-ai-card header b {
+  color: var(--teal);
+  font-size: 12px;
+}
+
+.inline-ai-card p {
+  margin: 0;
+  color: #263248;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.inline-ai-meta span {
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #506078;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inline-ai-card footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #2d405f;
+  font-weight: 800;
+}
+
+.inline-ai-card footer button:disabled {
+  color: #8792a6;
+  cursor: not-allowed;
+}
+
+.ai-explainability {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #dce8f8;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.ai-explainability summary {
+  color: #2d405f;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.ai-explainability ul {
+  display: grid;
+  gap: 4px;
+  margin: 7px 0 0;
+  padding-left: 18px;
+  color: #44546c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.ai-explainability li {
+  overflow-wrap: anywhere;
+}
+
+.composer textarea {
+  display: block;
+  width: calc(100% - 24px);
+  height: 86px;
+  margin: 0 12px;
+  resize: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  color: var(--text);
+  outline: none;
+}
+
+.composer textarea:focus {
+  border-color: #98c5ff;
+  box-shadow: 0 0 0 3px rgba(11, 116, 255, 0.1);
+}
+
+.visually-hidden-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.attachment-queue {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+
+.attachment-card {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fbff;
+}
+
+.attachment-card.error {
+  border-color: #f1b4b8;
+  background: #fff7f7;
+}
+
+.attachment-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  max-width: 100%;
+  color: #42516a;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.attachment-status.ready {
+  color: #0d8a5c;
+}
+
+.attachment-status.error {
+  color: #b4333f;
+}
+
+.attachment-progress {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5edf7;
+}
+
+.attachment-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blue);
+}
+
+.attachment-card.error .attachment-progress i {
+  background: #dc4855;
+}
+
+.attachment-card p {
+  margin: 0;
+  color: #9d2f3a;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.attachment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attachment-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #31415b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.composer-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 9px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid #f0d39d;
+  border-radius: 7px;
+  background: #fff8e9;
+  color: #865b13;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pre-send-quality {
+  display: grid;
+  gap: 8px;
+  margin: 9px 12px 0;
+  padding: 8px;
+  border: 1px solid #d9e7fb;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.pre-send-quality.warn {
+  border-color: #f0d39d;
+  background: #fffaf0;
+}
+
+.pre-send-quality.danger {
+  border-color: #f1b4b8;
+  background: #fff7f7;
+}
+
+.pre-send-quality > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 30px;
+  border-radius: 6px;
+  background: transparent;
+  color: #24344f;
+  font-weight: 850;
+}
+
+.pre-send-quality > button span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pre-send-quality > button b {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pre-send-check-list {
+  display: grid;
+  gap: 6px;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.pre-send-check-list span {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-left: 3px solid var(--green);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.pre-send-check-list span.warn {
+  border-left-color: #f59e0b;
+}
+
+.pre-send-check-list span.danger {
+  border-left-color: var(--red);
+}
+
+.pre-send-check-list strong {
+  color: #17233a;
+  font-size: 12px;
+}
+
+.pre-send-check-list small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 12px;
+}
+
+.composer-tools {
+  display: flex;
+  gap: 3px;
+}
+
+.composer-tools button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 6px;
+  background: transparent;
+  color: #607088;
+}
+
+.send-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 6px;
+  background: var(--blue);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.send-button:hover {
+  background: var(--blue-dark);
+}
+
+.send-button:disabled {
+  background: #dce5f1;
+  color: #7f8da3;
+}
+
+@media (max-width: 820px) {
+  .attachment-queue,
+  .inline-ai-card footer,
+  .composer-template-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .composer-footer {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .composer-tools {
+    flex-wrap: wrap;
+  }
+
+  .composer-tools button {
+    flex: 0 0 34px;
+  }
+
+  .inline-ai-card footer div,
+  .inline-ai-card footer button {
+    width: 100%;
+  }
+
+  .pre-send-quality > button {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .send-button {
+    justify-content: center;
+    width: 100%;
+  }
+}

@@ -13,6 +13,7 @@ import {
 import { createScreenStateItems } from "../../app/screenState.js";
 import { activeVisitors, proactiveRules, rescueChats } from "../../data.js";
 import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
+import "./visitors.css";
 
 const proactiveChannelOptions = ["SDK", "Telegram", "MAX", "VK"];
 

@@ -1,0 +1,347 @@
+.visitors-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.visitor-list,
+.rescue-list,
+.proactive-list,
+.sdk-timeline {
+  display: grid;
+}
+
+.visitor-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 96px 70px minmax(120px, 0.8fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--text);
+  text-align: left;
+}
+
+.visitor-row.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.visitor-row span,
+.visitor-row small {
+  display: grid;
+  min-width: 0;
+  color: var(--muted);
+}
+
+.visitor-row strong {
+  overflow: hidden;
+  color: #17233a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visitor-row em {
+  color: var(--teal);
+  font-style: normal;
+  font-weight: 800;
+}
+
+.info-pill {
+  display: grid;
+  gap: 4px;
+  min-height: 72px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.info-pill span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.info-pill strong {
+  color: #20304a;
+  font-size: 13px;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 64px minmax(150px, 0.7fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 46px;
+  padding: 0 14px;
+  border-top: 1px solid var(--line);
+}
+
+.timeline-row span,
+.timeline-row small {
+  color: var(--muted);
+}
+
+.rescue-row,
+.proactive-row {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.rescue-row header,
+.proactive-row header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rescue-row p,
+.proactive-row p {
+  margin: 0;
+  color: #46546b;
+}
+
+.rescue-row footer,
+.proactive-row footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rescue-row footer span {
+  color: var(--muted);
+}
+
+.rescue-row footer button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #edf5ff;
+  color: var(--blue);
+  font-weight: 800;
+}
+
+.proactive-row small {
+  color: var(--muted);
+}
+
+.proactive-row {
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+}
+
+.proactive-row.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.proactive-builder-panel {
+  margin-bottom: 14px;
+}
+
+.proactive-builder-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(360px, 1.05fr);
+  gap: 14px;
+  padding: 14px;
+}
+
+.proactive-rule-form,
+.proactive-preview-panel,
+.proactive-ab-list,
+.proactive-rule-summary {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.proactive-rule-form label,
+.proactive-field-row label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.proactive-rule-form span,
+.proactive-field-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.proactive-rule-form input,
+.proactive-rule-form textarea,
+.proactive-ab-list textarea {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: var(--text);
+  outline: 0;
+}
+
+.proactive-rule-form textarea,
+.proactive-ab-list textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.proactive-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.proactive-channel-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.proactive-channel-editor button,
+.proactive-ab-list button,
+.proactive-widget-preview footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #2e3d56;
+  font-weight: 800;
+}
+
+.proactive-channel-editor button.selected,
+.proactive-ab-list article.active button {
+  background: #edf5ff;
+  color: var(--blue);
+}
+
+.proactive-widget-preview {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d9e7fb;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f8fbff, #ffffff);
+}
+
+.proactive-widget-preview header,
+.proactive-widget-preview footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.proactive-widget-preview header span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e9f3ff;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.proactive-widget-preview header b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.proactive-widget-preview strong {
+  color: #17233a;
+  font-size: 17px;
+}
+
+.proactive-widget-preview p {
+  margin: 0;
+  color: #2f3d52;
+  line-height: 1.45;
+}
+
+.proactive-widget-preview footer button:first-child {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.proactive-rule-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.proactive-ab-list article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.proactive-ab-list article.active {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.proactive-ab-list header,
+.proactive-ab-list footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.proactive-ab-list footer span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (max-width: 1180px) {
+  .visitors-layout,
+  .proactive-builder-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 820px) {
+  .visitor-row,
+  .timeline-row {
+    grid-template-columns: 1fr;
+  }
+
+  .proactive-field-row,
+  .proactive-rule-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .proactive-channel-editor button,
+  .proactive-widget-preview footer button,
+  .proactive-ab-list button {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+}

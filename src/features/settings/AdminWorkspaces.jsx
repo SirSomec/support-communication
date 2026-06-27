@@ -12,7 +12,7 @@ import { AdminLockedPanel } from "./AdminLockedPanel.jsx";
 import { ApiGovernancePanel } from "./ApiGovernancePanel.jsx";
 import { BackendIntegrationPanel } from "./BackendIntegrationPanel.jsx";
 import { SecurityControlsPanel } from "./SecurityControlsPanel.jsx";
-import { integrationService } from "../../services/index.js";
+import { integrationService } from "../../services/integrationService.js";
 import "./settings.css";
 
 export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) {

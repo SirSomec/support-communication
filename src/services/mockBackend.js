@@ -1,4 +1,5 @@
 const DEFAULT_LATENCY_MS = 42;
+const MIN_AUDIT_REASON_LENGTH = 8;
 
 export function cloneEntity(value) {
   if (value === undefined || value === null) {
@@ -70,6 +71,20 @@ export function createBackendErrorEnvelope({ code, data = null, message, operati
     data,
     error: { code, message }
   });
+}
+
+export function createInvalidEnvelope({ code, data = {}, message, operation, service }) {
+  return createEnvelope({
+    service,
+    operation,
+    status: "invalid",
+    data,
+    error: { code, message }
+  });
+}
+
+export function hasAuditReason(reason) {
+  return String(reason ?? "").trim().length >= MIN_AUDIT_REASON_LENGTH;
 }
 
 export function slugify(value) {

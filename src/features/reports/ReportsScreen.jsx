@@ -13,7 +13,7 @@ import {
   rescueReportRows,
   topicOptions
 } from "../../data.js";
-import { reportService } from "../../services/index.js";
+import { reportService } from "../../services/reportService.js";
 import "./reports.css";
 
 const reportTeamOptions = ["Все команды", "1-я линия", "Старшие смены", "Финансы", "Администраторы"];

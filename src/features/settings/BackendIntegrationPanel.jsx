@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Activity, ServerCog } from "lucide-react";
 import { SectionTitle, StatusBadge } from "../../ui.jsx";
-import { backendIntegrationService } from "../../services/index.js";
+import { backendIntegrationService } from "../../services/backendIntegrationService.js";
 
 export function BackendIntegrationPanel() {
   const [snapshot, setSnapshot] = useState(null);

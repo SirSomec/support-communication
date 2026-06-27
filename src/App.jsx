@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { useAiSuggestions } from "./app/useAiSuggestions.js";
 import { useAppTransientState } from "./app/useAppTransientState.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
@@ -10,6 +10,8 @@ import { useDialogActions } from "./app/useDialogActions.js";
 import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
 import { useOutboundConversation } from "./app/useOutboundConversation.js";
 import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
+import { useWorkspaceRoute } from "./app/useWorkspaceRoute.js";
+import { serviceAdminAccessProfile, serviceAdminRole } from "./app/access.js";
 import { ChatPane } from "./features/dialogs/ChatPane.jsx";
 import { ConversationList } from "./features/dialogs/ConversationList.jsx";
 import { CustomerPanel } from "./features/dialogs/CustomerPanel.jsx";
@@ -21,6 +23,14 @@ import {
   aiSuggestions,
   conversations
 } from "./data.js";
+
+const SERVICE_ADMIN_DEMO_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_SERVICE_ADMIN === "true";
+const LandingPage = lazy(() => import("./features/public/index.js"));
+const AuthPage = lazy(() => import("./features/auth/index.js"));
+const OrganizationOnboarding = lazy(() => import("./features/onboarding/index.js"));
+const ServiceAdminDashboard = lazy(() => import("./features/service-admin/index.js").then((module) => ({
+  default: module.ServiceAdminDashboard
+})));
 
 function App() {
   const {
@@ -62,6 +72,15 @@ function App() {
     isOutboundOpen,
     setOutboundOpen,
     setToast
+  });
+  const appShellAccess = SERVICE_ADMIN_DEMO_ENABLED ? { ...access, canServiceAdmin: true } : access;
+  const { route, routeActions } = useWorkspaceRoute({
+    access: appShellAccess,
+    onAuthenticated: (payload) => {
+      const organizationName = payload?.organization?.name ?? payload?.tenant?.name ?? "организация";
+      setToast(`Вход выполнен: ${organizationName}`);
+    },
+    onDenied: setToast
   });
   const {
     attachments,
@@ -162,13 +181,89 @@ function App() {
     setTopics
   });
 
+  if (route.namespace === "public") {
+    return (
+      <div data-testid="route-public-landing">
+        <Suspense fallback={<RouteLoading label="Загрузка публичного контура" />}>
+          <LandingPage
+            onNavigateAuth={routeActions.openAuth}
+            onRequestDemo={() => setToast("Заявка на демо отправлена команде продаж.")}
+            onStartTrial={routeActions.openOnboarding}
+          />
+        </Suspense>
+        {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
+      </div>
+    );
+  }
+
+  if (route.namespace === "auth") {
+    return (
+      <div data-testid="route-auth-login">
+        <Suspense fallback={<RouteLoading label="Загрузка авторизации" />}>
+          <AuthPage
+            onAuthSuccess={routeActions.completeAuth}
+            onNavigateLanding={routeActions.openLanding}
+            onStartOnboarding={routeActions.openOnboarding}
+          />
+        </Suspense>
+        {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
+      </div>
+    );
+  }
+
+  if (route.namespace === "onboarding") {
+    return (
+      <div data-testid="route-onboarding">
+        <Suspense fallback={<RouteLoading label="Загрузка onboarding" />}>
+          <OrganizationOnboarding
+            onBack={routeActions.openLanding}
+            onFinish={routeActions.completeOnboarding}
+          />
+        </Suspense>
+        {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
+      </div>
+    );
+  }
+
+  if (route.namespace === "service-admin" && appShellAccess.canServiceAdmin) {
+    return (
+      <div data-testid="route-service-admin" className="app-shell">
+        <Sidebar active="service-admin" access={serviceAdminAccessProfile} onSelect={handleSectionSelect} />
+        <main className="workspace">
+          <TopBar
+            access={serviceAdminAccessProfile}
+            activeSection="service-admin"
+            onOpenAuth={routeActions.openAuth}
+            onOpenLanding={routeActions.openLanding}
+            onOpenServiceAdmin={routeActions.openServiceAdmin}
+            onOutbound={handleOutboundRequest}
+            onRoleMode={handleRoleModeChange}
+            onToast={setToast}
+            roleMode={serviceAdminRole}
+            showRoleSwitcher={false}
+          />
+          <Suspense fallback={<RouteLoading label="Загрузка администрирования сервиса" />}>
+            <ServiceAdminDashboard
+              onBack={routeActions.openApp}
+              onToast={setToast}
+            />
+          </Suspense>
+        </main>
+        {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
+      </div>
+    );
+  }
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-testid="route-app-shell">
       <Sidebar active={section} access={access} onSelect={handleSectionSelect} />
       <main className="workspace">
         <TopBar
-          access={access}
+          access={appShellAccess}
           activeSection={section}
+          onOpenAuth={routeActions.openAuth}
+          onOpenLanding={routeActions.openLanding}
+          onOpenServiceAdmin={routeActions.openServiceAdmin}
           onOutbound={handleOutboundRequest}
           onRoleMode={handleRoleModeChange}
           onToast={setToast}
@@ -270,6 +365,14 @@ function App() {
       ) : null}
       {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
     </div>
+  );
+}
+
+function RouteLoading({ label }) {
+  return (
+    <main className="route-loading" role="status">
+      <span>{label}</span>
+    </main>
   );
 }
 

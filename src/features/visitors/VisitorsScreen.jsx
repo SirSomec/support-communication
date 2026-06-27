@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { activeVisitors, proactiveRules, rescueChats } from "../../data.js";
-import { visitorService } from "../../services/index.js";
+import { visitorService } from "../../services/visitorService.js";
 import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
 import "./visitors.css";
 

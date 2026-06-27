@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { PlayCircle } from "lucide-react";
 import { ChannelBadge, SectionTitle } from "../../ui.jsx";
 import { channelDetails } from "../../data.js";
-import { integrationService } from "../../services/index.js";
+import { integrationService } from "../../services/integrationService.js";
 
 export function ChannelConnectionsPanel({ access, canEditSettings, onToast }) {
   const [selectedChannelId, setSelectedChannelId] = useState(channelDetails[0].id);

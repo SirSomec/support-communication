@@ -185,6 +185,16 @@ select:disabled {
   background: var(--surface);
 }
 
+.route-loading {
+  display: grid;
+  width: 100%;
+  min-height: 100vh;
+  place-items: center;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 800;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -203,8 +213,16 @@ select:disabled {
   min-width: 0;
 }
 
+.topbar-route-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .status-select,
 .quick-action,
+.ghost-action,
 .role-switcher {
   display: inline-flex;
   align-items: center;
@@ -217,6 +235,19 @@ select:disabled {
   color: var(--text);
   font-weight: 650;
   white-space: nowrap;
+}
+
+.ghost-action {
+  min-height: 34px;
+  padding-inline: 10px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.ghost-action.service-admin-entry {
+  border-color: #b8dcff;
+  background: #eef7ff;
+  color: #075a9c;
 }
 
 .role-switcher {
@@ -252,6 +283,7 @@ select:disabled {
 }
 
 .icon-button:hover,
+.ghost-action:hover,
 .quick-action:hover,
 .status-select:hover,
 .role-switcher:hover {
@@ -3676,6 +3708,16 @@ textarea:focus-visible {
   .topbar-right {
     flex: 1 1 100%;
     flex-wrap: wrap;
+  }
+
+  .topbar-route-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .ghost-action {
+    flex: 1 1 96px;
+    justify-content: center;
   }
 
   .role-switcher,

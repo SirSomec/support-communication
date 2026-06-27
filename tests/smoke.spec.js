@@ -654,3 +654,153 @@ test("critical sections do not overflow responsive viewports", async ({ page }) 
     }
   }
 });
+
+test("route namespaces keep public auth and service admin isolated", async ({ page }) => {
+  await page.goto("/#/landing");
+  await expect(page.getByTestId("route-public-landing")).toBeVisible();
+  await expect(page.locator(".sidebar")).toHaveCount(0);
+  await expect(page.locator(".topbar")).toHaveCount(0);
+  await expect(page.locator(".conversation-list")).toHaveCount(0);
+  await expect(page.locator(".public-page")).toContainText("Support Communication");
+  await expectHealthyPage(page);
+
+  await page.getByRole("button", { name: "Войти" }).first().click();
+  await expect(page.getByTestId("route-auth-login")).toBeVisible();
+  await expect(page.locator(".auth-page")).toContainText("Support Communication");
+  await expect(page.locator(".sidebar")).toHaveCount(0);
+  await expectHealthyPage(page);
+
+  await page.goto("/");
+  await selectRole(page, "Администратор");
+  await expect(page.locator(".role-switcher select")).not.toContainText("Администратор сервиса");
+  await expect(page.locator(".service-admin-entry")).toBeVisible();
+
+  await page.goto("/#/service-admin");
+  await expect(page.getByTestId("route-service-admin")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Service admin" })).toBeVisible();
+  await expect(page.locator(".role-switcher")).toHaveCount(0);
+  await expectHealthyPage(page);
+
+  await page.goto("/");
+  await page.locator(".service-admin-entry").click();
+  await expect(page.getByTestId("route-service-admin")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Service admin" })).toBeVisible();
+  await expect(page.locator(".service-admin-workspace-shell")).toContainText("Service-admin workspaces");
+  await expect(page.locator(".role-switcher")).toHaveCount(0);
+  await expectHealthyPage(page);
+});
+
+test("auth flow covers login 2fa recovery invite and organization selection", async ({ page }) => {
+  await page.goto("/#/login");
+  await expect(page.getByTestId("route-auth-login")).toBeVisible();
+
+  await page.locator(".auth-input-with-icon input").first().fill("multi@example.com");
+  await page.locator("input[type='password']").fill("correct-password");
+  await page.getByRole("button", { name: "Продолжить" }).click();
+  await expect(page.locator(".auth-organization-list")).toBeVisible();
+  await page.locator(".auth-organization-list button").filter({ hasText: "City Care" }).click();
+  await page.locator(".auth-flow-footer .auth-primary-button").click();
+  await expect(page.getByTestId("route-app-shell")).toBeVisible();
+  await expect(page.locator(".toast")).toContainText("City Care");
+
+  await page.goto("/#/login");
+  await page.getByRole("button", { name: "Invite", exact: true }).click();
+  await page.locator(".auth-field").filter({ hasText: "Email" }).locator("input").fill("invitee@example.com");
+  await page.locator(".auth-field").filter({ hasText: "Invite code" }).locator("input").fill("expired-token");
+  await page.getByRole("button", { name: "Активировать приглашение" }).click();
+  await expect(page.locator(".auth-state-panel")).toContainText("Старый invite token");
+  await page.getByRole("button", { name: "Начать onboarding" }).click();
+  await expect(page.getByTestId("route-onboarding")).toBeVisible();
+
+  await page.goto("/#/login");
+  await page.getByRole("button", { name: "Login" }).click();
+  await page.locator(".auth-input-with-icon input").first().fill("agent@example.com");
+  await page.locator("input[type='password']").fill("correct-password");
+  await page.getByRole("button", { name: "Продолжить" }).click();
+  await expect(page.locator(".auth-card-header")).toContainText("Двухфакторная");
+  await page.locator(".auth-input-with-icon input").fill("123456");
+  await page.getByRole("button", { name: "Подтвердить вход" }).click();
+  await expect(page.getByTestId("route-app-shell")).toBeVisible();
+  await expectHealthyPage(page);
+});
+
+test("onboarding completes tenant setup and returns to app", async ({ page }) => {
+  await page.goto("/#/onboarding");
+  await expect(page.getByTestId("route-onboarding")).toBeVisible();
+
+  await page.locator(".onboarding-field").filter({ hasText: "Название организации" }).locator("input").fill("QA Retail");
+  await page.getByRole("button", { name: "Сгенерировать" }).click();
+  await page.getByRole("button", { name: "Далее" }).click();
+  await page.getByRole("button", { name: "Далее" }).click();
+  await page.locator(".onboarding-field").filter({ hasText: "Имя" }).locator("input").fill("QA Admin");
+  await page.locator(".onboarding-field").filter({ hasText: "Email" }).locator("input").fill("admin@qa.example");
+  await page.getByRole("button", { name: "Далее" }).click();
+  await page.locator(".onboarding-sdk-panel button").first().click();
+  await page.locator(".onboarding-field").filter({ hasText: "Домен" }).locator("input").fill("qa.example");
+  await page.getByRole("button", { name: "Далее" }).click();
+  await page.getByRole("button", { name: "Далее" }).click();
+  await page.locator(".onboarding-employee-form input").first().fill("operator@qa.example");
+  await page.locator(".onboarding-employee-form button").click();
+  await page.getByRole("button", { name: "Далее" }).click();
+  await page.locator(".onboarding-test-form input").fill("qa@qa.example");
+  await page.getByRole("button", { name: "Отправить тест" }).click();
+  await expect(page.locator(".onboarding-test-result")).toContainText("test message queued");
+  await page.getByRole("button", { name: "Завершить" }).click();
+  await expect(page.getByTestId("route-app-shell")).toBeVisible();
+  await expect(page.locator(".toast")).toContainText("QA Retail");
+  await expectHealthyPage(page);
+});
+
+test("service admin critical actions require reason confirmation and audit", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".service-admin-entry").click();
+  await expect(page.getByTestId("route-service-admin")).toBeVisible();
+
+  await page.locator(".service-admin-tabs button").filter({ hasText: "Users" }).click();
+  await expect(page.locator(".user-support-workspace")).toContainText("Customer identity verified");
+  await page.locator(".service-admin-action-box textarea").fill("Customer approved webhook replay check");
+  await page.locator(".service-admin-action-picker button").filter({ hasText: "Impersonate" }).click();
+  await page.locator(".user-support-workspace .service-admin-confirm input").check();
+  await page.locator(".user-support-workspace .service-admin-action-box footer button").click();
+  await expect(page.locator(".service-admin-impersonation")).toContainText("read_only_by_default");
+  await expect(page.locator(".service-admin-feedback")).toContainText("impersonation.start");
+
+  await page.locator(".service-admin-impersonation button").click();
+  await expect(page.locator(".service-admin-impersonation")).toHaveCount(0);
+  await expect(page.locator(".service-admin-feedback")).toContainText("impersonation.stop");
+
+  await page.locator(".service-admin-tabs button").filter({ hasText: "Billing" }).click();
+  await page.locator(".service-admin-tenant-list button").filter({ hasText: "Volga Logistics" }).click();
+  await page.locator(".tariff-card-grid button").filter({ hasText: "Starter" }).click();
+  await page.locator(".billing-workspace textarea").fill("QA downgrade impact review");
+  await page.locator(".billing-workspace button").filter({ hasText: "Preview" }).click();
+  await expect(page.locator(".service-admin-preview")).toContainText("Approval");
+  await page.locator(".billing-workspace input").fill("CHANGE tenant-volga TO starter");
+  await page.locator(".billing-workspace button").filter({ hasText: "Apply" }).click();
+  await expect(page.locator(".service-admin-feedback")).toContainText("tenant.tariff.change");
+
+  await page.locator(".service-admin-tabs button").filter({ hasText: "Audit" }).click();
+  await expect(page.locator(".audit-workspace")).toContainText("impersonation.start");
+  await expect(page.locator(".audit-workspace")).toContainText("tenant.tariff.change");
+  await expectHealthyPage(page);
+});
+
+test("landing auth onboarding and service admin do not overflow responsive viewports", async ({ page }) => {
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 900 },
+    { width: 1024, height: 900 },
+    { width: 1440, height: 900 }
+  ]) {
+    await page.setViewportSize(viewport);
+
+    for (const route of ["/#/landing", "/#/login", "/#/onboarding"]) {
+      await page.goto(route);
+      await expectHealthyPage(page);
+    }
+
+    await page.goto("/#/service-admin");
+    await expect(page.getByTestId("route-service-admin")).toBeVisible();
+    await expectHealthyPage(page);
+  }
+});

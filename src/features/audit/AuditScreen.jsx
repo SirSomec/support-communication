@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Archive, Download, FileClock, Filter, KeyRound, Link2, ShieldAlert } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { auditLogEvents, auditRetentionPolicies } from "../../data.js";
-import { auditService } from "../../services/index.js";
+import { auditService } from "../../services/auditService.js";
 import { MetricTile, ProductScreen, SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
 
 const auditSourceOptions = ["Все источники", "Диалоги", "Отчеты", "Настройки", "Каналы", "Качество", "Боты"];

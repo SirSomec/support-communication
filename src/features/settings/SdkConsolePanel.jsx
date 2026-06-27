@@ -2,7 +2,8 @@ import React, { useMemo, useState } from "react";
 import { PlayCircle, Zap } from "lucide-react";
 import { SectionTitle } from "../../ui.jsx";
 import { sdkEvents } from "../../data.js";
-import { dialogService, integrationService } from "../../services/index.js";
+import { dialogService } from "../../services/dialogService.js";
+import { integrationService } from "../../services/integrationService.js";
 
 export function SdkConsolePanel({ access, canEditSettings, onToast }) {
   const [sdkPlaygroundEvent, setSdkPlaygroundEvent] = useState(sdkEvents[0][0]);

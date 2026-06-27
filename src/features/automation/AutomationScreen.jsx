@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { auditEvents, botScenarios, proactiveRules } from "../../data.js";
-import { automationService } from "../../services/index.js";
+import { automationService } from "../../services/automationService.js";
 import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
 
 const botNodeTypeOptions = [

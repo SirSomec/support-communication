@@ -1,33 +1,54 @@
 import { auditService } from "./auditService.js";
 import { automationService } from "./automationService.js";
 import { clientService } from "./clientService.js";
+import { createEnvelope } from "./mockBackend.js";
 import { dialogService } from "./dialogService.js";
 import { integrationService } from "./integrationService.js";
-import { permissionService } from "./permissionService.js";
-import { qualityService } from "./qualityService.js";
 import { reportService } from "./reportService.js";
-import { templateService } from "./templateService.js";
 import { visitorService } from "./visitorService.js";
-import { createEnvelope } from "./mockBackend.js";
 
 const SERVICE = "backendIntegrationService";
 
-const serviceRegistry = [
+const loadedServiceRegistry = [
   dialogService,
   clientService,
-  templateService,
   reportService,
   integrationService,
-  permissionService,
   visitorService,
   automationService,
-  qualityService,
   auditService
+];
+
+const lazyServiceRegistry = [
+  () => import("./templateService.js").then((module) => module.templateService),
+  () => import("./permissionService.js").then((module) => module.permissionService),
+  () => import("./qualityService.js").then((module) => module.qualityService),
+  () => import("./authService.js").then((module) => module.authService),
+  () => import("./tenantService.js").then((module) => module.tenantService),
+  () => import("./billingService.js").then((module) => module.billingService),
+  () => import("./platformMonitoringService.js").then((module) => module.platformMonitoringService),
+  () => import("./supportAdminService.js").then((module) => module.supportAdminService),
+  () => import("./incidentService.js").then((module) => module.incidentService),
+  () => import("./featureFlagService.js").then((module) => module.featureFlagService)
 ];
 
 export const backendIntegrationService = {
   async fetchBackendIntegrationSnapshot() {
-    const services = serviceRegistry.map((service) => service.getReadiness());
+    const lazyServiceAdapters = await Promise.all(lazyServiceRegistry.map((loadService) => loadService()));
+    const serviceAdapters = [
+      loadedServiceRegistry[0],
+      loadedServiceRegistry[1],
+      lazyServiceAdapters[0],
+      loadedServiceRegistry[2],
+      loadedServiceRegistry[3],
+      lazyServiceAdapters[1],
+      loadedServiceRegistry[4],
+      loadedServiceRegistry[5],
+      lazyServiceAdapters[2],
+      loadedServiceRegistry[6],
+      ...lazyServiceAdapters.slice(3)
+    ];
+    const services = serviceAdapters.map((service) => service.getReadiness());
 
     return createEnvelope({
       service: SERVICE,
@@ -49,7 +70,12 @@ export const backendIntegrationService = {
           "proactive_caps_rescue_countdown",
           "bot_publish_import_runtime",
           "quality_scoring_telemetry",
-          "audit_export_redaction"
+          "audit_export_redaction",
+          "auth_session_2fa_invite",
+          "tenant_billing_quota_management",
+          "platform_monitoring_incidents",
+          "support_admin_impersonation",
+          "feature_flag_rollout_audit"
         ]
       }
     });

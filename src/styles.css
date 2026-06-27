@@ -1551,8 +1551,7 @@ select:disabled {
 
 .primary-action,
 .product-actions button,
-.screen-toolbar button,
-.editor-actions button {
+.screen-toolbar button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1804,107 +1803,10 @@ select:disabled {
   margin-bottom: 14px;
 }
 
-.screen-toolbar.compact {
-  margin-bottom: 0;
-  padding: 12px;
-  border-bottom: 1px solid var(--line);
-}
-
 .report-toolbar .inline-select {
   flex: 1 1 150px;
 }
 
-.templates-workspace {
-  display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-  gap: 14px;
-  min-height: 620px;
-}
-
-.template-browser,
-.template-editor {
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.template-cards {
-  display: grid;
-  max-height: 690px;
-  overflow: auto;
-}
-
-.template-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 12px;
-  width: 100%;
-  min-height: 126px;
-  padding: 14px;
-  border-bottom: 1px solid var(--line);
-  background: #ffffff;
-  color: var(--text);
-  text-align: left;
-}
-
-.template-card.selected {
-  background: var(--surface-selected);
-  box-shadow: inset 3px 0 0 var(--blue);
-}
-
-.template-card strong,
-.template-card p {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.template-card small,
-.template-card em {
-  display: block;
-  color: var(--muted);
-  font-size: 12px;
-  font-style: normal;
-}
-
-.template-card p {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: #455269;
-}
-
-.template-card b {
-  color: var(--blue);
-}
-
-.template-editor {
-  padding: 0 0 16px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  padding: 14px;
-}
-
-.form-grid label,
-.large-field {
-  display: grid;
-  gap: 6px;
-}
-
-.form-grid span,
-.large-field span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.form-grid input,
-.form-grid select,
-.large-field textarea,
 .channel-settings input {
   width: 100%;
   min-height: 36px;
@@ -1913,16 +1815,6 @@ select:disabled {
   padding: 0 10px;
   color: var(--text);
   outline: 0;
-}
-
-.large-field {
-  padding: 0 14px;
-}
-
-.large-field textarea {
-  min-height: 180px;
-  padding: 12px;
-  resize: vertical;
 }
 
 .variable-row {
@@ -1941,13 +1833,6 @@ select:disabled {
   color: #34445e;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-}
-
-.editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 0 14px;
 }
 
 .bar-list {
@@ -3877,7 +3762,6 @@ textarea:focus-visible {
   .reports-layout,
   .settings-layout,
   .integration-layout,
-  .templates-workspace,
   .visitors-layout,
   .proactive-builder-grid,
   .quality-layout,
@@ -4264,7 +4148,6 @@ textarea:focus-visible {
   }
 
   .queue-health-grid,
-  .form-grid,
   .integration-cards {
     grid-template-columns: 1fr;
   }
@@ -4325,22 +4208,6 @@ textarea:focus-visible {
   .sdk-playground-actions {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .template-card {
-    min-height: 116px;
-  }
-
-  .large-field textarea {
-    min-height: 150px;
-  }
-
-  .editor-actions {
-    justify-content: stretch;
-  }
-
-  .editor-actions button {
-    flex: 1;
   }
 
   .channel-settings article {

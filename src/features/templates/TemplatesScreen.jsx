@@ -3,6 +3,7 @@ import { BookOpen, CheckCircle2, Plus } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { initialTemplates } from "../../data.js";
 import { ProductScreen, SectionTitle, ToolbarSearch } from "../../ui.jsx";
+import "./templates.css";
 
 export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange }) {
   const [localItems, setLocalItems] = useState(initialTemplates);

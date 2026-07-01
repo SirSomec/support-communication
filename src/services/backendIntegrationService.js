@@ -61,6 +61,16 @@ export const backendIntegrationService = {
           states: ["loading", "empty", "error", "partial"],
           realBackendBoundary: "replace src/services adapters with API clients"
         },
+        routeGaps: [
+          {
+            service: "auditService",
+            operations: ["exportAuditEvents", "redactAuditEvent"],
+            routes: [
+              "POST /service-admin/audit-events/exports",
+              "POST /service-admin/audit-events/:eventId/redactions"
+            ]
+          }
+        ],
         backlogCoverage: [
           "permission_denial_audit",
           "client_merge_graph",

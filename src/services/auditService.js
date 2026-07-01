@@ -1,69 +1,55 @@
-import { auditLogEvents, auditRetentionPolicies } from "../data.js";
-import { createEnvelope } from "./mockBackend.js";
+import { apiRequest, createApiErrorEnvelope } from "./apiClient.js";
 
 const SERVICE = "auditService";
 
 export const auditService = {
   async fetchAuditEvents(filters = {}) {
-    const source = filters.source;
-    const events = source
-      ? auditLogEvents.filter((event) => String(event.source).toLowerCase().includes(String(source).toLowerCase()))
-      : auditLogEvents;
-
-    return createEnvelope({
-      service: SERVICE,
+    return apiRequest("/service-admin/audit-events", {
       operation: "fetchAuditEvents",
-      data: {
-        events,
-        retentionPolicies: auditRetentionPolicies,
-        serverSideFilters: true
-      },
-      partial: true,
-      meta: { filters }
+      query: filters,
+      service: SERVICE
     });
   },
 
-  async exportAuditEvents({ format = "CSV", source = "all" } = {}) {
-    const extension = format.toLowerCase();
-    const normalizedSource = String(source).toLowerCase().replace(/[^a-z0-9]+/g, "-") || "all";
-    const immutableEventIds = auditLogEvents
-      .filter((event) => normalizedSource === "all" || String(event.source).toLowerCase().includes(normalizedSource))
-      .map((event) => event.eventId);
-
-    return createEnvelope({
-      service: SERVICE,
-      operation: "exportAuditEvents",
-      data: {
-        fileName: `audit-${normalizedSource}.${extension}`,
-        immutableEventIds: immutableEventIds.length ? immutableEventIds : auditLogEvents.map((event) => event.eventId),
-        retention: auditRetentionPolicies,
-        redactionState: "not_redacted"
-      }
-    });
+  async exportAuditEvents() {
+    return missingRouteEnvelope(
+      "exportAuditEvents",
+      "API Gateway does not expose an audit export route yet."
+    );
   },
 
-  async redactAuditEvent(eventId, { reason }) {
-    return createEnvelope({
-      service: SERVICE,
-      operation: "redactAuditEvent",
-      data: {
-        eventId,
-        reason,
-        immutable: true,
-        redactionId: `redact_${eventId}_${Date.now().toString(36)}`,
-        scope: "sensitive_fields_only"
-      }
-    });
+  async redactAuditEvent() {
+    return missingRouteEnvelope(
+      "redactAuditEvent",
+      "API Gateway does not expose an audit event redaction route yet."
+    );
   },
 
   getReadiness() {
     return {
       id: SERVICE,
-      status: "ready",
+      status: "partial",
       operations: ["fetchAuditEvents", "exportAuditEvents", "redactAuditEvent"],
-      traceId: `trc_${SERVICE}_ready`,
+      traceId: `trc_${SERVICE}_partial`,
       states: ["loading", "empty", "error", "partial"],
-      note: "Audit events expose immutable ids, retention and redaction metadata."
+      note: "fetchAuditEvents is connected to API Gateway; audit export and redaction routes are not exposed yet.",
+      backlog: ["audit_export_route", "audit_redaction_route"],
+      meta: {
+        source: "api-gateway",
+        routeGaps: [
+          "POST /service-admin/audit-events/exports",
+          "POST /service-admin/audit-events/:eventId/redactions"
+        ]
+      }
     };
   }
 };
+
+function missingRouteEnvelope(operation, message) {
+  return createApiErrorEnvelope({
+    code: "api_route_missing",
+    message,
+    operation,
+    service: SERVICE
+  });
+}

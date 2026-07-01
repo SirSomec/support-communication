@@ -812,7 +812,7 @@ git commit -m "feat: connect workspace service adapters to API gateway"
 - Modify: `src/services/featureFlagService.js`
 - Modify: `tests/backend-services.test.js`
 
-- [ ] **Step 1: Convert remaining adapters to API Gateway routes**
+- [x] **Step 1: Convert remaining adapters to API Gateway routes**
 
 Use these operation snippets:
 
@@ -857,13 +857,13 @@ previewFlagChange({ flagId, ...payload }) => apiRequest(`/feature-flags/${encode
 updateFeatureFlag({ flagId, ...payload }) => apiRequest(`/feature-flags/${encodeURIComponent(flagId)}`, { body: payload, method: "PATCH", operation: "updateFeatureFlag", service: SERVICE })
 ```
 
-- [ ] **Step 2: Confirm backend support for audit export and redaction**
+- [x] **Step 2: Confirm backend support for audit export and redaction**
 
 Run: `rg -n "audit-events|redact|redaction" backend/apps/api-gateway/src/service-admin backend/apps/api-gateway/src/platform backend/apps/api-gateway/src -g "*.ts"`
 
 Expected: if no audit export or redaction route exists, keep `exportAuditEvents` and `redactAuditEvent` as API-client error envelopes with `code: "api_route_missing"` and document the backend route gap in `backendIntegrationService` readiness. Do not silently return mock export URLs after this task.
 
-- [ ] **Step 3: Add route assertions for remaining services**
+- [x] **Step 3: Add route assertions for remaining services**
 
 In `tests/backend-services.test.js`, add:
 
@@ -892,13 +892,13 @@ it("admin, billing, monitoring, incidents and feature flag services call API Gat
 });
 ```
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `npm run test:api-client && npm run test:services`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/services/auditService.js src/services/tenantService.js src/services/billingService.js src/services/platformMonitoringService.js src/services/supportAdminService.js src/services/incidentService.js src/services/featureFlagService.js tests/backend-services.test.js

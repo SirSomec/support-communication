@@ -4,6 +4,7 @@ const DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_ID = "svc-admin-demo";
 const DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_NAME = "Demo Service Admin";
 const DEFAULT_DEMO_SERVICE_ADMIN_ROLES = "service_admin";
 const DEFAULT_DEMO_SERVICE_ADMIN_PERMISSIONS = "*";
+const DEFAULT_DEMO_SERVICE_ADMIN_TENANT_ID = "tenant-northstar";
 
 let apiClientTestConfig = {};
 
@@ -198,6 +199,7 @@ function getDemoServiceAdminHeaders() {
     "x-demo-service-admin-mfa-verified": "true",
     "x-demo-service-admin-permissions": String(getRuntimeConfigValue("demoServiceAdminPermissions", "VITE_DEMO_SERVICE_ADMIN_PERMISSIONS", DEFAULT_DEMO_SERVICE_ADMIN_PERMISSIONS)).trim(),
     "x-demo-service-admin-roles": String(getRuntimeConfigValue("demoServiceAdminRoles", "VITE_DEMO_SERVICE_ADMIN_ROLES", DEFAULT_DEMO_SERVICE_ADMIN_ROLES)).trim(),
+    "x-demo-service-admin-tenant-id": String(getRuntimeConfigValue("demoServiceAdminTenantId", "VITE_DEMO_SERVICE_ADMIN_TENANT_ID", DEFAULT_DEMO_SERVICE_ADMIN_TENANT_ID)).trim(),
     "x-demo-service-admin-session-expires-at": new Date(Date.now() + 60 * 60 * 1000).toISOString()
   };
 }

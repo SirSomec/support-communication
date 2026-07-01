@@ -1077,7 +1077,7 @@ git commit -m "test: add live backend API smoke coverage"
 **Files:**
 - No source files expected unless verification exposes a defect.
 
-- [ ] **Step 1: Run frontend service and build checks**
+- [x] **Step 1: Run frontend service and build checks**
 
 Run:
 
@@ -1089,19 +1089,19 @@ npm run build
 
 Expected: all commands pass.
 
-- [ ] **Step 2: Run backend typecheck**
+- [x] **Step 2: Run backend typecheck**
 
 Run: `npm run backend:typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 3: Run backend contract tests if time allows**
+- [x] **Step 3: Run backend contract tests if time allows**
 
 Run: `npm run backend:test`
 
 Expected: PASS.
 
-- [ ] **Step 4: Run Playwright smoke against real API mode**
+- [x] **Step 4: Run Playwright smoke against real API mode**
 
 Terminal 1:
 
@@ -1124,7 +1124,7 @@ npm run test:smoke
 
 Expected: PASS. If the existing Playwright smoke assumes mock-only fixture text, update the smoke assertion to verify rendered data from the API Gateway envelope instead of static mock text.
 
-- [ ] **Step 5: Commit final verification changes**
+- [x] **Step 5: Commit final verification changes**
 
 ```bash
 git add package.json tests src backend/README.md vite.config.js

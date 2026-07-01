@@ -48,6 +48,7 @@ describe("api client", () => {
       assert.equal(options.headers["x-demo-service-admin-mfa-verified"], "true");
       assert.equal(options.headers["x-demo-service-admin-permissions"], "*");
       assert.equal(options.headers["x-demo-service-admin-roles"], "service_admin");
+      assert.equal(options.headers["x-demo-service-admin-tenant-id"], "tenant-northstar");
       assert.ok(Date.parse(options.headers["x-demo-service-admin-session-expires-at"]) > Date.now());
       assert.deepEqual(JSON.parse(options.body), { email: "admin@example.com", password: "secret" });
 
@@ -112,6 +113,7 @@ describe("api client", () => {
       assert.equal("x-demo-service-admin-key" in options.headers, false);
       assert.equal("x-demo-service-admin-actor-id" in options.headers, false);
       assert.equal("x-demo-service-admin-permissions" in options.headers, false);
+      assert.equal("x-demo-service-admin-tenant-id" in options.headers, false);
 
       return new Response(JSON.stringify({ status: "ok", data: { ok: true } }), {
         headers: { "content-type": "application/json" },

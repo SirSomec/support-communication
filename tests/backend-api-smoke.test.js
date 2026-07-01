@@ -14,6 +14,7 @@ describe("live backend API smoke", { skip: !enabled }, () => {
       "x-demo-service-admin-mfa-verified": "true",
       "x-demo-service-admin-permissions": "*",
       "x-demo-service-admin-roles": "service_admin",
+      "x-demo-service-admin-tenant-id": "tenant-northstar",
       "x-demo-service-admin-session-expires-at": new Date(Date.now() + 60 * 60 * 1000).toISOString()
     };
 

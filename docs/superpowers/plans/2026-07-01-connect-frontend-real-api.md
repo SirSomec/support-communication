@@ -425,7 +425,7 @@ git commit -m "test: cover frontend API client"
 - Modify: `vite.config.js`
 - Modify: `backend/README.md`
 
-- [ ] **Step 1: Add Vite proxy**
+- [x] **Step 1: Add Vite proxy**
 
 Modify `vite.config.js`:
 
@@ -446,7 +446,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 2: Document real API local mode**
+- [x] **Step 2: Document real API local mode**
 
 Append to `backend/README.md`:
 
@@ -475,13 +475,13 @@ VITE_API_BASE_URL=http://127.0.0.1:4100 npm run dev
 Local privileged demo actions use `VITE_DEMO_SERVICE_ADMIN_KEY`; when it is not set, the frontend sends `dev-service-admin-key`, matching `.env.example`.
 ````
 
-- [ ] **Step 3: Run build to verify config syntax**
+- [x] **Step 3: Run build to verify config syntax**
 
 Run: `npm run build`
 
 Expected: PASS with Vite production build output.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add vite.config.js backend/README.md

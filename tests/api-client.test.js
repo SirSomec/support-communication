@@ -43,6 +43,12 @@ describe("api client", () => {
       assert.equal(options.method, "POST");
       assert.equal(options.headers["content-type"], "application/json");
       assert.equal(options.headers["x-demo-service-admin-key"], "dev-service-admin-key");
+      assert.equal(options.headers["x-demo-service-admin-actor-id"], "svc-admin-demo");
+      assert.equal(options.headers["x-demo-service-admin-actor-name"], "Demo Service Admin");
+      assert.equal(options.headers["x-demo-service-admin-mfa-verified"], "true");
+      assert.equal(options.headers["x-demo-service-admin-permissions"], "*");
+      assert.equal(options.headers["x-demo-service-admin-roles"], "service_admin");
+      assert.ok(Date.parse(options.headers["x-demo-service-admin-session-expires-at"]) > Date.now());
       assert.deepEqual(JSON.parse(options.body), { email: "admin@example.com", password: "secret" });
 
       return new Response(JSON.stringify({
@@ -79,6 +85,8 @@ describe("api client", () => {
 
     globalThis.fetch = mock.fn(async (_url, options) => {
       assert.equal(options.headers["x-demo-service-admin-key"], "configured-demo-key");
+      assert.equal(options.headers["x-demo-service-admin-actor-id"], "svc-admin-demo");
+      assert.equal(options.headers["x-demo-service-admin-permissions"], "*");
 
       return new Response(JSON.stringify({ status: "ok", data: { ok: true } }), {
         headers: { "content-type": "application/json" },
@@ -102,6 +110,8 @@ describe("api client", () => {
 
     globalThis.fetch = mock.fn(async (_url, options) => {
       assert.equal("x-demo-service-admin-key" in options.headers, false);
+      assert.equal("x-demo-service-admin-actor-id" in options.headers, false);
+      assert.equal("x-demo-service-admin-permissions" in options.headers, false);
 
       return new Response(JSON.stringify({ status: "ok", data: { ok: true } }), {
         headers: { "content-type": "application/json" },

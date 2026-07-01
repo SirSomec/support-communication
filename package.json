@@ -23,6 +23,7 @@
     "backend:billing:bullmq": "cd backend && npm run start:billing-bullmq-worker",
     "backend:build": "cd backend && npm run build",
     "test:api-client": "node --test tests/api-client.test.js",
+    "test:backend-api-smoke": "node --test tests/backend-api-smoke.test.js",
     "test:services": "node --test tests/backend-services.test.js",
     "test:smoke": "playwright test tests/smoke.spec.js"
   },

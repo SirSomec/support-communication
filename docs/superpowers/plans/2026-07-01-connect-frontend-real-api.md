@@ -990,7 +990,7 @@ git commit -m "test: prevent mock backend service regressions"
 - Create: `tests/backend-api-smoke.test.js`
 - Modify: `package.json`
 
-- [ ] **Step 1: Add gated live API smoke test**
+- [x] **Step 1: Add gated live API smoke test**
 
 Create `tests/backend-api-smoke.test.js`:
 
@@ -1034,7 +1034,7 @@ describe("live backend API smoke", { skip: !enabled }, () => {
 });
 ```
 
-- [ ] **Step 2: Add npm script**
+- [x] **Step 2: Add npm script**
 
 Modify `package.json` scripts:
 
@@ -1042,13 +1042,13 @@ Modify `package.json` scripts:
 "test:backend-api-smoke": "node --test tests/backend-api-smoke.test.js"
 ```
 
-- [ ] **Step 3: Run skipped smoke test without backend**
+- [x] **Step 3: Run skipped smoke test without backend**
 
 Run: `npm run test:backend-api-smoke`
 
 Expected: PASS with the suite skipped.
 
-- [ ] **Step 4: Run live smoke test with backend**
+- [x] **Step 4: Run live smoke test with backend**
 
 Terminal 1:
 
@@ -1065,7 +1065,7 @@ RUN_BACKEND_API_SMOKE=1 npm run test:backend-api-smoke
 
 Expected: PASS with health, ready, auth state and dialogs envelopes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json tests/backend-api-smoke.test.js

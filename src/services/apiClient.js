@@ -1,5 +1,9 @@
 const DEFAULT_API_BASE_PATH = "/api/v1";
 const DEFAULT_DEMO_SERVICE_ADMIN_KEY = "dev-service-admin-key";
+const DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_ID = "svc-admin-demo";
+const DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_NAME = "Demo Service Admin";
+const DEFAULT_DEMO_SERVICE_ADMIN_ROLES = "service_admin";
+const DEFAULT_DEMO_SERVICE_ADMIN_PERMISSIONS = "*";
 
 let apiClientTestConfig = {};
 
@@ -46,6 +50,7 @@ export async function apiRequest(path, { body, headers = {}, method = "GET", ope
 
   if (demoServiceAdminKey && getRuntimeMode() !== "production") {
     requestHeaders["x-demo-service-admin-key"] = demoServiceAdminKey;
+    Object.assign(requestHeaders, getDemoServiceAdminHeaders());
   }
 
   const requestInit = {
@@ -184,6 +189,17 @@ function getApiBaseUrl() {
 
 function getDemoServiceAdminKey() {
   return String(getRuntimeConfigValue("demoServiceAdminKey", "VITE_DEMO_SERVICE_ADMIN_KEY", DEFAULT_DEMO_SERVICE_ADMIN_KEY)).trim();
+}
+
+function getDemoServiceAdminHeaders() {
+  return {
+    "x-demo-service-admin-actor-id": String(getRuntimeConfigValue("demoServiceAdminActorId", "VITE_DEMO_SERVICE_ADMIN_ACTOR_ID", DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_ID)).trim(),
+    "x-demo-service-admin-actor-name": String(getRuntimeConfigValue("demoServiceAdminActorName", "VITE_DEMO_SERVICE_ADMIN_ACTOR_NAME", DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_NAME)).trim(),
+    "x-demo-service-admin-mfa-verified": "true",
+    "x-demo-service-admin-permissions": String(getRuntimeConfigValue("demoServiceAdminPermissions", "VITE_DEMO_SERVICE_ADMIN_PERMISSIONS", DEFAULT_DEMO_SERVICE_ADMIN_PERMISSIONS)).trim(),
+    "x-demo-service-admin-roles": String(getRuntimeConfigValue("demoServiceAdminRoles", "VITE_DEMO_SERVICE_ADMIN_ROLES", DEFAULT_DEMO_SERVICE_ADMIN_ROLES)).trim(),
+    "x-demo-service-admin-session-expires-at": new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  };
 }
 
 function getRuntimeMode() {

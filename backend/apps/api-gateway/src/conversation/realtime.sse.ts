@@ -10,12 +10,13 @@ export interface RealtimeSseMessage {
 
 export function createRealtimeSseStream(
   conversationService: ConversationService,
-  filters: { since?: string },
+  filters: { since?: string; tenantId?: string },
   lastEventId?: string
 ): Observable<RealtimeSseMessage> {
   return from(conversationService.fetchRealtimeEvents({
-    ...filters,
     since: lastEventId ?? filters.since
+  }, {
+    tenantId: filters.tenantId
   })).pipe(
     mergeMap((envelope) => from(envelope.data.events)),
     map((event) => ({

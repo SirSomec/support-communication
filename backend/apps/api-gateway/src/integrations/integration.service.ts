@@ -17,6 +17,13 @@ import {
   type WebhookDelivery
 } from "./integration.fixtures.js";
 import { IntegrationRepository, type WebhookDeliveryJournalEntry, type WebhookReplayAuditEvent } from "./integration.repository.js";
+import {
+  disableTelegramConnectionRecord,
+  saveTelegramConnectionRecord,
+  telegramConnectionEnvelope,
+  toTelegramConnectionPublicView,
+  type TelegramHttpFetch
+} from "./telegram-channel-connection.js";
 
 const INTEGRATION_SERVICE = "integrationService";
 const DEFAULT_FIXTURE_TENANT_ID = "tenant-volga";
@@ -30,6 +37,35 @@ interface ChannelTestPayload {
   recipient?: string;
 }
 
+interface ChannelConnectionRecord {
+  chatLimit: number;
+  credentialsMasked: boolean;
+  environment: string;
+  health: number;
+  id: string;
+  lastSyncAt: string;
+  name: string;
+  rawExternalId: string;
+  routingQueueId: string;
+  status: string;
+  tenantId: string;
+  traffic: string;
+  type: string;
+  webhookUrl: string;
+}
+
+interface ChannelConnectionMutationPayload {
+  chatLimit?: number;
+  credentials?: Record<string, unknown>;
+  environment?: string;
+  name?: string;
+  reason?: string;
+  routingQueueId?: string;
+  status?: string;
+  type?: string;
+  webhookUrl?: string;
+}
+
 interface ReplayPayload {
   deliveryId?: string;
   idempotencyKey?: string;
@@ -40,11 +76,26 @@ export class IntegrationService {
   private readonly apiKeys = clone(apiEnvironmentKeys);
   private readonly deliveries = clone(webhookDeliveryLog);
   private readonly sessions: SecuritySession[];
+  private readonly channelConnections: ChannelConnectionRecord[];
+  private readonly channelConnectionEvents = new Map<string, Array<Record<string, unknown>>>();
+  private readonly channelConnectionAuditEvents: Array<Record<string, unknown>> = [];
   private readonly replayIdempotency = new Map<string, Record<string, unknown>>();
 
   constructor(private readonly integrationRepository: IntegrationRepository = IntegrationRepository.default()) {
     const state = this.integrationRepository.readState();
     this.sessions = overlaySecuritySessions(clone(activeSecuritySessions), state.securitySessions);
+    this.channelConnections = buildChannelConnectionRecords(this.channels);
+    this.channelConnections.forEach((connection) => {
+      this.channelConnectionEvents.set(connection.id, [
+        {
+          id: makeAuditId("channel_event"),
+          action: "channel.connection.loaded",
+          at: new Date().toISOString(),
+          severity: connection.status === "error" ? "error" : connection.status === "paused" ? "warn" : "info",
+          message: `${connection.name} loaded into settings read model`
+        }
+      ]);
+    });
     state.webhookReplayJournal.forEach((entry) => {
       this.replayIdempotency.set(entry.idempotencyKey, {
         auditId: entry.auditId,
@@ -76,6 +127,205 @@ export class IntegrationService {
         securityControls: clone(securityControls),
         activeSecuritySessions: clone(this.sessions),
         securityAlerts: clone(securityAlerts)
+      }
+    });
+  }
+
+  listChannelConnectionAuditEvents() {
+    return this.channelConnectionAuditEvents.map((event) => ({ ...event }));
+  }
+
+  async fetchChannelConnections(filters: { type?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const type = normalizeOptionalType(filters.type);
+    const connections = this.channelConnections
+      .filter((connection) => !type || connection.type === type)
+      .map(maskChannelConnection);
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "fetchChannelConnections",
+      traceId: integrationTraceId("fetchChannelConnections"),
+      meta: apiMeta({ type: type ?? "all" }),
+      data: {
+        availableTypes: ["sdk", "telegram", "max", "vk"],
+        connections
+      }
+    });
+  }
+
+  async createChannelConnection(payload: ChannelConnectionMutationPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const type = normalizeOptionalType(payload.type);
+    const name = String(payload.name ?? "").trim();
+    if (!type || !name) {
+      return invalidEnvelope("createChannelConnection", "channel_type_and_name_required", "type and name are required.", {
+        type: type ?? null
+      });
+    }
+
+    const now = new Date().toISOString();
+    const connection: ChannelConnectionRecord = {
+      chatLimit: normalizeChatLimit(payload.chatLimit),
+      credentialsMasked: Boolean(payload.credentials),
+      environment: normalizeEnvironment(payload.environment),
+      health: 100,
+      id: `conn_${type}_${randomUUID()}`,
+      lastSyncAt: now,
+      name,
+      rawExternalId: `raw_${type}_${randomUUID()}`,
+      routingQueueId: String(payload.routingQueueId ?? `queue-${type}`).trim(),
+      status: String(payload.status ?? "active").trim().toLowerCase(),
+      tenantId: DEFAULT_FIXTURE_TENANT_ID,
+      traffic: "0 events",
+      type,
+      webhookUrl: String(payload.webhookUrl ?? "").trim()
+    };
+    this.channelConnections.push(connection);
+    this.recordChannelConnectionEvent(connection.id, "channel.connection.created", "info", `${name} created`);
+    const auditEvent = this.persistChannelConnectionAuditEvent("channel.connection.create", connection, "Channel connection created");
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "createChannelConnection",
+      traceId: integrationTraceId("createChannelConnection"),
+      meta: apiMeta({ connectionId: connection.id, type }),
+      data: {
+        auditEvent,
+        auditId: auditEvent.id,
+        connection: maskChannelConnection(connection)
+      }
+    });
+  }
+
+  async updateChannelConnection(connectionId: string, payload: ChannelConnectionMutationPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const connection = this.findChannelConnection(connectionId);
+    if (!connection) {
+      return notFoundEnvelope("updateChannelConnection", "channel_connection_not_found", `Channel connection ${connectionId} was not found.`, {
+        connectionId
+      });
+    }
+
+    if (payload.name !== undefined) {
+      connection.name = String(payload.name).trim() || connection.name;
+    }
+    if (payload.environment !== undefined) {
+      connection.environment = normalizeEnvironment(payload.environment);
+    }
+    if (payload.routingQueueId !== undefined) {
+      connection.routingQueueId = String(payload.routingQueueId).trim() || connection.routingQueueId;
+    }
+    if (payload.chatLimit !== undefined) {
+      connection.chatLimit = normalizeChatLimit(payload.chatLimit);
+    }
+    if (payload.status !== undefined) {
+      connection.status = String(payload.status).trim().toLowerCase() || connection.status;
+    }
+    if (payload.webhookUrl !== undefined) {
+      connection.webhookUrl = String(payload.webhookUrl).trim();
+    }
+    if (payload.credentials) {
+      connection.credentialsMasked = true;
+    }
+    connection.lastSyncAt = new Date().toISOString();
+    this.recordChannelConnectionEvent(connection.id, "channel.connection.updated", "info", payload.reason ?? `${connection.name} updated`);
+    const auditEvent = this.persistChannelConnectionAuditEvent("channel.connection.update", connection, payload.reason ?? "Channel connection updated");
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "updateChannelConnection",
+      traceId: integrationTraceId("updateChannelConnection"),
+      meta: apiMeta({ connectionId: connection.id, type: connection.type }),
+      data: {
+        auditEvent,
+        auditId: auditEvent.id,
+        connection: maskChannelConnection(connection),
+        reason: payload.reason ?? null
+      }
+    });
+  }
+
+  async deleteChannelConnection(connectionId: string, payload: { reason?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const connection = this.findChannelConnection(connectionId);
+    if (!connection) {
+      return notFoundEnvelope("deleteChannelConnection", "channel_connection_not_found", `Channel connection ${connectionId} was not found.`, {
+        connectionId
+      });
+    }
+
+    connection.status = "disabled";
+    connection.lastSyncAt = new Date().toISOString();
+    this.recordChannelConnectionEvent(connection.id, "channel.connection.disabled", "warn", payload.reason ?? `${connection.name} disabled`);
+    const auditEvent = this.persistChannelConnectionAuditEvent("channel.connection.disable", connection, payload.reason ?? "Channel connection disabled");
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "deleteChannelConnection",
+      traceId: integrationTraceId("deleteChannelConnection"),
+      meta: apiMeta({ connectionId: connection.id, type: connection.type }),
+      data: {
+        auditEvent,
+        auditId: auditEvent.id,
+        connectionId: connection.id,
+        reason: payload.reason ?? null,
+        status: connection.status
+      }
+    });
+  }
+
+  async testChannelConnectionInstance(connectionId: string, payload: Omit<ChannelTestPayload, "channelId" | "connectionId">): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const connection = this.findChannelConnection(connectionId);
+    if (!connection) {
+      return notFoundEnvelope("testChannelConnectionInstance", "channel_connection_not_found", `Channel connection ${connectionId} was not found.`, {
+        connectionId
+      });
+    }
+
+    if (!String(payload.recipient ?? "").trim() || !String(payload.message ?? "").trim()) {
+      return invalidEnvelope("testChannelConnectionInstance", "recipient_and_message_required", "recipient and message are required.", {
+        connectionId
+      });
+    }
+
+    const mode = payload.mode ?? "receive";
+    this.recordChannelConnectionEvent(connection.id, "channel.test", "info", `${mode} test queued for ${connection.name}`);
+    const auditEvent = this.persistChannelConnectionAuditEvent("channel.connection.test", connection, `${mode} test queued`);
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "testChannelConnectionInstance",
+      traceId: integrationTraceId("testChannelConnectionInstance"),
+      meta: apiMeta({ connectionId: connection.id, type: connection.type }),
+      data: {
+        auditEvent,
+        auditId: auditEvent.id,
+        delivery: {
+          connectionId: connection.id,
+          direction: mode,
+          environment: connection.environment,
+          rawSecretExposed: false,
+          recipient: payload.recipient,
+          requestId: makeRequestId(connection.type),
+          status: mode === "receive" ? "accepted_to_queue" : "sent_to_channel"
+        }
+      }
+    });
+  }
+
+  async fetchChannelConnectionEvents(connectionId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const connection = this.findChannelConnection(connectionId);
+    if (!connection) {
+      return notFoundEnvelope("fetchChannelConnectionEvents", "channel_connection_not_found", `Channel connection ${connectionId} was not found.`, {
+        connectionId
+      });
+    }
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "fetchChannelConnectionEvents",
+      traceId: integrationTraceId("fetchChannelConnectionEvents"),
+      meta: apiMeta({ connectionId: connection.id, type: connection.type }),
+      data: {
+        connectionId: connection.id,
+        events: clone(this.channelConnectionEvents.get(connection.id) ?? [])
       }
     });
   }
@@ -258,6 +508,69 @@ export class IntegrationService {
     });
   }
 
+  async fetchTelegramConnection(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = String(tenantId ?? "").trim();
+    if (!normalizedTenantId) {
+      return invalidEnvelope("fetchTelegramConnection", "tenant_id_required", "tenantId is required.", {});
+    }
+
+    const connection = this.integrationRepository.findTelegramConnectionByTenantId(normalizedTenantId);
+    return telegramConnectionEnvelope("fetchTelegramConnection", {
+      connection: toTelegramConnectionPublicView(connection, resolvePublicWebhookBaseUrl())
+    });
+  }
+
+  async saveTelegramConnection(
+    tenantId: string,
+    payload: { botToken?: string },
+    options: { fetcher?: TelegramHttpFetch } = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = String(tenantId ?? "").trim();
+    const botToken = String(payload.botToken ?? "").trim();
+    if (!normalizedTenantId || !botToken) {
+      return invalidEnvelope("saveTelegramConnection", "telegram_bot_token_required", "botToken is required.", {
+        tenantId: normalizedTenantId || null
+      });
+    }
+
+    try {
+      const existing = this.integrationRepository.findTelegramConnectionByTenantId(normalizedTenantId);
+      const saved = await saveTelegramConnectionRecord({
+        botToken,
+        fetcher: options.fetcher,
+        publicWebhookBaseUrl: resolvePublicWebhookBaseUrl(),
+        tenantId: normalizedTenantId
+      }, existing);
+      this.integrationRepository.saveTelegramConnection(saved);
+
+      return telegramConnectionEnvelope("saveTelegramConnection", {
+        connection: toTelegramConnectionPublicView(saved, resolvePublicWebhookBaseUrl())
+      });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "telegram_connection_save_failed";
+      return invalidEnvelope("saveTelegramConnection", code, "Telegram bot token could not be saved.", {
+        tenantId: normalizedTenantId
+      });
+    }
+  }
+
+  async disconnectTelegramConnection(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = String(tenantId ?? "").trim();
+    const existing = this.integrationRepository.findTelegramConnectionByTenantId(normalizedTenantId);
+    if (!existing || existing.status === "disabled") {
+      return notFoundEnvelope("disconnectTelegramConnection", "telegram_connection_not_found", "Telegram connection was not found.", {
+        tenantId: normalizedTenantId
+      });
+    }
+
+    const disabled = disableTelegramConnectionRecord(existing);
+    this.integrationRepository.saveTelegramConnection(disabled);
+
+    return telegramConnectionEnvelope("disconnectTelegramConnection", {
+      connection: toTelegramConnectionPublicView(disabled, resolvePublicWebhookBaseUrl())
+    });
+  }
+
   async revokeSecuritySession(sessionId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
     const session = this.sessions.find((item) => item.id === sessionId);
 
@@ -284,6 +597,10 @@ export class IntegrationService {
 
   private findApiKey(keyId: string): ApiEnvironmentKey | undefined {
     return this.apiKeys.find((key) => key.id === keyId);
+  }
+
+  private findChannelConnection(connectionId: string): ChannelConnectionRecord | undefined {
+    return this.channelConnections.find((connection) => connection.id === connectionId);
   }
 
   private findChannel(channelId: string): ChannelDetail | undefined {
@@ -314,6 +631,34 @@ export class IntegrationService {
     }
 
     return this.replayIdempotency.get(idempotencyKey);
+  }
+
+  private recordChannelConnectionEvent(connectionId: string, action: string, severity: string, message: string): void {
+    const current = this.channelConnectionEvents.get(connectionId) ?? [];
+    current.unshift({
+      id: makeAuditId("channel_event"),
+      action,
+      at: new Date().toISOString(),
+      message,
+      severity
+    });
+    this.channelConnectionEvents.set(connectionId, current);
+  }
+
+  private persistChannelConnectionAuditEvent(action: string, connection: ChannelConnectionRecord, reason: string) {
+    const event = {
+      action,
+      at: new Date().toISOString(),
+      connectionId: connection.id,
+      id: makeAuditId("channel"),
+      immutable: true,
+      reason,
+      result: "ok",
+      tenantId: connection.tenantId,
+      type: connection.type
+    };
+    this.channelConnectionAuditEvents.push(event);
+    return event;
   }
 }
 
@@ -487,6 +832,119 @@ function maskApiKey(key: ApiEnvironmentKey): ApiEnvironmentKey {
   return clone(key);
 }
 
+function buildChannelConnectionRecords(channels: ChannelDetail[]): ChannelConnectionRecord[] {
+  const records = channels.flatMap((channel) => channel.connections.map((connection) => ({
+    chatLimit: parseChatLimit(channel.limit),
+    credentialsMasked: true,
+    environment: normalizeEnvironment(connection.env),
+    health: channel.health,
+    id: connection.rawId,
+    lastSyncAt: channel.lastSync,
+    name: connection.name,
+    rawExternalId: connection.rawId,
+    routingQueueId: routeToQueueId(channel.route),
+    status: normalizeConnectionStatus(connection.status),
+    tenantId: DEFAULT_FIXTURE_TENANT_ID,
+    traffic: connection.traffic,
+    type: channel.id,
+    webhookUrl: `https://api.support.local/webhooks/${channel.id}/${connection.id}`
+  })));
+
+  return [
+    ...records,
+    {
+      chatLimit: 8,
+      credentialsMasked: true,
+      environment: "beta",
+      health: 82,
+      id: "conn_max_beta",
+      lastSyncAt: "Сегодня, 11:56",
+      name: "MAX Business beta",
+      rawExternalId: "conn_max_beta",
+      routingQueueId: "queue-max-beta",
+      status: "warn",
+      tenantId: DEFAULT_FIXTURE_TENANT_ID,
+      traffic: "1 130 messages",
+      type: "max",
+      webhookUrl: "https://api.support.local/webhooks/max/beta"
+    },
+    {
+      chatLimit: 8,
+      credentialsMasked: true,
+      environment: "stage",
+      health: 76,
+      id: "conn_max_backup",
+      lastSyncAt: "Сегодня, 10:48",
+      name: "MAX backup webhook",
+      rawExternalId: "conn_max_backup",
+      routingQueueId: "queue-max-backup",
+      status: "paused",
+      tenantId: DEFAULT_FIXTURE_TENANT_ID,
+      traffic: "0 messages",
+      type: "max",
+      webhookUrl: "https://api.support.local/webhooks/max/backup"
+    }
+  ];
+}
+
+function maskChannelConnection(connection: ChannelConnectionRecord): Record<string, unknown> {
+  return {
+    chatLimit: connection.chatLimit,
+    credentialsMasked: connection.credentialsMasked,
+    environment: connection.environment,
+    health: connection.health,
+    id: connection.id,
+    lastSyncAt: connection.lastSyncAt,
+    name: connection.name,
+    rawExternalId: connection.rawExternalId,
+    routingQueueId: connection.routingQueueId,
+    status: connection.status,
+    tenantId: connection.tenantId,
+    traffic: connection.traffic,
+    type: connection.type,
+    webhookUrl: connection.webhookUrl
+  };
+}
+
+function normalizeOptionalType(type?: string): string | undefined {
+  const value = String(type ?? "").trim().toLowerCase();
+  return value || undefined;
+}
+
+function normalizeChatLimit(value?: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 8;
+  }
+  return Math.max(1, Math.min(50, Math.round(parsed)));
+}
+
+function parseChatLimit(limit: string): number {
+  const match = limit.match(/\d+/);
+  return match ? normalizeChatLimit(Number(match[0])) : 8;
+}
+
+function routeToQueueId(route: string): string {
+  return String(route)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || "queue-default";
+}
+
+function normalizeConnectionStatus(status: string): string {
+  const value = status.trim().toLowerCase();
+  if (value === "ok") {
+    return "active";
+  }
+  if (value === "warn") {
+    return "warn";
+  }
+  if (value === "paused") {
+    return "paused";
+  }
+  return value || "active";
+}
+
 function normalizeEnvironment(environment?: string): string {
   const value = String(environment ?? "").trim().toLowerCase();
   return value === "prod" ? "production" : value || "production";
@@ -504,4 +962,8 @@ function overlaySecuritySessions(base: SecuritySession[], persisted: SecuritySes
     ...base.map((session) => clone(persistedById.get(session.id) ?? session)),
     ...persisted.filter((session) => !baseIds.has(session.id)).map((session) => clone(session))
   ];
+}
+
+function resolvePublicWebhookBaseUrl(env: Record<string, string | undefined> = process.env): string {
+  return String(env.PUBLIC_WEBHOOK_BASE_URL ?? env.PUBLIC_API_BASE_URL ?? "http://127.0.0.1:4100").trim();
 }

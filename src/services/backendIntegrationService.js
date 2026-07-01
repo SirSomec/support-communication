@@ -6,6 +6,7 @@ const serviceReadiness = [
   ["clientService", ["fetchClientProfiles", "mergeClientProfiles", "unmergeClientProfile"]],
   ["templateService", ["fetchTemplates", "saveTemplate"]],
   ["reportService", ["fetchReportWorkspace", "requestReportExport", "retryReportExport", "getExportFileDescriptor"]],
+  ["settingsService", ["fetchEmployees", "inviteEmployee", "updateEmployee", "resetEmployeePassword", "resetEmployeeMfa", "deactivateEmployee", "fetchRoles", "fetchGroups", "createGroup", "updateGroup", "fetchTopics", "createTopic", "updateTopic", "archiveTopic", "restoreTopic", "fetchTopicUsage", "fetchRules", "updateRule", "testRule"]],
   ["integrationService", ["fetchIntegrationWorkspace", "testChannelConnection", "rotateApiKey", "replayWebhookDelivery", "revokeSecuritySession"]],
   ["permissionService", ["validatePermission", "fetchPermissionModel"]],
   ["visitorService", ["fetchVisitorWorkspace", "saveProactiveRule", "triggerRescueReturn"]],

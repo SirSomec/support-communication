@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { AuthService } from "../apps/api-gateway/src/identity/auth.service.ts";
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
 import { PermissionService } from "../apps/api-gateway/src/identity/permission.service.ts";
+import { SettingsEmployeeService } from "../apps/api-gateway/src/identity/settings-employee.service.ts";
+import { SettingsRulesService } from "../apps/api-gateway/src/identity/settings-rules.service.ts";
 import { TenantService } from "../apps/api-gateway/src/identity/tenant.service.ts";
 
 describe("phase 1 identity, tenant and RBAC backend contracts", () => {
@@ -427,6 +430,127 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(statusAudit.tenantId, "tenant-volga");
     assert.equal(statusAudit.reason, "Security restriction requested");
     assert.equal(statusAudit.traceId, updated.traceId);
+  });
+
+  it("manages tenant employee settings with role, group, channel and reset audit evidence", async () => {
+    const repository = IdentityRepository.inMemory();
+    const settings = new SettingsEmployeeService(repository);
+
+    const workspace = await settings.fetchEmployees({ tenantId: "tenant-northstar" });
+    assert.equal(workspace.status, "ok");
+    assert.ok(workspace.data.employees.length >= 2);
+    assert.ok(workspace.data.roles.some((role) => role.key === "admin"));
+    assert.ok(workspace.data.groups.some((group) => group.id === "group-vip"));
+
+    const agent = workspace.data.employees.find((employee) => employee.id === "usr-ns-agent");
+    assert.ok(agent);
+    assert.equal(agent.credentials.passwordStatus, "active");
+    assert.equal(agent.mfaStatus, "reset_pending");
+
+    const updated = await settings.updateEmployee("usr-ns-agent", {
+      channels: ["Telegram", "MAX"],
+      chatLimit: 9,
+      canOverride: true,
+      groupId: "group-vip",
+      roleKey: "senior",
+      sensitiveData: true
+    });
+    assert.equal(updated.status, "ok");
+    assert.equal(updated.data.employee.chatLimit, 9);
+    assert.deepEqual(updated.data.employee.channels, ["Telegram", "MAX"]);
+    assert.equal(updated.data.employee.groupId, "group-vip");
+    assert.equal(updated.data.employee.roleKey, "senior");
+    assert.match(updated.data.auditEvent.id, /^evt_settings_employee_/);
+    assert.equal(settings.listSettingsAuditEvents().some((event) => event.id === updated.data.auditEvent.id), true);
+
+    const passwordReset = await settings.resetEmployeePassword("usr-ns-agent", { reason: "Operator requested password reset" });
+    assert.equal(passwordReset.status, "ok");
+    assert.equal(passwordReset.data.employee.credentials.passwordStatus, "reset_sent");
+
+    const mfaReset = await settings.resetEmployeeMfa("usr-ns-agent", { reason: "Phone replacement approved" });
+    assert.equal(mfaReset.status, "ok");
+    assert.equal(mfaReset.data.employee.mfaStatus, "reset_pending");
+
+    const invite = await settings.inviteEmployee({
+      email: "new.agent@northstar.example",
+      groupId: "group-line-1",
+      name: "New Agent",
+      roleKey: "employee"
+    }, { tenantId: "tenant-northstar" });
+    assert.equal(invite.status, "ok");
+    assert.equal(invite.data.employee.status, "invited");
+    assert.equal(invite.data.employee.email, "new.agent@northstar.example");
+    assert.equal(settings.listSettingsAuditEvents().some((event) => event.id === invite.data.auditEvent.id), true);
+
+    const group = await settings.createGroup({
+      channels: ["Telegram"],
+      name: "Escalation",
+      scope: "Escalation handoff"
+    });
+    assert.equal(group.status, "ok");
+    assert.equal(settings.listSettingsAuditEvents().some((event) => event.id === group.data.auditEvent.id), true);
+
+    const ownerDeactivation = await settings.deactivateEmployee("usr-ns-owner", { reason: "Need to test guard" });
+    assert.equal(ownerDeactivation.status, "invalid");
+    assert.equal(ownerDeactivation.error?.code, "last_admin_required");
+  });
+
+  it("manages settings rules with critical confirmation and impact tests", async () => {
+    const settingsRules = new SettingsRulesService();
+
+    const workspace = await settingsRules.fetchRules();
+    assert.equal(workspace.status, "ok");
+    assert.equal(workspace.data.totals.active, 8);
+    assert.ok(workspace.data.rules.some((rule) => rule.id === "close-topic-required" && rule.severity === "critical"));
+    assert.ok(workspace.data.rules.some((rule) => rule.id === "limit-override-allowed-roles"));
+    assert.ok(workspace.data.rules.some((rule) => rule.id === "sensitive-data-masked-by-role" && rule.severity === "critical"));
+    assert.ok(workspace.data.rules.some((rule) => rule.id === "route-by-channel-topic-working-time"));
+    assert.ok(workspace.data.rules.some((rule) => rule.id === "overload-fallback-escalation"));
+
+    const deniedCriticalDisable = await settingsRules.updateRule("close-topic-required", {
+      enabled: false,
+      reason: "QA attempts unsafe disable"
+    });
+    assert.equal(deniedCriticalDisable.status, "invalid");
+    assert.equal(deniedCriticalDisable.error?.code, "critical_rule_confirmation_required");
+
+    const updatedLimit = await settingsRules.updateRule("operator-chat-limit", {
+      parameters: { defaultLimit: 6 },
+      reason: "Lower shared queue capacity"
+    });
+    assert.equal(updatedLimit.status, "ok");
+    assert.equal(updatedLimit.data.rule.parameters.defaultLimit, 6);
+    assert.match(updatedLimit.data.auditEvent.id, /^evt_settings_rule_/);
+    assert.equal(settingsRules.listSettingsAuditEvents().some((event) => event.id === updatedLimit.data.auditEvent.id), true);
+
+    const testRun = await settingsRules.testRule("operator-chat-limit", { sampleSize: 50 });
+    assert.equal(testRun.status, "ok");
+    assert.equal(testRun.data.result.sampleSize, 50);
+    assert.equal(testRun.data.result.affectedWorkflows.includes("routing"), true);
+    assert.equal(settingsRules.listSettingsAuditEvents().some((event) => event.id === testRun.data.auditEvent.id), true);
+
+    const confirmedDisable = await settingsRules.updateRule("close-topic-required", {
+      confirmed: true,
+      enabled: false,
+      reason: "Emergency tenant override"
+    });
+    assert.equal(confirmedDisable.status, "ok");
+    assert.equal(confirmedDisable.data.rule.enabled, false);
+    assert.equal(confirmedDisable.data.workspace.totals.disabled, 1);
+  });
+
+  it("guards settings management and reset routes with service-admin permissions", () => {
+    const source = readFileSync(new URL("../apps/api-gateway/src/identity/settings.controller.ts", import.meta.url), "utf8");
+
+    assert.match(source, /@UseGuards\(DemoServiceAdminGuard\)[\s\S]*@Controller\("settings"\)/);
+    assert.match(source, /@Get\("employees"\)[\s\S]*@RequireServiceAdminAction\("settings\.read"\)[\s\S]*fetchEmployees\(/);
+    assert.match(source, /@Post\("employees\/invites"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*inviteEmployee\(/);
+    assert.match(source, /@Patch\("employees\/:employeeId"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*updateEmployee\(/);
+    assert.match(source, /@Post\("employees\/:employeeId\/password-reset"\)[\s\S]*@RequireServiceAdminAction\("settings\.security\.reset"\)[\s\S]*resetEmployeePassword\(/);
+    assert.match(source, /@Post\("employees\/:employeeId\/mfa-reset"\)[\s\S]*@RequireServiceAdminAction\("settings\.security\.reset"\)[\s\S]*resetEmployeeMfa\(/);
+    assert.match(source, /@Post\("groups"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*createGroup\(/);
+    assert.match(source, /@Patch\("groups\/:groupId"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*updateGroup\(/);
+    assert.match(source, /@Patch\("rules\/:ruleId"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*updateRule\(/);
   });
 
   it("returns RBAC decisions with denial audit metadata", async () => {

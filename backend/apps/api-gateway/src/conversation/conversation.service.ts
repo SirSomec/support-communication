@@ -88,6 +88,10 @@ interface ConversationServiceOptions {
   realtimeFanout?: RealtimeFanoutAdapter;
 }
 
+interface TenantScope {
+  tenantId?: string;
+}
+
 let defaultRealtimeFanout = createDisabledRealtimeFanoutAdapter("realtime_fanout_not_configured");
 
 export class ConversationService {
@@ -111,13 +115,16 @@ export class ConversationService {
     defaultRealtimeFanout = adapter;
   }
 
-  async fetchDialogs(filters: DialogFilters = {}): Promise<BackendEnvelope<{
+  async fetchDialogs(filters: DialogFilters = {}, scope: TenantScope = {}): Promise<BackendEnvelope<{
     items: ConversationRecord[];
     pagination: { mode: string; page: number; pageSize: number; total: number };
     savedPresetId: string | null;
   }>> {
     const conversations = await this.conversationRepository.listConversations();
     const filtered = conversations.filter((conversation) => {
+      if (!matchesTenantScope(conversation, scope.tenantId)) {
+        return false;
+      }
       const statusMatches = !filters.status || filters.status === "all" || conversation.status === filters.status;
       const channelMatches = !filters.channel || filters.channel === "all" || conversation.channel.toLowerCase() === String(filters.channel).toLowerCase();
       const topicMatches = !filters.topic || filters.topic === "all" || (filters.topic === "none" ? !conversation.topic : conversation.topic === filters.topic);
@@ -156,10 +163,10 @@ export class ConversationService {
     });
   }
 
-  async fetchDialogDetail(conversationId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async fetchDialogDetail(conversationId: string, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const conversation = await this.conversationRepository.findConversation(conversationId);
 
-    if (!conversation) {
+    if (!conversation || !matchesTenantScope(conversation, scope.tenantId)) {
       return notFoundEnvelope(DIALOG_SERVICE, "fetchDialogDetail", "conversation_not_found", `Conversation ${conversationId} was not found.`, { conversationId });
     }
 
@@ -175,11 +182,11 @@ export class ConversationService {
     });
   }
 
-  async transitionConversationStatus(payload: StatusPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async transitionConversationStatus(payload: StatusPayload, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const conversation = await this.conversationRepository.findConversation(payload.conversationId);
     const nextStatus = String(payload.nextStatus ?? "").trim();
 
-    if (!conversation) {
+    if (!conversation || !matchesTenantScope(conversation, scope.tenantId)) {
       return notFoundEnvelope(DIALOG_SERVICE, "transitionConversationStatus", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
         conversationId: payload.conversationId
       });
@@ -233,7 +240,7 @@ export class ConversationService {
       fromStatus: previousStatus,
       toStatus: nextStatus,
       topic: conversation.topic
-    });
+    }, resolveConversationTenantId(conversation));
     conversation.messages.push({
       id: makeMessageId("event"),
       type: "event",
@@ -259,10 +266,10 @@ export class ConversationService {
     });
   }
 
-  async appendMessage(payload: AppendMessagePayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async appendMessage(payload: AppendMessagePayload, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const conversation = await this.conversationRepository.findConversation(payload.conversationId);
 
-    if (!conversation) {
+    if (!conversation || !matchesTenantScope(conversation, scope.tenantId)) {
       return notFoundEnvelope(DIALOG_SERVICE, "appendMessage", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
         conversationId: payload.conversationId
       });
@@ -342,7 +349,7 @@ export class ConversationService {
     let event = this.createRealtimeEvent(internal ? "conversation.updated" : "message.created", "conversation", conversation.id, {
       messageId: message.id,
       mode: payload.mode ?? "reply"
-    });
+    }, resolveConversationTenantId(conversation));
     const auditEvent = {
       id: makeAuditId(internal ? "internal_note" : "message"),
       action: internal ? "message.internal_note.create" : "message.reply.send",
@@ -712,7 +719,7 @@ export class ConversationService {
       channel,
       eventId,
       messageId: message.id
-    });
+    }, resolveConversationTenantId(conversation));
     await this.conversationRepository.saveConversation(conversation);
     await this.conversationRepository.recordInboundEvent({
       channel,
@@ -829,7 +836,7 @@ export class ConversationService {
       providerEventId,
       receiptId: receipt.id,
       status: receipt.status
-    });
+    }, receipt.tenantId);
 
     return createEnvelope({
       service: CHANNEL_SERVICE,
@@ -844,10 +851,13 @@ export class ConversationService {
     });
   }
 
-  async fetchRealtimeEvents(filters: { since?: string } = {}): Promise<BackendEnvelope<{ events: RealtimeEvent[]; filters: { since?: string } }>> {
+  async fetchRealtimeEvents(
+    filters: { since?: string } = {},
+    scope: TenantScope = {}
+  ): Promise<BackendEnvelope<{ events: RealtimeEvent[]; filters: { since?: string } }>> {
     const events = mergeRealtimeEvents([
-      await this.conversationRepository.listRealtimeEvents(),
-      this.liveRealtimeEvents
+      await this.conversationRepository.listRealtimeEvents(scope.tenantId ? { tenantId: scope.tenantId } : {}),
+      this.liveRealtimeEvents.filter((event) => !scope.tenantId || event.tenantId === scope.tenantId)
     ], filters.since);
 
     return createEnvelope({
@@ -863,8 +873,14 @@ export class ConversationService {
     });
   }
 
-  private async recordRealtimeEvent(eventName: string, resourceType: string, resourceId: string, data: Record<string, unknown>): Promise<RealtimeEvent> {
-    return this.appendAndPublishRealtimeEvent(this.createRealtimeEvent(eventName, resourceType, resourceId, data));
+  private async recordRealtimeEvent(
+    eventName: string,
+    resourceType: string,
+    resourceId: string,
+    data: Record<string, unknown>,
+    tenantId = "tenant-volga"
+  ): Promise<RealtimeEvent> {
+    return this.appendAndPublishRealtimeEvent(this.createRealtimeEvent(eventName, resourceType, resourceId, data, tenantId));
   }
 
   private async appendAndPublishRealtimeEvent(event: RealtimeEvent): Promise<RealtimeEvent> {
@@ -881,7 +897,13 @@ export class ConversationService {
     }
   }
 
-  private createRealtimeEvent(eventName: string, resourceType: string, resourceId: string, data: Record<string, unknown>): RealtimeEvent {
+  private createRealtimeEvent(
+    eventName: string,
+    resourceType: string,
+    resourceId: string,
+    data: Record<string, unknown>,
+    tenantId = "tenant-volga"
+  ): RealtimeEvent {
     const occurredAtMs = Math.max(Date.now(), this.lastRealtimeOccurredAtMs + 1);
     this.lastRealtimeOccurredAtMs = occurredAtMs;
 
@@ -892,7 +914,7 @@ export class ConversationService {
       resourceId,
       resourceType,
       schemaVersion: "v1",
-      tenantId: "tenant-volga",
+      tenantId,
       traceId: conversationTraceId(REALTIME_SERVICE, eventName),
       data
     };
@@ -1109,4 +1131,15 @@ function statusTone(status: string): string {
 function toPositiveInt(value: number | string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function matchesTenantScope(conversation: ConversationRecord, tenantId?: string): boolean {
+  if (!tenantId) {
+    return true;
+  }
+  return resolveConversationTenantId(conversation) === tenantId;
+}
+
+function resolveConversationTenantId(conversation: ConversationRecord): string {
+  return conversation.tenantId ?? "tenant-volga";
 }

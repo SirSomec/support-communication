@@ -1,3 +1,5 @@
+import { getAccessToken } from "../app/sessionStore.js";
+
 const DEFAULT_API_BASE_PATH = "/api/v1";
 const DEFAULT_DEMO_SERVICE_ADMIN_KEY = "dev-service-admin-key";
 const DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_ID = "svc-admin-demo";
@@ -42,14 +44,22 @@ export function buildApiUrl(path, query = {}) {
   return baseUrl ? url.toString() : `${url.pathname}${url.search}`;
 }
 
-export async function apiRequest(path, { body, headers = {}, method = "GET", operation, query, service } = {}) {
+export async function apiRequest(path, { authMode = "auto", body, headers = {}, method = "GET", operation, query, service } = {}) {
   const requestHeaders = {
     accept: "application/json",
     ...headers
   };
   const demoServiceAdminKey = getDemoServiceAdminKey();
+  const accessToken = getAccessToken();
 
-  if (demoServiceAdminKey && getRuntimeMode() !== "production") {
+  if (authMode === "service-admin") {
+    if (demoServiceAdminKey && isDemoServiceAdminAllowed()) {
+      requestHeaders["x-demo-service-admin-key"] = demoServiceAdminKey;
+      Object.assign(requestHeaders, getDemoServiceAdminHeaders());
+    }
+  } else if (accessToken) {
+    requestHeaders.authorization = `Bearer ${accessToken}`;
+  } else if (demoServiceAdminKey && isDemoServiceAdminAllowed()) {
     requestHeaders["x-demo-service-admin-key"] = demoServiceAdminKey;
     Object.assign(requestHeaders, getDemoServiceAdminHeaders());
   }
@@ -192,6 +202,10 @@ function getDemoServiceAdminKey() {
   return String(getRuntimeConfigValue("demoServiceAdminKey", "VITE_DEMO_SERVICE_ADMIN_KEY", DEFAULT_DEMO_SERVICE_ADMIN_KEY)).trim();
 }
 
+function isDemoServiceAdminAllowed() {
+  return getRuntimeMode() !== "production" || getRuntimeFlag("enableServiceAdminDemo", "VITE_ENABLE_SERVICE_ADMIN");
+}
+
 function getDemoServiceAdminHeaders() {
   return {
     "x-demo-service-admin-actor-id": String(getRuntimeConfigValue("demoServiceAdminActorId", "VITE_DEMO_SERVICE_ADMIN_ACTOR_ID", DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_ID)).trim(),
@@ -216,6 +230,14 @@ function getRuntimeConfigValue(testKey, envKey, fallback) {
   }
 
   return import.meta.env?.[envKey] ?? fallback;
+}
+
+function getRuntimeFlag(testKey, envKey) {
+  if (Object.hasOwn(apiClientTestConfig, testKey)) {
+    return Boolean(apiClientTestConfig[testKey]);
+  }
+
+  return String(import.meta.env?.[envKey] ?? "").trim().toLowerCase() === "true";
 }
 
 function getNodeEnv() {

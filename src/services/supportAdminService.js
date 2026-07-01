@@ -5,6 +5,7 @@ const SERVICE = "supportAdminService";
 export const supportAdminService = {
   async fetchSupportUsers(filters = {}) {
     return apiRequest("/service-admin/users", {
+      authMode: "service-admin",
       operation: "fetchSupportUsers",
       query: filters,
       service: SERVICE
@@ -49,6 +50,7 @@ export const supportAdminService = {
 
   async startImpersonation(payload = {}) {
     return apiRequest("/service-admin/impersonations", {
+      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "startImpersonation",
@@ -62,6 +64,7 @@ export const supportAdminService = {
     }
 
     return apiRequest(`/service-admin/impersonations/${encodeURIComponent(impersonationId)}/stop`, {
+      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "stopImpersonation",
@@ -95,6 +98,7 @@ function userActionRequest({ operation, payload, route, userId }) {
   }
 
   return apiRequest(`/service-admin/users/${encodeURIComponent(userId)}/${route}`, {
+    authMode: "service-admin",
     body: payload,
     method: "POST",
     operation,

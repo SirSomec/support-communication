@@ -196,7 +196,8 @@ describe("secret redaction verification contracts", () => {
           idempotencyKey: "canonical-provider-log-failure",
           kind: "message_delivery",
           messageId: "msg_canonical_provider_log_failure",
-          payload: { text: "Runtime Telegram failure" }
+          payload: { text: "Runtime Telegram failure" },
+          tenantId: "tenant-log-bootstrap"
         })
       },
       writeLog
@@ -404,7 +405,8 @@ describe("secret redaction verification contracts", () => {
                 fileId: "file_scanner_provider_failure",
                 fileName: "provider-failure.pdf",
                 sizeBytes: 1024
-              }
+              },
+              tenantId: "tenant-provider-failure"
             };
           }
 
@@ -416,7 +418,8 @@ describe("secret redaction verification contracts", () => {
             idempotencyKey: `${descriptorId}-key`,
             kind: "message_delivery",
             messageId: `msg_${descriptorId}`,
-            payload: { text: "Provider failure redaction" }
+            payload: { text: "Provider failure redaction" },
+            tenantId: "tenant-provider-failure"
           };
         }
       },

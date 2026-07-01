@@ -16,6 +16,7 @@ import {
   platformMonitoringService,
   qualityService,
   reportService,
+  settingsService,
   supportAdminService,
   templateService,
   tenantService,
@@ -84,6 +85,7 @@ describe("frontend backend service contracts", () => {
       "platformMonitoringService.js",
       "qualityService.js",
       "reportService.js",
+      "settingsService.js",
       "supportAdminService.js",
       "templateService.js",
       "tenantService.js",
@@ -113,6 +115,7 @@ describe("frontend backend service contracts", () => {
       "clientService",
       "templateService",
       "reportService",
+      "settingsService",
       "integrationService",
       "permissionService",
       "visitorService",
@@ -196,6 +199,65 @@ describe("frontend backend service contracts", () => {
         "POST",
         { reason: "QA logout" },
         "logout",
+        { authenticated: false }
+      ]
+    ];
+
+    for (const [callService, expectedUrl, expectedMethod, expectedBody, expectedOperation, data] of cases) {
+      installFetchMock(envelope("authService", expectedOperation, data));
+
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, "authService");
+      assert.equal(response.operation, expectedOperation);
+      assert.deepEqual(response.data, data);
+    }
+  });
+
+  it("tenant auth service calls API Gateway routes", async () => {
+    const operator = {
+      id: "op-pilot-001",
+      email: "operator@pilot-client.test",
+      name: "Pilot Operator"
+    };
+    const cases = [
+      [
+        () => authService.loginTenantOperator({
+          email: "operator@pilot-client.test",
+          password: "Pilot-Operator-2026!"
+        }),
+        "/api/v1/auth/tenant/login",
+        "POST",
+        {
+          email: "operator@pilot-client.test",
+          password: "Pilot-Operator-2026!"
+        },
+        "loginTenantOperator",
+        {
+          accessToken: "tok_pilot",
+          refreshToken: "ref_pilot",
+          tenantId: "tenant-pilot-001",
+          operator
+        }
+      ],
+      [
+        () => authService.getTenantAuthState(),
+        "/api/v1/auth/tenant/state",
+        "GET",
+        undefined,
+        "getTenantAuthState",
+        { authenticated: true, tenantId: "tenant-pilot-001", operator }
+      ],
+      [
+        () => authService.logoutTenant({ reason: "shift end" }),
+        "/api/v1/auth/tenant/logout",
+        "POST",
+        { reason: "shift end" },
+        "logoutTenant",
         { authenticated: false }
       ]
     ];
@@ -734,6 +796,20 @@ describe("frontend backend service contracts", () => {
       [() => integrationService.rotateApiKey("  "), "integrationService", "rotateApiKey"],
       [() => integrationService.replayWebhookDelivery({ traceId: "hook_vk_441" }), "integrationService", "replayWebhookDelivery"],
       [() => integrationService.revokeSecuritySession(""), "integrationService", "revokeSecuritySession"],
+      [() => integrationService.updateChannelConnection({ name: "Telegram VIP" }), "integrationService", "updateChannelConnection"],
+      [() => integrationService.deleteChannelConnection({ reason: "retired" }), "integrationService", "deleteChannelConnection"],
+      [() => integrationService.testChannelConnectionInstance({ recipient: "+7 900 123-45-67" }), "integrationService", "testChannelConnectionInstance"],
+      [() => integrationService.fetchChannelConnectionEvents(""), "integrationService", "fetchChannelConnectionEvents"],
+      [() => settingsService.updateEmployee({ roleKey: "senior" }), "settingsService", "updateEmployee"],
+      [() => settingsService.resetEmployeePassword({ reason: "reset" }), "settingsService", "resetEmployeePassword"],
+      [() => settingsService.resetEmployeeMfa({ reason: "reset" }), "settingsService", "resetEmployeeMfa"],
+      [() => settingsService.deactivateEmployee({ reason: "offboard" }), "settingsService", "deactivateEmployee"],
+      [() => settingsService.updateTopic({ name: "Delay" }), "settingsService", "updateTopic"],
+      [() => settingsService.archiveTopic({ reason: "Duplicate" }), "settingsService", "archiveTopic"],
+      [() => settingsService.restoreTopic({ reason: "Needed" }), "settingsService", "restoreTopic"],
+      [() => settingsService.fetchTopicUsage(""), "settingsService", "fetchTopicUsage"],
+      [() => settingsService.updateRule({ enabled: false }), "settingsService", "updateRule"],
+      [() => settingsService.testRule({ sampleSize: 50 }), "settingsService", "testRule"],
       [() => automationService.publishBotScenario({ name: "Checkout bot" }), "automationService", "publishBotScenario"],
       [() => automationService.testBotScenario({ name: "Checkout bot" }), "automationService", "testBotScenario"]
     ];
@@ -762,6 +838,70 @@ describe("frontend backend service contracts", () => {
 
     const cases = [
       [() => integrationService.fetchIntegrationWorkspace(), "integrationService", "fetchIntegrationWorkspace", "/api/v1/integrations/workspace", "GET", undefined],
+      [() => integrationService.fetchChannelConnections({ type: "telegram" }), "integrationService", "fetchChannelConnections", "/api/v1/integrations/channels?type=telegram", "GET", undefined],
+      [
+        () => integrationService.createChannelConnection({
+          type: "telegram",
+          name: "Telegram VIP",
+          environment: "production",
+          credentials: { botToken: "123:secret" },
+          routingQueueId: "queue-vip",
+          chatLimit: 8
+        }),
+        "integrationService",
+        "createChannelConnection",
+        "/api/v1/integrations/channels",
+        "POST",
+        {
+          type: "telegram",
+          name: "Telegram VIP",
+          environment: "production",
+          credentials: { botToken: "123:secret" },
+          routingQueueId: "queue-vip",
+          chatLimit: 8
+        }
+      ],
+      [
+        () => integrationService.updateChannelConnection({
+          connectionId: "conn_tg_vip",
+          status: "paused",
+          reason: "maintenance window"
+        }),
+        "integrationService",
+        "updateChannelConnection",
+        "/api/v1/integrations/channels/conn_tg_vip",
+        "PATCH",
+        { status: "paused", reason: "maintenance window" }
+      ],
+      [
+        () => integrationService.deleteChannelConnection({
+          connectionId: "conn_tg_vip",
+          reason: "retired bot"
+        }),
+        "integrationService",
+        "deleteChannelConnection",
+        "/api/v1/integrations/channels/conn_tg_vip",
+        "DELETE",
+        { reason: "retired bot" }
+      ],
+      [
+        () => integrationService.testChannelConnectionInstance({
+          connectionId: "conn_tg_vip",
+          mode: "send",
+          recipient: "+7 900 123-45-67",
+          message: "channel smoke"
+        }),
+        "integrationService",
+        "testChannelConnectionInstance",
+        "/api/v1/integrations/channels/conn_tg_vip/test",
+        "POST",
+        {
+          mode: "send",
+          recipient: "+7 900 123-45-67",
+          message: "channel smoke"
+        }
+      ],
+      [() => integrationService.fetchChannelConnectionEvents("conn_tg_vip"), "integrationService", "fetchChannelConnectionEvents", "/api/v1/integrations/channels/conn_tg_vip/events", "GET", undefined],
       [
         () => integrationService.testChannelConnection({
           channel: { id: "vk", connections: [{ rawId: "conn_vk_main" }] },
@@ -806,6 +946,75 @@ describe("frontend backend service contracts", () => {
         url: expectedUrl
       });
       assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+    }
+  });
+
+  it("settings service calls employee, role and group API Gateway routes", async () => {
+    const employeeUpdate = {
+      employeeId: "usr-ns-agent",
+      roleKey: "senior",
+      groupId: "group-vip",
+      channels: ["Telegram", "MAX"],
+      chatLimit: 9,
+      canOverride: true,
+      sensitiveData: true
+    };
+    const invitePayload = {
+      email: "new.agent@northstar.example",
+      groupId: "group-line-1",
+      name: "New Agent",
+      roleKey: "employee"
+    };
+    const groupPayload = {
+      groupId: "group-vip",
+      name: "VIP",
+      channels: ["Telegram"],
+      memberIds: ["usr-ns-agent"]
+    };
+    const cases = [
+      [() => settingsService.fetchEmployees({ status: "active" }), "fetchEmployees", "/api/v1/settings/employees?status=active", "GET", undefined],
+      [() => settingsService.inviteEmployee(invitePayload), "inviteEmployee", "/api/v1/settings/employees/invites", "POST", invitePayload],
+      [() => settingsService.updateEmployee(employeeUpdate), "updateEmployee", "/api/v1/settings/employees/usr-ns-agent", "PATCH", {
+        roleKey: "senior",
+        groupId: "group-vip",
+        channels: ["Telegram", "MAX"],
+        chatLimit: 9,
+        canOverride: true,
+        sensitiveData: true
+      }],
+      [() => settingsService.resetEmployeePassword({ employeeId: "usr-ns-agent", reason: "Operator requested reset" }), "resetEmployeePassword", "/api/v1/settings/employees/usr-ns-agent/password-reset", "POST", { reason: "Operator requested reset" }],
+      [() => settingsService.resetEmployeeMfa({ employeeId: "usr-ns-agent", reason: "Phone replacement" }), "resetEmployeeMfa", "/api/v1/settings/employees/usr-ns-agent/mfa-reset", "POST", { reason: "Phone replacement" }],
+      [() => settingsService.deactivateEmployee({ employeeId: "usr-ns-agent", reason: "Offboarding" }), "deactivateEmployee", "/api/v1/settings/employees/usr-ns-agent/deactivate", "POST", { reason: "Offboarding" }],
+      [() => settingsService.fetchRoles(), "fetchRoles", "/api/v1/settings/roles", "GET", undefined],
+      [() => settingsService.fetchGroups(), "fetchGroups", "/api/v1/settings/groups", "GET", undefined],
+      [() => settingsService.createGroup({ name: "VIP", channels: ["Telegram"] }), "createGroup", "/api/v1/settings/groups", "POST", { name: "VIP", channels: ["Telegram"] }],
+      [() => settingsService.updateGroup(groupPayload), "updateGroup", "/api/v1/settings/groups/group-vip", "PATCH", {
+        name: "VIP",
+        channels: ["Telegram"],
+        memberIds: ["usr-ns-agent"]
+      }],
+      [() => settingsService.fetchTopics({ status: "active" }), "fetchTopics", "/api/v1/workspace/topics?status=active", "GET", undefined],
+      [() => settingsService.createTopic({ groupName: "Заказ", branchName: "Статус", name: "Перенос доставки" }), "createTopic", "/api/v1/workspace/topics", "POST", { groupName: "Заказ", branchName: "Статус", name: "Перенос доставки" }],
+      [() => settingsService.updateTopic({ topicId: "topic-delivery-delay", required: false }), "updateTopic", "/api/v1/workspace/topics/topic-delivery-delay", "PATCH", { required: false }],
+      [() => settingsService.archiveTopic({ topicId: "topic-delivery-delay", reason: "Duplicate" }), "archiveTopic", "/api/v1/workspace/topics/topic-delivery-delay/archive", "POST", { reason: "Duplicate" }],
+      [() => settingsService.restoreTopic({ topicId: "topic-delivery-delay", reason: "Needed" }), "restoreTopic", "/api/v1/workspace/topics/topic-delivery-delay/restore", "POST", { reason: "Needed" }],
+      [() => settingsService.fetchTopicUsage("topic-delivery-delay"), "fetchTopicUsage", "/api/v1/workspace/topics/topic-delivery-delay/usage", "GET", undefined],
+      [() => settingsService.fetchRules(), "fetchRules", "/api/v1/settings/rules", "GET", undefined],
+      [() => settingsService.updateRule({ ruleId: "operator-chat-limit", enabled: false, reason: "Maintenance" }), "updateRule", "/api/v1/settings/rules/operator-chat-limit", "PATCH", { enabled: false, reason: "Maintenance" }],
+      [() => settingsService.testRule({ ruleId: "operator-chat-limit", sampleSize: 50 }), "testRule", "/api/v1/settings/rules/operator-chat-limit/test", "POST", { sampleSize: 50 }]
+    ];
+
+    for (const [callService, expectedOperation, expectedUrl, expectedMethod, expectedBody] of cases) {
+      installFetchMock(envelope("settingsService", expectedOperation, { ok: true }));
+
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, "settingsService");
       assert.equal(response.operation, expectedOperation);
     }
   });

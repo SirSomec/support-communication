@@ -628,6 +628,15 @@ Acceptance criteria:
 19. Frontend service layer реализован: `supportAdminService` contract покрывает user lookup, account status, roles, sessions, resend invite, reset 2FA, forced logout, block/unblock and safe impersonation metadata. Production backend: privileged RBAC, break-glass approvals and read-only impersonation enforcement.
 20. Frontend service layer реализован: `incidentService` and `featureFlagService` contracts покрывают incident lifecycle, affected tenants/components, maintenance windows, rollout rules, internal tests and immutable audit events. Production backend: incident comms, postmortems, rollout engine and audit storage.
 
+### 7.3. First client pilot
+
+План запуска пилота с первым реальным клиентом (сквозной поток SDK → inbox → ответ оператора, PostgreSQL, tenant auth, embeddable widget):
+
+- [First Client Pilot Plan](superpowers/plans/2026-07-01-first-client-pilot.md)
+- [Pilot Runbook](pilot-runbook.md) — операционная инструкция
+
+Критерии успеха пилота и scope вынесены в план; полный production backlog остаётся в §7.2 и [backend-development-plan.md](backend-development-plan.md).
+
 ## 8. QA-gates для каждой frontend-итерации
 
 - `npm run build` проходит.

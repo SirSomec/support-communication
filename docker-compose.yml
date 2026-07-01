@@ -3,6 +3,9 @@ services:
     build:
       context: .
       target: frontend
+      args:
+        VITE_DEMO_SERVICE_ADMIN_KEY: dev-service-admin-key
+        VITE_ENABLE_SERVICE_ADMIN: "true"
     depends_on:
       api-gateway:
         condition: service_healthy
@@ -70,7 +73,7 @@ services:
       POSTGRES_USER: support
       POSTGRES_PASSWORD: support
     ports:
-      - "55432:5432"
+      - "56432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

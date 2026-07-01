@@ -1,0 +1,112 @@
+import { getStatusMeta } from "./dialogModel.js";
+
+const NOW_LABEL = "сейчас";
+const DEFAULT_LANGUAGE = "Русский";
+const DEFAULT_DEVICE = "Unknown";
+const DEFAULT_CLIENT_SINCE = "Новый контакт";
+
+export function mapApiConversationCollection(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  return items.map((item) => mapApiConversation(item));
+}
+
+export function mapApiConversation(input) {
+  const channel = nonEmptyString(input?.channel, "SDK");
+  const status = nonEmptyString(input?.status, "active");
+  const statusMeta = getStatusMeta(status);
+  const messages = mapMessages(input?.messages);
+  const previewFallback = messages.at(-1)?.text ?? "";
+
+  return {
+    id: nonEmptyString(input?.id, `conversation-${Date.now()}`),
+    name: nonEmptyString(input?.name, "Новый клиент"),
+    initials: nonEmptyString(input?.initials, buildInitials(input?.name)),
+    avatar: nonEmptyString(input?.avatar),
+    channel,
+    phone: nonEmptyString(input?.phone, ""),
+    time: mapTime(input?.time),
+    preview: nonEmptyString(input?.preview, previewFallback),
+    status,
+    sla: nonEmptyString(input?.sla, statusMeta.sla),
+    slaTone: nonEmptyString(input?.slaTone, statusMeta.tone),
+    topic: nonEmptyString(input?.topic),
+    unread: Boolean(input?.unread),
+    device: nonEmptyString(input?.device, DEFAULT_DEVICE),
+    entry: nonEmptyString(input?.entry, channel),
+    language: nonEmptyString(input?.language, DEFAULT_LANGUAGE),
+    clientSince: nonEmptyString(input?.clientSince, DEFAULT_CLIENT_SINCE),
+    tags: Array.isArray(input?.tags) ? input.tags.map((tag) => String(tag)) : [],
+    previous: Array.isArray(input?.previous) ? input.previous : [],
+    messages
+  };
+}
+
+export function mapApiMessage(input) {
+  const mapped = {
+    id: input?.id ?? `msg-${Date.now()}`,
+    text: nonEmptyString(input?.text),
+    time: mapTime(input?.time)
+  };
+
+  if (input?.side === "agent" || input?.side === "client") {
+    mapped.side = input.side;
+  }
+
+  if (input?.type === "event" || input?.type === "internal") {
+    mapped.type = input.type;
+  }
+
+  if (mapped.type === "internal") {
+    mapped.author = nonEmptyString(input?.author, "Иван П.");
+  }
+
+  if (Array.isArray(input?.attachments)) {
+    mapped.attachments = input.attachments;
+  }
+
+  return mapped;
+}
+
+function mapMessages(messages) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  return messages.map((message) => mapApiMessage(message));
+}
+
+function mapTime(value) {
+  if (!value) {
+    return NOW_LABEL;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === "now" || normalized === NOW_LABEL) {
+    return NOW_LABEL;
+  }
+
+  return String(value);
+}
+
+function buildInitials(name) {
+  const value = nonEmptyString(name);
+  if (!value) {
+    return "НК";
+  }
+
+  return value
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function nonEmptyString(value, fallback = "") {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.trim();
+  return normalized || fallback;
+}

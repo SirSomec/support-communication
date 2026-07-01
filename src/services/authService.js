@@ -28,11 +28,36 @@ export const authService = {
     });
   },
 
+  async loginTenantOperator(payload = {}) {
+    return apiRequest("/auth/tenant/login", {
+      body: payload,
+      method: "POST",
+      operation: "loginTenantOperator",
+      service: SERVICE
+    });
+  },
+
+  async getTenantAuthState() {
+    return apiRequest("/auth/tenant/state", {
+      operation: "getTenantAuthState",
+      service: SERVICE
+    });
+  },
+
+  async logoutTenant(payload = {}) {
+    return apiRequest("/auth/tenant/logout", {
+      body: payload,
+      method: "POST",
+      operation: "logoutTenant",
+      service: SERVICE
+    });
+  },
+
   getReadiness() {
     return {
       id: SERVICE,
       status: "ready",
-      operations: ["getAuthState", "login", "logout"],
+      operations: ["getAuthState", "login", "logout", "loginTenantOperator", "getTenantAuthState", "logoutTenant"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["anonymous", "password_verified", "mfa_required", "mfa_verified"],
       note: "Connected to API Gateway auth routes."

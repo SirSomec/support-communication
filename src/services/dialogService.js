@@ -11,6 +11,22 @@ export const dialogService = {
     });
   },
 
+  async fetchDialogDetail(conversationId) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}`, {
+      operation: "fetchDialogDetail",
+      service: SERVICE
+    });
+  },
+
+  async appendMessage({ conversationId, ...payload }) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/messages`, {
+      body: payload,
+      method: "POST",
+      operation: "appendMessage",
+      service: SERVICE
+    });
+  },
+
   async transitionConversationStatus({ conversationId, ...payload }) {
     return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/status`, {
       body: payload,
@@ -42,7 +58,14 @@ export const dialogService = {
     return {
       id: SERVICE,
       status: "ready",
-      operations: ["fetchDialogs", "transitionConversationStatus", "uploadAttachment", "createOutboundConversationRequest"],
+      operations: [
+        "fetchDialogs",
+        "fetchDialogDetail",
+        "appendMessage",
+        "transitionConversationStatus",
+        "uploadAttachment",
+        "createOutboundConversationRequest"
+      ],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
       note: "Connected to API Gateway dialog routes."

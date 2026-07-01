@@ -1,6 +1,5 @@
 import {
   Building2,
-  Code2,
   CreditCard,
   Gauge,
   Send,
@@ -12,7 +11,6 @@ export const steps = [
   { id: "tenant", label: "Tenant", icon: Building2 },
   { id: "plan", label: "Тариф / trial", icon: CreditCard },
   { id: "admin", label: "Первый администратор", icon: UserPlus },
-  { id: "channel", label: "Канал / SDK", icon: Code2 },
   { id: "limits", label: "Лимиты", icon: Gauge },
   { id: "employees", label: "Сотрудники", icon: Users },
   { id: "test", label: "Тестовое сообщение", icon: Send }
@@ -39,7 +37,6 @@ export const planOptions = [
   }
 ];
 
-export const channelOptions = ["Web SDK", "Telegram", "MAX", "VK", "REST API"];
 export const employeeRoles = ["Оператор", "Старший оператор", "Администратор", "Аудитор"];
 
 export function hasEmailShape(value) {
@@ -57,13 +54,8 @@ export function createSlug(value) {
   return slug || `tenant-${Date.now().toString(36).slice(-5)}`;
 }
 
-export function createSdkKey() {
-  return `sdk_live_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
-}
-
 export function getCompletion({
   admin,
-  channel,
   employees,
   limits,
   plan,
@@ -73,10 +65,9 @@ export function getCompletion({
   return {
     tenant: tenant.name.trim().length >= 2 && tenant.slug.trim().length >= 3,
     plan: Boolean(plan.id),
-    admin: admin.name.trim().length >= 2 && hasEmailShape(admin.email),
-    channel: channel.type === "Web SDK"
-      ? Boolean(channel.domain.trim().length >= 4 && channel.sdkKey)
-      : Boolean(channel.webhook.trim().length >= 8 || channel.sdkKey),
+    admin: admin.name.trim().length >= 2
+      && hasEmailShape(admin.email)
+      && String(admin.password ?? "").length >= 8,
     limits: limits.operatorLimit > 0 && limits.concurrentDialogs > 0 && limits.dailyMessages >= 100,
     employees: employees.length > 0,
     test: test.status === "sent"

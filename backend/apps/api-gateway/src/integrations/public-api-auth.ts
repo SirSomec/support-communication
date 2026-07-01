@@ -21,6 +21,7 @@ export interface PublicApiAuthContext {
 }
 
 export interface PublicApiKeyLookup {
+  findActiveKeyBySecretHash?(secretHash: string): Promise<PublicApiKeyRecord | undefined> | PublicApiKeyRecord | undefined;
   listActiveKeys(): Promise<PublicApiKeyRecord[]> | PublicApiKeyRecord[];
 }
 
@@ -56,7 +57,12 @@ export async function resolvePublicApiRequest(request: PublicApiAuthRequest): Pr
   }
 
   const secretHash = hashPublicApiKeySecret(rawSecret);
-  const activeKeys = (await request.lookup.listActiveKeys()).filter((key) => key.status === "active");
+  const directLookup = request.lookup.findActiveKeyBySecretHash
+    ? await request.lookup.findActiveKeyBySecretHash(secretHash)
+    : undefined;
+  const activeKeys = directLookup
+    ? [directLookup]
+    : (await request.lookup.listActiveKeys()).filter((key) => key.status === "active");
   const matchedKey = activeKeys.find((key) => safeEqualHex(key.secretHash, secretHash));
   if (!matchedKey) {
     return deny("public_api_key_invalid", "unauthorized");

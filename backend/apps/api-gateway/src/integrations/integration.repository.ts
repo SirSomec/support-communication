@@ -158,9 +158,22 @@ export interface IntegrationState {
   publicApiKeys: PublicApiKeyStoredRecord[];
   publicApiKeyRevealStates: PublicApiKeyRevealStateRecord[];
   securitySessions: SecuritySession[];
+  telegramConnections: TelegramConnectionStoredRecord[];
   webhookDeliveryJournal: WebhookDeliveryJournalEntry[];
   webhookReplayAuditEvents: WebhookReplayAuditEvent[];
   webhookReplayJournal: WebhookReplayJournalEntry[];
+}
+
+export interface TelegramConnectionStoredRecord {
+  botId: string | null;
+  botToken: string;
+  botUsername: string | null;
+  createdAt: string;
+  status: "active" | "disabled";
+  tenantId: string;
+  tokenPreview: string;
+  updatedAt: string;
+  webhookSecret: string;
 }
 
 interface IntegrationRepositoryOptions {
@@ -439,6 +452,18 @@ export class IntegrationRepository {
     }
 
     return clone(this.readState().publicApiKeys.filter((key) => key.status === "active"));
+  }
+
+  findActiveKeyBySecretHash(secretHash: string): MaybePromise<PublicApiKeyRecord | undefined> {
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.publicApiKey.findMany({
+        orderBy: { createdAt: "asc" },
+        where: { status: "active" }
+      })).then((rows) => rows.map(toPublicApiKeyRecord).find((row) => row.secretHash === secretHash));
+    }
+
+    const matched = this.readState().publicApiKeys.find((key) => key.status === "active" && key.secretHash === secretHash);
+    return matched ? clone(matched) : undefined;
   }
 
   consumePublicApiKeyReveal(input: ConsumePublicApiKeyRevealInput): MaybePromise<PublicApiKeyRevealResult> {
@@ -815,6 +840,39 @@ export class IntegrationRepository {
 
     return clone(persisted);
   }
+
+  findTelegramConnectionByTenantId(tenantId: string): TelegramConnectionStoredRecord | undefined {
+    const normalizedTenantId = String(tenantId ?? "").trim();
+    return clone(this.readState().telegramConnections.find((item) => item.tenantId === normalizedTenantId));
+  }
+
+  findTelegramConnectionByWebhookSecret(webhookSecret: string): TelegramConnectionStoredRecord | undefined {
+    const normalizedSecret = String(webhookSecret ?? "").trim();
+    return clone(this.readState().telegramConnections.find((item) =>
+      item.status === "active" && item.webhookSecret === normalizedSecret
+    ));
+  }
+
+  listTelegramConnections(): TelegramConnectionStoredRecord[] {
+    return clone(this.readState().telegramConnections);
+  }
+
+  saveTelegramConnection(connection: TelegramConnectionStoredRecord): TelegramConnectionStoredRecord {
+    const persisted = clone(connection);
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const exists = current.telegramConnections.some((item) => item.tenantId === persisted.tenantId);
+
+      return {
+        ...current,
+        telegramConnections: exists
+          ? current.telegramConnections.map((item) => item.tenantId === persisted.tenantId ? persisted : item)
+          : [...current.telegramConnections, persisted]
+      };
+    });
+
+    return clone(persisted);
+  }
 }
 
 function seedIntegrationState(): IntegrationState {
@@ -824,6 +882,7 @@ function seedIntegrationState(): IntegrationState {
     publicApiKeys: [],
     publicApiKeyRevealStates: [],
     securitySessions: [],
+    telegramConnections: [],
     webhookDeliveryJournal: [],
     webhookReplayAuditEvents: [],
     webhookReplayJournal: []
@@ -837,10 +896,25 @@ function normalizeState(state: Partial<IntegrationState>): IntegrationState {
     publicApiKeys: normalizePublicApiKeys(state.publicApiKeys),
     publicApiKeyRevealStates: normalizePublicApiKeyRevealStates(state.publicApiKeyRevealStates),
     securitySessions: state.securitySessions ?? [],
+    telegramConnections: normalizeTelegramConnections(state.telegramConnections),
     webhookDeliveryJournal: normalizeWebhookDeliveryJournal(state.webhookDeliveryJournal),
     webhookReplayAuditEvents: state.webhookReplayAuditEvents ?? [],
     webhookReplayJournal: state.webhookReplayJournal ?? []
   };
+}
+
+function normalizeTelegramConnections(connections: TelegramConnectionStoredRecord[] | undefined): TelegramConnectionStoredRecord[] {
+  return (connections ?? []).map((connection) => ({
+    botId: connection.botId ?? null,
+    botToken: String(connection.botToken ?? ""),
+    botUsername: connection.botUsername ?? null,
+    createdAt: connection.createdAt,
+    status: connection.status === "disabled" ? "disabled" : "active",
+    tenantId: connection.tenantId,
+    tokenPreview: connection.tokenPreview,
+    updatedAt: connection.updatedAt,
+    webhookSecret: connection.webhookSecret
+  }));
 }
 
 function normalizeWebhookDeliveryJournal(entries: WebhookDeliveryJournalEntry[] | undefined): WebhookDeliveryJournalEntry[] {

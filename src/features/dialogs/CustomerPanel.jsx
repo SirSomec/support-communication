@@ -1,9 +1,8 @@
 import React from "react";
 import { AlertTriangle, Copy, FileText, Lock, Plus, ShieldCheck, Smartphone } from "lucide-react";
 import { maskPhone } from "../../app/dialogModel.js";
-import { topicOptions } from "../../data.js";
 
-export function CustomerPanel({ conversation, topic, onTopic, setDraft, templates, onClose, access, isClosed }) {
+export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic, setDraft, templates, onClose, access, isClosed }) {
   return (
     <aside className="customer-panel" aria-label="Карточка клиента">
       <PanelSection title="О клиенте" action={<button aria-label="Копировать"><Copy size={18} /></button>}>

@@ -1,9 +1,9 @@
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import { useAiSuggestions } from "./app/useAiSuggestions.js";
 import { useAppTransientState } from "./app/useAppTransientState.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
 import { useComposerState } from "./app/useComposerState.js";
-import { useConversationMutations } from "./app/useConversationMutations.js";
+import { useConversationInbox } from "./app/useConversationInbox.js";
 import { useConversationSelection } from "./app/useConversationSelection.js";
 import { useAppNavigation } from "./app/useAppNavigation.js";
 import { useDialogActions } from "./app/useDialogActions.js";
@@ -17,10 +17,10 @@ import { DialogWorkspace } from "./features/dialogs/DialogWorkspace.jsx";
 import { DraftSwitchDialog, OutboundDialogLauncher, SaveTemplateDialog } from "./features/dialogs/DialogModals.jsx";
 import { Sidebar, TopBar } from "./features/app-shell/AppShell.jsx";
 import { SectionRouter } from "./features/section-router.jsx";
-import { Toast } from "./ui.jsx";
+import { settingsService } from "./services/settingsService.js";
+import { ScreenStateStrip, Toast } from "./ui.jsx";
 import {
-  aiSuggestions,
-  conversations
+  aiSuggestions
 } from "./data.js";
 
 const SERVICE_ADMIN_DEMO_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_SERVICE_ADMIN === "true";
@@ -32,6 +32,7 @@ const ServiceAdminDashboard = lazy(() => import("./features/service-admin/index.
 })));
 
 function App() {
+  const [topicOptions, setTopicOptions] = useState([]);
   const {
     handleToastClose,
     isOutboundOpen,
@@ -52,11 +53,14 @@ function App() {
     applyConversationStatus,
     closedIds,
     conversationItems,
+    error: inboxError,
+    loading: inboxLoading,
+    refreshInbox,
     setClosedIds,
     setConversationItems,
     setTopics,
     topics
-  } = useConversationMutations({ initialConversations: conversations });
+  } = useConversationInbox();
   const {
     access,
     section,
@@ -180,6 +184,22 @@ function App() {
     setTopics
   });
 
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadTopicOptions() {
+      const response = await settingsService.fetchTopics();
+      if (!ignore && response.status === "ok") {
+        setTopicOptions(Array.isArray(response.data?.activeOptions) ? response.data.activeOptions : []);
+      }
+    }
+
+    loadTopicOptions();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
   if (route.namespace === "public") {
     return (
       <div data-testid="route-public-landing">
@@ -269,46 +289,59 @@ function App() {
           roleMode={roleMode}
         />
         {section === "dialogs" ? (
-          <DialogWorkspace
-            access={access}
-            aiSuggestions={visibleAiSuggestions}
-            allConversations={conversationItems}
-            attachments={attachments}
-            closedIds={closedIds}
-            composeMode={composeMode}
-            conversation={selected}
-            conversations={filtered}
-            draft={draft}
-            filter={filter}
-            isClosed={isClosed}
-            onAiSuggestionAction={handleAiSuggestionAction}
-            onAttachFiles={handleAttachFiles}
-            onAttachmentComplete={handleCompleteAttachment}
-            onAttachmentRemove={handleRemoveAttachment}
-            onAttachmentRetry={handleRetryAttachment}
-            onCloseDialog={handleClose}
-            onConversationSelect={handleConversationSelect}
-            onDialogAction={handleDialogAction}
-            onFilter={setFilter}
-            onQuery={setQuery}
-            onQueueFilterChange={updateQueueFilter}
-            onQueueFiltersReset={resetQueueFilters}
-            onSaveTemplate={handleOpenTemplateSave}
-            onSend={handleSend}
-            onStatusChange={handleStatusChange}
-            onTopic={handleTopicChange}
-            query={query}
-            queueFilters={queueFilters}
-            selectedId={selectedId}
-            setComposeMode={setComposeMode}
-            setDraft={setDraft}
-            setTranscriptMode={setTranscriptMode}
-            status={selectedStatus}
-            templates={templateLibrary}
-            topic={selectedTopic}
-            topics={topics}
-            transcriptMode={transcriptMode}
-          />
+          <>
+            {inboxLoading ? (
+              <ScreenStateStrip items={[{ label: "Inbox", tone: "loading", value: "Загружается..." }]} />
+            ) : null}
+            {inboxError ? (
+              <ScreenStateStrip items={[{ label: "Inbox", tone: "error", value: inboxError }]} />
+            ) : null}
+            {!inboxLoading && !inboxError && !conversationItems.length ? (
+              <ScreenStateStrip items={[{ label: "Inbox", tone: "empty", value: "Нет активных диалогов" }]} />
+            ) : null}
+            <DialogWorkspace
+              access={access}
+              aiSuggestions={visibleAiSuggestions}
+              allConversations={conversationItems}
+              attachments={attachments}
+              closedIds={closedIds}
+              composeMode={composeMode}
+              conversation={selected}
+              conversations={filtered}
+              draft={draft}
+              filter={filter}
+              isClosed={isClosed}
+              onAiSuggestionAction={handleAiSuggestionAction}
+              onAttachFiles={handleAttachFiles}
+              onAttachmentComplete={handleCompleteAttachment}
+              onAttachmentRemove={handleRemoveAttachment}
+              onAttachmentRetry={handleRetryAttachment}
+              onCloseDialog={handleClose}
+              onConversationSelect={handleConversationSelect}
+              onDialogAction={handleDialogAction}
+              onFilter={setFilter}
+              onQuery={setQuery}
+              onQueueFilterChange={updateQueueFilter}
+              onQueueFiltersReset={resetQueueFilters}
+              onRefreshInbox={refreshInbox}
+              onSaveTemplate={handleOpenTemplateSave}
+              onSend={handleSend}
+              onStatusChange={handleStatusChange}
+              onTopic={handleTopicChange}
+              query={query}
+              queueFilters={queueFilters}
+              selectedId={selectedId}
+              setComposeMode={setComposeMode}
+              setDraft={setDraft}
+              setTranscriptMode={setTranscriptMode}
+              status={selectedStatus}
+              templates={templateLibrary}
+              topic={selectedTopic}
+              topicOptions={topicOptions}
+              topics={topics}
+              transcriptMode={transcriptMode}
+            />
+          </>
         ) : (
           <SectionRouter
             section={section}
@@ -320,6 +353,8 @@ function App() {
             access={access}
             roleMode={roleMode}
             onRoleMode={handleRoleModeChange}
+            onTopicOptionsChange={setTopicOptions}
+            topicOptions={topicOptions}
           />
         )}
       </main>
@@ -329,6 +364,7 @@ function App() {
           onClose={handleOutboundClose}
           onCreate={handleOutboundCreate}
           onToast={setToast}
+          topicOptions={topicOptions}
         />
       ) : null}
       {saveTemplateDraft ? (

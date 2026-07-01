@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from "react";
+import { setSession } from "../../app/sessionStore.js";
+import { authService } from "../../services/authService.js";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -44,6 +46,7 @@ export function AuthPage({
   const [selectedOrganizationId, setSelectedOrganizationId] = useState(organizationOptions[0].id);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const activeMode = authModes[mode];
   const selectedOrganization = useMemo(() => {
@@ -56,7 +59,7 @@ export function AuthPage({
     setMessage(nextMessage);
   }
 
-  function handleLoginSubmit(event) {
+  async function handleLoginSubmit(event) {
     event.preventDefault();
     const email = login.email.trim().toLowerCase();
 
@@ -85,7 +88,43 @@ export function AuthPage({
       return;
     }
 
-    transition("twoFactor", `Код 2FA отправлен для ${email}.`);
+    if (email.includes("agent")) {
+      transition("2fa", "Введите код 2FA для подтверждения входа.");
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await authService.loginTenantOperator({
+        email,
+        password: login.password
+      });
+
+      if (response.status !== "ok" || !response.data?.accessToken) {
+        setError(response.error?.message ?? "Не удалось войти. Проверьте email и пароль.");
+        return;
+      }
+
+      setSession({
+        accessToken: response.data.accessToken,
+        tenantId: response.data.tenantId,
+        operator: response.data.operator
+      });
+
+      onAuthSuccess({
+        method: "password",
+        email,
+        remember: login.remember,
+        organization: selectedOrganization,
+        tenantId: response.data.tenantId,
+        operator: response.data.operator
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function handleSsoSubmit(event) {
@@ -112,6 +151,11 @@ export function AuthPage({
       return;
     }
 
+    setDemoUiSession({
+      email: `${sso.provider.toLowerCase()}@${domain}`,
+      method: "sso",
+      organization: organizationOptions[0]
+    });
     onAuthSuccess({
       method: "sso",
       provider: sso.provider,
@@ -133,6 +177,11 @@ export function AuthPage({
       return;
     }
 
+    setDemoUiSession({
+      email: login.email.trim(),
+      method: "2fa",
+      organization: selectedOrganization
+    });
     onAuthSuccess({
       method: "password",
       email: login.email.trim(),
@@ -173,6 +222,11 @@ export function AuthPage({
       return;
     }
 
+    setDemoUiSession({
+      email,
+      method: "invite",
+      organization: selectedOrganization
+    });
     onAuthSuccess({
       method: "invite",
       email,
@@ -182,9 +236,15 @@ export function AuthPage({
   }
 
   function handleOrganizationContinue() {
+    const email = login.email.trim() || invite.email.trim() || `${selectedOrganization.id}@tenant.local`;
+    setDemoUiSession({
+      email,
+      method: "organizationSelect",
+      organization: selectedOrganization
+    });
     onAuthSuccess({
       method: "organizationSelect",
-      email: login.email.trim() || invite.email.trim() || `${selectedOrganization.id}@tenant.local`,
+      email,
       organization: selectedOrganization
     });
   }
@@ -290,8 +350,8 @@ export function AuthPage({
                 </label>
                 <button className="auth-link-button" onClick={() => transition("recovery")} type="button">Забыли пароль?</button>
               </div>
-              <button className="auth-primary-button" type="submit">
-                Продолжить
+              <button className="auth-primary-button" disabled={isSubmitting} type="submit">
+                {isSubmitting ? "Вход..." : "Продолжить"}
                 <ArrowRight size={17} />
               </button>
               <div className="auth-secondary-actions">
@@ -500,6 +560,19 @@ export function AuthPage({
       </section>
     </main>
   );
+}
+
+function setDemoUiSession({ email, method, organization }) {
+  setSession({
+    accessToken: `demo-ui-${method}-${organization.id}`,
+    tenantId: organization.id,
+    operator: {
+      email,
+      id: `demo-ui-${organization.id}`,
+      name: email.split("@")[0] || "Demo operator",
+      role: "Admin"
+    }
+  });
 }
 
 export default AuthPage;

@@ -10,6 +10,74 @@ export const integrationService = {
     });
   },
 
+  async fetchChannelConnections(filters = {}) {
+    return apiRequest("/integrations/channels", {
+      operation: "fetchChannelConnections",
+      query: filters,
+      service: SERVICE
+    });
+  },
+
+  async createChannelConnection(payload = {}) {
+    return apiRequest("/integrations/channels", {
+      body: payload,
+      method: "POST",
+      operation: "createChannelConnection",
+      service: SERVICE
+    });
+  },
+
+  async updateChannelConnection({ connectionId, ...payload } = {}) {
+    if (!hasRouteId(connectionId)) {
+      return missingIdEnvelope("updateChannelConnection", "Channel connection id is required.");
+    }
+
+    return apiRequest(`/integrations/channels/${encodeURIComponent(connectionId)}`, {
+      body: payload,
+      method: "PATCH",
+      operation: "updateChannelConnection",
+      service: SERVICE
+    });
+  },
+
+  async deleteChannelConnection({ connectionId, ...payload } = {}) {
+    if (!hasRouteId(connectionId)) {
+      return missingIdEnvelope("deleteChannelConnection", "Channel connection id is required.");
+    }
+
+    return apiRequest(`/integrations/channels/${encodeURIComponent(connectionId)}`, {
+      body: payload,
+      method: "DELETE",
+      operation: "deleteChannelConnection",
+      service: SERVICE
+    });
+  },
+
+  async testChannelConnectionInstance({ connectionId, ...payload } = {}) {
+    if (!hasRouteId(connectionId)) {
+      return missingIdEnvelope("testChannelConnectionInstance", "Channel connection id is required.");
+    }
+
+    return apiRequest(`/integrations/channels/${encodeURIComponent(connectionId)}/test`, {
+      body: payload,
+      method: "POST",
+      operation: "testChannelConnectionInstance",
+      service: SERVICE
+    });
+  },
+
+  async fetchChannelConnectionEvents(connectionId, filters = {}) {
+    if (!hasRouteId(connectionId)) {
+      return missingIdEnvelope("fetchChannelConnectionEvents", "Channel connection id is required.");
+    }
+
+    return apiRequest(`/integrations/channels/${encodeURIComponent(connectionId)}/events`, {
+      operation: "fetchChannelConnectionEvents",
+      query: filters,
+      service: SERVICE
+    });
+  },
+
   async testChannelConnection(payload = {}) {
     return apiRequest("/integrations/channel-tests", {
       body: normalizeChannelTestPayload(payload),
@@ -57,11 +125,50 @@ export const integrationService = {
     });
   },
 
+  async fetchTelegramConnection() {
+    return apiRequest("/integrations/channels/telegram", {
+      operation: "fetchTelegramConnection",
+      service: SERVICE
+    });
+  },
+
+  async saveTelegramConnection(payload = {}) {
+    return apiRequest("/integrations/channels/telegram", {
+      body: payload,
+      method: "POST",
+      operation: "saveTelegramConnection",
+      service: SERVICE
+    });
+  },
+
+  async disconnectTelegramConnection() {
+    return apiRequest("/integrations/channels/telegram", {
+      method: "DELETE",
+      operation: "disconnectTelegramConnection",
+      service: SERVICE
+    });
+  },
+
   getReadiness() {
     return {
       id: SERVICE,
       status: "ready",
-      operations: ["fetchIntegrationWorkspace", "testChannelConnection", "rotateApiKey", "replayWebhookDelivery", "revokeSecuritySession"],
+      operations: [
+        "fetchIntegrationWorkspace",
+        "fetchChannelConnections",
+        "createChannelConnection",
+        "updateChannelConnection",
+        "deleteChannelConnection",
+        "testChannelConnectionInstance",
+        "fetchChannelConnectionEvents",
+        "testChannelConnection",
+        "rotateApiKey",
+        "replayWebhookDelivery",
+        "revokeSecuritySession",
+        "fetchTelegramConnection",
+        "saveTelegramConnection",
+        "disconnectTelegramConnection"
+      ],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
       note: "Connected to API Gateway routes."

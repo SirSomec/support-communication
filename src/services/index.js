@@ -12,6 +12,7 @@ export { permissionService } from "./permissionService.js";
 export { platformMonitoringService } from "./platformMonitoringService.js";
 export { qualityService } from "./qualityService.js";
 export { reportService } from "./reportService.js";
+export { settingsService } from "./settingsService.js";
 export { supportAdminService } from "./supportAdminService.js";
 export { tenantService } from "./tenantService.js";
 export { templateService } from "./templateService.js";

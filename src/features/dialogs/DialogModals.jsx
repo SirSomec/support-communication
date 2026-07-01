@@ -1,20 +1,25 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { BookOpen, PhoneCall, Send, Smartphone } from "lucide-react";
-import { topicOptions } from "../../data.js";
 import { Modal } from "../../ui.jsx";
 import "./dialog-modals.css";
 
-export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast }) {
+export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast, topicOptions = [] }) {
   const [phone, setPhone] = useState("+7 ");
   const [clientName, setClientName] = useState("");
   const [channel, setChannel] = useState("SDK");
-  const [topic, setTopic] = useState(topicOptions[0]);
+  const [topic, setTopic] = useState(topicOptions[0] ?? "");
   const [message, setMessage] = useState("Здравствуйте! Пишем по вашему обращению, готовы помочь в этом диалоге.");
 
   const normalizedPhone = phone.replace(/\D/g, "");
   const existing = conversations.find((conversation) => conversation.phone.replace(/\D/g, "") === normalizedPhone);
   const device = channel === "SDK" ? "Android / iOS из SDK" : "Определится каналом";
   const canCreate = normalizedPhone.length >= 11 && message.trim().length > 0;
+
+  useEffect(() => {
+    if (!topic && topicOptions[0]) {
+      setTopic(topicOptions[0]);
+    }
+  }, [topic, topicOptions]);
 
   function handleCreate() {
     if (!canCreate) {
@@ -69,6 +74,7 @@ export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToa
         <label>
           <span>Тематика</span>
           <select value={topic} onChange={(event) => setTopic(event.target.value)}>
+            <option value="">РќРµ РІС‹Р±СЂР°РЅР°</option>
             {topicOptions.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>

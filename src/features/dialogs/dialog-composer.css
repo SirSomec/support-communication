@@ -1,6 +1,9 @@
 .composer {
   width: calc(100% - 32px);
+  min-height: 0;
+  max-height: clamp(220px, 34vh, 430px);
   margin: 0 16px 16px;
+  overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;

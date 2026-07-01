@@ -1,6 +1,28 @@
 import { useCallback, useMemo, useState } from "react";
 
 const DRAFT_SWITCH_DISCARD_TOAST = "Черновик и очередь вложений сброшены.";
+const EMPTY_CONVERSATION = {
+  id: "empty",
+  name: "Нет диалогов",
+  initials: "--",
+  avatar: "",
+  channel: "SDK",
+  phone: "",
+  time: "сейчас",
+  preview: "",
+  status: "active",
+  sla: "Новое",
+  slaTone: "ok",
+  topic: "",
+  unread: false,
+  device: "-",
+  entry: "SDK",
+  language: "Русский",
+  clientSince: "-",
+  tags: [],
+  previous: [],
+  messages: []
+};
 
 export function useConversationSelection({
   conversationItems,
@@ -15,7 +37,7 @@ export function useConversationSelection({
   const [pendingConversationId, setPendingConversationId] = useState(null);
 
   const selected = useMemo(
-    () => conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0],
+    () => conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0] ?? EMPTY_CONVERSATION,
     [conversationItems, selectedId]
   );
   const pendingConversation = useMemo(

@@ -1,0 +1,20 @@
+{
+  "name": "@support-communication/api-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@support-communication/auth-context": "0.1.0",
+    "@support-communication/config": "0.1.0",
+    "@support-communication/database": "0.1.0",
+    "@support-communication/envelope": "0.1.0",
+    "@support-communication/events": "0.1.0",
+    "@support-communication/observability": "0.1.0",
+    "@support-communication/redaction": "0.1.0"
+  }
+}

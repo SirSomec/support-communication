@@ -1,0 +1,58 @@
+{
+  "name": "@support-communication/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/api-gateway",
+    "apps/outbox-worker",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "test": "npm run build && node --test --import tsx tests/*.test.ts",
+    "test:integration": "npm run build && node --test --import tsx tests/*.test.ts",
+    "tenant-isolation:verify": "node --test --import tsx tests/tenant-isolation-contracts.test.ts",
+    "audit-immutability:verify": "node --test --import tsx tests/audit-immutability-contracts.test.ts",
+    "migration-rollback-check:verify": "node --test --import tsx tests/migration-rollback-check-contracts.test.ts",
+    "public-api:docs:verify": "node scripts/public-api-docs-smoke.mjs",
+    "public-api:docs:runtime-smoke": "node scripts/public-api-docs-smoke.mjs --runtime",
+    "redaction:runtime-smoke": "npm run build && node scripts/redaction-runtime-smoke.mjs",
+    "prisma:validate": "node --env-file=.env.example scripts/run-prisma.mjs prisma validate --schema prisma/schema.prisma",
+    "prisma:generate": "node --env-file=.env.example scripts/run-prisma.mjs prisma generate --schema prisma/schema.prisma",
+    "prisma:migrate:deploy": "node --env-file=.env.example scripts/run-prisma.mjs prisma migrate deploy --schema prisma/schema.prisma",
+    "prisma:seed": "node --env-file=.env.example --import tsx scripts/seed-identity.ts",
+    "identity:bootstrap:postgres": "npm run prisma:migrate:deploy && npm run prisma:seed",
+    "smoke:postgres": "node --env-file=.env.example scripts/smoke-postgres.mjs",
+    "release:checklist": "node --env-file=.env.example scripts/release-checklist.mjs",
+    "start:api-gateway": "npm run build && node --env-file=.env.example apps/api-gateway/dist/main.js",
+    "start:outbox-worker": "npm run build && node --env-file=.env.example apps/outbox-worker/dist/main.js",
+    "start:outbox-bullmq-worker": "npm run build && node --env-file=.env.example apps/outbox-worker/dist/main.js --bullmq",
+    "start:billing-bullmq-worker": "npm run build && node --env-file=.env.example apps/outbox-worker/dist/main.js --bullmq --billing-sync",
+    "outbox:worker:once": "npm run build && node --env-file=.env.example apps/outbox-worker/dist/main.js --once",
+    "billing:worker:once": "npm run build && node --env-file=.env.example apps/outbox-worker/dist/main.js --billing-sync --once",
+    "start:dev": "npm run start:api-gateway",
+    "lint": "npm run typecheck"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15",
+    "@nestjs/swagger": "^7.4.2",
+    "@prisma/client": "^6.19.1",
+    "bullmq": "^5.79.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "ioredis": "^5.11.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "prisma": "^6.19.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

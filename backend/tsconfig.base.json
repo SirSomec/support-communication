@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "declaration": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@support-communication/config": ["packages/config/src/index.ts"],
+      "@support-communication/contracts": ["packages/contracts/src/index.ts"],
+      "@support-communication/auth-context": ["packages/auth-context/src/index.ts"],
+      "@support-communication/database": ["packages/database/src/index.ts"],
+      "@support-communication/envelope": ["packages/envelope/src/index.ts"],
+      "@support-communication/events": ["packages/events/src/index.ts"],
+      "@support-communication/observability": ["packages/observability/src/index.ts"],
+      "@support-communication/redaction": ["packages/redaction/src/index.ts"],
+      "@support-communication/testing": ["packages/testing/src/index.ts"]
+    }
+  }
+}

@@ -1,0 +1,365 @@
+import { randomUUID } from "node:crypto";
+import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
+import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import { type ServiceAdminActor } from "../identity/service-admin-auth.js";
+import {
+  incidentPostmortems,
+  maintenanceWindows,
+  platformComponents,
+  platformIncidents,
+  platformTenants,
+  type PlatformIncident
+} from "../platform/platform.fixtures.js";
+import { PlatformRepository } from "../platform/platform.repository.js";
+import {
+  makeEphemeralPlatformMutationIdempotencyKey,
+  persistPlatformIncidentMutation
+} from "../platform/platform-audit-outbox.js";
+
+const INCIDENT_SERVICE = "incidentService";
+
+interface IncidentFilters {
+  componentId?: string;
+  severity?: string;
+  status?: string;
+  tenantId?: string;
+}
+
+interface IncidentUpdatePayload {
+  actor?: ServiceAdminActor;
+  confirmed?: boolean;
+  customerVisible?: boolean;
+  idempotencyKey?: string;
+  incidentId?: string;
+  message?: string;
+  reason?: string;
+  status?: PlatformIncident["status"];
+}
+
+interface IncidentIdempotencyEntry {
+  fingerprint: string;
+  result: Record<string, unknown>;
+}
+
+export class IncidentService {
+  private readonly incidents: PlatformIncident[];
+  private readonly idempotencyIndex: Map<string, IncidentIdempotencyEntry>;
+
+  constructor(private readonly platformRepository = PlatformRepository.default()) {
+    this.incidents = overlayById(platformIncidents, this.platformRepository.listIncidents());
+    this.idempotencyIndex = new Map(
+      this.platformRepository.readState().incidentIdempotencyKeys.map((item) => [item.key, {
+        fingerprint: item.fingerprint,
+        result: clone(item.result)
+      }])
+    );
+  }
+
+  async fetchIncidents(filters: IncidentFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const items = this.incidents.filter((incident) => {
+      const statusMatches = !filters.status || filters.status === "all" || incident.status === filters.status;
+      const severityMatches = !filters.severity || filters.severity === "all" || incident.severity === filters.severity;
+      const componentMatches = !filters.componentId || filters.componentId === "all" || incident.componentId === filters.componentId;
+      const tenantMatches = !filters.tenantId || incident.affectedTenantIds.includes(filters.tenantId);
+      return statusMatches && severityMatches && componentMatches && tenantMatches;
+    });
+
+    return createEnvelope({
+      service: INCIDENT_SERVICE,
+      operation: "fetchIncidents",
+      traceId: incidentTraceId("fetchIncidents"),
+      partial: true,
+      meta: apiMeta({ filters }),
+      data: {
+        components: platformComponents.map(({ id, name, status }) => ({ id, name, status })),
+        filters,
+        items: clone(items),
+        maintenanceWindows: clone(maintenanceWindows)
+      }
+    });
+  }
+
+  async fetchIncidentDetail(incidentId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const incident = this.findIncident(incidentId);
+
+    if (!incident) {
+      return notFoundEnvelope("fetchIncidentDetail", "incident_not_found", `Incident ${incidentId} was not found.`, { incidentId });
+    }
+
+    return createEnvelope({
+      service: INCIDENT_SERVICE,
+      operation: "fetchIncidentDetail",
+      traceId: incidentTraceId("fetchIncidentDetail"),
+      meta: apiMeta({ incidentId }),
+      data: incidentDetailPayload(incident)
+    });
+  }
+
+  async addIncidentUpdate(payload: IncidentUpdatePayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const request = payload ?? {};
+    const incident = this.findIncident(request.incidentId ?? "");
+
+    if (!incident) {
+      return notFoundEnvelope("addIncidentUpdate", "incident_not_found", `Incident ${request.incidentId ?? "(empty)"} was not found.`, {
+        incidentId: request.incidentId ?? null
+      });
+    }
+
+    if (!hasAuditReason(request.reason)) {
+      return invalidEnvelope("addIncidentUpdate", "reason_required", "A service-admin reason of at least 8 characters is required.", {
+        incidentId: incident.id,
+        reason: request.reason ?? null
+      });
+    }
+
+    if (String(request.message ?? "").trim().length < 10) {
+      return invalidEnvelope("addIncidentUpdate", "message_required", "Incident updates require a customer-visible message of at least 10 characters.", {
+        incidentId: incident.id,
+        message: request.message ?? null
+      });
+    }
+
+    if (!isSupportedIncidentStatus(request.status)) {
+      return invalidEnvelope("addIncidentUpdate", "incident_status_unsupported", "Incident status is not supported.", {
+        incidentId: incident.id,
+        status: request.status ?? null
+      });
+    }
+
+    if (!request.confirmed) {
+      return invalidEnvelope("addIncidentUpdate", "confirmation_required", "Explicit confirmation is required for incident timeline updates.", {
+        confirmation: { required: true },
+        incidentId: incident.id,
+        reason: request.reason
+      });
+    }
+
+    const idempotencyKey = request.idempotencyKey?.trim();
+    const fingerprint = buildIncidentUpdateFingerprint(incident.id, request);
+    const persistedCached = idempotencyKey ? this.platformRepository.findIncidentIdempotencyKey(idempotencyKey) : undefined;
+    const cached = persistedCached ?? (idempotencyKey ? this.idempotencyIndex.get(idempotencyKey) : undefined);
+    if (cached) {
+      if (cached.fingerprint !== fingerprint) {
+        return conflictEnvelope("addIncidentUpdate", "idempotency_key_reused", "Idempotency key was already used for a different incident update request.", {
+          idempotencyKey,
+          incidentId: incident.id
+        });
+      }
+
+      return createEnvelope({
+        service: INCIDENT_SERVICE,
+        operation: "addIncidentUpdate",
+        traceId: incidentTraceId("addIncidentUpdate"),
+        meta: apiMeta({ idempotencyKey, incidentId: incident.id }),
+        data: {
+          ...clone(cached.result),
+          duplicate: true
+        }
+      });
+    }
+
+    const now = new Date().toISOString();
+    const customerVisible = request.customerVisible !== false;
+    incident.status = request.status ?? incident.status;
+    incident.updatedAt = now;
+    incident.updates = [
+      { at: "now", author: request.actor?.name ?? "service-admin", text: String(request.message).trim() },
+      ...incident.updates
+    ];
+
+    const traceId = incidentTraceId("addIncidentUpdate");
+    const persistedIncident = this.platformRepository.saveIncident(incident);
+    const mutationPersistence = persistPlatformIncidentMutation({
+      actor: request.actor,
+      customerVisible,
+      idempotencyKey: idempotencyKey ?? makeEphemeralPlatformMutationIdempotencyKey(`incident-${incident.id}`),
+      incidentId: incident.id,
+      message: String(request.message).trim(),
+      reason: String(request.reason).trim(),
+      repository: this.platformRepository,
+      status: String(request.status ?? incident.status),
+      traceId
+    });
+    const result = {
+      auditEvent: auditEvent("incident.update", incident.id, request.reason, request.actor),
+      incident: clone(persistedIncident),
+      platformAudit: mutationPersistence.audit,
+      platformOutbox: mutationPersistence.outbox,
+      reason: normalizeReason(request.reason),
+      realtimeEvent: realtimeIncidentEvent(persistedIncident, traceId),
+      statusPageSync: customerVisible ? statusPageSync("incident-update", persistedIncident.id) : null
+    };
+
+    if (idempotencyKey) {
+      const saved = this.platformRepository.saveIncidentIdempotencyKey({ key: idempotencyKey, fingerprint, result: clone(result) });
+      this.idempotencyIndex.set(idempotencyKey, {
+        fingerprint: saved.fingerprint,
+        result: clone(saved.result)
+      });
+    }
+
+    return createEnvelope({
+      service: INCIDENT_SERVICE,
+      operation: "addIncidentUpdate",
+      traceId,
+      meta: apiMeta({ idempotencyKey: idempotencyKey ?? null, incidentId: incident.id }),
+      data: result
+    });
+  }
+
+  private findIncident(incidentId: string): PlatformIncident | undefined {
+    return this.incidents.find((incident) => incident.id === incidentId);
+  }
+}
+
+function apiMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    source: "api",
+    apiVersion: "v1",
+    ...extra
+  };
+}
+
+function auditEvent(action: string, target: string, reason: string | undefined, actor: ServiceAdminActor | undefined): Record<string, unknown> {
+  return {
+    id: makeAuditId("incident"),
+    action,
+    actor: actor?.id ?? "service-admin",
+    actorName: actor?.name ?? "Service Admin",
+    immutable: true,
+    reason: normalizeReason(reason),
+    target
+  };
+}
+
+function buildIncidentUpdateFingerprint(incidentId: string, request: IncidentUpdatePayload): string {
+  return JSON.stringify({
+    customerVisible: request.customerVisible !== false,
+    incidentId,
+    message: String(request.message ?? "").trim(),
+    reason: normalizeReason(request.reason),
+    status: request.status ?? null
+  });
+}
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function hasAuditReason(reason: unknown): boolean {
+  return typeof reason === "string" && reason.trim().length >= 8;
+}
+
+function incidentDetailPayload(incident: PlatformIncident): Record<string, unknown> {
+  return {
+    affectedTenants: platformTenants.filter((tenant) => incident.affectedTenantIds.includes(tenant.id)),
+    component: platformComponents.find((component) => component.id === incident.componentId) ?? null,
+    incident: clone(incident),
+    postmortem: incidentPostmortems.find((postmortem) => postmortem.incidentId === incident.id) ?? {
+      incidentId: incident.id,
+      status: "not_started",
+      dueAt: null,
+      owner: incident.owner
+    },
+    statusPagePublication: {
+      public: true,
+      tenantNamesExposed: false,
+      url: `https://status.local/incidents/${incident.id}`
+    },
+    timeline: clone(incident.updates)
+  };
+}
+
+function incidentTraceId(operation: string): string {
+  return getCurrentTraceId() ?? createRequestTraceId(INCIDENT_SERVICE, operation);
+}
+
+function invalidEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
+  return createEnvelope({
+    service: INCIDENT_SERVICE,
+    operation,
+    traceId: incidentTraceId(operation),
+    status: "invalid",
+    meta: apiMeta(),
+    data,
+    error: { code, message }
+  });
+}
+
+function conflictEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
+  return createEnvelope({
+    service: INCIDENT_SERVICE,
+    operation,
+    traceId: incidentTraceId(operation),
+    status: "conflict",
+    meta: apiMeta(),
+    data,
+    error: { code, message }
+  });
+}
+
+function isSupportedIncidentStatus(status: PlatformIncident["status"] | undefined): boolean {
+  return status === undefined || ["identified", "investigating", "monitoring", "resolved"].includes(status);
+}
+
+function makeAuditId(scope: string): string {
+  return `evt_${scope}_${randomUUID()}`;
+}
+
+function makeEventId(scope: string): string {
+  return `evt_${scope}_${randomUUID()}`;
+}
+
+function makeQueueId(scope: string): string {
+  return `${scope}_${randomUUID()}`;
+}
+
+function normalizeReason(reason: string | undefined): string | null {
+  return typeof reason === "string" ? reason.trim() : null;
+}
+
+function overlayById<T extends { id: string }>(base: T[], overlay: T[]): T[] {
+  const overrides = new Map(overlay.map((item) => [item.id, item]));
+  const merged = base.map((item) => overrides.get(item.id) ?? item);
+  const extra = overlay.filter((item) => !base.some((baseItem) => baseItem.id === item.id));
+  return clone([...extra, ...merged]);
+}
+
+function notFoundEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
+  return createEnvelope({
+    service: INCIDENT_SERVICE,
+    operation,
+    traceId: incidentTraceId(operation),
+    status: "not_found",
+    meta: apiMeta(),
+    data,
+    error: { code, message }
+  });
+}
+
+function realtimeIncidentEvent(incident: PlatformIncident, traceId: string): Record<string, unknown> {
+  return {
+    data: {
+      incidentId: incident.id,
+      severity: incident.severity,
+      status: incident.status
+    },
+    eventId: makeEventId("incident"),
+    eventName: "incident.updated",
+    occurredAt: new Date().toISOString(),
+    resourceId: incident.id,
+    resourceType: "incident",
+    schemaVersion: "incident/v1",
+    tenantId: "platform",
+    traceId
+  };
+}
+
+function statusPageSync(scope: string, target: string): Record<string, unknown> {
+  return {
+    id: makeQueueId("status_page"),
+    queue: "status-page-sync",
+    scope,
+    target
+  };
+}

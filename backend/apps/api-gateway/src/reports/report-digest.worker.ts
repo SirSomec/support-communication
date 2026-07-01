@@ -1,0 +1,114 @@
+import { type BackendEnvelope } from "@support-communication/envelope";
+import { ReportRepository, type ScheduledDigestDescriptorRecord } from "./report.repository.js";
+import { ReportService } from "./report.service.js";
+
+const SCHEDULED_DIGEST_EXPORT_COLUMNS = ["metric", "today", "previous", "delta", "status"];
+
+export interface ScheduledDigestClaimWorkerInput {
+  limit?: number;
+  now: Date;
+  reportRepository: ReportRepository;
+  tenantId?: string;
+}
+
+export interface ScheduledDigestClaimWorkerResult {
+  claimed: ScheduledDigestDescriptorRecord[];
+}
+
+export interface ScheduledDigestExportJobWorkerInput {
+  descriptor: ScheduledDigestDescriptorRecord;
+  now?: Date;
+  reportRepository: ReportRepository;
+  reportService: ReportService;
+}
+
+export interface ScheduledDigestExportJobWorkerResult {
+  descriptor: ScheduledDigestDescriptorRecord;
+  exportEnvelope: BackendEnvelope<Record<string, unknown>>;
+}
+
+export function claimDueScheduledDigestDescriptors(input: ScheduledDigestClaimWorkerInput): ScheduledDigestClaimWorkerResult {
+  if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 0)) {
+    throw new Error("scheduled_digest_claim_limit_invalid");
+  }
+
+  const dueDescriptors = input.reportRepository.listScheduledDigestDescriptors({
+    dueBefore: input.now.toISOString(),
+    status: "due",
+    tenantId: input.tenantId
+  });
+  const limit = input.limit ?? dueDescriptors.length;
+  const claimed = dueDescriptors.slice(0, limit).map((descriptor) =>
+    input.reportRepository.saveScheduledDigestDescriptor({
+      ...descriptor,
+      status: "running",
+      updatedAt: input.now.toISOString()
+    })
+  );
+
+  return { claimed };
+}
+
+export async function queueScheduledDigestExportJob(input: ScheduledDigestExportJobWorkerInput): Promise<ScheduledDigestExportJobWorkerResult> {
+  const descriptor = input.reportRepository.saveScheduledDigestDescriptor(input.descriptor);
+  const exportEnvelope = await input.reportService.requestReportExport({
+    columns: SCHEDULED_DIGEST_EXPORT_COLUMNS,
+    filters: {
+      periodKey: descriptor.periodKey,
+      scheduleId: descriptor.scheduleId,
+      scheduledDigest: true,
+      tenantId: descriptor.tenantId
+    },
+    idempotencyKey: scheduledDigestExportIdempotencyKey(descriptor),
+    period: descriptor.periodKey,
+    reportType: descriptor.reportType
+  });
+  const persistedDescriptor = input.reportRepository.saveScheduledDigestDescriptor({
+    ...descriptor,
+    status: exportEnvelope.status === "ok" ? "completed" : "failed",
+    updatedAt: (input.now ?? new Date()).toISOString()
+  });
+  if (exportEnvelope.status === "ok") {
+    const exportJobId = reportExportJobIdFromEnvelope(exportEnvelope);
+    input.reportRepository.saveReportNotificationDescriptor({
+      createdAt: (input.now ?? new Date()).toISOString(),
+      eventType: "export.ready",
+      exportJobId,
+      id: scheduledDigestNotificationDescriptorId(descriptor),
+      idempotencyKey: scheduledDigestNotificationIdempotencyKey(descriptor),
+      payload: {
+        periodKey: descriptor.periodKey,
+        reportType: descriptor.reportType,
+        scheduleId: descriptor.scheduleId
+      },
+      status: "queued",
+      tenantId: descriptor.tenantId
+    });
+  }
+
+  return {
+    descriptor: persistedDescriptor,
+    exportEnvelope
+  };
+}
+
+function scheduledDigestExportIdempotencyKey(descriptor: ScheduledDigestDescriptorRecord): string {
+  return `scheduled-digest-export:${descriptor.tenantId}:${descriptor.scheduleId}:${descriptor.periodKey}`;
+}
+
+function scheduledDigestNotificationDescriptorId(descriptor: ScheduledDigestDescriptorRecord): string {
+  return `report-notification-${descriptor.tenantId}-${descriptor.scheduleId}-${descriptor.periodKey}`;
+}
+
+function scheduledDigestNotificationIdempotencyKey(descriptor: ScheduledDigestDescriptorRecord): string {
+  return `scheduled-digest-notification:${descriptor.tenantId}:${descriptor.scheduleId}:${descriptor.periodKey}`;
+}
+
+function reportExportJobIdFromEnvelope(envelope: BackendEnvelope<Record<string, unknown>>): string {
+  const job = envelope.data.job;
+  if (!job || typeof job !== "object" || !("id" in job) || typeof (job as { id?: unknown }).id !== "string") {
+    throw new Error("scheduled_digest_export_job_id_missing");
+  }
+
+  return (job as { id: string }).id;
+}

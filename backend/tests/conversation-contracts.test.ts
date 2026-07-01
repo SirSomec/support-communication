@@ -1,0 +1,907 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { lastValueFrom, toArray } from "rxjs";
+import type { RealtimeFanoutAdapter, RealtimeFanoutEvent } from "../apps/api-gateway/src/conversation/realtime.fanout.ts";
+import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
+import { createRealtimeSseStream } from "../apps/api-gateway/src/conversation/realtime.sse.ts";
+import { writeRealtimeWebSocketReplay } from "../apps/api-gateway/src/conversation/realtime.websocket.ts";
+import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
+
+describe("phase 2 conversation, message, channel and realtime backend contracts", () => {
+  it("lists dialogs with frontend-compatible pagination and filters", async () => {
+    const conversations = new ConversationService();
+
+    const queued = await conversations.fetchDialogs({ status: "queued", page: 1, pageSize: 10 });
+
+    assert.equal(queued.service, "dialogService");
+    assert.equal(queued.operation, "fetchDialogs");
+    assert.equal(queued.partial, true);
+    assert.equal(queued.meta.source, "api");
+    assert.equal(queued.data.pagination.mode, "backend-ready");
+    assert.equal(queued.data.pagination.page, 1);
+    assert.equal(queued.data.pagination.pageSize, 10);
+    assert.ok(queued.data.items.length > 0);
+    assert.ok(queued.data.items.every((conversation) => conversation.status === "queued"));
+    assert.ok(queued.data.items[0].messages.length > 0);
+  });
+
+  it("guards close transitions until a topic is selected", async () => {
+    const conversations = new ConversationService();
+
+    const missingTopic = await conversations.transitionConversationStatus({
+      conversationId: "vladimir",
+      nextStatus: "closed",
+      roleMode: "admin"
+    });
+    assert.equal(missingTopic.status, "invalid");
+    assert.equal(missingTopic.error?.code, "topic_required");
+    assert.equal(missingTopic.data.guard, "role_channel_topic");
+
+    const closed = await conversations.transitionConversationStatus({
+      conversationId: "vladimir",
+      nextStatus: "closed",
+      roleMode: "admin",
+      topic: "Product / Mismatch"
+    });
+    assert.equal(closed.status, "ok");
+    assert.equal(closed.data.conversation.status, "closed");
+    assert.equal(closed.data.conversation.topic, "Product / Mismatch");
+    assert.equal(closed.data.auditEvent.immutable, true);
+    assert.equal(closed.data.realtimeEvent.eventName, "conversation.updated");
+  });
+
+  it("keeps internal comments out of outbound delivery", async () => {
+    const conversations = new ConversationService();
+
+    const internal = await conversations.appendMessage({
+      conversationId: "maria",
+      mode: "internal",
+      text: "Check courier escalation before replying"
+    });
+    assert.equal(internal.status, "ok");
+    assert.equal(internal.data.message.type, "internal");
+    assert.equal(internal.data.outboundDelivery, null);
+    assert.equal(internal.data.auditEvent.action, "message.internal_note.create");
+
+    const reply = await conversations.appendMessage({
+      conversationId: "maria",
+      mode: "reply",
+      text: "We are checking the delivery status now"
+    });
+    assert.equal(reply.status, "ok");
+    assert.equal(reply.data.message.side, "agent");
+    assert.equal(reply.data.outboundDelivery.deliveryState, "queued");
+    assert.equal(reply.data.outboundDelivery.channel, "SDK");
+
+    const empty = await conversations.appendMessage({
+      conversationId: "maria",
+      mode: "reply",
+      text: "   "
+    });
+    assert.equal(empty.status, "invalid");
+    assert.equal(empty.error?.code, "message_content_required");
+  });
+
+  it("replays outbound idempotency keys without duplicating messages or descriptors", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+
+    const firstReply = await conversations.appendMessage({
+      conversationId: "maria",
+      idempotencyKey: "reply-idem-001",
+      mode: "reply",
+      text: "Idempotent delivery reply"
+    });
+    const duplicateReply = await conversations.appendMessage({
+      conversationId: "maria",
+      idempotencyKey: "reply-idem-001",
+      mode: "reply",
+      text: "Idempotent delivery reply"
+    });
+    const conflictReply = await conversations.appendMessage({
+      conversationId: "maria",
+      idempotencyKey: "reply-idem-001",
+      mode: "reply",
+      text: "Different retry body"
+    });
+    const detail = await conversations.fetchDialogDetail("maria");
+    const outboundDescriptors = await repository.listOutboundDescriptors({ conversationId: "maria", kind: "message_delivery" });
+    const outboxEvents = await repository.listOutboxEvents();
+
+    assert.equal(firstReply.status, "ok");
+    assert.equal(duplicateReply.status, "ok");
+    assert.equal(duplicateReply.data.duplicate, true);
+    assert.equal(duplicateReply.data.outboundDelivery.descriptorId, firstReply.data.outboundDelivery.descriptorId);
+    assert.equal(conflictReply.status, "conflict");
+    assert.equal(conflictReply.error?.code, "idempotency_key_reused");
+    assert.equal((detail.data.messages as Array<Record<string, unknown>>).filter((message) => message.text === "Idempotent delivery reply").length, 1);
+    assert.equal(outboundDescriptors.filter((descriptor) => descriptor.idempotencyKey === "reply-idem-001").length, 1);
+    assert.equal(outboxEvents.filter((event) => event.type === "message.delivery.requested").length, 1);
+
+    const firstUpload = await conversations.uploadAttachment({
+      channel: "SDK",
+      fileName: "idem.pdf",
+      idempotencyKey: "upload-idem-001",
+      sizeBytes: 1024
+    });
+    const duplicateUpload = await conversations.uploadAttachment({
+      channel: "SDK",
+      fileName: "idem.pdf",
+      idempotencyKey: "upload-idem-001",
+      sizeBytes: 1024
+    });
+    const conflictUpload = await conversations.uploadAttachment({
+      channel: "SDK",
+      fileName: "different.pdf",
+      idempotencyKey: "upload-idem-001",
+      sizeBytes: 1024
+    });
+
+    assert.equal(duplicateUpload.data.duplicate, true);
+    assert.equal(duplicateUpload.data.descriptorId, firstUpload.data.descriptorId);
+    assert.equal(duplicateUpload.data.fileId, firstUpload.data.fileId);
+    assert.equal(conflictUpload.status, "conflict");
+
+    const firstOutbound = await conversations.createOutboundConversationRequest({
+      channel: "Telegram",
+      idempotencyKey: "outbound-idem-001",
+      message: "Hello from support",
+      phone: "+7 900 000-00-00",
+      topic: "Delivery / Status"
+    });
+    const duplicateOutbound = await conversations.createOutboundConversationRequest({
+      channel: "Telegram",
+      idempotencyKey: "outbound-idem-001",
+      message: "Hello from support",
+      phone: "+7 900 000-00-00",
+      topic: "Delivery / Status"
+    });
+    const conflictOutbound = await conversations.createOutboundConversationRequest({
+      channel: "Telegram",
+      idempotencyKey: "outbound-idem-001",
+      message: "Different outbound body",
+      phone: "+7 900 000-00-00",
+      topic: "Delivery / Status"
+    });
+
+    assert.equal(duplicateOutbound.data.duplicate, true);
+    assert.equal(duplicateOutbound.data.descriptorId, firstOutbound.data.descriptorId);
+    assert.equal(conflictOutbound.status, "conflict");
+  });
+
+  it("creates upload and outbound descriptors matching the current dialog adapter", async () => {
+    const repository = ConversationRepository.default();
+    const conversations = new ConversationService(repository);
+
+    const missingUploadChannel = await conversations.uploadAttachment({
+      channel: " ",
+      fileName: "invoice.pdf",
+      sizeBytes: 2048
+    });
+    const missingUploadFileName = await conversations.uploadAttachment({
+      channel: "SDK",
+      fileName: " ",
+      sizeBytes: 2048
+    });
+    const malformedUploadSize = await conversations.uploadAttachment({
+      channel: "SDK",
+      fileName: "invoice.pdf",
+      sizeBytes: Number.NaN
+    });
+
+    assert.equal(missingUploadChannel.status, "invalid");
+    assert.equal(missingUploadChannel.error?.code, "attachment_payload_required");
+    assert.equal(missingUploadFileName.status, "invalid");
+    assert.equal(missingUploadFileName.error?.code, "attachment_payload_required");
+    assert.equal(malformedUploadSize.status, "invalid");
+    assert.equal(malformedUploadSize.error?.code, "attachment_size_invalid");
+
+    const upload = await conversations.uploadAttachment({
+      channel: "SDK",
+      fileName: "invoice.pdf",
+      sizeBytes: 2048
+    });
+    assert.equal(upload.status, "ok");
+    assert.equal(upload.data.storageState, "upload_queued");
+    assert.equal(upload.data.antivirusState, "scan_pending");
+    assert.equal(upload.data.deliveryState, "not_sent");
+    assert.match(upload.data.auditId, /^evt_attachment_/);
+    assert.match(String(upload.data.fileId), /^attachment_/);
+    assert.equal(upload.data.fileId, upload.data.id);
+
+    const uploadDescriptors = await repository.listOutboundDescriptors({ kind: "attachment_upload" });
+    const uploadDescriptor = uploadDescriptors.find((descriptor) => descriptor.id === upload.data.descriptorId);
+    assert.equal(uploadDescriptor?.payload.fileId, upload.data.fileId);
+    const uploadOutbox = await repository.listOutboxEvents();
+    const uploadRequested = uploadOutbox.find((event) => event.id === upload.data.outboxEventId);
+    assert.equal(uploadRequested?.payload.fileId, upload.data.fileId);
+
+    const missingOutboundTopic = await conversations.createOutboundConversationRequest({
+      channel: "Telegram",
+      message: "Hello from support",
+      phone: "+7 900 000-00-00",
+      topic: " "
+    });
+    assert.equal(missingOutboundTopic.status, "invalid");
+    assert.equal(missingOutboundTopic.error?.code, "topic_required");
+
+    const outbound = await conversations.createOutboundConversationRequest({
+      channel: "Telegram",
+      clientName: "New Client",
+      message: "Hello from support",
+      phone: "+7 900 000-00-00",
+      topic: "Delivery / Status"
+    });
+    assert.equal(outbound.status, "ok");
+    assert.equal(outbound.data.status, "queued");
+    assert.equal(outbound.data.consentCheck, "required_before_send");
+    assert.match(outbound.data.backendQueueId, /^outbound_/);
+  });
+
+  it("normalizes inbound channel events idempotently and exposes realtime event feed", async () => {
+    const conversations = new ConversationService();
+
+    const first = await conversations.normalizeInboundEvent("telegram", {
+      eventId: "tg-event-001",
+      conversationId: "dmitry",
+      text: "Updated address is ready"
+    });
+    assert.equal(first.status, "ok");
+    assert.equal(first.data.duplicate, false);
+    assert.equal(first.data.message.side, "client");
+    assert.equal(first.data.realtimeEvent.eventName, "message.created");
+
+    const duplicate = await conversations.normalizeInboundEvent("telegram", {
+      eventId: "tg-event-001",
+      conversationId: "dmitry",
+      text: "Updated address is ready"
+    });
+    assert.equal(duplicate.status, "ok");
+    assert.equal(duplicate.data.duplicate, true);
+    assert.equal(duplicate.data.message, null);
+
+    const sameIdDifferentChannel = await conversations.normalizeInboundEvent("vk", {
+      eventId: "tg-event-001",
+      conversationId: "alexey",
+      text: "Same upstream id from another connector"
+    });
+    assert.equal(sameIdDifferentChannel.status, "ok");
+    assert.equal(sameIdDifferentChannel.data.duplicate, false);
+    assert.equal(sameIdDifferentChannel.data.message.side, "client");
+
+    const events = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    assert.equal(events.status, "ok");
+    assert.ok(events.data.events.some((event) => event.eventName === "message.created"));
+    assert.ok(events.data.events.every((event) => event.traceId));
+  });
+
+  it("publishes persisted realtime events through the configured fan-out adapter", async () => {
+    const fanout = new RecordingRealtimeFanoutAdapter();
+    const conversations = new ConversationService(ConversationRepository.inMemory(), { realtimeFanout: fanout });
+
+    const first = await conversations.normalizeInboundEvent("telegram", {
+      eventId: "tg-fanout-runtime-001",
+      conversationId: "dmitry",
+      text: "Fan-out runtime update"
+    });
+
+    assert.equal(first.status, "ok");
+    assert.deepEqual(fanout.published.map((event) => event.eventId), [first.data.realtimeEvent.eventId]);
+    assert.equal(fanout.published[0].eventName, "message.created");
+  });
+
+  it("publishes appended internal notes and replies through the configured fan-out adapter", async () => {
+    const fanout = new RecordingRealtimeFanoutAdapter();
+    const conversations = new ConversationService(ConversationRepository.inMemory(), { realtimeFanout: fanout });
+
+    const internal = await conversations.appendMessage({
+      conversationId: "maria",
+      mode: "internal",
+      text: "Publish internal note over Redis"
+    });
+    const reply = await conversations.appendMessage({
+      conversationId: "maria",
+      mode: "reply",
+      text: "Publish reply over Redis"
+    });
+
+    assert.equal(internal.status, "ok");
+    assert.equal(reply.status, "ok");
+    assert.deepEqual(fanout.published.map((event) => event.eventId), [
+      internal.data.realtimeEvent.eventId,
+      reply.data.realtimeEvent.eventId
+    ]);
+    assert.deepEqual(fanout.published.map((event) => event.eventName), ["conversation.updated", "message.created"]);
+  });
+
+  it("keeps persisted realtime writes available when fan-out publish fails", async () => {
+    const fanout = new FailingRealtimeFanoutAdapter();
+    const conversations = new ConversationService(ConversationRepository.inMemory(), { realtimeFanout: fanout });
+
+    const inbound = await conversations.normalizeInboundEvent("telegram", {
+      eventId: "tg-fanout-failure-001",
+      conversationId: "dmitry",
+      text: "Fan-out should not block persisted replay"
+    });
+    const replay = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+
+    assert.equal(inbound.status, "ok");
+    assert.equal(fanout.publishAttempts, 1);
+    assert.ok(replay.data.events.some((event) => event.eventId === inbound.data.realtimeEvent.eventId));
+  });
+
+  it("merges multi-instance realtime replay and live fanout events in cursor order", async () => {
+    const repository = ConversationRepository.inMemory();
+    const fanout = new DeterministicLiveRealtimeFanoutAdapter();
+    const firstInstance = new ConversationService(repository, { realtimeFanout: fanout });
+    const secondInstance = new ConversationService(repository, { realtimeFanout: fanout });
+    const RealDate = Date;
+    const fixedNow = new RealDate("2026-06-29T10:00:00.000Z");
+    let firstPersistedAndLive!: RealtimeFanoutEvent;
+    let secondPersistedAndLive!: RealtimeFanoutEvent;
+
+    globalThis.Date = class extends RealDate {
+      constructor(value?: string | number | Date) {
+        super(value ?? fixedNow);
+      }
+
+      static now(): number {
+        return fixedNow.getTime();
+      }
+    } as DateConstructor;
+
+    try {
+      const first = await firstInstance.normalizeInboundEvent("telegram", {
+        conversationId: "dmitry",
+        eventId: "tg-multi-instance-realtime-001",
+        text: "First instance persisted and published this event"
+      });
+      const second = await secondInstance.appendMessage({
+        conversationId: "maria",
+        mode: "reply",
+        text: "Second instance persisted and published this event"
+      });
+
+      assert.equal(first.status, "ok");
+      assert.equal(second.status, "ok");
+      firstPersistedAndLive = first.data.realtimeEvent;
+      secondPersistedAndLive = second.data.realtimeEvent;
+    } finally {
+      globalThis.Date = RealDate;
+    }
+
+    const liveOnlyFromSecondInstance = realtimeFanoutEventFixture({
+      data: { instance: "second", liveOnly: true },
+      eventId: "rt_multi_instance_live_only",
+      occurredAt: fixedNow.toISOString(),
+      traceId: "trace-multi-instance-live-only"
+    });
+    await fanout.publish(liveOnlyFromSecondInstance);
+
+    const expectedEvents = canonicalUniqueRealtimeEvents([
+      firstPersistedAndLive,
+      secondPersistedAndLive,
+      ...fanout.published
+    ]);
+    const mergedReplayAndLive = await firstInstance.fetchRealtimeEvents();
+
+    assert.deepEqual(
+      mergedReplayAndLive.data.events.map((event) => event.eventId),
+      expectedEvents.map((event) => event.eventId)
+    );
+    assert.equal(
+      new Set(mergedReplayAndLive.data.events.map((event) => event.eventId)).size,
+      mergedReplayAndLive.data.events.length
+    );
+
+    const cursor = expectedEvents[0];
+    const afterCursor = await secondInstance.fetchRealtimeEvents({ since: cursor.eventId });
+
+    assert.deepEqual(
+      afterCursor.data.events.map((event) => event.eventId),
+      expectedEvents.slice(1).map((event) => event.eventId)
+    );
+  });
+
+  it("streams merged realtime replay and live fanout events through SSE after Last-Event-ID", async () => {
+    const repository = ConversationRepository.inMemory();
+    const fanout = new DeterministicLiveRealtimeFanoutAdapter();
+    const conversations = new ConversationService(repository, { realtimeFanout: fanout });
+    const first = await conversations.normalizeInboundEvent("telegram", {
+      conversationId: "dmitry",
+      eventId: "tg-sse-merge-001",
+      text: "SSE cursor baseline"
+    });
+    const liveOnly = realtimeFanoutEventFixture({
+      data: { liveOnly: true, transport: "sse" },
+      eventId: "rt_sse_live_only",
+      occurredAt: new Date(Date.parse(first.data.realtimeEvent.occurredAt) + 1).toISOString(),
+      traceId: "trace-sse-live-only"
+    });
+    await fanout.publish(liveOnly);
+
+    const messages = await lastValueFrom(createRealtimeSseStream(conversations, {}, first.data.realtimeEvent.eventId).pipe(toArray()));
+
+    assert.deepEqual(messages.map((message) => message.id), ["rt_sse_live_only"]);
+    assert.deepEqual(messages.map((message) => message.type), ["message.created"]);
+    assert.deepEqual(messages.map((message) => (message.data as RealtimeFanoutEvent).eventId), ["rt_sse_live_only"]);
+  });
+
+  it("writes merged realtime replay and live fanout events through WebSocket after Last-Event-ID", async () => {
+    const repository = ConversationRepository.inMemory();
+    const fanout = new DeterministicLiveRealtimeFanoutAdapter();
+    const conversations = new ConversationService(repository, { realtimeFanout: fanout });
+    const first = await conversations.normalizeInboundEvent("telegram", {
+      conversationId: "dmitry",
+      eventId: "tg-ws-merge-001",
+      text: "WebSocket cursor baseline"
+    });
+    const liveOnly = realtimeFanoutEventFixture({
+      data: { liveOnly: true, transport: "websocket" },
+      eventId: "rt_ws_live_only",
+      occurredAt: new Date(Date.parse(first.data.realtimeEvent.occurredAt) + 1).toISOString(),
+      traceId: "trace-ws-live-only"
+    });
+    const socket = new FakeWebSocketReplaySocket();
+
+    await fanout.publish(liveOnly);
+    await writeRealtimeWebSocketReplay(conversations, socket, first.data.realtimeEvent.eventId);
+
+    const messages = decodeWebSocketTextFrames(socket.writes).map((message) => JSON.parse(message) as RealtimeFanoutEvent);
+    assert.deepEqual(messages.map((message) => message.eventId), ["rt_ws_live_only"]);
+    assert.equal(socket.ended, true);
+  });
+
+  it("prefers Last-Event-ID over query since when streaming merged SSE events", async () => {
+    const repository = ConversationRepository.inMemory();
+    const fanout = new DeterministicLiveRealtimeFanoutAdapter();
+    const conversations = new ConversationService(repository, { realtimeFanout: fanout });
+    const first = await conversations.normalizeInboundEvent("telegram", {
+      conversationId: "dmitry",
+      eventId: "tg-sse-precedence-001",
+      text: "SSE query cursor baseline"
+    });
+    const second = await conversations.normalizeInboundEvent("telegram", {
+      conversationId: "dmitry",
+      eventId: "tg-sse-precedence-002",
+      text: "SSE Last-Event-ID baseline"
+    });
+    const liveOnly = realtimeFanoutEventFixture({
+      data: { liveOnly: true, transport: "sse" },
+      eventId: "rt_sse_precedence_live_only",
+      occurredAt: new Date(Date.parse(second.data.realtimeEvent.occurredAt) + 1).toISOString(),
+      traceId: "trace-sse-precedence-live-only"
+    });
+    await fanout.publish(liveOnly);
+
+    const messages = await lastValueFrom(createRealtimeSseStream(
+      conversations,
+      { since: first.data.realtimeEvent.eventId },
+      second.data.realtimeEvent.eventId
+    ).pipe(toArray()));
+
+    assert.deepEqual(messages.map((message) => message.id), ["rt_sse_precedence_live_only"]);
+  });
+
+  it("orders persisted and live realtime events with identical timestamps by event id", async () => {
+    const repository = ConversationRepository.inMemory();
+    const fanout = new DeterministicLiveRealtimeFanoutAdapter();
+    const conversations = new ConversationService(repository, { realtimeFanout: fanout });
+    await repository.appendRealtimeEvent(realtimeFanoutEventFixture({
+      data: { source: "persisted" },
+      eventId: "rt_same_timestamp_b",
+      occurredAt: "2026-06-29T10:30:00.000Z",
+      traceId: "trace-same-timestamp-b"
+    }));
+    await fanout.publish(realtimeFanoutEventFixture({
+      data: { source: "live" },
+      eventId: "rt_same_timestamp_a",
+      occurredAt: "2026-06-29T10:30:00.000Z",
+      traceId: "trace-same-timestamp-a"
+    }));
+
+    const events = await conversations.fetchRealtimeEvents();
+
+    assert.deepEqual(
+      events.data.events
+        .filter((event) => event.eventId.startsWith("rt_same_timestamp_"))
+        .map((event) => event.eventId),
+      ["rt_same_timestamp_a", "rt_same_timestamp_b"]
+    );
+  });
+
+  it("deduplicates repeated live realtime events before cursor filtering", async () => {
+    const repository = ConversationRepository.inMemory();
+    const fanout = new DeterministicLiveRealtimeFanoutAdapter();
+    const conversations = new ConversationService(repository, { realtimeFanout: fanout });
+    const duplicate = realtimeFanoutEventFixture({
+      data: { source: "live" },
+      eventId: "rt_duplicate_live_event",
+      occurredAt: "2026-06-29T10:40:00.000Z",
+      traceId: "trace-duplicate-live-event"
+    });
+    const afterDuplicate = realtimeFanoutEventFixture({
+      data: { source: "after-duplicate" },
+      eventId: "rt_duplicate_live_event_after",
+      occurredAt: "2026-06-29T10:41:00.000Z",
+      traceId: "trace-duplicate-live-event-after"
+    });
+    await fanout.publish(duplicate);
+    await fanout.publish({ ...duplicate, data: { source: "duplicate-live-delivery" } });
+    await fanout.publish(afterDuplicate);
+
+    const events = await conversations.fetchRealtimeEvents();
+    const afterCursor = await conversations.fetchRealtimeEvents({ since: duplicate.eventId });
+
+    assert.deepEqual(
+      events.data.events
+        .filter((event) => event.eventId === "rt_duplicate_live_event")
+        .map((event) => event.data.source),
+      ["live"]
+    );
+    assert.deepEqual(
+      afterCursor.data.events
+        .filter((event) => event.eventId.startsWith("rt_duplicate_live_event"))
+        .map((event) => event.eventId),
+      ["rt_duplicate_live_event_after"]
+    );
+  });
+
+  it("records delivery receipts as message delivery realtime updates", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+
+    const receipt = await conversations.recordDeliveryReceipt("telegram", {
+      conversationId: "maria",
+      messageId: "msg_delivery_runtime_001",
+      payload: { providerStatus: "delivered" },
+      provider: "telegram-bot-api",
+      providerEventId: "tg-delivery-runtime-001",
+      status: "delivered"
+    });
+    const receipts = await repository.listDeliveryReceipts({
+      channel: "telegram",
+      messageId: "msg_delivery_runtime_001",
+      tenantId: "tenant-volga"
+    });
+    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const deliveryEvent = realtime.data.events.find((event) => event.eventName === "message.delivery.updated");
+
+    assert.equal(receipt.status, "ok");
+    assert.equal(receipt.service, "channelService");
+    assert.equal(receipt.operation, "recordDeliveryReceipt");
+    assert.equal(receipt.data.receipt.providerEventId, "tg-delivery-runtime-001");
+    assert.equal(receipt.data.receipt.status, "delivered");
+    assert.equal(receipt.data.realtimeEvent.eventName, "message.delivery.updated");
+    assert.equal(receipts.length, 1);
+    assert.ok(deliveryEvent);
+    assert.equal(deliveryEvent.resourceId, "maria");
+    assert.equal(deliveryEvent.data.messageId, "msg_delivery_runtime_001");
+    assert.equal(deliveryEvent.data.provider, "telegram-bot-api");
+    assert.equal(deliveryEvent.data.providerEventId, "tg-delivery-runtime-001");
+    assert.equal(deliveryEvent.data.status, "delivered");
+  });
+
+  it("replays duplicate delivery receipts without duplicating realtime updates", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+
+    const first = await conversations.recordDeliveryReceipt("telegram", {
+      conversationId: "maria",
+      messageId: "msg_delivery_replay_001",
+      provider: "telegram-bot-api",
+      providerEventId: "tg-delivery-replay-001",
+      status: "delivered"
+    });
+    const replay = await conversations.recordDeliveryReceipt("telegram", {
+      conversationId: "maria",
+      messageId: "msg_delivery_replay_ignored",
+      provider: "telegram-bot-api",
+      providerEventId: "tg-delivery-replay-001",
+      status: "failed"
+    });
+    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const deliveryEvents = realtime.data.events.filter((event) => event.eventName === "message.delivery.updated");
+
+    assert.equal(first.status, "ok");
+    assert.equal(first.data.duplicate, false);
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.data.duplicate, true);
+    assert.equal(replay.data.receipt.id, first.data.receipt.id);
+    assert.equal(replay.data.receipt.messageId, "msg_delivery_replay_001");
+    assert.equal(replay.data.realtimeEvent, null);
+    assert.equal(deliveryEvents.length, 1);
+    assert.equal(deliveryEvents[0].data.messageId, "msg_delivery_replay_001");
+    assert.equal(deliveryEvents[0].data.status, "delivered");
+  });
+
+  it("replays existing delivery receipts before validating replay body fields", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+
+    const first = await conversations.recordDeliveryReceipt("telegram", {
+      conversationId: "maria",
+      messageId: "msg_delivery_malformed_replay_001",
+      provider: "telegram-bot-api",
+      providerEventId: "tg-delivery-malformed-replay-001",
+      status: "delivered"
+    });
+    const replay = await conversations.recordDeliveryReceipt("telegram", {
+      conversationId: "missing-conversation",
+      provider: "telegram-bot-api",
+      providerEventId: "tg-delivery-malformed-replay-001"
+    });
+    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const deliveryEvents = realtime.data.events.filter((event) => event.eventName === "message.delivery.updated");
+
+    assert.equal(first.status, "ok");
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.data.duplicate, true);
+    assert.equal(replay.data.receipt.id, first.data.receipt.id);
+    assert.equal(replay.data.receipt.messageId, "msg_delivery_malformed_replay_001");
+    assert.equal(replay.data.realtimeEvent, null);
+    assert.equal(deliveryEvents.length, 1);
+  });
+
+  it("does not emit realtime when repository receipt insert races with an existing provider event", async () => {
+    const baseRepository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(baseRepository);
+
+    const existing = await baseRepository.recordDeliveryReceipt({
+      channel: "telegram",
+      conversationId: "maria",
+      id: "receipt_race_existing_001",
+      idempotencyKey: "telegram-bot-api:tg-delivery-race-001",
+      messageId: "msg_delivery_race_existing_001",
+      payload: null,
+      provider: "telegram-bot-api",
+      providerEventId: "tg-delivery-race-001",
+      receivedAt: "2026-06-29T11:00:00.000Z",
+      status: "delivered",
+      tenantId: "tenant-volga",
+      traceId: "trace-receipt-race-existing"
+    });
+    const racingRepository = {
+      appendRealtimeEvent: baseRepository.appendRealtimeEvent.bind(baseRepository),
+      findConversation: baseRepository.findConversation.bind(baseRepository),
+      findInboundEvent: baseRepository.findInboundEvent.bind(baseRepository),
+      findOutboundDescriptorByIdempotencyKey: baseRepository.findOutboundDescriptorByIdempotencyKey.bind(baseRepository),
+      listConversations: baseRepository.listConversations.bind(baseRepository),
+      listDeliveryReceipts: async () => [],
+      listOutboundDescriptors: baseRepository.listOutboundDescriptors.bind(baseRepository),
+      listOutboxEvents: baseRepository.listOutboxEvents.bind(baseRepository),
+      listRealtimeEvents: baseRepository.listRealtimeEvents.bind(baseRepository),
+      queueOutboundMessageReply: baseRepository.queueOutboundMessageReply.bind(baseRepository),
+      recordDeliveryReceipt: async () => existing,
+      recordInboundEvent: baseRepository.recordInboundEvent.bind(baseRepository),
+      recordOutboundDescriptor: baseRepository.recordOutboundDescriptor.bind(baseRepository),
+      saveConversation: baseRepository.saveConversation.bind(baseRepository)
+    } as unknown as ConversationRepository;
+    const racingConversations = new ConversationService(racingRepository);
+
+    const replay = await racingConversations.recordDeliveryReceipt("telegram", {
+      conversationId: "maria",
+      messageId: "msg_delivery_race_new_body",
+      provider: "telegram-bot-api",
+      providerEventId: "tg-delivery-race-001",
+      status: "failed"
+    });
+    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const deliveryEvents = realtime.data.events.filter((event) => event.eventName === "message.delivery.updated");
+
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.data.duplicate, true);
+    assert.equal(replay.data.receipt.id, "receipt_race_existing_001");
+    assert.equal(replay.data.realtimeEvent, null);
+    assert.equal(deliveryEvents.length, 0);
+  });
+
+  it("replays realtime events after timestamp or event-id cursors", async () => {
+    const conversations = new ConversationService(ConversationRepository.inMemory());
+    const RealDate = Date;
+    const fixedNow = new RealDate("2026-06-28T13:00:00.000Z");
+
+    globalThis.Date = class extends RealDate {
+      constructor(value?: string | number | Date) {
+        super(value ?? fixedNow);
+      }
+
+      static now(): number {
+        return fixedNow.getTime();
+      }
+    } as DateConstructor;
+
+    let first: Awaited<ReturnType<ConversationService["normalizeInboundEvent"]>>;
+    let second: Awaited<ReturnType<ConversationService["normalizeInboundEvent"]>>;
+
+    try {
+      first = await conversations.normalizeInboundEvent("telegram", {
+        eventId: "tg-cursor-001",
+        conversationId: "dmitry",
+        text: "Cursor baseline event"
+      });
+      second = await conversations.normalizeInboundEvent("telegram", {
+        eventId: "tg-cursor-002",
+        conversationId: "dmitry",
+        text: "Cursor replay event"
+      });
+    } finally {
+      globalThis.Date = RealDate;
+    }
+
+    const afterTimestamp = await conversations.fetchRealtimeEvents({ since: first.data.realtimeEvent.occurredAt });
+    const afterEventId = await conversations.fetchRealtimeEvents({ since: first.data.realtimeEvent.eventId });
+
+    assert.ok(
+      Date.parse(second.data.realtimeEvent.occurredAt) > Date.parse(first.data.realtimeEvent.occurredAt),
+      "service-generated realtime events must be monotonic for timestamp cursor replay"
+    );
+    assert.deepEqual(afterTimestamp.data.events.map((event) => event.eventId), [second.data.realtimeEvent.eventId]);
+    assert.deepEqual(afterEventId.data.events.map((event) => event.eventId), [second.data.realtimeEvent.eventId]);
+
+    const repository = ConversationRepository.inMemory();
+    await repository.appendRealtimeEvent({
+      data: { order: "second" },
+      eventId: "rt_same_ms_b",
+      eventName: "message.created",
+      occurredAt: "2026-06-28T12:45:00.000Z",
+      resourceId: "dmitry",
+      resourceType: "conversation",
+      schemaVersion: "v1",
+      tenantId: "tenant-volga",
+      traceId: "trc_same_ms_b"
+    });
+    await repository.appendRealtimeEvent({
+      data: { order: "first" },
+      eventId: "rt_same_ms_a",
+      eventName: "message.created",
+      occurredAt: "2026-06-28T12:45:00.000Z",
+      resourceId: "dmitry",
+      resourceType: "conversation",
+      schemaVersion: "v1",
+      tenantId: "tenant-volga",
+      traceId: "trc_same_ms_a"
+    });
+    const sameMillisecond = await new ConversationService(repository).fetchRealtimeEvents({ since: "rt_same_ms_a" });
+
+    assert.deepEqual(sameMillisecond.data.events.map((event) => event.eventId), ["rt_same_ms_b"]);
+  });
+});
+
+class RecordingRealtimeFanoutAdapter implements RealtimeFanoutAdapter {
+  readonly published: RealtimeFanoutEvent[] = [];
+
+  async publish(event: RealtimeFanoutEvent): Promise<{ channel: string; status: "published"; subscribers: number }> {
+    this.published.push(event);
+    return {
+      channel: "test:realtime",
+      status: "published",
+      subscribers: 1
+    };
+  }
+
+  async subscribe(): Promise<{ close(): Promise<void>; status: "disabled" }> {
+    return {
+      async close(): Promise<void> {},
+      status: "disabled"
+    };
+  }
+}
+
+class DeterministicLiveRealtimeFanoutAdapter implements RealtimeFanoutAdapter {
+  readonly published: RealtimeFanoutEvent[] = [];
+  private readonly subscribers = new Set<(event: RealtimeFanoutEvent) => void | Promise<void>>();
+
+  async publish(event: RealtimeFanoutEvent): Promise<{ channel: string; status: "published"; subscribers: number }> {
+    this.published.push(event);
+    await Promise.all([...this.subscribers].map((subscriber) => subscriber(event)));
+
+    return {
+      channel: "test:realtime",
+      status: "published",
+      subscribers: this.subscribers.size
+    };
+  }
+
+  async subscribe(handler: (event: RealtimeFanoutEvent) => void | Promise<void>): Promise<{ close(): Promise<void>; status: "active" }> {
+    for (const event of this.published) {
+      await handler(event);
+    }
+    this.subscribers.add(handler);
+
+    return {
+      async close(): Promise<void> {
+        this.subscribers.delete(handler);
+      },
+      status: "active"
+    };
+  }
+}
+
+class FailingRealtimeFanoutAdapter implements RealtimeFanoutAdapter {
+  publishAttempts = 0;
+
+  async publish(): Promise<never> {
+    this.publishAttempts += 1;
+    throw new Error("redis_publish_failed");
+  }
+
+  async subscribe(): Promise<{ close(): Promise<void>; status: "disabled" }> {
+    return {
+      async close(): Promise<void> {},
+      status: "disabled"
+    };
+  }
+}
+
+class FakeWebSocketReplaySocket {
+  destroyed = false;
+  ended = false;
+  readonly writes: Buffer[] = [];
+
+  write(value: Buffer | string): boolean {
+    this.writes.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
+    return true;
+  }
+
+  end(): void {
+    this.ended = true;
+  }
+}
+
+function realtimeFanoutEventFixture(input: Pick<RealtimeFanoutEvent, "eventId" | "occurredAt"> & Partial<RealtimeFanoutEvent>): RealtimeFanoutEvent {
+  return {
+    data: {},
+    eventName: "message.created",
+    resourceId: "maria",
+    resourceType: "conversation",
+    schemaVersion: "v1",
+    tenantId: "tenant-volga",
+    traceId: `trace-${input.eventId}`,
+    ...input
+  };
+}
+
+function canonicalUniqueRealtimeEvents(events: RealtimeFanoutEvent[]): RealtimeFanoutEvent[] {
+  const byEventId = new Map<string, RealtimeFanoutEvent>();
+
+  for (const event of [...events].sort(compareRealtimeFanoutEvents)) {
+    if (!byEventId.has(event.eventId)) {
+      byEventId.set(event.eventId, event);
+    }
+  }
+
+  return [...byEventId.values()];
+}
+
+function compareRealtimeFanoutEvents(left: RealtimeFanoutEvent, right: RealtimeFanoutEvent): number {
+  const occurredAtComparison = new Date(left.occurredAt).getTime() - new Date(right.occurredAt).getTime();
+  return occurredAtComparison === 0
+    ? left.eventId.localeCompare(right.eventId)
+    : occurredAtComparison;
+}
+
+function decodeWebSocketTextFrames(frames: Buffer[]): string[] {
+  const messages: string[] = [];
+  for (const frame of frames) {
+    const opcode = frame[0] & 0x0f;
+    if (opcode === 0x08) {
+      continue;
+    }
+
+    assert.equal(opcode, 0x01);
+    let length = frame[1] & 0x7f;
+    let offset = 2;
+    if (length === 126) {
+      length = frame.readUInt16BE(offset);
+      offset += 2;
+    } else if (length === 127) {
+      length = Number(frame.readBigUInt64BE(offset));
+      offset += 8;
+    }
+
+    messages.push(frame.subarray(offset, offset + length).toString("utf8"));
+  }
+
+  return messages;
+}

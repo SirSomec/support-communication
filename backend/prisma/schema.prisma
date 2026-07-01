@@ -1,0 +1,1753 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id          String             @id
+  name        String
+  status      String
+  healthScore Int?               @map("health_score")
+  metadata    Json?              @map("metadata")
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  auditEvents TenantAuditEvent[]
+  users       TenantUser[]
+
+  @@map("tenants")
+}
+
+model TenantAuditEvent {
+  id       String   @id
+  tenantId String   @map("tenant_id")
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  action   String
+  actor    String
+  at       DateTime @db.Timestamptz(3)
+  immutable Boolean  @default(true)
+  reason   String?
+  result   String
+  severity String
+  target   String
+  traceId  String   @map("trace_id")
+
+  @@index([tenantId, at], map: "tenant_audit_events_tenant_id_at_idx")
+  @@map("tenant_audit_events")
+}
+
+model TenantUser {
+  id           String    @id
+  tenantId     String    @map("tenant_id")
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  email        String
+  role         String
+  status       String
+  mfa          String    @map("mfa_status")
+  inviteStatus String    @map("invite_status")
+  lastActiveAt DateTime? @map("last_active_at") @db.Timestamptz(3)
+  sessions     Int       @default(0) @map("active_sessions")
+  risk         String
+  device       String
+  supportNotes String    @map("support_notes")
+  metadata     Json?
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, email], map: "tenant_users_tenant_id_email_key")
+  @@index([tenantId, status], map: "tenant_users_tenant_id_status_idx")
+  @@index([email], map: "tenant_users_email_idx")
+  @@map("tenant_users")
+}
+
+model PermissionRole {
+  id          String   @id @default(cuid())
+  key         String   @unique(map: "permission_roles_key_key")
+  description String?
+  actions     String[] @default([])
+  aliases     String[] @default([])
+  groupIds    String[] @default([]) @map("group_ids")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("permission_roles")
+}
+
+model RbacPolicyVersion {
+  id          String    @id
+  version     String
+  status      String
+  description String
+  checksum    String
+  createdBy   String    @map("created_by")
+  createdAt   DateTime  @map("created_at") @db.Timestamptz(3)
+  activatedAt DateTime? @map("activated_at") @db.Timestamptz(3)
+
+  @@index([status, activatedAt], map: "rbac_policy_versions_status_activated_at_idx")
+  @@map("rbac_policy_versions")
+}
+
+model RbacRoleGrant {
+  id              String   @id
+  policyVersionId String   @map("policy_version_id")
+  roleKey         String   @map("role_key")
+  tenantId        String?  @map("tenant_id")
+  action          String
+  resource        String
+  effect          String
+  createdBy       String   @map("created_by")
+  createdAt       DateTime @map("created_at") @db.Timestamptz(3)
+  traceId         String   @map("trace_id")
+
+  @@index([policyVersionId, tenantId, roleKey, action, resource], map: "rbac_role_grants_policy_tenant_role_action_idx")
+  @@index([roleKey, action], map: "rbac_role_grants_role_action_idx")
+  @@map("rbac_role_grants")
+}
+
+model PermissionDenialEvent {
+  id              String   @id
+  tenantId        String?  @map("tenant_id")
+  actorId         String?  @map("actor_id")
+  roleKey         String?  @map("role_key")
+  action          String
+  resource        String
+  policyVersionId String?  @map("policy_version_id")
+  reason          String
+  at              DateTime @db.Timestamptz(3)
+  traceId         String   @map("trace_id")
+  immutable       Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, action, at], map: "permission_denial_events_tenant_action_at_idx")
+  @@index([policyVersionId, at], map: "permission_denial_events_policy_at_idx")
+  @@map("permission_denial_events")
+}
+
+model ServiceAdminAuditEvent {
+  id        String   @id
+  action    String
+  actor     String
+  actorName String   @map("actor_name")
+  at        DateTime @db.Timestamptz(3)
+  immutable Boolean  @default(true)
+  reason    String?
+  result    String
+  severity  String
+  target    String
+  tenantId  String?  @map("tenant_id")
+  traceId   String   @map("trace_id")
+  userId    String?  @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([userId, at], map: "service_admin_audit_events_user_id_at_idx")
+  @@index([tenantId, at], map: "service_admin_audit_events_tenant_id_at_idx")
+  @@index([action, at], map: "service_admin_audit_events_action_at_idx")
+  @@map("service_admin_audit_events")
+}
+
+model ServiceAdminImpersonation {
+  id              String    @id
+  auditEventId    String?   @map("audit_event_id")
+  approvalId      String?   @map("approval_id")
+  tenantId        String    @map("tenant_id")
+  tenantName      String    @map("tenant_name")
+  userId          String?   @map("user_id")
+  userName        String?   @map("user_name")
+  mode            String
+  startedAt       DateTime  @map("started_at") @db.Timestamptz(3)
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz(3)
+  durationMinutes Int       @map("duration_minutes")
+  banner          String
+  stoppedAt       DateTime? @map("stopped_at") @db.Timestamptz(3)
+  stopAuditEvent  Json?     @map("stop_audit_event")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([approvalId], map: "service_admin_impersonations_approval_id_idx")
+  @@index([tenantId, userId, stoppedAt, expiresAt], map: "service_admin_impersonations_tenant_user_active_idx")
+  @@map("service_admin_impersonations")
+}
+
+model BreakGlassApproval {
+  id              String   @id
+  action          String
+  durationMinutes Int      @map("duration_minutes")
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz(3)
+  status          String
+  target          String
+  tenantId        String?  @map("tenant_id")
+  userId          String?  @map("user_id")
+  auditEventId    String   @map("audit_event_id")
+  requestedAt     DateTime @map("requested_at") @db.Timestamptz(3)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status, expiresAt], map: "break_glass_approvals_status_expires_at_idx")
+  @@index([tenantId, userId, requestedAt], map: "break_glass_approvals_tenant_user_requested_at_idx")
+  @@map("break_glass_approvals")
+}
+
+model BillingTenantState {
+  id                 String                    @id
+  name               String
+  status             String
+  planId             String                    @map("plan_id")
+  users              Int
+  workspaces         Int
+  monthlyRevenue     Int                       @map("monthly_revenue")
+  arr                Int
+  region             String
+  owner              String
+  healthScore        Int                       @map("health_score")
+  sla                String
+  usage              Json
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  syncJobs           BillingSyncJob[]
+  quotaLedgerEntries BillingQuotaLedgerEntry[]
+  quotaReservations  BillingQuotaReservation[]
+  subscriptions      BillingSubscription[]
+  invoices           BillingInvoice[]
+  providerSyncEvents BillingProviderSyncEvent[]
+  paymentRetrySchedules BillingPaymentRetrySchedule[]
+  paymentDunningStates BillingPaymentDunningState[]
+  reconciliationConflicts BillingReconciliationConflict[]
+  paymentRetryKeys BillingPaymentRetryKey[]
+  billingApprovals BillingApproval[]
+  billingLegalEntities BillingLegalEntity[]
+  billingTaxDocuments BillingTaxDocument[]
+
+  @@index([planId], map: "billing_tenant_states_plan_id_idx")
+  @@map("billing_tenant_states")
+}
+
+model BillingSyncJob {
+  id           String             @id
+  tenantId     String             @map("tenant_id")
+  tenant       BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  queue        String
+  status       String
+  fromPlanId   String             @map("from_plan_id")
+  toPlanId     String             @map("to_plan_id")
+  reason       String
+  actor        String
+  actorName    String             @map("actor_name")
+  auditEventId String             @map("audit_event_id")
+  traceId      String             @map("trace_id")
+  payload      Json
+  attempts     Int                @default(0)
+  lastError    String?            @map("last_error")
+  lockedAt     DateTime?          @map("locked_at") @db.Timestamptz(3)
+  nextAttemptAt DateTime?         @map("next_attempt_at") @db.Timestamptz(3)
+  deadLetteredAt DateTime?        @map("dead_lettered_at") @db.Timestamptz(3)
+  deadLetterReplayAuditEvents Json @default("[]") @map("dead_letter_replay_audit_events")
+  publishedAt  DateTime?          @map("published_at") @db.Timestamptz(3)
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, createdAt], map: "billing_sync_jobs_tenant_id_created_at_idx")
+  @@index([status, queue, createdAt], map: "billing_sync_jobs_status_queue_created_at_idx")
+  @@index([status, queue, lockedAt], map: "billing_sync_jobs_status_queue_locked_at_idx")
+  @@index([status, queue, nextAttemptAt], map: "billing_sync_jobs_status_queue_next_attempt_at_idx")
+  @@map("billing_sync_jobs")
+}
+
+model BillingQuotaLedgerEntry {
+  id                 String             @id
+  tenantId           String             @map("tenant_id")
+  tenant             BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId             String             @map("plan_id")
+  mode               String
+  resource           String
+  decision           String
+  requested          Int
+  used               Int
+  limit              Int
+  projected          Int
+  remainingBefore    Int                @map("remaining_before")
+  remainingAfter     Int                @map("remaining_after")
+  idempotencyKey     String             @unique(map: "billing_quota_ledger_entries_idempotency_key_key") @map("idempotency_key")
+  requestFingerprint String             @map("request_fingerprint")
+  auditEvent         Json?              @map("audit_event")
+  reason             String?
+  traceId            String             @map("trace_id")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, resource, createdAt], map: "billing_quota_ledger_entries_tenant_resource_created_at_idx")
+  @@index([tenantId, resource, decision, createdAt], map: "billing_quota_ledger_tenant_resource_decision_idx")
+  @@index([decision, createdAt], map: "billing_quota_ledger_entries_decision_created_at_idx")
+  @@map("billing_quota_ledger_entries")
+}
+
+model BillingQuotaReservation {
+  id                    String             @id
+  tenantId              String             @map("tenant_id")
+  tenant                BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId                String             @map("plan_id")
+  resource              String
+  status                String
+  requested             Int
+  usedBefore            Int                @map("used_before")
+  usedAfter             Int?               @map("used_after")
+  limit                 Int
+  idempotencyKey        String             @unique(map: "billing_quota_reservations_idempotency_key_key") @map("idempotency_key")
+  commitIdempotencyKey  String?            @unique(map: "billing_quota_reservations_commit_idempotency_key_key") @map("commit_idempotency_key")
+  releaseIdempotencyKey String?            @unique(map: "billing_quota_reservations_release_idempotency_key_key") @map("release_idempotency_key")
+  requestFingerprint    String             @map("request_fingerprint")
+  auditEvent            Json?              @map("audit_event")
+  auditEvents           Json               @default("[]") @map("audit_events")
+  traceId               String             @map("trace_id")
+  lockedAt              DateTime?          @map("locked_at") @db.Timestamptz(3)
+  expiresAt             DateTime           @map("expires_at") @db.Timestamptz(3)
+  committedAt           DateTime?          @map("committed_at") @db.Timestamptz(3)
+  releasedAt            DateTime?          @map("released_at") @db.Timestamptz(3)
+  createdAt             DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, resource, status, createdAt], map: "billing_quota_res_tenant_resource_status_created_idx")
+  @@index([status, expiresAt], map: "billing_quota_reservations_status_expires_at_idx")
+  @@index([status, expiresAt, lockedAt], map: "billing_quota_res_status_expires_locked_idx")
+  @@map("billing_quota_reservations")
+}
+
+model BillingSubscription {
+  id                     String             @id
+  tenantId               String             @map("tenant_id")
+  tenant                 BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  provider               String
+  providerCustomerId     String             @map("provider_customer_id")
+  providerSubscriptionId String             @map("provider_subscription_id")
+  planId                 String             @map("plan_id")
+  status                 String
+  billingPeriod          String             @map("billing_period")
+  cancelAtPeriodEnd      Boolean            @default(false) @map("cancel_at_period_end")
+  currency               String
+  seats                  Int
+  unitAmountMonthly      Int                @map("unit_amount_monthly")
+  currentPeriodStart     DateTime           @map("current_period_start") @db.Timestamptz(3)
+  currentPeriodEnd       DateTime           @map("current_period_end") @db.Timestamptz(3)
+  createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  invoices               BillingInvoice[]
+
+  @@unique([provider, providerSubscriptionId], map: "billing_subscriptions_provider_subscription_key")
+  @@index([tenantId, status, updatedAt], map: "billing_subscriptions_tenant_status_updated_at_idx")
+  @@index([tenantId, updatedAt], map: "billing_subscriptions_tenant_updated_at_idx")
+  @@map("billing_subscriptions")
+}
+
+model BillingInvoice {
+  id                String              @id
+  tenantId          String              @map("tenant_id")
+  tenant            BillingTenantState  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscriptionId    String?             @map("subscription_id")
+  subscription      BillingSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  provider          String
+  providerInvoiceId String              @map("provider_invoice_id")
+  status            String
+  paymentStatus     String              @map("payment_status")
+  currency          String
+  amountDue         Int                 @map("amount_due")
+  amountPaid        Int                 @map("amount_paid")
+  dueAt             DateTime            @map("due_at") @db.Timestamptz(3)
+  paidAt            DateTime?           @map("paid_at") @db.Timestamptz(3)
+  hostedInvoiceUrl  String?             @map("hosted_invoice_url")
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([provider, providerInvoiceId], map: "billing_invoices_provider_invoice_key")
+  @@index([tenantId, status, dueAt], map: "billing_invoices_tenant_status_due_at_idx")
+  @@index([tenantId, updatedAt], map: "billing_invoices_tenant_updated_at_idx")
+  @@map("billing_invoices")
+}
+
+model BillingProviderSyncEvent {
+  id                 String             @id
+  tenantId           String             @map("tenant_id")
+  tenant             BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  provider           String
+  eventType          String             @map("event_type")
+  status             String
+  idempotencyKey     String             @unique(map: "billing_provider_sync_events_idempotency_key_key") @map("idempotency_key")
+  requestFingerprint String             @map("request_fingerprint")
+  syncJobId          String             @map("sync_job_id")
+  traceId            String             @map("trace_id")
+  payload            Json
+  auditEvents        Json               @default("[]") @map("audit_events")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, provider, createdAt], map: "billing_provider_sync_events_tenant_provider_created_at_idx")
+  @@index([status, createdAt], map: "billing_provider_sync_events_status_created_at_idx")
+  @@map("billing_provider_sync_events")
+}
+
+model BillingPaymentRetrySchedule {
+  scheduleId         String             @map("schedule_id")
+  tenantId           String             @map("tenant_id")
+  tenant             BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoiceId          String             @map("invoice_id")
+  provider           String
+  providerInvoiceId  String             @map("provider_invoice_id")
+  idempotencyKey     String             @unique(map: "billing_payment_retry_schedules_idempotency_key_key") @map("idempotency_key")
+  requestFingerprint String             @map("request_fingerprint")
+  status             String
+  attempt            Int                @default(0)
+  maxAttempts        Int                @map("max_attempts")
+  nextAttemptAt      DateTime           @map("next_attempt_at") @db.Timestamptz(3)
+  lastAttemptAt      DateTime?          @map("last_attempt_at") @db.Timestamptz(3)
+  traceId            String             @map("trace_id")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([tenantId, scheduleId], map: "billing_payment_retry_schedules_pkey")
+  @@index([tenantId, invoiceId, status, nextAttemptAt], map: "billing_retry_sched_tenant_invoice_status_next_idx")
+  @@index([tenantId, status, nextAttemptAt], map: "billing_retry_sched_tenant_status_next_idx")
+  @@index([provider, providerInvoiceId], map: "billing_retry_sched_provider_invoice_idx")
+  @@map("billing_payment_retry_schedules")
+}
+
+model BillingPaymentDunningState {
+  dunningId          String             @map("dunning_id")
+  tenantId           String             @map("tenant_id")
+  tenant             BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoiceId          String             @map("invoice_id")
+  subscriptionId     String?            @map("subscription_id")
+  provider           String
+  providerInvoiceId  String             @map("provider_invoice_id")
+  idempotencyKey     String             @unique(map: "billing_payment_dunning_states_idempotency_key_key") @map("idempotency_key")
+  requestFingerprint String             @map("request_fingerprint")
+  stage              String
+  status             String
+  failedAttempts     Int                @default(0) @map("failed_attempts")
+  lastFailureAt      DateTime?          @map("last_failure_at") @db.Timestamptz(3)
+  nextActionAt       DateTime?          @map("next_action_at") @db.Timestamptz(3)
+  traceId            String             @map("trace_id")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([tenantId, dunningId], map: "billing_payment_dunning_states_pkey")
+  @@index([tenantId, invoiceId, status, updatedAt], map: "billing_dunning_tenant_invoice_status_updated_idx")
+  @@index([tenantId, status, nextActionAt], map: "billing_dunning_tenant_status_next_action_idx")
+  @@index([provider, providerInvoiceId], map: "billing_dunning_provider_invoice_idx")
+  @@map("billing_payment_dunning_states")
+}
+
+model BillingReconciliationConflict {
+  conflictId         String             @map("conflict_id")
+  tenantId           String             @map("tenant_id")
+  tenant             BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoiceId          String             @map("invoice_id")
+  provider           String
+  providerInvoiceId  String             @map("provider_invoice_id")
+  idempotencyKey     String             @unique(map: "billing_reconciliation_conflicts_idempotency_key_key") @map("idempotency_key")
+  requestFingerprint String             @map("request_fingerprint")
+  reason             String
+  severity           String
+  status             String
+  expected           Json               @default("{}")
+  actual             Json               @default("{}")
+  resolution         String?
+  resolvedAt         DateTime?          @map("resolved_at") @db.Timestamptz(3)
+  detectedAt         DateTime           @map("detected_at") @db.Timestamptz(3)
+  traceId            String             @map("trace_id")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([tenantId, conflictId], map: "billing_reconciliation_conflicts_pkey")
+  @@index([tenantId, invoiceId, status, detectedAt], map: "billing_recon_conflicts_tenant_invoice_status_detected_idx")
+  @@index([tenantId, status, severity, updatedAt], map: "billing_recon_conflicts_tenant_status_severity_updated_idx")
+  @@index([provider, providerInvoiceId], map: "billing_recon_conflicts_provider_invoice_idx")
+  @@map("billing_reconciliation_conflicts")
+}
+
+model BillingPaymentRetryKey {
+  retryKeyId         String             @map("retry_key_id")
+  tenantId           String             @map("tenant_id")
+  tenant             BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoiceId          String             @map("invoice_id")
+  scheduleId         String?            @map("schedule_id")
+  provider           String
+  providerInvoiceId  String             @map("provider_invoice_id")
+  idempotencyKey     String             @unique(map: "billing_payment_retry_keys_idempotency_key_key") @map("idempotency_key")
+  requestFingerprint String             @map("request_fingerprint")
+  status             String
+  attempt            Int                @default(0)
+  result             Json               @default("{}")
+  firstAttemptAt     DateTime           @map("first_attempt_at") @db.Timestamptz(3)
+  lastAttemptAt      DateTime?          @map("last_attempt_at") @db.Timestamptz(3)
+  traceId            String             @map("trace_id")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([tenantId, retryKeyId], map: "billing_payment_retry_keys_pkey")
+  @@index([tenantId, invoiceId, status, firstAttemptAt], map: "billing_retry_keys_tenant_invoice_status_first_idx")
+  @@index([tenantId, status, updatedAt], map: "billing_retry_keys_tenant_status_updated_idx")
+  @@index([provider, providerInvoiceId], map: "billing_retry_keys_provider_invoice_idx")
+  @@map("billing_payment_retry_keys")
+}
+
+model BillingApproval {
+  approvalId         String             @map("approval_id")
+  tenantId           String             @map("tenant_id")
+  tenant             BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subjectType        String             @map("subject_type")
+  subjectId          String             @map("subject_id")
+  status             String
+  reason             String
+  requestFingerprint String             @map("request_fingerprint")
+  requestedBy        String             @map("requested_by")
+  requestedByName    String             @map("requested_by_name")
+  decidedBy          String?            @map("decided_by")
+  decidedByName      String?            @map("decided_by_name")
+  decisionReason     String?            @map("decision_reason")
+  auditEvents        Json               @default("[]") @map("audit_events")
+  traceId            String             @map("trace_id")
+  expiresAt          DateTime           @map("expires_at") @db.Timestamptz(3)
+  decidedAt          DateTime?          @map("decided_at") @db.Timestamptz(3)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([tenantId, approvalId], map: "billing_approvals_pkey")
+  @@unique([tenantId, requestFingerprint], map: "billing_approvals_tenant_request_fingerprint_key")
+  @@index([tenantId, status, expiresAt], map: "billing_approvals_tenant_status_expires_idx")
+  @@index([tenantId, subjectType, subjectId, status], map: "billing_approvals_tenant_subject_status_idx")
+  @@index([tenantId, createdAt], map: "billing_approvals_tenant_created_idx")
+  @@map("billing_approvals")
+}
+
+model BillingLegalEntity {
+  legalEntityId      String             @map("legal_entity_id")
+  tenantId           String             @map("tenant_id")
+  tenant             BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalName          String             @map("legal_name")
+  registrationNumber String             @map("registration_number")
+  taxId              String             @map("tax_id")
+  vatId              String?            @map("vat_id")
+  addressLine1       String             @map("address_line_1")
+  addressLine2       String?            @map("address_line_2")
+  city               String
+  region             String
+  postalCode         String             @map("postal_code")
+  country            String
+  status             String
+  auditEvents        Json               @default("[]") @map("audit_events")
+  traceId            String             @map("trace_id")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  taxDocuments       BillingTaxDocument[]
+
+  @@id([tenantId, legalEntityId], map: "billing_legal_entities_pkey")
+  @@unique([tenantId, registrationNumber], map: "billing_legal_entities_tenant_registration_number_key")
+  @@index([tenantId, status, updatedAt], map: "billing_legal_entities_tenant_status_updated_idx")
+  @@index([tenantId, country, status], map: "billing_legal_entities_tenant_country_status_idx")
+  @@index([tenantId, legalName], map: "billing_legal_entities_tenant_legal_name_idx")
+  @@map("billing_legal_entities")
+}
+
+model BillingTaxDocument {
+  documentId         String             @map("document_id")
+  tenantId           String             @map("tenant_id")
+  tenant             BillingTenantState @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntityId      String             @map("legal_entity_id")
+  legalEntity        BillingLegalEntity @relation(fields: [tenantId, legalEntityId], references: [tenantId, legalEntityId], onDelete: Cascade)
+  documentType       String             @map("document_type")
+  fileName           String             @map("file_name")
+  mimeType           String             @map("mime_type")
+  requestFingerprint String             @map("request_fingerprint")
+  sha256             String
+  status             String
+  storageLocator     String             @map("storage_locator")
+  uploadedBy         String             @map("uploaded_by")
+  uploadedByName     String             @map("uploaded_by_name")
+  traceId            String             @map("trace_id")
+  auditEvents        Json               @default("[]") @map("audit_events")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([tenantId, documentId], map: "billing_tax_documents_pkey")
+  @@unique([tenantId, requestFingerprint], map: "billing_tax_documents_tenant_request_fingerprint_key")
+  @@index([tenantId, legalEntityId, status, updatedAt], map: "billing_tax_docs_tenant_entity_status_updated_idx")
+  @@index([tenantId, documentType, status], map: "billing_tax_docs_tenant_type_status_idx")
+  @@index([tenantId, sha256], map: "billing_tax_docs_tenant_sha256_idx")
+  @@map("billing_tax_documents")
+}
+
+model Conversation {
+  id            String                     @id
+  tenantId      String                     @default("tenant-volga") @map("tenant_id")
+  name          String
+  initials      String
+  avatar        String?
+  channel       String
+  phone         String
+  time          String
+  preview       String
+  status        String
+  sla           String
+  slaTone       String                     @map("sla_tone")
+  topic         String
+  unread        Boolean?                   @default(false)
+  device        String
+  entry         String
+  language      String
+  clientSince   String                     @map("client_since")
+  tags          String[]                   @default([])
+  previous      Json
+  metadata      Json?
+  createdAt     DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  messages      ConversationMessage[]
+  inboundEvents ConversationInboundEvent[]
+  outboundDescriptors ConversationOutboundDescriptor[]
+  deliveryReceipts ChannelDeliveryReceipt[]
+
+  @@index([status, channel], map: "conversations_status_channel_idx")
+  @@index([tenantId, status, updatedAt], map: "conversations_tenant_status_updated_at_idx")
+  @@map("conversations")
+}
+
+model ConversationMessage {
+  id             String       @id
+  conversationId String       @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  side           String?
+  type           String?
+  text           String
+  author         String?
+  time           String
+  attachments    Json?
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([conversationId, createdAt], map: "conversation_messages_conversation_id_created_at_idx")
+  @@map("conversation_messages")
+}
+
+model ConversationInboundEvent {
+  id             String       @id
+  conversationId String       @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  channel        String
+  eventId        String       @map("event_id")
+  messageId      String       @map("message_id")
+  receivedAt     DateTime     @default(now()) @map("received_at") @db.Timestamptz(3)
+  traceId        String       @map("trace_id")
+  payload        Json?
+
+  @@unique([channel, eventId], map: "conversation_inbound_events_channel_event_id_key")
+  @@index([conversationId, receivedAt], map: "conversation_inbound_events_conversation_id_received_at_idx")
+  @@map("conversation_inbound_events")
+}
+
+model ConversationOutboundDescriptor {
+  id             String        @id
+  kind           String
+  tenantId       String        @map("tenant_id")
+  conversationId String?       @map("conversation_id")
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  messageId      String?       @map("message_id")
+  channel        String
+  status         String
+  deliveryState  String?       @map("delivery_state")
+  idempotencyKey String?       @unique(map: "conversation_outbound_descriptors_idempotency_key_key") @map("idempotency_key")
+  requestFingerprint String?   @map("request_fingerprint")
+  retryable      Boolean       @default(false)
+  payload        Json
+  auditId        String?       @map("audit_id")
+  traceId        String        @map("trace_id")
+  outboxEventId  String?       @map("outbox_event_id")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([conversationId, createdAt], map: "conversation_outbound_descriptors_conversation_created_idx")
+  @@index([status, channel, createdAt], map: "conversation_outbound_descriptors_status_channel_created_idx")
+  @@map("conversation_outbound_descriptors")
+}
+
+model ConversationRealtimeEvent {
+  id            String   @id
+  eventId       String   @unique(map: "conversation_realtime_events_event_id_key") @map("event_id")
+  eventName     String   @map("event_name")
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(3)
+  resourceId    String   @map("resource_id")
+  resourceType  String   @map("resource_type")
+  schemaVersion String   @map("schema_version")
+  tenantId      String   @map("tenant_id")
+  traceId       String   @map("trace_id")
+  data          Json
+
+  @@index([resourceType, resourceId, occurredAt], map: "conversation_realtime_events_resource_idx")
+  @@map("conversation_realtime_events")
+}
+
+model ChannelDeliveryReceipt {
+  id                String       @id
+  tenantId          String       @map("tenant_id")
+  conversationId    String       @map("conversation_id")
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messageId         String       @map("message_id")
+  channel           String
+  provider          String
+  providerEventId   String       @map("provider_event_id")
+  status            String
+  idempotencyKey    String       @unique(map: "channel_delivery_receipts_idempotency_key_key") @map("idempotency_key")
+  receivedAt        DateTime     @map("received_at") @db.Timestamptz(3)
+  traceId           String       @map("trace_id")
+  payload           Json?
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([provider, providerEventId], map: "channel_delivery_receipts_provider_event_key")
+  @@index([messageId, receivedAt], map: "channel_delivery_receipts_message_received_at_idx")
+  @@index([tenantId, channel, receivedAt], map: "channel_delivery_receipts_tenant_channel_received_at_idx")
+  @@map("channel_delivery_receipts")
+}
+
+model WorkspaceFile {
+  fileId       String   @id @map("file_id")
+  auditId      String   @map("audit_id")
+  channel      String
+  checksum     String?
+  fileName     String   @map("file_name")
+  mimeType     String   @map("mime_type")
+  objectKey    String   @map("object_key")
+  scanCheckedAt DateTime? @map("scan_checked_at") @db.Timestamptz(3)
+  scanReason   String?  @map("scan_reason")
+  scanState    String   @map("scan_state")
+  scanVerdict  String?  @map("scan_verdict")
+  scanner      String?
+  sizeBytes    BigInt   @map("size_bytes")
+  storageState String   @map("storage_state")
+  tenantId     String   @map("tenant_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, fileId], map: "workspace_files_tenant_file_id_idx")
+  @@index([storageState, scanState], map: "workspace_files_storage_scan_state_idx")
+  @@index([scanVerdict, scanCheckedAt], map: "workspace_files_scan_verdict_checked_at_idx")
+  @@index([channel, createdAt], map: "workspace_files_channel_created_at_idx")
+  @@map("workspace_files")
+}
+
+model WorkspaceFileScanResultIdempotency {
+  id          String   @id @default(cuid())
+  key         String   @unique(map: "workspace_file_scan_result_idempotency_key_key")
+  fileId      String   @map("file_id")
+  fingerprint String
+  result      Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([fileId, createdAt], map: "workspace_file_scan_result_idem_file_created_idx")
+  @@map("workspace_file_scan_result_idempotency")
+}
+
+model ClientProfile {
+  id              String   @id
+  tenantId        String   @map("tenant_id")
+  sourceProfileId String   @map("source_profile_id")
+  name            String
+  channel         String
+  phone           String
+  device          String
+  entry           String
+  topic           String
+  clientSince     String   @map("client_since")
+  previous        Json
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, sourceProfileId], map: "client_profiles_tenant_source_profile_key")
+  @@index([tenantId, updatedAt], map: "client_profiles_tenant_id_updated_at_idx")
+  @@index([tenantId, channel], map: "client_profiles_tenant_id_channel_idx")
+  @@map("client_profiles")
+}
+
+model ClientMergeEvent {
+  id                String   @id
+  tenantId          String   @map("tenant_id")
+  action            String
+  primaryProfileId  String   @map("primary_profile_id")
+  candidateProfileId String? @map("candidate_profile_id")
+  detachedProfileId String?  @map("detached_profile_id")
+  mergeGraphEdge    String   @map("merge_graph_edge")
+  immutable         Boolean  @default(true)
+  reason            String?
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, action, mergeGraphEdge], map: "client_merge_events_tenant_action_edge_key")
+  @@index([tenantId, primaryProfileId], map: "client_merge_events_tenant_primary_idx")
+  @@index([tenantId, candidateProfileId], map: "client_merge_events_tenant_candidate_idx")
+  @@index([tenantId, detachedProfileId], map: "client_merge_events_tenant_detached_idx")
+  @@map("client_merge_events")
+}
+
+model ClientMergeConflict {
+  id                String   @id
+  tenantId          String   @map("tenant_id")
+  primaryProfileId  String   @map("primary_profile_id")
+  candidateProfileId String  @map("candidate_profile_id")
+  conflictingFields String[] @map("conflicting_fields")
+  reason            String
+  state             String
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, state], map: "client_merge_conflicts_tenant_state_idx")
+  @@index([tenantId, primaryProfileId], map: "client_merge_conflicts_tenant_primary_idx")
+  @@map("client_merge_conflicts")
+}
+
+model TemplateRecord {
+  id        String   @id
+  tenantId  String   @default("tenant-volga") @map("tenant_id")
+  auditId   String?  @map("audit_id")
+  channel   String
+  scope     String
+  title     String
+  text      String
+  topic     String
+  usage     Int      @default(0)
+  version   Int
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  versions  TemplateVersion[]
+  auditEvents TemplateAuditEvent[]
+
+  @@index([tenantId, scope, updatedAt], map: "template_records_tenant_scope_updated_at_idx")
+  @@index([tenantId, channel, topic], map: "template_records_tenant_channel_topic_idx")
+  @@map("template_records")
+}
+
+model TemplateVersion {
+  id         String         @id
+  templateId String         @map("template_id")
+  template   TemplateRecord @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  channel    String
+  scope      String
+  title      String
+  text       String
+  topic      String
+  usage      Int            @default(0)
+  version    Int
+  updatedAt  DateTime       @map("updated_at") @db.Timestamptz(3)
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([templateId, version], map: "template_versions_template_id_version_key")
+  @@index([templateId, version], map: "template_versions_template_id_version_idx")
+  @@map("template_versions")
+}
+
+model TemplateAuditEvent {
+  id         String         @id
+  templateId String         @map("template_id")
+  template   TemplateRecord @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  action     String
+  immutable  Boolean        @default(true)
+  reason     String?
+  timestamp  DateTime       @db.Timestamptz(3)
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([templateId, timestamp], map: "template_audit_events_template_id_timestamp_idx")
+  @@index([action, timestamp], map: "template_audit_events_action_timestamp_idx")
+  @@map("template_audit_events")
+}
+
+model KnowledgeArticle {
+  id              String   @id
+  tenantId        String   @default("tenant-volga") @map("tenant_id")
+  title           String
+  status          String
+  category        String
+  topics          String[] @default([])
+  channels        String[] @default([])
+  visibility      String
+  version         String
+  updatedAt       DateTime @map("updated_at") @db.Timestamptz(3)
+  owner           String
+  usage           Int      @default(0)
+  helpfulRate     Int      @default(0) @map("helpful_rate")
+  body            String
+  attachments     Json     @default("[]")
+  versions        Json     @default("[]")
+  approvalHistory Json     @default("[]") @map("approval_history")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  draftVersions   KnowledgeDraftVersion[]
+  approvalDecisions KnowledgeApprovalDecision[]
+
+  @@index([tenantId, visibility, status, updatedAt], map: "knowledge_articles_tenant_visibility_status_updated_at_idx")
+  @@index([tenantId, category], map: "knowledge_articles_tenant_category_idx")
+  @@map("knowledge_articles")
+}
+
+model KnowledgeDraftVersion {
+  id        String           @id
+  articleId String           @map("article_id")
+  article   KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  author    String
+  body      String
+  changes   String?
+  label     String
+  status    String
+  updatedAt DateTime         @map("updated_at") @db.Timestamptz(3)
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  approvalDecisions KnowledgeApprovalDecision[]
+
+  @@unique([articleId, id], map: "knowledge_draft_versions_article_id_id_key")
+  @@index([articleId, updatedAt], map: "knowledge_draft_versions_article_id_updated_at_idx")
+  @@index([articleId, status], map: "knowledge_draft_versions_article_id_status_idx")
+  @@map("knowledge_draft_versions")
+}
+
+model KnowledgeApprovalDecision {
+  id        String                 @id
+  articleId String                 @map("article_id")
+  article   KnowledgeArticle       @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  draftId   String?                @map("draft_id")
+  draft     KnowledgeDraftVersion? @relation(fields: [draftId], references: [id], onDelete: SetNull)
+  action    String
+  actor     String
+  immutable Boolean                @default(true)
+  reason    String?
+  timestamp DateTime               @db.Timestamptz(3)
+  createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([articleId, timestamp], map: "knowledge_approval_decisions_article_id_timestamp_idx")
+  @@index([draftId, timestamp], map: "knowledge_approval_decisions_draft_id_timestamp_idx")
+  @@index([action, timestamp], map: "knowledge_approval_decisions_action_timestamp_idx")
+  @@map("knowledge_approval_decisions")
+}
+
+model MfaChallenge {
+  id         String    @id
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  email      String
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+
+  @@index([email, expiresAt], map: "mfa_challenges_email_expires_at_idx")
+  @@map("mfa_challenges")
+}
+
+model ServiceAdminSession {
+  id                     String    @id
+  actorId                String    @map("actor_id")
+  actorName              String    @map("actor_name")
+  adminEmail             String    @map("admin_email")
+  adminId                String    @map("admin_id")
+  adminName              String    @map("admin_name")
+  allowedActions         String[]  @default([]) @map("allowed_actions")
+  authState              String    @map("auth_state")
+  availableOrganizations Json      @map("available_organizations")
+  currentTenantId        String    @map("current_tenant_id")
+  expiresAt              DateTime  @map("expires_at") @db.Timestamptz(3)
+  mfaVerifiedAt          DateTime? @map("mfa_verified_at") @db.Timestamptz(3)
+  revokedAt              DateTime? @map("revoked_at") @db.Timestamptz(3)
+  role                   String
+  tenantScope            String    @map("tenant_scope")
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tokenPairs ServiceAdminTokenPair[]
+
+  @@index([adminEmail, revokedAt], map: "service_admin_sessions_admin_email_revoked_at_idx")
+  @@map("service_admin_sessions")
+}
+
+model ServiceAdminTokenPair {
+  id                    String    @id
+  sessionId             String    @map("session_id")
+  subjectId             String    @map("subject_id")
+  accessTokenHash       String    @unique(map: "service_admin_token_pairs_access_hash_key") @map("access_token_hash")
+  refreshTokenHash      String    @unique(map: "service_admin_token_pairs_refresh_hash_key") @map("refresh_token_hash")
+  issuedAt              DateTime  @map("issued_at") @db.Timestamptz(3)
+  accessTokenExpiresAt  DateTime  @map("access_token_expires_at") @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime  @map("refresh_token_expires_at") @db.Timestamptz(3)
+  rotatedAt             DateTime? @map("rotated_at") @db.Timestamptz(3)
+  revokedAt             DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  session                 ServiceAdminSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  nextRotations           ServiceAdminTokenRotation[]    @relation("NextServiceAdminTokenPair")
+  previousRotations       ServiceAdminTokenRotation[]    @relation("PreviousServiceAdminTokenPair")
+  serviceAdminRevocations ServiceAdminTokenRevocation[]
+
+  @@index([sessionId, revokedAt, rotatedAt], map: "service_admin_token_pairs_session_active_idx")
+  @@index([subjectId, issuedAt], map: "service_admin_token_pairs_subject_issued_idx")
+  @@map("service_admin_token_pairs")
+}
+
+model ServiceAdminTokenRotation {
+  idempotencyKey      String   @id @map("idempotency_key")
+  previousTokenPairId String   @map("previous_token_pair_id")
+  nextTokenPairId     String   @unique(map: "service_admin_token_rotations_next_pair_key") @map("next_token_pair_id")
+  rotatedAt           DateTime @map("rotated_at") @db.Timestamptz(3)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  previousTokenPair ServiceAdminTokenPair @relation("PreviousServiceAdminTokenPair", fields: [previousTokenPairId], references: [id], onDelete: Cascade)
+  nextTokenPair     ServiceAdminTokenPair @relation("NextServiceAdminTokenPair", fields: [nextTokenPairId], references: [id], onDelete: Cascade)
+
+  @@index([previousTokenPairId, rotatedAt], map: "service_admin_token_rotations_previous_pair_idx")
+  @@map("service_admin_token_rotations")
+}
+
+model ServiceAdminTokenRevocation {
+  idempotencyKey String   @id @map("idempotency_key")
+  tokenPairId    String   @map("token_pair_id")
+  tokenHash      String   @map("token_hash")
+  revokedAt      DateTime @map("revoked_at") @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tokenPair ServiceAdminTokenPair @relation(fields: [tokenPairId], references: [id], onDelete: Cascade)
+
+  @@index([tokenPairId, revokedAt], map: "service_admin_token_revocations_pair_idx")
+  @@map("service_admin_token_revocations")
+}
+
+model OidcProviderConfig {
+  providerId String   @id @map("provider_id")
+  tenantId   String   @map("tenant_id")
+  issuer     String
+  audience   String
+  jwksUri    String   @map("jwks_uri")
+  clientId   String   @map("client_id")
+  scopes     String[] @default([])
+  enabled    Boolean  @default(true)
+  updatedAt  DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  callbackDescriptors OidcCallbackDescriptor[]
+
+  @@index([tenantId, enabled], map: "oidc_provider_configs_tenant_enabled_idx")
+  @@map("oidc_provider_configs")
+}
+
+model OidcCallbackDescriptor {
+  id          String    @id
+  providerId  String    @map("provider_id")
+  state       String    @unique(map: "oidc_callback_descriptors_state_key")
+  nonceHash   String    @map("nonce_hash")
+  redirectUri String    @map("redirect_uri")
+  requestedAt DateTime  @map("requested_at") @db.Timestamptz(3)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt  DateTime? @map("consumed_at") @db.Timestamptz(3)
+  traceId     String    @map("trace_id")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  provider OidcProviderConfig @relation(fields: [providerId], references: [providerId], onDelete: Cascade)
+
+  @@index([providerId, requestedAt], map: "oidc_callback_descriptors_provider_requested_idx")
+  @@index([expiresAt, consumedAt], map: "oidc_callback_descriptors_expiry_consumed_idx")
+  @@map("oidc_callback_descriptors")
+}
+
+model SamlProviderMetadata {
+  providerId             String   @id @map("provider_id")
+  tenantId               String   @map("tenant_id")
+  entityId               String   @map("entity_id")
+  ssoUrl                 String   @map("sso_url")
+  acsUrl                 String   @map("acs_url")
+  audience               String
+  certificateFingerprint String   @map("certificate_fingerprint")
+  enabled                Boolean  @default(true)
+  updatedAt              DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  acsRequestDescriptors SamlAcsRequestDescriptor[]
+  assertionReplays      SamlAssertionReplay[]
+
+  @@index([tenantId, enabled], map: "saml_provider_metadata_tenant_enabled_idx")
+  @@map("saml_provider_metadata")
+}
+
+model SamlAcsRequestDescriptor {
+  id          String    @id
+  providerId  String    @map("provider_id")
+  requestId   String    @unique(map: "saml_acs_request_descriptors_request_id_key") @map("request_id")
+  relayState  String    @unique(map: "saml_acs_request_descriptors_relay_state_key") @map("relay_state")
+  acsUrl      String    @map("acs_url")
+  requestedAt DateTime  @map("requested_at") @db.Timestamptz(3)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt  DateTime? @map("consumed_at") @db.Timestamptz(3)
+  traceId     String    @map("trace_id")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  provider SamlProviderMetadata @relation(fields: [providerId], references: [providerId], onDelete: Cascade)
+
+  @@index([providerId, requestedAt], map: "saml_acs_request_descriptors_provider_requested_idx")
+  @@index([expiresAt, consumedAt], map: "saml_acs_request_descriptors_expiry_consumed_idx")
+  @@map("saml_acs_request_descriptors")
+}
+
+model SamlAssertionReplay {
+  providerId  String   @map("provider_id")
+  assertionId String   @map("assertion_id")
+  requestId   String   @map("request_id")
+  subjectId   String   @map("subject_id")
+  audience    String
+  receivedAt  DateTime @map("received_at") @db.Timestamptz(3)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(3)
+  traceId     String   @map("trace_id")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  provider SamlProviderMetadata @relation(fields: [providerId], references: [providerId], onDelete: Cascade)
+
+  @@id([providerId, assertionId], map: "saml_assertion_replays_pkey")
+  @@index([providerId, receivedAt], map: "saml_assertion_replays_provider_received_idx")
+  @@index([expiresAt], map: "saml_assertion_replays_expires_at_idx")
+  @@map("saml_assertion_replays")
+}
+
+model PasswordCredential {
+  id        String   @id @default(cuid())
+  subjectId String   @map("subject_id")
+  email     String   @unique(map: "password_credentials_email_key")
+  algorithm String   @map("hash_algorithm")
+  hash      String   @map("password_hash")
+  version   Int      @map("hash_version")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@index([subjectId, updatedAt], map: "password_credentials_subject_id_updated_at_idx")
+  @@map("password_credentials")
+}
+
+model PasswordPolicy {
+  id                String   @id @default(cuid())
+  scope             String   @unique(map: "password_policies_scope_key")
+  minLength         Int      @map("min_length")
+  requireMfa        Boolean  @default(true) @map("require_mfa")
+  maxFailedAttempts Int      @map("max_failed_attempts")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@map("password_policies")
+}
+
+model CredentialAuditEvent {
+  id        String   @id
+  subjectId String   @map("subject_id")
+  action    String
+  actor     String
+  at        DateTime @db.Timestamptz(3)
+  immutable Boolean  @default(true)
+  reason    String
+  result    String
+  traceId   String   @map("trace_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([subjectId, at], map: "credential_audit_events_subject_id_at_idx")
+  @@index([action, at], map: "credential_audit_events_action_at_idx")
+  @@map("credential_audit_events")
+}
+
+model RoutingRule {
+  id                   String   @id
+  tenantId             String   @map("tenant_id")
+  channel              String
+  limitMode            String   @map("limit_mode")
+  waitThresholdSeconds Int      @map("wait_threshold_seconds")
+  priorityStrategy     String   @map("priority_strategy")
+  enabled              Boolean  @default(true)
+  updatedAt            DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, channel], map: "routing_rules_tenant_channel_key")
+  @@index([tenantId, enabled], map: "routing_rules_tenant_enabled_idx")
+  @@map("routing_rules")
+}
+
+model QueueMembership {
+  id         String   @id
+  tenantId   String   @map("tenant_id")
+  queueId    String   @map("queue_id")
+  operatorId String   @map("operator_id")
+  role       String
+  active     Boolean  @default(true)
+  updatedAt  DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, queueId, operatorId], map: "queue_memberships_tenant_queue_operator_key")
+  @@index([tenantId, queueId, active], map: "queue_memberships_tenant_queue_active_idx")
+  @@index([tenantId, operatorId], map: "queue_memberships_tenant_operator_idx")
+  @@map("queue_memberships")
+}
+
+model OperatorCapacity {
+  id              String   @id
+  tenantId        String   @map("tenant_id")
+  operatorId      String   @map("operator_id")
+  channel         String
+  chatLimit       Int      @map("chat_limit")
+  overrideAllowed Boolean  @default(false) @map("override_allowed")
+  updatedAt       DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, operatorId, channel], map: "operator_capacities_tenant_operator_channel_key")
+  @@index([tenantId, operatorId], map: "operator_capacities_tenant_operator_idx")
+  @@map("operator_capacities")
+}
+
+model RoutingAnalyticsRow {
+  id             String   @id
+  tenantId       String   @map("tenant_id")
+  eventKind      String   @map("event_kind")
+  conversationId String   @map("conversation_id")
+  channel        String
+  fromOperatorId String?  @map("from_operator_id")
+  toOperatorId   String?  @map("to_operator_id")
+  source         String
+  occurredAt     DateTime @map("occurred_at") @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, eventKind], map: "routing_analytics_rows_tenant_event_kind_idx")
+  @@index([tenantId, occurredAt], map: "routing_analytics_rows_tenant_occurred_at_idx")
+  @@index([tenantId, conversationId], map: "routing_analytics_rows_tenant_conversation_idx")
+  @@map("routing_analytics_rows")
+}
+
+model MetricDefinition {
+  id          String   @id
+  tenantId    String   @map("tenant_id")
+  key         String
+  name        String
+  description String
+  source      String
+  unit        String
+  updatedAt   DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  versions    MetricVersion[]
+  tenantOverrides MetricTenantOverride[]
+
+  @@unique([id, tenantId], map: "metric_definitions_id_tenant_key")
+  @@unique([tenantId, key], map: "metric_definitions_tenant_key_key")
+  @@index([tenantId, source], map: "metric_definitions_tenant_source_idx")
+  @@map("metric_definitions")
+}
+
+model MetricVersion {
+  id           String           @id
+  tenantId     String           @map("tenant_id")
+  definitionId String           @map("definition_id")
+  version      String
+  queryKey     String           @map("query_key")
+  status       String
+  updatedAt    DateTime         @map("updated_at") @db.Timestamptz(3)
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  definition   MetricDefinition @relation(fields: [definitionId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  tenantOverrides MetricTenantOverride[]
+
+  @@unique([id, tenantId], map: "metric_versions_id_tenant_key")
+  @@unique([tenantId, definitionId, version], map: "metric_versions_tenant_definition_version_key")
+  @@index([tenantId, definitionId, status], map: "metric_versions_tenant_definition_status_idx")
+  @@map("metric_versions")
+}
+
+model MetricTenantOverride {
+  id              String           @id
+  tenantId        String           @map("tenant_id")
+  definitionId    String           @map("definition_id")
+  metricVersionId String           @map("metric_version_id")
+  reason          String
+  updatedAt       DateTime         @map("updated_at") @db.Timestamptz(3)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  definition      MetricDefinition @relation(fields: [definitionId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  metricVersion   MetricVersion    @relation(fields: [metricVersionId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([tenantId, definitionId], map: "metric_tenant_overrides_tenant_definition_key")
+  @@index([tenantId, metricVersionId], map: "metric_tenant_overrides_tenant_version_idx")
+  @@map("metric_tenant_overrides")
+}
+
+model SavedReportTemplate {
+  id                    String   @id
+  tenantId              String   @map("tenant_id")
+  ownerUserId           String   @map("owner_user_id")
+  name                  String
+  reportType            String   @map("report_type")
+  columns               String[]
+  filters               Json
+  visibilityScope       String   @map("visibility_scope")
+  visibilityRoles       String[] @map("visibility_roles")
+  visibilityPermissions String[] @map("visibility_permissions")
+  updatedAt             DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, visibilityScope], map: "saved_report_templates_tenant_visibility_idx")
+  @@index([tenantId, ownerUserId], map: "saved_report_templates_tenant_owner_idx")
+  @@index([tenantId, reportType], map: "saved_report_templates_tenant_report_type_idx")
+  @@map("saved_report_templates")
+}
+
+model ReportExportJob {
+  id                      String   @id
+  name                    String
+  format                  String
+  period                  String
+  statusKey               String   @map("status_key")
+  status                  String
+  progress                Int
+  requestedBy             String   @map("requested_by")
+  createdAt               DateTime @map("created_at") @db.Timestamptz(3)
+  rows                    Int
+  columns                 String[] @default([])
+  filters                 Json     @default("{}")
+  backendQueueId          String?  @map("backend_queue_id")
+  auditId                 String   @map("audit_id")
+  metricDefinitionVersion String?  @map("metric_definition_version")
+  queue                   String?
+  fileName                String?  @map("file_name")
+  failureCode             String?  @map("failure_code")
+  failureMessage          String?  @map("failure_message")
+  deadLetteredAt          DateTime? @map("dead_lettered_at") @db.Timestamptz(3)
+  updatedAt               DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([queue, statusKey, createdAt], map: "report_export_jobs_queue_status_created_idx")
+  @@index([statusKey, createdAt], map: "report_export_jobs_status_created_idx")
+  @@map("report_export_jobs")
+}
+
+model ReportIdempotencyKey {
+  key         String   @id
+  fingerprint String
+  jobId       String   @map("job_id")
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([jobId], map: "report_idempotency_keys_job_idx")
+  @@map("report_idempotency_keys")
+}
+
+model PublicApiKey {
+  keyId       String   @id @map("key_id")
+  tenantId    String   @map("tenant_id")
+  environment String
+  name        String
+  owner       String
+  keyPreview  String   @map("key_preview")
+  secretHash  String   @unique(map: "public_api_keys_secret_hash_key") @map("secret_hash")
+  scopes      String[]
+  status      String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  revealState PublicApiKeyRevealState?
+  rotationAuditEvents PublicApiKeyRotationAuditEvent[]
+
+  @@index([tenantId, environment, status], map: "public_api_keys_tenant_environment_status_idx")
+  @@index([tenantId, keyId], map: "public_api_keys_tenant_key_idx")
+  @@map("public_api_keys")
+}
+
+model PublicApiKeyRevealState {
+  keyId      String    @id @map("key_id")
+  keyPreview String    @map("key_preview")
+  status     String
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  key        PublicApiKey @relation(fields: [keyId], references: [keyId], onDelete: Cascade)
+
+  @@index([status, createdAt], map: "public_api_key_reveal_states_status_created_idx")
+  @@index([consumedAt], map: "public_api_key_reveal_states_consumed_at_idx")
+  @@map("public_api_key_reveal_states")
+}
+
+model PublicApiKeyRotationAuditEvent {
+  auditId     String   @id @map("audit_id")
+  rotationId  String   @map("rotation_id")
+  keyId       String   @map("key_id")
+  environment String
+  action      String
+  status      String
+  keyPreview  String   @map("key_preview")
+  at          DateTime @db.Timestamptz(3)
+  immutable   Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  key         PublicApiKey @relation(fields: [keyId], references: [keyId], onDelete: Restrict)
+
+  @@index([keyId, at], map: "public_api_key_rotation_audit_events_key_at_idx")
+  @@index([rotationId], map: "public_api_key_rotation_audit_events_rotation_idx")
+  @@index([action, at], map: "public_api_key_rotation_audit_events_action_at_idx")
+  @@map("public_api_key_rotation_audit_events")
+}
+
+model SignedWebhookReplayNonce {
+  endpointId String   @map("endpoint_id")
+  nonce      String
+  firstSeenAt DateTime @map("first_seen_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([endpointId, nonce], map: "signed_webhook_replay_nonces_pkey")
+  @@index([endpointId, firstSeenAt], map: "signed_webhook_replay_nonces_endpoint_first_seen_idx")
+  @@map("signed_webhook_replay_nonces")
+}
+
+model WebhookDeliveryJournalEntry {
+  deliveryId    String    @id @map("delivery_id")
+  tenantId      String    @map("tenant_id")
+  endpointId    String    @map("endpoint_id")
+  eventType     String    @map("event_type")
+  idempotencyKey String   @unique(map: "webhook_delivery_journal_idempotency_key_key") @map("idempotency_key")
+  payloadRef    String    @map("payload_ref")
+  queue         String
+  status        String
+  targetUrl     String    @map("target_url")
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime? @map("last_attempt_at") @db.Timestamptz(3)
+  lastError     Json?     @map("last_error")
+  lockedAt      DateTime? @map("locked_at") @db.Timestamptz(3)
+  nextAttemptAt DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  deadLetteredAt DateTime? @map("dead_lettered_at") @db.Timestamptz(3)
+  traceId       String    @map("trace_id")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status, queue, nextAttemptAt], map: "webhook_delivery_journal_status_queue_next_attempt_idx")
+  @@index([status, queue, lockedAt], map: "webhook_delivery_journal_status_queue_locked_idx")
+  @@index([tenantId, endpointId, status], map: "webhook_delivery_journal_tenant_endpoint_status_idx")
+  @@index([status, deadLetteredAt], map: "webhook_delivery_journal_dead_letter_status_idx")
+  @@map("webhook_delivery_journal")
+}
+
+model BotScenario {
+  id            String   @id
+  tenantId      String   @map("tenant_id")
+  name          String
+  schemaVersion String   @map("schema_version")
+  status        String
+  channels      String[] @default([])
+  flowNodes     Json     @map("flow_nodes")
+  flowEdges     Json     @map("flow_edges")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  versions      BotScenarioVersion[]
+
+  @@unique([tenantId, id], map: "bot_scenarios_tenant_id_key")
+  @@index([tenantId, status], map: "bot_scenarios_tenant_status_idx")
+  @@index([tenantId, updatedAt], map: "bot_scenarios_tenant_updated_at_idx")
+  @@map("bot_scenarios")
+}
+
+model BotScenarioVersion {
+  versionId      String      @id @map("version_id")
+  tenantId       String      @map("tenant_id")
+  scenarioId     String      @map("scenario_id")
+  runtimeVersion String?     @map("runtime_version")
+  status         String
+  flowNodes      Json        @map("flow_nodes")
+  flowEdges      Json        @map("flow_edges")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  scenario       BotScenario @relation(fields: [tenantId, scenarioId], references: [tenantId, id], onDelete: Cascade)
+  publishAuditEvents BotPublishAuditEvent[]
+
+  @@unique([tenantId, scenarioId, versionId], map: "bot_scenario_versions_tenant_scenario_version_key")
+  @@index([tenantId, scenarioId, status], map: "bot_scenario_versions_tenant_scenario_status_idx")
+  @@index([tenantId, createdAt], map: "bot_scenario_versions_tenant_created_at_idx")
+  @@map("bot_scenario_versions")
+}
+
+model BotPublishAuditEvent {
+  auditId        String             @id @map("audit_id")
+  tenantId       String             @map("tenant_id")
+  scenarioId     String             @map("scenario_id")
+  versionId      String             @map("version_id")
+  action         String
+  actor          String
+  idempotencyKey String             @unique(map: "bot_publish_audit_events_idempotency_key_key") @map("idempotency_key")
+  runtimeVersion String             @map("runtime_version")
+  immutable      Boolean            @default(true)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  version        BotScenarioVersion @relation(fields: [tenantId, scenarioId, versionId], references: [tenantId, scenarioId, versionId], onDelete: Restrict)
+
+  @@index([tenantId, scenarioId, createdAt], map: "bot_publish_audit_events_tenant_scenario_created_idx")
+  @@map("bot_publish_audit_events")
+}
+
+model ProactiveExecutionWindow {
+  windowId   String   @id @map("window_id")
+  tenantId   String   @map("tenant_id")
+  ruleId     String   @map("rule_id")
+  timezone   String
+  startsAt   String   @map("starts_at")
+  endsAt     String   @map("ends_at")
+  daysOfWeek Int[]    @default([]) @map("days_of_week")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, ruleId, windowId], map: "proactive_execution_windows_tenant_rule_window_key")
+  @@index([tenantId, ruleId, active], map: "proactive_execution_windows_tenant_rule_active_idx")
+  @@index([tenantId, active], map: "proactive_execution_windows_tenant_active_idx")
+  @@map("proactive_execution_windows")
+}
+
+model ProactiveFrequencyCap {
+  capId     String   @id @map("cap_id")
+  tenantId  String   @map("tenant_id")
+  ruleId    String   @map("rule_id")
+  period    String
+  limit     Int
+  used      Int      @default(0)
+  resetAt   DateTime @map("reset_at") @db.Timestamptz(3)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, ruleId, capId], map: "proactive_frequency_caps_tenant_rule_cap_key")
+  @@index([tenantId, ruleId, active], map: "proactive_frequency_caps_tenant_rule_active_idx")
+  @@index([tenantId, active, resetAt], map: "proactive_frequency_caps_tenant_active_reset_idx")
+  @@map("proactive_frequency_caps")
+}
+
+model ProactiveExperimentAssignment {
+  assignmentId String   @id @map("assignment_id")
+  tenantId     String   @map("tenant_id")
+  ruleId       String   @map("rule_id")
+  experimentId String   @map("experiment_id")
+  subjectId    String   @map("subject_id")
+  variant      String
+  assignedAt   DateTime @map("assigned_at") @db.Timestamptz(3)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, ruleId, subjectId], map: "proactive_experiment_assignments_tenant_rule_subject_key")
+  @@index([tenantId, ruleId, variant], map: "proactive_experiment_assignments_tenant_rule_variant_idx")
+  @@index([tenantId, subjectId], map: "proactive_experiment_assignments_tenant_subject_idx")
+  @@map("proactive_experiment_assignments")
+}
+
+model QualityRating {
+  ratingId        String   @map("rating_id")
+  tenantId        String   @map("tenant_id")
+  conversationId  String   @map("conversation_id")
+  channel         String
+  operator        String
+  clientId        String?  @map("client_id")
+  topic           String?
+  scale           String
+  score           Float?
+  auditId         String   @map("audit_id")
+  realtimeEventId String   @map("realtime_event_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([tenantId, ratingId], map: "quality_ratings_pkey")
+  @@unique([tenantId, auditId], map: "quality_ratings_tenant_audit_key")
+  @@unique([tenantId, realtimeEventId], map: "quality_ratings_tenant_realtime_event_key")
+  @@index([tenantId, conversationId, createdAt], map: "quality_ratings_tenant_conversation_created_idx")
+  @@index([tenantId, channel, operator, createdAt], map: "quality_ratings_tenant_channel_operator_created_idx")
+  @@map("quality_ratings")
+}
+
+model ManualQaReview {
+  reviewId       String   @map("review_id")
+  tenantId       String   @map("tenant_id")
+  conversationId String   @map("conversation_id")
+  reviewer       String
+  score          Float?
+  criteria       Json     @default("{}")
+  overrideReason String?  @map("override_reason")
+  auditId        String   @map("audit_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([tenantId, reviewId], map: "manual_qa_reviews_pkey")
+  @@unique([tenantId, auditId], map: "manual_qa_reviews_tenant_audit_key")
+  @@index([tenantId, conversationId, createdAt], map: "manual_qa_reviews_tenant_conversation_created_idx")
+  @@index([tenantId, reviewer, createdAt], map: "manual_qa_reviews_tenant_reviewer_created_idx")
+  @@map("manual_qa_reviews")
+}
+
+model AiScoringAudit {
+  auditId          String   @map("audit_id")
+  tenantId         String   @map("tenant_id")
+  conversationId   String   @map("conversation_id")
+  providerId       String   @map("provider_id")
+  providerResultId String?  @map("provider_result_id")
+  queue            String
+  score            Float?
+  status           String
+  traceId          String   @map("trace_id")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([tenantId, auditId], map: "ai_scoring_audits_pkey")
+  @@index([tenantId, conversationId, createdAt], map: "ai_scoring_audits_tenant_conversation_created_idx")
+  @@index([tenantId, queue, status, createdAt], map: "ai_scoring_audits_tenant_queue_status_created_idx")
+  @@index([tenantId, traceId], map: "ai_scoring_audits_tenant_trace_idx")
+  @@index([tenantId, providerId, providerResultId], map: "ai_scoring_audits_tenant_provider_result_idx")
+  @@map("ai_scoring_audits")
+}
+
+model PlatformTelemetrySample {
+  id          String   @id
+  componentId String   @map("component_id")
+  tenantId    String?  @map("tenant_id")
+  metricKey   String   @map("metric_key")
+  sampledAt   DateTime @map("sampled_at") @db.Timestamptz(3)
+  source      String
+  tags        Json     @default("{}")
+  unit        String
+  value       Float
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([componentId, metricKey, sampledAt], map: "platform_telemetry_samples_component_metric_sampled_idx")
+  @@index([tenantId, metricKey, sampledAt], map: "platform_telemetry_samples_tenant_metric_sampled_idx")
+  @@index([sampledAt], map: "platform_telemetry_samples_sampled_at_idx")
+  @@map("platform_telemetry_samples")
+}
+
+model PlatformHealthRollup {
+  id           String   @id
+  componentId  String   @map("component_id")
+  windowStart  DateTime @map("window_start") @db.Timestamptz(3)
+  windowEnd    DateTime @map("window_end") @db.Timestamptz(3)
+  generatedAt  DateTime @map("generated_at") @db.Timestamptz(3)
+  status       String
+  availability Float
+  errorRate    Float    @map("error_rate")
+  latencyP95Ms Int      @map("latency_p95_ms")
+  sampleCount  Int      @map("sample_count")
+  incidentIds  Json     @default("[]") @map("incident_ids")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([componentId, windowEnd], map: "platform_health_rollups_component_window_end_idx")
+  @@index([status, windowEnd], map: "platform_health_rollups_status_window_end_idx")
+  @@index([windowEnd], map: "platform_health_rollups_window_end_idx")
+  @@map("platform_health_rollups")
+}
+
+model PlatformAlertRoutingRule {
+  id                 String   @id
+  componentIds       Json     @default("[]") @map("component_ids")
+  statuses           Json     @default("[]")
+  severities         Json     @default("[]")
+  destinationChannel String   @map("destination_channel")
+  destinationTarget  String   @map("destination_target")
+  enabled            Boolean  @default(true)
+  updatedAt          DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([enabled, updatedAt], map: "platform_alert_routing_rules_enabled_updated_idx")
+  @@index([destinationChannel], map: "platform_alert_routing_rules_destination_channel_idx")
+  @@map("platform_alert_routing_rules")
+}
+
+model FeatureFlagRule {
+  id               String   @id
+  flagId           String   @map("flag_id")
+  flagKey          String   @map("flag_key")
+  targeting        String
+  status           String
+  rollout          Int
+  bucketSalt       String   @map("bucket_salt")
+  segments         Json     @default("[]")
+  enabledTenantIds Json     @default("[]") @map("enabled_tenant_ids")
+  variants         Json     @default("[]")
+  updatedAt        DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([flagId, targeting], map: "feature_flag_rules_flag_targeting_idx")
+  @@index([flagKey], map: "feature_flag_rules_flag_key_idx")
+  @@map("feature_flag_rules")
+}
+
+model PlatformAuditRow {
+  id             String   @id
+  mutationKind   String   @map("mutation_kind")
+  action         String
+  actor          String
+  actorName      String   @map("actor_name")
+  target         String
+  reason         String
+  result         String
+  traceId        String   @map("trace_id")
+  idempotencyKey String   @unique @map("idempotency_key")
+  fingerprint    String
+  immutable      Boolean  @default(true)
+  payload        Json
+  createdAt      DateTime @map("created_at") @db.Timestamptz(3)
+
+  @@index([mutationKind, createdAt], map: "platform_audit_rows_mutation_created_idx")
+  @@index([mutationKind, action, target, createdAt], map: "platform_audit_rows_ack_action_target_idx")
+  @@index([target, createdAt], map: "platform_audit_rows_target_created_idx")
+  @@map("platform_audit_rows")
+}
+
+model PlatformOutboxRow {
+  id             String   @id
+  mutationKind   String   @map("mutation_kind")
+  aggregateType  String   @map("aggregate_type")
+  aggregateId    String   @map("aggregate_id")
+  target         String
+  queue          String
+  type           String
+  status         String
+  traceId        String   @map("trace_id")
+  idempotencyKey String   @unique @map("idempotency_key")
+  fingerprint    String
+  payload        Json
+  createdAt      DateTime @map("created_at") @db.Timestamptz(3)
+
+  @@index([mutationKind, createdAt], map: "platform_outbox_rows_mutation_created_idx")
+  @@index([queue, status, createdAt], map: "platform_outbox_rows_queue_status_created_idx")
+  @@map("platform_outbox_rows")
+}
+
+model OperationsPostgresRestoreCheckResult {
+  id             String   @id
+  drillId        String   @map("drill_id")
+  restoreCheckId String   @map("restore_check_id")
+  status         String
+  command        String
+  outputSummary  String   @map("output_summary")
+  durationMs     Int      @map("duration_ms")
+  executedAt     DateTime @map("executed_at") @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([drillId, executedAt], map: "operations_postgres_restore_check_results_drill_executed_idx")
+  @@index([restoreCheckId], map: "operations_postgres_restore_check_results_restore_check_id_idx")
+  @@map("operations_postgres_restore_check_results")
+}
+
+model OperationsObjectStorageRestoreCheckResult {
+  id               String   @id
+  drillId          String   @map("drill_id")
+  restoreCheckId   String   @map("restore_check_id")
+  artifactId       String   @map("artifact_id")
+  checkKind        String   @map("check_kind")
+  status           String
+  detail           Json
+  verifiedAt       DateTime @map("verified_at") @db.Timestamptz(3)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([drillId, checkKind, verifiedAt], map: "operations_object_storage_restore_check_results_drill_kind_idx")
+  @@index([artifactId, checkKind], map: "ops_object_restore_artifact_kind_idx")
+  @@index([restoreCheckId], map: "ops_object_restore_check_id_idx")
+  @@map("operations_object_storage_restore_check_results")
+}
+
+model OutboxEvent {
+  id            String    @id
+  aggregateId   String    @map("aggregate_id")
+  aggregateType String    @map("aggregate_type")
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error")
+  lockedAt      DateTime? @map("locked_at") @db.Timestamptz(3)
+  nextAttemptAt DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  deadLetteredAt DateTime? @map("dead_lettered_at") @db.Timestamptz(3)
+  deadLetterReplayAuditEvents Json @default("[]") @map("dead_letter_replay_audit_events")
+  occurredAt    DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  payload       Json
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(3)
+  queue         String
+  status        String
+  traceId       String    @map("trace_id")
+  type          String
+
+  @@index([status, queue, occurredAt], map: "outbox_events_status_queue_occurred_at_idx")
+  @@index([status, queue, nextAttemptAt], map: "outbox_events_status_queue_next_attempt_at_idx")
+  @@map("outbox_events")
+}

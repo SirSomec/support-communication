@@ -1,93 +1,110 @@
-import { auditService } from "./auditService.js";
-import { automationService } from "./automationService.js";
-import { clientService } from "./clientService.js";
-import { createEnvelope } from "./mockBackend.js";
-import { dialogService } from "./dialogService.js";
-import { integrationService } from "./integrationService.js";
-import { reportService } from "./reportService.js";
-import { visitorService } from "./visitorService.js";
-
 const SERVICE = "backendIntegrationService";
+const OPERATION = "fetchBackendIntegrationSnapshot";
 
-const loadedServiceRegistry = [
-  dialogService,
-  clientService,
-  reportService,
-  integrationService,
-  visitorService,
-  automationService,
-  auditService
+const serviceReadiness = [
+  ["dialogService", ["fetchDialogs", "transitionConversationStatus", "uploadAttachment", "createOutboundConversationRequest"]],
+  ["clientService", ["fetchClientProfiles", "mergeClientProfiles", "unmergeClientProfile"]],
+  ["templateService", ["fetchTemplates", "saveTemplate"]],
+  ["reportService", ["fetchReportWorkspace", "requestReportExport", "retryReportExport", "getExportFileDescriptor"]],
+  ["integrationService", ["fetchIntegrationWorkspace", "testChannelConnection", "rotateApiKey", "replayWebhookDelivery", "revokeSecuritySession"]],
+  ["permissionService", ["validatePermission", "fetchPermissionModel"]],
+  ["visitorService", ["fetchVisitorWorkspace", "saveProactiveRule", "triggerRescueReturn"]],
+  ["automationService", ["fetchAutomationWorkspace", "validateBotFlowImport", "publishBotScenario", "testBotScenario"]],
+  ["qualityService", ["fetchQualityWorkspace", "scoreDraftResponse"]],
+  ["auditService", ["fetchAuditEvents", "exportAuditEvents", "redactAuditEvent"]],
+  ["authService", ["getAuthState", "login", "logout"]],
+  ["tenantService", ["fetchTenants", "fetchTenantDetail", "updateTenantStatus"]],
+  ["billingService", ["fetchTariffs", "previewTariffChange", "changeTenantTariff"]],
+  ["platformMonitoringService", ["fetchPlatformSnapshot", "fetchComponentDrilldown", "acknowledgeComponentAlert"]],
+  ["supportAdminService", ["fetchSupportUsers", "resetTwoFactor", "forceLogout", "blockUser", "resendInvite", "startImpersonation", "stopImpersonation"]],
+  ["incidentService", ["fetchIncidents", "fetchIncidentDetail", "addIncidentUpdate"]],
+  ["featureFlagService", ["fetchFeatureFlags", "previewFlagChange", "updateFeatureFlag"]]
 ];
 
-const lazyServiceRegistry = [
-  () => import("./templateService.js").then((module) => module.templateService),
-  () => import("./permissionService.js").then((module) => module.permissionService),
-  () => import("./qualityService.js").then((module) => module.qualityService),
-  () => import("./authService.js").then((module) => module.authService),
-  () => import("./tenantService.js").then((module) => module.tenantService),
-  () => import("./billingService.js").then((module) => module.billingService),
-  () => import("./platformMonitoringService.js").then((module) => module.platformMonitoringService),
-  () => import("./supportAdminService.js").then((module) => module.supportAdminService),
-  () => import("./incidentService.js").then((module) => module.incidentService),
-  () => import("./featureFlagService.js").then((module) => module.featureFlagService)
+const routeGaps = [
+  {
+    service: "auditService",
+    operations: ["exportAuditEvents", "redactAuditEvent"],
+    routes: [
+      "POST /service-admin/audit-events/exports",
+      "POST /service-admin/audit-events/:eventId/redactions"
+    ]
+  }
+];
+
+const backlogCoverage = [
+  "permission_denial_audit",
+  "client_merge_graph",
+  "report_export_queue",
+  "channel_tests_webhook_replay",
+  "key_rotation_session_revoke",
+  "proactive_caps_rescue_countdown",
+  "bot_publish_import_runtime",
+  "quality_scoring_telemetry",
+  "audit_export_redaction",
+  "auth_session_2fa_invite",
+  "tenant_billing_quota_management",
+  "platform_monitoring_incidents",
+  "support_admin_impersonation",
+  "feature_flag_rollout_audit"
 ];
 
 export const backendIntegrationService = {
   async fetchBackendIntegrationSnapshot() {
-    const lazyServiceAdapters = await Promise.all(lazyServiceRegistry.map((loadService) => loadService()));
-    const serviceAdapters = [
-      loadedServiceRegistry[0],
-      loadedServiceRegistry[1],
-      lazyServiceAdapters[0],
-      loadedServiceRegistry[2],
-      loadedServiceRegistry[3],
-      lazyServiceAdapters[1],
-      loadedServiceRegistry[4],
-      loadedServiceRegistry[5],
-      lazyServiceAdapters[2],
-      loadedServiceRegistry[6],
-      ...lazyServiceAdapters.slice(3)
-    ];
-    const services = serviceAdapters.map((service) => service.getReadiness());
-
-    return createEnvelope({
+    return {
       service: SERVICE,
-      operation: "fetchBackendIntegrationSnapshot",
+      operation: OPERATION,
+      status: "ok",
       partial: true,
+      traceId: `trc_${SERVICE}_${Date.now()}`,
+      updatedAt: new Date().toISOString(),
       data: {
-        services,
+        services: serviceReadiness.map(([id, operations]) => buildServiceReadiness(id, operations)),
         contract: {
           envelope: ["service", "operation", "status", "traceId", "states", "meta", "data", "error"],
           states: ["loading", "empty", "error", "partial"],
           realBackendBoundary: "replace src/services adapters with API clients"
         },
-        routeGaps: [
-          {
-            service: "auditService",
-            operations: ["exportAuditEvents", "redactAuditEvent"],
-            routes: [
-              "POST /service-admin/audit-events/exports",
-              "POST /service-admin/audit-events/:eventId/redactions"
-            ]
-          }
-        ],
-        backlogCoverage: [
-          "permission_denial_audit",
-          "client_merge_graph",
-          "report_export_queue",
-          "channel_tests_webhook_replay",
-          "key_rotation_session_revoke",
-          "proactive_caps_rescue_countdown",
-          "bot_publish_import_runtime",
-          "quality_scoring_telemetry",
-          "audit_export_redaction",
-          "auth_session_2fa_invite",
-          "tenant_billing_quota_management",
-          "platform_monitoring_incidents",
-          "support_admin_impersonation",
-          "feature_flag_rollout_audit"
-        ]
+        routeGaps,
+        backlogCoverage
+      },
+      error: null,
+      states: {
+        loading: false,
+        empty: false,
+        error: false,
+        partial: true
+      },
+      meta: {
+        source: "api-client"
       }
-    });
+    };
   }
 };
+
+function buildServiceReadiness(id, operations) {
+  if (id === "auditService") {
+    return {
+      id,
+      status: "partial",
+      operations,
+      traceId: `trc_${id}_partial`,
+      states: ["loading", "empty", "error", "partial"],
+      note: "fetchAuditEvents is connected to API Gateway; audit export and redaction routes are not exposed yet.",
+      backlog: ["audit_export_route", "audit_redaction_route"],
+      meta: {
+        source: "api-gateway",
+        routeGaps: routeGaps[0].routes
+      }
+    };
+  }
+
+  return {
+    id,
+    status: "ready",
+    operations,
+    traceId: `trc_${id}_ready`,
+    states: ["loading", "empty", "error", "partial"],
+    note: "Connected to API Gateway routes."
+  };
+}

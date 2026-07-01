@@ -68,6 +68,35 @@ function envelope(service, operation, data = {}) {
 }
 
 describe("frontend backend service contracts", () => {
+  it("service adapters do not import mockBackend or static data fixtures", () => {
+    const serviceFiles = [
+      "auditService.js",
+      "authService.js",
+      "automationService.js",
+      "backendIntegrationService.js",
+      "billingService.js",
+      "clientService.js",
+      "dialogService.js",
+      "featureFlagService.js",
+      "incidentService.js",
+      "integrationService.js",
+      "permissionService.js",
+      "platformMonitoringService.js",
+      "qualityService.js",
+      "reportService.js",
+      "supportAdminService.js",
+      "templateService.js",
+      "tenantService.js",
+      "visitorService.js"
+    ];
+
+    for (const fileName of serviceFiles) {
+      const source = readFileSync(new URL(`../src/services/${fileName}`, import.meta.url), "utf8");
+      assert.doesNotMatch(source, /mockBackend\.js/);
+      assert.doesNotMatch(source, /\.\.\/data/);
+    }
+  });
+
   it("exposes one backend envelope per planned service adapter", async () => {
     const response = await backendIntegrationService.fetchBackendIntegrationSnapshot();
 

@@ -911,7 +911,7 @@ git commit -m "feat: connect admin service adapters to API gateway"
 - Modify: `src/services/backendIntegrationService.js`
 - Modify: `tests/backend-services.test.js`
 
-- [ ] **Step 1: Replace dynamic mock registry with static API readiness**
+- [x] **Step 1: Replace dynamic mock registry with static API readiness**
 
 Change `src/services/backendIntegrationService.js` so `fetchBackendIntegrationSnapshot()` returns a local readiness envelope with `meta.source: "api-client"` and every connected adapter marked `ready`. Use this registry:
 
@@ -937,7 +937,7 @@ const serviceReadiness = [
 ];
 ```
 
-- [ ] **Step 2: Add a no-mock-import regression test**
+- [x] **Step 2: Add a no-mock-import regression test**
 
 In `tests/backend-services.test.js`, add:
 
@@ -971,13 +971,13 @@ it("service adapters do not import mockBackend or static data fixtures", () => {
 });
 ```
 
-- [ ] **Step 3: Run service tests**
+- [x] **Step 3: Run service tests**
 
 Run: `npm run test:services`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/services/backendIntegrationService.js tests/backend-services.test.js

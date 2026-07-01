@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { describe, it } from "node:test";
+import { afterEach, describe, it, mock } from "node:test";
 import {
   auditService,
   authService,
@@ -8,6 +8,7 @@ import {
   backendIntegrationService,
   billingService,
   clientService,
+  dialogService,
   featureFlagService,
   incidentService,
   integrationService,
@@ -19,6 +20,51 @@ import {
   tenantService,
   visitorService
 } from "../src/services/index.js";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  mock.restoreAll();
+  globalThis.fetch = originalFetch;
+});
+
+function installFetchMock(responseEnvelope) {
+  globalThis.fetch = mock.fn(async () => (
+    new Response(JSON.stringify(responseEnvelope), {
+      headers: { "content-type": "application/json" },
+      status: 200
+    })
+  ));
+}
+
+function assertLastRequest({ body, method, url }) {
+  assert.equal(globalThis.fetch.mock.callCount(), 1);
+  const [actualUrl, options = {}] = globalThis.fetch.mock.calls[0].arguments;
+
+  assert.equal(actualUrl, url);
+  assert.equal(options.method, method);
+
+  if (body === undefined) {
+    assert.equal(options.body, undefined);
+  } else {
+    assert.deepEqual(JSON.parse(options.body), body);
+  }
+}
+
+function envelope(service, operation, data = {}) {
+  return {
+    service,
+    operation,
+    status: "ok",
+    partial: false,
+    traceId: `trc_${service}_${operation}`,
+    updatedAt: "2026-07-01T00:00:00.000Z",
+    data,
+    error: null,
+    states: { loading: false, empty: false, error: false, partial: false },
+    meta: { source: "api-gateway" }
+  };
+}
 
 describe("frontend backend service contracts", () => {
   it("exposes one backend envelope per planned service adapter", async () => {
@@ -80,32 +126,124 @@ describe("frontend backend service contracts", () => {
     assert.ok(snapshot.data.backlogCoverage.includes("feature_flag_rollout_audit"));
   });
 
-  it("auth service models session lifecycle and auth audit", async () => {
-    const passwordOnly = await authService.login({
-      email: "service-admin@example.com",
-      password: "correct-password"
-    });
+  it("auth service calls API Gateway routes", async () => {
+    const cases = [
+      [
+        () => authService.getAuthState(),
+        "/api/v1/auth/state",
+        "GET",
+        undefined,
+        "getAuthState",
+        { authenticated: false, authState: "anonymous" }
+      ],
+      [
+        () => authService.login({
+          email: "service-admin@example.com",
+          password: "correct-password"
+        }),
+        "/api/v1/auth/login",
+        "POST",
+        {
+          email: "service-admin@example.com",
+          password: "correct-password"
+        },
+        "login",
+        { authState: "mfa_required" }
+      ],
+      [
+        () => authService.logout({ reason: "QA logout" }),
+        "/api/v1/auth/logout",
+        "POST",
+        { reason: "QA logout" },
+        "logout",
+        { authenticated: false }
+      ]
+    ];
 
-    assert.equal(passwordOnly.service, "authService");
-    assert.equal(passwordOnly.status, "ok");
-    assert.equal(passwordOnly.partial, true);
-    assert.equal(passwordOnly.data.authState, "mfa_required");
-    assert.match(passwordOnly.data.mfaChallengeId, /^mfa_/);
+    for (const [callService, expectedUrl, expectedMethod, expectedBody, expectedOperation, data] of cases) {
+      installFetchMock(envelope("authService", expectedOperation, data));
 
-    const verified = await authService.login({
-      email: "service-admin@example.com",
-      password: "correct-password",
-      otp: "123456"
-    });
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, "authService");
+      assert.equal(response.operation, expectedOperation);
+      assert.deepEqual(response.data, data);
+    }
+  });
 
-    assert.equal(verified.status, "ok");
-    assert.equal(verified.data.authenticated, true);
-    assert.equal(verified.data.session.authState, "mfa_verified");
-    assert.match(verified.data.auditEvent.id, /^evt_auth_/);
+  it("dialog service calls API Gateway routes", async () => {
+    const cases = [
+      [
+        () => dialogService.fetchDialogs({ page: 1, pageSize: 25 }),
+        "/api/v1/dialogs?page=1&pageSize=25",
+        "GET",
+        undefined,
+        "fetchDialogs",
+        { items: [], pagination: { page: 1, pageSize: 25, total: 0 } }
+      ],
+      [
+        () => dialogService.transitionConversationStatus({
+          conversationId: "conv/with space",
+          nextStatus: "closed",
+          reason: "Resolved"
+        }),
+        "/api/v1/dialogs/conv%2Fwith%20space/status",
+        "PATCH",
+        { nextStatus: "closed", reason: "Resolved" },
+        "transitionConversationStatus",
+        { conversationId: "conv/with space", nextStatus: "closed" }
+      ],
+      [
+        () => dialogService.uploadAttachment({
+          channel: "SDK",
+          fileName: "invoice.pdf",
+          sizeBytes: 2048
+        }),
+        "/api/v1/dialogs/attachments",
+        "POST",
+        { channel: "SDK", fileName: "invoice.pdf", sizeBytes: 2048 },
+        "uploadAttachment",
+        { id: "attachment_1", storageState: "upload_queued" }
+      ],
+      [
+        () => dialogService.createOutboundConversationRequest({
+          channel: "Telegram",
+          phone: "+7 900 123-45-67",
+          topic: "Delivery follow-up",
+          clientName: "Queue Client",
+          message: "Follow up"
+        }),
+        "/api/v1/dialogs/outbound",
+        "POST",
+        {
+          channel: "Telegram",
+          phone: "+7 900 123-45-67",
+          topic: "Delivery follow-up",
+          clientName: "Queue Client",
+          message: "Follow up"
+        },
+        "createOutboundConversationRequest",
+        { backendQueueId: "outbound_1", status: "queued" }
+      ]
+    ];
 
-    const logout = await authService.logout({ reason: "QA logout" });
-    assert.equal(logout.data.authenticated, false);
-    assert.equal(logout.data.auditEvent.reason, "QA logout");
+    for (const [callService, expectedUrl, expectedMethod, expectedBody, expectedOperation, data] of cases) {
+      installFetchMock(envelope("dialogService", expectedOperation, data));
+
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, "dialogService");
+      assert.equal(response.operation, expectedOperation);
+      assert.deepEqual(response.data, data);
+    }
   });
 
   it("tenant and billing services enforce scope and tariff preview", async () => {

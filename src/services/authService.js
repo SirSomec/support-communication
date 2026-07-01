@@ -1,92 +1,30 @@
-import { serviceAdminSession } from "../data/serviceAdmin.js";
-import { addMinutes, createEnvelope, makeAuditId } from "./mockBackend.js";
+import { apiRequest } from "./apiClient.js";
 
 const SERVICE = "authService";
 
 export const authService = {
   async getAuthState() {
-    return createEnvelope({
-      service: SERVICE,
+    return apiRequest("/auth/state", {
       operation: "getAuthState",
-      data: {
-        authenticated: true,
-        session: serviceAdminSession,
-        states: ["anonymous", "password_verified", "mfa_required", "mfa_verified"],
-        impersonating: false
-      }
+      service: SERVICE
     });
   },
 
-  async login({ email, otp, password } = {}) {
-    const hasPassword = Boolean(password);
-    const hasOtp = Boolean(otp);
-
-    if (!hasPassword) {
-      return createEnvelope({
-        service: SERVICE,
-        operation: "login",
-        status: "invalid",
-        data: {
-          authenticated: false,
-          authState: "anonymous",
-          nextStep: "password"
-        },
-        error: { code: "password_required", message: "Для входа в демо-режиме нужен пароль." }
-      });
-    }
-
-    if (!hasOtp) {
-      return createEnvelope({
-        service: SERVICE,
-        operation: "login",
-        partial: true,
-        data: {
-          authenticated: false,
-          authState: "mfa_required",
-          email,
-          mfaChallengeId: `mfa_${Date.now().toString(36)}`,
-          nextStep: "otp"
-        }
-      });
-    }
-
-    return createEnvelope({
-      service: SERVICE,
+  async login(payload = {}) {
+    return apiRequest("/auth/login", {
+      body: payload,
+      method: "POST",
       operation: "login",
-      data: {
-        authenticated: true,
-        authState: "mfa_verified",
-        session: {
-          ...serviceAdminSession,
-          adminEmail: email ?? "service-admin@example.com",
-          mfaVerifiedAt: new Date().toISOString(),
-          expiresAt: addMinutes(new Date(), 240).toISOString()
-        },
-        auditEvent: {
-          id: makeAuditId("auth"),
-          action: "service_admin.login",
-          immutable: true,
-          result: "ok"
-        }
-      }
+      service: SERVICE
     });
   },
 
-  async logout({ reason = "Администратор сервиса вышел из системы" } = {}) {
-    return createEnvelope({
-      service: SERVICE,
+  async logout(payload = {}) {
+    return apiRequest("/auth/logout", {
+      body: payload,
+      method: "POST",
       operation: "logout",
-      data: {
-        authenticated: false,
-        authState: "anonymous",
-        reason,
-        auditEvent: {
-          id: makeAuditId("auth_logout"),
-          action: "service_admin.logout",
-          immutable: true,
-          reason
-        }
-      }
+      service: SERVICE
     });
   },
 
@@ -97,7 +35,7 @@ export const authService = {
       operations: ["getAuthState", "login", "logout"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["anonymous", "password_verified", "mfa_required", "mfa_verified"],
-      note: "Демо-состояния входа администратора сервиса используют общий конверт бекенда."
+      note: "Connected to API Gateway auth routes."
     };
   }
 };

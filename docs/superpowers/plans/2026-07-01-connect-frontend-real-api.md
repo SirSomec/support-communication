@@ -495,7 +495,7 @@ git commit -m "chore: proxy frontend API requests in dev"
 - Modify: `src/services/dialogService.js`
 - Modify: `tests/backend-services.test.js`
 
-- [ ] **Step 1: Replace auth service mock logic**
+- [x] **Step 1: Replace auth service mock logic**
 
 Change `src/services/authService.js` to:
 
@@ -543,7 +543,7 @@ export const authService = {
 };
 ```
 
-- [ ] **Step 2: Replace dialog service mock logic**
+- [x] **Step 2: Replace dialog service mock logic**
 
 Change `src/services/dialogService.js` to:
 
@@ -601,7 +601,7 @@ export const dialogService = {
 };
 ```
 
-- [ ] **Step 3: Rewrite affected backend service tests to mock `fetch`**
+- [x] **Step 3: Rewrite affected backend service tests to mock `fetch`**
 
 In `tests/backend-services.test.js`, add shared helpers near the top:
 
@@ -674,13 +674,13 @@ it("dialog service calls real API routes", async () => {
 });
 ```
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `npm run test:api-client && npm run test:services`
 
 Expected: PASS for API client tests and service contract tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/services/authService.js src/services/dialogService.js tests/backend-services.test.js

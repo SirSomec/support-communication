@@ -1131,6 +1131,48 @@ git add package.json tests src backend/README.md vite.config.js
 git commit -m "chore: verify frontend real API integration"
 ```
 
+## Task 9: Docker Project Run
+
+**Files:**
+- Create: `Dockerfile`
+- Create: `.dockerignore`
+- Create: `docker-compose.yml`
+- Create: `docker/nginx.conf`
+- Modify: `docs/superpowers/plans/2026-07-01-connect-frontend-real-api.md`
+
+- [x] **Step 1: Add container build files**
+
+Add a root Dockerfile with separate frontend and API Gateway targets, a frontend Nginx config that proxies `/api/*` to the API Gateway container, and a root compose file for frontend, API Gateway, PostgreSQL, Redis, MinIO and Mailpit.
+
+- [x] **Step 2: Build and start the Docker project**
+
+Run:
+
+```bash
+docker compose up -d --build
+```
+
+Expected: frontend and API Gateway containers become healthy/running.
+
+- [x] **Step 3: Verify containerized frontend and API**
+
+Run health checks against:
+
+```bash
+http://127.0.0.1:8080/
+http://127.0.0.1:8080/api/v1/health
+http://127.0.0.1:4101/api/v1/health
+```
+
+Expected: frontend returns HTML and both API health routes return 200.
+
+- [x] **Step 4: Commit Docker run support**
+
+```bash
+git add Dockerfile .dockerignore docker-compose.yml docker/nginx.conf docs/superpowers/plans/2026-07-01-connect-frontend-real-api.md
+git commit -m "chore: run project with docker compose"
+```
+
 ## Self-Review
 
 - Spec coverage: the plan covers the shared client, dev proxy, every existing frontend service adapter, auth headers, envelope preservation, tests, live backend smoke and documentation.

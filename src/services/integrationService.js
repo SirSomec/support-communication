@@ -1,105 +1,59 @@
-import {
-  activeSecuritySessions,
-  apiChangelog,
-  apiEnvironmentKeys,
-  channelDetails,
-  securityAlerts,
-  securityControls,
-  webhookDeliveryLog,
-  webhookEndpoints
-} from "../data.js";
-import { createBackendErrorEnvelope, createEnvelope, makeAuditId, makeQueueId, makeRequestId } from "./mockBackend.js";
+import { apiRequest, createApiErrorEnvelope } from "./apiClient.js";
 
 const SERVICE = "integrationService";
 
 export const integrationService = {
   async fetchIntegrationWorkspace() {
-    return createEnvelope({
-      service: SERVICE,
+    return apiRequest("/integrations/workspace", {
       operation: "fetchIntegrationWorkspace",
-      data: {
-        channelDetails,
-        apiEnvironmentKeys,
-        webhookEndpoints,
-        webhookDeliveryLog,
-        apiChangelog,
-        securityControls,
-        activeSecuritySessions,
-        securityAlerts
-      },
-      partial: true
+      service: SERVICE
     });
   },
 
-  async testChannelConnection({ channel, message, mode = "receive", recipient }) {
-    if (!recipient?.trim() || !message?.trim()) {
-      return createBackendErrorEnvelope({
-        service: SERVICE,
-        operation: "testChannelConnection",
-        code: "recipient_and_message_required",
-        message: "recipient and message are required",
-        data: { channel: channel?.channel ?? channel?.id ?? "unknown" }
-      });
-    }
-
-    const channelId = channel?.id ?? String(channel?.channel ?? "channel").toLowerCase();
-    const connection = channel?.connections?.[0]?.rawId ?? channel?.rawId ?? "conn_mock";
-
-    return createEnvelope({
-      service: SERVICE,
+  async testChannelConnection(payload = {}) {
+    return apiRequest("/integrations/channel-tests", {
+      body: normalizeChannelTestPayload(payload),
+      method: "POST",
       operation: "testChannelConnection",
-      data: {
-        delivery: {
-          channel: channel?.channel ?? channelId,
-          connection,
-          direction: mode,
-          recipient,
-          requestId: makeRequestId(channelId),
-          status: mode === "receive" ? "accepted_to_queue" : "sent_to_channel"
-        },
-        auditId: makeAuditId("channel")
-      }
+      service: SERVICE
     });
   },
 
   async rotateApiKey(keyId) {
-    return createEnvelope({
-      service: SERVICE,
+    if (!hasRouteId(keyId)) {
+      return missingIdEnvelope("rotateApiKey", "API key id is required.");
+    }
+
+    return apiRequest(`/integrations/api-keys/${encodeURIComponent(keyId)}/rotate`, {
+      method: "POST",
       operation: "rotateApiKey",
-      data: {
-        keyId,
-        status: "rotation_queued",
-        rotationId: makeQueueId("key_rotation"),
-        auditId: makeAuditId("key"),
-        requires2fa: true
-      }
+      service: SERVICE
     });
   },
 
-  async replayWebhookDelivery(delivery) {
-    return createEnvelope({
-      service: SERVICE,
+  async replayWebhookDelivery(delivery = {}) {
+    const deliveryId = getDeliveryId(delivery);
+    if (!hasRouteId(deliveryId)) {
+      return missingIdEnvelope("replayWebhookDelivery", "Webhook delivery id is required.");
+    }
+
+    return apiRequest(`/integrations/webhooks/deliveries/${encodeURIComponent(deliveryId)}/replay`, {
+      body: delivery.idempotencyKey ? { idempotencyKey: delivery.idempotencyKey } : {},
+      method: "POST",
       operation: "replayWebhookDelivery",
-      data: {
-        deliveryId: delivery.id,
-        originalTraceId: delivery.traceId,
-        status: "replay_queued",
-        replayId: makeQueueId("webhook_replay"),
-        auditId: makeAuditId("webhook")
-      }
+      service: SERVICE
     });
   },
 
   async revokeSecuritySession(sessionId) {
-    return createEnvelope({
-      service: SERVICE,
+    if (!hasRouteId(sessionId)) {
+      return missingIdEnvelope("revokeSecuritySession", "Security session id is required.");
+    }
+
+    return apiRequest(`/integrations/security/sessions/${encodeURIComponent(sessionId)}/revoke`, {
+      method: "POST",
       operation: "revokeSecuritySession",
-      data: {
-        sessionId,
-        status: "revoked",
-        revokedAt: new Date().toISOString(),
-        auditId: makeAuditId("session")
-      }
+      service: SERVICE
     });
   },
 
@@ -110,7 +64,47 @@ export const integrationService = {
       operations: ["fetchIntegrationWorkspace", "testChannelConnection", "rotateApiKey", "replayWebhookDelivery", "revokeSecuritySession"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
-      note: "Channel tests, webhook replay, key rotation and session revoke now use service contracts."
+      note: "Connected to API Gateway routes."
     };
   }
 };
+
+function normalizeChannelTestPayload({ channel, channelId, connectionId, environment, message, mode, recipient } = {}) {
+  return removeUndefined({
+    channelId: channelId ?? getChannelId(channel),
+    connectionId: connectionId ?? channel?.connections?.[0]?.rawId ?? channel?.rawId,
+    message,
+    mode: mode ?? "receive",
+    recipient,
+    environment
+  });
+}
+
+function getChannelId(channel) {
+  if (!channel || typeof channel !== "object") {
+    return channel;
+  }
+
+  return channel.id ?? channel.channel;
+}
+
+function getDeliveryId(delivery) {
+  return delivery.id ?? delivery.deliveryId;
+}
+
+function removeUndefined(payload) {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+}
+
+function hasRouteId(value) {
+  return String(value ?? "").trim().length > 0;
+}
+
+function missingIdEnvelope(operation, message) {
+  return createApiErrorEnvelope({
+    code: "missing_id",
+    message,
+    operation,
+    service: SERVICE
+  });
+}

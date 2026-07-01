@@ -700,7 +700,7 @@ git commit -m "feat: connect auth and dialogs to API gateway"
 - Modify: `src/services/qualityService.js`
 - Modify: `tests/backend-services.test.js`
 
-- [ ] **Step 1: Convert adapters to `apiRequest` routes**
+- [x] **Step 1: Convert adapters to `apiRequest` routes**
 
 For each method, replace `createEnvelope()` mock code with the route from the API Route Mapping table. Use these operation snippets:
 
@@ -747,7 +747,7 @@ fetchQualityWorkspace() => apiRequest("/quality/workspace", { operation: "fetchQ
 scoreDraftResponse(payload) => apiRequest("/quality/draft-score", { body: payload, method: "POST", operation: "scoreDraftResponse", service: SERVICE })
 ```
 
-- [ ] **Step 2: Update readiness notes**
+- [x] **Step 2: Update readiness notes**
 
 For each converted service, keep `getReadiness()` and set:
 
@@ -756,7 +756,7 @@ status: "ready",
 note: "Connected to API Gateway routes."
 ```
 
-- [ ] **Step 3: Add one route assertion per converted service**
+- [x] **Step 3: Add one route assertion per converted service**
 
 In `tests/backend-services.test.js`, add a table-driven test:
 
@@ -787,13 +787,13 @@ it("workspace, reports, integrations, permissions, automation and quality servic
 });
 ```
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `npm run test:api-client && npm run test:services`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/services/clientService.js src/services/templateService.js src/services/reportService.js src/services/integrationService.js src/services/permissionService.js src/services/visitorService.js src/services/automationService.js src/services/qualityService.js tests/backend-services.test.js

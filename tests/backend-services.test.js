@@ -17,6 +17,7 @@ import {
   qualityService,
   reportService,
   supportAdminService,
+  templateService,
   tenantService,
   visitorService
 } from "../src/services/index.js";
@@ -464,151 +465,303 @@ describe("frontend backend service contracts", () => {
     assert.doesNotMatch(smokeSource, /supportServiceAdminSession|grantServiceAdminSession/);
   });
 
-  it("returns permission decisions with denial audit metadata", async () => {
-    const denied = await permissionService.validatePermission({
-      action: "settings.manage",
-      resource: "settings",
-      roleMode: "employee"
-    });
+  it("converted workspace services report API Gateway readiness", () => {
+    const services = [
+      clientService,
+      templateService,
+      reportService,
+      integrationService,
+      permissionService,
+      visitorService,
+      automationService,
+      qualityService
+    ];
 
-    assert.equal(denied.status, "denied");
-    assert.equal(denied.data.allowed, false);
-    assert.equal(denied.data.serverValidated, true);
-    assert.match(denied.data.auditEvent.id, /^evt_perm_/);
-    assert.equal(denied.data.auditEvent.action, "settings.manage");
-    assert.equal(denied.states.error, true);
-
-    const allowed = await permissionService.validatePermission({
-      action: "settings.manage",
-      resource: "settings",
-      roleMode: "admin"
-    });
-
-    assert.equal(allowed.status, "ok");
-    assert.equal(allowed.data.allowed, true);
-    assert.equal(allowed.data.serverValidated, true);
+    for (const service of services) {
+      const readiness = service.getReadiness();
+      assert.equal(readiness.status, "ready");
+      assert.equal(readiness.note, "Connected to API Gateway routes.");
+    }
   });
 
-  it("queues report exports and exposes download descriptors", async () => {
-    const queued = await reportService.requestReportExport({
+  it("client, template and report services call API Gateway routes", async () => {
+    const exportPayload = {
       channel: "SDK",
       columns: ["metric", "today"],
       filters: { operator: "all", status: "all" },
       period: "Today",
       reportType: "Daily"
-    });
+    };
+    const templatePayload = { id: "tpl-1", title: "Greeting", text: "Hello", topic: "Welcome", channel: "SDK", version: 3 };
+    const legacyTemplatePayload = { id: "tpl-legacy", title: "Legacy Greeting", body: "Hello legacy", topic: "Welcome", channel: "Telegram", version: 2 };
 
-    assert.equal(queued.status, "ok");
-    assert.equal(queued.data.job.statusKey, "queued");
-    assert.match(queued.data.job.backendQueueId, /^queue_report_/);
-    assert.match(queued.data.job.auditId, /^evt_report_/);
-    assert.equal(queued.data.job.metricDefinitionVersion, "metrics/v1");
+    const cases = [
+      [() => clientService.fetchClientProfiles({ page: 1 }), "clientService", "fetchClientProfiles", "/api/v1/clients?page=1", "GET", undefined],
+      [
+        () => clientService.mergeClientProfiles({
+          candidate: { id: "maria", channel: "SDK" },
+          primary: { id: "maria-main", channel: "Telegram" }
+        }),
+        "clientService",
+        "mergeClientProfiles",
+        "/api/v1/clients/merge",
+        "POST",
+        {
+          candidateProfileId: "src_sdk_maria",
+          primaryProfileId: "src_telegram_maria-main",
+          reason: "Duplicate profile merge requested from client workspace"
+        }
+      ],
+      [
+        () => clientService.mergeClientProfiles({
+          candidateProfileId: "explicit-candidate",
+          primaryProfileId: "explicit-primary",
+          candidate: { id: "maria", channel: "SDK", sourceProfileId: "src_profile_candidate" },
+          primary: { id: "maria-main", channel: "Telegram", sourceProfileId: "src_profile_primary" },
+          reason: "Manual duplicate merge"
+        }),
+        "clientService",
+        "mergeClientProfiles",
+        "/api/v1/clients/merge",
+        "POST",
+        {
+          candidateProfileId: "explicit-candidate",
+          primaryProfileId: "explicit-primary",
+          reason: "Manual duplicate merge"
+        }
+      ],
+      [
+        () => clientService.unmergeClientProfile({
+          candidate: { id: "maria", channel: "SDK" },
+          primary: { id: "maria-main", channel: "Telegram" }
+        }),
+        "clientService",
+        "unmergeClientProfile",
+        "/api/v1/clients/unmerge",
+        "POST",
+        {
+          detachedProfileId: "src_sdk_maria",
+          primaryProfileId: "src_telegram_maria-main",
+          reason: "Profile unmerge requested from client workspace"
+        }
+      ],
+      [
+        () => clientService.unmergeClientProfile({
+          candidate: { id: "maria", channel: "SDK", sourceProfileId: "src_profile_candidate" },
+          primary: { id: "maria-main", channel: "Telegram", sourceProfileId: "src_profile_primary" },
+          reason: "Manual profile split"
+        }),
+        "clientService",
+        "unmergeClientProfile",
+        "/api/v1/clients/unmerge",
+        "POST",
+        {
+          detachedProfileId: "src_profile_candidate",
+          primaryProfileId: "src_profile_primary",
+          reason: "Manual profile split"
+        }
+      ],
+      [() => templateService.fetchTemplates({ operatorId: "current" }), "templateService", "fetchTemplates", "/api/v1/templates?operatorId=current", "GET", undefined],
+      [() => templateService.saveTemplate(templatePayload), "templateService", "saveTemplate", "/api/v1/templates", "POST", templatePayload],
+      [
+        () => templateService.saveTemplate(legacyTemplatePayload),
+        "templateService",
+        "saveTemplate",
+        "/api/v1/templates",
+        "POST",
+        { id: "tpl-legacy", title: "Legacy Greeting", text: "Hello legacy", topic: "Welcome", channel: "Telegram", version: 2 }
+      ],
+      [() => reportService.fetchReportWorkspace({ period: "Today" }), "reportService", "fetchReportWorkspace", "/api/v1/reports/workspace?period=Today", "GET", undefined],
+      [() => reportService.requestReportExport(exportPayload), "reportService", "requestReportExport", "/api/v1/reports/exports", "POST", exportPayload],
+      [
+        () => reportService.retryReportExport({ jobId: "export-failed", reason: "retry after timeout", rows: 0 }),
+        "reportService",
+        "retryReportExport",
+        "/api/v1/reports/exports/export-failed/retry",
+        "POST",
+        { reason: "retry after timeout" }
+      ],
+      [
+        () => reportService.getExportFileDescriptor({ id: "export-ready" }),
+        "reportService",
+        "getExportFileDescriptor",
+        "/api/v1/reports/exports/export-ready/file",
+        "GET",
+        undefined
+      ]
+    ];
 
-    const retry = await reportService.retryReportExport({
-      id: "export-failed",
-      name: "Failed export",
-      rows: 0
-    });
+    for (const [callService, expectedService, expectedOperation, expectedUrl, expectedMethod, expectedBody] of cases) {
+      installFetchMock(envelope(expectedService, expectedOperation, { ok: true }));
 
-    assert.equal(retry.data.job.statusKey, "running");
-    assert.match(retry.data.job.backendQueueId, /^queue_report_/);
-
-    const descriptor = await reportService.getExportFileDescriptor({
-      id: "export-ready",
-      name: "Daily report",
-      format: "XLSX",
-      statusKey: "ready"
-    });
-
-    assert.equal(descriptor.status, "ok");
-    assert.match(descriptor.data.downloadUrl, /^mock:\/\/exports\//);
-    assert.match(descriptor.data.fileName, /daily-report\.xlsx$/);
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+    }
   });
 
-  it("models client profile merge graph and audit metadata", async () => {
-    const profiles = await clientService.fetchClientProfiles({ page: 1 });
-    assert.equal(profiles.status, "ok");
-    assert.ok(profiles.data.mergeGraph.length > 0);
-    assert.equal(profiles.data.pagination.mode, "backend-ready");
+  it("report, integration and automation services reject missing route ids without fetch", async () => {
+    const cases = [
+      [() => reportService.retryReportExport({ reason: "retry after timeout" }), "reportService", "retryReportExport"],
+      [() => reportService.getExportFileDescriptor({}), "reportService", "getExportFileDescriptor"],
+      [() => integrationService.rotateApiKey("  "), "integrationService", "rotateApiKey"],
+      [() => integrationService.replayWebhookDelivery({ traceId: "hook_vk_441" }), "integrationService", "replayWebhookDelivery"],
+      [() => integrationService.revokeSecuritySession(""), "integrationService", "revokeSecuritySession"],
+      [() => automationService.publishBotScenario({ name: "Checkout bot" }), "automationService", "publishBotScenario"],
+      [() => automationService.testBotScenario({ name: "Checkout bot" }), "automationService", "testBotScenario"]
+    ];
 
-    const primary = profiles.data.items[0];
-    const candidate = profiles.data.items[1];
-    const merge = await clientService.mergeClientProfiles({ candidate, primary });
+    for (const [callService, expectedService, expectedOperation] of cases) {
+      globalThis.fetch = mock.fn(async () => {
+        throw new Error("fetch should not be called for missing route ids");
+      });
 
-    assert.equal(merge.status, "ok");
-    assert.match(merge.data.primaryProfileId, /^src_/);
-    assert.match(merge.data.mergedProfileId, /^src_/);
-    assert.ok(Array.isArray(merge.data.sourceProfileIds));
-    assert.match(merge.data.auditId, /^evt_client_merge_/);
-    assert.match(merge.data.conflictResolution, /auto_merge|manual_review/);
+      const response = await callService();
+
+      assert.equal(globalThis.fetch.mock.callCount(), 0);
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+      assert.equal(response.status, "error");
+      assert.equal(response.error.code, "missing_id");
+    }
   });
 
-  it("models channel, webhook, key rotation and session operations", async () => {
-    const channelTest = await integrationService.testChannelConnection({
-      channel: { id: "vk", channel: "VK", connections: [{ rawId: "conn_vk_main" }] },
-      message: "channel smoke",
-      mode: "receive",
-      recipient: "+7 900 123-45-67"
-    });
+  it("integration and permission services call API Gateway routes", async () => {
+    const permissionPayload = {
+      action: "settings.manage",
+      resource: "settings",
+      roleMode: "employee"
+    };
 
-    assert.equal(channelTest.status, "ok");
-    assert.equal(channelTest.data.delivery.status, "accepted_to_queue");
-    assert.match(channelTest.data.delivery.requestId, /^test_vk_/);
-    assert.match(channelTest.data.auditId, /^evt_channel_/);
+    const cases = [
+      [() => integrationService.fetchIntegrationWorkspace(), "integrationService", "fetchIntegrationWorkspace", "/api/v1/integrations/workspace", "GET", undefined],
+      [
+        () => integrationService.testChannelConnection({
+          channel: { id: "vk", connections: [{ rawId: "conn_vk_main" }] },
+          environment: "sandbox",
+          message: "channel smoke",
+          recipient: "+7 900 123-45-67"
+        }),
+        "integrationService",
+        "testChannelConnection",
+        "/api/v1/integrations/channel-tests",
+        "POST",
+        {
+          channelId: "vk",
+          connectionId: "conn_vk_main",
+          environment: "sandbox",
+          message: "channel smoke",
+          mode: "receive",
+          recipient: "+7 900 123-45-67"
+        }
+      ],
+      [() => integrationService.rotateApiKey("prod-key"), "integrationService", "rotateApiKey", "/api/v1/integrations/api-keys/prod-key/rotate", "POST", undefined],
+      [
+        () => integrationService.replayWebhookDelivery({ deliveryId: "dlv-441", idempotencyKey: "idem-1", traceId: "hook_vk_441" }),
+        "integrationService",
+        "replayWebhookDelivery",
+        "/api/v1/integrations/webhooks/deliveries/dlv-441/replay",
+        "POST",
+        { idempotencyKey: "idem-1" }
+      ],
+      [() => integrationService.revokeSecuritySession("sess-risk"), "integrationService", "revokeSecuritySession", "/api/v1/integrations/security/sessions/sess-risk/revoke", "POST", undefined],
+      [() => permissionService.validatePermission(permissionPayload), "permissionService", "validatePermission", "/api/v1/permissions/validate", "POST", permissionPayload],
+      [() => permissionService.fetchPermissionModel(), "permissionService", "fetchPermissionModel", "/api/v1/permissions/model", "GET", undefined]
+    ];
 
-    const rotation = await integrationService.rotateApiKey("prod-key");
-    assert.equal(rotation.data.status, "rotation_queued");
-    assert.match(rotation.data.auditId, /^evt_key_/);
+    for (const [callService, expectedService, expectedOperation, expectedUrl, expectedMethod, expectedBody] of cases) {
+      installFetchMock(envelope(expectedService, expectedOperation, { ok: true }));
 
-    const replay = await integrationService.replayWebhookDelivery({ id: "dlv-441", traceId: "hook_vk_441" });
-    assert.equal(replay.data.status, "replay_queued");
-    assert.equal(replay.data.originalTraceId, "hook_vk_441");
-
-    const revoke = await integrationService.revokeSecuritySession("sess-risk");
-    assert.equal(revoke.data.status, "revoked");
-    assert.match(revoke.data.auditId, /^evt_session_/);
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+    }
   });
 
-  it("covers proactive, rescue, automation, quality and audit backend adapters", async () => {
-    const proactive = await visitorService.saveProactiveRule({
+  it("visitor, automation and quality services call API Gateway routes", async () => {
+    const proactiveRule = {
       id: "rule-checkout",
       channels: ["SDK", "Telegram"],
       activeVariant: "B",
       cooldown: "24h"
-    });
-    assert.match(proactive.data.frequencyCap.id, /^cap_rule-checkout_/);
-    assert.match(proactive.data.experiment.id, /^exp_rule-checkout_/);
-    assert.deepEqual(proactive.data.targeting.channels, ["SDK", "Telegram"]);
-
-    const rescue = await visitorService.triggerRescueReturn({
+    };
+    const rescueChat = {
       id: "rescue-vk",
       channel: "VK",
-      client: "Queue VK"
-    });
-    assert.equal(rescue.data.outcome.status, "return_queued");
-    assert.match(rescue.data.countdown.serverDeadlineAt, /^\d{4}-\d{2}-\d{2}T/);
-
-    const invalidFlow = await automationService.validateBotFlowImport('{"name":"Broken","flowNodes":[{"id":"bad","type":"bad_type"}]}');
-    assert.equal(invalidFlow.status, "invalid");
-    assert.ok(invalidFlow.data.errors.some((error) => error.includes("type")));
-
-    const publish = await automationService.publishBotScenario({
+      client: "Queue VK",
+      nextAction: "Return to operator",
+      operator: "Nina",
+      priority: "critical",
+      timer: "02:00"
+    };
+    const flowImport = '{"name":"Broken","flowNodes":[{"id":"bad","type":"bad_type"}]}';
+    const botScenario = {
       id: "bot-checkout",
       name: "Checkout bot",
       channels: ["SDK"],
       flowNodes: [{ id: "start", type: "message" }],
       flowEdges: []
-    });
-    assert.match(publish.data.runtimeVersion, /^runtime-bot-checkout-/);
-    assert.match(publish.data.auditId, /^evt_bot_/);
+    };
+    const qualityDraft = { conversationId: "conv-1", text: "Need help" };
 
-    const score = await qualityService.scoreDraftResponse({
-      conversationId: "conv-1",
-      text: "Need help"
-    });
-    assert.equal(score.data.telemetry.model, "quality-mock/v1");
-    assert.ok(Array.isArray(score.data.repairActions));
+    const cases = [
+      [() => visitorService.fetchVisitorWorkspace(), "visitorService", "fetchVisitorWorkspace", "/api/v1/automation/workspace", "GET", undefined],
+      [() => visitorService.saveProactiveRule(proactiveRule), "visitorService", "saveProactiveRule", "/api/v1/automation/proactive-rules", "POST", proactiveRule],
+      [
+        () => visitorService.triggerRescueReturn(rescueChat),
+        "visitorService",
+        "triggerRescueReturn",
+        "/api/v1/automation/handoff-events",
+        "POST",
+        {
+          botId: "bot-rescue-vk",
+          conversationId: "rescue-vk",
+          queue: "VK",
+          reason: "Return to operator",
+          collectedFields: {
+            client: "Queue VK",
+            channel: "VK",
+            operator: "Nina",
+            priority: "critical",
+            timer: "02:00",
+            nextAction: "Return to operator"
+          }
+        },
+        { summary: { queue: "VK", reason: "Return to operator" }, eventId: "handoff_1" }
+      ],
+      [() => automationService.fetchAutomationWorkspace(), "automationService", "fetchAutomationWorkspace", "/api/v1/automation/workspace", "GET", undefined],
+      [() => automationService.validateBotFlowImport(flowImport), "automationService", "validateBotFlowImport", "/api/v1/automation/bot-flow/validate", "POST", flowImport],
+      [() => automationService.publishBotScenario(botScenario), "automationService", "publishBotScenario", "/api/v1/automation/bot-scenarios/bot-checkout/publish", "POST", botScenario],
+      [() => automationService.testBotScenario(botScenario), "automationService", "testBotScenario", "/api/v1/automation/bot-scenarios/bot-checkout/test-runs", "POST", botScenario],
+      [() => qualityService.fetchQualityWorkspace(), "qualityService", "fetchQualityWorkspace", "/api/v1/quality/workspace", "GET", undefined],
+      [() => qualityService.scoreDraftResponse(qualityDraft), "qualityService", "scoreDraftResponse", "/api/v1/quality/draft-score", "POST", qualityDraft]
+    ];
 
+    for (const [callService, expectedService, expectedOperation, expectedUrl, expectedMethod, expectedBody, data = { ok: true }] of cases) {
+      installFetchMock(envelope(expectedService, expectedOperation, data));
+
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+    }
+  });
+
+  it("audit backend adapters expose export and redaction metadata", async () => {
     const auditExport = await auditService.exportAuditEvents({ format: "CSV", source: "channels" });
     assert.equal(auditExport.data.fileName, "audit-channels.csv");
     assert.ok(auditExport.data.immutableEventIds.length > 0);

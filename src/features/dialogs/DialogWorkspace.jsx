@@ -40,6 +40,7 @@ export function DialogWorkspace({
   status,
   templates,
   topic,
+  topicOptions,
   topics,
   transcriptMode
 }) {
@@ -58,6 +59,7 @@ export function DialogWorkspace({
         query={query}
         onQuery={onQuery}
         topics={topics}
+        topicOptions={topicOptions}
         closedIds={closedIds}
       />
       <ChatPane
@@ -86,6 +88,7 @@ export function DialogWorkspace({
         access={access}
         isClosed={isClosed}
         status={status}
+        topicOptions={topicOptions}
       />
       <CustomerPanel
         conversation={conversation}
@@ -96,6 +99,7 @@ export function DialogWorkspace({
         onClose={onCloseDialog}
         access={access}
         isClosed={isClosed}
+        topicOptions={topicOptions}
       />
     </div>
   );

@@ -48,7 +48,7 @@ export function useAiSuggestions({
         text: `AI-подсказка ${aiActionLabels[action]}: ${suggestion.title}`,
         type: "event",
         time: "сейчас"
-      });
+      }, { persist: false });
       setToast(`AI-действие записано в audit: ${suggestion.title}.`);
     },
     [appendMessage, isClosed, selectedId, setComposeMode, setDraft, setToast]

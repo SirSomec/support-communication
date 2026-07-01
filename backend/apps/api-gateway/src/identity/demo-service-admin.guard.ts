@@ -80,7 +80,7 @@ export class DemoServiceAdminGuard implements CanActivate {
     }
 
     const config = loadBackendConfig();
-    if (!["development", "test"].includes(config.NODE_ENV)) {
+    if (!["development", "test"].includes(config.NODE_ENV) && process.env.ALLOW_DEMO_SERVICE_ADMIN_HEADERS !== "true") {
       throw new UnauthorizedException("Bearer service-admin session is required for privileged identity endpoints.");
     }
 

@@ -80,6 +80,65 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(missingConnection.error?.code, "connection_not_found");
   });
 
+  it("manages generic multi-instance channel connections without exposing secrets", async () => {
+    const integrations = new IntegrationService();
+
+    const list = await integrations.fetchChannelConnections({ type: "telegram" });
+    const telegramConnections = list.data.connections as Array<Record<string, unknown>>;
+    assert.equal(list.status, "ok");
+    assert.ok(telegramConnections.length >= 2);
+    assert.ok(telegramConnections.every((connection) => connection.type === "telegram"));
+    assert.ok(telegramConnections.every((connection) => !("credentials" in connection)));
+    assert.ok(telegramConnections.every((connection) => connection.credentialsMasked === true));
+
+    const created = await integrations.createChannelConnection({
+      chatLimit: 8,
+      credentials: { botToken: "123:secret" },
+      environment: "production",
+      name: "Telegram VIP",
+      routingQueueId: "queue-vip",
+      type: "telegram"
+    });
+    assert.equal(created.status, "ok");
+    assert.equal(created.data.connection.name, "Telegram VIP");
+    assert.equal(created.data.connection.type, "telegram");
+    assert.equal(created.data.connection.credentialsMasked, true);
+    assert.equal(JSON.stringify(created.data).includes("123:secret"), false);
+    assert.match(String(created.data.auditId), /^evt_channel_/);
+    assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === created.data.auditId), true);
+
+    const connectionId = String(created.data.connection.id);
+    const updated = await integrations.updateChannelConnection(connectionId, {
+      reason: "maintenance window",
+      status: "paused"
+    });
+    assert.equal(updated.status, "ok");
+    assert.equal(updated.data.connection.status, "paused");
+    assert.equal(updated.data.reason, "maintenance window");
+    assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === updated.data.auditId), true);
+
+    const test = await integrations.testChannelConnectionInstance(connectionId, {
+      message: "Channel smoke",
+      mode: "send",
+      recipient: "+7 900 123-45-67"
+    });
+    assert.equal(test.status, "ok");
+    assert.equal(test.data.delivery.connectionId, connectionId);
+    assert.equal(test.data.delivery.status, "sent_to_channel");
+    assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === test.data.auditId), true);
+
+    const events = await integrations.fetchChannelConnectionEvents(connectionId);
+    assert.equal(events.status, "ok");
+    assert.ok(Array.isArray(events.data.events));
+    assert.ok((events.data.events as Array<Record<string, unknown>>).some((event) => event.action === "channel.test"));
+
+    const deleted = await integrations.deleteChannelConnection(connectionId, { reason: "retired bot" });
+    assert.equal(deleted.status, "ok");
+    assert.equal(deleted.data.connectionId, connectionId);
+    assert.equal(deleted.data.status, "disabled");
+    assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === deleted.data.auditId), true);
+  });
+
   it("queues API key rotation without returning raw key material", async () => {
     const integrations = new IntegrationService();
 

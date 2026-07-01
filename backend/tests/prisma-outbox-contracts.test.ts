@@ -2616,7 +2616,8 @@ describe("Prisma database and transactional outbox contracts", () => {
             idempotencyKey: "delivery-key-001",
             kind: "message_delivery",
             messageId: "msg_prisma_descriptor",
-            payload: { text: "Prisma descriptor dispatch" }
+            payload: { text: "Prisma descriptor dispatch" },
+            tenantId: "tenant-prisma-descriptor"
           };
         }
       }
@@ -2634,7 +2635,8 @@ describe("Prisma database and transactional outbox contracts", () => {
       idempotencyKey: "delivery-key-001",
       kind: "message_delivery",
       messageId: "msg_prisma_descriptor",
-      payload: { text: "Prisma descriptor dispatch" }
+      payload: { text: "Prisma descriptor dispatch" },
+      tenantId: "tenant-prisma-descriptor"
     });
   });
 

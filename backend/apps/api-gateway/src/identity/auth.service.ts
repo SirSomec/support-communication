@@ -2,9 +2,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
 import { addMinutes, makeAuditId } from "./backend-ids.js";
-import { IdentityRepository, type IdentityCredentialAuditEvent, type StoredServiceAdminSession, verifyPasswordCredential } from "./identity.repository.js";
+import {
+  IdentityRepository,
+  type IdentityCredentialAuditEvent,
+  type StoredServiceAdminSession,
+  type StoredTenantOperatorSession,
+  verifyPasswordCredential
+} from "./identity.repository.js";
 import { serviceAdminSession } from "./identity.fixtures.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
+import { resolveTenantOperatorPermissions } from "./tenant-operator-auth.js";
 
 const SERVICE = "authService";
 
@@ -46,6 +53,15 @@ interface CompleteSamlAcsPayload {
   providerId?: string;
   requestId?: string;
   subjectId?: string;
+}
+
+interface TenantOperatorLoginPayload {
+  email?: string;
+  password?: string;
+}
+
+interface TenantOperatorSessionContext {
+  sessionId?: string;
 }
 
 export type LoginData =
@@ -115,6 +131,39 @@ export interface SamlAcsData {
   providerId?: string;
   requestId?: string;
   subjectId?: string;
+}
+
+export interface TenantOperatorLoginData {
+  accessToken?: string;
+  authenticated: boolean;
+  operator: {
+    email: string;
+    id: string;
+    name: string;
+    role: string;
+  } | null;
+  permissions: string[];
+  refreshToken?: string;
+  tenantId: string | null;
+}
+
+export interface TenantOperatorStateData {
+  authenticated: boolean;
+  operator: {
+    email: string;
+    id: string;
+    name: string;
+    role: string;
+  } | null;
+  permissions: string[];
+  sessionId: string | null;
+  tenantId: string | null;
+}
+
+export interface TenantOperatorLogoutData {
+  authenticated: false;
+  revoked: boolean;
+  sessionId: string | null;
 }
 
 export class AuthService {
@@ -769,10 +818,201 @@ export class AuthService {
       }
     });
   }
+
+  async loginTenantOperator({ email, password }: TenantOperatorLoginPayload = {}): Promise<BackendEnvelope<TenantOperatorLoginData>> {
+    const traceId = identityTraceId(SERVICE, "loginTenantOperator");
+    const normalizedEmail = String(email ?? "").trim().toLowerCase();
+    if (!normalizedEmail || !password) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "loginTenantOperator",
+        traceId,
+        status: "invalid",
+        meta: apiMeta(),
+        data: {
+          authenticated: false,
+          operator: null,
+          permissions: [],
+          tenantId: null
+        },
+        error: {
+          code: "tenant_operator_credentials_required",
+          message: "Tenant operator email and password are required."
+        }
+      });
+    }
+
+    const credential = await this.identityRepository.findPasswordCredentialByEmail(normalizedEmail);
+    if (!verifyPasswordCredential(password, credential)) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "loginTenantOperator",
+        traceId,
+        status: "denied",
+        meta: apiMeta(),
+        data: {
+          authenticated: false,
+          operator: null,
+          permissions: [],
+          tenantId: null
+        },
+        error: {
+          code: "invalid_credentials",
+          message: "Password credentials are invalid."
+        }
+      });
+    }
+
+    const tenantUser = await this.identityRepository.findTenantUserByEmail(normalizedEmail);
+    if (!tenantUser || tenantUser.status !== "active") {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "loginTenantOperator",
+        traceId,
+        status: "denied",
+        meta: apiMeta(),
+        data: {
+          authenticated: false,
+          operator: null,
+          permissions: [],
+          tenantId: null
+        },
+        error: {
+          code: "tenant_operator_not_available",
+          message: "Tenant operator account is missing or inactive."
+        }
+      });
+    }
+
+    if (!shouldSkipTenantOperatorMfa()) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "loginTenantOperator",
+        traceId,
+        status: "denied",
+        meta: apiMeta({ tenantId: tenantUser.tenantId }),
+        data: {
+          authenticated: false,
+          operator: null,
+          permissions: [],
+          tenantId: tenantUser.tenantId
+        },
+        error: {
+          code: "tenant_operator_mfa_required",
+          message: "MFA verification is required for tenant operator login."
+        }
+      });
+    }
+
+    const createdSession = await this.identityRepository.createTenantOperatorSession({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id
+    });
+    const permissionRoles = await this.identityRepository.listPermissionRoles();
+    const permissions = resolveTenantOperatorPermissions(tenantUser.role, permissionRoles);
+
+    return createEnvelope({
+      service: SERVICE,
+      operation: "loginTenantOperator",
+      traceId,
+      meta: apiMeta({ tenantId: tenantUser.tenantId }),
+      data: {
+        accessToken: createdSession.accessToken,
+        authenticated: true,
+        operator: {
+          email: tenantUser.email,
+          id: tenantUser.id,
+          name: tenantUser.name,
+          role: tenantUser.role
+        },
+        permissions,
+        refreshToken: createdSession.refreshToken,
+        tenantId: tenantUser.tenantId
+      }
+    });
+  }
+
+  async getTenantOperatorState({ sessionId }: TenantOperatorSessionContext = {}): Promise<BackendEnvelope<TenantOperatorStateData>> {
+    const traceId = identityTraceId(SERVICE, "getTenantOperatorState");
+    const session = await this.identityRepository.findTenantOperatorSession(sessionId);
+    const denied = resolveTenantOperatorSessionDenial(session);
+    if (denied) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "getTenantOperatorState",
+        traceId,
+        status: "denied",
+        meta: apiMeta(),
+        data: {
+          authenticated: false,
+          operator: null,
+          permissions: [],
+          sessionId: null,
+          tenantId: null
+        },
+        error: denied
+      });
+    }
+    if (!session) {
+      throw new Error("Tenant operator session denial was not resolved.");
+    }
+
+    const user = await this.identityRepository.findTenantUser(session.userId);
+    const permissions = [...session.allowedActions];
+
+    return createEnvelope({
+      service: SERVICE,
+      operation: "getTenantOperatorState",
+      traceId,
+      meta: apiMeta({ tenantId: session.tenantId }),
+      data: {
+        authenticated: true,
+        operator: user ? {
+          email: user.email,
+          id: user.id,
+          name: user.name,
+          role: user.role
+        } : {
+          email: session.userEmail,
+          id: session.userId,
+          name: session.userName,
+          role: session.role
+        },
+        permissions,
+        sessionId: session.id,
+        tenantId: session.tenantId
+      }
+    });
+  }
+
+  async logoutTenantOperator({ sessionId }: TenantOperatorSessionContext = {}): Promise<BackendEnvelope<TenantOperatorLogoutData>> {
+    const traceId = identityTraceId(SERVICE, "logoutTenantOperator");
+    const revoked = await this.identityRepository.revokeTenantOperatorSession({ sessionId });
+
+    return createEnvelope({
+      service: SERVICE,
+      operation: "logoutTenantOperator",
+      traceId,
+      meta: apiMeta(),
+      data: {
+        authenticated: false,
+        revoked,
+        sessionId: sessionId ?? null
+      }
+    });
+  }
 }
 
 function currentNodeEnv(): string {
   return process.env.NODE_ENV || "test";
+}
+
+function shouldSkipTenantOperatorMfa(): boolean {
+  if (String(process.env.PILOT_SKIP_MFA ?? "").trim().toLowerCase() === "true") {
+    return true;
+  }
+
+  return ["development", "staging"].includes(currentNodeEnv());
 }
 
 function buildOidcAuthorizationUrl(
@@ -830,6 +1070,22 @@ function resolveSessionStateDenial(session: StoredServiceAdminSession | undefine
 
   if (!Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
     return { code: "session_expired", message: "Service-admin session has expired." };
+  }
+
+  return null;
+}
+
+function resolveTenantOperatorSessionDenial(session: StoredTenantOperatorSession | undefined): { code: string; message: string } | null {
+  if (!session) {
+    return { code: "session_not_found", message: "Tenant operator session was not found." };
+  }
+
+  if (session.revokedAt) {
+    return { code: "session_revoked", message: "Tenant operator session was revoked." };
+  }
+
+  if (!Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
+    return { code: "session_expired", message: "Tenant operator session has expired." };
   }
 
   return null;

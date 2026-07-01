@@ -756,16 +756,14 @@ describe("outbox worker runtime contracts", () => {
     });
 
     assert.equal(disabled.channelConnectors.Telegram, undefined);
-    assert.throws(
-      () => worker.createHttpWorkerAdaptersFromEnv({
-        OUTBOX_TELEGRAM_ENABLED: "true",
-        OUTBOX_TELEGRAM_API_BASE_URL: "https://telegram.provider.example.test",
-        OUTBOX_HTTP_TIMEOUT_MS: "25"
-      }, async () => {
-        throw new Error("missing token adapter must not call fetch");
-      }),
-      /telegram_bot_token_required/
-    );
+    const enabledWithoutGlobalToken = worker.createHttpWorkerAdaptersFromEnv({
+      OUTBOX_TELEGRAM_ENABLED: "true",
+      OUTBOX_TELEGRAM_API_BASE_URL: "https://telegram.provider.example.test",
+      OUTBOX_HTTP_TIMEOUT_MS: "25"
+    }, async () => {
+      throw new Error("tenant-aware telegram adapter must not call fetch during registration");
+    });
+    assert.equal(typeof enabledWithoutGlobalToken.channelConnectors.Telegram?.deliverMessage, "function");
 
     const calls: Array<{ init: { body?: string; headers?: Record<string, string>; method?: string; signal?: AbortSignal }; url: string }> = [];
     const defaultChannelAdapters = worker.createHttpWorkerAdaptersFromEnv({
@@ -795,6 +793,7 @@ describe("outbox worker runtime contracts", () => {
       idempotencyKey: "telegram-runtime-key",
       messageId: "msg_telegram_runtime",
       outboxEventId: "outbox_telegram_runtime",
+      tenantId: "tenant-volga",
       text: "Runtime Telegram hello",
       traceId: "trc_telegram_runtime"
     });
@@ -839,7 +838,8 @@ describe("outbox worker runtime contracts", () => {
           idempotencyKey: "telegram-runtime-failure-key",
           kind: "message_delivery",
           messageId: "msg_telegram_runtime_failure",
-          payload: { text: "Runtime Telegram failure" }
+          payload: { text: "Runtime Telegram failure" },
+          tenantId: "tenant-volga"
         })
       },
       writeLog: (_level: string, message: string, context: Record<string, unknown>) => {
@@ -892,7 +892,8 @@ describe("outbox worker runtime contracts", () => {
           idempotencyKey: "telegram-runtime-descriptor-key",
           kind: "message_delivery",
           messageId: "msg_telegram_runtime_descriptor",
-          payload: { text: "Runtime descriptor hello" }
+          payload: { text: "Runtime descriptor hello" },
+          tenantId: "tenant-volga"
         })
       },
       writeLog: () => undefined
@@ -961,7 +962,8 @@ describe("outbox worker runtime contracts", () => {
           idempotencyKey: "telegram-runtime-replay-key",
           kind: "message_delivery",
           messageId: "msg_telegram_runtime_replay",
-          payload: { text: "Runtime replay hello" }
+          payload: { text: "Runtime replay hello" },
+          tenantId: "tenant-volga"
         })
       },
       writeLog: () => undefined
@@ -1284,7 +1286,8 @@ describe("outbox worker runtime contracts", () => {
               payload: {
                 attachments: [{ providerAttachmentId: "max-file-1" }],
                 text: "MAX blocked attachment"
-              }
+              },
+              tenantId: "tenant-volga"
             };
           }
 
@@ -1299,7 +1302,8 @@ describe("outbox worker runtime contracts", () => {
               message: "VK blocked proactive",
               phone: "+79000000003",
               topic: "Capability"
-            }
+            },
+            tenantId: "tenant-volga"
           };
         }
       },
@@ -1354,7 +1358,8 @@ describe("outbox worker runtime contracts", () => {
             idempotencyKey: "delivery-runtime-missing-adapter",
             kind: "message_delivery",
             messageId: "msg_runtime_missing_adapter",
-            payload: { text: "Runtime delivery without adapter" }
+            payload: { text: "Runtime delivery without adapter" },
+            tenantId: "tenant-volga"
           }
           : {
             channel: "SDK",
@@ -1421,7 +1426,8 @@ describe("outbox worker runtime contracts", () => {
         messageId: "msg_agent_002",
         payload: {
           text: "Reply from descriptor"
-        }
+        },
+        tenantId: "tenant-volga"
       }],
       ["outbound_002", {
         channel: "Telegram",
@@ -1435,7 +1441,8 @@ describe("outbox worker runtime contracts", () => {
           message: "Hello from descriptor",
           phone: "+7 900 000-00-00",
           topic: "Delivery / Status"
-        }
+        },
+        tenantId: "tenant-volga"
       }]
     ]);
 
@@ -2135,7 +2142,8 @@ describe("outbox worker runtime contracts", () => {
             idempotencyKey: "malformed-key",
             kind: "message_delivery",
             messageId: "msg_agent_missing_channel",
-            payload: { text: "No channel" }
+            payload: { text: "No channel" },
+            tenantId: "tenant-volga"
           })
         },
         writeLog: () => undefined

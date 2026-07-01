@@ -30,7 +30,8 @@ export function ChatPane({
   onStatusChange,
   access,
   isClosed,
-  status
+  status,
+  topicOptions
 }) {
   const [rescueNow, setRescueNow] = useState(Date.now());
   const activeRescue = conversation.rescue?.state === "active" && !isClosed ? conversation.rescue : null;
@@ -66,6 +67,7 @@ export function ChatPane({
         onTopic={onTopic}
         status={status}
         topic={topic}
+        topicOptions={topicOptions}
       />
 
       <TranscriptToolbar

@@ -8,6 +8,7 @@ import {
 } from "@support-communication/events";
 import { type BillingSyncJobStore, type StoredBillingSyncJob } from "@support-communication/database";
 import { type LogContext, writeStructuredLog } from "@support-communication/observability";
+import { createIntegrationTelegramTokenResolver, type TelegramBotTokenResolver } from "./integration-telegram-store.js";
 
 export type OutboxEventHandler = (event: StoredOutboxEvent) => Promise<void> | void;
 export type BillingSyncJobHandler = (job: StoredBillingSyncJob) => Promise<void> | void;
@@ -45,6 +46,7 @@ export interface ChannelConnectorRequest {
   message?: string;
   messageId?: string;
   phone?: string;
+  tenantId?: string;
   text?: string;
   topic?: string;
 }
@@ -105,6 +107,7 @@ export interface WorkerOutboundDescriptor {
   kind: WorkerOutboundDescriptorKind;
   messageId: string | null;
   payload: Record<string, unknown>;
+  tenantId: string;
 }
 
 export interface OutboundDescriptorStore {
@@ -141,6 +144,14 @@ export interface EndpointRuntimeConnectorConfig {
 export interface TelegramChannelConnectorOptions {
   endpoint: string;
   fetcher: WorkerHttpFetch;
+  timeoutMs?: number;
+}
+
+export interface TenantTelegramChannelConnectorOptions {
+  apiBaseUrl: string;
+  channel: string;
+  fetcher: WorkerHttpFetch;
+  resolveBotToken: TelegramBotTokenResolver["resolveBotToken"];
   timeoutMs?: number;
 }
 
@@ -552,9 +563,15 @@ export function createHttpWorkerAdaptersFromEnv(
     .map(([channel, endpoint]) => [channel, createHttpChannelConnector(endpoint, fetcher, timeoutMs)]));
   const telegramConfig = loadTelegramRuntimeConnectorConfig(env);
   if (telegramConfig.enabled) {
-    channelConnectors[telegramConfig.channel] = createTelegramChannelConnector({
-      endpoint: telegramSendMessageEndpoint(telegramConfig.apiBaseUrl, telegramConfig.botToken),
+    const tokenResolver = createIntegrationTelegramTokenResolver(
+      stringValue(env.INTEGRATION_STORE_FILE),
+      telegramConfig.botToken
+    );
+    channelConnectors[telegramConfig.channel] = createTenantTelegramChannelConnector({
+      apiBaseUrl: telegramConfig.apiBaseUrl,
+      channel: telegramConfig.channel,
       fetcher,
+      resolveBotToken: tokenResolver.resolveBotToken,
       timeoutMs
     });
   }
@@ -597,7 +614,7 @@ export function loadTelegramRuntimeConnectorConfig(env: Record<string, string | 
   const enabled = env.OUTBOX_TELEGRAM_ENABLED === "true";
   return {
     apiBaseUrl: stringValue(env.OUTBOX_TELEGRAM_API_BASE_URL) || "https://api.telegram.org",
-    botToken: enabled ? requireString(env.OUTBOX_TELEGRAM_BOT_TOKEN, "telegram_bot_token_required") : stringValue(env.OUTBOX_TELEGRAM_BOT_TOKEN),
+    botToken: stringValue(env.OUTBOX_TELEGRAM_BOT_TOKEN),
     channel: stringValue(env.OUTBOX_TELEGRAM_CHANNEL) || "Telegram",
     enabled
   };
@@ -969,6 +986,32 @@ export function createTelegramChannelConnector({
     timeoutMs,
     traceId: requireString(request.traceId, "telegram_trace_id_required")
   });
+
+  return {
+    deliverMessage: async (request) => sendMessage(request, requireString(request.text, "telegram_text_required")),
+    startConversation: async (request) => sendMessage(request, requireString(request.message, "telegram_text_required"))
+  };
+}
+
+export function createTenantTelegramChannelConnector({
+  apiBaseUrl,
+  fetcher,
+  resolveBotToken,
+  timeoutMs = 5_000
+}: TenantTelegramChannelConnectorOptions): ChannelConnector {
+  const sendMessage = (request: ChannelConnectorRequest, message: string): Promise<void> => {
+    const tenantId = requireString(request.tenantId, "telegram_tenant_id_required");
+    const botToken = requireString(resolveBotToken(tenantId), "telegram_bot_token_not_configured");
+    return postTelegramSendMessage({
+      chatId: requireString(request.conversationId ?? request.phone, "telegram_chat_id_required"),
+      endpoint: telegramSendMessageEndpoint(apiBaseUrl, botToken),
+      fetcher,
+      idempotencyKey: requireString(request.idempotencyKey, "telegram_idempotency_key_required"),
+      text: message,
+      timeoutMs,
+      traceId: requireString(request.traceId, "telegram_trace_id_required")
+    });
+  };
 
   return {
     deliverMessage: async (request) => sendMessage(request, requireString(request.text, "telegram_text_required")),
@@ -1380,6 +1423,7 @@ function toMessageDeliveryRequest(event: StoredOutboxEvent, descriptor: WorkerOu
     idempotencyKey: descriptor.idempotencyKey || descriptor.id,
     messageId: requireString(descriptor.messageId, "message_id_required"),
     outboxEventId: event.id,
+    tenantId: requireString(descriptor.tenantId, "tenant_id_required"),
     text: requireString(descriptor.payload.text, "message_text_required"),
     traceId: event.traceId
   };
@@ -1398,6 +1442,7 @@ function toOutboundConversationRequest(event: StoredOutboxEvent, descriptor: Wor
     message: requireString(descriptor.payload.message, "message_required"),
     outboxEventId: event.id,
     phone: requireString(descriptor.payload.phone, "phone_required"),
+    tenantId: requireString(descriptor.tenantId, "tenant_id_required"),
     topic: requireString(descriptor.payload.topic, "topic_required"),
     traceId: event.traceId
   };

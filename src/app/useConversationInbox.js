@@ -1,0 +1,317 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createAuditEvent, getStatusMeta } from "./dialogModel.js";
+import { hasSession } from "./sessionStore.js";
+import { mapApiConversation, mapApiConversationCollection } from "./conversationApiMapper.js";
+import { useRealtimeInbox } from "./useRealtimeInbox.js";
+import { dialogService } from "../services/dialogService.js";
+
+const ATTACHMENT_PREVIEW_LABEL = "Вложение";
+const NOW_LABEL = "сейчас";
+
+export function useConversationInbox() {
+  const sessionActive = hasSession();
+  const [conversationItems, setConversationItems] = useState([]);
+  const [topics, setTopics] = useState({});
+  const [closedIds, setClosedIds] = useState(() => new Set());
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+
+  const syncMetaFromItems = useCallback((items) => {
+    setTopics(Object.fromEntries(items.map((conversation) => [conversation.id, conversation.topic ?? ""])));
+    setClosedIds(new Set(items.filter((conversation) => conversation.status === "closed").map((conversation) => conversation.id)));
+  }, []);
+
+  const refreshInbox = useCallback(async () => {
+    if (!hasSession()) {
+      setConversationItems([]);
+      setTopics({});
+      setClosedIds(new Set());
+      setError("");
+      setLoading(false);
+      return { ok: false };
+    }
+
+    setLoading(true);
+    setRefreshing(true);
+    setError("");
+    const response = await dialogService.fetchDialogs({ page: 1, pageSize: 50 });
+    if (response.status !== "ok") {
+      setError(response.error?.message ?? "Не удалось загрузить список диалогов.");
+      setLoading(false);
+      setRefreshing(false);
+      return { ok: false, response };
+    }
+
+    const items = mapApiConversationCollection(response.data);
+    setConversationItems(items);
+    syncMetaFromItems(items);
+    setLoading(false);
+    setRefreshing(false);
+    return { ok: true, response };
+  }, [syncMetaFromItems]);
+
+  useEffect(() => {
+    void refreshInbox();
+  }, [refreshInbox, sessionActive]);
+
+  const appendMessage = useCallback(async (conversationId, message, options = {}) => {
+    const optimistic = options.optimistic ?? true;
+    const persist = options.persist ?? true;
+    const temporaryId = `local-${Date.now()}`;
+    const optimisticMessage = {
+      id: message.id ?? temporaryId,
+      ...message,
+      time: message.time ?? NOW_LABEL
+    };
+    let previousConversation = null;
+
+    if (optimistic) {
+      setConversationItems((current) =>
+        current.map((conversation) => {
+          if (conversation.id !== conversationId) {
+            return conversation;
+          }
+
+          previousConversation = conversation;
+          return withAppendedMessage(conversation, optimisticMessage);
+        })
+      );
+    }
+
+    if (!persist) {
+      return { ok: true, message: optimisticMessage };
+    }
+
+    const payload = {
+      mode: message.type === "internal" ? "internal" : "reply",
+      text: message.text,
+      attachments: message.attachments
+    };
+
+    const response = await dialogService.appendMessage({
+      conversationId,
+      ...payload
+    });
+
+    if (response.status !== "ok") {
+      if (optimistic && previousConversation) {
+        setConversationItems((current) =>
+          current.map((conversation) => (conversation.id === conversationId ? previousConversation : conversation))
+        );
+      }
+      setError(response.error?.message ?? "Не удалось отправить сообщение.");
+      return { ok: false, response };
+    }
+
+    const serverMessage = response.data?.message ? mapApiMessage(response.data.message) : null;
+    if (serverMessage && optimistic) {
+      setConversationItems((current) =>
+        current.map((conversation) => {
+          if (conversation.id !== conversationId) {
+            return conversation;
+          }
+
+          return {
+            ...conversation,
+            messages: conversation.messages.map((item) => (item.id === optimisticMessage.id ? serverMessage : item)),
+            preview: serverMessage.text || conversation.preview,
+            time: mapTime(serverMessage.time)
+          };
+        })
+      );
+    } else if (serverMessage) {
+      setConversationItems((current) =>
+        current.map((conversation) => {
+          if (conversation.id !== conversationId) {
+            return conversation;
+          }
+          return withAppendedMessage(conversation, serverMessage);
+        })
+      );
+    }
+
+    return { ok: true, response };
+  }, []);
+
+  const applyConversationStatus = useCallback(async (conversationId, nextStatus, eventPayload) => {
+    let previousConversation = null;
+    setConversationItems((current) =>
+      current.map((conversation) => {
+        if (conversation.id !== conversationId) {
+          return conversation;
+        }
+
+        previousConversation = conversation;
+        const meta = getStatusMeta(nextStatus);
+        const nextTopic = typeof eventPayload === "object" && eventPayload?.toTopic
+          ? eventPayload.toTopic
+          : conversation.topic;
+        const auditEvent = eventPayload
+          ? createAuditEvent({
+              eventKind: typeof eventPayload === "object" && eventPayload.eventKind ? eventPayload.eventKind : "status",
+              fromStatus: conversation.status,
+              toStatus: nextStatus,
+              ...(typeof eventPayload === "string" ? { detail: eventPayload } : eventPayload)
+            })
+          : null;
+
+        return {
+          ...conversation,
+          status: nextStatus,
+          topic: nextTopic,
+          sla: meta.sla,
+          slaTone: meta.tone,
+          messages: auditEvent ? [...conversation.messages, auditEvent] : conversation.messages,
+          time: NOW_LABEL
+        };
+      })
+    );
+
+    setClosedIds((current) => {
+      const next = new Set(current);
+      if (nextStatus === "closed") {
+        next.add(conversationId);
+      } else {
+        next.delete(conversationId);
+      }
+      return next;
+    });
+
+    const response = await dialogService.transitionConversationStatus({
+      conversationId,
+      nextStatus,
+      topic: typeof eventPayload === "object" ? eventPayload?.toTopic : undefined
+    });
+
+    if (response.status !== "ok") {
+      if (previousConversation) {
+        setConversationItems((current) =>
+          current.map((conversation) => (conversation.id === conversationId ? previousConversation : conversation))
+        );
+        setClosedIds((current) => {
+          const next = new Set(current);
+          if (previousConversation.status === "closed") {
+            next.add(conversationId);
+          } else {
+            next.delete(conversationId);
+          }
+          return next;
+        });
+      }
+
+      setError(response.error?.message ?? "Не удалось обновить статус.");
+      return { ok: false, response };
+    }
+
+    const serverConversation = response.data?.conversation ? mapApiConversation(response.data.conversation) : null;
+    if (serverConversation) {
+      setConversationItems((current) =>
+        current.map((conversation) => (conversation.id === conversationId ? serverConversation : conversation))
+      );
+      setTopics((current) => ({ ...current, [conversationId]: serverConversation.topic ?? "" }));
+      setClosedIds((current) => {
+        const next = new Set(current);
+        if (serverConversation.status === "closed") {
+          next.add(conversationId);
+        } else {
+          next.delete(conversationId);
+        }
+        return next;
+      });
+    }
+
+    return { ok: true, response };
+  }, []);
+
+  const handleRealtimeEvent = useCallback((event) => {
+    if (event.eventName !== "message.created" && event.eventName !== "conversation.updated") {
+      return;
+    }
+
+    const conversationId = String(event.resourceId ?? "").trim();
+    if (!conversationId) {
+      return;
+    }
+
+    void dialogService.fetchDialogDetail(conversationId).then((response) => {
+      if (response.status !== "ok") {
+        return;
+      }
+
+      const mapped = mapApiConversation(response.data?.conversation ?? {});
+      setConversationItems((current) =>
+        current.some((item) => item.id === mapped.id)
+          ? current.map((item) => (item.id === mapped.id ? mapped : item))
+          : [mapped, ...current]
+      );
+      setTopics((current) => ({ ...current, [mapped.id]: mapped.topic ?? "" }));
+      setClosedIds((current) => {
+        const next = new Set(current);
+        if (mapped.status === "closed") {
+          next.add(mapped.id);
+        } else {
+          next.delete(mapped.id);
+        }
+        return next;
+      });
+    });
+  }, []);
+
+  useRealtimeInbox({
+    enabled: sessionActive,
+    onEvent: handleRealtimeEvent
+  });
+
+  return useMemo(() => ({
+    appendMessage,
+    applyConversationStatus,
+    closedIds,
+    conversationItems,
+    error,
+    loading,
+    refreshInbox,
+    refreshing,
+    setClosedIds,
+    setConversationItems,
+    setTopics,
+    topics
+  }), [
+    appendMessage,
+    applyConversationStatus,
+    closedIds,
+    conversationItems,
+    error,
+    loading,
+    refreshInbox,
+    refreshing,
+    topics
+  ]);
+}
+
+function withAppendedMessage(conversation, message) {
+  return {
+    ...conversation,
+    messages: [...conversation.messages, message],
+    preview: message.text ?? (
+      message.attachments?.length
+        ? `${ATTACHMENT_PREVIEW_LABEL}: ${message.attachments[0].name}`
+        : conversation.preview
+    ),
+    time: mapTime(message.time)
+  };
+}
+
+function mapApiMessage(message) {
+  return {
+    ...message,
+    time: mapTime(message?.time)
+  };
+}
+
+function mapTime(value) {
+  if (String(value ?? "").trim().toLowerCase() === "now") {
+    return NOW_LABEL;
+  }
+  return value ?? NOW_LABEL;
+}

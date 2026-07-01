@@ -1,7 +1,5 @@
 import {
   Building2,
-  Code2,
-  Copy,
   CreditCard,
   Gauge,
   KeyRound,
@@ -14,24 +12,20 @@ import {
   X
 } from "lucide-react";
 import { RangeControl, StepHeading } from "./OnboardingControls.jsx";
-import { channelOptions, employeeRoles, planOptions } from "./onboardingModel.js";
+import { employeeRoles, planOptions } from "./onboardingModel.js";
 
 export function OnboardingStepContent({
   activeStep,
   admin,
-  channel,
-  completion,
   employeeDraft,
   employees,
   handleAddEmployee,
-  handleGenerateSdkKey,
   handleGenerateSlug,
   handleRemoveEmployee,
   handleSendTest,
   limits,
   plan,
   setAdmin,
-  setChannel,
   setEmployeeDraft,
   setLimits,
   setNotice,
@@ -48,7 +42,7 @@ export function OnboardingStepContent({
               <StepHeading
                 icon={<Building2 size={20} />}
                 title="Tenant"
-                text="Создайте рабочее пространство и публичный slug, который будет использоваться в маршрутах, SDK и audit."
+                text="Создайте рабочее пространство и публичный slug, который будет использоваться в маршрутах и audit."
               />
               <div className="onboarding-form-grid">
                 <label className="onboarding-field">
@@ -171,6 +165,17 @@ export function OnboardingStepContent({
                   />
                 </label>
                 <label className="onboarding-field">
+                  <span>Пароль</span>
+                  <input
+                    autoComplete="new-password"
+                    minLength={8}
+                    onChange={(event) => setAdmin((current) => ({ ...current, password: event.target.value }))}
+                    placeholder="Минимум 8 символов"
+                    type="password"
+                    value={admin.password ?? ""}
+                  />
+                </label>
+                <label className="onboarding-field">
                   <span>Роль</span>
                   <select
                     onChange={(event) => setAdmin((current) => ({ ...current, role: event.target.value }))}
@@ -189,58 +194,6 @@ export function OnboardingStepContent({
                   />
                   Требовать 2FA при первом входе
                 </label>
-              </div>
-            </div>
-          ) : null}
-
-          {activeStep === "channel" ? (
-            <div className="onboarding-step">
-              <StepHeading
-                icon={<Code2 size={20} />}
-                title="Канал и SDK"
-                text="Подключите первый канал или SDK-ключ. Все поля локальные, но отражают production-contract будущего adapter."
-              />
-              <div className="onboarding-form-grid">
-                <label className="onboarding-field">
-                  <span>Тип канала</span>
-                  <select
-                    onChange={(event) => setChannel((current) => ({ ...current, type: event.target.value }))}
-                    value={channel.type}
-                  >
-                    {channelOptions.map((option) => <option key={option}>{option}</option>)}
-                  </select>
-                </label>
-                <label className="onboarding-field">
-                  <span>Разрешенный домен</span>
-                  <input
-                    onChange={(event) => setChannel((current) => ({ ...current, domain: event.target.value }))}
-                    placeholder="company.ru"
-                    value={channel.domain}
-                  />
-                </label>
-                <label className="onboarding-field wide">
-                  <span>Webhook endpoint</span>
-                  <input
-                    onChange={(event) => setChannel((current) => ({ ...current, webhook: event.target.value }))}
-                    placeholder="https://company.ru/support/webhook"
-                    value={channel.webhook}
-                  />
-                </label>
-              </div>
-              <div className="onboarding-sdk-panel">
-                <div>
-                  <Code2 size={18} />
-                  <strong>{channel.sdkKey || "SDK key еще не создан"}</strong>
-                </div>
-                <button onClick={handleGenerateSdkKey} type="button">Сгенерировать ключ</button>
-                <button
-                  disabled={!channel.sdkKey}
-                  onClick={() => setNotice({ tone: "success", text: "SDK key готов к копированию в интеграцию." })}
-                  type="button"
-                >
-                  <Copy size={16} />
-                  Скопировать
-                </button>
               </div>
             </div>
           ) : null}
@@ -358,7 +311,7 @@ export function OnboardingStepContent({
               <StepHeading
                 icon={<Send size={20} />}
                 title="Тестовое сообщение"
-                text="Отправьте тестовое сообщение через выбранный канал, чтобы подтвердить маршрут перед завершением."
+                text="Отправьте тестовое сообщение, чтобы подтвердить готовность организации перед завершением."
               />
               <form className="onboarding-test-form" onSubmit={handleSendTest}>
                 <label className="onboarding-field">

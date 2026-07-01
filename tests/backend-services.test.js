@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { describe, it } from "node:test";
+import { afterEach, describe, it, mock } from "node:test";
 import {
   auditService,
   authService,
@@ -8,6 +8,7 @@ import {
   backendIntegrationService,
   billingService,
   clientService,
+  dialogService,
   featureFlagService,
   incidentService,
   integrationService,
@@ -15,12 +16,89 @@ import {
   platformMonitoringService,
   qualityService,
   reportService,
+  settingsService,
   supportAdminService,
+  templateService,
   tenantService,
   visitorService
 } from "../src/services/index.js";
 
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  mock.restoreAll();
+  globalThis.fetch = originalFetch;
+});
+
+function installFetchMock(responseEnvelope) {
+  globalThis.fetch = mock.fn(async () => (
+    new Response(JSON.stringify(responseEnvelope), {
+      headers: { "content-type": "application/json" },
+      status: 200
+    })
+  ));
+}
+
+function assertLastRequest({ body, method, url }) {
+  assert.equal(globalThis.fetch.mock.callCount(), 1);
+  const [actualUrl, options = {}] = globalThis.fetch.mock.calls[0].arguments;
+
+  assert.equal(actualUrl, url);
+  assert.equal(options.method, method);
+
+  if (body === undefined) {
+    assert.equal(options.body, undefined);
+  } else {
+    assert.deepEqual(JSON.parse(options.body), body);
+  }
+}
+
+function envelope(service, operation, data = {}) {
+  return {
+    service,
+    operation,
+    status: "ok",
+    partial: false,
+    traceId: `trc_${service}_${operation}`,
+    updatedAt: "2026-07-01T00:00:00.000Z",
+    data,
+    error: null,
+    states: { loading: false, empty: false, error: false, partial: false },
+    meta: { source: "api-gateway" }
+  };
+}
+
 describe("frontend backend service contracts", () => {
+  it("service adapters do not import mockBackend or static data fixtures", () => {
+    const serviceFiles = [
+      "auditService.js",
+      "authService.js",
+      "automationService.js",
+      "backendIntegrationService.js",
+      "billingService.js",
+      "clientService.js",
+      "dialogService.js",
+      "featureFlagService.js",
+      "incidentService.js",
+      "integrationService.js",
+      "permissionService.js",
+      "platformMonitoringService.js",
+      "qualityService.js",
+      "reportService.js",
+      "settingsService.js",
+      "supportAdminService.js",
+      "templateService.js",
+      "tenantService.js",
+      "visitorService.js"
+    ];
+
+    for (const fileName of serviceFiles) {
+      const source = readFileSync(new URL(`../src/services/${fileName}`, import.meta.url), "utf8");
+      assert.doesNotMatch(source, /mockBackend\.js/);
+      assert.doesNotMatch(source, /\.\.\/data/);
+    }
+  });
+
   it("exposes one backend envelope per planned service adapter", async () => {
     const response = await backendIntegrationService.fetchBackendIntegrationSnapshot();
 
@@ -37,6 +115,7 @@ describe("frontend backend service contracts", () => {
       "clientService",
       "templateService",
       "reportService",
+      "settingsService",
       "integrationService",
       "permissionService",
       "visitorService",
@@ -78,243 +157,487 @@ describe("frontend backend service contracts", () => {
 
     assert.ok(snapshot.data.backlogCoverage.includes("support_admin_impersonation"));
     assert.ok(snapshot.data.backlogCoverage.includes("feature_flag_rollout_audit"));
+    assert.deepEqual(snapshot.data.routeGaps, [
+      {
+        service: "auditService",
+        operations: ["exportAuditEvents", "redactAuditEvent"],
+        routes: [
+          "POST /service-admin/audit-events/exports",
+          "POST /service-admin/audit-events/:eventId/redactions"
+        ]
+      }
+    ]);
   });
 
-  it("auth service models session lifecycle and auth audit", async () => {
-    const passwordOnly = await authService.login({
-      email: "service-admin@example.com",
-      password: "correct-password"
-    });
+  it("auth service calls API Gateway routes", async () => {
+    const cases = [
+      [
+        () => authService.getAuthState(),
+        "/api/v1/auth/state",
+        "GET",
+        undefined,
+        "getAuthState",
+        { authenticated: false, authState: "anonymous" }
+      ],
+      [
+        () => authService.login({
+          email: "service-admin@example.com",
+          password: "correct-password"
+        }),
+        "/api/v1/auth/login",
+        "POST",
+        {
+          email: "service-admin@example.com",
+          password: "correct-password"
+        },
+        "login",
+        { authState: "mfa_required" }
+      ],
+      [
+        () => authService.logout({ reason: "QA logout" }),
+        "/api/v1/auth/logout",
+        "POST",
+        { reason: "QA logout" },
+        "logout",
+        { authenticated: false }
+      ]
+    ];
 
-    assert.equal(passwordOnly.service, "authService");
-    assert.equal(passwordOnly.status, "ok");
-    assert.equal(passwordOnly.partial, true);
-    assert.equal(passwordOnly.data.authState, "mfa_required");
-    assert.match(passwordOnly.data.mfaChallengeId, /^mfa_/);
+    for (const [callService, expectedUrl, expectedMethod, expectedBody, expectedOperation, data] of cases) {
+      installFetchMock(envelope("authService", expectedOperation, data));
 
-    const verified = await authService.login({
-      email: "service-admin@example.com",
-      password: "correct-password",
-      otp: "123456"
-    });
-
-    assert.equal(verified.status, "ok");
-    assert.equal(verified.data.authenticated, true);
-    assert.equal(verified.data.session.authState, "mfa_verified");
-    assert.match(verified.data.auditEvent.id, /^evt_auth_/);
-
-    const logout = await authService.logout({ reason: "QA logout" });
-    assert.equal(logout.data.authenticated, false);
-    assert.equal(logout.data.auditEvent.reason, "QA logout");
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, "authService");
+      assert.equal(response.operation, expectedOperation);
+      assert.deepEqual(response.data, data);
+    }
   });
 
-  it("tenant and billing services enforce scope and tariff preview", async () => {
-    const tenants = await tenantService.fetchTenants({ status: "watch" });
-    assert.equal(tenants.service, "tenantService");
-    assert.ok(tenants.data.items.every((tenant) => tenant.status === "watch"));
+  it("tenant auth service calls API Gateway routes", async () => {
+    const operator = {
+      id: "op-pilot-001",
+      email: "operator@pilot-client.test",
+      name: "Pilot Operator"
+    };
+    const cases = [
+      [
+        () => authService.loginTenantOperator({
+          email: "operator@pilot-client.test",
+          password: "Pilot-Operator-2026!"
+        }),
+        "/api/v1/auth/tenant/login",
+        "POST",
+        {
+          email: "operator@pilot-client.test",
+          password: "Pilot-Operator-2026!"
+        },
+        "loginTenantOperator",
+        {
+          accessToken: "tok_pilot",
+          refreshToken: "ref_pilot",
+          tenantId: "tenant-pilot-001",
+          operator
+        }
+      ],
+      [
+        () => authService.getTenantAuthState(),
+        "/api/v1/auth/tenant/state",
+        "GET",
+        undefined,
+        "getTenantAuthState",
+        { authenticated: true, tenantId: "tenant-pilot-001", operator }
+      ],
+      [
+        () => authService.logoutTenant({ reason: "shift end" }),
+        "/api/v1/auth/tenant/logout",
+        "POST",
+        { reason: "shift end" },
+        "logoutTenant",
+        { authenticated: false }
+      ]
+    ];
 
-    const detail = await tenantService.fetchTenantDetail("tenant-volga");
-    assert.equal(detail.status, "ok");
-    assert.equal(detail.data.tenant.id, "tenant-volga");
-    assert.ok(detail.data.users.length > 0);
-    assert.ok(detail.data.incidents.length > 0);
+    for (const [callService, expectedUrl, expectedMethod, expectedBody, expectedOperation, data] of cases) {
+      installFetchMock(envelope("authService", expectedOperation, data));
 
-    const preview = await billingService.previewTariffChange({
-      tenantId: "tenant-volga",
-      nextPlanId: "starter",
-      reason: "QA downgrade preview"
-    });
-
-    assert.equal(preview.service, "billingService");
-    assert.equal(preview.data.approval.required, true);
-    assert.equal(preview.data.confirmation.required, true);
-    assert.match(preview.data.confirmation.expectedText, /^CHANGE tenant-volga TO starter$/);
-
-    const blockedChange = await billingService.changeTenantTariff({
-      tenantId: "tenant-volga",
-      nextPlanId: "starter",
-      reason: "QA downgrade preview",
-      confirmed: true,
-      confirmationText: "wrong"
-    });
-
-    assert.equal(blockedChange.status, "invalid");
-    assert.equal(blockedChange.states.error, true);
-    assert.equal(blockedChange.data.applied, false);
-    assert.match(blockedChange.data.auditEvent.id, /^evt_billing_tariff_/);
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, "authService");
+      assert.equal(response.operation, expectedOperation);
+      assert.deepEqual(response.data, data);
+    }
   });
 
-  it("support admin actions require reason and impersonation audit", async () => {
-    const reset = await supportAdminService.resetTwoFactor({
-      userId: "usr-ns-agent",
-      reason: "Phone replaced by employee",
-      confirmed: true
-    });
+  it("dialog service calls API Gateway routes", async () => {
+    const cases = [
+      [
+        () => dialogService.fetchDialogs({ page: 1, pageSize: 25 }),
+        "/api/v1/dialogs?page=1&pageSize=25",
+        "GET",
+        undefined,
+        "fetchDialogs",
+        { items: [], pagination: { page: 1, pageSize: 25, total: 0 } }
+      ],
+      [
+        () => dialogService.transitionConversationStatus({
+          conversationId: "conv/with space",
+          nextStatus: "closed",
+          reason: "Resolved"
+        }),
+        "/api/v1/dialogs/conv%2Fwith%20space/status",
+        "PATCH",
+        { nextStatus: "closed", reason: "Resolved" },
+        "transitionConversationStatus",
+        { conversationId: "conv/with space", nextStatus: "closed" }
+      ],
+      [
+        () => dialogService.uploadAttachment({
+          channel: "SDK",
+          fileName: "invoice.pdf",
+          sizeBytes: 2048
+        }),
+        "/api/v1/dialogs/attachments",
+        "POST",
+        { channel: "SDK", fileName: "invoice.pdf", sizeBytes: 2048 },
+        "uploadAttachment",
+        { id: "attachment_1", storageState: "upload_queued" }
+      ],
+      [
+        () => dialogService.createOutboundConversationRequest({
+          channel: "Telegram",
+          phone: "+7 900 123-45-67",
+          topic: "Delivery follow-up",
+          clientName: "Queue Client",
+          message: "Follow up"
+        }),
+        "/api/v1/dialogs/outbound",
+        "POST",
+        {
+          channel: "Telegram",
+          phone: "+7 900 123-45-67",
+          topic: "Delivery follow-up",
+          clientName: "Queue Client",
+          message: "Follow up"
+        },
+        "createOutboundConversationRequest",
+        { backendQueueId: "outbound_1", status: "queued" }
+      ]
+    ];
 
-    assert.equal(reset.service, "supportAdminService");
-    assert.equal(reset.data.confirmationRequired, true);
-    assert.equal(reset.data.user.mfa, "reset_pending");
-    assert.equal(reset.data.auditEvent.reason, "Phone replaced by employee");
+    for (const [callService, expectedUrl, expectedMethod, expectedBody, expectedOperation, data] of cases) {
+      installFetchMock(envelope("dialogService", expectedOperation, data));
 
-    const impersonation = await supportAdminService.startImpersonation({
-      tenantId: "tenant-volga",
-      userId: "usr-volga-admin",
-      reason: "Customer approved webhook replay check",
-      confirmed: true,
-      durationMinutes: 15
-    });
-
-    assert.equal(impersonation.status, "ok");
-    assert.equal(impersonation.data.impersonation.mode, "read_only_by_default");
-    assert.match(impersonation.data.impersonation.id, /^imp_tenant-volga_/);
-    assert.equal(impersonation.data.auditEvent.action, "impersonation.start");
-
-    const stop = await supportAdminService.stopImpersonation({
-      impersonationId: impersonation.data.impersonation.id,
-      reason: "QA exit reason"
-    });
-
-    assert.equal(stop.data.reason, "QA exit reason");
-    assert.equal(stop.data.auditEvent.action, "impersonation.stop");
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, "dialogService");
+      assert.equal(response.operation, expectedOperation);
+      assert.deepEqual(response.data, data);
+    }
   });
 
-  it("service-admin adapters reject privileged actions without reason or confirmation", async () => {
-    const missingReason = await supportAdminService.resetTwoFactor({
-      userId: "usr-ns-agent",
-      reason: "",
-      confirmed: true
-    });
+  it("admin, billing, monitoring, incidents and feature flag services report API Gateway readiness", () => {
+    const readyServices = [
+      tenantService,
+      billingService,
+      platformMonitoringService,
+      supportAdminService,
+      incidentService,
+      featureFlagService
+    ];
 
-    assert.equal(missingReason.status, "invalid");
-    assert.equal(missingReason.error.code, "reason_required");
-    assert.equal(missingReason.states.error, true);
+    for (const service of readyServices) {
+      const readiness = service.getReadiness();
+      assert.equal(readiness.status, "ready");
+      assert.equal(readiness.note, "Connected to API Gateway routes.");
+    }
 
-    const missingConfirmation = await supportAdminService.startImpersonation({
-      tenantId: "tenant-volga",
-      userId: "usr-volga-admin",
-      reason: "Customer approved webhook replay check"
-    });
-
-    assert.equal(missingConfirmation.status, "invalid");
-    assert.equal(missingConfirmation.error.code, "confirmation_required");
-
-    const restrictedTenant = await tenantService.updateTenantStatus({
-      tenantId: "tenant-volga",
-      status: "restricted",
-      reason: "Security restriction requested"
-    });
-
-    assert.equal(restrictedTenant.status, "invalid");
-    assert.equal(restrictedTenant.error.code, "confirmation_required");
-
-    const nonRestrictiveTenant = await tenantService.updateTenantStatus({
-      tenantId: "tenant-volga",
-      status: "watch",
-      reason: "Operational watch requested"
-    });
-
-    assert.equal(nonRestrictiveTenant.status, "invalid");
-    assert.equal(nonRestrictiveTenant.error.code, "confirmation_required");
-
-    const incident = await incidentService.addIncidentUpdate({
-      incidentId: "inc-webhook-retry",
-      message: "short",
-      reason: "Incident update reason",
-      confirmed: true,
-      status: "monitoring"
-    });
-
-    assert.equal(incident.status, "invalid");
-    assert.equal(incident.error.code, "message_required");
-
-    const platformAck = await platformMonitoringService.acknowledgeComponentAlert({
-      componentId: "cmp-webhooks",
-      reason: ""
-    });
-
-    assert.equal(platformAck.status, "invalid");
-    assert.equal(platformAck.error.code, "reason_required");
-
-    const unconfirmedPlatformAck = await platformMonitoringService.acknowledgeComponentAlert({
-      componentId: "cmp-webhooks",
-      reason: "Platform alert acknowledged"
-    });
-
-    assert.equal(unconfirmedPlatformAck.status, "invalid");
-    assert.equal(unconfirmedPlatformAck.error.code, "confirmation_required");
-
-    const billingPreview = await billingService.previewTariffChange({
-      tenantId: "tenant-volga",
-      nextPlanId: "starter",
-      reason: ""
-    });
-
-    assert.equal(billingPreview.status, "invalid");
-    assert.equal(billingPreview.error.code, "reason_required");
-
-    const flagPreview = await featureFlagService.previewFlagChange({
-      flagId: "flag-ai-replies",
-      nextRollout: 100,
-      nextStatus: "on",
-      reason: ""
-    });
-
-    assert.equal(flagPreview.status, "invalid");
-    assert.equal(flagPreview.error.code, "reason_required");
-
-    const unconfirmedFlagUpdate = await featureFlagService.updateFeatureFlag({
-      flagId: "flag-ai-replies",
-      nextRollout: 25,
-      nextStatus: "gradual",
-      reason: "Standard rollout review"
-    });
-
-    assert.equal(unconfirmedFlagUpdate.status, "invalid");
-    assert.equal(unconfirmedFlagUpdate.error.code, "confirmation_required");
+    const auditReadiness = auditService.getReadiness();
+    assert.equal(auditReadiness.status, "partial");
+    assert.match(auditReadiness.note, /fetchAuditEvents/);
+    assert.ok(auditReadiness.backlog.includes("audit_export_route"));
+    assert.ok(auditReadiness.backlog.includes("audit_redaction_route"));
   });
 
-  it("monitoring incidents and feature flags expose drilldown audit metadata", async () => {
-    const snapshot = await platformMonitoringService.fetchPlatformSnapshot({ status: "degraded" });
-    assert.equal(snapshot.service, "platformMonitoringService");
-    assert.ok(snapshot.data.components.every((component) => component.status === "degraded"));
+  it("admin, billing, monitoring, incidents and feature flag services call API Gateway routes", async () => {
+    const cases = [
+      [() => auditService.fetchAuditEvents({ source: "channels" }), "auditService", "fetchAuditEvents", "/api/v1/service-admin/audit-events?source=channels", "GET", undefined],
+      [() => tenantService.fetchTenants({ status: "watch" }), "tenantService", "fetchTenants", "/api/v1/tenants?status=watch", "GET", undefined],
+      [() => tenantService.fetchTenantDetail("tenant/volga"), "tenantService", "fetchTenantDetail", "/api/v1/tenants/tenant%2Fvolga", "GET", undefined],
+      [
+        () => tenantService.updateTenantStatus({
+          tenantId: "tenant-volga",
+          status: "restricted",
+          reason: "Security restriction requested"
+        }),
+        "tenantService",
+        "updateTenantStatus",
+        "/api/v1/tenants/tenant-volga/status",
+        "PATCH",
+        { status: "restricted", reason: "Security restriction requested" }
+      ],
+      [() => billingService.fetchTariffs(), "billingService", "fetchTariffs", "/api/v1/billing/tariffs", "GET", undefined],
+      [
+        () => billingService.previewTariffChange({
+          tenantId: "tenant-volga",
+          nextPlanId: "starter",
+          reason: "QA downgrade preview"
+        }),
+        "billingService",
+        "previewTariffChange",
+        "/api/v1/billing/tenants/tenant-volga/tariff-change/preview",
+        "POST",
+        { nextPlanId: "starter", reason: "QA downgrade preview" }
+      ],
+      [
+        () => billingService.changeTenantTariff({
+          tenantId: "tenant-volga",
+          nextPlanId: "starter",
+          reason: "QA downgrade preview",
+          confirmed: true,
+          confirmationText: "CHANGE tenant-volga TO starter"
+        }),
+        "billingService",
+        "changeTenantTariff",
+        "/api/v1/billing/tenants/tenant-volga/tariff-change",
+        "POST",
+        {
+          nextPlanId: "starter",
+          reason: "QA downgrade preview",
+          confirmed: true,
+          confirmationText: "CHANGE tenant-volga TO starter"
+        }
+      ],
+      [() => platformMonitoringService.fetchPlatformSnapshot({ status: "degraded" }), "platformMonitoringService", "fetchPlatformSnapshot", "/api/v1/platform-monitoring/snapshot?status=degraded", "GET", undefined],
+      [() => platformMonitoringService.fetchComponentDrilldown("cmp/webhooks"), "platformMonitoringService", "fetchComponentDrilldown", "/api/v1/platform-monitoring/components/cmp%2Fwebhooks", "GET", undefined],
+      [
+        () => platformMonitoringService.acknowledgeComponentAlert({
+          componentId: "cmp-webhooks",
+          reason: "Platform alert acknowledged"
+        }),
+        "platformMonitoringService",
+        "acknowledgeComponentAlert",
+        "/api/v1/platform-monitoring/components/cmp-webhooks/acknowledgements",
+        "POST",
+        { reason: "Platform alert acknowledged" }
+      ],
+      [() => supportAdminService.fetchSupportUsers({ query: "agent" }), "supportAdminService", "fetchSupportUsers", "/api/v1/service-admin/users?query=agent", "GET", undefined],
+      [
+        () => supportAdminService.resetTwoFactor({
+          userId: "usr-ns-agent",
+          reason: "Phone replaced by employee",
+          confirmed: true
+        }),
+        "supportAdminService",
+        "resetTwoFactor",
+        "/api/v1/service-admin/users/usr-ns-agent/mfa/reset",
+        "POST",
+        { reason: "Phone replaced by employee", confirmed: true }
+      ],
+      [
+        () => supportAdminService.forceLogout({
+          userId: "usr-ns-agent",
+          reason: "Session risk"
+        }),
+        "supportAdminService",
+        "forceLogout",
+        "/api/v1/service-admin/users/usr-ns-agent/sessions/logout",
+        "POST",
+        { reason: "Session risk" }
+      ],
+      [
+        () => supportAdminService.blockUser({
+          userId: "usr-ns-agent",
+          reason: "Account takeover",
+          confirmed: true
+        }),
+        "supportAdminService",
+        "blockUser",
+        "/api/v1/service-admin/users/usr-ns-agent/block",
+        "POST",
+        { reason: "Account takeover", confirmed: true }
+      ],
+      [
+        () => supportAdminService.resendInvite({
+          userId: "usr-invite",
+          reason: "Invite expired"
+        }),
+        "supportAdminService",
+        "resendInvite",
+        "/api/v1/service-admin/users/usr-invite/invite/resend",
+        "POST",
+        { reason: "Invite expired" }
+      ],
+      [
+        () => supportAdminService.startImpersonation({
+          tenantId: "tenant-volga",
+          userId: "usr-volga-admin",
+          reason: "Customer approved webhook replay check",
+          confirmed: true,
+          durationMinutes: 15
+        }),
+        "supportAdminService",
+        "startImpersonation",
+        "/api/v1/service-admin/impersonations",
+        "POST",
+        {
+          tenantId: "tenant-volga",
+          userId: "usr-volga-admin",
+          reason: "Customer approved webhook replay check",
+          confirmed: true,
+          durationMinutes: 15
+        }
+      ],
+      [
+        () => supportAdminService.stopImpersonation({
+          impersonationId: "imp-123",
+          reason: "QA exit reason"
+        }),
+        "supportAdminService",
+        "stopImpersonation",
+        "/api/v1/service-admin/impersonations/imp-123/stop",
+        "POST",
+        { reason: "QA exit reason" }
+      ],
+      [() => incidentService.fetchIncidents({ status: "open" }), "incidentService", "fetchIncidents", "/api/v1/incidents?status=open", "GET", undefined],
+      [() => incidentService.fetchIncidentDetail("inc/webhook"), "incidentService", "fetchIncidentDetail", "/api/v1/incidents/inc%2Fwebhook", "GET", undefined],
+      [
+        () => incidentService.addIncidentUpdate({
+          incidentId: "inc-webhook-retry",
+          message: "QA update note",
+          reason: "QA incident action",
+          confirmed: true,
+          status: "monitoring"
+        }),
+        "incidentService",
+        "addIncidentUpdate",
+        "/api/v1/incidents/inc-webhook-retry/updates",
+        "POST",
+        {
+          message: "QA update note",
+          reason: "QA incident action",
+          confirmed: true,
+          status: "monitoring"
+        }
+      ],
+      [() => featureFlagService.fetchFeatureFlags({ status: "on" }), "featureFlagService", "fetchFeatureFlags", "/api/v1/feature-flags?status=on", "GET", undefined],
+      [
+        () => featureFlagService.previewFlagChange({
+          flagId: "flag-ai-replies",
+          nextRollout: 100,
+          nextStatus: "on",
+          reason: "QA rollout preview",
+          tenantIds: ["tenant-volga"]
+        }),
+        "featureFlagService",
+        "previewFlagChange",
+        "/api/v1/feature-flags/flag-ai-replies/preview",
+        "POST",
+        {
+          nextRollout: 100,
+          nextStatus: "on",
+          reason: "QA rollout preview",
+          tenantIds: ["tenant-volga"]
+        }
+      ],
+      [
+        () => featureFlagService.updateFeatureFlag({
+          flagId: "flag-ai-replies",
+          nextRollout: 25,
+          nextStatus: "gradual",
+          reason: "Standard rollout review"
+        }),
+        "featureFlagService",
+        "updateFeatureFlag",
+        "/api/v1/feature-flags/flag-ai-replies",
+        "PATCH",
+        {
+          nextRollout: 25,
+          nextStatus: "gradual",
+          reason: "Standard rollout review"
+        }
+      ]
+    ];
 
-    const drilldown = await platformMonitoringService.fetchComponentDrilldown("cmp-webhooks");
-    assert.equal(drilldown.status, "ok");
-    assert.ok(drilldown.data.affectedTenants.length > 0);
+    for (const [callService, expectedService, expectedOperation, expectedUrl, expectedMethod, expectedBody] of cases) {
+      installFetchMock(envelope(expectedService, expectedOperation, { ok: true }));
 
-    const incidentUpdate = await incidentService.addIncidentUpdate({
-      incidentId: "inc-webhook-retry",
-      message: "QA update note",
-      reason: "QA incident action",
-      confirmed: true,
-      status: "monitoring"
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+    }
+  });
+
+  it("admin, billing, monitoring, incidents and feature flag services reject missing route ids without fetch", async () => {
+    const cases = [
+      [() => tenantService.fetchTenantDetail("  "), "tenantService", "fetchTenantDetail"],
+      [() => tenantService.updateTenantStatus({ status: "watch" }), "tenantService", "updateTenantStatus"],
+      [() => billingService.previewTariffChange({ nextPlanId: "starter" }), "billingService", "previewTariffChange"],
+      [() => billingService.changeTenantTariff({ nextPlanId: "starter" }), "billingService", "changeTenantTariff"],
+      [() => platformMonitoringService.fetchComponentDrilldown(""), "platformMonitoringService", "fetchComponentDrilldown"],
+      [() => platformMonitoringService.acknowledgeComponentAlert({ reason: "Platform alert acknowledged" }), "platformMonitoringService", "acknowledgeComponentAlert"],
+      [() => supportAdminService.resetTwoFactor({ reason: "Phone replaced by employee" }), "supportAdminService", "resetTwoFactor"],
+      [() => supportAdminService.forceLogout({ reason: "Session risk" }), "supportAdminService", "forceLogout"],
+      [() => supportAdminService.blockUser({ reason: "Account takeover" }), "supportAdminService", "blockUser"],
+      [() => supportAdminService.resendInvite({ reason: "Invite expired" }), "supportAdminService", "resendInvite"],
+      [() => supportAdminService.stopImpersonation({ reason: "QA exit reason" }), "supportAdminService", "stopImpersonation"],
+      [() => incidentService.fetchIncidentDetail(null), "incidentService", "fetchIncidentDetail"],
+      [() => incidentService.addIncidentUpdate({ message: "QA update note" }), "incidentService", "addIncidentUpdate"],
+      [() => featureFlagService.previewFlagChange({ nextRollout: 100 }), "featureFlagService", "previewFlagChange"],
+      [() => featureFlagService.updateFeatureFlag({ nextStatus: "gradual" }), "featureFlagService", "updateFeatureFlag"]
+    ];
+
+    for (const [callService, expectedService, expectedOperation] of cases) {
+      globalThis.fetch = mock.fn(async () => {
+        throw new Error("fetch should not be called for missing route ids");
+      });
+
+      const response = await callService();
+
+      assert.equal(globalThis.fetch.mock.callCount(), 0);
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+      assert.equal(response.status, "error");
+      assert.equal(response.error.code, "missing_id");
+    }
+  });
+
+  it("audit export and redaction return explicit missing-route envelopes without mock data", async () => {
+    globalThis.fetch = mock.fn(async () => {
+      throw new Error("fetch should not be called for missing audit routes");
     });
 
-    assert.equal(incidentUpdate.data.incident.status, "monitoring");
-    assert.match(incidentUpdate.data.auditEvent.id, /^evt_incident_/);
+    const auditExport = await auditService.exportAuditEvents({ format: "CSV", source: "channels" });
+    const redaction = await auditService.redactAuditEvent("evt_hook_9006", { reason: "privacy" });
 
-    const flagPreview = await featureFlagService.previewFlagChange({
-      flagId: "flag-ai-replies",
-      nextRollout: 100,
-      nextStatus: "on",
-      reason: "QA rollout preview"
-    });
-
-    assert.equal(flagPreview.data.confirmation.required, true);
-    assert.match(flagPreview.data.confirmation.expectedText, /^UPDATE ff-ai-replies$/);
-
-    const flagUpdate = await featureFlagService.updateFeatureFlag({
-      flagId: "flag-ai-replies",
-      nextRollout: 100,
-      nextStatus: "on",
-      reason: "QA rollout preview",
-      confirmed: true,
-      confirmationText: "UPDATE ff-ai-replies"
-    });
-
-    assert.equal(flagUpdate.status, "ok");
-    assert.equal(flagUpdate.data.applied, true);
-    assert.match(flagUpdate.data.auditEvent.id, /^evt_feature_flag_/);
+    assert.equal(globalThis.fetch.mock.callCount(), 0);
+    assert.equal(auditExport.service, "auditService");
+    assert.equal(auditExport.operation, "exportAuditEvents");
+    assert.equal(auditExport.status, "error");
+    assert.equal(auditExport.error.code, "api_route_missing");
+    assert.equal(auditExport.data, null);
+    assert.equal(redaction.service, "auditService");
+    assert.equal(redaction.operation, "redactAuditEvent");
+    assert.equal(redaction.status, "error");
+    assert.equal(redaction.error.code, "api_route_missing");
+    assert.equal(redaction.data, null);
   });
 
   it("keeps service-admin demo access out of browser-writable storage", () => {
@@ -326,158 +649,447 @@ describe("frontend backend service contracts", () => {
     assert.doesNotMatch(smokeSource, /supportServiceAdminSession|grantServiceAdminSession/);
   });
 
-  it("returns permission decisions with denial audit metadata", async () => {
-    const denied = await permissionService.validatePermission({
-      action: "settings.manage",
-      resource: "settings",
-      roleMode: "employee"
-    });
+  it("converted workspace services report API Gateway readiness", () => {
+    const services = [
+      clientService,
+      templateService,
+      reportService,
+      integrationService,
+      permissionService,
+      visitorService,
+      automationService,
+      qualityService
+    ];
 
-    assert.equal(denied.status, "denied");
-    assert.equal(denied.data.allowed, false);
-    assert.equal(denied.data.serverValidated, true);
-    assert.match(denied.data.auditEvent.id, /^evt_perm_/);
-    assert.equal(denied.data.auditEvent.action, "settings.manage");
-    assert.equal(denied.states.error, true);
-
-    const allowed = await permissionService.validatePermission({
-      action: "settings.manage",
-      resource: "settings",
-      roleMode: "admin"
-    });
-
-    assert.equal(allowed.status, "ok");
-    assert.equal(allowed.data.allowed, true);
-    assert.equal(allowed.data.serverValidated, true);
+    for (const service of services) {
+      const readiness = service.getReadiness();
+      assert.equal(readiness.status, "ready");
+      assert.equal(readiness.note, "Connected to API Gateway routes.");
+    }
   });
 
-  it("queues report exports and exposes download descriptors", async () => {
-    const queued = await reportService.requestReportExport({
+  it("client, template and report services call API Gateway routes", async () => {
+    const exportPayload = {
       channel: "SDK",
       columns: ["metric", "today"],
       filters: { operator: "all", status: "all" },
       period: "Today",
       reportType: "Daily"
-    });
+    };
+    const templatePayload = { id: "tpl-1", title: "Greeting", text: "Hello", topic: "Welcome", channel: "SDK", version: 3 };
+    const legacyTemplatePayload = { id: "tpl-legacy", title: "Legacy Greeting", body: "Hello legacy", topic: "Welcome", channel: "Telegram", version: 2 };
 
-    assert.equal(queued.status, "ok");
-    assert.equal(queued.data.job.statusKey, "queued");
-    assert.match(queued.data.job.backendQueueId, /^queue_report_/);
-    assert.match(queued.data.job.auditId, /^evt_report_/);
-    assert.equal(queued.data.job.metricDefinitionVersion, "metrics/v1");
+    const cases = [
+      [() => clientService.fetchClientProfiles({ page: 1 }), "clientService", "fetchClientProfiles", "/api/v1/clients?page=1", "GET", undefined],
+      [
+        () => clientService.mergeClientProfiles({
+          candidate: { id: "maria", channel: "SDK" },
+          primary: { id: "maria-main", channel: "Telegram" }
+        }),
+        "clientService",
+        "mergeClientProfiles",
+        "/api/v1/clients/merge",
+        "POST",
+        {
+          candidateProfileId: "src_sdk_maria",
+          primaryProfileId: "src_telegram_maria-main",
+          reason: "Duplicate profile merge requested from client workspace"
+        }
+      ],
+      [
+        () => clientService.mergeClientProfiles({
+          candidateProfileId: "explicit-candidate",
+          primaryProfileId: "explicit-primary",
+          candidate: { id: "maria", channel: "SDK", sourceProfileId: "src_profile_candidate" },
+          primary: { id: "maria-main", channel: "Telegram", sourceProfileId: "src_profile_primary" },
+          reason: "Manual duplicate merge"
+        }),
+        "clientService",
+        "mergeClientProfiles",
+        "/api/v1/clients/merge",
+        "POST",
+        {
+          candidateProfileId: "explicit-candidate",
+          primaryProfileId: "explicit-primary",
+          reason: "Manual duplicate merge"
+        }
+      ],
+      [
+        () => clientService.unmergeClientProfile({
+          candidate: { id: "maria", channel: "SDK" },
+          primary: { id: "maria-main", channel: "Telegram" }
+        }),
+        "clientService",
+        "unmergeClientProfile",
+        "/api/v1/clients/unmerge",
+        "POST",
+        {
+          detachedProfileId: "src_sdk_maria",
+          primaryProfileId: "src_telegram_maria-main",
+          reason: "Profile unmerge requested from client workspace"
+        }
+      ],
+      [
+        () => clientService.unmergeClientProfile({
+          candidate: { id: "maria", channel: "SDK", sourceProfileId: "src_profile_candidate" },
+          primary: { id: "maria-main", channel: "Telegram", sourceProfileId: "src_profile_primary" },
+          reason: "Manual profile split"
+        }),
+        "clientService",
+        "unmergeClientProfile",
+        "/api/v1/clients/unmerge",
+        "POST",
+        {
+          detachedProfileId: "src_profile_candidate",
+          primaryProfileId: "src_profile_primary",
+          reason: "Manual profile split"
+        }
+      ],
+      [() => templateService.fetchTemplates({ operatorId: "current" }), "templateService", "fetchTemplates", "/api/v1/templates?operatorId=current", "GET", undefined],
+      [() => templateService.saveTemplate(templatePayload), "templateService", "saveTemplate", "/api/v1/templates", "POST", templatePayload],
+      [
+        () => templateService.saveTemplate(legacyTemplatePayload),
+        "templateService",
+        "saveTemplate",
+        "/api/v1/templates",
+        "POST",
+        { id: "tpl-legacy", title: "Legacy Greeting", text: "Hello legacy", topic: "Welcome", channel: "Telegram", version: 2 }
+      ],
+      [() => reportService.fetchReportWorkspace({ period: "Today" }), "reportService", "fetchReportWorkspace", "/api/v1/reports/workspace?period=Today", "GET", undefined],
+      [() => reportService.requestReportExport(exportPayload), "reportService", "requestReportExport", "/api/v1/reports/exports", "POST", exportPayload],
+      [
+        () => reportService.retryReportExport({ jobId: "export-failed", reason: "retry after timeout", rows: 0 }),
+        "reportService",
+        "retryReportExport",
+        "/api/v1/reports/exports/export-failed/retry",
+        "POST",
+        { reason: "retry after timeout" }
+      ],
+      [
+        () => reportService.getExportFileDescriptor({ id: "export-ready" }),
+        "reportService",
+        "getExportFileDescriptor",
+        "/api/v1/reports/exports/export-ready/file",
+        "GET",
+        undefined
+      ]
+    ];
 
-    const retry = await reportService.retryReportExport({
-      id: "export-failed",
-      name: "Failed export",
-      rows: 0
-    });
+    for (const [callService, expectedService, expectedOperation, expectedUrl, expectedMethod, expectedBody] of cases) {
+      installFetchMock(envelope(expectedService, expectedOperation, { ok: true }));
 
-    assert.equal(retry.data.job.statusKey, "running");
-    assert.match(retry.data.job.backendQueueId, /^queue_report_/);
-
-    const descriptor = await reportService.getExportFileDescriptor({
-      id: "export-ready",
-      name: "Daily report",
-      format: "XLSX",
-      statusKey: "ready"
-    });
-
-    assert.equal(descriptor.status, "ok");
-    assert.match(descriptor.data.downloadUrl, /^mock:\/\/exports\//);
-    assert.match(descriptor.data.fileName, /daily-report\.xlsx$/);
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+    }
   });
 
-  it("models client profile merge graph and audit metadata", async () => {
-    const profiles = await clientService.fetchClientProfiles({ page: 1 });
-    assert.equal(profiles.status, "ok");
-    assert.ok(profiles.data.mergeGraph.length > 0);
-    assert.equal(profiles.data.pagination.mode, "backend-ready");
+  it("report, integration and automation services reject missing route ids without fetch", async () => {
+    const cases = [
+      [() => reportService.retryReportExport({ reason: "retry after timeout" }), "reportService", "retryReportExport"],
+      [() => reportService.getExportFileDescriptor({}), "reportService", "getExportFileDescriptor"],
+      [() => integrationService.rotateApiKey("  "), "integrationService", "rotateApiKey"],
+      [() => integrationService.replayWebhookDelivery({ traceId: "hook_vk_441" }), "integrationService", "replayWebhookDelivery"],
+      [() => integrationService.revokeSecuritySession(""), "integrationService", "revokeSecuritySession"],
+      [() => integrationService.updateChannelConnection({ name: "Telegram VIP" }), "integrationService", "updateChannelConnection"],
+      [() => integrationService.deleteChannelConnection({ reason: "retired" }), "integrationService", "deleteChannelConnection"],
+      [() => integrationService.testChannelConnectionInstance({ recipient: "+7 900 123-45-67" }), "integrationService", "testChannelConnectionInstance"],
+      [() => integrationService.fetchChannelConnectionEvents(""), "integrationService", "fetchChannelConnectionEvents"],
+      [() => settingsService.updateEmployee({ roleKey: "senior" }), "settingsService", "updateEmployee"],
+      [() => settingsService.resetEmployeePassword({ reason: "reset" }), "settingsService", "resetEmployeePassword"],
+      [() => settingsService.resetEmployeeMfa({ reason: "reset" }), "settingsService", "resetEmployeeMfa"],
+      [() => settingsService.deactivateEmployee({ reason: "offboard" }), "settingsService", "deactivateEmployee"],
+      [() => settingsService.updateTopic({ name: "Delay" }), "settingsService", "updateTopic"],
+      [() => settingsService.archiveTopic({ reason: "Duplicate" }), "settingsService", "archiveTopic"],
+      [() => settingsService.restoreTopic({ reason: "Needed" }), "settingsService", "restoreTopic"],
+      [() => settingsService.fetchTopicUsage(""), "settingsService", "fetchTopicUsage"],
+      [() => settingsService.updateRule({ enabled: false }), "settingsService", "updateRule"],
+      [() => settingsService.testRule({ sampleSize: 50 }), "settingsService", "testRule"],
+      [() => automationService.publishBotScenario({ name: "Checkout bot" }), "automationService", "publishBotScenario"],
+      [() => automationService.testBotScenario({ name: "Checkout bot" }), "automationService", "testBotScenario"]
+    ];
 
-    const primary = profiles.data.items[0];
-    const candidate = profiles.data.items[1];
-    const merge = await clientService.mergeClientProfiles({ candidate, primary });
+    for (const [callService, expectedService, expectedOperation] of cases) {
+      globalThis.fetch = mock.fn(async () => {
+        throw new Error("fetch should not be called for missing route ids");
+      });
 
-    assert.equal(merge.status, "ok");
-    assert.match(merge.data.primaryProfileId, /^src_/);
-    assert.match(merge.data.mergedProfileId, /^src_/);
-    assert.ok(Array.isArray(merge.data.sourceProfileIds));
-    assert.match(merge.data.auditId, /^evt_client_merge_/);
-    assert.match(merge.data.conflictResolution, /auto_merge|manual_review/);
+      const response = await callService();
+
+      assert.equal(globalThis.fetch.mock.callCount(), 0);
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+      assert.equal(response.status, "error");
+      assert.equal(response.error.code, "missing_id");
+    }
   });
 
-  it("models channel, webhook, key rotation and session operations", async () => {
-    const channelTest = await integrationService.testChannelConnection({
-      channel: { id: "vk", channel: "VK", connections: [{ rawId: "conn_vk_main" }] },
-      message: "channel smoke",
-      mode: "receive",
-      recipient: "+7 900 123-45-67"
-    });
+  it("integration and permission services call API Gateway routes", async () => {
+    const permissionPayload = {
+      action: "settings.manage",
+      resource: "settings",
+      roleMode: "employee"
+    };
 
-    assert.equal(channelTest.status, "ok");
-    assert.equal(channelTest.data.delivery.status, "accepted_to_queue");
-    assert.match(channelTest.data.delivery.requestId, /^test_vk_/);
-    assert.match(channelTest.data.auditId, /^evt_channel_/);
+    const cases = [
+      [() => integrationService.fetchIntegrationWorkspace(), "integrationService", "fetchIntegrationWorkspace", "/api/v1/integrations/workspace", "GET", undefined],
+      [() => integrationService.fetchChannelConnections({ type: "telegram" }), "integrationService", "fetchChannelConnections", "/api/v1/integrations/channels?type=telegram", "GET", undefined],
+      [
+        () => integrationService.createChannelConnection({
+          type: "telegram",
+          name: "Telegram VIP",
+          environment: "production",
+          credentials: { botToken: "123:secret" },
+          routingQueueId: "queue-vip",
+          chatLimit: 8
+        }),
+        "integrationService",
+        "createChannelConnection",
+        "/api/v1/integrations/channels",
+        "POST",
+        {
+          type: "telegram",
+          name: "Telegram VIP",
+          environment: "production",
+          credentials: { botToken: "123:secret" },
+          routingQueueId: "queue-vip",
+          chatLimit: 8
+        }
+      ],
+      [
+        () => integrationService.updateChannelConnection({
+          connectionId: "conn_tg_vip",
+          status: "paused",
+          reason: "maintenance window"
+        }),
+        "integrationService",
+        "updateChannelConnection",
+        "/api/v1/integrations/channels/conn_tg_vip",
+        "PATCH",
+        { status: "paused", reason: "maintenance window" }
+      ],
+      [
+        () => integrationService.deleteChannelConnection({
+          connectionId: "conn_tg_vip",
+          reason: "retired bot"
+        }),
+        "integrationService",
+        "deleteChannelConnection",
+        "/api/v1/integrations/channels/conn_tg_vip",
+        "DELETE",
+        { reason: "retired bot" }
+      ],
+      [
+        () => integrationService.testChannelConnectionInstance({
+          connectionId: "conn_tg_vip",
+          mode: "send",
+          recipient: "+7 900 123-45-67",
+          message: "channel smoke"
+        }),
+        "integrationService",
+        "testChannelConnectionInstance",
+        "/api/v1/integrations/channels/conn_tg_vip/test",
+        "POST",
+        {
+          mode: "send",
+          recipient: "+7 900 123-45-67",
+          message: "channel smoke"
+        }
+      ],
+      [() => integrationService.fetchChannelConnectionEvents("conn_tg_vip"), "integrationService", "fetchChannelConnectionEvents", "/api/v1/integrations/channels/conn_tg_vip/events", "GET", undefined],
+      [
+        () => integrationService.testChannelConnection({
+          channel: { id: "vk", connections: [{ rawId: "conn_vk_main" }] },
+          environment: "sandbox",
+          message: "channel smoke",
+          recipient: "+7 900 123-45-67"
+        }),
+        "integrationService",
+        "testChannelConnection",
+        "/api/v1/integrations/channel-tests",
+        "POST",
+        {
+          channelId: "vk",
+          connectionId: "conn_vk_main",
+          environment: "sandbox",
+          message: "channel smoke",
+          mode: "receive",
+          recipient: "+7 900 123-45-67"
+        }
+      ],
+      [() => integrationService.rotateApiKey("prod-key"), "integrationService", "rotateApiKey", "/api/v1/integrations/api-keys/prod-key/rotate", "POST", undefined],
+      [
+        () => integrationService.replayWebhookDelivery({ deliveryId: "dlv-441", idempotencyKey: "idem-1", traceId: "hook_vk_441" }),
+        "integrationService",
+        "replayWebhookDelivery",
+        "/api/v1/integrations/webhooks/deliveries/dlv-441/replay",
+        "POST",
+        { idempotencyKey: "idem-1" }
+      ],
+      [() => integrationService.revokeSecuritySession("sess-risk"), "integrationService", "revokeSecuritySession", "/api/v1/integrations/security/sessions/sess-risk/revoke", "POST", undefined],
+      [() => permissionService.validatePermission(permissionPayload), "permissionService", "validatePermission", "/api/v1/permissions/validate", "POST", permissionPayload],
+      [() => permissionService.fetchPermissionModel(), "permissionService", "fetchPermissionModel", "/api/v1/permissions/model", "GET", undefined]
+    ];
 
-    const rotation = await integrationService.rotateApiKey("prod-key");
-    assert.equal(rotation.data.status, "rotation_queued");
-    assert.match(rotation.data.auditId, /^evt_key_/);
+    for (const [callService, expectedService, expectedOperation, expectedUrl, expectedMethod, expectedBody] of cases) {
+      installFetchMock(envelope(expectedService, expectedOperation, { ok: true }));
 
-    const replay = await integrationService.replayWebhookDelivery({ id: "dlv-441", traceId: "hook_vk_441" });
-    assert.equal(replay.data.status, "replay_queued");
-    assert.equal(replay.data.originalTraceId, "hook_vk_441");
-
-    const revoke = await integrationService.revokeSecuritySession("sess-risk");
-    assert.equal(revoke.data.status, "revoked");
-    assert.match(revoke.data.auditId, /^evt_session_/);
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+    }
   });
 
-  it("covers proactive, rescue, automation, quality and audit backend adapters", async () => {
-    const proactive = await visitorService.saveProactiveRule({
+  it("settings service calls employee, role and group API Gateway routes", async () => {
+    const employeeUpdate = {
+      employeeId: "usr-ns-agent",
+      roleKey: "senior",
+      groupId: "group-vip",
+      channels: ["Telegram", "MAX"],
+      chatLimit: 9,
+      canOverride: true,
+      sensitiveData: true
+    };
+    const invitePayload = {
+      email: "new.agent@northstar.example",
+      groupId: "group-line-1",
+      name: "New Agent",
+      roleKey: "employee"
+    };
+    const groupPayload = {
+      groupId: "group-vip",
+      name: "VIP",
+      channels: ["Telegram"],
+      memberIds: ["usr-ns-agent"]
+    };
+    const cases = [
+      [() => settingsService.fetchEmployees({ status: "active" }), "fetchEmployees", "/api/v1/settings/employees?status=active", "GET", undefined],
+      [() => settingsService.inviteEmployee(invitePayload), "inviteEmployee", "/api/v1/settings/employees/invites", "POST", invitePayload],
+      [() => settingsService.updateEmployee(employeeUpdate), "updateEmployee", "/api/v1/settings/employees/usr-ns-agent", "PATCH", {
+        roleKey: "senior",
+        groupId: "group-vip",
+        channels: ["Telegram", "MAX"],
+        chatLimit: 9,
+        canOverride: true,
+        sensitiveData: true
+      }],
+      [() => settingsService.resetEmployeePassword({ employeeId: "usr-ns-agent", reason: "Operator requested reset" }), "resetEmployeePassword", "/api/v1/settings/employees/usr-ns-agent/password-reset", "POST", { reason: "Operator requested reset" }],
+      [() => settingsService.resetEmployeeMfa({ employeeId: "usr-ns-agent", reason: "Phone replacement" }), "resetEmployeeMfa", "/api/v1/settings/employees/usr-ns-agent/mfa-reset", "POST", { reason: "Phone replacement" }],
+      [() => settingsService.deactivateEmployee({ employeeId: "usr-ns-agent", reason: "Offboarding" }), "deactivateEmployee", "/api/v1/settings/employees/usr-ns-agent/deactivate", "POST", { reason: "Offboarding" }],
+      [() => settingsService.fetchRoles(), "fetchRoles", "/api/v1/settings/roles", "GET", undefined],
+      [() => settingsService.fetchGroups(), "fetchGroups", "/api/v1/settings/groups", "GET", undefined],
+      [() => settingsService.createGroup({ name: "VIP", channels: ["Telegram"] }), "createGroup", "/api/v1/settings/groups", "POST", { name: "VIP", channels: ["Telegram"] }],
+      [() => settingsService.updateGroup(groupPayload), "updateGroup", "/api/v1/settings/groups/group-vip", "PATCH", {
+        name: "VIP",
+        channels: ["Telegram"],
+        memberIds: ["usr-ns-agent"]
+      }],
+      [() => settingsService.fetchTopics({ status: "active" }), "fetchTopics", "/api/v1/workspace/topics?status=active", "GET", undefined],
+      [() => settingsService.createTopic({ groupName: "Заказ", branchName: "Статус", name: "Перенос доставки" }), "createTopic", "/api/v1/workspace/topics", "POST", { groupName: "Заказ", branchName: "Статус", name: "Перенос доставки" }],
+      [() => settingsService.updateTopic({ topicId: "topic-delivery-delay", required: false }), "updateTopic", "/api/v1/workspace/topics/topic-delivery-delay", "PATCH", { required: false }],
+      [() => settingsService.archiveTopic({ topicId: "topic-delivery-delay", reason: "Duplicate" }), "archiveTopic", "/api/v1/workspace/topics/topic-delivery-delay/archive", "POST", { reason: "Duplicate" }],
+      [() => settingsService.restoreTopic({ topicId: "topic-delivery-delay", reason: "Needed" }), "restoreTopic", "/api/v1/workspace/topics/topic-delivery-delay/restore", "POST", { reason: "Needed" }],
+      [() => settingsService.fetchTopicUsage("topic-delivery-delay"), "fetchTopicUsage", "/api/v1/workspace/topics/topic-delivery-delay/usage", "GET", undefined],
+      [() => settingsService.fetchRules(), "fetchRules", "/api/v1/settings/rules", "GET", undefined],
+      [() => settingsService.updateRule({ ruleId: "operator-chat-limit", enabled: false, reason: "Maintenance" }), "updateRule", "/api/v1/settings/rules/operator-chat-limit", "PATCH", { enabled: false, reason: "Maintenance" }],
+      [() => settingsService.testRule({ ruleId: "operator-chat-limit", sampleSize: 50 }), "testRule", "/api/v1/settings/rules/operator-chat-limit/test", "POST", { sampleSize: 50 }]
+    ];
+
+    for (const [callService, expectedOperation, expectedUrl, expectedMethod, expectedBody] of cases) {
+      installFetchMock(envelope("settingsService", expectedOperation, { ok: true }));
+
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, "settingsService");
+      assert.equal(response.operation, expectedOperation);
+    }
+  });
+
+  it("visitor, automation and quality services call API Gateway routes", async () => {
+    const proactiveRule = {
       id: "rule-checkout",
       channels: ["SDK", "Telegram"],
       activeVariant: "B",
       cooldown: "24h"
-    });
-    assert.match(proactive.data.frequencyCap.id, /^cap_rule-checkout_/);
-    assert.match(proactive.data.experiment.id, /^exp_rule-checkout_/);
-    assert.deepEqual(proactive.data.targeting.channels, ["SDK", "Telegram"]);
-
-    const rescue = await visitorService.triggerRescueReturn({
+    };
+    const rescueChat = {
       id: "rescue-vk",
       channel: "VK",
-      client: "Queue VK"
-    });
-    assert.equal(rescue.data.outcome.status, "return_queued");
-    assert.match(rescue.data.countdown.serverDeadlineAt, /^\d{4}-\d{2}-\d{2}T/);
-
-    const invalidFlow = await automationService.validateBotFlowImport('{"name":"Broken","flowNodes":[{"id":"bad","type":"bad_type"}]}');
-    assert.equal(invalidFlow.status, "invalid");
-    assert.ok(invalidFlow.data.errors.some((error) => error.includes("type")));
-
-    const publish = await automationService.publishBotScenario({
+      client: "Queue VK",
+      nextAction: "Return to operator",
+      operator: "Nina",
+      priority: "critical",
+      timer: "02:00"
+    };
+    const flowImport = '{"name":"Broken","flowNodes":[{"id":"bad","type":"bad_type"}]}';
+    const botScenario = {
       id: "bot-checkout",
       name: "Checkout bot",
       channels: ["SDK"],
       flowNodes: [{ id: "start", type: "message" }],
       flowEdges: []
-    });
-    assert.match(publish.data.runtimeVersion, /^runtime-bot-checkout-/);
-    assert.match(publish.data.auditId, /^evt_bot_/);
+    };
+    const qualityDraft = { conversationId: "conv-1", text: "Need help" };
 
-    const score = await qualityService.scoreDraftResponse({
-      conversationId: "conv-1",
-      text: "Need help"
-    });
-    assert.equal(score.data.telemetry.model, "quality-mock/v1");
-    assert.ok(Array.isArray(score.data.repairActions));
+    const cases = [
+      [() => visitorService.fetchVisitorWorkspace(), "visitorService", "fetchVisitorWorkspace", "/api/v1/automation/workspace", "GET", undefined],
+      [() => visitorService.saveProactiveRule(proactiveRule), "visitorService", "saveProactiveRule", "/api/v1/automation/proactive-rules", "POST", proactiveRule],
+      [
+        () => visitorService.triggerRescueReturn(rescueChat),
+        "visitorService",
+        "triggerRescueReturn",
+        "/api/v1/automation/handoff-events",
+        "POST",
+        {
+          botId: "bot-rescue-vk",
+          conversationId: "rescue-vk",
+          queue: "VK",
+          reason: "Return to operator",
+          collectedFields: {
+            client: "Queue VK",
+            channel: "VK",
+            operator: "Nina",
+            priority: "critical",
+            timer: "02:00",
+            nextAction: "Return to operator"
+          }
+        },
+        { summary: { queue: "VK", reason: "Return to operator" }, eventId: "handoff_1" }
+      ],
+      [() => automationService.fetchAutomationWorkspace(), "automationService", "fetchAutomationWorkspace", "/api/v1/automation/workspace", "GET", undefined],
+      [() => automationService.validateBotFlowImport(flowImport), "automationService", "validateBotFlowImport", "/api/v1/automation/bot-flow/validate", "POST", flowImport],
+      [() => automationService.publishBotScenario(botScenario), "automationService", "publishBotScenario", "/api/v1/automation/bot-scenarios/bot-checkout/publish", "POST", botScenario],
+      [() => automationService.testBotScenario(botScenario), "automationService", "testBotScenario", "/api/v1/automation/bot-scenarios/bot-checkout/test-runs", "POST", botScenario],
+      [() => qualityService.fetchQualityWorkspace(), "qualityService", "fetchQualityWorkspace", "/api/v1/quality/workspace", "GET", undefined],
+      [() => qualityService.scoreDraftResponse(qualityDraft), "qualityService", "scoreDraftResponse", "/api/v1/quality/draft-score", "POST", qualityDraft]
+    ];
 
-    const auditExport = await auditService.exportAuditEvents({ format: "CSV", source: "channels" });
-    assert.equal(auditExport.data.fileName, "audit-channels.csv");
-    assert.ok(auditExport.data.immutableEventIds.length > 0);
+    for (const [callService, expectedService, expectedOperation, expectedUrl, expectedMethod, expectedBody, data = { ok: true }] of cases) {
+      installFetchMock(envelope(expectedService, expectedOperation, data));
 
-    const redaction = await auditService.redactAuditEvent("evt_hook_9006", { reason: "privacy" });
-    assert.equal(redaction.data.eventId, "evt_hook_9006");
-    assert.equal(redaction.data.immutable, true);
-    assert.match(redaction.data.redactionId, /^redact_evt_hook_9006_/);
+      const response = await callService();
+      assertLastRequest({
+        body: expectedBody,
+        method: expectedMethod,
+        url: expectedUrl
+      });
+      assert.equal(response.service, expectedService);
+      assert.equal(response.operation, expectedOperation);
+    }
   });
+
 });

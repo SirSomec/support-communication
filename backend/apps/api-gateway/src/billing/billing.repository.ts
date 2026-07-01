@@ -453,6 +453,7 @@ export interface BillingRepositoryPort {
   saveBillingApproval(approval: BillingApproval): MaybePromise<BillingApproval>;
   saveBillingLegalEntity(entity: BillingLegalEntity): MaybePromise<BillingLegalEntity>;
   saveBillingTaxDocument(document: BillingTaxDocument): MaybePromise<BillingTaxDocument>;
+  saveTenant(tenant: BillingTenantState): MaybePromise<BillingTenantState>;
   saveReconciliationConflict(conflict: BillingReconciliationConflict): MaybePromise<BillingReconciliationConflict>;
   recordQuotaLedgerEntry(entry: BillingQuotaLedgerEntry): MaybePromise<BillingQuotaLedgerEntry>;
   releaseQuotaReservation(input: BillingQuotaReservationReleaseInput): MaybePromise<BillingQuotaReservation>;
@@ -550,6 +551,10 @@ export class BillingRepository implements BillingRepositoryPort {
 
   findTenant(tenantId: string | undefined): MaybePromise<BillingTenantState | undefined> {
     return this.adapter.findTenant(tenantId);
+  }
+
+  saveTenant(tenant: BillingTenantState): MaybePromise<BillingTenantState> {
+    return this.adapter.saveTenant(tenant);
   }
 
   findTenantSubscription(tenantId: string | undefined): MaybePromise<BillingSubscriptionState | undefined> {
@@ -874,6 +879,7 @@ interface PrismaBillingDelegates {
     findMany(input: { orderBy: { createdAt: "desc" } }): Promise<PrismaBillingSyncJobRow[]>;
   };
   billingTenantState: {
+    create(input: { data: PrismaBillingTenantStateCreateInput }): Promise<PrismaBillingTenantStateRow>;
     findMany(input: { orderBy: { name: "asc" } }): Promise<PrismaBillingTenantStateRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaBillingTenantStateRow | null>;
     update(input: { data: PrismaBillingTenantStateUpdateInput; where: { id: string } }): Promise<PrismaBillingTenantStateRow>;
@@ -903,6 +909,8 @@ interface PrismaBillingTenantStateRow {
   users: number;
   workspaces: number;
 }
+
+type PrismaBillingTenantStateCreateInput = PrismaBillingTenantStateUpdateInput & { id: string };
 
 interface PrismaBillingSyncJobRow {
   actor: string;
@@ -1477,6 +1485,15 @@ class PrismaBillingRepository implements BillingRepositoryPort {
 
     const row = await this.client.billingTenantState.findUnique({ where: { id: tenantId } });
     return row ? clone(toBillingTenantState(row)) : undefined;
+  }
+
+  async saveTenant(tenant: BillingTenantState): Promise<BillingTenantState> {
+    const existing = await this.client.billingTenantState.findUnique({ where: { id: tenant.id } });
+    const data = toPrismaBillingTenantStateUpdateInput(tenant);
+    const row = existing
+      ? await this.client.billingTenantState.update({ data, where: { id: tenant.id } })
+      : await this.client.billingTenantState.create({ data: { ...data, id: tenant.id } });
+    return clone(toBillingTenantState(row));
   }
 
   async findTenantSubscription(tenantId: string | undefined): Promise<BillingSubscriptionState | undefined> {
@@ -2290,6 +2307,20 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
       }
 
       return clone((store.read().tenants ?? tenantBillingStates).find((tenant) => tenant.id === tenantId));
+    },
+
+    saveTenant(tenant: BillingTenantState): BillingTenantState {
+      const state = store.read();
+      const tenants = state.tenants ?? tenantBillingStates;
+      const existing = tenants.some((item) => item.id === tenant.id);
+      const nextTenant = clone(tenant);
+      store.write({
+        ...state,
+        tenants: existing
+          ? tenants.map((item) => item.id === tenant.id ? nextTenant : item)
+          : [...tenants, nextTenant]
+      });
+      return clone(nextTenant);
     },
 
     findTenantSubscription(tenantId: string | undefined): BillingSubscriptionState | undefined {

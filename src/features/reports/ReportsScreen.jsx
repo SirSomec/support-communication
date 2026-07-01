@@ -10,8 +10,7 @@ import {
   reportColumnOptions,
   reportRows,
   rescueOutcomeSummary,
-  rescueReportRows,
-  topicOptions
+  rescueReportRows
 } from "../../data.js";
 import { reportService } from "../../services/reportService.js";
 import "./reports.css";
@@ -27,7 +26,7 @@ const exportStatusClasses = {
   error: "warn",
   expired: "closed"
 };
-export function ReportsScreen({ onBack, onToast, access }) {
+export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
   const [period, setPeriod] = useState("Сегодня");
   const [channel, setChannel] = useState("Все каналы");
   const [reportType, setReportType] = useState("Ежедневный");
@@ -39,6 +38,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
   const [dialogTypeFilter, setDialogTypeFilter] = useState("Все типы");
   const [selectedColumns, setSelectedColumns] = useState(reportColumnOptions.map((column) => column.id));
   const [reportExportJobs, setReportExportJobs] = useState(exportJobs);
+  const [exportError, setExportError] = useState("");
   const visibleReportColumns = reportColumnOptions.filter((column) => selectedColumns.includes(column.id));
   const reportOperatorOptions = ["Все операторы", ...operators.map((operator) => operator.name)];
   const reportTopicOptions = ["Все тематики", ...topicOptions.slice(0, 8)];
@@ -74,6 +74,13 @@ export function ReportsScreen({ onBack, onToast, access }) {
       period,
       reportType
     });
+    if (response.status !== "ok") {
+      const message = response.error?.message ?? "Не удалось поставить экспорт в очередь.";
+      setExportError(message);
+      onToast(message);
+      return;
+    }
+
     const nextJob = {
       ...response.data.job,
       status: "В очереди",
@@ -81,6 +88,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
       createdAt: "сейчас"
     };
 
+    setExportError("");
     setReportExportJobs((current) => [nextJob, ...current]);
     onToast(`Выгрузка XLSX за период "${period}" поставлена в очередь: ${nextJob.backendQueueId}.`);
   }
@@ -179,6 +187,8 @@ export function ReportsScreen({ onBack, onToast, access }) {
         <button onClick={handleApplyFilters} type="button"><Filter size={17} /> Применить</button>
         <button onClick={() => onToast("История экспортов открыта.")} type="button"><CalendarDays size={17} /> История</button>
       </div>
+
+      {exportError ? <div className="report-export-error">{exportError}</div> : null}
 
       <div className="reports-layout">
         <section className="work-panel">

@@ -26,6 +26,7 @@ export interface ConversationRecord {
   slaTone: string;
   status: string;
   tags: string[];
+  tenantId?: string;
   time: string;
   topic: string;
   unread?: boolean;

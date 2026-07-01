@@ -253,6 +253,7 @@ export interface WorkerConversationOutboundDescriptor {
   kind: ConversationOutboundDescriptorKind;
   messageId: string | null;
   payload: Record<string, unknown>;
+  tenantId: string;
 }
 
 export interface ConversationOutboundDescriptorStore {
@@ -311,6 +312,7 @@ interface PrismaConversationOutboundDescriptorRow {
   kind: string;
   messageId: string | null;
   payload: unknown;
+  tenantId: string;
 }
 
 interface PrismaChannelDeliveryReceiptCreateInput {
@@ -1061,7 +1063,8 @@ function toWorkerConversationOutboundDescriptor(row: PrismaConversationOutboundD
     idempotencyKey: row.idempotencyKey ?? null,
     kind: row.kind as ConversationOutboundDescriptorKind,
     messageId: row.messageId,
-    payload: toJsonRecord(row.payload)
+    payload: toJsonRecord(row.payload),
+    tenantId: row.tenantId
   };
 }
 

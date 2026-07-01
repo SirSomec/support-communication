@@ -189,7 +189,7 @@ export function useDialogActions({
     setToast("Диалог закрыт и попадет в ежедневный отчет.");
   }
 
-  function handleSend() {
+  async function handleSend() {
     const readyAttachments = attachments.filter((attachment) => attachment.status === "ready");
     const hasAttachmentIssues = attachments.some((attachment) => attachment.status !== "ready");
 
@@ -203,14 +203,23 @@ export function useDialogActions({
       return;
     }
 
-    appendMessage(selected.id, {
+    const result = await appendMessage(selected.id, {
       type: composeMode === "internal" ? "internal" : undefined,
       side: composeMode === "internal" ? undefined : "agent",
       text: draft.trim() || "Отправлено вложение",
       attachments: readyAttachments,
       author: composeMode === "internal" ? "Иван П." : undefined,
       time: "сейчас"
+    }, {
+      optimistic: false,
+      persist: true
     });
+
+    if (!result?.ok) {
+      setToast("Не удалось отправить сообщение. Попробуйте еще раз.");
+      return;
+    }
+
     setDraft("");
     clearAttachments({ releasePreviews: false });
     setToast(composeMode === "internal" ? "Внутренний комментарий сохранен в истории чата." : "Ответ отправлен клиенту.");

@@ -1,69 +1,30 @@
-import { activeVisitors, proactiveRules, rescueChats } from "../data.js";
-import { addMinutes, createEnvelope, makeAuditId } from "./mockBackend.js";
+import { apiRequest } from "./apiClient.js";
 
 const SERVICE = "visitorService";
 
 export const visitorService = {
   async fetchVisitorWorkspace() {
-    return createEnvelope({
-      service: SERVICE,
+    return apiRequest("/automation/workspace", {
       operation: "fetchVisitorWorkspace",
-      data: {
-        activeVisitors,
-        proactiveRules,
-        rescueChats
-      },
-      partial: true
+      service: SERVICE
     });
   },
 
-  async saveProactiveRule(rule) {
-    return createEnvelope({
-      service: SERVICE,
+  async saveProactiveRule(rule = {}) {
+    return apiRequest("/automation/proactive-rules", {
+      body: rule,
+      method: "POST",
       operation: "saveProactiveRule",
-      data: {
-        rule,
-        frequencyCap: {
-          id: `cap_${rule.id}_${Date.now().toString(36)}`,
-          cooldown: rule.cooldown ?? "24h",
-          perUser: true,
-          perChannel: true
-        },
-        experiment: {
-          id: `exp_${rule.id}_${Date.now().toString(36)}`,
-          activeVariant: rule.activeVariant ?? "A",
-          persisted: true
-        },
-        targeting: {
-          channels: rule.channels ?? [],
-          segment: rule.segment ?? "manual",
-          privacyChecked: true
-        },
-        auditId: makeAuditId("proactive")
-      }
+      service: SERVICE
     });
   },
 
-  async triggerRescueReturn(chat) {
-    const serverDeadlineAt = addMinutes(new Date(), 3).toISOString();
-
-    return createEnvelope({
-      service: SERVICE,
+  async triggerRescueReturn(chat = {}) {
+    return apiRequest("/automation/handoff-events", {
+      body: normalizeHandoffEventPayload(chat),
+      method: "POST",
       operation: "triggerRescueReturn",
-      data: {
-        chatId: chat.id,
-        channel: chat.channel,
-        countdown: {
-          serverDeadlineAt,
-          autoReturn: true,
-          policy: "channel_queue_role"
-        },
-        outcome: {
-          status: "return_queued",
-          analyticsKey: `rescue_${chat.channel}_${Date.now().toString(36)}`
-        },
-        auditId: makeAuditId("rescue")
-      }
+      service: SERVICE
     });
   },
 
@@ -74,7 +35,36 @@ export const visitorService = {
       operations: ["fetchVisitorWorkspace", "saveProactiveRule", "triggerRescueReturn"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
-      note: "Proactive and rescue actions expose server countdown, caps and experiment ids."
+      note: "Connected to API Gateway routes."
     };
   }
 };
+
+function normalizeHandoffEventPayload(chat) {
+  return {
+    botId: chat.botId ?? `bot-${safeId(chat.id ?? chat.channel ?? "visitor")}`,
+    conversationId: chat.conversationId ?? chat.id,
+    queue: chat.queue ?? chat.channel,
+    reason: chat.reason ?? chat.nextAction,
+    collectedFields: removeUndefined({
+      client: chat.client,
+      channel: chat.channel,
+      operator: chat.operator,
+      priority: chat.priority,
+      timer: chat.timer,
+      nextAction: chat.nextAction
+    })
+  };
+}
+
+function safeId(value) {
+  return String(value ?? "visitor")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "visitor";
+}
+
+function removeUndefined(payload) {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+}

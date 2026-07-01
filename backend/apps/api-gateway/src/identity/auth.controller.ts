@@ -4,6 +4,8 @@ import { loadBackendConfig } from "@support-communication/config";
 import { AuthService } from "./auth.service.js";
 import { DemoServiceAdminGuard } from "./demo-service-admin.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "./service-admin-auth.js";
+import { TenantOperatorAuthGuard } from "./tenant-operator-auth.guard.js";
+import { type TenantOperatorRequest } from "./tenant-operator-auth.js";
 
 @ApiTags("auth")
 @Controller("auth")
@@ -35,6 +37,28 @@ export class AuthController {
     }
 
     return this.authService.login(payload, { privileged });
+  }
+
+  @Post("tenant/login")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Tenant operator login envelope" })
+  tenantLogin(@Body() payload: { email?: string; password?: string }) {
+    return this.authService.loginTenantOperator(payload);
+  }
+
+  @Get("tenant/state")
+  @UseGuards(TenantOperatorAuthGuard)
+  @ApiOkResponse({ description: "Tenant operator auth state envelope" })
+  tenantState(@Req() request: TenantOperatorRequest) {
+    return this.authService.getTenantOperatorState({ sessionId: request.tenantOperatorContext?.sessionId });
+  }
+
+  @Post("tenant/logout")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(TenantOperatorAuthGuard)
+  @ApiOkResponse({ description: "Tenant operator logout envelope" })
+  tenantLogout(@Req() request: TenantOperatorRequest) {
+    return this.authService.logoutTenantOperator({ sessionId: request.tenantOperatorContext?.sessionId });
   }
 
   @Post("oidc/start")

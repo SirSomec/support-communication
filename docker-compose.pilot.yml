@@ -1,0 +1,21 @@
+services:
+  frontend:
+    build:
+      args:
+        VITE_DEMO_SERVICE_ADMIN_KEY: pilot-local-service-admin-key
+        VITE_ENABLE_SERVICE_ADMIN: "true"
+
+  api-gateway:
+    environment:
+      NODE_ENV: staging
+      DEMO_SERVICE_ADMIN_KEY: pilot-local-service-admin-key
+      ALLOW_DEMO_SERVICE_ADMIN_HEADERS: "true"
+      IDENTITY_REPOSITORY: prisma
+      BILLING_REPOSITORY: prisma
+      CONVERSATION_REPOSITORY: prisma
+      WORKSPACE_REPOSITORY: prisma
+      REALTIME_REDIS_FANOUT_ENABLED: "true"
+      TELEGRAM_WEBHOOK_ENABLED: "true"
+      PUBLIC_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_BASE_URL:-http://127.0.0.1:4100}
+      OUTBOX_TELEGRAM_ENABLED: "true"
+      OUTBOX_TELEGRAM_CHANNEL: Telegram

@@ -6,7 +6,6 @@ import {
   queueWaitingStatuses,
   statusLabels
 } from "../../app/dialogModel.js";
-import { topicOptions } from "../../data.js";
 import { StatusBadge } from "../../ui.jsx";
 import { Avatar } from "./Avatar.jsx";
 
@@ -23,6 +22,7 @@ export function ConversationList({
   query,
   onQuery,
   topics,
+  topicOptions = [],
   closedIds
 }) {
   const [isFilterPanelOpen, setFilterPanelOpen] = useState(false);

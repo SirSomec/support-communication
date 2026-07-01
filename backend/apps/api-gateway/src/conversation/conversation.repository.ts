@@ -976,6 +976,7 @@ function toConversationRecord(row: PrismaConversationRow): ConversationRecord {
     slaTone: row.slaTone,
     status: row.status,
     tags: [...row.tags],
+    tenantId: row.tenantId,
     time: row.time,
     topic: row.topic,
     ...(row.unread === null ? {} : { unread: row.unread })
@@ -1012,7 +1013,7 @@ function toPrismaConversationUpsertData(conversation: ConversationRecord): Prism
     slaTone: conversation.slaTone,
     status: conversation.status,
     tags: [...conversation.tags],
-    tenantId: "tenant-volga",
+    tenantId: conversation.tenantId ?? "tenant-volga",
     time: conversation.time,
     topic: conversation.topic,
     unread: conversation.unread ?? false

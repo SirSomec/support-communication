@@ -24,6 +24,7 @@
     "prisma:migrate:deploy": "node --env-file=.env.example scripts/run-prisma.mjs prisma migrate deploy --schema prisma/schema.prisma",
     "prisma:seed": "node --env-file=.env.example --import tsx scripts/seed-identity.ts",
     "identity:bootstrap:postgres": "npm run prisma:migrate:deploy && npm run prisma:seed",
+    "pilot:bootstrap": "node --env-file=.env.example scripts/pilot-bootstrap.mjs",
     "smoke:postgres": "node --env-file=.env.example scripts/smoke-postgres.mjs",
     "release:checklist": "node --env-file=.env.example scripts/release-checklist.mjs",
     "start:api-gateway": "npm run build && node --env-file=.env.example apps/api-gateway/dist/main.js",

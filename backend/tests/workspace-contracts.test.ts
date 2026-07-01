@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { createDeterministicObjectStorageSigner, createS3CompatibleObjectStorageSigner } from "../apps/api-gateway/src/workspace/object-storage.ts";
 import { WorkspaceRepository, type ClientProfileRecord, type KnowledgeArticle, type TemplateRecord } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 import { WorkspaceService } from "../apps/api-gateway/src/workspace/workspace.service.ts";
+import { TopicDirectoryService } from "../apps/api-gateway/src/workspace/topic-directory.service.ts";
 
 type ClientProfileIdentityRepository = {
   findClientProfile(sourceProfileId: string, scope?: { tenantId?: string }): ClientProfileIdentityRecord | Promise<ClientProfileIdentityRecord | undefined> | undefined;
@@ -17,6 +18,74 @@ type ClientProfileIdentityRepository = {
   saveClientProfile(profile: ClientProfileIdentityRecord): ClientProfileIdentityRecord | Promise<ClientProfileIdentityRecord>;
   updateClientMergeConflictState(conflictId: string, state: ClientMergeConflictState): ClientMergeConflictRecord | Promise<ClientMergeConflictRecord | undefined> | undefined;
 };
+
+describe("topic directory settings contracts", () => {
+  it("manages hierarchical topics and preserves archived topics out of active options", async () => {
+    const service = new TopicDirectoryService();
+
+    const initial = await service.fetchTopics({ tenantId: "tenant-northstar" });
+    assert.equal(initial.status, "ok");
+    assert.ok(initial.data.directory.length >= 3);
+    assert.ok(initial.data.activeOptions.every((option: string) => !option.includes("Смена карты")));
+
+    const created = await service.createTopic({
+      accessScope: "admins",
+      branchName: "Статус",
+      channels: ["Telegram", "MAX"],
+      groupName: "Заказ",
+      name: "Перенос доставки",
+      required: true,
+      routingTarget: "VIP support"
+    }, { tenantId: "tenant-northstar" });
+    assert.equal(created.status, "ok");
+    assert.equal(created.data.topic.name, "Перенос доставки");
+    assert.equal(created.data.topic.archived, false);
+    assert.match(created.data.auditEvent.id, /^evt_topic_directory_/);
+
+    const updated = await service.updateTopic(created.data.topic.id, {
+      channels: ["Telegram"],
+      required: false,
+      routingTarget: "Line 1"
+    });
+    assert.equal(updated.status, "ok");
+    assert.deepEqual(updated.data.topic.channels, ["Telegram"]);
+    assert.equal(updated.data.topic.required, false);
+
+    const usage = await service.fetchTopicUsage(created.data.topic.id);
+    assert.equal(usage.status, "ok");
+    assert.equal(usage.data.canHardDelete, false);
+    assert.ok(usage.data.usage.dialogs >= 0);
+
+    const archived = await service.archiveTopic(created.data.topic.id, { reason: "Duplicate topic" });
+    assert.equal(archived.status, "ok");
+    assert.equal(archived.data.topic.archived, true);
+
+    const afterArchive = await service.fetchTopics({ tenantId: "tenant-northstar" });
+    assert.equal(afterArchive.data.activeOptions.includes("Заказ / Перенос доставки"), false);
+    assert.ok(afterArchive.data.directory.some((group: Record<string, unknown>) => JSON.stringify(group).includes("Перенос доставки")));
+
+    const restored = await service.restoreTopic(created.data.topic.id, { reason: "Needed for routing" });
+    assert.equal(restored.status, "ok");
+    assert.equal(restored.data.topic.archived, false);
+  });
+
+  it("keeps topic directory mutations visible across service instances", async () => {
+    const first = new TopicDirectoryService();
+    const created = await first.createTopic({
+      branchName: "SLA",
+      channels: ["SDK"],
+      groupName: "Quality",
+      name: `Persistent topic ${Date.now()}`,
+      routingTarget: "Senior operators"
+    }, { tenantId: "tenant-northstar" });
+    assert.equal(created.status, "ok");
+
+    const second = new TopicDirectoryService();
+    const fetched = await second.fetchTopics({ query: created.data.topic.name, tenantId: "tenant-northstar" });
+    assert.equal(fetched.status, "ok");
+    assert.equal(fetched.data.topics.some((topic: Record<string, unknown>) => topic.id === created.data.topic.id), true);
+  });
+});
 
 type TemplateRecordRepository = {
   findTemplate(templateId: string, scope?: { tenantId?: string }): TemplateRecord | Promise<TemplateRecord | undefined> | undefined;

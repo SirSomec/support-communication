@@ -1,42 +1,41 @@
-import React from "react";
-import {
-  KeyRound,
-  ShieldCheck
-} from "lucide-react";
-import { ProductScreen, SectionTitle } from "../../ui.jsx";
-import {
-  channelDetails,
-  channelSettings
-} from "../../data.js";
+import React, { useMemo, useState } from "react";
+import { ProductScreen } from "../../ui.jsx";
+import { channelSettings, employeeChannelRules, topicDirectorySeed } from "../../data.js";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { AdminWorkspaces } from "./AdminWorkspaces.jsx";
 import { ChannelConnectionsPanel } from "./ChannelConnectionsPanel.jsx";
 import { EmployeeManagementPanel } from "./EmployeeManagementPanel.jsx";
+import { RulesPanel } from "./RulesPanel.jsx";
 import { SettingsAccessPanel } from "./SettingsAccessPanel.jsx";
+import { SettingsShell } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
 import { TopicDirectoryPanel } from "./TopicDirectoryPanel.jsx";
 
-export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }) {
+export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, onTopicOptionsChange }) {
+  const [activeTab, setActiveTab] = useState("connections");
+  const [connectionSummary, setConnectionSummary] = useState({ active: 0, total: 0 });
   const canEditSettings = access.canManageSettings;
+  const topicTotals = useMemo(() => countTopics(topicDirectorySeed), []);
+
+  const summaries = {
+    connections: `${connectionSummary.total} подключений, ${connectionSummary.active} активных`,
+    employees: `${employeeChannelRules.length} сотрудников, роли и лимиты`,
+    topics: `${topicTotals.active} активных / ${topicTotals.archived} архив`,
+    rules: "4 активных правила"
+  };
 
   return (
     <ProductScreen
       title="Настройки"
-      subtitle="Права, каналы, лимиты операторов, маршрутизация и обязательные правила закрытия."
+      subtitle="Подключения, сотрудники, справочник тематик и правила обработки обращений."
       onBack={onBack}
       stateItems={createScreenStateItems({
         total: channelSettings.length,
         empty: `${channelSettings.length} каналов`,
         emptyWhenZero: "каналы не настроены",
-        errors: channelDetails.flatMap((channel) => channel.logs).filter((log) => log.severity === "error").length,
+        errors: 0,
         errorLabel: "критичных ошибок нет"
       })}
-      actions={
-        <button className="primary-action" disabled={!canEditSettings} onClick={() => onToast("Настройки сохранены и попадут в аудит.")}>
-          <ShieldCheck size={17} />
-          Сохранить
-        </button>
-      }
     >
       <SettingsAccessPanel
         canEditSettings={canEditSettings}
@@ -44,56 +43,75 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode }
         roleMode={roleMode}
       />
 
-      <EmployeeManagementPanel
-        access={access}
-        canEditSettings={canEditSettings}
-        canResetEmployeePassword={access.canResetPasswords}
-        onToast={onToast}
-        roleMode={roleMode}
-      />
+      <SettingsShell activeTab={activeTab} onTabChange={setActiveTab} summaries={summaries}>
+        {activeTab === "connections" ? (
+          <>
+            <div className="integration-layout">
+              <ChannelConnectionsPanel
+                access={access}
+                canEditSettings={canEditSettings}
+                onSummaryChange={setConnectionSummary}
+                onToast={onToast}
+              />
 
-      <TopicDirectoryPanel
-        access={access}
-        canEditSettings={canEditSettings}
-        onToast={onToast}
-        roleMode={roleMode}
-      />
+              <SdkConsolePanel
+                access={access}
+                canEditSettings={canEditSettings}
+                onToast={onToast}
+              />
+            </div>
+            <AdminWorkspaces
+              access={access}
+              canEditSettings={canEditSettings}
+              onToast={onToast}
+              roleMode={roleMode}
+            />
+          </>
+        ) : null}
 
-      <div className="integration-layout">
-        <ChannelConnectionsPanel
-          access={access}
-          canEditSettings={canEditSettings}
-          onToast={onToast}
-        />
+        {activeTab === "employees" ? (
+          <EmployeeManagementPanel
+            access={access}
+            canEditSettings={canEditSettings}
+            canResetEmployeePassword={access.canResetPasswords}
+            onToast={onToast}
+            roleMode={roleMode}
+          />
+        ) : null}
 
-        <SdkConsolePanel
-          access={access}
-          canEditSettings={canEditSettings}
-          onToast={onToast}
-        />
-      </div>
-      <AdminWorkspaces
-        access={access}
-        canEditSettings={canEditSettings}
-        onToast={onToast}
-        roleMode={roleMode}
-      />
+        {activeTab === "topics" ? (
+          <TopicDirectoryPanel
+            access={access}
+            canEditSettings={canEditSettings}
+            onTopicOptionsChange={onTopicOptionsChange}
+            onToast={onToast}
+            roleMode={roleMode}
+          />
+        ) : null}
 
-      <div className="rules-panel">
-        <SectionTitle title="Критичные правила" action="Включены" />
-        {[
-          ["Нельзя закрыть диалог без тематики", "Обязательное правило для всех каналов"],
-          ["Внутренний комментарий не отправляется клиенту", "Разделение режимов ввода"],
-          ["Оператор не получает чаты сверх лимита", "Override только с правами старшего"],
-          ["Экспорт отчетов фиксируется в аудите", "CSV/XLSX/PDF"]
-        ].map(([title, description]) => (
-          <div className="rule-row" key={title}>
-            <KeyRound size={18} />
-            <strong>{title}</strong>
-            <span>{description}</span>
-          </div>
-        ))}
-      </div>
+        {activeTab === "rules" ? (
+          <RulesPanel
+            access={access}
+            canEditSettings={canEditSettings}
+            onToast={onToast}
+          />
+        ) : null}
+      </SettingsShell>
     </ProductScreen>
   );
+}
+
+function countTopics(directory) {
+  return directory.reduce((totals, group) => {
+    group.branches.forEach((branch) => {
+      branch.children.forEach((topic) => {
+        if (topic.archived) {
+          totals.archived += 1;
+        } else {
+          totals.active += 1;
+        }
+      });
+    });
+    return totals;
+  }, { active: 0, archived: 0 });
 }

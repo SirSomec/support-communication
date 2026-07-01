@@ -4,6 +4,17 @@
   margin-bottom: 14px;
 }
 
+.report-export-error {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #ffd1d1;
+  border-radius: 7px;
+  background: #fff7f7;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 850;
+}
+
 .report-table .entity-head,
 .report-table .entity-row {
   grid-template-columns: minmax(220px, 1fr) 130px 120px 90px minmax(160px, 1fr);

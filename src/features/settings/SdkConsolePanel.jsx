@@ -89,6 +89,7 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
           environment: sdkPlaygroundEnv,
           message: sdkPlaygroundMessage,
           phone: sdkPlaygroundPhone,
+          topic: "Оплата / Возврат",
           userId: sdkPlaygroundUser
         })
       : await integrationService.testChannelConnection({

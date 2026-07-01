@@ -72,7 +72,8 @@ export function VisitorsScreen({ onBack, onToast, access }) {
 
   async function handleRescueAction(chat) {
     const response = await visitorService.triggerRescueReturn(chat);
-    onToast(`${chat.client}: ${chat.nextAction}. ${response.data.outcome.status}`);
+    const result = response.data?.summary?.queue ?? response.data?.summary?.reason ?? response.data?.eventId ?? "";
+    onToast(`${chat.client}: ${chat.nextAction}. ${result}`);
   }
 
   return (

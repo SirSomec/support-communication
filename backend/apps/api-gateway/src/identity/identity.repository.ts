@@ -4,6 +4,7 @@ import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-commun
 import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
 import { addMinutes, makeAuditId, makeMfaChallengeId } from "./backend-ids.js";
 import { permissionRoles, serviceAdminSession, tenantAuditEvents, tenants, tenantUsers } from "./identity.fixtures.js";
+import { createTenantOperatorSessionTokens, resolveTenantOperatorPermissions } from "./tenant-operator-auth.js";
 
 export type IdentityTenant = (typeof tenants)[number];
 export type IdentityTenantAuditEvent = (typeof tenantAuditEvents)[number] & { immutable?: boolean };
@@ -276,6 +277,30 @@ export interface StoredServiceAdminSession extends ServiceAdminSessionRecord {
   tenantScope: string;
 }
 
+export interface StoredTenantOperatorSession {
+  allowedActions: string[];
+  expiresAt: string;
+  id: string;
+  revokedAt: string | null;
+  role: string;
+  tenantId: string;
+  userEmail: string;
+  userId: string;
+  userName: string;
+}
+
+interface CreateTenantOperatorSessionInput {
+  tenantId: string;
+  userId: string;
+}
+
+export interface CreateTenantOperatorSessionResult {
+  accessToken: string;
+  expiresAt: string;
+  refreshToken: string;
+  sessionId: string;
+}
+
 export interface IdentityState {
   breakGlassApprovals: IdentityBreakGlassApproval[];
   credentialAuditEvents: IdentityCredentialAuditEvent[];
@@ -328,6 +353,7 @@ export interface IdentityRepositoryPort {
   consumeOidcCallbackDescriptor(input: ConsumeOidcCallbackDescriptorInput): MaybePromise<OidcCallbackDescriptorConsumeResult>;
   consumeSamlAcsRequestDescriptor(input: ConsumeSamlAcsRequestDescriptorInput): MaybePromise<SamlAcsRequestDescriptorConsumeResult>;
   createMfaChallenge(email: string): MaybePromise<IdentityMfaChallenge>;
+  createTenantOperatorSession(input: CreateTenantOperatorSessionInput): MaybePromise<CreateTenantOperatorSessionResult>;
   createServiceAdminSession(input?: CreateServiceAdminSessionInput): MaybePromise<StoredServiceAdminSession>;
   createServiceAdminTokenPair(input: CreateServiceAdminTokenPairInput): MaybePromise<IdentityServiceAdminTokenPair>;
   findActiveServiceAdminImpersonation(input: FindActiveServiceAdminImpersonationInput): MaybePromise<IdentityServiceAdminImpersonationSession | undefined>;
@@ -345,7 +371,14 @@ export interface IdentityRepositoryPort {
   findTenant(tenantId: string): MaybePromise<IdentityTenant | undefined>;
   findTenantAuditEvents(tenantId: string): MaybePromise<IdentityTenantAuditEvent[]>;
   findTenantUser(userId: string | undefined): MaybePromise<IdentityTenantUser | undefined>;
+  findTenantUserByEmail(email: string): MaybePromise<IdentityTenantUser | undefined>;
   findTenantUsers(tenantId: string): MaybePromise<IdentityTenantUser[]>;
+  findTenantOperatorSession(sessionId: string | undefined): MaybePromise<StoredTenantOperatorSession | undefined>;
+  findTenantOperatorSessionByAccessToken(accessToken: string): MaybePromise<{
+    permissions: string[];
+    session: StoredTenantOperatorSession;
+    user: IdentityTenantUser;
+  } | undefined>;
   getActiveRbacPolicyVersion(): MaybePromise<IdentityRbacPolicyVersion | undefined>;
   getPasswordPolicy(scope: string): MaybePromise<IdentityPasswordPolicy | undefined>;
   listCredentialAuditEvents(subjectId: string): MaybePromise<IdentityCredentialAuditEvent[]>;
@@ -361,6 +394,9 @@ export interface IdentityRepositoryPort {
   recordSamlAcsRequestDescriptor(descriptor: IdentitySamlAcsRequestDescriptor): MaybePromise<IdentitySamlAcsRequestDescriptor>;
   recordSamlAssertionReplay(replay: IdentitySamlAssertionReplay): MaybePromise<IdentitySamlAssertionReplay>;
   recordServiceAdminAuditEvent(event: IdentityServiceAdminAuditEvent): MaybePromise<IdentityServiceAdminAuditEvent>;
+  saveTenant(tenant: IdentityTenant): MaybePromise<IdentityTenant>;
+  saveTenantUser(user: IdentityTenantUser): MaybePromise<IdentityTenantUser>;
+  revokeTenantOperatorSession(input: { sessionId?: string; token?: string }): MaybePromise<boolean>;
   revokeServiceAdminSession(sessionId: string | undefined): MaybePromise<StoredServiceAdminSession | undefined>;
   revokeServiceAdminToken(input: RevokeServiceAdminTokenInput): MaybePromise<IdentityServiceAdminTokenRevokeResult | undefined>;
   rotateServiceAdminRefreshToken(input: RotateServiceAdminRefreshTokenInput): MaybePromise<IdentityServiceAdminTokenRotationResult | undefined>;
@@ -389,7 +425,12 @@ interface CreateServiceAdminSessionInput {
   actorName?: string;
   adminEmail?: string;
   allowedActions?: string[];
+  availableOrganizations?: typeof serviceAdminSession.availableOrganizations;
+  currentTenantId?: string;
   mfaVerified?: boolean;
+  role?: string;
+  sessionIdPrefix?: string;
+  tenantScope?: string;
   ttlMinutes?: number;
 }
 
@@ -522,12 +563,24 @@ export class IdentityRepository implements IdentityRepositoryPort {
     return this.adapter.findTenant(tenantId);
   }
 
+  saveTenant(tenant: IdentityTenant): MaybePromise<IdentityTenant> {
+    return this.adapter.saveTenant(tenant);
+  }
+
+  saveTenantUser(user: IdentityTenantUser): MaybePromise<IdentityTenantUser> {
+    return this.adapter.saveTenantUser(user);
+  }
+
   findTenantAuditEvents(tenantId: string): MaybePromise<IdentityTenantAuditEvent[]> {
     return this.adapter.findTenantAuditEvents(tenantId);
   }
 
   findTenantUser(userId: string | undefined): MaybePromise<IdentityTenantUser | undefined> {
     return this.adapter.findTenantUser(userId);
+  }
+
+  findTenantUserByEmail(email: string): MaybePromise<IdentityTenantUser | undefined> {
+    return this.adapter.findTenantUserByEmail(email);
   }
 
   findTenantUsers(tenantId: string): MaybePromise<IdentityTenantUser[]> {
@@ -629,6 +682,10 @@ export class IdentityRepository implements IdentityRepositoryPort {
     return this.adapter.createMfaChallenge(email);
   }
 
+  createTenantOperatorSession(input: CreateTenantOperatorSessionInput): MaybePromise<CreateTenantOperatorSessionResult> {
+    return this.adapter.createTenantOperatorSession(input);
+  }
+
   consumeMfaChallenge(input: ConsumeMfaChallengeInput): MaybePromise<MfaChallengeConsumeResult> {
     return this.adapter.consumeMfaChallenge(input);
   }
@@ -725,8 +782,24 @@ export class IdentityRepository implements IdentityRepositoryPort {
     return this.adapter.findServiceAdminSessionByAccessToken(accessToken);
   }
 
+  findTenantOperatorSession(sessionId: string | undefined): MaybePromise<StoredTenantOperatorSession | undefined> {
+    return this.adapter.findTenantOperatorSession(sessionId);
+  }
+
+  findTenantOperatorSessionByAccessToken(accessToken: string): MaybePromise<{
+    permissions: string[];
+    session: StoredTenantOperatorSession;
+    user: IdentityTenantUser;
+  } | undefined> {
+    return this.adapter.findTenantOperatorSessionByAccessToken(accessToken);
+  }
+
   revokeServiceAdminSession(sessionId: string | undefined): MaybePromise<StoredServiceAdminSession | undefined> {
     return this.adapter.revokeServiceAdminSession(sessionId);
+  }
+
+  revokeTenantOperatorSession(input: { sessionId?: string; token?: string }): MaybePromise<boolean> {
+    return this.adapter.revokeTenantOperatorSession(input);
   }
 
   rotateServiceAdminRefreshToken(input: RotateServiceAdminRefreshTokenInput): MaybePromise<IdentityServiceAdminTokenRotationResult | undefined> {
@@ -873,15 +946,18 @@ interface PrismaIdentityDelegates {
     update(input: { data: PrismaServiceAdminImpersonationUpdateInput; where: { id: string } }): Promise<PrismaServiceAdminImpersonationRow>;
   };
   tenant: {
+    create(input: { data: PrismaTenantCreateInput }): Promise<PrismaTenantRow>;
     findMany(input: { orderBy: { name: "asc" } }): Promise<PrismaTenantRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaTenantRow | null>;
-    update(input: { data: { metadata: Record<string, unknown>; status: string }; where: { id: string } }): Promise<PrismaTenantRow>;
+    update(input: { data: PrismaTenantUpdateInput; where: { id: string } }): Promise<PrismaTenantRow>;
   };
   tenantAuditEvent: {
     create(input: { data: PrismaTenantAuditEventCreateInput }): Promise<PrismaTenantAuditEventRow>;
     findMany(input: { orderBy: { at: "desc" }; where: { tenantId: string } }): Promise<PrismaTenantAuditEventRow[]>;
   };
   tenantUser: {
+    create(input: { data: PrismaTenantUserCreateInput }): Promise<PrismaTenantUserRow>;
+    findFirst(input: { where: { email: string } }): Promise<PrismaTenantUserRow | null>;
     findUnique(input: { where: { id: string } }): Promise<PrismaTenantUserRow | null>;
     findMany(input: { orderBy: { name: "asc" }; where: { tenantId: string } }): Promise<PrismaTenantUserRow[]>;
     update(input: { data: PrismaTenantUserUpdateInput; where: { id: string } }): Promise<PrismaTenantUserRow>;
@@ -894,6 +970,21 @@ interface PrismaTenantRow {
   metadata?: unknown;
   name: string;
   status: string;
+}
+
+interface PrismaTenantCreateInput {
+  healthScore: number;
+  id: string;
+  metadata: Record<string, unknown>;
+  name: string;
+  status: string;
+}
+
+interface PrismaTenantUpdateInput {
+  healthScore?: number;
+  metadata?: Record<string, unknown>;
+  name?: string;
+  status?: string;
 }
 
 interface PrismaTenantAuditEventRow {
@@ -917,6 +1008,23 @@ interface PrismaTenantUserRow {
   inviteStatus: string;
   lastActiveAt: Date | string | null;
   metadata?: unknown;
+  mfa: string;
+  name: string;
+  risk: string;
+  role: string;
+  sessions: number;
+  status: string;
+  supportNotes: string;
+  tenantId: string;
+}
+
+interface PrismaTenantUserCreateInput {
+  device: string;
+  email: string;
+  id: string;
+  inviteStatus: string;
+  lastActiveAt: Date | null;
+  metadata: Record<string, unknown>;
   mfa: string;
   name: string;
   risk: string;
@@ -1487,6 +1595,36 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
     return row ? clone(toIdentityTenant(row)) : undefined;
   }
 
+  async saveTenant(tenant: IdentityTenant): Promise<IdentityTenant> {
+    const data = toPrismaTenantCreateInput(tenant);
+    const existing = await this.client.tenant.findUnique({ where: { id: tenant.id } });
+    const row = existing
+      ? await this.client.tenant.update({
+        data: {
+          healthScore: data.healthScore,
+          metadata: data.metadata,
+          name: data.name,
+          status: data.status
+        },
+        where: { id: tenant.id }
+      })
+      : await this.client.tenant.create({ data });
+    return clone(toIdentityTenant(row));
+  }
+
+  async saveTenantUser(user: IdentityTenantUser): Promise<IdentityTenantUser> {
+    const existing = await this.client.tenantUser.findUnique({ where: { id: user.id } });
+    const row = existing
+      ? await this.client.tenantUser.update({
+        data: toPrismaTenantUserUpdateInput(user),
+        where: { id: user.id }
+      })
+      : await this.client.tenantUser.create({
+        data: toPrismaTenantUserCreateInput(user)
+      });
+    return clone(toTenantUser(row));
+  }
+
   async findTenantAuditEvents(tenantId: string): Promise<IdentityTenantAuditEvent[]> {
     const rows = await this.client.tenantAuditEvent.findMany({
       orderBy: { at: "desc" },
@@ -1511,6 +1649,16 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
     }
 
     const row = await this.client.tenantUser.findUnique({ where: { id: userId } });
+    return row ? clone(toTenantUser(row)) : undefined;
+  }
+
+  async findTenantUserByEmail(email: string): Promise<IdentityTenantUser | undefined> {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) {
+      return undefined;
+    }
+
+    const row = await this.client.tenantUser.findFirst({ where: { email: normalizedEmail } });
     return row ? clone(toTenantUser(row)) : undefined;
   }
 
@@ -2167,18 +2315,62 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
         adminName: actorName,
         allowedActions: input.allowedActions ?? [...serviceAdminSession.allowedActions],
         authState: "mfa_verified",
-        availableOrganizations: clone(serviceAdminSession.availableOrganizations),
-        currentTenantId: serviceAdminSession.currentTenantId,
+        availableOrganizations: clone(input.availableOrganizations ?? serviceAdminSession.availableOrganizations),
+        currentTenantId: input.currentTenantId ?? serviceAdminSession.currentTenantId,
         expiresAt: addMinutes(now, input.ttlMinutes ?? 240),
-        id: `svc-session_${randomUUID()}`,
+        id: `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
         mfaVerifiedAt: input.mfaVerified === false ? null : now,
         revokedAt: null,
-        role: serviceAdminSession.role,
-        tenantScope: serviceAdminSession.tenantScope
+        role: input.role ?? serviceAdminSession.role,
+        tenantScope: input.tenantScope ?? serviceAdminSession.tenantScope
       }
     });
 
     return clone(toServiceAdminSession(row));
+  }
+
+  async createTenantOperatorSession(input: CreateTenantOperatorSessionInput): Promise<CreateTenantOperatorSessionResult> {
+    const user = await this.findTenantUser(input.userId);
+    if (!user || user.status !== "active" || user.tenantId !== input.tenantId) {
+      throw new Error(`Tenant operator ${input.userId} is unavailable for tenant ${input.tenantId}.`);
+    }
+
+    const permissionRoles = await this.listPermissionRoles();
+    const permissions = resolveTenantOperatorPermissions(user.role, permissionRoles);
+    const session = await this.createServiceAdminSession({
+      actorId: user.id,
+      actorName: user.name,
+      adminEmail: user.email,
+      allowedActions: permissions,
+      availableOrganizations: [{ id: user.tenantId, name: user.tenantId, role: "operator" }],
+      currentTenantId: user.tenantId,
+      role: user.role,
+      sessionIdPrefix: "top-session",
+      tenantScope: user.tenantId,
+      ttlMinutes: 60
+    });
+    const tokenPair = createTenantOperatorSessionTokens({
+      hashToken: hashServiceAdminToken,
+      sessionId: session.id,
+      subjectId: user.id
+    });
+    await this.createServiceAdminTokenPair({
+      accessTokenExpiresAt: tokenPair.accessTokenExpiresAt,
+      accessTokenHash: tokenPair.accessTokenHash,
+      id: tokenPair.id,
+      issuedAt: tokenPair.issuedAt,
+      refreshTokenExpiresAt: tokenPair.refreshTokenExpiresAt,
+      refreshTokenHash: tokenPair.refreshTokenHash,
+      sessionId: tokenPair.sessionId,
+      subjectId: tokenPair.subjectId
+    });
+
+    return {
+      accessToken: tokenPair.accessToken,
+      expiresAt: tokenPair.accessTokenExpiresAt,
+      refreshToken: tokenPair.refreshToken,
+      sessionId: session.id
+    };
   }
 
   async createServiceAdminTokenPair(input: CreateServiceAdminTokenPairInput): Promise<IdentityServiceAdminTokenPair> {
@@ -2238,6 +2430,43 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
     return session ? clone(toServiceAdminSession(session)) : undefined;
   }
 
+  async findTenantOperatorSession(sessionId: string | undefined): Promise<StoredTenantOperatorSession | undefined> {
+    const session = await this.findServiceAdminSession(sessionId);
+    if (!session || !isTenantOperatorSession(session)) {
+      return undefined;
+    }
+
+    return toTenantOperatorSession(session);
+  }
+
+  async findTenantOperatorSessionByAccessToken(accessToken: string): Promise<{
+    permissions: string[];
+    session: StoredTenantOperatorSession;
+    user: IdentityTenantUser;
+  } | undefined> {
+    const session = await this.findServiceAdminSessionByAccessToken(accessToken);
+    if (!session || !isTenantOperatorSession(session)) {
+      return undefined;
+    }
+    if (session.revokedAt) {
+      return undefined;
+    }
+    if (!Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
+      return undefined;
+    }
+
+    const user = await this.findTenantUser(session.adminId);
+    if (!user || user.status !== "active") {
+      return undefined;
+    }
+
+    return {
+      permissions: [...session.allowedActions],
+      session: toTenantOperatorSession(session),
+      user
+    };
+  }
+
   async revokeServiceAdminSession(sessionId: string | undefined): Promise<StoredServiceAdminSession | undefined> {
     if (!sessionId) {
       return undefined;
@@ -2254,6 +2483,26 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
     });
 
     return clone(toServiceAdminSession(revoked));
+  }
+
+  async revokeTenantOperatorSession(input: { sessionId?: string; token?: string }): Promise<boolean> {
+    const token = String(input.token ?? "").trim();
+    const sessionFromToken = token ? await this.findTenantOperatorSessionByAccessToken(token) : undefined;
+    const sessionId = input.sessionId ?? sessionFromToken?.session.id;
+    if (!sessionId) {
+      return false;
+    }
+
+    const revokedSession = await this.revokeServiceAdminSession(sessionId);
+    if (token) {
+      await this.revokeServiceAdminToken({
+        idempotencyKey: `top_revoke_${randomUUID()}`,
+        revokedAt: new Date().toISOString(),
+        tokenHash: hashServiceAdminToken(token)
+      });
+    }
+
+    return Boolean(revokedSession);
   }
 
   async rotateServiceAdminRefreshToken(input: RotateServiceAdminRefreshTokenInput): Promise<IdentityServiceAdminTokenRotationResult | undefined> {
@@ -2387,6 +2636,8 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
 }
 
 function createDurableIdentityRepository(store: DurableStore<IdentityState>): IdentityRepositoryPort {
+  ensureSeedPasswordCredentials(store);
+
   return {
     listTenants(): IdentityTenant[] {
       return clone(store.read().tenants);
@@ -2394,6 +2645,19 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
 
     findTenant(tenantId: string): IdentityTenant | undefined {
       return clone(store.read().tenants.find((tenant) => tenant.id === tenantId));
+    },
+
+    saveTenant(tenant: IdentityTenant): IdentityTenant {
+      const state = store.read();
+      const existing = state.tenants.some((item) => item.id === tenant.id);
+      const nextTenant = clone(tenant);
+      store.write({
+        ...state,
+        tenants: existing
+          ? state.tenants.map((item) => item.id === tenant.id ? nextTenant : item)
+          : [...state.tenants, nextTenant]
+      });
+      return clone(nextTenant);
     },
 
     findTenantAuditEvents(tenantId: string): IdentityTenantAuditEvent[] {
@@ -2412,6 +2676,31 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
 
       const state = store.read();
       return clone((state.tenantUsers ?? tenantUsers).find((user) => user.id === userId));
+    },
+
+    findTenantUserByEmail(email: string): IdentityTenantUser | undefined {
+      const normalizedEmail = normalizeEmail(email);
+      if (!normalizedEmail) {
+        return undefined;
+      }
+
+      const state = store.read();
+      return clone((state.tenantUsers ?? tenantUsers).find((user) => normalizeEmail(user.email) === normalizedEmail));
+    },
+
+    saveTenantUser(user: IdentityTenantUser): IdentityTenantUser {
+      store.update((state) => {
+        const currentTenantUsers = state.tenantUsers ?? clone(tenantUsers);
+        return {
+          ...state,
+          tenantUsers: [
+            user,
+            ...currentTenantUsers.filter((item) => item.id !== user.id)
+          ]
+        };
+      });
+
+      return clone(user);
     },
 
     listServiceAdminAuditEvents(): IdentityServiceAdminAuditEvent[] {
@@ -2723,6 +3012,76 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       }));
 
       return clone(challenge);
+    },
+
+    createTenantOperatorSession(input: CreateTenantOperatorSessionInput): CreateTenantOperatorSessionResult {
+      const user = clone((store.read().tenantUsers ?? tenantUsers).find((item) => item.id === input.userId));
+      if (!user || user.status !== "active" || user.tenantId !== input.tenantId) {
+        throw new Error(`Tenant operator ${input.userId} is unavailable for tenant ${input.tenantId}.`);
+      }
+
+      const permissions = resolveTenantOperatorPermissions(user.role, store.read().permissionRoles ?? permissionRoles);
+      const now = new Date();
+      const session: StoredServiceAdminSession = {
+        ...serviceAdminSession,
+        actorId: user.id,
+        actorName: user.name,
+        adminEmail: user.email,
+        adminId: user.id,
+        adminName: user.name,
+        allowedActions: permissions,
+        authState: "mfa_verified",
+        availableOrganizations: [{ id: user.tenantId, name: user.tenantId, role: "operator" }],
+        currentTenantId: user.tenantId,
+        role: user.role,
+        tenantScope: user.tenantId,
+        id: `top-session_${randomUUID()}`,
+        expiresAt: addMinutes(now, 60).toISOString(),
+        mfaVerifiedAt: now.toISOString(),
+        revokedAt: null
+      };
+      store.update((state) => ({
+        ...state,
+        serviceAdminSessions: [...state.serviceAdminSessions, session]
+      }));
+      const tokenPair = createTenantOperatorSessionTokens({
+        hashToken: hashServiceAdminToken,
+        sessionId: session.id,
+        subjectId: user.id
+      });
+      const existingPairs = store.read().serviceAdminTokenPairs ?? [];
+      if (hasActiveServiceAdminTokenHashConflict(existingPairs, {
+        accessTokenHash: tokenPair.accessTokenHash,
+        refreshTokenHash: tokenPair.refreshTokenHash
+      }, tokenPair.id)) {
+        throw new Error("Service-admin token hash conflict.");
+      }
+      const persistedPair: IdentityServiceAdminTokenPair = {
+        accessTokenExpiresAt: tokenPair.accessTokenExpiresAt,
+        accessTokenHash: tokenPair.accessTokenHash,
+        id: tokenPair.id,
+        issuedAt: tokenPair.issuedAt,
+        refreshTokenExpiresAt: tokenPair.refreshTokenExpiresAt,
+        refreshTokenHash: tokenPair.refreshTokenHash,
+        revokedAt: null,
+        rotatedAt: null,
+        sessionId: tokenPair.sessionId,
+        subjectId: tokenPair.subjectId
+      };
+      store.update((state) => ({
+        ...state,
+        serviceAdminTokenPairs: [
+          persistedPair,
+          ...(state.serviceAdminTokenPairs ?? []).filter((item) => item.id !== persistedPair.id)
+        ]
+      }));
+
+      return clone({
+        accessToken: tokenPair.accessToken,
+        expiresAt: tokenPair.accessTokenExpiresAt,
+        refreshToken: tokenPair.refreshToken,
+        sessionId: session.id
+      });
     },
 
     consumeMfaChallenge({ challengeId, email, now = new Date() }: ConsumeMfaChallengeInput): MfaChallengeConsumeResult {
@@ -3087,7 +3446,6 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       const now = new Date();
       const session: StoredServiceAdminSession = {
         ...serviceAdminSession,
-        id: `svc-session_${randomUUID()}`,
         actorId,
         actorName,
         adminEmail: input.adminEmail ?? serviceAdminSession.adminEmail,
@@ -3095,6 +3453,11 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         adminName: actorName,
         allowedActions: input.allowedActions ?? [...serviceAdminSession.allowedActions],
         authState: "mfa_verified",
+        availableOrganizations: clone(input.availableOrganizations ?? serviceAdminSession.availableOrganizations),
+        currentTenantId: input.currentTenantId ?? serviceAdminSession.currentTenantId,
+        role: input.role ?? serviceAdminSession.role,
+        tenantScope: input.tenantScope ?? serviceAdminSession.tenantScope,
+        id: `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
         expiresAt: addMinutes(now, input.ttlMinutes ?? 240).toISOString(),
         mfaVerifiedAt: input.mfaVerified === false ? null : now.toISOString(),
         revokedAt: null
@@ -3172,6 +3535,58 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       return clone(store.read().serviceAdminSessions.find((session) => session.id === tokenPair.sessionId));
     },
 
+    findTenantOperatorSession(sessionId: string | undefined): StoredTenantOperatorSession | undefined {
+      if (!sessionId) {
+        return undefined;
+      }
+      const session = clone(store.read().serviceAdminSessions.find((item) => item.id === sessionId));
+      if (!session || !isTenantOperatorSession(session)) {
+        return undefined;
+      }
+
+      return clone(toTenantOperatorSession(session));
+    },
+
+    findTenantOperatorSessionByAccessToken(accessToken: string): {
+      permissions: string[];
+      session: StoredTenantOperatorSession;
+      user: IdentityTenantUser;
+    } | undefined {
+      const tokenHash = hashServiceAdminToken(accessToken);
+      const now = Date.now();
+      const tokenPair = (store.read().serviceAdminTokenPairs ?? []).find((item) => (
+        item.accessTokenHash === tokenHash
+        && !item.revokedAt
+        && !item.rotatedAt
+        && Number.isFinite(Date.parse(item.accessTokenExpiresAt))
+        && Date.parse(item.accessTokenExpiresAt) > now
+      ));
+      if (!tokenPair) {
+        return undefined;
+      }
+      const session = clone(store.read().serviceAdminSessions.find((item) => item.id === tokenPair.sessionId));
+      if (!session || !isTenantOperatorSession(session)) {
+        return undefined;
+      }
+      if (session.revokedAt) {
+        return undefined;
+      }
+      if (!Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
+        return undefined;
+      }
+
+      const user = clone((store.read().tenantUsers ?? tenantUsers).find((item) => item.id === session.adminId));
+      if (!user || user.status !== "active") {
+        return undefined;
+      }
+
+      return clone({
+        permissions: [...session.allowedActions],
+        session: toTenantOperatorSession(session),
+        user
+      });
+    },
+
     revokeServiceAdminSession(sessionId: string | undefined): StoredServiceAdminSession | undefined {
       if (!sessionId) {
         return undefined;
@@ -3191,6 +3606,66 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       }));
 
       return clone(revoked);
+    },
+
+    revokeTenantOperatorSession(input: { sessionId?: string; token?: string }): boolean {
+      const token = String(input.token ?? "").trim();
+      const sessionFromToken = token ? (() => {
+        const tokenHash = hashServiceAdminToken(token);
+        const now = Date.now();
+        const tokenPair = (store.read().serviceAdminTokenPairs ?? []).find((item) => (
+          item.accessTokenHash === tokenHash
+          && !item.revokedAt
+          && !item.rotatedAt
+          && Number.isFinite(Date.parse(item.accessTokenExpiresAt))
+          && Date.parse(item.accessTokenExpiresAt) > now
+        ));
+        if (!tokenPair) {
+          return undefined;
+        }
+        const session = clone(store.read().serviceAdminSessions.find((item) => item.id === tokenPair.sessionId));
+        if (!session || !isTenantOperatorSession(session)) {
+          return undefined;
+        }
+        const user = clone((store.read().tenantUsers ?? tenantUsers).find((item) => item.id === session.adminId));
+        if (!user || user.status !== "active") {
+          return undefined;
+        }
+        return {
+          permissions: [...session.allowedActions],
+          session: toTenantOperatorSession(session),
+          user
+        };
+      })() : undefined;
+      const sessionId = input.sessionId ?? sessionFromToken?.session.id;
+      if (!sessionId) {
+        return false;
+      }
+
+      let revokedSession: StoredServiceAdminSession | undefined;
+      store.update((state) => ({
+        ...state,
+        serviceAdminSessions: state.serviceAdminSessions.map((session) => {
+          if (session.id !== sessionId) {
+            return session;
+          }
+          revokedSession = { ...session, revokedAt: new Date().toISOString() };
+          return revokedSession;
+        })
+      }));
+      if (token) {
+        const tokenHash = hashServiceAdminToken(token);
+        store.update((state) => ({
+          ...state,
+          serviceAdminTokenPairs: (state.serviceAdminTokenPairs ?? []).map((pair) => (
+            pair.accessTokenHash === tokenHash || pair.refreshTokenHash === tokenHash
+              ? { ...pair, revokedAt: new Date().toISOString() }
+              : pair
+          ))
+        }));
+      }
+
+      return Boolean(revokedSession);
     },
 
     rotateServiceAdminRefreshToken(input: RotateServiceAdminRefreshTokenInput): IdentityServiceAdminTokenRotationResult | undefined {
@@ -3315,6 +3790,24 @@ export function hashServiceAdminToken(token: string): string {
   return `sha256:${createHash("sha256").update(token).digest("hex")}`;
 }
 
+function isTenantOperatorSession(session: StoredServiceAdminSession): boolean {
+  return session.id.startsWith("top-session_");
+}
+
+function toTenantOperatorSession(session: StoredServiceAdminSession): StoredTenantOperatorSession {
+  return {
+    allowedActions: [...session.allowedActions],
+    expiresAt: session.expiresAt,
+    id: session.id,
+    revokedAt: session.revokedAt ?? null,
+    role: session.role,
+    tenantId: session.currentTenantId,
+    userEmail: session.adminEmail,
+    userId: session.adminId,
+    userName: session.adminName
+  };
+}
+
 function hasActiveServiceAdminTokenHashConflict(
   tokenPairs: IdentityServiceAdminTokenPair[],
   hashes: { accessTokenHash: string; refreshTokenHash: string },
@@ -3374,6 +3867,53 @@ function toIdentityTenant(row: PrismaTenantRow): IdentityTenant {
     status: tenantStatusFromRow(row.status),
     users: numberFromMetadata(metadata.users, 0),
     workspaces: numberFromMetadata(metadata.workspaces, 0)
+  };
+}
+
+function ensureSeedPasswordCredentials(store: DurableStore<IdentityState>): void {
+  const seedCredentials = seedIdentityPasswordCredentials();
+  const existingEmails = new Set(
+    (store.read().passwordCredentials ?? []).map((credential) => normalizeEmail(credential.email))
+  );
+  const missingCredentials = seedCredentials.filter((credential) => !existingEmails.has(normalizeEmail(credential.email)));
+
+  if (missingCredentials.length === 0) {
+    return;
+  }
+
+  store.update((state) => ({
+    ...state,
+    passwordCredentials: [
+      ...(state.passwordCredentials ?? []),
+      ...missingCredentials
+    ]
+  }));
+}
+
+function toPrismaTenantCreateInput(tenant: IdentityTenant): PrismaTenantCreateInput {
+  return {
+    healthScore: tenant.healthScore,
+    id: tenant.id,
+    metadata: {
+      activeUsers: tenant.activeUsers,
+      arr: tenant.arr,
+      domains: tenant.domains,
+      flags: tenant.flags,
+      incidentIds: tenant.incidentIds,
+      lastSeenAt: tenant.lastSeenAt,
+      legalName: tenant.legalName,
+      monthlyRevenue: tenant.monthlyRevenue,
+      notes: tenant.notes,
+      owner: tenant.owner,
+      ownerEmail: tenant.ownerEmail,
+      planId: tenant.planId,
+      region: tenant.region,
+      sla: tenant.sla,
+      users: tenant.users,
+      workspaces: tenant.workspaces
+    },
+    name: tenant.name,
+    status: tenant.status
   };
 }
 
@@ -3955,6 +4495,25 @@ function toPrismaTenantUserUpdateInput(changes: Partial<IdentityTenantUser>): Pr
   return input;
 }
 
+function toPrismaTenantUserCreateInput(user: IdentityTenantUser): PrismaTenantUserCreateInput {
+  return {
+    device: user.device,
+    email: user.email,
+    id: user.id,
+    inviteStatus: user.inviteStatus,
+    lastActiveAt: user.lastActiveAt ? new Date(user.lastActiveAt) : null,
+    metadata: {},
+    mfa: user.mfa,
+    name: user.name,
+    risk: user.risk,
+    role: user.role,
+    sessions: user.sessions,
+    status: user.status,
+    supportNotes: user.supportNotes,
+    tenantId: user.tenantId
+  };
+}
+
 function toPrismaOutboxEventCreateInput(event: OutboxEvent): PrismaOutboxEventCreateInput {
   return {
     aggregateId: event.aggregateId,
@@ -4108,14 +4667,7 @@ function seedIdentityState(): IdentityState {
     oidcCallbackDescriptors: [],
     oidcProviderConfigs: [],
     outbox: [],
-    passwordCredentials: [{
-      algorithm: "sha256",
-      email: serviceAdminSession.adminEmail,
-      hash: hashPasswordCredential("correct-password"),
-      subjectId: serviceAdminSession.adminId,
-      updatedAt: "2026-06-28T00:00:00.000Z",
-      version: 1
-    }],
+    passwordCredentials: seedIdentityPasswordCredentials(),
     passwordPolicies: [{
       maxFailedAttempts: 5,
       minLength: 12,
@@ -4140,4 +4692,25 @@ function seedIdentityState(): IdentityState {
     tenantUsers: clone(tenantUsers),
     tenants: clone(tenants)
   };
+}
+
+function seedIdentityPasswordCredentials(): IdentityPasswordCredential[] {
+  return [
+    {
+      algorithm: "sha256",
+      email: serviceAdminSession.adminEmail,
+      hash: hashPasswordCredential("correct-password"),
+      subjectId: serviceAdminSession.adminId,
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      version: 1
+    },
+    ...tenantUsers.map((user) => ({
+      algorithm: "sha256" as const,
+      email: user.email,
+      hash: hashPasswordCredential("correct-password"),
+      subjectId: user.id,
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      version: 1
+    }))
+  ];
 }

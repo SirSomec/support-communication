@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { hasSession } from "./sessionStore.js";
 
 const routeByHash = {
+  "#/app": { namespace: "app", view: "dialogs" },
   "#/landing": { namespace: "public", view: "landing" },
   "#/login": { namespace: "auth", view: "login" },
   "#/auth": { namespace: "auth", view: "login" },
@@ -8,11 +10,12 @@ const routeByHash = {
   "#/service-admin": { namespace: "service-admin", view: "dashboard" }
 };
 
-const defaultRoute = { namespace: "app", view: "dialogs" };
+const defaultRoute = { namespace: "public", view: "landing" };
 
 export function useWorkspaceRoute({ access, onDenied, onAuthenticated }) {
   const [route, setRoute] = useState(() => parseCurrentRoute());
   const isServiceAdminDenied = route.namespace === "service-admin" && !access.canServiceAdmin;
+  const isAppDenied = route.namespace === "app" && !hasSession();
 
   useEffect(() => {
     function handleHashChange() {
@@ -24,11 +27,22 @@ export function useWorkspaceRoute({ access, onDenied, onAuthenticated }) {
   }, []);
 
   useEffect(() => {
+    if (isAppDenied) {
+      onDenied?.("Войдите в аккаунт оператора, чтобы открыть рабочее место.");
+      setRoute({ namespace: "auth", view: "login" });
+
+      if (window.location.hash === "#/app") {
+        window.history.replaceState(null, "", "#/login");
+      }
+    }
+  }, [isAppDenied, onDenied]);
+
+  useEffect(() => {
     if (isServiceAdminDenied) {
       onDenied?.("Администрирование сервиса доступно только внутреннему администратору сервиса.");
       setRoute(defaultRoute);
       if (window.location.hash === "#/service-admin") {
-        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        window.history.replaceState(null, "", "#/landing");
       }
     }
   }, [isServiceAdminDenied, onDenied]);
@@ -86,6 +100,10 @@ function hashForRoute(route) {
 
   if (route.namespace === "service-admin") {
     return "#/service-admin";
+  }
+
+  if (route.namespace === "app") {
+    return "#/app";
   }
 
   return "";

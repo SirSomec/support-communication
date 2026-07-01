@@ -1,12 +1,38 @@
-import { expect, test } from "@playwright/test";
+﻿import { expect, test } from "@playwright/test";
 
 async function selectRole(page, role) {
   await page.locator(".role-switcher select").selectOption({ label: role });
 }
 
+async function openAppShell(page) {
+  const loginResponse = await page.request.post("/api/v1/auth/tenant/login", {
+    data: {
+      email: "sergey@volga.example",
+      password: "correct-password"
+    }
+  });
+  expect(loginResponse.ok()).toBeTruthy();
+  const loginPayload = await loginResponse.json();
+  const session = loginPayload.data;
+  expect(loginPayload.status).toBe("ok");
+  expect(session.accessToken).toBeTruthy();
+
+  if (page.url() === "about:blank") {
+    await page.goto("/#/landing");
+  }
+
+  await page.evaluate((storedSession) => {
+    sessionStorage.setItem("sc_access_token", storedSession.accessToken);
+    sessionStorage.setItem("sc_tenant_id", storedSession.tenantId);
+    sessionStorage.setItem("sc_operator", JSON.stringify(storedSession.operator));
+  }, session);
+  await page.goto("/#/app");
+  await expect(page.getByTestId("route-app-shell")).toBeVisible();
+}
+
 async function openSection(page, label) {
   await page.locator("nav button").filter({ hasText: label }).click();
-  await expect(page.locator(".product-screen")).toBeVisible();
+  await expect(page.getByTestId("route-app-shell")).toBeVisible();
 }
 
 async function expectHealthyPage(page) {
@@ -34,7 +60,7 @@ async function activeElementSnapshot(page) {
 }
 
 test("product sections expose loading/data/error states", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   for (const section of ["Панель", "Клиенты", "Шаблоны", "Визиты", "Отчеты", "Качество", "Боты", "Audit", "Настройки"]) {
@@ -46,7 +72,7 @@ test("product sections expose loading/data/error states", async ({ page }) => {
 });
 
 test("app shell enforces role access and closes notifications on section change", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Сотрудник");
 
   await expect(page.locator(".quick-action")).toBeDisabled();
@@ -71,7 +97,7 @@ test("app shell enforces role access and closes notifications on section change"
 });
 
 test("reports metrics table exposes semantic headers and keyboard column controls", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Отчеты");
 
@@ -93,7 +119,7 @@ test("reports metrics table exposes semantic headers and keyboard column control
 });
 
 test("keyboard navigation exposes focus states and modal trap", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await page.locator(".role-switcher select").blur();
 
@@ -131,7 +157,7 @@ test("keyboard navigation exposes focus states and modal trap", async ({ page })
 });
 
 test("rescue timer starts from chat action and writes audit", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   await page.getByRole("button", { name: "Действия с диалогом" }).click();
@@ -147,7 +173,7 @@ test("rescue timer starts from chat action and writes audit", async ({ page }) =
 });
 
 test("conversation queue filters remain actionable", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   await page.getByRole("button", { name: "Расширенные фильтры" }).click();
@@ -158,8 +184,8 @@ test("conversation queue filters remain actionable", async ({ page }) => {
   await expect(page.locator(".active-filter-chips")).toContainText("Канал: Telegram");
   await expect(page.locator(".active-filter-chips")).toContainText("Без тематики");
   await expect(page.locator(".queue-row")).toHaveCount(1);
-  await expect(page.locator(".queue-row")).toContainText("Владимир Б.");
-  await expect(page.locator(".queue-row")).not.toContainText("Дмитрий С.");
+  await expect(page.locator(".queue-row")).toContainText("Vladimir B.");
+  await expect(page.locator(".queue-row")).not.toContainText("Dmitry S.");
   await page.locator(".queue-filter-check input").check();
   await expect(page.locator(".active-filter-chips")).toContainText("Внутренние комментарии");
   await expect(page.locator(".queue-empty")).toContainText("Нет диалогов");
@@ -172,10 +198,10 @@ test("conversation queue filters remain actionable", async ({ page }) => {
 });
 
 test("customer panel inserts templates and enforces close topic", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
-  await page.locator(".queue-row").filter({ hasText: "Владимир Б." }).click();
+  await page.locator(".queue-row").filter({ hasText: "Vladimir B." }).click();
   await expect(page.locator(".customer-panel")).toContainText("Для закрытия укажите тематику");
   await expect(page.locator(".customer-panel .close-button")).toBeDisabled();
 
@@ -192,7 +218,7 @@ test("customer panel inserts templates and enforces close topic", async ({ page 
 });
 
 test("employee role masks phone in chat context", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Сотрудник");
 
   await expect(page.locator(".chat-identity")).toContainText("+7 *** ***-**-44");
@@ -205,7 +231,7 @@ test("employee role masks phone in chat context", async ({ page }) => {
 });
 
 test("outbound SDK dialog can be created from quick actions", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   await page.locator(".quick-action").click();
@@ -224,7 +250,7 @@ test("outbound SDK dialog can be created from quick actions", async ({ page }) =
 });
 
 test("topbar notifications and live bot handoff summary are actionable", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   await expect(page.locator(".bot-handoff-summary")).toContainText("Handoff summary");
@@ -254,7 +280,7 @@ test("topbar notifications and live bot handoff summary are actionable", async (
 });
 
 test("composer exposes AI explainability and pre-send quality checks", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   await page.locator(".ai-explainability summary").click();
@@ -274,7 +300,7 @@ test("composer exposes AI explainability and pre-send quality checks", async ({ 
 });
 
 test("composer save-template modal keeps dialog semantics", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   await page.locator(".composer textarea").fill("Проверю заказ и вернусь с точным сроком доставки.");
@@ -287,14 +313,15 @@ test("composer save-template modal keeps dialog semantics", async ({ page }) => 
   await page.locator(".template-save-panel > footer button").filter({ hasText: "Сохранить шаблон" }).click();
   await expect(page.locator(".toast")).toContainText("Шаблон сохранен");
   await page.locator(".composer-tabs button").filter({ hasText: "Шаблоны" }).click();
-  await expect(page.locator(".composer-template-picker button").first()).toContainText("Статус заказа");
-  await page.locator(".composer-template-picker button").first().click();
+  const savedTemplate = page.locator(".composer-template-picker button").filter({ hasText: "Status" }).first();
+  await expect(savedTemplate).toContainText("Delivery / Status");
+  await savedTemplate.click();
   await expect(page.locator(".composer textarea")).toHaveValue(/Проверю заказ и вернусь с точным сроком доставки/);
   await expectHealthyPage(page);
 });
 
 test("composer attachment queue sends ready files", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   await page.getByLabel("Выбор вложений").setInputFiles({
@@ -315,7 +342,7 @@ test("composer attachment queue sends ready files", async ({ page }) => {
 });
 
 test("draft switch warning preserves or discards unsent draft", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   await page.getByLabel("Выбор вложений").setInputFiles({
@@ -326,22 +353,22 @@ test("draft switch warning preserves or discards unsent draft", async ({ page })
   await expect(page.locator(".attachment-queue")).toContainText("pending-switch.txt");
 
   await page.locator(".composer textarea").fill("Черновик перед переключением");
-  await page.locator(".queue-row").filter({ hasText: "Владимир Б." }).click();
+  await page.locator(".queue-row").filter({ hasText: "Vladimir B." }).click();
 
   await expect(page.getByRole("dialog", { name: "Перейти в другой диалог?" })).toBeVisible();
   await expect(page.locator(".draft-switch-panel")).toContainText("Черновик перед переключением");
   await expect(page.locator(".draft-switch-panel")).toContainText("1 в очереди");
   await page.locator(".draft-switch-panel > footer button").filter({ hasText: "Остаться" }).click();
   await expect(page.locator(".draft-switch-panel")).toHaveCount(0);
-  await expect(page.locator(".chat-identity")).toContainText("Мария К.");
+  await expect(page.locator(".chat-identity")).toContainText("Maria K.");
   await expect(page.locator(".composer textarea")).toHaveValue("Черновик перед переключением");
   await expect(page.locator(".attachment-queue")).toContainText("pending-switch.txt");
 
-  await page.locator(".queue-row").filter({ hasText: "Владимир Б." }).click();
+  await page.locator(".queue-row").filter({ hasText: "Vladimir B." }).click();
   await expect(page.getByRole("dialog", { name: "Перейти в другой диалог?" })).toBeVisible();
   await page.locator(".draft-switch-panel > footer button").filter({ hasText: "Сбросить и перейти" }).click();
   await expect(page.locator(".draft-switch-panel")).toHaveCount(0);
-  await expect(page.locator(".chat-identity")).toContainText("Владимир Б.");
+  await expect(page.locator(".chat-identity")).toContainText("Vladimir B.");
   await expect(page.locator(".composer textarea")).toHaveValue("");
   await expect(page.locator(".attachment-queue")).toHaveCount(0);
   await expect(page.locator(".toast")).toContainText("Черновик и очередь вложений сброшены.");
@@ -349,7 +376,7 @@ test("draft switch warning preserves or discards unsent draft", async ({ page })
 });
 
 test("knowledge editor supports article draft status and preview", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Качество");
 
@@ -384,7 +411,7 @@ test("knowledge editor supports article draft status and preview", async ({ page
 });
 
 test("quality AI workspace exposes real-time scoring and coaching", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Качество");
 
@@ -402,7 +429,7 @@ test("quality AI workspace exposes real-time scoring and coaching", async ({ pag
 });
 
 test("bot builder supports canonical nodes and import validation", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Боты");
 
@@ -435,7 +462,7 @@ test("bot builder supports canonical nodes and import validation", async ({ page
 });
 
 test("audit screen filters events and exposes event detail", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Audit");
 
@@ -460,7 +487,7 @@ test("audit screen filters events and exposes event detail", async ({ page }) =>
 });
 
 test("settings expose webhooks api keys and security controls", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
 
@@ -501,7 +528,7 @@ test("settings expose webhooks api keys and security controls", async ({ page })
 });
 
 test("settings access panel keeps role matrix and channel limit permissions", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
 
@@ -527,30 +554,32 @@ test("settings access panel keeps role matrix and channel limit permissions", as
 });
 
 test("settings employee management preserves edit and role permissions", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
+  await page.locator(".settings-subnav button").filter({ hasText: "Сотрудники" }).click();
 
   const employeePanel = page.locator(".employee-rules-panel");
-  await expect(employeePanel).toContainText("Каналы и лимиты по сотрудникам");
-  await employeePanel.getByLabel("Поиск сотрудника").fill("Анна");
-  await expect(employeePanel.locator("[data-employee-id='rule-anna']")).toBeVisible();
-  await expect(employeePanel.locator("[data-employee-id='rule-ivan']")).toHaveCount(0);
-  await employeePanel.locator("[data-employee-id='rule-anna']").click();
+  await expect(employeePanel).toContainText("Сотрудники и роли");
+  await expect(employeePanel).toContainText("Mira Volkova");
+  await employeePanel.getByLabel("Поиск сотрудника").fill("Pavel");
+  await expect(employeePanel.locator("[data-employee-id='usr-ns-agent']")).toBeVisible();
+  await expect(employeePanel.locator("[data-employee-id='usr-ns-owner']")).toHaveCount(0);
+  await employeePanel.locator("[data-employee-id='usr-ns-agent']").click();
 
-  await employeePanel.locator(".employee-editor-grid select").first().selectOption({ label: "Администратор" });
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("Администратор");
-  await employeePanel.locator(".employee-editor-grid select").nth(1).selectOption({ label: "Финансы" });
+  await employeePanel.locator(".employee-editor-grid select").first().selectOption({ label: "Старший сотрудник" });
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Pavel Antonov" })).toContainText("Старший сотрудник");
+  await employeePanel.locator(".employee-editor-grid select").nth(1).selectOption({ label: "VIP support" });
   await employeePanel.locator(".employee-editor-grid input").fill("14");
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("14 чатов");
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Pavel Antonov" })).toContainText("14 чатов");
   await employeePanel.locator(".employee-channel-editor label").filter({ hasText: "SDK" }).locator("input").check();
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("SDK");
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Pavel Antonov" })).toContainText("SDK");
   await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Override" }).locator("input").uncheck();
   await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Чувствительные" }).locator("input").uncheck();
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("без override");
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("данные маскированы");
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Pavel Antonov" })).toContainText("без override");
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Pavel Antonov" })).toContainText("данные маскированы");
   await employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" }).click();
-  await expect(page.locator(".toast")).toContainText("Анна Р.: настройки сотрудника сохранены.");
+  await expect(page.locator(".toast")).toContainText("Pavel Antonov: настройки сохранены.");
 
   await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
   await expect(employeePanel.locator(".employee-editor-grid select").first()).toBeDisabled();
@@ -559,56 +588,70 @@ test("settings employee management preserves edit and role permissions", async (
   await expect(employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" })).toBeDisabled();
   await expect(employeePanel.locator(".employee-editor header button").filter({ hasText: "Сбросить пароль" })).toBeEnabled();
   await employeePanel.locator(".employee-editor header button").filter({ hasText: "Сбросить пароль" }).click();
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Анна Р." })).toContainText("Сброс отправлен");
-  await expect(page.locator(".toast")).toContainText("Анна Р.: ссылка для смены пароля отправлена");
+  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Pavel Antonov" })).toContainText("reset_sent");
+  await expect(page.locator(".toast")).toContainText("Pavel Antonov: ссылка для смены пароля отправлена");
   await expectNoElementOverflow(page, ".employee-rules-panel");
   await expectHealthyPage(page);
 });
 
-test("settings channel connections keep logs tests and permissions", async ({ page }) => {
-  await page.goto("/");
+test("settings channel connections create multiple Telegram and MAX instances", async ({ page }) => {
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
 
   const channelPanel = page.locator(".channel-connections-panel");
-  await channelPanel.locator("[data-channel-card='vk']").click();
-  await expect(channelPanel.locator(".channel-detail-head")).toContainText("VK Сообщества");
-  await expect(channelPanel.locator(".channel-detail-head")).toContainText("Требует внимания");
+  const runId = Date.now().toString(36);
+  const telegramName = `Telegram QA bot ${runId}`;
+  const maxName = `MAX QA bot ${runId}`;
+  await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: "Support main bot" })).toBeVisible();
+  await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: "VIP bot" })).toBeVisible();
+  await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: "MAX Business beta" })).toBeVisible();
+  await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: "MAX backup webhook" })).toBeVisible();
 
-  await channelPanel.getByLabel("Фильтр логов по уровню").selectOption("error");
-  await expect(channelPanel.locator(".channel-log-row")).toHaveCount(1);
-  await expect(channelPanel.locator(".channel-log-list")).toContainText("Ошибка отправки вложения");
-  await channelPanel.getByLabel("Фильтр логов по подключению").selectOption("vk-test");
-  await expect(channelPanel.locator(".channel-log-empty")).toContainText("По выбранным фильтрам событий нет.");
+  const createForm = channelPanel.locator(".channel-create-form");
+  await createForm.locator("select").first().selectOption("telegram");
+  await createForm.locator("input").nth(0).fill(telegramName);
+  await createForm.locator("select").nth(1).selectOption("sandbox");
+  await createForm.locator("input").nth(1).fill("queue-telegram-qa");
+  await createForm.locator("input").nth(2).fill("9");
+  await createForm.locator("input").nth(3).fill("https://api.support.local/webhooks/telegram/qa");
+  await createForm.locator("input").nth(4).fill("qa-telegram-token");
+  await createForm.getByRole("button", { name: "Создать" }).click();
+  await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName })).toBeVisible();
+  await expect(page.locator(".toast")).toContainText(`${telegramName}: подключение создано.`);
 
-  await channelPanel.getByLabel("Фильтр логов по подключению").selectOption("all");
-  await channelPanel.getByLabel("Фильтр логов по уровню").selectOption("all");
-  await channelPanel.locator(".channel-test-grid label").filter({ hasText: "Адресат" }).locator("input").fill("");
-  await channelPanel.locator(".channel-test-message textarea").fill("");
-  await channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить тест" }).click();
-  await expect(channelPanel.locator(".channel-test-result")).toContainText("Заполните адресата и сообщение");
+  await createForm.locator("select").first().selectOption("max");
+  await createForm.locator("input").nth(0).fill(maxName);
+  await createForm.locator("input").nth(1).fill("queue-max-qa");
+  await createForm.locator("input").nth(2).fill("7");
+  await createForm.locator("input").nth(3).fill("https://api.support.local/webhooks/max/qa");
+  await createForm.locator("input").nth(4).fill("qa-max-token");
+  await createForm.getByRole("button", { name: "Создать" }).click();
+  await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: maxName })).toBeVisible();
+  await expect(page.locator(".toast")).toContainText(`${maxName}: подключение создано.`);
 
+  await channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName }).click();
   await channelPanel.locator(".channel-test-grid label").filter({ hasText: "Адресат" }).locator("input").fill("+7 900 123-45-67");
-  await channelPanel.locator(".channel-test-message textarea").fill("Проверка канального теста");
-  await channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить тест" }).click();
-  await expect(channelPanel.locator(".channel-test-result")).toContainText("Входящее тестовое сообщение принято");
-  await expect(page.locator(".toast")).toContainText("VK: тест приема выполнен.");
+  await channelPanel.locator(".channel-test-message textarea").fill("Проверка Telegram QA bot");
+  await channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить" }).click();
+  await expect(channelPanel.locator(".channel-test-result")).toContainText("accepted_to_queue");
+  await expect(page.locator(".toast")).toContainText(`${telegramName}: тест выполнен.`);
 
   await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
-  await expect(channelPanel.locator("[data-channel-card='telegram']")).toBeEnabled();
-  await expect(channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить тест" })).toBeDisabled();
-  await expect(channelPanel.locator(".channel-detail-head button").filter({ hasText: "Проверить канал" })).toBeDisabled();
+  await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName })).toBeEnabled();
+  await expect(channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить" })).toBeDisabled();
+  await expect(channelPanel.locator(".channel-detail-head button").filter({ hasText: "Проверить" })).toBeDisabled();
   await expectNoElementOverflow(page, ".channel-connections-panel");
   await expectHealthyPage(page);
 });
 
 test("settings sdk console keeps payload preview run states and permissions", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
 
   const sdkPanel = page.locator(".sdk-console");
-  await sdkPanel.getByLabel("Событие").selectOption("initConversation");
+  await sdkPanel.getByLabel("Событие").selectOption("identifyUser");
   await sdkPanel.getByLabel("Окружение").selectOption("stage");
   await sdkPanel.getByLabel("Канал").selectOption("Telegram");
   await sdkPanel.getByLabel("User ID").fill("gig-test-100");
@@ -622,11 +665,10 @@ test("settings sdk console keeps payload preview run states and permissions", as
   await expect(sdkPanel.locator(".sdk-playground-actions")).toContainText("Payload не прошел валидацию");
 
   await sdkPanel.getByLabel("Телефон").fill("+7 900 333-22-11");
-  await sdkPanel.locator(".sdk-message-field textarea").fill("Проверка SDK initConversation.");
   await sdkPanel.locator(".sdk-playground-actions button").filter({ hasText: "Запустить событие" }).click();
   await expect(sdkPanel.locator(".sdk-playground-actions")).toContainText("Payload принят тестовым стендом");
-  await expect(sdkPanel.locator(".sdk-payload-preview")).toContainText('"route": "outbound_queue"');
-  await expect(page.locator(".toast")).toContainText("SDK playground: initConversation выполнен в stage.");
+  await expect(sdkPanel.locator(".sdk-payload-preview")).toContainText('"entryPoint": "Telegram"');
+  await expect(page.locator(".toast")).toContainText("SDK playground: identifyUser выполнен в stage.");
 
   await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
   await expect(sdkPanel.locator(".sdk-code button").filter({ hasText: "Копировать" })).toBeDisabled();
@@ -645,7 +687,7 @@ test("critical sections do not overflow responsive viewports", async ({ page }) 
     { width: 1440, height: 900 }
   ]) {
     await page.setViewportSize(viewport);
-    await page.goto("/");
+    await openAppShell(page);
     await selectRole(page, "Администратор");
 
     for (const section of ["Отчеты", "Боты", "Визиты", "Качество", "Audit", "Настройки"]) {
@@ -670,7 +712,7 @@ test("route namespaces keep public auth and service admin isolated", async ({ pa
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await expectHealthyPage(page);
 
-  await page.goto("/");
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await expect(page.locator(".role-switcher select")).not.toContainText("Администратор сервиса");
   await expect(page.locator(".service-admin-entry")).toBeVisible();
@@ -681,7 +723,7 @@ test("route namespaces keep public auth and service admin isolated", async ({ pa
   await expect(page.locator(".role-switcher")).toHaveCount(0);
   await expectHealthyPage(page);
 
-  await page.goto("/");
+  await openAppShell(page);
   await page.locator(".service-admin-entry").click();
   await expect(page.getByTestId("route-service-admin")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Администрирование сервиса" })).toBeVisible();
@@ -714,12 +756,9 @@ test("auth flow covers login 2fa recovery invite and organization selection", as
 
   await page.goto("/#/login");
   await page.getByRole("button", { name: "Login" }).click();
-  await page.locator(".auth-input-with-icon input").first().fill("agent@example.com");
+  await page.locator(".auth-input-with-icon input").first().fill("sergey@volga.example");
   await page.locator("input[type='password']").fill("correct-password");
   await page.getByRole("button", { name: "Продолжить" }).click();
-  await expect(page.locator(".auth-card-header")).toContainText("Двухфакторная");
-  await page.locator(".auth-input-with-icon input").fill("123456");
-  await page.getByRole("button", { name: "Подтвердить вход" }).click();
   await expect(page.getByTestId("route-app-shell")).toBeVisible();
   await expectHealthyPage(page);
 });
@@ -734,9 +773,7 @@ test("onboarding completes tenant setup and returns to app", async ({ page }) =>
   await page.getByRole("button", { name: "Далее" }).click();
   await page.locator(".onboarding-field").filter({ hasText: "Имя" }).locator("input").fill("QA Admin");
   await page.locator(".onboarding-field").filter({ hasText: "Email" }).locator("input").fill("admin@qa.example");
-  await page.getByRole("button", { name: "Далее" }).click();
-  await page.locator(".onboarding-sdk-panel button").first().click();
-  await page.locator(".onboarding-field").filter({ hasText: "Домен" }).locator("input").fill("qa.example");
+  await page.locator(".onboarding-field").filter({ hasText: "Пароль" }).locator("input").fill("correct-password");
   await page.getByRole("button", { name: "Далее" }).click();
   await page.getByRole("button", { name: "Далее" }).click();
   await page.locator(".onboarding-employee-form input").first().fill("operator@qa.example");
@@ -752,7 +789,7 @@ test("onboarding completes tenant setup and returns to app", async ({ page }) =>
 });
 
 test("service admin critical actions require reason confirmation and audit", async ({ page }) => {
-  await page.goto("/");
+  await openAppShell(page);
   await page.locator(".service-admin-entry").click();
   await expect(page.getByTestId("route-service-admin")).toBeVisible();
 

@@ -358,7 +358,8 @@
 
 .chat-pane {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) minmax(206px, auto);
+  --operator-transcript-min-height: clamp(156px, 24vh, 236px);
+  grid-template-rows: auto auto auto minmax(var(--operator-transcript-min-height), 1fr) minmax(0, auto);
   overflow: hidden;
   background: #ffffff;
 }
@@ -629,6 +630,17 @@
   color: #17233a;
   font-size: 11px;
   text-transform: uppercase;
+}
+
+@media (max-height: 800px) {
+  .chat-pane {
+    --operator-transcript-min-height: 96px;
+  }
+
+  .bot-handoff-summary {
+    max-height: 96px;
+    overflow: auto;
+  }
 }
 
 .compact-close-button {

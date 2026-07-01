@@ -1,82 +1,74 @@
-import { conversations } from "../data.js";
-import { cloneEntity, createEnvelope, makeAuditId, makeQueueId } from "./mockBackend.js";
+import { apiRequest } from "./apiClient.js";
 
 const SERVICE = "dialogService";
 
 export const dialogService = {
   async fetchDialogs(filters = {}) {
-    return createEnvelope({
-      service: SERVICE,
+    return apiRequest("/dialogs", {
       operation: "fetchDialogs",
-      data: {
-        items: conversations,
-        pagination: {
-          mode: "backend-ready",
-          page: filters.page ?? 1,
-          pageSize: filters.pageSize ?? 25,
-          total: conversations.length
-        },
-        savedPresetId: filters.savedPresetId ?? null
-      },
-      partial: true,
-      meta: { filters }
+      query: filters,
+      service: SERVICE
     });
   },
 
-  async transitionConversationStatus({ conversationId, nextStatus, roleMode }) {
-    return createEnvelope({
-      service: SERVICE,
+  async fetchDialogDetail(conversationId) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}`, {
+      operation: "fetchDialogDetail",
+      service: SERVICE
+    });
+  },
+
+  async appendMessage({ conversationId, ...payload }) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/messages`, {
+      body: payload,
+      method: "POST",
+      operation: "appendMessage",
+      service: SERVICE
+    });
+  },
+
+  async transitionConversationStatus({ conversationId, ...payload }) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/status`, {
+      body: payload,
+      method: "PATCH",
       operation: "transitionConversationStatus",
-      data: {
-        conversationId,
-        nextStatus,
-        roleMode,
-        transitionId: makeQueueId("dialog_transition"),
-        guard: "role_channel_topic",
-        auditId: makeAuditId("dialog")
-      }
+      service: SERVICE
     });
   },
 
-  async uploadAttachment({ channel, fileName, sizeBytes = 0 }) {
-    return createEnvelope({
-      service: SERVICE,
+  async uploadAttachment(payload) {
+    return apiRequest("/dialogs/attachments", {
+      body: payload,
+      method: "POST",
       operation: "uploadAttachment",
-      data: {
-        id: makeQueueId("attachment"),
-        channel,
-        fileName,
-        sizeBytes,
-        storageState: "upload_queued",
-        antivirusState: "scan_pending",
-        deliveryState: "not_sent",
-        auditId: makeAuditId("attachment")
-      }
+      service: SERVICE
     });
   },
 
   async createOutboundConversationRequest(payload) {
-    return createEnvelope({
-      service: SERVICE,
+    return apiRequest("/dialogs/outbound", {
+      body: payload,
+      method: "POST",
       operation: "createOutboundConversationRequest",
-      data: {
-        ...cloneEntity(payload),
-        backendQueueId: makeQueueId("outbound"),
-        status: "queued",
-        consentCheck: "required_before_send",
-        auditId: makeAuditId("outbound")
-      }
+      service: SERVICE
     });
   },
 
   getReadiness() {
     return {
       id: SERVICE,
-      status: "partial",
-      operations: ["fetchDialogs", "transitionConversationStatus", "uploadAttachment", "createOutboundConversationRequest"],
+      status: "ready",
+      operations: [
+        "fetchDialogs",
+        "fetchDialogDetail",
+        "appendMessage",
+        "transitionConversationStatus",
+        "uploadAttachment",
+        "createOutboundConversationRequest"
+      ],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
-      note: "Queue pagination, transitions and attachments are backend-shaped but still mock-backed."
+      note: "Connected to API Gateway dialog routes."
     };
   }
 };

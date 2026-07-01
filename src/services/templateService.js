@@ -1,32 +1,22 @@
-import { initialTemplates } from "../data.js";
-import { createEnvelope, makeAuditId } from "./mockBackend.js";
+import { apiRequest } from "./apiClient.js";
 
 const SERVICE = "templateService";
 
 export const templateService = {
-  async fetchTemplates({ operatorId = "current" } = {}) {
-    return createEnvelope({
-      service: SERVICE,
+  async fetchTemplates(filters = {}) {
+    return apiRequest("/templates", {
       operation: "fetchTemplates",
-      data: {
-        operatorId,
-        items: initialTemplates,
-        source: "operator_template_library"
-      },
-      partial: true
+      query: filters,
+      service: SERVICE
     });
   },
 
-  async saveTemplate(template) {
-    return createEnvelope({
-      service: SERVICE,
+  async saveTemplate(template = {}) {
+    return apiRequest("/templates", {
+      body: normalizeTemplatePayload(template),
+      method: "POST",
       operation: "saveTemplate",
-      data: {
-        ...template,
-        id: template.id ?? `tpl-${Date.now().toString(36)}`,
-        auditId: makeAuditId("template"),
-        version: template.version ?? 1
-      }
+      service: SERVICE
     });
   },
 
@@ -36,7 +26,23 @@ export const templateService = {
       status: "ready",
       operations: ["fetchTemplates", "saveTemplate"],
       traceId: `trc_${SERVICE}_ready`,
-      states: ["loading", "empty", "error"]
+      states: ["loading", "empty", "error"],
+      note: "Connected to API Gateway routes."
     };
   }
 };
+
+function normalizeTemplatePayload(template) {
+  return removeUndefined({
+    id: template.id,
+    title: template.title,
+    text: template.text ?? template.body,
+    topic: template.topic,
+    channel: template.channel,
+    version: template.version
+  });
+}
+
+function removeUndefined(payload) {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+}

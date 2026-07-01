@@ -37,3 +37,26 @@ docker compose -f docker/docker-compose.yml up -d
 ```
 
 The compose file starts PostgreSQL, Redis, MinIO and Mailpit for local development. Domain service persistence is being added incrementally behind the API Gateway contract slices.
+
+## Frontend Real API Mode
+
+Run the API Gateway:
+
+```bash
+cd backend
+npm run start:api-gateway
+```
+
+In another terminal, run the frontend:
+
+```bash
+npm run dev
+```
+
+The Vite dev server proxies `/api/*` to `http://127.0.0.1:4100`, and frontend service adapters call `/api/v1/*` by default. To call a different API host from the browser, set `VITE_API_BASE_URL`, for example:
+
+```bash
+VITE_API_BASE_URL=http://127.0.0.1:4100 npm run dev
+```
+
+Local privileged demo actions use `VITE_DEMO_SERVICE_ADMIN_KEY`; when it is not set, the frontend sends `dev-service-admin-key`, matching `.env.example`. The demo key header is sent only outside production mode.

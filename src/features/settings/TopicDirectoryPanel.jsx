@@ -1,31 +1,53 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Search, ShieldCheck, Tag, ToggleLeft, ToggleRight } from "lucide-react";
 import { ChannelList, SectionTitle, SegmentedControl, ToolbarSearch } from "../../ui.jsx";
-import { topicDirectorySeed } from "../../data.js";
+import { settingsService } from "../../services/settingsService.js";
 
 const topicStatusFilters = ["Все", "Активные", "Архив"];
+const channelOptions = ["SDK", "Telegram", "MAX", "VK"];
 
-export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode }) {
-  const [topicDirectory, setTopicDirectory] = useState(topicDirectorySeed);
+export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicOptionsChange, roleMode }) {
+  const [topicDirectory, setTopicDirectory] = useState([]);
+  const [topics, setTopics] = useState([]);
+  const [topicTotals, setTopicTotals] = useState({ active: 0, archived: 0, total: 0 });
   const [topicQuery, setTopicQuery] = useState("");
   const [topicStatusFilter, setTopicStatusFilter] = useState("Все");
-  const normalizedTopicQuery = topicQuery.trim().toLowerCase();
+  const [selectedTopicId, setSelectedTopicId] = useState("");
+  const [draft, setDraft] = useState(emptyDraft());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const topicTotals = useMemo(() => {
-    return topicDirectory.reduce((totals, group) => {
-      group.branches.forEach((branch) => {
-        branch.children.forEach((topic) => {
-          totals.total += 1;
-          if (topic.archived) {
-            totals.archived += 1;
-          } else {
-            totals.active += 1;
-          }
-        });
-      });
-      return totals;
-    }, { active: 0, archived: 0, total: 0 });
-  }, [topicDirectory]);
+  const normalizedTopicQuery = topicQuery.trim().toLowerCase();
+  const selectedTopic = topics.find((topic) => topic.id === selectedTopicId) ?? null;
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadTopics() {
+      setLoading(true);
+      setError("");
+      const response = await settingsService.fetchTopics();
+
+      if (ignore) {
+        return;
+      }
+
+      if (response.status !== "ok") {
+        setError(response.error?.message ?? "Не удалось загрузить справочник тематик.");
+        setLoading(false);
+        return;
+      }
+
+      applyTopicResponse(response.data);
+      setLoading(false);
+    }
+
+    loadTopics();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const visibleTopicDirectory = useMemo(() => {
     function statusMatches(topic) {
@@ -48,8 +70,8 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode
             group.description,
             branch.name,
             topic.name,
-            topic.routing,
-            topic.access,
+            topic.routingTarget ?? topic.routing,
+            topic.accessScope ?? topic.access,
             ...topic.channels
           ].join(" ").toLowerCase();
           return statusMatches(topic) && (!normalizedTopicQuery || branchMatches || haystack.includes(normalizedTopicQuery));
@@ -57,61 +79,118 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode
         return { ...branch, children };
       }).filter((branch) => branch.children.length > 0);
 
-      if (!branches.length) {
-        return null;
-      }
-
-      return { ...group, branches };
+      return branches.length ? { ...group, branches } : null;
     }).filter(Boolean);
   }, [normalizedTopicQuery, topicDirectory, topicStatusFilter]);
 
-  function handleTopicArchive(groupId, branchId, topicId) {
+  function applyTopicResponse(data = {}) {
+    const nextDirectory = Array.isArray(data.directory) ? data.directory : [];
+    const nextTopics = Array.isArray(data.topics) ? data.topics.map(normalizeTopic) : flattenDirectory(nextDirectory);
+    setTopicDirectory(nextDirectory);
+    setTopics(nextTopics);
+    setTopicTotals(data.totals ?? countTopics(nextTopics));
+    if (Array.isArray(data.activeOptions)) {
+      onTopicOptionsChange?.(data.activeOptions);
+    }
+    setSelectedTopicId((current) => current && nextTopics.some((topic) => topic.id === current)
+      ? current
+      : nextTopics[0]?.id ?? "");
+  }
+
+  function handleNewTopic() {
+    if (!canEditSettings) {
+      onToast(access.reason);
+      return;
+    }
+
+    setSelectedTopicId("");
+    setDraft(emptyDraft());
+  }
+
+  function handleTopicEdit(topic) {
+    if (!canEditSettings) {
+      onToast(access.reason);
+      return;
+    }
+
+    setSelectedTopicId(topic.id);
+    setDraft({
+      accessScope: topic.accessScope ?? topic.access ?? "admins",
+      branchName: topic.branchName,
+      channels: topic.channels,
+      groupName: topic.groupName,
+      name: topic.name,
+      required: Boolean(topic.required),
+      routingTarget: topic.routingTarget ?? topic.routing ?? "Line 1"
+    });
+  }
+
+  async function handleTopicArchive(topic) {
     if (!canEditSettings) {
       return;
     }
 
-    let toastMessage = "";
-    const nextDirectory = topicDirectory.map((group) => {
-      if (group.id !== groupId) {
-        return group;
+    const response = topic.archived
+      ? await settingsService.restoreTopic({ topicId: topic.id, reason: "Restored from topic directory" })
+      : await settingsService.archiveTopic({ topicId: topic.id, reason: "Archived from topic directory" });
+
+    if (response.status !== "ok") {
+      setError(response.error?.message ?? "Не удалось изменить статус тематики.");
+      return;
+    }
+
+    await refreshTopics();
+    onToast(`${topic.groupName} / ${topic.name}: ${response.data?.topic?.archived ? "перемещена в архив" : "восстановлена"}. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
+  }
+
+  async function handleSaveTopic(event) {
+    event.preventDefault();
+    if (!canEditSettings) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    const payload = {
+      ...draft,
+      channels: draft.channels.length ? draft.channels : ["SDK"]
+    };
+    const response = selectedTopicId
+      ? await settingsService.updateTopic({ topicId: selectedTopicId, ...payload })
+      : await settingsService.createTopic(payload);
+    setSaving(false);
+
+    if (response.status !== "ok") {
+      setError(response.error?.message ?? "Не удалось сохранить тематику.");
+      return;
+    }
+
+    await refreshTopics(response.data?.topic?.id);
+    onToast(`${response.data?.topic?.groupName} / ${response.data?.topic?.name}: сохранено. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
+  }
+
+  async function refreshTopics(preferredTopicId = selectedTopicId) {
+    const response = await settingsService.fetchTopics();
+    if (response.status === "ok") {
+      applyTopicResponse(response.data);
+      if (preferredTopicId) {
+        setSelectedTopicId(preferredTopicId);
       }
-
-      return {
-        ...group,
-        branches: group.branches.map((branch) => {
-          if (branch.id !== branchId) {
-            return branch;
-          }
-
-          return {
-            ...branch,
-            children: branch.children.map((topic) => {
-              if (topic.id !== topicId) {
-                return topic;
-              }
-
-              const archived = !topic.archived;
-              toastMessage = `${group.name} / ${topic.name}: ${archived ? "перемещена в архив" : "восстановлена"}. Audit-событие подготовлено.`;
-              return { ...topic, archived };
-            })
-          };
-        })
-      };
-    });
-
-    setTopicDirectory(nextDirectory);
-    if (toastMessage) {
-      onToast(toastMessage);
     }
   }
 
-  function handleTopicEdit(groupName, topicName) {
-    onToast(canEditSettings ? `${groupName} / ${topicName}: карточка редактирования открыта.` : access.reason);
+  function toggleDraftChannel(channelName) {
+    setDraft((current) => ({
+      ...current,
+      channels: current.channels.includes(channelName)
+        ? current.channels.filter((channel) => channel !== channelName)
+        : [...current.channels, channelName]
+    }));
   }
 
   return (
     <section className="work-panel topic-directory-panel">
-      <SectionTitle title="Справочник тематик" action={`${topicTotals.active} активных / ${topicTotals.archived} архив`} />
+      <SectionTitle title="Справочник тематик" action={loading ? "загрузка" : `${topicTotals.active} активных / ${topicTotals.archived} архив`} />
       <div className="topic-directory-toolbar">
         <ToolbarSearch
           ariaLabel="Поиск по справочнику тематик"
@@ -131,7 +210,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode
         <button
           className="topic-add-button"
           disabled={!canEditSettings}
-          onClick={() => onToast("Новая тематика: карточка создания открыта.")}
+          onClick={handleNewTopic}
           title={canEditSettings ? "Добавить тематику" : access.reason}
           type="button"
         >
@@ -143,8 +222,65 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode
         <ShieldCheck size={17} />
         <span>{canEditSettings ? "Администратор может создавать, редактировать, архивировать и восстанавливать тематики." : `${roleMode}: просмотр справочника без изменения общих настроек.`}</span>
       </div>
+
+      <form className="topic-editor-form" onSubmit={handleSaveTopic}>
+        <strong>{selectedTopicId ? "Редактирование тематики" : "Новая тематика"}</strong>
+        <div className="topic-editor-grid">
+          <label>
+            <span>Группа</span>
+            <input disabled={!canEditSettings} value={draft.groupName} onChange={(event) => setDraft((current) => ({ ...current, groupName: event.target.value }))} />
+          </label>
+          <label>
+            <span>Ветка</span>
+            <input disabled={!canEditSettings} value={draft.branchName} onChange={(event) => setDraft((current) => ({ ...current, branchName: event.target.value }))} />
+          </label>
+          <label>
+            <span>Тема</span>
+            <input disabled={!canEditSettings} value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+          </label>
+          <label>
+            <span>Маршрутизация</span>
+            <input disabled={!canEditSettings} value={draft.routingTarget} onChange={(event) => setDraft((current) => ({ ...current, routingTarget: event.target.value }))} />
+          </label>
+          <label>
+            <span>Доступ</span>
+            <select disabled={!canEditSettings} value={draft.accessScope} onChange={(event) => setDraft((current) => ({ ...current, accessScope: event.target.value }))}>
+              <option value="admins">Администраторы</option>
+              <option value="senior">Старшие сотрудники</option>
+              <option value="all">Все сотрудники</option>
+            </select>
+          </label>
+          <label className="topic-required-toggle">
+            <input disabled={!canEditSettings} checked={draft.required} type="checkbox" onChange={(event) => setDraft((current) => ({ ...current, required: event.target.checked }))} />
+            <span>Обязательная для закрытия</span>
+          </label>
+        </div>
+        <div className="topic-channel-picker" aria-label="Каналы тематики">
+          {channelOptions.map((channel) => (
+            <label key={channel}>
+              <input disabled={!canEditSettings} checked={draft.channels.includes(channel)} type="checkbox" onChange={() => toggleDraftChannel(channel)} />
+              <span>{channel}</span>
+            </label>
+          ))}
+        </div>
+        {error ? <div className="topic-error">{error}</div> : null}
+        <footer>
+          <span>Сохранение обновляет backend-справочник, который используется закрытием диалогов, отчетами и маршрутизацией.</span>
+          <button disabled={!canEditSettings || saving} type="submit">
+            Сохранить тематику
+          </button>
+        </footer>
+      </form>
+
       <div className="topic-tree-list">
-        {visibleTopicDirectory.map((group) => (
+        {loading ? (
+          <div className="topic-empty">
+            <Search size={18} />
+            <strong>Загрузка тематик</strong>
+            <span>Получаем актуальный справочник из backend.</span>
+          </div>
+        ) : null}
+        {!loading && visibleTopicDirectory.map((group) => (
           <article className="topic-group" key={group.id}>
             <header>
               <div>
@@ -169,7 +305,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode
                         <Tag size={16} />
                         <div>
                           <strong>{topic.name}</strong>
-                          <span>{group.name} / {branch.name} / {topic.name}</span>
+                          <span>{topic.groupName} / {topic.branchName} / {topic.name}</span>
                         </div>
                       </div>
                       <ChannelList channels={topic.channels} />
@@ -178,15 +314,15 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode
                         <small>{topic.required ? "обязательная" : "необязательная"}</small>
                       </div>
                       <div className="topic-routing">
-                        <strong>{topic.routing}</strong>
-                        <span>{topic.access}</span>
+                        <strong>{topic.routingTarget ?? topic.routing}</strong>
+                        <span>{topic.accessScope ?? topic.access}</span>
                       </div>
                       <div className="topic-actions">
                         <button
-                          aria-label={`Редактировать: ${group.name} / ${topic.name}`}
+                          aria-label={`Редактировать: ${topic.groupName} / ${topic.name}`}
                           data-topic-action="edit"
                           disabled={!canEditSettings}
-                          onClick={() => handleTopicEdit(group.name, topic.name)}
+                          onClick={() => handleTopicEdit(normalizeTopic(topic))}
                           title={canEditSettings ? "Редактировать тематику" : access.reason}
                           type="button"
                         >
@@ -194,11 +330,11 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode
                           Редактировать
                         </button>
                         <button
-                          aria-label={`${topic.archived ? "Вернуть" : "В архив"}: ${group.name} / ${topic.name}`}
+                          aria-label={`${topic.archived ? "Вернуть" : "В архив"}: ${topic.groupName} / ${topic.name}`}
                           aria-pressed={topic.archived}
                           data-topic-action="archive"
                           disabled={!canEditSettings}
-                          onClick={() => handleTopicArchive(group.id, branch.id, topic.id)}
+                          onClick={() => handleTopicArchive(normalizeTopic(topic))}
                           title={canEditSettings ? (topic.archived ? "Вернуть тематику из архива" : "Переместить тематику в архив") : access.reason}
                           type="button"
                         >
@@ -213,7 +349,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode
             ))}
           </article>
         ))}
-        {!visibleTopicDirectory.length && (
+        {!loading && !visibleTopicDirectory.length && (
           <div className="topic-empty">
             <Search size={18} />
             <strong>Тематики не найдены</strong>
@@ -223,4 +359,50 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, roleMode
       </div>
     </section>
   );
+}
+
+function emptyDraft() {
+  return {
+    accessScope: "admins",
+    branchName: "",
+    channels: ["SDK"],
+    groupName: "",
+    name: "",
+    required: true,
+    routingTarget: "Line 1"
+  };
+}
+
+function flattenDirectory(directory) {
+  return directory.flatMap((group) => group.branches.flatMap((branch) => branch.children.map((topic) => normalizeTopic({
+    ...topic,
+    branchName: branch.name,
+    groupName: group.name
+  }))));
+}
+
+function normalizeTopic(topic) {
+  return {
+    id: topic.id,
+    accessScope: topic.accessScope ?? topic.access ?? "admins",
+    archived: Boolean(topic.archived),
+    branchName: topic.branchName ?? "",
+    channels: Array.isArray(topic.channels) ? topic.channels : ["SDK"],
+    groupName: topic.groupName ?? "",
+    name: topic.name ?? "",
+    required: Boolean(topic.required),
+    routingTarget: topic.routingTarget ?? topic.routing ?? "Line 1"
+  };
+}
+
+function countTopics(items) {
+  return items.reduce((totals, topic) => {
+    totals.total += 1;
+    if (topic.archived) {
+      totals.archived += 1;
+    } else {
+      totals.active += 1;
+    }
+    return totals;
+  }, { active: 0, archived: 0, total: 0 });
 }

@@ -1,119 +1,37 @@
-import {
-  serviceAdminAuditEvents,
-  serviceAdminFeatureFlags,
-  serviceAdminIncidents,
-  serviceAdminTariffs,
-  serviceAdminTenants,
-  serviceAdminUsers
-} from "../data/serviceAdmin.js";
-import { createBackendErrorEnvelope, createEnvelope, createInvalidEnvelope, hasAuditReason, makeAuditId } from "./mockBackend.js";
+import { apiRequest, createApiErrorEnvelope } from "./apiClient.js";
 
 const SERVICE = "tenantService";
 
 export const tenantService = {
   async fetchTenants(filters = {}) {
-    const tenants = serviceAdminTenants.filter((tenant) => {
-      const statusMatches = !filters.status || filters.status === "all" || tenant.status === filters.status;
-      const regionMatches = !filters.region || filters.region === "all" || tenant.region === filters.region;
-      const query = String(filters.query ?? "").trim().toLowerCase();
-      const queryMatches = !query || [tenant.name, tenant.legalName, tenant.owner, tenant.ownerEmail]
-        .some((value) => String(value).toLowerCase().includes(query));
-
-      return statusMatches && regionMatches && queryMatches;
-    });
-
-    return createEnvelope({
-      service: SERVICE,
+    return apiRequest("/tenants", {
       operation: "fetchTenants",
-      data: {
-        items: tenants,
-        filters,
-        totals: {
-          all: serviceAdminTenants.length,
-          active: serviceAdminTenants.filter((tenant) => tenant.status === "active").length,
-          watch: serviceAdminTenants.filter((tenant) => tenant.status === "watch").length,
-          restricted: serviceAdminTenants.filter((tenant) => tenant.status === "restricted").length
-        }
-      },
-      partial: true,
-      meta: { filters }
+      query: filters,
+      service: SERVICE
     });
   },
 
   async fetchTenantDetail(tenantId) {
-    const tenant = findTenant(tenantId);
-
-    if (!tenant) {
-      return createBackendErrorEnvelope({
-        service: SERVICE,
-        operation: "fetchTenantDetail",
-        code: "tenant_not_found",
-        message: `Tenant ${tenantId} was not found.`
-      });
+    if (!hasRouteId(tenantId)) {
+      return missingIdEnvelope("fetchTenantDetail", "Tenant id is required.");
     }
 
-    return createEnvelope({
-      service: SERVICE,
+    return apiRequest(`/tenants/${encodeURIComponent(tenantId)}`, {
       operation: "fetchTenantDetail",
-      data: buildTenantDetail(tenant)
+      service: SERVICE
     });
   },
 
-  async updateTenantStatus({ confirmed = false, reason, status, tenantId }) {
-    const tenant = findTenant(tenantId);
-
-    if (!tenant) {
-      return createBackendErrorEnvelope({
-        service: SERVICE,
-        operation: "updateTenantStatus",
-        code: "tenant_not_found",
-        message: `Tenant ${tenantId} was not found.`
-      });
+  async updateTenantStatus({ tenantId, ...payload } = {}) {
+    if (!hasRouteId(tenantId)) {
+      return missingIdEnvelope("updateTenantStatus", "Tenant id is required.");
     }
 
-    if (!hasAuditReason(reason)) {
-      return createInvalidEnvelope({
-        service: SERVICE,
-        operation: "updateTenantStatus",
-        code: "reason_required",
-        message: "A service-admin reason of at least 8 characters is required.",
-        data: { reason, status, tenantId }
-      });
-    }
-
-    if (!confirmed) {
-      return createInvalidEnvelope({
-        service: SERVICE,
-        operation: "updateTenantStatus",
-        code: "confirmation_required",
-        message: "Explicit confirmation is required for tenant status changes.",
-        data: {
-          confirmation: { required: true },
-          reason,
-          status,
-          tenantId
-        }
-      });
-    }
-
-    const auditEvent = {
-      id: makeAuditId("tenant_status"),
-      action: "tenant.status.change",
-      target: tenant.id,
-      reason,
-      from: tenant.status,
-      to: status,
-      immutable: true
-    };
-
-    return createEnvelope({
-      service: SERVICE,
+    return apiRequest(`/tenants/${encodeURIComponent(tenantId)}/status`, {
+      body: payload,
+      method: "PATCH",
       operation: "updateTenantStatus",
-      data: {
-        tenant: { ...tenant, status },
-        auditEvent,
-        confirmationRequired: true
-      }
+      service: SERVICE
     });
   },
 
@@ -124,22 +42,20 @@ export const tenantService = {
       operations: ["fetchTenants", "fetchTenantDetail", "updateTenantStatus"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
-      note: "Tenant list and detail adapters include users, billing, incidents, flags and audit context."
+      note: "Connected to API Gateway routes."
     };
   }
 };
 
-function buildTenantDetail(tenant) {
-  return {
-    tenant,
-    users: serviceAdminUsers.filter((user) => user.tenantId === tenant.id),
-    tariff: serviceAdminTariffs.find((tariff) => tariff.id === tenant.planId),
-    incidents: serviceAdminIncidents.filter((incident) => incident.affectedTenantIds.includes(tenant.id)),
-    flags: serviceAdminFeatureFlags.filter((flag) => flag.enabledTenantIds.includes(tenant.id)),
-    auditEvents: serviceAdminAuditEvents.filter((event) => event.tenantId === tenant.id)
-  };
+function hasRouteId(value) {
+  return String(value ?? "").trim().length > 0;
 }
 
-function findTenant(tenantId) {
-  return serviceAdminTenants.find((tenant) => tenant.id === tenantId);
+function missingIdEnvelope(operation, message) {
+  return createApiErrorEnvelope({
+    code: "missing_id",
+    message,
+    operation,
+    service: SERVICE
+  });
 }

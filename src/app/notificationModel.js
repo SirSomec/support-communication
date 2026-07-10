@@ -1,50 +1,3 @@
-export const notificationItems = [
-  {
-    id: "sla-vladimir",
-    type: "SLA",
-    typeKey: "sla",
-    title: "Владимир Б. без тематики",
-    detail: "Закрытие заблокировано, SLA просрочен",
-    meta: "Telegram · очередь спасения",
-    action: "Открыть диалог",
-    tone: "danger",
-    history: "11:36 · SLA alert доставлен старшему сотруднику"
-  },
-  {
-    id: "mention-anna",
-    type: "Mention",
-    typeKey: "mention",
-    title: "Анна Р. упомянула вас",
-    detail: "Нужна проверка возврата до закрытия",
-    meta: "MAX · старший сотрудник",
-    action: "Посмотреть",
-    tone: "warn",
-    history: "11:34 · mention из внутреннего комментария"
-  },
-  {
-    id: "channel-vk",
-    type: "Channel",
-    typeKey: "channel",
-    title: "VK: рост ошибок webhook",
-    detail: "3 ошибки доставки за последние 15 минут",
-    meta: "Интеграции · требует администратора",
-    action: "Открыть канал",
-    tone: "info",
-    history: "11:31 · webhook retry превысил порог"
-  },
-  {
-    id: "export-ready",
-    type: "Export",
-    typeKey: "export",
-    title: "Ежедневный отчет готов",
-    detail: "XLSX, 486 строк, audit export-2418",
-    meta: "Отчеты · сегодня 11:30",
-    action: "Скачать",
-    tone: "ok",
-    history: "11:30 · export queue завершила задачу"
-  }
-];
-
 export const notificationFilterOptions = [
   { id: "all", label: "Все" },
   { id: "unread", label: "Новые" },
@@ -72,6 +25,60 @@ export const externalCriticalChannels = [
   { id: "email-digest", label: "Email digest", detail: "Сводка ошибок за 15 минут" },
   { id: "incident-webhook", label: "Incident webhook", detail: "POST в внешний мониторинг" }
 ];
+
+export function mapNotificationItems(items = []) {
+  return items.map((item) => ({
+    action: item.action,
+    actionTarget: normalizeNotificationActionTarget(item.actionTarget),
+    category: item.category,
+    detail: item.detail,
+    history: item.history,
+    id: item.id,
+    meta: item.meta,
+    readAt: item.readAt ?? null,
+    title: item.title,
+    tone: item.tone,
+    type: item.type,
+    typeKey: item.typeKey
+  }));
+}
+
+function normalizeNotificationActionTarget(actionTarget) {
+  if (!actionTarget || typeof actionTarget !== "object" || Array.isArray(actionTarget)) {
+    return null;
+  }
+
+  if (actionTarget.kind === "download") {
+    const jobId = String(actionTarget.jobId ?? "").trim();
+    const service = String(actionTarget.service ?? "").trim();
+    if (!jobId || service !== "reports") {
+      return null;
+    }
+
+    return {
+      fileName: String(actionTarget.fileName ?? "").trim() || undefined,
+      format: String(actionTarget.format ?? "").trim() || undefined,
+      jobId,
+      kind: "download",
+      service: "reports"
+    };
+  }
+
+  if (actionTarget.kind === "navigate") {
+    const section = String(actionTarget.section ?? "").trim();
+    if (!section) {
+      return null;
+    }
+
+    return {
+      kind: "navigate",
+      resourceId: String(actionTarget.resourceId ?? "").trim() || undefined,
+      section
+    };
+  }
+
+  return null;
+}
 
 export function filterNotifications(items, filter, readIds, mutedTypes) {
   return items.filter((item) => {
@@ -103,4 +110,8 @@ export function getNotificationGroupSummary(items, readIds, mutedTypes) {
       muted: mutedTypes.includes(option.id)
     };
   });
+}
+
+export function collectReadNotificationIds(items = []) {
+  return items.filter((item) => item.readAt).map((item) => item.id);
 }

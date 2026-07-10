@@ -5,6 +5,7 @@ import "./dialogs.css";
 
 export function DialogWorkspace({
   access,
+  assignees,
   aiSuggestions,
   allConversations,
   attachments,
@@ -23,6 +24,7 @@ export function DialogWorkspace({
   onCloseDialog,
   onConversationSelect,
   onDialogAction,
+  onAssignment,
   onFilter,
   onQuery,
   onQueueFilterChange,
@@ -63,6 +65,7 @@ export function DialogWorkspace({
         closedIds={closedIds}
       />
       <ChatPane
+        assignees={assignees}
         conversation={conversation}
         topic={topic}
         onTopic={onTopic}
@@ -83,6 +86,7 @@ export function DialogWorkspace({
         templates={templates}
         onSaveTemplate={onSaveTemplate}
         onDialogAction={onDialogAction}
+        onAssignment={onAssignment}
         onCloseDialog={onCloseDialog}
         onStatusChange={onStatusChange}
         access={access}

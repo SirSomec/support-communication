@@ -4,7 +4,6 @@ services:
       context: .
       target: frontend
       args:
-        VITE_DEMO_SERVICE_ADMIN_KEY: dev-service-admin-key
         VITE_ENABLE_SERVICE_ADMIN: "true"
     depends_on:
       api-gateway:
@@ -23,6 +22,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
       mailpit:
         condition: service_healthy
     environment:
@@ -32,15 +33,18 @@ services:
       API_VERSION: v1
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
       REDIS_URL: redis://redis:6379
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://127.0.0.1:19000}
       S3_BUCKET: support-communication-local
       S3_REGION: us-east-1
       S3_ACCESS_KEY: minio
       S3_SECRET_KEY: minio-password
       MAIL_HOST: mailpit
       MAIL_PORT: 1025
+      MAIL_FROM: noreply@support-communication.local
       LOG_LEVEL: info
       DEMO_SERVICE_ADMIN_KEY: dev-service-admin-key
+      # Fast local JSON mode. Use docker-compose.pilot.yml with the
+      # prisma-postgres profile for the production-like PostgreSQL slice.
       IDENTITY_REPOSITORY: json
       IDENTITY_STORE_FILE: .runtime/docker/identity-store.json
       BILLING_REPOSITORY: json
@@ -51,11 +55,19 @@ services:
       WORKSPACE_STORE_FILE: .runtime/docker/workspace-store.json
       ROUTING_REPOSITORY: json
       ROUTING_STORE_FILE: .runtime/docker/routing-store.json
+      INTEGRATION_REPOSITORY: json
+      OPERATIONS_REPOSITORY: json
+      PLATFORM_REPOSITORY: json
       AUTOMATION_STORE_FILE: .runtime/docker/automation-store.json
       INTEGRATION_STORE_FILE: .runtime/docker/integration-store.json
+      NOTIFICATION_STORE_FILE: .runtime/docker/notification-store.json
+      BROWSER_PUSH_PUBLIC_KEY: BJ0dA02pytrMj9D5Olp1WM4xuJ-PQIZeq01YMWSX0J6gOLWoLHhbnzLZfivD_SlSjEKBDr1a-B80aXSdYHUTyEE
       OPERATIONS_STORE_FILE: .runtime/docker/operations-store.json
       PLATFORM_STORE_FILE: .runtime/docker/platform-store.json
       REPORT_STORE_FILE: .runtime/docker/report-store.json
+      REPORT_EXPORT_OBJECT_ROOT: .runtime/report-exports
+      TELEGRAM_INGRESS_MODE: ${TELEGRAM_INGRESS_MODE:-polling}
+      TELEGRAM_WEBHOOK_ENABLED: "false"
     ports:
       - "4101:4100"
     volumes:
@@ -65,6 +77,221 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  notification-delivery-worker:
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/notifications/notification-delivery.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: notification-delivery-worker
+      NOTIFICATION_STORE_FILE: .runtime/docker/notification-store.json
+      NOTIFICATION_DELIVERY_PROVIDER_MODE: local
+      NOTIFICATION_DELIVERY_INTERVAL_MS: 10000
+      NOTIFICATION_DELIVERY_LIMIT: 50
+      NOTIFICATION_DELIVERY_MAX_ATTEMPTS: 3
+      NOTIFICATION_DELIVERY_RETRY_DELAY_MS: 60000
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  lead-notification-worker:
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/integrations/public-demo-request-notification.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: lead-notification-worker
+      INTEGRATION_STORE_FILE: .runtime/docker/integration-store.json
+      PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE: local
+      PUBLIC_DEMO_NOTIFICATION_DELIVERY_INTERVAL_MS: 10000
+      PUBLIC_DEMO_NOTIFICATION_DELIVERY_LIMIT: 50
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  webhook-delivery-worker:
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/integrations/webhook-delivery.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: webhook-delivery-worker
+      INTEGRATION_STORE_FILE: .runtime/docker/integration-store.json
+      WEBHOOK_DELIVERY_PROVIDER_MODE: local
+      WEBHOOK_DELIVERY_INTERVAL_MS: 10000
+      WEBHOOK_DELIVERY_LIMIT: 50
+      WEBHOOK_DELIVERY_MAX_ATTEMPTS: 3
+      WEBHOOK_DELIVERY_RETRY_BACKOFF_MS: 60000
+      WEBHOOK_DELIVERY_HTTP_TIMEOUT_MS: 5000
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  telegram-polling-worker:
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/integrations/telegram-polling.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: telegram-polling-worker
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      INTEGRATION_REPOSITORY: json
+      INTEGRATION_STORE_FILE: .runtime/docker/integration-store.json
+      CONVERSATION_REPOSITORY: json
+      CONVERSATION_STORE_FILE: .runtime/docker/conversation-store.json
+      TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-true}
+      TELEGRAM_INGRESS_MODE: ${TELEGRAM_INGRESS_MODE:-polling}
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
+      TELEGRAM_POLLING_INTERVAL_MS: ${TELEGRAM_POLLING_INTERVAL_MS:-5000}
+      TELEGRAM_POLLING_LIMIT: ${TELEGRAM_POLLING_LIMIT:-50}
+      TELEGRAM_POLLING_TIMEOUT_MS: ${TELEGRAM_POLLING_TIMEOUT_MS:-10000}
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  proactive-delivery-worker:
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/automation/proactive-delivery.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: proactive-delivery-worker
+      AUTOMATION_REPOSITORY: json
+      AUTOMATION_STORE_FILE: .runtime/docker/automation-store.json
+      CONVERSATION_REPOSITORY: json
+      CONVERSATION_STORE_FILE: .runtime/docker/conversation-store.json
+      PROACTIVE_DELIVERY_ACTIVE_VARIANTS: A,B
+      PROACTIVE_DELIVERY_INTERVAL_MS: 10000
+      PROACTIVE_DELIVERY_LIMIT: 50
+      PROACTIVE_DELIVERY_VISITOR_TTL_MS: 900000
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  report-digest-worker:
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/reports/report-digest.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: report-digest-worker
+      REPORT_STORE_FILE: .runtime/docker/report-store.json
+      REPORT_DIGEST_WORKER_INTERVAL_MS: 10000
+      REPORT_DIGEST_WORKER_LIMIT: 10
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  report-export-worker:
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/reports/report-export.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: report-export-worker
+      REPORT_STORE_FILE: .runtime/docker/report-store.json
+      REPORT_EXPORT_OBJECT_ROOT: .runtime/report-exports
+      REPORT_EXPORT_WORKER_INTERVAL_MS: 10000
+      REPORT_EXPORT_WORKER_LIMIT: 10
+      REPORT_EXPORT_WORKER_QUEUE: report-export
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  outbox-worker:
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/outbox-worker/dist/main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: outbox-worker
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      INTEGRATION_STORE_FILE: .runtime/docker/integration-store.json
+      OUTBOX_QUEUE: message-delivery
+      OUTBOX_POLL_INTERVAL_MS: 10000
+      OUTBOX_BATCH_SIZE: 50
+      OUTBOX_MAX_ATTEMPTS: 5
+      OUTBOX_RETRY_BACKOFF_MS: 60000
+      OUTBOX_HTTP_TIMEOUT_MS: 5000
+      OUTBOX_CHANNEL_CONNECTORS: ${OUTBOX_CHANNEL_CONNECTORS:-}
+      OUTBOX_TELEGRAM_ENABLED: ${OUTBOX_TELEGRAM_ENABLED:-false}
+      OUTBOX_TELEGRAM_CHANNEL: ${OUTBOX_TELEGRAM_CHANNEL:-Telegram}
+      OUTBOX_TELEGRAM_API_BASE_URL: ${OUTBOX_TELEGRAM_API_BASE_URL:-https://api.telegram.org}
+      OUTBOX_TELEGRAM_BOT_TOKEN: ${OUTBOX_TELEGRAM_BOT_TOKEN:-}
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  billing-sync-worker:
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/outbox-worker/dist/main.js", "--billing-sync"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: billing-sync-worker
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      BILLING_SYNC_WORKER: "true"
+      BILLING_SYNC_PROVIDER_MODE: ${BILLING_SYNC_PROVIDER_MODE:-local}
+      BILLING_SYNC_PROVIDER_URL: ${BILLING_SYNC_PROVIDER_URL:-}
+      OUTBOX_QUEUE: billing-sync
+      OUTBOX_POLL_INTERVAL_MS: 10000
+      OUTBOX_BATCH_SIZE: 50
+      OUTBOX_MAX_ATTEMPTS: 5
+      OUTBOX_RETRY_BACKOFF_MS: 60000
+
+  file-scan-scanner-worker:
+    profiles: ["scanner-runtime"]
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/outbox-worker/dist/main.js", "--file-scan-scanner"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: file-scan-scanner-worker
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      OUTBOX_FILE_SCAN_SCANNER_WORKER: "true"
+      OUTBOX_QUEUE: file-scan
+      OUTBOX_SCANNER_ENABLED: ${OUTBOX_SCANNER_ENABLED:-true}
+      OUTBOX_SCANNER_PROVIDER_MODE: ${OUTBOX_SCANNER_PROVIDER_MODE:-local}
+      OUTBOX_SCANNER_LOCAL_VERDICT: ${OUTBOX_SCANNER_LOCAL_VERDICT:-clean}
+      OUTBOX_SCANNER_URL: ${OUTBOX_SCANNER_URL:-}
+      OUTBOX_SCANNER_BEARER_TOKEN: ${OUTBOX_SCANNER_BEARER_TOKEN:-}
+      OUTBOX_FILE_SCAN_RESULT_BASE_URL: ${OUTBOX_FILE_SCAN_RESULT_BASE_URL:-http://api-gateway:4100/api/v1}
+      OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN: ${OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN:-dev-service-admin-key}
+      OUTBOX_POLL_INTERVAL_MS: 10000
+      OUTBOX_BATCH_SIZE: 50
 
   postgres:
     image: postgres:16-alpine
@@ -101,8 +328,8 @@ services:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: minio-password
     ports:
-      - "59000:9000"
-      - "59001:9001"
+      - "19000:9000"
+      - "19001:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -110,6 +337,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "mc alias set local http://minio:9000 minio minio-password
+      && mc mb --ignore-existing local/support-communication-local"
 
   mailpit:
     image: axllent/mailpit:v1.22

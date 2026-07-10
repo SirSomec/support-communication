@@ -61,12 +61,12 @@ These are the runtime gaps found in the current workspace and used as the basis 
 - Create: `tests/no-demo-runtime-imports.test.js`
 - Modify: `package.json`
 
-- [ ] Add a Node test that scans frontend runtime files and fails on imports from `src/data.js`, `src/data/*`, and `src/services/mockBackend.js` outside explicitly allowed model/config files.
-- [ ] Add a backend scan in the same test that fails when files under `backend/apps/api-gateway/src/**/*.service.ts`, `*.controller.ts`, `*.route.ts`, and worker files import `*.fixtures.ts`.
-- [ ] Allow `*.fixtures.ts` imports only from repository seed/bootstrap files and backend tests while this migration is running.
-- [ ] Add a check that frontend runtime code does not write access tokens matching `demo-ui-` or `onboarding-ui-`.
-- [ ] Add `test:no-demo-runtime` to `package.json`.
-- [ ] Run `npm run test:no-demo-runtime` and confirm it fails before migration with the current runtime imports.
+- [x] Add a Node test that scans frontend runtime files and fails on imports from `src/data.js`, `src/data/*`, and `src/services/mockBackend.js` outside explicitly allowed model/config files.
+- [x] Add a backend scan in the same test that fails when files under `backend/apps/api-gateway/src/**/*.service.ts`, `*.controller.ts`, `*.route.ts`, and worker files import `*.fixtures.ts`.
+- [x] Allow `*.fixtures.ts` imports only from repository seed/bootstrap files and backend tests while this migration is running.
+- [x] Add a check that frontend runtime code does not write access tokens matching `demo-ui-` or `onboarding-ui-`.
+- [x] Add `test:no-demo-runtime` to `package.json`.
+- [x] Run `npm run test:no-demo-runtime` and confirm it fails before migration with the current runtime imports.
 
 Suggested scanner shape:
 
@@ -125,14 +125,14 @@ describe("runtime demo-data guard", () => {
 - Modify: `tests/api-client.test.js`
 - Modify: `tests/session-store.test.js`
 
-- [ ] Remove `DEFAULT_DEMO_SERVICE_ADMIN_KEY` and automatic browser injection of `x-demo-service-admin-*` headers from `apiRequest`.
-- [ ] Keep `authMode: "service-admin"` but require a stored service-admin bearer token; return a client error envelope when the token is absent.
-- [ ] Split tenant operator session and service-admin session storage keys in `sessionStore.js`.
-- [ ] Add `setTenantSession`, `getTenantAccessToken`, `clearTenantSession`, `setServiceAdminSession`, `getServiceAdminAccessToken`, and `clearServiceAdminSession`.
-- [ ] Keep backward-compatible `setSession`, `getAccessToken`, and `clearSession` as tenant-session aliases until all callers are updated.
-- [ ] Update `apiRequest` token selection: tenant routes use tenant access token, service-admin routes use service-admin access token, and public onboarding/provisioning routes use no token unless the caller passes one.
-- [ ] Update tests to assert no `x-demo-service-admin-key` header is sent by default in development, test, or production mode.
-- [ ] Update service-admin adapter tests to seed a service-admin token before calling privileged routes.
+- [x] Remove `DEFAULT_DEMO_SERVICE_ADMIN_KEY` and automatic browser injection of `x-demo-service-admin-*` headers from `apiRequest`.
+- [x] Keep `authMode: "service-admin"` but require a stored service-admin bearer token; return a client error envelope when the token is absent.
+- [x] Split tenant operator session and service-admin session storage keys in `sessionStore.js`.
+- [x] Add `setTenantSession`, `getTenantAccessToken`, `clearTenantSession`, `setServiceAdminSession`, `getServiceAdminAccessToken`, and `clearServiceAdminSession`.
+- [x] Keep backward-compatible `setSession`, `getAccessToken`, and `clearSession` as tenant-session aliases until all callers are updated.
+- [x] Update `apiRequest` token selection: tenant routes use tenant access token, service-admin routes use service-admin access token, and public onboarding/provisioning routes use no token unless the caller passes one.
+- [x] Update tests to assert no `x-demo-service-admin-key` header is sent by default in development, test, or production mode.
+- [x] Update service-admin adapter tests to seed a service-admin token before calling privileged routes.
 
 Expected API-client behavior:
 
@@ -169,15 +169,15 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/apps/api-gateway/src/feature-flags/feature-flag.module.ts`
 - Modify: backend auth and privileged-route tests under `backend/tests`
 
-- [ ] Rename the guard class to `ServiceAdminSessionGuard`.
-- [ ] Make bearer service-admin session the normal path for privileged endpoints.
-- [ ] Move the current demo-header path behind `ALLOW_DEMO_SERVICE_ADMIN_HEADERS=true` and `NODE_ENV` in `["development", "test"]`.
-- [ ] Ensure production rejects requests without a valid bearer session even when demo env vars are present.
-- [ ] Update `AuthService.getAuthState` so absent service-admin session returns `authenticated: false` instead of the fixture `serviceAdminSession`.
-- [ ] Update `AuthService.login` so successful MFA completion creates a persisted service-admin session without requiring a demo header.
-- [ ] Keep OIDC/SAML descriptors as provider flows, but do not issue a completed local session until the backend has a validated subject and role mapping.
-- [ ] Record permission denials through `IdentityRepository.recordPermissionDenialEvent` for both bearer and denied demo-header attempts.
-- [ ] Add backend tests for production rejection, test-mode demo opt-in, bearer success, missing permission denial, and revoked session denial.
+- [x] Rename the guard class to `ServiceAdminSessionGuard`.
+- [x] Make bearer service-admin session the normal path for privileged endpoints.
+- [x] Move the current demo-header path behind `ALLOW_DEMO_SERVICE_ADMIN_HEADERS=true` and `NODE_ENV` in `["development", "test"]`.
+- [x] Ensure production rejects requests without a valid bearer session even when demo env vars are present.
+- [x] Update `AuthService.getAuthState` so absent service-admin session returns `authenticated: false` instead of the fixture `serviceAdminSession`.
+- [x] Update `AuthService.login` so successful MFA completion creates a persisted service-admin session without requiring a demo header.
+- [x] Keep OIDC/SAML descriptors as provider flows, but do not issue a completed local session until the backend has a validated subject and role mapping.
+- [x] Record permission denials through `IdentityRepository.recordPermissionDenialEvent` for both bearer and denied demo-header attempts.
+- [x] Add backend tests for production rejection, test-mode demo opt-in, bearer success, missing permission denial, and revoked session denial.
 
 ## Task 4: Make Auth UI Fully Backend-Driven
 
@@ -188,14 +188,14 @@ if (authMode === "service-admin" && !token) {
 - Modify: `tests/pilot-flow.spec.js`
 - Modify: `tests/smoke.spec.js`
 
-- [ ] Remove email substring branches for blocked, maintenance, multi-organization, and agent 2FA simulation from `handleLoginSubmit`.
-- [ ] Wire SSO buttons to existing `POST /auth/oidc/start`, `GET /auth/oidc/callback`, and `POST /auth/saml/acs` routes.
-- [ ] Add `POST /auth/invites/accept`, `POST /auth/recovery/request`, `POST /auth/recovery/complete`, and `POST /auth/tenant/select` routes in `auth.controller.ts`.
-- [ ] Persist invite tokens, recovery tokens, tenant membership choices, token expiry, token consumption, and auth audit events in `IdentityRepository`.
-- [ ] Replace `setDemoUiSession` with backend session creation or backend denial states.
-- [ ] Use `authService.loginTenantOperator` as the only password-login success path.
-- [ ] Display backend `error.code` states for blocked tenant, inactive user, expired invite, required MFA, and maintenance.
-- [ ] Update Playwright auth tests so they create or seed real tenant operator credentials, log in, and verify the app shell only after `auth/tenant/state` confirms the session.
+- [x] Remove email substring branches for blocked, maintenance, multi-organization, and agent 2FA simulation from `handleLoginSubmit`.
+- [x] Wire SSO buttons to existing `POST /auth/oidc/start`, `GET /auth/oidc/callback`, and `POST /auth/saml/acs` routes.
+- [x] Add `POST /auth/invites/accept`, `POST /auth/recovery/request`, `POST /auth/recovery/complete`, and `POST /auth/tenant/select` routes in `auth.controller.ts`.
+- [x] Persist invite tokens, recovery tokens, tenant membership choices, token expiry, token consumption, and auth audit events in `IdentityRepository`.
+- [x] Replace `setDemoUiSession` with backend session creation or backend denial states.
+- [x] Use `authService.loginTenantOperator` as the only password-login success path.
+- [x] Display backend `error.code` states for blocked tenant, inactive user, expired invite, required MFA, and maintenance.
+- [x] Update Playwright auth tests so they create or seed real tenant operator credentials, log in, and verify the app shell only after `auth/tenant/state` confirms the session.
 
 ## Task 5: Make Onboarding Produce Real Tenant State
 
@@ -210,13 +210,13 @@ if (authMode === "service-admin" && !token) {
 - Modify: `tests/tenant-provision-service.test.js`
 - Add backend test: `backend/tests/tenant-provision-session.test.ts`
 
-- [ ] Extend provision response with `session.accessToken`, `session.refreshToken`, `session.expiresAt`, `operator`, `tenantId`, seeded role grants, and default workspace identifiers.
-- [ ] Add `IdentityRepository.provisionTenantBundle` that persists tenant, first owner, password credential, default topic directory, default groups, default settings rules, billing tenant state, public API key, and default SDK channel inside one Prisma transaction.
-- [ ] Persist invited employees from onboarding rather than keeping them in local React state after finish.
-- [ ] Replace onboarding test-message local queue with an API call that writes an outbox event and a webhook/channel test record.
-- [ ] Remove `onboarding-ui-*` fallback from `OrganizationOnboarding.jsx`; if login after provision fails, show backend error and keep the user on onboarding.
-- [ ] Add backend rollback behavior or compensation when tenant creation fails after partial persistence.
-- [ ] Add tests for duplicate slug, duplicate admin email, invalid channel domain, provisioned owner login, and seeded tenant settings visibility.
+- [x] Extend provision response with `session.accessToken`, `session.refreshToken`, `session.expiresAt`, `operator`, `tenantId`, seeded role grants, and default workspace identifiers.
+- [x] Add `IdentityRepository.provisionTenantBundle` that persists tenant, first owner, password credential, default topic directory, default groups, default settings rules, billing tenant state, public API key, and default SDK channel inside one Prisma transaction.
+- [x] Persist invited employees from onboarding rather than keeping them in local React state after finish.
+- [x] Replace onboarding test-message local queue with an API call that writes an outbox event and a webhook/channel test record.
+- [x] Remove `onboarding-ui-*` fallback from `OrganizationOnboarding.jsx`; if login after provision fails, show backend error and keep the user on onboarding.
+- [x] Add backend rollback behavior or compensation when tenant creation fails after partial persistence.
+- [x] Add tests for duplicate slug, duplicate admin email, invalid channel domain, provisioned owner login, and seeded tenant settings visibility.
 
 ## Task 6: Enforce Tenant State At App Entry
 
@@ -231,12 +231,12 @@ if (authMode === "service-admin" && !token) {
 - Modify: `tests/session-store.test.js`
 - Modify: `tests/smoke.spec.js`
 
-- [ ] Add `useTenantSessionState` that calls `authService.getTenantOperatorState` on app load and exposes `loading`, `authenticated`, `operator`, `tenantId`, `permissions`, and denial reason.
-- [ ] Block product workspace rendering until tenant state is loaded.
-- [ ] Redirect unauthenticated users to auth instead of letting hooks operate with no real backend session.
-- [ ] Replace `hasSession()` checks that only inspect local storage with confirmed tenant state.
-- [ ] Ensure every app-level mutation surfaces `401` and `403` by clearing session or showing an access-denied state.
-- [ ] Update route tests to verify stale local tokens do not open the workspace.
+- [x] Add `useTenantSessionState` that calls `authService.getTenantOperatorState` on app load and exposes `loading`, `authenticated`, `operator`, `tenantId`, `permissions`, and denial reason.
+- [x] Block product workspace rendering until tenant state is loaded.
+- [x] Redirect unauthenticated users to auth instead of letting hooks operate with no real backend session.
+- [x] Replace `hasSession()` checks that only inspect local storage with confirmed tenant state.
+- [x] Ensure every app-level mutation surfaces `401` and `403` by clearing session or showing an access-denied state.
+- [x] Update route tests to verify stale local tokens do not open the workspace.
 
 ## Task 7: Move Navigation And Access From Static Data To Permission Model
 
@@ -249,12 +249,12 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/apps/api-gateway/src/identity/permission.controller.ts`
 - Modify: `backend/tests/permission-contracts.test.ts`
 
-- [ ] Move local route labels/icons into `src/app/navigationModel.js` as UI metadata without tenant/demo metrics.
-- [ ] Load role actions and section availability from `permissionService.fetchPermissionModel`.
-- [ ] Map backend actions to app sections with a deterministic table, for example `reports.read -> reports`, `settings.integrations.write -> settings`.
-- [ ] Remove import of `navItems` from `src/data.js`.
-- [ ] Add backend permissions for all sections: dialogs, panel, clients, templates, visitors, reports, quality, automation, audit, settings, service-admin.
-- [ ] Add tests that each seeded role has a clear section access profile and that denied roles do not see restricted navigation items.
+- [x] Move local route labels/icons into `src/app/navigationModel.js` as UI metadata without tenant/demo metrics.
+- [x] Load role actions and section availability from `permissionService.fetchPermissionModel`.
+- [x] Map backend actions to app sections with a deterministic table, for example `reports.read -> reports`, `settings.integrations.write -> settings`.
+- [x] Remove import of `navItems` from `src/data.js`.
+- [x] Add backend permissions for all sections: dialogs, panel, clients, templates, visitors, reports, quality, automation, audit, settings, service-admin.
+- [x] Add tests that each seeded role has a clear section access profile and that denied roles do not see restricted navigation items.
 
 ## Task 8: Make Panel And Routing Workload API-Owned
 
@@ -268,13 +268,13 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/tests/routing-contracts.test.ts`
 - Modify: `tests/backend-services.test.js`
 
-- [ ] Add frontend `routingService.fetchWorkload`, `simulateAssignment`, `createAssignment`, `pauseSla`, `startRescue`, and `resolveRescue`.
-- [ ] Replace `operators` and `queues` imports in `PanelScreen.jsx` with `routingService.fetchWorkload`.
-- [ ] Render backend loading, empty, partial, and error states through `ProductScreen`.
-- [ ] Ensure `routing.controller.ts` uses `TenantOperatorAuthGuard` for tenant workload reads/writes.
-- [ ] Replace any hardcoded `tenant-demo` fallback in routing service/repository with tenant ID from request context.
-- [ ] Persist queue/operator workload state and rescue reports per tenant.
-- [ ] Add contract tests that two tenants see isolated queues and operators.
+- [x] Add frontend `routingService.fetchWorkload`, `simulateAssignment`, `createAssignment`, `pauseSla`, `startRescue`, and `resolveRescue`.
+- [x] Replace `operators` and `queues` imports in `PanelScreen.jsx` with `routingService.fetchWorkload`.
+- [x] Render backend loading, empty, partial, and error states through `ProductScreen`.
+- [x] Ensure `routing.controller.ts` uses `TenantOperatorAuthGuard` for tenant workload reads/writes.
+- [x] Replace any hardcoded `tenant-demo` fallback in routing service/repository with tenant ID from request context.
+- [x] Persist queue/operator workload state and rescue reports per tenant.
+- [x] Add contract tests that two tenants see isolated queues and operators.
 
 ## Task 9: Make Reports Screen Render Report Workspace Data
 
@@ -287,13 +287,13 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/tests/report-contracts.test.ts`
 - Modify: `tests/backend-services.test.js`
 
-- [ ] Load `metrics`, `bars`, `chartBlocks`, `columnOptions`, `rows`, `rescueOutcomeSummary`, `rescueReportRows`, and `exportJobs` from `reportService.fetchReportWorkspace`.
-- [ ] Remove imports from `src/data.js` in `ReportsScreen.jsx`.
-- [ ] Build filter option lists from backend workspace payload instead of local arrays when backend provides them.
-- [ ] Keep export creation, retry, and download flows on `reportService`, but update UI state from returned backend job records.
-- [ ] Move report fixtures into repository seed input and remove fixture imports from `report.service.ts`.
-- [ ] Persist export jobs, descriptors, idempotency keys, retry audits, and digest jobs per tenant.
-- [ ] Add tests for export idempotency, expired descriptor regeneration, denied export without permission, and tenant-isolated report rows.
+- [x] Load `metrics`, `bars`, `chartBlocks`, `columnOptions`, `rows`, `rescueOutcomeSummary`, `rescueReportRows`, and `exportJobs` from `reportService.fetchReportWorkspace`.
+- [x] Remove imports from `src/data.js` in `ReportsScreen.jsx`.
+- [x] Build filter option lists from backend workspace payload instead of local arrays when backend provides them.
+- [x] Keep export creation, retry, and download flows on `reportService`, but update UI state from returned backend job records.
+- [x] Move report fixtures into repository seed input and remove fixture imports from `report.service.ts`.
+- [x] Persist export jobs, descriptors, idempotency keys, retry audits, and digest jobs per tenant.
+- [x] Add tests for export idempotency, expired descriptor regeneration, denied export without permission, and tenant-isolated report rows.
 
 ## Task 10: Make Templates Backend-Owned
 
@@ -306,12 +306,12 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/apps/api-gateway/src/workspace/workspace.repository.ts`
 - Modify: `backend/tests/workspace-template-contracts.test.ts`
 
-- [ ] Remove `initialTemplates` import from `TemplatesScreen.jsx`.
-- [ ] Load templates from `templateService.fetchTemplates`.
-- [ ] Save template drafts through `templateService.saveTemplate`.
-- [ ] Ensure templates are stored with `tenantId`, `topicId`, `channel`, author, status, version, and audit event.
-- [ ] Add empty state for tenants with no templates.
-- [ ] Add tests for create, update, archive, tenant isolation, and permission denial.
+- [x] Remove `initialTemplates` import from `TemplatesScreen.jsx`.
+- [x] Load templates from `templateService.fetchTemplates`.
+- [x] Save template drafts through `templateService.saveTemplate`.
+- [x] Ensure templates are stored with `tenantId`, `topicId`, `channel`, author, status, version, and audit event.
+- [x] Add empty state for tenants with no templates.
+- [x] Add tests for create, update, archive, tenant isolation, and permission denial.
 
 ## Task 11: Make Visitors And Proactive Rules Backend-Owned
 
@@ -323,11 +323,11 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/apps/api-gateway/src/automation/automation.controller.ts`
 - Modify: `backend/tests/automation-proactive-contracts.test.ts`
 
-- [ ] Replace imports of `activeVisitors`, `proactiveRules`, and `rescueChats` with `visitorService.fetchVisitorWorkspace`.
-- [ ] Persist proactive rules, execution windows, frequency caps, experiment assignments, handoff events, and rescue outcomes per tenant.
-- [ ] Replace local UI updates after rule save with backend response records.
-- [ ] Enforce tenant operator permission on proactive rule save and rescue trigger routes.
-- [ ] Add tests for rule save, handoff event creation, rescue return timer, frequency cap enforcement, and tenant isolation.
+- [x] Replace imports of `activeVisitors`, `proactiveRules`, and `rescueChats` with `visitorService.fetchVisitorWorkspace`.
+- [x] Persist proactive rules, execution windows, frequency caps, experiment assignments, handoff events, and rescue outcomes per tenant.
+- [x] Replace local UI updates after rule save with backend response records.
+- [x] Enforce tenant operator permission on proactive rule save and rescue trigger routes.
+- [x] Add tests for rule save, handoff event creation, rescue return timer, frequency cap enforcement, and tenant isolation.
 
 ## Task 12: Make Quality And Knowledge Workspaces Backend-Owned
 
@@ -345,12 +345,12 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/tests/quality-contracts.test.ts`
 - Modify: `backend/tests/knowledge-contracts.test.ts`
 
-- [ ] Replace imports of quality metrics, suggestions, checks, coaching queue, effectiveness metrics, and knowledge articles with API workspace payloads.
-- [ ] Add `knowledgeService.fetchArticles`, `fetchArticle`, and `saveArticleDraft` to match existing knowledge controller routes.
-- [ ] Wire `KnowledgeBaseWorkspace` draft/version state to backend article data.
-- [ ] Persist quality ratings, manual reviews, AI scoring audits, coaching queue, and knowledge article versions per tenant.
-- [ ] Move quality fixture arrays into seed scripts and repository defaults.
-- [ ] Add tests for draft scoring, manual review, article draft creation, version selection, tenant isolation, and provider audit records.
+- [x] Replace imports of quality metrics, suggestions, checks, coaching queue, effectiveness metrics, and knowledge articles with API workspace payloads.
+- [x] Add `knowledgeService.fetchArticles`, `fetchArticle`, and `saveArticleDraft` to match existing knowledge controller routes.
+- [x] Wire `KnowledgeBaseWorkspace` draft/version state to backend article data.
+- [x] Persist quality ratings, manual reviews, AI scoring audits, coaching queue, and knowledge article versions per tenant.
+- [x] Move quality fixture arrays into seed scripts and repository defaults.
+- [x] Add tests for draft scoring, manual review, article draft creation, version selection, tenant isolation, and provider audit records.
 
 ## Task 13: Make Automation Screen Backend-Owned
 
@@ -363,12 +363,12 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/apps/api-gateway/src/automation/bot-runtime.worker.ts`
 - Modify: `backend/tests/automation-contracts.test.ts`
 
-- [ ] Replace imports of `auditEvents`, `botScenarios`, and `proactiveRules` with `automationService.fetchAutomationWorkspace`.
-- [ ] Keep `createDraftScenario` as a UI-only empty flow factory, but persist newly created scenarios through a backend create/update route.
-- [ ] Add `POST /api/v1/automation/bot-scenarios` and `PATCH /api/v1/automation/bot-scenarios/:scenarioId` routes for saving scenario drafts.
-- [ ] Persist bot scenarios, versions, publish audit events, runtime test runs, and bot handoff events per tenant.
-- [ ] Ensure publish creates immutable version and runtime worker can execute the published version.
-- [ ] Add tests for import validation, draft save, publish idempotency, test run output, handoff event, and tenant isolation.
+- [x] Replace imports of `auditEvents`, `botScenarios`, and `proactiveRules` with `automationService.fetchAutomationWorkspace`.
+- [x] Keep `createDraftScenario` as a UI-only empty flow factory, but persist newly created scenarios through a backend create/update route.
+- [x] Add `POST /api/v1/automation/bot-scenarios` and `PATCH /api/v1/automation/bot-scenarios/:scenarioId` routes for saving scenario drafts.
+- [x] Persist bot scenarios, versions, publish audit events, runtime test runs, and bot handoff events per tenant.
+- [x] Ensure publish creates immutable version and runtime worker can execute the published version.
+- [x] Add tests for import validation, draft save, publish idempotency, test run output, handoff event, and tenant isolation.
 
 ## Task 14: Complete Audit Export And Redaction Routes
 
@@ -383,14 +383,14 @@ if (authMode === "service-admin" && !token) {
 - Add backend test: `backend/tests/service-admin-audit-export-contracts.test.ts`
 - Modify: `tests/backend-services.test.js`
 
-- [ ] Add `POST /api/v1/service-admin/audit-events/exports` route that calls `ServiceAdminService.requestAuditExport`.
-- [ ] Add `POST /api/v1/service-admin/audit-events/:eventId/redactions` route.
-- [ ] Persist audit export descriptors, requested filters, source event IDs, requester, expiry, redaction policy, and object key.
-- [ ] Persist redaction records separately from immutable original audit events.
-- [ ] Ensure read-side audit events apply redaction overlays without mutating original rows.
-- [ ] Update `auditService.exportAuditEvents` and `auditService.redactAuditEvent` to call the new routes.
-- [ ] Replace `AuditScreen.jsx` local audit data with `auditService.fetchAuditEvents`.
-- [ ] Add tests for permission denial, export descriptor redaction, cursor pagination, redaction overlay, immutable original record, and expired export descriptor.
+- [x] Add `POST /api/v1/service-admin/audit-events/exports` route that calls `ServiceAdminService.requestAuditExport`.
+- [x] Add `POST /api/v1/service-admin/audit-events/:eventId/redactions` route.
+- [x] Persist audit export descriptors, requested filters, source event IDs, requester, expiry, redaction policy, and object key.
+- [x] Persist redaction records separately from immutable original audit events.
+- [x] Ensure read-side audit events apply redaction overlays without mutating original rows.
+- [x] Update `auditService.exportAuditEvents` and `auditService.redactAuditEvent` to call the new routes.
+- [x] Replace `AuditScreen.jsx` local audit data with `auditService.fetchAuditEvents`.
+- [x] Add tests for permission denial, export descriptor redaction, cursor pagination, redaction overlay, immutable original record, and expired export descriptor.
 
 ## Task 15: Finish Settings Runtime Wiring
 
@@ -408,14 +408,14 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/apps/api-gateway/src/integrations/integration.repository.ts`
 - Modify: `backend/tests/settings-contracts.test.ts`
 
-- [ ] Remove fallback arrays for channels, roles, and groups from settings UI.
-- [ ] Ensure settings subpages block mutations when their backend fetch failed instead of rendering local defaults.
-- [ ] Load SDK events and connection test logs from integration APIs rather than `src/data.js`.
-- [ ] Persist multiple channel connections of the same provider type, including Telegram and MAX, with unique display name, credentials, status, webhook state, and last test result.
-- [ ] Persist employee groups and roles per tenant through identity repository tables or existing metadata with explicit schema.
-- [ ] Persist settings rules and rule audit events with tenant ID and actor.
-- [ ] Update `BackendIntegrationPanel` to fetch a backend capability endpoint instead of static `backendIntegrationService`.
-- [ ] Add tests for two Telegram channels in one tenant, channel credential redaction, role update, employee deactivation, group update, topic archive/restore, rule test, and tenant isolation.
+- [x] Remove fallback arrays for channels, roles, and groups from settings UI.
+- [x] Ensure settings subpages block mutations when their backend fetch failed instead of rendering local defaults.
+- [x] Load SDK events and connection test logs from integration APIs rather than `src/data.js`.
+- [x] Persist multiple channel connections of the same provider type, including Telegram and MAX, with unique display name, credentials, status, webhook state, and last test result.
+- [x] Persist employee groups and roles per tenant through identity repository tables or existing metadata with explicit schema.
+- [x] Persist settings rules and rule audit events with tenant ID and actor.
+- [x] Update `BackendIntegrationPanel` to fetch a backend capability endpoint instead of static `backendIntegrationService`.
+- [x] Add tests for two Telegram channels in one tenant, channel credential redaction, role update, employee deactivation, group update, topic archive/restore, rule test, and tenant isolation.
 
 ## Task 16: Make Service-Admin Workspaces Backend-Owned
 
@@ -439,12 +439,12 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/apps/api-gateway/src/feature-flags/feature-flag.service.ts`
 - Modify: `backend/tests/service-admin-contracts.test.ts`
 
-- [ ] Remove all imports from `src/data/serviceAdmin.js` in service-admin screens.
-- [ ] Load dashboard metrics from platform, tenant, billing, support user, incident, audit, and feature flag APIs.
-- [ ] Use service-admin bearer auth mode for all service-admin adapters.
-- [ ] Persist impersonation sessions, break-glass approvals, privileged actions, and audit events in identity repository.
-- [ ] Replace fixture tenant/user lists in service-admin service with repository queries.
-- [ ] Add tests for user MFA reset, forced logout, block/unblock, invite resend, impersonation start/stop, break-glass decision, audit stream, and denied permission.
+- [x] Remove all imports from `src/data/serviceAdmin.js` in service-admin screens.
+- [x] Load dashboard metrics from platform, tenant, billing, support user, incident, audit, and feature flag APIs.
+- [x] Use service-admin bearer auth mode for all service-admin adapters.
+- [x] Persist impersonation sessions, break-glass approvals, privileged actions, and audit events in identity repository.
+- [x] Replace fixture tenant/user lists in service-admin service with repository queries.
+- [x] Add tests for user MFA reset, forced logout, block/unblock, invite resend, impersonation start/stop, break-glass decision, audit stream, and denied permission.
 
 ## Task 17: Remove Runtime Fixture Imports From Backend Services
 
@@ -463,12 +463,12 @@ if (authMode === "service-admin" && !token) {
 - Add seed modules under `backend/apps/api-gateway/src/**/seed.ts` where each context needs default rows.
 - Modify backend tests under `backend/tests`
 
-- [ ] Convert fixture-exported TypeScript types into local repository/service types or shared DTO files so runtime code does not import `*.fixtures.ts` for types.
-- [ ] Move initial data arrays into seed scripts consumed by `backend/scripts/seed-identity.ts` or context-specific bootstrap scripts.
-- [ ] Ensure repositories can start empty and still return valid empty envelopes.
-- [ ] Remove default `tenant-demo` behavior from runtime services.
-- [ ] Add per-context tests proving empty repository state returns empty UI-safe payloads.
-- [ ] Add per-context tests proving seeded state is created only by explicit seed/bootstrap commands.
+- [x] Convert fixture-exported TypeScript types into local repository/service types or shared DTO files so runtime code does not import `*.fixtures.ts` for types.
+- [x] Move initial data arrays into seed scripts consumed by `backend/scripts/seed-identity.ts` or context-specific bootstrap scripts.
+- [x] Ensure repositories can start empty and still return valid empty envelopes.
+- [x] Remove default `tenant-demo` behavior from runtime services.
+- [x] Add per-context tests proving empty repository state returns empty UI-safe payloads.
+- [x] Add per-context tests proving seeded state is created only by explicit seed/bootstrap commands.
 
 ## Task 18: Harden Billing Provider Runtime
 
@@ -480,11 +480,11 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/apps/api-gateway/src/billing/billing.controller.ts`
 - Modify: `backend/tests/billing-provider-contracts.test.ts`
 
-- [ ] Introduce a billing provider port for customer, subscription, invoice, payment retry, provider sync, and reconciliation operations.
-- [ ] Use a sandbox provider in local/dev/test that persists provider IDs and events in repository records.
-- [ ] Remove hardcoded provider naming from service responses except where stored on real provider records.
-- [ ] Add idempotency for provider sync and tariff change operations.
-- [ ] Add tests for tariff preview, tariff change approval, quota check, reservation commit/release, provider sync conflict, retry schedule, and reconciliation conflict.
+- [x] Introduce a billing provider port for customer, subscription, invoice, payment retry, provider sync, and reconciliation operations.
+- [x] Use a sandbox provider in local/dev/test that persists provider IDs and events in repository records.
+- [x] Remove hardcoded provider naming from service responses except where stored on real provider records.
+- [x] Add idempotency for provider sync and tariff change operations.
+- [x] Add tests for tariff preview, tariff change approval, quota check, reservation commit/release, provider sync conflict, retry schedule, and reconciliation conflict.
 
 ## Task 19: Make Platform And Operations Runtime Observability Real
 
@@ -497,11 +497,11 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/tests/platform-contracts.test.ts`
 - Modify: `backend/tests/operations-contracts.test.ts`
 
-- [ ] Build platform snapshot from telemetry samples, health rollups, incidents, alert routing rules, and feature flags rather than fixture arrays.
-- [ ] Persist acknowledgements and status-page publish audits through platform repository.
-- [ ] Build operations readiness from load-test runs, restore checks, dead-letter records, migration rollback checks, and security review records.
-- [ ] Ensure operation execution workers write result rows and audit records.
-- [ ] Add tests for component drilldown, acknowledgement idempotency, alert routing rule, dead-letter replay, restore check, migration rollback check, and security review export.
+- [x] Build platform snapshot from telemetry samples, health rollups, incidents, alert routing rules, and feature flags rather than fixture arrays.
+- [x] Persist acknowledgements and status-page publish audits through platform repository.
+- [x] Build operations readiness from load-test runs, restore checks, dead-letter records, migration rollback checks, and security review records.
+- [x] Ensure operation execution workers write result rows and audit records.
+- [x] Add tests for component drilldown, acknowledgement idempotency, alert routing rule, dead-letter replay, restore check, migration rollback check, and security review export.
 
 ## Task 20: Add Notifications And Realtime Backend Source
 
@@ -516,11 +516,11 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/apps/api-gateway/src/app.module.ts`
 - Add backend test: `backend/tests/notification-contracts.test.ts`
 
-- [ ] Add notification repository records for SLA risk, channel failures, export completion, invite events, and privileged service-admin events.
-- [ ] Add `GET /api/v1/notifications` and mutation route for mark-as-read.
-- [ ] Stream new notifications through existing realtime SSE/WebSocket fanout.
-- [ ] Replace local notification model events with API data.
-- [ ] Add tests for notification creation, mark-as-read, unread count, realtime delivery, and tenant isolation.
+- [x] Add notification repository records for SLA risk, channel failures, export completion, invite events, and privileged service-admin events.
+- [x] Add `GET /api/v1/notifications` and mutation route for mark-as-read.
+- [x] Stream new notifications through existing realtime SSE/WebSocket fanout.
+- [x] Replace local notification model events with API data.
+- [x] Add tests for notification creation, mark-as-read, unread count, realtime delivery, and tenant isolation.
 
 ## Task 21: Remove Static Frontend Data Modules
 
@@ -542,11 +542,11 @@ if (authMode === "service-admin" && !token) {
 - Modify: `tests/no-demo-runtime-imports.test.js`
 - Modify: `tests/backend-services.test.js`
 
-- [ ] Run `rg -n "from .*data|src/data|mockBackend" src tests` and verify no runtime imports remain.
-- [ ] Delete the static data modules.
-- [ ] Remove test allowances for frontend static data imports.
-- [ ] Keep pure UI model files such as `dialogModel.js`, `automationModel.js`, and `navigationModel.js` only when they contain labels, mappings, and empty object factories rather than tenant records.
-- [ ] Run `npm run test:no-demo-runtime`, `npm run test:services`, and `npm run build`.
+- [x] Run `rg -n "from .*data|src/data|mockBackend" src tests` and verify no runtime imports remain.
+- [x] Delete the static data modules.
+- [x] Remove test allowances for frontend static data imports.
+- [x] Keep pure UI model files such as `dialogModel.js`, `automationModel.js`, and `navigationModel.js` only when they contain labels, mappings, and empty object factories rather than tenant records.
+- [x] Run `npm run test:no-demo-runtime`, `npm run test:services`, and `npm run build`.
 
 ## Task 22: Convert Backend Fixture Files To Seed/Test Inputs
 
@@ -567,11 +567,11 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/scripts/pilot-bootstrap.mjs`
 - Modify backend tests under `backend/tests`
 
-- [ ] Move reusable seed records to `backend/scripts/seeds/*.ts`.
-- [ ] Export seed functions that write through repositories rather than being imported by services.
-- [ ] Update tests to create their own seed rows through repositories or factory helpers.
-- [ ] Delete runtime fixture files once imports are gone.
-- [ ] Update `tests/no-demo-runtime-imports.test.js` so backend fixture imports are rejected outside `backend/tests` and `backend/scripts`.
+- [x] Move reusable seed records to `backend/scripts/seeds/*.ts`.
+- [x] Export seed functions that write through repositories rather than being imported by services.
+- [x] Update tests to create their own seed rows through repositories or factory helpers.
+- [x] Delete runtime fixture files once imports are gone.
+- [x] Update `tests/no-demo-runtime-imports.test.js` so backend fixture imports are rejected outside `backend/tests` and `backend/scripts`.
 
 ## Task 23: Production Configuration And Docker Hardening
 
@@ -585,12 +585,12 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/README.md`
 - Add: `docs/runtime-configuration.md`
 
-- [ ] Split local, test, staging, and production env descriptions.
-- [ ] Make production startup fail when demo header auth is enabled.
-- [ ] Require `DATABASE_URL`, JWT/session secrets, public API key secret, object storage credentials, and billing provider mode outside local/test.
-- [ ] Ensure frontend build does not bake a service-admin demo key.
-- [ ] Document Docker Compose local mode and production env requirements.
-- [ ] Add backend config tests for fail-closed production settings.
+- [x] Split local, test, staging, and production env descriptions.
+- [x] Make production startup fail when demo header auth is enabled.
+- [x] Require `DATABASE_URL`, JWT/session secrets, public API key secret, object storage credentials, and billing provider mode outside local/test.
+- [x] Ensure frontend build does not bake a service-admin demo key.
+- [x] Document Docker Compose local mode and production env requirements.
+- [x] Add backend config tests for fail-closed production settings.
 
 ## Task 24: End-To-End Scenario Coverage
 
@@ -601,16 +601,16 @@ if (authMode === "service-admin" && !token) {
 - Add: `tests/service-admin-runtime.spec.js`
 - Modify backend tests under `backend/tests`
 
-- [ ] Create a real tenant through onboarding and verify owner session opens the workspace.
-- [ ] Connect two Telegram channels and one MAX channel in settings, then verify both are listed and independently testable.
-- [ ] Invite an employee, assign a role/group, log in as that employee, and verify section access.
-- [ ] Create and archive a topic, then verify dialogs/templates/rules reference the updated directory.
-- [ ] Change a rule, run its test, and verify an audit event.
-- [ ] Create outbound SDK dialog and verify it appears in dialogs, panel workload, reports, and audit.
-- [ ] Create report export, retry failed export, and download descriptor.
-- [ ] Publish bot scenario and run a bot test.
-- [ ] Score a draft response and save a knowledge article draft.
-- [ ] Use service-admin bearer login for user support, tenant status change, feature flag preview/update, incident update, and audit export.
+- [x] Create a real tenant through onboarding and verify owner session opens the workspace.
+- [x] Connect two Telegram channels and one MAX channel in settings, then verify both are listed and independently testable.
+- [x] Invite an employee, assign a role/group, log in as that employee, and verify section access.
+- [x] Create and archive a topic, then verify dialogs/templates/rules reference the updated directory.
+- [x] Change a rule, run its test, and verify an audit event.
+- [x] Create outbound SDK dialog and verify it appears in dialogs, panel workload, reports, and audit.
+- [x] Create report export, retry failed export, and download descriptor.
+- [x] Publish bot scenario and run a bot test.
+- [x] Score a draft response and save a knowledge article draft.
+- [x] Use service-admin bearer login for user support, tenant status change, feature flag preview/update, incident update, and audit export.
 
 ## Task 25: Final Verification And Release Checklist
 
@@ -620,7 +620,24 @@ if (authMode === "service-admin" && !token) {
 - Modify: `backend/README.md`
 - Modify this plan with completion checkmarks
 
-- [ ] Run frontend unit/contract checks:
+Status 2026-07-05:
+
+- Service-admin runtime crash fixed: operations readiness now returns parseable worker timestamps for default seeds, report export seed timestamps are ISO, and the service-admin date formatter tolerates invalid runtime input.
+- Regression coverage added to backend operations contracts and `tests/service-admin-utils.test.js`; `npm run release:gate` now includes `npm run test:service-admin-utils`.
+- Local compose stack was rebuilt through `docker compose up -d --build`; API Gateway, frontend and all workers were recreated from the current branch.
+- Live checks passed for `http://127.0.0.1:4101/api/v1/health`, `http://127.0.0.1:4101/api/v1/ready`, service-admin bearer login, operations readiness worker timestamps, service-admin users, feature flags, and browser rendering on `http://127.0.0.1:8080/#/service-admin`.
+- Earlier service-admin namespace background 401s for tenant-only app-shell loaders are resolved by auth-mode aware runtime coverage in `tests/service-admin-runtime.spec.js`.
+- Release gate now covers `npm run test:pilot-flow`, `npm run test:settings-runtime`, `npm run test:service-admin-runtime`, and a non-skipping live `npm run test:backend-api-smoke` after compose readiness. Backend API smoke uses a real tenant operator bearer session instead of demo service-admin headers.
+- Operations readiness now exposes `report-digest-worker` from durable `reports.scheduledDigestDescriptors` evidence with queue depth, dead-letter count, last delivery status, and redacted trace evidence.
+- Operations readiness now exposes `file-scan-scanner-worker` from durable `database.outboxEvents` queue `file-scan` evidence. Service-admin runtime renders the worker row and last-delivery event type/status/trace.
+- Public demo lead notification now supports `PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE=smtp` with optional external SMTP credentials and implicit TLS/SMTPS configuration; `lead-notification:worker:once` verifies one SMTP delivery through an embedded SMTP endpoint with a persisted `smtp-*` provider message id, root `release:gate` runs `lead-notification:mailpit-smoke` against compose Mailpit SMTP/API before the product build, and the gate includes skip-safe `lead-notification:smtp-live-smoke` for external SMTP acceptance when real endpoint credentials are supplied.
+- File-scan scanner runtime now has `file-scan:api-callback-smoke` in root `release:gate`; it runs after production-like API readiness and verifies worker callback delivery through the live `/files/:fileId/scan-result` route into Prisma persistence. The HTTP scanner provider supports `OUTBOX_SCANNER_BEARER_TOKEN` plus safe descriptor `signedFile` access metadata without exposing raw object keys. Dialog attachment upload creates a real `workspaceFile`, returns client `signedUpload`, seeds scanner `signedFile`, uploads bytes to that signed policy, finalizes through `dialogs/attachments/:fileId/finalize`, and polls `dialogs/attachments/:fileId/status` until scan-ready, blocked, failed or still pending. The gate also includes skip-safe `file-scan:external-scanner-smoke`, which exercises a real HTTP scanner endpoint only when `FILE_SCAN_EXTERNAL_SCANNER_SMOKE_ENABLED=true` and `OUTBOX_SCANNER_URL` are supplied, with optional signed-file smoke input through `FILE_SCAN_EXTERNAL_SCANNER_SIGNED_FILE_URL`.
+- Telegram live provider smoke is wired into root `release:gate` through skip-safe `provider:telegram-live-smoke`; it sends a real Telegram message only when `OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true`, `OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID`, and a Telegram token source are supplied.
+- VK/MAX live provider-proxy smoke is wired into root `release:gate` through skip-safe `provider:vk-max-live-smoke`; it sends staged VK/MAX messages through `OUTBOX_VK_ENDPOINT` and `OUTBOX_MAX_ENDPOINT` only when `OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED=true`, endpoint env and peer/dialog ids are supplied.
+- Current branch containers were rebuilt and restarted through `docker compose up -d --build`; compose health passed for 14 services including `webhook-delivery-worker` and `proactive-delivery-worker`, frontend `http://127.0.0.1:8080/`, API `health`/`ready`, live bearer backend API smoke, and live service-admin `report-digest-worker` plus `file-scan-scanner-worker` readiness all passed on the rebuilt stack.
+- Remaining follow-up gaps: `provider:outbox:smoke` now covers Telegram, VK and MAX runtime adapters against local provider endpoints when explicitly enabled, `release:gate` includes compose Mailpit lead notification smoke, public demo SMTP supports auth plus implicit TLS for external providers, `release:gate` includes skip-safe external SMTP acceptance smoke, `release:gate` includes file-scan API callback smoke plus skip-safe external scanner smoke, `release:gate` includes skip-safe Telegram live smoke and skip-safe VK/MAX provider-proxy smoke, and `release:gate` includes skip-safe public SDK pilot smoke after compose readiness. Live/staging public SDK and external SMTP execution still depend on target credentials; inbox placement/async bounce validation needs a mailbox API or IMAP contract; direct official VK/MAX adapter contracts are only required if the staging proxy is not the integration boundary; scanner provider work is down to non-skipping auth/signed-file execution against the chosen scanner endpoint and strict scan-worker finalize gating only if that endpoint requires stronger upload completion semantics.
+
+- [x] Run frontend unit/contract checks:
 
 ```bash
 npm run test:api-client
@@ -631,7 +648,7 @@ npm run test:no-demo-runtime
 npm run build
 ```
 
-- [ ] Run backend checks:
+- [x] Run backend checks:
 
 ```bash
 npm run backend:typecheck
@@ -646,6 +663,8 @@ npm run backend:test:runtime
 
 ```bash
 npm run test:pilot-flow
+npm run test:settings-runtime
+npm run test:service-admin-runtime
 npm run test:smoke
 npm run test:backend-api-smoke
 ```
@@ -665,9 +684,9 @@ curl http://127.0.0.1:8080/api/v1/health
 curl http://127.0.0.1:4101/api/v1/health
 ```
 
-- [ ] Run `rg -n "demo-ui-|onboarding-ui-|mockBackend|from .*src/data|from .*\\.\\./data|tenant-demo|x-demo-service-admin" src backend/apps/api-gateway/src tests` and classify any remaining matches as test-only, seed-only, or a blocker.
-- [ ] Update docs with the final runtime state, seed process, auth modes, and known local-only switches.
-- [ ] Confirm production runtime has no frontend path that can mint a session without backend authentication.
+- [x] Run `rg -n "demo-ui-|onboarding-ui-|mockBackend|from .*src/data|from .*\\.\\./data|tenant-demo|x-demo-service-admin" src backend/apps/api-gateway/src tests` and classify any remaining matches as test-only, seed-only, or a blocker.
+- [x] Update docs with the final runtime state, seed process, auth modes, and known local-only switches.
+- [x] Confirm production runtime has no frontend path that can mint a session without backend authentication.
 
 ## Parallelization Plan
 

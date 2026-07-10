@@ -7,12 +7,14 @@ import {
   createApiErrorEnvelope,
   resetApiClientTestConfig
 } from "../src/services/apiClient.js";
+import { clearServiceAdminSession, setServiceAdminSession } from "../src/app/sessionStore.js";
 
 const originalFetch = globalThis.fetch;
 
 describe("api client", () => {
   afterEach(() => {
     mock.restoreAll();
+    clearServiceAdminSession();
     resetApiClientTestConfig();
     globalThis.fetch = originalFetch;
   });
@@ -37,57 +39,50 @@ describe("api client", () => {
     assert.equal(url, "https://api.example.test/api/v1/dialogs?page=1");
   });
 
-  it("sends JSON, trace headers and the demo service-admin key", async () => {
+  it("sends JSON and tenant bearer token for default auth mode", async () => {
     globalThis.fetch = mock.fn(async (url, options) => {
-      assert.equal(url, "/api/v1/auth/login");
-      assert.equal(options.method, "POST");
-      assert.equal(options.headers["content-type"], "application/json");
-      assert.equal(options.headers["x-demo-service-admin-key"], "dev-service-admin-key");
-      assert.equal(options.headers["x-demo-service-admin-actor-id"], "svc-admin-demo");
-      assert.equal(options.headers["x-demo-service-admin-actor-name"], "Demo Service Admin");
-      assert.equal(options.headers["x-demo-service-admin-mfa-verified"], "true");
-      assert.equal(options.headers["x-demo-service-admin-permissions"], "*");
-      assert.equal(options.headers["x-demo-service-admin-roles"], "service_admin");
-      assert.equal(options.headers["x-demo-service-admin-tenant-id"], "tenant-northstar");
-      assert.ok(Date.parse(options.headers["x-demo-service-admin-session-expires-at"]) > Date.now());
-      assert.deepEqual(JSON.parse(options.body), { email: "admin@example.com", password: "secret" });
+      assert.equal(url, "/api/v1/auth/tenant/state");
+      assert.equal(options.method, "GET");
+      assert.equal(options.headers.authorization, "Bearer tenant-token");
+      assert.equal("x-demo-service-admin-key" in options.headers, false);
 
       return new Response(JSON.stringify({
         service: "authService",
-        operation: "login",
+        operation: "getTenantAuthState",
         status: "ok",
-        partial: true,
-        traceId: "trc_auth_login",
-        updatedAt: "2026-07-01T00:00:00.000Z",
-        data: { authState: "mfa_required" },
-        error: null,
-        states: { loading: false, empty: false, error: false, partial: true },
-        meta: { source: "api-gateway" }
+        data: { authenticated: true },
+        error: null
       }), { headers: { "content-type": "application/json" }, status: 200 });
     });
 
-    const response = await apiRequest("/auth/login", {
-      body: { email: "admin@example.com", password: "secret" },
-      method: "POST",
-      operation: "login",
+    const { setTenantSession } = await import("../src/app/sessionStore.js");
+    setTenantSession({ accessToken: "tenant-token", tenantId: "tenant-demo" });
+
+    const response = await apiRequest("/auth/tenant/state", {
+      operation: "getTenantAuthState",
       service: "authService"
     });
 
-    assert.equal(response.service, "authService");
     assert.equal(response.status, "ok");
-    assert.equal(response.data.authState, "mfa_required");
   });
 
-  it("sends a configured demo service-admin key outside production", async () => {
-    configureApiClientForTests({
-      demoServiceAdminKey: "configured-demo-key",
-      mode: "test"
+  it("requires a stored service-admin bearer token for service-admin routes", async () => {
+    const response = await apiRequest("/service-admin/users", {
+      authMode: "service-admin",
+      operation: "fetchUsers",
+      service: "supportAdminService"
     });
 
+    assert.equal(response.status, "error");
+    assert.equal(response.error.code, "service_admin_session_required");
+  });
+
+  it("sends service-admin bearer token when session is seeded", async () => {
+    setServiceAdminSession({ accessToken: "svc-admin-token" });
+
     globalThis.fetch = mock.fn(async (_url, options) => {
-      assert.equal(options.headers["x-demo-service-admin-key"], "configured-demo-key");
-      assert.equal(options.headers["x-demo-service-admin-actor-id"], "svc-admin-demo");
-      assert.equal(options.headers["x-demo-service-admin-permissions"], "*");
+      assert.equal(options.headers.authorization, "Bearer svc-admin-token");
+      assert.equal("x-demo-service-admin-key" in options.headers, false);
 
       return new Response(JSON.stringify({ status: "ok", data: { ok: true } }), {
         headers: { "content-type": "application/json" },
@@ -95,25 +90,21 @@ describe("api client", () => {
       });
     });
 
-    const response = await apiRequest("/health", {
-      operation: "health",
-      service: "apiClient"
+    const response = await apiRequest("/service-admin/users", {
+      authMode: "service-admin",
+      operation: "fetchUsers",
+      service: "supportAdminService"
     });
 
     assert.equal(response.status, "ok");
   });
 
-  it("omits the demo service-admin key in production mode", async () => {
-    configureApiClientForTests({
-      demoServiceAdminKey: "configured-demo-key",
-      mode: "production"
-    });
+  it("does not send demo service-admin headers in development mode", async () => {
+    configureApiClientForTests({ mode: "development" });
 
     globalThis.fetch = mock.fn(async (_url, options) => {
       assert.equal("x-demo-service-admin-key" in options.headers, false);
-      assert.equal("x-demo-service-admin-actor-id" in options.headers, false);
-      assert.equal("x-demo-service-admin-permissions" in options.headers, false);
-      assert.equal("x-demo-service-admin-tenant-id" in options.headers, false);
+      assert.equal("authorization" in options.headers, false);
 
       return new Response(JSON.stringify({ status: "ok", data: { ok: true } }), {
         headers: { "content-type": "application/json" },
@@ -122,6 +113,7 @@ describe("api client", () => {
     });
 
     const response = await apiRequest("/health", {
+      authMode: "public",
       operation: "health",
       service: "apiClient"
     });
@@ -130,6 +122,8 @@ describe("api client", () => {
   });
 
   it("normalizes HTTP errors into frontend envelopes", async () => {
+    setServiceAdminSession({ accessToken: "service-admin-token" });
+
     globalThis.fetch = mock.fn(async () => new Response(JSON.stringify({
       service: "authService",
       operation: "getAuthState",
@@ -139,6 +133,7 @@ describe("api client", () => {
     }), { headers: { "content-type": "application/json" }, status: 401 }));
 
     const response = await apiRequest("/auth/state", {
+      authMode: "service-admin",
       operation: "getAuthState",
       service: "authService"
     });
@@ -154,6 +149,7 @@ describe("api client", () => {
     });
 
     const response = await apiRequest("/health", {
+      authMode: "public",
       operation: "health",
       service: "apiClient"
     });

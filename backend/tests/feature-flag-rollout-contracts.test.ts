@@ -10,7 +10,7 @@ import {
   resolveDeterministicRolloutBucket,
   validateFeatureFlagRule
 } from "../apps/api-gateway/src/feature-flags/feature-flag-rollout.engine.ts";
-import { featureFlags } from "../apps/api-gateway/src/platform/platform.fixtures.ts";
+import { featureFlags } from "../apps/api-gateway/src/platform/seed-catalog.ts";
 import { PlatformRepository } from "../apps/api-gateway/src/platform/platform.repository.ts";
 
 const tenantRule = {

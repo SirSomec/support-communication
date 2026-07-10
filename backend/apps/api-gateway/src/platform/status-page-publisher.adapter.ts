@@ -5,7 +5,6 @@ import type {
   IncidentCommunicationSyncJob
 } from "../incidents/incident-communication.worker.js";
 import type {
-  PlatformAuditOutboxRepository,
   PlatformOutboxRow
 } from "./platform.repository.js";
 
@@ -75,7 +74,13 @@ export interface ExecuteStatusPageSyncOutboxWorkerInput {
   now?: string;
   outbox: PlatformOutboxRow;
   publisher: StatusPagePublisherPort;
-  repository: Pick<PlatformAuditOutboxRepository, "updatePlatformOutboxRowStatus">;
+  repository: {
+    updatePlatformOutboxRowStatusAsync(
+      idempotencyKey: string,
+      status: string,
+      payloadPatch?: Record<string, unknown>
+    ): Promise<PlatformOutboxRow>;
+  };
 }
 
 export interface ExecuteStatusPageSyncOutboxWorkerResult {
@@ -268,7 +273,7 @@ export async function executeStatusPageSyncOutboxWorker(
   const publishedAt = input.now ?? new Date().toISOString();
   const publishResult = await withPublishedAt(input.publisher, publishedAt).publish(request);
   const status = publishResult.ok ? "published" : "retry_scheduled";
-  const outbox = input.repository.updatePlatformOutboxRowStatus(input.outbox.idempotencyKey, status, {
+  const outbox = await input.repository.updatePlatformOutboxRowStatusAsync(input.outbox.idempotencyKey, status, {
     statusPagePublish: publishResult
   });
 

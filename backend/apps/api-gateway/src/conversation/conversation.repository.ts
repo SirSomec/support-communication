@@ -7,7 +7,8 @@ import {
   JsonFileStore
 } from "@support-communication/database";
 import { type OutboxEvent } from "@support-communication/events";
-import { conversationFixtures, type ConversationMessage, type ConversationRecord } from "./conversation.fixtures.js";
+import { conversationFixtures, channelFixtures } from "./seed-catalog.js";
+import { type ConversationMessage, type ConversationRecord } from "./conversation.types.js";
 
 export interface RealtimeEvent {
   eventId: string;
@@ -87,22 +88,55 @@ export interface ConversationOutboundMessageReplyRecord extends ConversationOutb
   realtimeEvent: RealtimeEvent;
 }
 
+export interface ConversationAssignmentAnalyticsRow {
+  channel: string;
+  conversationId: string;
+  eventKind: "assignment" | "transfer";
+  fromOperatorId: string | null;
+  id: string;
+  occurredAt: string;
+  source: "dialog-interface";
+  tenantId: string;
+  toOperatorId: string;
+}
+
+export interface ConversationAssignmentRecordInput {
+  analyticsRow: ConversationAssignmentAnalyticsRow;
+  conversation: ConversationRecord;
+  realtimeEvent: RealtimeEvent;
+}
+
+export interface ConversationAssignmentRecord extends ConversationAssignmentRecordInput {}
+
+export class ConversationAssignmentConflictError extends Error {
+  readonly code = "conversation_assignment_conflict";
+
+  constructor(conversationId: string) {
+    super(`Conversation ${conversationId} assignment changed before commit.`);
+    this.name = "ConversationAssignmentConflictError";
+  }
+}
+
 export interface ConversationState {
+  channelCatalog: Array<Record<string, unknown>>;
   conversations: ConversationRecord[];
   deliveryReceipts: ConversationDeliveryReceipt[];
   inboundEvents: ConversationInboundEvent[];
   outboundDescriptors: ConversationOutboundDescriptor[];
   outboxEvents: OutboxEvent[];
   realtimeEvents: RealtimeEvent[];
+  routingAnalyticsRows?: ConversationAssignmentAnalyticsRow[];
 }
 
 export interface ConversationRepositoryPort {
+  assignConversation(input: ConversationAssignmentRecordInput): MaybePromise<ConversationAssignmentRecord>;
   appendRealtimeEvent(event: RealtimeEvent): MaybePromise<RealtimeEvent>;
   findConversation(conversationId: string): MaybePromise<ConversationRecord | undefined>;
   findInboundEvent(channel: string, eventId: string): MaybePromise<ConversationInboundEvent | undefined>;
   findOutboundDescriptorByIdempotencyKey(idempotencyKey: string): MaybePromise<ConversationOutboundDescriptor | undefined>;
   listDeliveryReceipts(filter?: ConversationDeliveryReceiptFilter): MaybePromise<ConversationDeliveryReceipt[]>;
   listConversations(): MaybePromise<ConversationRecord[]>;
+  listChannelCatalog(): MaybePromise<Array<Record<string, unknown>>>;
   listOutboundDescriptors(filter?: ConversationOutboundDescriptorFilter): MaybePromise<ConversationOutboundDescriptor[]>;
   listOutboxEvents(): MaybePromise<OutboxEvent[]>;
   listRealtimeEvents(filter?: ConversationRealtimeEventFilter): MaybePromise<RealtimeEvent[]>;
@@ -148,6 +182,10 @@ export class ConversationRepository implements ConversationRepositoryPort {
     return this.adapter.listConversations();
   }
 
+  listChannelCatalog(): MaybePromise<Array<Record<string, unknown>>> {
+    return this.adapter.listChannelCatalog();
+  }
+
   listOutboundDescriptors(filter: ConversationOutboundDescriptorFilter = {}): MaybePromise<ConversationOutboundDescriptor[]> {
     return this.adapter.listOutboundDescriptors(filter);
   }
@@ -162,6 +200,10 @@ export class ConversationRepository implements ConversationRepositoryPort {
 
   saveConversation(conversation: ConversationRecord): MaybePromise<ConversationRecord> {
     return this.adapter.saveConversation(conversation);
+  }
+
+  assignConversation(input: ConversationAssignmentRecordInput): MaybePromise<ConversationAssignmentRecord> {
+    return this.adapter.assignConversation(input);
   }
 
   findInboundEvent(channel: string, eventId: string): MaybePromise<ConversationInboundEvent | undefined> {
@@ -216,6 +258,7 @@ interface PrismaConversationDelegates {
   conversation: {
     findMany(input: PrismaConversationFindManyInput): Promise<PrismaConversationRow[]>;
     findUnique(input: PrismaConversationFindUniqueInput): Promise<PrismaConversationRow | null>;
+    updateMany(input: PrismaConversationUpdateManyInput): Promise<{ count: number }>;
     upsert(input: PrismaConversationUpsertInput): Promise<PrismaConversationRow>;
   };
   conversationInboundEvent: {
@@ -241,6 +284,9 @@ interface PrismaConversationDelegates {
   outboxEvent: {
     create(input: { data: PrismaOutboxEventCreateInput }): Promise<PrismaOutboxEventRow>;
     findMany?(input: { orderBy: { occurredAt: "asc" } }): Promise<PrismaOutboxEventRow[]>;
+  };
+  routingAnalyticsRow: {
+    create(input: { data: PrismaRoutingAnalyticsRowCreateInput }): Promise<PrismaRoutingAnalyticsRow>;
   };
 }
 
@@ -296,6 +342,8 @@ interface PrismaConversationUpsertData {
   initials: string;
   language: string;
   name: string;
+  operatorId: string | null;
+  operatorName: string | null;
   phone: string;
   preview: string;
   previous: unknown;
@@ -420,6 +468,31 @@ interface PrismaConversationRealtimeEventCreateInput {
   traceId: string;
 }
 
+interface PrismaConversationUpdateManyInput {
+  data: PrismaConversationUpsertData;
+  where: {
+    id: string;
+    operatorId: string | null;
+    tenantId: string;
+  };
+}
+
+interface PrismaRoutingAnalyticsRowCreateInput {
+  channel: string;
+  conversationId: string;
+  eventKind: "assignment" | "transfer";
+  fromOperatorId: string | null;
+  id: string;
+  occurredAt: Date;
+  source: string;
+  tenantId: string;
+  toOperatorId: string;
+}
+
+interface PrismaRoutingAnalyticsRow extends PrismaRoutingAnalyticsRowCreateInput {
+  createdAt?: Date | string;
+}
+
 async function savePrismaConversation(transaction: PrismaConversationTransactionalClient, conversation: ConversationRecord): Promise<ConversationRecord> {
   const conversationData = toPrismaConversationUpsertData(conversation);
   await transaction.conversation.upsert({
@@ -427,18 +500,25 @@ async function savePrismaConversation(transaction: PrismaConversationTransaction
     update: conversationData,
     where: { id: conversation.id }
   });
+  await replacePrismaConversationMessages(transaction, conversation);
+
+  return clone(conversation);
+}
+
+async function replacePrismaConversationMessages(
+  transaction: PrismaConversationTransactionalClient,
+  conversation: ConversationRecord
+): Promise<void> {
   await transaction.conversationMessage.deleteMany({ where: { conversationId: conversation.id } });
   const firstCreatedAt = new Date();
   const messages = conversation.messages.map((message, index) => toPrismaConversationMessageCreateInput(
     conversation.id,
     message,
-    new Date(firstCreatedAt.getTime() + index)
+    messageCreatedAtOrFallback(message.createdAt, new Date(firstCreatedAt.getTime() + index))
   ));
   if (messages.length > 0) {
     await transaction.conversationMessage.createMany({ data: messages });
   }
-
-  return clone(conversation);
 }
 
 async function appendPrismaRealtimeEvent(transaction: PrismaConversationTransactionalClient, event: RealtimeEvent): Promise<RealtimeEvent> {
@@ -490,6 +570,10 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
     return rows.map(toConversationRecord);
   }
 
+  async listChannelCatalog(): Promise<Array<Record<string, unknown>>> {
+    return [];
+  }
+
   async findConversation(conversationId: string): Promise<ConversationRecord | undefined> {
     const row = await this.client.conversation.findUnique({
       include: conversationMessagesInclude(),
@@ -501,6 +585,38 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
 
   saveConversation(conversation: ConversationRecord): Promise<ConversationRecord> {
     return this.client.$transaction((transaction) => savePrismaConversation(transaction, conversation));
+  }
+
+  assignConversation(input: ConversationAssignmentRecordInput): Promise<ConversationAssignmentRecord> {
+    return this.client.$transaction(async (transaction) => {
+      const conversationData = toPrismaConversationUpsertData(input.conversation);
+      const updated = await transaction.conversation.updateMany({
+        data: conversationData,
+        where: {
+          id: input.conversation.id,
+          operatorId: input.analyticsRow.fromOperatorId,
+          tenantId: input.analyticsRow.tenantId
+        }
+      });
+      if (updated.count !== 1) {
+        throw new ConversationAssignmentConflictError(input.conversation.id);
+      }
+      await replacePrismaConversationMessages(transaction, input.conversation);
+      const conversation = clone(input.conversation);
+      const realtimeEvent = await appendPrismaRealtimeEvent(transaction, input.realtimeEvent);
+      await transaction.routingAnalyticsRow.create({
+        data: {
+          ...input.analyticsRow,
+          occurredAt: new Date(input.analyticsRow.occurredAt)
+        }
+      });
+
+      return {
+        analyticsRow: clone(input.analyticsRow),
+        conversation,
+        realtimeEvent
+      };
+    });
   }
 
   async findInboundEvent(channel: string, eventId: string): Promise<ConversationInboundEvent | undefined> {
@@ -660,6 +776,10 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
       return clone(store.read().conversations);
     },
 
+    listChannelCatalog(): Array<Record<string, unknown>> {
+      return clone(store.read().channelCatalog ?? []);
+    },
+
     listOutboundDescriptors(filter: ConversationOutboundDescriptorFilter = {}): ConversationOutboundDescriptor[] {
       return clone(
         [...(store.read().outboundDescriptors ?? [])]
@@ -736,6 +856,43 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
 
       if (!persisted) {
         throw new Error(`Conversation ${conversation.id} was not persisted.`);
+      }
+
+      return clone(persisted);
+    },
+
+    assignConversation(input: ConversationAssignmentRecordInput): ConversationAssignmentRecord {
+      let persisted: ConversationAssignmentRecord | null = null;
+      store.update((state) => {
+        const currentConversation = state.conversations.find((item) => item.id === input.conversation.id);
+        if (!currentConversation
+          || resolveNullableOperatorId(currentConversation.operatorId) !== input.analyticsRow.fromOperatorId
+          || currentConversation.tenantId !== input.analyticsRow.tenantId) {
+          throw new ConversationAssignmentConflictError(input.conversation.id);
+        }
+        const nextConversation = clone(input.conversation);
+        const nextRealtimeEvent = clone(input.realtimeEvent);
+        const nextAnalyticsRow = clone(input.analyticsRow);
+        persisted = {
+          analyticsRow: nextAnalyticsRow,
+          conversation: nextConversation,
+          realtimeEvent: nextRealtimeEvent
+        };
+
+        return {
+          ...state,
+          conversations: upsertConversationRows(state.conversations, nextConversation),
+          realtimeEvents: (state.realtimeEvents ?? []).some((event) => event.eventId === nextRealtimeEvent.eventId)
+            ? state.realtimeEvents
+            : [...(state.realtimeEvents ?? []), nextRealtimeEvent],
+          routingAnalyticsRows: (state.routingAnalyticsRows ?? []).some((row) => row.id === nextAnalyticsRow.id)
+            ? state.routingAnalyticsRows
+            : [...(state.routingAnalyticsRows ?? []), nextAnalyticsRow]
+        };
+      });
+
+      if (!persisted) {
+        throw new Error(`Assignment for conversation ${input.conversation.id} was not persisted.`);
       }
 
       return clone(persisted);
@@ -969,6 +1126,8 @@ function toConversationRecord(row: PrismaConversationRow): ConversationRecord {
     language: row.language,
     messages: (row.messages ?? []).map(toConversationMessage),
     name: row.name,
+    ...(row.operatorId ? { operatorId: row.operatorId } : {}),
+    ...(row.operatorName ? { operatorName: row.operatorName } : {}),
     phone: row.phone,
     preview: row.preview,
     previous: stringMatrixFromJson(row.previous),
@@ -979,7 +1138,8 @@ function toConversationRecord(row: PrismaConversationRow): ConversationRecord {
     tenantId: row.tenantId,
     time: row.time,
     topic: row.topic,
-    ...(row.unread === null ? {} : { unread: row.unread })
+    ...(row.unread === null ? {} : { unread: row.unread }),
+    updatedAt: toIso(row.updatedAt)
   };
 }
 
@@ -987,6 +1147,7 @@ function toConversationMessage(row: PrismaConversationMessageRow): ConversationM
   return {
     ...(attachmentsFromJson(row.attachments) ? { attachments: attachmentsFromJson(row.attachments) } : {}),
     ...(row.author ? { author: row.author } : {}),
+    createdAt: toIso(row.createdAt),
     id: row.id,
     ...(messageSideFromRow(row.side) ? { side: messageSideFromRow(row.side) } : {}),
     text: row.text,
@@ -1006,6 +1167,8 @@ function toPrismaConversationUpsertData(conversation: ConversationRecord): Prism
     initials: conversation.initials,
     language: conversation.language,
     name: conversation.name,
+    operatorId: conversation.operatorId ?? null,
+    operatorName: conversation.operatorName ?? null,
     phone: conversation.phone,
     preview: conversation.preview,
     previous: conversation.previous,
@@ -1013,7 +1176,7 @@ function toPrismaConversationUpsertData(conversation: ConversationRecord): Prism
     slaTone: conversation.slaTone,
     status: conversation.status,
     tags: [...conversation.tags],
-    tenantId: conversation.tenantId ?? "tenant-volga",
+    tenantId: requireConversationTenantId(conversation.tenantId),
     time: conversation.time,
     topic: conversation.topic,
     unread: conversation.unread ?? false
@@ -1032,6 +1195,15 @@ function toPrismaConversationMessageCreateInput(conversationId: string, message:
     time: message.time,
     type: message.type ?? null
   };
+}
+
+function messageCreatedAtOrFallback(value: string | undefined, fallback: Date): Date {
+  if (!value) {
+    return fallback;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp) : fallback;
 }
 
 function toConversationInboundEvent(row: PrismaConversationInboundEventRow): ConversationInboundEvent {
@@ -1159,6 +1331,14 @@ function makePersistenceId(scope: string, ...parts: string[]): string {
   return `${scope}_${parts.join("_")}`.replace(/[^a-z0-9._-]+/gi, "_");
 }
 
+function requireConversationTenantId(value: unknown): string {
+  const tenantId = String(value ?? "").trim();
+  if (!tenantId) {
+    throw new Error("conversation_tenant_id_required");
+  }
+  return tenantId;
+}
+
 function isUniqueConstraintError(error: unknown): boolean {
   return error !== null
     && typeof error === "object"
@@ -1176,13 +1356,19 @@ function toIso(value: Date | string): string {
 
 function seedConversationState(): ConversationState {
   return {
+    channelCatalog: clone(channelFixtures),
     conversations: clone(conversationFixtures),
     deliveryReceipts: [],
     inboundEvents: [],
     outboundDescriptors: [],
     outboxEvents: [],
-    realtimeEvents: []
+    realtimeEvents: [],
+    routingAnalyticsRows: []
   };
+}
+
+function resolveNullableOperatorId(value: string | undefined): string | null {
+  return value ?? null;
 }
 
 function clone<T>(value: T): T {

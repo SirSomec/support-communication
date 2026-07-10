@@ -7,6 +7,7 @@ import { HealthController } from "./health.controller.js";
 import { IdentityModule } from "./identity/identity.module.js";
 import { IncidentModule } from "./incidents/incident.module.js";
 import { IntegrationModule } from "./integrations/integration.module.js";
+import { NotificationModule } from "./notifications/notification.module.js";
 import { OperationsModule } from "./operations/operations.module.js";
 import { PlatformModule } from "./platform/platform.module.js";
 import { QualityModule } from "./quality/quality.module.js";
@@ -25,6 +26,7 @@ import { WorkspaceModule } from "./workspace/workspace.module.js";
     IdentityModule,
     IncidentModule,
     IntegrationModule,
+    NotificationModule,
     OperationsModule,
     PlatformModule,
     QualityModule,

@@ -5,49 +5,56 @@ const SERVICE = "auditService";
 export const auditService = {
   async fetchAuditEvents(filters = {}) {
     return apiRequest("/service-admin/audit-events", {
+      authMode: "service-admin",
       operation: "fetchAuditEvents",
       query: filters,
       service: SERVICE
     });
   },
 
-  async exportAuditEvents() {
-    return missingRouteEnvelope(
-      "exportAuditEvents",
-      "API Gateway does not expose an audit export route yet."
-    );
+  async exportAuditEvents(payload = {}) {
+    return apiRequest("/service-admin/audit-events/exports", {
+      authMode: "service-admin",
+      body: payload,
+      method: "POST",
+      operation: "exportAuditEvents",
+      service: SERVICE
+    });
   },
 
-  async redactAuditEvent() {
-    return missingRouteEnvelope(
-      "redactAuditEvent",
-      "API Gateway does not expose an audit event redaction route yet."
-    );
+  async redactAuditEvent(eventId, payload = {}) {
+    if (!hasRouteId(eventId)) {
+      return missingIdEnvelope("redactAuditEvent", "Audit event id is required.");
+    }
+
+    return apiRequest(`/service-admin/audit-events/${encodeURIComponent(eventId)}/redactions`, {
+      authMode: "service-admin",
+      body: payload,
+      method: "POST",
+      operation: "redactAuditEvent",
+      service: SERVICE
+    });
   },
 
   getReadiness() {
     return {
       id: SERVICE,
-      status: "partial",
+      status: "ready",
       operations: ["fetchAuditEvents", "exportAuditEvents", "redactAuditEvent"],
-      traceId: `trc_${SERVICE}_partial`,
+      traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
-      note: "fetchAuditEvents is connected to API Gateway; audit export and redaction routes are not exposed yet.",
-      backlog: ["audit_export_route", "audit_redaction_route"],
-      meta: {
-        source: "api-gateway",
-        routeGaps: [
-          "POST /service-admin/audit-events/exports",
-          "POST /service-admin/audit-events/:eventId/redactions"
-        ]
-      }
+      note: "Connected to API Gateway routes."
     };
   }
 };
 
-function missingRouteEnvelope(operation, message) {
+function hasRouteId(value) {
+  return String(value ?? "").trim().length > 0;
+}
+
+function missingIdEnvelope(operation, message) {
   return createApiErrorEnvelope({
-    code: "api_route_missing",
+    code: "missing_id",
     message,
     operation,
     service: SERVICE

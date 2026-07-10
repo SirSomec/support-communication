@@ -1,12 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { Activity, Search, ShieldCheck } from "lucide-react";
 import { SectionTitle, StatusBadge } from "../../ui.jsx";
-import { serviceAdminAuditEvents } from "../../data/serviceAdmin.js";
 import { formatAction, formatDateTime, formatLabel, formatResult, getStatusTone } from "./serviceAdminUtils.js";
 
 const severityOptions = ["all", "info", "warn", "critical"];
 
-export function ServiceAdminAuditStream({ events = serviceAdminAuditEvents }) {
+export function ServiceAdminAuditStream({ events = [] }) {
   const [query, setQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [selectedEventId, setSelectedEventId] = useState(events[0]?.id ?? "");

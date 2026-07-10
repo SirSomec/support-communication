@@ -166,6 +166,7 @@ export function getRescueRemainingSeconds(rescue, now) {
 export function createComposerAttachment(file, index, channel) {
   const extension = getFileExtension(file.name);
   const errors = [];
+  const id = `${file.name}-${file.lastModified}-${index}-${Date.now()}`;
 
   if (!allowedAttachmentExtensions.includes(extension)) {
     errors.push("Недоступный тип файла: PDF, PNG, JPG или WEBP");
@@ -177,10 +178,13 @@ export function createComposerAttachment(file, index, channel) {
 
   const isImage = imageAttachmentExtensions.includes(extension) && !errors.length;
 
-  return {
-    id: `${file.name}-${file.lastModified}-${index}-${Date.now()}`,
+  const attachment = {
+    id,
+    idempotencyKey: `attachment-upload:${channel ?? "unknown"}:${id}`,
+    mimeType: file.type || "application/octet-stream",
     name: file.name,
     type: extension ? extension.toUpperCase() : "FILE",
+    sizeBytes: file.size,
     size: formatFileSize(file.size),
     status: errors.length ? "error" : "uploading",
     progress: errors.length ? 100 : 64,
@@ -190,6 +194,11 @@ export function createComposerAttachment(file, index, channel) {
     retryable: false,
     error: errors.join(". ")
   };
+  Object.defineProperty(attachment, "file", {
+    enumerable: false,
+    value: file
+  });
+  return attachment;
 }
 
 export function releaseAttachmentPreviews(attachments) {

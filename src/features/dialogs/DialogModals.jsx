@@ -8,6 +8,8 @@ export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToa
   const [clientName, setClientName] = useState("");
   const [channel, setChannel] = useState("SDK");
   const [topic, setTopic] = useState(topicOptions[0] ?? "");
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("Здравствуйте! Пишем по вашему обращению, готовы помочь в этом диалоге.");
 
   const normalizedPhone = phone.replace(/\D/g, "");
@@ -21,21 +23,42 @@ export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToa
     }
   }, [topic, topicOptions]);
 
-  function handleCreate() {
+  async function handleCreate() {
     if (!canCreate) {
       onToast("Укажите телефон и стартовое сообщение для исходящего диалога.");
       return;
     }
 
-    onCreate({
-      phone,
-      clientName: existing?.name ?? clientName.trim(),
-      channel,
-      topic,
-      message: message.trim(),
-      device,
-      existing
-    });
+    setError("");
+    setIsSubmitting(true);
+    let shouldResetSubmitting = true;
+
+    try {
+      const result = await onCreate({
+        phone,
+        clientName: existing?.name ?? clientName.trim(),
+        channel,
+        topic,
+        message: message.trim(),
+        device,
+        existing
+      });
+
+      if (result?.ok === false) {
+        setError(result.message);
+        return;
+      }
+
+      shouldResetSubmitting = false;
+    } catch (err) {
+      const nextError = err instanceof Error ? err.message : "Failed to create outbound conversation.";
+      setError(nextError);
+      onToast(nextError);
+    } finally {
+      if (shouldResetSubmitting) {
+        setIsSubmitting(false);
+      }
+    }
   }
 
   return (
@@ -44,7 +67,7 @@ export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToa
       footer={
         <>
           <button onClick={onClose} type="button">Отмена</button>
-          <button className="primary-action" disabled={!canCreate} onClick={handleCreate} type="button">
+          <button className="primary-action" disabled={!canCreate || isSubmitting} onClick={handleCreate} type="button">
             <Send size={17} />
             Создать диалог
           </button>
@@ -84,6 +107,12 @@ export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToa
         <span>Стартовое сообщение</span>
         <textarea value={message} onChange={(event) => setMessage(event.target.value)} />
       </label>
+
+      {error ? (
+        <div className="outbound-error" role="alert">
+          {error}
+        </div>
+      ) : null}
 
       <div className="sdk-preview">
         <div>

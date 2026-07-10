@@ -30,7 +30,6 @@ describe("tenant provision contracts", () => {
     const provisionResponse = await fetch(`${baseUrl}/api/v1/tenants/provision`, {
       method: "POST",
       headers: {
-        ...demoServiceAdminHeaders("tenants.manage"),
         "content-type": "application/json"
       },
       body: JSON.stringify({
@@ -97,7 +96,6 @@ async function provisionTenant(baseUrl: string, payload: Record<string, unknown>
   const response = await fetch(`${baseUrl}/api/v1/tenants/provision`, {
     method: "POST",
     headers: {
-      ...demoServiceAdminHeaders("tenants.manage"),
       "content-type": "application/json"
     },
     body: JSON.stringify(payload)
@@ -106,7 +104,6 @@ async function provisionTenant(baseUrl: string, payload: Record<string, unknown>
 
   return { envelope, response };
 }
-
 async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: string }> {
   process.env.NODE_ENV = "test";
   process.env.API_VERSION = "v1";
@@ -138,17 +135,5 @@ async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: st
 
   return {
     baseUrl: `http://127.0.0.1:${address.port}`
-  };
-}
-
-function demoServiceAdminHeaders(requiredAction: string): Record<string, string> {
-  return {
-    "x-demo-service-admin-key": "dev-service-admin-key-0001",
-    "x-demo-service-admin-actor-id": "service-admin-contract",
-    "x-demo-service-admin-actor-name": "Service Admin Contract",
-    "x-demo-service-admin-mfa-verified": "true",
-    "x-demo-service-admin-session-expires-at": "2099-12-31T23:59:59.000Z",
-    "x-demo-service-admin-roles": "service_admin",
-    "x-demo-service-admin-permissions": `${requiredAction},*`
   };
 }

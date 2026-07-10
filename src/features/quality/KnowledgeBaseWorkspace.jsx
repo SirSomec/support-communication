@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   FileText,
@@ -10,6 +10,15 @@ import {
   UploadCloud,
   X
 } from "lucide-react";
+import {
+  addKnowledgeArticleAttachment,
+  archiveKnowledgeArticle,
+  deleteKnowledgeArticleAttachment,
+  publishKnowledgeArticle,
+  rejectKnowledgeArticle,
+  submitKnowledgeArticleDraft,
+  submitKnowledgeArticleForReview
+} from "../../app/knowledgeArticleActions.js";
 import { ChannelList, SegmentedControl, StatusBadge, ToolbarSearch } from "../../ui.jsx";
 import "./knowledge-base.css";
 
@@ -23,10 +32,27 @@ const visibilityOptions = [
   { value: "internal", label: "Только оператор" }
 ];
 const statusTone = {
+  approved: "ok",
+  archived: "warn",
+  draft: "info",
+  published: "ok",
+  review: "hold",
   "Опубликована": "ok",
   "На проверке": "hold",
   "Черновик": "info"
 };
+
+function isPublishedArticle(article) {
+  return article.status === "published" || article.status === "Опубликована";
+}
+
+function isReviewableArticle(article) {
+  return article.status === "draft" || article.status === "Р§РµСЂРЅРѕРІРёРє";
+}
+
+function isPublishableArticle(article) {
+  return article.status === "review" || article.status === "approved" || article.status === "РќР° РїСЂРѕРІРµСЂРєРµ";
+}
 
 function createArticleDraft(article) {
   return {
@@ -36,19 +62,6 @@ function createArticleDraft(article) {
     attachments: article.attachments ?? [],
     versions: article.versions ?? [],
     approvalHistory: article.approvalHistory ?? []
-  };
-}
-
-function createNextVersion(article) {
-  const nextIndex = article.versions.length + 1;
-
-  return {
-    id: `${article.id}-draft-${nextIndex}`,
-    label: `${article.version ?? "v1.0"} draft ${nextIndex}`,
-    status: "Черновик",
-    author: article.owner,
-    updated: "Только что",
-    changes: "Сохранены изменения из редактора статьи."
   };
 }
 
@@ -68,7 +81,7 @@ function getWidgetArticles(articles, query) {
   const normalizedQuery = query.trim().toLowerCase();
 
   return Object.values(articles).filter((article) => {
-    if (article.visibility !== "public" || article.status !== "Опубликована") {
+    if (article.visibility !== "public" || !isPublishedArticle(article)) {
       return false;
     }
 
@@ -80,7 +93,29 @@ function getWidgetArticles(articles, query) {
   });
 }
 
-export function KnowledgeBaseWorkspace({ articles, onToast }) {
+function resolveKnowledgeActor(operator) {
+  return String(operator?.id ?? operator?.email ?? operator?.name ?? "knowledge-editor").trim() || "knowledge-editor";
+}
+
+function formatFileSize(bytes = 0) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0 B";
+  }
+
+  if (size < 1024) {
+    return `${Math.round(size)} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
+  const attachmentInputRef = useRef(null);
   const [selectedArticleId, setSelectedArticleId] = useState(articles[0]?.id ?? "");
   const [articleDrafts, setArticleDrafts] = useState(() =>
     Object.fromEntries(articles.map((article) => [article.id, createArticleDraft(article)]))
@@ -89,13 +124,17 @@ export function KnowledgeBaseWorkspace({ articles, onToast }) {
     Object.fromEntries(articles.map((article) => [article.id, article.versions?.[0]?.id ?? "current"]))
   );
   const [previewMode, setPreviewMode] = useState("operator");
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [pendingAction, setPendingAction] = useState("");
   const [widgetQuery, setWidgetQuery] = useState("");
 
   const selectedArticle = articleDrafts[selectedArticleId] ?? Object.values(articleDrafts)[0];
   const selectedVersionId = selectedVersionByArticle[selectedArticle.id] ?? selectedArticle.versions[0]?.id;
   const selectedVersion = selectedArticle.versions.find((version) => version.id === selectedVersionId) ?? selectedArticle.versions[0];
-  const selectedArticleIsPublished = selectedArticle.visibility === "public" && selectedArticle.status === "Опубликована";
+  const selectedArticleIsPublished = selectedArticle.visibility === "public" && isPublishedArticle(selectedArticle);
   const widgetArticles = useMemo(() => getWidgetArticles(articleDrafts, widgetQuery), [articleDrafts, widgetQuery]);
+  const actor = resolveKnowledgeActor(operator);
+  const workflowBusy = Boolean(pendingAction);
 
   function updateSelectedArticle(updater) {
     setArticleDrafts((current) => ({
@@ -130,86 +169,126 @@ export function KnowledgeBaseWorkspace({ articles, onToast }) {
     }));
   }
 
-  function saveDraftVersion() {
-    const nextVersion = createNextVersion(selectedArticle);
+  function upsertSavedArticle(article) {
+    const savedArticle = createArticleDraft(article);
+    const nextVersionId = savedArticle.versions[0]?.id ?? "current";
 
-    updateSelectedArticle((article) => ({
-      ...article,
-      version: nextVersion.label,
-      versions: [nextVersion, ...article.versions],
-      approvalHistory: [
-        createApprovalEvent(article, "Сохранил версию", "Черновик версии доступен в истории.", "info"),
-        ...article.approvalHistory
-      ]
+    setArticleDrafts((current) => ({
+      ...current,
+      [savedArticle.id]: savedArticle
     }));
     setSelectedVersionByArticle((current) => ({
       ...current,
-      [selectedArticle.id]: nextVersion.id
+      [savedArticle.id]: nextVersionId
     }));
-    onToast(`${selectedArticle.title}: черновик сохранен.`);
+
+    return savedArticle;
   }
 
-  function submitForReview() {
-    updateSelectedArticle((article) => ({
-      ...article,
-      status: "На проверке",
+  async function runGovernanceAction(actionKey, requestAction, successMessage) {
+    if (workflowBusy) {
+      return;
+    }
+
+    const articleAtStart = selectedArticle;
+    setPendingAction(actionKey);
+    const result = await requestAction(articleAtStart, {
+      actor,
+      draftId: selectedVersionId
+    });
+    setPendingAction("");
+
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    const savedArticle = upsertSavedArticle(result.article);
+    onToast(successMessage(savedArticle));
+  }
+
+  async function deleteAttachment(attachment) {
+    if (workflowBusy) {
+      return;
+    }
+
+    const articleAtStart = selectedArticle;
+    setPendingAction(`attachment:delete:${attachment.id}`);
+    const result = await deleteKnowledgeArticleAttachment(articleAtStart, attachment, { actor });
+    setPendingAction("");
+
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    const savedArticle = upsertSavedArticle(result.article);
+    onToast(`${savedArticle.title}: вложение удалено в backend.`);
+  }
+
+  async function addAttachmentFromFile(file) {
+    if (!file || workflowBusy) {
+      return;
+    }
+
+    const articleAtStart = selectedArticle;
+    setPendingAction("attachment:add");
+    const result = await addKnowledgeArticleAttachment(
+      articleAtStart,
+      {
+        name: file.name,
+        size: formatFileSize(file.size),
+        sizeBytes: file.size,
+        status: "scan_pending",
+        scanState: "scan_pending",
+        type: file.type || file.name.split(".").at(-1)?.toUpperCase() || "FILE"
+      },
+      { actor }
+    );
+    setPendingAction("");
+
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    const savedArticle = upsertSavedArticle(result.article);
+    onToast(`${savedArticle.title}: вложение добавлено и ожидает проверки.`);
+  }
+
+  async function saveDraftVersion() {
+    if (savingDraft) {
+      return;
+    }
+
+    setSavingDraft(true);
+    const result = await submitKnowledgeArticleDraft(selectedArticle);
+    setSavingDraft(false);
+
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    const savedArticle = createArticleDraft({
+      ...selectedArticle,
+      ...result.article,
       approvalHistory: [
-        createApprovalEvent(article, "Отправил на проверку", "Статья ожидает решения старшего сотрудника.", "info"),
-        ...article.approvalHistory
+        createApprovalEvent(selectedArticle, "Сохранил версию", result.auditEvent?.reason ?? "Backend сохранил черновик статьи.", "info"),
+        ...(result.article.approvalHistory ?? selectedArticle.approvalHistory)
       ]
-    }));
-    onToast(`${selectedArticle.title}: отправлено на проверку.`);
-  }
+    });
+    const nextVersionId = savedArticle.versions[0]?.id ?? "current";
 
-  function approveArticle() {
-    updateSelectedArticle((article) => ({
-      ...article,
-      status: "Опубликована",
-      approvalHistory: [
-        createApprovalEvent(article, "Опубликовал", "Публичная версия обновлена для выбранных каналов.", "ok"),
-        ...article.approvalHistory
-      ]
+    setArticleDrafts((current) => ({
+      ...current,
+      [savedArticle.id]: savedArticle
     }));
-    onToast(`${selectedArticle.title}: опубликована.`);
-  }
-
-  function rejectArticle() {
-    updateSelectedArticle((article) => ({
-      ...article,
-      status: "Черновик",
-      approvalHistory: [
-        createApprovalEvent(article, "Вернул на доработку", "Нужны правки перед публикацией.", "warn"),
-        ...article.approvalHistory
-      ]
+    setSelectedVersionByArticle((current) => ({
+      ...current,
+      [savedArticle.id]: nextVersionId
     }));
-    onToast(`${selectedArticle.title}: возвращена на доработку.`);
-  }
-
-  function addAttachment() {
-    const nextAttachment = {
-      id: `${selectedArticle.id}-attachment-${selectedArticle.attachments.length + 1}`,
-      name: `Регламент: ${selectedArticle.category}.docx`,
-      type: "DOCX",
-      size: "180 КБ",
-      status: "ready"
-    };
-
-    updateSelectedArticle((article) => ({
-      ...article,
-      attachments: [...article.attachments, nextAttachment],
-      approvalHistory: [
-        createApprovalEvent(article, "Добавил вложение", nextAttachment.name, "info"),
-        ...article.approvalHistory
-      ]
-    }));
-    onToast(`${selectedArticle.title}: вложение добавлено.`);
-  }
-
-  function removeAttachment(attachmentId) {
-    updateSelectedArticle((article) => ({
-      ...article,
-      attachments: article.attachments.filter((attachment) => attachment.id !== attachmentId)
-    }));
+    onToast(`${savedArticle.title}: черновик сохранен в backend.`);
   }
 
   return (
@@ -240,7 +319,7 @@ export function KnowledgeBaseWorkspace({ articles, onToast }) {
           <div className="knowledge-form-grid">
             <label>
               <span>Статус</span>
-              <select value={selectedArticle.status} onChange={(event) => updateArticleDraft("status", event.target.value)}>
+              <select disabled title="Статус статьи меняется через workflow-кнопки ниже." value={selectedArticle.status} onChange={(event) => updateArticleDraft("status", event.target.value)}>
                 <option>Черновик</option>
                 <option>На проверке</option>
                 <option>Опубликована</option>
@@ -273,21 +352,25 @@ export function KnowledgeBaseWorkspace({ articles, onToast }) {
             ))}
           </div>
           <footer>
-            <button onClick={saveDraftVersion} type="button">
+            <button disabled={savingDraft || workflowBusy} onClick={() => void saveDraftVersion()} type="button">
               <Pencil size={16} />
-              Сохранить
+              {savingDraft ? "Сохранение..." : "Сохранить"}
             </button>
-            <button className="primary-action" onClick={submitForReview} type="button">
+            <button className="primary-action" disabled={workflowBusy || !isReviewableArticle(selectedArticle)} onClick={() => void runGovernanceAction("submit-review", submitKnowledgeArticleForReview, (article) => `${article.title}: статья отправлена на проверку.`)} title={isReviewableArticle(selectedArticle) ? "Отправить статью на проверку" : "Статья должна быть в черновике"} type="button">
               <CheckCircle2 size={16} />
               На проверку
             </button>
-            <button onClick={approveArticle} type="button">
+            <button disabled={workflowBusy || !isPublishableArticle(selectedArticle)} onClick={() => void runGovernanceAction("publish", publishKnowledgeArticle, (article) => `${article.title}: статья опубликована.`)} title={isPublishableArticle(selectedArticle) ? "Опубликовать статью" : "Сначала отправьте статью на проверку"} type="button">
               <ShieldCheck size={16} />
               Опубликовать
             </button>
-            <button onClick={rejectArticle} type="button">
+            <button disabled={workflowBusy || !isPublishableArticle(selectedArticle)} onClick={() => void runGovernanceAction("reject", rejectKnowledgeArticle, (article) => `${article.title}: статья возвращена на доработку.`)} title={isPublishableArticle(selectedArticle) ? "Вернуть статью на доработку" : "Возврат доступен только на проверке"} type="button">
               <RotateCcw size={16} />
               На доработку
+            </button>
+            <button disabled={workflowBusy || !isPublishedArticle(selectedArticle)} onClick={() => void runGovernanceAction("archive", archiveKnowledgeArticle, (article) => `${article.title}: статья перенесена в архив.`)} title={isPublishedArticle(selectedArticle) ? "Перенести статью в архив" : "Архив доступен только для опубликованной статьи"} type="button">
+              <X size={16} />
+              В архив
             </button>
           </footer>
         </div>
@@ -372,7 +455,17 @@ export function KnowledgeBaseWorkspace({ articles, onToast }) {
           <header>
             <Paperclip size={17} />
             <strong>Вложения</strong>
-            <button onClick={addAttachment} type="button"><UploadCloud size={15} /> Добавить</button>
+            <button disabled={workflowBusy} onClick={() => attachmentInputRef.current?.click()} title="Добавить вложение к статье" type="button"><UploadCloud size={15} /> Добавить</button>
+            <input
+              ref={attachmentInputRef}
+              className="knowledge-file-input"
+              onChange={(event) => {
+                const [file] = Array.from(event.target.files ?? []);
+                event.target.value = "";
+                void addAttachmentFromFile(file);
+              }}
+              type="file"
+            />
           </header>
           <div className="knowledge-attachment-list">
             {selectedArticle.attachments.map((attachment) => (
@@ -382,7 +475,7 @@ export function KnowledgeBaseWorkspace({ articles, onToast }) {
                   <strong>{attachment.name}</strong>
                   <span>{attachment.type} · {attachment.size}</span>
                 </div>
-                <button aria-label={`Удалить ${attachment.name}`} onClick={() => removeAttachment(attachment.id)} type="button">
+                <button aria-label={`Удалить ${attachment.name}`} disabled={workflowBusy} onClick={() => void deleteAttachment(attachment)} title="Удалить вложение" type="button">
                   <X size={15} />
                 </button>
               </article>

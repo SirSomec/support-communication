@@ -118,13 +118,15 @@ describe("tenant operator dialog and realtime contracts", () => {
       }
     });
     assert.equal(allowedQueryStream.status, 200);
-    assert.equal(String(allowedQueryStream.headers.get("content-type") ?? "").includes("text/event-stream"), true);
+    const allowedQueryStreamContentType = String(allowedQueryStream.headers.get("content-type") ?? "");
+    assert.equal(allowedQueryStreamContentType.includes("text/event-stream"), true, allowedQueryStreamContentType);
     allowedQueryStream.body?.cancel();
   });
 });
 
 async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: string; otherTenantConversationId: string }> {
   process.env.NODE_ENV = "test";
+  process.env.ALLOW_DEMO_SERVICE_ADMIN_HEADERS = "true";
   process.env.API_VERSION = "v1";
   process.env.DATABASE_URL = "https://example.invalid/database";
   process.env.REDIS_URL = "https://example.invalid/redis";

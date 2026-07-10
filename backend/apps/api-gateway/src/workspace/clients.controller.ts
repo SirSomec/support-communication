@@ -1,11 +1,11 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
-import { DemoServiceAdminGuard } from "../identity/demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { RequireServiceAdminAction } from "../identity/service-admin-auth.js";
 import { WorkspaceService } from "./workspace.service.js";
 
 @ApiTags("clients")
-@UseGuards(DemoServiceAdminGuard)
+@UseGuards(ServiceAdminSessionGuard)
 @Controller("clients")
 export class ClientsController {
   constructor(private readonly workspaceService: WorkspaceService) {}
@@ -13,8 +13,23 @@ export class ClientsController {
   @Get()
   @RequireServiceAdminAction("clients.read")
   @ApiOkResponse({ description: "Client profile list envelope with merge graph" })
-  fetchClientProfiles(@Query() filters: { maskSensitive?: string; page?: string; pageSize?: string }): Promise<unknown> {
+  fetchClientProfiles(@Query() filters: { maskSensitive?: string; page?: string; pageSize?: string; segmentId?: string }): Promise<unknown> {
     return this.workspaceService.fetchClientProfiles(filters);
+  }
+
+  @Get("segments")
+  @RequireServiceAdminAction("clients.read")
+  @ApiOkResponse({ description: "Client segment descriptor envelope" })
+  fetchClientSegments(): Promise<unknown> {
+    return this.workspaceService.fetchClientSegments();
+  }
+
+  @Post("exports")
+  @RequireServiceAdminAction("clients.read")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Client export job descriptor envelope" })
+  createClientExport(@Body() payload: { format?: string; reason?: string; segmentId?: string }): Promise<unknown> {
+    return this.workspaceService.createClientExport(payload);
   }
 
   @Post("merge")

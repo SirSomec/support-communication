@@ -1,5 +1,7 @@
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
-import type { ReportExportJob } from "./report.fixtures.js";
+import { isLocalRuntime } from "../runtime/local-runtime.js";
+import { bootstrapReportState } from "./seed.js";
+import type { ReportExportJob } from "./report.types.js";
 
 export interface ReportIdempotencyRecord {
   fingerprint: string;
@@ -10,6 +12,12 @@ export interface ReportIdempotencyRecord {
 export type ReportExportJobIdempotencyWriteResult =
   | { idempotencyKey: ReportIdempotencyRecord; job: ReportExportJob; status: "created" | "duplicate" }
   | { idempotencyKey: ReportIdempotencyRecord; status: "conflict" };
+
+export interface ClaimQueuedReportExportJobsInput {
+  limit?: number;
+  now?: Date;
+  queue?: string;
+}
 
 export interface MetricDefinitionRecord {
   createdAt: string;
@@ -163,6 +171,57 @@ export interface ExportRetryAuditEvent {
   reasonCode: "operator_requested";
 }
 
+export interface ReportWorkspaceCatalog {
+  metricDefinitionVersion: string;
+  reportBars: unknown[];
+  reportChartBlocks: unknown[];
+  reportColumnOptions: unknown[];
+  reportRows: unknown[];
+  rescueOutcomeSummary: unknown[];
+  rescueReportRows: unknown[];
+}
+
+export interface ConversationReportSourceRow {
+  channel: string;
+  createdAt: string;
+  id: string;
+  messages: Array<{
+    createdAt: string;
+    id: string;
+    side?: string;
+    text: string;
+    time: string;
+    type?: string;
+  }>;
+  slaTone: string;
+  status: string;
+  topic: string;
+  updatedAt: string;
+}
+
+export type RoutingActivityEventType = "assignment" | "transfer";
+
+export interface RoutingActivityReportSourceRow {
+  channel: string;
+  conversationId: string;
+  eventKind: RoutingActivityEventType;
+  fromOperatorId?: string | null;
+  id: string;
+  occurredAt: string;
+  source: string;
+  tenantId: string;
+  toOperatorId?: string | null;
+}
+
+export interface RoutingActivityReportSourceFilters {
+  channel?: string;
+  eventType?: RoutingActivityEventType;
+  from: Date;
+  operatorId?: string;
+  tenantId: string;
+  to: Date;
+}
+
 export interface ReportState {
   exportRetryAuditEvents: ExportRetryAuditEvent[];
   exportJobs: ReportExportJob[];
@@ -175,10 +234,12 @@ export interface ReportState {
   reportQueryExecutions: ReportQueryExecutionRecord[];
   savedReportTemplates: SavedReportTemplateRecord[];
   scheduledDigestDescriptors: ScheduledDigestDescriptorRecord[];
+  workspace: ReportWorkspaceCatalog;
 }
 
 interface ReportRepositoryOptions {
   filePath: string;
+  seed?: ReportState;
 }
 
 export interface PrismaReportRepositoryOptions {
@@ -188,6 +249,22 @@ export interface PrismaReportRepositoryOptions {
 type MaybePromise<T> = T | Promise<T>;
 
 interface PrismaReportDataClient {
+  conversation?: {
+    findMany(input: {
+      include: { messages: { orderBy: { createdAt: "asc" } } };
+      orderBy: { createdAt: "asc" };
+      where: {
+        createdAt: { gte: Date; lt: Date };
+        tenantId: string;
+      };
+    }): Promise<PrismaConversationReportRow[]>;
+  };
+  routingAnalyticsRow?: {
+    findMany(input: {
+      orderBy: { occurredAt: "asc" };
+      where: PrismaRoutingActivityReportWhereInput;
+    }): Promise<PrismaRoutingActivityReportRow[]>;
+  };
   metricDefinition: {
     findMany(input: { orderBy: { updatedAt: "desc" }; where?: PrismaMetricDefinitionWhereInput }): Promise<PrismaMetricDefinitionRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaMetricDefinitionRow | null>;
@@ -225,7 +302,7 @@ interface PrismaReportDataClient {
     }): Promise<PrismaReportIdempotencyKeyRow>;
   };
   reportExportJob: {
-    findMany(input: { orderBy: { createdAt: "desc" } }): Promise<PrismaReportExportJobRow[]>;
+    findMany(input: { orderBy: { createdAt: "asc" | "desc" }; take?: number; where?: PrismaReportExportJobWhereInput }): Promise<PrismaReportExportJobRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaReportExportJobRow | null>;
     upsert(input: {
       create: PrismaReportExportJobCreateInput;
@@ -242,6 +319,50 @@ interface PrismaReportDataClient {
       where: { id: string };
     }): Promise<PrismaSavedReportTemplateRow>;
   };
+  reportQueryExecution: {
+    findMany(input: { orderBy: { createdAt: "desc" } }): Promise<PrismaReportQueryExecutionRow[]>;
+    upsert(input: {
+      create: PrismaReportQueryExecutionCreateInput;
+      update: PrismaReportQueryExecutionUpdateInput;
+      where: { id: string };
+    }): Promise<PrismaReportQueryExecutionRow>;
+  };
+  reportFileDescriptor: {
+    deleteMany(input: { where: { jobId: string } }): Promise<{ count: number }>;
+    findMany(input: { orderBy: { createdAt: "desc" } }): Promise<PrismaReportFileDescriptorRow[]>;
+    findUnique(input: { where: { jobId: string } }): Promise<PrismaReportFileDescriptorRow | null>;
+    upsert(input: {
+      create: PrismaReportFileDescriptorCreateInput;
+      update: PrismaReportFileDescriptorUpdateInput;
+      where: { jobId: string };
+    }): Promise<PrismaReportFileDescriptorRow>;
+  };
+  reportNotificationDescriptor: {
+    findMany(input: { orderBy: { createdAt: "desc" } }): Promise<PrismaReportNotificationDescriptorRow[]>;
+    findUnique(input: { where: { idempotencyKey: string } }): Promise<PrismaReportNotificationDescriptorRow | null>;
+    upsert(input: {
+      create: PrismaReportNotificationDescriptorCreateInput;
+      update: PrismaReportNotificationDescriptorUpdateInput;
+      where: { idempotencyKey: string };
+    }): Promise<PrismaReportNotificationDescriptorRow>;
+  };
+  scheduledDigestDescriptor: {
+    findMany(input: { orderBy: { dueAt: "asc" }; where?: PrismaScheduledDigestDescriptorWhereInput }): Promise<PrismaScheduledDigestDescriptorRow[]>;
+    findUnique(input: { where: { id: string } }): Promise<PrismaScheduledDigestDescriptorRow | null>;
+    upsert(input: {
+      create: PrismaScheduledDigestDescriptorCreateInput;
+      update: PrismaScheduledDigestDescriptorUpdateInput;
+      where: { id: string };
+    }): Promise<PrismaScheduledDigestDescriptorRow>;
+  };
+  reportExportRetryAuditEvent: {
+    findMany(input: { orderBy: { at: "desc" } }): Promise<PrismaReportExportRetryAuditEventRow[]>;
+    upsert(input: {
+      create: PrismaReportExportRetryAuditEventCreateInput;
+      update: PrismaReportExportRetryAuditEventUpdateInput;
+      where: { auditId: string };
+    }): Promise<PrismaReportExportRetryAuditEventRow>;
+  };
 }
 
 export interface PrismaReportClient extends PrismaReportDataClient {
@@ -251,6 +372,44 @@ export interface PrismaReportClient extends PrismaReportDataClient {
 interface PrismaMetricDefinitionWhereInput {
   key?: string;
   tenantId?: string;
+}
+
+interface PrismaConversationReportRow {
+  channel: string;
+  createdAt: Date;
+  id: string;
+  messages: Array<{
+    createdAt: Date;
+    id: string;
+    side: string | null;
+    text: string;
+    time: string;
+    type: string | null;
+  }>;
+  slaTone: string;
+  status: string;
+  topic: string;
+  updatedAt: Date;
+}
+
+interface PrismaRoutingActivityReportWhereInput {
+  channel?: string;
+  eventKind: string | { in: string[] };
+  occurredAt: { gte: Date; lt: Date };
+  OR?: Array<{ fromOperatorId?: string; toOperatorId?: string }>;
+  tenantId: string;
+}
+
+interface PrismaRoutingActivityReportRow {
+  channel: string;
+  conversationId: string;
+  eventKind: string;
+  fromOperatorId: string | null;
+  id: string;
+  occurredAt: Date;
+  source: string;
+  tenantId: string;
+  toOperatorId: string | null;
 }
 
 interface PrismaMetricDefinitionRow {
@@ -339,6 +498,13 @@ interface PrismaReportExportJobRow {
   rows: number;
   status: string;
   statusKey: string;
+  tenantId: string;
+}
+
+interface PrismaReportExportJobWhereInput {
+  queue?: string;
+  statusKey?: string;
+  tenantId?: string;
 }
 
 interface PrismaReportExportJobCreateInput extends PrismaReportExportJobRow {}
@@ -368,6 +534,99 @@ interface PrismaSavedReportTemplateCreateInput extends PrismaSavedReportTemplate
 
 type PrismaSavedReportTemplateUpdateInput = Omit<PrismaSavedReportTemplateCreateInput, "createdAt" | "id">;
 
+interface PrismaReportQueryExecutionRow {
+  createdAt: Date;
+  failureCode: string | null;
+  failureMessage: string | null;
+  id: string;
+  metricKey: string;
+  parameters: Record<string, unknown> | null;
+  status: string;
+  updatedAt: Date;
+}
+
+interface PrismaReportQueryExecutionCreateInput extends PrismaReportQueryExecutionRow {}
+
+type PrismaReportQueryExecutionUpdateInput = Omit<PrismaReportQueryExecutionCreateInput, "createdAt" | "id">;
+
+interface PrismaReportFileDescriptorRow {
+  checksum: string;
+  contentType: string;
+  createdAt: Date;
+  fileName: string;
+  format: string;
+  id: string;
+  jobId: string;
+  metricDefinitionVersion: string;
+  objectKey: string;
+  sizeBytes: number;
+  tenantId: string;
+  updatedAt: Date;
+  writtenAt: Date;
+}
+
+interface PrismaReportFileDescriptorCreateInput extends PrismaReportFileDescriptorRow {}
+
+type PrismaReportFileDescriptorUpdateInput = Omit<PrismaReportFileDescriptorCreateInput, "createdAt" | "id">;
+
+interface PrismaReportNotificationDescriptorRow {
+  createdAt: Date;
+  eventType: string;
+  exportJobId: string;
+  id: string;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  status: string;
+  tenantId: string;
+  updatedAt: Date;
+}
+
+interface PrismaReportNotificationDescriptorCreateInput extends PrismaReportNotificationDescriptorRow {}
+
+type PrismaReportNotificationDescriptorUpdateInput = Omit<PrismaReportNotificationDescriptorCreateInput, "createdAt" | "id">;
+
+interface PrismaScheduledDigestDescriptorWhereInput {
+  dueAt?: { lte: Date };
+  status?: string;
+  tenantId?: string;
+}
+
+interface PrismaScheduledDigestDescriptorRow {
+  createdAt: Date;
+  dueAt: Date;
+  id: string;
+  periodKey: string;
+  reportType: string;
+  scheduleId: string;
+  status: string;
+  tenantId: string;
+  updatedAt: Date;
+}
+
+interface PrismaScheduledDigestDescriptorCreateInput extends PrismaScheduledDigestDescriptorRow {}
+
+type PrismaScheduledDigestDescriptorUpdateInput = Omit<PrismaScheduledDigestDescriptorCreateInput, "createdAt" | "id">;
+
+interface PrismaReportExportRetryAuditEventRow {
+  action: string;
+  at: Date;
+  auditId: string;
+  backendQueueId: string;
+  createdAt: Date;
+  format: string;
+  immutable: boolean;
+  jobId: string;
+  metricDefinitionVersion: string;
+  nextStatusKey: string;
+  previousStatusKey: string;
+  queue: string;
+  reasonCode: string;
+}
+
+interface PrismaReportExportRetryAuditEventCreateInput extends PrismaReportExportRetryAuditEventRow {}
+
+type PrismaReportExportRetryAuditEventUpdateInput = Omit<PrismaReportExportRetryAuditEventCreateInput, "auditId" | "createdAt">;
+
 let defaultRepository: ReportRepository | null = null;
 
 export class ReportRepository {
@@ -377,7 +636,15 @@ export class ReportRepository {
   ) {}
 
   static default(): ReportRepository {
-    return defaultRepository ?? ReportRepository.inMemory();
+    if (defaultRepository) {
+      return defaultRepository;
+    }
+
+    if (isLocalRuntime()) {
+      return ReportRepository.inMemory(bootstrapReportState());
+    }
+
+    return ReportRepository.inMemory();
   }
 
   static useDefault(repository: ReportRepository): void {
@@ -388,12 +655,13 @@ export class ReportRepository {
     defaultRepository = null;
   }
 
-  static inMemory(seed: ReportState = seedReportState()): ReportRepository {
-    return new ReportRepository(new InMemoryStore(seed));
+  static inMemory(seed?: ReportState): ReportRepository {
+    const resolved = seed ?? (isLocalRuntime() ? bootstrapReportState() : seedReportState());
+    return new ReportRepository(new InMemoryStore(resolved));
   }
 
-  static open({ filePath }: ReportRepositoryOptions): ReportRepository {
-    return new ReportRepository(new JsonFileStore({ filePath, seed: seedReportState() }));
+  static open({ filePath, seed = seedReportState() }: ReportRepositoryOptions): ReportRepository {
+    return new ReportRepository(new JsonFileStore({ filePath, seed }));
   }
 
   static prisma({ client }: PrismaReportRepositoryOptions): ReportRepository {
@@ -403,6 +671,83 @@ export class ReportRepository {
 
   readState(): ReportState {
     return normalizeState(this.store.read());
+  }
+
+  readWorkspaceCatalog(): ReportWorkspaceCatalog {
+    return clone(this.readState().workspace);
+  }
+
+  async listConversationReportSourceRowsAsync(input: {
+    from: Date;
+    tenantId: string;
+    to: Date;
+  }): Promise<ConversationReportSourceRow[]> {
+    if (!this.prismaClient?.conversation) {
+      return [];
+    }
+
+    const rows = await this.prismaClient.conversation.findMany({
+      include: { messages: { orderBy: { createdAt: "asc" } } },
+      orderBy: { createdAt: "asc" },
+      where: {
+        createdAt: { gte: input.from, lt: input.to },
+        tenantId: input.tenantId
+      }
+    });
+
+    return rows.map((row) => ({
+      channel: row.channel,
+      createdAt: row.createdAt.toISOString(),
+      id: row.id,
+      messages: row.messages.map((message) => ({
+        createdAt: message.createdAt.toISOString(),
+        id: message.id,
+        ...(message.side ? { side: message.side } : {}),
+        text: message.text,
+        time: message.time,
+        ...(message.type ? { type: message.type } : {})
+      })),
+      slaTone: row.slaTone,
+      status: row.status,
+      topic: row.topic,
+      updatedAt: row.updatedAt.toISOString()
+    }));
+  }
+
+  async listRoutingActivityReportSourceRowsAsync(input: RoutingActivityReportSourceFilters): Promise<RoutingActivityReportSourceRow[]> {
+    if (!this.prismaClient?.routingAnalyticsRow) {
+      return [];
+    }
+
+    const rows = await this.prismaClient.routingAnalyticsRow.findMany({
+      orderBy: { occurredAt: "asc" },
+      where: {
+        tenantId: input.tenantId,
+        occurredAt: { gte: input.from, lt: input.to },
+        eventKind: input.eventType ?? { in: ["assignment", "transfer"] },
+        ...(input.channel ? { channel: input.channel } : {}),
+        ...(input.operatorId ? {
+          OR: [
+            { fromOperatorId: input.operatorId },
+            { toOperatorId: input.operatorId }
+          ]
+        } : {})
+      }
+    });
+
+    return rows.flatMap((row) => row.eventKind === "assignment" || row.eventKind === "transfer"
+      ? [{
+          channel: row.channel,
+          conversationId: row.conversationId,
+          eventKind: row.eventKind,
+          fromOperatorId: row.fromOperatorId,
+          id: row.id,
+          occurredAt: row.occurredAt.toISOString(),
+          source: row.source,
+          tenantId: row.tenantId,
+          toOperatorId: row.toOperatorId
+        }]
+      : []);
   }
 
   saveState(state: ReportState): ReportState {
@@ -421,13 +766,69 @@ export class ReportRepository {
     return clone(this.readState().exportJobs);
   }
 
-  async listExportJobsAsync(): Promise<ReportExportJob[]> {
+  async listExportJobsAsync(filters: { tenantId?: string } = {}): Promise<ReportExportJob[]> {
     if (this.prismaClient) {
-      const rows = await this.prismaClient.reportExportJob.findMany({ orderBy: { createdAt: "desc" } });
+      const rows = await this.prismaClient.reportExportJob.findMany({
+        orderBy: { createdAt: "desc" },
+        ...(filters.tenantId ? { where: { tenantId: filters.tenantId } } : {})
+      });
       return rows.map(toReportExportJob);
     }
 
-    return this.listExportJobs();
+    return this.listExportJobs().filter((job) => !filters.tenantId || reportExportJobTenantId(job) === filters.tenantId);
+  }
+
+  async claimQueuedExportJobsAsync(input: ClaimQueuedReportExportJobsInput = {}): Promise<ReportExportJob[]> {
+    const limit = normalizeClaimLimit(input.limit);
+    const queue = normalizeExportQueue(input.queue);
+    const claimJob = (job: ReportExportJob): ReportExportJob => ({
+      ...job,
+      progress: Math.max(job.progress, 20),
+      queue,
+      status: "Running",
+      statusKey: "running"
+    });
+
+    if (this.prismaClient) {
+      const rows = await this.prismaClient.reportExportJob.findMany({
+        orderBy: { createdAt: "asc" },
+        take: limit,
+        where: {
+          queue,
+          statusKey: "queued"
+        }
+      });
+      const claimed: ReportExportJob[] = [];
+      for (const row of rows) {
+        claimed.push(await this.saveExportJobAsync(claimJob(toReportExportJob(row))));
+      }
+      return claimed;
+    }
+
+    const claimed: ReportExportJob[] = [];
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const claimableIds = current.exportJobs
+        .filter((job) => job.statusKey === "queued" && (job.queue ?? "report-export") === queue)
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        .slice(0, limit)
+        .map((job) => job.id);
+      const claimable = new Set(claimableIds);
+      const exportJobs = current.exportJobs.map((job) => {
+        if (!claimable.has(job.id)) {
+          return job;
+        }
+        const next = claimJob(job);
+        claimed.push(clone(next));
+        return next;
+      });
+      return {
+        ...current,
+        exportJobs
+      };
+    });
+
+    return clone(claimed);
   }
 
   listMetricDefinitions(filters: MetricDefinitionFilters = {}): MaybePromise<MetricDefinitionRecord[]> {
@@ -510,19 +911,71 @@ export class ReportRepository {
   }
 
   listReportQueryExecutions(): ReportQueryExecutionRecord[] {
+    if (this.prismaClient) {
+      throw new Error("prisma_report_query_executions_async_required");
+    }
+
     return clone(this.readState().reportQueryExecutions);
   }
 
+  async listReportQueryExecutionsAsync(): Promise<ReportQueryExecutionRecord[]> {
+    if (this.prismaClient) {
+      const rows = await this.prismaClient.reportQueryExecution.findMany({ orderBy: { createdAt: "desc" } });
+      return rows.map(toReportQueryExecutionRecord);
+    }
+
+    return this.listReportQueryExecutions();
+  }
+
   listReportFileDescriptors(): ReportFileDescriptorRecord[] {
+    if (this.prismaClient) {
+      throw new Error("prisma_report_file_descriptors_async_required");
+    }
+
     return clone(this.readState().reportFileDescriptors);
   }
 
+  async listReportFileDescriptorsAsync(): Promise<ReportFileDescriptorRecord[]> {
+    if (this.prismaClient) {
+      const rows = await this.prismaClient.reportFileDescriptor.findMany({ orderBy: { createdAt: "desc" } });
+      return rows.map(toReportFileDescriptorRecord);
+    }
+
+    return this.listReportFileDescriptors();
+  }
+
   listReportNotificationDescriptors(): ReportNotificationDescriptorRecord[] {
+    if (this.prismaClient) {
+      throw new Error("prisma_report_notification_descriptors_async_required");
+    }
+
     return clone(this.readState().reportNotificationDescriptors);
   }
 
+  async listReportNotificationDescriptorsAsync(): Promise<ReportNotificationDescriptorRecord[]> {
+    if (this.prismaClient) {
+      const rows = await this.prismaClient.reportNotificationDescriptor.findMany({ orderBy: { createdAt: "desc" } });
+      return rows.map(toReportNotificationDescriptorRecord);
+    }
+
+    return this.listReportNotificationDescriptors();
+  }
+
   findReportFileDescriptor(jobId: string): ReportFileDescriptorRecord | undefined {
+    if (this.prismaClient) {
+      throw new Error("prisma_report_file_descriptors_async_required");
+    }
+
     return clone(this.readState().reportFileDescriptors.find((descriptor) => descriptor.jobId === jobId));
+  }
+
+  async findReportFileDescriptorAsync(jobId: string): Promise<ReportFileDescriptorRecord | undefined> {
+    if (this.prismaClient) {
+      const row = await this.prismaClient.reportFileDescriptor.findUnique({ where: { jobId } });
+      return row ? toReportFileDescriptorRecord(row) : undefined;
+    }
+
+    return this.findReportFileDescriptor(jobId);
   }
 
   listSavedReportTemplates(filters: SavedReportTemplateFilters = {}): MaybePromise<SavedReportTemplateRecord[]> {
@@ -551,15 +1004,49 @@ export class ReportRepository {
   }
 
   listScheduledDigestDescriptors(filters: ScheduledDigestDescriptorFilters = {}): ScheduledDigestDescriptorRecord[] {
+    if (this.prismaClient) {
+      throw new Error("prisma_scheduled_digest_descriptors_async_required");
+    }
+
     return clone(this.readState().scheduledDigestDescriptors.filter((descriptor) => isScheduledDigestDescriptorInScope(descriptor, filters))
       .sort(compareScheduledDigestDescriptors));
   }
 
+  async listScheduledDigestDescriptorsAsync(filters: ScheduledDigestDescriptorFilters = {}): Promise<ScheduledDigestDescriptorRecord[]> {
+    if (this.prismaClient) {
+      const rows = await this.prismaClient.scheduledDigestDescriptor.findMany({
+        orderBy: { dueAt: "asc" },
+        ...(hasScheduledDigestDescriptorWhere(filters) ? { where: scheduledDigestDescriptorWhere(filters) } : {})
+      });
+      return rows.map(toScheduledDigestDescriptorRecord);
+    }
+
+    return this.listScheduledDigestDescriptors(filters);
+  }
+
   findScheduledDigestDescriptor(descriptorId: string, filters: ScheduledDigestDescriptorFilters = {}): ScheduledDigestDescriptorRecord | undefined {
+    if (this.prismaClient) {
+      throw new Error("prisma_scheduled_digest_descriptors_async_required");
+    }
+
     return clone(this.readState().scheduledDigestDescriptors.find((descriptor) => descriptor.id === descriptorId && isScheduledDigestDescriptorInScope(descriptor, filters)));
   }
 
+  async findScheduledDigestDescriptorAsync(descriptorId: string, filters: ScheduledDigestDescriptorFilters = {}): Promise<ScheduledDigestDescriptorRecord | undefined> {
+    if (this.prismaClient) {
+      const row = await this.prismaClient.scheduledDigestDescriptor.findUnique({ where: { id: descriptorId } });
+      const descriptor = row ? toScheduledDigestDescriptorRecord(row) : undefined;
+      return descriptor && isScheduledDigestDescriptorInScope(descriptor, filters) ? descriptor : undefined;
+    }
+
+    return this.findScheduledDigestDescriptor(descriptorId, filters);
+  }
+
   deleteReportFileDescriptor(jobId: string): void {
+    if (this.prismaClient) {
+      throw new Error("prisma_report_file_descriptors_async_required");
+    }
+
     this.store.update((state) => {
       const current = normalizeState(state);
 
@@ -568,6 +1055,15 @@ export class ReportRepository {
         reportFileDescriptors: current.reportFileDescriptors.filter((descriptor) => descriptor.jobId !== jobId)
       };
     });
+  }
+
+  async deleteReportFileDescriptorAsync(jobId: string): Promise<void> {
+    if (this.prismaClient) {
+      await this.prismaClient.reportFileDescriptor.deleteMany({ where: { jobId } });
+      return;
+    }
+
+    this.deleteReportFileDescriptor(jobId);
   }
 
   findMetricTenantOverride(overrideId: string, filters: MetricTenantOverrideFilters = {}): MaybePromise<MetricTenantOverrideRecord | undefined> {
@@ -696,23 +1192,29 @@ export class ReportRepository {
   async saveRetriedExportJobAsync(job: ReportExportJob, auditEvent: ExportRetryAuditEvent): Promise<{ auditEvent: ExportRetryAuditEvent; job: ReportExportJob }> {
     if (this.prismaClient) {
       const persistedJob = await this.saveExportJobAsync(job);
-      const persistedAuditEvent = clone(auditEvent);
-      this.store.update((state) => {
-        const current = normalizeState(state);
-
-        return {
-          ...current,
-          exportRetryAuditEvents: [...current.exportRetryAuditEvents, persistedAuditEvent]
-        };
+      const create = toPrismaReportExportRetryAuditEventCreateInput(auditEvent);
+      const persistedAuditEvent = await this.prismaClient.reportExportRetryAuditEvent.upsert({
+        create,
+        update: toPrismaReportExportRetryAuditEventUpdateInput(create),
+        where: { auditId: create.auditId }
       });
 
       return {
-        auditEvent: clone(persistedAuditEvent),
+        auditEvent: toExportRetryAuditEvent(persistedAuditEvent),
         job: persistedJob
       };
     }
 
     return this.saveRetriedExportJob(job, auditEvent);
+  }
+
+  async listExportRetryAuditEventsAsync(): Promise<ExportRetryAuditEvent[]> {
+    if (this.prismaClient) {
+      const rows = await this.prismaClient.reportExportRetryAuditEvent.findMany({ orderBy: { at: "desc" } });
+      return rows.map(toExportRetryAuditEvent);
+    }
+
+    return clone(this.readState().exportRetryAuditEvents);
   }
 
   findIdempotencyKey(key: string): MaybePromise<ReportIdempotencyRecord | undefined> {
@@ -829,6 +1331,10 @@ export class ReportRepository {
 
   saveReportQueryExecution(execution: ReportQueryExecutionRecord): ReportQueryExecutionRecord {
     const persisted = normalizeReportQueryExecution(execution);
+    if (this.prismaClient) {
+      throw new Error("prisma_report_query_executions_async_required");
+    }
+
     this.store.update((state) => {
       const current = normalizeState(state);
       const exists = current.reportQueryExecutions.some((item) => item.id === persisted.id);
@@ -844,8 +1350,27 @@ export class ReportRepository {
     return clone(persisted);
   }
 
+  async saveReportQueryExecutionAsync(execution: ReportQueryExecutionRecord): Promise<ReportQueryExecutionRecord> {
+    const persisted = normalizeReportQueryExecution(execution);
+    if (this.prismaClient) {
+      const create = toPrismaReportQueryExecutionCreateInput(persisted);
+      const row = await this.prismaClient.reportQueryExecution.upsert({
+        create,
+        update: toPrismaReportQueryExecutionUpdateInput(create),
+        where: { id: create.id }
+      });
+      return toReportQueryExecutionRecord(row);
+    }
+
+    return this.saveReportQueryExecution(persisted);
+  }
+
   saveReportFileDescriptor(descriptor: ReportFileDescriptorRecord): ReportFileDescriptorRecord {
     const persisted = normalizeReportFileDescriptor(descriptor);
+    if (this.prismaClient) {
+      throw new Error("prisma_report_file_descriptors_async_required");
+    }
+
     this.store.update((state) => {
       const current = normalizeState(state);
       const exists = current.reportFileDescriptors.some((item) => item.jobId === persisted.jobId);
@@ -859,6 +1384,21 @@ export class ReportRepository {
     });
 
     return clone(persisted);
+  }
+
+  async saveReportFileDescriptorAsync(descriptor: ReportFileDescriptorRecord): Promise<ReportFileDescriptorRecord> {
+    const persisted = normalizeReportFileDescriptor(descriptor);
+    if (this.prismaClient) {
+      const create = toPrismaReportFileDescriptorCreateInput(persisted);
+      const row = await this.prismaClient.reportFileDescriptor.upsert({
+        create,
+        update: toPrismaReportFileDescriptorUpdateInput(create),
+        where: { jobId: create.jobId }
+      });
+      return toReportFileDescriptorRecord(row);
+    }
+
+    return this.saveReportFileDescriptor(persisted);
   }
 
   saveSavedReportTemplate(template: SavedReportTemplateRecord): MaybePromise<SavedReportTemplateRecord> {
@@ -889,6 +1429,10 @@ export class ReportRepository {
 
   saveReportNotificationDescriptor(descriptor: ReportNotificationDescriptorRecord): ReportNotificationDescriptorRecord {
     const persisted = normalizeReportNotificationDescriptor(descriptor);
+    if (this.prismaClient) {
+      throw new Error("prisma_report_notification_descriptors_async_required");
+    }
+
     const currentState = this.readState();
     const existing = currentState.reportNotificationDescriptors.find((item) => item.idempotencyKey === persisted.idempotencyKey);
     if (existing) {
@@ -907,8 +1451,32 @@ export class ReportRepository {
     return clone(persisted);
   }
 
+  async saveReportNotificationDescriptorAsync(descriptor: ReportNotificationDescriptorRecord): Promise<ReportNotificationDescriptorRecord> {
+    const persisted = normalizeReportNotificationDescriptor(descriptor);
+    if (this.prismaClient) {
+      const existing = await this.prismaClient.reportNotificationDescriptor.findUnique({ where: { idempotencyKey: persisted.idempotencyKey } });
+      if (existing) {
+        return toReportNotificationDescriptorRecord(existing);
+      }
+
+      const create = toPrismaReportNotificationDescriptorCreateInput(persisted);
+      const row = await this.prismaClient.reportNotificationDescriptor.upsert({
+        create,
+        update: toPrismaReportNotificationDescriptorUpdateInput(create),
+        where: { idempotencyKey: create.idempotencyKey }
+      });
+      return toReportNotificationDescriptorRecord(row);
+    }
+
+    return this.saveReportNotificationDescriptor(persisted);
+  }
+
   saveScheduledDigestDescriptor(descriptor: ScheduledDigestDescriptorRecord): ScheduledDigestDescriptorRecord {
     const persisted = normalizeScheduledDigestDescriptor(descriptor);
+    if (this.prismaClient) {
+      throw new Error("prisma_scheduled_digest_descriptors_async_required");
+    }
+
     const currentState = this.readState();
     const existingById = currentState.scheduledDigestDescriptors.find((item) => item.id === persisted.id);
     if (existingById && !isDuplicateScheduledDigestPeriodReplay(existingById, persisted)) {
@@ -939,6 +1507,43 @@ export class ReportRepository {
     });
 
     return clone(persisted);
+  }
+
+  async saveScheduledDigestDescriptorAsync(descriptor: ScheduledDigestDescriptorRecord): Promise<ScheduledDigestDescriptorRecord> {
+    const persisted = normalizeScheduledDigestDescriptor(descriptor);
+    if (this.prismaClient) {
+      const existingByIdRow = await this.prismaClient.scheduledDigestDescriptor.findUnique({ where: { id: persisted.id } });
+      const existingById = existingByIdRow ? toScheduledDigestDescriptorRecord(existingByIdRow) : undefined;
+      if (existingById && !isDuplicateScheduledDigestPeriodReplay(existingById, persisted)) {
+        throw new Error("scheduled_digest_period_conflict");
+      }
+
+      if (!existingById) {
+        const periodRows = await this.prismaClient.scheduledDigestDescriptor.findMany({
+          orderBy: { dueAt: "asc" },
+          where: { tenantId: persisted.tenantId }
+        });
+        const existingPeriodDescriptor = periodRows.map(toScheduledDigestDescriptorRecord)
+          .find((item) => isSameScheduledDigestPeriod(item, persisted));
+        if (existingPeriodDescriptor) {
+          if (!isDuplicateScheduledDigestPeriodReplay(existingPeriodDescriptor, persisted)) {
+            throw new Error("scheduled_digest_period_conflict");
+          }
+
+          return clone(existingPeriodDescriptor);
+        }
+      }
+
+      const create = toPrismaScheduledDigestDescriptorCreateInput(persisted);
+      const row = await this.prismaClient.scheduledDigestDescriptor.upsert({
+        create,
+        update: toPrismaScheduledDigestDescriptorUpdateInput(create),
+        where: { id: create.id }
+      });
+      return toScheduledDigestDescriptorRecord(row);
+    }
+
+    return this.saveScheduledDigestDescriptor(persisted);
   }
 
   private async savePrismaExportJobWithIdempotency(job: ReportExportJob, idempotencyKey: ReportIdempotencyRecord): Promise<ReportExportJobIdempotencyWriteResult> {
@@ -993,7 +1598,20 @@ function seedReportState(): ReportState {
     reportNotificationDescriptors: [],
     reportQueryExecutions: [],
     savedReportTemplates: [],
-    scheduledDigestDescriptors: []
+    scheduledDigestDescriptors: [],
+    workspace: emptyReportWorkspace()
+  };
+}
+
+function emptyReportWorkspace(): ReportWorkspaceCatalog {
+  return {
+    metricDefinitionVersion: "metrics/v1",
+    reportBars: [],
+    reportChartBlocks: [],
+    reportColumnOptions: [],
+    reportRows: [],
+    rescueOutcomeSummary: [],
+    rescueReportRows: []
   };
 }
 
@@ -1045,6 +1663,26 @@ function assertCompletePrismaReportClient(client: PrismaReportClient): void {
     throw new Error("prisma_report_export_job_delegate_required");
   }
 
+  if (!client.reportQueryExecution) {
+    throw new Error("prisma_report_query_execution_delegate_required");
+  }
+
+  if (!client.reportFileDescriptor) {
+    throw new Error("prisma_report_file_descriptor_delegate_required");
+  }
+
+  if (!client.reportNotificationDescriptor) {
+    throw new Error("prisma_report_notification_descriptor_delegate_required");
+  }
+
+  if (!client.scheduledDigestDescriptor) {
+    throw new Error("prisma_scheduled_digest_delegate_required");
+  }
+
+  if (!client.reportExportRetryAuditEvent) {
+    throw new Error("prisma_report_export_retry_audit_delegate_required");
+  }
+
   if (!client.$transaction) {
     throw new Error("prisma_report_transaction_required");
   }
@@ -1062,7 +1700,8 @@ function normalizeState(state: Partial<ReportState>): ReportState {
     reportNotificationDescriptors: (state.reportNotificationDescriptors ?? []).map(normalizeReportNotificationDescriptor),
     reportQueryExecutions: (state.reportQueryExecutions ?? []).map(normalizeReportQueryExecution),
     savedReportTemplates: (state.savedReportTemplates ?? []).map(normalizeSavedReportTemplate),
-    scheduledDigestDescriptors: (state.scheduledDigestDescriptors ?? []).map(normalizeScheduledDigestDescriptor)
+    scheduledDigestDescriptors: (state.scheduledDigestDescriptors ?? []).map(normalizeScheduledDigestDescriptor),
+    workspace: state.workspace ?? emptyReportWorkspace()
   };
 }
 
@@ -1535,7 +2174,8 @@ function toPrismaReportExportJobCreateInput(job: ReportExportJob): PrismaReportE
     requestedBy: job.requestedBy,
     rows: job.rows,
     status: job.status,
-    statusKey: job.statusKey
+    statusKey: job.statusKey,
+    tenantId: job.tenantId ?? reportExportJobTenantId(job)
   };
 }
 
@@ -1558,7 +2198,8 @@ function toPrismaReportExportJobUpdateInput(create: PrismaReportExportJobCreateI
     requestedBy: create.requestedBy,
     rows: create.rows,
     status: create.status,
-    statusKey: create.statusKey
+    statusKey: create.statusKey,
+    tenantId: create.tenantId
   };
 }
 
@@ -1583,8 +2224,14 @@ function toReportExportJob(row: PrismaReportExportJobRow): ReportExportJob {
     requestedBy: row.requestedBy,
     rows: row.rows,
     status: row.status,
-    statusKey: parseReportExportStatusKey(row.statusKey)
+    statusKey: parseReportExportStatusKey(row.statusKey),
+    tenantId: row.tenantId
   };
+}
+
+function reportExportJobTenantId(job: ReportExportJob): string {
+  const filterTenantId = typeof job.filters?.tenantId === "string" ? job.filters.tenantId.trim() : "";
+  return job.tenantId?.trim() || filterTenantId || "tenant-volga";
 }
 
 function parseReportExportFormat(format: string): ReportExportJob["format"] {
@@ -1654,6 +2301,248 @@ function toSavedReportTemplateRecord(row: PrismaSavedReportTemplateRow): SavedRe
   };
 }
 
+function toPrismaReportQueryExecutionCreateInput(execution: ReportQueryExecutionRecord): PrismaReportQueryExecutionCreateInput {
+  const now = new Date();
+  return {
+    createdAt: now,
+    failureCode: execution.failureEnvelope?.code ?? null,
+    failureMessage: execution.failureEnvelope?.message ?? null,
+    id: execution.id,
+    metricKey: execution.metricKey,
+    parameters: execution.parameters ? clone(execution.parameters) : null,
+    status: execution.status,
+    updatedAt: now
+  };
+}
+
+function toPrismaReportQueryExecutionUpdateInput(create: PrismaReportQueryExecutionCreateInput): PrismaReportQueryExecutionUpdateInput {
+  return {
+    failureCode: create.failureCode,
+    failureMessage: create.failureMessage,
+    metricKey: create.metricKey,
+    parameters: create.parameters,
+    status: create.status,
+    updatedAt: create.updatedAt
+  };
+}
+
+function toReportQueryExecutionRecord(row: PrismaReportQueryExecutionRow): ReportQueryExecutionRecord {
+  return normalizeReportQueryExecution({
+    ...(row.failureCode && row.failureMessage ? { failureEnvelope: { code: row.failureCode, message: row.failureMessage } } : {}),
+    id: row.id,
+    metricKey: row.metricKey,
+    ...(row.parameters ? { parameters: clone(row.parameters) } : {}),
+    status: parseReportQueryExecutionStatus(row.status)
+  });
+}
+
+function toPrismaReportFileDescriptorCreateInput(descriptor: ReportFileDescriptorRecord): PrismaReportFileDescriptorCreateInput {
+  const createdAt = new Date(requireIsoDate(descriptor.createdAt, "report_file_descriptor_created_at_invalid"));
+  return {
+    checksum: descriptor.checksum,
+    contentType: descriptor.contentType,
+    createdAt,
+    fileName: descriptor.fileName,
+    format: descriptor.format,
+    id: descriptor.id,
+    jobId: descriptor.jobId,
+    metricDefinitionVersion: descriptor.metricDefinitionVersion,
+    objectKey: descriptor.objectKey,
+    sizeBytes: descriptor.sizeBytes,
+    tenantId: descriptor.tenantId,
+    updatedAt: createdAt,
+    writtenAt: new Date(requireIsoDate(descriptor.writtenAt, "report_file_descriptor_written_at_invalid"))
+  };
+}
+
+function toPrismaReportFileDescriptorUpdateInput(create: PrismaReportFileDescriptorCreateInput): PrismaReportFileDescriptorUpdateInput {
+  return {
+    checksum: create.checksum,
+    contentType: create.contentType,
+    fileName: create.fileName,
+    format: create.format,
+    jobId: create.jobId,
+    metricDefinitionVersion: create.metricDefinitionVersion,
+    objectKey: create.objectKey,
+    sizeBytes: create.sizeBytes,
+    tenantId: create.tenantId,
+    updatedAt: create.updatedAt,
+    writtenAt: create.writtenAt
+  };
+}
+
+function toReportFileDescriptorRecord(row: PrismaReportFileDescriptorRow): ReportFileDescriptorRecord {
+  return normalizeReportFileDescriptor({
+    checksum: row.checksum,
+    contentType: row.contentType,
+    createdAt: row.createdAt.toISOString(),
+    fileName: row.fileName,
+    format: row.format,
+    id: row.id,
+    jobId: row.jobId,
+    metricDefinitionVersion: row.metricDefinitionVersion,
+    objectKey: row.objectKey,
+    sizeBytes: row.sizeBytes,
+    tenantId: row.tenantId,
+    writtenAt: row.writtenAt.toISOString()
+  });
+}
+
+function toPrismaReportNotificationDescriptorCreateInput(descriptor: ReportNotificationDescriptorRecord): PrismaReportNotificationDescriptorCreateInput {
+  const createdAt = new Date(descriptor.createdAt);
+  return {
+    createdAt,
+    eventType: descriptor.eventType,
+    exportJobId: descriptor.exportJobId,
+    id: descriptor.id,
+    idempotencyKey: descriptor.idempotencyKey,
+    payload: clone(descriptor.payload),
+    status: descriptor.status,
+    tenantId: descriptor.tenantId,
+    updatedAt: createdAt
+  };
+}
+
+function toPrismaReportNotificationDescriptorUpdateInput(create: PrismaReportNotificationDescriptorCreateInput): PrismaReportNotificationDescriptorUpdateInput {
+  return {
+    eventType: create.eventType,
+    exportJobId: create.exportJobId,
+    idempotencyKey: create.idempotencyKey,
+    payload: create.payload,
+    status: create.status,
+    tenantId: create.tenantId,
+    updatedAt: create.updatedAt
+  };
+}
+
+function toReportNotificationDescriptorRecord(row: PrismaReportNotificationDescriptorRow): ReportNotificationDescriptorRecord {
+  return normalizeReportNotificationDescriptor({
+    createdAt: row.createdAt.toISOString(),
+    eventType: parseReportNotificationEventType(row.eventType),
+    exportJobId: row.exportJobId,
+    id: row.id,
+    idempotencyKey: row.idempotencyKey,
+    payload: clone(row.payload),
+    status: parseReportNotificationStatus(row.status),
+    tenantId: row.tenantId
+  });
+}
+
+function hasScheduledDigestDescriptorWhere(filters: ScheduledDigestDescriptorFilters): boolean {
+  return Boolean(filters.dueBefore || filters.status || filters.tenantId);
+}
+
+function scheduledDigestDescriptorWhere(filters: ScheduledDigestDescriptorFilters): PrismaScheduledDigestDescriptorWhereInput {
+  return {
+    ...(filters.dueBefore ? { dueAt: { lte: new Date(requireIsoDate(filters.dueBefore, "scheduled_digest_due_before_invalid")) } } : {}),
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.tenantId ? { tenantId: filters.tenantId } : {})
+  };
+}
+
+function toPrismaScheduledDigestDescriptorCreateInput(descriptor: ScheduledDigestDescriptorRecord): PrismaScheduledDigestDescriptorCreateInput {
+  return {
+    createdAt: new Date(descriptor.createdAt),
+    dueAt: new Date(descriptor.dueAt),
+    id: descriptor.id,
+    periodKey: descriptor.periodKey,
+    reportType: descriptor.reportType,
+    scheduleId: descriptor.scheduleId,
+    status: descriptor.status,
+    tenantId: descriptor.tenantId,
+    updatedAt: new Date(descriptor.updatedAt)
+  };
+}
+
+function toPrismaScheduledDigestDescriptorUpdateInput(create: PrismaScheduledDigestDescriptorCreateInput): PrismaScheduledDigestDescriptorUpdateInput {
+  return {
+    dueAt: create.dueAt,
+    periodKey: create.periodKey,
+    reportType: create.reportType,
+    scheduleId: create.scheduleId,
+    status: create.status,
+    tenantId: create.tenantId,
+    updatedAt: create.updatedAt
+  };
+}
+
+function toScheduledDigestDescriptorRecord(row: PrismaScheduledDigestDescriptorRow): ScheduledDigestDescriptorRecord {
+  return normalizeScheduledDigestDescriptor({
+    createdAt: row.createdAt.toISOString(),
+    dueAt: row.dueAt.toISOString(),
+    id: row.id,
+    periodKey: row.periodKey,
+    reportType: row.reportType,
+    scheduleId: row.scheduleId,
+    status: parseScheduledDigestStatus(row.status),
+    tenantId: row.tenantId,
+    updatedAt: row.updatedAt.toISOString()
+  });
+}
+
+function toPrismaReportExportRetryAuditEventCreateInput(auditEvent: ExportRetryAuditEvent): PrismaReportExportRetryAuditEventCreateInput {
+  return {
+    action: auditEvent.action,
+    at: new Date(requireIsoDate(auditEvent.at, "report_export_retry_audit_at_invalid")),
+    auditId: auditEvent.auditId,
+    backendQueueId: auditEvent.backendQueueId,
+    createdAt: new Date(requireIsoDate(auditEvent.at, "report_export_retry_audit_at_invalid")),
+    format: auditEvent.format,
+    immutable: auditEvent.immutable,
+    jobId: auditEvent.jobId,
+    metricDefinitionVersion: auditEvent.metricDefinitionVersion,
+    nextStatusKey: auditEvent.nextStatusKey,
+    previousStatusKey: auditEvent.previousStatusKey,
+    queue: auditEvent.queue,
+    reasonCode: auditEvent.reasonCode
+  };
+}
+
+function toPrismaReportExportRetryAuditEventUpdateInput(create: PrismaReportExportRetryAuditEventCreateInput): PrismaReportExportRetryAuditEventUpdateInput {
+  return {
+    action: create.action,
+    at: create.at,
+    backendQueueId: create.backendQueueId,
+    format: create.format,
+    immutable: create.immutable,
+    jobId: create.jobId,
+    metricDefinitionVersion: create.metricDefinitionVersion,
+    nextStatusKey: create.nextStatusKey,
+    previousStatusKey: create.previousStatusKey,
+    queue: create.queue,
+    reasonCode: create.reasonCode
+  };
+}
+
+function toExportRetryAuditEvent(row: PrismaReportExportRetryAuditEventRow): ExportRetryAuditEvent {
+  if (row.action !== "report.export.retry") {
+    throw new Error(`Unsupported report export retry audit action: ${row.action}`);
+  }
+
+  if (!row.immutable) {
+    throw new Error("report_export_retry_audit_mutable");
+  }
+
+  if (row.reasonCode !== "operator_requested") {
+    throw new Error(`Unsupported report export retry reason: ${row.reasonCode}`);
+  }
+
+  return {
+    action: "report.export.retry",
+    at: row.at.toISOString(),
+    auditId: row.auditId,
+    backendQueueId: row.backendQueueId,
+    format: row.format,
+    immutable: true,
+    jobId: row.jobId,
+    metricDefinitionVersion: row.metricDefinitionVersion,
+    nextStatusKey: row.nextStatusKey,
+    previousStatusKey: row.previousStatusKey,
+    queue: row.queue,
+    reasonCode: "operator_requested"
+  };
+}
+
 function clone<T>(value: T): T {
   if (value === undefined) {
     return value;
@@ -1664,6 +2553,19 @@ function clone<T>(value: T): T {
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return Boolean(value && typeof (value as Promise<T>).then === "function");
+}
+
+function normalizeClaimLimit(value: number | undefined): number {
+  const normalized = value ?? 50;
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    throw new Error("report_export_claim_limit_invalid");
+  }
+
+  return normalized;
+}
+
+function normalizeExportQueue(value: string | undefined): string {
+  return value?.trim() || "report-export";
 }
 
 function requireNonEmpty(value: string, errorCode: string): string {

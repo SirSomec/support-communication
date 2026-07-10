@@ -22,6 +22,7 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
   const [error, setError] = useState("");
   const [busyRuleId, setBusyRuleId] = useState("");
   const [testResults, setTestResults] = useState({});
+  const canMutateRules = canEditSettings && !error;
 
   useEffect(() => {
     let cancelled = false;
@@ -153,14 +154,14 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
                       {typeof value === "boolean" ? (
                         <input
                           checked={value}
-                          disabled={!canEditSettings || busy}
+                          disabled={!canMutateRules || busy}
                           onChange={(event) => updateParameter(rule, key, event.target.checked)}
                           type="checkbox"
                         />
                       ) : (
                         <input
                           defaultValue={value}
-                          disabled={!canEditSettings || busy}
+                          disabled={!canMutateRules || busy}
                           onBlur={(event) => updateParameter(rule, key, event.target.value)}
                           type={typeof value === "number" ? "number" : "text"}
                         />
@@ -198,18 +199,18 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
               <footer>
                 <span>{severityLabel[rule.severity] ?? rule.severity}</span>
                 <button
-                  disabled={!canEditSettings || busy}
+                  disabled={!canMutateRules || busy}
                   onClick={() => testRule(rule)}
-                  title={canEditSettings ? "Проверить правило" : access.reason}
+                  title={canMutateRules ? "Проверить правило" : access.reason}
                   type="button"
                 >
                   {busy ? "Ждем" : "Проверить"}
                 </button>
                 <button
                   className={rule.enabled ? "danger" : "primary"}
-                  disabled={!canEditSettings || busy}
+                  disabled={!canMutateRules || busy}
                   onClick={() => toggleRule(rule)}
-                  title={canEditSettings ? "Изменить состояние правила" : access.reason}
+                  title={canMutateRules ? "Изменить состояние правила" : access.reason}
                   type="button"
                 >
                   {rule.enabled ? "Выключить" : "Включить"}

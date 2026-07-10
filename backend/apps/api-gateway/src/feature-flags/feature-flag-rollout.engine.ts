@@ -1,4 +1,4 @@
-import type { FeatureFlag } from "../platform/platform.fixtures.js";
+import type { FeatureFlag } from "../platform/platform.types.js";
 
 export type FeatureFlagRuleStatus = FeatureFlag["status"];
 export type FeatureFlagRuleTargeting = "segment" | "tenant";

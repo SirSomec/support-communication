@@ -1,0 +1,113 @@
+{
+  "browserPushSubscriptions": [],
+  "deliveryDescriptors": [],
+  "notifications": [
+    {
+      "id": "notif-sla-vladimir",
+      "actionTarget": {
+        "kind": "navigate",
+        "resourceId": "vladimir",
+        "section": "dialogs"
+      },
+      "tenantId": "tenant-volga",
+      "category": "sla_risk",
+      "type": "SLA",
+      "typeKey": "sla",
+      "title": "Владимир Б. без тематики",
+      "detail": "Закрытие заблокировано, SLA просрочен",
+      "meta": "Telegram · очередь спасения",
+      "action": "Открыть диалог",
+      "tone": "danger",
+      "history": "11:36 · SLA alert доставлен старшему сотруднику",
+      "readAt": null,
+      "recipientUserId": null,
+      "createdAt": "2026-07-02T08:36:00.000Z"
+    },
+    {
+      "id": "notif-mention-anna",
+      "actionTarget": {
+        "kind": "navigate",
+        "resourceId": "irina",
+        "section": "dialogs"
+      },
+      "tenantId": "tenant-volga",
+      "category": "invite_event",
+      "type": "Mention",
+      "typeKey": "mention",
+      "title": "Анна Р. упомянула вас",
+      "detail": "Нужна проверка возврата до закрытия",
+      "meta": "MAX · старший сотрудник",
+      "action": "Посмотреть",
+      "tone": "warn",
+      "history": "11:34 · mention из внутреннего комментария",
+      "readAt": null,
+      "recipientUserId": null,
+      "createdAt": "2026-07-02T08:34:00.000Z"
+    },
+    {
+      "id": "notif-channel-vk",
+      "actionTarget": {
+        "kind": "navigate",
+        "resourceId": "vk",
+        "section": "settings"
+      },
+      "tenantId": "tenant-volga",
+      "category": "channel_failure",
+      "type": "Channel",
+      "typeKey": "channel",
+      "title": "VK: рост ошибок webhook",
+      "detail": "3 ошибки доставки за последние 15 минут",
+      "meta": "Интеграции · требует администратора",
+      "action": "Открыть канал",
+      "tone": "info",
+      "history": "11:31 · webhook retry превысил порог",
+      "readAt": null,
+      "recipientUserId": null,
+      "createdAt": "2026-07-02T08:31:00.000Z"
+    },
+    {
+      "id": "notif-ladoga-sla",
+      "actionTarget": {
+        "kind": "navigate",
+        "resourceId": "tenant-ladoga",
+        "section": "panel"
+      },
+      "tenantId": "tenant-ladoga",
+      "category": "sla_risk",
+      "type": "SLA",
+      "typeKey": "sla",
+      "title": "Очередь Ladoga перегружена",
+      "detail": "SLA risk на 4 диалогах",
+      "meta": "Telegram · rescue queue",
+      "action": "Открыть панель",
+      "tone": "danger",
+      "history": "10:12 · SLA risk escalated",
+      "readAt": null,
+      "recipientUserId": null,
+      "createdAt": "2026-07-02T07:12:00.000Z"
+    },
+    {
+      "id": "notif-privileged-admin",
+      "actionTarget": {
+        "kind": "navigate",
+        "resourceId": "service-admin-audit",
+        "section": "audit"
+      },
+      "tenantId": "tenant-volga",
+      "category": "privileged_admin",
+      "type": "Privileged",
+      "typeKey": "privileged",
+      "title": "Service-admin audit export готов",
+      "detail": "CSV, 128 событий, redaction policy applied",
+      "meta": "Service admin · privileged",
+      "action": "Открыть audit",
+      "tone": "info",
+      "history": "09:55 · privileged export completed",
+      "readAt": "2026-07-02T09:56:00.000Z",
+      "recipientUserId": null,
+      "createdAt": "2026-07-02T06:55:00.000Z"
+    }
+  ],
+  "preferenceAuditEvents": [],
+  "preferences": []
+}

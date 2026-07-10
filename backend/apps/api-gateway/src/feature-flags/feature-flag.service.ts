@@ -7,11 +7,11 @@ import {
   evaluateFeatureFlagRollout,
   featureFlagToRolloutRule
 } from "./feature-flag-rollout.engine.js";
-import { featureFlags, platformTenants, type FeatureFlag } from "../platform/platform.fixtures.js";
+import type { FeatureFlag, PlatformTenant } from "../platform/platform.types.js";
 import { PlatformRepository } from "../platform/platform.repository.js";
 import {
   makeEphemeralPlatformMutationIdempotencyKey,
-  persistPlatformRolloutMutation
+  persistPlatformRolloutMutationAsync
 } from "../platform/platform-audit-outbox.js";
 
 const FEATURE_FLAG_SERVICE = "featureFlagService";
@@ -41,15 +41,19 @@ interface InternalFlagTestPayload {
 }
 
 export class FeatureFlagService {
-  private readonly flags: FeatureFlag[];
+  constructor(private readonly platformRepository = PlatformRepository.default()) {}
 
-  constructor(private readonly platformRepository = PlatformRepository.default()) {
-    this.flags = overlayById(featureFlags, this.platformRepository.listFeatureFlags());
+  private listFlags(): Promise<FeatureFlag[]> {
+    return this.platformRepository.listFeatureFlagsAsync();
+  }
+
+  private listTenants() {
+    return this.platformRepository.listPlatformTenantsAsync();
   }
 
   async fetchFeatureFlags(filters: FeatureFlagFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const query = String(filters.query ?? "").trim().toLowerCase();
-    const items = this.flags.filter((flag) => {
+    const items = (await this.listFlags()).filter((flag) => {
       const statusMatches = !filters.status || filters.status === "all" || flag.status === filters.status;
       const scopeMatches = !filters.scope || filters.scope === "all" || flag.scope === filters.scope;
       const queryMatches = !query || [flag.key, flag.name, flag.owner].some((value) => value.toLowerCase().includes(query));
@@ -65,7 +69,7 @@ export class FeatureFlagService {
       data: {
         filters,
         items: clone(items),
-        tenants: platformTenants.map(({ id, name, planId, status }) => ({ id, name, planId, status }))
+        tenants: (await this.listTenants()).map(({ id, name, planId, status }) => ({ id, name, planId, status }))
       }
     });
   }
@@ -87,13 +91,14 @@ export class FeatureFlagService {
       });
     }
 
-    const flag = this.findFlag(request.flagId ?? "");
+    const flag = await this.findFlag(request.flagId ?? "");
     if (!flag) {
       return notFoundEnvelope("previewFlagChange", "flag_not_found", `Feature flag ${request.flagId ?? "(empty)"} was not found.`, {
         flagId: request.flagId ?? null
       });
     }
 
+    const tenants = await this.listTenants();
     return createEnvelope({
       service: FEATURE_FLAG_SERVICE,
       operation: "previewFlagChange",
@@ -105,11 +110,12 @@ export class FeatureFlagService {
           nextRollout: request.nextRollout,
           nextStatus: request.nextStatus,
           reason: request.reason,
-          tenantIds: request.tenantIds ?? []
+          tenantIds: request.tenantIds ?? [],
+          tenants
         }),
         rolloutEvaluation: buildFeatureFlagPreviewRollout({
           rule: buildPreviewRule(flag, request),
-          tenants: platformTenants.map(({ id, planId }) => ({ id, planId }))
+          tenants: tenants.map(({ id, planId }) => ({ id, planId }))
         })
       }
     });
@@ -132,19 +138,21 @@ export class FeatureFlagService {
       });
     }
 
-    const flag = this.findFlag(request.flagId ?? "");
+    const flag = await this.findFlag(request.flagId ?? "");
     if (!flag) {
       return notFoundEnvelope("updateFeatureFlag", "flag_not_found", `Feature flag ${request.flagId ?? "(empty)"} was not found.`, {
         flagId: request.flagId ?? null
       });
     }
 
+    const tenants = await this.listTenants();
     const preview = buildFlagPreview({
       flag,
       nextRollout: request.nextRollout,
       nextStatus: request.nextStatus,
       reason: request.reason,
-      tenantIds: request.tenantIds ?? []
+      tenantIds: request.tenantIds ?? [],
+      tenants
     });
     const confirmation = preview.confirmation as { expectedText: string; required: boolean };
     const confirmationValid = request.confirmed && (!confirmation.required || request.confirmationText === confirmation.expectedText);
@@ -167,9 +175,9 @@ export class FeatureFlagService {
       status: request.nextStatus ?? flag.status,
       updatedAt: new Date().toISOString()
     };
-    let mutationPersistence: ReturnType<typeof persistPlatformRolloutMutation>;
+    let mutationPersistence: Awaited<ReturnType<typeof persistPlatformRolloutMutationAsync>>;
     try {
-      mutationPersistence = persistPlatformRolloutMutation({
+      mutationPersistence = await persistPlatformRolloutMutationAsync({
         actor: request.actor,
         flagKey: nextFlag.key,
         idempotencyKey: isNonEmptyString(request.idempotencyKey)
@@ -192,10 +200,10 @@ export class FeatureFlagService {
       throw error;
     }
 
-    const persistedFlag = this.platformRepository.saveFeatureFlag(nextFlag);
+    const persistedFlag = await this.platformRepository.saveFeatureFlagAsync(nextFlag);
     Object.assign(flag, persistedFlag);
-    this.platformRepository.saveFeatureFlagRule(buildPreviewRule(persistedFlag, request));
-    const outbox = this.platformRepository.saveFeatureFlagOutbox({
+    await this.platformRepository.saveFeatureFlagRuleAsync(buildPreviewRule(persistedFlag, request));
+    const outbox = await this.platformRepository.saveFeatureFlagOutboxAsync({
       id: mutationPersistence.outbox?.id ?? makeQueueId("feature_flag_rollout"),
       queue: "feature-flag-rollout",
       target: persistedFlag.key
@@ -220,7 +228,7 @@ export class FeatureFlagService {
 
   async runInternalFlagTest(payload: InternalFlagTestPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const flag = this.findFlag(request.flagId ?? "");
+    const flag = await this.findFlag(request.flagId ?? "");
 
     if (!flag) {
       return notFoundEnvelope("runInternalFlagTest", "flag_not_found", `Feature flag ${request.flagId ?? "(empty)"} was not found.`, {
@@ -228,7 +236,7 @@ export class FeatureFlagService {
       });
     }
 
-    const tenant = platformTenants.find((item) => item.id === request.tenantId);
+    const tenant = (await this.listTenants()).find((item) => item.id === request.tenantId);
 
     if (!tenant) {
       return notFoundEnvelope("runInternalFlagTest", "tenant_not_found", `Tenant ${request.tenantId ?? "(empty)"} was not found.`, {
@@ -237,7 +245,7 @@ export class FeatureFlagService {
     }
 
     const segment = request.segment ?? tenant.planId;
-    const rule = this.platformRepository.listFeatureFlagRules({ flagId: flag.id })[0] ?? featureFlagToRolloutRule(flag);
+    const rule = (await this.platformRepository.listFeatureFlagRulesAsync({ flagId: flag.id }))[0] ?? featureFlagToRolloutRule(flag);
     const evaluation = evaluateFeatureFlagRollout({
       planId: tenant.planId,
       rule,
@@ -270,8 +278,8 @@ export class FeatureFlagService {
     });
   }
 
-  private findFlag(flagId: string): FeatureFlag | undefined {
-    return this.flags.find((flag) => flag.id === flagId || flag.key === flagId);
+  private async findFlag(flagId: string): Promise<FeatureFlag | undefined> {
+    return (await this.listFlags()).find((flag) => flag.id === flagId || flag.key === flagId);
   }
 }
 
@@ -307,18 +315,20 @@ function buildFlagPreview({
   nextRollout,
   nextStatus,
   reason,
-  tenantIds
+  tenantIds,
+  tenants
 }: {
   flag: FeatureFlag;
   nextRollout: unknown;
   nextStatus: FeatureFlag["status"] | undefined;
   reason: string | undefined;
   tenantIds: string[];
+  tenants: PlatformTenant[];
 }): Record<string, unknown> {
   const rollout = normalizeRollout(nextRollout, flag.rollout);
   const normalizedNextStatus = nextStatus ?? flag.status;
-  const selectedTenants = tenantIds.length ? platformTenants.filter((tenant) => tenantIds.includes(tenant.id)) : [];
-  const blastRadius = selectedTenants.length || Math.ceil((platformTenants.length * rollout) / 100);
+  const selectedTenants = tenantIds.length ? tenants.filter((tenant) => tenantIds.includes(tenant.id)) : [];
+  const blastRadius = selectedTenants.length || Math.ceil((tenants.length * rollout) / 100);
   const risky = flag.killSwitch && (rollout === 0 || rollout >= 90 || normalizedNextStatus === "off");
 
   return {

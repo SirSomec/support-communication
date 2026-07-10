@@ -274,6 +274,58 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.match(unmerge.data.auditEvent.id, /^evt_client_merge_/);
   });
 
+  it("returns client segment descriptors and filters profiles by segment", async () => {
+    const workspace = new WorkspaceService();
+
+    const segments = await workspace.fetchClientSegments();
+    const sdkSegment = segments.data.segments.find((segment: Record<string, unknown>) => segment.id === "channel:SDK");
+    const segmentedProfiles = await workspace.fetchClientProfiles({ segmentId: "channel:SDK" });
+
+    assert.equal(segments.status, "ok");
+    assert.equal(segments.operation, "fetchClientSegments");
+    assert.ok(sdkSegment);
+    assert.equal(sdkSegment.label, "SDK");
+    assert.equal(sdkSegment.count, 2);
+    assert.equal(segmentedProfiles.status, "ok");
+    assert.equal(segmentedProfiles.data.pagination.total, 2);
+    assert.equal(segmentedProfiles.data.items.every((profile: Record<string, unknown>) => profile.channel === "SDK"), true);
+    assert.deepEqual(segmentedProfiles.data.segment, {
+      count: 2,
+      dimension: "channel",
+      id: "channel:SDK",
+      label: "SDK"
+    });
+  });
+
+  it("creates client export descriptors with masked fields and immutable audit evidence", async () => {
+    const workspace = new WorkspaceService();
+
+    const exported = await workspace.createClientExport({
+      format: "json",
+      reason: "Segment export requested by support lead",
+      segmentId: "channel:SDK"
+    });
+
+    assert.equal(exported.status, "ok");
+    assert.equal(exported.operation, "createClientExport");
+    assert.match(exported.data.exportId, /^client_export_/);
+    assert.equal(exported.data.status, "queued");
+    assert.equal(exported.data.segment.id, "channel:SDK");
+    assert.equal(exported.data.itemCount, 2);
+    assert.equal(exported.data.fileDescriptor.fileName.endsWith(".json"), true);
+    assert.equal(exported.data.auditEvent.immutable, true);
+    assert.match(exported.data.auditEvent.id, /^evt_client_export_/);
+    assert.equal(exported.data.previewRows.every((profile: Record<string, unknown>) => /^\+7 \*\*\* \*\*\*-\*\*-\d{2}$/.test(String(profile.phone))), true);
+
+    const missingReason = await workspace.createClientExport({
+      format: "json",
+      reason: "",
+      segmentId: "channel:SDK"
+    });
+    assert.equal(missingReason.status, "invalid");
+    assert.equal(missingReason.error?.code, "reason_required");
+  });
+
   it("persists client profile identity records behind tenant-scoped repository reads", async () => {
     const repository = WorkspaceRepository.inMemory() as unknown as ClientProfileIdentityRepository;
     const volgaProfile = clientProfile({
@@ -1588,8 +1640,8 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
 
     assert.match(source, /@RequireServiceAdminAction\("templates\.read"\)[\s\S]*fetchTemplates\(/);
     assert.match(source, /@RequireServiceAdminAction\("templates\.write"\)[\s\S]*saveTemplate\(/);
-    assert.match(source, /fetchTemplates\([\s\S]*@Req\(\)\s+request:\s*ServiceAdminRequest[\s\S]*\):\s*Promise<unknown>/);
-    assert.match(source, /saveTemplate\([\s\S]*@Req\(\)\s+request:\s*ServiceAdminRequest[\s\S]*\):\s*Promise<unknown>/);
+    assert.match(source, /fetchTemplates\([\s\S]*@Req\(\)\s+request:\s*TenantOperatorRequest & ServiceAdminRequest[\s\S]*\):\s*Promise<unknown>/);
+    assert.match(source, /saveTemplate\([\s\S]*@Req\(\)\s+request:\s*TenantOperatorRequest & ServiceAdminRequest[\s\S]*\):\s*Promise<unknown>/);
     assert.match(source, /this\.workspaceService\.fetchTemplates\(filters,\s*tenantContextFromServiceAdminRequest\(request\)\)/);
     assert.match(source, /this\.workspaceService\.saveTemplate\(payload,\s*tenantContextFromServiceAdminRequest\(request\)\)/);
   });

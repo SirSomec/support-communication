@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { createOutboxEvent, InMemoryOutboxStore } from "@support-communication/events";
 import { InMemoryBillingSyncJobStore, type StoredBillingSyncJob } from "@support-communication/database";
 
@@ -19,16 +21,45 @@ describe("outbox worker runtime contracts", () => {
     assert.match(packageJson.scripts["start:outbox-worker"], /apps\/outbox-worker\/dist\/main\.js/);
     assert.match(packageJson.scripts["start:outbox-bullmq-worker"], /--bullmq/);
     assert.match(packageJson.scripts["start:billing-bullmq-worker"], /--bullmq --billing-sync/);
-    assert.match(packageJson.scripts["outbox:worker:once"], /--once/);
-    assert.match(packageJson.scripts["billing:worker:once"], /--billing-sync --once/);
+    assert.equal(packageJson.scripts["outbox:worker:once"], "npm run build && node --env-file=.env.example scripts/outbox-worker-smoke.mjs");
+    assert.equal(existsSync(new URL("../scripts/outbox-worker-smoke.mjs", import.meta.url)), true);
+    const outboxSmoke = readFileSync(new URL("../scripts/outbox-worker-smoke.mjs", import.meta.url), "utf8");
+    assert.match(outboxSmoke, /conversationOutboundDescriptor\.create/);
+    assert.match(outboxSmoke, /outboxEvent\.create/);
+    assert.match(outboxSmoke, /OUTBOX_CHANNEL_CONNECTORS/);
+    assert.match(outboxSmoke, /result\.scanned !== 1/);
+    assert.match(outboxSmoke, /result\.published !== 1/);
+    assert.match(outboxSmoke, /result\.failed !== 0/);
+    assert.match(outboxSmoke, /event\.status !== "published"/);
+    assert.equal(packageJson.scripts["billing:worker:once"], "npm run build && node --env-file=.env.example scripts/billing-sync-worker-smoke.mjs");
+    assert.equal(existsSync(new URL("../scripts/billing-sync-worker-smoke.mjs", import.meta.url)), true);
     assert.match(packageJson.dependencies.bullmq, /^\^/);
     assert.equal(tsconfig.references.some((reference) => reference.path === "apps/outbox-worker"), true);
 
     const main = readFileSync(new URL("../apps/outbox-worker/src/main.ts", import.meta.url), "utf8");
     assert.doesNotMatch(main, /handlers:\s*\{\s*\}/);
-    assert.match(main, /createDefaultBillingSyncHandlers/);
+    assert.match(main, /createRuntimeBillingSyncHandlers/);
     assert.match(main, /createPrismaConversationOutboundDescriptorStore/);
     assert.match(main, /createRuntimeOutboxHandlers/);
+    assert.match(main, /queue:\s*config\.queue\s*\?\?\s*"file-scan"/);
+    assert.doesNotMatch(main, /queue:\s*"file-scan"/);
+  });
+
+  it("skips provider outbox smoke without live credentials", () => {
+    const backendRoot = fileURLToPath(new URL("..", import.meta.url));
+    const result = spawnSync(process.execPath, ["scripts/provider-outbox-smoke.mjs"], {
+      cwd: backendRoot,
+      env: {
+        ...process.env,
+        DATABASE_URL: "",
+        OUTBOX_PROVIDER_SMOKE_ENABLED: "false"
+      },
+      encoding: "utf8"
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /provider outbox smoke skipped/);
+    assert.doesNotMatch(result.stderr, /DATABASE_URL_required/);
   });
 
   it("processes one bounded batch with registered handlers", async () => {
@@ -339,6 +370,124 @@ describe("outbox worker runtime contracts", () => {
         traceId: "trc_runtime_scanner"
       }
     });
+  });
+
+  it("authenticates HTTP runtime scanner requests and forwards signed file access metadata without raw object keys", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    const event = await store.append(createOutboxEvent({
+      aggregateId: "attachment_runtime_signed_payload",
+      aggregateType: "attachment",
+      payload: { descriptorId: "attachment_runtime_signed_payload" },
+      queue: "file-scan",
+      traceId: "trc_file_scan_runtime_signed_payload",
+      type: "attachment.upload.requested"
+    }));
+    const httpCalls: Array<{ url: string; init: { body?: string; headers?: Record<string, string>; method?: string } }> = [];
+
+    const result = await worker.runRuntimeFileScanScannerWorker({
+      env: {
+        OUTBOX_FILE_SCAN_RESULT_BASE_URL: "https://api.example.test/api/v1",
+        OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN: "service-admin-scan-token",
+        OUTBOX_SCANNER_BEARER_TOKEN: "scanner-provider-token",
+        OUTBOX_SCANNER_ENABLED: "true",
+        OUTBOX_SCANNER_PROVIDER_MODE: "http",
+        OUTBOX_SCANNER_URL: "https://scanner.example.test/runtime"
+      },
+      fetcher: async (url: string, init: { body?: string; headers?: Record<string, string>; method?: string }) => {
+        httpCalls.push({ url, init });
+        return {
+          ok: true,
+          status: 200,
+          text: async () => url.includes("scanner.example.test")
+            ? JSON.stringify({
+              checkedAt: "2026-06-29T09:37:00.000Z",
+              reason: "runtime signed clean",
+              scanner: "signed-runtime-scanner",
+              verdict: "clean"
+            })
+            : JSON.stringify({ data: { scanState: "clean" } })
+        };
+      },
+      now: new Date("2026-06-29T09:37:30.000Z"),
+      outboundDescriptorStore: {
+        findOutboundDescriptorById: async () => ({
+          channel: "SDK",
+          conversationId: null,
+          id: "attachment_runtime_signed_payload",
+          idempotencyKey: "runtime-signed-payload-key",
+          kind: "attachment_upload",
+          messageId: null,
+          payload: {
+            checksum: "sha256-runtime-signed",
+            fileId: "file_runtime_signed_payload",
+            fileName: "runtime-signed.pdf",
+            mimeType: "application/pdf",
+            objectKey: "tenant-volga/private/uploads/runtime-signed.pdf",
+            signedFile: {
+              expiresAt: "2026-06-29T09:47:00.000Z",
+              headers: { "x-storage-scan": "runtime" },
+              method: "GET",
+              url: "https://storage.example.test/signed/runtime-signed.pdf?X-Amz-Signature=abc123"
+            },
+            sizeBytes: 8192
+          }
+        })
+      },
+      store
+    });
+
+    assert.equal(result.published, 1);
+    assert.equal(httpCalls[0].url, "https://scanner.example.test/runtime");
+    assert.equal(httpCalls[0].init.headers?.authorization, "Bearer scanner-provider-token");
+    const scannerBody = JSON.parse(httpCalls[0].init.body ?? "{}");
+    assert.deepEqual(scannerBody.request, {
+      channel: "SDK",
+      checksum: "sha256-runtime-signed",
+      descriptorId: "attachment_runtime_signed_payload",
+      fileId: "file_runtime_signed_payload",
+      fileName: "runtime-signed.pdf",
+      idempotencyKey: "runtime-signed-payload-key",
+      mimeType: "application/pdf",
+      outboxEventId: event.id,
+      signedFile: {
+        expiresAt: "2026-06-29T09:47:00.000Z",
+        headers: { "x-storage-scan": "runtime" },
+        method: "GET",
+        url: "https://storage.example.test/signed/runtime-signed.pdf?X-Amz-Signature=abc123"
+      },
+      sizeBytes: 8192,
+      traceId: "trc_file_scan_runtime_signed_payload"
+    });
+    assert.equal(JSON.stringify(scannerBody).includes("objectKey"), false);
+    assert.equal(httpCalls[1].url, "https://api.example.test/api/v1/files/file_runtime_signed_payload/scan-result");
+  });
+
+  it("loads a local runtime attachment scanner without requiring an external scanner URL", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const adapters = worker.createHttpWorkerAdaptersFromEnv({
+      OUTBOX_SCANNER_ENABLED: "true",
+      OUTBOX_SCANNER_LOCAL_VERDICT: "clean",
+      OUTBOX_SCANNER_PROVIDER_MODE: "local"
+    }, async () => {
+      throw new Error("local scanner must not call external fetch");
+    });
+
+    assert.equal(typeof adapters.scanner?.scanAttachment, "function");
+    const result = await adapters.scanner.scanAttachment({
+      channel: "SDK",
+      descriptorId: "attachment_local_scanner",
+      fileId: "file_local_scanner",
+      fileName: "local.pdf",
+      idempotencyKey: "local-scanner-key",
+      outboxEventId: "outbox_local_scanner",
+      sizeBytes: 2048,
+      traceId: "trc_local_scanner"
+    });
+
+    assert.equal(result?.verdict, "clean");
+    assert.equal(result?.scanner, "local-deterministic-scanner");
+    assert.equal(result?.reason, "local scanner clean");
   });
 
   it("keeps runtime scanner config isolated from legacy file-scan queue config", async () => {
@@ -809,6 +958,93 @@ describe("outbox worker runtime contracts", () => {
     });
   });
 
+  it("routes Telegram delivery through an async tenant credential resolver", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    await store.append(createOutboxEvent({
+      aggregateId: "tg-prisma-chat",
+      aggregateType: "conversation",
+      payload: { descriptorId: "telegram_prisma_descriptor" },
+      queue: "message-delivery",
+      traceId: "trc_telegram_prisma_descriptor",
+      type: "message.delivery.requested"
+    }));
+    const calls: Array<{ init: { body?: string; headers?: Record<string, string>; method?: string; signal?: AbortSignal }; url: string }> = [];
+    const handlers = worker.createRuntimeOutboxHandlers({
+      env: {
+        OUTBOX_TELEGRAM_API_BASE_URL: "https://telegram.provider.example.test",
+        OUTBOX_TELEGRAM_ENABLED: "true",
+        OUTBOX_HTTP_TIMEOUT_MS: "25"
+      },
+      fetcher: async (url: string, init: { body?: string; headers?: Record<string, string>; method?: string; signal?: AbortSignal }) => {
+        calls.push({ url, init });
+        return { ok: true, status: 200, text: async () => "" };
+      },
+      outboundDescriptorStore: {
+        async findOutboundDescriptorById(descriptorId: string) {
+          assert.equal(descriptorId, "telegram_prisma_descriptor");
+          return {
+            channel: "Telegram",
+            conversationId: "tg-prisma-chat",
+            id: descriptorId,
+            idempotencyKey: "telegram-prisma-key",
+            kind: "message_delivery",
+            messageId: "msg_telegram_prisma",
+            payload: { text: "Runtime Prisma Telegram hello" },
+            phone: "",
+            requestedBy: "operator-prisma",
+            status: "queued",
+            tenantId: "tenant-prisma",
+            traceId: "trc_telegram_prisma_descriptor"
+          };
+        }
+      },
+      telegramBotTokenResolver: {
+        async resolveBotToken(tenantId: string) {
+          assert.equal(tenantId, "tenant-prisma");
+          return "987654:PRISMA_SECRET";
+        }
+      }
+    });
+
+    const result = await worker.runOutboxWorker({
+      handlers,
+      once: true,
+      store
+    });
+
+    assert.equal(result.published, 1);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://telegram.provider.example.test/bot987654:PRISMA_SECRET/sendMessage");
+    assert.equal(calls[0].init.headers?.["idempotency-key"], "telegram-prisma-key");
+    assert.equal(calls[0].init.headers?.["x-trace-id"], "trc_telegram_prisma_descriptor");
+  });
+
+  it("resolves active Telegram bot tokens from Prisma integration state with env fallback", async () => {
+    const tokenStore = await import("../apps/outbox-worker/src/integration-telegram-store.ts");
+    const requestedTenants: string[] = [];
+    const resolver = tokenStore.createPrismaIntegrationTelegramTokenResolver({
+      telegramConnection: {
+        async findUnique(input: { where: { tenantId: string } }) {
+          requestedTenants.push(input.where.tenantId);
+          if (input.where.tenantId === "tenant-active") {
+            return { botToken: "111111:PRISMA_ACTIVE", status: "active" };
+          }
+          if (input.where.tenantId === "tenant-disabled") {
+            return { botToken: "222222:DISABLED", status: "disabled" };
+          }
+          return null;
+        }
+      }
+    }, "333333:ENV_FALLBACK");
+
+    assert.equal(await resolver.resolveBotToken("tenant-active"), "111111:PRISMA_ACTIVE");
+    assert.equal(await resolver.resolveBotToken("tenant-disabled"), "333333:ENV_FALLBACK");
+    assert.equal(await resolver.resolveBotToken("tenant-missing"), "333333:ENV_FALLBACK");
+    assert.equal(await resolver.resolveBotToken(""), "333333:ENV_FALLBACK");
+    assert.deepEqual(requestedTenants, ["tenant-active", "tenant-disabled", "tenant-missing"]);
+  });
+
   it("keeps Telegram runtime provider failures sanitized in worker state and logs", async () => {
     const worker = await import("../apps/outbox-worker/src/index.ts");
     const store = new InMemoryOutboxStore();
@@ -821,6 +1057,7 @@ describe("outbox worker runtime contracts", () => {
       type: "message.delivery.requested"
     }));
     const logs: string[] = [];
+    const deliveryStates: string[] = [];
     const handlers = worker.createRuntimeOutboxHandlers({
       env: {
         OUTBOX_TELEGRAM_API_BASE_URL: "https://telegram.provider.example.test",
@@ -840,7 +1077,11 @@ describe("outbox worker runtime contracts", () => {
           messageId: "msg_telegram_runtime_failure",
           payload: { text: "Runtime Telegram failure" },
           tenantId: "tenant-volga"
-        })
+        }),
+        markOutboundDescriptorDelivery: async (_descriptorId: string, deliveryState: string) => {
+          deliveryStates.push(deliveryState);
+          return null;
+        }
       },
       writeLog: (_level: string, message: string, context: Record<string, unknown>) => {
         logs.push(JSON.stringify({ context, message }));
@@ -858,6 +1099,7 @@ describe("outbox worker runtime contracts", () => {
     assert.equal(result.published, 0);
     const failed = (await store.list({ statuses: ["failed"] })).find((event) => event.id === delivery.id);
     assert.equal(failed?.lastError, "telegram_dispatch_failed");
+    assert.deepEqual(deliveryStates, ["failed"]);
     assert.doesNotMatch(failed?.lastError ?? "", /SECRET|token|bot123456/i);
     assert.equal(logs.some((entry) => /SECRET|token|bot123456/i.test(entry)), false);
   });
@@ -874,6 +1116,7 @@ describe("outbox worker runtime contracts", () => {
       type: "message.delivery.requested"
     }));
     const calls: Array<{ init: { body?: string; headers?: Record<string, string>; method?: string }; url: string }> = [];
+    const deliveryStates: string[] = [];
     const handlers = worker.createRuntimeOutboxHandlers({
       env: {
         OUTBOX_TELEGRAM_API_BASE_URL: "https://telegram.provider.example.test",
@@ -894,7 +1137,11 @@ describe("outbox worker runtime contracts", () => {
           messageId: "msg_telegram_runtime_descriptor",
           payload: { text: "Runtime descriptor hello" },
           tenantId: "tenant-volga"
-        })
+        }),
+        markOutboundDescriptorDelivery: async (_descriptorId: string, deliveryState: string) => {
+          deliveryStates.push(deliveryState);
+          return null;
+        }
       },
       writeLog: () => undefined
     });
@@ -908,6 +1155,7 @@ describe("outbox worker runtime contracts", () => {
 
     assert.equal(result.failed, 0);
     assert.equal(result.published, 1);
+    assert.deepEqual(deliveryStates, ["delivered"]);
     assert.equal((await store.list({ statuses: ["published"] })).some((event) => event.id === delivery.id), true);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "https://telegram.provider.example.test/bot123456:SECRET/sendMessage");
@@ -1573,6 +1821,38 @@ describe("outbox worker runtime contracts", () => {
     assert.deepEqual((await store.list({ queue: "message-delivery", statuses: ["pending"] })).map((item) => item.id), [deliveryDescriptor.id]);
   });
 
+  it("claims file-scan descriptors from an explicitly configured scanner queue", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    const defaultQueue = await store.append(createOutboxEvent({
+      aggregateId: "attachment_default_scan_queue",
+      aggregateType: "attachment",
+      payload: { descriptorId: "attachment_default_scan_queue" },
+      queue: "file-scan",
+      traceId: "trc_default_scan_queue",
+      type: "attachment.upload.requested"
+    }));
+    const smokeQueue = await store.append(createOutboxEvent({
+      aggregateId: "attachment_smoke_scan_queue",
+      aggregateType: "attachment",
+      payload: { descriptorId: "attachment_smoke_scan_queue" },
+      queue: "file-scan-smoke",
+      traceId: "trc_smoke_scan_queue",
+      type: "attachment.upload.requested"
+    }));
+
+    const claimed = await worker.claimFileScanDescriptors({
+      leaseTimeoutMs: 60_000,
+      limit: 10,
+      now: new Date("2026-06-29T09:02:00.000Z"),
+      queue: "file-scan-smoke",
+      store
+    });
+
+    assert.deepEqual(claimed.map((descriptor: { id: string }) => descriptor.id), [smokeQueue.id]);
+    assert.deepEqual((await store.list({ queue: "file-scan", statuses: ["pending"] })).map((item) => item.id), [defaultQueue.id]);
+  });
+
   it("runs one scanner worker claim pass over only file-scan descriptors", async () => {
     const worker = await import("../apps/outbox-worker/src/index.ts");
     const store = new InMemoryOutboxStore();
@@ -1690,6 +1970,111 @@ describe("outbox worker runtime contracts", () => {
     assert.deepEqual(await store.list({ queue: "file-scan", statuses: ["published"] }), []);
   });
 
+  it("runs scanner worker execution from an explicitly configured scanner queue", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    const defaultQueue = await store.append(createOutboxEvent({
+      aggregateId: "attachment_runtime_scan_default_queue",
+      aggregateType: "attachment",
+      payload: { descriptorId: "attachment_runtime_scan_default_queue" },
+      queue: "file-scan",
+      traceId: "trc_runtime_scan_default_queue",
+      type: "attachment.upload.requested"
+    }));
+    const smokeQueue = await store.append(createOutboxEvent({
+      aggregateId: "attachment_runtime_scan_smoke_queue",
+      aggregateType: "attachment",
+      payload: { descriptorId: "attachment_runtime_scan_smoke_queue" },
+      queue: "file-scan-smoke",
+      traceId: "trc_runtime_scan_smoke_queue",
+      type: "attachment.upload.requested"
+    }));
+    const scanCalls: Array<Record<string, unknown>> = [];
+
+    const result = await worker.runFileScanScannerWorker({
+      leaseTimeoutMs: 60_000,
+      limit: 1,
+      now: new Date("2026-06-29T09:04:45.000Z"),
+      outboundDescriptorStore: {
+        findOutboundDescriptorById: async (descriptorId: string) => descriptorId === "attachment_runtime_scan_smoke_queue"
+          ? {
+            channel: "SDK",
+            conversationId: null,
+            id: descriptorId,
+            idempotencyKey: "runtime-scan-smoke-queue-key",
+            kind: "attachment_upload",
+            messageId: null,
+            payload: {
+              fileId: "file_runtime_scan_smoke_queue",
+              fileName: "runtime-scan-smoke-queue.pdf",
+              sizeBytes: 1024
+            },
+            tenantId: "tenant-lumen"
+          }
+          : null
+      },
+      queue: "file-scan-smoke",
+      scanResultCallback: {
+        recordScanResult: async () => undefined
+      },
+      scanner: {
+        scanAttachment: async (request: Record<string, unknown>) => {
+          scanCalls.push(request);
+          return {
+            checkedAt: "2026-06-29T09:04:46.000Z",
+            scanner: "runtime-scanner",
+            verdict: "clean"
+          };
+        }
+      },
+      store
+    });
+
+    assert.deepEqual(result, {
+      failed: 0,
+      iterations: 1,
+      published: 1,
+      scanned: 1,
+      stopped: false
+    });
+    assert.deepEqual(scanCalls.map((request) => request.descriptorId), ["attachment_runtime_scan_smoke_queue"]);
+    assert.deepEqual((await store.list({ queue: "file-scan-smoke", statuses: ["published"] })).map((item) => item.id), [smokeQueue.id]);
+    assert.deepEqual((await store.list({ queue: "file-scan", statuses: ["pending"] })).map((item) => item.id), [defaultQueue.id]);
+  });
+
+  it("keeps the runtime scanner worker polling when not started in once mode", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    const sleeps: number[] = [];
+
+    const result = await worker.runRuntimeFileScanScannerWorker({
+      env: {
+        OUTBOX_FILE_SCAN_RESULT_BASE_URL: "https://api.example.test/api/v1",
+        OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN: "service-admin-scan-token",
+        OUTBOX_SCANNER_ENABLED: "true",
+        OUTBOX_SCANNER_PROVIDER_MODE: "local"
+      },
+      fetcher: async () => {
+        throw new Error("idle scanner loop must not call fetch");
+      },
+      maxIterations: 2,
+      once: false,
+      outboundDescriptorStore: {
+        findOutboundDescriptorById: () => {
+          throw new Error("idle scanner loop must not read descriptors");
+        }
+      },
+      sleep: async (milliseconds: number) => {
+        sleeps.push(milliseconds);
+      },
+      store
+    });
+
+    assert.equal(result.iterations, 2);
+    assert.equal(result.scanned, 0);
+    assert.deepEqual(sleeps, [1000]);
+  });
+
   it("posts successful scanner output to the scan-result callback and publishes the descriptor", async () => {
     const worker = await import("../apps/outbox-worker/src/index.ts");
     const store = new InMemoryOutboxStore();
@@ -1753,6 +2138,84 @@ describe("outbox worker runtime contracts", () => {
       verdict: "clean"
     }]);
     assert.deepEqual((await store.list({ queue: "file-scan", statuses: ["published"] })).map((item) => item.id), [event.id]);
+  });
+
+  it("does not publish scanner work when the scan-result callback returns an error envelope", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    const event = await store.append(createOutboxEvent({
+      aggregateId: "attachment_runtime_callback_error",
+      aggregateType: "attachment",
+      payload: { descriptorId: "attachment_runtime_callback_error" },
+      queue: "file-scan",
+      traceId: "trc_file_scan_runtime_callback_error",
+      type: "attachment.upload.requested"
+    }));
+    const httpCalls: string[] = [];
+
+    const result = await worker.runRuntimeFileScanScannerWorker({
+      env: {
+        OUTBOX_FILE_SCAN_RESULT_BASE_URL: "https://api.example.test/api/v1",
+        OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN: "service-admin-scan-token",
+        OUTBOX_SCANNER_ENABLED: "true",
+        OUTBOX_SCANNER_PROVIDER_MODE: "http",
+        OUTBOX_SCANNER_URL: "https://scanner.example.test/runtime"
+      },
+      fetcher: async (url: string) => {
+        httpCalls.push(url);
+        return {
+          ok: true,
+          status: 200,
+          text: async () => url.includes("scanner.example.test")
+            ? JSON.stringify({
+              checkedAt: "2026-06-29T09:38:00.000Z",
+              reason: "runtime clean",
+              scanner: "runtime-scanner",
+              verdict: "clean"
+            })
+            : JSON.stringify({
+              error: {
+                code: "file_not_found",
+                message: "File file_runtime_callback_error was not found."
+              },
+              status: "not_found"
+            })
+        };
+      },
+      now: new Date("2026-06-29T09:38:30.000Z"),
+      outboundDescriptorStore: {
+        findOutboundDescriptorById: async () => ({
+          channel: "SDK",
+          conversationId: null,
+          id: "attachment_runtime_callback_error",
+          idempotencyKey: "runtime-callback-error-key",
+          kind: "attachment_upload",
+          messageId: null,
+          payload: {
+            fileId: "file_runtime_callback_error",
+            fileName: "runtime-callback-error.pdf",
+            sizeBytes: 4096
+          }
+        })
+      },
+      store
+    });
+
+    assert.deepEqual(result, {
+      failed: 1,
+      iterations: 1,
+      published: 0,
+      scanned: 1,
+      stopped: false
+    });
+    assert.deepEqual(httpCalls, [
+      "https://scanner.example.test/runtime",
+      "https://api.example.test/api/v1/files/file_runtime_callback_error/scan-result"
+    ]);
+    const [failed] = await store.list({ queue: "file-scan", statuses: ["failed"] });
+    assert.equal(failed.id, event.id);
+    assert.equal(failed.lastError, "file_scan_result_callback_rejected:not_found:file_not_found");
+    assert.deepEqual(await store.list({ queue: "file-scan", statuses: ["published"] }), []);
   });
 
   it("marks scanner worker failures retryable without publishing the descriptor", async () => {
@@ -2593,6 +3056,112 @@ describe("outbox worker runtime contracts", () => {
     const published = await store.list({ statuses: ["published"] });
     assert.equal(published[0]?.id, "billing_sync_provider_paid");
     assert.equal(published[0]?.publishedAt?.startsWith("20"), true);
+  });
+
+  it("dispatches billing sync jobs through the runtime provider adapter before publishing", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    assert.equal(typeof worker.createRuntimeBillingSyncHandlers, "function");
+
+    const job = createBillingSyncJob({
+      id: "billing_sync_runtime_provider_paid",
+      payload: {
+        eventType: "invoice.payment_succeeded",
+        idempotencyKey: "billing-runtime-provider-key",
+        invoiceId: "inv_runtime_provider",
+        provider: "demo-billing-provider",
+        providerInvoiceId: "provider-invoice-runtime",
+        tenantId: "tenant-lumen"
+      },
+      reason: "invoice.payment_succeeded",
+      traceId: "trc_billing_runtime_provider"
+    });
+    const store = new InMemoryBillingSyncJobStore([job]);
+    const calls: Array<{ init: { body?: string; headers?: Record<string, string>; method?: string }; url: string }> = [];
+    const logs: Array<{ context: Record<string, unknown>; level: string; message: string }> = [];
+
+    const handlers = worker.createRuntimeBillingSyncHandlers({
+      env: {
+        BILLING_SYNC_PROVIDER_MODE: "http",
+        BILLING_SYNC_PROVIDER_URL: "https://billing-provider.example.test/sync"
+      },
+      fetcher: async (url: string, init: { body?: string; headers?: Record<string, string>; method?: string }) => {
+        calls.push({ url, init });
+        return { ok: true, status: 202, text: async () => "" };
+      },
+      writeLog: (level: string, message: string, context: Record<string, unknown>) => {
+        logs.push({ context, level, message });
+      }
+    });
+
+    const result = await worker.runBillingSyncWorker({
+      handlers,
+      once: true,
+      queue: "billing-sync",
+      store
+    });
+
+    assert.equal(result.failed, 0);
+    assert.equal(result.published, 1);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://billing-provider.example.test/sync");
+    assert.equal(calls[0].init.method, "POST");
+    assert.equal(calls[0].init.headers?.["content-type"], "application/json");
+    assert.equal(calls[0].init.headers?.["idempotency-key"], "billing-runtime-provider-key");
+    assert.equal(calls[0].init.headers?.["x-trace-id"], "trc_billing_runtime_provider");
+    assert.deepEqual(JSON.parse(calls[0].init.body ?? "{}"), {
+      operation: "syncBillingJob",
+      request: {
+        eventType: "invoice.payment_succeeded",
+        fromPlanId: "starter",
+        idempotencyKey: "billing-runtime-provider-key",
+        jobId: "billing_sync_runtime_provider_paid",
+        payload: {
+          eventType: "invoice.payment_succeeded",
+          idempotencyKey: "billing-runtime-provider-key",
+          invoiceId: "inv_runtime_provider",
+          provider: "demo-billing-provider",
+          providerInvoiceId: "provider-invoice-runtime",
+          tenantId: "tenant-lumen"
+        },
+        provider: "demo-billing-provider",
+        queue: "billing-sync",
+        reason: "invoice.payment_succeeded",
+        tenantId: "tenant-lumen",
+        toPlanId: "business",
+        traceId: "trc_billing_runtime_provider"
+      }
+    });
+    assert.equal(logs.some((entry) => entry.message === "billing sync provider dispatch completed"), true);
+    assert.equal((await store.list({ statuses: ["published"] }))[0]?.id, "billing_sync_runtime_provider_paid");
+  });
+
+  it("fails billing sync runtime jobs without an explicitly configured provider", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryBillingSyncJobStore([
+      createBillingSyncJob({
+        id: "billing_sync_runtime_provider_missing",
+        payload: {
+          eventType: "invoice.payment_succeeded",
+          idempotencyKey: "billing-runtime-provider-missing-key",
+          provider: "demo-billing-provider",
+          tenantId: "tenant-lumen"
+        },
+        reason: "invoice.payment_succeeded",
+        traceId: "trc_billing_runtime_provider_missing"
+      })
+    ]);
+
+    const result = await worker.runBillingSyncWorker({
+      handlers: worker.createRuntimeBillingSyncHandlers({ env: {} }),
+      once: true,
+      queue: "billing-sync",
+      store
+    });
+
+    assert.equal(result.failed, 1);
+    assert.equal(result.published, 0);
+    assert.equal((await store.list({ statuses: ["published"] })).length, 0);
+    assert.match((await store.list({ statuses: ["failed"] }))[0]?.lastError ?? "", /billing_sync_provider_not_configured/);
   });
 
   it("publishes known provider billing sync events through wildcard default handlers", async () => {

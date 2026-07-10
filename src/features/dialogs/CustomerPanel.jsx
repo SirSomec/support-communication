@@ -3,6 +3,9 @@ import { AlertTriangle, Copy, FileText, Lock, Plus, ShieldCheck, Smartphone } fr
 import { maskPhone } from "../../app/dialogModel.js";
 
 export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic, setDraft, templates, onClose, access, isClosed }) {
+  const channelTemplates = templates.filter((template) => sameValue(template.channel, conversation.channel));
+  const recommendedTemplates = channelTemplates.length ? channelTemplates : templates;
+
   return (
     <aside className="customer-panel" aria-label="Карточка клиента">
       <PanelSection title="О клиенте" action={<button aria-label="Копировать"><Copy size={18} /></button>}>
@@ -43,7 +46,7 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
 
       <PanelSection title="Рекомендуемые шаблоны">
         <div className="template-list">
-          {templates.slice(0, 3).map((template) => (
+          {recommendedTemplates.slice(0, 3).map((template) => (
             <button key={template.id} onClick={() => setDraft(template.text)}>
               <span>
                 <strong>{template.title}</strong>
@@ -92,6 +95,10 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
       </PanelSection>
     </aside>
   );
+}
+
+function sameValue(left, right) {
+  return String(left ?? "").trim().toLowerCase() === String(right ?? "").trim().toLowerCase();
 }
 
 function PanelSection({ title, action, children }) {

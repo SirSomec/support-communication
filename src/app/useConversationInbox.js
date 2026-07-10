@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createAuditEvent, getStatusMeta } from "./dialogModel.js";
-import { hasSession } from "./sessionStore.js";
+import { clearTenantSession } from "./sessionStore.js";
 import { mapApiConversation, mapApiConversationCollection } from "./conversationApiMapper.js";
 import { useRealtimeInbox } from "./useRealtimeInbox.js";
 import { dialogService } from "../services/dialogService.js";
@@ -8,14 +8,14 @@ import { dialogService } from "../services/dialogService.js";
 const ATTACHMENT_PREVIEW_LABEL = "Вложение";
 const NOW_LABEL = "сейчас";
 
-export function useConversationInbox() {
-  const sessionActive = hasSession();
+export function useConversationInbox({ sessionActive = false } = {}) {
   const [conversationItems, setConversationItems] = useState([]);
   const [topics, setTopics] = useState({});
   const [closedIds, setClosedIds] = useState(() => new Set());
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [assignees, setAssignees] = useState([]);
 
   const syncMetaFromItems = useCallback((items) => {
     setTopics(Object.fromEntries(items.map((conversation) => [conversation.id, conversation.topic ?? ""])));
@@ -23,7 +23,7 @@ export function useConversationInbox() {
   }, []);
 
   const refreshInbox = useCallback(async () => {
-    if (!hasSession()) {
+    if (!sessionActive) {
       setConversationItems([]);
       setTopics({});
       setClosedIds(new Set());
@@ -37,6 +37,9 @@ export function useConversationInbox() {
     setError("");
     const response = await dialogService.fetchDialogs({ page: 1, pageSize: 50 });
     if (response.status !== "ok") {
+      if (response.error?.code === "unauthorized" || response.error?.code === "session_revoked" || response.error?.code === "session_expired") {
+        clearTenantSession();
+      }
       setError(response.error?.message ?? "Не удалось загрузить список диалогов.");
       setLoading(false);
       setRefreshing(false);
@@ -49,11 +52,35 @@ export function useConversationInbox() {
     setLoading(false);
     setRefreshing(false);
     return { ok: true, response };
-  }, [syncMetaFromItems]);
+  }, [sessionActive, syncMetaFromItems]);
 
   useEffect(() => {
     void refreshInbox();
   }, [refreshInbox, sessionActive]);
+
+  useEffect(() => {
+    if (!sessionActive) {
+      setAssignees([]);
+      return;
+    }
+
+    let ignore = false;
+    void dialogService.fetchAssignees().then((response) => {
+      if (ignore) return;
+      const items = response.status === "ok" && Array.isArray(response.data?.items)
+        ? response.data.items
+        : [];
+      setAssignees(items.map((item) => ({
+        id: String(item?.id ?? ""),
+        name: String(item?.name ?? ""),
+        role: String(item?.role ?? "")
+      })).filter((item) => item.id && item.name));
+    });
+
+    return () => {
+      ignore = true;
+    };
+  }, [sessionActive]);
 
   const appendMessage = useCallback(async (conversationId, message, options = {}) => {
     const optimistic = options.optimistic ?? true;
@@ -224,6 +251,26 @@ export function useConversationInbox() {
     return { ok: true, response };
   }, []);
 
+  const applyConversationAssignment = useCallback(async (conversationId, payload) => {
+    const response = await dialogService.assignConversation({ conversationId, ...payload });
+    if (response.status !== "ok") {
+      const message = response.error?.message ?? "Не удалось назначить оператора.";
+      setError(message);
+      return { ok: false, message, response };
+    }
+
+    const serverConversation = response.data?.conversation
+      ? mapApiConversation(response.data.conversation)
+      : null;
+    if (serverConversation) {
+      setConversationItems((current) => current.map((conversation) => (
+        conversation.id === conversationId ? serverConversation : conversation
+      )));
+    }
+    setError("");
+    return { ok: true, response };
+  }, []);
+
   const handleRealtimeEvent = useCallback((event) => {
     if (event.eventName !== "message.created" && event.eventName !== "conversation.updated") {
       return;
@@ -265,7 +312,9 @@ export function useConversationInbox() {
 
   return useMemo(() => ({
     appendMessage,
+    applyConversationAssignment,
     applyConversationStatus,
+    assignees,
     closedIds,
     conversationItems,
     error,
@@ -278,7 +327,9 @@ export function useConversationInbox() {
     topics
   }), [
     appendMessage,
+    applyConversationAssignment,
     applyConversationStatus,
+    assignees,
     closedIds,
     conversationItems,
     error,

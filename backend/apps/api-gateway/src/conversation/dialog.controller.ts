@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
-import { RequireServiceAdminAction } from "../identity/service-admin-auth.js";
+import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
 import { RequireTenantOperatorPermission, type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
 import { ConversationService } from "./conversation.service.js";
 import { TenantOperatorOrServiceAdminGuard } from "./tenant-operator-or-service-admin.guard.js";
@@ -17,11 +17,9 @@ export class DialogController {
   @ApiOkResponse({ description: "Dialog list envelope with backend-ready pagination" })
   fetchDialogs(
     @Query() filters: { channel?: string; page?: string; pageSize?: string; query?: string; savedPresetId?: string; status?: string; topic?: string },
-    @Req() request: TenantOperatorRequest
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
   ) {
-    return this.conversationService.fetchDialogs(filters, {
-      tenantId: request.tenantOperatorContext?.tenantId
-    });
+    return this.conversationService.fetchDialogs(filters, dialogContextFromRequest(request));
   }
 
   @Post("attachments")
@@ -29,8 +27,32 @@ export class DialogController {
   @RequireServiceAdminAction("files.write")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "Attachment upload descriptor envelope" })
-  uploadAttachment(@Body() payload: { channel: string; fileName: string; sizeBytes?: number }) {
-    return this.conversationService.uploadAttachment(payload);
+  uploadAttachment(
+    @Body() payload: { channel: string; fileName: string; mimeType?: string; sizeBytes?: number },
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
+  ) {
+    return this.conversationService.uploadAttachment(payload, dialogContextFromRequest(request));
+  }
+
+  @Post("attachments/:fileId/finalize")
+  @RequireTenantOperatorPermission("files.write")
+  @RequireServiceAdminAction("files.write")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Attachment upload finalize envelope" })
+  finalizeAttachmentUpload(
+    @Param("fileId") fileId: string,
+    @Body() payload: { checksum?: string },
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
+  ) {
+    return this.conversationService.finalizeAttachmentUpload({ ...payload, fileId }, dialogContextFromRequest(request));
+  }
+
+  @Get("attachments/:fileId/status")
+  @RequireTenantOperatorPermission("files.read")
+  @RequireServiceAdminAction("files.read")
+  @ApiOkResponse({ description: "Attachment upload status envelope" })
+  fetchAttachmentUploadStatus(@Param("fileId") fileId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) {
+    return this.conversationService.fetchAttachmentUploadStatus(fileId, dialogContextFromRequest(request));
   }
 
   @Post("outbound")
@@ -38,18 +60,40 @@ export class DialogController {
   @RequireServiceAdminAction("outbound.start")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "Outbound conversation request envelope" })
-  createOutboundConversationRequest(@Body() payload: { channel: string; clientName?: string; message: string; phone: string; topic: string }) {
-    return this.conversationService.createOutboundConversationRequest(payload);
+  createOutboundConversationRequest(
+    @Body() payload: { channel: string; clientName?: string; message: string; phone: string; topic: string },
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
+  ) {
+    return this.conversationService.createOutboundConversationRequest(payload, dialogContextFromRequest(request));
+  }
+
+  @Get("assignees")
+  @RequireTenantOperatorPermission("dialogs.read")
+  @RequireServiceAdminAction("dialogs.read")
+  @ApiOkResponse({ description: "Active tenant users available for dialog assignment" })
+  fetchAssignees(@Req() request: TenantOperatorRequest & ServiceAdminRequest) {
+    return this.conversationService.fetchAssignees(dialogContextFromRequest(request));
   }
 
   @Get(":conversationId")
   @RequireTenantOperatorPermission("dialogs.read")
   @RequireServiceAdminAction("dialogs.read")
   @ApiOkResponse({ description: "Dialog detail envelope" })
-  fetchDialogDetail(@Param("conversationId") conversationId: string, @Req() request: TenantOperatorRequest) {
-    return this.conversationService.fetchDialogDetail(conversationId, {
-      tenantId: request.tenantOperatorContext?.tenantId
-    });
+  fetchDialogDetail(@Param("conversationId") conversationId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) {
+    return this.conversationService.fetchDialogDetail(conversationId, dialogContextFromRequest(request));
+  }
+
+  @Patch(":conversationId/assignment")
+  @RequireTenantOperatorPermission("dialogs.manage")
+  @RequireServiceAdminAction("dialogs.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Assign or transfer a dialog and record routing activity" })
+  assignConversation(
+    @Param("conversationId") conversationId: string,
+    @Body() payload: { operatorId?: string; reason?: string },
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
+  ) {
+    return this.conversationService.assignConversation({ ...payload, conversationId }, dialogContextFromRequest(request));
   }
 
   @Patch(":conversationId/status")
@@ -60,11 +104,9 @@ export class DialogController {
   transitionConversationStatus(
     @Param("conversationId") conversationId: string,
     @Body() payload: { nextStatus?: string; roleMode?: string; topic?: string },
-    @Req() request: TenantOperatorRequest
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
   ) {
-    return this.conversationService.transitionConversationStatus({ ...payload, conversationId }, {
-      tenantId: request.tenantOperatorContext?.tenantId
-    });
+    return this.conversationService.transitionConversationStatus({ ...payload, conversationId }, dialogContextFromRequest(request));
   }
 
   @Post(":conversationId/messages")
@@ -75,10 +117,13 @@ export class DialogController {
   appendMessage(
     @Param("conversationId") conversationId: string,
     @Body() payload: { attachments?: Array<Record<string, unknown>>; mode?: "internal" | "reply"; text?: string },
-    @Req() request: TenantOperatorRequest
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
   ) {
-    return this.conversationService.appendMessage({ ...payload, conversationId }, {
-      tenantId: request.tenantOperatorContext?.tenantId
-    });
+    return this.conversationService.appendMessage({ ...payload, conversationId }, dialogContextFromRequest(request));
   }
+}
+
+function dialogContextFromRequest(request: TenantOperatorRequest & ServiceAdminRequest): { tenantId?: string } {
+  const tenantId = request.tenantOperatorContext?.tenantId ?? request.serviceAdminContext?.currentTenantId;
+  return tenantId ? { tenantId } : {};
 }

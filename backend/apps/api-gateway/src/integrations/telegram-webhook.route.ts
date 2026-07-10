@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
-import type { ConversationRecord } from "../conversation/conversation.fixtures.js";
+import type { ConversationRecord } from "../conversation/conversation.types.js";
 import type { ConversationService } from "../conversation/conversation.service.js";
 import type { ConversationRepository } from "../conversation/conversation.repository.js";
-import type { IntegrationRepository } from "./integration.repository.js";
+import type { TelegramConnectionStoredRecord } from "./integration.repository.js";
 import { resolveTelegramTenantByWebhookSecret } from "./telegram-channel-connection.js";
 
 const INTEGRATION_SERVICE = "integrationService";
@@ -19,15 +19,21 @@ export interface TelegramWebhookRouteInput {
   conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   headers: Record<string, string | undefined>;
-  integrationRepository: Pick<IntegrationRepository, "listTelegramConnections">;
+  integrationRepository: TelegramConnectionReader;
   now?: Date;
+}
+
+export interface TelegramConnectionReader {
+  listTelegramConnections(): TelegramConnectionStoredRecord[];
+  listTelegramConnectionsAsync?(): Promise<TelegramConnectionStoredRecord[]>;
 }
 
 export function loadTelegramWebhookConfig(
   env: Record<string, string | undefined> = process.env
 ): TelegramWebhookConfig {
+  const ingressMode = String(env.TELEGRAM_INGRESS_MODE ?? "").trim().toLowerCase();
   return {
-    enabled: env.TELEGRAM_WEBHOOK_ENABLED === "true",
+    enabled: ingressMode ? ingressMode === "webhook" : env.TELEGRAM_WEBHOOK_ENABLED === "true",
     legacySecret: String(env.TELEGRAM_WEBHOOK_SECRET ?? "").trim() || undefined,
     legacyTenantId: String(env.PILOT_TELEGRAM_TENANT_ID ?? env.TELEGRAM_WEBHOOK_TENANT_ID ?? "").trim() || undefined
   };
@@ -42,8 +48,11 @@ export async function handleTelegramWebhookFromRoute(
   }
 
   const providedSecret = input.headers["x-telegram-bot-api-secret-token"];
+  const telegramConnections = input.integrationRepository.listTelegramConnectionsAsync
+    ? await input.integrationRepository.listTelegramConnectionsAsync()
+    : input.integrationRepository.listTelegramConnections();
   const tenantConnection = resolveTelegramTenantByWebhookSecret(
-    input.integrationRepository.listTelegramConnections(),
+    telegramConnections,
     providedSecret
   );
   const tenantId = tenantConnection?.tenantId
@@ -59,6 +68,7 @@ export async function handleTelegramWebhookFromRoute(
   }
 
   const conversation = await resolveOrCreateTelegramConversation({
+    botId: tenantConnection?.botId ?? undefined,
     chatId: parsed.chatId,
     conversationRepository: input.conversationRepository,
     displayName: parsed.displayName,
@@ -72,7 +82,7 @@ export async function handleTelegramWebhookFromRoute(
 
   const normalized = await input.conversationService.normalizeInboundEvent("telegram", {
     conversationId: conversation.id,
-    eventId: parsed.eventId,
+    eventId: telegramTenantEventId(tenantId, tenantConnection?.botId ?? undefined, parsed.eventId),
     text: parsed.text
   });
 
@@ -126,6 +136,7 @@ function timingSafeEqualStrings(left: string, right: string): boolean {
 }
 
 export async function resolveOrCreateTelegramConversation(input: {
+  botId?: string;
   chatId: string;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversation">;
   displayName: string;
@@ -139,7 +150,7 @@ export async function resolveOrCreateTelegramConversation(input: {
     return null;
   }
 
-  const conversationId = chatId;
+  const conversationId = telegramConversationId(tenantId, input.botId, chatId);
   const existing = await input.conversationRepository.findConversation(conversationId);
 
   if (existing) {
@@ -148,6 +159,11 @@ export async function resolveOrCreateTelegramConversation(input: {
     }
 
     return existing;
+  }
+
+  const legacy = await input.conversationRepository.findConversation(chatId);
+  if (legacy && resolveConversationTenantId(legacy) === tenantId) {
+    return legacy;
   }
 
   const displayName = input.displayName.trim() || `Telegram ${chatId}`;
@@ -170,6 +186,7 @@ export async function resolveOrCreateTelegramConversation(input: {
     tags: compactTags([
       "telegram",
       `chat:${chatId}`,
+      input.botId ? `bot:${input.botId}` : "",
       input.username ? `username:${input.username}` : ""
     ]),
     tenantId,
@@ -178,6 +195,19 @@ export async function resolveOrCreateTelegramConversation(input: {
   };
 
   return input.conversationRepository.saveConversation(conversation);
+}
+
+export function telegramConversationId(tenantId: string, botId: string | undefined, chatId: string): string {
+  const scope = `${String(tenantId).trim()}:${String(botId ?? "default").trim() || "default"}`;
+  return `tg_${createHash("sha256").update(`${scope}:${String(chatId).trim()}`).digest("hex").slice(0, 24)}`;
+}
+
+export function telegramTenantEventId(tenantId: string, botId: string | undefined, providerEventId: string): string {
+  const scope = createHash("sha256")
+    .update(`${String(tenantId).trim()}:${String(botId ?? "default").trim() || "default"}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `telegram:${scope}:${String(providerEventId).replace(/^telegram:/, "")}`;
 }
 
 function parseTelegramUpdate(body: Record<string, unknown>) {

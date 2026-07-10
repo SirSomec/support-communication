@@ -1,15 +1,7 @@
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
 import { redactSensitiveText } from "@support-communication/redaction";
-import {
-  billingInvoices,
-  billingSubscriptions,
-  billingTariffs,
-  tenantBillingStates,
-  type BillingInvoice,
-  type BillingSubscription,
-  type BillingTariff,
-  type TenantBillingState
-} from "./billing.fixtures.js";
+import type { BillingInvoice, BillingSubscription, BillingTariff, TenantBillingState } from "./billing.types.js";
+import { billingInvoices, billingSubscriptions, billingTariffs, tenantBillingStates } from "./seed-catalog.js";
 
 export type BillingTenantState = TenantBillingState;
 export type BillingInvoiceState = BillingInvoice;

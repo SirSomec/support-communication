@@ -13,6 +13,7 @@ import { installRealtimeWebSocketReplay } from "./conversation/realtime.websocke
 import { EnvelopeHttpExceptionFilter } from "./http-exception.filter.js";
 import { configureIdentityRepository } from "./identity/bootstrap.js";
 import { configureIntegrationRepository } from "./integrations/bootstrap.js";
+import { configureNotificationRepository } from "./notifications/bootstrap.js";
 import { setupOpenApi } from "./openapi.js";
 import { configureOperationsRepository } from "./operations/bootstrap.js";
 import { configurePlatformRepository } from "./platform/bootstrap.js";
@@ -24,18 +25,22 @@ import type { Socket } from "node:net";
 
 export async function bootstrap(): Promise<void> {
   const config = loadBackendConfig();
+  if (config.NODE_ENV === "production" && process.env.ALLOW_DEMO_SERVICE_ADMIN_HEADERS === "true") {
+    throw new Error("Production startup blocked: ALLOW_DEMO_SERVICE_ADMIN_HEADERS must not be enabled.");
+  }
   configureAutomationRepository(config);
   configureIdentityRepository(config);
   configureBillingRepository(config);
   configureConversationRepository(config);
   configureConversationRealtimeFanout(config);
   configureWorkspaceRepository(config);
-  configureRoutingRepository(config);
+  const routingRepository = configureRoutingRepository(config);
+  await routingRepository.hydrateStateSnapshot();
   configureReportRepository(config);
   configureIntegrationRepository(config);
+  configureNotificationRepository(config);
   configurePlatformRepository(config);
   configureOperationsRepository(config);
-
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true
   });
@@ -50,7 +55,6 @@ export async function bootstrap(): Promise<void> {
     config,
     conversationService: app.get(ConversationService)
   });
-
   await app.listen(config.PORT);
 
   writeStructuredLog("info", "API Gateway started", {

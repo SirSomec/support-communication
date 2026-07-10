@@ -1,11 +1,11 @@
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
-import { DemoServiceAdminGuard } from "../identity/demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
 import { FeatureFlagService } from "./feature-flag.service.js";
 
 @ApiTags("feature-flags")
-@UseGuards(DemoServiceAdminGuard)
+@UseGuards(ServiceAdminSessionGuard)
 @Controller("feature-flags")
 export class FeatureFlagController {
   constructor(private readonly featureFlagService: FeatureFlagService) {}

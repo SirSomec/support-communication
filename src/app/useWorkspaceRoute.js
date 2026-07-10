@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { hasSession } from "./sessionStore.js";
 
 const routeByHash = {
   "#/app": { namespace: "app", view: "dialogs" },
@@ -12,10 +11,15 @@ const routeByHash = {
 
 const defaultRoute = { namespace: "public", view: "landing" };
 
-export function useWorkspaceRoute({ access, onDenied, onAuthenticated }) {
+export function useWorkspaceRoute({
+  access,
+  onDenied,
+  onAuthenticated,
+  tenantSession
+}) {
   const [route, setRoute] = useState(() => parseCurrentRoute());
   const isServiceAdminDenied = route.namespace === "service-admin" && !access.canServiceAdmin;
-  const isAppDenied = route.namespace === "app" && !hasSession();
+  const isAppDenied = route.namespace === "app" && !tenantSession.loading && !tenantSession.authenticated;
 
   useEffect(() => {
     function handleHashChange() {
@@ -27,15 +31,19 @@ export function useWorkspaceRoute({ access, onDenied, onAuthenticated }) {
   }, []);
 
   useEffect(() => {
+    if (tenantSession.loading) {
+      return;
+    }
+
     if (isAppDenied) {
-      onDenied?.("Войдите в аккаунт оператора, чтобы открыть рабочее место.");
+      onDenied?.(tenantSession.denialReason ?? "Войдите в аккаунт оператора, чтобы открыть рабочее место.");
       setRoute({ namespace: "auth", view: "login" });
 
       if (window.location.hash === "#/app") {
         window.history.replaceState(null, "", "#/login");
       }
     }
-  }, [isAppDenied, onDenied]);
+  }, [isAppDenied, onDenied, tenantSession.denialReason, tenantSession.loading]);
 
   useEffect(() => {
     if (isServiceAdminDenied) {
@@ -65,15 +73,17 @@ export function useWorkspaceRoute({ access, onDenied, onAuthenticated }) {
     openLanding: () => navigate("public", "landing"),
     openOnboarding: () => navigate("onboarding", "organization"),
     openServiceAdmin: () => navigate("service-admin", "dashboard"),
-    completeAuth: (payload) => {
+    completeAuth: async (payload) => {
       onAuthenticated?.(payload);
+      await tenantSession.refresh?.({ force: true });
       navigate("app", "dialogs");
     },
-    completeOnboarding: (payload) => {
+    completeOnboarding: async (payload) => {
       onAuthenticated?.(payload);
+      await tenantSession.refresh?.({ force: true });
       navigate("app", "dialogs");
     }
-  }), [navigate, onAuthenticated]);
+  }), [navigate, onAuthenticated, tenantSession]);
 
   return {
     route,

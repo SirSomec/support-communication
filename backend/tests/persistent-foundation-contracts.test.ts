@@ -18,8 +18,9 @@ import { ConversationRepository } from "../apps/api-gateway/src/conversation/con
 import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
 import { configureIdentityRepository } from "../apps/api-gateway/src/identity/bootstrap.ts";
 import { AuthService } from "../apps/api-gateway/src/identity/auth.service.ts";
-import { DemoServiceAdminGuard } from "../apps/api-gateway/src/identity/demo-service-admin.guard.ts";
-import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { ServiceAdminSessionGuard } from "../apps/api-gateway/src/identity/service-admin-session.guard.ts";
+import { IdentityRepository, hashServiceAdminToken } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { createMfaOtpRuntime } from "../apps/api-gateway/src/identity/mfa-otp.ts";
 import { TenantService } from "../apps/api-gateway/src/identity/tenant.service.ts";
 import { FeatureFlagService } from "../apps/api-gateway/src/feature-flags/feature-flag.service.ts";
 import { IncidentService } from "../apps/api-gateway/src/incidents/incident.service.ts";
@@ -40,6 +41,7 @@ import { PlatformMonitoringService } from "../apps/api-gateway/src/platform/plat
 import { configureReportRepository } from "../apps/api-gateway/src/reports/bootstrap.ts";
 import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
+import { exportJobFixtures } from "../apps/api-gateway/src/reports/seed-catalog.ts";
 import { configureRoutingRepository } from "../apps/api-gateway/src/routing/bootstrap.ts";
 import { RoutingRepository } from "../apps/api-gateway/src/routing/routing.repository.ts";
 import { RoutingService } from "../apps/api-gateway/src/routing/routing.service.ts";
@@ -214,7 +216,7 @@ describe("persistent backend foundation and identity services", () => {
         channel: "SDK",
         fileName: "invoice.pdf",
         sizeBytes: 2048
-      });
+      }, { tenantId: "tenant-volga" });
       assert.equal(upload.status, "ok");
 
       const outbound = await firstConversations.createOutboundConversationRequest({
@@ -222,7 +224,7 @@ describe("persistent backend foundation and identity services", () => {
         message: "Persistent proactive message",
         phone: "+7 999 111-22-33",
         topic: "Delivery / Status"
-      });
+      }, { tenantId: "tenant-volga" });
       assert.equal(outbound.status, "ok");
 
       const inbound = await firstConversations.normalizeInboundEvent("telegram", {
@@ -2290,27 +2292,28 @@ describe("persistent backend foundation and identity services", () => {
       const filePath = join(workspace, "runtime-routing.json");
       configureRoutingRepository({ ROUTING_STORE_FILE: filePath });
       const first = new RoutingService();
+      const routingContext = { tenantId: "tenant-volga" };
 
       const assigned = await first.createAssignment({
         action: "assign",
         conversationId: "alexey",
         reason: "Runtime persistent assignment",
         targetOperatorId: "operator-anna"
-      });
+      }, routingContext);
       const paused = await first.pauseSla({
         conversationId: "maria",
         durationMinutes: 15,
         reason: "Runtime persistent SLA pause"
-      });
+      }, routingContext);
       const rescue = await first.startRescue({
         conversationId: "vladimir",
         reason: "Runtime persistent rescue"
-      });
+      }, routingContext);
       const resolved = await first.resolveRescue({
         conversationId: "vladimir",
         outcome: "returned_to_queue",
         reason: "Runtime persistent rescue return"
-      });
+      }, routingContext);
       assert.equal(assigned.status, "ok");
       assert.equal(paused.status, "ok");
       assert.equal(rescue.status, "ok");
@@ -2318,8 +2321,8 @@ describe("persistent backend foundation and identity services", () => {
 
       configureRoutingRepository({ ROUTING_STORE_FILE: filePath });
       const second = new RoutingService();
-      const workload = await second.fetchWorkload({ channel: "VK" });
-      const rescueReport = await second.fetchRescueReport({ period: "today" });
+      const workload = await second.fetchWorkload({ channel: "VK" }, routingContext);
+      const rescueReport = await second.fetchRescueReport({ period: "today" }, routingContext);
       const routingRepository = RoutingRepository.open({ filePath });
       const jobs = await routingRepository.listJobs();
 
@@ -2343,7 +2346,10 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-reports.json");
-      configureReportRepository({ REPORT_STORE_FILE: filePath });
+      const reportRepository = configureReportRepository({ REPORT_STORE_FILE: filePath });
+      for (const fixture of structuredClone(exportJobFixtures)) {
+        reportRepository.saveExportJob(fixture);
+      }
       const first = new ReportService();
 
       const queued = await first.requestReportExport({
@@ -2387,8 +2393,8 @@ describe("persistent backend foundation and identity services", () => {
       const untouchedReadyDescriptor = await second.getExportFileDescriptor("export-2418", { canDownload: true });
 
       const exportJobs = workspaceEnvelope.data.exportJobs as Array<Record<string, unknown>>;
-      const reportRepository = ReportRepository.open({ filePath });
-      const state = reportRepository.readState();
+      const reopenedReportRepository = ReportRepository.open({ filePath });
+      const state = reopenedReportRepository.readState();
 
       assert.equal(existsSync(filePath), true);
       assert.ok(exportJobs.some((job) => job.id === queued.data.job.id && job.statusKey === "queued"));
@@ -2905,26 +2911,26 @@ describe("persistent backend foundation and identity services", () => {
         flowNodes: [{ id: "start", type: "message" }],
         flowEdges: [],
         idempotencyKey: "persistent-bot-publish"
-      });
+      }, { tenantId: "tenant-demo" });
       const testRun = await first.testBotScenario({
         id: "bot-persistent",
         name: "Persistent bot",
         testCases: [{ id: "happy-path", expected: "handoff" }]
-      });
+      }, { tenantId: "tenant-demo" });
       const proactive = await first.saveProactiveRule({
         id: "rule-persistent",
         channels: ["VK"],
         activeVariant: "B",
         cooldown: "12h",
         segment: "returning"
-      });
+      }, { tenantId: "tenant-demo" });
       assert.equal(published.status, "ok");
       assert.equal(testRun.status, "ok");
       assert.equal(proactive.status, "ok");
 
       configureAutomationRepository({ AUTOMATION_STORE_FILE: filePath });
       const second = new AutomationService();
-      const workspaceEnvelope = await second.fetchAutomationWorkspace();
+      const workspaceEnvelope = await second.fetchAutomationWorkspace({ tenantId: "tenant-demo" });
       const duplicate = await second.publishBotScenario({
         id: "bot-persistent",
         name: "Persistent bot",
@@ -2932,7 +2938,7 @@ describe("persistent backend foundation and identity services", () => {
         flowNodes: [{ id: "start", type: "message" }],
         flowEdges: [],
         idempotencyKey: "persistent-bot-publish"
-      });
+      }, { tenantId: "tenant-demo" });
       const repository = AutomationRepository.open({ filePath });
       const state = repository.readState();
 
@@ -3342,11 +3348,21 @@ describe("persistent backend foundation and identity services", () => {
       mfaVerified: true,
       ttlMinutes: 30
     });
+    repository.createServiceAdminTokenPair({
+      accessTokenExpiresAt: "2099-12-31T23:59:59.000Z",
+      accessTokenHash: hashServiceAdminToken("prod-access-token"),
+      id: "prod-token-pair",
+      issuedAt: "2026-07-02T00:00:00.000Z",
+      refreshTokenExpiresAt: "2100-01-01T23:59:59.000Z",
+      refreshTokenHash: hashServiceAdminToken("prod-refresh-token"),
+      sessionId: session.id,
+      subjectId: session.adminId
+    });
 
-    const guard = new DemoServiceAdminGuard(reflectorForAction("tenants.manage"));
+    const guard = new ServiceAdminSessionGuard(reflectorForAction("tenants.manage"));
     const request = {
       headers: {
-        authorization: `Bearer ${session.id}`,
+        authorization: "Bearer prod-access-token",
         "x-demo-service-admin-actor-id": "spoofed-admin",
         "x-demo-service-admin-actor-name": "Spoofed Admin",
         "x-demo-service-admin-mfa-verified": "true",
@@ -3361,9 +3377,9 @@ describe("persistent backend foundation and identity services", () => {
     assert.equal(request.serviceAdminContext.sessionId, session.id);
     assert.deepEqual(request.serviceAdminContext.permissions, ["tenants.manage"]);
 
-    const deniedGuard = new DemoServiceAdminGuard(reflectorForAction("billing.change"));
+    const deniedGuard = new ServiceAdminSessionGuard(reflectorForAction("billing.change"));
     await assert.rejects(
-      () => deniedGuard.canActivate(executionContextForRequest({ headers: { authorization: `Bearer ${session.id}`, "x-demo-service-admin-permissions": "*" } })),
+      () => deniedGuard.canActivate(executionContextForRequest({ headers: { authorization: "Bearer prod-access-token", "x-demo-service-admin-permissions": "*" } })),
       /permission_denied|permission/
     );
     const denials = await repository.listPermissionDenialEvents();
@@ -3371,12 +3387,12 @@ describe("persistent backend foundation and identity services", () => {
     assert.equal(denials[0].actorId, "svc-admin-prod");
     assert.equal(denials[0].action, "billing.change");
     assert.equal(denials[0].resource, "service-admin");
-    assert.equal(denials[0].roleKey, "admin");
+    assert.equal(denials[0].roleKey, "service_admin");
     assert.equal(denials[0].immutable, true);
 
     repository.revokeServiceAdminSession(session.id);
     await assert.rejects(
-      () => guard.canActivate(executionContextForRequest({ headers: { authorization: `Bearer ${session.id}` } })),
+      () => guard.canActivate(executionContextForRequest({ headers: { authorization: "Bearer prod-access-token" } })),
       /session_revoked|revoked/
     );
   });
@@ -3402,7 +3418,7 @@ describe("persistent backend foundation and identity services", () => {
       subjectId: "svc-admin-token-prod"
     });
 
-    const guard = new DemoServiceAdminGuard(reflectorForAction("tenants.manage"));
+    const guard = new ServiceAdminSessionGuard(reflectorForAction("tenants.manage"));
     const request = {
       headers: {
         authorization: "Bearer guard-access-token",
@@ -3466,7 +3482,7 @@ describe("persistent backend foundation and identity services", () => {
         ttlMinutes: 30
       });
 
-      const guard = new DemoServiceAdminGuard(reflectorForAction("tenants.manage"));
+      const guard = new ServiceAdminSessionGuard(reflectorForAction("tenants.manage"));
       await assert.rejects(
         () => guard.canActivate(executionContextForRequest({
           headers: {
@@ -3490,7 +3506,7 @@ describe("persistent backend foundation and identity services", () => {
         NODE_ENV: "production"
       }));
 
-      const guard = new DemoServiceAdminGuard(reflectorForAction("tenants.manage"));
+      const guard = new ServiceAdminSessionGuard(reflectorForAction("tenants.manage"));
       await assert.rejects(
         () => guard.canActivate(executionContextForRequest({
           headers: {
@@ -3509,7 +3525,7 @@ describe("persistent backend foundation and identity services", () => {
     }
   });
 
-  it("rejects demo-key service-admin login completion outside development and test", async () => {
+  it("creates persisted service-admin sessions after MFA without demo headers in production", async () => {
     const previous = snapshotEnv();
     try {
       Object.assign(process.env, requiredConfigEnv({
@@ -3517,7 +3533,15 @@ describe("persistent backend foundation and identity services", () => {
         NODE_ENV: "production"
       }));
       const repository = IdentityRepository.inMemory();
-      const auth = new AuthService(repository);
+      const auth = new AuthService(repository, createMfaOtpRuntime({
+        delivery: {
+          async send({ challengeId }) {
+            return { providerMessageId: `test-${challengeId}` };
+          }
+        },
+        generateOtp: () => "123456",
+        hashKey: "production-session-contract-mfa-key"
+      }));
       const challenge = await auth.login({
         email: "service-admin@example.com",
         password: "correct-password"
@@ -3534,11 +3558,12 @@ describe("persistent backend foundation and identity services", () => {
         mfaChallengeId: challenge.data.mfaChallengeId,
         otp: "123456",
         password: "correct-password"
-      }, { privileged: true });
+      });
 
-      assert.equal(completion.status, "denied");
-      assert.equal(completion.error?.code, "production_identity_provider_required");
-      assert.equal(sessionsCreated, 0);
+      assert.equal(completion.status, "ok");
+      assert.equal(completion.data.authenticated, true);
+      assert.equal(typeof completion.data.accessToken, "string");
+      assert.equal(sessionsCreated, 1);
     } finally {
       restoreEnv(previous);
     }
@@ -3550,7 +3575,7 @@ describe("persistent backend foundation and identity services", () => {
 
     for (const fileUrl of listControllerFiles(controllerRoot)) {
       const content = readFileSync(fileUrl, "utf8");
-      if (!content.includes("DemoServiceAdminGuard")) {
+      if (!content.includes("ServiceAdminSessionGuard")) {
         continue;
       }
 
@@ -3565,13 +3590,13 @@ describe("persistent backend foundation and identity services", () => {
         }
 
         if (/^export class \w+/.test(trimmed)) {
-          classGuarded = decorators.some((decorator) => decorator.includes("DemoServiceAdminGuard"));
+          classGuarded = decorators.some((decorator) => decorator.includes("ServiceAdminSessionGuard"));
           decorators = [];
           continue;
         }
 
         const routeDecorated = decorators.some((decorator) => /^@(Delete|Get|Patch|Post|Put)\b/.test(decorator));
-        const methodGuarded = decorators.some((decorator) => decorator.includes("DemoServiceAdminGuard"));
+        const methodGuarded = decorators.some((decorator) => decorator.includes("ServiceAdminSessionGuard"));
         const methodMatch = /^([a-zA-Z_$][\w$]*)\s*\(/.exec(trimmed);
         if (routeDecorated && methodMatch && (classGuarded || methodGuarded) && !decorators.some((decorator) => decorator.startsWith("@RequireServiceAdminAction"))) {
           missing.push(`${fileUrl.pathname}:${index + 1}:${methodMatch[1]}`);
@@ -3614,19 +3639,27 @@ function reflectorForAction(action: string) {
 function requiredConfigEnv(overrides: Record<string, string>): Record<string, string> {
   return {
     API_VERSION: "v1",
+    BILLING_REPOSITORY: "prisma",
+    CONVERSATION_REPOSITORY: "prisma",
     DATABASE_URL: "postgresql://support:support@127.0.0.1:5432/support_communication",
     DEMO_SERVICE_ADMIN_KEY: "dev-service-admin-key",
+    IDENTITY_REPOSITORY: "prisma",
+    JWT_ACCESS_SECRET: "test-access-secret-16chars",
+    JWT_REFRESH_SECRET: "test-refresh-secret-16chars",
     LOG_LEVEL: "info",
     MAIL_HOST: "127.0.0.1",
     MAIL_PORT: "1025",
     NODE_ENV: "test",
     PORT: "4191",
+    PUBLIC_API_KEY_SECRET: "test-public-api-secret",
     REDIS_URL: "redis://127.0.0.1:6379",
+    ROUTING_REPOSITORY: "prisma",
     S3_ACCESS_KEY: "minio",
     S3_BUCKET: "support-communication-local",
     S3_ENDPOINT: "http://127.0.0.1:9000",
     S3_SECRET_KEY: "minio-password",
     SERVICE_NAME: "api-gateway",
+    WORKSPACE_REPOSITORY: "prisma",
     ...overrides
   };
 }

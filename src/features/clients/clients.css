@@ -9,6 +9,30 @@
   min-width: 0;
 }
 
+.client-segment-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #31415b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.client-segment-control select {
+  min-width: 150px;
+  height: 30px;
+  padding: 0 26px 0 8px;
+  border: 0;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+}
+
 .clients-table .entity-head,
 .clients-table .entity-row {
   grid-template-columns: 1fr 150px 96px 96px minmax(160px, 1fr) 90px;

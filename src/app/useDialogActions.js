@@ -31,17 +31,13 @@ export function useDialogActions({
     setTopics((current) => ({ ...current, [selected.id]: value }));
 
     if (value && value !== previousTopic) {
-      appendMessage(selected.id, {
-        actor: "Иван П.",
-        detail: previousTopic ? `Тематика изменена: ${previousTopic} -> ${value}` : `Проставлена тематика: ${value}`,
+      applyConversationStatus(selected.id, selectedStatus, {
+        detail: previousTopic ? `Topic changed: ${previousTopic} -> ${value}` : `Topic selected: ${value}`,
         eventKind: "topic",
-        fromTopic: previousTopic || "Не выбрана",
-        text: previousTopic ? `Тематика изменена: ${previousTopic} -> ${value}` : `Проставлена тематика: ${value}`,
-        toTopic: value,
-        type: "event",
-        time: "сейчас"
+        fromTopic: previousTopic || "Not selected",
+        toTopic: value
       });
-      setToast("Тематика сохранена и попадет в audit trail.");
+      setToast("Тематика сохранена в audit trail.");
     }
   }
 

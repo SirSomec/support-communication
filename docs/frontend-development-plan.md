@@ -238,10 +238,10 @@
 Уже сделано:
 
 - Общие UI-примитивы вынесены в `src/ui.jsx`.
-- Основные seed-данные разнесены в `src/data/*.js`, а `src/data.js` оставлен публичным barrel-агрегатором.
+- Общие seed-данные удалены из runtime: `src/data.js`, `src/data/*` и `src/services/mockBackend.js` больше не используются продуктовыми экранами.
 - Ролевая модель и доменная модель диалогов вынесены в `src/app/access.js` и `src/app/dialogModel.js`.
 - Helper `createScreenStateItems` вынесен в `src/app/screenState.js` для переиспользования product-screen state strip.
-- Модель уведомлений вынесена в `src/app/notificationModel.js`.
+- Модель уведомлений вынесена в `src/app/notificationModel.js`; runtime-данные загружаются через `src/services/notificationService.js` и `GET /api/v1/notifications`.
 - Правила AI explainability и pre-send quality check вынесены в `src/app/aiQualityModel.js`.
 - Sidebar и TopBar вынесены в `src/features/app-shell/AppShell.jsx` без изменения CSS-контрактов, topbar notification center и quick action flow.
 - PanelScreen вынесен в `src/features/panel/PanelScreen.jsx`; section-router подключает его напрямую, а данные операторов/очередей больше не импортируются в общий `sections.jsx`.
@@ -252,7 +252,7 @@
 - VisitorsScreen вынесен в `src/features/visitors/VisitorsScreen.jsx` вместе с proactive builder helper `InfoPill` и локальным списком каналов proactive.
 - AutomationScreen вынесен в `src/features/automation/AutomationScreen.jsx` вместе с bot flow node dictionary, import/export flow logic и channel assignment state.
 - SettingsScreen вынесен в `src/features/settings/SettingsScreen.jsx`; legacy `src/sections.jsx` удален из активной архитектуры.
-- AuditScreen добавлен в `src/features/audit/AuditScreen.jsx` вместе с отдельными audit seed-данными `src/data/audit.js`.
+- AuditScreen добавлен в `src/features/audit/AuditScreen.jsx` и загружает audit workspace через `auditService`.
 - Topbar notification center вынесен в `src/features/notifications/NotificationCenter.jsx`, а его CSS-контракты и responsive overrides вынесены в `src/features/notifications/notifications.css` без изменения smoke-селекторов.
 - ConversationList/TabButton, ChatPane, CustomerPanel/PanelSection/InfoRow, DialogModals, Composer, inline AI panel и attachment preview вынесены в `src/features/dialogs/*` без изменения smoke-селекторов; CSS модалок DialogModals вынесен в `src/features/dialogs/dialog-modals.css`, CSS composer surface — в `src/features/dialogs/dialog-composer.css`.
 - Toast вынесен в `src/ui.jsx`, получил `aria-live="polite"`/`role="status"`, а его CSS вынесен в `src/ui.css`.

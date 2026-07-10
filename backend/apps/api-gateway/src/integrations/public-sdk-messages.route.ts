@@ -1,6 +1,6 @@
 import { createHmac, createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
-import type { ConversationMessage, ConversationRecord } from "../conversation/conversation.fixtures.js";
+import type { ConversationMessage, ConversationRecord } from "../conversation/conversation.types.js";
 import type { ConversationService } from "../conversation/conversation.service.js";
 import type { ConversationRepository } from "../conversation/conversation.repository.js";
 import {
@@ -64,7 +64,10 @@ export async function resolveOrCreatePublicSdkConversation(
     if (resolveConversationTenantId(existing) !== input.tenantId) {
       return null;
     }
-    return existing;
+    return input.conversationRepository.saveConversation({
+      ...existing,
+      updatedAt: new Date().toISOString()
+    });
   }
 
   const conversation: ConversationRecord = {
@@ -86,7 +89,8 @@ export async function resolveOrCreatePublicSdkConversation(
     tags: compactTags(["sdk", `external:${externalId}`, input.pageUrl ? `page:${input.pageUrl}` : ""]),
     tenantId: input.tenantId,
     time: "now",
-    topic: "SDK / Web widget"
+    topic: "SDK / Web widget",
+    updatedAt: new Date().toISOString()
   };
 
   return input.conversationRepository.saveConversation(conversation);

@@ -2,7 +2,7 @@ import { apiRequest } from "./apiClient.js";
 
 const SERVICE = "tenantProvisionService";
 
-export function mapOnboardingFormToProvisionPayload({ admin, plan, tenant }) {
+export function mapOnboardingFormToProvisionPayload({ admin, employees = [], plan, tenant }) {
   return {
     tenant: {
       name: tenant.name.trim(),
@@ -17,6 +17,16 @@ export function mapOnboardingFormToProvisionPayload({ admin, plan, tenant }) {
     plan: {
       id: plan.trial ? "trial" : String(plan.id ?? "trial").trim() || "trial",
       trial: Boolean(plan.trial)
+    },
+    employees: employees.map((employee) => ({
+      email: employee.email,
+      ...(employee.name ? { name: employee.name } : {}),
+      role: employee.role,
+      team: employee.team
+    })),
+    channel: {
+      domain: tenant.slug ? `${tenant.slug}.example.test` : "example.test",
+      type: "sdk"
     }
   };
 }
@@ -24,7 +34,7 @@ export function mapOnboardingFormToProvisionPayload({ admin, plan, tenant }) {
 export const tenantProvisionService = {
   async provisionOrganization(payload) {
     return apiRequest("/tenants/provision", {
-      authMode: "service-admin",
+      authMode: "public",
       body: payload,
       method: "POST",
       operation: "provisionOrganization",

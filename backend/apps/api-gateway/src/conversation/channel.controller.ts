@@ -1,11 +1,11 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
-import { DemoServiceAdminGuard } from "../identity/demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { RequireServiceAdminAction } from "../identity/service-admin-auth.js";
 import { ConversationService } from "./conversation.service.js";
 
 @ApiTags("channels")
-@UseGuards(DemoServiceAdminGuard)
+@UseGuards(ServiceAdminSessionGuard)
 @Controller("channels")
 export class ChannelController {
   constructor(private readonly conversationService: ConversationService) {}
@@ -47,6 +47,8 @@ export class ChannelController {
       traceId?: string;
     }
   ) {
-    return this.conversationService.recordDeliveryReceipt(channel, payload);
+    return this.conversationService.recordDeliveryReceipt(channel, payload, {
+      tenantId: payload.tenantId
+    });
   }
 }

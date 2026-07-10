@@ -37,6 +37,9 @@ export class RealtimeController {
       ...(request?.tenantOperatorContext?.tenantId
         ? { tenantId: request.tenantOperatorContext.tenantId }
         : {})
-    }, lastEventId);
+    }, lastEventId, {
+      keepOpen: true,
+      includeHandshake: true
+    });
   }
 }

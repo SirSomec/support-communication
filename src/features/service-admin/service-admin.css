@@ -66,8 +66,82 @@
 }
 
 .service-admin-platform,
+.service-admin-worker-observability,
 .service-admin-workspace-shell {
   margin-bottom: 14px;
+}
+
+.service-admin-worker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.service-admin-worker-row {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.service-admin-worker-row.blocked {
+  border-color: #fecaca;
+  background: #fffafa;
+}
+
+.service-admin-worker-row.degraded {
+  border-color: #fde68a;
+  background: #fffdf5;
+}
+
+.service-admin-worker-row > header {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.service-admin-worker-row > header svg {
+  color: var(--blue);
+}
+
+.service-admin-worker-row > header span,
+.service-admin-worker-delivery {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.service-admin-worker-row strong,
+.service-admin-worker-row small,
+.service-admin-worker-delivery span,
+.service-admin-worker-delivery strong,
+.service-admin-worker-delivery code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-admin-worker-row small,
+.service-admin-worker-delivery {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.service-admin-worker-delivery {
+  padding: 9px 10px;
+  border: 1px solid #dce7f5;
+  border-radius: 7px;
+  background: #f8fbff;
+}
+
+.service-admin-worker-delivery code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .service-admin-platform-toolbar {

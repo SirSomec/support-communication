@@ -236,3 +236,199 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+@media (max-width: 1100px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-block: 10px;
+  }
+
+  .topbar-left,
+  .topbar-right {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .topbar-left .status-select,
+  .topbar-route-actions .ghost-action:not(.service-admin-entry),
+  .topbar-right > .icon-button {
+    display: none;
+  }
+
+  .topbar-left {
+    flex: 0 1 auto;
+  }
+
+  .topbar-right {
+    display: grid;
+    flex: 0 0 auto;
+    grid-template-columns: 38px 38px 38px;
+    justify-content: flex-end;
+    justify-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .topbar-route-actions {
+    display: grid;
+    flex: 0 0 38px;
+    grid-template-columns: 38px;
+    width: 38px;
+    min-width: 38px;
+    max-width: 38px;
+  }
+
+  .notification-center {
+    position: relative;
+    display: inline-flex;
+    width: 38px;
+    min-width: 38px;
+    max-width: 38px;
+  }
+
+  .notification-center .icon-button {
+    width: 38px;
+    height: 38px;
+  }
+
+  .role-switcher {
+    max-width: min(190px, 100%);
+  }
+
+  .ghost-action,
+  .quick-action {
+    justify-content: center;
+    width: 38px;
+    min-width: 38px;
+    max-width: 38px;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+
+  .ghost-action svg,
+  .quick-action svg {
+    flex-shrink: 0;
+  }
+
+  .quick-action svg:last-child {
+    display: none;
+  }
+
+  .topbar-access-note {
+    flex: 1 1 100%;
+    max-width: 100%;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    grid-template-columns: 60px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 12px 6px;
+  }
+
+  .brand-mark {
+    margin: 0 auto 14px;
+  }
+
+  .nav-item {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .nav-item span,
+  .operator-card div,
+  .operator-card > svg {
+    display: none;
+  }
+
+  .operator-card {
+    grid-template-columns: 32px;
+    justify-content: center;
+    padding: 6px 0;
+  }
+
+  .topbar {
+    gap: 8px;
+    padding-inline: 8px;
+  }
+
+  .topbar-left,
+  .topbar-right {
+    gap: 6px;
+  }
+
+  .topbar-left .status-select,
+  .topbar-route-actions .ghost-action:not(.service-admin-entry),
+  .topbar-right > .icon-button {
+    display: none;
+  }
+
+  .role-switcher {
+    max-width: 116px;
+    min-width: 0;
+    gap: 6px;
+    padding-inline: 8px;
+  }
+
+  .role-switcher select {
+    max-width: 78px;
+  }
+
+  .topbar-right {
+    display: grid;
+    flex: 0 0 auto;
+    grid-template-columns: 38px 38px 38px;
+    justify-content: flex-end;
+    justify-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .topbar-route-actions {
+    display: grid;
+    flex: 0 0 38px;
+    grid-template-columns: 38px;
+    width: 38px;
+    min-width: 38px;
+  }
+
+  .notification-center {
+    width: 38px;
+    min-width: 38px;
+  }
+
+  .notification-center .icon-button {
+    width: 38px;
+    height: 38px;
+  }
+
+  .ghost-action,
+  .quick-action {
+    justify-content: center;
+    width: 38px;
+    min-width: 38px;
+    gap: 0;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .ghost-action svg,
+  .quick-action svg {
+    flex-shrink: 0;
+  }
+
+  .quick-action svg:last-child {
+    display: none;
+  }
+
+  .topbar-access-note {
+    display: none;
+  }
+}

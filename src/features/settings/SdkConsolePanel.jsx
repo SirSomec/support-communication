@@ -1,12 +1,70 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { PlayCircle, Zap } from "lucide-react";
 import { SectionTitle } from "../../ui.jsx";
-import { sdkEvents } from "../../data.js";
+import { copyTextToClipboard } from "../../services/clipboardService.js";
 import { dialogService } from "../../services/dialogService.js";
 import { integrationService } from "../../services/integrationService.js";
 
+const sdkSnippet = `SupportSDK.init({ appId: "gig-app", channels: ["SDK", "Telegram", "MAX", "VK"] })`;
+
+const defaultSdkEvents = [
+  ["identifyUser", "Передает телефон, устройство и ID гигера"],
+  ["initConversation", "Инициирует диалог по номеру телефона"],
+  ["trackEntryPoint", "Фиксирует SDK, Telegram, MAX или VK"],
+  ["syncTopic", "Синхронизирует тематику и запрет закрытия"]
+];
+
+function createSdkPlaygroundErrorResult(message, code = "sdk_request_failed") {
+  const errorMessage = typeof message === "string" && message.trim()
+    ? message
+    : "Не удалось выполнить SDK событие.";
+
+  return {
+    tone: "error",
+    title: "SDK событие не выполнено",
+    response: JSON.stringify({
+      ok: false,
+      error: {
+        code,
+        message: errorMessage
+      }
+    }, null, 2)
+  };
+}
+
+function getSdkPlaygroundSuccessEvidence(serviceResponse, eventName) {
+  if (!serviceResponse || typeof serviceResponse !== "object" || typeof serviceResponse.status !== "string") {
+    return { error: createSdkPlaygroundErrorResult("Некорректный ответ SDK сервиса.", "malformed_response") };
+  }
+
+  if (serviceResponse.status !== "ok") {
+    return {
+      error: createSdkPlaygroundErrorResult(
+        serviceResponse.error?.message,
+        serviceResponse.error?.code ?? "sdk_request_failed"
+      )
+    };
+  }
+
+  const requestId = eventName === "initConversation"
+    ? serviceResponse.data?.backendQueueId
+    : serviceResponse.data?.delivery?.requestId;
+  if (!String(serviceResponse.traceId ?? "").trim() || !String(requestId ?? "").trim()) {
+    return { error: createSdkPlaygroundErrorResult("Некорректный ответ SDK сервиса.", "malformed_response") };
+  }
+
+  return {
+    requestId,
+    traceId: serviceResponse.traceId
+  };
+}
+
 export function SdkConsolePanel({ access, canEditSettings, onToast }) {
-  const [sdkPlaygroundEvent, setSdkPlaygroundEvent] = useState(sdkEvents[0][0]);
+  const [sdkEvents, setSdkEvents] = useState(defaultSdkEvents);
+  const [sdkChannelConnections, setSdkChannelConnections] = useState([]);
+  const [loadError, setLoadError] = useState("");
+  const [loadingWorkspace, setLoadingWorkspace] = useState(true);
+  const [sdkPlaygroundEvent, setSdkPlaygroundEvent] = useState(defaultSdkEvents[0][0]);
   const [sdkPlaygroundEnv, setSdkPlaygroundEnv] = useState("production");
   const [sdkPlaygroundChannel, setSdkPlaygroundChannel] = useState("SDK");
   const [sdkPlaygroundUser, setSdkPlaygroundUser] = useState("gig-olga-0940");
@@ -14,13 +72,65 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
   const [sdkPlaygroundMessage, setSdkPlaygroundMessage] = useState("Здравствуйте, проверяем запуск диалога из SDK.");
   const [sdkPlaygroundResult, setSdkPlaygroundResult] = useState(null);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWorkspace() {
+      try {
+        const [workspaceResponse, connectionsResponse] = await Promise.all([
+          integrationService.fetchIntegrationWorkspace(),
+          integrationService.fetchChannelConnections()
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        if (workspaceResponse.status !== "ok" || connectionsResponse.status !== "ok") {
+          setLoadError(
+            workspaceResponse.error?.message
+            ?? connectionsResponse.error?.message
+            ?? "Не удалось загрузить SDK workspace."
+          );
+          setSdkChannelConnections([]);
+          return;
+        }
+
+        setSdkEvents(workspaceResponse.data?.sdkEventCatalog?.length
+          ? workspaceResponse.data.sdkEventCatalog
+          : defaultSdkEvents);
+        setSdkChannelConnections(connectionsResponse.data?.connections ?? []);
+        setSdkPlaygroundEvent((current) => current || workspaceResponse.data?.sdkEventCatalog?.[0]?.[0] || defaultSdkEvents[0][0]);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "Не удалось загрузить SDK workspace.");
+          setSdkChannelConnections([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingWorkspace(false);
+        }
+      }
+    }
+
+    loadWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const availableEnvironments = useMemo(() => new Set(
+    sdkChannelConnections
+      .filter((connection) => connection.type === sdkPlaygroundChannel.toLowerCase() && connection.status === "active")
+      .map((connection) => connection.environment)
+  ), [sdkChannelConnections, sdkPlaygroundChannel]);
+
   const sdkPayloadPreview = useMemo(() => {
     const base = {
       appId: sdkPlaygroundEnv === "production" ? "gig-app-prod" : "gig-app-stage",
       event: sdkPlaygroundEvent,
       channel: sdkPlaygroundChannel,
       userId: sdkPlaygroundUser,
-      timestamp: "2026-06-26T12:00:00+03:00"
+      timestamp: new Date().toISOString()
     };
 
     if (sdkPlaygroundEvent === "identifyUser") {
@@ -68,7 +178,7 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
   }, [sdkPlaygroundChannel, sdkPlaygroundEnv, sdkPlaygroundEvent, sdkPlaygroundMessage, sdkPlaygroundPhone, sdkPlaygroundUser]);
 
   async function handleSdkPlaygroundRun() {
-    if (!canEditSettings) {
+    if (!canEditSettings || loadError || loadingWorkspace) {
       return;
     }
 
@@ -83,44 +193,83 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
       return;
     }
 
-    const serviceResponse = sdkPlaygroundEvent === "initConversation"
-      ? await dialogService.createOutboundConversationRequest({
-          channel: sdkPlaygroundChannel,
-          environment: sdkPlaygroundEnv,
-          message: sdkPlaygroundMessage,
-          phone: sdkPlaygroundPhone,
-          topic: "Оплата / Возврат",
-          userId: sdkPlaygroundUser
-        })
-      : await integrationService.testChannelConnection({
-          channel: { id: sdkPlaygroundChannel.toLowerCase(), channel: sdkPlaygroundChannel, connections: [{ rawId: sdkPlaygroundEnv }] },
-          message: sdkPlaygroundEvent,
-          mode: "receive",
-          recipient: sdkPlaygroundPhone || sdkPlaygroundUser
-        });
-    const response = {
-      ok: true,
-      event: sdkPlaygroundEvent,
-      environment: sdkPlaygroundEnv,
-      traceId: serviceResponse.traceId,
-      requestId: serviceResponse.data.backendQueueId ?? serviceResponse.data.delivery?.requestId,
-      acceptedAt: "2026-06-26T12:00:02+03:00",
-      route: sdkPlaygroundEvent === "initConversation" ? "outbound_queue" : "event_stream"
-    };
-    setSdkPlaygroundResult({
-      tone: "success",
-      title: "Payload принят тестовым стендом",
-      response: JSON.stringify(response, null, 2)
-    });
-    onToast(`SDK playground: ${sdkPlaygroundEvent} выполнен в ${sdkPlaygroundEnv}.`);
+    setSdkPlaygroundResult(null);
+
+    try {
+      let serviceResponse;
+      if (sdkPlaygroundEvent === "initConversation") {
+        serviceResponse = await dialogService.createOutboundConversationRequest({
+            channel: sdkPlaygroundChannel,
+            environment: sdkPlaygroundEnv,
+            message: sdkPlaygroundMessage,
+            phone: sdkPlaygroundPhone,
+            topic: "Оплата / Возврат",
+            userId: sdkPlaygroundUser
+          });
+      } else {
+        const connection = sdkChannelConnections.find((item) =>
+          item.type === sdkPlaygroundChannel.toLowerCase()
+          && item.environment === sdkPlaygroundEnv
+          && item.status === "active"
+        );
+        if (!connection) {
+          setSdkPlaygroundResult(createSdkPlaygroundErrorResult(
+            `Нет активного подключения ${sdkPlaygroundChannel} в окружении ${sdkPlaygroundEnv}.`,
+            "channel_connection_unavailable"
+          ));
+          return;
+        }
+        serviceResponse = await integrationService.testChannelConnectionInstance({
+            connectionId: connection.id,
+            message: sdkPlaygroundEvent,
+            mode: "receive",
+            recipient: sdkPlaygroundPhone || sdkPlaygroundUser
+          });
+      }
+      const evidence = getSdkPlaygroundSuccessEvidence(serviceResponse, sdkPlaygroundEvent);
+      if (evidence.error) {
+        setSdkPlaygroundResult(evidence.error);
+        return;
+      }
+
+      const response = {
+        ok: true,
+        event: sdkPlaygroundEvent,
+        environment: sdkPlaygroundEnv,
+        traceId: evidence.traceId,
+        requestId: evidence.requestId,
+        route: sdkPlaygroundEvent === "initConversation" ? "outbound_queue" : "event_stream"
+      };
+      setSdkPlaygroundResult({
+        tone: "success",
+        title: "Payload принят тестовым стендом",
+        response: JSON.stringify(response, null, 2)
+      });
+      onToast(`SDK playground: ${sdkPlaygroundEvent} выполнен в ${sdkPlaygroundEnv}.`);
+    } catch (error) {
+      setSdkPlaygroundResult(createSdkPlaygroundErrorResult(
+        error instanceof Error ? error.message : "Не удалось выполнить SDK событие."
+      ));
+    }
+  }
+
+  async function handleCopySdkSnippet() {
+    if (!canEditSettings) {
+      onToast(access.reason);
+      return;
+    }
+
+    const result = await copyTextToClipboard(sdkSnippet);
+    onToast(result.ok ? "SDK snippet скопирован." : result.message);
   }
 
   return (
     <section className="work-panel sdk-console">
-      <SectionTitle title="SDK-консоль" action="Ключи, события, точки входа" />
+      <SectionTitle title="SDK-консоль" action={loadError ? "backend error" : "Ключи, события, точки входа"} />
+      {loadError ? <div className="entity-empty"><strong>{loadError}</strong></div> : null}
       <div className="sdk-code">
-        <code>{`SupportSDK.init({ appId: "gig-app", channels: ["SDK", "Telegram", "MAX", "VK"] })`}</code>
-        <button disabled={!canEditSettings} onClick={() => onToast("SDK snippet скопирован.")} title={canEditSettings ? "Копировать SDK snippet" : access.reason} type="button">Копировать</button>
+        <code>{sdkSnippet}</code>
+        <button disabled={!canEditSettings} onClick={() => void handleCopySdkSnippet()} title={canEditSettings ? "Копировать SDK snippet" : access.reason} type="button">Копировать</button>
       </div>
       <div className="sdk-playground">
         <div className="section-title compact-title">
@@ -137,8 +286,8 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
           <label>
             <span>Окружение</span>
             <select disabled={!canEditSettings} value={sdkPlaygroundEnv} onChange={(event) => setSdkPlaygroundEnv(event.target.value)} title={canEditSettings ? "Выберите окружение" : access.reason}>
-              <option value="production">production</option>
-              <option value="stage">stage</option>
+              <option disabled={sdkPlaygroundEvent !== "initConversation" && !availableEnvironments.has("production")} value="production">production</option>
+              <option disabled={sdkPlaygroundEvent !== "initConversation" && !availableEnvironments.has("stage")} value="stage">stage</option>
             </select>
           </label>
           <label>
@@ -176,7 +325,7 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
         </div>
         <div className="sdk-playground-actions">
           {sdkPlaygroundResult ? <span className={sdkPlaygroundResult.tone}>{sdkPlaygroundResult.title}</span> : <span>Payload обновляется при изменении полей.</span>}
-          <button disabled={!canEditSettings} onClick={handleSdkPlaygroundRun} title={canEditSettings ? "Запустить SDK событие" : access.reason} type="button">
+          <button disabled={!canEditSettings || loadingWorkspace || Boolean(loadError)} onClick={handleSdkPlaygroundRun} title={canEditSettings ? "Запустить SDK событие" : access.reason} type="button">
             <PlayCircle size={16} />
             Запустить событие
           </button>

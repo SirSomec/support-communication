@@ -37,7 +37,9 @@ export function mapApiConversation(input) {
     clientSince: nonEmptyString(input?.clientSince, DEFAULT_CLIENT_SINCE),
     tags: Array.isArray(input?.tags) ? input.tags.map((tag) => String(tag)) : [],
     previous: Array.isArray(input?.previous) ? input.previous : [],
-    messages
+    messages,
+    ...(nonEmptyString(input?.operatorId) ? { operatorId: nonEmptyString(input.operatorId) } : {}),
+    ...(nonEmptyString(input?.operatorName) ? { operatorName: nonEmptyString(input.operatorName) } : {})
   };
 }
 
@@ -47,6 +49,11 @@ export function mapApiMessage(input) {
     text: nonEmptyString(input?.text),
     time: mapTime(input?.time)
   };
+
+  const createdAt = nonEmptyString(input?.createdAt);
+  if (createdAt) {
+    mapped.createdAt = createdAt;
+  }
 
   if (input?.side === "agent" || input?.side === "client") {
     mapped.side = input.side;

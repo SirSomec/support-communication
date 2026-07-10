@@ -6,6 +6,44 @@ import { apiMeta, identityTraceId } from "./identity-meta.js";
 const SERVICE = "permissionService";
 type ResolvedRole = string | "unknown";
 
+const ACTION_TO_SECTION: Record<string, string> = {
+  "dialogs.read": "dialogs",
+  "dialogs.manage": "dialogs",
+  "panel.read": "panel",
+  "routing.read": "panel",
+  "routing.redistribute": "panel",
+  "clients.read": "clients",
+  "clients.merge": "clients",
+  "templates.read": "templates",
+  "templates.write": "templates",
+  "visitors.read": "visitors",
+  "automation.proactive.read": "visitors",
+  "reports.read": "reports",
+  "reports.export": "reports",
+  "quality.read": "quality",
+  "knowledge.read": "quality",
+  "automation.read": "automation",
+  "audit.read": "audit",
+  "settings.read": "settings",
+  "settings.manage": "settings",
+  "settings.write": "settings",
+  "settings.integrations.read": "settings",
+  "settings.integrations.write": "settings"
+};
+
+const ALL_SECTIONS = [
+  "dialogs",
+  "panel",
+  "clients",
+  "templates",
+  "visitors",
+  "reports",
+  "quality",
+  "automation",
+  "audit",
+  "settings"
+];
+
 interface PermissionPayload {
   action: string;
   actorId?: string | null;
@@ -36,8 +74,15 @@ export interface PermissionDecision {
 }
 
 export interface PermissionModel {
-  roles: string[];
+  roles: Array<{
+    actions: string[];
+    aliases: string[];
+    key: string;
+    sections: string[];
+  }>;
   actions: string[];
+  actionSectionMap: Record<string, string>;
+  sections: string[];
   serverValidation: true;
   denialAudit: true;
   groups: string[];
@@ -136,8 +181,15 @@ export class PermissionService {
       partial: true,
       meta: apiMeta(),
       data: {
-        roles: permissionRoles.map((role) => role.key),
+        roles: permissionRoles.map((role) => ({
+          key: role.key,
+          aliases: role.aliases,
+          actions: role.actions,
+          sections: resolveSectionsForRole(role)
+        })),
         actions: Array.from(new Set(permissionRoles.flatMap((role) => role.actions))),
+        actionSectionMap: ACTION_TO_SECTION,
+        sections: ALL_SECTIONS,
         serverValidation: true,
         denialAudit: true,
         groups: Array.from(new Set(permissionRoles.flatMap((role) => role.groupIds)))
@@ -146,11 +198,24 @@ export class PermissionService {
   }
 }
 
+function resolveSectionsForRole(role: IdentityPermissionRole): string[] {
+  if (role.actions.includes("*")) {
+    return ALL_SECTIONS;
+  }
+
+  return [...new Set(
+    role.actions
+      .map((action) => ACTION_TO_SECTION[action])
+      .filter(Boolean)
+  )];
+}
+
 function resolvePermissionRole(roleMode: string | undefined, permissionRoles: IdentityPermissionRole[]): IdentityPermissionRole | undefined {
   const value = String(roleMode ?? "").trim().toLowerCase();
+  const normalizedValue = value === "senior operator" ? "senior" : value;
   return permissionRoles.find((role) =>
-    role.key.toLowerCase() === value ||
-    role.aliases.some((alias) => alias.toLowerCase() === value)
+    role.key.toLowerCase() === normalizedValue ||
+    role.aliases.some((alias) => alias.toLowerCase() === normalizedValue)
   );
 }
 

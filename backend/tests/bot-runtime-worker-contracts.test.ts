@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { BotScenario } from "../apps/api-gateway/src/automation/automation.fixtures.ts";
+import type { BotScenario } from "../apps/api-gateway/src/automation/automation.types.ts";
 import {
   applyBotRuntimeStateTransition,
   persistBotRuntimeHandoffDescriptors,

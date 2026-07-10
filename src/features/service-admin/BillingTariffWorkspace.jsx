@@ -1,31 +1,62 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { CreditCard, Eye, ShieldAlert, WalletCards } from "lucide-react";
 import { SectionTitle, StatusBadge } from "../../ui.jsx";
-import { serviceAdminTariffs, serviceAdminTenants } from "../../data/serviceAdmin.js";
 import { billingService } from "../../services/billingService.js";
+import { tenantService } from "../../services/tenantService.js";
 import { formatCurrency, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
 
 export function BillingTariffWorkspace({ onAudit }) {
+  const [tenants, setTenants] = useState([]);
+  const [tariffs, setTariffs] = useState([]);
   const [tenantFilter, setTenantFilter] = useState("all");
-  const [selectedTenantId, setSelectedTenantId] = useState(serviceAdminTenants[0].id);
+  const [selectedTenantId, setSelectedTenantId] = useState("");
   const [selectedPlanId, setSelectedPlanId] = useState("scale");
   const [reason, setReason] = useState("Коммерческое согласование получено в тикете по биллингу");
   const [preview, setPreview] = useState(null);
   const [confirmationText, setConfirmationText] = useState("");
   const [planOverrides, setPlanOverrides] = useState({});
 
-  const tenants = useMemo(() => (
-    serviceAdminTenants.map((tenant) => ({ ...tenant, planId: planOverrides[tenant.id] ?? tenant.planId }))
-  ), [planOverrides]);
-  const visibleTenants = tenants.filter((tenant) => tenantFilter === "all" || tenant.status === tenantFilter);
-  const selectedTenant = tenants.find((tenant) => tenant.id === selectedTenantId) ?? tenants[0];
-  const currentTariff = serviceAdminTariffs.find((tariff) => tariff.id === selectedTenant.planId);
-  const nextTariff = serviceAdminTariffs.find((tariff) => tariff.id === selectedPlanId) ?? serviceAdminTariffs[0];
-  const currentPreview = preview?.tenant?.id === selectedTenant.id && preview.nextTariff?.id === nextTariff.id ? preview : null;
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWorkspace() {
+      const [tenantResponse, tariffResponse] = await Promise.all([
+        tenantService.fetchTenants(),
+        billingService.fetchTariffs()
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      const items = tenantResponse.status === "ok" ? tenantResponse.data?.items ?? [] : [];
+      setTenants(items);
+      setTariffs(tariffResponse.status === "ok" ? tariffResponse.data?.items ?? [] : []);
+      setSelectedTenantId(items[0]?.id ?? "");
+    }
+
+    loadWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const mergedTenants = useMemo(() => (
+    tenants.map((tenant) => ({ ...tenant, planId: planOverrides[tenant.id] ?? tenant.planId }))
+  ), [planOverrides, tenants]);
+  const visibleTenants = mergedTenants.filter((tenant) => tenantFilter === "all" || tenant.status === tenantFilter);
+  const selectedTenant = visibleTenants.find((tenant) => tenant.id === selectedTenantId) ?? visibleTenants[0] ?? null;
+  const currentTariff = tariffs.find((tariff) => tariff.id === selectedTenant?.planId);
+  const nextTariff = tariffs.find((tariff) => tariff.id === selectedPlanId) ?? tariffs[0];
+  const currentPreview = selectedTenant && nextTariff && preview?.tenant?.id === selectedTenant.id && preview.nextTariff?.id === nextTariff.id ? preview : null;
   const confirmationRequired = Boolean(currentPreview?.confirmation?.required);
-  const canApply = currentPreview && reason.trim().length >= 8 && (!confirmationRequired || confirmationText === currentPreview.confirmation.expectedText);
+  const canApply = Boolean(currentPreview && reason.trim().length >= 8 && (!confirmationRequired || confirmationText === currentPreview.confirmation.expectedText));
 
   async function handlePreview() {
+    if (!selectedTenant || !nextTariff) {
+      return;
+    }
+
     const envelope = await billingService.previewTariffChange({
       nextPlanId: nextTariff.id,
       reason,
@@ -39,6 +70,10 @@ export function BillingTariffWorkspace({ onAudit }) {
   }
 
   async function handleApply() {
+    if (!selectedTenant || !nextTariff) {
+      return;
+    }
+
     const envelope = await billingService.changeTenantTariff({
       confirmationText,
       confirmed: true,
@@ -75,11 +110,11 @@ export function BillingTariffWorkspace({ onAudit }) {
         </header>
         <div className="service-admin-tenant-list">
           {visibleTenants.map((tenant) => {
-            const tariff = serviceAdminTariffs.find((item) => item.id === tenant.planId);
+            const tariff = tariffs.find((item) => item.id === tenant.planId);
 
             return (
               <button
-                className={tenant.id === selectedTenant.id ? "selected" : ""}
+                className={tenant.id === selectedTenant?.id ? "selected" : ""}
                 key={tenant.id}
                 onClick={() => {
                   setSelectedTenantId(tenant.id);
@@ -101,20 +136,20 @@ export function BillingTariffWorkspace({ onAudit }) {
       </section>
 
       <section className="service-admin-detail-panel">
-        <SectionTitle title="Предпросмотр и смена тарифа" action={selectedTenant.name} />
+        <SectionTitle title="Предпросмотр и смена тарифа" action={selectedTenant?.name ?? "Нет данных"} />
         <div className="service-admin-detail-head">
           <div>
             <span>Текущий: {currentTariff?.name}</span>
             <h3>{formatCurrency(currentTariff?.priceMonthly ?? 0)} / мес.</h3>
             <p>{currentTariff?.changePolicy}</p>
           </div>
-          <StatusBadge tone={getStatusTone(selectedTenant.status)}>{formatLabel(selectedTenant.status)}</StatusBadge>
+          {selectedTenant ? <StatusBadge tone={getStatusTone(selectedTenant.status)}>{formatLabel(selectedTenant.status)}</StatusBadge> : null}
         </div>
 
         <div className="tariff-card-grid">
-          {serviceAdminTariffs.map((tariff) => (
+          {tariffs.map((tariff) => (
             <button
-              className={tariff.id === nextTariff.id ? "selected" : ""}
+              className={tariff.id === nextTariff?.id ? "selected" : ""}
               key={tariff.id}
               onClick={() => {
                 setSelectedPlanId(tariff.id);
@@ -136,7 +171,7 @@ export function BillingTariffWorkspace({ onAudit }) {
             <ShieldAlert size={18} />
             <div>
               <strong>Предпросмотр изменения биллинга</strong>
-              <span>{currentTariff?.name} → {nextTariff.name}</span>
+              <span>{currentTariff?.name} → {nextTariff?.name ?? "нет тарифа"}</span>
             </div>
           </header>
           <label className="service-admin-reason-field">
@@ -144,7 +179,7 @@ export function BillingTariffWorkspace({ onAudit }) {
             <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={2} />
           </label>
           <div className="service-admin-action-buttons">
-            <button disabled={reason.trim().length < 8 || currentTariff?.id === nextTariff.id} onClick={handlePreview} type="button">
+            <button disabled={!selectedTenant || !nextTariff || reason.trim().length < 8 || currentTariff?.id === nextTariff.id} onClick={handlePreview} type="button">
               <Eye size={17} />
               Предпросмотр
             </button>

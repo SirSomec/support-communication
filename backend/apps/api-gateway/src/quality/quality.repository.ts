@@ -1,4 +1,6 @@
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { isLocalRuntime } from "../runtime/local-runtime.js";
+import { bootstrapQualityState } from "./seed.js";
 
 export type QualityRatingScale = "CSAT" | "CSI" | "QA";
 
@@ -59,10 +61,20 @@ export interface AiScoringAuditFilter {
   tenantId?: string;
 }
 
+export interface QualityWorkspaceSnapshot {
+  aiCoachingQueue: Array<Record<string, unknown>>;
+  aiEffectivenessMetrics: Array<Record<string, unknown>>;
+  aiRealtimeChecks: Array<Record<string, unknown>>;
+  aiSuggestions: Array<Record<string, unknown>>;
+  knowledgeArticles: Array<Record<string, unknown>>;
+  qualityMetrics: Array<Record<string, unknown>>;
+}
+
 export interface QualityState {
   aiScoringAudits: AiScoringAuditRecord[];
   manualQaReviews: ManualQaReviewRecord[];
   ratings: QualityRatingRecord[];
+  workspace: QualityWorkspaceSnapshot;
 }
 
 export interface QualityRepositoryOptions {
@@ -189,8 +201,30 @@ interface PrismaQualityRatingFindUniqueInput {
 
 interface PrismaQualityRatingRow extends PrismaQualityRatingCreateInput {}
 
+let defaultQualityRepository: QualityRepository | null = null;
+
 export class QualityRepository {
   private constructor(private readonly store: DurableStore<QualityState>) {}
+
+  static default(): QualityRepository {
+    if (defaultQualityRepository) {
+      return defaultQualityRepository;
+    }
+
+    if (isLocalRuntime()) {
+      return QualityRepository.inMemory(bootstrapQualityState());
+    }
+
+    return QualityRepository.inMemory();
+  }
+
+  static useDefault(repository: QualityRepository): void {
+    defaultQualityRepository = repository;
+  }
+
+  static clearDefault(): void {
+    defaultQualityRepository = null;
+  }
 
   static inMemory(seed: QualityState = seedQualityState()): QualityRepository {
     return new QualityRepository(new InMemoryStore(normalizeState(seed)));
@@ -206,6 +240,10 @@ export class QualityRepository {
 
   readState(): QualityState {
     return clone(normalizeState(this.store.read()));
+  }
+
+  readWorkspace(): QualityWorkspaceSnapshot {
+    return clone(this.readState().workspace);
   }
 
   listQualityRatings(filter: QualityRatingFilter = {}): QualityRatingRecord[] {
@@ -448,11 +486,23 @@ export class PrismaQualityRepository {
   }
 }
 
+function emptyQualityWorkspace(): QualityWorkspaceSnapshot {
+  return {
+    aiCoachingQueue: [],
+    aiEffectivenessMetrics: [],
+    aiRealtimeChecks: [],
+    aiSuggestions: [],
+    knowledgeArticles: [],
+    qualityMetrics: []
+  };
+}
+
 function seedQualityState(): QualityState {
   return {
     aiScoringAudits: [],
     manualQaReviews: [],
-    ratings: []
+    ratings: [],
+    workspace: emptyQualityWorkspace()
   };
 }
 
@@ -460,7 +510,8 @@ function normalizeState(state: Partial<QualityState>): QualityState {
   return {
     aiScoringAudits: (state.aiScoringAudits ?? []).map(normalizeAiScoringAudit),
     manualQaReviews: (state.manualQaReviews ?? []).map(normalizeManualQaReview),
-    ratings: (state.ratings ?? []).map(normalizeQualityRating)
+    ratings: (state.ratings ?? []).map(normalizeQualityRating),
+    workspace: state.workspace ?? emptyQualityWorkspace()
   };
 }
 

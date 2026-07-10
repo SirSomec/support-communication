@@ -1,6 +1,5 @@
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { hasAuditReason } from "./backend-ids.js";
-import { featureFlags, incidents, tariffs, tenantAuditEvents, tenantUsers } from "./identity.fixtures.js";
 import { IdentityRepository, type IdentityTenant } from "./identity.repository.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
 
@@ -27,11 +26,11 @@ export interface TenantListData {
 
 export interface TenantDetailData {
   tenant: IdentityTenant;
-  users: typeof tenantUsers;
-  tariff?: (typeof tariffs)[number];
-  incidents: typeof incidents;
-  flags: typeof featureFlags;
-  auditEvents: typeof tenantAuditEvents;
+  users: Awaited<ReturnType<IdentityRepository["findTenantUsers"]>>;
+  tariff?: Awaited<ReturnType<IdentityRepository["listServiceAdminTariffs"]>>[number];
+  incidents: Awaited<ReturnType<IdentityRepository["listServiceAdminIncidents"]>>;
+  flags: Awaited<ReturnType<IdentityRepository["listServiceAdminFeatureFlags"]>>;
+  auditEvents: Awaited<ReturnType<IdentityRepository["findTenantAuditEvents"]>>;
 }
 
 interface TenantStatusPayload {
@@ -196,13 +195,21 @@ export class TenantService {
   }
 
   private async buildTenantDetail(tenant: IdentityTenant): Promise<TenantDetailData> {
+    const [users, auditEvents, tariffs, incidents, featureFlags] = await Promise.all([
+      this.identityRepository.findTenantUsers(tenant.id),
+      this.identityRepository.findTenantAuditEvents(tenant.id),
+      this.identityRepository.listServiceAdminTariffs(),
+      this.identityRepository.listServiceAdminIncidents(),
+      this.identityRepository.listServiceAdminFeatureFlags()
+    ]);
+
     return {
       tenant,
-      users: await this.identityRepository.findTenantUsers(tenant.id),
+      users,
       tariff: tariffs.find((tariff) => tariff.id === tenant.planId),
       incidents: incidents.filter((incident) => incident.affectedTenantIds.includes(tenant.id)),
       flags: featureFlags.filter((flag) => flag.enabledTenantIds.includes(tenant.id)),
-        auditEvents: await this.identityRepository.findTenantAuditEvents(tenant.id)
+      auditEvents
     };
   }
 }

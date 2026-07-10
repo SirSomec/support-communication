@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Ban, KeyRound, LogOut, Send, ShieldAlert, UserCog } from "lucide-react";
 import { SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
-import { serviceAdminTenants, serviceAdminUsers } from "../../data/serviceAdmin.js";
+import { authService } from "../../services/authService.js";
 import { supportAdminService } from "../../services/supportAdminService.js";
 import { formatDateTime, formatLabel, formatRole, getStatusTone } from "./serviceAdminUtils.js";
 
@@ -47,22 +47,72 @@ const actionConfigs = {
 const userStatusOptions = ["all", "active", "blocked", "invited"];
 
 export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
+  const [tenants, setTenants] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [loadError, setLoadError] = useState("");
+  const [tenantScopeId, setTenantScopeId] = useState("");
   const [query, setQuery] = useState("");
   const [tenantFilter, setTenantFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [selectedUserId, setSelectedUserId] = useState(serviceAdminUsers[0].id);
+  const [selectedUserId, setSelectedUserId] = useState("");
   const [selectedAction, setSelectedAction] = useState("reset2fa");
   const [reason, setReason] = useState("Личность клиента подтверждена в тикете поддержки");
   const [confirmed, setConfirmed] = useState(false);
   const [userOverrides, setUserOverrides] = useState({});
 
-  const users = useMemo(() => (
-    serviceAdminUsers.map((user) => ({ ...user, ...(userOverrides[user.id] ?? {}) }))
-  ), [userOverrides]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUsers() {
+      const authState = await authService.getAuthState();
+      if (cancelled) {
+        return;
+      }
+
+      if (authState.status !== "ok" || !authState.data?.authenticated) {
+        setLoadError(authState.error?.message ?? "Не удалось определить контур администратора сервиса.");
+        return;
+      }
+
+      const currentTenantId = authState.data.session?.currentTenantId ?? "";
+      const response = await supportAdminService.fetchSupportUsers(currentTenantId ? { tenantId: currentTenantId } : {});
+      if (cancelled) {
+        return;
+      }
+
+      if (response.status !== "ok") {
+        setLoadError(response.error?.message ?? "Не удалось загрузить пользователей.");
+        return;
+      }
+
+      setUsers(response.data?.items ?? []);
+      setTenants(response.data?.tenants ?? []);
+      setTenantScopeId(currentTenantId);
+      setTenantFilter(currentTenantId || "all");
+      setSelectedUserId(response.data?.items?.[0]?.id ?? "");
+    }
+
+    loadUsers();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const mergedUsers = useMemo(() => (
+    users.map((user) => ({ ...user, ...(userOverrides[user.id] ?? {}) }))
+  ), [userOverrides, users]);
+  const tenantOptions = useMemo(() => {
+    if (!tenantScopeId) {
+      return tenants;
+    }
+
+    const scopedTenants = tenants.filter((tenant) => tenant.id === tenantScopeId);
+    return scopedTenants.length ? scopedTenants : [{ id: tenantScopeId, name: tenantScopeId }];
+  }, [tenantScopeId, tenants]);
   const visibleUsers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return users.filter((user) => {
+    return mergedUsers.filter((user) => {
       const tenantMatches = tenantFilter === "all" || user.tenantId === tenantFilter;
       const statusMatches = statusFilter === "all" || user.status === statusFilter;
       const queryMatches = !normalizedQuery || [user.name, user.email, user.role]
@@ -70,15 +120,20 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
 
       return tenantMatches && statusMatches && queryMatches;
     });
-  }, [query, statusFilter, tenantFilter, users]);
+  }, [mergedUsers, query, statusFilter, tenantFilter]);
 
-  const selectedUser = users.find((user) => user.id === selectedUserId) ?? users[0];
-  const selectedTenant = serviceAdminTenants.find((tenant) => tenant.id === selectedUser.tenantId);
+  const selectedUser = visibleUsers.find((user) => user.id === selectedUserId) ?? visibleUsers[0] ?? null;
+  const selectedTenant = tenants.find((tenant) => tenant.id === selectedUser?.tenantId);
   const actionConfig = actionConfigs[selectedAction];
   const ActionIcon = actionConfig.icon;
-  const actionDisabled = reason.trim().length < 8 || !confirmed;
+  const impersonationScopeMissing = selectedAction === "impersonate" && !tenantScopeId;
+  const actionDisabled = !selectedUser || reason.trim().length < 8 || !confirmed || impersonationScopeMissing;
 
   async function handleRunAction() {
+    if (!selectedUser) {
+      return;
+    }
+
     const envelope = await actionConfig.run(selectedUser, reason, confirmed);
 
     if (envelope.status !== "ok") {
@@ -113,8 +168,8 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
             onChange={(event) => setTenantFilter(event.target.value)}
             value={tenantFilter}
           >
-            <option value="all">все организации</option>
-            {serviceAdminTenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
+            {!tenantScopeId ? <option value="all">все организации</option> : null}
+            {tenantOptions.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
           </select>
           <select
             aria-label="Фильтр пользователей по статусу"
@@ -129,7 +184,7 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
         <div className="service-admin-user-list">
           {visibleUsers.map((user) => (
             <button
-              className={user.id === selectedUser.id ? "selected" : ""}
+              className={user.id === selectedUser?.id ? "selected" : ""}
               key={user.id}
               onClick={() => setSelectedUserId(user.id)}
               type="button"
@@ -145,7 +200,8 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
         </div>
       </section>
 
-      <section className="service-admin-detail-panel">
+      {selectedUser ? (
+        <section className="service-admin-detail-panel">
         <SectionTitle title="Поддержка учетной записи" action={selectedTenant?.name ?? selectedUser.tenantId} />
         <div className="service-admin-detail-head">
           <div>
@@ -199,14 +255,23 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
             <span>Подтверждаю, что действие согласовано и должно попасть в аудит.</span>
           </label>
           <footer>
-            <span>{actionDisabled ? "Нужны причина и подтверждение" : `Готово: ${selectedUser.name}`}</span>
+            <span>{impersonationScopeMissing ? "Нужен tenant scope" : actionDisabled ? "Нужны причина и подтверждение" : `Готово: ${selectedUser.name}`}</span>
             <button disabled={actionDisabled} onClick={handleRunAction} type="button">
               <ActionIcon size={17} />
               Выполнить
             </button>
           </footer>
         </div>
-      </section>
+        </section>
+      ) : (
+        <section className="service-admin-detail-panel">
+          <SectionTitle title="Поддержка учетной записи" action={loadError || "Нет данных"} />
+          <div className="service-admin-empty">
+            <strong>Нет пользователей</strong>
+            <span>{loadError || "Список пользователей еще не загружен или пуст."}</span>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

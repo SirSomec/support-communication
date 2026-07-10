@@ -1,24 +1,33 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import {
+  clearServiceAdminSession,
   clearSession,
+  clearTenantSession,
   getAccessToken,
   getOperator,
+  getServiceAdminAccessToken,
+  getTenantAccessToken,
   getTenantId,
+  hasServiceAdminSession,
   hasSession,
-  setSession
+  setServiceAdminSession,
+  setSession,
+  setTenantSession
 } from "../src/app/sessionStore.js";
 
 describe("sessionStore", () => {
   afterEach(() => {
     clearSession();
+    clearServiceAdminSession();
   });
 
-  it("round-trips access token", () => {
-    setSession({ accessToken: "tok_123", tenantId: "tenant-pilot-001" });
+  it("round-trips tenant access token", () => {
+    setTenantSession({ accessToken: "tok_123", tenantId: "tenant-pilot-001" });
+    assert.equal(getTenantAccessToken(), "tok_123");
     assert.equal(getAccessToken(), "tok_123");
-    clearSession();
-    assert.equal(getAccessToken(), null);
+    clearTenantSession();
+    assert.equal(getTenantAccessToken(), null);
   });
 
   it("stores tenant id and operator profile", () => {
@@ -36,5 +45,27 @@ describe("sessionStore", () => {
     assert.equal(hasSession(), false);
     assert.equal(getTenantId(), null);
     assert.equal(getOperator(), null);
+  });
+
+  it("stores service-admin bearer token separately from tenant session", () => {
+    setTenantSession({ accessToken: "tenant-token", tenantId: "tenant-a" });
+    setServiceAdminSession({ accessToken: "service-admin-token" });
+
+    assert.equal(getTenantAccessToken(), "tenant-token");
+    assert.equal(getServiceAdminAccessToken(), "service-admin-token");
+    assert.equal(hasServiceAdminSession(), true);
+
+    clearTenantSession();
+    assert.equal(getTenantAccessToken(), null);
+    assert.equal(getServiceAdminAccessToken(), "service-admin-token");
+  });
+
+  it("clears stale tenant tokens without affecting service-admin session", () => {
+    setTenantSession({ accessToken: "stale-token", tenantId: "tenant-stale" });
+    setServiceAdminSession({ accessToken: "service-admin-token" });
+
+    clearTenantSession();
+    assert.equal(hasSession(), false);
+    assert.equal(hasServiceAdminSession(), true);
   });
 });

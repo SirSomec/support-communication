@@ -1,12 +1,12 @@
 import { Body, Controller, Get, Param, Patch, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
-import { DemoServiceAdminGuard } from "./demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "./service-admin-session.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "./service-admin-auth.js";
 import { updateTenantStatusFromRoute } from "./tenant.route.js";
 import { TenantService } from "./tenant.service.js";
 
 @ApiTags("tenants")
-@UseGuards(DemoServiceAdminGuard)
+@UseGuards(ServiceAdminSessionGuard)
 @Controller("tenants")
 export class TenantController {
   constructor(private readonly tenantService: TenantService) {}

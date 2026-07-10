@@ -5,6 +5,7 @@ const SERVICE = "billingService";
 export const billingService = {
   async fetchTariffs() {
     return apiRequest("/billing/tariffs", {
+      authMode: "service-admin",
       operation: "fetchTariffs",
       service: SERVICE
     });
@@ -16,6 +17,7 @@ export const billingService = {
     }
 
     return apiRequest(`/billing/tenants/${encodeURIComponent(tenantId)}/tariff-change/preview`, {
+      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "previewTariffChange",
@@ -29,6 +31,7 @@ export const billingService = {
     }
 
     return apiRequest(`/billing/tenants/${encodeURIComponent(tenantId)}/tariff-change`, {
+      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "changeTenantTariff",

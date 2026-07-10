@@ -4,7 +4,7 @@ const SERVICE = "visitorService";
 
 export const visitorService = {
   async fetchVisitorWorkspace() {
-    return apiRequest("/automation/workspace", {
+    return apiRequest("/automation/visitor-workspace", {
       operation: "fetchVisitorWorkspace",
       service: SERVICE
     });

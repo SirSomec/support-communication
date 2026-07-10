@@ -1,12 +1,6 @@
-import { getAccessToken } from "../app/sessionStore.js";
+import { getServiceAdminAccessToken, getTenantAccessToken } from "../app/sessionStore.js";
 
 const DEFAULT_API_BASE_PATH = "/api/v1";
-const DEFAULT_DEMO_SERVICE_ADMIN_KEY = "dev-service-admin-key";
-const DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_ID = "svc-admin-demo";
-const DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_NAME = "Demo Service Admin";
-const DEFAULT_DEMO_SERVICE_ADMIN_ROLES = "service_admin";
-const DEFAULT_DEMO_SERVICE_ADMIN_PERMISSIONS = "*";
-const DEFAULT_DEMO_SERVICE_ADMIN_TENANT_ID = "tenant-northstar";
 
 let apiClientTestConfig = {};
 
@@ -49,19 +43,26 @@ export async function apiRequest(path, { authMode = "auto", body, headers = {}, 
     accept: "application/json",
     ...headers
   };
-  const demoServiceAdminKey = getDemoServiceAdminKey();
-  const accessToken = getAccessToken();
 
   if (authMode === "service-admin") {
-    if (demoServiceAdminKey && isDemoServiceAdminAllowed()) {
-      requestHeaders["x-demo-service-admin-key"] = demoServiceAdminKey;
-      Object.assign(requestHeaders, getDemoServiceAdminHeaders());
+    const token = getServiceAdminAccessToken();
+    if (!token) {
+      return createApiErrorEnvelope({
+        code: "service_admin_session_required",
+        message: "Service-admin bearer session is required.",
+        operation,
+        service
+      });
     }
-  } else if (accessToken) {
-    requestHeaders.authorization = `Bearer ${accessToken}`;
-  } else if (demoServiceAdminKey && isDemoServiceAdminAllowed()) {
-    requestHeaders["x-demo-service-admin-key"] = demoServiceAdminKey;
-    Object.assign(requestHeaders, getDemoServiceAdminHeaders());
+
+    if (!requestHeaders.authorization) {
+      requestHeaders.authorization = `Bearer ${token}`;
+    }
+  } else if (authMode !== "public") {
+    const token = getTenantAccessToken();
+    if (token && !requestHeaders.authorization) {
+      requestHeaders.authorization = `Bearer ${token}`;
+    }
   }
 
   const requestInit = {
@@ -198,50 +199,12 @@ function getApiBaseUrl() {
   return String(getRuntimeConfigValue("apiBaseUrl", "VITE_API_BASE_URL", "")).trim().replace(/\/+$/, "");
 }
 
-function getDemoServiceAdminKey() {
-  return String(getRuntimeConfigValue("demoServiceAdminKey", "VITE_DEMO_SERVICE_ADMIN_KEY", DEFAULT_DEMO_SERVICE_ADMIN_KEY)).trim();
-}
-
-function isDemoServiceAdminAllowed() {
-  return getRuntimeMode() !== "production" || getRuntimeFlag("enableServiceAdminDemo", "VITE_ENABLE_SERVICE_ADMIN");
-}
-
-function getDemoServiceAdminHeaders() {
-  return {
-    "x-demo-service-admin-actor-id": String(getRuntimeConfigValue("demoServiceAdminActorId", "VITE_DEMO_SERVICE_ADMIN_ACTOR_ID", DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_ID)).trim(),
-    "x-demo-service-admin-actor-name": String(getRuntimeConfigValue("demoServiceAdminActorName", "VITE_DEMO_SERVICE_ADMIN_ACTOR_NAME", DEFAULT_DEMO_SERVICE_ADMIN_ACTOR_NAME)).trim(),
-    "x-demo-service-admin-mfa-verified": "true",
-    "x-demo-service-admin-permissions": String(getRuntimeConfigValue("demoServiceAdminPermissions", "VITE_DEMO_SERVICE_ADMIN_PERMISSIONS", DEFAULT_DEMO_SERVICE_ADMIN_PERMISSIONS)).trim(),
-    "x-demo-service-admin-roles": String(getRuntimeConfigValue("demoServiceAdminRoles", "VITE_DEMO_SERVICE_ADMIN_ROLES", DEFAULT_DEMO_SERVICE_ADMIN_ROLES)).trim(),
-    "x-demo-service-admin-tenant-id": String(getRuntimeConfigValue("demoServiceAdminTenantId", "VITE_DEMO_SERVICE_ADMIN_TENANT_ID", DEFAULT_DEMO_SERVICE_ADMIN_TENANT_ID)).trim(),
-    "x-demo-service-admin-session-expires-at": new Date(Date.now() + 60 * 60 * 1000).toISOString()
-  };
-}
-
-function getRuntimeMode() {
-  return String(
-    getRuntimeConfigValue("mode", "MODE", getNodeEnv() || "development")
-  ).trim();
-}
-
 function getRuntimeConfigValue(testKey, envKey, fallback) {
   if (Object.hasOwn(apiClientTestConfig, testKey)) {
     return apiClientTestConfig[testKey];
   }
 
   return import.meta.env?.[envKey] ?? fallback;
-}
-
-function getRuntimeFlag(testKey, envKey) {
-  if (Object.hasOwn(apiClientTestConfig, testKey)) {
-    return Boolean(apiClientTestConfig[testKey]);
-  }
-
-  return String(import.meta.env?.[envKey] ?? "").trim().toLowerCase() === "true";
-}
-
-function getNodeEnv() {
-  return typeof process !== "undefined" ? process.env?.NODE_ENV : undefined;
 }
 
 function ensureTrailingSlash(value) {

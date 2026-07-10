@@ -7,9 +7,18 @@ import {
   routingConversationFixtures,
   routingOperatorFixtures,
   routingQueueFixtures
-} from "../apps/api-gateway/src/routing/routing.fixtures.ts";
+} from "../apps/api-gateway/src/routing/seed-catalog.ts";
 import { RoutingRepository } from "../apps/api-gateway/src/routing/routing.repository.ts";
 import { RoutingService } from "../apps/api-gateway/src/routing/routing.service.ts";
+
+const VOLGA_CONTEXT = { tenantId: "tenant-volga" };
+
+function cloneWithVolgaTenant<T extends { tenantId?: string }>(records: T[]): T[] {
+  return JSON.parse(JSON.stringify(records)).map((record: T) => ({
+    ...record,
+    tenantId: record.tenantId ?? VOLGA_CONTEXT.tenantId
+  }));
+}
 
 describe("phase 4 routing, SLA and rescue backend contracts", () => {
   beforeEach(() => {
@@ -20,10 +29,63 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     RoutingRepository.clearDefault();
   });
 
+  it("requires explicit tenant context for tenant-scoped routing service operations", async () => {
+    const cases: Array<[string, () => Promise<Record<string, unknown>>]> = [
+      ["fetchWorkload", () => new RoutingService().fetchWorkload({ channel: "VK" })],
+      ["createAssignment", () => new RoutingService().createAssignment({
+        action: "assign",
+        conversationId: "alexey",
+        reason: "Tenant context gate",
+        targetOperatorId: "operator-anna"
+      })],
+      ["simulateAssignment", () => new RoutingService().simulateAssignment({ conversationId: "alexey" })],
+      ["previewRedistribution", () => new RoutingService().previewRedistribution({
+        idempotencyKey: "tenant_context_preview",
+        reason: "Tenant context gate",
+        selectedQueues: ["VK"],
+        targetRule: "least_loaded"
+      })],
+      ["commitRedistribution", () => new RoutingService().commitRedistribution({
+        idempotencyKey: "tenant_context_commit",
+        reason: "Tenant context gate",
+        selectedQueues: ["VK"],
+        targetRule: "least_loaded"
+      })],
+      ["pauseSla", () => new RoutingService().pauseSla({
+        conversationId: "alexey",
+        reason: "Tenant context gate"
+      })],
+      ["startRescue", () => new RoutingService().startRescue({
+        conversationId: "vladimir",
+        reason: "Tenant context gate"
+      })],
+      ["resolveRescue", () => new RoutingService().resolveRescue({
+        conversationId: "vladimir",
+        outcome: "saved",
+        reason: "Tenant context gate"
+      })],
+      ["fetchRescueReport", () => new RoutingService().fetchRescueReport({ period: "today" })]
+    ];
+
+    for (const [operation, callOperation] of cases) {
+      const envelope = await callOperation();
+      assert.equal(envelope.operation, operation);
+      assert.equal(envelope.status, "invalid");
+      assert.equal(envelope.error?.code, "tenant_context_required");
+    }
+  });
+
+  it("derives routing tenant context from tenant operator and service-admin requests", () => {
+    const controllerSource = readFileSync(new URL("../apps/api-gateway/src/routing/routing.controller.ts", import.meta.url), "utf8");
+
+    assert.match(controllerSource, /request\.tenantOperatorContext\?\.tenantId/);
+    assert.match(controllerSource, /request\.serviceAdminContext\?\.currentTenantId/);
+  });
+
   it("lists operator workload and queue health with frontend-compatible fields", async () => {
     const routing = new RoutingService();
 
-    const workload = await routing.fetchWorkload({ channel: "VK" });
+    const workload = await routing.fetchWorkload({ channel: "VK" }, VOLGA_CONTEXT);
 
     assert.equal(workload.service, "routingService");
     assert.equal(workload.status, "ok");
@@ -46,8 +108,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     const repository = RoutingRepository.inMemory();
     const routing = new RoutingService(repository);
 
-    await routing.fetchWorkload({ channel: "VK" });
-    await routing.fetchWorkload({ channel: "Telegram" });
+    await routing.fetchWorkload({ channel: "VK" }, VOLGA_CONTEXT);
+    await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
 
     assert.deepEqual(repository.listJobs(), []);
   });
@@ -100,7 +162,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     });
     const routing = new RoutingService(repository);
 
-    const workload = await routing.fetchWorkload({ channel: "Telegram" });
+    const workload = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
 
     assert.deepEqual(workload.data.routingAnalytics, {
       byEventKind: {
@@ -138,7 +200,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     });
     const routing = new RoutingService(repository);
 
-    const workload = await routing.fetchWorkload({ channel: "VK" });
+    const workload = await routing.fetchWorkload({ channel: "VK" }, VOLGA_CONTEXT);
     const anna = workload.data.operators.find((operator) => operator.id === "operator-anna");
     assert.equal(workload.data.routingPolicy.limitMode, "queue_round_robin");
     assert.equal(workload.data.routingPolicy.priorityStrategy, "round_robin");
@@ -152,7 +214,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "alexey",
       reason: "Persisted capacity gate",
       targetOperatorId: "operator-anna"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(assignment.status, "denied");
     assert.equal(assignment.error?.code, "operator_limit_exceeded");
     assert.equal(assignment.data.limit, 0);
@@ -171,7 +233,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     });
     const routing = new RoutingService(repository);
 
-    const workload = await routing.fetchWorkload({ channel: "VK" });
+    const workload = await routing.fetchWorkload({ channel: "VK" }, VOLGA_CONTEXT);
     const ivan = workload.data.operators.find((operator) => operator.id === "operator-ivan");
     assert.ok(ivan);
     assert.ok(ivan.channels.includes("VK"));
@@ -182,7 +244,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "alexey",
       reason: "Persisted queue membership",
       targetOperatorId: "operator-ivan"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(assignment.status, "ok");
     assert.equal(assignment.data.assignment.targetOperatorId, "operator-ivan");
   });
@@ -209,7 +271,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     });
     const routing = new RoutingService(repository);
 
-    const simulation = await routing.simulateAssignment({ conversationId: "alexey" });
+    const simulation = await routing.simulateAssignment({ conversationId: "alexey" }, VOLGA_CONTEXT);
 
     assert.equal(simulation.status, "ok");
     assert.equal(simulation.operation, "simulateAssignment");
@@ -232,7 +294,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   it("simulates assignment candidates with explainable ranking decisions", async () => {
     const routing = new RoutingService();
 
-    const simulation = await routing.simulateAssignment({ conversationId: "alexey" });
+    const simulation = await routing.simulateAssignment({ conversationId: "alexey" }, VOLGA_CONTEXT);
 
     assert.equal(simulation.status, "ok");
     assert.equal(simulation.data.rankingStrategy, "least_loaded");
@@ -253,7 +315,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   it("ranks assignment candidates by eligible least-loaded workload first", async () => {
     const routing = new RoutingService();
 
-    const simulation = await routing.simulateAssignment({ conversationId: "alexey" });
+    const simulation = await routing.simulateAssignment({ conversationId: "alexey" }, VOLGA_CONTEXT);
 
     assert.equal(simulation.status, "ok");
     const candidates = simulation.data.candidates as Array<Record<string, unknown>>;
@@ -269,7 +331,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   it("ranks blocked assignment candidates with channel access before access-denied candidates", async () => {
     const routing = new RoutingService();
 
-    const simulation = await routing.simulateAssignment({ conversationId: "alexey" });
+    const simulation = await routing.simulateAssignment({ conversationId: "alexey" }, VOLGA_CONTEXT);
 
     assert.equal(simulation.status, "ok");
     const candidates = simulation.data.candidates as Array<Record<string, unknown>>;
@@ -313,7 +375,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     });
     const routing = new RoutingService(repository);
 
-    const simulation = await routing.simulateAssignment({ conversationId: "alexey" });
+    const simulation = await routing.simulateAssignment({ conversationId: "alexey" }, VOLGA_CONTEXT);
 
     assert.equal(simulation.status, "ok");
     const candidates = simulation.data.candidates as Array<Record<string, unknown>>;
@@ -367,7 +429,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     });
     const routing = new RoutingService(repository);
 
-    const simulation = await routing.simulateAssignment({ conversationId: "alexey" });
+    const simulation = await routing.simulateAssignment({ conversationId: "alexey" }, VOLGA_CONTEXT);
 
     assert.equal(simulation.status, "ok");
     const candidates = simulation.data.candidates as Array<Record<string, unknown>>;
@@ -384,9 +446,9 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     const controllerSource = readFileSync(new URL("../apps/api-gateway/src/routing/routing.controller.ts", import.meta.url), "utf8");
 
     assert.match(controllerSource, /@Post\("assignments\/simulate"\)[\s\S]*simulateAssignment\(@Body\(\) payload:/);
-    assert.match(controllerSource, /return this\.routingService\.simulateAssignment\(payload\);/);
+    assert.match(controllerSource, /return this\.routingService\.simulateAssignment\(payload, routingContextFromRequest\(request\)\);/);
 
-    const simulation = await routing.simulateAssignment({ conversationId: "alexey" });
+    const simulation = await routing.simulateAssignment({ conversationId: "alexey" }, VOLGA_CONTEXT);
 
     assert.equal(simulation.status, "ok");
     assert.equal(simulation.operation, "simulateAssignment");
@@ -396,19 +458,19 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
 
   it("keeps assignment simulation from mutating live assignment state or queue jobs", async () => {
     const repository = RoutingRepository.inMemory({
-      conversations: JSON.parse(JSON.stringify(routingConversationFixtures)),
+      conversations: cloneWithVolgaTenant(routingConversationFixtures),
       jobs: [],
       operatorCapacities: [],
-      operators: JSON.parse(JSON.stringify(routingOperatorFixtures)),
+      operators: cloneWithVolgaTenant(routingOperatorFixtures),
       queueMemberships: [],
-      queues: JSON.parse(JSON.stringify(routingQueueFixtures)),
-      rescueReportRows: JSON.parse(JSON.stringify(rescueReportSeedRows)),
+      queues: cloneWithVolgaTenant(routingQueueFixtures),
+      rescueReportRows: cloneWithVolgaTenant(rescueReportSeedRows),
       routingRules: []
     });
     const routing = new RoutingService(repository);
     const before = repository.readState();
 
-    const simulation = await routing.simulateAssignment({ conversationId: "alexey" });
+    const simulation = await routing.simulateAssignment({ conversationId: "alexey" }, VOLGA_CONTEXT);
     const after = repository.readState();
 
     assert.equal(simulation.status, "ok");
@@ -420,10 +482,148 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "alexey",
       reason: "Simulation did not mutate state",
       targetOperatorId: "operator-anna"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(assignment.status, "ok");
     assert.equal(assignment.data.assignment.targetOperatorId, "operator-anna");
     assert.equal(assignment.data.conversation.status, "assigned");
+  });
+
+  it("previews batch redistribution without mutating live routing state", async () => {
+    const repository = RoutingRepository.inMemory({
+      conversations: cloneWithVolgaTenant(routingConversationFixtures),
+      jobs: [],
+      operatorCapacities: [],
+      operators: cloneWithVolgaTenant(routingOperatorFixtures),
+      queueMemberships: [],
+      queues: cloneWithVolgaTenant(routingQueueFixtures),
+      rescueReportRows: cloneWithVolgaTenant(rescueReportSeedRows),
+      routingRules: []
+    });
+    const routing = new RoutingService(repository);
+    const before = repository.readState();
+
+    const preview = await routing.previewRedistribution({
+      idempotencyKey: "preview-vk-redistribution",
+      reason: "Preview SLA risk redistribution",
+      selectedQueues: ["VK"],
+      targetRule: "least_loaded"
+    }, VOLGA_CONTEXT);
+    const after = repository.readState();
+
+    assert.equal(preview.status, "ok");
+    assert.equal(preview.operation, "previewRedistribution");
+    assert.equal(preview.data.mode, "preview");
+    assert.equal(preview.data.redistributionId, "routing_redist_preview-vk-redistribution");
+    assert.equal(preview.data.plan.length, 1);
+    assert.equal(preview.data.plan[0].conversationId, "alexey");
+    assert.equal(preview.data.plan[0].targetOperatorId, "operator-anna");
+    assert.equal(preview.data.capacityConflicts.length, 0);
+    assert.deepEqual(after, before);
+    assert.deepEqual(repository.listJobs(), []);
+  });
+
+  it("commits batch redistribution atomically with audit, job and analytics evidence", async () => {
+    const repository = RoutingRepository.inMemory({
+      conversations: cloneWithVolgaTenant(routingConversationFixtures),
+      jobs: [],
+      operatorCapacities: [],
+      operators: cloneWithVolgaTenant(routingOperatorFixtures),
+      queueMemberships: [],
+      queues: cloneWithVolgaTenant(routingQueueFixtures),
+      rescueReportRows: cloneWithVolgaTenant(rescueReportSeedRows),
+      routingRules: []
+    });
+    const routing = new RoutingService(repository);
+
+    const commit = await routing.commitRedistribution({
+      idempotencyKey: "commit-vk-redistribution",
+      reason: "Commit SLA risk redistribution",
+      selectedQueues: ["VK"],
+      targetRule: "least_loaded"
+    }, VOLGA_CONTEXT);
+
+    assert.equal(commit.status, "ok");
+    assert.equal(commit.operation, "commitRedistribution");
+    assert.equal(commit.data.mode, "commit");
+    assert.equal(commit.data.redistributionId, "routing_redist_commit-vk-redistribution");
+    assert.equal(commit.data.auditEvent.immutable, true);
+    assert.equal(commit.data.queueJob.kind, "redistribution.commit");
+    assert.equal(commit.data.appliedAssignments.length, 1);
+    assert.equal(commit.data.appliedAssignments[0].conversationId, "alexey");
+    assert.equal(commit.data.appliedAssignments[0].targetOperatorId, "operator-anna");
+    assert.equal(commit.data.realtimeEvent.eventName, "routing.redistribution.committed");
+
+    const after = repository.readState();
+    const alexey = after.conversations.find((conversation) => conversation.id === "alexey");
+    const anna = after.operators.find((operator) => operator.id === "operator-anna");
+    const vkQueue = after.queues.find((queue) => queue.channel === "VK");
+    assert.equal(alexey?.operatorId, "operator-anna");
+    assert.equal(alexey?.status, "assigned");
+    assert.equal(anna?.chats, 11);
+    assert.equal(vkQueue?.waiting, 8);
+    assert.equal(vkQueue?.active, 26);
+    assert.equal(repository.listJobs().length, 1);
+    assert.equal(repository.listRoutingAnalyticsRows({ eventKind: "assignment", tenantId: "tenant-volga" }).length, 1);
+  });
+
+  it("treats repeated batch redistribution commits with the same idempotency key as already committed", async () => {
+    const repository = RoutingRepository.inMemory({
+      conversations: cloneWithVolgaTenant(routingConversationFixtures),
+      jobs: [],
+      operatorCapacities: [],
+      operators: cloneWithVolgaTenant(routingOperatorFixtures),
+      queueMemberships: [],
+      queues: cloneWithVolgaTenant(routingQueueFixtures),
+      rescueReportRows: cloneWithVolgaTenant(rescueReportSeedRows),
+      routingRules: []
+    });
+    const routing = new RoutingService(repository);
+    const request = {
+      idempotencyKey: "idempotent-vk-redistribution",
+      reason: "Commit SLA risk redistribution once",
+      selectedQueues: ["VK"],
+      targetRule: "least_loaded"
+    };
+
+    const first = await routing.commitRedistribution(request, VOLGA_CONTEXT);
+    const afterFirst = repository.readState();
+    const second = await routing.commitRedistribution(request, VOLGA_CONTEXT);
+
+    assert.equal(first.status, "ok");
+    assert.equal(second.status, "ok");
+    assert.equal(second.data.idempotent, true);
+    assert.deepEqual(repository.readState(), afterFirst);
+    assert.equal(repository.listJobs().length, 1);
+    assert.equal(repository.listRoutingAnalyticsRows({ eventKind: "assignment", tenantId: "tenant-volga" }).length, 1);
+  });
+
+  it("rejects batch redistribution when any selected queue has no eligible capacity", async () => {
+    const repository = RoutingRepository.inMemory();
+    await repository.saveOperatorCapacity({
+      channel: "VK",
+      chatLimit: 10,
+      id: "capacity_vk_anna_no_redist",
+      operatorId: "operator-anna",
+      overrideAllowed: false,
+      tenantId: "tenant-volga",
+      updatedAt: "2026-06-29T13:10:00.000Z"
+    });
+    const routing = new RoutingService(repository);
+    const before = repository.readState();
+
+    const commit = await routing.commitRedistribution({
+      idempotencyKey: "conflict-vk-redistribution",
+      reason: "Commit blocked SLA risk redistribution",
+      selectedQueues: ["VK"],
+      targetRule: "least_loaded"
+    }, VOLGA_CONTEXT);
+
+    assert.equal(commit.status, "conflict");
+    assert.equal(commit.error?.code, "redistribution_capacity_conflict");
+    assert.equal(commit.data.capacityConflicts.length, 1);
+    assert.equal(commit.data.capacityConflicts[0].conversationId, "alexey");
+    assert.deepEqual(repository.readState(), before);
+    assert.deepEqual(repository.listJobs(), []);
   });
 
   it("writes assignment routing analytics rows when assigning a conversation", async () => {
@@ -435,7 +635,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "alexey",
       reason: "Analytics assignment runtime",
       targetOperatorId: "operator-anna"
-    });
+    }, VOLGA_CONTEXT);
     const rows = repository.listRoutingAnalyticsRows({
       eventKind: "assignment",
       tenantId: "tenant-volga"
@@ -460,7 +660,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "vladimir",
       reason: "Analytics transfer runtime",
       targetOperatorId: "operator-ivan"
-    });
+    }, VOLGA_CONTEXT);
     const rows = repository.listRoutingAnalyticsRows({
       eventKind: "transfer",
       tenantId: "tenant-volga"
@@ -484,7 +684,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "vladimir",
       reason: "Analytics rescue runtime",
       source: "manual"
-    });
+    }, VOLGA_CONTEXT);
     const rows = repository.listRoutingAnalyticsRows({
       eventKind: "rescue",
       tenantId: "tenant-volga"
@@ -508,7 +708,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "alexey",
       reason: "Senior redistribution",
       targetOperatorId: "operator-ivan"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(channelDenied.status, "denied");
     assert.equal(channelDenied.error?.code, "operator_channel_denied");
     assert.equal(channelDenied.data.guard, "operator_channel_limit");
@@ -520,7 +720,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "alexey",
       reason: "Senior redistribution",
       targetOperatorId: "operator-full"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(limitDenied.status, "denied");
     assert.equal(limitDenied.error?.code, "operator_limit_exceeded");
     assert.equal(limitDenied.data.availableCapacity, 0);
@@ -531,7 +731,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       overrideLimit: true,
       reason: "Senior redistribution",
       targetOperatorId: "operator-full"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(clientOverrideDenied.status, "denied");
     assert.equal(clientOverrideDenied.error?.code, "operator_limit_exceeded");
     assert.equal(clientOverrideDenied.data.overrideRequested, true);
@@ -542,7 +742,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "alexey",
       reason: "Senior redistribution",
       targetOperatorId: "operator-anna"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(unsupportedAction.status, "invalid");
     assert.equal(unsupportedAction.error?.code, "assignment_action_unsupported");
 
@@ -551,7 +751,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "alexey",
       reason: "Senior redistribution",
       targetOperatorId: "operator-anna"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(assigned.status, "ok");
     assert.equal(assigned.data.assignment.action, "assign");
     assert.equal(assigned.data.assignment.targetOperatorId, "operator-anna");
@@ -563,7 +763,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   it("keeps operator and queue counters consistent across transfer and return-to-queue", async () => {
     const routing = new RoutingService();
 
-    const before = await routing.fetchWorkload({ channel: "Telegram" });
+    const before = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
     const beforeIvan = before.data.operators.find((operator) => operator.id === "operator-ivan");
     const beforeKirill = before.data.operators.find((operator) => operator.id === "operator-kirill");
     const beforeQueue = before.data.queues[0];
@@ -573,13 +773,13 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "vladimir",
       reason: "Senior transfer",
       targetOperatorId: "operator-ivan"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(transferred.status, "ok");
     assert.equal(transferred.data.assignment.fromOperatorId, "operator-kirill");
     assert.equal(transferred.data.assignment.targetOperatorId, "operator-ivan");
     assert.equal(transferred.data.conversation.status, "transferred");
 
-    const afterTransfer = await routing.fetchWorkload({ channel: "Telegram" });
+    const afterTransfer = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
     const transferIvan = afterTransfer.data.operators.find((operator) => operator.id === "operator-ivan");
     const transferKirill = afterTransfer.data.operators.find((operator) => operator.id === "operator-kirill");
     const transferQueue = afterTransfer.data.queues[0];
@@ -593,12 +793,12 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       action: "return_queue",
       conversationId: "vladimir",
       reason: "No operator answer"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(returned.status, "ok");
     assert.equal(returned.data.assignment.fromOperatorId, "operator-ivan");
     assert.equal(returned.data.assignment.targetOperatorId, null);
 
-    const afterReturn = await routing.fetchWorkload({ channel: "Telegram" });
+    const afterReturn = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
     const returnIvan = afterReturn.data.operators.find((operator) => operator.id === "operator-ivan");
     const returnQueue = afterReturn.data.queues[0];
 
@@ -614,7 +814,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "maria",
       durationMinutes: 15,
       reason: ""
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(missingReason.status, "invalid");
     assert.equal(missingReason.error?.code, "sla_pause_reason_required");
 
@@ -622,7 +822,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "maria",
       durationMinutes: 15,
       reason: "Customer requested a short hold"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(paused.status, "ok");
     assert.equal(paused.data.conversation.status, "paused");
     assert.equal(paused.data.sla.state, "paused");
@@ -758,7 +958,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRules: []
     });
 
-    const result = worker.claimDueSlaTimerJobs({
+    const result = await worker.claimDueSlaTimerJobs({
       limit: 1,
       now: new Date("2026-06-29T13:16:00.000Z"),
       routingRepository: repository
@@ -773,6 +973,47 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(due.claimedAt, "2026-06-29T13:16:00.000Z");
     assert.equal(future.status, "pending");
     assert.equal(rescue.status, "pending");
+  });
+
+  it("claims due SLA timer jobs through the repository atomic claim hook", async () => {
+    const worker = await import("../apps/api-gateway/src/routing/sla-timer.worker.ts");
+    const pendingJob = {
+      action: "resume_sla",
+      id: "job_sla_atomic_claim",
+      queue: "sla-timers",
+      runAt: "2026-06-29T13:15:00.000Z",
+      status: "pending"
+    };
+    const claimCalls: Array<Record<string, unknown>> = [];
+    const repository = {
+      listJobs(): Array<Record<string, unknown>> {
+        return [pendingJob];
+      },
+      claimJob(input: Record<string, unknown>): Record<string, unknown> {
+        claimCalls.push(input);
+        return {
+          ...pendingJob,
+          claimedAt: input.claimedAt,
+          status: "claimed"
+        };
+      },
+      saveJob(): Record<string, unknown> {
+        throw new Error("saveJob must not be used for claim");
+      }
+    };
+
+    const result = await worker.claimDueSlaTimerJobs({
+      now: new Date("2026-06-29T13:16:00.000Z"),
+      routingRepository: repository
+    });
+
+    assert.deepEqual(result.claimed.map((job: { id: string }) => job.id), ["job_sla_atomic_claim"]);
+    assert.deepEqual(claimCalls, [{
+      claimedAt: "2026-06-29T13:16:00.000Z",
+      expectedStatus: "pending",
+      jobId: "job_sla_atomic_claim",
+      queue: "sla-timers"
+    }]);
   });
 
   it("applies a claimed SLA resume transition to durable conversation state", async () => {
@@ -808,7 +1049,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       job: repository.listJobs()[0],
       now: new Date("2026-06-29T13:16:30.000Z")
     });
-    const applied = worker.applySlaTimerTransition({
+    const applied = await worker.applySlaTimerTransition({
       completedAt: new Date("2026-06-29T13:16:30.000Z"),
       routingRepository: repository,
       transition
@@ -821,6 +1062,102 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(state.conversations[0].slaTone, "ok");
     assert.equal(state.jobs[0].status, "completed");
     assert.equal(state.jobs[0].completedAt, "2026-06-29T13:16:30.000Z");
+  });
+
+  it("applies ready SLA timer transitions through the repository-owned apply hook", async () => {
+    const worker = await import("../apps/api-gateway/src/routing/sla-timer.worker.ts");
+    const applyCalls: Array<Record<string, unknown>> = [];
+    const repository = {
+      applySlaTimerTransition(input: Record<string, unknown>): Record<string, unknown> {
+        applyCalls.push(input);
+        return {
+          conversationId: "maria",
+          jobId: "job_sla_repository_apply",
+          status: "applied"
+        };
+      },
+      listJobs(): never {
+        throw new Error("listJobs must not be used for SLA apply");
+      },
+      readState(): never {
+        throw new Error("readState must not be used for SLA apply");
+      },
+      saveState(): never {
+        throw new Error("saveState must not be used for SLA apply");
+      }
+    };
+
+    const applied = await worker.applySlaTimerTransition({
+      completedAt: new Date("2026-06-29T13:16:30.000Z"),
+      routingRepository: repository,
+      transition: {
+        action: "resume_sla",
+        conversationId: "maria",
+        fromStatus: "paused",
+        jobId: "job_sla_repository_apply",
+        status: "ready",
+        toStatus: "active"
+      }
+    });
+
+    assert.equal(applied.status, "applied");
+    assert.deepEqual(applyCalls, [{
+      action: "resume_sla",
+      completedAt: "2026-06-29T13:16:30.000Z",
+      conversationId: "maria",
+      jobId: "job_sla_repository_apply",
+      toStatus: "active"
+    }]);
+  });
+
+  it("skips SLA timer transitions when the repository-current job is not claimed", async () => {
+    const worker = await import("../apps/api-gateway/src/routing/sla-timer.worker.ts");
+    const repository = RoutingRepository.inMemory({
+      conversations: [{
+        client: "Maria K.",
+        channel: "SDK",
+        id: "maria",
+        operatorId: "operator-ivan",
+        slaTone: "hold",
+        status: "paused",
+        topic: "Delivery / Status"
+      }],
+      jobs: [{
+        action: "resume_sla",
+        id: "job_sla_resume_pending",
+        queue: "sla-timers",
+        runAt: "2026-06-29T13:15:00.000Z",
+        status: "pending"
+      }],
+      operatorCapacities: [],
+      operators: [],
+      queueMemberships: [],
+      queues: [],
+      rescueReportRows: [],
+      routingRules: []
+    });
+    const transition = worker.planSlaTimerTransition({
+      conversation: repository.readState().conversations[0],
+      job: {
+        ...repository.listJobs()[0],
+        claimedAt: "2026-06-29T13:16:00.000Z",
+        status: "claimed"
+      },
+      now: new Date("2026-06-29T13:16:30.000Z")
+    });
+
+    const applied = await worker.applySlaTimerTransition({
+      completedAt: new Date("2026-06-29T13:16:30.000Z"),
+      routingRepository: repository,
+      transition
+    });
+
+    assert.equal(applied.status, "skipped");
+    const state = repository.readState();
+    assert.equal(state.conversations[0].status, "paused");
+    assert.equal(state.conversations[0].slaTone, "hold");
+    assert.equal(state.jobs[0].status, "pending");
+    assert.equal(state.jobs[0].completedAt, undefined);
   });
 
   it("applies a claimed SLA overdue transition to durable conversation state", async () => {
@@ -856,7 +1193,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       job: repository.listJobs()[0],
       now: new Date("2026-06-29T13:16:30.000Z")
     });
-    const applied = worker.applySlaTimerTransition({
+    const applied = await worker.applySlaTimerTransition({
       completedAt: new Date("2026-06-29T13:16:30.000Z"),
       routingRepository: repository,
       transition
@@ -904,7 +1241,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       now: new Date("2026-06-29T13:16:30.000Z")
     });
 
-    const applied = worker.applySlaTimerTransition({
+    const applied = await worker.applySlaTimerTransition({
       completedAt: new Date("2026-06-29T13:16:30.000Z"),
       routingRepository: repository,
       transition
@@ -950,7 +1287,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       now: new Date("2026-06-29T13:16:30.000Z")
     });
 
-    const applied = worker.applySlaTimerTransition({
+    const applied = await worker.applySlaTimerTransition({
       completedAt: new Date("2026-06-29T13:16:30.000Z"),
       routingRepository: repository,
       transition
@@ -985,7 +1322,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRules: []
     });
 
-    const failed = worker.recordSlaTimerJobFailure({
+    const failed = await worker.recordSlaTimerJobFailure({
       error: new Error("routing store unavailable"),
       failedAt,
       maxAttempts: 3,
@@ -993,11 +1330,11 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRepository: repository,
       jobId: "job_sla_retryable"
     });
-    const earlyRetry = worker.claimDueSlaTimerJobs({
+    const earlyRetry = await worker.claimDueSlaTimerJobs({
       now: new Date("2026-06-29T13:20:30.000Z"),
       routingRepository: repository
     });
-    const readyRetry = worker.claimDueSlaTimerJobs({
+    const readyRetry = await worker.claimDueSlaTimerJobs({
       now: new Date("2026-06-29T13:21:00.000Z"),
       routingRepository: repository
     });
@@ -1034,7 +1371,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRules: []
     });
 
-    const failed = worker.recordSlaTimerJobFailure({
+    const failed = await worker.recordSlaTimerJobFailure({
       error: "routing store unavailable",
       failedAt,
       maxAttempts: 3,
@@ -1042,7 +1379,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRepository: repository,
       jobId: "job_sla_dead_letter"
     });
-    const retry = worker.claimDueSlaTimerJobs({
+    const retry = await worker.claimDueSlaTimerJobs({
       now: new Date("2026-06-29T13:26:00.000Z"),
       routingRepository: repository
     });
@@ -1110,7 +1447,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRules: []
     });
 
-    const result = worker.claimDueSlaTimerJobs({
+    const result = await worker.claimDueSlaTimerJobs({
       now: new Date("2026-06-29T13:25:00.000Z"),
       routingRepository: repository
     });
@@ -1139,13 +1476,17 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         listCalls += 1;
         return [listCalls === 1 ? pendingJob : completedJob];
       },
+      claimJob(): undefined {
+        listCalls += 1;
+        return undefined;
+      },
       saveJob(job: Record<string, unknown>): Record<string, unknown> {
         savedJob = job;
         return job;
       }
     };
 
-    const result = worker.claimDueSlaTimerJobs({
+    const result = await worker.claimDueSlaTimerJobs({
       now: new Date("2026-06-29T13:25:00.000Z"),
       routingRepository: repository
     });
@@ -1196,7 +1537,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRules: []
     });
 
-    const result = worker.claimExpiredRescueReturnJobs({
+    const result = await worker.claimExpiredRescueReturnJobs({
       limit: 2,
       now: new Date("2026-06-29T13:30:00.000Z"),
       routingRepository: repository
@@ -1236,13 +1577,17 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         listCalls += 1;
         return [listCalls === 1 ? pendingJob : completedJob];
       },
+      claimJob(): undefined {
+        listCalls += 1;
+        return undefined;
+      },
       saveJob(job: Record<string, unknown>): Record<string, unknown> {
         savedJob = job;
         return job;
       }
     };
 
-    const result = worker.claimExpiredRescueReturnJobs({
+    const result = await worker.claimExpiredRescueReturnJobs({
       now: new Date("2026-06-29T13:30:00.000Z"),
       routingRepository: repository
     });
@@ -1270,6 +1615,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         },
         slaTone: "danger",
         status: "assigned",
+        tenantId: "tenant-volga",
         topic: "Delivery / Status"
       }],
       jobs: [{
@@ -1279,7 +1625,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         id: "job_rescue_return_claimed",
         queue: "rescue-return",
         runAt: "2026-06-29T13:34:00.000Z",
-        status: "claimed"
+        status: "claimed",
+        tenantId: "tenant-volga"
       }],
       operatorCapacities: [],
       operators: [{
@@ -1291,7 +1638,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         name: "Kirill M.",
         rescueActive: 1,
         slaPercent: 88,
-        status: "break"
+        status: "break",
+        tenantId: "tenant-volga"
       }],
       queueMemberships: [],
       queues: [{
@@ -1300,13 +1648,14 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         health: 74,
         limit: 8,
         overdue: 3,
+        tenantId: "tenant-volga",
         waiting: 11
       }],
       rescueReportRows: [],
       routingRules: []
     });
 
-    const applied = worker.applyRescueReturnTransition({
+    const applied = await worker.applyRescueReturnTransition({
       completedAt: new Date("2026-06-29T13:35:00.000Z"),
       job: repository.listJobs()[0],
       routingRepository: repository
@@ -1331,6 +1680,51 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(job.completedAt, "2026-06-29T13:35:00.000Z");
   });
 
+  it("applies rescue-return transitions through the repository-owned apply hook", async () => {
+    const worker = await import("../apps/api-gateway/src/routing/rescue-return.worker.ts");
+    const applyCalls: Array<Record<string, unknown>> = [];
+    const repository = {
+      applyRescueReturnTransition(input: Record<string, unknown>): Record<string, unknown> {
+        applyCalls.push(input);
+        return {
+          conversationId: "vladimir",
+          jobId: "job_rescue_repository_apply",
+          status: "applied"
+        };
+      },
+      listJobs(): never {
+        throw new Error("listJobs must not be used for rescue apply");
+      },
+      readState(): never {
+        throw new Error("readState must not be used for rescue apply");
+      },
+      saveState(): never {
+        throw new Error("saveState must not be used for rescue apply");
+      }
+    };
+
+    const applied = await worker.applyRescueReturnTransition({
+      completedAt: new Date("2026-06-29T13:35:00.000Z"),
+      job: {
+        action: "return_to_sla_queue",
+        conversationId: "vladimir",
+        id: "job_rescue_repository_apply",
+        queue: "rescue-return",
+        tenantId: "tenant-volga",
+        status: "claimed"
+      },
+      routingRepository: repository
+    });
+
+    assert.equal(applied.status, "applied");
+    assert.deepEqual(applyCalls, [{
+      completedAt: "2026-06-29T13:35:00.000Z",
+      fallbackConversationId: "vladimir",
+      jobId: "job_rescue_repository_apply",
+      tenantId: "tenant-volga"
+    }]);
+  });
+
   it("skips rescue-return transitions when the repository-current job is not claimed", async () => {
     const worker = await import("../apps/api-gateway/src/routing/rescue-return.worker.ts");
     const repository = RoutingRepository.inMemory({
@@ -1350,6 +1744,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         },
         slaTone: "danger",
         status: "assigned",
+        tenantId: "tenant-volga",
         topic: "Delivery / Status"
       }],
       jobs: [{
@@ -1385,7 +1780,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRules: []
     });
 
-    const skipped = worker.applyRescueReturnTransition({
+    const skipped = await worker.applyRescueReturnTransition({
       completedAt: new Date("2026-06-29T13:35:00.000Z"),
       job: repository.listJobs()[0],
       routingRepository: repository
@@ -1428,6 +1823,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         },
         slaTone: "danger",
         status: "assigned",
+        tenantId: "tenant-volga",
         topic: "Delivery / Status"
       }],
       jobs: [{
@@ -1459,7 +1855,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRules: []
     });
 
-    const skipped = worker.applyRescueReturnTransition({
+    const skipped = await worker.applyRescueReturnTransition({
       completedAt: new Date("2026-06-29T13:35:00.000Z"),
       job: staleClaimedJob,
       routingRepository: repository
@@ -1541,11 +1937,11 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       }]
     });
 
-    const wrongQueue = worker.applyRescueReturnTransition({
+    const wrongQueue = await worker.applyRescueReturnTransition({
       job: wrongQueueRepository.listJobs()[0],
       routingRepository: wrongQueueRepository
     });
-    const wrongAction = worker.applyRescueReturnTransition({
+    const wrongAction = await worker.applyRescueReturnTransition({
       job: wrongActionRepository.listJobs()[0],
       routingRepository: wrongActionRepository
     });
@@ -1577,6 +1973,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         },
         slaTone: "danger",
         status: "assigned",
+        tenantId: "tenant-ladoga",
         topic: "Delivery / Status"
       }],
       jobs: [{
@@ -1586,7 +1983,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         id: "job_rescue_return_outcome",
         queue: "rescue-return",
         runAt: "2026-06-29T13:34:00.000Z",
-        status: "claimed"
+        status: "claimed",
+        tenantId: "tenant-ladoga"
       }],
       operatorCapacities: [],
       operators: [{
@@ -1598,7 +1996,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         name: "Kirill M.",
         rescueActive: 1,
         slaPercent: 88,
-        status: "break"
+        status: "break",
+        tenantId: "tenant-ladoga"
       }],
       queueMemberships: [],
       queues: [{
@@ -1607,13 +2006,14 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         health: 74,
         limit: 8,
         overdue: 3,
+        tenantId: "tenant-ladoga",
         waiting: 11
       }],
       rescueReportRows: [],
       routingRules: []
     });
 
-    worker.applyRescueReturnTransition({
+    await worker.applyRescueReturnTransition({
       completedAt: new Date("2026-06-29T13:35:00.000Z"),
       job: repository.listJobs()[0],
       routingRepository: repository
@@ -1631,14 +2031,16 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
 
     const [analyticsRow] = repository.listRoutingAnalyticsRows({
       eventKind: "auto_return",
-      tenantId: "tenant-volga"
+      tenantId: "tenant-ladoga"
     });
     assert.equal(Boolean(analyticsRow), true);
     assert.equal(analyticsRow.conversationId, "vladimir");
     assert.equal(analyticsRow.channel, "Telegram");
     assert.equal(analyticsRow.fromOperatorId, "operator-kirill");
+    assert.equal(analyticsRow.tenantId, "tenant-ladoga");
     assert.equal(analyticsRow.toOperatorId, null);
     assert.equal(analyticsRow.source, "rescue-return-worker");
+    assert.equal(repository.listRoutingAnalyticsRows({ eventKind: "auto_return", tenantId: "tenant-volga" }).length, 0);
   });
 
   it("emits realtime descriptors for rescue auto-return outcomes", async () => {
@@ -1660,6 +2062,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         },
         slaTone: "danger",
         status: "assigned",
+        tenantId: "tenant-volga",
         topic: "Delivery / Status"
       }],
       jobs: [{
@@ -1669,7 +2072,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         id: "job_rescue_return_realtime",
         queue: "rescue-return",
         runAt: "2026-06-29T13:34:00.000Z",
-        status: "claimed"
+        status: "claimed",
+        tenantId: "tenant-volga"
       }],
       operatorCapacities: [],
       operators: [],
@@ -1679,7 +2083,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       routingRules: []
     });
 
-    const applied = worker.applyRescueReturnTransition({
+    const applied = await worker.applyRescueReturnTransition({
       completedAt: new Date("2026-06-29T13:35:00.000Z"),
       job: repository.listJobs()[0],
       routingRepository: repository
@@ -1721,7 +2125,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         id: "job_rescue_return_analytics",
         queue: "rescue-return",
         runAt: "2026-06-29T13:34:00.000Z",
-        status: "claimed"
+        status: "claimed",
+        tenantId: "tenant-volga"
       }],
       operatorCapacities: [],
       operators: [{
@@ -1733,7 +2138,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         name: "Kirill M.",
         rescueActive: 1,
         slaPercent: 88,
-        status: "break"
+        status: "break",
+        tenantId: "tenant-volga"
       }],
       queueMemberships: [],
       queues: [{
@@ -1742,13 +2148,14 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         health: 74,
         limit: 8,
         overdue: 3,
+        tenantId: "tenant-volga",
         waiting: 11
       }],
       rescueReportRows: [],
       routingRules: []
     });
 
-    const applied = worker.applyRescueReturnTransition({
+    const applied = await worker.applyRescueReturnTransition({
       completedAt: new Date("2026-06-29T13:35:00.000Z"),
       job: repository.listJobs()[0],
       routingRepository: repository
@@ -1982,7 +2389,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     const closed = await routing.startRescue({
       conversationId: "closed-dialog",
       reason: "Manual escalation"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(closed.status, "denied");
     assert.equal(closed.error?.code, "conversation_closed");
 
@@ -1991,7 +2398,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       durationSeconds: 1,
       reason: "No operator answer after accept",
       source: "manual"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(rescue.status, "ok");
     assert.equal(rescue.data.conversation.status, "assigned");
     assert.equal(rescue.data.conversation.slaTone, "danger");
@@ -2008,7 +2415,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     const duplicateStart = await routing.startRescue({
       conversationId: "vladimir",
       reason: "Repeated start"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(duplicateStart.status, "conflict");
     assert.equal(duplicateStart.error?.code, "rescue_already_active");
     assert.equal(duplicateStart.data.rescue.deadlineAt, rescue.data.rescue.deadlineAt);
@@ -2017,16 +2424,16 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   it("updates rescue workload counters and validates rescue outcomes", async () => {
     const routing = new RoutingService();
 
-    const before = await routing.fetchWorkload({ channel: "Telegram" });
+    const before = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
     const beforeKirill = before.data.operators.find((operator) => operator.id === "operator-kirill");
     const beforeTotalRescue = before.data.totals.rescueActive;
 
     await routing.startRescue({
       conversationId: "vladimir",
       reason: "No operator answer after accept"
-    });
+    }, VOLGA_CONTEXT);
 
-    const afterStart = await routing.fetchWorkload({ channel: "Telegram" });
+    const afterStart = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
     const startKirill = afterStart.data.operators.find((operator) => operator.id === "operator-kirill");
     assert.equal(startKirill.rescueActive, beforeKirill.rescueActive + 1);
     assert.equal(afterStart.data.totals.rescueActive, beforeTotalRescue + 1);
@@ -2035,7 +2442,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "vladimir",
       outcome: "bogus",
       reason: "Invalid runtime payload"
-    });
+    }, VOLGA_CONTEXT);
     assert.equal(unsupportedOutcome.status, "invalid");
     assert.equal(unsupportedOutcome.error?.code, "rescue_outcome_unsupported");
 
@@ -2043,9 +2450,9 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "vladimir",
       outcome: "saved",
       reason: "Operator answered"
-    });
+    }, VOLGA_CONTEXT);
 
-    const afterResolve = await routing.fetchWorkload({ channel: "Telegram" });
+    const afterResolve = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
     const resolveKirill = afterResolve.data.operators.find((operator) => operator.id === "operator-kirill");
     assert.equal(resolveKirill.rescueActive, beforeKirill.rescueActive);
     assert.equal(afterResolve.data.totals.rescueActive, beforeTotalRescue);
@@ -2057,12 +2464,12 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     await routing.startRescue({
       conversationId: "vladimir",
       reason: "No operator answer after accept"
-    });
+    }, VOLGA_CONTEXT);
     const resolved = await routing.resolveRescue({
       conversationId: "vladimir",
       outcome: "returned_to_queue",
       reason: "Timer expired"
-    });
+    }, VOLGA_CONTEXT);
 
     assert.equal(resolved.status, "ok");
     assert.equal(resolved.data.rescue.state, "returned_to_queue");
@@ -2074,7 +2481,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(resolved.data.reportEvent.eventName, "rescue.report.ready");
     assert.equal(resolved.data.reportEvent.digest, "daily_rescue");
 
-    const report = await routing.fetchRescueReport({ period: "today" });
+    const report = await routing.fetchRescueReport({ period: "today" }, VOLGA_CONTEXT);
     assert.equal(report.status, "ok");
     assert.ok(report.data.outcomeSummary.some((item) => item.label === "returned_to_queue"));
     assert.ok(report.data.rows.some((row) => row.conversationId === "vladimir" && row.operatorId === "operator-kirill"));
@@ -2129,7 +2536,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     });
     const routing = new RoutingService(repository);
 
-    const report = await routing.fetchRescueReport({ period: "today" });
+    const report = await routing.fetchRescueReport({ period: "today" }, VOLGA_CONTEXT);
 
     assert.deepEqual(report.data.routingAnalytics, {
       byEventKind: {
@@ -2164,21 +2571,21 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   it("updates workload counters when rescue auto-returns an assigned dialog", async () => {
     const routing = new RoutingService();
 
-    const before = await routing.fetchWorkload({ channel: "Telegram" });
+    const before = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
     const beforeKirill = before.data.operators.find((operator) => operator.id === "operator-kirill");
     const beforeQueue = before.data.queues[0];
 
     await routing.startRescue({
       conversationId: "vladimir",
       reason: "No operator answer after accept"
-    });
+    }, VOLGA_CONTEXT);
     await routing.resolveRescue({
       conversationId: "vladimir",
       outcome: "returned_to_queue",
       reason: "Timer expired"
-    });
+    }, VOLGA_CONTEXT);
 
-    const after = await routing.fetchWorkload({ channel: "Telegram" });
+    const after = await routing.fetchWorkload({ channel: "Telegram" }, VOLGA_CONTEXT);
     const afterKirill = after.data.operators.find((operator) => operator.id === "operator-kirill");
     const afterQueue = after.data.queues[0];
 
@@ -2190,16 +2597,16 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   it("balances queue counters when rescue starts from a queued dialog", async () => {
     const routing = new RoutingService();
 
-    const before = await routing.fetchWorkload({ channel: "VK" });
+    const before = await routing.fetchWorkload({ channel: "VK" }, VOLGA_CONTEXT);
     const beforeQueue = before.data.queues[0];
     const beforeRescueTotal = before.data.totals.rescueActive;
 
     await routing.startRescue({
       conversationId: "alexey",
       reason: "Queue SLA risk"
-    });
+    }, VOLGA_CONTEXT);
 
-    const afterStart = await routing.fetchWorkload({ channel: "VK" });
+    const afterStart = await routing.fetchWorkload({ channel: "VK" }, VOLGA_CONTEXT);
     const startQueue = afterStart.data.queues[0];
     assert.equal(startQueue.active, beforeQueue.active + 1);
     assert.equal(startQueue.waiting, beforeQueue.waiting - 1);
@@ -2209,9 +2616,9 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       conversationId: "alexey",
       outcome: "returned_to_queue",
       reason: "Timer expired"
-    });
+    }, VOLGA_CONTEXT);
 
-    const afterResolve = await routing.fetchWorkload({ channel: "VK" });
+    const afterResolve = await routing.fetchWorkload({ channel: "VK" }, VOLGA_CONTEXT);
     const resolveQueue = afterResolve.data.queues[0];
     assert.equal(resolveQueue.active, beforeQueue.active);
     assert.equal(resolveQueue.waiting, beforeQueue.waiting);

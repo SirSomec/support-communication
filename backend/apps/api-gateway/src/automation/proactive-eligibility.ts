@@ -126,6 +126,66 @@ export function evaluateProactiveExecutionWindowEligibility({
   };
 }
 
+export async function evaluateProactiveExecutionWindowEligibilityAsync({
+  evaluatedAt,
+  repository,
+  ruleId,
+  tenantId
+}: ProactiveExecutionWindowEligibilityInput): Promise<ProactiveExecutionWindowEligibilityResult> {
+  if (!tenantId.trim()) {
+    return {
+      consideredWindowIds: [],
+      eligible: false,
+      matchedWindowIds: [],
+      reason: "tenant_targeting_invalid"
+    };
+  }
+
+  const evaluationDate = new Date(evaluatedAt);
+  if (Number.isNaN(evaluationDate.getTime()) || evaluationDate.toISOString() !== evaluatedAt) {
+    return {
+      consideredWindowIds: [],
+      eligible: false,
+      matchedWindowIds: [],
+      reason: "execution_window_invalid_time"
+    };
+  }
+
+  const windows = (await repository.listProactiveExecutionWindowsAsync({ ruleId, tenantId }))
+    .filter((window) => window.active);
+
+  if (!windows.length) {
+    const activeRuleWindows = (await repository.listProactiveExecutionWindowsAsync({ ruleId }))
+      .filter((window) => window.active);
+    if (activeRuleWindows.length) {
+      return {
+        consideredWindowIds: [],
+        eligible: false,
+        matchedWindowIds: [],
+        reason: "tenant_targeting_mismatch"
+      };
+    }
+
+    return {
+      consideredWindowIds: [],
+      eligible: true,
+      matchedWindowIds: [],
+      reason: "execution_window_not_configured"
+    };
+  }
+
+  const matchedWindowIds = windows
+    .filter((window) => windowMatchesEvaluationTime(window, evaluationDate))
+    .map((window) => window.windowId);
+
+  return {
+    consideredWindowIds: windows.map((window) => window.windowId),
+    eligible: matchedWindowIds.length > 0,
+    matchedWindowIds,
+    reason: matchedWindowIds.length ? "execution_window_matched" : "outside_execution_window"
+  };
+}
+
 export function evaluateProactiveFrequencyCapEligibility({
   evaluatedAt,
   repository,
@@ -158,6 +218,84 @@ export function evaluateProactiveFrequencyCapEligibility({
   if (!caps.length) {
     const activeRuleCaps = repository
       .listProactiveFrequencyCaps({ ruleId })
+      .filter((cap) => cap.active);
+    if (activeRuleCaps.length) {
+      return {
+        consideredCapIds: [],
+        eligible: false,
+        exhaustedCapIds: [],
+        reason: "tenant_targeting_mismatch"
+      };
+    }
+
+    return {
+      consideredCapIds: [],
+      eligible: true,
+      exhaustedCapIds: [],
+      reason: "frequency_cap_not_configured"
+    };
+  }
+
+  const exhaustedCaps = caps.filter((cap) => cap.used >= cap.limit);
+  const malformedResetCapIds = exhaustedCaps
+    .filter((cap) => !parseStrictIsoInstant(cap.resetAt))
+    .map((cap) => cap.capId);
+  if (malformedResetCapIds.length) {
+    return {
+      consideredCapIds: caps.map((cap) => cap.capId),
+      eligible: false,
+      exhaustedCapIds: malformedResetCapIds,
+      reason: "frequency_cap_reset_invalid"
+    };
+  }
+
+  const exhaustedCapIds = exhaustedCaps
+    .filter((cap) => isAfterEvaluation(cap.resetAt, evaluationDate))
+    .map((cap) => cap.capId);
+  const anyResetReached = exhaustedCaps.some((cap) => !isAfterEvaluation(cap.resetAt, evaluationDate));
+
+  return {
+    consideredCapIds: caps.map((cap) => cap.capId),
+    eligible: exhaustedCapIds.length === 0,
+    exhaustedCapIds,
+    reason: exhaustedCapIds.length
+      ? "frequency_cap_exhausted"
+      : anyResetReached
+        ? "frequency_cap_reset_reached"
+        : "frequency_cap_available"
+  };
+}
+
+export async function evaluateProactiveFrequencyCapEligibilityAsync({
+  evaluatedAt,
+  repository,
+  ruleId,
+  tenantId
+}: ProactiveFrequencyCapEligibilityInput): Promise<ProactiveFrequencyCapEligibilityResult> {
+  if (!tenantId.trim()) {
+    return {
+      consideredCapIds: [],
+      eligible: false,
+      exhaustedCapIds: [],
+      reason: "tenant_targeting_invalid"
+    };
+  }
+
+  const evaluationDate = new Date(evaluatedAt);
+  if (Number.isNaN(evaluationDate.getTime()) || evaluationDate.toISOString() !== evaluatedAt) {
+    return {
+      consideredCapIds: [],
+      eligible: false,
+      exhaustedCapIds: [],
+      reason: "frequency_cap_invalid_time"
+    };
+  }
+
+  const caps = (await repository.listProactiveFrequencyCapsAsync({ ruleId, tenantId }))
+    .filter((cap) => cap.active);
+
+  if (!caps.length) {
+    const activeRuleCaps = (await repository.listProactiveFrequencyCapsAsync({ ruleId }))
       .filter((cap) => cap.active);
     if (activeRuleCaps.length) {
       return {
@@ -259,6 +397,75 @@ export function evaluateProactiveExperimentAssignmentEligibility({
   }
 
   const assignment = repository.saveProactiveExperimentAssignment({
+    assignedAt,
+    assignmentId: `${experimentId}:${tenantId}:${ruleId}:${subjectId}`,
+    experimentId,
+    ruleId,
+    subjectId,
+    tenantId,
+    variant: normalizedVariants[stableBucket(`${tenantId}:${ruleId}:${subjectId}`, normalizedVariants.length)]
+  });
+
+  return {
+    assignment,
+    eligible: true,
+    reason: "experiment_assigned"
+  };
+}
+
+export async function evaluateProactiveExperimentAssignmentEligibilityAsync({
+  assignedAt,
+  experimentId,
+  repository,
+  ruleId,
+  subjectId,
+  tenantId,
+  variants
+}: ProactiveExperimentAssignmentEligibilityInput): Promise<ProactiveExperimentAssignmentEligibilityResult> {
+  if (!tenantId.trim()) {
+    return {
+      assignment: null,
+      eligible: false,
+      reason: "tenant_targeting_invalid"
+    };
+  }
+
+  if (!subjectId.trim()) {
+    return {
+      assignment: null,
+      eligible: false,
+      reason: "client_targeting_invalid"
+    };
+  }
+
+  const assignmentDate = new Date(assignedAt);
+  if (Number.isNaN(assignmentDate.getTime()) || assignmentDate.toISOString() !== assignedAt) {
+    return {
+      assignment: null,
+      eligible: false,
+      reason: "experiment_assignment_invalid_time"
+    };
+  }
+
+  const normalizedVariants = variants.map((variant) => variant.trim()).filter(Boolean);
+  if (!normalizedVariants.length) {
+    return {
+      assignment: null,
+      eligible: false,
+      reason: "experiment_assignment_invalid_variants"
+    };
+  }
+
+  const existing = (await repository.listProactiveExperimentAssignmentsAsync({ ruleId, subjectId, tenantId }))[0];
+  if (existing) {
+    return {
+      assignment: existing,
+      eligible: true,
+      reason: "experiment_assignment_replayed"
+    };
+  }
+
+  const assignment = await repository.saveProactiveExperimentAssignmentAsync({
     assignedAt,
     assignmentId: `${experimentId}:${tenantId}:${ruleId}:${subjectId}`,
     experimentId,

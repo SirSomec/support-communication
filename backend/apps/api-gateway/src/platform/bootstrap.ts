@@ -1,33 +1,49 @@
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { PlatformRepository } from "./platform.repository.js";
+import {
+  configureRepositoryBootstrap,
+  createPrismaClient,
+  resolveRepositoryStoreFile,
+  type PrismaClientFactoryOptions
+} from "@support-communication/database";
+import { bootstrapPlatformState } from "./seed.js";
+import { PlatformRepository, type PrismaPlatformClient } from "./platform.repository.js";
 
 export interface PlatformRepositoryBootstrapSource {
+  DATABASE_URL?: string;
   NODE_ENV?: string;
+  PLATFORM_REPOSITORY?: string;
   PLATFORM_STORE_FILE?: string;
   PORT?: number | string;
   SERVICE_NAME?: string;
 }
 
-export function configurePlatformRepository(source: PlatformRepositoryBootstrapSource = process.env): PlatformRepository {
-  const repository = PlatformRepository.open({ filePath: resolvePlatformStoreFile(source) });
-  PlatformRepository.useDefault(repository);
-  return repository;
+export interface PlatformRepositoryBootstrapOptions {
+  prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaPlatformClient;
+}
+
+export function configurePlatformRepository(
+  source: PlatformRepositoryBootstrapSource = process.env,
+  options: PlatformRepositoryBootstrapOptions = {}
+): PlatformRepository {
+  return configureRepositoryBootstrap({
+    createJsonRepository: (filePath) => PlatformRepository.open({ filePath, seed: bootstrapPlatformState() }),
+    createPrismaRepository: (client) => PlatformRepository.prisma({ client }),
+    prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
+    repositoryEnv: "PLATFORM_REPOSITORY",
+    source,
+    storeFileEnv: "PLATFORM_STORE_FILE",
+    suffix: "platform",
+    useDefault: (configuredRepository) => PlatformRepository.useDefault(configuredRepository)
+  });
 }
 
 export function resolvePlatformStoreFile(source: PlatformRepositoryBootstrapSource = process.env): string {
-  const configuredPath = source.PLATFORM_STORE_FILE?.trim();
-  if (configuredPath) {
-    return resolve(configuredPath);
-  }
-
-  const serviceName = sanitizePathSegment(source.SERVICE_NAME ?? "api-gateway");
-  const nodeEnv = sanitizePathSegment(source.NODE_ENV ?? "development");
-  const port = sanitizePathSegment(String(source.PORT ?? "4100"));
-
-  return join(tmpdir(), "support-communication", `${serviceName}-${nodeEnv}-${port}-platform.json`);
+  return resolveRepositoryStoreFile({
+    source,
+    storeFileEnv: "PLATFORM_STORE_FILE",
+    suffix: "platform"
+  });
 }
 
-function sanitizePathSegment(value: string): string {
-  return value.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "default";
+function defaultPrismaClientFactory(options: PrismaClientFactoryOptions): PrismaPlatformClient {
+  return createPrismaClient(options) as PrismaPlatformClient;
 }

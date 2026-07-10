@@ -156,7 +156,7 @@ export async function verifyObjectStorageRestoreCheckExistence(input: {
   result: OperationsObjectStorageRestoreCheckExistenceResultRecord;
 }> {
   const verification = await input.existencePort.verify(input.request);
-  const result = persistObjectStorageRestoreCheckExistenceResult(input.operationsRepository, {
+  const result = await input.operationsRepository.saveObjectStorageRestoreCheckExistenceResultAsync({
     artifactId: input.request.artifact.artifactId,
     drillId: input.request.drillId,
     exists: verification.exists,
@@ -187,7 +187,7 @@ export async function verifyObjectStorageRestoreCheckChecksum(input: {
   result: OperationsObjectStorageRestoreCheckChecksumResultRecord;
 }> {
   const verification = await input.checksumPort.verify(input.request);
-  const result = persistObjectStorageRestoreCheckChecksumResult(input.operationsRepository, {
+  const result = await input.operationsRepository.saveObjectStorageRestoreCheckChecksumResultAsync({
     actualChecksum: verification.actualChecksum,
     artifactId: input.request.artifact.artifactId,
     drillId: input.request.drillId,
@@ -220,7 +220,7 @@ export async function verifyObjectStorageRestoreCheckMetadata(input: {
   result: OperationsObjectStorageRestoreCheckMetadataResultRecord;
 }> {
   const verification = await input.metadataPort.verify(input.request);
-  const result = persistObjectStorageRestoreCheckMetadataResult(input.operationsRepository, {
+  const result = await input.operationsRepository.saveObjectStorageRestoreCheckMetadataResultAsync({
     actualMetadata: verification.actualMetadata,
     artifactId: input.request.artifact.artifactId,
     drillId: input.request.drillId,

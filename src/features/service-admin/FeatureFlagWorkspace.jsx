@@ -1,19 +1,35 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Eye, Flag, ShieldAlert, SlidersHorizontal } from "lucide-react";
 import { SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
-import { serviceAdminFeatureFlags, serviceAdminTenants } from "../../data/serviceAdmin.js";
 import { featureFlagService } from "../../services/featureFlagService.js";
+import { tenantService } from "../../services/tenantService.js";
 import { formatLabel, getStatusTone } from "./serviceAdminUtils.js";
 
 const flagStatuses = ["all", "on", "off", "gradual", "guarded"];
 const flagScopes = ["all", "tenant", "plan"];
 const nextFlagStatuses = ["on", "off", "gradual", "guarded"];
+const emptyFlag = {
+  enabledTenantIds: [],
+  environment: "production",
+  id: "",
+  key: "no-data",
+  killSwitch: false,
+  name: "No data",
+  owner: "Service Admin",
+  rollout: 0,
+  scope: "tenant",
+  segments: [],
+  status: "off",
+  variants: []
+};
 
 export function FeatureFlagWorkspace({ onAudit }) {
+  const [flags, setFlags] = useState([]);
+  const [tenants, setTenants] = useState([]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [scopeFilter, setScopeFilter] = useState("all");
-  const [selectedFlagId, setSelectedFlagId] = useState(serviceAdminFeatureFlags[0].id);
+  const [selectedFlagId, setSelectedFlagId] = useState("");
   const [nextStatus, setNextStatus] = useState("gradual");
   const [rollout, setRollout] = useState(50);
   const [selectedTenantIds, setSelectedTenantIds] = useState([]);
@@ -22,13 +38,38 @@ export function FeatureFlagWorkspace({ onAudit }) {
   const [confirmationText, setConfirmationText] = useState("");
   const [flagOverrides, setFlagOverrides] = useState({});
 
-  const flags = useMemo(() => (
-    serviceAdminFeatureFlags.map((flag) => ({ ...flag, ...(flagOverrides[flag.id] ?? {}) }))
-  ), [flagOverrides]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWorkspace() {
+      const [flagResponse, tenantResponse] = await Promise.all([
+        featureFlagService.fetchFeatureFlags(),
+        tenantService.fetchTenants()
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      const items = flagResponse.status === "ok" ? flagResponse.data?.items ?? [] : [];
+      setFlags(items);
+      setTenants(tenantResponse.status === "ok" ? tenantResponse.data?.items ?? [] : []);
+      setSelectedFlagId(items[0]?.id ?? "");
+    }
+
+    loadWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const mergedFlags = useMemo(() => (
+    flags.map((flag) => ({ ...flag, ...(flagOverrides[flag.id] ?? {}) }))
+  ), [flagOverrides, flags]);
   const visibleFlags = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return flags.filter((flag) => {
+    return mergedFlags.filter((flag) => {
       const statusMatches = statusFilter === "all" || flag.status === statusFilter;
       const scopeMatches = scopeFilter === "all" || flag.scope === scopeFilter;
       const queryMatches = !normalizedQuery || [flag.key, flag.name, flag.owner]
@@ -36,12 +77,13 @@ export function FeatureFlagWorkspace({ onAudit }) {
 
       return statusMatches && scopeMatches && queryMatches;
     });
-  }, [flags, query, scopeFilter, statusFilter]);
+  }, [mergedFlags, query, scopeFilter, statusFilter]);
 
-  const selectedFlag = flags.find((flag) => flag.id === selectedFlagId) ?? flags[0];
-  const currentPreview = preview?.flag?.id === selectedFlag.id ? preview : null;
+  const selectedFlag = mergedFlags.find((flag) => flag.id === selectedFlagId) ?? mergedFlags[0] ?? emptyFlag;
+  const currentPreview = selectedFlag.id && preview?.flag?.id === selectedFlag.id ? preview : null;
   const confirmationRequired = Boolean(currentPreview?.confirmation?.required);
-  const canApply = currentPreview && reason.trim().length >= 8 && (!confirmationRequired || confirmationText === currentPreview.confirmation.expectedText);
+  const canPreview = Boolean(selectedFlag.id && reason.trim().length >= 8);
+  const canApply = Boolean(currentPreview && reason.trim().length >= 8 && (!confirmationRequired || confirmationText === currentPreview.confirmation.expectedText));
 
   function handleToggleTenant(tenantId) {
     setSelectedTenantIds((current) => (
@@ -52,6 +94,10 @@ export function FeatureFlagWorkspace({ onAudit }) {
   }
 
   async function handlePreview() {
+    if (!selectedFlag.id) {
+      return;
+    }
+
     const envelope = await featureFlagService.previewFlagChange({
       flagId: selectedFlag.id,
       nextRollout: rollout,
@@ -67,6 +113,10 @@ export function FeatureFlagWorkspace({ onAudit }) {
   }
 
   async function handleApply() {
+    if (!selectedFlag.id) {
+      return;
+    }
+
     const envelope = await featureFlagService.updateFeatureFlag({
       confirmationText,
       confirmed: true,
@@ -117,7 +167,7 @@ export function FeatureFlagWorkspace({ onAudit }) {
         <div className="service-admin-flag-list">
           {visibleFlags.map((flag) => (
             <button
-              className={flag.id === selectedFlag.id ? "selected" : ""}
+              className={flag.id === selectedFlag?.id ? "selected" : ""}
               key={flag.id}
               onClick={() => {
                 setSelectedFlagId(flag.id);
@@ -196,7 +246,7 @@ export function FeatureFlagWorkspace({ onAudit }) {
           </div>
 
           <div className="service-admin-tenant-checks" aria-label="Таргетинг флага по организациям">
-            {serviceAdminTenants.map((tenant) => (
+            {tenants.map((tenant) => (
               <label key={tenant.id}>
                 <input
                   checked={selectedTenantIds.includes(tenant.id)}
@@ -209,7 +259,7 @@ export function FeatureFlagWorkspace({ onAudit }) {
           </div>
 
           <div className="service-admin-action-buttons">
-            <button disabled={reason.trim().length < 8} onClick={handlePreview} type="button">
+            <button disabled={!canPreview} onClick={handlePreview} type="button">
               <Eye size={17} />
               Предпросмотр
             </button>

@@ -1,0 +1,7 @@
+ALTER TABLE "mfa_challenges"
+  ADD COLUMN "otp_hash" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN "attempts" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "max_attempts" INTEGER NOT NULL DEFAULT 5;
+
+ALTER TABLE "mfa_challenges"
+  ALTER COLUMN "otp_hash" DROP DEFAULT;

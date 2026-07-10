@@ -1,5 +1,5 @@
 import { redactSensitiveText } from "@support-communication/redaction";
-import type { BotScenario } from "./automation.fixtures.js";
+import type { BotScenario } from "./automation.types.js";
 import type {
   ConversationOutboundDescriptor,
   ConversationOutboundDescriptorRecord,

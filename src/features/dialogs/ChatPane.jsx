@@ -6,6 +6,7 @@ import { Composer } from "./Composer.jsx";
 import { TranscriptToolbar } from "./TranscriptToolbar.jsx";
 
 export function ChatPane({
+  assignees,
   conversation,
   topic,
   onTopic,
@@ -26,6 +27,7 @@ export function ChatPane({
   templates,
   onSaveTemplate,
   onDialogAction,
+  onAssignment,
   onCloseDialog,
   onStatusChange,
   access,
@@ -60,9 +62,11 @@ export function ChatPane({
       <ChatHeader
         access={access}
         activeRescue={activeRescue}
+        assignees={assignees}
         conversation={conversation}
         isClosed={isClosed}
         onDialogAction={onDialogAction}
+        onAssignment={onAssignment}
         onStatusChange={onStatusChange}
         onTopic={onTopic}
         status={status}

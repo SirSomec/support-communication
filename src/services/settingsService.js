@@ -5,7 +5,6 @@ const SERVICE = "settingsService";
 export const settingsService = {
   async fetchEmployees(filters = {}) {
     return apiRequest("/settings/employees", {
-      authMode: "service-admin",
       operation: "fetchEmployees",
       query: filters,
       service: SERVICE
@@ -14,7 +13,6 @@ export const settingsService = {
 
   async inviteEmployee(payload = {}) {
     return apiRequest("/settings/employees/invites", {
-      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "inviteEmployee",
@@ -28,7 +26,6 @@ export const settingsService = {
     }
 
     return apiRequest(`/settings/employees/${encodeURIComponent(employeeId)}`, {
-      authMode: "service-admin",
       body: payload,
       method: "PATCH",
       operation: "updateEmployee",
@@ -42,7 +39,6 @@ export const settingsService = {
     }
 
     return apiRequest(`/settings/employees/${encodeURIComponent(employeeId)}/password-reset`, {
-      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "resetEmployeePassword",
@@ -56,7 +52,6 @@ export const settingsService = {
     }
 
     return apiRequest(`/settings/employees/${encodeURIComponent(employeeId)}/mfa-reset`, {
-      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "resetEmployeeMfa",
@@ -70,7 +65,6 @@ export const settingsService = {
     }
 
     return apiRequest(`/settings/employees/${encodeURIComponent(employeeId)}/deactivate`, {
-      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "deactivateEmployee",
@@ -80,7 +74,6 @@ export const settingsService = {
 
   async fetchRoles() {
     return apiRequest("/settings/roles", {
-      authMode: "service-admin",
       operation: "fetchRoles",
       service: SERVICE
     });
@@ -88,7 +81,6 @@ export const settingsService = {
 
   async fetchGroups() {
     return apiRequest("/settings/groups", {
-      authMode: "service-admin",
       operation: "fetchGroups",
       service: SERVICE
     });
@@ -96,7 +88,6 @@ export const settingsService = {
 
   async createGroup(payload = {}) {
     return apiRequest("/settings/groups", {
-      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "createGroup",
@@ -110,7 +101,6 @@ export const settingsService = {
     }
 
     return apiRequest(`/settings/groups/${encodeURIComponent(groupId)}`, {
-      authMode: "service-admin",
       body: payload,
       method: "PATCH",
       operation: "updateGroup",
@@ -187,7 +177,6 @@ export const settingsService = {
 
   async fetchRules(filters = {}) {
     return apiRequest("/settings/rules", {
-      authMode: "service-admin",
       operation: "fetchRules",
       query: filters,
       service: SERVICE
@@ -200,7 +189,6 @@ export const settingsService = {
     }
 
     return apiRequest(`/settings/rules/${encodeURIComponent(ruleId)}`, {
-      authMode: "service-admin",
       body: payload,
       method: "PATCH",
       operation: "updateRule",
@@ -214,7 +202,6 @@ export const settingsService = {
     }
 
     return apiRequest(`/settings/rules/${encodeURIComponent(ruleId)}/test`, {
-      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "testRule",

@@ -1,8 +1,7 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Post, Query, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
-import { loadBackendConfig } from "@support-communication/config";
 import { AuthService } from "./auth.service.js";
-import { DemoServiceAdminGuard } from "./demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "./service-admin-session.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "./service-admin-auth.js";
 import { TenantOperatorAuthGuard } from "./tenant-operator-auth.guard.js";
 import { type TenantOperatorRequest } from "./tenant-operator-auth.js";
@@ -10,12 +9,10 @@ import { type TenantOperatorRequest } from "./tenant-operator-auth.js";
 @ApiTags("auth")
 @Controller("auth")
 export class AuthController {
-  private readonly demoServiceAdminKey = loadBackendConfig().DEMO_SERVICE_ADMIN_KEY;
-
   constructor(private readonly authService: AuthService) {}
 
   @Get("state")
-  @UseGuards(DemoServiceAdminGuard)
+  @UseGuards(ServiceAdminSessionGuard)
   @RequireServiceAdminAction("auth.state")
   @ApiOkResponse({ description: "Current authentication state envelope" })
   getAuthState(@Req() request: ServiceAdminRequest) {
@@ -25,24 +22,14 @@ export class AuthController {
   @Post("login")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "Password and MFA login envelope" })
-  login(
-    @Body() payload: { email?: string; mfaChallengeId?: string; otp?: string; password?: string },
-    @Headers("x-demo-service-admin-key") demoServiceAdminKey?: string | string[]
-  ) {
-    const providedKey = Array.isArray(demoServiceAdminKey) ? demoServiceAdminKey[0] : demoServiceAdminKey;
-    const privileged = providedKey === this.demoServiceAdminKey;
-
-    if (payload.otp && !privileged) {
-      throw new UnauthorizedException("Demo service-admin key is required to complete MFA login.");
-    }
-
-    return this.authService.login(payload, { privileged });
+  login(@Body() payload: { email?: string; mfaChallengeId?: string; otp?: string; password?: string }) {
+    return this.authService.login(payload);
   }
 
   @Post("tenant/login")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "Tenant operator login envelope" })
-  tenantLogin(@Body() payload: { email?: string; password?: string }) {
+  tenantLogin(@Body() payload: { email?: string; mfaChallengeId?: string; otp?: string; password?: string; tenantId?: string }) {
     return this.authService.loginTenantOperator(payload);
   }
 
@@ -59,6 +46,34 @@ export class AuthController {
   @ApiOkResponse({ description: "Tenant operator logout envelope" })
   tenantLogout(@Req() request: TenantOperatorRequest) {
     return this.authService.logoutTenantOperator({ sessionId: request.tenantOperatorContext?.sessionId });
+  }
+
+  @Post("tenant/select")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Tenant membership selection envelope" })
+  selectTenant(@Body() payload: { email?: string; tenantId?: string }) {
+    return this.authService.selectTenant(payload);
+  }
+
+  @Post("invites/accept")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Invite acceptance envelope" })
+  acceptInvite(@Body() payload: { code?: string; email?: string; mfaChallengeId?: string; otp?: string; password?: string }) {
+    return this.authService.acceptInvite(payload);
+  }
+
+  @Post("recovery/request")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Password recovery request envelope" })
+  requestRecovery(@Body() payload: { email?: string }) {
+    return this.authService.requestRecovery(payload);
+  }
+
+  @Post("recovery/complete")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Password recovery completion envelope" })
+  completeRecovery(@Body() payload: { email?: string; mfaChallengeId?: string; otp?: string; password?: string; token?: string }) {
+    return this.authService.completeRecovery(payload);
   }
 
   @Post("oidc/start")
@@ -95,7 +110,7 @@ export class AuthController {
 
   @Post("logout")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(DemoServiceAdminGuard)
+  @UseGuards(ServiceAdminSessionGuard)
   @RequireServiceAdminAction("auth.logout")
   @ApiOkResponse({ description: "Logout envelope with auth audit metadata" })
   logout(@Body() payload: { reason?: string } = {}, @Req() request: ServiceAdminRequest) {

@@ -13,12 +13,17 @@ export function formatDateTime(value) {
     return "нет данных";
   }
 
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return "РЅРµС‚ РґР°РЅРЅС‹С…";
+  }
+
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     month: "2-digit"
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export function formatTimer(totalSeconds) {

@@ -1,16 +1,24 @@
 import { useEffect, useState } from "react";
-import { roleAccessProfiles } from "./access.js";
+import { buildAccessProfile, buildAccessProfileForRoleMode, constrainPermissionsForRoleMode } from "./access.js";
 
 export function useAppNavigation({
   initialSection = "dialogs",
   initialRoleMode = "Администратор",
   isOutboundOpen,
+  permissionModel = null,
+  sessionPermissions = null,
   setOutboundOpen,
-  setToast
+  setToast,
+  useSessionPermissions = false
 }) {
   const [section, setSection] = useState(initialSection);
   const [roleMode, setRoleMode] = useState(initialRoleMode);
-  const access = roleAccessProfiles[roleMode];
+  const access = resolveNavigationAccess({
+    permissionModel,
+    roleMode,
+    sessionPermissions,
+    useSessionPermissions
+  });
   const canAccessSection = access.sections.includes(section);
 
   useEffect(() => {
@@ -62,4 +70,20 @@ export function useAppNavigation({
     handleBackToDialogs,
     handleOutboundRequest
   };
+}
+
+export function resolveNavigationAccess({
+  permissionModel = null,
+  roleMode = "Администратор",
+  sessionPermissions = null,
+  useSessionPermissions = false
+} = {}) {
+  if (useSessionPermissions) {
+    return buildAccessProfile(
+      constrainPermissionsForRoleMode(sessionPermissions ?? [], roleMode, permissionModel),
+      permissionModel
+    );
+  }
+
+  return buildAccessProfileForRoleMode(roleMode, permissionModel);
 }

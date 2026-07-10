@@ -10,6 +10,7 @@ import { describe, it } from "node:test";
 
 const backendEnv = {
   ...process.env,
+  ALLOW_DEMO_SERVICE_ADMIN_HEADERS: "true",
   API_VERSION: "v1",
   DATABASE_URL: "postgresql://support:support@127.0.0.1:5432/support_communication",
   DEMO_SERVICE_ADMIN_KEY: "dev-service-admin-key",
@@ -65,6 +66,7 @@ describe("backend API Gateway runtime contracts", () => {
         OPERATIONS_STORE_FILE: join(workspace, "operations.json"),
         PLATFORM_STORE_FILE: join(workspace, "platform.json"),
         PORT: String(activeRuntimePort),
+        REPORT_EXPORT_OBJECT_ROOT: join(workspace, "report-exports"),
         REPORT_STORE_FILE: join(workspace, "reports.json"),
         ROUTING_STORE_FILE: join(workspace, "routing.json"),
         WORKSPACE_STORE_FILE: join(workspace, "workspace.json")
@@ -119,12 +121,12 @@ describe("backend API Gateway runtime contracts", () => {
           otp: "123456"
         })
       });
-      assert.equal(publicOtpCompletion.status, 401);
+      assert.equal(publicOtpCompletion.status, 200);
       const publicOtpCompletionBody = await publicOtpCompletion.json();
-      assert.equal(publicOtpCompletionBody.status, "denied");
+      assert.equal(publicOtpCompletionBody.status, "invalid");
       assert.equal(publicOtpCompletionBody.states.error, true);
-      assert.equal(publicOtpCompletionBody.service, "api-gateway");
-      assert.equal(publicOtpCompletionBody.error.code, "unauthorized");
+      assert.equal(publicOtpCompletionBody.service, "authService");
+      assert.equal(publicOtpCompletionBody.error.code, "mfa_challenge_required");
 
       const verified = await postJson("http://127.0.0.1:4191/api/v1/auth/login", {
         email: "service-admin@example.com",
@@ -137,13 +139,16 @@ describe("backend API Gateway runtime contracts", () => {
       assert.equal(verified.data.session.adminId, "svc-admin-001");
       assert.equal(verified.data.session.adminName, "Надя Орлова");
       assert.equal(verified.data.session.authState, "mfa_verified");
+      assert.equal(typeof verified.data.accessToken, "string");
 
-      const authState = await getJson("http://127.0.0.1:4191/api/v1/auth/state");
+      const authState = await getJson("http://127.0.0.1:4191/api/v1/auth/state", {
+        authorization: `Bearer ${verified.data.accessToken}`
+      });
       assert.equal(authState.data.authenticated, true);
       assert.equal(authState.data.session.adminId, "svc-admin-001");
 
       const bearerAuthStateResponse = await fetch("http://127.0.0.1:4191/api/v1/auth/state", {
-        headers: { authorization: `Bearer ${verified.data.session.id}` }
+        headers: { authorization: `Bearer ${verified.data.accessToken}` }
       });
       assert.equal(bearerAuthStateResponse.status, 200);
       const bearerAuthState = await bearerAuthStateResponse.json();
@@ -154,7 +159,7 @@ describe("backend API Gateway runtime contracts", () => {
       const bearerLogoutResponse = await fetch("http://127.0.0.1:4191/api/v1/auth/logout", {
         method: "POST",
         headers: {
-          authorization: `Bearer ${verified.data.session.id}`,
+          authorization: `Bearer ${verified.data.accessToken}`,
           "content-type": "application/json"
         },
         body: JSON.stringify({ reason: "runtime bearer logout" })
@@ -165,7 +170,7 @@ describe("backend API Gateway runtime contracts", () => {
       assert.equal(bearerLogout.data.outbox.type, "service_admin.logout");
 
       const revokedBearerState = await fetch("http://127.0.0.1:4191/api/v1/auth/state", {
-        headers: { authorization: `Bearer ${verified.data.session.id}` }
+        headers: { authorization: `Bearer ${verified.data.accessToken}` }
       });
       assert.equal(revokedBearerState.status, 401);
       const revokedBearerStateBody = await revokedBearerState.json();
@@ -285,7 +290,7 @@ describe("backend API Gateway runtime contracts", () => {
         channel: "SDK",
         fileName: "runtime.pdf",
         sizeBytes: 2048
-      });
+      }, withTenantScope("tenant-volga"));
       assert.equal(upload.data.storageState, "upload_queued");
 
       const outbound = await postJson("http://127.0.0.1:4191/api/v1/dialogs/outbound", {
@@ -294,7 +299,7 @@ describe("backend API Gateway runtime contracts", () => {
         message: "Hello",
         phone: "+7 900 000-00-00",
         topic: "Delivery / Status"
-      });
+      }, withTenantScope("tenant-volga"));
       assert.equal(outbound.data.status, "queued");
       assert.equal(outbound.data.consentCheck, "required_before_send");
 
@@ -350,7 +355,12 @@ describe("backend API Gateway runtime contracts", () => {
       assert.equal(deniedSocket.timedOut, false, `Denied WebSocket timed out with status ${deniedSocket.status}`);
       assert.equal(deniedSocket.status, 401);
 
-      const routingWorkload = await getJson("http://127.0.0.1:4191/api/v1/routing/workload?channel=VK");
+      const routingMissingTenant = await getJson("http://127.0.0.1:4191/api/v1/routing/workload?channel=VK");
+      assert.equal(routingMissingTenant.status, "invalid");
+      assert.equal(routingMissingTenant.error.code, "tenant_context_required");
+
+      const routingTenantScope = withTenantScope("tenant-volga");
+      const routingWorkload = await getJson("http://127.0.0.1:4191/api/v1/routing/workload?channel=VK", routingTenantScope);
       assert.equal(routingWorkload.service, "routingService");
       assert.ok(routingWorkload.data.operators.every((operator) => operator.channels.includes("VK")));
       assert.ok(routingWorkload.data.operators.every((operator) => typeof operator.avg === "string"));
@@ -363,7 +373,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "alexey",
         reason: "Runtime redistribution",
         targetOperatorId: "operator-ivan"
-      });
+      }, routingTenantScope);
       assert.equal(channelDeniedAssignment.status, "denied");
       assert.equal(channelDeniedAssignment.error.code, "operator_channel_denied");
 
@@ -372,7 +382,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "alexey",
         reason: "Runtime redistribution",
         targetOperatorId: "operator-full"
-      });
+      }, routingTenantScope);
       assert.equal(limitDeniedAssignment.status, "denied");
       assert.equal(limitDeniedAssignment.error.code, "operator_limit_exceeded");
 
@@ -382,7 +392,7 @@ describe("backend API Gateway runtime contracts", () => {
         overrideLimit: true,
         reason: "Runtime redistribution",
         targetOperatorId: "operator-full"
-      });
+      }, routingTenantScope);
       assert.equal(clientOverrideAssignment.status, "denied");
       assert.equal(clientOverrideAssignment.data.overrideRequested, true);
       assert.equal(clientOverrideAssignment.data.overrideSupported, false);
@@ -392,7 +402,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "alexey",
         reason: "Runtime redistribution",
         targetOperatorId: "operator-anna"
-      });
+      }, routingTenantScope);
       assert.equal(unsupportedAssignment.status, "invalid");
       assert.equal(unsupportedAssignment.error.code, "assignment_action_unsupported");
 
@@ -401,7 +411,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "alexey",
         reason: "Runtime redistribution",
         targetOperatorId: "operator-anna"
-      });
+      }, routingTenantScope);
       assert.equal(runtimeAssignment.status, "ok");
       assert.equal(runtimeAssignment.data.conversation.status, "assigned");
 
@@ -410,7 +420,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "vladimir",
         reason: "Runtime senior transfer",
         targetOperatorId: "operator-ivan"
-      });
+      }, routingTenantScope);
       assert.equal(transferAssignment.status, "ok");
       assert.equal(transferAssignment.data.conversation.status, "transferred");
 
@@ -418,7 +428,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "maria",
         durationMinutes: 15,
         reason: ""
-      });
+      }, routingTenantScope);
       assert.equal(slaPauseMissingReason.status, "invalid");
       assert.equal(slaPauseMissingReason.error.code, "sla_pause_reason_required");
 
@@ -426,14 +436,14 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "maria",
         durationMinutes: 15,
         reason: "Runtime customer hold"
-      });
+      }, routingTenantScope);
       assert.equal(slaPaused.status, "ok");
       assert.equal(slaPaused.data.schedulerJob.queue, "sla-timers");
 
       const closedRescue = await postJson("http://127.0.0.1:4191/api/v1/routing/rescue/start", {
         conversationId: "closed-dialog",
         reason: "Runtime escalation"
-      });
+      }, routingTenantScope);
       assert.equal(closedRescue.status, "denied");
       assert.equal(closedRescue.error.code, "conversation_closed");
 
@@ -441,7 +451,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "vladimir",
         durationSeconds: 1,
         reason: "Runtime no operator answer"
-      });
+      }, routingTenantScope);
       assert.equal(rescueStarted.status, "ok");
       assert.equal(rescueStarted.data.rescue.durationSeconds, 240);
       assert.equal(typeof rescueStarted.data.rescue.startedAt, "number");
@@ -452,7 +462,7 @@ describe("backend API Gateway runtime contracts", () => {
       const duplicateRescueStart = await postJson("http://127.0.0.1:4191/api/v1/routing/rescue/start", {
         conversationId: "vladimir",
         reason: "Runtime duplicate rescue"
-      });
+      }, routingTenantScope);
       assert.equal(duplicateRescueStart.status, "conflict");
       assert.equal(duplicateRescueStart.error.code, "rescue_already_active");
       assert.equal(duplicateRescueStart.data.rescue.deadlineAt, rescueStarted.data.rescue.deadlineAt);
@@ -461,11 +471,11 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "vladimir",
         outcome: "returned_to_queue",
         reason: "Runtime timer expired"
-      });
+      }, routingTenantScope);
       assert.equal(rescueResolved.status, "ok");
       assert.equal(rescueResolved.data.reportEvent.eventName, "rescue.report.ready");
 
-      const rescueReport = await getJson("http://127.0.0.1:4191/api/v1/routing/reports/rescue?period=today");
+      const rescueReport = await getJson("http://127.0.0.1:4191/api/v1/routing/reports/rescue?period=today", routingTenantScope);
       assert.equal(rescueReport.service, "routingService");
       assert.equal(rescueReport.data.exportDescriptor.metricDefinitionVersion, "routing-rescue-v1");
 
@@ -533,9 +543,19 @@ describe("backend API Gateway runtime contracts", () => {
       assert.equal(notReadyReportFile.error.code, "report_export_not_ready");
 
       const reportFile = await getJson("http://127.0.0.1:4191/api/v1/reports/exports/export-2418/file?canDownload=true");
-      assert.equal(reportFile.status, "denied");
-      assert.equal(reportFile.error.code, "report_export_download_denied");
-      assert.equal(reportFile.data.permissionRequired, "reports.export");
+      assert.equal(reportFile.status, "ok");
+      assert.equal(reportFile.data.jobId ?? reportFile.data.descriptor?.jobId ?? "export-2418", "export-2418");
+
+      const reportDownload = await fetch("http://127.0.0.1:4191/api/v1/reports/exports/export-2418/download", {
+        headers: withAdminKey()
+      });
+      assert.equal(reportDownload.ok, true, `report export download returned ${reportDownload.status}`);
+      assert.match(reportDownload.headers.get("content-disposition") ?? "", /attachment/);
+      assert.match(reportDownload.headers.get("content-disposition") ?? "", /export-2418/);
+      assert.match(reportDownload.headers.get("content-type") ?? "", /spreadsheetml|text\/csv/);
+      const reportDownloadBytes = Buffer.from(await reportDownload.arrayBuffer());
+      assert.ok(reportDownloadBytes.byteLength > 0);
+      assert.doesNotMatch(reportDownloadBytes.toString("utf8"), /downloadUrl|objectKey/);
 
       const integrationWorkspace = await getJson("http://127.0.0.1:4191/api/v1/integrations/workspace");
       assert.equal(integrationWorkspace.service, "integrationService");
@@ -584,7 +604,8 @@ describe("backend API Gateway runtime contracts", () => {
       assert.equal(revokedSession.status, "ok");
       assert.equal(revokedSession.data.status, "revoked");
 
-      const automationWorkspace = await getJson("http://127.0.0.1:4191/api/v1/automation/workspace");
+      const tenantDemoScope = withTenantScope("tenant-demo");
+      const automationWorkspace = await getJson("http://127.0.0.1:4191/api/v1/automation/workspace", tenantDemoScope);
       assert.equal(automationWorkspace.service, "automationService");
       assert.ok(automationWorkspace.data.botScenarios.length > 0);
       assert.ok(automationWorkspace.data.proactiveRules.length > 0);
@@ -592,7 +613,7 @@ describe("backend API Gateway runtime contracts", () => {
       const invalidBotFlow = await postJson("http://127.0.0.1:4191/api/v1/automation/bot-flow/validate", {
         name: "Broken",
         flowNodes: [{ id: "bad", type: "bad_type" }]
-      });
+      }, tenantDemoScope);
       assert.equal(invalidBotFlow.status, "invalid");
       assert.equal(invalidBotFlow.error.code, "bot_flow_invalid");
 
@@ -600,7 +621,7 @@ describe("backend API Gateway runtime contracts", () => {
         flowEdges: [],
         flowNodes: [{ id: "start", type: "message" }],
         name: "Checkout bot"
-      });
+      }, tenantDemoScope);
       assert.equal(validBotFlowAlias.status, "ok");
       assert.equal(validBotFlowAlias.data.payload.schemaVersion, "bot-flow/v1");
 
@@ -610,7 +631,7 @@ describe("backend API Gateway runtime contracts", () => {
         flowNodes: [{ id: "start", type: "message" }],
         idempotencyKey: "runtime-publish-bot-checkout",
         name: "Checkout bot"
-      });
+      }, tenantDemoScope);
       assert.equal(botPublish.status, "ok");
       assert.equal(botPublish.data.queue, "bot-runtime");
       assert.match(botPublish.data.runtimeVersion, /^runtime-bot-checkout-/);
@@ -621,7 +642,7 @@ describe("backend API Gateway runtime contracts", () => {
         flowNodes: [{ id: "start", type: "message" }],
         idempotencyKey: "runtime-publish-bot-checkout-alias",
         name: "Checkout bot"
-      });
+      }, tenantDemoScope);
       assert.equal(botPublishAlias.status, "ok");
       assert.match(botPublishAlias.data.runtimeVersion, /^runtime-bot-checkout-/);
 
@@ -633,7 +654,7 @@ describe("backend API Gateway runtime contracts", () => {
           flowNodes: [{ id: "start", type: "message" }],
           name: "Header bot"
         },
-        { "Idempotency-Key": "runtime-publish-bot-header" }
+        { ...tenantDemoScope, "Idempotency-Key": "runtime-publish-bot-header" }
       );
       assert.equal(botPublishHeader.status, "ok");
       assert.match(botPublishHeader.data.runtimeVersion, /^runtime-bot-header-/);
@@ -646,7 +667,7 @@ describe("backend API Gateway runtime contracts", () => {
           flowNodes: [{ id: "start", type: "message" }],
           name: "Header bot"
         },
-        { "Idempotency-Key": "runtime-publish-bot-header" }
+        { ...tenantDemoScope, "Idempotency-Key": "runtime-publish-bot-header" }
       );
       assert.equal(duplicateBotPublishHeader.data.duplicate, true);
       assert.equal(duplicateBotPublishHeader.data.runtimeVersion, botPublishHeader.data.runtimeVersion);
@@ -659,7 +680,7 @@ describe("backend API Gateway runtime contracts", () => {
           flowNodes: [{ id: "start", type: "message" }],
           name: "Header bot changed"
         },
-        { "Idempotency-Key": "runtime-publish-bot-header" }
+        { ...tenantDemoScope, "Idempotency-Key": "runtime-publish-bot-header" }
       );
       assert.equal(reusedBotPublishHeader.status, "conflict");
       assert.equal(reusedBotPublishHeader.error.code, "idempotency_key_reused");
@@ -667,7 +688,7 @@ describe("backend API Gateway runtime contracts", () => {
       const botTestRun = await postJson("http://127.0.0.1:4191/api/v1/automation/bot-scenarios/bot-checkout/test-runs", {
         name: "Checkout bot",
         testCases: [{ id: "happy-path", expected: "handoff" }]
-      });
+      }, tenantDemoScope);
       assert.equal(botTestRun.status, "ok");
       assert.equal(botTestRun.data.status, "running");
       assert.match(botTestRun.data.testRunId, /^bot_test_/);
@@ -678,7 +699,7 @@ describe("backend API Gateway runtime contracts", () => {
         cooldown: "24h",
         id: "rule-runtime-checkout",
         segment: "checkout"
-      });
+      }, tenantDemoScope);
       assert.equal(proactiveRule.status, "ok");
       assert.equal(proactiveRule.data.experiment.persisted, true);
       assert.equal(proactiveRule.data.queue, "proactive-delivery");
@@ -689,7 +710,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "conv-42",
         queue: "Delivery",
         reason: "customer_requested_operator"
-      });
+      }, tenantDemoScope);
       assert.equal(botHandoff.status, "ok");
       assert.equal(botHandoff.data.eventName, "bot.handoff.created");
 
@@ -697,11 +718,11 @@ describe("backend API Gateway runtime contracts", () => {
         botId: "bot-checkout",
         conversationId: "conv-42",
         reason: "customer_requested_operator"
-      });
+      }, tenantDemoScope);
       assert.equal(botHandoffAlias.status, "ok");
       assert.equal(botHandoffAlias.data.eventName, "bot.handoff.created");
 
-      const qualityWorkspace = await getJson("http://127.0.0.1:4191/api/v1/quality/workspace");
+      const qualityWorkspace = await getJson("http://127.0.0.1:4191/api/v1/quality/workspace", tenantDemoScope);
       assert.equal(qualityWorkspace.service, "qualityService");
       assert.ok(qualityWorkspace.data.qualityMetrics.every((score) => score.conversationId && score.channel && score.operator));
 
@@ -711,7 +732,7 @@ describe("backend API Gateway runtime contracts", () => {
         mode: "reply",
         suggestions: [{ id: "ai-reply" }],
         text: "This is not our problem"
-      });
+      }, tenantDemoScope);
       assert.equal(draftScore.status, "ok");
       assert.equal(draftScore.data.telemetry.model, "quality-rules/v1");
       assert.ok(draftScore.data.checks.some((check) => check.id === "attachment"));
@@ -720,7 +741,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "conv-empty",
         mode: "reply",
         text: ""
-      });
+      }, tenantDemoScope);
       assert.equal(draftScoreAlias.status, "ok");
       assert.equal(draftScoreAlias.data.checks[0].id, "empty");
 
@@ -732,7 +753,7 @@ describe("backend API Gateway runtime contracts", () => {
         scale: "CSAT",
         score: 5,
         topic: "Delivery"
-      });
+      }, tenantDemoScope);
       assert.equal(qualityRating.status, "ok");
       assert.equal(qualityRating.data.realtimeEvent.eventName, "quality.score.updated");
 
@@ -740,7 +761,7 @@ describe("backend API Gateway runtime contracts", () => {
         conversationId: "conv-42",
         reviewer: "senior-1",
         score: 92
-      });
+      }, tenantDemoScope);
       assert.equal(manualQa.status, "ok");
       assert.equal(manualQa.data.override.auditRequired, false);
 
@@ -1145,6 +1166,7 @@ describe("backend API Gateway runtime contracts", () => {
       assert.ok(docs.paths["/api/v1/reports/exports"]);
       assert.ok(docs.paths["/api/v1/reports/exports/{jobId}/retry"]);
       assert.ok(docs.paths["/api/v1/reports/exports/{jobId}/file"]);
+      assert.ok(docs.paths["/api/v1/reports/exports/{jobId}/download"]);
       assert.ok(docs.paths["/api/v1/integrations/workspace"]);
       assert.ok(docs.paths["/api/v1/integrations/channel-tests"]);
       assert.ok(docs.paths["/api/v1/integrations/api-keys/{keyId}/rotate"]);
@@ -1452,6 +1474,7 @@ function withAdminKey(headers = {}) {
     "X-Demo-Service-Admin-Actor-Name": "Runtime Admin",
     "X-Demo-Service-Admin-Mfa-Verified": "true",
     "X-Demo-Service-Admin-Permissions": "*",
+    "X-Demo-Service-Admin-Roles": "admin",
     "X-Demo-Service-Admin-Session-Expires-At": "2999-01-01T00:00:00.000Z",
     ...headers
   };

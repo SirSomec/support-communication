@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { type OutboxEvent, type OutboxEventClaimQuery, type OutboxEventListQuery, type OutboxEventStore, type OutboxRetryPolicy, type StoredOutboxEvent, resolveRetryFailureState } from "@support-communication/events";
+import { type OutboxEvent, type OutboxEventClaimQuery, type OutboxEventListQuery, type OutboxEventStore, type OutboxRetryPolicy, type StoredOutboxEvent, type StoredOutboxEventStatus, resolveRetryFailureState } from "@support-communication/events";
 import { redactSensitiveText } from "@support-communication/redaction";
 
 export interface DurableStore<TState> {
@@ -38,7 +38,7 @@ export class JsonFileStore<TState> implements DurableStore<TState> {
     const next = clone(state);
     const temporaryPath = `${this.options.filePath}.${process.pid}.${randomUUID()}.tmp`;
     writeFileSync(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-    renameSync(temporaryPath, this.options.filePath);
+    replaceJsonFile(temporaryPath, this.options.filePath);
     return clone(next);
   }
 }
@@ -121,6 +121,40 @@ function sanitizePathSegment(value: string): string {
   return value.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "default";
 }
 
+function replaceJsonFile(sourcePath: string, targetPath: string): void {
+  const maxAttempts = 6;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      renameSync(sourcePath, targetPath);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableFileReplaceError(error) || attempt === maxAttempts - 1) {
+        break;
+      }
+      sleepSync(10 * (attempt + 1));
+    }
+  }
+
+  try {
+    writeFileSync(targetPath, readFileSync(sourcePath, "utf8"), "utf8");
+    rmSync(sourcePath, { force: true });
+  } catch {
+    throw lastError;
+  }
+}
+
+function isRetryableFileReplaceError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "EBUSY" || code === "EPERM" || code === "EACCES";
+}
+
+function sleepSync(milliseconds: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
 function stringOrUndefined(value: number | string | undefined): string | undefined {
   if (value === undefined) {
     return undefined;
@@ -141,6 +175,7 @@ export interface PrismaTransactionRunner<TTransactionClient> {
 export interface PrismaOutboxClient {
   $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   outboxEvent: {
+    count?(input: PrismaOutboxEventCountInput): Promise<number>;
     create(input: { data: PrismaOutboxEventCreateInput }): Promise<PrismaOutboxEventRow>;
     findMany?(input: PrismaOutboxEventFindManyInput): Promise<PrismaOutboxEventRow[]>;
     update?(input: PrismaOutboxEventUpdateInput): Promise<PrismaOutboxEventRow>;
@@ -166,13 +201,27 @@ export interface PrismaOutboxEventCreateInput {
   type: string;
 }
 
+interface PrismaOutboxEventCountInput {
+  where: PrismaOutboxEventWhereInput;
+}
+
 interface PrismaOutboxEventFindManyInput {
-  orderBy: { occurredAt: "asc" };
+  orderBy: PrismaOutboxEventOrderByInput;
   take?: number;
-  where: {
-    queue?: string;
-    status?: { in: string[] };
-  };
+  where: PrismaOutboxEventWhereInput;
+}
+
+type PrismaOutboxEventOrderByInput = Partial<Record<"deadLetteredAt" | "lockedAt" | "nextAttemptAt" | "occurredAt" | "publishedAt", "asc" | "desc">>;
+type PrismaNullableTimestampFilter = { not: null };
+type PrismaOutboxNullableEvidenceOrderField = "deadLetteredAt" | "lockedAt" | "nextAttemptAt" | "publishedAt";
+
+interface PrismaOutboxEventWhereInput {
+  deadLetteredAt?: PrismaNullableTimestampFilter;
+  lockedAt?: PrismaNullableTimestampFilter;
+  nextAttemptAt?: PrismaNullableTimestampFilter;
+  publishedAt?: PrismaNullableTimestampFilter;
+  queue?: string;
+  status?: string | { in: string[] };
 }
 
 interface PrismaOutboxEventUpdateInput {
@@ -238,9 +287,32 @@ export interface BillingSyncJobStore {
 export interface PrismaBillingSyncJobClient {
   $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   billingSyncJob: {
+    count?(input: PrismaBillingSyncJobCountInput): Promise<number>;
     findMany?(input: PrismaBillingSyncJobFindManyInput): Promise<PrismaBillingSyncJobRow[]>;
     update?(input: PrismaBillingSyncJobUpdateInput): Promise<PrismaBillingSyncJobRow>;
   };
+}
+
+export interface OutboxQueueSummary {
+  deadLetterCount: number;
+  latestEvent: StoredOutboxEvent | null;
+  queue: string;
+  queueDepth: number;
+}
+
+export interface OutboxQueueSummaryStore {
+  summarizeOutboxQueue(query: { queue: string }): Promise<OutboxQueueSummary>;
+}
+
+export interface BillingSyncQueueSummary {
+  deadLetterCount: number;
+  latestJob: StoredBillingSyncJob | null;
+  queue: string;
+  queueDepth: number;
+}
+
+export interface BillingSyncQueueSummaryStore {
+  summarizeBillingSyncQueue(query: { queue: string }): Promise<BillingSyncQueueSummary>;
 }
 
 export type ConversationOutboundDescriptorKind = "attachment_upload" | "message_delivery" | "outbound_conversation";
@@ -258,11 +330,16 @@ export interface WorkerConversationOutboundDescriptor {
 
 export interface ConversationOutboundDescriptorStore {
   findOutboundDescriptorById(descriptorId: string): Promise<WorkerConversationOutboundDescriptor | null | undefined> | WorkerConversationOutboundDescriptor | null | undefined;
+  markOutboundDescriptorDelivery?(descriptorId: string, deliveryState: "delivered" | "failed"): Promise<WorkerConversationOutboundDescriptor | null>;
 }
 
 export interface PrismaConversationOutboundDescriptorClient {
   conversationOutboundDescriptor: {
     findUnique(input: PrismaConversationOutboundDescriptorFindUniqueInput): Promise<PrismaConversationOutboundDescriptorRow | null>;
+    update?(input: {
+      data: { deliveryState: string; retryable: boolean; status: string; updatedAt: Date };
+      where: { id: string };
+    }): Promise<PrismaConversationOutboundDescriptorRow>;
   };
 }
 
@@ -361,13 +438,26 @@ interface PrismaChannelDeliveryReceiptRow {
   traceId: string;
 }
 
+interface PrismaBillingSyncJobCountInput {
+  where: PrismaBillingSyncJobWhereInput;
+}
+
 interface PrismaBillingSyncJobFindManyInput {
-  orderBy: { createdAt: "asc" };
+  orderBy: PrismaBillingSyncJobOrderByInput;
   take?: number;
-  where: {
-    queue?: string;
-    status?: { in: string[] };
-  };
+  where: PrismaBillingSyncJobWhereInput;
+}
+
+type PrismaBillingSyncJobOrderByInput = Partial<Record<"createdAt" | "deadLetteredAt" | "lockedAt" | "nextAttemptAt" | "publishedAt", "asc" | "desc">>;
+type PrismaBillingSyncNullableEvidenceOrderField = "deadLetteredAt" | "lockedAt" | "nextAttemptAt" | "publishedAt";
+
+interface PrismaBillingSyncJobWhereInput {
+  deadLetteredAt?: PrismaNullableTimestampFilter;
+  lockedAt?: PrismaNullableTimestampFilter;
+  nextAttemptAt?: PrismaNullableTimestampFilter;
+  publishedAt?: PrismaNullableTimestampFilter;
+  queue?: string;
+  status?: string | { in: string[] };
 }
 
 interface PrismaBillingSyncJobUpdateInput {
@@ -437,6 +527,144 @@ export function withTransaction<TTransactionClient, TResult>(
   operation: (client: TTransactionClient) => Promise<TResult>
 ): Promise<TResult> {
   return client.$transaction(operation);
+}
+
+const OUTBOX_EVIDENCE_STATUSES: StoredOutboxEventStatus[] = ["dead_lettered", "failed", "pending", "publishing", "published"];
+const BILLING_SYNC_EVIDENCE_STATUSES: StoredBillingSyncJobStatus[] = ["dead_lettered", "failed", "pending", "publishing", "published"];
+const SUMMARY_EVIDENCE_LIMIT = 25;
+const OUTBOX_EVIDENCE_ORDER_FIELDS: Record<StoredOutboxEventStatus, Array<keyof PrismaOutboxEventOrderByInput>> = {
+  dead_lettered: ["deadLetteredAt", "occurredAt"],
+  failed: ["nextAttemptAt", "lockedAt", "occurredAt"],
+  pending: ["occurredAt"],
+  published: ["publishedAt", "occurredAt"],
+  publishing: ["lockedAt", "occurredAt"]
+};
+const OUTBOX_NULLABLE_EVIDENCE_ORDER_FIELDS = new Set<PrismaOutboxNullableEvidenceOrderField>([
+  "deadLetteredAt",
+  "lockedAt",
+  "nextAttemptAt",
+  "publishedAt"
+]);
+const BILLING_SYNC_EVIDENCE_ORDER_FIELDS: Record<StoredBillingSyncJobStatus, Array<keyof PrismaBillingSyncJobOrderByInput>> = {
+  dead_lettered: ["deadLetteredAt", "createdAt"],
+  failed: ["nextAttemptAt", "lockedAt", "createdAt"],
+  pending: ["createdAt"],
+  published: ["publishedAt", "createdAt"],
+  publishing: ["lockedAt", "createdAt"]
+};
+const BILLING_SYNC_NULLABLE_EVIDENCE_ORDER_FIELDS = new Set<PrismaBillingSyncNullableEvidenceOrderField>([
+  "deadLetteredAt",
+  "lockedAt",
+  "nextAttemptAt",
+  "publishedAt"
+]);
+
+function outboxEvidenceWhere(
+  queue: string,
+  status: StoredOutboxEventStatus,
+  field: keyof PrismaOutboxEventOrderByInput
+): PrismaOutboxEventWhereInput {
+  const where: PrismaOutboxEventWhereInput = { queue, status };
+  if (isOutboxNullableEvidenceOrderField(field)) {
+    where[field] = { not: null };
+  }
+  return where;
+}
+
+function billingSyncEvidenceWhere(
+  queue: string,
+  status: StoredBillingSyncJobStatus,
+  field: keyof PrismaBillingSyncJobOrderByInput
+): PrismaBillingSyncJobWhereInput {
+  const where: PrismaBillingSyncJobWhereInput = { queue, status };
+  if (isBillingSyncNullableEvidenceOrderField(field)) {
+    where[field] = { not: null };
+  }
+  return where;
+}
+
+function isOutboxNullableEvidenceOrderField(
+  field: keyof PrismaOutboxEventOrderByInput
+): field is PrismaOutboxNullableEvidenceOrderField {
+  return OUTBOX_NULLABLE_EVIDENCE_ORDER_FIELDS.has(field as PrismaOutboxNullableEvidenceOrderField);
+}
+
+function isBillingSyncNullableEvidenceOrderField(
+  field: keyof PrismaBillingSyncJobOrderByInput
+): field is PrismaBillingSyncNullableEvidenceOrderField {
+  return BILLING_SYNC_NULLABLE_EVIDENCE_ORDER_FIELDS.has(field as PrismaBillingSyncNullableEvidenceOrderField);
+}
+
+export function createPrismaOutboxQueueSummaryStore(client: PrismaOutboxClient): OutboxQueueSummaryStore {
+  return {
+    async summarizeOutboxQueue({ queue }: { queue: string }): Promise<OutboxQueueSummary> {
+      if (!client.outboxEvent.count || !client.outboxEvent.findMany) {
+        throw new Error("Prisma outbox client does not support queue summaries.");
+      }
+
+      const [
+        pendingCount,
+        publishingCount,
+        failedCount,
+        deadLetterCount
+      ] = await Promise.all([
+        client.outboxEvent.count({ where: { queue, status: "pending" } }),
+        client.outboxEvent.count({ where: { queue, status: "publishing" } }),
+        client.outboxEvent.count({ where: { queue, status: "failed" } }),
+        client.outboxEvent.count({ where: { queue, status: "dead_lettered" } })
+      ]);
+      const evidenceStatuses = deadLetterCount > 0 ? ["dead_lettered" as const] : OUTBOX_EVIDENCE_STATUSES;
+      const evidenceRows = await Promise.all(evidenceStatuses.flatMap((status) => OUTBOX_EVIDENCE_ORDER_FIELDS[status].map((field) => client.outboxEvent.findMany!({
+        orderBy: { [field]: "desc" },
+        take: SUMMARY_EVIDENCE_LIMIT,
+        where: outboxEvidenceWhere(queue, status, field)
+      }))));
+      const evidenceEvents = uniqueById(evidenceRows.flat().map(toStoredOutboxEvent));
+
+      return {
+        deadLetterCount,
+        latestEvent: latestByTimestamp(evidenceEvents, outboxSummaryTimestamp),
+        queue,
+        queueDepth: pendingCount + publishingCount + failedCount
+      };
+    }
+  };
+}
+
+export function createPrismaBillingSyncQueueSummaryStore(client: PrismaBillingSyncJobClient): BillingSyncQueueSummaryStore {
+  return {
+    async summarizeBillingSyncQueue({ queue }: { queue: string }): Promise<BillingSyncQueueSummary> {
+      if (!client.billingSyncJob.count || !client.billingSyncJob.findMany) {
+        throw new Error("Prisma billing sync job client does not support queue summaries.");
+      }
+
+      const [
+        pendingCount,
+        publishingCount,
+        failedCount,
+        deadLetterCount
+      ] = await Promise.all([
+        client.billingSyncJob.count({ where: { queue, status: "pending" } }),
+        client.billingSyncJob.count({ where: { queue, status: "publishing" } }),
+        client.billingSyncJob.count({ where: { queue, status: "failed" } }),
+        client.billingSyncJob.count({ where: { queue, status: "dead_lettered" } })
+      ]);
+      const evidenceStatuses = deadLetterCount > 0 ? ["dead_lettered" as const] : BILLING_SYNC_EVIDENCE_STATUSES;
+      const evidenceRows = await Promise.all(evidenceStatuses.flatMap((status) => BILLING_SYNC_EVIDENCE_ORDER_FIELDS[status].map((field) => client.billingSyncJob.findMany!({
+        orderBy: { [field]: "desc" },
+        take: SUMMARY_EVIDENCE_LIMIT,
+        where: billingSyncEvidenceWhere(queue, status, field)
+      }))));
+      const evidenceJobs = uniqueById(evidenceRows.flat().map(toStoredBillingSyncJob));
+
+      return {
+        deadLetterCount,
+        latestJob: latestByTimestamp(evidenceJobs, billingSyncSummaryTimestamp),
+        queue,
+        queueDepth: pendingCount + publishingCount + failedCount
+      };
+    }
+  };
 }
 
 export function createPrismaOutboxStore(client: PrismaOutboxClient): OutboxEventStore {
@@ -875,6 +1103,22 @@ export function createPrismaConversationOutboundDescriptorStore(client: PrismaCo
       });
 
       return row ? toWorkerConversationOutboundDescriptor(row) : null;
+    },
+    async markOutboundDescriptorDelivery(descriptorId, deliveryState) {
+      if (!client.conversationOutboundDescriptor.update) {
+        return null;
+      }
+
+      const row = await client.conversationOutboundDescriptor.update({
+        data: {
+          deliveryState,
+          retryable: deliveryState !== "delivered",
+          status: deliveryState,
+          updatedAt: new Date()
+        },
+        where: { id: descriptorId }
+      });
+      return toWorkerConversationOutboundDescriptor(row);
     }
   };
 }
@@ -1083,6 +1327,48 @@ function toChannelDeliveryReceipt(row: PrismaChannelDeliveryReceiptRow): Channel
     tenantId: row.tenantId,
     traceId: row.traceId
   };
+}
+
+function outboxSummaryTimestamp(event: StoredOutboxEvent): string {
+  return event.publishedAt
+    ?? event.deadLetteredAt
+    ?? event.lockedAt
+    ?? event.nextAttemptAt
+    ?? event.occurredAt;
+}
+
+function billingSyncSummaryTimestamp(job: StoredBillingSyncJob): string {
+  return job.publishedAt
+    ?? job.deadLetteredAt
+    ?? job.lockedAt
+    ?? job.nextAttemptAt
+    ?? job.createdAt;
+}
+
+function uniqueById<TItem extends { id: string }>(items: TItem[]): TItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) {
+      return false;
+    }
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function latestByTimestamp<T>(items: T[], timestamp: (item: T) => string): T | null {
+  return [...items].sort((left, right) => compareTimestampStrings(timestamp(right), timestamp(left)))[0] ?? null;
+}
+
+function compareTimestampStrings(leftTimestamp: string, rightTimestamp: string): number {
+  const leftTime = Date.parse(leftTimestamp);
+  const rightTime = Date.parse(rightTimestamp);
+
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+
+  return leftTimestamp.localeCompare(rightTimestamp);
 }
 
 function toIso(value: Date | string): string {

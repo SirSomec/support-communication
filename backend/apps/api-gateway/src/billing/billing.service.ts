@@ -18,7 +18,7 @@ import {
   type BillingSubscriptionState,
   type BillingSyncJob
 } from "./billing.repository.js";
-import { type BillingTariff, type TenantBillingState } from "./billing.fixtures.js";
+import { type BillingTariff, type TenantBillingState } from "./billing.types.js";
 
 const BILLING_SERVICE = "billingService";
 const QUOTA_SERVICE = "quotaService";

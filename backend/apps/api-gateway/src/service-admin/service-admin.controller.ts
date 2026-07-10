@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
-import { DemoServiceAdminGuard } from "../identity/demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
 import { requestServiceAdminBreakGlassApprovalFromRoute, startServiceAdminImpersonationFromRoute } from "./service-admin.route.js";
 import { ServiceAdminService } from "./service-admin.service.js";
@@ -38,7 +38,7 @@ interface BreakGlassDecisionBody {
 }
 
 @ApiTags("service-admin")
-@UseGuards(DemoServiceAdminGuard)
+@UseGuards(ServiceAdminSessionGuard)
 @Controller("service-admin")
 export class ServiceAdminController {
   constructor(private readonly serviceAdminService: ServiceAdminService) {}
@@ -182,5 +182,44 @@ export class ServiceAdminController {
     }
   ) {
     return this.serviceAdminService.fetchAuditEvents(filters);
+  }
+
+  @Post("audit-events/exports")
+  @RequireServiceAdminAction("service-admin.audit.export")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Service-admin audit export envelope" })
+  requestAuditExport(
+    @Body() payload: {
+      action?: string;
+      actorId?: string;
+      cursor?: string;
+      limit?: number | string;
+      period?: string;
+      query?: string;
+      severity?: string;
+      status?: string;
+      target?: string;
+      tenantId?: string;
+      userId?: string;
+    },
+    @Req() request: ServiceAdminRequest
+  ) {
+    return this.serviceAdminService.requestAuditExport(payload, request.serviceAdminContext?.actor);
+  }
+
+  @Post("audit-events/:eventId/redactions")
+  @RequireServiceAdminAction("service-admin.audit.redact")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Service-admin audit redaction envelope" })
+  redactAuditEvent(
+    @Param("eventId") eventId: string,
+    @Body() payload: { fields?: string[]; reason?: string },
+    @Req() request: ServiceAdminRequest
+  ) {
+    return this.serviceAdminService.redactAuditEvent({
+      ...payload,
+      actor: request.serviceAdminContext?.actor,
+      eventId
+    });
   }
 }

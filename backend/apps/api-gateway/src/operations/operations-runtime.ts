@@ -6,24 +6,24 @@ import {
 } from "./dead-letter-replay.worker.js";
 import { getOperationsDeadLetterBackendRegistry } from "./operations-dead-letter-backend.registry.js";
 import { getLoadTestRunnerRuntimeConfig } from "./bootstrap.js";
-import { type BackupDrill, type DeadLetterMessage, type LoadTestScenario, type MigrationCandidate } from "./operations.fixtures.js";
+import { type BackupDrill, type DeadLetterMessage, type LoadTestScenario, type MigrationCandidate } from "./operations.types.js";
 import { type OperationsRepository } from "./operations.repository.js";
 import {
   buildLoadTestRunErrorSummary,
   buildLoadTestRunMetrics,
-  claimQueuedLoadTestRuns,
+  claimQueuedLoadTestRunsAsync,
   createDeterministicHttpLoadTestRunnerAdapter,
   createDeterministicRealtimeLoadTestRunnerAdapter,
   executeLoadTestOperation,
-  persistLoadTestRunErrorSummary,
-  persistLoadTestRunMetrics,
-  seedLoadTestRunExecution,
-  transitionLoadTestRunStatus,
+  persistLoadTestRunErrorSummaryAsync,
+  persistLoadTestRunMetricsAsync,
+  seedLoadTestRunExecutionAsync,
+  transitionLoadTestRunStatusAsync,
   type LoadTestWorkflow,
   type LoadTestRunnerRuntimeConfig
 } from "./load-test-runner.worker.js";
 import {
-  executeMigrationRollbackCheck,
+  executeMigrationRollbackCheckAsync,
   migrationMetadataFromCandidate,
   REQUIRED_ENVELOPE_CONTRACT_FIELDS,
   type ApiContractSnapshot
@@ -109,7 +109,7 @@ export async function runQueuedLoadTestExecution(input: {
 }): Promise<Record<string, unknown>> {
   const config = input.config ?? getLoadTestRunnerRuntimeConfig();
   const traceId = input.traceId ?? createRequestTraceId("operationsReadinessService", "queueLoadTestRun");
-  seedLoadTestRunExecution({
+  await seedLoadTestRunExecutionAsync({
     operationsRepository: input.operationsRepository,
     runId: input.runId,
     scenarioId: input.scenario.id,
@@ -127,12 +127,12 @@ export async function runQueuedLoadTestExecution(input: {
     };
   }
 
-  claimQueuedLoadTestRuns({
+  await claimQueuedLoadTestRunsAsync({
     limit: 1,
     operationsRepository: input.operationsRepository
   });
 
-  const execution = input.operationsRepository.findLoadTestRunExecution(input.runId);
+  const execution = await input.operationsRepository.findLoadTestRunExecutionAsync(input.runId);
   if (!execution) {
     throw new Error(`load_test_run_not_found:${input.runId}`);
   }
@@ -172,7 +172,7 @@ export async function runQueuedLoadTestExecution(input: {
     }));
   }
 
-  const metrics = persistLoadTestRunMetrics(
+  const metrics = await persistLoadTestRunMetricsAsync(
     input.operationsRepository,
     buildLoadTestRunMetrics({
       operationResults,
@@ -180,7 +180,7 @@ export async function runQueuedLoadTestExecution(input: {
       targetRps: input.scenario.targetRps
     })
   );
-  const errorSummary = persistLoadTestRunErrorSummary(
+  const errorSummary = await persistLoadTestRunErrorSummaryAsync(
     input.operationsRepository,
     buildLoadTestRunErrorSummary({
       operationResults,
@@ -188,7 +188,7 @@ export async function runQueuedLoadTestExecution(input: {
     })
   );
   const finalStatus = metrics.failedOperations > 0 ? "failed" : "completed";
-  transitionLoadTestRunStatus(input.operationsRepository, input.runId, finalStatus);
+  await transitionLoadTestRunStatusAsync(input.operationsRepository, input.runId, finalStatus);
 
   return {
     enabled: true,
@@ -263,13 +263,13 @@ export async function runRestoreDrillWorkers(input: {
   return results;
 }
 
-export function runMigrationRollbackTooling(input: {
+export async function runMigrationRollbackTooling(input: {
   migration: MigrationCandidate;
   migrationSql?: string;
   operationsRepository: OperationsRepository;
   reason: string;
-}): ReturnType<typeof executeMigrationRollbackCheck> {
-  return executeMigrationRollbackCheck({
+}): Promise<Awaited<ReturnType<typeof executeMigrationRollbackCheckAsync>>> {
+  return executeMigrationRollbackCheckAsync({
     afterSnapshot: buildMigrationApiContractSnapshot(input.migration.id),
     beforeSnapshot: BASELINE_API_CONTRACT_SNAPSHOT,
     metadata: migrationMetadataFromCandidate(input.migration),

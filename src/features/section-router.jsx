@@ -22,9 +22,11 @@ export function SectionRouter({
   roleMode,
   onRoleMode,
   onTopicOptionsChange,
-  topicOptions
+  operator,
+  topicOptions,
+  navigationTarget
 }) {
-  const screenProps = { onBack, conversations, templates, onTemplatesChange, onToast, access, roleMode, onRoleMode, onTopicOptionsChange, topicOptions };
+  const screenProps = { onBack, conversations, templates, onTemplatesChange, onToast, access, roleMode, onRoleMode, onTopicOptionsChange, operator, topicOptions, navigationTarget };
 
   if (!access.sections.includes(section)) {
     return (

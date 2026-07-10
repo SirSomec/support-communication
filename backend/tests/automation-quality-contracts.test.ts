@@ -40,7 +40,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
   it("returns automation workspace with bot scenarios, proactive rules and audit events", async () => {
     const automation = new AutomationService();
 
-    const workspace = await automation.fetchAutomationWorkspace();
+    const workspace = await automation.fetchAutomationWorkspace({ tenantId: "tenant-demo" });
 
     assert.equal(workspace.service, "automationService");
     assert.equal(workspace.status, "ok");
@@ -88,7 +88,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       flowNodes: [{ id: "start", type: "message" }],
       flowEdges: [],
       idempotencyKey: "publish-bot-checkout"
-    });
+    }, { tenantId: "tenant-demo" });
     assert.equal(publish.status, "ok");
     assert.equal(publish.data.scenarioId, "bot-checkout");
     assert.equal(publish.data.versionState, "published");
@@ -104,7 +104,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       flowNodes: [{ id: "start", type: "message" }],
       flowEdges: [],
       idempotencyKey: "publish-bot-checkout"
-    });
+    }, { tenantId: "tenant-demo" });
     assert.equal(duplicate.status, "ok");
     assert.equal(duplicate.data.duplicate, true);
     assert.equal(duplicate.data.runtimeVersion, publish.data.runtimeVersion);
@@ -116,7 +116,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       flowNodes: [{ id: "start", type: "message" }],
       flowEdges: [],
       idempotencyKey: "publish-bot-checkout"
-    });
+    }, { tenantId: "tenant-demo" });
     assert.equal(reusedKey.status, "conflict");
     assert.equal(reusedKey.error?.code, "idempotency_key_reused");
 
@@ -124,13 +124,14 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       id: "bot-checkout",
       name: "Checkout bot",
       testCases: [{ id: "happy-path", expected: "handoff" }]
-    });
+    }, { tenantId: "tenant-demo" });
     assert.equal(testRun.status, "ok");
     assert.equal(testRun.data.scenarioId, "bot-checkout");
     assert.match(testRun.data.testRunId, /^bot_test_/);
     assert.equal(testRun.data.status, "running");
     assert.equal(testRun.data.queue, "bot-runtime");
     assert.equal(testRun.data.cases.length, 1);
+    assert.equal(testRun.data.tenantId, "tenant-demo");
     assert.match(testRun.data.auditId, /^evt_bot_/);
   });
 
@@ -166,7 +167,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       id: "bot-publish-hardening",
       idempotencyKey: "publish-hardening-key",
       name: "Publish hardening bot"
-    });
+    }, { tenantId: "tenant-demo" });
     const duplicate = await automation.publishBotScenario({
       channels: ["SDK"],
       flowEdges: [{ from: "start", to: "handoff" }],
@@ -174,7 +175,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       id: "bot-publish-hardening",
       idempotencyKey: "publish-hardening-key",
       name: "Publish hardening bot"
-    });
+    }, { tenantId: "tenant-demo" });
     const version = await repository.findBotScenarioVersion(String(publish.data.runtimeVersion));
     const audit = await repository.findBotPublishAuditEvent(String(publish.data.auditId));
     const auditRows = await repository.listBotPublishAuditEvents("bot-publish-hardening");
@@ -204,8 +205,8 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       id: "bot-version-visible",
       idempotencyKey: "version-visible-key",
       name: "Version visible bot"
-    });
-    const workspace = await automation.fetchAutomationWorkspace();
+    }, { tenantId: "tenant-demo" });
+    const workspace = await automation.fetchAutomationWorkspace({ tenantId: "tenant-demo" });
     const versions = workspace.data.botScenarioVersions as Array<Record<string, unknown>>;
     const auditRows = workspace.data.auditEvents as Array<Record<string, unknown>>;
 
@@ -383,7 +384,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       activeVariant: "B",
       cooldown: "24h",
       segment: "checkout"
-    });
+    }, { tenantId: "tenant-demo" });
     assert.equal(rule.status, "ok");
     assert.match(rule.data.frequencyCap.id, /^cap_rule-checkout_/);
     assert.match(rule.data.experiment.id, /^exp_rule-checkout_/);
@@ -398,7 +399,8 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       conversationId: "conv-42",
       reason: "customer_requested_operator",
       collectedFields: { cardNumber: "4111111111111111", orderId: "A-42", phone: "+7 999 204-18-44" },
-      queue: "Delivery"
+      queue: "Delivery",
+      tenantId: "tenant-demo"
     });
     assert.equal(handoff.status, "ok");
     assert.equal(handoff.data.eventName, "bot.handoff.created");
@@ -2398,9 +2400,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
 
   it("wires quality rating controller writes to service-admin rating permissions", () => {
     const source = readFileSync(new URL("../apps/api-gateway/src/quality/quality.controller.ts", import.meta.url), "utf8");
-    const identityFixtures = readFileSync(new URL("../apps/api-gateway/src/identity/identity.fixtures.ts", import.meta.url), "utf8");
+    const identityFixtures = readFileSync(new URL("../apps/api-gateway/src/identity/seed-catalog.ts", import.meta.url), "utf8");
 
-    assert.match(source, /@Post\("ratings"\)[\s\S]*@UseGuards\(DemoServiceAdminGuard\)[\s\S]*@RequireServiceAdminAction\("quality\.ratings\.write"\)[\s\S]*recordClientQualityRating\(/);
+    assert.match(source, /@UseGuards\(TenantOperatorOrServiceAdminGuard\)[\s\S]*@Post\("ratings"\)[\s\S]*@RequireServiceAdminAction\("quality\.ratings\.write"\)[\s\S]*recordClientQualityRating\(/);
     assert.match(identityFixtures, /"quality\.ratings\.write"/);
   });
 
@@ -2572,9 +2574,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
 
   it("wires manual QA review controller writes to service-admin review permissions", () => {
     const source = readFileSync(new URL("../apps/api-gateway/src/quality/quality.controller.ts", import.meta.url), "utf8");
-    const identityFixtures = readFileSync(new URL("../apps/api-gateway/src/identity/identity.fixtures.ts", import.meta.url), "utf8");
+    const identityFixtures = readFileSync(new URL("../apps/api-gateway/src/identity/seed-catalog.ts", import.meta.url), "utf8");
 
-    assert.match(source, /@Post\("manual-reviews"\)[\s\S]*@UseGuards\(DemoServiceAdminGuard\)[\s\S]*@RequireServiceAdminAction\("quality\.manual-reviews\.write"\)[\s\S]*recordManualQaReview\(/);
+    assert.match(source, /@UseGuards\(TenantOperatorOrServiceAdminGuard\)[\s\S]*@Post\("manual-reviews"\)[\s\S]*@RequireServiceAdminAction\("quality\.manual-reviews\.write"\)[\s\S]*recordManualQaReview\(/);
     assert.match(identityFixtures, /"quality\.manual-reviews\.write"/);
   });
 
@@ -2740,10 +2742,10 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
 
   it("wires AI scoring controller writes to service-admin scoring audit permissions", () => {
     const source = readFileSync(new URL("../apps/api-gateway/src/quality/quality.controller.ts", import.meta.url), "utf8");
-    const identityFixtures = readFileSync(new URL("../apps/api-gateway/src/identity/identity.fixtures.ts", import.meta.url), "utf8");
+    const identityFixtures = readFileSync(new URL("../apps/api-gateway/src/identity/seed-catalog.ts", import.meta.url), "utf8");
 
-    assert.match(source, /@Post\("draft-score"\)[\s\S]*@UseGuards\(DemoServiceAdminGuard\)[\s\S]*@RequireServiceAdminAction\("quality\.scoring-audits\.write"\)[\s\S]*scoreDraftResponse\(/);
-    assert.match(source, /@Post\("draft-scores"\)[\s\S]*@UseGuards\(DemoServiceAdminGuard\)[\s\S]*@RequireServiceAdminAction\("quality\.scoring-audits\.write"\)[\s\S]*scoreDraftResponseAlias\(/);
+    assert.match(source, /@Post\("draft-score"\)[\s\S]*@RequireServiceAdminAction\("quality\.scoring-audits\.write"\)[\s\S]*scoreDraftResponse\(/);
+    assert.match(source, /@Post\("draft-scores"\)[\s\S]*@RequireServiceAdminAction\("quality\.scoring-audits\.write"\)[\s\S]*scoreDraftResponseAlias\(/);
     assert.match(identityFixtures, /"quality\.scoring-audits\.write"/);
   });
 
@@ -2865,7 +2867,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
   it("returns quality workspace and scores draft responses with explainable telemetry", async () => {
     const quality = new QualityService();
 
-    const workspace = await quality.fetchQualityWorkspace();
+    const workspace = await quality.fetchQualityWorkspace({ tenantId: "tenant-demo" });
     assert.equal(workspace.service, "qualityService");
     assert.equal(workspace.status, "ok");
     assert.equal(workspace.partial, true);
@@ -2877,7 +2879,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       conversationId: "conv-empty",
       mode: "reply",
       text: ""
-    });
+    }, { tenantId: "tenant-demo" });
     assert.equal(empty.status, "ok");
     assert.equal(empty.data.checks[0].id, "empty");
     assert.equal(empty.data.checks[0].tone, "danger");
@@ -2890,14 +2892,14 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       mode: "reply",
       suggestions: [{ id: "ai-reply" }],
       text: "This is not our problem"
-    });
+    }, { tenantId: "tenant-demo" });
     assert.equal(risky.status, "ok");
     assert.ok(risky.data.checks.some((check) => check.id === "attachment" && check.tone === "danger"));
     assert.ok(risky.data.repairActions.length > 0);
     assert.equal(risky.data.telemetry.effectivenessKey, "quality_conv-risk");
     assert.ok(risky.data.explainability.reasons.length > 0);
 
-    const malformed = await quality.scoreDraftResponse(null);
+    const malformed = await quality.scoreDraftResponse(null, { tenantId: "tenant-demo" });
     assert.equal(malformed.status, "invalid");
     assert.equal(malformed.error?.code, "quality_draft_payload_required");
   });
@@ -2920,7 +2922,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       score: 5,
       scale: "CSAT",
       topic: "Delivery"
-    });
+    }, { tenantId: "tenant-demo" });
     assert.equal(rating.status, "ok");
     assert.match(rating.data.ratingId, /^quality_/);
     assert.equal(rating.data.links.conversationId, "conv-42");
@@ -2945,7 +2947,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         speed: 5
       },
       overrideReason: "senior_review"
-    });
+    }, { tenantId: "tenant-demo" });
     assert.equal(review.status, "ok");
     assert.equal(review.data.reviewId.startsWith("qa_"), true);
     assert.equal(review.data.override.auditRequired, true);

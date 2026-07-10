@@ -199,6 +199,18 @@
   line-height: 1.45;
 }
 
+.ai-coaching-score {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid rgba(22, 163, 74, 0.32);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgba(22, 163, 74, 0.1);
+  color: #047857;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .ai-coaching-card footer button {
   min-height: 32px;
   border: 1px solid var(--line);

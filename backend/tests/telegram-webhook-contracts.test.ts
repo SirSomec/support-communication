@@ -12,7 +12,8 @@ import { IntegrationRepository } from "../apps/api-gateway/dist/integrations/int
 import {
   handleTelegramWebhookFromRoute,
   loadTelegramWebhookConfig,
-  resolveOrCreateTelegramConversation
+  resolveOrCreateTelegramConversation,
+  telegramConversationId
 } from "../apps/api-gateway/dist/integrations/telegram-webhook.route.js";
 import { ConversationService } from "../apps/api-gateway/dist/conversation/conversation.service.js";
 
@@ -52,11 +53,13 @@ describe("telegram webhook ingress contracts", () => {
     assert.equal(response.status, "ok");
     assert.equal(response.data.accepted, true);
     assert.equal(response.data.chatId, "99887766");
-    assert.equal(response.data.conversationId, "99887766");
+    const conversationId = telegramConversationId(TENANT_ID, "123456789", "99887766");
+    assert.equal(response.data.conversationId, conversationId);
 
-    const conversation = await ConversationRepository.default().findConversation("99887766");
+    const conversation = await ConversationRepository.default().findConversation(conversationId);
     assert.ok(conversation);
     assert.equal(conversation?.channel, "Telegram");
+    assert.equal(conversation?.phone, "99887766");
     assert.equal(conversation?.tenantId, TENANT_ID);
     assert.equal(conversation?.messages.at(-1)?.text, "Здравствуйте, где мой заказ?");
   });
@@ -119,7 +122,7 @@ describe("telegram webhook ingress contracts", () => {
     assert.equal(duplicate.data.duplicate, true);
   });
 
-  it("resolveOrCreateTelegramConversation uses chat id as conversation id for outbound delivery", async () => {
+  it("uses a tenant-scoped conversation id and keeps provider chat id for outbound delivery", async () => {
     const repository = ConversationRepository.inMemory();
     const conversation = await resolveOrCreateTelegramConversation({
       chatId: "55667788",
@@ -130,7 +133,8 @@ describe("telegram webhook ingress contracts", () => {
     });
 
     assert.ok(conversation);
-    assert.equal(conversation?.id, "55667788");
+    assert.equal(conversation?.id, telegramConversationId(TENANT_ID, undefined, "55667788"));
+    assert.equal(conversation?.phone, "55667788");
     assert.equal(conversation?.channel, "Telegram");
     assert.ok(conversation?.tags.includes("telegram"));
   });

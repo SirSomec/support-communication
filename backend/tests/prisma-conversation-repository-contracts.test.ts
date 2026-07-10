@@ -17,6 +17,7 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.equal(detail?.name, "Maria K.");
     assert.equal(detail?.messages.length, 2);
     assert.equal(detail?.messages[0].text, "Where is my order?");
+    assert.equal(detail?.messages[0].createdAt, "2026-06-28T10:00:00.000Z");
     assert.equal(detail?.messages[1].type, "internal");
     assert.deepEqual(client.calls.conversationFindMany, [{
       include: { messages: { orderBy: { createdAt: "asc" } } },
@@ -55,14 +56,101 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.equal(client.calls.conversationMessageCreateMany[0].data.length, 3);
     assert.equal(client.calls.conversationMessageCreateMany[0].data[2].id, "msg_agent_prisma");
     assert.equal(client.calls.conversationMessageCreateMany[0].data.every((message) => message.createdAt instanceof Date), true);
-    assert.equal(
-      client.calls.conversationMessageCreateMany[0].data[0].createdAt.getTime()
-        < client.calls.conversationMessageCreateMany[0].data[1].createdAt.getTime(),
-      true
-    );
+    assert.equal(client.calls.conversationMessageCreateMany[0].data[0].createdAt.toISOString(), "2026-06-28T10:00:00.000Z");
+    assert.equal(client.calls.conversationMessageCreateMany[0].data[1].createdAt.toISOString(), "2026-06-28T10:01:00.000Z");
 
     const refetched = await repository.findConversation("maria");
     assert.deepEqual(refetched?.messages.map((message) => message.id), ["msg_1", "msg_2", "msg_agent_prisma"]);
+  });
+
+  it("persists assignment, realtime notification and routing analytics in one Prisma transaction", async () => {
+    const { client } = createFakePrismaConversationClient();
+    const repository = ConversationRepository.prisma({ client });
+    const conversation = await repository.findConversation("maria");
+    assert.ok(conversation);
+    conversation.operatorId = "usr-volga-admin";
+    conversation.operatorName = "Sergey Markin";
+    conversation.status = "assigned";
+
+    const persisted = await repository.assignConversation({
+      analyticsRow: {
+        channel: "SDK",
+        conversationId: "maria",
+        eventKind: "assignment",
+        fromOperatorId: null,
+        id: "analytics_assignment_prisma",
+        occurredAt: "2026-07-10T09:00:00.000Z",
+        source: "dialog-interface",
+        tenantId: "tenant-volga",
+        toOperatorId: "usr-volga-admin"
+      },
+      conversation,
+      realtimeEvent: {
+        data: { action: "assignment", toOperatorId: "usr-volga-admin" },
+        eventId: "rt_assignment_prisma",
+        eventName: "conversation.updated",
+        occurredAt: "2026-07-10T09:00:00.000Z",
+        resourceId: "maria",
+        resourceType: "conversation",
+        schemaVersion: "v1",
+        tenantId: "tenant-volga",
+        traceId: "trc_assignment_prisma"
+      }
+    });
+
+    assert.equal(client.calls.transactions, 1);
+    assert.equal(client.calls.conversationUpdateMany.length, 1);
+    assert.equal(client.calls.routingAnalyticsRowCreates.length, 1);
+    assert.equal(client.calls.routingAnalyticsRowCreates[0].data.occurredAt instanceof Date, true);
+    assert.equal(client.calls.conversationRealtimeEventCreates[0].data.eventId, "rt_assignment_prisma");
+    assert.equal(persisted.conversation.operatorId, "usr-volga-admin");
+    assert.equal(persisted.analyticsRow.id, "analytics_assignment_prisma");
+  });
+
+  it("rejects a stale assignment before writing realtime or analytics rows", async () => {
+    const { client } = createFakePrismaConversationClient();
+    const repository = ConversationRepository.prisma({ client });
+    const conversation = await repository.findConversation("maria");
+    assert.ok(conversation);
+    conversation.operatorId = "usr-volga-admin";
+    conversation.operatorName = "Sergey Markin";
+
+    await repository.assignConversation({
+      analyticsRow: {
+        channel: "SDK",
+        conversationId: "maria",
+        eventKind: "assignment",
+        fromOperatorId: null,
+        id: "analytics_assignment_first",
+        occurredAt: "2026-07-10T09:00:00.000Z",
+        source: "dialog-interface",
+        tenantId: "tenant-volga",
+        toOperatorId: "usr-volga-admin"
+      },
+      conversation,
+      realtimeEvent: assignmentRealtimeEvent("rt_assignment_first")
+    });
+
+    const staleConversation = { ...conversation, operatorId: "usr-ns-owner", operatorName: "Mira Volkova" };
+    await assert.rejects(() => repository.assignConversation({
+      analyticsRow: {
+        channel: "SDK",
+        conversationId: "maria",
+        eventKind: "assignment",
+        fromOperatorId: null,
+        id: "analytics_assignment_stale",
+        occurredAt: "2026-07-10T09:00:01.000Z",
+        source: "dialog-interface",
+        tenantId: "tenant-volga",
+        toOperatorId: "usr-ns-owner"
+      },
+      conversation: staleConversation,
+      realtimeEvent: assignmentRealtimeEvent("rt_assignment_stale")
+    }), /assignment changed before commit/);
+
+    assert.equal(client.calls.conversationUpdateMany.length, 2);
+    assert.equal(client.calls.routingAnalyticsRowCreates.length, 1);
+    assert.equal(client.calls.conversationRealtimeEventCreates.length, 1);
   });
 
   it("persists inbound idempotency and realtime events through Prisma delegates", async () => {
@@ -366,6 +454,8 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
         }
       ],
       name: "Maria K.",
+      operatorId: null,
+      operatorName: null,
       phone: "+7 999 204-18-44",
       preview: "Where is my order?",
       previous: [["2024-05-05", "Return", "Closed"]],
@@ -400,7 +490,9 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
     conversationRealtimeEventCreates: [] as Array<{ data: FakeConversationRealtimeEventCreateInput }>,
     conversationRealtimeEventFindMany: [] as unknown[],
     conversationUpserts: [] as Array<{ create: FakeConversationUpsertInput; update: FakeConversationUpsertInput; where: { id: string } }>,
+    conversationUpdateMany: [] as Array<{ data: FakeConversationUpsertInput; where: { id: string; operatorId: string | null; tenantId: string } }>,
     outboxEventCreates: [] as Array<{ data: FakeOutboxEventCreateInput }>,
+    routingAnalyticsRowCreates: [] as Array<{ data: FakeRoutingAnalyticsRowCreateInput }>,
     transactions: 0
   };
 
@@ -442,6 +534,17 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
       findUnique: async (input: { where: { id: string } }) => {
         calls.conversationFindUnique.push(input);
         return conversations.get(input.where.id) ?? null;
+      },
+      updateMany: async (input: { data: FakeConversationUpsertInput; where: { id: string; operatorId: string | null; tenantId: string } }) => {
+        calls.conversationUpdateMany.push(input);
+        const existing = conversations.get(input.where.id);
+        if (!existing
+          || existing.tenantId !== input.where.tenantId
+          || (existing.operatorId ?? null) !== input.where.operatorId) {
+          return { count: 0 };
+        }
+        conversations.set(input.where.id, { ...existing, ...input.data });
+        return { count: 1 };
       },
       upsert: async (input: { create: FakeConversationUpsertInput; update: FakeConversationUpsertInput; where: { id: string } }) => {
         calls.conversationUpserts.push(input);
@@ -525,6 +628,12 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
         calls.outboxEventCreates.push(input);
         return input.data;
       }
+    },
+    routingAnalyticsRow: {
+      create: async (input: { data: FakeRoutingAnalyticsRowCreateInput }) => {
+        calls.routingAnalyticsRowCreates.push(input);
+        return { ...input.data, createdAt: input.data.occurredAt };
+      }
     }
   };
 
@@ -552,6 +661,8 @@ interface FakeConversationRowWithMessages {
   language: string;
   messages: FakeConversationMessageRow[];
   name: string;
+  operatorId: string | null;
+  operatorName: string | null;
   phone: string;
   preview: string;
   previous: unknown;
@@ -588,6 +699,8 @@ interface FakeConversationUpsertInput {
   initials: string;
   language: string;
   name: string;
+  operatorId: string | null;
+  operatorName: string | null;
   phone: string;
   preview: string;
   previous: unknown;
@@ -599,6 +712,18 @@ interface FakeConversationUpsertInput {
   time: string;
   topic: string;
   unread: boolean;
+}
+
+interface FakeRoutingAnalyticsRowCreateInput {
+  channel: string;
+  conversationId: string;
+  eventKind: "assignment" | "transfer";
+  fromOperatorId: string | null;
+  id: string;
+  occurredAt: Date;
+  source: string;
+  tenantId: string;
+  toOperatorId: string;
 }
 
 interface FakeConversationMessageCreateInput {
@@ -681,6 +806,20 @@ interface FakeConversationRealtimeEventCreateInput {
 }
 
 type FakeConversationRealtimeEventRow = FakeConversationRealtimeEventCreateInput;
+
+function assignmentRealtimeEvent(eventId: string) {
+  return {
+    data: { action: "assignment" },
+    eventId,
+    eventName: "conversation.updated",
+    occurredAt: "2026-07-10T09:00:00.000Z",
+    resourceId: "maria",
+    resourceType: "conversation",
+    schemaVersion: "v1",
+    tenantId: "tenant-volga",
+    traceId: `trc_${eventId}`
+  };
+}
 
 interface FakeOutboxEventCreateInput {
   aggregateId: string;

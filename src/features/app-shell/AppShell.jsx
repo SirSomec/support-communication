@@ -1,7 +1,7 @@
 import React from "react";
 import { ChevronDown, Globe2, Headphones, LogIn, Search, ServerCog, ShieldCheck, UsersRound, Zap } from "lucide-react";
 import { roleModes } from "../../app/access.js";
-import { navItems } from "../../data.js";
+import { navigationItems } from "../../app/navigationModel.js";
 import { NotificationCenter } from "../notifications/NotificationCenter.jsx";
 import "./app-shell.css";
 
@@ -12,7 +12,7 @@ export function Sidebar({ active, access, onSelect }) {
         <Headphones size={22} />
       </div>
       <nav className="nav-list" aria-label="Главная навигация">
-        {navItems.map(({ key, label, icon: Icon }) => {
+        {navigationItems.map(({ key, label, icon: Icon }) => {
           const isAllowed = access.sections.includes(key);
 
           return (
@@ -49,12 +49,15 @@ export function Sidebar({ active, access, onSelect }) {
 export function TopBar({
   access,
   activeSection,
+  getNotificationActionAvailability,
   onOpenAuth,
   onOpenLanding,
   onOpenServiceAdmin,
+  onNavigateNotificationAction,
   onOutbound,
   onRoleMode,
   onToast,
+  notificationsEnabled = true,
   roleMode,
   showRoleSwitcher = true
 }) {
@@ -97,7 +100,14 @@ export function TopBar({
             </button>
           ) : null}
         </div>
-        <NotificationCenter activeSection={activeSection} onToast={onToast} />
+        {notificationsEnabled ? (
+          <NotificationCenter
+            activeSection={activeSection}
+            getNotificationActionAvailability={getNotificationActionAvailability}
+            onNavigateNotificationAction={onNavigateNotificationAction}
+            onToast={onToast}
+          />
+        ) : null}
         <button className="icon-button" aria-label="Поиск" title="Поиск" type="button">
           <Search size={20} />
         </button>

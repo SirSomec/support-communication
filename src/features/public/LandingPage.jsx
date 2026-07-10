@@ -101,10 +101,55 @@ const queueRows = [
 ];
 
 export function LandingPage({
+  demoRequestEnabled = false,
   onNavigateAuth = noop,
   onRequestDemo = noop,
   onStartTrial = noop
 }) {
+  const [requestDialog, setRequestDialog] = React.useState(null);
+  const [requestForm, setRequestForm] = React.useState(defaultRequestForm());
+  const [requestState, setRequestState] = React.useState({ error: "", submitting: false });
+  const handleDemoRequest = demoRequestEnabled
+    ? (options = {}) => openRequestDialog(options)
+    : undefined;
+
+  function openRequestDialog({ planInterest = "Growth", source = "landing-hero", title = "Демо по запросу" } = {}) {
+    setRequestDialog({ source, title });
+    setRequestForm(defaultRequestForm({ planInterest, source }));
+    setRequestState({ error: "", submitting: false });
+  }
+
+  function updateRequestForm(field, value) {
+    setRequestForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
+
+  async function submitRequestForm(event) {
+    event.preventDefault();
+    if (requestState.submitting || !requestDialog) {
+      return;
+    }
+
+    setRequestState({ error: "", submitting: true });
+    const response = await onRequestDemo({
+      ...requestForm,
+      source: requestDialog.source
+    });
+
+    if (response?.status === "ok") {
+      setRequestDialog(null);
+      setRequestState({ error: "", submitting: false });
+      return;
+    }
+
+    setRequestState({
+      error: response?.error?.message ?? "Не удалось отправить заявку.",
+      submitting: false
+    });
+  }
+
   return (
     <main className="public-page">
       <header className="public-nav" aria-label="Публичная навигация">
@@ -139,8 +184,13 @@ export function LandingPage({
               Запустить trial
               <ArrowRight size={18} />
             </button>
-            <button className="public-btn secondary large" onClick={onRequestDemo} type="button">
-              Получить демо
+            <button
+              className="public-btn secondary large"
+              disabled={!demoRequestEnabled}
+              onClick={() => handleDemoRequest?.({ planInterest: "Growth", source: "landing-hero", title: "Демо по запросу" })}
+              type="button"
+            >
+              Демо по запросу
             </button>
             <button className="public-btn text" onClick={onNavigateAuth} type="button">
               Уже есть аккаунт
@@ -337,12 +387,143 @@ export function LandingPage({
           ))}
         </div>
         <div className="public-support-actions">
-          <button className="public-btn secondary" onClick={onRequestDemo} type="button"><LifeBuoy size={17} /> Связаться с поддержкой</button>
+          <button
+            className="public-btn secondary"
+            disabled={!demoRequestEnabled}
+            onClick={() => handleDemoRequest?.({ planInterest: "Enterprise", source: "landing-status-contact", title: "Контакт по запросу" })}
+            type="button"
+          >
+            <LifeBuoy size={17} /> Контакт по запросу
+          </button>
           <button className="public-btn text" onClick={onNavigateAuth} type="button"><Globe2 size={17} /> Перейти ко входу</button>
         </div>
       </section>
+
+      {requestDialog ? (
+        <div className="public-dialog-backdrop">
+          <section
+            aria-labelledby="public-demo-request-title"
+            aria-modal="true"
+            className="public-request-dialog"
+            data-testid="public-demo-request-dialog"
+            role="dialog"
+          >
+            <header>
+              <div>
+                <h2 id="public-demo-request-title">{requestDialog.title}</h2>
+                <p>Оставьте рабочие контакты, чтобы команда сервиса подготовила маршрут демо.</p>
+              </div>
+              <button aria-label="Закрыть заявку" onClick={() => setRequestDialog(null)} type="button">Закрыть</button>
+            </header>
+
+            <form onSubmit={submitRequestForm}>
+              <div className="public-request-grid">
+                <label>
+                  <span>Имя</span>
+                  <input
+                    autoComplete="name"
+                    name="name"
+                    onChange={(event) => updateRequestForm("name", event.target.value)}
+                    required
+                    value={requestForm.name}
+                  />
+                </label>
+                <label>
+                  <span>Компания</span>
+                  <input
+                    autoComplete="organization"
+                    name="company"
+                    onChange={(event) => updateRequestForm("company", event.target.value)}
+                    required
+                    value={requestForm.company}
+                  />
+                </label>
+                <label>
+                  <span>Email</span>
+                  <input
+                    autoComplete="email"
+                    name="email"
+                    onChange={(event) => updateRequestForm("email", event.target.value)}
+                    required
+                    type="email"
+                    value={requestForm.email}
+                  />
+                </label>
+                <label>
+                  <span>Тариф</span>
+                  <select
+                    name="planInterest"
+                    onChange={(event) => updateRequestForm("planInterest", event.target.value)}
+                    value={requestForm.planInterest}
+                  >
+                    <option value="Start">Start</option>
+                    <option value="Growth">Growth</option>
+                    <option value="Enterprise">Enterprise</option>
+                  </select>
+                </label>
+              </div>
+              <label className="public-request-message">
+                <span>Сообщение</span>
+                <textarea
+                  name="message"
+                  onChange={(event) => updateRequestForm("message", event.target.value)}
+                  required
+                  rows={4}
+                  value={requestForm.message}
+                />
+              </label>
+              <label className="public-request-consent">
+                <input
+                  checked={requestForm.consent}
+                  name="consent"
+                  onChange={(event) => updateRequestForm("consent", event.target.checked)}
+                  required
+                  type="checkbox"
+                />
+                <span>Согласие на обработку заявки</span>
+              </label>
+              <label aria-hidden="true" className="public-request-website">
+                <span>Website</span>
+                <input
+                  autoComplete="off"
+                  name="website"
+                  onChange={(event) => updateRequestForm("website", event.target.value)}
+                  tabIndex={-1}
+                  value={requestForm.website}
+                />
+              </label>
+              {requestState.error ? <p className="public-request-error" role="alert">{requestState.error}</p> : null}
+              <footer>
+                <button className="public-btn text" onClick={() => setRequestDialog(null)} type="button">Отмена</button>
+                <button
+                  className="public-btn primary"
+                  data-testid="public-demo-request-submit"
+                  disabled={requestState.submitting}
+                  type="submit"
+                >
+                  {requestState.submitting ? "Отправка" : "Отправить заявку"}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
 
 export default LandingPage;
+
+function defaultRequestForm(overrides = {}) {
+  return {
+    company: "",
+    consent: false,
+    email: "",
+    message: "",
+    name: "",
+    planInterest: "Growth",
+    source: "landing-hero",
+    website: "",
+    ...overrides
+  };
+}

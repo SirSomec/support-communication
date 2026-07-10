@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Gauge, Sparkles, TrendingUp } from "lucide-react";
+import { scoreCoachingDraft } from "../../app/qualityAiActions.js";
 import { ChannelBadge, SegmentedControl, StatusBadge } from "../../ui.jsx";
 import "./ai-quality.css";
 
@@ -20,11 +21,38 @@ function getAverageScore(checks) {
 
 export function AiQualityWorkspace({ coachingQueue, effectivenessMetrics, realtimeChecks, onToast }) {
   const [activeFilter, setActiveFilter] = useState("Все");
+  const [scoringId, setScoringId] = useState("");
+  const [scoredDrafts, setScoredDrafts] = useState({});
   const averageScore = getAverageScore(realtimeChecks);
   const filteredCoaching = useMemo(
     () => coachingQueue.filter((item) => activeFilter === "Все" || item.segment === activeFilter),
     [activeFilter, coachingQueue]
   );
+
+  async function handleScoreCoachingDraft(item) {
+    if (scoringId) {
+      return;
+    }
+
+    setScoringId(item.id);
+    const result = await scoreCoachingDraft(item);
+    setScoringId("");
+
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    setScoredDrafts((current) => ({
+      ...current,
+      [item.id]: {
+        auditId: result.auditId,
+        checks: result.checks,
+        score: result.score
+      }
+    }));
+    onToast(`AI scoring: ${item.trigger} ${result.score}/100 ${result.auditId}`);
+  }
 
   return (
     <div className="ai-quality-workspace">
@@ -78,10 +106,15 @@ export function AiQualityWorkspace({ coachingQueue, effectivenessMetrics, realti
               </header>
               <p>{item.recommendation}</p>
               <blockquote>{item.draft}</blockquote>
+              {scoredDrafts[item.id] ? (
+                <small className="ai-coaching-score">
+                  {scoredDrafts[item.id].score}/100 · {scoredDrafts[item.id].auditId}
+                </small>
+              ) : null}
               <footer>
                 <StatusBadge tone={stateTone[item.severity] ?? "info"}>{item.trigger}</StatusBadge>
-                <button onClick={() => onToast(`AI coaching: ${item.trigger}`)} type="button">
-                  Применить исправление
+                <button disabled={scoringId === item.id} onClick={() => void handleScoreCoachingDraft(item)} type="button">
+                  {scoringId === item.id ? "Оценка..." : "Проверить черновик"}
                 </button>
               </footer>
             </article>

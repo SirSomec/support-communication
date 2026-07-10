@@ -374,7 +374,8 @@
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
     "identity actions"
-    "status topic";
+    "status status"
+    "topic topic";
   gap: 10px 12px;
   padding: 14px 18px 12px;
   border-bottom: 1px solid var(--line);
@@ -397,6 +398,20 @@
 .chat-identity span {
   color: var(--muted);
   font-size: 13px;
+}
+
+.chat-identity > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.assignment-owner {
+  color: #405069;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .chat-actions {
@@ -479,6 +494,79 @@
   font-size: 12px;
 }
 
+.assignment-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid #d6e2f2;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.assignment-panel label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.assignment-panel label span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.assignment-panel select,
+.assignment-panel input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #263248;
+  outline: none;
+}
+
+.assignment-panel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.assignment-panel-actions button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #405069;
+}
+
+.assignment-panel-actions .assignment-submit {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.assignment-panel-actions .assignment-submit:disabled {
+  border-color: var(--line);
+  background: #e8edf4;
+  color: #8a94a6;
+}
+
+.assignment-panel > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #a72836;
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .inline-disabled-reason {
   display: inline-flex;
   align-items: center;
@@ -533,6 +621,27 @@
   background: #ffffff;
   color: #263248;
   outline: none;
+}
+
+@media (max-width: 900px) {
+  .assignment-panel {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .assignment-panel-actions {
+    grid-column: 1 / -1;
+    justify-content: end;
+  }
+}
+
+@media (max-width: 640px) {
+  .assignment-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .assignment-panel-actions {
+    grid-column: auto;
+  }
 }
 
 .transcript-toolbar {

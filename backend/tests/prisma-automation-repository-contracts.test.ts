@@ -1,8 +1,42 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { configureAutomationRepository } from "../apps/api-gateway/src/automation/bootstrap.ts";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
+import { planEligibleProactiveRuleDeliveryAsync } from "../apps/api-gateway/src/automation/proactive-delivery.worker.ts";
 
 describe("Prisma-backed automation repository contracts", () => {
+  it("bootstraps the default automation repository from a Prisma client factory", async () => {
+    const { client, calls } = createFakePrismaAutomationClient();
+    let datasourceUrl: string | undefined;
+
+    const repository = configureAutomationRepository({
+      AUTOMATION_REPOSITORY: "prisma",
+      DATABASE_URL: "postgresql://automation-bootstrap"
+    }, {
+      prismaClientFactory(options) {
+        datasourceUrl = options.datasourceUrl;
+        return client;
+      }
+    });
+
+    await repository.saveBotScenario({
+      channels: ["SDK"],
+      flowEdges: [],
+      flowNodes: [{ id: "start", title: "Start", type: "message" }],
+      id: "automation-bootstrap-bot",
+      name: "Automation bootstrap bot",
+      schemaVersion: "bot-flow/v1",
+      status: "draft",
+      tenantId: "tenant-bootstrap"
+    });
+    const defaultRepository = AutomationRepository.default();
+    const listed = await defaultRepository.listBotScenarios();
+
+    assert.equal(datasourceUrl, "postgresql://automation-bootstrap");
+    assert.deepEqual(listed.map((scenario) => scenario.id), ["automation-bootstrap-bot"]);
+    assert.equal(calls.botScenarioUpsert.length, 1);
+  });
+
   it("persists bot scenarios through Prisma with tenant parity and defensive JSON mapping", async () => {
     const { client, calls } = createFakePrismaAutomationClient();
     const repository = AutomationRepository.prisma({ client });
@@ -35,7 +69,7 @@ describe("Prisma-backed automation repository contracts", () => {
     const foundAgain = await repository.findBotScenario("bot-scenario-prisma");
     const listed = await repository.listBotScenarios();
     const missing = await repository.findBotScenario("missing-bot");
-    const state = repository.readState();
+    const state = await repository.readStateAsync();
 
     assert.equal(saved.tenantId, "tenant-demo");
     assert.equal(found?.tenantId, "tenant-demo");
@@ -50,9 +84,9 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.equal(missing, undefined);
     assert.equal(calls.botScenarioFindUnique.length, 6);
     assert.equal(calls.botScenarioUpsert.length, 2);
-    assert.deepEqual(calls.botScenarioFindMany, [{
+    assert.deepEqual(calls.botScenarioFindMany[0], {
       orderBy: { updatedAt: "desc" }
-    }]);
+    });
     assert.equal(calls.botScenarioUpsert[0].create.tenantId, "tenant-demo");
     assert.equal(calls.botScenarioUpsert[1].update.tenantId, "tenant-demo");
     assert.equal(calls.botScenarioUpsert[0].create.createdAt instanceof Date, true);
@@ -93,7 +127,7 @@ describe("Prisma-backed automation repository contracts", () => {
     const foundAgain = await repository.findBotScenarioVersion("bot-version-prisma-v1");
     const versions = await repository.listBotScenarioVersions("bot-version-prisma");
     const missing = await repository.findBotScenarioVersion("missing-version");
-    const state = repository.readState();
+    const state = await repository.readStateAsync();
 
     assert.equal(saved.tenantId, "tenant-demo");
     assert.equal(duplicate.versionId, "bot-version-prisma-v1");
@@ -109,10 +143,10 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.equal(missing, undefined);
     assert.equal(calls.botScenarioVersionCreates.length, 2);
     assert.equal(calls.botScenarioVersionFindUnique.length, 6);
-    assert.deepEqual(calls.botScenarioVersionFindMany, [{
+    assert.deepEqual(calls.botScenarioVersionFindMany.find((input) => input.where?.scenarioId === "bot-version-prisma"), {
       orderBy: { createdAt: "asc" },
       where: { scenarioId: "bot-version-prisma" }
-    }]);
+    });
     assert.equal(calls.botScenarioVersionCreates[0].data.createdAt instanceof Date, true);
     assert.equal(calls.botScenarioVersionCreates[0].data.tenantId, "tenant-demo");
     assert.equal(calls.botScenarioVersionCreates[1].data.tenantId, "tenant-demo");
@@ -157,7 +191,7 @@ describe("Prisma-backed automation repository contracts", () => {
     const found = await repository.findBotPublishAuditEvent("evt_bot_publish_prisma_001");
     const listed = await repository.listBotPublishAuditEvents("bot-publish-prisma");
     const missing = await repository.findBotPublishAuditEvent("missing-audit");
-    const state = repository.readState();
+    const state = await repository.readStateAsync();
 
     assert.equal(saved.tenantId, "tenant-demo");
     assert.equal(saved.immutable, true);
@@ -172,21 +206,224 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.equal(missing, undefined);
     assert.equal(calls.botPublishAuditEventCreates.length, 2);
     assert.equal(calls.botPublishAuditEventFindUnique.length, 9);
-    assert.deepEqual(calls.botPublishAuditEventFindMany, [{
+    assert.deepEqual(calls.botPublishAuditEventFindMany.find((input) => input.where?.scenarioId === "bot-publish-prisma"), {
       orderBy: { createdAt: "asc" },
       where: { scenarioId: "bot-publish-prisma" }
-    }]);
+    });
     assert.equal(calls.botPublishAuditEventCreates[0].data.createdAt instanceof Date, true);
     assert.equal(calls.botPublishAuditEventCreates[0].data.immutable, true);
     assert.equal(calls.botPublishAuditEventCreates[0].data.tenantId, "tenant-demo");
   });
+
+  it("persists automation runtime state through Prisma delegates without JSON fallback", async () => {
+    const { client, calls } = createFakePrismaAutomationClient();
+    const repository = AutomationRepository.prisma({ client });
+
+    assert.throws(() => repository.readState(), /prisma_automation_async_required/);
+
+    const publishRecord = await repository.savePublishIdempotencyKeyAsync({
+      fingerprint: "publish-fingerprint",
+      key: "publish-key",
+      result: { runtimeVersion: "runtime-prisma-v1", scenarioId: "bot-prisma-runtime" }
+    });
+    const replayedPublish = await repository.savePublishIdempotencyKeyAsync({
+      fingerprint: "changed-fingerprint",
+      key: "publish-key",
+      result: { runtimeVersion: "changed" }
+    });
+    const foundPublish = await repository.findPublishIdempotencyKeyAsync("publish-key");
+
+    const testRun = await repository.saveBotTestRunAsync({
+      auditId: "evt_bot_test_prisma",
+      cases: [{ input: "hello" }],
+      queue: "bot-runtime",
+      scenarioId: "bot-prisma-runtime",
+      status: "running",
+      tenantId: "tenant-demo",
+      testRunId: "bot-test-prisma"
+    });
+
+    const rule = await repository.saveProactiveRuleAsync({
+      activeVariant: "B",
+      channels: ["SDK", "Telegram"],
+      cooldown: "24h",
+      id: "rule-prisma",
+      segment: "checkout",
+      status: "enabled"
+    });
+    const listedRules = await repository.listProactiveRulesAsync();
+
+    const window = await repository.saveProactiveExecutionWindowAsync({
+      active: true,
+      daysOfWeek: [1, 2, 3],
+      endsAt: "18:00",
+      ruleId: "rule-prisma",
+      startsAt: "09:00",
+      tenantId: "tenant-demo",
+      timezone: "Europe/Moscow",
+      windowId: "window-prisma"
+    });
+    const cap = await repository.saveProactiveFrequencyCapAsync({
+      active: true,
+      capId: "cap-prisma",
+      limit: 3,
+      period: "day",
+      resetAt: "2026-07-03T21:00:00.000Z",
+      ruleId: "rule-prisma",
+      tenantId: "tenant-demo",
+      used: 1
+    });
+    const assignment = await repository.saveProactiveExperimentAssignmentAsync({
+      assignedAt: "2026-07-03T10:00:00.000Z",
+      assignmentId: "assignment-prisma",
+      experimentId: "exp-rule-prisma",
+      ruleId: "rule-prisma",
+      subjectId: "client-42",
+      tenantId: "tenant-demo",
+      variant: "B"
+    });
+    const replayedAssignment = await repository.saveProactiveExperimentAssignmentAsync({
+      ...assignment,
+      variant: "C"
+    });
+
+    const attempt = await repository.saveProactiveDeliveryAttemptAsync({
+      attemptedAt: "2026-07-03T10:05:00.000Z",
+      attemptId: "attempt-prisma",
+      channel: "SDK",
+      descriptorId: "proactive_rule_prisma_tenant_demo_client_42",
+      ruleId: "rule-prisma",
+      status: "queued",
+      subjectId: "client-42",
+      tenantId: "tenant-demo",
+      traceId: "trc_proactive_prisma"
+    });
+    const deliveryRecord = await repository.saveProactiveDeliveryIdempotencyKeyAsync({
+      fingerprint: "delivery-fingerprint",
+      key: "proactive-delivery:tenant-demo:rule-prisma:client-42",
+      result: { descriptorId: "proactive_rule_prisma_tenant_demo_client_42" },
+      ruleId: "rule-prisma",
+      subjectId: "client-42",
+      tenantId: "tenant-demo"
+    });
+    const attribution = await repository.saveProactiveDeliveryAttributionAsync({
+      assignedAt: "2026-07-03T10:05:01.000Z",
+      attributionId: "attribution-prisma",
+      descriptorId: "proactive_rule_prisma_tenant_demo_client_42",
+      experimentId: "exp-rule-prisma",
+      ruleId: "rule-prisma",
+      subjectId: "client-42",
+      tenantId: "tenant-demo",
+      variant: "B"
+    });
+    const state = await repository.readStateAsync();
+
+    assert.equal(publishRecord.key, "publish-key");
+    assert.equal(replayedPublish.fingerprint, "publish-fingerprint");
+    assert.equal(foundPublish?.result.runtimeVersion, "runtime-prisma-v1");
+    assert.equal(testRun.tenantId, "tenant-demo");
+    assert.equal(rule.status, "enabled");
+    assert.deepEqual(listedRules.map((item) => item.id), ["rule-prisma"]);
+    assert.equal(window.windowId, "window-prisma");
+    assert.equal(cap.capId, "cap-prisma");
+    assert.equal(replayedAssignment.variant, "B");
+    assert.equal(attempt.traceId, "trc_proactive_prisma");
+    assert.equal(deliveryRecord.result.descriptorId, "proactive_rule_prisma_tenant_demo_client_42");
+    assert.equal(attribution.variant, "B");
+    assert.equal(state.publishIdempotencyKeys.length, 1);
+    assert.equal(state.botTestRuns.length, 1);
+    assert.equal(state.proactiveRules.length, 1);
+    assert.equal(state.proactiveExecutionWindows.length, 1);
+    assert.equal(state.proactiveFrequencyCaps.length, 1);
+    assert.equal(state.proactiveExperimentAssignments.length, 1);
+    assert.equal(state.proactiveDeliveryAttempts.length, 1);
+    assert.equal(state.proactiveDeliveryIdempotencyKeys.length, 1);
+    assert.equal(state.proactiveDeliveryAttributions.length, 1);
+    assert.equal(calls.automationPublishIdempotencyKeyCreates.length, 1);
+    assert.equal(calls.automationBotTestRunUpserts.length, 1);
+    assert.equal(calls.proactiveRuleUpserts.length, 1);
+    assert.equal(calls.proactiveExecutionWindowUpserts.length, 1);
+    assert.equal(calls.proactiveFrequencyCapUpserts.length, 1);
+    assert.equal(calls.proactiveExperimentAssignmentCreates.length, 1);
+    assert.equal(calls.proactiveDeliveryAttemptCreates.length, 1);
+    assert.equal(calls.proactiveDeliveryIdempotencyKeyCreates.length, 1);
+    assert.equal(calls.proactiveDeliveryAttributionCreates.length, 1);
+  });
+
+  it("plans proactive delivery through async Prisma-backed eligibility without sync fallback reads", async () => {
+    const { client } = createFakePrismaAutomationClient();
+    const repository = AutomationRepository.prisma({ client });
+    await repository.saveProactiveRuleAsync({
+      activeVariant: "A",
+      channels: ["SDK"],
+      id: "rule-prisma-eligible",
+      segment: "checkout",
+      status: "enabled"
+    });
+    await repository.saveProactiveExecutionWindowAsync({
+      active: true,
+      daysOfWeek: [5],
+      endsAt: "23:59",
+      ruleId: "rule-prisma-eligible",
+      startsAt: "00:00",
+      tenantId: "tenant-demo",
+      timezone: "UTC",
+      windowId: "window-prisma-eligible"
+    });
+    await repository.saveProactiveFrequencyCapAsync({
+      active: true,
+      capId: "cap-prisma-eligible",
+      limit: 10,
+      period: "day",
+      resetAt: "2026-07-04T00:00:00.000Z",
+      ruleId: "rule-prisma-eligible",
+      tenantId: "tenant-demo",
+      used: 0
+    });
+    const rules = await repository.listProactiveRulesAsync();
+
+    const plan = await planEligibleProactiveRuleDeliveryAsync({
+      activeVariants: ["A", "B"],
+      channel: "SDK",
+      evaluatedAt: "2026-07-03T10:00:00.000Z",
+      message: "Checkout help",
+      phone: "+79000000000",
+      repository,
+      rules,
+      subjectId: "client-42",
+      tenantId: "tenant-demo",
+      topic: "checkout",
+      traceId: "trc_prisma_proactive_plan"
+    });
+
+    const assignments = await repository.listProactiveExperimentAssignmentsAsync({
+      ruleId: "rule-prisma-eligible",
+      subjectId: "client-42",
+      tenantId: "tenant-demo"
+    });
+
+    assert.equal(plan?.descriptor.id, "proactive_rule_prisma_eligible_tenant_demo_client_42");
+    assert.equal(plan?.descriptor.payload.variant, assignments[0]?.variant);
+    assert.equal(assignments.length, 1);
+  });
 });
 
 function createFakePrismaAutomationClient() {
+  const automationPublishIdempotencyKeys = new Map<string, FakeAutomationPublishIdempotencyKeyRow>();
+  const automationBotTestRuns = new Map<string, FakeAutomationBotTestRunRow>();
   const scenarios = new Map<string, FakeBotScenarioRow>();
   const scenarioVersions = new Map<string, FakeBotScenarioVersionRow>();
   const publishAuditEvents = new Map<string, FakeBotPublishAuditEventRow>();
+  const proactiveRules = new Map<string, FakeProactiveRuleRow>();
+  const proactiveExecutionWindows = new Map<string, FakeProactiveExecutionWindowRow>();
+  const proactiveFrequencyCaps = new Map<string, FakeProactiveFrequencyCapRow>();
+  const proactiveExperimentAssignments = new Map<string, FakeProactiveExperimentAssignmentRow>();
+  const proactiveDeliveryAttempts = new Map<string, FakeProactiveDeliveryAttemptRow>();
+  const proactiveDeliveryIdempotencyKeys = new Map<string, FakeProactiveDeliveryIdempotencyKeyRow>();
+  const proactiveDeliveryAttributions = new Map<string, FakeProactiveDeliveryAttributionRow>();
   const calls = {
+    automationPublishIdempotencyKeyCreates: [] as Array<{ data: FakeAutomationPublishIdempotencyKeyRow }>,
+    automationBotTestRunUpserts: [] as Array<FakeGenericUpsertInput>,
     botScenarioFindMany: [] as Array<{ orderBy: { updatedAt: "desc" } }>,
     botScenarioFindUnique: [] as Array<{ where: { id: string } }>,
     botScenarioUpsert: [] as Array<FakeBotScenarioUpsertInput>,
@@ -203,9 +440,42 @@ function createFakePrismaAutomationClient() {
     }>,
     botPublishAuditEventFindUnique: [] as Array<{
       where: { auditId: string } | { idempotencyKey: string };
-    }>
+    }>,
+    proactiveRuleUpserts: [] as Array<FakeGenericUpsertInput>,
+    proactiveExecutionWindowUpserts: [] as Array<FakeGenericUpsertInput>,
+    proactiveFrequencyCapUpserts: [] as Array<FakeGenericUpsertInput>,
+    proactiveExperimentAssignmentCreates: [] as Array<{ data: FakeProactiveExperimentAssignmentRow }>,
+    proactiveDeliveryAttemptCreates: [] as Array<{ data: FakeProactiveDeliveryAttemptRow }>,
+    proactiveDeliveryIdempotencyKeyCreates: [] as Array<{ data: FakeProactiveDeliveryIdempotencyKeyRow }>,
+    proactiveDeliveryAttributionCreates: [] as Array<{ data: FakeProactiveDeliveryAttributionRow }>
   };
   const client = {
+    automationPublishIdempotencyKey: {
+      async create(input: { data: FakeAutomationPublishIdempotencyKeyRow }): Promise<FakeAutomationPublishIdempotencyKeyRow> {
+        calls.automationPublishIdempotencyKeyCreates.push(input);
+        automationPublishIdempotencyKeys.set(input.data.key, clone(input.data));
+        return clone(input.data);
+      },
+      async findMany(): Promise<FakeAutomationPublishIdempotencyKeyRow[]> {
+        return Array.from(automationPublishIdempotencyKeys.values()).sort((left, right) => left.key.localeCompare(right.key)).map(clone);
+      },
+      async findUnique(input: { where: { key: string } }): Promise<FakeAutomationPublishIdempotencyKeyRow | null> {
+        return clone(automationPublishIdempotencyKeys.get(input.where.key) ?? null);
+      }
+    },
+    automationBotTestRun: {
+      async findMany(): Promise<FakeAutomationBotTestRunRow[]> {
+        return Array.from(automationBotTestRuns.values()).sort((left, right) => left.testRunId.localeCompare(right.testRunId)).map(clone);
+      },
+      async upsert(input: FakeGenericUpsertInput): Promise<FakeAutomationBotTestRunRow> {
+        calls.automationBotTestRunUpserts.push(input);
+        const key = String(input.where.testRunId);
+        const existing = automationBotTestRuns.get(key);
+        const row = clone((existing ? { ...existing, ...input.update } : input.create) as FakeAutomationBotTestRunRow);
+        automationBotTestRuns.set(key, clone(row));
+        return clone(row);
+      }
+    },
     botScenario: {
       async findMany(input: { orderBy: { updatedAt: "desc" } }): Promise<FakeBotScenarioRow[]> {
         calls.botScenarioFindMany.push(input);
@@ -241,11 +511,11 @@ function createFakePrismaAutomationClient() {
       },
       async findMany(input: {
         orderBy: { createdAt: "asc" };
-        where: { scenarioId: string };
+        where?: { scenarioId?: string };
       }): Promise<FakeBotScenarioVersionRow[]> {
         calls.botScenarioVersionFindMany.push(input);
         return Array.from(scenarioVersions.values())
-          .filter((row) => row.scenarioId === input.where.scenarioId)
+          .filter((row) => !input.where?.scenarioId || row.scenarioId === input.where.scenarioId)
           .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
           .map(clone);
       },
@@ -263,11 +533,11 @@ function createFakePrismaAutomationClient() {
       },
       async findMany(input: {
         orderBy: { createdAt: "asc" };
-        where: { scenarioId: string };
+        where?: { scenarioId?: string };
       }): Promise<FakeBotPublishAuditEventRow[]> {
         calls.botPublishAuditEventFindMany.push(input);
         return Array.from(publishAuditEvents.values())
-          .filter((row) => row.scenarioId === input.where.scenarioId)
+          .filter((row) => !input.where?.scenarioId || row.scenarioId === input.where.scenarioId)
           .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
           .map(clone);
       },
@@ -282,6 +552,97 @@ function createFakePrismaAutomationClient() {
         return clone(
           Array.from(publishAuditEvents.values()).find((row) => row.idempotencyKey === input.where.idempotencyKey) ?? null
         );
+      }
+    },
+    proactiveRule: {
+      async findMany(): Promise<FakeProactiveRuleRow[]> {
+        return Array.from(proactiveRules.values()).sort((left, right) => left.id.localeCompare(right.id)).map(clone);
+      },
+      async upsert(input: FakeGenericUpsertInput): Promise<FakeProactiveRuleRow> {
+        calls.proactiveRuleUpserts.push(input);
+        const key = String(input.where.id);
+        const existing = proactiveRules.get(key);
+        const row = clone((existing ? { ...existing, ...input.update } : input.create) as FakeProactiveRuleRow);
+        proactiveRules.set(key, clone(row));
+        return clone(row);
+      }
+    },
+    proactiveExecutionWindow: {
+      async findMany(input: { where?: Partial<FakeProactiveExecutionWindowRow> } = {}): Promise<FakeProactiveExecutionWindowRow[]> {
+        return filterRows(proactiveExecutionWindows, input.where, "windowId");
+      },
+      async upsert(input: FakeGenericUpsertInput): Promise<FakeProactiveExecutionWindowRow> {
+        calls.proactiveExecutionWindowUpserts.push(input);
+        const key = String(input.where.windowId);
+        const existing = proactiveExecutionWindows.get(key);
+        const row = clone((existing ? { ...existing, ...input.update } : input.create) as FakeProactiveExecutionWindowRow);
+        proactiveExecutionWindows.set(key, clone(row));
+        return clone(row);
+      }
+    },
+    proactiveFrequencyCap: {
+      async findMany(input: { where?: Partial<FakeProactiveFrequencyCapRow> } = {}): Promise<FakeProactiveFrequencyCapRow[]> {
+        return filterRows(proactiveFrequencyCaps, input.where, "capId");
+      },
+      async upsert(input: FakeGenericUpsertInput): Promise<FakeProactiveFrequencyCapRow> {
+        calls.proactiveFrequencyCapUpserts.push(input);
+        const key = String(input.where.capId);
+        const existing = proactiveFrequencyCaps.get(key);
+        const row = clone((existing ? { ...existing, ...input.update } : input.create) as FakeProactiveFrequencyCapRow);
+        proactiveFrequencyCaps.set(key, clone(row));
+        return clone(row);
+      }
+    },
+    proactiveExperimentAssignment: {
+      async create(input: { data: FakeProactiveExperimentAssignmentRow }): Promise<FakeProactiveExperimentAssignmentRow> {
+        calls.proactiveExperimentAssignmentCreates.push(input);
+        proactiveExperimentAssignments.set(input.data.assignmentId, clone(input.data));
+        return clone(input.data);
+      },
+      async findMany(input: { where?: Partial<FakeProactiveExperimentAssignmentRow> } = {}): Promise<FakeProactiveExperimentAssignmentRow[]> {
+        return filterRows(proactiveExperimentAssignments, input.where, "assignmentId");
+      },
+      async findUnique(input: { where: { assignmentId: string } }): Promise<FakeProactiveExperimentAssignmentRow | null> {
+        return clone(proactiveExperimentAssignments.get(input.where.assignmentId) ?? null);
+      }
+    },
+    proactiveDeliveryAttempt: {
+      async create(input: { data: FakeProactiveDeliveryAttemptRow }): Promise<FakeProactiveDeliveryAttemptRow> {
+        calls.proactiveDeliveryAttemptCreates.push(input);
+        proactiveDeliveryAttempts.set(input.data.attemptId, clone(input.data));
+        return clone(input.data);
+      },
+      async findMany(input: { where?: Partial<FakeProactiveDeliveryAttemptRow> } = {}): Promise<FakeProactiveDeliveryAttemptRow[]> {
+        return filterRows(proactiveDeliveryAttempts, input.where, "attemptId");
+      },
+      async findUnique(input: { where: { attemptId: string } }): Promise<FakeProactiveDeliveryAttemptRow | null> {
+        return clone(proactiveDeliveryAttempts.get(input.where.attemptId) ?? null);
+      }
+    },
+    proactiveDeliveryIdempotencyKey: {
+      async create(input: { data: FakeProactiveDeliveryIdempotencyKeyRow }): Promise<FakeProactiveDeliveryIdempotencyKeyRow> {
+        calls.proactiveDeliveryIdempotencyKeyCreates.push(input);
+        proactiveDeliveryIdempotencyKeys.set(input.data.key, clone(input.data));
+        return clone(input.data);
+      },
+      async findMany(input: { where?: Partial<FakeProactiveDeliveryIdempotencyKeyRow> } = {}): Promise<FakeProactiveDeliveryIdempotencyKeyRow[]> {
+        return filterRows(proactiveDeliveryIdempotencyKeys, input.where, "key");
+      },
+      async findUnique(input: { where: { key: string } }): Promise<FakeProactiveDeliveryIdempotencyKeyRow | null> {
+        return clone(proactiveDeliveryIdempotencyKeys.get(input.where.key) ?? null);
+      }
+    },
+    proactiveDeliveryAttribution: {
+      async create(input: { data: FakeProactiveDeliveryAttributionRow }): Promise<FakeProactiveDeliveryAttributionRow> {
+        calls.proactiveDeliveryAttributionCreates.push(input);
+        proactiveDeliveryAttributions.set(input.data.attributionId, clone(input.data));
+        return clone(input.data);
+      },
+      async findMany(input: { where?: Partial<FakeProactiveDeliveryAttributionRow> } = {}): Promise<FakeProactiveDeliveryAttributionRow[]> {
+        return filterRows(proactiveDeliveryAttributions, input.where, "attributionId");
+      },
+      async findUnique(input: { where: { attributionId: string } }): Promise<FakeProactiveDeliveryAttributionRow | null> {
+        return clone(proactiveDeliveryAttributions.get(input.where.attributionId) ?? null);
       }
     }
   };
@@ -339,6 +700,112 @@ interface FakeBotPublishAuditEventCreateInput {
 }
 
 interface FakeBotPublishAuditEventRow extends FakeBotPublishAuditEventCreateInput {}
+
+interface FakeGenericUpsertInput {
+  create: Record<string, unknown>;
+  update: Record<string, unknown>;
+  where: Record<string, unknown>;
+}
+
+interface FakeAutomationPublishIdempotencyKeyRow {
+  fingerprint: string;
+  key: string;
+  result: Record<string, unknown>;
+}
+
+interface FakeAutomationBotTestRunRow {
+  auditId: string;
+  cases: Array<Record<string, unknown>>;
+  queue: string;
+  scenarioId: string;
+  status: string;
+  tenantId: string | null;
+  testRunId: string;
+}
+
+interface FakeProactiveRuleRow {
+  activeVariant: string | null;
+  channels: string[];
+  cooldown: string | null;
+  id: string;
+  segment: string | null;
+  status: string | null;
+}
+
+interface FakeProactiveExecutionWindowRow {
+  active: boolean;
+  daysOfWeek: number[];
+  endsAt: string;
+  ruleId: string;
+  startsAt: string;
+  tenantId: string;
+  timezone: string;
+  windowId: string;
+}
+
+interface FakeProactiveFrequencyCapRow {
+  active: boolean;
+  capId: string;
+  limit: number;
+  period: string;
+  resetAt: Date;
+  ruleId: string;
+  tenantId: string;
+  used: number;
+}
+
+interface FakeProactiveExperimentAssignmentRow {
+  assignedAt: Date;
+  assignmentId: string;
+  experimentId: string;
+  ruleId: string;
+  subjectId: string;
+  tenantId: string;
+  variant: string;
+}
+
+interface FakeProactiveDeliveryAttemptRow {
+  attemptedAt: Date;
+  attemptId: string;
+  channel: string;
+  descriptorId: string;
+  ruleId: string;
+  status: string;
+  subjectId: string;
+  tenantId: string;
+  traceId: string;
+}
+
+interface FakeProactiveDeliveryIdempotencyKeyRow {
+  fingerprint: string;
+  key: string;
+  result: Record<string, unknown>;
+  ruleId: string;
+  subjectId: string;
+  tenantId: string;
+}
+
+interface FakeProactiveDeliveryAttributionRow {
+  assignedAt: Date;
+  attributionId: string;
+  descriptorId: string;
+  experimentId: string;
+  ruleId: string;
+  subjectId: string;
+  tenantId: string;
+  variant: string;
+}
+
+function filterRows<TRow extends Record<string, unknown>>(
+  rows: Map<string, TRow>,
+  where: Partial<TRow> | undefined,
+  sortField: keyof TRow
+): TRow[] {
+  return Array.from(rows.values())
+    .filter((row) => Object.entries(where ?? {}).every(([key, value]) => value === undefined || row[key] === value))
+    .sort((left, right) => String(left[sortField]).localeCompare(String(right[sortField])))
+    .map(clone);
+}
 
 function clone<T>(value: T): T {
   if (value === null || value === undefined) {

@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { DemoServiceAdminGuard } from "../identity/demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { TenantOperatorAuthGuard } from "../identity/tenant-operator-auth.guard.js";
 import { readBearerTokenFromAuthorization, type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
 
@@ -27,7 +27,7 @@ export class TenantOperatorOrServiceAdminGuard implements CanActivate {
       }
     }
 
-    return new DemoServiceAdminGuard(this.reflector).canActivate(context);
+    return new ServiceAdminSessionGuard(this.reflector).canActivate(context);
   }
 }
 

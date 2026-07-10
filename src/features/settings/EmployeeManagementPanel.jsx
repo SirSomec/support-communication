@@ -3,23 +3,11 @@ import { KeyRound, RefreshCcw, ShieldCheck, Smartphone, UserPlus } from "lucide-
 import { ChannelBadge, ChannelList, SectionTitle, ToolbarSearch } from "../../ui.jsx";
 import { settingsService } from "../../services/settingsService.js";
 
-const fallbackChannels = ["SDK", "Telegram", "MAX", "VK"];
-const fallbackRoles = [
-  { key: "employee", name: "Сотрудник" },
-  { key: "senior", name: "Старший сотрудник" },
-  { key: "admin", name: "Администратор" }
-];
-const fallbackGroups = [
-  { id: "group-line-1", name: "Line 1", scope: "First response", memberIds: [] },
-  { id: "group-vip", name: "VIP support", scope: "High value clients", memberIds: [] },
-  { id: "group-admins", name: "Administrators", scope: "Settings and audit", memberIds: [] }
-];
-
 export function EmployeeManagementPanel({ access, canEditSettings, canResetEmployeePassword, onToast, roleMode }) {
   const [employees, setEmployees] = useState([]);
-  const [groups, setGroups] = useState(fallbackGroups);
-  const [roles, setRoles] = useState(fallbackRoles);
-  const [supportedChannels, setSupportedChannels] = useState(fallbackChannels);
+  const [groups, setGroups] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [supportedChannels, setSupportedChannels] = useState([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [employeeQuery, setEmployeeQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -32,7 +20,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
   const [inviteDraft, setInviteDraft] = useState({ email: "", name: "", roleKey: "employee", groupId: "group-line-1" });
   const [groupDraft, setGroupDraft] = useState({ channels: ["SDK"], groupId: "", name: "", scope: "" });
 
-  const canEditEmployeeDirectory = canEditSettings;
+  const canEditEmployeeDirectory = canEditSettings && !error;
   const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId) ?? employees[0] ?? null;
 
   useEffect(() => {
@@ -49,15 +37,19 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
 
       if (response.status !== "ok") {
         setError(response.error?.message ?? "Не удалось загрузить сотрудников.");
+        setEmployees([]);
+        setGroups([]);
+        setRoles([]);
+        setSupportedChannels([]);
         setLoading(false);
         return;
       }
 
-      const nextEmployees = normalizeEmployees(response.data?.employees ?? []);
+      const nextEmployees = normalizeEmployees(response.data?.employees ?? [], response.data?.roles ?? [], response.data?.groups ?? []);
       setEmployees(nextEmployees);
-      setGroups(response.data?.groups?.length ? response.data.groups : fallbackGroups);
-      setRoles(response.data?.roles?.length ? response.data.roles : fallbackRoles);
-      setSupportedChannels(response.data?.supportedChannels?.length ? response.data.supportedChannels : fallbackChannels);
+      setGroups(response.data?.groups ?? []);
+      setRoles(response.data?.roles ?? []);
+      setSupportedChannels(response.data?.supportedChannels ?? []);
       setSelectedEmployeeId((current) => current && nextEmployees.some((employee) => employee.id === current)
         ? current
         : nextEmployees[0]?.id ?? "");
@@ -504,11 +496,11 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
   );
 }
 
-function normalizeEmployees(items) {
-  return items.map(normalizeEmployee).filter(Boolean);
+function normalizeEmployees(items, roles = [], groups = []) {
+  return items.map((employee) => normalizeEmployee(employee, roles, groups)).filter(Boolean);
 }
 
-function normalizeEmployee(employee) {
+function normalizeEmployee(employee, roles = [], groups = []) {
   if (!employee?.id) {
     return null;
   }
@@ -517,9 +509,9 @@ function normalizeEmployee(employee) {
     id: employee.id,
     employee: employee.employee ?? employee.name ?? employee.email ?? employee.id,
     email: employee.email ?? "",
-    role: employee.role ?? roleName(fallbackRoles, employee.roleKey),
+    role: employee.role ?? roleName(roles, employee.roleKey),
     roleKey: employee.roleKey ?? "employee",
-    group: employee.group ?? employee.groupName ?? employee.groupId ?? "Line 1",
+    group: employee.group ?? employee.groupName ?? groupName(groups, employee.groupId),
     groupId: employee.groupId ?? "group-line-1",
     status: employee.status ?? "active",
     channels: Array.isArray(employee.channels) ? employee.channels : ["SDK"],

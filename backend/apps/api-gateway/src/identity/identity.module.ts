@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthController } from "./auth.controller.js";
 import { AuthService } from "./auth.service.js";
-import { DemoServiceAdminGuard } from "./demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "./service-admin-session.guard.js";
 import { PermissionController } from "./permission.controller.js";
 import { PermissionService } from "./permission.service.js";
 import { SettingsController } from "./settings.controller.js";
@@ -17,7 +17,7 @@ import { TenantOperatorAuthGuard } from "./tenant-operator-auth.guard.js";
   controllers: [AuthController, PermissionController, SettingsController, TenantController, TenantProvisionController],
   providers: [
     AuthService,
-    DemoServiceAdminGuard,
+    ServiceAdminSessionGuard,
     TenantOperatorAuthGuard,
     PermissionService,
     SettingsEmployeeService,

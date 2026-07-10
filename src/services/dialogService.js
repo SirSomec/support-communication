@@ -45,6 +45,38 @@ export const dialogService = {
     });
   },
 
+  async fetchAssignees() {
+    return apiRequest("/dialogs/assignees", {
+      operation: "fetchAssignees",
+      service: SERVICE
+    });
+  },
+
+  async assignConversation({ conversationId, ...payload }) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/assignment`, {
+      body: payload,
+      method: "PATCH",
+      operation: "assignConversation",
+      service: SERVICE
+    });
+  },
+
+  async finalizeAttachmentUpload({ fileId, ...payload }) {
+    return apiRequest(`/dialogs/attachments/${encodeURIComponent(fileId)}/finalize`, {
+      body: payload,
+      method: "POST",
+      operation: "finalizeAttachmentUpload",
+      service: SERVICE
+    });
+  },
+
+  async fetchAttachmentStatus(fileId) {
+    return apiRequest(`/dialogs/attachments/${encodeURIComponent(fileId)}/status`, {
+      operation: "fetchAttachmentUploadStatus",
+      service: SERVICE
+    });
+  },
+
   async createOutboundConversationRequest(payload) {
     return apiRequest("/dialogs/outbound", {
       body: payload,
@@ -61,9 +93,13 @@ export const dialogService = {
       operations: [
         "fetchDialogs",
         "fetchDialogDetail",
+        "fetchAssignees",
+        "assignConversation",
         "appendMessage",
         "transitionConversationStatus",
         "uploadAttachment",
+        "finalizeAttachmentUpload",
+        "fetchAttachmentUploadStatus",
         "createOutboundConversationRequest"
       ],
       traceId: `trc_${SERVICE}_ready`,

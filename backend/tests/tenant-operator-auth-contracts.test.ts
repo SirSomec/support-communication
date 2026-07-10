@@ -6,6 +6,7 @@ import { NestFactory, type INestApplication } from "@nestjs/core";
 import { EnvelopeHttpExceptionFilter } from "../apps/api-gateway/dist/http-exception.filter.js";
 import { IdentityModule } from "../apps/api-gateway/dist/identity/identity.module.js";
 import { IdentityRepository } from "../apps/api-gateway/dist/identity/identity.repository.js";
+import { resolveTenantOperatorPermissions } from "../apps/api-gateway/dist/identity/tenant-operator-auth.js";
 
 const PILOT_TENANT_ID = "tenant-pilot-001";
 const PILOT_OPERATOR_EMAIL = "operator@pilot-client.test";
@@ -83,10 +84,75 @@ describe("tenant operator auth contracts", () => {
     });
     assert.equal(revokedStateResponse.status, 401);
   });
+
+  it("completes tenant operator MFA challenge when pilot skip is disabled", async () => {
+    const { baseUrl } = await createTestApiApp(apps, { nodeEnv: "test", skipTenantMfa: false });
+
+    const passwordOnlyResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: PILOT_OPERATOR_EMAIL,
+        password: PILOT_OPERATOR_PASSWORD
+      })
+    });
+    const passwordOnlyEnvelope = await passwordOnlyResponse.json() as { data: Record<string, unknown>; partial?: boolean; status: string };
+    assert.equal(passwordOnlyResponse.status, 200);
+    assert.equal(passwordOnlyEnvelope.status, "ok");
+    assert.equal(passwordOnlyEnvelope.partial, true);
+    assert.equal(passwordOnlyEnvelope.data.authenticated, false);
+    assert.equal(passwordOnlyEnvelope.data.tenantId, PILOT_TENANT_ID);
+    assert.match(String(passwordOnlyEnvelope.data.mfaChallengeId), /^mfa_/);
+    assert.equal(passwordOnlyEnvelope.data.nextStep, "otp");
+
+    const completedResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mfaChallengeId: passwordOnlyEnvelope.data.mfaChallengeId,
+        otp: "123456"
+      })
+    });
+    const completedEnvelope = await completedResponse.json() as { data: Record<string, unknown>; status: string };
+    assert.equal(completedResponse.status, 200);
+    assert.equal(completedEnvelope.status, "ok");
+    assert.equal(completedEnvelope.data.authenticated, true);
+    assert.equal(completedEnvelope.data.tenantId, PILOT_TENANT_ID);
+    assert.equal(typeof completedEnvelope.data.accessToken, "string");
+  });
+
+  it("maps provisioned owner role to tenant administrator permissions even with stale role aliases", () => {
+    const permissions = resolveTenantOperatorPermissions("Owner", [{
+      actions: ["*"],
+      aliases: ["admin", "administrator"],
+      description: "Tenant administrator",
+      groupIds: ["admins"],
+      key: "admin",
+      metadata: {}
+    }]);
+
+    assert.deepEqual(permissions, ["*"]);
+  });
+
+  it("maps seeded senior operator display role to senior permissions", () => {
+    const permissions = resolveTenantOperatorPermissions("Senior operator", [{
+      actions: ["dialogs.read", "templates.read", "quality.read"],
+      aliases: ["senior", "senior_operator", "lead"],
+      description: "Senior support operator",
+      groupIds: ["senior-shifts"],
+      key: "senior",
+      metadata: {}
+    }]);
+
+    assert.deepEqual(permissions, ["dialogs.read", "templates.read", "quality.read"]);
+  });
 });
 
-async function createTestApiApp(apps: INestApplication[]): Promise<{ app: INestApplication; baseUrl: string }> {
-  process.env.NODE_ENV = "test";
+async function createTestApiApp(
+  apps: INestApplication[],
+  options: { nodeEnv?: string; skipTenantMfa?: boolean } = {}
+): Promise<{ app: INestApplication; baseUrl: string }> {
+  process.env.NODE_ENV = options.nodeEnv ?? "test";
   process.env.API_VERSION = "v1";
   process.env.DATABASE_URL = "https://example.invalid/database";
   process.env.REDIS_URL = "https://example.invalid/redis";
@@ -95,7 +161,8 @@ async function createTestApiApp(apps: INestApplication[]): Promise<{ app: INestA
   process.env.S3_ACCESS_KEY = "test-access-key";
   process.env.S3_SECRET_KEY = "test-secret-key";
   process.env.DEMO_SERVICE_ADMIN_KEY = "dev-service-admin-key-0001";
-  process.env.PILOT_SKIP_MFA = "true";
+  process.env.PILOT_SKIP_MFA = options.skipTenantMfa === false ? "false" : "true";
+  process.env.AUTH_REQUIRE_TENANT_MFA = options.skipTenantMfa === false ? "true" : "false";
 
   const repository = IdentityRepository.inMemory();
   await seedPilotOperator(repository);

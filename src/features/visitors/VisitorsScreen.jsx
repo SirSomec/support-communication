@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,7 +11,7 @@ import {
   Zap
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
-import { activeVisitors, proactiveRules, rescueChats } from "../../data.js";
+import { dialogService } from "../../services/dialogService.js";
 import { visitorService } from "../../services/visitorService.js";
 import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
 import "./visitors.css";
@@ -19,15 +19,100 @@ import "./visitors.css";
 const proactiveChannelOptions = ["SDK", "Telegram", "MAX", "VK"];
 
 export function VisitorsScreen({ onBack, onToast, access }) {
-  const [selectedVisitorId, setSelectedVisitorId] = useState(activeVisitors[0].id);
-  const [proactiveRuleItems, setProactiveRuleItems] = useState(proactiveRules);
-  const [selectedRuleId, setSelectedRuleId] = useState(proactiveRules[0].id);
-  const selectedVisitor = activeVisitors.find((visitor) => visitor.id === selectedVisitorId) ?? activeVisitors[0];
-  const selectedRule = proactiveRuleItems.find((rule) => rule.id === selectedRuleId) ?? proactiveRuleItems[0];
-  const activeVariant = selectedRule.variants.find((variant) => variant.id === selectedRule.activeVariant) ?? selectedRule.variants[0];
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [activeVisitors, setActiveVisitors] = useState([]);
+  const [rescueChats, setRescueChats] = useState([]);
+  const [proactiveRuleItems, setProactiveRuleItems] = useState([]);
+  const [selectedVisitorId, setSelectedVisitorId] = useState("");
+  const [selectedRuleId, setSelectedRuleId] = useState("");
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadWorkspace() {
+      setLoading(true);
+      setError("");
+      const response = await visitorService.fetchVisitorWorkspace();
+      if (ignore) {
+        return;
+      }
+
+      if (response.status !== "ok") {
+        setError(response.error?.message ?? "Не удалось загрузить визиты.");
+        setLoading(false);
+        return;
+      }
+
+      const visitors = (Array.isArray(response.data?.activeVisitors) ? response.data.activeVisitors : []).map(toVisitorRow);
+      const rules = (Array.isArray(response.data?.proactiveRules) ? response.data.proactiveRules : []).map(toProactiveRuleRow);
+      const chats = Array.isArray(response.data?.rescueChats) ? response.data.rescueChats : [];
+      setActiveVisitors(visitors);
+      setProactiveRuleItems(rules);
+      setRescueChats(chats);
+      setSelectedVisitorId(visitors[0]?.id ?? "");
+      setSelectedRuleId(rules[0]?.id ?? "");
+      setLoading(false);
+    }
+
+    void loadWorkspace();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const selectedVisitor = activeVisitors.find((visitor) => visitor.id === selectedVisitorId) ?? activeVisitors[0] ?? null;
+  const selectedRule = proactiveRuleItems.find((rule) => rule.id === selectedRuleId) ?? proactiveRuleItems[0] ?? null;
+  const activeVariant = selectedRule?.variants?.find((variant) => variant.id === selectedRule.activeVariant) ?? selectedRule?.variants?.[0] ?? { text: "" };
   const typingCount = activeVisitors.filter((visitor) => visitor.typing).length;
   const criticalRescue = rescueChats.filter((chat) => chat.priority === "Критичный").length;
   const canManageProactive = access.canManageSettings;
+
+  if (loading) {
+    return (
+      <ProductScreen
+        title="Активные визиты и спасение"
+        subtitle="Загрузка..."
+        onBack={onBack}
+        stateItems={createScreenStateItems({
+          loading: "загружается...",
+          total: 0,
+          emptyWhenZero: "ожидание API",
+          errorLabel: "ошибок нет"
+        })}
+      />
+    );
+  }
+
+  if (error) {
+    return (
+      <ProductScreen
+        title="Активные визиты и спасение"
+        subtitle="Ошибка загрузки"
+        onBack={onBack}
+        stateItems={[
+          { label: "Загрузка", tone: "error", value: "ошибка" },
+          { label: "Данные", tone: "empty", value: "недоступны" },
+          { label: "Ошибки", tone: "error", value: error }
+        ]}
+      />
+    );
+  }
+
+  if (!selectedVisitor || !selectedRule) {
+    return (
+      <ProductScreen
+        title="Активные визиты и спасение"
+        subtitle="Нет данных визитов"
+        onBack={onBack}
+        stateItems={createScreenStateItems({
+          total: 0,
+          emptyWhenZero: "активных визитов и правил нет",
+          errorLabel: "ошибок нет"
+        })}
+      />
+    );
+  }
 
   function updateProactiveRule(field, value) {
     setProactiveRuleItems((current) => current.map((rule) => rule.id === selectedRule.id ? { ...rule, [field]: value } : rule));
@@ -67,13 +152,51 @@ export function VisitorsScreen({ onBack, onToast, access }) {
     }
 
     const response = await visitorService.saveProactiveRule(selectedRule);
-    onToast(`Правило "${selectedRule.name}" сохранено: ${response.data.frequencyCap.id}, ${response.data.experiment.id}.`);
+    if (response.status !== "ok" || !response.data?.rule) {
+      onToast(response.error?.message ?? "Не удалось сохранить proactive-правило.");
+      return;
+    }
+
+    setProactiveRuleItems((current) => current.map((rule) => rule.id === response.data.rule.id ? response.data.rule : rule));
+    onToast(`Правило "${selectedRule.name}" сохранено: ${response.data.frequencyCap?.id ?? "frequency-cap"}, ${response.data.experiment?.id ?? "experiment"}.`);
   }
 
   async function handleRescueAction(chat) {
     const response = await visitorService.triggerRescueReturn(chat);
+    if (response.status !== "ok") {
+      onToast(response.error?.message ?? "Не удалось выполнить rescue-действие.");
+      return;
+    }
+
     const result = response.data?.summary?.queue ?? response.data?.summary?.reason ?? response.data?.eventId ?? "";
     onToast(`${chat.client}: ${chat.nextAction}. ${result}`);
+  }
+
+  async function handleStartVisitorDialog() {
+    if (!access.canOutbound) {
+      onToast(access.reason);
+      return;
+    }
+
+    if (!selectedVisitor.phone) {
+      onToast("Нельзя начать исходящий диалог: посетитель еще не передал телефон.");
+      return;
+    }
+
+    const response = await dialogService.createOutboundConversationRequest({
+      channel: selectedVisitor.channel,
+      clientName: selectedVisitor.name,
+      message: activeVariant.text || selectedRule.message || "Здравствуйте! Готовы помочь в этом диалоге.",
+      phone: selectedVisitor.phone,
+      topic: selectedVisitor.segment || selectedRule.name || "Proactive visitor"
+    });
+
+    if (response.status !== "ok") {
+      onToast(response.error?.message ?? "Не удалось поставить исходящий диалог в очередь.");
+      return;
+    }
+
+    onToast(`${selectedVisitor.name}: исходящий диалог поставлен в очередь ${response.data?.descriptorId ?? response.data?.backendQueueId ?? ""}.`);
   }
 
   return (
@@ -99,7 +222,7 @@ export function VisitorsScreen({ onBack, onToast, access }) {
             <Zap size={17} />
             Сохранить правило
           </button>
-          <button className="primary-action" disabled={!access.canOutbound} onClick={() => onToast(`Диалог с ${selectedVisitor.name} инициирован через ${selectedVisitor.channel}.`)} title={access.canOutbound ? "Начать диалог" : access.reason} type="button">
+          <button className="primary-action" disabled={!access.canOutbound || !selectedVisitor.phone} onClick={() => void handleStartVisitorDialog()} title={!access.canOutbound ? access.reason : selectedVisitor.phone ? "Начать диалог" : "Посетитель еще не передал телефон"} type="button">
             <MessageSquareWarning size={17} />
             Начать диалог
           </button>
@@ -305,4 +428,51 @@ function InfoPill({ label, value }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function toVisitorRow(visitor) {
+  return {
+    activeFor: visitor.activeFor ?? "сейчас",
+    channel: visitor.channel ?? "SDK",
+    device: visitor.device ?? "Unknown",
+    entry: visitor.entry ?? visitor.page ?? "unknown",
+    id: visitor.id,
+    lastEvent: visitor.lastEvent ?? visitor.status ?? "browsing",
+    name: visitor.name ?? visitor.id ?? "Анонимный посетитель",
+    operatorHint: visitor.operatorHint ?? "Очередь по умолчанию",
+    page: visitor.page ?? "/",
+    phone: visitor.phone ?? "",
+    privacy: visitor.privacy ?? "anonymous",
+    segment: visitor.segment ?? "visitor",
+    typing: Boolean(visitor.typing)
+  };
+}
+
+function toProactiveRuleRow(rule) {
+  const variants = Array.isArray(rule.variants) && rule.variants.length
+    ? rule.variants
+    : [
+        { id: "A", label: "A", text: rule.message ?? "Здравствуйте! Нужна помощь?", conversion: 0, dismiss: 0 },
+        { id: "B", label: "B", text: rule.message ?? "Готовы подключить оператора.", conversion: 0, dismiss: 0 }
+      ];
+
+  return {
+    acceptanceRate: rule.acceptanceRate ?? 0,
+    activeVariant: rule.activeVariant ?? variants[0]?.id ?? "A",
+    channels: Array.isArray(rule.channels) && rule.channels.length ? rule.channels : ["SDK"],
+    conversionRate: rule.conversionRate ?? 0,
+    cooldown: rule.cooldown ?? "24h",
+    dismissRate: rule.dismissRate ?? 0,
+    id: rule.id,
+    message: rule.message ?? variants[0]?.text ?? "",
+    name: rule.name ?? rule.id ?? "Proactive rule",
+    offlineForm: rule.offlineForm ?? "default",
+    privacyNotice: rule.privacyNotice ?? "standard",
+    screen: rule.screen ?? rule.segment ?? "visitor",
+    segment: rule.segment ?? "visitor",
+    status: rule.status ?? "draft",
+    triggerDelay: rule.triggerDelay ?? "5s",
+    variants,
+    workHours: rule.workHours ?? "24/7"
+  };
 }

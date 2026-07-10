@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -12,16 +12,27 @@ import {
 } from "../apps/api-gateway/src/integrations/public-api-auth.ts";
 import { IntegrationService } from "../apps/api-gateway/src/integrations/integration.service.ts";
 import { IntegrationRepository } from "../apps/api-gateway/src/integrations/integration.repository.ts";
+import { configureIntegrationRepository } from "../apps/api-gateway/src/integrations/bootstrap.ts";
+import { bootstrapIntegrationState } from "../apps/api-gateway/src/integrations/seed.ts";
 import { identifyPublicClientFromRoute } from "../apps/api-gateway/src/integrations/public-api.route.ts";
 import { normalizeSignedInboundWebhookFromRoute } from "../apps/api-gateway/src/integrations/signed-webhook.route.ts";
 import { InMemorySignedWebhookNonceStore } from "../apps/api-gateway/src/integrations/signed-webhook-verifier.ts";
 import {
   recordWebhookDeliveryAttemptSuccess,
   recordWebhookDeliveryFailureForRetry,
-  resolveWebhookDeliveryFailureState
+  resolveWebhookDeliveryFailureState,
+  runWebhookDeliveryWorkerOnce
 } from "../apps/api-gateway/src/integrations/webhook-delivery.worker.ts";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
+
+function telegramFetchOk(username = "support_bot") {
+  return async (_input: string) => ({
+    json: async () => ({ ok: true, result: { id: 123456, username } }),
+    ok: true,
+    status: 200
+  });
+}
 
 describe("phase 6 public API, webhooks and SDK integration backend contracts", () => {
   it("returns integration workspace without exposing raw API keys or secrets", async () => {
@@ -81,17 +92,16 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("manages generic multi-instance channel connections without exposing secrets", async () => {
-    const integrations = new IntegrationService();
+    const repository = IntegrationRepository.inMemory();
+    const integrations = new IntegrationService(repository, { telegramFetch: telegramFetchOk() });
+    const tenantId = "tenant-acme";
 
-    const list = await integrations.fetchChannelConnections({ type: "telegram" });
+    const list = await integrations.fetchChannelConnections(tenantId, { type: "telegram" });
     const telegramConnections = list.data.connections as Array<Record<string, unknown>>;
     assert.equal(list.status, "ok");
-    assert.ok(telegramConnections.length >= 2);
-    assert.ok(telegramConnections.every((connection) => connection.type === "telegram"));
-    assert.ok(telegramConnections.every((connection) => !("credentials" in connection)));
-    assert.ok(telegramConnections.every((connection) => connection.credentialsMasked === true));
+    assert.equal(telegramConnections.length, 0);
 
-    const created = await integrations.createChannelConnection({
+    const created = await integrations.createChannelConnection(tenantId, {
       chatLimit: 8,
       credentials: { botToken: "123:secret" },
       environment: "production",
@@ -103,12 +113,16 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(created.data.connection.name, "Telegram VIP");
     assert.equal(created.data.connection.type, "telegram");
     assert.equal(created.data.connection.credentialsMasked, true);
+    assert.match(String(created.data.connection.webhookUrl), /\/integrations\/telegram\/webhook\/conn_telegram_/);
     assert.equal(JSON.stringify(created.data).includes("123:secret"), false);
     assert.match(String(created.data.auditId), /^evt_channel_/);
     assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === created.data.auditId), true);
 
     const connectionId = String(created.data.connection.id);
-    const updated = await integrations.updateChannelConnection(connectionId, {
+    const otherTenantList = await integrations.fetchChannelConnections("tenant-other", { type: "telegram" });
+    assert.deepEqual(otherTenantList.data.connections, []);
+
+    const updated = await integrations.updateChannelConnection(tenantId, connectionId, {
       reason: "maintenance window",
       status: "paused"
     });
@@ -117,7 +131,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(updated.data.reason, "maintenance window");
     assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === updated.data.auditId), true);
 
-    const test = await integrations.testChannelConnectionInstance(connectionId, {
+    const test = await integrations.testChannelConnectionInstance(tenantId, connectionId, {
       message: "Channel smoke",
       mode: "send",
       recipient: "+7 900 123-45-67"
@@ -127,16 +141,173 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(test.data.delivery.status, "sent_to_channel");
     assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === test.data.auditId), true);
 
-    const events = await integrations.fetchChannelConnectionEvents(connectionId);
+    const events = await integrations.fetchChannelConnectionEvents(tenantId, connectionId);
     assert.equal(events.status, "ok");
     assert.ok(Array.isArray(events.data.events));
     assert.ok((events.data.events as Array<Record<string, unknown>>).some((event) => event.action === "channel.test"));
 
-    const deleted = await integrations.deleteChannelConnection(connectionId, { reason: "retired bot" });
+    const deleted = await integrations.deleteChannelConnection(tenantId, connectionId, { reason: "retired bot" });
     assert.equal(deleted.status, "ok");
     assert.equal(deleted.data.connectionId, connectionId);
     assert.equal(deleted.data.status, "disabled");
     assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === deleted.data.auditId), true);
+  });
+
+  it("lists active seeded tenant channel connections for notification delivery preferences", async () => {
+    const integrations = new IntegrationService(IntegrationRepository.inMemory());
+
+    const list = await integrations.fetchChannelConnections("tenant-volga");
+    const connections = list.data.connections as Array<Record<string, unknown>>;
+
+    assert.equal(list.status, "ok");
+    assert.ok(connections.some((connection) =>
+      connection.id === "conn_admin_telegram"
+        && connection.status === "active"
+        && connection.tenantId === "tenant-volga"
+    ));
+    assert.ok(connections.some((connection) => connection.id === "conn_incident_webhook" && connection.status === "active"));
+    assert.equal(connections.every((connection) => connection.tenantId === "tenant-volga"), true);
+  });
+
+  it("updates tenant channel type status through an audited aggregate mutation", async () => {
+    const repository = IntegrationRepository.inMemory();
+    const integrations = new IntegrationService(repository);
+
+    const disabled = await integrations.updateChannelTypeStatus("tenant-volga", "telegram", {
+      enabled: false,
+      reason: "Settings aggregate channel toggle disabled"
+    });
+    const disabledConnections = (await integrations.fetchChannelConnections("tenant-volga", { type: "telegram" })).data.connections as Array<Record<string, unknown>>;
+
+    assert.equal(disabled.status, "ok");
+    assert.equal(disabled.data.channel.type, "telegram");
+    assert.equal(disabled.data.channel.enabled, false);
+    assert.equal(disabled.data.channel.activeCount, 0);
+    assert.equal(disabled.data.channel.total, disabledConnections.length);
+    assert.ok(disabledConnections.length > 0);
+    assert.equal(disabledConnections.every((connection) => connection.status === "disabled"), true);
+    assert.ok((disabled.data.auditEvents as Array<Record<string, unknown>>).every((event) => event.immutable === true));
+    assert.ok((disabled.data.auditEvents as Array<Record<string, unknown>>).every((event) => event.action === "channel.type_status.update"));
+
+    const enabled = await integrations.updateChannelTypeStatus("tenant-volga", "telegram", {
+      enabled: true,
+      reason: "Settings aggregate channel toggle enabled"
+    });
+    const enabledConnections = (await integrations.fetchChannelConnections("tenant-volga", { type: "telegram" })).data.connections as Array<Record<string, unknown>>;
+
+    assert.equal(enabled.status, "ok");
+    assert.equal(enabled.data.channel.enabled, true);
+    assert.equal(enabledConnections.every((connection) => connection.status === "active"), true);
+    assert.equal(repository.listChannelConnectionAuditEvents().some((event) => event.id === enabled.data.auditEvents[0].id), true);
+
+    const missing = await integrations.updateChannelTypeStatus("tenant-volga", "missing", {
+      enabled: false,
+      reason: "No such channel type"
+    });
+    assert.equal(missing.status, "not_found");
+    assert.equal(missing.error?.code, "channel_type_connections_not_found");
+  });
+
+  it("adds missing seeded notification channel connections when reopening an existing JSON store", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "integration-seed-backfill-"));
+    const filePath = join(workspace, "integration-store.json");
+    const existingAdminTelegram = {
+      ...bootstrapIntegrationState().channelConnections.find((connection) => connection.id === "conn_admin_telegram")!,
+      name: "Existing Admin Telegram",
+      status: "disabled"
+    };
+
+    try {
+      IntegrationRepository.open({
+        filePath,
+        seed: bootstrapIntegrationState({ channelConnections: [existingAdminTelegram] })
+      });
+
+      const repository = configureIntegrationRepository({
+        INTEGRATION_STORE_FILE: filePath,
+        NODE_ENV: "test",
+        PORT: 4101,
+        SERVICE_NAME: "api-gateway-test"
+      });
+      const state = repository.readState();
+
+      assert.equal(repository.findChannelConnection("tenant-volga", "conn_admin_telegram")?.name, "Existing Admin Telegram");
+      assert.equal(repository.findChannelConnection("tenant-volga", "conn_admin_telegram")?.status, "disabled");
+      assert.ok(state.channelConnections.some((connection) => connection.id === "conn_email_digest" && connection.status === "active"));
+      assert.ok(state.channelConnections.some((connection) => connection.id === "conn_incident_webhook" && connection.status === "active"));
+      assert.equal(state.channelConnections.filter((connection) => connection.id === "conn_admin_telegram").length, 1);
+    } finally {
+      IntegrationRepository.clearDefault();
+      rmSync(workspace, { force: true, recursive: true });
+    }
+  });
+
+  it("provisions Telegram and MAX channel connections from token without manual webhook URL", async () => {
+    const repository = IntegrationRepository.inMemory();
+    let telegramGetMeUrl = "";
+    const integrations = new IntegrationService(repository, {
+      telegramFetch: async (input) => {
+        telegramGetMeUrl = input;
+        return {
+          json: async () => ({ ok: true, result: { id: 123456, username: "support_bot" } }),
+          ok: true,
+          status: 200
+        };
+      }
+    });
+    const tenantId = "tenant-token-only";
+
+    const telegram = await integrations.createChannelConnection(tenantId, {
+      credentials: { token: "123:telegramToken_123" },
+      name: "Telegram token only",
+      type: "telegram"
+    });
+    const max = await integrations.createChannelConnection(tenantId, {
+      credentials: { token: "max-token" },
+      name: "MAX token only",
+      type: "max"
+    });
+
+    assert.equal(telegram.status, "ok");
+    assert.equal(max.status, "ok");
+    assert.match(String(telegram.data.connection.webhookUrl), /\/integrations\/telegram\/webhook\/conn_telegram_/);
+    assert.match(String(max.data.connection.webhookUrl), /\/integrations\/max\/webhook\/conn_max_/);
+    assert.match(telegramGetMeUrl, /https:\/\/api\.telegram\.org\/bot123:telegramToken_123\/getMe/);
+    assert.equal(telegram.data.connection.rawExternalId, "telegram:support_bot");
+    assert.equal(repository.findTelegramConnectionByTenantId(tenantId)?.botUsername, "support_bot");
+    assert.equal(JSON.stringify(telegram.data).includes("telegramToken_123"), false);
+    assert.equal(JSON.stringify(max.data).includes("max-token"), false);
+  });
+
+  it("persists tenant channel connections across JSON repository reopen without raw secrets", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "integration-channel-connections-"));
+    const filePath = join(workspace, "integration-store.json");
+    const tenantId = "tenant-durable";
+
+    try {
+      const firstRepository = IntegrationRepository.open({ filePath });
+      const firstService = new IntegrationService(firstRepository, { telegramFetch: telegramFetchOk("durable_bot") });
+      const created = await firstService.createChannelConnection(tenantId, {
+        credentials: { botToken: "123:durable-secret" },
+        name: "Durable Telegram",
+        type: "telegram"
+      });
+      assert.equal(created.status, "ok");
+
+      const reopenedRepository = IntegrationRepository.open({ filePath });
+      const reopenedService = new IntegrationService(reopenedRepository);
+      const list = await reopenedService.fetchChannelConnections(tenantId, { type: "telegram" });
+      const connections = list.data.connections as Array<Record<string, unknown>>;
+
+      assert.equal(list.status, "ok");
+      assert.equal(connections.length, 1);
+      assert.equal(connections[0]?.name, "Durable Telegram");
+      assert.equal(connections[0]?.credentialsMasked, true);
+      assert.equal(JSON.stringify(connections).includes("durable-secret"), false);
+      assert.equal(reopenedRepository.findTelegramConnectionByTenantId(tenantId)?.botToken, "123:durable-secret");
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+    }
   });
 
   it("queues API key rotation without returning raw key material", async () => {
@@ -949,6 +1120,150 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(journalJson.includes("webhookSecret"), false);
   });
 
+  it("runs webhook delivery worker once and persists provider delivery outcomes", async () => {
+    const repository = IntegrationRepository.inMemory();
+    const deliveredCalls: Array<{ deliveryId: string; targetUrl: string }> = [];
+    repository.saveWebhookDeliveryJournalEntry({
+      attempts: 0,
+      createdAt: "2026-06-30T14:10:00.000Z",
+      deliveryId: "wdj-worker-delivered-001",
+      endpointId: "wep-vk-support",
+      eventType: "conversation.message.created",
+      idempotencyKey: "webhook-delivery-worker-delivered-001",
+      payloadRef: "outbox_evt_worker_delivered_001",
+      queue: "webhook-delivery",
+      status: "queued",
+      targetUrl: "https://hooks.example.com/success",
+      tenantId: "tenant-volga",
+      traceId: "trc_webhook_delivery_worker_delivered_001"
+    });
+    repository.saveWebhookDeliveryJournalEntry({
+      attempts: 0,
+      createdAt: "2026-06-30T14:10:01.000Z",
+      deliveryId: "wdj-worker-retry-001",
+      endpointId: "wep-vk-support",
+      eventType: "conversation.message.created",
+      idempotencyKey: "webhook-delivery-worker-retry-001",
+      payloadRef: "outbox_evt_worker_retry_001",
+      queue: "webhook-delivery",
+      status: "queued",
+      targetUrl: "https://hooks.example.com/failure",
+      tenantId: "tenant-volga",
+      traceId: "trc_webhook_delivery_worker_retry_001"
+    });
+    repository.saveWebhookDeliveryJournalEntry({
+      attempts: 2,
+      createdAt: "2026-06-30T14:10:02.000Z",
+      deliveryId: "wdj-worker-dead-letter-001",
+      endpointId: "wep-vk-support",
+      eventType: "conversation.message.created",
+      idempotencyKey: "webhook-delivery-worker-dead-letter-001",
+      payloadRef: "outbox_evt_worker_dead_letter_001",
+      queue: "webhook-delivery",
+      status: "queued",
+      targetUrl: "https://hooks.example.com/dead-letter",
+      tenantId: "tenant-volga",
+      traceId: "trc_webhook_delivery_worker_dead_letter_001"
+    });
+
+    const result = await runWebhookDeliveryWorkerOnce({
+      maxAttempts: 3,
+      now: "2026-06-30T14:11:00.000Z",
+      provider: {
+        async deliver(entry) {
+          deliveredCalls.push({ deliveryId: entry.deliveryId, targetUrl: entry.targetUrl });
+          if (entry.deliveryId === "wdj-worker-retry-001") {
+            throw Object.assign(new Error("Provider rejected Authorization: Bearer whsec_worker and signatureSecret=retry-secret"), {
+              code: "provider_503",
+              statusCode: 503
+            });
+          }
+          if (entry.deliveryId === "wdj-worker-dead-letter-001") {
+            throw Object.assign(new Error("Provider exhausted Authorization: Bearer whsec_dead_letter and webhookSecret=terminal-secret"), {
+              code: "provider_410",
+              statusCode: 410
+            });
+          }
+
+          return { body: "accepted Authorization: Bearer whsec_success", statusCode: 202 };
+        }
+      },
+      repository,
+      retryBackoffMs: 120_000
+    });
+    const delivered = repository.findWebhookDeliveryJournalEntry("wdj-worker-delivered-001");
+    const retry = repository.findWebhookDeliveryJournalEntry("wdj-worker-retry-001");
+    const deadLetter = repository.findWebhookDeliveryJournalEntry("wdj-worker-dead-letter-001");
+    const journalJson = JSON.stringify(repository.readState().webhookDeliveryJournal);
+
+    assert.deepEqual(result, {
+      claimed: 3,
+      deadLettered: 1,
+      delivered: 1,
+      failed: 0,
+      retryScheduled: 1
+    });
+    assert.deepEqual(deliveredCalls, [
+      { deliveryId: "wdj-worker-delivered-001", targetUrl: "https://hooks.example.com/success" },
+      { deliveryId: "wdj-worker-retry-001", targetUrl: "https://hooks.example.com/failure" },
+      { deliveryId: "wdj-worker-dead-letter-001", targetUrl: "https://hooks.example.com/dead-letter" }
+    ]);
+    assert.equal(delivered?.status, "delivered");
+    assert.equal(delivered?.attempts, 1);
+    assert.equal(delivered?.lastAttemptAt, "2026-06-30T14:11:00.000Z");
+    assert.equal(delivered?.lockedAt, undefined);
+    assert.equal(retry?.status, "retry_scheduled");
+    assert.equal(retry?.attempts, 1);
+    assert.equal(retry?.lastAttemptAt, "2026-06-30T14:11:00.000Z");
+    assert.equal(retry?.nextAttemptAt, "2026-06-30T14:13:00.000Z");
+    assert.deepEqual(retry?.lastError, {
+      code: "provider_503",
+      message: "Provider rejected [REDACTED:api_key] and [REDACTED:secret]",
+      statusCode: 503
+    });
+    assert.equal(deadLetter?.status, "dead_lettered");
+    assert.equal(deadLetter?.attempts, 3);
+    assert.equal(deadLetter?.lastAttemptAt, "2026-06-30T14:11:00.000Z");
+    assert.equal(deadLetter?.lockedAt, undefined);
+    assert.equal(deadLetter?.nextAttemptAt, undefined);
+    assert.equal(deadLetter?.deadLetteredAt, "2026-06-30T14:11:00.000Z");
+    assert.deepEqual(deadLetter?.lastError, {
+      code: "provider_410",
+      message: "Provider exhausted [REDACTED:api_key] and [REDACTED:secret]",
+      statusCode: 410
+    });
+    assert.equal(journalJson.includes("whsec_"), false);
+    assert.equal(journalJson.includes("Authorization"), false);
+    assert.equal(journalJson.includes("signatureSecret"), false);
+    assert.equal(journalJson.includes("retry-secret"), false);
+    assert.equal(journalJson.includes("terminal-secret"), false);
+  });
+
+  it("exposes webhook delivery worker runtime wiring and release smoke", () => {
+    const backendPackageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    const releaseChecklist = readFileSync(new URL("../scripts/release-checklist.mjs", import.meta.url), "utf8");
+    const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+    const pilotCompose = readFileSync(new URL("../../docker-compose.pilot.yml", import.meta.url), "utf8");
+    const composeHealthCheck = readFileSync(new URL("../../scripts/compose-health-check.mjs", import.meta.url), "utf8");
+    const smokeUrl = new URL("../scripts/webhook-delivery-worker-smoke.mjs", import.meta.url);
+
+    assert.equal(
+      backendPackageJson.scripts["start:webhook-delivery-worker"],
+      "npm run build && node --env-file=.env.example apps/api-gateway/dist/integrations/webhook-delivery.main.js"
+    );
+    assert.equal(
+      backendPackageJson.scripts["webhook:worker:once"],
+      "npm run build && node --env-file=.env.example scripts/webhook-delivery-worker-smoke.mjs"
+    );
+    assert.equal(existsSync(smokeUrl), true);
+    assert.match(readFileSync(smokeUrl, "utf8"), /createServer[\s\S]*webhook-delivery\.main\.js[\s\S]*webhook-delivery/);
+    assert.match(releaseChecklist, /script: "webhook:worker:once"/);
+    assert.match(compose, /webhook-delivery-worker:[\s\S]*command: \["node", "apps\/api-gateway\/dist\/integrations\/webhook-delivery\.main\.js"\]/);
+    assert.match(compose, /webhook-delivery-worker:[\s\S]*WEBHOOK_DELIVERY_PROVIDER_MODE: local/);
+    assert.match(pilotCompose, /webhook-delivery-worker:[\s\S]*INTEGRATION_REPOSITORY: prisma/);
+    assert.match(composeHealthCheck, /\["webhook-delivery-worker", \{\}\]/);
+  });
+
   it("revokes security sessions with audit metadata", async () => {
     const integrations = new IntegrationService();
 
@@ -962,6 +1277,16 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(revoked.data.status, "revoked");
     assert.match(revoked.data.revokedAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.match(revoked.data.auditId, /^evt_session_/);
+  });
+
+  it("guards sensitive integration admin routes with tenant or service-admin permissions", () => {
+    const source = readFileSync(new URL("../apps/api-gateway/src/integrations/integration.controller.ts", import.meta.url), "utf8");
+
+    assert.match(source, /import \{ TenantOperatorOrServiceAdminGuard \} from "\.\.\/conversation\/tenant-operator-or-service-admin\.guard\.js"/);
+    assert.match(source, /import \{ RequireServiceAdminAction/);
+    assert.match(source, /@Post\("api-keys\/:keyId\/rotate"\)[\s\S]*@UseGuards\(TenantOperatorOrServiceAdminGuard\)[\s\S]*@RequireTenantOperatorPermission\("settings\.manage"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*rotateApiKey/);
+    assert.match(source, /@Post\("webhooks\/deliveries\/:deliveryId\/replay"\)[\s\S]*@UseGuards\(TenantOperatorOrServiceAdminGuard\)[\s\S]*@RequireTenantOperatorPermission\("settings\.manage"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*replayWebhookDelivery/);
+    assert.match(source, /@Post\("security\/sessions\/:sessionId\/revoke"\)[\s\S]*@UseGuards\(TenantOperatorOrServiceAdminGuard\)[\s\S]*@RequireTenantOperatorPermission\("settings\.manage"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*revokeSecuritySession/);
   });
 
   it("authenticates public API keys with environment binding and required scopes", async () => {

@@ -2,7 +2,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import { createObjectStorageSigner } from "./object-storage.js";
-import { WorkspaceRepository, type ClientProfileRecord, type FileRecord, type KnowledgeArticle, type TemplateAuditRecord, type TemplateRecord } from "./workspace.repository.js";
+import {
+  WorkspaceRepository,
+  type ClientExportJobRecord,
+  type ClientProfileRecord,
+  type FileRecord,
+  type KnowledgeApprovalDecisionRecord,
+  type KnowledgeArticle,
+  type TemplateAuditRecord,
+  type TemplateRecord
+} from "./workspace.repository.js";
 
 const CLIENT_SERVICE = "clientService";
 const FILE_SERVICE = "fileService";
@@ -81,6 +90,27 @@ export interface WorkspaceRequestContext {
 
 export type FileScanVerdict = "clean" | "error" | "infected";
 
+export interface KnowledgeWorkflowPayload {
+  actor?: string;
+  articleId: string;
+  draftId?: string;
+  reason?: string;
+}
+
+export interface KnowledgeAttachmentPayload {
+  actor?: string;
+  articleId: string;
+  attachment: Record<string, unknown>;
+  reason?: string;
+}
+
+export interface KnowledgeAttachmentDeletePayload {
+  actor?: string;
+  articleId: string;
+  attachmentId: string;
+  reason?: string;
+}
+
 const clientProfiles: ClientProfileRecord[] = [
   {
     id: "maria",
@@ -148,6 +178,7 @@ const templateFixtures: TemplateRecord[] = [
 const knowledgeFixtures: KnowledgeArticle[] = [
   {
     id: "kb-delivery-tracking",
+    tenantId: "tenant-volga",
     title: "Order tracking",
     status: "published",
     category: "Delivery",
@@ -174,6 +205,7 @@ const knowledgeFixtures: KnowledgeArticle[] = [
   },
   {
     id: "kb-refund-terms",
+    tenantId: "tenant-volga",
     title: "Refund timelines",
     status: "review",
     category: "Payment",
@@ -198,6 +230,7 @@ const knowledgeFixtures: KnowledgeArticle[] = [
   },
   {
     id: "kb-auth-code",
+    tenantId: "tenant-volga",
     title: "Confirmation code not received",
     status: "draft",
     category: "Authorization",
@@ -234,11 +267,13 @@ export class WorkspaceService {
     this.objectStorage = options.objectStorage ?? createObjectStorageSigner();
   }
 
-  async fetchClientProfiles(filters: { maskSensitive?: boolean | string; page?: number | string; pageSize?: number | string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async fetchClientProfiles(filters: { maskSensitive?: boolean | string; page?: number | string; pageSize?: number | string; segmentId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const page = toPositiveInt(filters.page, 1);
     const pageSize = toPositiveInt(filters.pageSize, 25);
     const maskSensitive = true;
-    const profiles = await this.listClientProfiles();
+    const allProfiles = await this.listClientProfiles();
+    const segment = resolveClientSegment(allProfiles, filters.segmentId);
+    const profiles = filterClientProfilesBySegment(allProfiles, segment);
     const mergeEvents = await this.workspaceRepository.listClientMergeEvents();
     const items = profiles.slice((page - 1) * pageSize, page * pageSize).map((profile) => ({
       ...profile,
@@ -254,13 +289,79 @@ export class WorkspaceService {
       data: {
         items,
         mergeEvents,
-        mergeGraph: buildMergeGraph(profiles),
+        mergeGraph: buildMergeGraph(allProfiles),
         pagination: {
           mode: "backend-ready",
           page,
           pageSize,
           total: profiles.length
-        }
+        },
+        segment
+      }
+    });
+  }
+
+  async fetchClientSegments(): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const profiles = await this.listClientProfiles();
+    const segments = buildClientSegments(profiles);
+
+    return createEnvelope({
+      service: CLIENT_SERVICE,
+      operation: "fetchClientSegments",
+      traceId: workspaceTraceId(CLIENT_SERVICE, "fetchClientSegments"),
+      meta: apiMeta(),
+      data: {
+        dimensions: ["channel", "device", "topic"],
+        segments,
+        totalProfiles: profiles.length
+      }
+    });
+  }
+
+  async createClientExport(payload: { format?: string; reason?: string; segmentId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    if (!hasReason(payload.reason)) {
+      return invalidEnvelope(CLIENT_SERVICE, "createClientExport", "reason_required", "A client export reason of at least 8 characters is required.", {
+        segmentId: payload.segmentId ?? null
+      });
+    }
+
+    const allProfiles = await this.listClientProfiles();
+    const segment = resolveClientSegment(allProfiles, payload.segmentId);
+    const profiles = filterClientProfilesBySegment(allProfiles, segment);
+    const format = normalizeClientExportFormat(payload.format);
+    const audit = auditEvent("client_export", "client.export", payload.reason);
+    const exportId = `client_export_${randomUUID()}`;
+    const fileDescriptor = {
+      fileName: clientExportFileName(segment, format),
+      format,
+      mimeType: format === "csv" ? "text/csv" : "application/json",
+      sensitiveFieldsMasked: true
+    };
+    const job: ClientExportJobRecord = {
+      auditEvent: audit,
+      createdAt: new Date().toISOString(),
+      exportId,
+      fileDescriptor,
+      filters: {
+        segmentId: segment?.id ?? null
+      },
+      format,
+      itemCount: profiles.length,
+      reason: String(payload.reason ?? "").trim(),
+      ...(segment ? { segment } : {}),
+      sensitiveFieldsMasked: true,
+      status: "queued"
+    };
+    const saved = await this.workspaceRepository.saveClientExportJob(job);
+
+    return createEnvelope({
+      service: CLIENT_SERVICE,
+      operation: "createClientExport",
+      traceId: workspaceTraceId(CLIENT_SERVICE, "createClientExport"),
+      meta: apiMeta({ sensitiveFieldsMasked: true }),
+      data: {
+        ...saved,
+        previewRows: profiles.slice(0, 5).map(maskClientProfileForExport)
       }
     });
   }
@@ -743,8 +844,9 @@ export class WorkspaceService {
     });
   }
 
-  async fetchKnowledgeArticles(filters: { visibility?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const articles = await this.listKnowledgeArticles();
+  async fetchKnowledgeArticles(filters: { visibility?: string } = {}, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = context.tenantId;
+    const articles = await this.listKnowledgeArticles(context);
     const items = articles.filter((article) => isKnowledgeArticleVisible(article, filters));
 
     return createEnvelope({
@@ -752,15 +854,15 @@ export class WorkspaceService {
       operation: "fetchKnowledgeArticles",
       traceId: workspaceTraceId(KNOWLEDGE_SERVICE, "fetchKnowledgeArticles"),
       partial: true,
-      meta: apiMeta({ filters }),
+      meta: apiMeta({ filters, tenantId: tenantId ?? null }),
       data: {
         items: clone(items)
       }
     });
   }
 
-  async fetchKnowledgeArticle(articleId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const article = await this.findArticle(articleId);
+  async fetchKnowledgeArticle(articleId: string, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const article = await this.findArticle(articleId, context);
 
     if (!article) {
       return notFoundEnvelope(KNOWLEDGE_SERVICE, "fetchKnowledgeArticle", "knowledge_article_not_found", `Article ${articleId} was not found.`, { articleId });
@@ -770,22 +872,34 @@ export class WorkspaceService {
       service: KNOWLEDGE_SERVICE,
       operation: "fetchKnowledgeArticle",
       traceId: workspaceTraceId(KNOWLEDGE_SERVICE, "fetchKnowledgeArticle"),
-      meta: apiMeta({ articleId }),
+      meta: apiMeta({ articleId, tenantId: context.tenantId ?? null }),
       data: {
         article: clone(article)
       }
     });
   }
 
-  async saveKnowledgeArticleDraft(payload: { articleId: string; body: string; reason?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async saveKnowledgeArticleDraft(
+    payload: {
+      articleId: string;
+      body: string;
+      category?: string;
+      channels?: string[];
+      reason?: string;
+      title?: string;
+      topics?: string[];
+      visibility?: string;
+    },
+    context: WorkspaceRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
     if (!hasReason(payload.reason)) {
       return invalidEnvelope(KNOWLEDGE_SERVICE, "saveKnowledgeArticleDraft", "reason_required", "A knowledge draft reason of at least 8 characters is required.", {
         articleId: payload.articleId
       });
     }
 
-    await this.seedKnowledgeIfNeeded();
-    const article = await this.workspaceRepository.findKnowledgeArticle(payload.articleId);
+    await this.seedKnowledgeIfNeeded(context);
+    const article = await this.workspaceRepository.findKnowledgeArticle(payload.articleId, { tenantId: context.tenantId });
 
     if (!article) {
       return notFoundEnvelope(KNOWLEDGE_SERVICE, "saveKnowledgeArticleDraft", "knowledge_article_not_found", `Article ${payload.articleId} was not found.`, {
@@ -796,8 +910,14 @@ export class WorkspaceService {
     const draft = await this.workspaceRepository.saveKnowledgeArticle({
       ...article,
       body: payload.body,
+      category: normalizeText(payload.category) ?? article.category,
+      channels: normalizeStringList(payload.channels) ?? article.channels,
       status: "draft",
+      tenantId: article.tenantId ?? context.tenantId,
+      title: normalizeText(payload.title) ?? article.title,
+      topics: normalizeStringList(payload.topics) ?? article.topics,
       version: nextDraftVersion(article.version),
+      visibility: normalizeText(payload.visibility) ?? article.visibility,
       updated: new Date().toISOString(),
       versions: [
         {
@@ -816,7 +936,7 @@ export class WorkspaceService {
       service: KNOWLEDGE_SERVICE,
       operation: "saveKnowledgeArticleDraft",
       traceId: workspaceTraceId(KNOWLEDGE_SERVICE, "saveKnowledgeArticleDraft"),
-      meta: apiMeta({ articleId: article.id }),
+      meta: apiMeta({ articleId: article.id, tenantId: context.tenantId ?? article.tenantId ?? null }),
       data: {
         article: draft,
         auditEvent: auditEvent("knowledge", "knowledge.article.draft", payload.reason)
@@ -824,9 +944,349 @@ export class WorkspaceService {
     });
   }
 
-  private async findArticle(articleId: string): Promise<KnowledgeArticle | undefined> {
-    const articles = await this.listKnowledgeArticles();
+  async submitKnowledgeArticleForReview(
+    payload: KnowledgeWorkflowPayload,
+    context: WorkspaceRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.transitionKnowledgeArticle(payload, context, {
+      action: "sent_for_review",
+      allowedStatuses: ["draft", "review"],
+      nextStatus: "review",
+      nextVisibility: "internal",
+      operation: "submitKnowledgeArticleForReview",
+      tone: "info"
+    });
+  }
+
+  async approveKnowledgeArticle(
+    payload: KnowledgeWorkflowPayload,
+    context: WorkspaceRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.transitionKnowledgeArticle(payload, context, {
+      action: "approved",
+      allowedStatuses: ["review", "approved"],
+      nextStatus: "approved",
+      nextVisibility: "internal",
+      operation: "approveKnowledgeArticle",
+      tone: "ok"
+    });
+  }
+
+  async publishKnowledgeArticle(
+    payload: KnowledgeWorkflowPayload,
+    context: WorkspaceRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const base = await this.prepareKnowledgeWorkflow(payload, context, "publishKnowledgeArticle", ["review", "approved"]);
+    if (!base.ok) {
+      return base.envelope;
+    }
+
+    const unsafeAttachments = base.article.attachments.filter((attachment) => !isKnowledgeAttachmentPublishable(attachment));
+    if (unsafeAttachments.length > 0) {
+      return deniedEnvelope(KNOWLEDGE_SERVICE, "publishKnowledgeArticle", "knowledge_attachment_scan_required", "All knowledge article attachments must be scan-clean before publication.", {
+        articleId: base.article.id,
+        unsafeAttachmentIds: unsafeAttachments.map((attachment) => String(attachment.id ?? attachment.fileId ?? attachment.name ?? "attachment"))
+      });
+    }
+
+    return this.persistKnowledgeTransition(base.article, payload, context, {
+      action: "published",
+      nextStatus: "published",
+      nextVisibility: "public",
+      operation: "publishKnowledgeArticle",
+      tone: "ok"
+    });
+  }
+
+  async rejectKnowledgeArticle(
+    payload: KnowledgeWorkflowPayload,
+    context: WorkspaceRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.transitionKnowledgeArticle(payload, context, {
+      action: "returned_for_revision",
+      allowedStatuses: ["review", "approved"],
+      nextStatus: "draft",
+      nextVisibility: "internal",
+      operation: "rejectKnowledgeArticle",
+      tone: "warn"
+    });
+  }
+
+  async archiveKnowledgeArticle(
+    payload: KnowledgeWorkflowPayload,
+    context: WorkspaceRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.transitionKnowledgeArticle(payload, context, {
+      action: "archived",
+      allowedStatuses: ["published"],
+      nextStatus: "archived",
+      nextVisibility: "internal",
+      operation: "archiveKnowledgeArticle",
+      tone: "warn"
+    });
+  }
+
+  async addKnowledgeArticleAttachment(
+    payload: KnowledgeAttachmentPayload,
+    context: WorkspaceRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    if (!hasReason(payload.reason)) {
+      return invalidEnvelope(KNOWLEDGE_SERVICE, "addKnowledgeArticleAttachment", "reason_required", "A knowledge attachment reason of at least 8 characters is required.", {
+        articleId: payload.articleId
+      });
+    }
+
+    await this.seedKnowledgeIfNeeded(context);
+    const article = await this.workspaceRepository.findKnowledgeArticle(payload.articleId, { tenantId: context.tenantId });
+    if (!article) {
+      return notFoundEnvelope(KNOWLEDGE_SERVICE, "addKnowledgeArticleAttachment", "knowledge_article_not_found", `Article ${payload.articleId} was not found.`, {
+        articleId: payload.articleId
+      });
+    }
+
+    const attachment = normalizeKnowledgeAttachment(payload.attachment);
+    if (!attachment) {
+      return invalidEnvelope(KNOWLEDGE_SERVICE, "addKnowledgeArticleAttachment", "knowledge_attachment_invalid", "Knowledge attachment name is required.", {
+        articleId: article.id
+      });
+    }
+
+    if (article.attachments.some((item) => String(item.id ?? "") === attachment.id)) {
+      return conflictEnvelope(KNOWLEDGE_SERVICE, "addKnowledgeArticleAttachment", "knowledge_attachment_conflict", "Knowledge attachment already exists for this article.", {
+        articleId: article.id,
+        attachmentId: attachment.id
+      });
+    }
+
+    const now = new Date().toISOString();
+    const audit: Record<string, unknown> = {
+      ...auditEvent("knowledge", "knowledge.article.attachment.added", payload.reason),
+      actor: knowledgeActor(payload.actor),
+      articleId: article.id,
+      attachmentId: attachment.id
+    };
+    const saved = await this.workspaceRepository.saveKnowledgeArticle({
+      ...article,
+      attachments: [...article.attachments, attachment],
+      approvalHistory: [
+        knowledgeHistoryEvent({
+          action: "attachment_added",
+          actor: knowledgeActor(payload.actor),
+          comment: payload.reason,
+          id: String(audit.id),
+          timestamp: now,
+          tone: "info"
+        }),
+        ...article.approvalHistory
+      ],
+      status: article.status === "published" ? "draft" : article.status,
+      tenantId: article.tenantId ?? context.tenantId,
+      updated: now,
+      visibility: article.status === "published" ? "internal" : article.visibility
+    });
+
+    return createEnvelope({
+      service: KNOWLEDGE_SERVICE,
+      operation: "addKnowledgeArticleAttachment",
+      traceId: workspaceTraceId(KNOWLEDGE_SERVICE, "addKnowledgeArticleAttachment"),
+      meta: apiMeta({ articleId: article.id, tenantId: context.tenantId ?? article.tenantId ?? null }),
+      data: {
+        article: saved,
+        attachment,
+        auditEvent: audit
+      }
+    });
+  }
+
+  async deleteKnowledgeArticleAttachment(
+    payload: KnowledgeAttachmentDeletePayload,
+    context: WorkspaceRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    if (!hasReason(payload.reason)) {
+      return invalidEnvelope(KNOWLEDGE_SERVICE, "deleteKnowledgeArticleAttachment", "reason_required", "A knowledge attachment delete reason of at least 8 characters is required.", {
+        articleId: payload.articleId,
+        attachmentId: payload.attachmentId
+      });
+    }
+
+    await this.seedKnowledgeIfNeeded(context);
+    const article = await this.workspaceRepository.findKnowledgeArticle(payload.articleId, { tenantId: context.tenantId });
+    if (!article) {
+      return notFoundEnvelope(KNOWLEDGE_SERVICE, "deleteKnowledgeArticleAttachment", "knowledge_article_not_found", `Article ${payload.articleId} was not found.`, {
+        articleId: payload.articleId
+      });
+    }
+
+    const attachment = article.attachments.find((item) => knowledgeAttachmentId(item) === payload.attachmentId);
+    if (!attachment) {
+      return notFoundEnvelope(KNOWLEDGE_SERVICE, "deleteKnowledgeArticleAttachment", "knowledge_attachment_not_found", `Attachment ${payload.attachmentId} was not found.`, {
+        articleId: article.id,
+        attachmentId: payload.attachmentId
+      });
+    }
+
+    const now = new Date().toISOString();
+    const audit: Record<string, unknown> = {
+      ...auditEvent("knowledge", "knowledge.article.attachment.deleted", payload.reason),
+      actor: knowledgeActor(payload.actor),
+      articleId: article.id,
+      attachmentId: payload.attachmentId
+    };
+    const saved = await this.workspaceRepository.saveKnowledgeArticle({
+      ...article,
+      approvalHistory: [
+        knowledgeHistoryEvent({
+          action: "attachment_deleted",
+          actor: knowledgeActor(payload.actor),
+          comment: payload.reason,
+          id: String(audit.id),
+          timestamp: now,
+          tone: "warn"
+        }),
+        ...article.approvalHistory
+      ],
+      attachments: article.attachments.filter((item) => knowledgeAttachmentId(item) !== payload.attachmentId),
+      status: article.status === "published" ? "draft" : article.status,
+      tenantId: article.tenantId ?? context.tenantId,
+      updated: now,
+      visibility: article.status === "published" ? "internal" : article.visibility
+    });
+
+    return createEnvelope({
+      service: KNOWLEDGE_SERVICE,
+      operation: "deleteKnowledgeArticleAttachment",
+      traceId: workspaceTraceId(KNOWLEDGE_SERVICE, "deleteKnowledgeArticleAttachment"),
+      meta: apiMeta({ articleId: article.id, attachmentId: payload.attachmentId, tenantId: context.tenantId ?? article.tenantId ?? null }),
+      data: {
+        article: saved,
+        attachment,
+        auditEvent: audit
+      }
+    });
+  }
+
+  private async findArticle(articleId: string, context: WorkspaceRequestContext = {}): Promise<KnowledgeArticle | undefined> {
+    const articles = await this.listKnowledgeArticles(context);
     return articles.find((article) => article.id === articleId);
+  }
+
+  private async transitionKnowledgeArticle(
+    payload: KnowledgeWorkflowPayload,
+    context: WorkspaceRequestContext,
+    transition: {
+      action: string;
+      allowedStatuses: string[];
+      nextStatus: string;
+      nextVisibility: string;
+      operation: string;
+      tone: string;
+    }
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const base = await this.prepareKnowledgeWorkflow(payload, context, transition.operation, transition.allowedStatuses);
+    if (!base.ok) {
+      return base.envelope;
+    }
+
+    return this.persistKnowledgeTransition(base.article, payload, context, transition);
+  }
+
+  private async prepareKnowledgeWorkflow(
+    payload: KnowledgeWorkflowPayload,
+    context: WorkspaceRequestContext,
+    operation: string,
+    allowedStatuses: string[]
+  ): Promise<
+    | { ok: true; article: KnowledgeArticle }
+    | { ok: false; envelope: BackendEnvelope<Record<string, unknown>> }
+  > {
+    if (!hasReason(payload.reason)) {
+      return {
+        ok: false,
+        envelope: invalidEnvelope(KNOWLEDGE_SERVICE, operation, "reason_required", "A knowledge workflow reason of at least 8 characters is required.", {
+          articleId: payload.articleId
+        })
+      };
+    }
+
+    await this.seedKnowledgeIfNeeded(context);
+    const article = await this.workspaceRepository.findKnowledgeArticle(payload.articleId, { tenantId: context.tenantId });
+    if (!article) {
+      return {
+        ok: false,
+        envelope: notFoundEnvelope(KNOWLEDGE_SERVICE, operation, "knowledge_article_not_found", `Article ${payload.articleId} was not found.`, {
+          articleId: payload.articleId
+        })
+      };
+    }
+
+    if (!allowedStatuses.includes(article.status)) {
+      return {
+        ok: false,
+        envelope: conflictEnvelope(KNOWLEDGE_SERVICE, operation, "knowledge_status_transition_invalid", `Article ${article.id} cannot transition from ${article.status}.`, {
+          allowedStatuses,
+          articleId: article.id,
+          status: article.status
+        })
+      };
+    }
+
+    return { ok: true, article };
+  }
+
+  private async persistKnowledgeTransition(
+    article: KnowledgeArticle,
+    payload: KnowledgeWorkflowPayload,
+    context: WorkspaceRequestContext,
+    transition: {
+      action: string;
+      nextStatus: string;
+      nextVisibility: string;
+      operation: string;
+      tone: string;
+    }
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const now = new Date().toISOString();
+    const actor = knowledgeActor(payload.actor);
+    const decision = await this.workspaceRepository.saveKnowledgeApprovalDecision({
+      action: transition.action,
+      actor,
+      articleId: article.id,
+      ...(payload.draftId ? { draftId: payload.draftId } : {}),
+      id: makeAuditId("knowledge"),
+      immutable: true,
+      reason: payload.reason,
+      timestamp: now
+    });
+    const saved = await this.workspaceRepository.saveKnowledgeArticle({
+      ...article,
+      approvalHistory: [
+        knowledgeDecisionHistoryEvent(decision, transition.tone),
+        ...article.approvalHistory
+      ],
+      status: transition.nextStatus,
+      tenantId: article.tenantId ?? context.tenantId,
+      updated: now,
+      versions: updateKnowledgeVersionStatuses(article, transition.nextStatus, now, actor, payload.reason),
+      visibility: transition.nextVisibility
+    });
+    const audit: Record<string, unknown> = {
+      ...auditEvent("knowledge", `knowledge.article.${transition.action}`, payload.reason),
+      actor,
+      articleId: article.id,
+      approvalDecisionId: decision.id
+    };
+
+    return createEnvelope({
+      service: KNOWLEDGE_SERVICE,
+      operation: transition.operation,
+      traceId: workspaceTraceId(KNOWLEDGE_SERVICE, transition.operation),
+      meta: apiMeta({ articleId: article.id, tenantId: context.tenantId ?? article.tenantId ?? null }),
+      data: {
+        article: saved,
+        approvalDecision: decision,
+        auditEvent: audit
+      }
+    });
   }
 
   private async detectConflict(primaryProfileId: string, candidateProfileId: string): Promise<string> {
@@ -839,9 +1299,10 @@ export class WorkspaceService {
     return profiles.length ? profiles : clone(clientProfiles);
   }
 
-  private async listKnowledgeArticles(): Promise<KnowledgeArticle[]> {
-    const articles = await this.workspaceRepository.listKnowledgeArticles();
-    return articles.length ? articles : clone(knowledgeFixtures);
+  private async listKnowledgeArticles(context: WorkspaceRequestContext = {}): Promise<KnowledgeArticle[]> {
+    await this.seedKnowledgeIfNeeded(context);
+    const articles = await this.workspaceRepository.listKnowledgeArticles({ tenantId: context.tenantId });
+    return articles.length ? articles : context.tenantId ? [] : clone(knowledgeFixtures);
   }
 
   private async listTemplates(context: WorkspaceRequestContext = {}): Promise<TemplateRecord[]> {
@@ -849,14 +1310,16 @@ export class WorkspaceService {
     return templates.length ? templates : context.tenantId ? [] : clone(templateFixtures);
   }
 
-  private async seedKnowledgeIfNeeded(): Promise<void> {
-    const articles = await this.workspaceRepository.listKnowledgeArticles();
+  private async seedKnowledgeIfNeeded(context: WorkspaceRequestContext = {}): Promise<void> {
+    const articles = await this.workspaceRepository.listKnowledgeArticles({ tenantId: context.tenantId });
     if (articles.length > 0) {
       return;
     }
 
     for (const article of knowledgeFixtures) {
-      await this.workspaceRepository.saveKnowledgeArticle(article);
+      if (!context.tenantId || article.tenantId === context.tenantId) {
+        await this.workspaceRepository.saveKnowledgeArticle({ ...article, tenantId: article.tenantId ?? context.tenantId });
+      }
     }
   }
 
@@ -908,6 +1371,111 @@ function buildMergeGraph(items: ClientProfileRecord[]): Array<{ candidateIds: st
       .filter((candidate) => candidate.channel === client.channel || candidate.name.split(" ")[0] === client.name.split(" ")[0])
       .map((candidate) => candidate.sourceProfileId)
   }));
+}
+
+function buildClientSegments(profiles: ClientProfileRecord[]): Array<{ count: number; dimension: string; id: string; label: string }> {
+  return [
+    ...countClientSegmentDimension(profiles, "channel", (profile) => profile.channel),
+    ...countClientSegmentDimension(profiles, "device", (profile) => profile.device),
+    ...countClientSegmentDimension(profiles, "topic", (profile) => profile.topic || "No topic")
+  ];
+}
+
+function countClientSegmentDimension(
+  profiles: ClientProfileRecord[],
+  dimension: string,
+  valueSelector: (profile: ClientProfileRecord) => string
+): Array<{ count: number; dimension: string; id: string; label: string }> {
+  const counts = new Map<string, number>();
+  for (const profile of profiles) {
+    const value = String(valueSelector(profile) ?? "").trim() || "Unknown";
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([label, count]) => ({
+      count,
+      dimension,
+      id: `${dimension}:${label}`,
+      label
+    }));
+}
+
+function resolveClientSegment(
+  profiles: ClientProfileRecord[],
+  segmentId: string | undefined
+): { count: number; dimension: string; id: string; label: string } | null {
+  const normalizedSegmentId = String(segmentId ?? "").trim();
+  if (!normalizedSegmentId) {
+    return null;
+  }
+
+  const existing = buildClientSegments(profiles).find((segment) => segment.id === normalizedSegmentId);
+  if (existing) {
+    return existing;
+  }
+
+  const parsed = parseClientSegmentId(normalizedSegmentId);
+  return parsed ? { ...parsed, count: 0, id: normalizedSegmentId } : null;
+}
+
+function parseClientSegmentId(segmentId: string): { dimension: string; label: string } | null {
+  const [dimension, ...labelParts] = segmentId.split(":");
+  const label = labelParts.join(":").trim();
+  if (!["channel", "device", "topic"].includes(dimension) || !label) {
+    return null;
+  }
+
+  return { dimension, label };
+}
+
+function filterClientProfilesBySegment(
+  profiles: ClientProfileRecord[],
+  segment: { dimension: string; label: string } | null
+): ClientProfileRecord[] {
+  if (!segment) {
+    return profiles;
+  }
+
+  return profiles.filter((profile) => {
+    if (segment.dimension === "channel") {
+      return profile.channel === segment.label;
+    }
+
+    if (segment.dimension === "device") {
+      return profile.device === segment.label;
+    }
+
+    return (profile.topic || "No topic") === segment.label;
+  });
+}
+
+function normalizeClientExportFormat(format: string | undefined): "csv" | "json" {
+  return String(format ?? "").trim().toLowerCase() === "csv" ? "csv" : "json";
+}
+
+function clientExportFileName(segment: { id: string } | null, format: "csv" | "json"): string {
+  const suffix = sanitizeFileSegment(segment?.id ?? "all");
+  return `clients-${suffix}.${format}`;
+}
+
+function sanitizeFileSegment(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "all";
+}
+
+function maskClientProfileForExport(profile: ClientProfileRecord): Record<string, unknown> {
+  return {
+    channel: profile.channel,
+    clientSince: profile.clientSince,
+    device: profile.device,
+    entry: profile.entry,
+    id: profile.id,
+    name: profile.name,
+    phone: maskPhone(profile.phone),
+    sourceProfileId: profile.sourceProfileId,
+    topic: profile.topic
+  };
 }
 
 function clone<T>(value: T): T {
@@ -1119,6 +1687,125 @@ function nextDraftVersion(version: string): string {
   }
 
   return `v${match[1]}.${Number(match[2]) + 1}-draft`;
+}
+
+function normalizeText(value: string | undefined): string | undefined {
+  const normalized = String(value ?? "").trim();
+  return normalized ? normalized : undefined;
+}
+
+function normalizeStringList(value: string[] | undefined): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const normalized = value.map((item) => String(item ?? "").trim()).filter(Boolean);
+  return normalized.length ? normalized : undefined;
+}
+
+function knowledgeActor(actor?: string): string {
+  return normalizeText(actor) ?? "current-service-admin";
+}
+
+function knowledgeAttachmentId(attachment: Record<string, unknown>): string {
+  return String(attachment.id ?? attachment.fileId ?? attachment.name ?? "").trim();
+}
+
+function normalizeKnowledgeAttachment(attachment: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
+    return null;
+  }
+
+  const name = normalizeText(stringRecordValue(attachment, "name") ?? stringRecordValue(attachment, "fileName"));
+  if (!name) {
+    return null;
+  }
+
+  return {
+    ...attachment,
+    id: normalizeText(stringRecordValue(attachment, "id") ?? stringRecordValue(attachment, "fileId")) ?? `att_${randomUUID()}`,
+    name,
+    status: normalizeText(stringRecordValue(attachment, "status")) ?? "scan_pending"
+  };
+}
+
+function isKnowledgeAttachmentPublishable(attachment: Record<string, unknown>): boolean {
+  const status = normalizeText(stringRecordValue(attachment, "status"))?.toLowerCase();
+  const scanState = normalizeText(stringRecordValue(attachment, "scanState"))?.toLowerCase();
+  const scanVerdict = normalizeText(stringRecordValue(attachment, "scanVerdict"))?.toLowerCase();
+
+  return (!status || ["ready", "clean", "scan_clean"].includes(status))
+    && (!scanState || ["ready", "clean", "scan_clean"].includes(scanState))
+    && (!scanVerdict || scanVerdict === "clean");
+}
+
+function knowledgeDecisionHistoryEvent(decision: KnowledgeApprovalDecisionRecord, tone: string): Record<string, unknown> {
+  return knowledgeHistoryEvent({
+    action: decision.action,
+    actor: decision.actor,
+    comment: decision.reason,
+    id: decision.id,
+    timestamp: decision.timestamp,
+    tone
+  });
+}
+
+function knowledgeHistoryEvent(input: {
+  action: string;
+  actor: string;
+  comment?: string;
+  id: string;
+  timestamp: string;
+  tone: string;
+}): Record<string, unknown> {
+  return {
+    id: input.id,
+    actor: input.actor,
+    role: "Knowledge governance",
+    action: input.action,
+    date: input.timestamp,
+    comment: input.comment,
+    tone: input.tone
+  };
+}
+
+function updateKnowledgeVersionStatuses(
+  article: KnowledgeArticle,
+  status: string,
+  updated: string,
+  author: string,
+  changes?: string
+): Array<Record<string, unknown>> {
+  const versions = Array.isArray(article.versions) ? article.versions : [];
+  if (versions.length === 0) {
+    return [
+      {
+        id: `${article.id}-${status}-${randomUUID()}`,
+        label: article.version,
+        status,
+        author,
+        updated,
+        changes
+      }
+    ];
+  }
+
+  return versions.map((version, index) => (
+    index === 0
+      ? {
+          ...version,
+          status,
+          author,
+          updated,
+          changes: changes ?? version.changes
+        }
+      : version
+  ));
+}
+
+function stringRecordValue(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return value === undefined || value === null ? undefined : String(value);
 }
 
 function isKnowledgeArticleVisible(article: KnowledgeArticle, filters: { visibility?: string }): boolean {

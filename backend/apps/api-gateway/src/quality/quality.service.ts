@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
-import { aiCoachingQueue, aiEffectivenessMetrics, aiRealtimeChecks, aiSuggestions, knowledgeArticles, qualityMetrics } from "./quality.fixtures.js";
+import { QualityRepository } from "./quality.repository.js";
 
 const QUALITY_SERVICE = "qualityService";
-const DEFAULT_TENANT_ID = "tenant-demo";
+
+export interface QualityRequestContext {
+  tenantId?: string;
+}
 const empathyPattern = /understand|sorry|apolog|help|check|verify/i;
 const resolutionPattern = /check|verify|return|send|transfer|resolve|next|status/i;
 const riskyPattern = /not our problem|your problem|impossible|cannot help|nothing we can do|blame/i;
@@ -41,27 +44,42 @@ interface ManualQaPayload {
 }
 
 export class QualityService {
-  async fetchQualityWorkspace(): Promise<BackendEnvelope<Record<string, unknown>>> {
+  constructor(private readonly qualityRepository = QualityRepository.default()) {}
+
+  async fetchQualityWorkspace(context: QualityRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveQualityTenantId(context);
+    if (!tenantId) {
+      return tenantRequiredEnvelope("fetchQualityWorkspace");
+    }
+
+    const workspace = this.qualityRepository.readWorkspace();
+
     return createEnvelope({
       service: QUALITY_SERVICE,
       operation: "fetchQualityWorkspace",
       traceId: qualityTraceId("fetchQualityWorkspace"),
       partial: true,
-      meta: apiMeta(),
+      meta: apiMeta({ tenantId }),
       data: {
-        aiCoachingQueue: clone(aiCoachingQueue),
-        aiEffectivenessMetrics: clone(aiEffectivenessMetrics),
-        aiRealtimeChecks: clone(aiRealtimeChecks),
-        aiSuggestions: clone(aiSuggestions),
-        knowledgeArticles: clone(knowledgeArticles),
-        qualityMetrics: clone(qualityMetrics)
+        aiCoachingQueue: clone(workspace.aiCoachingQueue),
+        aiEffectivenessMetrics: clone(workspace.aiEffectivenessMetrics),
+        aiRealtimeChecks: clone(workspace.aiRealtimeChecks),
+        aiSuggestions: clone(workspace.aiSuggestions),
+        knowledgeArticles: clone(workspace.knowledgeArticles),
+        qualityMetrics: clone(workspace.qualityMetrics),
+        qualityScores: clone(workspace.qualityMetrics),
+        tenantId
       }
     });
   }
 
-  async scoreDraftResponse(payload: ScoreDraftPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async scoreDraftResponse(payload: ScoreDraftPayload | null | undefined, context: QualityRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return invalidEnvelope("scoreDraftResponse", "quality_draft_payload_required", "Draft scoring payload is required.", {});
+    }
+    const tenantId = resolveQualityTenantId(context);
+    if (!tenantId) {
+      return tenantRequiredEnvelope("scoreDraftResponse");
     }
 
     const checks = getPreSendQualityChecks(payload);
@@ -73,7 +91,7 @@ export class QualityService {
       service: QUALITY_SERVICE,
       operation: "scoreDraftResponse",
       traceId: qualityTraceId("scoreDraftResponse"),
-      meta: apiMeta({ conversationId: payload.conversationId ?? null }),
+      meta: apiMeta({ conversationId: payload.conversationId ?? null, tenantId }),
       data: {
         checks,
         conversationId: payload.conversationId ?? null,
@@ -95,7 +113,7 @@ export class QualityService {
     });
   }
 
-  async recordClientQualityRating(payload: ClientRatingPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async recordClientQualityRating(payload: ClientRatingPayload | null | undefined, context: QualityRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
 
     if (!request.conversationId?.trim() || !request.channel?.trim() || !request.operator?.trim()) {
@@ -104,6 +122,10 @@ export class QualityService {
         conversationId: request.conversationId ?? null,
         operator: request.operator ?? null
       });
+    }
+    const tenantId = resolveQualityTenantId(context);
+    if (!tenantId) {
+      return tenantRequiredEnvelope("recordClientQualityRating");
     }
 
     const ratingId = `quality_${randomUUID()}`;
@@ -137,6 +159,7 @@ export class QualityService {
           resourceId: conversationId,
           resourceType: "conversation",
           schemaVersion: "quality-score/v1",
+          tenantId,
           traceId
         }),
         scale: request.scale ?? "CSAT",
@@ -145,7 +168,7 @@ export class QualityService {
     });
   }
 
-  async recordManualQaReview(payload: ManualQaPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async recordManualQaReview(payload: ManualQaPayload | null | undefined, context: QualityRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
 
     if (!request.conversationId?.trim() || !request.reviewer?.trim()) {
@@ -154,12 +177,16 @@ export class QualityService {
         reviewer: request.reviewer ?? null
       });
     }
+    const tenantId = resolveQualityTenantId(context);
+    if (!tenantId) {
+      return tenantRequiredEnvelope("recordManualQaReview");
+    }
 
     return createEnvelope({
       service: QUALITY_SERVICE,
       operation: "recordManualQaReview",
       traceId: qualityTraceId("recordManualQaReview"),
-      meta: apiMeta({ conversationId: request.conversationId }),
+      meta: apiMeta({ conversationId: request.conversationId, tenantId }),
       data: {
         auditId: makeAuditId("quality"),
         criteria: clone(request.criteria ?? {}),
@@ -276,6 +303,14 @@ function invalidEnvelope(operation: string, code: string, message: string, data:
   });
 }
 
+function resolveQualityTenantId(context: QualityRequestContext = {}): string | null {
+  return context.tenantId?.trim() || null;
+}
+
+function tenantRequiredEnvelope(operation: string): BackendEnvelope<Record<string, unknown>> {
+  return invalidEnvelope(operation, "tenant_context_required", "Tenant context is required for quality runtime operations.", {});
+}
+
 function makeAuditId(scope: string): string {
   return `evt_${scope}_${randomUUID()}`;
 }
@@ -295,6 +330,7 @@ function realtimeEvent({
   resourceId,
   resourceType,
   schemaVersion,
+  tenantId,
   traceId
 }: {
   data: Record<string, unknown>;
@@ -303,6 +339,7 @@ function realtimeEvent({
   resourceId: string;
   resourceType: string;
   schemaVersion: string;
+  tenantId: string;
   traceId: string;
 }): Record<string, unknown> {
   return {
@@ -313,7 +350,7 @@ function realtimeEvent({
     resourceId,
     resourceType,
     schemaVersion,
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId,
     traceId
   };
 }

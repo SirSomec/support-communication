@@ -10,6 +10,8 @@ import { createRuntimeOutboxHandlers, runOutboxWorker } from "../apps/outbox-wor
 import { OperationsReadinessService } from "../apps/api-gateway/dist/operations/operations-readiness.service.js";
 import { OperationsRepository } from "../apps/api-gateway/dist/operations/operations.repository.js";
 import { ReportService } from "../apps/api-gateway/dist/reports/report.service.js";
+import { ReportRepository } from "../apps/api-gateway/dist/reports/report.repository.js";
+import { exportJobFixtures } from "../apps/api-gateway/dist/reports/seed-catalog.js";
 
 const modes = new Set(process.argv.slice(2));
 
@@ -237,8 +239,10 @@ async function runScannerSmoke() {
 }
 
 async function runExportSmoke() {
-  const reportDescriptor = await new ReportService().getExportFileDescriptor("export-2418", { canDownload: true });
-  const restoreDescriptor = await new OperationsReadinessService(OperationsRepository.inMemory()).queueRestoreCheck({
+  const reportRepository = ReportRepository.inMemory();
+  reportRepository.saveExportJob(structuredClone(exportJobFixtures.find((job) => job.id === "export-2418")));
+  const reportDescriptor = await new ReportService(reportRepository).getExportFileDescriptor("export-2418", { canDownload: true });
+  const restoreDescriptor = await new OperationsReadinessService(OperationsRepository.default()).queueRestoreCheck({
     confirmed: true,
     drillId: "backup-postgres-nightly",
     idempotencyKey: "restore-redaction-runtime-smoke",

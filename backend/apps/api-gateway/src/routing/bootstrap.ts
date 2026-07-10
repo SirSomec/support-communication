@@ -1,4 +1,5 @@
 import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryKind, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
+import { bootstrapRoutingState } from "./seed.js";
 import { RoutingRepository, type PrismaRoutingClient } from "./routing.repository.js";
 
 export interface RoutingRepositoryBootstrapSource {
@@ -19,7 +20,7 @@ export function configureRoutingRepository(
   options: RoutingRepositoryBootstrapOptions = {}
 ): RoutingRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => RoutingRepository.open({ filePath }),
+    createJsonRepository: (filePath) => RoutingRepository.open({ filePath, seed: bootstrapRoutingState() }),
     createPrismaRepository: (client, createFallback) => RoutingRepository.prisma({ client, fallback: createFallback() }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "ROUTING_REPOSITORY",

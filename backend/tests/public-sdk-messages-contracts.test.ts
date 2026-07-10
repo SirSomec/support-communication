@@ -114,6 +114,7 @@ describe("public sdk message ingress and widget poll contracts", () => {
 
 async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: string }> {
   process.env.NODE_ENV = "test";
+  process.env.ALLOW_DEMO_SERVICE_ADMIN_HEADERS = "true";
   process.env.API_VERSION = "v1";
   process.env.DATABASE_URL = "https://example.invalid/database";
   process.env.REDIS_URL = "https://example.invalid/redis";

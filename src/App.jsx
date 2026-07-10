@@ -12,16 +12,18 @@ import { useOutboundConversation } from "./app/useOutboundConversation.js";
 import { RouteLoading } from "./app/RouteLoading.jsx";
 import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
 import { useWorkspaceRoute } from "./app/useWorkspaceRoute.js";
+import { useTenantSessionState } from "./app/useTenantSessionState.js";
+import { resolveNotificationActionAvailability, resolveNotificationNavigationTarget } from "./app/notificationNavigation.js";
 import { serviceAdminAccessProfile, serviceAdminRole } from "./app/access.js";
 import { DialogWorkspace } from "./features/dialogs/DialogWorkspace.jsx";
 import { DraftSwitchDialog, OutboundDialogLauncher, SaveTemplateDialog } from "./features/dialogs/DialogModals.jsx";
 import { Sidebar, TopBar } from "./features/app-shell/AppShell.jsx";
 import { SectionRouter } from "./features/section-router.jsx";
+import { permissionService } from "./services/permissionService.js";
+import { publicLeadService } from "./services/publicLeadService.js";
+import { qualityService } from "./services/qualityService.js";
 import { settingsService } from "./services/settingsService.js";
 import { ScreenStateStrip, Toast } from "./ui.jsx";
-import {
-  aiSuggestions
-} from "./data.js";
 
 const SERVICE_ADMIN_DEMO_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_SERVICE_ADMIN === "true";
 const LandingPage = lazy(() => import("./features/public/index.js"));
@@ -33,6 +35,9 @@ const ServiceAdminDashboard = lazy(() => import("./features/service-admin/index.
 
 function App() {
   const [topicOptions, setTopicOptions] = useState([]);
+  const [permissionModel, setPermissionModel] = useState(null);
+  const [aiSuggestions, setAiSuggestions] = useState([]);
+  const [notificationNavigationTarget, setNotificationNavigationTarget] = useState(null);
   const {
     handleToastClose,
     isOutboundOpen,
@@ -48,9 +53,14 @@ function App() {
     setTranscriptMode,
     transcriptMode
   } = useComposerState();
+  const tenantSession = useTenantSessionState({
+    enabled: typeof window !== "undefined" && (window.location.hash === "#/app" || window.location.hash.startsWith("#/app"))
+  });
   const {
     appendMessage,
+    applyConversationAssignment,
     applyConversationStatus,
+    assignees,
     closedIds,
     conversationItems,
     error: inboxError,
@@ -60,7 +70,7 @@ function App() {
     setConversationItems,
     setTopics,
     topics
-  } = useConversationInbox();
+  } = useConversationInbox({ sessionActive: tenantSession.authenticated });
   const {
     access,
     section,
@@ -73,12 +83,16 @@ function App() {
     initialSection: "dialogs",
     initialRoleMode: "Администратор",
     isOutboundOpen,
+    permissionModel,
+    sessionPermissions: tenantSession.permissions,
     setOutboundOpen,
-    setToast
+    setToast,
+    useSessionPermissions: tenantSession.authenticated
   });
   const appShellAccess = SERVICE_ADMIN_DEMO_ENABLED ? { ...access, canServiceAdmin: true } : access;
   const { route, routeActions } = useWorkspaceRoute({
     access: appShellAccess,
+    tenantSession,
     onAuthenticated: (payload) => {
       const organizationName = payload?.organization?.name ?? payload?.tenant?.name ?? "организация";
       setToast(`Вход выполнен: ${organizationName}`);
@@ -131,6 +145,7 @@ function App() {
     templateLibrary
   } = useTemplateLibrary({
     draft,
+    enabled: tenantSession.authenticated,
     selectedChannel: selected.channel,
     selectedTopic,
     setToast
@@ -184,7 +199,96 @@ function App() {
     setTopics
   });
 
+  async function handlePublicDemoRequest(payload) {
+    const response = await publicLeadService.createDemoRequest(payload);
+
+    if (response.status === "ok") {
+      setToast("Заявка на демо принята. Мы свяжемся с вами после проверки маршрута.");
+      return response;
+    }
+
+    if (response.status === "rate_limited" && response.data?.duplicate) {
+      setToast("Заявка уже принята. Повторная отправка ограничена.");
+      return response;
+    }
+
+    setToast(response.error?.message ?? "Не удалось отправить заявку на демо.");
+    return response;
+  }
+
+  function handleNotificationNavigation(actionTarget, item) {
+    const resolvedTarget = resolveNotificationNavigationTarget(actionTarget);
+
+    if (!resolvedTarget) {
+      return {
+        ok: false,
+        message: appShellAccess.reason ?? "Notification target is unavailable."
+      };
+    }
+
+    if (resolvedTarget.namespace === "service-admin") {
+      if (!appShellAccess.canServiceAdmin) {
+        return {
+          ok: false,
+          message: appShellAccess.reason ?? "Notification target is unavailable."
+        };
+      }
+
+      setNotificationNavigationTarget(buildNotificationNavigationState(resolvedTarget, item));
+      routeActions.openServiceAdmin();
+
+      return {
+        ok: true,
+        message: `${item?.type ?? "Notification"}: ${item?.action ?? "opened"}`
+      };
+    }
+
+    const targetSection = resolvedTarget.section;
+    const targetResourceId = typeof resolvedTarget.detail?.resourceId === "string" ? resolvedTarget.detail.resourceId : "";
+
+    if (!targetSection || !appShellAccess.sections.includes(targetSection)) {
+      return {
+        ok: false,
+        message: appShellAccess.reason ?? "Notification target is unavailable."
+      };
+    }
+
+    if (targetSection === "dialogs" && targetResourceId) {
+      const targetConversation = conversationItems.find((conversation) => conversation.id === targetResourceId);
+      if (!targetConversation) {
+        return {
+          ok: false,
+          message: "Notification dialog target was not found."
+        };
+      }
+
+      setSelectedId(targetResourceId);
+    }
+
+    setNotificationNavigationTarget(buildNotificationNavigationState(resolvedTarget, item));
+    routeActions.openApp();
+    handleSectionSelect(targetSection);
+
+    return {
+      ok: true,
+      message: `${item?.type ?? "Notification"}: ${item?.action ?? "opened"}`
+    };
+  }
+
+  function getNotificationActionAvailability(actionTarget) {
+    return resolveNotificationActionAvailability(actionTarget, {
+      accessProfile: appShellAccess,
+      conversationItems
+    });
+  }
+
   useEffect(() => {
+    if (route.namespace !== "app" || !tenantSession.authenticated) {
+      setTopicOptions([]);
+      setPermissionModel(null);
+      return undefined;
+    }
+
     let ignore = false;
 
     async function loadTopicOptions() {
@@ -194,19 +298,55 @@ function App() {
       }
     }
 
+    async function loadPermissionModel() {
+      const response = await permissionService.fetchPermissionModel();
+      if (!ignore && response.status === "ok") {
+        setPermissionModel(response.data ?? null);
+      }
+    }
+
     loadTopicOptions();
+    loadPermissionModel();
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [route.namespace, tenantSession.authenticated]);
+
+  useEffect(() => {
+    if (!tenantSession.authenticated) {
+      setAiSuggestions([]);
+      return undefined;
+    }
+
+    let ignore = false;
+
+    async function loadAiSuggestions() {
+      const response = await qualityService.fetchQualityWorkspace();
+      if (!ignore && response.status === "ok") {
+        const suggestions = Array.isArray(response.data?.aiSuggestions)
+          ? response.data.aiSuggestions
+          : Array.isArray(response.data?.suggestions)
+            ? response.data.suggestions
+            : [];
+        setAiSuggestions(suggestions);
+      }
+    }
+
+    loadAiSuggestions();
+
+    return () => {
+      ignore = true;
+    };
+  }, [tenantSession.authenticated]);
 
   if (route.namespace === "public") {
     return (
       <div data-testid="route-public-landing">
         <Suspense fallback={<RouteLoading label="Загрузка публичного контура" />}>
           <LandingPage
+            demoRequestEnabled
             onNavigateAuth={routeActions.openAuth}
-            onRequestDemo={() => setToast("Заявка на демо отправлена команде продаж.")}
+            onRequestDemo={handlePublicDemoRequest}
             onStartTrial={routeActions.openOnboarding}
           />
         </Suspense>
@@ -252,9 +392,12 @@ function App() {
           <TopBar
             access={serviceAdminAccessProfile}
             activeSection="service-admin"
+            notificationsEnabled={false}
             onOpenAuth={routeActions.openAuth}
             onOpenLanding={routeActions.openLanding}
             onOpenServiceAdmin={routeActions.openServiceAdmin}
+            getNotificationActionAvailability={getNotificationActionAvailability}
+            onNavigateNotificationAction={handleNotificationNavigation}
             onOutbound={handleOutboundRequest}
             onRoleMode={handleRoleModeChange}
             onToast={setToast}
@@ -263,11 +406,35 @@ function App() {
           />
           <Suspense fallback={<RouteLoading label="Загрузка администрирования сервиса" />}>
             <ServiceAdminDashboard
+              navigationTarget={notificationNavigationTarget?.namespace === "service-admin" ? notificationNavigationTarget : null}
               onBack={routeActions.openApp}
               onToast={setToast}
             />
           </Suspense>
         </main>
+        {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
+      </div>
+    );
+  }
+
+  if (route.namespace === "app" && tenantSession.loading) {
+    return (
+      <div data-testid="route-app-loading">
+        <RouteLoading label="Проверка tenant-сессии" />
+      </div>
+    );
+  }
+
+  if (route.namespace === "app" && !tenantSession.authenticated) {
+    return (
+      <div data-testid="route-auth-login">
+        <Suspense fallback={<RouteLoading label="Загрузка авторизации" />}>
+          <AuthPage
+            onAuthSuccess={routeActions.completeAuth}
+            onNavigateLanding={routeActions.openLanding}
+            onStartOnboarding={routeActions.openOnboarding}
+          />
+        </Suspense>
         {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
       </div>
     );
@@ -283,6 +450,8 @@ function App() {
           onOpenAuth={routeActions.openAuth}
           onOpenLanding={routeActions.openLanding}
           onOpenServiceAdmin={routeActions.openServiceAdmin}
+          getNotificationActionAvailability={getNotificationActionAvailability}
+          onNavigateNotificationAction={handleNotificationNavigation}
           onOutbound={handleOutboundRequest}
           onRoleMode={handleRoleModeChange}
           onToast={setToast}
@@ -301,6 +470,7 @@ function App() {
             ) : null}
             <DialogWorkspace
               access={access}
+              assignees={assignees}
               aiSuggestions={visibleAiSuggestions}
               allConversations={conversationItems}
               attachments={attachments}
@@ -319,6 +489,7 @@ function App() {
               onCloseDialog={handleClose}
               onConversationSelect={handleConversationSelect}
               onDialogAction={handleDialogAction}
+              onAssignment={(payload) => applyConversationAssignment(selected.id, payload)}
               onFilter={setFilter}
               onQuery={setQuery}
               onQueueFilterChange={updateQueueFilter}
@@ -354,7 +525,9 @@ function App() {
             roleMode={roleMode}
             onRoleMode={handleRoleModeChange}
             onTopicOptionsChange={setTopicOptions}
+            operator={tenantSession.operator}
             topicOptions={topicOptions}
+            navigationTarget={notificationNavigationTarget?.namespace === "app" && notificationNavigationTarget.section === section ? notificationNavigationTarget : null}
           />
         )}
       </main>
@@ -387,6 +560,17 @@ function App() {
       {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
     </div>
   );
+}
+
+function buildNotificationNavigationState(resolvedTarget, item) {
+  return {
+    ...(resolvedTarget.detail ?? {}),
+    namespace: resolvedTarget.namespace,
+    section: resolvedTarget.section,
+    view: resolvedTarget.view,
+    notificationId: item?.id ?? "",
+    navigationKey: `${item?.id ?? resolvedTarget.section}:${Date.now()}`
+  };
 }
 
 export default App;

@@ -15,7 +15,7 @@ import {
   validateApiContractSnapshot,
   validateMigrationRollbackMetadata
 } from "../apps/api-gateway/src/operations/migration-rollback-check.worker.ts";
-import { migrationCandidates } from "../apps/api-gateway/src/operations/operations.fixtures.ts";
+import { migrationCandidates } from "../apps/api-gateway/src/operations/seed-catalog.ts";
 import { OperationsRepository } from "../apps/api-gateway/src/operations/operations.repository.ts";
 
 const readyMigration = migrationCandidates.find((item) => item.id === "mig-add-message-search-index")!;
@@ -139,7 +139,9 @@ describe("migration rollback-check tooling contracts", () => {
       script: "migration-rollback-check:verify"
     }]);
     assert.match(releaseChecklist, /migration-rollback-check:verify/);
+    assert.match(releaseChecklist, /notification:worker:once/);
     assert.match(packageJson.scripts["migration-rollback-check:verify"], /migration-rollback-check-contracts/);
+    assert.match(packageJson.scripts["notification:worker:once"], /notification-delivery-worker-smoke\.mjs/);
   });
 
   it("persists rollback-check result rows", () => {

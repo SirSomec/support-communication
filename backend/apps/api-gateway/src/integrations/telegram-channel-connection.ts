@@ -7,6 +7,7 @@ export interface TelegramConnectionRecord {
   botId: string | null;
   botToken: string;
   botUsername: string | null;
+  pollingOffset?: number;
   createdAt: string;
   status: "active" | "disabled";
   tenantId: string;
@@ -167,6 +168,7 @@ export async function saveTelegramConnectionRecord(
     botId: validated.botId,
     botToken,
     botUsername: validated.botUsername,
+    pollingOffset: existing?.pollingOffset ?? 0,
     createdAt: existing?.createdAt ?? now,
     status: "active",
     tenantId,

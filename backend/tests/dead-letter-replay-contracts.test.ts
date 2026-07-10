@@ -12,7 +12,7 @@ import {
   validateDeadLetterQueueOwnership,
   validateDeadLetterReplayIdempotency
 } from "../apps/api-gateway/src/operations/dead-letter-replay.worker.ts";
-import { deadLetterMessages } from "../apps/api-gateway/src/operations/operations.fixtures.ts";
+import { deadLetterMessages } from "../apps/api-gateway/src/operations/seed-catalog.ts";
 import { OperationsRepository } from "../apps/api-gateway/src/operations/operations.repository.ts";
 
 describe("dead-letter replay worker contracts", () => {

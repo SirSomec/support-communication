@@ -1,5 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiBody, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
+import { TenantOperatorOrServiceAdminGuard } from "../conversation/tenant-operator-or-service-admin.guard.js";
+import { RequireServiceAdminAction } from "../identity/service-admin-auth.js";
 import { TenantOperatorAuthGuard } from "../identity/tenant-operator-auth.guard.js";
 import { RequireTenantOperatorPermission, type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
 import { IntegrationService } from "./integration.service.js";
@@ -20,37 +22,74 @@ export class IntegrationController {
     return this.integrationService.fetchIntegrationWorkspace();
   }
 
+  @Get("capabilities")
+  @ApiOperation({
+    operationId: "fetchIntegrationCapabilities",
+    summary: "List backend integration capability snapshot for settings diagnostics"
+  })
+  @ApiOkResponse({ description: "Backend integration capability envelope" })
+  fetchIntegrationCapabilities() {
+    return this.integrationService.fetchIntegrationCapabilities();
+  }
+
   @Get("channels")
+  @UseGuards(TenantOperatorAuthGuard)
+  @RequireTenantOperatorPermission("settings.read")
   @ApiOperation({
     operationId: "listChannelConnections",
     summary: "List tenant channel connection instances"
   })
   @ApiOkResponse({ description: "Channel connection instances envelope" })
-  fetchChannelConnections(@Query() query: { type?: string }) {
-    return this.integrationService.fetchChannelConnections(query);
+  fetchChannelConnections(@Req() request: TenantOperatorRequest, @Query() query: { type?: string }) {
+    return this.integrationService.fetchChannelConnections(request.tenantOperatorContext?.tenantId ?? "", query);
   }
 
   @Post("channels")
+  @UseGuards(TenantOperatorAuthGuard)
+  @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     operationId: "createChannelConnection",
     summary: "Create a tenant channel connection instance"
   })
   @ApiOkResponse({ description: "Created channel connection envelope with masked credentials" })
-  createChannelConnection(@Body() payload: {
-    chatLimit?: number;
-    credentials?: Record<string, unknown>;
-    environment?: string;
-    name?: string;
-    routingQueueId?: string;
-    status?: string;
-    type?: string;
-    webhookUrl?: string;
-  }) {
-    return this.integrationService.createChannelConnection(payload);
+  createChannelConnection(
+    @Req() request: TenantOperatorRequest,
+    @Body() payload: {
+      chatLimit?: number;
+      credentials?: Record<string, unknown>;
+      environment?: string;
+      name?: string;
+      routingQueueId?: string;
+      status?: string;
+      type?: string;
+      webhookUrl?: string;
+    }
+  ) {
+    return this.integrationService.createChannelConnection(request.tenantOperatorContext?.tenantId ?? "", payload);
+  }
+
+  @Patch("channels/types/:type/status")
+  @UseGuards(TenantOperatorAuthGuard)
+  @RequireTenantOperatorPermission("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    operationId: "updateChannelTypeStatus",
+    summary: "Enable or disable every tenant connection of one channel type"
+  })
+  @ApiParam({ name: "type", description: "Channel type, for example telegram, sdk, vk or max" })
+  @ApiOkResponse({ description: "Updated aggregate channel status envelope with immutable audit evidence" })
+  updateChannelTypeStatus(
+    @Req() request: TenantOperatorRequest,
+    @Param("type") type: string,
+    @Body() payload: { enabled?: boolean; reason?: string }
+  ) {
+    return this.integrationService.updateChannelTypeStatus(request.tenantOperatorContext?.tenantId ?? "", type, payload);
   }
 
   @Patch("channels/:connectionId")
+  @UseGuards(TenantOperatorAuthGuard)
+  @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     operationId: "updateChannelConnection",
@@ -58,11 +97,17 @@ export class IntegrationController {
   })
   @ApiParam({ name: "connectionId", description: "Channel connection identifier" })
   @ApiOkResponse({ description: "Updated channel connection envelope with masked credentials" })
-  updateChannelConnection(@Param("connectionId") connectionId: string, @Body() payload: Record<string, unknown>) {
-    return this.integrationService.updateChannelConnection(connectionId, payload);
+  updateChannelConnection(
+    @Req() request: TenantOperatorRequest,
+    @Param("connectionId") connectionId: string,
+    @Body() payload: Record<string, unknown>
+  ) {
+    return this.integrationService.updateChannelConnection(request.tenantOperatorContext?.tenantId ?? "", connectionId, payload);
   }
 
   @Delete("channels/:connectionId")
+  @UseGuards(TenantOperatorAuthGuard)
+  @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     operationId: "deleteChannelConnection",
@@ -70,11 +115,17 @@ export class IntegrationController {
   })
   @ApiParam({ name: "connectionId", description: "Channel connection identifier" })
   @ApiOkResponse({ description: "Disabled channel connection envelope" })
-  deleteChannelConnection(@Param("connectionId") connectionId: string, @Body() payload: { reason?: string } = {}) {
-    return this.integrationService.deleteChannelConnection(connectionId, payload);
+  deleteChannelConnection(
+    @Req() request: TenantOperatorRequest,
+    @Param("connectionId") connectionId: string,
+    @Body() payload: { reason?: string } = {}
+  ) {
+    return this.integrationService.deleteChannelConnection(request.tenantOperatorContext?.tenantId ?? "", connectionId, payload);
   }
 
   @Post("channels/:connectionId/test")
+  @UseGuards(TenantOperatorAuthGuard)
+  @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     operationId: "testChannelConnectionInstance",
@@ -83,6 +134,7 @@ export class IntegrationController {
   @ApiParam({ name: "connectionId", description: "Channel connection identifier" })
   @ApiOkResponse({ description: "Queued channel connection test envelope" })
   testChannelConnectionInstance(
+    @Req() request: TenantOperatorRequest,
     @Param("connectionId") connectionId: string,
     @Body() payload: {
       environment?: string;
@@ -91,18 +143,20 @@ export class IntegrationController {
       recipient?: string;
     }
   ) {
-    return this.integrationService.testChannelConnectionInstance(connectionId, payload);
+    return this.integrationService.testChannelConnectionInstance(request.tenantOperatorContext?.tenantId ?? "", connectionId, payload);
   }
 
   @Get("channels/:connectionId/events")
+  @UseGuards(TenantOperatorAuthGuard)
+  @RequireTenantOperatorPermission("settings.read")
   @ApiOperation({
     operationId: "listChannelConnectionEvents",
     summary: "List channel connection audit and health events"
   })
   @ApiParam({ name: "connectionId", description: "Channel connection identifier" })
   @ApiOkResponse({ description: "Channel connection events envelope" })
-  fetchChannelConnectionEvents(@Param("connectionId") connectionId: string) {
-    return this.integrationService.fetchChannelConnectionEvents(connectionId);
+  fetchChannelConnectionEvents(@Req() request: TenantOperatorRequest, @Param("connectionId") connectionId: string) {
+    return this.integrationService.fetchChannelConnectionEvents(request.tenantOperatorContext?.tenantId ?? "", connectionId);
   }
 
   @Post("channel-tests")
@@ -120,6 +174,9 @@ export class IntegrationController {
   }
 
   @Post("api-keys/:keyId/rotate")
+  @UseGuards(TenantOperatorOrServiceAdminGuard)
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     description: "Queues public API key rotation; raw key material is never returned in the response.",
@@ -133,6 +190,9 @@ export class IntegrationController {
   }
 
   @Post("webhooks/deliveries/:deliveryId/replay")
+  @UseGuards(TenantOperatorOrServiceAdminGuard)
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     description: "Signed webhook delivery replay endpoint; original trace id is preserved and duplicate idempotency keys return the original replay descriptor.",
@@ -155,6 +215,9 @@ export class IntegrationController {
   }
 
   @Post("security/sessions/:sessionId/revoke")
+  @UseGuards(TenantOperatorOrServiceAdminGuard)
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "Security session revoke envelope" })
   revokeSecuritySession(@Param("sessionId") sessionId: string) {

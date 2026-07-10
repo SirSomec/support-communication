@@ -5,6 +5,7 @@ const SERVICE = "incidentService";
 export const incidentService = {
   async fetchIncidents(filters = {}) {
     return apiRequest("/incidents", {
+      authMode: "service-admin",
       operation: "fetchIncidents",
       query: filters,
       service: SERVICE
@@ -17,6 +18,7 @@ export const incidentService = {
     }
 
     return apiRequest(`/incidents/${encodeURIComponent(incidentId)}`, {
+      authMode: "service-admin",
       operation: "fetchIncidentDetail",
       service: SERVICE
     });
@@ -28,6 +30,7 @@ export const incidentService = {
     }
 
     return apiRequest(`/incidents/${encodeURIComponent(incidentId)}/updates`, {
+      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "addIncidentUpdate",

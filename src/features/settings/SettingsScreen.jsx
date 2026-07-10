@@ -1,6 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ProductScreen } from "../../ui.jsx";
-import { channelSettings, employeeChannelRules, topicDirectorySeed } from "../../data.js";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { AdminWorkspaces } from "./AdminWorkspaces.jsx";
 import { ChannelConnectionsPanel } from "./ChannelConnectionsPanel.jsx";
@@ -10,18 +9,59 @@ import { SettingsAccessPanel } from "./SettingsAccessPanel.jsx";
 import { SettingsShell } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
 import { TopicDirectoryPanel } from "./TopicDirectoryPanel.jsx";
+import { settingsService } from "../../services/settingsService.js";
 
-export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, onTopicOptionsChange }) {
-  const [activeTab, setActiveTab] = useState("connections");
+export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, onTopicOptionsChange, navigationTarget = null }) {
+  const requestedTab = resolveSettingsNavigationTab(navigationTarget);
+  const [activeTab, setActiveTab] = useState(requestedTab || "connections");
   const [connectionSummary, setConnectionSummary] = useState({ active: 0, total: 0 });
-  const canEditSettings = access.canManageSettings;
-  const topicTotals = useMemo(() => countTopics(topicDirectorySeed), []);
+  const [employeeSummary, setEmployeeSummary] = useState({ total: 0 });
+  const [topicTotals, setTopicTotals] = useState({ active: 0, archived: 0, total: 0 });
+  const [rulesSummary, setRulesSummary] = useState({ active: 0 });
+  const [loadError, setLoadError] = useState("");
+  const canEditSettings = access.canManageSettings && !loadError;
+
+  useEffect(() => {
+    if (requestedTab && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+    }
+  }, [activeTab, requestedTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSummaries() {
+      const [employees, topics, rules] = await Promise.all([
+        settingsService.fetchEmployees(),
+        settingsService.fetchTopics(),
+        settingsService.fetchRules()
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      if ([employees, topics, rules].some((response) => response.status !== "ok")) {
+        setLoadError("Не удалось загрузить настройки из backend.");
+        return;
+      }
+
+      setEmployeeSummary({ total: employees.data?.employees?.length ?? 0 });
+      setTopicTotals(topics.data?.totals ?? { active: 0, archived: 0, total: 0 });
+      setRulesSummary({ active: rules.data?.totals?.active ?? 0 });
+    }
+
+    loadSummaries();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const summaries = {
     connections: `${connectionSummary.total} подключений, ${connectionSummary.active} активных`,
-    employees: `${employeeChannelRules.length} сотрудников, роли и лимиты`,
+    employees: `${employeeSummary.total} сотрудников, роли и лимиты`,
     topics: `${topicTotals.active} активных / ${topicTotals.archived} архив`,
-    rules: "4 активных правила"
+    rules: `${rulesSummary.active} активных правил`
   };
 
   return (
@@ -30,16 +70,18 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, 
       subtitle="Подключения, сотрудники, справочник тематик и правила обработки обращений."
       onBack={onBack}
       stateItems={createScreenStateItems({
-        total: channelSettings.length,
-        empty: `${channelSettings.length} каналов`,
+        total: connectionSummary.total,
+        empty: `${connectionSummary.total} каналов`,
         emptyWhenZero: "каналы не настроены",
-        errors: 0,
-        errorLabel: "критичных ошибок нет"
+        errors: loadError ? 1 : 0,
+        errorLabel: loadError || "критичных ошибок нет"
       })}
     >
+      {loadError ? <div className="entity-empty"><strong>{loadError}</strong><span>Изменения заблокированы до восстановления backend.</span></div> : null}
       <SettingsAccessPanel
         canEditSettings={canEditSettings}
         onRoleMode={onRoleMode}
+        onToast={onToast}
         roleMode={roleMode}
       />
 
@@ -50,6 +92,8 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, 
               <ChannelConnectionsPanel
                 access={access}
                 canEditSettings={canEditSettings}
+                focusChannelType={navigationTarget?.tab === "connections" ? navigationTarget.channelType : ""}
+                focusConnectionId={navigationTarget?.tab === "connections" ? navigationTarget.connectionId : ""}
                 onSummaryChange={setConnectionSummary}
                 onToast={onToast}
               />
@@ -101,17 +145,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, 
   );
 }
 
-function countTopics(directory) {
-  return directory.reduce((totals, group) => {
-    group.branches.forEach((branch) => {
-      branch.children.forEach((topic) => {
-        if (topic.archived) {
-          totals.archived += 1;
-        } else {
-          totals.active += 1;
-        }
-      });
-    });
-    return totals;
-  }, { active: 0, archived: 0 });
+function resolveSettingsNavigationTab(navigationTarget) {
+  const tab = typeof navigationTarget?.tab === "string" ? navigationTarget.tab : "";
+  return ["connections", "employees", "topics", "rules"].includes(tab) ? tab : "";
 }

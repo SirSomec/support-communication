@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { resolveReportStoreFile } from "../apps/api-gateway/src/reports/bootstrap.ts";
 import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
+import { bootstrapReportState, exportJobFixtures } from "../apps/api-gateway/src/reports/seed.ts";
 
 describe("phase 5 reports, exports and metric definition backend contracts", () => {
   it("persists tenant-scoped metric definitions through the report repository", () => {
@@ -369,7 +370,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     }
   });
 
-  it("returns the report workspace read model with metric definitions and rescue rows", async () => {
+  it("returns an honest empty live workspace when no persisted tenant conversations exist", async () => {
     const reports = new ReportService();
 
     const workspace = await reports.fetchReportWorkspace({
@@ -380,17 +381,19 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
 
     assert.equal(workspace.service, "reportService");
     assert.equal(workspace.status, "ok");
-    assert.equal(workspace.partial, true);
+    assert.equal(workspace.partial, false);
     assert.equal(workspace.meta.source, "api");
     assert.equal(workspace.data.metricDefinitionVersion, "metrics/v1");
     assert.deepEqual(workspace.data.filters, { channel: "VK", period: "today", reportType: "SLA" });
-    assert.ok(workspace.data.rows.some((row) => row.metric === "SLA выполнен"));
-    assert.ok(workspace.data.bars.some(([channel]) => channel === "VK"));
-    assert.ok(workspace.data.chartBlocks.some((chart) => chart.id === "operator-load"));
+    assert.equal(workspace.data.source, "tenant_conversations");
+    assert.equal(workspace.data.rows.length, 4);
+    assert.equal(workspace.data.rows.every((row) => ["0", "00:00", "0%"].includes(row.today)), true);
+    assert.deepEqual(workspace.data.bars, []);
+    assert.equal(workspace.data.chartBlocks.some((chart) => chart.id === "operator-load"), false);
     assert.ok(workspace.data.columnOptions.some((column) => column.id === "metric" && column.locked));
-    assert.ok(workspace.data.rescueOutcomeSummary.some((item) => item.label === "Спасено"));
-    assert.ok(workspace.data.rescueReportRows.every((row) => "client" in row && "timer" in row && "outcome" in row));
-    assert.ok(workspace.data.exportJobs.length > 0);
+    assert.deepEqual(workspace.data.rescueOutcomeSummary, []);
+    assert.deepEqual(workspace.data.rescueReportRows, []);
+    assert.deepEqual(workspace.data.exportJobs, []);
   });
 
   it("executes current rescue report metrics as a deterministic query", async () => {
@@ -637,7 +640,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
   });
 
   it("retries export jobs and exposes permission-aware file descriptors", async () => {
-    const reports = new ReportService();
+    const reports = new ReportService(reportRepositoryWithExportFixtures());
 
     const running = await reports.retryReportExport({
       jobId: "export-2420",
@@ -696,7 +699,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
   });
 
   it("persists immutable report export retry audit events for failed and expired descriptors", async () => {
-    const repository = ReportRepository.inMemory();
+    const repository = reportRepositoryWithExportFixtures();
     const reports = new ReportService(repository);
 
     const failedRetry = await reports.retryReportExport({
@@ -832,6 +835,128 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.equal(descriptor.data.permissionRequired, "reports.export");
     assert.match(String(descriptor.data.downloadUrl), /^https:\/\/reports\.local\/download\/export-json-006\/conversation-report\.json/);
     assert.equal(JSON.stringify(descriptor.data).includes("reports/tenant-volga/export-json-006/report.json"), false);
+  });
+
+  it("returns downloadable report export file bytes from server-owned object storage", async () => {
+    const repository = ReportRepository.inMemory();
+    repository.saveExportJob({
+      auditId: "evt_report_download_runtime",
+      backendQueueId: "report_queue_download_runtime",
+      columns: ["metric", "today"],
+      createdAt: "2026-07-04T09:00:00.000Z",
+      filters: { tenantId: "tenant-volga" },
+      format: "CSV",
+      id: "export-download-runtime",
+      metricDefinitionVersion: "metrics/v1",
+      name: "Download runtime",
+      period: "today",
+      progress: 100,
+      queue: "report-export",
+      requestedBy: "operator-anna",
+      rows: 2,
+      status: "Ready",
+      statusKey: "ready"
+    });
+    repository.saveReportFileDescriptor({
+      checksum: "sha256:download-runtime",
+      contentType: "text/csv",
+      createdAt: "2026-07-04T09:01:00.000Z",
+      fileName: "download-runtime.csv",
+      format: "CSV",
+      id: "file-export-download-runtime",
+      jobId: "export-download-runtime",
+      metricDefinitionVersion: "metrics/v1",
+      objectKey: "reports/tenant-volga/export-download-runtime/download-runtime.csv",
+      sizeBytes: 20,
+      tenantId: "tenant-volga",
+      writtenAt: "2026-07-04T09:01:00.000Z"
+    });
+    const reports = new ReportService(repository, {
+      objectStorage: {
+        async getObject(input) {
+          assert.deepEqual(input, {
+            objectKey: "reports/tenant-volga/export-download-runtime/download-runtime.csv"
+          });
+          return {
+            body: "metric,today\r\nNew,486",
+            contentType: "text/csv",
+            sizeBytes: 20
+          };
+        }
+      }
+    });
+
+    const download = await reports.getExportFileDownload("export-download-runtime", {
+      canDownload: true,
+      tenantId: "tenant-volga"
+    });
+
+    assert.equal(download.status, "ok");
+    assert.equal(download.data.fileName, "download-runtime.csv");
+    assert.equal(download.data.contentType, "text/csv");
+    assert.equal(download.data.sizeBytes, 20);
+    assert.equal(download.data.objectKeyExposed, false);
+    assert.equal(Buffer.isBuffer(download.data.body), true);
+    assert.equal(download.data.body.toString("utf8"), "metric,today\r\nNew,486");
+    assert.equal(JSON.stringify(download.data).includes("reports/tenant-volga"), false);
+  });
+
+  it("materializes ready report export downloads when the file descriptor is missing", async () => {
+    const repository = ReportRepository.inMemory();
+    repository.saveExportJob({
+      auditId: "evt_report_lazy_download",
+      backendQueueId: "report_queue_lazy_download",
+      columns: ["metric", "today"],
+      createdAt: "2026-07-04T09:15:00.000Z",
+      filters: { tenantId: "tenant-volga" },
+      format: "XLSX",
+      id: "export-lazy-download",
+      metricDefinitionVersion: "metrics/v1",
+      name: "Lazy download",
+      period: "today",
+      progress: 100,
+      queue: "report-export",
+      requestedBy: "operator-anna",
+      rows: 5,
+      status: "Ready",
+      statusKey: "ready"
+    });
+    const objects = new Map();
+    const reports = new ReportService(repository, {
+      objectStorage: {
+        async getObject(input) {
+          return objects.get(input.objectKey);
+        },
+        async putObject(input) {
+          const stored = {
+            body: input.body,
+            contentType: input.contentType,
+            sizeBytes: Buffer.byteLength(input.body)
+          };
+          objects.set(input.objectKey, stored);
+          return {
+            checksum: "sha256:lazy-download",
+            sizeBytes: stored.sizeBytes,
+            writtenAt: "2026-07-04T09:16:00.000Z"
+          };
+        }
+      }
+    });
+
+    const download = await reports.getExportFileDownload("export-lazy-download", {
+      canDownload: true,
+      tenantId: "tenant-volga"
+    });
+    const descriptor = repository.findReportFileDescriptor("export-lazy-download");
+
+    assert.equal(download.status, "ok");
+    assert.equal(download.data.fileName, "export-lazy-download.xlsx");
+    assert.equal(download.data.contentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    assert.equal(Buffer.isBuffer(download.data.body), true);
+    assert.equal(descriptor?.objectKey, "reports/tenant-volga/export-lazy-download/export-lazy-download.xlsx");
+    assert.equal(descriptor?.checksum, "sha256:lazy-download");
+    assert.equal(descriptor?.tenantId, "tenant-volga");
+    assert.equal(JSON.stringify(download.data).includes("reports/tenant-volga"), false);
   });
 
   it("clears stale report file descriptors when retrying failed exports", async () => {
@@ -980,7 +1105,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.equal(sameTenant.status, "ok");
     assert.equal(sameTenant.data.fileName, "conversation-report.json");
     assert.equal(foreignTenant.status, "not_found");
-    assert.equal(foreignTenant.error?.code, "report_export_file_descriptor_not_found");
+    assert.equal(foreignTenant.error?.code, "report_export_not_found");
     assert.equal(JSON.stringify(foreignTenant).includes("reports.local/download"), false);
   });
 
@@ -1027,22 +1152,31 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
 
     assert.match(controller, /@Post\("templates"\)/);
     assert.match(controller, /saveSavedReportTemplate\(@Body\(\) payload:/);
-    assert.match(controller, /@Req\(\) request: ServiceAdminRequest/);
+    assert.match(controller, /@Req\(\) request: TenantOperatorRequest & ServiceAdminRequest/);
     assert.match(controller, /return this\.reportService\.saveSavedReportTemplate\(payload, reportContextFromServiceAdminRequest\(request\)\);/);
   });
 
   it("routes report file descriptors with server-owned download context", () => {
     const controller = readFileSync(new URL("../apps/api-gateway/src/reports/report.controller.ts", import.meta.url), "utf8");
 
-    assert.match(controller, /getExportFileDescriptor\(@Param\("jobId"\) jobId: string, @Req\(\) request: ServiceAdminRequest\)/);
+    assert.match(controller, /getExportFileDescriptor\(@Param\("jobId"\) jobId: string, @Req\(\) request: TenantOperatorRequest & ServiceAdminRequest\)/);
     assert.match(controller, /return this\.reportService\.getExportFileDescriptor\(jobId, \{ canDownload: true, \.\.\.reportContextFromServiceAdminRequest\(request\) \}\);/);
+  });
+
+  it("routes report export downloads through server-owned object storage context", () => {
+    const controller = readFileSync(new URL("../apps/api-gateway/src/reports/report.controller.ts", import.meta.url), "utf8");
+
+    assert.match(controller, /@Get\("exports\/:jobId\/download"\)/);
+    assert.match(controller, /getExportFileDownload\(jobId, \{ canDownload: true, \.\.\.reportContextFromServiceAdminRequest\(request\) \}\)/);
+    assert.match(controller, /Content-Disposition/);
+    assert.match(controller, /new StreamableFile\(envelope\.data\.body as Buffer\)/);
   });
 
   it("routes saved report template reads through server-owned visibility context", () => {
     const controller = readFileSync(new URL("../apps/api-gateway/src/reports/report.controller.ts", import.meta.url), "utf8");
 
     assert.match(controller, /@Get\("templates\/:templateId"\)/);
-    assert.match(controller, /getSavedReportTemplate\(@Param\("templateId"\) templateId: string, @Req\(\) request: ServiceAdminRequest\)/);
+    assert.match(controller, /getSavedReportTemplate\(@Param\("templateId"\) templateId: string, @Req\(\) request: TenantOperatorRequest & ServiceAdminRequest\)/);
     assert.match(controller, /return this\.reportService\.getSavedReportTemplate\(templateId, reportContextFromServiceAdminRequest\(request\)\);/);
   });
 
@@ -1271,3 +1405,9 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     ]);
   });
 });
+
+function reportRepositoryWithExportFixtures(): ReportRepository {
+  return ReportRepository.inMemory(bootstrapReportState({
+    exportJobs: structuredClone(exportJobFixtures)
+  }));
+}

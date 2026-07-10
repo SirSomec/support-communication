@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { makeAuditId } from "./backend-ids.js";
-import { permissionRoles } from "./identity.fixtures.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
 import { IdentityRepository, type IdentityTenantUser } from "./identity.repository.js";
 
 const SERVICE = "settingsService";
-const DEFAULT_TENANT_ID = "tenant-northstar";
 const supportedChannels = ["SDK", "Telegram", "MAX", "VK"];
 
 interface EmployeeSettingsOverlay {
@@ -41,6 +39,11 @@ interface GroupMutationPayload {
   memberIds?: string[];
   name?: string;
   scope?: string;
+  tenantId?: string;
+}
+
+interface EmployeeTenantOptions {
+  tenantId?: string;
 }
 
 interface EmployeeGroup {
@@ -49,12 +52,13 @@ interface EmployeeGroup {
   memberIds: string[];
   name: string;
   scope: string;
+  tenantId: string;
   updatedAt: string;
 }
 
 export class SettingsEmployeeService {
   private readonly employeeSettings = new Map<string, EmployeeSettingsOverlay>();
-  private readonly groups = new Map<string, EmployeeGroup>(defaultGroups.map((group) => [group.id, { ...group, channels: [...group.channels], memberIds: [...group.memberIds] }]));
+  private readonly groups = new Map<string, EmployeeGroup>();
   private readonly auditEvents: Array<Record<string, unknown>> = [];
 
   constructor(private readonly identityRepository = IdentityRepository.default()) {}
@@ -65,6 +69,10 @@ export class SettingsEmployeeService {
 
   async fetchEmployees(filters: { groupId?: string; query?: string; roleKey?: string; status?: string; tenantId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = normalizeTenantId(filters.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope("fetchEmployees");
+    }
+
     const users = await this.identityRepository.findTenantUsers(tenantId);
     const employees = users.map((user) => this.toEmployee(user));
     const filtered = employees
@@ -97,8 +105,8 @@ export class SettingsEmployeeService {
       meta: apiMeta({ filters: { ...filters, tenantId } }),
       data: {
         employees: filtered,
-        groups: this.listGroups(),
-        roles: buildRoleReadModel(),
+        groups: this.listGroups(tenantId),
+        roles: await this.buildRoleReadModel(),
         supportedChannels,
         totals: {
           all: employees.length,
@@ -113,6 +121,10 @@ export class SettingsEmployeeService {
 
   async inviteEmployee(payload: EmployeeInvitePayload = {}, options: { tenantId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = normalizeTenantId(payload.tenantId ?? options.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope("inviteEmployee");
+    }
+
     const email = String(payload.email ?? "").trim().toLowerCase();
     const name = String(payload.name ?? "").trim();
     if (!email || !name) {
@@ -143,6 +155,11 @@ export class SettingsEmployeeService {
       supportNotes: "Invited from tenant settings."
     };
     const saved = await this.identityRepository.saveTenantUser(user);
+    const inviteToken = await this.identityRepository.createInviteToken({
+      code: `invite_${randomUUID()}`,
+      email,
+      tenantId
+    });
     this.employeeSettings.set(saved.id, {
       canOverride: roleKey !== "employee",
       channels: ["SDK", "Telegram"],
@@ -151,7 +168,7 @@ export class SettingsEmployeeService {
       roleKey,
       sensitiveData: roleKey !== "employee"
     });
-    this.syncGroupMember(groupId, saved.id);
+    this.syncGroupMember(groupId, saved.id, saved.tenantId);
 
     return createEnvelope({
       service: SERVICE,
@@ -160,15 +177,27 @@ export class SettingsEmployeeService {
       meta: apiMeta({ tenantId }),
       data: {
         auditEvent: this.persistAuditEvent(auditEvent("settings.employee.invite", tenantId, saved.id, "Employee invited from settings", now)),
-        employee: this.toEmployee(saved)
+        employee: this.toEmployee(saved),
+        inviteDescriptor: {
+          code: inviteToken.code,
+          deliveryState: "queued",
+          email: inviteToken.email,
+          expiresAt: inviteToken.expiresAt,
+          id: inviteToken.id,
+          tenantId: inviteToken.tenantId
+        }
       }
     });
   }
 
-  async updateEmployee(employeeId: string, payload: EmployeeMutationPayload = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async updateEmployee(employeeId: string, payload: EmployeeMutationPayload = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const user = await this.identityRepository.findTenantUser(employeeId);
     if (!user) {
       return notFoundEnvelope("updateEmployee", employeeId);
+    }
+    const tenantMismatch = validateEmployeeTenant("updateEmployee", user, options.tenantId);
+    if (tenantMismatch) {
+      return tenantMismatch;
     }
 
     const current = this.getEmployeeSettings(user);
@@ -190,7 +219,7 @@ export class SettingsEmployeeService {
       status: payload.status ?? user.status
     });
     this.employeeSettings.set(saved.id, next);
-    this.syncGroupMember(next.groupId, saved.id);
+    this.syncGroupMember(next.groupId, saved.id, saved.tenantId);
 
     return createEnvelope({
       service: SERVICE,
@@ -204,10 +233,14 @@ export class SettingsEmployeeService {
     });
   }
 
-  async resetEmployeePassword(employeeId: string, payload: { reason?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async resetEmployeePassword(employeeId: string, payload: { reason?: string } = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const user = await this.identityRepository.findTenantUser(employeeId);
     if (!user) {
       return notFoundEnvelope("resetEmployeePassword", employeeId);
+    }
+    const tenantMismatch = validateEmployeeTenant("resetEmployeePassword", user, options.tenantId);
+    if (tenantMismatch) {
+      return tenantMismatch;
     }
 
     const saved = await this.identityRepository.saveTenantUser({
@@ -230,10 +263,14 @@ export class SettingsEmployeeService {
     });
   }
 
-  async resetEmployeeMfa(employeeId: string, payload: { reason?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async resetEmployeeMfa(employeeId: string, payload: { reason?: string } = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const user = await this.identityRepository.findTenantUser(employeeId);
     if (!user) {
       return notFoundEnvelope("resetEmployeeMfa", employeeId);
+    }
+    const tenantMismatch = validateEmployeeTenant("resetEmployeeMfa", user, options.tenantId);
+    if (tenantMismatch) {
+      return tenantMismatch;
     }
 
     const saved = await this.identityRepository.saveTenantUser({ ...user, mfa: "reset_pending" });
@@ -249,10 +286,14 @@ export class SettingsEmployeeService {
     });
   }
 
-  async deactivateEmployee(employeeId: string, payload: { reason?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async deactivateEmployee(employeeId: string, payload: { reason?: string } = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const user = await this.identityRepository.findTenantUser(employeeId);
     if (!user) {
       return notFoundEnvelope("deactivateEmployee", employeeId);
+    }
+    const tenantMismatch = validateEmployeeTenant("deactivateEmployee", user, options.tenantId);
+    if (tenantMismatch) {
+      return tenantMismatch;
     }
 
     if (this.getEmployeeSettings(user).roleKey === "admin") {
@@ -285,58 +326,76 @@ export class SettingsEmployeeService {
       operation: "fetchRoles",
       traceId: identityTraceId(SERVICE, "fetchRoles"),
       meta: apiMeta(),
-      data: { roles: buildRoleReadModel() }
+      data: { roles: await this.buildRoleReadModel() }
     });
   }
 
-  async fetchGroups(): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async fetchGroups(options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = normalizeTenantId(options.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope("fetchGroups");
+    }
+
     return createEnvelope({
       service: SERVICE,
       operation: "fetchGroups",
       traceId: identityTraceId(SERVICE, "fetchGroups"),
-      meta: apiMeta(),
-      data: { groups: this.listGroups() }
+      meta: apiMeta({ tenantId }),
+      data: { groups: this.listGroups(tenantId) }
     });
   }
 
-  async createGroup(payload: GroupMutationPayload = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const name = String(payload.name ?? "").trim();
-    if (!name) {
-      return invalidEnvelope("createGroup", "group_name_required", "Group name is required.", {});
+  async createGroup(payload: GroupMutationPayload = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = normalizeTenantId(payload.tenantId ?? options.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope("createGroup");
     }
 
+    const name = String(payload.name ?? "").trim();
+    if (!name) {
+      return invalidEnvelope("createGroup", "group_name_required", "Group name is required.", { tenantId });
+    }
+
+    this.ensureDefaultGroupsForTenant(tenantId);
     const group: EmployeeGroup = {
       channels: normalizeChannels(payload.channels ?? supportedChannels),
       id: `group-${slugify(name)}-${randomUUID().slice(0, 8)}`,
       memberIds: payload.memberIds ?? [],
       name,
       scope: String(payload.scope ?? "Tenant support").trim(),
+      tenantId,
       updatedAt: new Date().toISOString()
     };
-    this.groups.set(group.id, group);
+    this.groups.set(groupKey(tenantId, group.id), group);
 
     return createEnvelope({
       service: SERVICE,
       operation: "createGroup",
       traceId: identityTraceId(SERVICE, "createGroup"),
-      meta: apiMeta({ groupId: group.id }),
+      meta: apiMeta({ groupId: group.id, tenantId }),
       data: {
-        auditEvent: this.persistAuditEvent(auditEvent("settings.group.create", DEFAULT_TENANT_ID, group.id, "Employee group created")),
+        auditEvent: this.persistAuditEvent(auditEvent("settings.group.create", tenantId, group.id, "Employee group created")),
         group
       }
     });
   }
 
-  async updateGroup(groupId: string, payload: GroupMutationPayload = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const group = this.groups.get(groupId);
+  async updateGroup(groupId: string, payload: GroupMutationPayload = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = normalizeTenantId(payload.tenantId ?? options.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope("updateGroup", { groupId });
+    }
+
+    this.ensureDefaultGroupsForTenant(tenantId);
+    const group = this.groups.get(groupKey(tenantId, groupId));
     if (!group) {
       return createEnvelope({
         service: SERVICE,
         operation: "updateGroup",
         traceId: identityTraceId(SERVICE, "updateGroup"),
         status: "not_found",
-        meta: apiMeta({ groupId }),
-        data: { groupId },
+        meta: apiMeta({ groupId, tenantId }),
+        data: { groupId, tenantId },
         error: { code: "group_not_found", message: `Group ${groupId} was not found.` }
       });
     }
@@ -349,15 +408,15 @@ export class SettingsEmployeeService {
       scope: String(payload.scope ?? group.scope).trim() || group.scope,
       updatedAt: new Date().toISOString()
     };
-    this.groups.set(groupId, updated);
+    this.groups.set(groupKey(tenantId, groupId), updated);
 
     return createEnvelope({
       service: SERVICE,
       operation: "updateGroup",
       traceId: identityTraceId(SERVICE, "updateGroup"),
-      meta: apiMeta({ groupId }),
+      meta: apiMeta({ groupId, tenantId }),
       data: {
-        auditEvent: this.persistAuditEvent(auditEvent("settings.group.update", DEFAULT_TENANT_ID, groupId, "Employee group updated")),
+        auditEvent: this.persistAuditEvent(auditEvent("settings.group.update", tenantId, groupId, "Employee group updated")),
         group: updated
       }
     });
@@ -365,7 +424,7 @@ export class SettingsEmployeeService {
 
   private toEmployee(user: IdentityTenantUser): Record<string, unknown> {
     const settings = this.getEmployeeSettings(user);
-    const group = this.groups.get(settings.groupId);
+    const group = this.getGroup(user.tenantId, settings.groupId);
     return {
       id: user.id,
       tenantId: user.tenantId,
@@ -411,25 +470,45 @@ export class SettingsEmployeeService {
       sensitiveData: roleKey !== "employee"
     };
     this.employeeSettings.set(user.id, settings);
-    this.syncGroupMember(settings.groupId, user.id);
+    this.syncGroupMember(settings.groupId, user.id, user.tenantId);
     return settings;
   }
 
-  private listGroups(): EmployeeGroup[] {
+  private listGroups(tenantId: string): EmployeeGroup[] {
+    this.ensureDefaultGroupsForTenant(tenantId);
     return Array.from(this.groups.values()).map((group) => ({
       ...group,
       channels: [...group.channels],
       memberIds: [...group.memberIds]
-    }));
+    })).filter((group) => group.tenantId === tenantId);
   }
 
-  private syncGroupMember(groupId: string, employeeId: string): void {
-    const group = this.groups.get(groupId);
+  private getGroup(tenantId: string, groupId: string): EmployeeGroup | undefined {
+    this.ensureDefaultGroupsForTenant(tenantId);
+    return this.groups.get(groupKey(tenantId, groupId));
+  }
+
+  private ensureDefaultGroupsForTenant(tenantId: string): void {
+    for (const group of defaultGroups) {
+      const key = groupKey(tenantId, group.id);
+      if (!this.groups.has(key)) {
+        this.groups.set(key, {
+          ...group,
+          channels: [...group.channels],
+          memberIds: [...group.memberIds],
+          tenantId
+        });
+      }
+    }
+  }
+
+  private syncGroupMember(groupId: string, employeeId: string, tenantId: string): void {
+    const group = this.getGroup(tenantId, groupId);
     if (!group || group.memberIds.includes(employeeId)) {
       return;
     }
 
-    this.groups.set(groupId, {
+    this.groups.set(groupKey(group.tenantId, groupId), {
       ...group,
       memberIds: [...group.memberIds, employeeId],
       updatedAt: new Date().toISOString()
@@ -440,22 +519,27 @@ export class SettingsEmployeeService {
     this.auditEvents.push({ ...event });
     return event;
   }
+
+  private async buildRoleReadModel() {
+    const permissionRoles = await this.identityRepository.listPermissionRoles();
+    return permissionRoles.map((role) => ({
+      key: role.key,
+      name: roleNameFromKey(role.key),
+      description: role.description,
+      actions: role.actions,
+      groupIds: role.groupIds
+    }));
+  }
 }
 
-const defaultGroups: EmployeeGroup[] = [
+const defaultGroups: Array<Omit<EmployeeGroup, "tenantId">> = [
   { channels: ["SDK", "Telegram"], id: "group-line-1", memberIds: [], name: "Line 1", scope: "First response", updatedAt: "2026-07-01T00:00:00.000Z" },
   { channels: ["Telegram", "MAX", "VK"], id: "group-vip", memberIds: [], name: "VIP support", scope: "High value clients", updatedAt: "2026-07-01T00:00:00.000Z" },
   { channels: supportedChannels, id: "group-admins", memberIds: [], name: "Administrators", scope: "Settings and audit", updatedAt: "2026-07-01T00:00:00.000Z" }
 ];
 
-function buildRoleReadModel() {
-  return permissionRoles.map((role) => ({
-    key: role.key,
-    name: roleNameFromKey(role.key),
-    description: role.description,
-    actions: role.actions,
-    groupIds: role.groupIds
-  }));
+function groupKey(tenantId: string, groupId: string): string {
+  return `${tenantId}:${groupId}`;
 }
 
 function auditEvent(action: string, tenantId: string, targetId: string, reason: string, at = new Date().toISOString()) {
@@ -495,8 +579,43 @@ function notFoundEnvelope(operation: string, employeeId: string) {
   });
 }
 
+function validateEmployeeTenant(operation: string, user: IdentityTenantUser, expectedTenantId?: string): BackendEnvelope<Record<string, unknown>> | null {
+  const tenantId = String(expectedTenantId ?? "").trim();
+  if (!tenantId) {
+    return tenantContextRequiredEnvelope(operation, { employeeId: user.id });
+  }
+
+  if (tenantId === user.tenantId) {
+    return null;
+  }
+
+  return createEnvelope({
+    service: SERVICE,
+    operation,
+    traceId: identityTraceId(SERVICE, operation),
+    status: "denied",
+    meta: apiMeta({ employeeId: user.id, tenantId }),
+    data: {
+      employeeId: user.id,
+      requestedTenantId: tenantId,
+      tenantId: user.tenantId
+    },
+    error: {
+      code: "employee_tenant_mismatch",
+      message: `Employee ${user.id} does not belong to tenant ${tenantId}.`
+    }
+  });
+}
+
 function normalizeTenantId(value: unknown): string {
-  return String(value ?? DEFAULT_TENANT_ID).trim() || DEFAULT_TENANT_ID;
+  return String(value ?? "").trim();
+}
+
+function tenantContextRequiredEnvelope(operation: string, data: Record<string, unknown> = {}) {
+  return invalidEnvelope(operation, "tenant_context_required", "Tenant context is required for settings operations.", {
+    ...data,
+    tenantId: null
+  });
 }
 
 function normalizeRoleKey(value: unknown): string {

@@ -3,6 +3,7 @@ import { createEnvelope, type BackendEnvelope } from "@support-communication/env
 import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import type { ConversationMessage, ConversationRecord } from "./conversation.types.js";
+import { recordClosedAppealHistory } from "./appeal-lifecycle.js";
 import {
   ConversationAssignmentConflictError,
   ConversationRepository,
@@ -537,6 +538,10 @@ export class ConversationService {
     conversation.topic = nextTopic || conversation.topic;
     if (nextStatus === "closed") {
       conversation.resolutionOutcome = resolutionOutcome;
+      const closedAppeal = recordClosedAppealHistory(conversation, new Date().toISOString());
+      conversation.previous = closedAppeal.previous;
+      conversation.metadata = closedAppeal.metadata;
+      conversation.updatedAt = closedAppeal.updatedAt;
     } else if (nextStatus === "reopened") {
       conversation.resolutionOutcome = undefined;
     }

@@ -3,6 +3,7 @@ import { Check, Info, MoreHorizontal, UserRoundCheck, X } from "lucide-react";
 import { maskPhone, resolutionOutcomeLabels, statusLabels } from "../../app/dialogModel.js";
 import { Avatar } from "./Avatar.jsx";
 import { DialogActionMenu } from "./DialogActionMenu.jsx";
+import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 
 export function ChatHeader({
   access,
@@ -71,7 +72,10 @@ export function ChatHeader({
       <div className="chat-identity">
         <Avatar conversation={conversation} />
         <div>
-          <h1>{conversation.name}</h1>
+          <div className="chat-title-row">
+            <h1>{conversation.name}</h1>
+            <RepeatAppealBadge conversation={conversation} />
+          </div>
           <span>{visiblePhone}</span>
           <small
             className="assignment-owner"

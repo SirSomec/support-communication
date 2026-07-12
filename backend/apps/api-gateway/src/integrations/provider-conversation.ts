@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import {
+  resolveOrForkAppealConversation,
+  type AppealConversationMutation
+} from "../conversation/appeal-lifecycle.js";
 import type {
   ConversationLifecycleEvent,
   ConversationRepository,
@@ -12,7 +16,7 @@ const SERVICE = "integrationService";
 export interface ProviderConversationInput {
   channel: "MAX" | "VK";
   channelConnectionId: string;
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   displayName: string;
   providerConversationId: string;
   providerUserId?: string;
@@ -26,74 +30,94 @@ export async function resolveOrCreateProviderConversation(input: ProviderConvers
   const providerConversationId = required(input.providerConversationId);
   if (!tenantId || !connectionId || !providerConversationId) return null;
 
-  const id = providerConversationKey(tenantId, connectionId, providerConversationId);
-  const existing = await input.conversationRepository.findConversation(id);
-  if (existing) {
-    return existing.tenantId === tenantId && existing.channelConnectionId === connectionId ? existing : null;
-  }
-
+  const anchorId = providerConversationKey(tenantId, connectionId, providerConversationId);
   const displayName = required(input.displayName) || `${input.channel} ${providerConversationId}`;
-  const conversation: ConversationRecord = {
-    channel: input.channel,
-    channelConnectionId: connectionId,
-    clientSince: new Date().toISOString().slice(0, 10),
-    device: input.channel,
-    entry: input.channel,
-    id,
-    initials: initials(displayName),
-    language: "Unknown",
-    messages: [],
-    name: displayName,
-    phone: providerConversationId,
-    preview: "",
-    previous: [],
-    providerConversationId,
-    ...(required(input.providerUserId) ? { providerUserId: required(input.providerUserId) } : {}),
-    ...(required(input.queueId) ? { queueId: required(input.queueId) } : {}),
-    sla: "Active",
-    slaTone: "ok",
-    status: "active",
-    tags: [input.channel.toLowerCase(), `connection:${connectionId}`],
-    tenantId,
-    time: "now",
-    topic: `${input.channel} / Bot`
-  };
+
+  const resolved = await resolveOrForkAppealConversation({
+    anchorId,
+    conversationRepository: input.conversationRepository,
+    createInitial: () => ({
+      channel: input.channel,
+      channelConnectionId: connectionId,
+      clientSince: new Date().toISOString().slice(0, 10),
+      device: input.channel,
+      entry: input.channel,
+      id: anchorId,
+      initials: initials(displayName),
+      language: "Unknown",
+      messages: [],
+      name: displayName,
+      phone: providerConversationId,
+      preview: "",
+      previous: [],
+      providerConversationId,
+      ...(required(input.providerUserId) ? { providerUserId: required(input.providerUserId) } : {}),
+      ...(required(input.queueId) ? { queueId: required(input.queueId) } : {}),
+      sla: "Active",
+      slaTone: "ok",
+      status: "active",
+      tags: [input.channel.toLowerCase(), `connection:${connectionId}`],
+      tenantId,
+      time: "now",
+      topic: `${input.channel} / Bot`
+    }),
+    createMutation: (conversation, eventType = "conversation.created") =>
+      providerConversationMutation(conversation, input.channel, eventType),
+    tenantId
+  });
+
+  return resolved?.conversation ?? null;
+}
+
+export function providerConversationKey(tenantId: string, connectionId: string, providerConversationId: string): string {
+  const digest = createHash("sha256").update(`${tenantId}\0${connectionId}\0${providerConversationId}`).digest("base64url").slice(0, 32);
+  return `provider_${digest}`;
+}
+
+function providerConversationMutation(
+  conversation: ConversationRecord,
+  channel: "MAX" | "VK",
+  eventType: AppealConversationMutation["lifecycleEvent"]["eventType"] = "conversation.created"
+): AppealConversationMutation {
   const occurredAt = new Date().toISOString();
-  const traceId = getCurrentTraceId() ?? createRequestTraceId(SERVICE, "provider.conversation.created");
+  const traceId = getCurrentTraceId() ?? createRequestTraceId(SERVICE, eventType);
   const realtimeEvent: RealtimeEvent = {
-    data: { channel: input.channel.toLowerCase(), channelConnectionId: connectionId, direction: "inbound" },
+    data: {
+      channel: channel.toLowerCase(),
+      channelConnectionId: conversation.channelConnectionId,
+      direction: "inbound",
+      ...(conversation.metadata?.isRepeatAppeal ? { isRepeatAppeal: true } : {}),
+      ...(conversation.metadata?.parentConversationId ? { parentConversationId: conversation.metadata.parentConversationId } : {}),
+      ...(conversation.queueId ? { queueId: conversation.queueId } : {})
+    },
     eventId: `rt_${randomUUID()}`,
-    eventName: "conversation.created",
+    eventName: eventType === "conversation.updated" ? "conversation.updated" : "conversation.created",
     occurredAt,
-    resourceId: id,
+    resourceId: conversation.id,
     resourceType: "conversation",
     schemaVersion: "v1",
-    tenantId,
+    tenantId: conversation.tenantId,
     traceId
   };
   const lifecycleEvent: ConversationLifecycleEvent = {
     actorId: null,
     actorName: null,
     actorType: "client",
-    conversationId: id,
+    conversationId: conversation.id,
     data: realtimeEvent.data,
-    eventType: "conversation.created",
+    eventType,
     id: `lifecycle_${randomUUID()}`,
     ingestedAt: occurredAt,
     occurredAt,
-    reason: null,
+    reason: eventType === "conversation.created" && conversation.metadata?.isRepeatAppeal ? "repeat_appeal" : null,
     schemaVersion: "conversation-lifecycle/v1",
     source: "integration-service",
     sourceEventId: realtimeEvent.eventId,
-    tenantId,
+    tenantId: conversation.tenantId,
     traceId
   };
-  return (await input.conversationRepository.saveConversationMutation({ conversation, lifecycleEvent, realtimeEvent })).conversation;
-}
 
-export function providerConversationKey(tenantId: string, connectionId: string, providerConversationId: string): string {
-  const digest = createHash("sha256").update(`${tenantId}\0${connectionId}\0${providerConversationId}`).digest("base64url").slice(0, 32);
-  return `provider_${digest}`;
+  return { conversation, lifecycleEvent, realtimeEvent };
 }
 
 function required(value: unknown): string {

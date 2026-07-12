@@ -7,6 +7,7 @@ import {
   statusLabels
 } from "../../app/dialogModel.js";
 import { StatusBadge } from "../../ui.jsx";
+import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 import { Avatar } from "./Avatar.jsx";
 
 export function ConversationList({
@@ -149,6 +150,7 @@ export function ConversationList({
             <span className="queue-body">
               <span className="queue-title">
                 <strong>{conversation.name}</strong>
+                <RepeatAppealBadge compact conversation={conversation} />
                 <time>{conversation.time}</time>
               </span>
               <span className={`channel-chip ${conversation.channel.toLowerCase()}`}>{conversation.channel}</span>

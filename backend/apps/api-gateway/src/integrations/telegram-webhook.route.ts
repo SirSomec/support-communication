@@ -8,6 +8,10 @@ import type {
   ConversationRepository,
   RealtimeEvent
 } from "../conversation/conversation.repository.js";
+import {
+  resolveOrForkAppealConversation,
+  type AppealConversationMutation
+} from "../conversation/appeal-lifecycle.js";
 import type { ChannelConnectionStoredRecord, TelegramConnectionStoredRecord } from "./integration.repository.js";
 import { resolveConnectionRoutingQueue } from "./routing-queue.js";
 import { resolveTelegramTenantByWebhookSecret } from "./telegram-channel-connection.js";
@@ -23,7 +27,7 @@ export interface TelegramWebhookConfig {
 export interface TelegramWebhookRouteInput {
   autoAssignConversation?: (conversationId: string, tenantId: string) => Promise<BackendEnvelope<Record<string, unknown>>>;
   body: Record<string, unknown>;
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   headers: Record<string, string | undefined>;
   integrationRepository: TelegramConnectionReader;
@@ -194,8 +198,7 @@ function timingSafeEqualStrings(left: string, right: string): boolean {
 export async function resolveOrCreateTelegramConversation(input: {
   botId?: string;
   chatId: string;
-  conversationRepository: Pick<ConversationRepository, "findConversation"> &
-    Partial<Pick<ConversationRepository, "saveConversationMutation">>;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   displayName: string;
   queueId?: string;
   tenantId: string;
@@ -208,59 +211,49 @@ export async function resolveOrCreateTelegramConversation(input: {
     return null;
   }
 
-  const conversationId = telegramConversationId(tenantId, input.botId, chatId);
-  const existing = await input.conversationRepository.findConversation(conversationId);
-
-  if (existing) {
-    if (resolveConversationTenantId(existing) !== tenantId) {
-      return null;
-    }
-
-    return existing;
-  }
-
+  const anchorId = telegramConversationId(tenantId, input.botId, chatId);
   const legacy = await input.conversationRepository.findConversation(chatId);
-  if (legacy && resolveConversationTenantId(legacy) === tenantId) {
+  if (legacy && resolveConversationTenantId(legacy) === tenantId && legacy.status !== "closed") {
     return legacy;
   }
 
   const displayName = input.displayName.trim() || `Telegram ${chatId}`;
-  const conversation: ConversationRecord = {
-    channel: "Telegram",
-    clientSince: new Date().toISOString().slice(0, 10),
-    device: "Telegram",
-    entry: "Telegram",
-    id: conversationId,
-    initials: initialsFromName(displayName),
-    language: "Unknown",
-    messages: [],
-    name: displayName,
-    phone: chatId,
-    preview: "",
-    previous: [],
-    ...(input.queueId?.trim() ? { queueId: input.queueId.trim() } : {}),
-    sla: "Active",
-    slaTone: "ok",
-    status: "active",
-    tags: compactTags([
-      "telegram",
-      `chat:${chatId}`,
-      input.botId ? `bot:${input.botId}` : "",
-      input.username ? `username:${input.username}` : ""
-    ]),
-    tenantId,
-    time: "now",
-    topic: "Telegram / Bot"
-  };
+  const resolved = await resolveOrForkAppealConversation({
+    anchorId,
+    conversationRepository: input.conversationRepository,
+    createInitial: () => ({
+      channel: "Telegram",
+      clientSince: new Date().toISOString().slice(0, 10),
+      device: "Telegram",
+      entry: "Telegram",
+      id: anchorId,
+      initials: initialsFromName(displayName),
+      language: "Unknown",
+      messages: [],
+      name: displayName,
+      phone: chatId,
+      preview: "",
+      previous: [],
+      ...(input.queueId?.trim() ? { queueId: input.queueId.trim() } : {}),
+      sla: "Active",
+      slaTone: "ok",
+      status: "active",
+      tags: compactTags([
+        "telegram",
+        `chat:${chatId}`,
+        input.botId ? `bot:${input.botId}` : "",
+        input.username ? `username:${input.username}` : ""
+      ]),
+      tenantId,
+      time: "now",
+      topic: "Telegram / Bot"
+    }),
+    createMutation: (conversation, eventType = "conversation.created") =>
+      conversationCreatedMutation(conversation, eventType),
+    tenantId
+  });
 
-  if (!input.conversationRepository.saveConversationMutation) {
-    return null;
-  }
-
-  const mutation = await input.conversationRepository.saveConversationMutation(
-    conversationCreatedMutation(conversation)
-  );
-  return mutation.conversation;
+  return resolved?.conversation ?? null;
 }
 
 async function tryBotRuntime(run: NonNullable<TelegramWebhookRouteInput["runBotRuntime"]>, event: Parameters<NonNullable<TelegramWebhookRouteInput["runBotRuntime"]>>[0]) {
@@ -280,14 +273,21 @@ async function tryAutoAssignment(
 }
 
 function conversationCreatedMutation(
-  conversation: ConversationRecord
-): { conversation: ConversationRecord; lifecycleEvent: ConversationLifecycleEvent; realtimeEvent: RealtimeEvent } {
+  conversation: ConversationRecord,
+  eventType: AppealConversationMutation["lifecycleEvent"]["eventType"] = "conversation.created"
+): AppealConversationMutation {
   const occurredAt = new Date().toISOString();
-  const traceId = getCurrentTraceId() ?? createRequestTraceId(INTEGRATION_SERVICE, "conversation.created");
+  const traceId = getCurrentTraceId() ?? createRequestTraceId(INTEGRATION_SERVICE, eventType);
   const realtimeEvent: RealtimeEvent = {
-    data: { channel: "telegram", direction: "inbound", ...(conversation.queueId ? { queueId: conversation.queueId } : {}) },
+    data: {
+      channel: "telegram",
+      direction: "inbound",
+      ...(conversation.metadata?.isRepeatAppeal ? { isRepeatAppeal: true } : {}),
+      ...(conversation.metadata?.parentConversationId ? { parentConversationId: conversation.metadata.parentConversationId } : {}),
+      ...(conversation.queueId ? { queueId: conversation.queueId } : {})
+    },
     eventId: `rt_${randomUUID()}`,
-    eventName: "conversation.created",
+    eventName: eventType === "conversation.updated" ? "conversation.updated" : "conversation.created",
     occurredAt,
     resourceId: conversation.id,
     resourceType: "conversation",
@@ -300,12 +300,12 @@ function conversationCreatedMutation(
     actorName: null,
     actorType: "client",
     conversationId: conversation.id,
-    data: { channel: "telegram", direction: "inbound", ...(conversation.queueId ? { queueId: conversation.queueId } : {}) },
-    eventType: "conversation.created",
+    data: realtimeEvent.data,
+    eventType,
     id: `lifecycle_${randomUUID()}`,
     ingestedAt: occurredAt,
     occurredAt,
-    reason: null,
+    reason: eventType === "conversation.created" && conversation.metadata?.isRepeatAppeal ? "repeat_appeal" : null,
     schemaVersion: "conversation-lifecycle/v1",
     source: "integration-service",
     sourceEventId: realtimeEvent.eventId,

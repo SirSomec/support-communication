@@ -9,6 +9,13 @@ export interface ConversationMessage {
   type?: "event" | "internal";
 }
 
+export interface ConversationAppealMetadata {
+  anchorId?: string;
+  closedAt?: string;
+  isRepeatAppeal?: boolean;
+  parentConversationId?: string;
+}
+
 export interface ConversationRecord {
   avatar?: string;
   channel: string;
@@ -20,6 +27,7 @@ export interface ConversationRecord {
   initials: string;
   language: string;
   messages: ConversationMessage[];
+  metadata?: ConversationAppealMetadata;
   name: string;
   operatorId?: string;
   operatorName?: string;

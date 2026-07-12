@@ -6,6 +6,7 @@ import {
   knowledgeSourceStatuses,
   type KnowledgeSourceRecord
 } from "./knowledge-source.types.js";
+import { KnowledgeRetrievalCache } from "./knowledge-retrieval-cache.js";
 
 export interface KnowledgeSourcesState {
   ingestionJobs: KnowledgeDocumentIngestionJob[];
@@ -46,6 +47,10 @@ export class KnowledgeSourceRepository {
 
   static clearDefault(): void { defaultRepository = null; }
 
+  static bindRetrievalCache(cache: KnowledgeRetrievalCache | null): void {
+    KnowledgeRetrievalCache.useDefault(cache);
+  }
+
   static inMemory(seed: KnowledgeSourcesState = { ingestionJobs: [], sources: [] }): KnowledgeSourceRepository {
     return new KnowledgeSourceRepository(new InMemoryStore(normalizeState(seed)));
   }
@@ -82,6 +87,7 @@ export class KnowledgeSourceRepository {
           : [...current.sources, normalized]
       };
     });
+    KnowledgeRetrievalCache.default().purgeSource(normalized.tenantId, normalized.id);
     return clone(normalized);
   }
 

@@ -1,6 +1,7 @@
 import { KnowledgeSourceRepository } from "./knowledge-source.repository.js";
 import { isKnowledgeSourceRetrievalEligible } from "./knowledge-source.types.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
+import { buildRetrievalCacheKey, KnowledgeRetrievalCache } from "./knowledge-retrieval-cache.js";
 
 export interface KnowledgeRetrievalInput {
   query: string;
@@ -15,15 +16,40 @@ export interface KnowledgeRetrievalPassage {
   score: number;
 }
 
+export interface KnowledgeRetrievalResult {
+  cache: "hit" | "miss";
+  passages: KnowledgeRetrievalPassage[];
+  tokenBudget: number;
+  tokensUsed: number;
+}
+
 /** Tenant- and scenario-bound lexical retrieval with an explicit provider token budget. */
 export class KnowledgeRetrievalService {
+  private readonly workspace: WorkspaceRepository;
+  private readonly cache: KnowledgeRetrievalCache;
+
   constructor(
     private readonly sources = KnowledgeSourceRepository.default(),
-    private readonly workspace = WorkspaceRepository.default()
-  ) {}
+    workspace?: WorkspaceRepository,
+    cache?: KnowledgeRetrievalCache
+  ) {
+    this.workspace = workspace ?? WorkspaceRepository.default();
+    this.cache = cache ?? KnowledgeRetrievalCache.default();
+  }
 
-  async retrieve(input: KnowledgeRetrievalInput): Promise<{ passages: KnowledgeRetrievalPassage[]; tokenBudget: number; tokensUsed: number }> {
+  async retrieve(input: KnowledgeRetrievalInput): Promise<KnowledgeRetrievalResult> {
     const budget = clampInteger(input.tokenBudget, 1_500, 100, 6_000);
+    const cacheKey = buildRetrievalCacheKey({
+      query: input.query,
+      sourceBindings: input.sourceBindings,
+      tenantId: input.tenantId,
+      tokenBudget: budget
+    });
+    const cached = this.cache.get(cacheKey);
+    if (cached) {
+      return { cache: "hit", ...cached };
+    }
+
     const queryTerms = terms(input.query);
     const candidates: KnowledgeRetrievalPassage[] = [];
     for (const binding of input.sourceBindings) {
@@ -45,7 +71,12 @@ export class KnowledgeRetrievalService {
       passages.push(candidate); tokensUsed += tokens;
       if (passages.length >= 8) break;
     }
-    return { passages, tokenBudget: budget, tokensUsed };
+    const result = { passages, tokenBudget: budget, tokensUsed };
+    this.cache.set(cacheKey, result, {
+      sourceIds: input.sourceBindings.map((binding) => binding.sourceId),
+      tenantId: input.tenantId
+    });
+    return { cache: "miss", ...result };
   }
 }
 

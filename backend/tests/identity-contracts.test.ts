@@ -82,7 +82,7 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(verified.status, "ok");
     assert.equal(verified.data.authenticated, true);
     assert.equal(verified.data.session.authState, "mfa_verified");
-    assert.equal(verified.data.session.currentTenantId, "tenant-northstar");
+    assert.equal(verified.data.session.currentTenantId, "tenant-volga");
     assert.equal(verified.data.session.adminId, "svc-admin-001");
     assert.equal(verified.data.session.adminName, "service-admin@example.com");
     assert.ok(Array.isArray(verified.data.session.allowedActions));

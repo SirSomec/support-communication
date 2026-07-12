@@ -73,12 +73,9 @@ async function openAppShell(page, { serviceAdmin = false } = {}) {
 
 async function openServiceAdminShell(page) {
   const session = await loginServiceAdmin(page);
-  await page.addInitScript((accessToken) => {
-    try {
-      window.sessionStorage.setItem("sc_service_admin_access_token", accessToken);
-    } catch {
-      // about:blank blocks sessionStorage in Chromium; the script runs again on the app origin.
-    }
+  await page.goto("/service-admin/login", { waitUntil: "domcontentloaded" });
+  await page.evaluate((accessToken) => {
+    window.sessionStorage.setItem("sc_service_admin_access_token", accessToken);
   }, session.accessToken);
   await page.goto("/service-admin", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("route-service-admin")).toBeVisible();
@@ -1309,7 +1306,10 @@ test("service admin critical actions require reason confirmation and audit", asy
 
   await page.locator(".service-admin-tabs button").filter({ hasText: "Пользователи" }).click();
   await expect(page.locator(".user-support-workspace")).toContainText("Личность клиента");
-  await page.locator(".service-admin-user-list button").filter({ hasText: "sergey@volga.example" }).click();
+  await page.getByLabel("Фильтр по организации").selectOption({ label: "Volga Logistics" });
+  const userButton = page.locator(".service-admin-user-list button").filter({ hasText: "sergey@volga.example" });
+  await expect(userButton).toBeVisible({ timeout: 15000 });
+  await userButton.click();
   await expect(page.locator(".service-admin-detail-panel")).toContainText("Volga Logistics");
   await page.locator(".service-admin-action-box textarea").fill("Клиент согласовал проверку повторов вебхуков");
   await page.locator(".service-admin-action-picker button").filter({ hasText: "Войти от имени" }).click();

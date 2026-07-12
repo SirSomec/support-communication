@@ -411,12 +411,13 @@ export class AuthService {
       name: tenant.name,
       role: "service_admin"
     }));
+    const preferredTenantId = availableOrganizations.find((organization) => organization.id === "tenant-volga")?.id;
     const session = await this.identityRepository.createServiceAdminSession({
       actorId: credential.subjectId,
       actorName: loginEmail,
       adminEmail: loginEmail,
       availableOrganizations,
-      currentTenantId: availableOrganizations[0]?.id ?? "",
+      currentTenantId: preferredTenantId ?? availableOrganizations[0]?.id ?? "",
       mfaVerified: true
     });
     const tokenPair = createTenantOperatorSessionTokens({

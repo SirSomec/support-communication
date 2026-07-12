@@ -1,10 +1,21 @@
-/* Service-admin MPA has no tenant sidebar — use full-width shell. */
+/* Service-admin MPA has no tenant sidebar / TopBar — single full-viewport pane.
+   Must beat the max-width:1100px app-shell/workspace mobile overrides in styles.css. */
 .app-shell.service-admin-app {
   grid-template-columns: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .app-shell.service-admin-app .workspace {
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: auto;
+}
+
+.app-shell.service-admin-app .product-screen {
+  height: auto;
+  min-height: 100%;
 }

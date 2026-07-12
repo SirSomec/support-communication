@@ -3901,7 +3901,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
       confirmed: true,
       durationMinutes: 15,
       reason: "Customer approved webhook replay check",
-      tenantId: "tenant-lumen",
+      tenantId: "tenant-volga",
       userId: "usr-volga-admin"
     }, {
       headers: {},
@@ -3910,7 +3910,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
           id: "svc-admin-scoped",
           name: "Scoped Service Admin"
         },
-        currentTenantId: "tenant-volga",
+        currentTenantId: "tenant-lumen",
         permissions: ["impersonation.start"],
         roles: ["admin"],
         sessionId: "sess-scoped-tenant"
@@ -3928,7 +3928,6 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
       confirmed: true,
       durationMinutes: 15,
       reason: "Customer approved webhook replay check",
-      tenantId: "tenant-volga",
       userId: "usr-volga-admin"
     }, {
       headers: {},
@@ -3945,7 +3944,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(missingTenantScope.status, "invalid");
     assert.equal(missingTenantScope.error?.code, "service_admin_tenant_scope_required");
     assert.equal(missingTenantScope.data.actorId, "svc-admin-unscoped");
-    assert.equal(missingTenantScope.data.rejectedTenantId, "tenant-volga");
+    assert.equal(missingTenantScope.data.rejectedTenantId, null);
     assert.equal((await repository.findActiveServiceAdminImpersonation({
       tenantId: "tenant-volga",
       userId: "usr-volga-admin"
@@ -3973,7 +3972,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     const approval = await requestServiceAdminBreakGlassApprovalFromRoute(support, {
       confirmed: true,
       reason: "Emergency invite delivery correction",
-      tenantId: "tenant-volga",
+      tenantId: "tenant-lumen",
       userId: "usr-lumen-invite"
     }, request);
 
@@ -3994,7 +3993,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
       approvalId: approval.data.approval.id,
       confirmed: true,
       reason: "Emergency invite delivery correction",
-      tenantId: "tenant-volga",
+      tenantId: "tenant-lumen",
       userId: "usr-lumen-invite",
       writeAccess: true
     }, request);
@@ -4008,7 +4007,6 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     const missingTenantScopeApproval = await requestServiceAdminBreakGlassApprovalFromRoute(support, {
       confirmed: true,
       reason: "Emergency invite delivery correction",
-      tenantId: "tenant-lumen",
       userId: "usr-lumen-invite"
     }, {
       headers: {},
@@ -4025,7 +4023,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(missingTenantScopeApproval.status, "invalid");
     assert.equal(missingTenantScopeApproval.error?.code, "service_admin_tenant_scope_required");
     assert.equal(missingTenantScopeApproval.data.actorId, "svc-admin-unscoped");
-    assert.equal(missingTenantScopeApproval.data.rejectedTenantId, "tenant-lumen");
+    assert.equal(missingTenantScopeApproval.data.rejectedTenantId, null);
   });
 
   it("starts write impersonation only with a matching approved break-glass approval", async () => {

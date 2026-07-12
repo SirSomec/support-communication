@@ -9,15 +9,22 @@ type TenantBoundServiceAdminPayload = {
   tenantId?: string;
 };
 
+function resolveTenantBoundId(
+  payload: TenantBoundServiceAdminPayload,
+  request: ServiceAdminRequest
+): string {
+  return String(payload.tenantId ?? "").trim() || String(request.serviceAdminContext?.currentTenantId ?? "").trim();
+}
+
 export function bindServiceAdminTenantContext<TPayload extends TenantBoundServiceAdminPayload>(
   payload: TPayload,
   request: ServiceAdminRequest
 ): TPayload {
-  const currentTenantId = request.serviceAdminContext?.currentTenantId;
+  const tenantId = resolveTenantBoundId(payload, request);
   return {
     ...payload,
     actor: request.serviceAdminContext?.actor,
-    ...(request.serviceAdminContext ? { tenantId: currentTenantId } : {})
+    ...(request.serviceAdminContext ? { tenantId } : {})
   };
 }
 
@@ -32,12 +39,14 @@ export function startServiceAdminImpersonationFromRoute<TPayload extends TenantB
     return denied;
   }
 
+  const tenantId = resolveTenantBoundId(payload, request);
+
   return authorizeServiceAdminPolicy({
     action: "impersonation.start",
     identityRepository,
     request,
     resource: "impersonation",
-    tenantId: request.serviceAdminContext?.currentTenantId ?? payload.tenantId
+    tenantId
   }).then((policyDenied) => {
     if (policyDenied) {
       return policyDenied;
@@ -58,12 +67,14 @@ export function requestServiceAdminBreakGlassApprovalFromRoute<TPayload extends 
     return denied;
   }
 
+  const tenantId = resolveTenantBoundId(payload, request);
+
   return authorizeServiceAdminPolicy({
     action: "break-glass.request",
     identityRepository,
     request,
     resource: "break-glass",
-    tenantId: request.serviceAdminContext?.currentTenantId ?? payload.tenantId
+    tenantId
   }).then((policyDenied) => {
     if (policyDenied) {
       return policyDenied;
@@ -78,7 +89,11 @@ function denyMissingTenantScope<TPayload extends TenantBoundServiceAdminPayload>
   payload: TPayload,
   request: ServiceAdminRequest
 ): BackendEnvelope<Record<string, unknown>> | null {
-  if (!request.serviceAdminContext || request.serviceAdminContext.currentTenantId) {
+  if (!request.serviceAdminContext) {
+    return null;
+  }
+
+  if (resolveTenantBoundId(payload, request)) {
     return null;
   }
 

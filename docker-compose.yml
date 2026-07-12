@@ -48,6 +48,7 @@ services:
       AI_CONNECTIONS_KEY_VERSION: ${AI_CONNECTIONS_KEY_VERSION:-local-v1}
       AI_CONNECTIONS_STORE_FILE: .runtime/docker/ai-connections-store.json
       AI_USAGE_STORE_FILE: .runtime/docker/ai-usage-store.json
+      AGENT_SESSION_STORE_FILE: .runtime/docker/agent-session-state.json
       KNOWLEDGE_SOURCES_STORE_FILE: .runtime/docker/knowledge-sources-store.json
       # Fast local JSON mode. Use docker-compose.pilot.yml with the
       # prisma-postgres profile for the production-like PostgreSQL slice.

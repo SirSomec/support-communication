@@ -64,7 +64,7 @@ export class BotRuntimeService {
         traceId: event.traceId
       });
       const node = resolved.scenario.flowNodes.find((item) => item.id === transition.nextNodeId)!;
-      const executed = await this.executeNode(node, event, existing?.context ?? {}, resolved.scenario.sourceBindings ?? []);
+      const executed = await this.executeNode(node, event, existing?.context ?? {}, resolved.scenario.sourceBindings ?? [], resolved.version.versionId);
       applyGeneratedMessage(transition.sideEffects, executed.aiResponse);
       if (executed.outcome === "ai_handoff_requested" && executed.handoffSummary) transition.sideEffects.push(createAiFailureHandoff(event, node, executed.handoffSummary));
       const instance = makeInstance(existing, event, resolved.version, transition.nextNodeId, executed.status, executed.context, now);
@@ -134,7 +134,7 @@ export class BotRuntimeService {
     };
   }
 
-  private async executeNode(node: BotFlowNode, event: BotRuntimeInboundEvent, previous: Record<string, unknown>, sourceBindings: import("./automation.types.js").KnowledgeSourceBinding[]) {
+  private async executeNode(node: BotFlowNode, event: BotRuntimeInboundEvent, previous: Record<string, unknown>, sourceBindings: import("./automation.types.js").KnowledgeSourceBinding[], scenarioRevisionId?: string) {
     const context = { ...previous, ...(event.payload?.context as Record<string, unknown> | undefined ?? {}) };
     if (node.type === "contact_request") {
       const field = String(node.config?.field ?? "contact");
@@ -151,7 +151,14 @@ export class BotRuntimeService {
       const message = inboundText(event.payload ?? {});
       if (!message) throw new Error("bot_ai_message_required");
       try {
-        const aiResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({ instructions: typeof node.config?.instructions === "string" ? node.config.instructions : node.title, message, sourceBindings, tenantId: event.tenantId });
+        const aiResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({
+          conversationId: event.conversationId,
+          instructions: typeof node.config?.instructions === "string" ? node.config.instructions : node.title,
+          message,
+          scenarioRevisionId,
+          sourceBindings,
+          tenantId: event.tenantId
+        });
         return { aiResponse, context: { ...context, lastAiResponse: { citations: aiResponse.citations, model: aiResponse.model } }, outcome: "ai_reply_queued", status: "active" as const };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "bot_ai_unavailable";

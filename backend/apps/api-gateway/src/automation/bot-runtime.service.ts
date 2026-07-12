@@ -12,7 +12,9 @@ import { planBotRuntimeLabeledTransition, resolveBotRuntimeDeadLetterState, reso
 import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runtime.worker.js";
 import { matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
 import { AiBotResponseService, type AiBotResponse } from "./ai-bot-response.service.js";
+import { evaluateAiAgentsPilot } from "./ai-agents-pilot.js";
 import { recordBotHandoff, recordBotTriggerMatch } from "./bot-observability.js";
+import type { FeatureFlag } from "../platform/platform.types.js";
 
 export interface BotRuntimeInboundEvent {
   channel: string;
@@ -26,6 +28,7 @@ export interface BotRuntimeInboundEvent {
 
 export interface BotRuntimeOptions {
   aiResponder?: Pick<AiBotResponseService, "respond">;
+  featureFlags?: FeatureFlag[];
   fetch?: typeof fetch;
   maxAttempts?: number;
   now?: () => Date;
@@ -187,6 +190,29 @@ export class BotRuntimeService {
     if (node.type === "ai_reply") {
       const message = inboundText(event.payload ?? {});
       if (!message) throw new Error("bot_ai_message_required");
+      if (this.options.featureFlags) {
+        const pilot = evaluateAiAgentsPilot({ flags: this.options.featureFlags, tenantId: event.tenantId });
+        if (!pilot.eligible) {
+          const handoffSummary = {
+            botId: scenarioId ?? event.scenarioId ?? "",
+            collectedFields: redactObject(context),
+            nodeId: node.id,
+            queue: String(node.config?.handoffQueue ?? "default"),
+            reason: "bot_ai_pilot_disabled"
+          };
+          return {
+            aiResponse: {
+              citations: [],
+              model: "unavailable",
+              text: String(node.config?.fallbackMessage ?? "AI-агент временно отключён для этого tenant. Передаю вопрос специалисту.")
+            },
+            context: { ...context, lastAiFailure: "bot_ai_pilot_disabled", pilotReason: pilot.reason },
+            handoffSummary,
+            outcome: "ai_handoff_requested",
+            status: "handoff" as const
+          };
+        }
+      }
       try {
         const aiResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({
           conversationId: event.conversationId,

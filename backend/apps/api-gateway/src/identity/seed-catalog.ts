@@ -458,6 +458,21 @@ export const incidents = [
 
 export const featureFlags = [
   {
+    id: "flag-ai-agents-v1",
+    key: "ai_agents_v1",
+    name: "AI agents v1 (pilot)",
+    status: "on",
+    environment: "production",
+    scope: "tenant",
+    rollout: 0,
+    owner: "AI team",
+    segments: [],
+    enabledTenantIds: ["tenant-pilot-001"],
+    variants: [{ id: "pilot", weight: 100 }],
+    killSwitch: true,
+    updatedAt: "2026-07-12T00:00:00.000Z"
+  },
+  {
     id: "flag-ai-bots",
     key: "ai_bots",
     name: "AI consultation bots",

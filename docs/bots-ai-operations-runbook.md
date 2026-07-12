@@ -81,7 +81,14 @@
 1. **Сценарий:** Automation → Пауза / архив.  
 2. **AI connection:** Service Admin → Disable connection.  
 3. **Источник:** отключить source / снять approval.  
-4. **Feature flag (пилот):** выключить rollout flag tenant (см. BAI-706).
+4. **Feature flag (пилот):** выключить `ai_agents_v1` (status `off` или убрать tenant из `enabledTenantIds`). Runtime enforce включается опцией `featureFlags` / `BOT_AI_AGENTS_PILOT_ENFORCE=1`.
+
+## Пилот и расширение (BAI-706)
+
+1. Внутренний tenant `tenant-pilot-001` в allowlist `ai_agents_v1`.
+2. Собрать метрики `bot_*` и feedback (помогло / не помогло / неверный источник).
+3. Расширять allowlist постепенно; при регрессии — kill switch выше.
+4. Коммуникация: support-lead уведомляет tenant-admin о pause/restore без раскрытия ключей.
 
 ## Эскалация
 
@@ -89,3 +96,6 @@
 2. Support-lead → service-admin (provider/quota/secret).  
 3. Platform-ops → security (SSRF/MCP).  
 4. Incident с `traceId`/`scenarioId`/`tenantId` без текста диалога и секретов.
+
+Пользовательская инструкция: [bots-ai-user-guide-ru.md](bots-ai-user-guide-ru.md).  
+Security review: [bots-ai-security-privacy-review.md](bots-ai-security-privacy-review.md).

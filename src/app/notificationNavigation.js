@@ -64,9 +64,9 @@ export function resolveNotificationActionAvailability(actionTarget = {}, { acces
   }
 
   if (resolvedTarget.namespace === "service-admin") {
-    return accessProfile.canServiceAdmin
-      ? availableNotificationAction()
-      : unavailableNotificationAction("Service-admin access is required for this notification target.");
+    return unavailableNotificationAction(
+      "Откройте /service-admin — этот раздел недоступен из рабочего места организации."
+    );
   }
 
   const sections = Array.isArray(accessProfile.sections) ? accessProfile.sections : [];

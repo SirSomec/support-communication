@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronDown, Globe2, Headphones, LogIn, Search, ServerCog, ShieldCheck, UsersRound, Zap } from "lucide-react";
+import { ChevronDown, Globe2, Headphones, LogIn, Search, ShieldCheck, UsersRound, Zap } from "lucide-react";
 import { roleModes } from "../../app/access.js";
 import { navigationItems } from "../../app/navigationModel.js";
 import { NotificationCenter } from "../notifications/NotificationCenter.jsx";
@@ -51,7 +51,6 @@ export function TopBar({
   getNotificationActionAvailability,
   onOpenAuth,
   onOpenLanding,
-  onOpenServiceAdmin,
   onNavigateNotificationAction,
   onOutbound,
   onRoleMode,
@@ -90,12 +89,6 @@ export function TopBar({
             <LogIn size={16} />
             Вход
           </button>
-          {access.canServiceAdmin ? (
-            <button className="ghost-action service-admin-entry" onClick={onOpenServiceAdmin} type="button">
-              <ServerCog size={16} />
-              Админ сервиса
-            </button>
-          ) : null}
         </div>
         {notificationsEnabled ? (
           <NotificationCenter

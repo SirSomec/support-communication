@@ -14,7 +14,6 @@ import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
 import { useWorkspaceRoute } from "./app/useWorkspaceRoute.js";
 import { useTenantSessionState } from "./app/useTenantSessionState.js";
 import { resolveNotificationActionAvailability, resolveNotificationNavigationTarget } from "./app/notificationNavigation.js";
-import { serviceAdminAccessProfile, serviceAdminRole } from "./app/access.js";
 import { DialogWorkspace } from "./features/dialogs/DialogWorkspace.jsx";
 import { DraftSwitchDialog, OutboundDialogLauncher, SaveTemplateDialog } from "./features/dialogs/DialogModals.jsx";
 import { Sidebar, TopBar } from "./features/app-shell/AppShell.jsx";
@@ -25,17 +24,11 @@ import { qualityService } from "./services/qualityService.js";
 import { settingsService } from "./services/settingsService.js";
 import { ScreenStateStrip, Toast } from "./ui.jsx";
 
-const SERVICE_ADMIN_DEMO_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_SERVICE_ADMIN === "true";
 const ROLE_SWITCHER_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROLE_SWITCHER === "true";
+const SERVICE_ADMIN_UNAVAILABLE_MESSAGE = "Откройте /service-admin — этот раздел недоступен из рабочего места организации.";
 const LandingPage = lazy(() => import("./features/public/index.js"));
 const AuthPage = lazy(() => import("./features/auth/index.js"));
 const OrganizationOnboarding = lazy(() => import("./features/onboarding/index.js"));
-const ServiceAdminDashboard = lazy(() => import("./features/service-admin/index.js").then((module) => ({
-  default: module.ServiceAdminDashboard
-})));
-const ServiceAdminLogin = lazy(() => import("./features/service-admin/ServiceAdminLogin.jsx").then((module) => ({
-  default: module.ServiceAdminLogin
-})));
 
 function App() {
   const [topicOptions, setTopicOptions] = useState([]);
@@ -94,9 +87,7 @@ function App() {
     setToast,
     useSessionPermissions: tenantSession.authenticated
   });
-  const appShellAccess = SERVICE_ADMIN_DEMO_ENABLED ? { ...access, canServiceAdmin: true } : access;
   const { route, routeActions } = useWorkspaceRoute({
-    access: appShellAccess,
     tenantSession,
     onAuthenticated: (payload) => {
       const organizationName = payload?.organization?.name ?? payload?.tenant?.name ?? "организация";
@@ -233,34 +224,25 @@ function App() {
     if (!resolvedTarget) {
       return {
         ok: false,
-        message: appShellAccess.reason ?? "Notification target is unavailable."
+        message: access.reason ?? "Notification target is unavailable."
       };
     }
 
     if (resolvedTarget.namespace === "service-admin") {
-      if (!appShellAccess.canServiceAdmin) {
-        return {
-          ok: false,
-          message: appShellAccess.reason ?? "Notification target is unavailable."
-        };
-      }
-
-      setNotificationNavigationTarget(buildNotificationNavigationState(resolvedTarget, item));
-      routeActions.openServiceAdmin();
-
+      setToast(SERVICE_ADMIN_UNAVAILABLE_MESSAGE);
       return {
-        ok: true,
-        message: `${item?.type ?? "Notification"}: ${item?.action ?? "opened"}`
+        ok: false,
+        message: SERVICE_ADMIN_UNAVAILABLE_MESSAGE
       };
     }
 
     const targetSection = resolvedTarget.section;
     const targetResourceId = typeof resolvedTarget.detail?.resourceId === "string" ? resolvedTarget.detail.resourceId : "";
 
-    if (!targetSection || !appShellAccess.sections.includes(targetSection)) {
+    if (!targetSection || !access.sections.includes(targetSection)) {
       return {
         ok: false,
-        message: appShellAccess.reason ?? "Notification target is unavailable."
+        message: access.reason ?? "Notification target is unavailable."
       };
     }
 
@@ -288,7 +270,7 @@ function App() {
 
   function getNotificationActionAvailability(actionTarget) {
     return resolveNotificationActionAvailability(actionTarget, {
-      accessProfile: appShellAccess,
+      accessProfile: access,
       conversationItems
     });
   }
@@ -395,47 +377,6 @@ function App() {
     );
   }
 
-  if (route.namespace === "service-admin" && route.view === "login") {
-    return (
-      <Suspense fallback={<RouteLoading label="Загрузка входа администратора сервиса" />}>
-        <ServiceAdminLogin onBack={routeActions.openLanding} onSuccess={routeActions.openServiceAdmin} />
-      </Suspense>
-    );
-  }
-
-  if (route.namespace === "service-admin" && appShellAccess.canServiceAdmin) {
-    return (
-      <div data-testid="route-service-admin" className="app-shell">
-        <Sidebar active="service-admin" access={serviceAdminAccessProfile} onSelect={handleSectionSelect} />
-        <main className="workspace">
-          <TopBar
-            access={serviceAdminAccessProfile}
-            activeSection="service-admin"
-            notificationsEnabled={false}
-            onOpenAuth={routeActions.openAuth}
-            onOpenLanding={routeActions.openLanding}
-            onOpenServiceAdmin={routeActions.openServiceAdmin}
-            getNotificationActionAvailability={getNotificationActionAvailability}
-            onNavigateNotificationAction={handleNotificationNavigation}
-            onOutbound={handleOutboundRequest}
-            onRoleMode={handleRoleModeChange}
-            onToast={setToast}
-            roleMode={serviceAdminRole}
-            showRoleSwitcher={false}
-          />
-          <Suspense fallback={<RouteLoading label="Загрузка администрирования сервиса" />}>
-            <ServiceAdminDashboard
-              navigationTarget={notificationNavigationTarget?.namespace === "service-admin" ? notificationNavigationTarget : null}
-              onBack={routeActions.openApp}
-              onToast={setToast}
-            />
-          </Suspense>
-        </main>
-        {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
-      </div>
-    );
-  }
-
   if (route.namespace === "app" && tenantSession.loading) {
     return (
       <div data-testid="route-app-loading">
@@ -464,11 +405,10 @@ function App() {
       <Sidebar active={section} access={access} onSelect={handleSectionSelect} operator={tenantSession.operator} />
       <main className="workspace">
         <TopBar
-          access={appShellAccess}
+          access={access}
           activeSection={section}
           onOpenAuth={routeActions.openAuth}
           onOpenLanding={routeActions.openLanding}
-          onOpenServiceAdmin={routeActions.openServiceAdmin}
           getNotificationActionAvailability={getNotificationActionAvailability}
           onNavigateNotificationAction={handleNotificationNavigation}
           onOutbound={handleOutboundRequest}

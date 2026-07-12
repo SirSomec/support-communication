@@ -1,28 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { hasServiceAdminSession } from "./sessionStore.js";
 
 const routeByHash = {
   "#/app": { namespace: "app", view: "dialogs" },
   "#/landing": { namespace: "public", view: "landing" },
   "#/login": { namespace: "auth", view: "login" },
   "#/auth": { namespace: "auth", view: "login" },
-  "#/onboarding": { namespace: "onboarding", view: "organization" },
-  "#/service-admin": { namespace: "service-admin", view: "dashboard" },
-  "#/service-admin/login": { namespace: "service-admin", view: "login" }
+  "#/onboarding": { namespace: "onboarding", view: "organization" }
 };
 
 const defaultRoute = { namespace: "public", view: "landing" };
 
 export function useWorkspaceRoute({
-  access,
   onDenied,
   onAuthenticated,
   tenantSession
 }) {
   const [route, setRoute] = useState(() => parseCurrentRoute());
-  const isServiceAdminDenied = route.namespace === "service-admin"
-    && route.view === "dashboard"
-    && (!access.canServiceAdmin || !hasServiceAdminSession());
   const isAppDenied = route.namespace === "app" && !tenantSession.loading && !tenantSession.authenticated;
 
   useEffect(() => {
@@ -49,16 +42,6 @@ export function useWorkspaceRoute({
     }
   }, [isAppDenied, onDenied, tenantSession.denialReason, tenantSession.loading]);
 
-  useEffect(() => {
-    if (isServiceAdminDenied) {
-      onDenied?.("Войдите под учетной записью администратора сервиса, чтобы открыть этот раздел.");
-      setRoute({ namespace: "service-admin", view: "login" });
-      if (window.location.hash === "#/service-admin") {
-        window.history.replaceState(null, "", "#/service-admin/login");
-      }
-    }
-  }, [isServiceAdminDenied, onDenied]);
-
   const navigate = useCallback((namespace, view = namespace) => {
     const nextRoute = { namespace, view };
     setRoute(nextRoute);
@@ -76,7 +59,6 @@ export function useWorkspaceRoute({
     openAuth: () => navigate("auth", "login"),
     openLanding: () => navigate("public", "landing"),
     openOnboarding: () => navigate("onboarding", "organization"),
-    openServiceAdmin: () => navigate("service-admin", hasServiceAdminSession() ? "dashboard" : "login"),
     completeAuth: async (payload) => {
       onAuthenticated?.(payload);
       await tenantSession.refresh?.({ force: true });
@@ -110,10 +92,6 @@ function hashForRoute(route) {
 
   if (route.namespace === "onboarding") {
     return "#/onboarding";
-  }
-
-  if (route.namespace === "service-admin") {
-    return route.view === "login" ? "#/service-admin/login" : "#/service-admin";
   }
 
   if (route.namespace === "app") {

@@ -1,8 +1,9 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { ServiceAdminApp } from "./ServiceAdminApp.jsx";
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <main data-testid="route-service-admin-login">service-admin entry</main>
+    <ServiceAdminApp />
   </React.StrictMode>
 );

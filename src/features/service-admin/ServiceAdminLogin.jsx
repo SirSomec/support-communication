@@ -3,7 +3,7 @@ import { KeyRound, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { authService } from "../../services/authService.js";
 import "../auth/auth.css";
 
-export function ServiceAdminLogin({ onBack, onSuccess }) {
+export function ServiceAdminLogin({ onSuccess }) {
   const [credentials, setCredentials] = useState({ email: "", password: "" });
   const [challengeId, setChallengeId] = useState("");
   const [otp, setOtp] = useState("");
@@ -71,7 +71,15 @@ export function ServiceAdminLogin({ onBack, onSuccess }) {
           )}
           {error ? <div className="auth-message error" role="alert">{error}</div> : null}
           <div className="auth-actions">
-            <button className="secondary-button" onClick={onBack} type="button">Назад</button>
+            <button
+              className="secondary-button"
+              onClick={() => {
+                window.location.href = "/#/landing";
+              }}
+              type="button"
+            >
+              На сайт
+            </button>
             <button className="primary-button" disabled={submitting} type="submit">{awaitingOtp ? "Подтвердить" : "Продолжить"}</button>
           </div>
         </form>

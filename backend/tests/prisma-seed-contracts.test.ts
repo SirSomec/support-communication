@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { tenantBillingStates } from "../apps/api-gateway/src/billing/billing.fixtures.ts";
-import { permissionRoles, tenantAuditEvents, tenants, tenantUsers } from "../apps/api-gateway/src/identity/identity.fixtures.ts";
+import { tenantBillingStates } from "../apps/api-gateway/src/billing/seed-catalog.ts";
+import { permissionRoles, tenantAuditEvents, tenants, tenantUsers } from "../apps/api-gateway/src/identity/seed-catalog.ts";
 import { seedIdentityPrisma } from "../scripts/seed-identity.ts";
 
 describe("Prisma identity seed contracts", () => {
@@ -25,7 +25,7 @@ describe("Prisma identity seed contracts", () => {
 
     assert.deepEqual(first, {
       billingTenantStates: tenantBillingStates.length,
-      passwordCredentials: 1,
+      passwordCredentials: tenantUsers.length + 1,
       passwordPolicies: 1,
       permissionRoles: permissionRoles.length,
       rbacPolicyVersions: 1,
@@ -38,13 +38,16 @@ describe("Prisma identity seed contracts", () => {
     assert.equal(client.calls.transactions, 2);
     assert.equal(client.calls.tenantCreates.length, tenants.length);
     assert.equal(client.calls.tenantUpdates.length, tenants.length);
-    assert.equal(client.calls.passwordCredentialUpserts.length, 2);
+    assert.equal(client.calls.passwordCredentialUpserts.length, (tenantUsers.length + 1) * 2);
     assert.equal(client.calls.passwordPolicyUpserts.length, 2);
     assert.equal(client.calls.rbacPolicyVersionUpdateMany.length, 2);
     assert.equal(client.calls.rbacPolicyVersionUpserts.length, 2);
     assert.equal(client.calls.rbacRoleGrantUpserts.length, permissionRoles.reduce((total, role) => total + role.actions.length, 0) * 2);
     assert.equal(client.passwordCredentials.get("service-admin@example.com")?.hash, "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf");
     assert.doesNotMatch(client.passwordCredentials.get("service-admin@example.com")?.hash ?? "", /correct-password/);
+    assert.equal(client.passwordCredentials.get("sergey@volga.example")?.hash, "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf");
+    assert.equal(client.passwordCredentials.get("sergey@volga.example")?.subjectId, "usr-volga-admin");
+    assert.doesNotMatch(client.passwordCredentials.get("sergey@volga.example")?.hash ?? "", /correct-password/);
     assert.equal(client.passwordPolicies.get("service-admin")?.requireMfa, true);
 
     const volga = client.tenants.get("tenant-volga");

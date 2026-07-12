@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { hasSession } from "./sessionStore.js";
+import { hasServiceAdminSession } from "./sessionStore.js";
 
 const routeByHash = {
   "#/app": { namespace: "app", view: "dialogs" },
@@ -7,15 +7,23 @@ const routeByHash = {
   "#/login": { namespace: "auth", view: "login" },
   "#/auth": { namespace: "auth", view: "login" },
   "#/onboarding": { namespace: "onboarding", view: "organization" },
-  "#/service-admin": { namespace: "service-admin", view: "dashboard" }
+  "#/service-admin": { namespace: "service-admin", view: "dashboard" },
+  "#/service-admin/login": { namespace: "service-admin", view: "login" }
 };
 
 const defaultRoute = { namespace: "public", view: "landing" };
 
-export function useWorkspaceRoute({ access, onDenied, onAuthenticated }) {
+export function useWorkspaceRoute({
+  access,
+  onDenied,
+  onAuthenticated,
+  tenantSession
+}) {
   const [route, setRoute] = useState(() => parseCurrentRoute());
-  const isServiceAdminDenied = route.namespace === "service-admin" && !access.canServiceAdmin;
-  const isAppDenied = route.namespace === "app" && !hasSession();
+  const isServiceAdminDenied = route.namespace === "service-admin"
+    && route.view === "dashboard"
+    && (!access.canServiceAdmin || !hasServiceAdminSession());
+  const isAppDenied = route.namespace === "app" && !tenantSession.loading && !tenantSession.authenticated;
 
   useEffect(() => {
     function handleHashChange() {
@@ -27,22 +35,26 @@ export function useWorkspaceRoute({ access, onDenied, onAuthenticated }) {
   }, []);
 
   useEffect(() => {
+    if (tenantSession.loading) {
+      return;
+    }
+
     if (isAppDenied) {
-      onDenied?.("Войдите в аккаунт оператора, чтобы открыть рабочее место.");
+      onDenied?.(tenantSession.denialReason ?? "Войдите в аккаунт оператора, чтобы открыть рабочее место.");
       setRoute({ namespace: "auth", view: "login" });
 
       if (window.location.hash === "#/app") {
         window.history.replaceState(null, "", "#/login");
       }
     }
-  }, [isAppDenied, onDenied]);
+  }, [isAppDenied, onDenied, tenantSession.denialReason, tenantSession.loading]);
 
   useEffect(() => {
     if (isServiceAdminDenied) {
-      onDenied?.("Администрирование сервиса доступно только внутреннему администратору сервиса.");
-      setRoute(defaultRoute);
+      onDenied?.("Войдите под учетной записью администратора сервиса, чтобы открыть этот раздел.");
+      setRoute({ namespace: "service-admin", view: "login" });
       if (window.location.hash === "#/service-admin") {
-        window.history.replaceState(null, "", "#/landing");
+        window.history.replaceState(null, "", "#/service-admin/login");
       }
     }
   }, [isServiceAdminDenied, onDenied]);
@@ -64,16 +76,18 @@ export function useWorkspaceRoute({ access, onDenied, onAuthenticated }) {
     openAuth: () => navigate("auth", "login"),
     openLanding: () => navigate("public", "landing"),
     openOnboarding: () => navigate("onboarding", "organization"),
-    openServiceAdmin: () => navigate("service-admin", "dashboard"),
-    completeAuth: (payload) => {
+    openServiceAdmin: () => navigate("service-admin", hasServiceAdminSession() ? "dashboard" : "login"),
+    completeAuth: async (payload) => {
       onAuthenticated?.(payload);
+      await tenantSession.refresh?.({ force: true });
       navigate("app", "dialogs");
     },
-    completeOnboarding: (payload) => {
+    completeOnboarding: async (payload) => {
       onAuthenticated?.(payload);
+      await tenantSession.refresh?.({ force: true });
       navigate("app", "dialogs");
     }
-  }), [navigate, onAuthenticated]);
+  }), [navigate, onAuthenticated, tenantSession]);
 
   return {
     route,
@@ -99,7 +113,7 @@ function hashForRoute(route) {
   }
 
   if (route.namespace === "service-admin") {
-    return "#/service-admin";
+    return route.view === "login" ? "#/service-admin/login" : "#/service-admin";
   }
 
   if (route.namespace === "app") {

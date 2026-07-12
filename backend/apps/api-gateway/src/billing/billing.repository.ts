@@ -1,15 +1,7 @@
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
 import { redactSensitiveText } from "@support-communication/redaction";
-import {
-  billingInvoices,
-  billingSubscriptions,
-  billingTariffs,
-  tenantBillingStates,
-  type BillingInvoice,
-  type BillingSubscription,
-  type BillingTariff,
-  type TenantBillingState
-} from "./billing.fixtures.js";
+import type { BillingInvoice, BillingSubscription, BillingTariff, TenantBillingState } from "./billing.types.js";
+import { billingTariffCatalog } from "./tariff-catalog.js";
 
 export type BillingTenantState = TenantBillingState;
 export type BillingInvoiceState = BillingInvoice;
@@ -462,6 +454,7 @@ export interface BillingRepositoryPort {
 
 interface BillingRepositoryOptions {
   filePath: string;
+  seed?: BillingState;
 }
 
 interface BillingTariffChangeInput {
@@ -529,12 +522,12 @@ export class BillingRepository implements BillingRepositoryPort {
     defaultRepository = repository;
   }
 
-  static inMemory(): BillingRepository {
-    return new BillingRepository(createDurableBillingRepository(new InMemoryStore(seedBillingState())));
+  static inMemory(seed: BillingState = createEmptyBillingState()): BillingRepository {
+    return new BillingRepository(createDurableBillingRepository(new InMemoryStore(seed)));
   }
 
-  static open({ filePath }: BillingRepositoryOptions): BillingRepository {
-    return new BillingRepository(createDurableBillingRepository(new JsonFileStore({ filePath, seed: seedBillingState() })));
+  static open({ filePath, seed = createEmptyBillingState() }: BillingRepositoryOptions): BillingRepository {
+    return new BillingRepository(createDurableBillingRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client }: PrismaBillingRepositoryOptions): BillingRepository {
@@ -1471,11 +1464,11 @@ class PrismaBillingRepository implements BillingRepositoryPort {
   constructor(private readonly client: PrismaBillingClient) {}
 
   listTariffs(): BillingTariff[] {
-    return clone(billingTariffs);
+    return clone(billingTariffCatalog);
   }
 
   findTariff(planId: string | undefined): BillingTariff | undefined {
-    return clone(billingTariffs.find((tariff) => tariff.id === planId));
+    return clone(billingTariffCatalog.find((tariff) => tariff.id === planId));
   }
 
   async findTenant(tenantId: string | undefined): Promise<BillingTenantState | undefined> {
@@ -2294,11 +2287,11 @@ async function persistPrismaReconciliationConflict(
 function createDurableBillingRepository(store: DurableStore<BillingState>): BillingRepositoryPort {
   return {
     listTariffs(): BillingTariff[] {
-      return clone(store.read().tariffs ?? billingTariffs);
+      return clone(store.read().tariffs ?? billingTariffCatalog);
     },
 
     findTariff(planId: string | undefined): BillingTariff | undefined {
-      return clone((store.read().tariffs ?? billingTariffs).find((tariff) => tariff.id === planId));
+      return clone((store.read().tariffs ?? billingTariffCatalog).find((tariff) => tariff.id === planId));
     },
 
     findTenant(tenantId: string | undefined): BillingTenantState | undefined {
@@ -2306,12 +2299,12 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
         return undefined;
       }
 
-      return clone((store.read().tenants ?? tenantBillingStates).find((tenant) => tenant.id === tenantId));
+      return clone((store.read().tenants ?? []).find((tenant) => tenant.id === tenantId));
     },
 
     saveTenant(tenant: BillingTenantState): BillingTenantState {
       const state = store.read();
-      const tenants = state.tenants ?? tenantBillingStates;
+      const tenants = state.tenants ?? [];
       const existing = tenants.some((item) => item.id === tenant.id);
       const nextTenant = clone(tenant);
       store.write({
@@ -2328,7 +2321,7 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
         return undefined;
       }
 
-      return clone((store.read().subscriptions ?? billingSubscriptions)
+      return clone((store.read().subscriptions ?? [])
         .filter((subscription) => subscription.tenantId === tenantId)
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]);
     },
@@ -2338,7 +2331,7 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
         return [];
       }
 
-      return clone((store.read().invoices ?? billingInvoices)
+      return clone((store.read().invoices ?? [])
         .filter((invoice) => invoice.tenantId === tenantId)
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
     },
@@ -2894,7 +2887,7 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
           throw new Error(`Quota reservation ${input.reservationId} was not found.`);
         }
 
-        const currentTenants = state.tenants ?? clone(tenantBillingStates);
+        const currentTenants = state.tenants ?? [];
         const existingTenant = currentTenants.find((tenant) => tenant.id === existingReservation.tenantId);
         if (!existingTenant) {
           throw new Error(`Billing tenant ${existingReservation.tenantId} was not found.`);
@@ -3019,15 +3012,15 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
       } | null = null;
 
       store.update((state) => {
-        const currentTenants = state.tenants ?? clone(tenantBillingStates);
+        const currentTenants = state.tenants ?? [];
         const existing = currentTenants.find((tenant) => tenant.id === input.tenantId);
         if (!existing) {
           throw new Error(`Billing tenant ${input.tenantId} was not found.`);
         }
 
         const updatedTenant = { ...existing, ...(input.tenantChanges ?? {}) };
-        const currentSubscriptions = state.subscriptions ?? clone(billingSubscriptions);
-        const currentInvoices = state.invoices ?? clone(billingInvoices);
+        const currentSubscriptions = state.subscriptions ?? [];
+        const currentInvoices = state.invoices ?? [];
         const nextSubscriptions = input.subscription
           ? upsertSubscriptionByProviderId(currentSubscriptions, input.subscription)
           : currentSubscriptions;
@@ -3104,7 +3097,7 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
       let result: { syncJob: BillingSyncJob; tenant: BillingTenantState } | null = null;
 
       store.update((state) => {
-        const currentTenants = state.tenants ?? clone(tenantBillingStates);
+        const currentTenants = state.tenants ?? [];
         const existing = currentTenants.find((tenant) => tenant.id === tenantId);
         if (!existing) {
           throw new Error(`Billing tenant ${tenantId} was not found.`);
@@ -4395,22 +4388,22 @@ function usageValue(usage: BillingTenantState["usage"], resource: string): numbe
   }
 }
 
-function seedBillingState(): BillingState {
+export function createEmptyBillingState(): BillingState {
   return {
     billingApprovals: [],
     billingLegalEntities: [],
     billingProviderSyncEvents: [],
     billingTaxDocuments: [],
     billingSyncJobs: [],
-    invoices: clone(billingInvoices),
+    invoices: [],
     paymentDunningStates: [],
     paymentRetryKeys: [],
     paymentRetrySchedules: [],
     quotaLedgerEntries: [],
     quotaReservations: [],
     reconciliationConflicts: [],
-    subscriptions: clone(billingSubscriptions),
-    tariffs: clone(billingTariffs),
-    tenants: clone(tenantBillingStates)
+    subscriptions: [],
+    tariffs: clone(billingTariffCatalog),
+    tenants: []
   };
 }

@@ -117,7 +117,7 @@ export async function executePostgresRestoreCheck(
     };
   }
 
-  const result = persistPostgresRestoreCheckResult(input.operationsRepository, {
+  const result = await input.operationsRepository.savePostgresRestoreCheckResultAsync({
     command: commandResult.command,
     drillId: input.drillId,
     durationMs: commandResult.durationMs,

@@ -1,5 +1,6 @@
 import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryKind, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
-import { IdentityRepository, type PrismaIdentityClient } from "./identity.repository.js";
+import { IdentityRepository, type IdentityState, type PrismaIdentityClient } from "./identity.repository.js";
+import { TeamDirectoryRepository } from "./team-directory.repository.js";
 
 export interface IdentityRepositoryBootstrapSource {
   DATABASE_URL?: string;
@@ -12,6 +13,7 @@ export interface IdentityRepositoryBootstrapSource {
 
 export interface IdentityRepositoryBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaIdentityClient;
+  seed?: IdentityState;
 }
 
 export function configureIdentityRepository(
@@ -19,8 +21,14 @@ export function configureIdentityRepository(
   options: IdentityRepositoryBootstrapOptions = {}
 ): IdentityRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => IdentityRepository.open({ filePath }),
-    createPrismaRepository: (client) => IdentityRepository.prisma({ client }),
+    createJsonRepository: (filePath) => {
+      TeamDirectoryRepository.useDefault(TeamDirectoryRepository.inMemory());
+      return IdentityRepository.open({ filePath, seed: options.seed });
+    },
+    createPrismaRepository: (client) => {
+      TeamDirectoryRepository.useDefault(TeamDirectoryRepository.prisma(client as never));
+      return IdentityRepository.prisma({ client });
+    },
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "IDENTITY_REPOSITORY",
     source,

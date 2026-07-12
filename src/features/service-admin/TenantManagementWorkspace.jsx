@@ -1,13 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Ban, Building2, CheckCircle2, Eye, Search, ShieldAlert } from "lucide-react";
 import { SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
-import {
-  serviceAdminFeatureFlags,
-  serviceAdminIncidents,
-  serviceAdminTariffs,
-  serviceAdminTenants,
-  serviceAdminUsers
-} from "../../data/serviceAdmin.js";
 import { tenantService } from "../../services/tenantService.js";
 import { formatCurrency, formatDateTime, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
 
@@ -15,19 +8,46 @@ const tenantStatusOptions = ["all", "active", "watch", "restricted", "trial"];
 const nextStatusOptions = ["active", "watch", "restricted"];
 
 export function TenantManagementWorkspace({ onAudit }) {
+  const [tenants, setTenants] = useState([]);
+  const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [selectedTenantId, setSelectedTenantId] = useState(serviceAdminTenants[0].id);
+  const [selectedTenantId, setSelectedTenantId] = useState("");
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [nextStatus, setNextStatus] = useState("watch");
   const [reason, setReason] = useState("Проверка администратора сервиса после эскалации клиента");
   const [confirmed, setConfirmed] = useState(false);
   const [statusOverrides, setStatusOverrides] = useState({});
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTenants() {
+      const response = await tenantService.fetchTenants();
+      if (cancelled) {
+        return;
+      }
+
+      if (response.status !== "ok") {
+        setLoadError(response.error?.message ?? "Не удалось загрузить организации.");
+        return;
+      }
+
+      const items = response.data?.items ?? [];
+      setTenants(items);
+      setSelectedTenantId(items[0]?.id ?? "");
+    }
+
+    loadTenants();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const visibleTenants = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return serviceAdminTenants
+    return tenants
       .map((tenant) => ({ ...tenant, status: statusOverrides[tenant.id] ?? tenant.status }))
       .filter((tenant) => {
         const statusMatches = statusFilter === "all" || tenant.status === statusFilter;
@@ -36,15 +56,25 @@ export function TenantManagementWorkspace({ onAudit }) {
 
         return statusMatches && queryMatches;
       });
-  }, [query, statusFilter, statusOverrides]);
+  }, [query, statusFilter, statusOverrides, tenants]);
 
   const selectedTenant = visibleTenants.find((tenant) => tenant.id === selectedTenantId)
-    ?? serviceAdminTenants.find((tenant) => tenant.id === selectedTenantId)
-    ?? serviceAdminTenants[0];
-  const detail = selectedDetail?.tenant?.id === selectedTenant.id ? selectedDetail : buildLocalTenantDetail(selectedTenant);
-  const actionDisabled = reason.trim().length < 8 || !confirmed || nextStatus === selectedTenant.status;
+    ?? tenants.find((tenant) => tenant.id === selectedTenantId)
+    ?? visibleTenants[0]
+    ?? tenants[0]
+    ?? null;
+  const detail = selectedTenant && selectedDetail?.tenant?.id === selectedTenant.id
+    ? selectedDetail
+    : selectedTenant
+      ? buildLocalTenantDetail(selectedTenant)
+      : null;
+  const actionDisabled = !selectedTenant || reason.trim().length < 8 || !confirmed || nextStatus === selectedTenant.status;
 
   async function handleSelectTenant(tenantId) {
+    if (!tenantId) {
+      return;
+    }
+
     setSelectedTenantId(tenantId);
     const envelope = await tenantService.fetchTenantDetail(tenantId);
 
@@ -55,6 +85,10 @@ export function TenantManagementWorkspace({ onAudit }) {
   }
 
   async function handleStatusChange() {
+    if (!selectedTenant) {
+      return;
+    }
+
     const envelope = await tenantService.updateTenantStatus({
       confirmed,
       reason,
@@ -93,7 +127,7 @@ export function TenantManagementWorkspace({ onAudit }) {
         <div className="service-admin-tenant-list">
           {visibleTenants.map((tenant) => (
             <button
-              className={tenant.id === selectedTenant.id ? "selected" : ""}
+              className={tenant.id === selectedTenant?.id ? "selected" : ""}
               key={tenant.id}
               onClick={() => handleSelectTenant(tenant.id)}
               type="button"
@@ -109,7 +143,8 @@ export function TenantManagementWorkspace({ onAudit }) {
         </div>
       </section>
 
-      <section className="service-admin-detail-panel">
+      {selectedTenant && detail ? (
+        <section className="service-admin-detail-panel">
         <SectionTitle title="Карточка организации" action={selectedTenant.id} />
         <div className="service-admin-detail-head">
           <div>
@@ -182,7 +217,16 @@ export function TenantManagementWorkspace({ onAudit }) {
             </button>
           </footer>
         </div>
-      </section>
+        </section>
+      ) : (
+        <section className="service-admin-detail-panel">
+          <SectionTitle title="Карточка организации" action={loadError || "Нет данных"} />
+          <div className="service-admin-empty">
+            <strong>Нет организаций</strong>
+            <span>{loadError || "Список организаций еще не загружен или пуст."}</span>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -190,9 +234,9 @@ export function TenantManagementWorkspace({ onAudit }) {
 function buildLocalTenantDetail(tenant) {
   return {
     tenant,
-    users: serviceAdminUsers.filter((user) => user.tenantId === tenant.id),
-    tariff: serviceAdminTariffs.find((tariff) => tariff.id === tenant.planId),
-    incidents: serviceAdminIncidents.filter((incident) => incident.affectedTenantIds.includes(tenant.id)),
-    flags: serviceAdminFeatureFlags.filter((flag) => flag.enabledTenantIds.includes(tenant.id))
+    users: [],
+    tariff: { id: tenant.planId, name: tenant.planId },
+    incidents: [],
+    flags: []
   };
 }

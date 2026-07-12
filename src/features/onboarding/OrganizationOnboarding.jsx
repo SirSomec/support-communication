@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { setSession } from "../../app/sessionStore.js";
+import { setTenantSession } from "../../app/sessionStore.js";
 import { authService } from "../../services/authService.js";
 import {
   mapOnboardingFormToProvisionPayload,
@@ -15,7 +15,6 @@ import { StepButton, SummaryRow } from "./OnboardingControls.jsx";
 import { OnboardingStepContent } from "./OnboardingStepContent.jsx";
 import {
   createSlug,
-  employeeRoles,
   getCompletion,
   hasEmailShape,
   planOptions,
@@ -59,17 +58,11 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     team: "Support"
   });
   const [employees, setEmployees] = useState([]);
-  const [test, setTest] = useState({
-    recipient: "",
-    message: "Здравствуйте! Это тестовое сообщение из onboarding Support Communication.",
-    status: "idle",
-    log: ""
-  });
   const [notice, setNotice] = useState({ tone: "info", text: "" });
 
   const completion = useMemo(() => {
-    return getCompletion({ admin, employees, limits, plan, tenant, test });
-  }, [admin, employees, limits, plan, tenant, test]);
+    return getCompletion({ admin, employees, limits, plan, tenant });
+  }, [admin, employees, limits, plan, tenant]);
   const completedCount = Object.values(completion).filter(Boolean).length;
   const progress = Math.round((completedCount / steps.length) * 100);
   const activeIndex = steps.findIndex((step) => step.id === activeStep);
@@ -95,7 +88,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     }
 
     if (employees.some((employee) => employee.email === email)) {
-      setNotice({ tone: "error", text: "Этот сотрудник уже добавлен в приглашения." });
+      setNotice({ tone: "error", text: "Этот сотрудник уже добавлен в список приглашений." });
       return;
     }
 
@@ -106,27 +99,6 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
 
   function handleRemoveEmployee(email) {
     setEmployees((current) => current.filter((employee) => employee.email !== email));
-  }
-
-  function handleSendTest(event) {
-    event.preventDefault();
-
-    if (!hasEmailShape(test.recipient.trim())) {
-      setNotice({ tone: "error", text: "Введите email получателя тестового сообщения." });
-      return;
-    }
-
-    if (test.message.trim().length < 12) {
-      setNotice({ tone: "error", text: "Текст тестового сообщения слишком короткий." });
-      return;
-    }
-
-    setTest((current) => ({
-      ...current,
-      status: "sent",
-      log: `test message queued for ${current.recipient.trim()}`
-    }));
-    setNotice({ tone: "success", text: "Тестовое сообщение поставлено в локальную очередь." });
   }
 
   async function handleFinish() {
@@ -140,10 +112,10 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     }
 
     setIsProvisioning(true);
-    setNotice({ tone: "info", text: "Создаём организацию..." });
+    setNotice({ tone: "info", text: "Создаем организацию..." });
 
     try {
-      const provisionPayload = mapOnboardingFormToProvisionPayload({ admin, plan, tenant });
+      const provisionPayload = mapOnboardingFormToProvisionPayload({ admin, employees, plan, tenant });
       const provisionResponse = await tenantProvisionService.provisionOrganization(provisionPayload);
 
       if (provisionResponse.status !== "ok" || !provisionResponse.data?.tenant) {
@@ -154,25 +126,34 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
         return;
       }
 
-      const { admin: provisionedAdmin, embedSnippet, publicApiKey, tenant: provisionedTenant } = provisionResponse.data;
+      const {
+        embedSnippet,
+        operator,
+        publicApiKey,
+        session,
+        tenant: provisionedTenant
+      } = provisionResponse.data;
 
-      const loginResponse = await authService.loginTenantOperator({
-        email: admin.email.trim().toLowerCase(),
-        password: admin.password
-      });
+      if (!session?.accessToken) {
+        const loginResponse = await authService.loginTenantOperator({
+          email: admin.email.trim().toLowerCase(),
+          password: admin.password
+        });
 
-      setSession({
-        accessToken: loginResponse.status === "ok" && loginResponse.data?.accessToken
-          ? loginResponse.data.accessToken
-          : `onboarding-ui-${provisionedTenant.id}`,
-        tenantId: loginResponse.data?.tenantId ?? provisionedTenant.id,
-        operator: loginResponse.data?.operator ?? {
-          email: provisionedAdmin?.email ?? admin.email,
-          id: provisionedAdmin?.id ?? `onboarding-admin-${provisionedTenant.id}`,
-          name: provisionedAdmin?.name ?? admin.name,
-          role: provisionedAdmin?.role ?? "Admin"
+        if (!authService.persistTenantLogin(loginResponse)) {
+          setNotice({
+            tone: "error",
+            text: loginResponse.error?.message ?? "Организация создана, но вход не удался. Попробуйте войти вручную."
+          });
+          return;
         }
-      });
+      } else {
+        setTenantSession({
+          accessToken: session.accessToken,
+          tenantId: provisionResponse.data.tenantId ?? provisionedTenant.id,
+          operator: operator ?? provisionResponse.data.admin
+        });
+      }
 
       onFinish({
         tenant: provisionedTenant,
@@ -180,8 +161,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
         embedSnippet,
         plan,
         limits,
-        employees,
-        test
+        employees
       });
     } catch {
       setNotice({
@@ -202,7 +182,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
         </button>
         <div>
           <h1>Onboarding организации</h1>
-          <p>Tenant, trial, первый администратор, лимиты, сотрудники и тестовое сообщение перед входом в app namespace.</p>
+          <p>Tenant, trial, первый администратор, лимиты и сотрудники перед входом в app namespace.</p>
         </div>
         <button className="onboarding-finish" disabled={isProvisioning} onClick={handleFinish} type="button">
           {isProvisioning ? "Создание..." : "Завершить"}
@@ -250,7 +230,6 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
             handleAddEmployee={handleAddEmployee}
             handleGenerateSlug={handleGenerateSlug}
             handleRemoveEmployee={handleRemoveEmployee}
-            handleSendTest={handleSendTest}
             limits={limits}
             plan={plan}
             setAdmin={setAdmin}
@@ -259,9 +238,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
             setNotice={setNotice}
             setPlan={setPlan}
             setTenant={setTenant}
-            setTest={setTest}
             tenant={tenant}
-            test={test}
           />
           <footer className="onboarding-step-footer">
             <button disabled={activeIndex === 0} onClick={() => moveStep(-1)} type="button">
@@ -283,7 +260,6 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
           <SummaryRow label="Администратор" value={admin.email || "не задан"} />
           <SummaryRow label="Лимиты" value={`${limits.operatorLimit} операторов · ${limits.concurrentDialogs} диалогов`} />
           <SummaryRow label="Сотрудники" value={`${employees.length} приглашений`} />
-          <SummaryRow label="Тест" value={test.status === "sent" ? "отправлен" : "ожидает"} />
         </aside>
       </div>
     </main>

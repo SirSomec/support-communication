@@ -2,7 +2,6 @@ import {
   Building2,
   CreditCard,
   Gauge,
-  Send,
   UserPlus,
   Users
 } from "lucide-react";
@@ -12,8 +11,7 @@ export const steps = [
   { id: "plan", label: "Тариф / trial", icon: CreditCard },
   { id: "admin", label: "Первый администратор", icon: UserPlus },
   { id: "limits", label: "Лимиты", icon: Gauge },
-  { id: "employees", label: "Сотрудники", icon: Users },
-  { id: "test", label: "Тестовое сообщение", icon: Send }
+  { id: "employees", label: "Сотрудники", icon: Users }
 ];
 
 export const planOptions = [
@@ -59,8 +57,7 @@ export function getCompletion({
   employees,
   limits,
   plan,
-  tenant,
-  test
+  tenant
 }) {
   return {
     tenant: tenant.name.trim().length >= 2 && tenant.slug.trim().length >= 3,
@@ -69,7 +66,6 @@ export function getCompletion({
       && hasEmailShape(admin.email)
       && String(admin.password ?? "").length >= 8,
     limits: limits.operatorLimit > 0 && limits.concurrentDialogs > 0 && limits.dailyMessages >= 100,
-    employees: employees.length > 0,
-    test: test.status === "sent"
+    employees: employees.length > 0
   };
 }

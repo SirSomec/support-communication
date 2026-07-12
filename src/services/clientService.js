@@ -13,6 +13,22 @@ export const clientService = {
     });
   },
 
+  async fetchClientSegments() {
+    return apiRequest("/clients/segments", {
+      operation: "fetchClientSegments",
+      service: SERVICE
+    });
+  },
+
+  async createClientExport(payload = {}) {
+    return apiRequest("/clients/exports", {
+      body: normalizeExportPayload(payload),
+      method: "POST",
+      operation: "createClientExport",
+      service: SERVICE
+    });
+  },
+
   async mergeClientProfiles(payload = {}) {
     return apiRequest("/clients/merge", {
       body: normalizeMergePayload(payload),
@@ -35,13 +51,21 @@ export const clientService = {
     return {
       id: SERVICE,
       status: "ready",
-      operations: ["fetchClientProfiles", "mergeClientProfiles", "unmergeClientProfile"],
+      operations: ["fetchClientProfiles", "fetchClientSegments", "createClientExport", "mergeClientProfiles", "unmergeClientProfile"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
       note: "Connected to API Gateway routes."
     };
   }
 };
+
+function normalizeExportPayload({ format = "json", reason, segmentId } = {}) {
+  return {
+    format: String(format || "json").trim().toLowerCase() === "csv" ? "csv" : "json",
+    reason: normalizeReason(reason, "Client export requested from client workspace"),
+    ...(segmentId ? { segmentId } : {})
+  };
+}
 
 function normalizeMergePayload({ candidate, candidateProfileId, primary, primaryProfileId, reason } = {}) {
   return {

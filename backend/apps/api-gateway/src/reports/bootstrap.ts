@@ -1,33 +1,44 @@
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { ReportRepository } from "./report.repository.js";
+import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
+import { ReportRepository, type PrismaReportClient, type ReportState } from "./report.repository.js";
 
 export interface ReportRepositoryBootstrapSource {
+  DATABASE_URL?: string;
   NODE_ENV?: string;
   PORT?: number | string;
+  REPORT_REPOSITORY?: string;
   REPORT_STORE_FILE?: string;
   SERVICE_NAME?: string;
 }
 
-export function configureReportRepository(source: ReportRepositoryBootstrapSource = process.env): ReportRepository {
-  const repository = ReportRepository.open({ filePath: resolveReportStoreFile(source) });
-  ReportRepository.useDefault(repository);
-  return repository;
+export interface ReportRepositoryBootstrapOptions {
+  prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaReportClient;
+  seed?: ReportState;
+}
+
+export function configureReportRepository(
+  source: ReportRepositoryBootstrapSource = process.env,
+  options: ReportRepositoryBootstrapOptions = {}
+): ReportRepository {
+  return configureRepositoryBootstrap({
+    createJsonRepository: (filePath) => ReportRepository.open({ filePath, ...(options.seed ? { seed: options.seed } : {}) }),
+    createPrismaRepository: (client) => ReportRepository.prisma({ client }),
+    prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
+    repositoryEnv: "REPORT_REPOSITORY",
+    source,
+    storeFileEnv: "REPORT_STORE_FILE",
+    suffix: "reports",
+    useDefault: (repository) => ReportRepository.useDefault(repository)
+  });
 }
 
 export function resolveReportStoreFile(source: ReportRepositoryBootstrapSource = process.env): string {
-  const configuredPath = source.REPORT_STORE_FILE?.trim();
-  if (configuredPath) {
-    return resolve(configuredPath);
-  }
-
-  const serviceName = sanitizePathSegment(source.SERVICE_NAME ?? "api-gateway");
-  const nodeEnv = sanitizePathSegment(source.NODE_ENV ?? "development");
-  const port = sanitizePathSegment(String(source.PORT ?? "4100"));
-
-  return join(tmpdir(), "support-communication", `${serviceName}-${nodeEnv}-${port}-reports.json`);
+  return resolveRepositoryStoreFile({
+    source,
+    storeFileEnv: "REPORT_STORE_FILE",
+    suffix: "reports"
+  });
 }
 
-function sanitizePathSegment(value: string): string {
-  return value.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "default";
+function defaultPrismaClientFactory(options: PrismaClientFactoryOptions): PrismaReportClient {
+  return createPrismaClient(options) as PrismaReportClient;
 }

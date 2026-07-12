@@ -1,20 +1,88 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.ts";
+import { bootstrapReportState } from "../apps/api-gateway/src/reports/seed.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
 import { claimDueScheduledDigestDescriptors, queueScheduledDigestExportJob } from "../apps/api-gateway/src/reports/report-digest.worker.ts";
+import type { ReportExportJob } from "../apps/api-gateway/src/reports/report.types.ts";
 import {
   createDeterministicReportObjectStorageAdapter,
   createReportObjectStoragePort,
   createReportExportFileDescriptor,
   executeCsvReportExport,
+  executeXlsxReportExport,
   executeJsonReportExport,
+  executeReportExportWorkerOnce,
   serializeReportRowsAsCsv,
+  serializeReportRowsAsXlsx,
   serializeReportRowsAsJson,
   writeReportExportObject
 } from "../apps/api-gateway/src/reports/report-export.worker.ts";
 
 describe("report export worker contracts", () => {
+  it("exposes scheduled digest worker runtime scripts, compose service and release smoke", () => {
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const releaseChecklist = readFileSync(new URL("../scripts/release-checklist.mjs", import.meta.url), "utf8");
+    const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+    const pilotCompose = readFileSync(new URL("../../docker-compose.pilot.yml", import.meta.url), "utf8");
+    const main = readFileSync(new URL("../apps/api-gateway/src/reports/report-digest.main.ts", import.meta.url), "utf8");
+
+    assert.match(packageJson.scripts["start:report-digest-worker"], /apps\/api-gateway\/dist\/reports\/report-digest\.main\.js/);
+    assert.equal(packageJson.scripts["report-digest:worker:once"], "npm run build && node --env-file=.env.example scripts/report-digest-worker-smoke.mjs");
+    assert.equal(existsSync(new URL("../scripts/report-digest-worker-smoke.mjs", import.meta.url)), true);
+    const smoke = readFileSync(new URL("../scripts/report-digest-worker-smoke.mjs", import.meta.url), "utf8");
+    assert.match(smoke, /scheduledDigestDescriptor\.create/);
+    assert.match(smoke, /reportExportJob\.findFirst/);
+    assert.match(smoke, /reportNotificationDescriptor\.findUnique/);
+    assert.match(smoke, /result\.claimed !== 1/);
+    assert.match(smoke, /result\.completed !== 1/);
+    assert.match(smoke, /result\.failed !== 0/);
+    assert.match(smoke, /status !== "completed"/);
+    assert.match(releaseChecklist, /script: "report-digest:worker:once"/);
+    assert.match(compose, /report-digest-worker:/);
+    assert.match(compose, /command: \["node", "apps\/api-gateway\/dist\/reports\/report-digest\.main\.js"\]/);
+    assert.match(compose, /REPORT_DIGEST_WORKER_INTERVAL_MS: 10000/);
+    assert.match(compose, /REPORT_DIGEST_WORKER_LIMIT: 10/);
+    assert.match(pilotCompose, /report-digest-worker:[\s\S]*REPORT_REPOSITORY: prisma/);
+    assert.match(main, /runReportDigestWorkerFromEnv/);
+    assert.match(main, /queueScheduledDigestExportJob/);
+  });
+
+  it("exposes report export worker runtime scripts and release smoke", () => {
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const releaseChecklist = readFileSync(new URL("../scripts/release-checklist.mjs", import.meta.url), "utf8");
+    const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+    const pilotCompose = readFileSync(new URL("../../docker-compose.pilot.yml", import.meta.url), "utf8");
+
+    assert.match(packageJson.scripts["start:report-export-worker"], /apps\/api-gateway\/dist\/reports\/report-export\.main\.js/);
+    assert.equal(packageJson.scripts["report-export:worker:once"], "npm run build && node --env-file=.env.example scripts/report-export-worker-smoke.mjs");
+    assert.equal(existsSync(new URL("../apps/api-gateway/src/reports/report-export.main.ts", import.meta.url)), true);
+    assert.equal(existsSync(new URL("../scripts/report-export-worker-smoke.mjs", import.meta.url)), true);
+    const main = readFileSync(new URL("../apps/api-gateway/src/reports/report-export.main.ts", import.meta.url), "utf8");
+    const smoke = readFileSync(new URL("../scripts/report-export-worker-smoke.mjs", import.meta.url), "utf8");
+    assert.match(main, /runReportExportWorkerFromEnv/);
+    assert.match(main, /executeReportExportWorkerOnce/);
+    assert.match(smoke, /reportExportJob\.create/);
+    assert.match(smoke, /reportFileDescriptor\.findUnique/);
+    assert.match(smoke, /REPORT_EXPORT_WORKER_QUEUE/);
+    assert.match(smoke, /result\.scanned !== 1/);
+    assert.match(smoke, /result\.ready !== 1/);
+    assert.match(smoke, /result\.failed !== 0/);
+    assert.match(smoke, /statusKey !== "ready"/);
+    assert.match(releaseChecklist, /script: "report-export:worker:once"/);
+    assert.match(compose, /report-export-worker:/);
+    assert.match(compose, /command: \["node", "apps\/api-gateway\/dist\/reports\/report-export\.main\.js"\]/);
+    assert.match(compose, /REPORT_EXPORT_WORKER_INTERVAL_MS: 10000/);
+    assert.match(compose, /REPORT_EXPORT_WORKER_LIMIT: 10/);
+    assert.match(compose, /REPORT_EXPORT_OBJECT_ROOT: \.runtime\/report-exports/);
+    assert.match(pilotCompose, /report-export-worker:[\s\S]*REPORT_REPOSITORY: prisma/);
+  });
+
   it("serializes report rows as deterministic CSV", () => {
     const csv = serializeReportRowsAsCsv({
       columns: [
@@ -93,6 +161,26 @@ describe("report export worker contracts", () => {
         2
       )
     );
+  });
+
+  it("serializes report rows as a deterministic XLSX workbook", () => {
+    const workbook = serializeReportRowsAsXlsx({
+      columns: [
+        { id: "metric", label: "Metric" },
+        { id: "today", label: "Today" }
+      ],
+      rows: [
+        { metric: "New conversations", today: 486 },
+        { metric: "Closed & saved", today: "<451>" }
+      ]
+    });
+    const body = workbook.toString("utf8");
+
+    assert.equal(workbook.subarray(0, 4).toString("binary"), "PK\u0003\u0004");
+    assert.match(body, /xl\/worksheets\/sheet1\.xml/);
+    assert.match(body, /New conversations/);
+    assert.match(body, /Closed &amp; saved/);
+    assert.match(body, /&lt;451&gt;/);
   });
 
   it("writes serialized report output through the object storage boundary", async () => {
@@ -259,6 +347,10 @@ describe("report export worker contracts", () => {
         writtenAt: "2026-06-30T10:45:00.000Z"
       }
     ]);
+    const stored = await adapter.getObject({ objectKey: "reports/tenant-volga/export-csv-002/report.csv" });
+    assert.equal(stored?.contentType, "text/csv");
+    assert.equal(stored?.body, "metric,today\r\nNew,486");
+    assert.equal(await adapter.getObject({ objectKey: "reports/tenant-volga/missing.csv" }), undefined);
   });
 
   it("executes CSV report exports by writing serialized rows through object storage", async () => {
@@ -347,6 +439,179 @@ describe("report export worker contracts", () => {
       sizeBytes: Buffer.byteLength(expectedBody),
       writtenAt: "2026-06-30T11:15:00.000Z"
     });
+  });
+
+  it("executes XLSX report exports by writing a workbook through object storage", async () => {
+    const adapter = createDeterministicReportObjectStorageAdapter({
+      now: () => new Date("2026-06-30T11:30:00.000Z")
+    });
+
+    const result = await executeXlsxReportExport({
+      columns: [
+        { id: "metric", label: "Metric" },
+        { id: "today", label: "Today" }
+      ],
+      jobId: "export-xlsx-005",
+      metricDefinitionVersion: "metrics/v1",
+      objectKey: "reports/tenant-volga/export-xlsx-005/report.xlsx",
+      rows: [
+        { metric: "New conversations", today: 486 },
+        { metric: "Closed conversations", today: 451 }
+      ],
+      storage: createReportObjectStoragePort(adapter)
+    });
+
+    const stored = adapter.readObject("reports/tenant-volga/export-xlsx-005/report.xlsx");
+    assert.ok(Buffer.isBuffer(stored?.body));
+    assert.equal(stored?.contentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    assert.deepEqual(stored?.metadata, {
+      format: "xlsx",
+      jobId: "export-xlsx-005",
+      metricDefinitionVersion: "metrics/v1"
+    });
+    assert.deepEqual(result, {
+      checksum: stored?.checksum,
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      objectKey: "reports/tenant-volga/export-xlsx-005/report.xlsx",
+      sizeBytes: stored?.sizeBytes,
+      writtenAt: "2026-06-30T11:30:00.000Z"
+    });
+  });
+
+  it("claims queued report export jobs from an explicitly configured queue", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({ exportJobs: [] }));
+    repository.saveExportJob(reportExportJob({
+      createdAt: "2026-07-04T08:00:00.000Z",
+      id: "export-default-queue",
+      queue: "report-export"
+    }));
+    repository.saveExportJob(reportExportJob({
+      createdAt: "2026-07-04T08:01:00.000Z",
+      id: "export-smoke-queue",
+      queue: "report-export-smoke"
+    }));
+
+    const claimed = await repository.claimQueuedExportJobsAsync({
+      limit: 5,
+      now: new Date("2026-07-04T08:05:00.000Z"),
+      queue: "report-export-smoke"
+    });
+    const jobs = repository.listExportJobs();
+
+    assert.deepEqual(claimed.map((job: ReportExportJob) => job.id), ["export-smoke-queue"]);
+    assert.equal(jobs.find((job) => job.id === "export-smoke-queue")?.statusKey, "running");
+    assert.equal(jobs.find((job) => job.id === "export-smoke-queue")?.status, "Running");
+    assert.equal(jobs.find((job) => job.id === "export-smoke-queue")?.progress, 20);
+    assert.equal(jobs.find((job) => job.id === "export-default-queue")?.statusKey, "queued");
+  });
+
+  it("executes one claimed report export job into a persisted file descriptor", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({
+      exportJobs: [],
+      reportFileDescriptors: []
+    }));
+    repository.saveExportJob(reportExportJob({
+      columns: ["metric", "today"],
+      createdAt: "2026-07-04T08:10:00.000Z",
+      filters: { tenantId: "tenant-volga" },
+      format: "XLSX",
+      id: "export-worker-runtime",
+      queue: "report-export-smoke"
+    }));
+    const storageAdapter = createDeterministicReportObjectStorageAdapter({
+      now: () => new Date("2026-07-04T08:15:00.000Z")
+    });
+
+    const result = await executeReportExportWorkerOnce({
+      limit: 1,
+      now: new Date("2026-07-04T08:15:00.000Z"),
+      queue: "report-export-smoke",
+      reportRepository: repository,
+      storage: createReportObjectStoragePort(storageAdapter)
+    });
+    const job = repository.listExportJobs().find((item) => item.id === "export-worker-runtime");
+    const descriptor = repository.findReportFileDescriptor("export-worker-runtime");
+    const object = storageAdapter.listObjects()[0];
+
+    assert.deepEqual(result, {
+      failed: 0,
+      ready: 1,
+      scanned: 1
+    });
+    assert.equal(job?.statusKey, "ready");
+    assert.equal(job?.status, "Ready");
+    assert.equal(job?.progress, 100);
+    assert.equal(job?.rows, 4);
+    assert.equal(job?.fileName, "export-worker-runtime.xlsx");
+    assert.equal(job?.filters?.eventWatermark, null);
+    assert.equal(object.objectKey, "reports/tenant-volga/export-worker-runtime/export-worker-runtime.xlsx");
+    assert.equal(object.contentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    assert.equal(descriptor?.jobId, "export-worker-runtime");
+    assert.equal(descriptor?.objectKey, object.objectKey);
+    assert.equal(descriptor?.checksum, object.checksum);
+    assert.equal(descriptor?.sizeBytes, object.sizeBytes);
+    assert.equal(descriptor?.tenantId, "tenant-volga");
+  });
+
+  it("regenerates a failed export after retry", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({
+      exportJobs: [],
+      reportFileDescriptors: []
+    }));
+    repository.saveExportJob(reportExportJob({
+      columns: ["metric", "today"],
+      filters: { tenantId: "tenant-volga" },
+      format: "XLSX",
+      id: "export-worker-retry",
+      progress: 100,
+      queue: "report-export",
+      status: "Failed",
+      statusKey: "error"
+    }));
+
+    const retry = await new ReportService(repository).retryReportExport({
+      jobId: "export-worker-retry",
+      reason: "Retry failed export"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(retry.data.job.statusKey, "queued");
+
+    const result = await executeReportExportWorkerOnce({
+      limit: 1,
+      queue: "report-export",
+      reportRepository: repository,
+      storage: createReportObjectStoragePort(createDeterministicReportObjectStorageAdapter())
+    });
+    const job = repository.listExportJobs().find((item) => item.id === "export-worker-retry");
+
+    assert.deepEqual(result, { failed: 0, ready: 1, scanned: 1 });
+    assert.equal(job?.statusKey, "ready");
+    assert.ok(repository.findReportFileDescriptor("export-worker-retry"));
+  });
+
+  it("marks persisted export jobs without a tenant as corrupt instead of assigning a default tenant", async () => {
+    const repository = ReportRepository.inMemory();
+    const corrupt = reportExportJob({
+      columns: ["metric"],
+      id: "export-worker-missing-tenant",
+      queue: "report-export-smoke"
+    });
+    delete corrupt.tenantId;
+    corrupt.filters = {};
+    repository.saveExportJob(corrupt);
+    const storage = createDeterministicReportObjectStorageAdapter();
+
+    const result = await executeReportExportWorkerOnce({
+      queue: "report-export-smoke",
+      reportRepository: repository,
+      storage
+    });
+    const failed = repository.listExportJobs().find((job) => job.id === corrupt.id);
+
+    assert.deepEqual(result, { failed: 1, ready: 0, scanned: 1 });
+    assert.equal(failed?.statusKey, "error");
+    assert.equal(failed?.failureMessage, "report_export_job_tenant_id_required");
+    assert.deepEqual(storage.listObjects(), []);
+    assert.equal(repository.findReportFileDescriptor(corrupt.id), undefined);
   });
 
   it("claims due scheduled digest descriptors as running without claiming future or completed periods", () => {
@@ -447,7 +712,10 @@ describe("report export worker contracts", () => {
     assert.equal(first.exportEnvelope.data.job.period, "2026-06-30");
     assert.equal(first.exportEnvelope.data.job.reportType, undefined);
     assert.deepEqual(first.exportEnvelope.data.job.columns, ["metric", "today", "previous", "delta", "status"]);
-    assert.deepEqual(first.exportEnvelope.data.job.filters, {
+    const { snapshotAt, ...persistedFilters } = first.exportEnvelope.data.job.filters;
+    assert.ok(Number.isFinite(Date.parse(snapshotAt)));
+    assert.deepEqual(persistedFilters, {
+      channel: "Все каналы",
       periodKey: "2026-06-30",
       scheduleId: "digest-volga-daily",
       scheduledDigest: true,
@@ -525,7 +793,7 @@ describe("report export worker contracts", () => {
       idempotencyKey: "scheduled-digest-export:tenant-volga:digest-volga-daily:2026-07-03",
       period: "2026-07-03",
       reportType: "daily_support_digest"
-    });
+    }, { tenantId: "tenant-volga" });
     const conflictRunning = repository.saveScheduledDigestDescriptor({
       createdAt: "2026-06-30T12:00:00.000Z",
       dueAt: "2026-07-03T14:00:00.000Z",
@@ -690,7 +958,7 @@ describe("report export worker contracts", () => {
   });
 
   it("rejects conflicting scheduled digest period replays before worker outputs", async () => {
-    const repository = ReportRepository.inMemory();
+    const repository = ReportRepository.inMemory(bootstrapReportState({ exportJobs: [] }));
     repository.saveScheduledDigestDescriptor({
       createdAt: "2026-06-30T12:00:00.000Z",
       dueAt: "2026-07-07T14:00:00.000Z",
@@ -845,3 +1113,26 @@ describe("report export worker contracts", () => {
     );
   });
 });
+
+function reportExportJob(overrides: Partial<ReportExportJob> = {}): ReportExportJob {
+  return {
+    auditId: "audit-report-export-worker",
+    backendQueueId: "queue-report-export-worker",
+    columns: ["metric", "today"],
+    createdAt: "2026-07-04T08:00:00.000Z",
+    filters: {},
+    format: "CSV",
+    id: "export-report-worker",
+    metricDefinitionVersion: "metrics/v1",
+    name: "Report worker export",
+    period: "today",
+    progress: 8,
+    queue: "report-export",
+    requestedBy: "operator-report-worker",
+    rows: 0,
+    status: "Queued",
+    statusKey: "queued",
+    tenantId: "tenant-volga",
+    ...overrides
+  };
+}

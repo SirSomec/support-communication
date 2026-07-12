@@ -5,6 +5,7 @@ const SERVICE = "tenantService";
 export const tenantService = {
   async fetchTenants(filters = {}) {
     return apiRequest("/tenants", {
+      authMode: "service-admin",
       operation: "fetchTenants",
       query: filters,
       service: SERVICE
@@ -17,6 +18,7 @@ export const tenantService = {
     }
 
     return apiRequest(`/tenants/${encodeURIComponent(tenantId)}`, {
+      authMode: "service-admin",
       operation: "fetchTenantDetail",
       service: SERVICE
     });
@@ -28,6 +30,7 @@ export const tenantService = {
     }
 
     return apiRequest(`/tenants/${encodeURIComponent(tenantId)}/status`, {
+      authMode: "service-admin",
       body: payload,
       method: "PATCH",
       operation: "updateTenantStatus",

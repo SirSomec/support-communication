@@ -19,18 +19,14 @@ import {
   Users
 } from "lucide-react";
 import { MetricTile, ProductScreen, SectionTitle, SegmentedControl, StatusBadge } from "../../ui.jsx";
-import {
-  serviceAdminFeatureFlags,
-  serviceAdminAuditEvents,
-  serviceAdminIncidents,
-  serviceAdminPlatformComponents,
-  serviceAdminSession,
-  serviceAdminTenants,
-  serviceAdminUsers
-} from "../../data/serviceAdmin.js";
+import { auditService } from "../../services/auditService.js";
 import { authService } from "../../services/authService.js";
+import { featureFlagService } from "../../services/featureFlagService.js";
+import { incidentService } from "../../services/incidentService.js";
+import { operationsService } from "../../services/operationsService.js";
 import { platformMonitoringService } from "../../services/platformMonitoringService.js";
 import { supportAdminService } from "../../services/supportAdminService.js";
+import { tenantService } from "../../services/tenantService.js";
 import { BillingTariffWorkspace } from "./BillingTariffWorkspace.jsx";
 import { FeatureFlagWorkspace } from "./FeatureFlagWorkspace.jsx";
 import { IncidentMonitoringWorkspace } from "./IncidentMonitoringWorkspace.jsx";
@@ -40,6 +36,7 @@ import { TenantManagementWorkspace } from "./TenantManagementWorkspace.jsx";
 import {
   envelopeToAuditEntry,
   formatAction,
+  formatDateTime,
   formatLabel,
   formatResult,
   formatTimer,
@@ -57,17 +54,90 @@ const workspaceOptions = [
   { label: "Аудит", value: "audit" }
 ];
 
-export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
-  const [activeWorkspace, setActiveWorkspace] = useState("tenants");
-  const [auditEvents, setAuditEvents] = useState(() => serviceAdminAuditEvents);
+function formatMeasuredValue(value, suffix) {
+  return typeof value === "number" ? `${value} ${suffix}` : "Нет данных";
+}
+
+export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, onToast = noop }) {
+  const requestedWorkspace = resolveServiceAdminWorkspace(navigationTarget);
+  const [activeWorkspace, setActiveWorkspace] = useState(requestedWorkspace || "tenants");
+  const [auditEvents, setAuditEvents] = useState([]);
+  const [dashboard, setDashboard] = useState({
+    degradedComponents: 0,
+    guardedFlags: 0,
+    openIncidentCount: 0,
+    riskyUsers: 0,
+    tenantCount: 0,
+    userCount: 0
+  });
   const [feedback, setFeedback] = useState(null);
+  const [loadError, setLoadError] = useState("");
   const [impersonation, setImpersonation] = useState(null);
+  const [workerObservability, setWorkerObservability] = useState([]);
   const [clockTick, setClockTick] = useState(Date.now());
 
-  const openIncidentCount = serviceAdminIncidents.filter((incident) => incident.status !== "resolved").length;
-  const riskyUsers = serviceAdminUsers.filter((user) => ["high", "critical"].includes(user.risk)).length;
-  const degradedComponents = serviceAdminPlatformComponents.filter((component) => component.status !== "operational").length;
-  const guardedFlags = serviceAdminFeatureFlags.filter((flag) => flag.killSwitch).length;
+  const openIncidentCount = dashboard.openIncidentCount;
+  const riskyUsers = dashboard.riskyUsers;
+  const degradedComponents = dashboard.degradedComponents;
+  const guardedFlags = dashboard.guardedFlags;
+
+  useEffect(() => {
+    if (requestedWorkspace && requestedWorkspace !== activeWorkspace) {
+      setActiveWorkspace(requestedWorkspace);
+    }
+  }, [activeWorkspace, requestedWorkspace]);
+
+  const loadDashboard = useCallback(async () => {
+    setLoadError("");
+    const [tenants, users, incidents, flags, platform, operations, audit] = await Promise.all([
+      tenantService.fetchTenants(),
+      supportAdminService.fetchSupportUsers(),
+      incidentService.fetchIncidents(),
+      featureFlagService.fetchFeatureFlags(),
+      platformMonitoringService.fetchPlatformSnapshot(),
+      operationsService.fetchReadinessDashboard({ domain: "delivery" }),
+      auditService.fetchAuditEvents({ limit: 20 })
+    ]);
+
+    const responses = [tenants, users, incidents, flags, platform, operations, audit];
+    const firstError = responses.find((response) => response.status !== "ok");
+    if (firstError) {
+      setLoadError(firstError.error?.message ?? "Не удалось загрузить данные администрирования сервиса.");
+    }
+
+    const tenantItems = tenants.status === "ok" ? tenants.data?.items ?? [] : [];
+    const userItems = users.status === "ok" ? users.data?.items ?? [] : [];
+    const incidentItems = incidents.status === "ok" ? incidents.data?.items ?? [] : [];
+    const flagItems = flags.status === "ok" ? flags.data?.items ?? [] : [];
+    const components = platform.status === "ok" ? platform.data?.components ?? [] : [];
+    const workers = operations.status === "ok" ? operations.data?.workerObservability ?? [] : [];
+    const auditItems = audit.status === "ok" ? audit.data?.items ?? [] : [];
+
+    setDashboard({
+      degradedComponents: components.filter((component) => component.status !== "operational").length,
+      guardedFlags: flagItems.filter((flag) => flag.killSwitch).length,
+      openIncidentCount: incidentItems.filter((incident) => incident.status !== "resolved").length,
+      riskyUsers: userItems.filter((user) => ["high", "critical"].includes(user.risk)).length,
+      tenantCount: tenantItems.length,
+      userCount: userItems.length
+    });
+    setWorkerObservability(workers);
+    setAuditEvents(auditItems.map((event) => ({
+      id: event.id,
+      action: event.action,
+      actor: event.actorName ?? event.actor,
+      at: event.at,
+      reason: event.reason,
+      result: event.result,
+      severity: event.severity === "critical" ? "critical" : event.severity === "warning" ? "warn" : "info",
+      target: event.target,
+      traceId: event.traceId
+    })));
+  }, []);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
 
   const remainingSeconds = useMemo(() => {
     if (!impersonation) {
@@ -79,7 +149,7 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
 
   const recordEnvelope = useCallback((envelope, fallback = {}) => {
     const entry = envelopeToAuditEntry(envelope, {
-      actor: serviceAdminSession.adminName,
+      actor: "Service Admin",
       ...fallback
     });
 
@@ -150,7 +220,7 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
       subtitle="Операции с организациями, поддержка учетных записей, биллинг, инциденты платформы, флаги и аудит привилегированных действий."
       onBack={onBack}
       stateItems={[
-        { label: "организации", value: serviceAdminTenants.length, tone: "ok" },
+        { label: "организации", value: dashboard.tenantCount, tone: "ok" },
         { label: "открытые инциденты", value: openIncidentCount, tone: openIncidentCount ? "warn" : "ok" },
         { label: "рисковые пользователи", value: riskyUsers, tone: riskyUsers ? "warn" : "ok" },
         { label: "деградации компонентов", value: degradedComponents, tone: degradedComponents ? "error" : "ok" }
@@ -169,6 +239,10 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
             <RefreshCw size={17} />
             Состояние входа
           </button>
+          <button onClick={loadDashboard} type="button">
+            <RefreshCw size={17} />
+            Обновить данные
+          </button>
         </>
       }
     >
@@ -180,14 +254,17 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
         />
       ) : null}
 
+      {loadError ? <div className="service-admin-feedback error" role="alert">{loadError}</div> : null}
+
       <div className="metric-strip service-admin-metrics">
-        <MetricTile icon={<Building2 size={21} />} label="Организации" value={serviceAdminTenants.length} detail="активные аккаунты сервиса" />
-        <MetricTile icon={<Users size={21} />} label="Пользователи" value={serviceAdminUsers.length} detail={`${riskyUsers} профиля с высоким риском`} tone={riskyUsers ? "danger" : ""} />
+        <MetricTile icon={<Building2 size={21} />} label="Организации" value={dashboard.tenantCount} detail="активные аккаунты сервиса" />
+        <MetricTile icon={<Users size={21} />} label="Пользователи" value={dashboard.userCount} detail={`${riskyUsers} профиля с высоким риском`} tone={riskyUsers ? "danger" : ""} />
         <MetricTile icon={<Siren size={21} />} label="Инциденты" value={openIncidentCount} detail="открытые события платформы" tone={openIncidentCount ? "danger" : ""} />
         <MetricTile icon={<Flag size={21} />} label="Стоп-флаги" value={guardedFlags} detail="флаги с защитным выключателем" />
       </div>
 
       <PlatformSnapshotPanel onEnvelope={recordEnvelope} />
+      <WorkerObservabilityPanel workers={workerObservability} />
 
       <section className="work-panel service-admin-workspace-shell">
         <header className="service-admin-workspace-header">
@@ -228,6 +305,11 @@ export function ServiceAdminDashboard({ onBack = noop, onToast = noop }) {
   );
 }
 
+function resolveServiceAdminWorkspace(navigationTarget) {
+  const workspace = typeof navigationTarget?.workspace === "string" ? navigationTarget.workspace : "";
+  return workspaceOptions.some((option) => option.value === workspace) ? workspace : "";
+}
+
 function ServiceAdminImpersonationBanner({ impersonation, onExit, remainingSeconds }) {
   return (
     <section className="service-admin-impersonation" aria-live="polite">
@@ -245,26 +327,116 @@ function ServiceAdminImpersonationBanner({ impersonation, onExit, remainingSecon
   );
 }
 
+function WorkerObservabilityPanel({ workers = [] }) {
+  const blockedCount = workers.filter((worker) => worker.health?.status === "blocked").length;
+  const queuedCount = workers.reduce((total, worker) => total + Number(worker.queueDepth ?? 0), 0);
+
+  return (
+    <section className="work-panel service-admin-worker-observability" data-testid="service-admin-worker-observability">
+      <SectionTitle title="Очереди фоновых задач" action={`${blockedCount} заблокировано / ${queuedCount} в очереди`} />
+      {workers.length ? (
+        <div className="service-admin-worker-grid">
+          {workers.map((worker) => (
+            <article className={`service-admin-worker-row ${worker.health?.status ?? "unknown"}`} key={worker.workerId}>
+              <header>
+                <RadioTower size={18} />
+                <span>
+                  <strong>{worker.workerId}</strong>
+                  <small>{worker.queue}</small>
+                </span>
+                <StatusBadge tone={getStatusTone(worker.health?.status)}>{formatLabel(worker.health?.status)}</StatusBadge>
+              </header>
+              <div className="service-admin-signal-grid">
+                <span><Gauge size={17} /> {worker.queueDepth ?? 0} в очереди</span>
+                <span><AlertTriangle size={17} /> {worker.deadLetterCount ?? 0} dead letters</span>
+                <span><Clock3 size={17} /> {formatDateTime(worker.updatedAt)}</span>
+                <span><ShieldCheck size={17} /> {worker.evidenceSource}</span>
+              </div>
+              {worker.lastDelivery ? (
+                <div className="service-admin-worker-delivery">
+                  <span>{worker.lastDelivery.eventType}</span>
+                  <span>{worker.lastDelivery.deliveryId}</span>
+                  <strong>{formatLabel(worker.lastDelivery.status)}</strong>
+                  <code>{worker.lastDelivery.traceId}</code>
+                </div>
+              ) : (
+                <div className="service-admin-worker-delivery empty">
+                  <span>нет событий</span>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="service-admin-empty">
+          <strong>Нет данных о фоновых задачах</strong>
+          <span>Журнал доставки пока не содержит событий фоновых задач.</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PlatformSnapshotPanel({ onEnvelope }) {
+  const [components, setComponents] = useState([]);
+  const [incidents, setIncidents] = useState([]);
+  const [tenants, setTenants] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");
-  const [selectedComponentId, setSelectedComponentId] = useState(serviceAdminPlatformComponents[0].id);
+  const [selectedComponentId, setSelectedComponentId] = useState("");
   const [componentDetail, setComponentDetail] = useState(null);
   const [reason, setReason] = useState("Подтверждение из панели состояния платформы");
   const [confirmed, setConfirmed] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPlatform() {
+      const [platform, incidentResponse, tenantResponse] = await Promise.all([
+        platformMonitoringService.fetchPlatformSnapshot(),
+        incidentService.fetchIncidents(),
+        tenantService.fetchTenants()
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      const nextComponents = platform.status === "ok" ? platform.data?.components ?? [] : [];
+      setComponents(nextComponents);
+      setIncidents(incidentResponse.status === "ok" ? incidentResponse.data?.items ?? [] : []);
+      setTenants(tenantResponse.status === "ok" ? tenantResponse.data?.items ?? [] : []);
+      setSelectedComponentId(nextComponents[0]?.id ?? "");
+    }
+
+    loadPlatform();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const visibleComponents = useMemo(() => (
-    serviceAdminPlatformComponents.filter((component) => statusFilter === "all" || component.status === statusFilter)
-  ), [statusFilter]);
-  const selectedComponent = serviceAdminPlatformComponents.find((component) => component.id === selectedComponentId) ?? serviceAdminPlatformComponents[0];
-  const detail = componentDetail?.component?.id === selectedComponent.id ? componentDetail : {
-    component: selectedComponent,
-    incidents: serviceAdminIncidents.filter((incident) => incident.componentId === selectedComponent.id),
-    affectedTenants: serviceAdminTenants.filter((tenant) => (
-      serviceAdminIncidents.some((incident) => incident.componentId === selectedComponent.id && incident.affectedTenantIds.includes(tenant.id))
-    ))
-  };
+    components.filter((component) => statusFilter === "all" || component.status === statusFilter)
+  ), [components, statusFilter]);
+  const selectedComponent = visibleComponents.find((component) => component.id === selectedComponentId)
+    ?? visibleComponents[0]
+    ?? components.find((component) => component.id === selectedComponentId)
+    ?? components[0]
+    ?? null;
+  const detail = selectedComponent ? (
+    componentDetail?.component?.id === selectedComponent.id ? componentDetail : {
+      component: selectedComponent,
+      incidents: incidents.filter((incident) => incident.componentId === selectedComponent.id),
+      affectedTenants: tenants.filter((tenant) => (
+        incidents.some((incident) => incident.componentId === selectedComponent.id && incident.affectedTenantIds?.includes(tenant.id))
+      ))
+    }
+  ) : null;
 
   async function handleSelectComponent(componentId) {
+    if (!componentId) {
+      return;
+    }
+
     setSelectedComponentId(componentId);
     const envelope = await platformMonitoringService.fetchComponentDrilldown(componentId);
 
@@ -274,6 +446,10 @@ function PlatformSnapshotPanel({ onEnvelope }) {
   }
 
   async function handleAcknowledge() {
+    if (!selectedComponent) {
+      return;
+    }
+
     const envelope = await platformMonitoringService.acknowledgeComponentAlert({
       componentId: selectedComponent.id,
       confirmed,
@@ -302,7 +478,7 @@ function PlatformSnapshotPanel({ onEnvelope }) {
           <option value="degraded">Деградация</option>
           <option value="partial_outage">Частичный сбой</option>
         </select>
-        <button onClick={() => handleSelectComponent(selectedComponent.id)} type="button">
+        <button disabled={!selectedComponent} onClick={() => handleSelectComponent(selectedComponent?.id)} type="button">
           <Eye size={17} />
           Детали
         </button>
@@ -312,7 +488,7 @@ function PlatformSnapshotPanel({ onEnvelope }) {
         <div className="service-admin-component-list">
           {visibleComponents.map((component) => (
             <button
-              className={component.id === selectedComponent.id ? "selected" : ""}
+              className={component.id === selectedComponent?.id ? "selected" : ""}
               key={component.id}
               onClick={() => handleSelectComponent(component.id)}
               type="button"
@@ -327,7 +503,8 @@ function PlatformSnapshotPanel({ onEnvelope }) {
           ))}
         </div>
 
-        <div className="service-admin-component-detail">
+        {detail ? (
+          <div className="service-admin-component-detail">
           <header>
             <div>
               <span>{detail.component.ownerTeam}</span>
@@ -336,9 +513,9 @@ function PlatformSnapshotPanel({ onEnvelope }) {
             <StatusBadge tone={getStatusTone(detail.component.status)}>{formatLabel(detail.component.status)}</StatusBadge>
           </header>
           <div className="service-admin-signal-grid">
-            <span><Gauge size={17} /> {detail.component.latencyMs} мс p95</span>
-            <span><AlertTriangle size={17} /> {detail.component.errorRate}% ошибок</span>
-            <span><ShieldCheck size={17} /> {detail.component.uptime}% аптайм</span>
+            <span><Gauge size={17} /> {formatMeasuredValue(detail.component.latencyMs, "мс p95")}</span>
+            <span><AlertTriangle size={17} /> {formatMeasuredValue(detail.component.errorRate, "% ошибок")}</span>
+            <span><ShieldCheck size={17} /> {formatMeasuredValue(detail.component.uptime, "% аптайм")}</span>
             <span><RadioTower size={17} /> {detail.affectedTenants.length} организаций</span>
           </div>
           <div className="service-admin-mini-list">
@@ -364,7 +541,15 @@ function PlatformSnapshotPanel({ onEnvelope }) {
               Подтвердить
             </button>
           </footer>
-        </div>
+          </div>
+        ) : (
+          <div className="service-admin-component-detail">
+            <div className="service-admin-empty">
+              <strong>Нет компонентов платформы</strong>
+              <span>Данные мониторинга еще не загружены или недоступны.</span>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

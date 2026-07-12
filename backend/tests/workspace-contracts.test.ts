@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { createDeterministicObjectStorageSigner, createS3CompatibleObjectStorageSigner } from "../apps/api-gateway/src/workspace/object-storage.ts";
 import { WorkspaceRepository, type ClientProfileRecord, type KnowledgeArticle, type TemplateRecord } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
-import { WorkspaceService } from "../apps/api-gateway/src/workspace/workspace.service.ts";
+import { WorkspaceService as RuntimeWorkspaceService, type WorkspaceRequestContext } from "../apps/api-gateway/src/workspace/workspace.service.ts";
+import { bootstrapWorkspaceState } from "../apps/api-gateway/src/workspace/seed.ts";
 import { TopicDirectoryService } from "../apps/api-gateway/src/workspace/topic-directory.service.ts";
 
 type ClientProfileIdentityRepository = {
@@ -18,6 +19,38 @@ type ClientProfileIdentityRepository = {
   saveClientProfile(profile: ClientProfileIdentityRecord): ClientProfileIdentityRecord | Promise<ClientProfileIdentityRecord>;
   updateClientMergeConflictState(conflictId: string, state: ClientMergeConflictState): ClientMergeConflictRecord | Promise<ClientMergeConflictRecord | undefined> | undefined;
 };
+
+beforeEach(() => {
+  WorkspaceRepository.useDefault(WorkspaceRepository.inMemory(bootstrapWorkspaceState()));
+});
+
+const TEST_TENANT_CONTEXT: WorkspaceRequestContext = { tenantId: "tenant-volga" };
+
+class WorkspaceService extends RuntimeWorkspaceService {
+  override createClientExport(payload: Parameters<RuntimeWorkspaceService["createClientExport"]>[0] = {}, context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.createClientExport(payload, context);
+  }
+
+  override mergeClientProfiles(payload: Parameters<RuntimeWorkspaceService["mergeClientProfiles"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.mergeClientProfiles(payload, context);
+  }
+
+  override unmergeClientProfile(payload: Parameters<RuntimeWorkspaceService["unmergeClientProfile"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.unmergeClientProfile(payload, context);
+  }
+
+  override createUploadDescriptor(payload: Parameters<RuntimeWorkspaceService["createUploadDescriptor"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.createUploadDescriptor(payload, context);
+  }
+
+  override saveTemplate(payload: Parameters<RuntimeWorkspaceService["saveTemplate"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.saveTemplate(payload, context);
+  }
+
+  override saveKnowledgeArticleDraft(payload: Parameters<RuntimeWorkspaceService["saveKnowledgeArticleDraft"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.saveKnowledgeArticleDraft(payload, context);
+  }
+}
 
 describe("topic directory settings contracts", () => {
   it("manages hierarchical topics and preserves archived topics out of active options", async () => {
@@ -272,6 +305,58 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.equal(unmerge.status, "ok");
     assert.equal(unmerge.data.conflictResolution, "manual_detach");
     assert.match(unmerge.data.auditEvent.id, /^evt_client_merge_/);
+  });
+
+  it("returns client segment descriptors and filters profiles by segment", async () => {
+    const workspace = new WorkspaceService();
+
+    const segments = await workspace.fetchClientSegments();
+    const sdkSegment = segments.data.segments.find((segment: Record<string, unknown>) => segment.id === "channel:SDK");
+    const segmentedProfiles = await workspace.fetchClientProfiles({ segmentId: "channel:SDK" });
+
+    assert.equal(segments.status, "ok");
+    assert.equal(segments.operation, "fetchClientSegments");
+    assert.ok(sdkSegment);
+    assert.equal(sdkSegment.label, "SDK");
+    assert.equal(sdkSegment.count, 2);
+    assert.equal(segmentedProfiles.status, "ok");
+    assert.equal(segmentedProfiles.data.pagination.total, 2);
+    assert.equal(segmentedProfiles.data.items.every((profile: Record<string, unknown>) => profile.channel === "SDK"), true);
+    assert.deepEqual(segmentedProfiles.data.segment, {
+      count: 2,
+      dimension: "channel",
+      id: "channel:SDK",
+      label: "SDK"
+    });
+  });
+
+  it("creates client export descriptors with masked fields and immutable audit evidence", async () => {
+    const workspace = new WorkspaceService();
+
+    const exported = await workspace.createClientExport({
+      format: "json",
+      reason: "Segment export requested by support lead",
+      segmentId: "channel:SDK"
+    });
+
+    assert.equal(exported.status, "ok");
+    assert.equal(exported.operation, "createClientExport");
+    assert.match(exported.data.exportId, /^client_export_/);
+    assert.equal(exported.data.status, "queued");
+    assert.equal(exported.data.segment.id, "channel:SDK");
+    assert.equal(exported.data.itemCount, 2);
+    assert.equal(exported.data.fileDescriptor.fileName.endsWith(".json"), true);
+    assert.equal(exported.data.auditEvent.immutable, true);
+    assert.match(exported.data.auditEvent.id, /^evt_client_export_/);
+    assert.equal(exported.data.previewRows.every((profile: Record<string, unknown>) => /^\+7 \*\*\* \*\*\*-\*\*-\d{2}$/.test(String(profile.phone))), true);
+
+    const missingReason = await workspace.createClientExport({
+      format: "json",
+      reason: "",
+      segmentId: "channel:SDK"
+    });
+    assert.equal(missingReason.status, "invalid");
+    assert.equal(missingReason.error?.code, "reason_required");
   });
 
   it("persists client profile identity records behind tenant-scoped repository reads", async () => {
@@ -1518,9 +1603,10 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     const source = readFileSync(new URL("../apps/api-gateway/src/workspace/files.controller.ts", import.meta.url), "utf8");
 
     assert.match(source, /getDownloadPolicy\(fileId,\s*\{\s*canDownload:\s*true,\s*\.\.\.tenantContextFromServiceAdminRequest\(request\)\s*\}\)/s);
-    assert.match(source, /@Post\(":fileId\/scan-result"\)/);
+    assert.match(source, /export class FileScanCallbackController/);
+    assert.match(source, /@Post\(":fileId\/scan-result"\)\s+@UseGuards\(FileScanCallbackGuard\)/s);
     assert.match(source, /@Headers\("idempotency-key"\)\s+idempotencyKey/);
-    assert.match(source, /recordScanResult\(\s*\{\s*\.\.\.payload,\s*fileId,\s*idempotencyKey:\s*idempotencyKey\s*\?\?\s*payload\.idempotencyKey\s*\},\s*tenantContextFromServiceAdminRequest\(request\)\s*\)/s);
+    assert.match(source, /recordScanResult\(\s*\{\s*\.\.\.payload,\s*fileId,\s*idempotencyKey:\s*idempotencyKey\s*\?\?\s*payload\.idempotencyKey\s*\}\s*\)/s);
     assert.match(source, /tenantContextFromServiceAdminRequest\(request\)/);
   });
 
@@ -1588,8 +1674,8 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
 
     assert.match(source, /@RequireServiceAdminAction\("templates\.read"\)[\s\S]*fetchTemplates\(/);
     assert.match(source, /@RequireServiceAdminAction\("templates\.write"\)[\s\S]*saveTemplate\(/);
-    assert.match(source, /fetchTemplates\([\s\S]*@Req\(\)\s+request:\s*ServiceAdminRequest[\s\S]*\):\s*Promise<unknown>/);
-    assert.match(source, /saveTemplate\([\s\S]*@Req\(\)\s+request:\s*ServiceAdminRequest[\s\S]*\):\s*Promise<unknown>/);
+    assert.match(source, /fetchTemplates\([\s\S]*@Req\(\)\s+request:\s*TenantOperatorRequest & ServiceAdminRequest[\s\S]*\):\s*Promise<unknown>/);
+    assert.match(source, /saveTemplate\([\s\S]*@Req\(\)\s+request:\s*TenantOperatorRequest & ServiceAdminRequest[\s\S]*\):\s*Promise<unknown>/);
     assert.match(source, /this\.workspaceService\.fetchTemplates\(filters,\s*tenantContextFromServiceAdminRequest\(request\)\)/);
     assert.match(source, /this\.workspaceService\.saveTemplate\(payload,\s*tenantContextFromServiceAdminRequest\(request\)\)/);
   });
@@ -2285,6 +2371,7 @@ function templateRecord(input: {
     channel: "SDK",
     id: input.id,
     scope: "team",
+    tenantId: "tenant-volga",
     text: input.text,
     title: input.title,
     topic: input.topic ?? "Delivery",

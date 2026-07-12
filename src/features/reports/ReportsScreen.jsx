@@ -1,24 +1,10 @@
-﻿import React, { useState } from "react";
-import { CalendarDays, CheckCircle2, ClipboardList, Clock3, Download, Filter, Gauge, PlayCircle } from "lucide-react";
+﻿import React, { useEffect, useState } from "react";
+import { CalendarDays, CheckCircle2, ClipboardList, Clock3, Download, Gauge, PlayCircle } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
-import { ChannelBadge, EntityTable, MetricTile, ProductScreen, SectionTitle, StatusBadge } from "../../ui.jsx";
-import {
-  exportJobs,
-  operators,
-  reportBars,
-  reportChartBlocks,
-  reportColumnOptions,
-  reportRows,
-  rescueOutcomeSummary,
-  rescueReportRows
-} from "../../data.js";
 import { reportService } from "../../services/reportService.js";
+import { ChannelBadge, EntityTable, MetricTile, ProductScreen, ScreenStateStrip, SectionTitle, StatusBadge } from "../../ui.jsx";
 import "./reports.css";
 
-const reportTeamOptions = ["Все команды", "1-я линия", "Старшие смены", "Финансы", "Администраторы"];
-const reportStatusOptions = ["Все статусы", "Новые", "В работе", "Закрытые", "Ожидают", "Спасение"];
-const reportSlaOptions = ["Все SLA", "В норме", "Риск", "Просрочено"];
-const reportDialogTypeOptions = ["Все типы", "Входящие", "Исходящие", "Proactive", "Бот"];
 const exportStatusClasses = {
   ready: "ok",
   running: "info",
@@ -26,22 +12,176 @@ const exportStatusClasses = {
   error: "warn",
   expired: "closed"
 };
-export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
+
+const routingActivityColumns = [
+  { id: "operatorId", label: "Оператор" },
+  { id: "assignments", label: "Назначено" },
+  { id: "transfersFrom", label: "Передано" },
+  { id: "transfersTo", label: "Получено" },
+  { id: "transferEvents", label: "Передач" },
+  { id: "totalEvents", label: "Всего событий" }
+];
+
+export function ReportsScreen({ onBack, onToast, access }) {
   const [period, setPeriod] = useState("Сегодня");
   const [channel, setChannel] = useState("Все каналы");
-  const [reportType, setReportType] = useState("Ежедневный");
-  const [operatorFilter, setOperatorFilter] = useState("Все операторы");
-  const [topicFilter, setTopicFilter] = useState("Все тематики");
-  const [teamFilter, setTeamFilter] = useState("Все команды");
-  const [statusFilter, setStatusFilter] = useState("Все статусы");
-  const [slaFilter, setSlaFilter] = useState("Все SLA");
-  const [dialogTypeFilter, setDialogTypeFilter] = useState("Все типы");
-  const [selectedColumns, setSelectedColumns] = useState(reportColumnOptions.map((column) => column.id));
-  const [reportExportJobs, setReportExportJobs] = useState(exportJobs);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [metrics, setMetrics] = useState([]);
+  const [hasActivity, setHasActivity] = useState(false);
+  const [reportBars, setReportBars] = useState([]);
+  const [reportChartBlocks, setReportChartBlocks] = useState([]);
+  const [reportColumnOptions, setReportColumnOptions] = useState([]);
+  const [reportRows, setReportRows] = useState([]);
+  const [rescueOutcomeSummary, setRescueOutcomeSummary] = useState([]);
+  const [rescueReportRows, setRescueReportRows] = useState([]);
+  const [reportExportJobs, setReportExportJobs] = useState([]);
+  const [dataQuality, setDataQuality] = useState(null);
+  const [reportSnapshotAt, setReportSnapshotAt] = useState("");
+  const [reportFilterOptions, setReportFilterOptions] = useState({});
+  const [reportFilters, setReportFilters] = useState({
+    operatorId: "all",
+    outcome: "all",
+    queueId: "all",
+    resolutionOutcome: "all",
+    status: "all",
+    teamId: "all",
+    topic: "all"
+  });
+  const [selectedColumns, setSelectedColumns] = useState([]);
   const [exportError, setExportError] = useState("");
+  const [exportHistoryOpen, setExportHistoryOpen] = useState(false);
+  const [selectedAuditJobId, setSelectedAuditJobId] = useState("");
+  const [routingActivityLoading, setRoutingActivityLoading] = useState(true);
+  const [routingActivityError, setRoutingActivityError] = useState("");
+  const [routingActivityRows, setRoutingActivityRows] = useState([]);
+  const [routingActivityTotals, setRoutingActivityTotals] = useState({ assignments: 0, operators: 0, totalEvents: 0, transfers: 0, unattributedEvents: 0 });
+  const [routingEventType, setRoutingEventType] = useState("all");
+  const [routingOperatorId, setRoutingOperatorId] = useState("all");
+  const [routingOperatorOptions, setRoutingOperatorOptions] = useState([]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadWorkspace() {
+      setLoading(true);
+      setError("");
+      const response = await reportService.fetchReportWorkspace({
+        channel,
+        ...reportFilters,
+        period,
+        timezoneOffsetMinutes: -new Date().getTimezoneOffset()
+      });
+
+      if (ignore) {
+        return;
+      }
+
+      if (response.status !== "ok") {
+        setError(response.error?.message ?? "Не удалось загрузить рабочую область отчетов.");
+        setLoading(false);
+        return;
+      }
+
+      const data = response.data ?? {};
+      const columns = Array.isArray(data.columnOptions) ? data.columnOptions : [];
+      setMetrics(Array.isArray(data.metrics) ? data.metrics : []);
+      setHasActivity(Boolean(data.hasActivity));
+      setReportBars(Array.isArray(data.bars) ? data.bars : []);
+      setReportChartBlocks(Array.isArray(data.chartBlocks) ? data.chartBlocks : []);
+      setReportColumnOptions(columns);
+      setReportRows(Array.isArray(data.rows) ? data.rows : []);
+      setRescueOutcomeSummary(Array.isArray(data.rescueOutcomeSummary) ? data.rescueOutcomeSummary : []);
+      setRescueReportRows(Array.isArray(data.rescueReportRows) ? data.rescueReportRows : []);
+      setReportExportJobs(Array.isArray(data.exportJobs) ? data.exportJobs : []);
+      setDataQuality(data.dataQuality ?? null);
+      setReportSnapshotAt(data.snapshotAt ?? "");
+      setReportFilterOptions(data.filterOptions ?? {});
+      setSelectedColumns(columns.map((column) => column.id));
+      setLoading(false);
+    }
+
+    void loadWorkspace();
+    return () => {
+      ignore = true;
+    };
+  }, [channel, period, reportFilters.operatorId, reportFilters.outcome, reportFilters.queueId, reportFilters.resolutionOutcome, reportFilters.status, reportFilters.teamId, reportFilters.topic]);
+
+  const hasPendingExports = reportExportJobs.some((job) => job.statusKey === "queued" || job.statusKey === "running");
+
+  useEffect(() => {
+    if (!hasPendingExports) {
+      return undefined;
+    }
+
+    let ignore = false;
+    const refreshExportJobs = async () => {
+      const response = await reportService.fetchReportWorkspace({
+        channel,
+        period,
+        timezoneOffsetMinutes: -new Date().getTimezoneOffset()
+      });
+      if (!ignore && response.status === "ok") {
+        setReportExportJobs(Array.isArray(response.data?.exportJobs) ? response.data.exportJobs : []);
+      }
+    };
+    const timer = window.setInterval(() => void refreshExportJobs(), 3000);
+    void refreshExportJobs();
+
+    return () => {
+      ignore = true;
+      window.clearInterval(timer);
+    };
+  }, [channel, hasPendingExports, period]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadRoutingActivity() {
+      setRoutingActivityLoading(true);
+      setRoutingActivityError("");
+      const response = await reportService.fetchRoutingActivityReport({
+        channel: channel === "Все каналы" ? undefined : channel,
+        eventType: routingEventType === "all" ? undefined : routingEventType,
+        operatorId: routingOperatorId === "all" ? undefined : routingOperatorId,
+        period
+      });
+
+      if (ignore) {
+        return;
+      }
+
+      if (response.status !== "ok") {
+        setRoutingActivityError(response.error?.message ?? "Не удалось загрузить назначения и передачи.");
+        setRoutingActivityLoading(false);
+        return;
+      }
+
+      const data = response.data ?? {};
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      setRoutingActivityRows(rows);
+      setRoutingActivityTotals({
+        assignments: Number(data.totals?.assignments ?? 0),
+        operators: Number(data.totals?.operators ?? 0),
+        totalEvents: Number(data.totals?.totalEvents ?? 0),
+        transfers: Number(data.totals?.transfers ?? 0),
+        unattributedEvents: Number(data.totals?.unattributedEvents ?? 0)
+      });
+      setRoutingOperatorOptions((current) => [...new Set([
+        ...current,
+        ...rows.map((row) => String(row.operatorId ?? "").trim()).filter(Boolean)
+      ])].sort((left, right) => left.localeCompare(right, "ru")));
+      setRoutingActivityLoading(false);
+    }
+
+    void loadRoutingActivity();
+    return () => {
+      ignore = true;
+    };
+  }, [channel, period, routingEventType, routingOperatorId]);
+
   const visibleReportColumns = reportColumnOptions.filter((column) => selectedColumns.includes(column.id));
-  const reportOperatorOptions = ["Все операторы", ...operators.map((operator) => operator.name)];
-  const reportTopicOptions = ["Все тематики", ...topicOptions.slice(0, 8)];
+  const selectedAuditJob = reportExportJobs.find((job) => job.id === selectedAuditJobId) ?? null;
 
   function toggleReportColumn(columnId) {
     const column = reportColumnOptions.find((item) => item.id === columnId);
@@ -60,19 +200,17 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
       return;
     }
 
+    const exportColumns = selectedColumns.length ? selectedColumns : reportColumnOptions.map((column) => column.id);
     const response = await reportService.requestReportExport({
       channel,
-      columns: selectedColumns,
+      columns: exportColumns,
       filters: {
-        operator: operatorFilter,
-        topic: topicFilter,
-        team: teamFilter,
-        status: statusFilter,
-        sla: slaFilter,
-        dialogType: dialogTypeFilter
+        ...reportFilters,
+        snapshotAt: reportSnapshotAt,
+        timezoneOffsetMinutes: -new Date().getTimezoneOffset()
       },
       period,
-      reportType
+      reportType: "Диалоги"
     });
     if (response.status !== "ok") {
       const message = response.error?.message ?? "Не удалось поставить экспорт в очередь.";
@@ -90,11 +228,17 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
 
     setExportError("");
     setReportExportJobs((current) => [nextJob, ...current]);
-    onToast(`Выгрузка XLSX за период "${period}" поставлена в очередь: ${nextJob.backendQueueId}.`);
+    onToast(`Выгрузка XLSX за период "${period}" поставлена в очередь: ${nextJob.backendQueueId ?? nextJob.id}.`);
   }
 
-  function handleApplyFilters() {
-    onToast(`Фильтр применен: ${reportType}, ${period}, ${channel}, ${operatorFilter}, ${topicFilter}, ${teamFilter}, ${statusFilter}, ${slaFilter}, ${dialogTypeFilter}.`);
+  function handleOpenExportHistory() {
+    setExportHistoryOpen(true);
+    setSelectedAuditJobId((current) => current || reportExportJobs[0]?.id || "");
+  }
+
+  function handleOpenReportAudit(job) {
+    setExportHistoryOpen(true);
+    setSelectedAuditJobId(job.id);
   }
 
   async function handleExportRetry(jobId) {
@@ -104,10 +248,18 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
 
     const jobToRetry = reportExportJobs.find((job) => job.id === jobId);
     const response = await reportService.retryReportExport(jobToRetry);
+    if (response.status !== "ok") {
+      const message = response.error?.message ?? "Не удалось повторить экспорт.";
+      setExportError(message);
+      onToast(message);
+      return;
+    }
+
     setReportExportJobs((current) => current.map((job) => job.id === jobId
-      ? { ...job, ...response.data.job, status: "Повторная подготовка" }
+      ? { ...job, ...response.data.job, status: "Повторная подготовка", statusKey: response.data.job?.statusKey ?? "queued" }
       : job
     ));
+    setExportError("");
     onToast("Экспорт поставлен на повторную подготовку.");
   }
 
@@ -116,8 +268,24 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
       return;
     }
 
-    const response = await reportService.getExportFileDescriptor(job);
-    onToast(`${job.name}: файл ${job.format} готов к скачиванию (${response.data.fileName}).`);
+    const response = await reportService.downloadExportFile(job);
+    if (response.status !== "ok") {
+      const message = response.error?.message ?? "Не удалось скачать файл выгрузки.";
+      setExportError(message);
+      onToast(message);
+      return;
+    }
+
+    const url = URL.createObjectURL(response.data.blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = response.data.fileName || `${job.id}.xlsx`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setExportError("");
+    onToast(`${job.name}: файл ${job.format} скачивается (${response.data.fileName}).`);
   }
 
   function getReportCell(row, columnId) {
@@ -128,10 +296,62 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
     return <span>{row.status}</span>;
   }
 
+  function chartPointHeight(points, point) {
+    const values = (Array.isArray(points) ? points : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value >= 0);
+    const maximum = Math.max(1, ...values);
+    const value = Number(point);
+
+    if (!Number.isFinite(value) || value <= 0) {
+      return 18;
+    }
+
+    return Math.max(18, Math.min(100, Math.round(value / maximum * 100)));
+  }
+
+  if (loading) {
+    return (
+      <ProductScreen
+        title="Отчеты"
+        subtitle="Загрузка рабочей области отчетов..."
+        onBack={onBack}
+        stateItems={createScreenStateItems({
+          loading: "загружается...",
+          total: 0,
+          emptyWhenZero: "ожидание API",
+          errorLabel: "ошибок нет"
+        })}
+      />
+    );
+  }
+
+  if (error) {
+    return (
+      <ProductScreen
+        title="Отчеты"
+        subtitle="Не удалось загрузить отчеты."
+        onBack={onBack}
+        stateItems={[
+          { label: "Загрузка", tone: "error", value: "ошибка" },
+          { label: "Данные", tone: "empty", value: "недоступны" },
+          { label: "Ошибки", tone: "error", value: error }
+        ]}
+      />
+    );
+  }
+
+  const headlineMetrics = hasActivity && metrics.length ? metrics : [
+    { label: "Новых", value: "—", detail: "нет данных" },
+    { label: "Закрыто", value: "—", detail: "нет данных" },
+    { label: "Первый ответ", value: "—", detail: "нет данных" },
+    { label: "SLA", value: "—", detail: "нет данных" }
+  ];
+
   return (
     <ProductScreen
       title="Отчеты"
-      subtitle="Ежедневный отчет, дайджест и выгрузка всех показателей, которые видны в интерфейсе."
+      subtitle="Фактические показатели по диалогам текущей организации."
       onBack={onBack}
       stateItems={createScreenStateItems({
         total: reportRows.length,
@@ -145,9 +365,6 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
           <select className="inline-select" value={period} onChange={(event) => setPeriod(event.target.value)} aria-label="Период отчета">
             {["Сегодня", "Вчера", "7 дней", "30 дней"].map((option) => <option key={option}>{option}</option>)}
           </select>
-          <select className="inline-select" value={reportType} onChange={(event) => setReportType(event.target.value)} aria-label="Тип отчета">
-            {["Ежедневный", "Дайджест", "CSAT/CSI", "SLA", "Операторы"].map((option) => <option key={option}>{option}</option>)}
-          </select>
           <button className="primary-action" disabled={!access.canExportReports} onClick={handleCreateExport} title={access.canExportReports ? "Экспорт XLSX" : access.reason}>
             <Download size={17} />
             Экспорт XLSX
@@ -155,42 +372,170 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
         </>
       }
     >
+      {!hasActivity ? (
+        <ScreenStateStrip items={[{ label: "Отчёты", tone: "empty", value: "За выбранный период диалогов нет" }]} />
+      ) : null}
+      {dataQuality ? (
+        <ScreenStateStrip items={[
+          { label: "Источник", tone: "ok", value: "Журнал реальных событий диалогов" },
+          { label: "События", tone: "ok", value: `${Number(dataQuality.eventCount ?? 0)} событий в ${Number(dataQuality.conversationCount ?? 0)} диалогах` },
+          { label: "Обновление", tone: dataQuality.latestEventAt ? "ok" : "empty", value: dataQuality.latestEventAt ? formatReportTimestamp(dataQuality.latestEventAt) : "Событий нет" },
+          { label: "Задержка", tone: Number(dataQuality.freshnessLagSeconds ?? 0) > 60 ? "partial" : "ok", value: dataQuality.freshnessLagSeconds === null ? "Нет данных" : `${Number(dataQuality.freshnessLagSeconds ?? 0)} сек.` },
+          { label: "Покрытие", tone: Number(dataQuality.dimensionCoverage?.teamId?.unknown ?? 0) > 0 ? "partial" : "ok", value: `Команды ${Number(dataQuality.dimensionCoverage?.teamId?.known ?? 0)}/${Number(dataQuality.conversationCount ?? 0)}, результаты ${Number(dataQuality.dimensionCoverage?.resolutionOutcome?.known ?? 0)}/${Number(dataQuality.conversationCount ?? 0)}` },
+          ...(Array.isArray(dataQuality.historicalLimitations) && dataQuality.historicalLimitations.length
+            ? [{ label: "История", tone: "partial", value: dataQuality.backfillBoundary ? `Неполное восстановление до ${formatReportTimestamp(dataQuality.backfillBoundary)}` : "События до включения журнала восстановлены не полностью" }]
+            : [])
+        ]} />
+      ) : null}
+
       <div className="metric-strip">
-        <MetricTile icon={<ClipboardList size={21} />} label="Новых" value="486" detail="+11% к прошлому" />
-        <MetricTile icon={<CheckCircle2 size={21} />} label="Закрыто" value="451" detail="93% обработано" />
-        <MetricTile icon={<Clock3 size={21} />} label="Первый ответ" value="01:36" detail="лучше на 16 сек" />
-        <MetricTile icon={<Gauge size={21} />} label="SLA" value="91%" detail="+4 п.п." />
+        {headlineMetrics.slice(0, 4).map((metric, index) => {
+          const icons = [ClipboardList, CheckCircle2, Clock3, Gauge];
+          const Icon = icons[index] ?? ClipboardList;
+          return (
+            <MetricTile
+              icon={<Icon size={21} />}
+              key={metric.label ?? index}
+              label={metric.label}
+              value={metric.value}
+              detail={metric.detail}
+            />
+          );
+        })}
       </div>
 
       <div className="screen-toolbar report-toolbar">
         <select className="inline-select" value={channel} onChange={(event) => setChannel(event.target.value)} aria-label="Канал отчета">
-          {["Все каналы", "SDK", "Telegram", "MAX", "VK"].map((option) => <option key={option}>{option}</option>)}
+          <option>Все каналы</option>
+          {(reportFilterOptions.channels ?? []).map((option) => <option key={option}>{option}</option>)}
         </select>
-        <select className="inline-select" value={operatorFilter} onChange={(event) => setOperatorFilter(event.target.value)} aria-label="Оператор отчета">
-          {reportOperatorOptions.map((option) => <option key={option}>{option}</option>)}
-        </select>
-        <select className="inline-select" value={topicFilter} onChange={(event) => setTopicFilter(event.target.value)} aria-label="Тематика отчета">
-          {reportTopicOptions.map((option) => <option key={option}>{option}</option>)}
-        </select>
-        <select className="inline-select" value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)} aria-label="Команда отчета">
-          {reportTeamOptions.map((option) => <option key={option}>{option}</option>)}
-        </select>
-        <select className="inline-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Статус диалога в отчете">
-          {reportStatusOptions.map((option) => <option key={option}>{option}</option>)}
-        </select>
-        <select className="inline-select" value={slaFilter} onChange={(event) => setSlaFilter(event.target.value)} aria-label="SLA отчета">
-          {reportSlaOptions.map((option) => <option key={option}>{option}</option>)}
-        </select>
-        <select className="inline-select" value={dialogTypeFilter} onChange={(event) => setDialogTypeFilter(event.target.value)} aria-label="Тип диалога в отчете">
-          {reportDialogTypeOptions.map((option) => <option key={option}>{option}</option>)}
-        </select>
-        <button onClick={handleApplyFilters} type="button"><Filter size={17} /> Применить</button>
-        <button onClick={() => onToast("История экспортов открыта.")} type="button"><CalendarDays size={17} /> История</button>
+        <ReportFacetSelect label="Оператор" options={reportFilterOptions.operatorId} value={reportFilters.operatorId} onChange={(value) => setReportFilters((current) => ({ ...current, operatorId: value }))} />
+        <ReportFacetSelect label="Тема" options={reportFilterOptions.topic} value={reportFilters.topic} onChange={(value) => setReportFilters((current) => ({ ...current, topic: value }))} />
+        <ReportFacetSelect label="Статус в периоде" options={reportFilterOptions.status} value={reportFilters.status} onChange={(value) => setReportFilters((current) => ({ ...current, status: value }))} />
+        <ReportFacetSelect label="Результат закрытия" options={reportFilterOptions.resolutionOutcome} value={reportFilters.resolutionOutcome} onChange={(value) => setReportFilters((current) => ({ ...current, resolutionOutcome: value }))} />
+        <ReportFacetSelect label="Результат rescue" options={reportFilterOptions.outcome} value={reportFilters.outcome} onChange={(value) => setReportFilters((current) => ({ ...current, outcome: value }))} />
+        <ReportFacetSelect label="Очередь" options={reportFilterOptions.queueId} value={reportFilters.queueId} onChange={(value) => setReportFilters((current) => ({ ...current, queueId: value }))} />
+        <ReportFacetSelect label="Команда" options={reportFilterOptions.teamId} value={reportFilters.teamId} onChange={(value) => setReportFilters((current) => ({ ...current, teamId: value }))} />
+        <button onClick={handleOpenExportHistory} type="button"><CalendarDays size={17} /> История</button>
       </div>
+
+      <section className="work-panel routing-activity-panel" data-testid="routing-activity-report">
+        <SectionTitle title="Назначения и передачи" action="по фактическим событиям" />
+        <div className="routing-activity-controls">
+          <label>
+            <span>Событие</span>
+            <select className="inline-select" value={routingEventType} onChange={(event) => setRoutingEventType(event.target.value)}>
+              <option value="all">Все события</option>
+              <option value="assignment">Назначения</option>
+              <option value="transfer">Передачи</option>
+            </select>
+          </label>
+          <label>
+            <span>Оператор</span>
+            <select className="inline-select" value={routingOperatorId} onChange={(event) => setRoutingOperatorId(event.target.value)}>
+              <option value="all">Все операторы</option>
+              {routingOperatorOptions.map((operatorId) => <option key={operatorId} value={operatorId}>{operatorId}</option>)}
+            </select>
+          </label>
+        </div>
+
+        {routingActivityLoading ? <p className="routing-activity-state">Загрузка событий...</p> : null}
+        {routingActivityError ? <p className="routing-activity-state error">{routingActivityError}</p> : null}
+        {!routingActivityLoading && !routingActivityError ? (
+          <>
+            <div className="routing-activity-summary" aria-label="Итоги назначений и передач">
+              <span><b>{routingActivityTotals.assignments}</b> назначений</span>
+              <span><b>{routingActivityTotals.transfers}</b> передач</span>
+              <span><b>{routingActivityTotals.operators}</b> операторов</span>
+              <span><b>{routingActivityTotals.totalEvents}</b> событий</span>
+            </div>
+            {routingActivityRows.length ? (
+              <EntityTable
+                as="table"
+                caption="Активность назначений и передач по операторам"
+                className="routing-activity-table"
+                columns={routingActivityColumns}
+              >
+                {routingActivityRows.map((row) => (
+                  <tr className="entity-row" key={row.operatorId}>
+                    <th scope="row">{row.operatorId}</th>
+                    <td>{row.assignments}</td>
+                    <td>{row.transfersFrom}</td>
+                    <td>{row.transfersTo}</td>
+                    <td>{row.transferEvents}</td>
+                    <td><b>{row.totalEvents}</b></td>
+                  </tr>
+                ))}
+              </EntityTable>
+            ) : (
+              <p className="routing-activity-state">За выбранный период назначений и передач нет.</p>
+            )}
+            {routingActivityTotals.unattributedEvents > 0 ? (
+              <p className="routing-activity-note">Без указанного оператора: {routingActivityTotals.unattributedEvents}</p>
+            ) : null}
+          </>
+        ) : null}
+      </section>
 
       {exportError ? <div className="report-export-error">{exportError}</div> : null}
 
-      <div className="reports-layout">
+      {exportHistoryOpen ? (
+        <section className="work-panel report-export-history-panel" data-testid="report-export-history-panel">
+          <SectionTitle title="История экспортов" action={`${reportExportJobs.length} выгрузок`} />
+          <div className="report-history-grid">
+            {reportExportJobs.map((job) => (
+              <button
+                className={job.id === selectedAuditJobId ? "selected" : ""}
+                data-testid="report-export-history-row"
+                key={job.id}
+                onClick={() => setSelectedAuditJobId(job.id)}
+                type="button"
+              >
+                <span>
+                  <strong>{job.name}</strong>
+                  <small>{job.period} · {job.format} · {job.rows} строк</small>
+                </span>
+                <b>{job.auditId}</b>
+                <StatusBadge tone={exportStatusClasses[job.statusKey] ?? "info"}>{job.status}</StatusBadge>
+              </button>
+            ))}
+          </div>
+          <footer>
+            <span>История фактических выгрузок за выбранные периоды.</span>
+            <button onClick={() => setExportHistoryOpen(false)} type="button">Свернуть</button>
+          </footer>
+        </section>
+      ) : null}
+
+      {selectedAuditJob ? (
+        <section className="work-panel report-audit-panel" data-testid="report-audit-panel">
+          <SectionTitle title="Проверка выгрузки" action="запись не изменяется" />
+          <dl>
+            <div><dt>Audit ID</dt><dd>{selectedAuditJob.auditId}</dd></div>
+            <div><dt>Job</dt><dd>{selectedAuditJob.name}</dd></div>
+            <div><dt>Status</dt><dd>{selectedAuditJob.status}</dd></div>
+            <div><dt>Format</dt><dd>{selectedAuditJob.format}</dd></div>
+            <div><dt>Period</dt><dd>{selectedAuditJob.period}</dd></div>
+            <div><dt>Rows</dt><dd>{selectedAuditJob.rows}</dd></div>
+            <div><dt>Queue ID</dt><dd>{selectedAuditJob.backendQueueId ?? selectedAuditJob.id}</dd></div>
+            <div><dt>Queue</dt><dd>{selectedAuditJob.queue ?? "report-export"}</dd></div>
+            <div><dt>Metric version</dt><dd>{selectedAuditJob.metricDefinitionVersion ?? "metrics/v1"}</dd></div>
+            <div><dt>Requested by</dt><dd>{selectedAuditJob.requestedBy ?? "-"}</dd></div>
+            <div><dt>Created</dt><dd>{selectedAuditJob.createdAt ?? "-"}</dd></div>
+            {Array.isArray(selectedAuditJob.columns) && selectedAuditJob.columns.length ? (
+              <div><dt>Columns</dt><dd>{selectedAuditJob.columns.join(", ")}</dd></div>
+            ) : null}
+            {selectedAuditJob.filters ? (
+              <div><dt>Filters</dt><dd>{Object.entries(selectedAuditJob.filters).map(([key, value]) => `${key}: ${value}`).join(", ")}</dd></div>
+            ) : null}
+            {selectedAuditJob.failureCode ? (
+              <div><dt>Failure</dt><dd>{selectedAuditJob.failureCode}: {selectedAuditJob.failureMessage ?? "without message"}</dd></div>
+            ) : null}
+          </dl>
+        </section>
+      ) : null}
+
+      {reportBars.length ? <div className="reports-layout">
         <section className="work-panel">
           <SectionTitle title="Каналы" action="Доля новых обращений" />
           <div className="bar-list">
@@ -204,17 +549,16 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
           </div>
         </section>
         <section className="work-panel">
-          <SectionTitle title="Дайджест руководителя" action="Автообновление 18:00" />
+          <SectionTitle title="Краткий итог" action="по текущим данным" />
           <div className="digest-list">
-            <p><b>Главный риск:</b> VK просел по SLA до 68%, очередь требует перераспределения.</p>
-            <p><b>Топ тематика:</b> доставка и статус заказа, 34% всех обращений.</p>
-            <p><b>Контроль качества:</b> низких оценок 7, все попали в фильтр старшего.</p>
+            <p><b>Диалоги:</b> показатели рассчитаны по сообщениям выбранной организации.</p>
+            <p><b>Состав:</b> {reportRows.length} показателя, {reportChartBlocks.length} графика.</p>
           </div>
         </section>
-      </div>
+      </div> : null}
 
-      <section className="work-panel report-charts-panel">
-        <SectionTitle title="Chart-блоки отчета" action="нагрузка, SLA, качество, rescue" />
+      {reportChartBlocks.length ? <section className="work-panel report-charts-panel">
+        <SectionTitle title="Динамика" action="по выбранному периоду" />
         <div className="report-chart-grid">
           {reportChartBlocks.map((chart) => (
             <article className={`report-chart-card ${chart.tone}`} key={chart.id}>
@@ -224,19 +568,19 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
               </header>
               <b>{chart.value}</b>
               <div className="mini-chart" aria-label={chart.title} role="img">
-                {chart.points.map((point, index) => (
-                  <i style={{ height: `${Math.max(18, point)}%` }} key={`${chart.id}-${index}`} />
+                {(chart.points ?? []).map((point, index) => (
+                  <i style={{ height: `${chartPointHeight(chart.points, point)}%` }} key={`${chart.id}-${index}`} />
                 ))}
               </div>
               <footer>
-                {chart.legend.map((item) => <span key={item}>{item}</span>)}
+                {(chart.legend ?? []).map((item) => <span key={item}>{item}</span>)}
               </footer>
             </article>
           ))}
         </div>
-      </section>
+      </section> : null}
 
-      <section className="work-panel rescue-report-panel">
+      {rescueOutcomeSummary.length || rescueReportRows.length ? <section className="work-panel rescue-report-panel">
         <SectionTitle title="Спасенные и пропущенные" action="rescue timer outcomes" />
         <div className="rescue-outcome-summary">
           {rescueOutcomeSummary.map((item) => (
@@ -268,7 +612,7 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
             </article>
           ))}
         </div>
-      </section>
+      </section> : null}
 
       <section className="work-panel report-columns-panel">
         <SectionTitle title="Состав колонок выгрузки" action={`${selectedColumns.length} из ${reportColumnOptions.length}`} />
@@ -310,17 +654,18 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
       <section className="work-panel export-queue-panel">
         <SectionTitle title="Очередь и история выгрузок" action="каждый экспорт фиксируется в audit" />
         <div className="export-job-list">
+          {!reportExportJobs.length ? <p>Выгрузок пока нет.</p> : null}
           {reportExportJobs.map((job) => (
             <article className={`export-job ${job.statusKey === "error" ? "danger" : ""}`} key={job.id}>
               <header>
                 <strong>{job.name}</strong>
                 <StatusBadge tone={exportStatusClasses[job.statusKey] ?? "info"}>{job.status}</StatusBadge>
               </header>
-              <div className="health-bar"><i style={{ width: `${job.progress}%` }} /></div>
+              <div className="health-bar"><i style={{ width: `${job.progress ?? 0}%` }} /></div>
               <footer>
                 <span>{job.format} · {job.period} · {job.rows} строк</span>
                 <div className="export-actions">
-                  <button disabled={!access.canExportReports} onClick={() => onToast(`${job.name}: audit ${job.auditId}`)} title={access.canExportReports ? "Открыть audit" : access.reason} type="button">Audit</button>
+                  <button disabled={!access.canExportReports} onClick={() => handleOpenReportAudit(job)} title={access.canExportReports ? "Открыть audit" : access.reason} type="button">Audit</button>
                   {job.statusKey === "ready" ? (
                     <button disabled={!access.canExportReports} onClick={() => handleExportDownload(job)} title={access.canExportReports ? "Скачать файл" : access.reason} type="button">
                       <Download size={15} />
@@ -350,4 +695,22 @@ export function ReportsScreen({ onBack, onToast, access, topicOptions = [] }) {
       </section>
     </ProductScreen>
   );
+}
+
+function ReportFacetSelect({ label, onChange, options = [], value }) {
+  if (!Array.isArray(options) || !options.length) {
+    return null;
+  }
+
+  return (
+    <select aria-label={label} className="inline-select" onChange={(event) => onChange(event.target.value)} value={value}>
+      <option value="all">Все: {label.toLocaleLowerCase("ru")}</option>
+      {options.map((option) => <option key={option} value={option}>{option}</option>)}
+    </select>
+  );
+}
+
+function formatReportTimestamp(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Нет данных" : parsed.toLocaleString("ru-RU");
 }

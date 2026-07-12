@@ -49,8 +49,30 @@ export function claimDueScheduledDigestDescriptors(input: ScheduledDigestClaimWo
   return { claimed };
 }
 
+export async function claimDueScheduledDigestDescriptorsAsync(input: ScheduledDigestClaimWorkerInput): Promise<ScheduledDigestClaimWorkerResult> {
+  if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 0)) {
+    throw new Error("scheduled_digest_claim_limit_invalid");
+  }
+
+  const dueDescriptors = await input.reportRepository.listScheduledDigestDescriptorsAsync({
+    dueBefore: input.now.toISOString(),
+    status: "due",
+    tenantId: input.tenantId
+  });
+  const limit = input.limit ?? dueDescriptors.length;
+  const claimed = await Promise.all(dueDescriptors.slice(0, limit).map((descriptor) =>
+    input.reportRepository.saveScheduledDigestDescriptorAsync({
+      ...descriptor,
+      status: "running",
+      updatedAt: input.now.toISOString()
+    })
+  ));
+
+  return { claimed };
+}
+
 export async function queueScheduledDigestExportJob(input: ScheduledDigestExportJobWorkerInput): Promise<ScheduledDigestExportJobWorkerResult> {
-  const descriptor = input.reportRepository.saveScheduledDigestDescriptor(input.descriptor);
+  const descriptor = await input.reportRepository.saveScheduledDigestDescriptorAsync(input.descriptor);
   const exportEnvelope = await input.reportService.requestReportExport({
     columns: SCHEDULED_DIGEST_EXPORT_COLUMNS,
     filters: {
@@ -62,15 +84,15 @@ export async function queueScheduledDigestExportJob(input: ScheduledDigestExport
     idempotencyKey: scheduledDigestExportIdempotencyKey(descriptor),
     period: descriptor.periodKey,
     reportType: descriptor.reportType
-  });
-  const persistedDescriptor = input.reportRepository.saveScheduledDigestDescriptor({
+  }, { tenantId: descriptor.tenantId });
+  const persistedDescriptor = await input.reportRepository.saveScheduledDigestDescriptorAsync({
     ...descriptor,
     status: exportEnvelope.status === "ok" ? "completed" : "failed",
     updatedAt: (input.now ?? new Date()).toISOString()
   });
   if (exportEnvelope.status === "ok") {
     const exportJobId = reportExportJobIdFromEnvelope(exportEnvelope);
-    input.reportRepository.saveReportNotificationDescriptor({
+    await input.reportRepository.saveReportNotificationDescriptorAsync({
       createdAt: (input.now ?? new Date()).toISOString(),
       eventType: "export.ready",
       exportJobId,

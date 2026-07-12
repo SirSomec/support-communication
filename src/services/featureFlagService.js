@@ -5,6 +5,7 @@ const SERVICE = "featureFlagService";
 export const featureFlagService = {
   async fetchFeatureFlags(filters = {}) {
     return apiRequest("/feature-flags", {
+      authMode: "service-admin",
       operation: "fetchFeatureFlags",
       query: filters,
       service: SERVICE
@@ -17,6 +18,7 @@ export const featureFlagService = {
     }
 
     return apiRequest(`/feature-flags/${encodeURIComponent(flagId)}/preview`, {
+      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "previewFlagChange",
@@ -30,6 +32,7 @@ export const featureFlagService = {
     }
 
     return apiRequest(`/feature-flags/${encodeURIComponent(flagId)}`, {
+      authMode: "service-admin",
       body: payload,
       method: "PATCH",
       operation: "updateFeatureFlag",

@@ -12,7 +12,10 @@ import {
 } from "../packages/testing/src/index.ts";
 import { OperationsReadinessService } from "../apps/api-gateway/src/operations/operations-readiness.service.ts";
 import { OperationsRepository } from "../apps/api-gateway/src/operations/operations.repository.ts";
+import { bootstrapOperationsState } from "../apps/api-gateway/src/operations/seed.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
+import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.ts";
+import { exportJobFixtures } from "../apps/api-gateway/src/reports/seed-catalog.ts";
 
 describe("secret redaction verification contracts", () => {
   it("exposes canonical secret-bearing fixtures for every redaction gate", () => {
@@ -479,8 +482,17 @@ describe("secret redaction verification contracts", () => {
   });
 
   it("redacts exported report, audit and restore-check descriptors", async () => {
-    const reportDescriptor = await new ReportService().getExportFileDescriptor("export-2418", { canDownload: true });
-    const restoreDescriptor = await new OperationsReadinessService(OperationsRepository.inMemory()).queueRestoreCheck({
+    const reportRepository = ReportRepository.inMemory();
+    reportRepository.saveExportJob({
+      ...structuredClone(exportJobFixtures.find((job) => job.id === "export-2418")!),
+      tenantId: "tenant-volga"
+    });
+    const reportDescriptor = await new ReportService(reportRepository).getExportFileDescriptor("export-2418", {
+      canDownload: true,
+      tenantId: "tenant-volga"
+    });
+    const operationsRepository = OperationsRepository.inMemory(bootstrapOperationsState());
+    const restoreDescriptor = await new OperationsReadinessService(operationsRepository).queueRestoreCheck({
       confirmed: true,
       drillId: "backup-postgres-nightly",
       idempotencyKey: "restore-redaction-live-descriptor",

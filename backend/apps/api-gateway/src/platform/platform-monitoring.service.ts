@@ -2,11 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import { type ServiceAdminActor } from "../identity/service-admin-auth.js";
-import { platformComponents, platformIncidents, platformMetrics, platformTenants, type PlatformComponent, type PlatformIncident } from "./platform.fixtures.js";
+import type { PlatformComponent, PlatformIncident } from "./platform.types.js";
 import { PlatformRepository, type PlatformHealthRollup, type PlatformTelemetrySample } from "./platform.repository.js";
 import {
   makeEphemeralPlatformMutationIdempotencyKey,
-  persistPlatformAlertMutation
+  persistPlatformAlertMutationAsync
 } from "./platform-audit-outbox.js";
 
 const PLATFORM_SERVICE = "platformMonitoringService";
@@ -66,25 +66,34 @@ interface SaveAlertRoutingRulePayload {
   statuses?: string[];
 }
 
-export class PlatformMonitoringService {
-  private readonly components: PlatformComponent[];
+interface PlatformReadModel {
+  components: PlatformComponent[];
+  healthRollups: PlatformHealthRollup[];
+  incidents: PlatformIncident[];
+  metrics: Array<Record<string, unknown>>;
+  telemetrySamples: PlatformTelemetrySample[];
+}
 
-  constructor(private readonly platformRepository = PlatformRepository.default()) {
-    this.components = overlayById(platformComponents, this.platformRepository.listComponents());
-  }
+export class PlatformMonitoringService {
+  constructor(private readonly platformRepository = PlatformRepository.default()) {}
 
   async fetchPlatformSnapshot(filters: PlatformFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const components = this.components.filter((component) => {
+    const readModel = await this.loadReadModel();
+    const components = readModel.components.filter((component) => {
       const statusMatches = componentStatusMatches(component, filters.status);
       const regionMatches = !filters.region || filters.region === "all" || component.region === filters.region || component.region === "global";
       return statusMatches && regionMatches;
     });
     const componentIds = new Set(components.map((component) => component.id));
-    const incidents = this.currentIncidents().filter((incident) => componentIds.has(incident.componentId));
-    const healthRollups = this.currentSnapshotHealthRollups(componentIds);
-    const metrics = this.currentSnapshotMetrics(componentIds);
+    const incidents = readModel.incidents.filter((incident) => componentIds.has(incident.componentId));
+    const healthRollups = readModel.healthRollups.filter((rollup) => componentIds.has(rollup.componentId));
+    const metrics = readModel.metrics.filter((metric) => componentIds.has(String(metric.componentId)));
 
     const openIncidents = incidents.filter((incident) => incident.status !== "resolved");
+    const sloBurnRate = latestTelemetryValue(
+      readModel.telemetrySamples.filter((sample) => componentIds.has(sample.componentId)),
+      ["slo_burn_rate", "sloBurnRate"]
+    );
 
     return createEnvelope({
       service: PLATFORM_SERVICE,
@@ -94,29 +103,31 @@ export class PlatformMonitoringService {
       meta: apiMeta({ filters }),
       data: {
         components: clone(components),
+        dataState: components.length === 0 ? "empty" : "available",
         healthRollups,
         incidents: clone(incidents),
         metrics: clone(metrics),
         summary: {
           affectedTenants: new Set(incidents.flatMap((incident) => incident.affectedTenantIds)).size,
-          degraded: components.filter((component) => component.status !== "operational").length,
+          degraded: components.filter((component) => component.status === "degraded" || component.status === "partial_outage").length,
           globalUptime: averageUptime(components),
           openIncidents: openIncidents.length,
-          sloBurnRate: 1.42
+          sloBurnRate
         }
       }
     });
   }
 
   async fetchComponentDrilldown(componentId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const component = this.findComponent(componentId);
+    const readModel = await this.loadReadModel();
+    const component = readModel.components.find((item) => item.id === componentId);
 
     if (!component) {
       return notFoundEnvelope("fetchComponentDrilldown", "component_not_found", `Component ${componentId} was not found.`, { componentId });
     }
 
-    const incidents = this.currentIncidents().filter((incident) => incident.componentId === component.id);
-    const affectedTenants = platformTenants.filter((tenant) => incidents.some((incident) => incident.affectedTenantIds.includes(tenant.id)));
+    const incidents = readModel.incidents.filter((incident) => incident.componentId === component.id);
+    const affectedTenants = (await this.platformRepository.listPlatformTenantsAsync()).filter((tenant) => incidents.some((incident) => incident.affectedTenantIds.includes(tenant.id)));
 
     return createEnvelope({
       service: PLATFORM_SERVICE,
@@ -127,12 +138,9 @@ export class PlatformMonitoringService {
         affectedTenants: clone(affectedTenants),
         component: clone(component),
         incidents: clone(incidents),
-        metrics: clone(platformMetrics.filter((metric) => metric.componentId === component.id)),
-        runbooks: [
-          `${component.ownerTeam} on-call escalation`,
-          "Customer status note review",
-          "Audit stream integrity check"
-        ]
+        healthRollups: clone(readModel.healthRollups.filter((rollup) => rollup.componentId === component.id)),
+        metrics: clone(readModel.metrics.filter((metric) => metric.componentId === component.id)),
+        runbooks: []
       }
     });
   }
@@ -146,9 +154,9 @@ export class PlatformMonitoringService {
     }
 
     const id = isNonEmptyString(request.ruleId) ? request.ruleId.trim() : alertRoutingRuleId();
-    const existing = this.platformRepository.listAlertRoutingRules().find((rule) => rule.id === id);
+    const existing = (await this.platformRepository.listAlertRoutingRulesAsync()).find((rule) => rule.id === id);
     const now = new Date().toISOString();
-    const rule = this.platformRepository.saveAlertRoutingRule({
+    const rule = await this.platformRepository.saveAlertRoutingRuleAsync({
       componentIds: normalizeStringList(request.componentIds),
       createdAt: existing?.createdAt ?? now,
       destination: {
@@ -175,7 +183,7 @@ export class PlatformMonitoringService {
 
   async ingestTelemetrySample(payload: IngestTelemetrySamplePayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const component = this.findComponent(request.componentId ?? "");
+    const component = await this.resolveWritableComponent(request.componentId ?? "");
 
     if (!component) {
       return invalidEnvelope("ingestTelemetrySample", "component_required", "A known platform component is required.", {
@@ -222,7 +230,7 @@ export class PlatformMonitoringService {
       });
     }
 
-    const sample = this.platformRepository.saveTelemetrySample({
+    const sample = await this.platformRepository.saveTelemetrySampleAsync({
       componentId: component.id,
       id: isNonEmptyString(request.id) ? request.id.trim() : telemetrySampleId(),
       metricKey: request.metricKey.trim(),
@@ -248,7 +256,7 @@ export class PlatformMonitoringService {
 
   async writeHealthRollup(payload: WriteHealthRollupPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const component = this.findComponent(request.componentId ?? "");
+    const component = await this.resolveWritableComponent(request.componentId ?? "");
 
     if (!component) {
       return invalidEnvelope("writeHealthRollup", "component_required", "A known platform component is required.", {
@@ -295,7 +303,7 @@ export class PlatformMonitoringService {
       });
     }
 
-    const rollup = this.platformRepository.saveHealthRollup({
+    const rollup = await this.platformRepository.saveHealthRollupAsync({
       availability: request.availability,
       componentId: component.id,
       errorRate: request.errorRate,
@@ -323,7 +331,7 @@ export class PlatformMonitoringService {
 
   async acknowledgeComponentAlert(payload: AcknowledgePayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const component = this.findComponent(request.componentId ?? "");
+    const component = await this.findComponent(request.componentId ?? "");
 
     if (!component) {
       return notFoundEnvelope("acknowledgeComponentAlert", "component_not_found", `Component ${request.componentId ?? "(empty)"} was not found.`, {
@@ -350,9 +358,9 @@ export class PlatformMonitoringService {
     const idempotencyKey = isNonEmptyString(request.idempotencyKey)
       ? request.idempotencyKey.trim()
       : makeEphemeralPlatformMutationIdempotencyKey(`alert-ack-${component.id}`);
-    let mutationPersistence: ReturnType<typeof persistPlatformAlertMutation>;
+    let mutationPersistence: Awaited<ReturnType<typeof persistPlatformAlertMutationAsync>>;
     try {
-      mutationPersistence = persistPlatformAlertMutation({
+      mutationPersistence = await persistPlatformAlertMutationAsync({
         actor: request.actor,
         componentId: component.id,
         idempotencyKey,
@@ -370,15 +378,15 @@ export class PlatformMonitoringService {
 
       throw error;
     }
-    const severity = this.currentIncidents().find((incident) => incident.componentId === component.id && incident.status !== "resolved")?.severity ?? component.status;
-    const notificationOutboxRows = this.platformRepository
-      .listAlertRoutingRules({
+    const severity = (await this.platformRepository.listIncidentsAsync()).find((incident) => incident.componentId === component.id && incident.status !== "resolved")?.severity ?? component.status;
+    const notificationOutboxRows = await Promise.all((await this.platformRepository
+      .listAlertRoutingRulesAsync({
         componentId: component.id,
         enabled: true,
         severity,
         status: component.status
       })
-      .map((rule) => this.platformRepository.savePlatformOutboxRow({
+    ).map((rule) => this.platformRepository.savePlatformOutboxRowAsync({
         aggregateId: component.id,
         aggregateType: "platform_component",
         createdAt: mutationPersistence.audit.createdAt,
@@ -402,8 +410,8 @@ export class PlatformMonitoringService {
         target: component.id,
         traceId,
         type: "platform.alert.notification.requested"
-      }));
-    const acknowledgement = this.platformRepository.saveAlertAcknowledgement({
+      })));
+    const acknowledgement = await this.platformRepository.saveAlertAcknowledgementAsync({
       acknowledgedAt: new Date().toISOString(),
       auditEvent: auditEvent("platform.alert.acknowledge", component.id, request.reason, request.actor),
       componentId: component.id,
@@ -425,30 +433,56 @@ export class PlatformMonitoringService {
     });
   }
 
-  private findComponent(componentId: string): PlatformComponent | undefined {
-    return this.components.find((component) => component.id === componentId);
+  private async findComponent(componentId: string): Promise<PlatformComponent | undefined> {
+    return (await this.loadReadModel()).components.find((component) => component.id === componentId);
   }
 
-  private currentIncidents(): PlatformIncident[] {
-    return overlayById(platformIncidents, this.platformRepository.listIncidents());
+  private async resolveWritableComponent(componentId: string): Promise<PlatformComponent | undefined> {
+    const normalized = String(componentId ?? "").trim();
+    if (!normalized) {
+      return undefined;
+    }
+
+    return (await this.findComponent(normalized)) ?? syntheticPlatformComponent(normalized);
   }
 
-  private currentSnapshotMetrics(componentIds: Set<string>): Array<Record<string, unknown>> {
-    const fixtureMetrics = platformMetrics.filter((metric) => componentIds.has(metric.componentId));
-    const telemetryMetrics = this.platformRepository
-      .listTelemetrySamples()
-      .filter((sample) => componentIds.has(sample.componentId))
-      .map(telemetrySampleMetric);
+  private async loadReadModel(): Promise<PlatformReadModel> {
+    const [catalogComponents, incidents, staticMetrics, telemetrySamples, healthRollups] = await Promise.all([
+      this.platformRepository.listComponentsAsync(),
+      this.platformRepository.listIncidentsAsync(),
+      this.platformRepository.listStaticMetricsAsync(),
+      this.platformRepository.listTelemetrySamplesAsync(),
+      this.platformRepository.listHealthRollupsAsync()
+    ]);
 
-    return clone([...fixtureMetrics, ...telemetryMetrics]);
+    return {
+      components: derivePlatformComponents(catalogComponents, incidents, telemetrySamples, healthRollups),
+      healthRollups: clone(healthRollups),
+      incidents: clone(incidents),
+      metrics: clone([
+        ...staticMetrics,
+        ...telemetrySamples.map(telemetrySampleMetric)
+      ] as Array<Record<string, unknown>>),
+      telemetrySamples: clone(telemetrySamples)
+    };
   }
+}
 
-  private currentSnapshotHealthRollups(componentIds: Set<string>): Array<Record<string, unknown>> {
-    return this.platformRepository
-      .listHealthRollups()
-      .filter((rollup) => componentIds.has(rollup.componentId))
-      .map((rollup) => ({ ...clone(rollup) }));
-  }
+function syntheticPlatformComponent(componentId: string): PlatformComponent {
+  return {
+    dependencies: [],
+    errorRate: null,
+    id: componentId,
+    latencyMs: null,
+    name: componentId,
+    ownerTeam: "unknown",
+    recentEvents: [],
+    region: "unknown",
+    signals: [],
+    status: "unknown",
+    tenantImpact: 0,
+    uptime: null
+  };
 }
 
 function apiMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -471,12 +505,15 @@ function auditEvent(action: string, target: string, reason: string | undefined, 
   };
 }
 
-function averageUptime(components: PlatformComponent[]): number {
-  if (components.length === 0) {
-    return 0;
+function averageUptime(components: PlatformComponent[]): number | null {
+  const observed = components
+    .map((component) => component.uptime)
+    .filter((uptime): uptime is number => uptime !== null);
+  if (observed.length === 0) {
+    return null;
   }
 
-  return Number((components.reduce((sum, component) => sum + component.uptime, 0) / components.length).toFixed(2));
+  return Number((observed.reduce((sum, uptime) => sum + uptime, 0) / observed.length).toFixed(2));
 }
 
 function addDays(date: Date, days: number): Date {
@@ -497,10 +534,69 @@ function componentStatusMatches(component: PlatformComponent, status: string | u
   }
 
   if (status === "degraded") {
-    return component.status !== "operational";
+    return component.status === "degraded" || component.status === "partial_outage";
   }
 
   return component.status === status;
+}
+
+function derivePlatformComponents(
+  catalogComponents: PlatformComponent[],
+  incidents: PlatformIncident[],
+  telemetrySamples: PlatformTelemetrySample[],
+  healthRollups: PlatformHealthRollup[]
+): PlatformComponent[] {
+  const components = new Map(catalogComponents.map((component) => [component.id, clone(component)]));
+  const componentIds = new Set([
+    ...catalogComponents.map((component) => component.id),
+    ...incidents.map((incident) => incident.componentId),
+    ...telemetrySamples.map((sample) => sample.componentId),
+    ...healthRollups.map((rollup) => rollup.componentId)
+  ]);
+
+  for (const componentId of componentIds) {
+    const catalogComponent = components.get(componentId);
+    const componentIncidents = incidents.filter((incident) => incident.componentId === componentId);
+    const activeIncident = componentIncidents.find((incident) => incident.status !== "resolved");
+    const latestRollup = healthRollups
+      .filter((rollup) => rollup.componentId === componentId)
+      .sort((left, right) => Date.parse(right.windowEnd) - Date.parse(left.windowEnd))[0];
+    const componentTelemetry = telemetrySamples.filter((sample) => sample.componentId === componentId);
+
+    const runtimeTenantImpact = new Set(componentIncidents.flatMap((incident) => incident.affectedTenantIds)).size;
+
+    components.set(componentId, {
+      ...(catalogComponent ?? syntheticPlatformComponent(componentId)),
+      errorRate: latestRollup?.errorRate ?? latestTelemetryValue(componentTelemetry, ["error_rate", "errorRate"]) ?? catalogComponent?.errorRate ?? null,
+      latencyMs: latestRollup?.latencyP95Ms ?? latestTelemetryValue(componentTelemetry, ["latency_p95_ms", "latencyMs"]) ?? catalogComponent?.latencyMs ?? null,
+      ownerTeam: catalogComponent?.ownerTeam ?? activeIncident?.owner ?? componentIncidents[0]?.owner ?? "unknown",
+      status: platformComponentStatus(latestRollup?.status, activeIncident, catalogComponent?.status),
+      tenantImpact: componentIncidents.length > 0 ? runtimeTenantImpact : catalogComponent?.tenantImpact ?? 0,
+      uptime: latestRollup?.availability ?? latestTelemetryValue(componentTelemetry, ["availability", "uptime"]) ?? catalogComponent?.uptime ?? null
+    });
+  }
+
+  return [...components.values()];
+}
+
+function latestTelemetryValue(samples: PlatformTelemetrySample[], metricKeys: string[]): number | null {
+  const keys = new Set(metricKeys);
+  const sample = samples
+    .filter((item) => keys.has(item.metricKey))
+    .sort((left, right) => Date.parse(right.sampledAt) - Date.parse(left.sampledAt))[0];
+  return sample?.value ?? null;
+}
+
+function platformComponentStatus(
+  healthStatus: string | undefined,
+  activeIncident: PlatformIncident | undefined,
+  catalogStatus?: PlatformComponent["status"]
+): PlatformComponent["status"] {
+  if (healthStatus === "operational" || healthStatus === "degraded" || healthStatus === "partial_outage") {
+    return healthStatus;
+  }
+
+  return catalogStatus ?? (activeIncident ? "degraded" : "unknown");
 }
 
 function hasAuditReason(reason: unknown): boolean {

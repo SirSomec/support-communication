@@ -1,5 +1,5 @@
-import type { RoutingConversation } from "./routing.fixtures.js";
-import type { RoutingJobDescriptor, RoutingRepository } from "./routing.repository.js";
+import type { RoutingConversation } from "./routing.types.js";
+import type { RoutingJobDescriptor, RoutingRepository, RoutingSlaTimerApplyResult } from "./routing.repository.js";
 
 interface SlaTimerTransitionInput {
   conversation: Pick<RoutingConversation, "id" | "status">;
@@ -8,9 +8,11 @@ interface SlaTimerTransitionInput {
 }
 
 interface SlaTimerClaimWorkerInput {
+  leaseDurationMs?: number;
   limit?: number;
   now?: Date;
-  routingRepository: Pick<RoutingRepository, "listJobs" | "saveJob">;
+  routingRepository: Pick<RoutingRepository, "claimJob" | "listJobs">;
+  workerId?: string;
 }
 
 interface SlaTimerFailureInput {
@@ -24,7 +26,7 @@ interface SlaTimerFailureInput {
 
 interface SlaTimerApplyWorkerInput {
   completedAt?: Date;
-  routingRepository: Pick<RoutingRepository, "readState" | "saveState">;
+  routingRepository: Pick<RoutingRepository, "applySlaTimerTransition">;
   transition: SlaTimerTransition;
 }
 
@@ -32,34 +34,15 @@ interface SlaTimerClaimWorkerResult {
   claimed: RoutingJobDescriptor[];
 }
 
-interface SlaTimerApplyWorkerResult {
-  conversationId: string;
-  jobId: string;
-  overdueDescriptor?: {
-    conversationId: string;
-    jobId: string;
-    kind: "sla.timer.overdue";
-    occurredAt: string;
-    queue: "sla-timers";
-  };
-  realtimeEvent?: {
-    data: {
-      jobId: string;
-      state: "overdue";
-    };
-    occurredAt: string;
-    resourceId: string;
-    resourceType: "conversation";
-    type: "sla.timer.updated";
-  };
-  status: "applied" | "skipped";
-}
+type SlaTimerApplyWorkerResult = RoutingSlaTimerApplyResult;
 
 interface SlaTimerTransitionReady {
   action: "resume_sla";
   conversationId: string;
   fromStatus: "paused";
   jobId: string;
+  leaseOwner?: string;
+  tenantId?: string;
   status: "ready";
   toStatus: "active";
 }
@@ -69,6 +52,8 @@ interface SlaTimerOverdueTransitionReady {
   conversationId: string;
   fromStatus: "active" | "assigned";
   jobId: string;
+  leaseOwner?: string;
+  tenantId?: string;
   status: "ready";
   toSlaTone: "danger";
   toStatus: "active" | "assigned";
@@ -84,33 +69,38 @@ interface SlaTimerTransitionSkipped {
 
 export type SlaTimerTransition = SlaTimerOverdueTransitionReady | SlaTimerTransitionReady | SlaTimerTransitionSkipped;
 
-export function claimDueSlaTimerJobs(input: SlaTimerClaimWorkerInput): SlaTimerClaimWorkerResult {
+export async function claimDueSlaTimerJobs(input: SlaTimerClaimWorkerInput): Promise<SlaTimerClaimWorkerResult> {
   const now = input.now ?? new Date();
   const limit = Math.max(1, Math.trunc(input.limit ?? 1));
-  const dueJobs = input.routingRepository.listJobs()
+  const jobs = await input.routingRepository.listJobs();
+  const dueJobs = jobs
     .filter((job) => job.queue === "sla-timers")
     .filter((job) => isClaimableSlaTimerJob(job, now))
     .sort(compareJobDueAt)
     .slice(0, limit);
 
-  const claimed = dueJobs.flatMap((job) => {
-    const current = input.routingRepository.listJobs().find((item) => item.id === job.id);
-    if (!current || !isClaimableSlaTimerJob(current, now)) {
-      return [];
-    }
-
-    return [input.routingRepository.saveJob({
-      ...current,
+  const claimed: RoutingJobDescriptor[] = [];
+  for (const job of dueJobs) {
+    const current = await input.routingRepository.claimJob({
       claimedAt: now.toISOString(),
-      status: "claimed"
-    })];
-  });
+      expectedLeaseExpiresAt: job.leaseExpiresAt ?? null,
+      expectedLeaseOwner: job.leaseOwner ?? null,
+      expectedStatus: job.status ?? null,
+      jobId: job.id,
+      ...(input.leaseDurationMs ? { leaseDurationMs: input.leaseDurationMs } : {}),
+      queue: job.queue,
+      ...(input.workerId ? { workerId: input.workerId } : {})
+    });
+    if (current) {
+      claimed.push(current);
+    }
+  }
 
   return { claimed };
 }
 
-export function recordSlaTimerJobFailure(input: SlaTimerFailureInput): RoutingJobDescriptor {
-  const job = input.routingRepository.listJobs().find((item) => item.id === input.jobId);
+export async function recordSlaTimerJobFailure(input: SlaTimerFailureInput): Promise<RoutingJobDescriptor> {
+  const job = (await input.routingRepository.listJobs()).find((item) => item.id === input.jobId);
   if (!job) {
     throw new Error(`sla_timer_job_not_found:${input.jobId}`);
   }
@@ -129,12 +119,14 @@ export function recordSlaTimerJobFailure(input: SlaTimerFailureInput): RoutingJo
     completedAt: undefined,
     deadLetteredAt: exhausted ? failedAt.toISOString() : undefined,
     lastError: typeof input.error === "string" ? input.error : input.error.message,
+    leaseExpiresAt: undefined,
+    leaseOwner: undefined,
     nextAttemptAt,
     status: exhausted ? "dead_lettered" : "failed"
   });
 }
 
-export function applySlaTimerTransition(input: SlaTimerApplyWorkerInput): SlaTimerApplyWorkerResult {
+export async function applySlaTimerTransition(input: SlaTimerApplyWorkerInput): Promise<SlaTimerApplyWorkerResult> {
   if (input.transition.status !== "ready") {
     return {
       conversationId: input.transition.conversationId,
@@ -145,54 +137,16 @@ export function applySlaTimerTransition(input: SlaTimerApplyWorkerInput): SlaTim
 
   const transition = input.transition;
   const completedAt = (input.completedAt ?? new Date()).toISOString();
-  const state = input.routingRepository.readState();
-  const conversations = state.conversations.map((conversation) => {
-    if (conversation.id !== transition.conversationId) {
-      return conversation;
-    }
-
-    return {
-      ...conversation,
-      slaTone: transition.action === "resume_sla" ? "ok" as const : transition.toSlaTone,
-      status: transition.toStatus
-    };
-  });
-  const jobs = state.jobs.map((job) => job.id === transition.jobId
-    ? { ...job, completedAt, status: "completed" }
-    : job);
-
-  input.routingRepository.saveState({
-    ...state,
-    conversations,
-    jobs
-  });
-
-  return {
+  return input.routingRepository.applySlaTimerTransition({
+    action: transition.action,
+    completedAt,
     conversationId: transition.conversationId,
     jobId: transition.jobId,
-    ...(transition.action === "mark_sla_overdue"
-      ? {
-          overdueDescriptor: {
-            conversationId: transition.conversationId,
-            jobId: transition.jobId,
-            kind: "sla.timer.overdue" as const,
-            occurredAt: completedAt,
-            queue: "sla-timers" as const
-          },
-          realtimeEvent: {
-            data: {
-              jobId: transition.jobId,
-              state: "overdue" as const
-            },
-            occurredAt: completedAt,
-            resourceId: transition.conversationId,
-            resourceType: "conversation" as const,
-            type: "sla.timer.updated" as const
-          }
-        }
-      : {}),
-    status: "applied"
-  };
+    ...(transition.leaseOwner ? { leaseOwner: transition.leaseOwner } : {}),
+    ...(transition.tenantId ? { tenantId: transition.tenantId } : {}),
+    ...(transition.action === "mark_sla_overdue" ? { toSlaTone: transition.toSlaTone } : {}),
+    toStatus: transition.toStatus
+  });
 }
 
 export function planSlaTimerTransition(input: SlaTimerTransitionInput): SlaTimerTransition {
@@ -217,6 +171,8 @@ export function planSlaTimerTransition(input: SlaTimerTransitionInput): SlaTimer
       conversationId: input.conversation.id,
       fromStatus: input.conversation.status,
       jobId: input.job.id,
+      ...(input.job.leaseOwner ? { leaseOwner: input.job.leaseOwner } : {}),
+      ...(input.job.tenantId ? { tenantId: input.job.tenantId } : {}),
       status: "ready",
       toSlaTone: "danger",
       toStatus: input.conversation.status
@@ -232,6 +188,8 @@ export function planSlaTimerTransition(input: SlaTimerTransitionInput): SlaTimer
     conversationId: input.conversation.id,
     fromStatus: "paused",
     jobId: input.job.id,
+    ...(input.job.leaseOwner ? { leaseOwner: input.job.leaseOwner } : {}),
+    ...(input.job.tenantId ? { tenantId: input.job.tenantId } : {}),
     status: "ready",
     toStatus: "active"
   };
@@ -262,6 +220,9 @@ function isClaimableSlaTimerJob(job: RoutingJobDescriptor, now: Date): boolean {
   }
   if (status === "failed") {
     return typeof job.nextAttemptAt === "string" && isDue(job.nextAttemptAt, now);
+  }
+  if (status === "claimed") {
+    return typeof job.leaseExpiresAt !== "string" || isDue(job.leaseExpiresAt, now);
   }
 
   return false;

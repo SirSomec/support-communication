@@ -1,7 +1,11 @@
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { ConversationRepository } from "../conversation/conversation.repository.js";
+import { AutomationService } from "../automation/automation.service.js";
+import { ProactiveExposureRepository } from "../automation/proactive-exposure.repository.js";
 import { ConversationService } from "../conversation/conversation.service.js";
+import { RoutingService } from "../routing/routing.service.js";
+import { QualityService } from "../quality/quality.service.js";
 import { IntegrationRepository } from "./integration.repository.js";
 import {
   type PublicApiEnvironment,
@@ -11,17 +15,75 @@ import { identifyPublicClientFromRoute } from "./public-api.route.js";
 import {
   handlePublicSdkMessageIngressFromRoute,
   handlePublicSdkMessagesPollFromRoute,
+  handlePublicSdkQualityRatingFromRoute,
   resolveOrCreatePublicSdkConversation
 } from "./public-sdk-messages.route.js";
+import { handlePublicSdkPresenceDisconnect, handlePublicSdkPresenceHeartbeat, type PublicSdkPresenceBody } from "./public-sdk-presence.route.js";
+import { handlePublicSdkInvitationAcknowledge, handlePublicSdkInvitationPoll } from "./public-sdk-invitations.route.js";
 
 @ApiTags("public")
 @ApiBearerAuth()
 @Controller("public")
 export class PublicApiController {
   private readonly conversationRepository = ConversationRepository.default();
+  private readonly integrationRepository = IntegrationRepository.default();
+  private readonly proactiveExposureRepository = ProactiveExposureRepository.default();
   protected readonly lookup: PublicApiKeyLookup = runtimePublicApiKeyLookup();
 
-  constructor(private readonly conversationService: ConversationService = new ConversationService()) {}
+  constructor(
+    private readonly conversationService: ConversationService = new ConversationService(),
+    private readonly routingService: RoutingService = new RoutingService(),
+    private readonly qualityService: QualityService = new QualityService(),
+    private readonly automationService: AutomationService = new AutomationService()
+  ) {}
+
+  @Post("sdk/presence/heartbeat")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "heartbeatPublicSdkPresence", summary: "Refresh an anonymous SDK visitor presence session" })
+  heartbeatPublicSdkPresence(@Headers("authorization") authorization: string | undefined,
+    @Query("environment") environment: PublicApiEnvironment = "production", @Body() payload: PublicSdkPresenceBody = {}) {
+    return handlePublicSdkPresenceHeartbeat({ authorization, body: payload, environment, lookup: this.lookup,
+      repository: this.integrationRepository });
+  }
+
+  @Post("sdk/presence/disconnect")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "disconnectPublicSdkPresence", summary: "Disconnect an SDK visitor presence session" })
+  disconnectPublicSdkPresence(@Headers("authorization") authorization: string | undefined,
+    @Query("environment") environment: PublicApiEnvironment = "production", @Body() payload: PublicSdkPresenceBody = {}) {
+    return handlePublicSdkPresenceDisconnect({ authorization, body: payload, environment, lookup: this.lookup,
+      repository: this.integrationRepository });
+  }
+
+  @Get("sdk/invitations")
+  @ApiOperation({ operationId: "pollPublicSdkInvitations", summary: "Poll pending proactive invitations for a live SDK session" })
+  pollPublicSdkInvitations(@Headers("authorization") authorization: string | undefined,
+    @Query("sessionId") sessionId: string | undefined,
+    @Query("environment") environment: PublicApiEnvironment = "production") {
+    return handlePublicSdkInvitationPoll({ authorization, environment, exposureRepository: this.proactiveExposureRepository,
+      integrationRepository: this.integrationRepository, lookup: this.lookup, sessionId });
+  }
+
+  @Post("sdk/invitations/:exposureId/:action")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "acknowledgePublicSdkInvitation", summary: "Acknowledge a proactive SDK invitation lifecycle event" })
+  acknowledgePublicSdkInvitation(@Headers("authorization") authorization: string | undefined,
+    @Param("exposureId") exposureId: string, @Param("action") action: "shown" | "dismissed" | "accepted" | "failed",
+    @Query("environment") environment: PublicApiEnvironment = "production",
+    @Body() payload: { conversationId?: string; failureCode?: string; sessionId?: string } = {}) {
+    if (!["shown", "dismissed", "accepted", "failed"].includes(action)) {
+      return { status: "invalid", data: {}, error: { code: "proactive_exposure_action_invalid", message: "Unsupported invitation action." } };
+    }
+    return handlePublicSdkInvitationAcknowledge({ action, authorization, conversationId: payload.conversationId,
+      environment, exposureId, exposureRepository: this.proactiveExposureRepository, failureCode: payload.failureCode,
+      integrationRepository: this.integrationRepository, lookup: this.lookup,
+      onAccepted: async (exposure) => exposure ? (await resolveOrCreatePublicSdkConversation({
+        conversationRepository: this.conversationRepository, externalId: `proactive:${exposure.subjectId}`,
+        pageUrl: typeof exposure.segmentSnapshot.page === "string" ? exposure.segmentSnapshot.page : undefined,
+        queueId: await this.resolveSdkQueueId(exposure.tenantId, exposure.channelConnectionId), tenantId: exposure.tenantId
+      }))?.id ?? null : null,
+      sessionId: payload.sessionId });
+  }
 
   @Post("sdk/identify")
   @HttpCode(HttpStatus.OK)
@@ -42,7 +104,7 @@ export class PublicApiController {
         return response;
       }
 
-      const authContext = response.data?.context as { tenantId?: string } | undefined;
+      const authContext = response.data?.context as { channelConnectionId?: string | null; tenantId?: string } | undefined;
       const tenantId = String(authContext?.tenantId ?? "").trim();
       if (!tenantId) {
         return response;
@@ -51,6 +113,7 @@ export class PublicApiController {
       const conversation = await resolveOrCreatePublicSdkConversation({
         conversationRepository: this.conversationRepository,
         externalId: payload.externalId,
+        queueId: await this.resolveSdkQueueId(tenantId, authContext?.channelConnectionId),
         tenantId
       });
 
@@ -80,12 +143,46 @@ export class PublicApiController {
   ) {
     return handlePublicSdkMessageIngressFromRoute({
       authorization,
+      autoAssignConversation: (conversationId, tenantId) => this.routingService.autoAssignConversation(conversationId, { tenantId }),
       body: payload,
       conversationRepository: this.conversationRepository,
       conversationService: this.conversationService,
       environment,
-      lookup: this.lookup
+      lookup: this.lookup,
+      recordProactiveConversion: this.proactiveExposureRepository,
+      runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event),
+      resolveQueueId: (tenantId, channelConnectionId) => this.resolveSdkQueueId(tenantId, channelConnectionId)
     });
+  }
+
+  @Post("sdk/conversations/:conversationId/ratings")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "recordPublicSdkQualityRating", summary: "Record a public SDK conversation rating" })
+  @ApiParam({ name: "conversationId", description: "SDK conversation identifier" })
+  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
+  @ApiOkResponse({ description: "Public SDK quality rating acceptance envelope" })
+  recordPublicSdkQualityRating(
+    @Headers("authorization") authorization: string | undefined,
+    @Param("conversationId") conversationId: string,
+    @Query("environment") environment: PublicApiEnvironment = "production",
+    @Body() payload: { idempotencyKey?: string; scale?: "CSAT" | "CSI"; score?: number; visitorSessionToken?: string } = {}
+  ) {
+    return handlePublicSdkQualityRatingFromRoute({
+      authorization,
+      body: payload,
+      conversationId,
+      conversationRepository: this.conversationRepository,
+      environment,
+      lookup: this.lookup,
+      recordQualityRating: (rating, context) => this.qualityService.recordClientQualityRating(rating, context)
+    });
+  }
+
+  private async resolveSdkQueueId(tenantId: string, channelConnectionId?: string | null): Promise<string | undefined> {
+    if (!channelConnectionId) return undefined;
+    const connection = await this.integrationRepository.findChannelConnectionAsync(tenantId, channelConnectionId);
+    if (!connection || connection.type.toLowerCase() !== "sdk" || connection.status.toLowerCase() !== "active") return undefined;
+    return connection.routingQueueId || undefined;
   }
 
   @Get("sdk/conversations/:conversationId/messages")

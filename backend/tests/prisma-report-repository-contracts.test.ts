@@ -2,13 +2,19 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ReportRepository,
+  type ExportRetryAuditEvent,
   type MetricDefinitionRecord,
   type MetricTenantOverrideRecord,
   type MetricVersionRecord,
+  type ReportFileDescriptorRecord,
   type ReportIdempotencyRecord,
+  type ReportNotificationDescriptorRecord,
+  type ReportQueryExecutionRecord,
+  type ScheduledDigestDescriptorRecord,
   type SavedReportTemplateRecord
 } from "../apps/api-gateway/src/reports/report.repository.ts";
-import type { ReportExportJob } from "../apps/api-gateway/src/reports/report.fixtures.ts";
+import { configureReportRepository } from "../apps/api-gateway/src/reports/bootstrap.ts";
+import type { ReportExportJob } from "../apps/api-gateway/src/reports/report.types.ts";
 
 describe("Prisma-backed report repository contracts", () => {
   it("fails closed when Prisma report delegates are incomplete", () => {
@@ -19,6 +25,85 @@ describe("Prisma-backed report repository contracts", () => {
       () => ReportRepository.prisma({ client }),
       /prisma_report_metric_version_delegate_required/
     );
+  });
+
+  it("bootstraps the default report repository from a Prisma client factory", async () => {
+    const { calls, client } = createFakePrismaReportClient();
+    let datasourceUrl: string | undefined;
+
+    try {
+      const repository = configureReportRepository({
+        DATABASE_URL: "postgresql://reports:secret@127.0.0.1:5432/support",
+        NODE_ENV: "test",
+        REPORT_REPOSITORY: "prisma"
+      }, {
+        prismaClientFactory(options) {
+          datasourceUrl = options.datasourceUrl;
+          return client;
+        }
+      });
+
+      await repository.saveMetricDefinition({
+        createdAt: "2026-06-30T10:00:00.000Z",
+        description: "Report bootstrap metric",
+        id: "metric_report_bootstrap",
+        key: "report_bootstrap",
+        name: "Report bootstrap",
+        source: "reports",
+        tenantId: "tenant-volga",
+        unit: "count",
+        updatedAt: "2026-06-30T10:05:00.000Z"
+      });
+
+      const refetched = await ReportRepository.default().findMetricDefinition("metric_report_bootstrap", { tenantId: "tenant-volga" });
+
+      assert.equal(datasourceUrl, "postgresql://reports:secret@127.0.0.1:5432/support");
+      assert.equal(refetched?.id, "metric_report_bootstrap");
+      assert.equal(calls.metricDefinitionUpserts.length, 1);
+    } finally {
+      ReportRepository.clearDefault();
+    }
+  });
+
+  it("reads tenant report facts from immutable lifecycle events", async () => {
+    const { calls, client, seedConversationLifecycleEvent } = createFakePrismaReportClient();
+    seedConversationLifecycleEvent({
+      conversation: {
+        channel: "Telegram",
+        operatorId: "operator-anna",
+        operatorName: "Anna",
+        status: "closed",
+        topic: "payment"
+      },
+      conversationId: "conversation-report-journal",
+      data: { toStatus: "closed" },
+      eventType: "status.changed",
+      id: "evt-report-status-closed",
+      ingestedAt: new Date("2026-07-11T09:00:01.000Z"),
+      occurredAt: new Date("2026-07-11T09:00:00.000Z"),
+      source: "conversation-service",
+      tenantId: "tenant-volga"
+    });
+    const repository = ReportRepository.prisma({ client });
+
+    const rows = await repository.listConversationReportSourceRowsAsync({
+      from: new Date("2026-07-11T00:00:00.000Z"),
+      tenantId: "tenant-volga",
+      to: new Date("2026-07-12T00:00:00.000Z")
+    });
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].channel, "Telegram");
+    assert.deepEqual(rows[0].lifecycleEvents, [{
+      data: { toStatus: "closed" },
+      eventType: "status.changed",
+      id: "evt-report-status-closed",
+      ingestedAt: "2026-07-11T09:00:01.000Z",
+      occurredAt: "2026-07-11T09:00:00.000Z",
+      source: "conversation-service"
+    }]);
+    assert.equal(calls.conversationLifecycleEventFindMany.length, 1);
+    assert.equal(calls.conversationLifecycleEventFindMany[0].where.tenantId, "tenant-volga");
   });
 
   it("persists metric definitions through Prisma delegates", async () => {
@@ -216,7 +301,8 @@ describe("Prisma-backed report repository contracts", () => {
     await repository.saveIdempotencyKey({
       fingerprint: "fingerprint-template-prisma",
       jobId: saved.id,
-      key: "saveSavedReportTemplate:template-prisma-key"
+      key: "saveSavedReportTemplate:template-prisma-key",
+      tenantId: "tenant-volga"
     });
     const refetched = await repository.findSavedReportTemplate("template_prisma_saved", {
       requesterRoles: ["supervisor"],
@@ -238,7 +324,7 @@ describe("Prisma-backed report repository contracts", () => {
       requesterUserId: "operator-boris",
       tenantId: "tenant-volga"
     });
-    const idempotency = await repository.findIdempotencyKey("saveSavedReportTemplate:template-prisma-key");
+    const idempotency = await repository.findIdempotencyKey("tenant-volga", "saveSavedReportTemplate:template-prisma-key");
 
     assert.equal(saved.name, "Prisma saved report");
     assert.equal(refetched?.id, "template_prisma_saved");
@@ -248,7 +334,8 @@ describe("Prisma-backed report repository contracts", () => {
     assert.deepEqual(idempotency, {
       fingerprint: "fingerprint-template-prisma",
       jobId: "template_prisma_saved",
-      key: "saveSavedReportTemplate:template-prisma-key"
+      key: "saveSavedReportTemplate:template-prisma-key",
+      tenantId: "tenant-volga"
     });
     assert.deepEqual(calls.savedReportTemplateUpserts[0], {
       create: {
@@ -289,13 +376,19 @@ describe("Prisma-backed report repository contracts", () => {
       create: {
         fingerprint: "fingerprint-template-prisma",
         jobId: "template_prisma_saved",
-        key: "saveSavedReportTemplate:template-prisma-key"
+        key: "saveSavedReportTemplate:template-prisma-key",
+        tenantId: "tenant-volga"
       },
       update: {
         fingerprint: "fingerprint-template-prisma",
         jobId: "template_prisma_saved"
       },
-      where: { key: "saveSavedReportTemplate:template-prisma-key" }
+      where: {
+        tenantId_key: {
+          key: "saveSavedReportTemplate:template-prisma-key",
+          tenantId: "tenant-volga"
+        }
+      }
     });
   });
 
@@ -306,7 +399,8 @@ describe("Prisma-backed report repository contracts", () => {
     const idempotencyKey: ReportIdempotencyRecord = {
       fingerprint: "digest-export-fingerprint",
       jobId: "export-prisma-first",
-      key: "scheduled-digest-export:tenant-volga:digest-volga-daily:2026-07-01"
+      key: "scheduled-digest-export:tenant-volga:digest-volga-daily:2026-07-01",
+      tenantId: "tenant-volga"
     };
 
     const first = await firstRepository.saveExportJobWithIdempotency(reportExportJob({
@@ -324,7 +418,18 @@ describe("Prisma-backed report repository contracts", () => {
     }), {
       fingerprint: "different-fingerprint",
       jobId: "export-prisma-conflict",
-      key: idempotencyKey.key
+      key: idempotencyKey.key,
+      tenantId: "tenant-volga"
+    });
+    const otherTenant = await secondRepository.saveExportJobWithIdempotency(reportExportJob({
+      auditId: "evt_report_prisma_export_ladoga",
+      id: "export-prisma-ladoga",
+      tenantId: "tenant-ladoga"
+    }), {
+      fingerprint: "ladoga-fingerprint",
+      jobId: "export-prisma-ladoga",
+      key: idempotencyKey.key,
+      tenantId: "tenant-ladoga"
     });
     const jobs = await secondRepository.listExportJobsAsync();
 
@@ -333,21 +438,131 @@ describe("Prisma-backed report repository contracts", () => {
     assert.equal(duplicate.status, "duplicate");
     assert.equal(duplicate.job.id, "export-prisma-first");
     assert.equal(conflict.status, "conflict");
-    assert.deepEqual(jobs.map((job) => job.id), ["export-prisma-first"]);
-    assert.equal(calls.reportExportJobUpserts.length, 1);
-    assert.equal(calls.reportIdempotencyKeyCreates.length, 1);
-    assert.equal(calls.transactions.length, 3);
+    assert.equal(otherTenant.status, "created");
+    assert.deepEqual(jobs.map((job) => job.id), ["export-prisma-first", "export-prisma-ladoga"]);
+    assert.equal(calls.reportExportJobUpserts.length, 2);
+    assert.equal(calls.reportIdempotencyKeyCreates.length, 2);
+    assert.equal(calls.transactions.length, 4);
+  });
+
+  it("persists report runtime descriptors through Prisma delegates without JSON fallback", async () => {
+    const { calls, client } = createFakePrismaReportClient();
+    const repository = ReportRepository.prisma({ client });
+    const secondRepository = ReportRepository.prisma({ client });
+    const queryExecution: ReportQueryExecutionRecord = {
+      id: "query_prisma_runtime",
+      metricKey: "conversation.current",
+      parameters: {
+        channel: "VK",
+        period: "today"
+      },
+      status: "completed"
+    };
+    const fileDescriptor: ReportFileDescriptorRecord = {
+      checksum: "sha256:report-runtime",
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      createdAt: "2026-07-01T10:10:00.000Z",
+      fileName: "runtime-report.xlsx",
+      format: "XLSX",
+      id: "file_prisma_runtime",
+      jobId: "export-prisma-runtime",
+      metricDefinitionVersion: "metrics/v1",
+      objectKey: "reports/tenant-volga/export-prisma-runtime.xlsx",
+      sizeBytes: 2048,
+      tenantId: "tenant-volga",
+      writtenAt: "2026-07-01T10:11:00.000Z"
+    };
+    const notificationDescriptor: ReportNotificationDescriptorRecord = {
+      createdAt: "2026-07-01T10:12:00.000Z",
+      eventType: "export.ready",
+      exportJobId: "export-prisma-runtime",
+      id: "notification_prisma_runtime",
+      idempotencyKey: "notification-prisma-runtime",
+      payload: {
+        jobId: "export-prisma-runtime"
+      },
+      status: "queued",
+      tenantId: "tenant-volga"
+    };
+    const scheduledDigest: ScheduledDigestDescriptorRecord = {
+      createdAt: "2026-07-01T10:13:00.000Z",
+      dueAt: "2026-07-02T10:00:00.000Z",
+      id: "digest_prisma_runtime",
+      periodKey: "2026-07-02",
+      reportType: "daily_support_digest",
+      scheduleId: "digest-volga-daily",
+      status: "due",
+      tenantId: "tenant-volga",
+      updatedAt: "2026-07-01T10:13:00.000Z"
+    };
+    const retryAudit: ExportRetryAuditEvent = {
+      action: "report.export.retry",
+      at: "2026-07-01T10:14:00.000Z",
+      auditId: "audit_prisma_retry",
+      backendQueueId: "queue-report-runtime",
+      format: "XLSX",
+      immutable: true,
+      jobId: "export-prisma-runtime",
+      metricDefinitionVersion: "metrics/v1",
+      nextStatusKey: "running",
+      previousStatusKey: "error",
+      queue: "report-export",
+      reasonCode: "operator_requested"
+    };
+
+    await repository.saveReportQueryExecutionAsync(queryExecution);
+    await repository.saveReportFileDescriptorAsync(fileDescriptor);
+    await repository.saveReportNotificationDescriptorAsync(notificationDescriptor);
+    await repository.saveScheduledDigestDescriptorAsync(scheduledDigest);
+    await repository.saveRetriedExportJobAsync(reportExportJob({
+      id: "export-prisma-runtime",
+      statusKey: "running"
+    }), retryAudit);
+
+    const queryRows = await secondRepository.listReportQueryExecutionsAsync();
+    const fileRows = await secondRepository.listReportFileDescriptorsAsync();
+    const notificationRows = await secondRepository.listReportNotificationDescriptorsAsync();
+    const digestRows = await secondRepository.listScheduledDigestDescriptorsAsync({ tenantId: "tenant-volga" });
+    const retryAuditRows = await secondRepository.listExportRetryAuditEventsAsync();
+    const duplicateNotification = await secondRepository.saveReportNotificationDescriptorAsync({
+      ...notificationDescriptor,
+      id: "notification_prisma_runtime_replay"
+    });
+
+    assert.deepEqual(queryRows.map((row) => row.id), ["query_prisma_runtime"]);
+    assert.equal(fileRows[0]?.objectKey, "reports/tenant-volga/export-prisma-runtime.xlsx");
+    assert.equal((await secondRepository.findReportFileDescriptorAsync("export-prisma-runtime"))?.id, "file_prisma_runtime");
+    assert.equal(notificationRows[0]?.idempotencyKey, "notification-prisma-runtime");
+    assert.equal(duplicateNotification.id, "notification_prisma_runtime");
+    assert.deepEqual(digestRows.map((row) => row.id), ["digest_prisma_runtime"]);
+    assert.equal((await secondRepository.findScheduledDigestDescriptorAsync("digest_prisma_runtime", { tenantId: "tenant-volga" }))?.periodKey, "2026-07-02");
+    assert.equal(retryAuditRows[0]?.auditId, "audit_prisma_retry");
+
+    await secondRepository.deleteReportFileDescriptorAsync("export-prisma-runtime");
+    assert.equal(await secondRepository.findReportFileDescriptorAsync("export-prisma-runtime"), undefined);
+    assert.equal(calls.reportQueryExecutionUpserts.length, 1);
+    assert.equal(calls.reportFileDescriptorUpserts.length, 1);
+    assert.equal(calls.reportNotificationDescriptorUpserts.length, 1);
+    assert.equal(calls.scheduledDigestDescriptorUpserts.length, 1);
+    assert.equal(calls.reportExportRetryAuditEventUpserts.length, 1);
   });
 });
 
 function createFakePrismaReportClient() {
+  const conversationLifecycleEvents: FakeConversationLifecycleEvent[] = [];
   const metricDefinitions = new Map<string, FakeMetricDefinitionCreateInput>();
   const metricTenantOverrides = new Map<string, FakeMetricTenantOverrideCreateInput>();
   const metricVersions = new Map<string, FakeMetricVersionCreateInput>();
   const reportExportJobs = new Map<string, FakeReportExportJobCreateInput>();
   const reportIdempotencyKeys = new Map<string, FakeReportIdempotencyKeyCreateInput>();
   const savedReportTemplates = new Map<string, FakeSavedReportTemplateCreateInput>();
+  const reportQueryExecutions = new Map<string, FakeReportQueryExecutionCreateInput>();
+  const reportFileDescriptors = new Map<string, FakeReportFileDescriptorCreateInput>();
+  const reportNotificationDescriptors = new Map<string, FakeReportNotificationDescriptorCreateInput>();
+  const scheduledDigestDescriptors = new Map<string, FakeScheduledDigestDescriptorCreateInput>();
+  const reportExportRetryAuditEvents = new Map<string, FakeReportExportRetryAuditEventCreateInput>();
   const calls = {
+    conversationLifecycleEventFindMany: [] as Array<Record<string, any>>,
     metricDefinitionFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }>,
     metricDefinitionFindUnique: [] as Array<{ where: { id: string } }>,
     metricDefinitionUpserts: [] as Array<{
@@ -369,12 +584,12 @@ function createFakePrismaReportClient() {
       update: FakeMetricTenantOverrideUpdateInput;
       where: { id: string };
     }>,
-    reportIdempotencyKeyFindUnique: [] as Array<{ where: { key: string } }>,
+    reportIdempotencyKeyFindUnique: [] as Array<{ where: FakeReportIdempotencyKeyWhereUniqueInput }>,
     reportIdempotencyKeyCreates: [] as Array<{ data: FakeReportIdempotencyKeyCreateInput }>,
     reportIdempotencyKeyUpserts: [] as Array<{
       create: FakeReportIdempotencyKeyCreateInput;
       update: FakeReportIdempotencyKeyUpdateInput;
-      where: { key: string };
+      where: FakeReportIdempotencyKeyWhereUniqueInput;
     }>,
     reportExportJobFindMany: [] as Array<{ orderBy: { createdAt: "desc" } }>,
     reportExportJobFindUnique: [] as Array<{ where: { id: string } }>,
@@ -390,15 +605,52 @@ function createFakePrismaReportClient() {
       update: FakeSavedReportTemplateUpdateInput;
       where: { id: string };
     }>,
+    reportQueryExecutionUpserts: [] as Array<{
+      create: FakeReportQueryExecutionCreateInput;
+      update: FakeReportQueryExecutionUpdateInput;
+      where: { id: string };
+    }>,
+    reportFileDescriptorUpserts: [] as Array<{
+      create: FakeReportFileDescriptorCreateInput;
+      update: FakeReportFileDescriptorUpdateInput;
+      where: { jobId: string };
+    }>,
+    reportNotificationDescriptorUpserts: [] as Array<{
+      create: FakeReportNotificationDescriptorCreateInput;
+      update: FakeReportNotificationDescriptorUpdateInput;
+      where: { idempotencyKey: string };
+    }>,
+    scheduledDigestDescriptorUpserts: [] as Array<{
+      create: FakeScheduledDigestDescriptorCreateInput;
+      update: FakeScheduledDigestDescriptorUpdateInput;
+      where: { id: string };
+    }>,
+    reportExportRetryAuditEventUpserts: [] as Array<{
+      create: FakeReportExportRetryAuditEventCreateInput;
+      update: FakeReportExportRetryAuditEventUpdateInput;
+      where: { auditId: string };
+    }>,
     transactions: [] as Array<{ isolationLevel?: "Serializable" }>
   };
 
   return {
     calls,
+    seedConversationLifecycleEvent(row: FakeConversationLifecycleEvent) {
+      conversationLifecycleEvents.push(row);
+    },
     seedMetricVersion(row: FakeMetricVersionCreateInput) {
       metricVersions.set(row.id, row);
     },
     client: {
+      conversationLifecycleEvent: {
+        findMany(input: Record<string, any>) {
+          calls.conversationLifecycleEventFindMany.push(input);
+          const { gte, lt } = input.where.occurredAt as { gte: Date; lt: Date };
+          return Promise.resolve(conversationLifecycleEvents
+            .filter((row) => row.tenantId === input.where.tenantId && row.occurredAt >= gte && row.occurredAt < lt)
+            .sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime()));
+        }
+      },
       metricDefinition: {
         findMany(input: { orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }) {
           calls.metricDefinitionFindMany.push(input);
@@ -477,30 +729,34 @@ function createFakePrismaReportClient() {
       reportIdempotencyKey: {
         create(input: { data: FakeReportIdempotencyKeyCreateInput }) {
           calls.reportIdempotencyKeyCreates.push(input);
-          if (reportIdempotencyKeys.has(input.data.key)) {
-            const error = new Error("Unique constraint failed on the fields: (`key`)") as Error & { code?: string };
+          const mapKey = fakeReportIdempotencyMapKey(input.data.tenantId, input.data.key);
+          if (reportIdempotencyKeys.has(mapKey)) {
+            const error = new Error("Unique constraint failed on the fields: (`tenant_id`,`key`)") as Error & { code?: string };
             error.code = "P2002";
             return Promise.reject(error);
           }
 
-          reportIdempotencyKeys.set(input.data.key, input.data);
+          reportIdempotencyKeys.set(mapKey, input.data);
           return Promise.resolve(input.data);
         },
-        findUnique(input: { where: { key: string } }) {
+        findUnique(input: { where: FakeReportIdempotencyKeyWhereUniqueInput }) {
           calls.reportIdempotencyKeyFindUnique.push(input);
-          return Promise.resolve(reportIdempotencyKeys.get(input.where.key) ?? null);
+          const { key, tenantId } = input.where.tenantId_key;
+          return Promise.resolve(reportIdempotencyKeys.get(fakeReportIdempotencyMapKey(tenantId, key)) ?? null);
         },
         upsert(input: {
           create: FakeReportIdempotencyKeyCreateInput;
           update: FakeReportIdempotencyKeyUpdateInput;
-          where: { key: string };
+          where: FakeReportIdempotencyKeyWhereUniqueInput;
         }) {
           calls.reportIdempotencyKeyUpserts.push(input);
-          const current = reportIdempotencyKeys.get(input.where.key);
+          const { key, tenantId } = input.where.tenantId_key;
+          const mapKey = fakeReportIdempotencyMapKey(tenantId, key);
+          const current = reportIdempotencyKeys.get(mapKey);
           const next: FakeReportIdempotencyKeyCreateInput = current
-            ? { ...current, ...input.update, key: current.key }
+            ? { ...current, ...input.update, key: current.key, tenantId: current.tenantId }
             : input.create;
-          reportIdempotencyKeys.set(input.where.key, next);
+          reportIdempotencyKeys.set(mapKey, next);
           return Promise.resolve(next);
         }
       },
@@ -550,6 +806,115 @@ function createFakePrismaReportClient() {
             ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
             : input.create;
           savedReportTemplates.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportQueryExecution: {
+        findMany(_input: { orderBy: { createdAt: "desc" } }) {
+          return Promise.resolve(Array.from(reportQueryExecutions.values())
+            .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()));
+        },
+        upsert(input: {
+          create: FakeReportQueryExecutionCreateInput;
+          update: FakeReportQueryExecutionUpdateInput;
+          where: { id: string };
+        }) {
+          calls.reportQueryExecutionUpserts.push(input);
+          const current = reportQueryExecutions.get(input.where.id);
+          const next: FakeReportQueryExecutionCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          reportQueryExecutions.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportFileDescriptor: {
+        deleteMany(input: { where: { jobId: string } }) {
+          const deleted = reportFileDescriptors.delete(input.where.jobId);
+          return Promise.resolve({ count: deleted ? 1 : 0 });
+        },
+        findMany(_input: { orderBy: { createdAt: "desc" } }) {
+          return Promise.resolve(Array.from(reportFileDescriptors.values())
+            .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()));
+        },
+        findUnique(input: { where: { jobId: string } }) {
+          return Promise.resolve(reportFileDescriptors.get(input.where.jobId) ?? null);
+        },
+        upsert(input: {
+          create: FakeReportFileDescriptorCreateInput;
+          update: FakeReportFileDescriptorUpdateInput;
+          where: { jobId: string };
+        }) {
+          calls.reportFileDescriptorUpserts.push(input);
+          const current = reportFileDescriptors.get(input.where.jobId);
+          const next: FakeReportFileDescriptorCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          reportFileDescriptors.set(input.where.jobId, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportNotificationDescriptor: {
+        findMany(_input: { orderBy: { createdAt: "desc" } }) {
+          return Promise.resolve(Array.from(reportNotificationDescriptors.values())
+            .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()));
+        },
+        findUnique(input: { where: { idempotencyKey: string } }) {
+          return Promise.resolve(reportNotificationDescriptors.get(input.where.idempotencyKey) ?? null);
+        },
+        upsert(input: {
+          create: FakeReportNotificationDescriptorCreateInput;
+          update: FakeReportNotificationDescriptorUpdateInput;
+          where: { idempotencyKey: string };
+        }) {
+          calls.reportNotificationDescriptorUpserts.push(input);
+          const current = reportNotificationDescriptors.get(input.where.idempotencyKey);
+          const next: FakeReportNotificationDescriptorCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          reportNotificationDescriptors.set(input.where.idempotencyKey, next);
+          return Promise.resolve(next);
+        }
+      },
+      scheduledDigestDescriptor: {
+        findMany(input: { orderBy: { dueAt: "asc" }; where?: Record<string, unknown> }) {
+          return Promise.resolve(Array.from(scheduledDigestDescriptors.values())
+            .filter((row) => matchesWhere(row, input.where))
+            .sort((left, right) => left.dueAt.getTime() - right.dueAt.getTime()));
+        },
+        findUnique(input: { where: { id: string } }) {
+          return Promise.resolve(scheduledDigestDescriptors.get(input.where.id) ?? null);
+        },
+        upsert(input: {
+          create: FakeScheduledDigestDescriptorCreateInput;
+          update: FakeScheduledDigestDescriptorUpdateInput;
+          where: { id: string };
+        }) {
+          calls.scheduledDigestDescriptorUpserts.push(input);
+          const current = scheduledDigestDescriptors.get(input.where.id);
+          const next: FakeScheduledDigestDescriptorCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          scheduledDigestDescriptors.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportExportRetryAuditEvent: {
+        findMany(_input: { orderBy: { at: "desc" } }) {
+          return Promise.resolve(Array.from(reportExportRetryAuditEvents.values())
+            .sort((left, right) => right.at.getTime() - left.at.getTime()));
+        },
+        upsert(input: {
+          create: FakeReportExportRetryAuditEventCreateInput;
+          update: FakeReportExportRetryAuditEventUpdateInput;
+          where: { auditId: string };
+        }) {
+          calls.reportExportRetryAuditEventUpserts.push(input);
+          const current = reportExportRetryAuditEvents.get(input.where.auditId);
+          const next: FakeReportExportRetryAuditEventCreateInput = current
+            ? { ...current, ...input.update, auditId: current.auditId, createdAt: current.createdAt }
+            : input.create;
+          reportExportRetryAuditEvents.set(input.where.auditId, next);
           return Promise.resolve(next);
         }
       },
@@ -604,9 +969,21 @@ interface FakeReportIdempotencyKeyCreateInput {
   fingerprint: string;
   jobId: string;
   key: string;
+  tenantId: string;
 }
 
-type FakeReportIdempotencyKeyUpdateInput = Omit<FakeReportIdempotencyKeyCreateInput, "key">;
+type FakeReportIdempotencyKeyUpdateInput = Omit<FakeReportIdempotencyKeyCreateInput, "key" | "tenantId">;
+
+interface FakeReportIdempotencyKeyWhereUniqueInput {
+  tenantId_key: {
+    key: string;
+    tenantId: string;
+  };
+}
+
+function fakeReportIdempotencyMapKey(tenantId: string, key: string): string {
+  return `${tenantId}\u0000${key}`;
+}
 
 interface FakeReportExportJobCreateInput {
   auditId: string;
@@ -650,6 +1027,101 @@ interface FakeSavedReportTemplateCreateInput {
 
 type FakeSavedReportTemplateUpdateInput = Omit<FakeSavedReportTemplateCreateInput, "createdAt" | "id">;
 
+interface FakeReportQueryExecutionCreateInput {
+  createdAt: Date;
+  failureCode: string | null;
+  failureMessage: string | null;
+  id: string;
+  metricKey: string;
+  parameters: Record<string, unknown> | null;
+  status: string;
+  updatedAt: Date;
+}
+
+type FakeReportQueryExecutionUpdateInput = Omit<FakeReportQueryExecutionCreateInput, "createdAt" | "id">;
+
+interface FakeReportFileDescriptorCreateInput {
+  checksum: string;
+  contentType: string;
+  createdAt: Date;
+  fileName: string;
+  format: string;
+  id: string;
+  jobId: string;
+  metricDefinitionVersion: string;
+  objectKey: string;
+  sizeBytes: number;
+  tenantId: string;
+  updatedAt: Date;
+  writtenAt: Date;
+}
+
+type FakeReportFileDescriptorUpdateInput = Omit<FakeReportFileDescriptorCreateInput, "createdAt" | "id">;
+
+interface FakeReportNotificationDescriptorCreateInput {
+  createdAt: Date;
+  eventType: string;
+  exportJobId: string;
+  id: string;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  status: string;
+  tenantId: string;
+  updatedAt: Date;
+}
+
+type FakeReportNotificationDescriptorUpdateInput = Omit<FakeReportNotificationDescriptorCreateInput, "createdAt" | "id">;
+
+interface FakeScheduledDigestDescriptorCreateInput {
+  createdAt: Date;
+  dueAt: Date;
+  id: string;
+  periodKey: string;
+  reportType: string;
+  scheduleId: string;
+  status: string;
+  tenantId: string;
+  updatedAt: Date;
+}
+
+type FakeScheduledDigestDescriptorUpdateInput = Omit<FakeScheduledDigestDescriptorCreateInput, "createdAt" | "id">;
+
+interface FakeReportExportRetryAuditEventCreateInput {
+  action: string;
+  at: Date;
+  auditId: string;
+  backendQueueId: string;
+  createdAt: Date;
+  format: string;
+  immutable: boolean;
+  jobId: string;
+  metricDefinitionVersion: string;
+  nextStatusKey: string;
+  previousStatusKey: string;
+  queue: string;
+  reasonCode: string;
+}
+
+type FakeReportExportRetryAuditEventUpdateInput = Omit<FakeReportExportRetryAuditEventCreateInput, "auditId" | "createdAt">;
+
+interface FakeConversationLifecycleEvent {
+  conversation: {
+    channel: string;
+    operatorId: string | null;
+    operatorName: string | null;
+    status: string;
+    topic: string;
+  };
+  conversationId: string;
+  data: Record<string, unknown>;
+  eventType: string;
+  id: string;
+  ingestedAt: Date;
+  occurredAt: Date;
+  source: string;
+  tenantId: string;
+}
+
 function reportExportJob(overrides: Partial<ReportExportJob> = {}): ReportExportJob {
   return {
     auditId: "evt_report_prisma_export",
@@ -672,6 +1144,7 @@ function reportExportJob(overrides: Partial<ReportExportJob> = {}): ReportExport
     rows: 0,
     status: "Queued",
     statusKey: "queued",
+    tenantId: "tenant-volga",
     ...overrides
   };
 }
@@ -681,5 +1154,13 @@ function matchesWhere(row: Record<string, unknown>, where: Record<string, unknow
     return true;
   }
 
-  return Object.entries(where).every(([key, value]) => row[key] === value);
+  return Object.entries(where).every(([key, value]) => {
+    const rowValue = row[key];
+    if (value && typeof value === "object" && "lte" in value) {
+      const limit = (value as { lte: unknown }).lte;
+      return rowValue instanceof Date && limit instanceof Date && rowValue.getTime() <= limit.getTime();
+    }
+
+    return rowValue === value;
+  });
 }

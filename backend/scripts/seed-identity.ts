@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPrismaClient } from "@support-communication/database";
-import { tenantBillingStates } from "../apps/api-gateway/src/billing/billing.fixtures.ts";
-import { serviceAdminSession, permissionRoles, tenantAuditEvents, tenants, tenantUsers } from "../apps/api-gateway/src/identity/identity.fixtures.ts";
+import { tenantBillingStates } from "../apps/api-gateway/src/billing/seed-catalog.ts";
+import { serviceAdminSession, permissionRoles, tenantAuditEvents, tenants, tenantUsers } from "../apps/api-gateway/src/identity/seed-catalog.ts";
 import { hashPasswordCredential } from "../apps/api-gateway/src/identity/identity.repository.ts";
 
 export interface IdentitySeedResult {
@@ -317,15 +317,17 @@ export async function seedIdentityPrisma(client: PrismaIdentitySeedClient): Prom
       });
     }
 
-    const passwordCredential = defaultServiceAdminPasswordCredential();
-    await transaction.passwordCredential.upsert({
-      create: passwordCredential,
-      update: {
-        algorithm: passwordCredential.algorithm,
-        subjectId: passwordCredential.subjectId
-      },
-      where: { email: passwordCredential.email }
-    });
+    const passwordCredentials = [defaultServiceAdminPasswordCredential(), ...defaultTenantPasswordCredentials()];
+    for (const passwordCredential of passwordCredentials) {
+      await transaction.passwordCredential.upsert({
+        create: passwordCredential,
+        update: {
+          algorithm: passwordCredential.algorithm,
+          subjectId: passwordCredential.subjectId
+        },
+        where: { email: passwordCredential.email }
+      });
+    }
 
     const passwordPolicy = defaultServiceAdminPasswordPolicy();
     await transaction.passwordPolicy.upsert({
@@ -380,7 +382,7 @@ export async function seedIdentityPrisma(client: PrismaIdentitySeedClient): Prom
 
     return {
       billingTenantStates: tenantBillingStates.length,
-      passwordCredentials: 1,
+      passwordCredentials: passwordCredentials.length,
       passwordPolicies: 1,
       permissionRoles: permissionRoles.length,
       rbacPolicyVersions: 1,
@@ -401,6 +403,17 @@ function defaultServiceAdminPasswordCredential(): PrismaPasswordCredentialSeedIn
     updatedAt: new Date("2026-06-28T00:00:00.000Z"),
     version: 1
   };
+}
+
+function defaultTenantPasswordCredentials(): PrismaPasswordCredentialSeedInput[] {
+  return tenantUsers.map((user) => ({
+    algorithm: "sha256",
+    email: user.email,
+    hash: hashPasswordCredential("correct-password"),
+    subjectId: user.id,
+    updatedAt: new Date("2026-06-28T00:00:00.000Z"),
+    version: 1
+  }));
 }
 
 function defaultServiceAdminPasswordPolicy(): PrismaPasswordPolicySeedInput {

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { configureWorkspaceRepository } from "../apps/api-gateway/src/workspace/bootstrap.ts";
 import {
   WorkspaceRepository,
+  type ClientExportJobRecord,
   type ClientMergeConflictRecord,
   type ClientMergeEvent,
   type ClientProfileRecord,
@@ -14,8 +15,14 @@ import {
   type TemplateRecord,
   type TemplateVersionRecord
 } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
+import { bootstrapWorkspaceState } from "../apps/api-gateway/src/workspace/seed.ts";
 
 describe("Prisma-backed workspace repository contracts", () => {
+  it("keeps repository defaults empty and applies local fixtures only when explicitly injected", async () => {
+    assert.deepEqual(await WorkspaceRepository.inMemory().listKnowledgeArticles(), []);
+    assert.deepEqual(await WorkspaceRepository.inMemory().listTemplates(), []);
+    assert.ok((await WorkspaceRepository.inMemory(bootstrapWorkspaceState()).listKnowledgeArticles()).length > 0);
+  });
   it("persists workspace file metadata through Prisma delegates", async () => {
     const { client } = createFakePrismaWorkspaceClient();
     const repository = WorkspaceRepository.prisma({ client });
@@ -33,7 +40,8 @@ describe("Prisma-backed workspace repository contracts", () => {
       scanCheckedAt: "2026-06-28T12:20:00.000Z",
       scanReason: "Queued after upload finalize",
       scanVerdict: "pending",
-      scanner: "clamav"
+      scanner: "clamav",
+      tenantId: "tenant-volga"
     } as FileRecord & {
       scanCheckedAt: string;
       scanReason: string;
@@ -95,6 +103,116 @@ describe("Prisma-backed workspace repository contracts", () => {
     ]);
   });
 
+  it("persists client export jobs through Prisma delegates without fallback", async () => {
+    const { client } = createFakePrismaWorkspaceClient();
+    const fallback = WorkspaceRepository.inMemory();
+    fallback.saveClientExportJob = () => {
+      throw new Error("fallback saveClientExportJob called");
+    };
+    fallback.listClientExportJobs = () => {
+      throw new Error("fallback listClientExportJobs called");
+    };
+    const repository = WorkspaceRepository.prisma({ client, fallback });
+    const job: ClientExportJobRecord = {
+      auditEvent: {
+        actor: "service-admin",
+        immutable: true,
+        traceId: "trace-export-prisma"
+      },
+      createdAt: "2026-06-29T09:10:00.000Z",
+      exportId: "client_export_prisma_001",
+      fileDescriptor: {
+        checksum: "sha256-export",
+        contentType: "text/csv",
+        objectKey: "exports/tenant-volga/client_export_prisma_001.csv"
+      },
+      filters: {
+        channel: "telegram",
+        segmentId: "vip"
+      },
+      format: "csv",
+      itemCount: 2,
+      reason: "GDPR client data portability request",
+      segment: {
+        id: "vip",
+        title: "VIP clients"
+      },
+      sensitiveFieldsMasked: true,
+      status: "ready",
+      tenantId: "tenant-volga"
+    };
+
+    const saved = await repository.saveClientExportJob(job);
+    const listed = await repository.listClientExportJobs({ tenantId: "tenant-volga" });
+    const crossTenant = await repository.listClientExportJobs({ tenantId: "tenant-lumen" });
+
+    assert.deepEqual(saved, job);
+    assert.deepEqual(listed, [job]);
+    assert.deepEqual(crossTenant, []);
+    assert.deepEqual(client.calls.clientExportJobUpserts, [{
+      create: {
+        auditEvent: {
+          actor: "service-admin",
+          immutable: true,
+          traceId: "trace-export-prisma"
+        },
+        createdAt: new Date("2026-06-29T09:10:00.000Z"),
+        exportId: "client_export_prisma_001",
+        fileDescriptor: {
+          checksum: "sha256-export",
+          contentType: "text/csv",
+          objectKey: "exports/tenant-volga/client_export_prisma_001.csv"
+        },
+        filters: {
+          channel: "telegram",
+          segmentId: "vip"
+        },
+        format: "csv",
+        itemCount: 2,
+        reason: "GDPR client data portability request",
+        segment: {
+          id: "vip",
+          title: "VIP clients"
+        },
+        sensitiveFieldsMasked: true,
+        status: "ready",
+        tenantId: "tenant-volga"
+      },
+      update: {
+        auditEvent: {
+          actor: "service-admin",
+          immutable: true,
+          traceId: "trace-export-prisma"
+        },
+        createdAt: new Date("2026-06-29T09:10:00.000Z"),
+        fileDescriptor: {
+          checksum: "sha256-export",
+          contentType: "text/csv",
+          objectKey: "exports/tenant-volga/client_export_prisma_001.csv"
+        },
+        filters: {
+          channel: "telegram",
+          segmentId: "vip"
+        },
+        format: "csv",
+        itemCount: 2,
+        reason: "GDPR client data portability request",
+        segment: {
+          id: "vip",
+          title: "VIP clients"
+        },
+        sensitiveFieldsMasked: true,
+        status: "ready",
+        tenantId: "tenant-volga"
+      },
+      where: { exportId: "client_export_prisma_001" }
+    }]);
+    assert.deepEqual(client.calls.clientExportJobFindMany, [
+      { orderBy: { createdAt: "desc" }, where: { tenantId: "tenant-volga" } },
+      { orderBy: { createdAt: "desc" }, where: { tenantId: "tenant-lumen" } }
+    ]);
+  });
+
   it("bootstraps the default workspace repository from a Prisma client factory", async () => {
     const { client } = createFakePrismaWorkspaceClient();
     const factoryCalls: unknown[] = [];
@@ -126,7 +244,8 @@ describe("Prisma-backed workspace repository contracts", () => {
       objectKey: "tenant-volga/file_bootstrap_001/bootstrap.txt",
       scanState: "pending",
       sizeBytes: 120,
-      storageState: "upload_descriptor_ready"
+      storageState: "upload_descriptor_ready",
+      tenantId: "tenant-volga"
     });
     const refetched = await WorkspaceRepository.default().findFile("file_bootstrap_001");
     assert.equal(refetched?.fileName, "bootstrap.txt");
@@ -455,6 +574,7 @@ describe("Prisma-backed workspace repository contracts", () => {
       text: "We are checking your delivery status.",
       title: "Delivery status",
       topic: "Delivery",
+      tenantId: "tenant-volga",
       updated: "2026-06-29T10:30:00.000Z",
       usage: 4,
       version: 2
@@ -773,7 +893,8 @@ describe("Prisma-backed workspace repository contracts", () => {
       objectKey: "tenant-volga/file_empty_checksum/empty.txt",
       scanState: "scan_pending",
       sizeBytes: 1,
-      storageState: "uploaded"
+      storageState: "uploaded",
+      tenantId: "tenant-volga"
     });
 
     const refetched = await repository.findFile("file_empty_checksum");
@@ -822,11 +943,11 @@ describe("Prisma-backed workspace repository contracts", () => {
     }]);
   });
 
-  it("does not infer tenant ownership from opaque object keys", async () => {
+  it("requires explicit tenant ownership for opaque object keys", async () => {
     const { client } = createFakePrismaWorkspaceClient();
     const repository = WorkspaceRepository.prisma({ client });
 
-    await repository.saveFile({
+    const missingTenant = {
       auditId: "evt_file_opaque_tenant",
       channel: "SDK",
       fileId: "file_opaque_tenant",
@@ -836,7 +957,10 @@ describe("Prisma-backed workspace repository contracts", () => {
       scanState: "pending",
       sizeBytes: 1,
       storageState: "upload_descriptor_ready"
-    });
+    };
+
+    await assert.rejects(() => repository.saveFile(missingTenant), /workspace_tenant_id_required/);
+    await repository.saveFile({ ...missingTenant, tenantId: "tenant-volga" });
 
     assert.equal(client.calls.workspaceFileUpserts[0].create.tenantId, "tenant-volga");
   });
@@ -904,6 +1028,7 @@ describe("Prisma-backed workspace repository contracts", () => {
 function createFakePrismaWorkspaceClient() {
   const files = new Map<string, FakeWorkspaceFileRow>();
   const idempotencyRecords = new Map<string, FakeWorkspaceFileScanResultIdempotencyCreateInput>();
+  const clientExportJobs = new Map<string, FakeClientExportJobCreateInput>();
   const clientProfiles = new Map<string, FakeClientProfileCreateInput>();
   const clientMergeEvents = new Map<string, FakeClientMergeEventCreateInput>();
   const clientMergeConflicts = new Map<string, FakeClientMergeConflictCreateInput>();
@@ -928,6 +1053,12 @@ function createFakePrismaWorkspaceClient() {
       create: FakeClientMergeEventCreateInput;
       update: Omit<FakeClientMergeEventCreateInput, "id">;
       where: { id: string };
+    }>,
+    clientExportJobFindMany: [] as Array<{ orderBy: { createdAt: "desc" }; where?: { tenantId?: string } }>,
+    clientExportJobUpserts: [] as Array<{
+      create: FakeClientExportJobCreateInput;
+      update: Omit<FakeClientExportJobCreateInput, "exportId">;
+      where: { exportId: string };
     }>,
     clientProfileFindFirst: [] as Array<{ where: { sourceProfileId: string; tenantId?: string } }>,
     clientProfileFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: { tenantId?: string } }>,
@@ -1078,6 +1209,29 @@ function createFakePrismaWorkspaceClient() {
           id: input.where.id
         };
         clientMergeEvents.set(input.where.id, next);
+        return next;
+      }
+    },
+    clientExportJob: {
+      findMany: async (input: { orderBy: { createdAt: "desc" }; where?: { tenantId?: string } }) => {
+        calls.clientExportJobFindMany.push(input);
+        return Array.from(clientExportJobs.values())
+          .filter((job) => !input.where?.tenantId || job.tenantId === input.where.tenantId)
+          .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+      },
+      upsert: async (input: {
+        create: FakeClientExportJobCreateInput;
+        update: Omit<FakeClientExportJobCreateInput, "exportId">;
+        where: { exportId: string };
+      }) => {
+        calls.clientExportJobUpserts.push(input);
+        const next = {
+          ...(clientExportJobs.get(input.where.exportId) ?? {}),
+          ...input.create,
+          ...input.update,
+          exportId: input.where.exportId
+        };
+        clientExportJobs.set(input.where.exportId, next);
         return next;
       }
     },
@@ -1419,6 +1573,21 @@ interface FakeWorkspaceFileCreateInput {
 
 type FakeWorkspaceFileRow = FakeWorkspaceFileCreateInput;
 
+interface FakeClientExportJobCreateInput {
+  auditEvent: Record<string, unknown>;
+  createdAt: Date;
+  exportId: string;
+  fileDescriptor: Record<string, unknown>;
+  filters: Record<string, unknown>;
+  format: string;
+  itemCount: number;
+  reason: string;
+  segment: Record<string, unknown> | null;
+  sensitiveFieldsMasked: boolean;
+  status: string;
+  tenantId: string;
+}
+
 interface FakeWorkspaceFileScanUpdateInput {
   scanCheckedAt: Date | null;
   scanReason: string | null;
@@ -1637,6 +1806,7 @@ function knowledgeArticle(input: {
     id: input.id,
     owner: "Support Ops",
     status: "draft",
+    tenantId: "tenant-volga",
     title: input.title,
     topics: ["Delivery"],
     updated: "2026-06-29T10:00:00.000Z",

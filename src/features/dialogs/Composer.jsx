@@ -133,9 +133,6 @@ export function Composer({
               </div>
               {attachment.error ? <p>{attachment.error}</p> : null}
               <div className="attachment-actions">
-                {attachment.status === "uploading" ? (
-                  <button disabled={disabled} onClick={() => onAttachmentComplete(attachment.id)} type="button">Завершить</button>
-                ) : null}
                 {attachment.status === "error" && attachment.retryable ? (
                   <button disabled={disabled} onClick={() => onAttachmentRetry(attachment.id)} type="button">
                     <RotateCcw size={14} />

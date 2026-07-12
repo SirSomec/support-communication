@@ -1,22 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import type { ApiEnvironmentKey, ChannelDetail, IntegrationConnection, SecuritySession, WebhookDelivery } from "./integration.types.js";
 import {
-  activeSecuritySessions,
-  apiChangelog,
-  apiEnvironmentKeys,
-  channelDetails,
-  securityAlerts,
-  securityControls,
-  webhookDeliveryLog,
-  webhookEndpoints,
-  type ApiEnvironmentKey,
-  type ChannelDetail,
-  type IntegrationConnection,
-  type SecuritySession,
-  type WebhookDelivery
-} from "./integration.fixtures.js";
-import { IntegrationRepository, type WebhookDeliveryJournalEntry, type WebhookReplayAuditEvent } from "./integration.repository.js";
+  IntegrationRepository,
+  type ChannelConnectionAuditEventRecord,
+  type ChannelConnectionStoredRecord,
+  type IntegrationWorkspaceCatalog,
+  type ProviderConnectionCredentialRecord,
+  type WebhookDeliveryJournalEntry,
+  type WebhookReplayAuditEvent
+} from "./integration.repository.js";
 import {
   disableTelegramConnectionRecord,
   saveTelegramConnectionRecord,
@@ -24,6 +18,8 @@ import {
   toTelegramConnectionPublicView,
   type TelegramHttpFetch
 } from "./telegram-channel-connection.js";
+import { QueueDirectoryRepository } from "../routing/queue-directory.repository.js";
+import { ProviderConnectionCrypto } from "./provider-connection-crypto.js";
 
 const INTEGRATION_SERVICE = "integrationService";
 const DEFAULT_FIXTURE_TENANT_ID = "tenant-volga";
@@ -35,23 +31,6 @@ interface ChannelTestPayload {
   message?: string;
   mode?: "receive" | "send";
   recipient?: string;
-}
-
-interface ChannelConnectionRecord {
-  chatLimit: number;
-  credentialsMasked: boolean;
-  environment: string;
-  health: number;
-  id: string;
-  lastSyncAt: string;
-  name: string;
-  rawExternalId: string;
-  routingQueueId: string;
-  status: string;
-  tenantId: string;
-  traffic: string;
-  type: string;
-  webhookUrl: string;
 }
 
 interface ChannelConnectionMutationPayload {
@@ -66,36 +45,43 @@ interface ChannelConnectionMutationPayload {
   webhookUrl?: string;
 }
 
+interface ChannelTypeStatusMutationPayload {
+  enabled?: boolean;
+  reason?: string;
+}
+
 interface ReplayPayload {
   deliveryId?: string;
   idempotencyKey?: string;
 }
 
-export class IntegrationService {
-  private readonly channels = clone(channelDetails);
-  private readonly apiKeys = clone(apiEnvironmentKeys);
-  private readonly deliveries = clone(webhookDeliveryLog);
-  private readonly sessions: SecuritySession[];
-  private readonly channelConnections: ChannelConnectionRecord[];
-  private readonly channelConnectionEvents = new Map<string, Array<Record<string, unknown>>>();
-  private readonly channelConnectionAuditEvents: Array<Record<string, unknown>> = [];
-  private readonly replayIdempotency = new Map<string, Record<string, unknown>>();
+interface IntegrationServiceOptions {
+  providerCredentialCrypto?: ProviderConnectionCrypto;
+  queueDirectoryRepository?: Pick<QueueDirectoryRepository, "findQueue">;
+  telegramFetch?: TelegramHttpFetch;
+}
 
-  constructor(private readonly integrationRepository: IntegrationRepository = IntegrationRepository.default()) {
-    const state = this.integrationRepository.readState();
-    this.sessions = overlaySecuritySessions(clone(activeSecuritySessions), state.securitySessions);
-    this.channelConnections = buildChannelConnectionRecords(this.channels);
-    this.channelConnections.forEach((connection) => {
-      this.channelConnectionEvents.set(connection.id, [
-        {
-          id: makeAuditId("channel_event"),
-          action: "channel.connection.loaded",
-          at: new Date().toISOString(),
-          severity: connection.status === "error" ? "error" : connection.status === "paused" ? "warn" : "info",
-          message: `${connection.name} loaded into settings read model`
-        }
-      ]);
-    });
+export class IntegrationService {
+  private readonly workspace: IntegrationWorkspaceCatalog;
+  private readonly channels: ChannelDetail[];
+  private readonly apiKeys: ApiEnvironmentKey[];
+  private readonly deliveries: WebhookDelivery[];
+  private readonly sessions: SecuritySession[];
+  private readonly replayIdempotency = new Map<string, Record<string, unknown>>();
+  private readonly queueDirectoryRepository?: Pick<QueueDirectoryRepository, "findQueue">;
+
+  constructor(
+    private readonly integrationRepository: IntegrationRepository = IntegrationRepository.default(),
+    private readonly options: IntegrationServiceOptions = {}
+  ) {
+    this.queueDirectoryRepository = options.queueDirectoryRepository
+      ?? (process.env.INTEGRATION_REPOSITORY === "prisma" ? new QueueDirectoryRepository() : undefined);
+    const state = readInitialIntegrationState(this.integrationRepository);
+    this.workspace = this.integrationRepository.readWorkspaceCatalog();
+    this.channels = clone(this.workspace.channelDetails);
+    this.apiKeys = clone(this.workspace.apiEnvironmentKeys);
+    this.deliveries = clone(this.workspace.webhookDeliveryLog);
+    this.sessions = clone(state.securitySessions);
     state.webhookReplayJournal.forEach((entry) => {
       this.replayIdempotency.set(entry.idempotencyKey, {
         auditId: entry.auditId,
@@ -109,7 +95,8 @@ export class IntegrationService {
   }
 
   async fetchIntegrationWorkspace(): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const webhookDeliveryJournal = this.integrationRepository.listWebhookDeliveryJournal();
+    const webhookDeliveryJournal = await this.integrationRepository.listWebhookDeliveryJournalAsync();
+    const securitySessions = overlaySecuritySessions(this.sessions, await this.integrationRepository.listSecuritySessionsAsync());
 
     return createEnvelope({
       service: INTEGRATION_SERVICE,
@@ -120,32 +107,93 @@ export class IntegrationService {
       data: {
         channelDetails: clone(this.channels),
         apiEnvironmentKeys: this.apiKeys.map(maskApiKey),
-        webhookEndpoints: clone(webhookEndpoints),
+        webhookEndpoints: clone(this.workspace.webhookEndpoints),
         webhookDeliveryLog: buildWebhookDeliveryReadSide(this.deliveries, webhookDeliveryJournal),
         webhookDeadLetters: buildWebhookDeadLetterReadSide(webhookDeliveryJournal),
-        apiChangelog: clone(apiChangelog),
-        securityControls: clone(securityControls),
-        activeSecuritySessions: clone(this.sessions),
-        securityAlerts: clone(securityAlerts)
+        apiChangelog: clone(this.workspace.apiChangelog),
+        securityControls: clone(this.workspace.securityControls),
+        activeSecuritySessions: clone(securitySessions),
+        securityAlerts: clone(this.workspace.securityAlerts),
+        sdkEventCatalog: buildSdkEventCatalog(),
+        sdkDeliveryLog: clone(this.deliveries).filter((delivery) => delivery.endpointId === "sdk-events")
+      }
+    });
+  }
+
+  async fetchIntegrationCapabilities(): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const services = [
+      ["dialogService", ["fetchDialogs", "transitionConversationStatus", "uploadAttachment", "createOutboundConversationRequest"]],
+      ["clientService", ["fetchClients", "fetchClientDetail", "updateClient"]],
+      ["templateService", ["fetchTemplates", "createTemplate", "updateTemplate"]],
+      ["reportService", ["fetchReports", "exportReport"]],
+      ["settingsService", ["fetchEmployees", "inviteEmployee", "updateEmployee", "fetchRoles", "fetchGroups", "fetchRules", "updateRule", "testRule"]],
+      ["integrationService", ["fetchIntegrationWorkspace", "fetchChannelConnections", "updateChannelTypeStatus", "testChannelConnection"]],
+      ["permissionService", ["fetchPermissionWorkspace", "updateRoleGrants"]],
+      ["visitorService", ["fetchVisitorWorkspace", "saveProactiveRule", "triggerRescueReturn"]],
+      ["automationService", ["fetchAutomationWorkspace", "validateBotFlowImport", "publishBotScenario", "testBotScenario"]],
+      ["qualityService", ["fetchQualityWorkspace", "scoreDraftResponse"]],
+      ["auditService", ["fetchAuditEvents", "exportAuditEvents", "redactAuditEvent"]],
+      ["authService", ["getAuthState", "login", "logout", "loginTenantOperator", "getTenantOperatorState"]],
+      ["tenantService", ["fetchTenants", "fetchTenantDetail", "updateTenantStatus"]],
+      ["billingService", ["fetchTariffs", "previewTariffChange", "changeTenantTariff"]],
+      ["platformMonitoringService", ["fetchPlatformSnapshot", "fetchComponentDrilldown", "acknowledgeComponentAlert"]],
+      ["supportAdminService", ["fetchSupportUsers", "resetTwoFactor", "forceLogout", "blockUser", "startImpersonation", "stopImpersonation"]],
+      ["incidentService", ["fetchIncidents", "fetchIncidentDetail", "addIncidentUpdate"]],
+      ["featureFlagService", ["fetchFeatureFlags", "previewFlagChange", "updateFeatureFlag"]]
+    ] as const;
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "fetchIntegrationCapabilities",
+      traceId: integrationTraceId("fetchIntegrationCapabilities"),
+      partial: true,
+      meta: apiMeta(),
+      data: {
+        services: services.map(([id, operations]) => ({
+          id,
+          status: "ready",
+          operations,
+          traceId: `trc_${id}_ready`,
+          states: ["loading", "empty", "error", "partial"],
+          note: "Connected to API Gateway routes."
+        })),
+        contract: {
+          envelope: ["service", "operation", "status", "traceId", "states", "meta", "data", "error"],
+          states: ["loading", "empty", "error", "partial"],
+          realBackendBoundary: "replace src/services adapters with API clients"
+        },
+        routeGaps: [],
+        backlogCoverage: [
+          "permission_denial_audit",
+          "channel_tests_webhook_replay",
+          "audit_export_redaction",
+          "support_admin_impersonation",
+          "feature_flag_rollout_audit"
+        ]
       }
     });
   }
 
   listChannelConnectionAuditEvents() {
-    return this.channelConnectionAuditEvents.map((event) => ({ ...event }));
+    return this.integrationRepository.listChannelConnectionAuditEvents();
   }
 
-  async fetchChannelConnections(filters: { type?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async fetchChannelConnections(tenantId: string, filters: { type?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = normalizeTenantId(tenantId);
+    if (!normalizedTenantId) {
+      return invalidEnvelope("fetchChannelConnections", "tenant_id_required", "tenantId is required.", {});
+    }
+
     const type = normalizeOptionalType(filters.type);
-    const connections = this.channelConnections
-      .filter((connection) => !type || connection.type === type)
+    const connections = (await this.integrationRepository
+      .listChannelConnectionsAsync({ tenantId: normalizedTenantId, type }))
       .map(maskChannelConnection);
 
     return createEnvelope({
       service: INTEGRATION_SERVICE,
       operation: "fetchChannelConnections",
       traceId: integrationTraceId("fetchChannelConnections"),
-      meta: apiMeta({ type: type ?? "all" }),
+      meta: apiMeta({ tenantId: normalizedTenantId, type: type ?? "all" }),
       data: {
         availableTypes: ["sdk", "telegram", "max", "vk"],
         connections
@@ -153,7 +201,12 @@ export class IntegrationService {
     });
   }
 
-  async createChannelConnection(payload: ChannelConnectionMutationPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async createChannelConnection(tenantId: string, payload: ChannelConnectionMutationPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = normalizeTenantId(tenantId);
+    if (!normalizedTenantId) {
+      return invalidEnvelope("createChannelConnection", "tenant_id_required", "tenantId is required.", {});
+    }
+
     const type = normalizeOptionalType(payload.type);
     const name = String(payload.name ?? "").trim();
     if (!type || !name) {
@@ -161,43 +214,115 @@ export class IntegrationService {
         type: type ?? null
       });
     }
+    if (isTokenManagedChannelType(type) && !hasCredentialMaterial(payload.credentials)) {
+      return invalidEnvelope("createChannelConnection", "channel_token_required", `${type} token is required.`, {
+        type
+      });
+    }
+    const routingQueueId = String(payload.routingQueueId ?? (this.queueDirectoryRepository ? "" : `queue-${type}`)).trim();
+    const queueError = await this.validateRoutingQueue(normalizedTenantId, routingQueueId);
+    if (queueError) {
+      return queueError;
+    }
+    const connectionId = `conn_${type}_${randomUUID()}`;
+    let rawExternalId = `raw_${type}_${randomUUID()}`;
+    let telegramConnection: Awaited<ReturnType<typeof saveTelegramConnectionRecord>> | null = null;
+    if (type === "telegram") {
+      const botToken = extractCredentialMaterial(payload.credentials);
+      try {
+        const telegramFetch = this.options.telegramFetch ?? resolveTestTelegramFetch(botToken);
+        telegramConnection = await saveTelegramConnectionRecord({
+          botToken,
+          channelConnectionId: connectionId,
+          fetcher: telegramFetch,
+          publicWebhookBaseUrl: resolvePublicWebhookBaseUrl(),
+          tenantId: normalizedTenantId
+        });
+        rawExternalId = `telegram:${telegramConnection.botUsername ?? telegramConnection.botId ?? "bot"}`;
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "telegram_bot_token_rejected";
+        return invalidEnvelope(
+          "createChannelConnection",
+          code,
+          "Telegram bot token could not be validated.",
+          { type }
+        );
+      }
+    }
 
     const now = new Date().toISOString();
-    const connection: ChannelConnectionRecord = {
+    const connection: ChannelConnectionStoredRecord = {
       chatLimit: normalizeChatLimit(payload.chatLimit),
+      createdAt: now,
       credentialsMasked: Boolean(payload.credentials),
       environment: normalizeEnvironment(payload.environment),
       health: 100,
-      id: `conn_${type}_${randomUUID()}`,
+      id: connectionId,
       lastSyncAt: now,
       name,
-      rawExternalId: `raw_${type}_${randomUUID()}`,
-      routingQueueId: String(payload.routingQueueId ?? `queue-${type}`).trim(),
+      rawExternalId,
+      routingQueueId,
       status: String(payload.status ?? "active").trim().toLowerCase(),
-      tenantId: DEFAULT_FIXTURE_TENANT_ID,
+      tenantId: normalizedTenantId,
       traffic: "0 events",
       type,
-      webhookUrl: String(payload.webhookUrl ?? "").trim()
+      updatedAt: now,
+      webhookUrl: resolveChannelServiceEndpoint(type, connectionId, payload.webhookUrl)
     };
-    this.channelConnections.push(connection);
-    this.recordChannelConnectionEvent(connection.id, "channel.connection.created", "info", `${name} created`);
-    const auditEvent = this.persistChannelConnectionAuditEvent("channel.connection.create", connection, "Channel connection created");
+    const providerCrypto = type === "vk" || type === "max"
+      ? (this.options.providerCredentialCrypto ?? ProviderConnectionCrypto.fromEnvironment(
+          process.env.PROVIDER_CREDENTIAL_KEY_VERSION?.trim() || "v1"
+        ))
+      : null;
+    const saved = await this.integrationRepository.saveChannelConnectionAsync(connection);
+    let providerCredential: ProviderConnectionCredentialRecord | null = null;
+    let webhookSecret: string | null = null;
+    if (type === "vk" || type === "max") {
+      const token = extractCredentialMaterial(payload.credentials);
+      const crypto = providerCrypto!;
+      webhookSecret = randomUUID();
+      providerCredential = await this.integrationRepository.saveProviderConnectionCredentialAsync({
+        accessTokenEncrypted: JSON.stringify(crypto.encrypt(token)),
+        apiVersion: type === "vk" ? String(payload.credentials?.apiVersion ?? "5.199") : null,
+        channelConnectionId: saved.id,
+        confirmationCodeEncrypted: type === "vk" && payload.credentials?.confirmationCode
+          ? JSON.stringify(crypto.encrypt(String(payload.credentials.confirmationCode)))
+          : null,
+        createdAt: now,
+        externalAccountId: String(payload.credentials?.groupId ?? payload.credentials?.botId ?? "pending").trim() || "pending",
+        keyVersion: crypto.keyVersion,
+        lastError: null,
+        lastWebhookAt: null,
+        provider: type,
+        status: saved.status,
+        tenantId: normalizedTenantId,
+        updatedAt: now,
+        webhookSecretEncrypted: JSON.stringify(crypto.encrypt(webhookSecret))
+      });
+    }
+    if (telegramConnection) {
+      await this.integrationRepository.saveTelegramConnectionAsync(telegramConnection);
+    }
+    await this.recordChannelConnectionEvent(saved.tenantId, saved.id, "channel.connection.created", "info", `${name} created`);
+    const auditEvent = await this.persistChannelConnectionAuditEvent("channel.connection.create", saved, "Channel connection created");
 
     return createEnvelope({
       service: INTEGRATION_SERVICE,
       operation: "createChannelConnection",
       traceId: integrationTraceId("createChannelConnection"),
-      meta: apiMeta({ connectionId: connection.id, type }),
+      meta: apiMeta({ connectionId: saved.id, tenantId: normalizedTenantId, type }),
       data: {
         auditEvent,
         auditId: auditEvent.id,
-        connection: maskChannelConnection(connection)
+        connection: maskChannelConnection(saved),
+        ...(providerCredential ? { providerRuntime: { keyVersion: providerCredential.keyVersion, provider: providerCredential.provider, webhookSecret } } : {})
       }
     });
   }
 
-  async updateChannelConnection(connectionId: string, payload: ChannelConnectionMutationPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const connection = this.findChannelConnection(connectionId);
+  async updateChannelConnection(tenantId: string, connectionId: string, payload: ChannelConnectionMutationPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = normalizeTenantId(tenantId);
+    const connection = await this.findChannelConnection(normalizedTenantId, connectionId);
     if (!connection) {
       return notFoundEnvelope("updateChannelConnection", "channel_connection_not_found", `Channel connection ${connectionId} was not found.`, {
         connectionId
@@ -211,7 +336,12 @@ export class IntegrationService {
       connection.environment = normalizeEnvironment(payload.environment);
     }
     if (payload.routingQueueId !== undefined) {
-      connection.routingQueueId = String(payload.routingQueueId).trim() || connection.routingQueueId;
+      const routingQueueId = String(payload.routingQueueId).trim();
+      const queueError = await this.validateRoutingQueue(normalizedTenantId, routingQueueId);
+      if (queueError) {
+        return queueError;
+      }
+      connection.routingQueueId = routingQueueId;
     }
     if (payload.chatLimit !== undefined) {
       connection.chatLimit = normalizeChatLimit(payload.chatLimit);
@@ -220,59 +350,138 @@ export class IntegrationService {
       connection.status = String(payload.status).trim().toLowerCase() || connection.status;
     }
     if (payload.webhookUrl !== undefined) {
-      connection.webhookUrl = String(payload.webhookUrl).trim();
+      connection.webhookUrl = resolveChannelServiceEndpoint(connection.type, connection.id, payload.webhookUrl);
     }
     if (payload.credentials) {
       connection.credentialsMasked = true;
     }
-    connection.lastSyncAt = new Date().toISOString();
-    this.recordChannelConnectionEvent(connection.id, "channel.connection.updated", "info", payload.reason ?? `${connection.name} updated`);
-    const auditEvent = this.persistChannelConnectionAuditEvent("channel.connection.update", connection, payload.reason ?? "Channel connection updated");
+    const now = new Date().toISOString();
+    connection.lastSyncAt = now;
+    connection.updatedAt = now;
+    const saved = await this.integrationRepository.saveChannelConnectionAsync(connection);
+    await this.recordChannelConnectionEvent(saved.tenantId, saved.id, "channel.connection.updated", "info", payload.reason ?? `${saved.name} updated`);
+    const auditEvent = await this.persistChannelConnectionAuditEvent("channel.connection.update", saved, payload.reason ?? "Channel connection updated");
 
     return createEnvelope({
       service: INTEGRATION_SERVICE,
       operation: "updateChannelConnection",
       traceId: integrationTraceId("updateChannelConnection"),
-      meta: apiMeta({ connectionId: connection.id, type: connection.type }),
+      meta: apiMeta({ connectionId: saved.id, tenantId: normalizedTenantId, type: saved.type }),
       data: {
         auditEvent,
         auditId: auditEvent.id,
-        connection: maskChannelConnection(connection),
+        connection: maskChannelConnection(saved),
         reason: payload.reason ?? null
       }
     });
   }
 
-  async deleteChannelConnection(connectionId: string, payload: { reason?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const connection = this.findChannelConnection(connectionId);
+  async updateChannelTypeStatus(
+    tenantId: string,
+    type: string,
+    payload: ChannelTypeStatusMutationPayload
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = normalizeTenantId(tenantId);
+    if (!normalizedTenantId) {
+      return invalidEnvelope("updateChannelTypeStatus", "tenant_id_required", "tenantId is required.", {});
+    }
+
+    const normalizedType = normalizeOptionalType(type);
+    if (!normalizedType) {
+      return invalidEnvelope("updateChannelTypeStatus", "channel_type_required", "channel type is required.", {});
+    }
+
+    if (typeof payload.enabled !== "boolean") {
+      return invalidEnvelope("updateChannelTypeStatus", "channel_enabled_required", "enabled boolean is required.", {
+        type: normalizedType
+      });
+    }
+
+    const connections = await this.integrationRepository.listChannelConnectionsAsync({
+      tenantId: normalizedTenantId,
+      type: normalizedType
+    });
+    if (!connections.length) {
+      return notFoundEnvelope(
+        "updateChannelTypeStatus",
+        "channel_type_connections_not_found",
+        `Channel type ${normalizedType} has no tenant connections.`,
+        { tenantId: normalizedTenantId, type: normalizedType }
+      );
+    }
+
+    const now = new Date().toISOString();
+    const nextStatus = payload.enabled ? "active" : "disabled";
+    const reason = payload.reason ?? `Channel type ${normalizedType} ${payload.enabled ? "enabled" : "disabled"}`;
+    const savedConnections = await Promise.all(connections.map((connection) => this.integrationRepository.saveChannelConnectionAsync({
+      ...connection,
+      lastSyncAt: now,
+      status: nextStatus,
+      updatedAt: now
+    })));
+    await Promise.all(savedConnections.map((connection) =>
+      this.recordChannelConnectionEvent(
+        connection.tenantId,
+        connection.id,
+        "channel.type_status.updated",
+        payload.enabled ? "info" : "warn",
+        reason
+      )
+    ));
+    const auditEvents = await Promise.all(savedConnections.map((connection) =>
+      this.persistChannelConnectionAuditEvent("channel.type_status.update", connection, reason)
+    ));
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "updateChannelTypeStatus",
+      traceId: integrationTraceId("updateChannelTypeStatus"),
+      meta: apiMeta({ tenantId: normalizedTenantId, type: normalizedType }),
+      data: {
+        auditEvents,
+        auditIds: auditEvents.map((event) => event.id),
+        channel: summarizeChannelTypeStatus(normalizedType, savedConnections, this.channels),
+        connections: savedConnections.map(maskChannelConnection),
+        reason
+      }
+    });
+  }
+
+  async deleteChannelConnection(tenantId: string, connectionId: string, payload: { reason?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = normalizeTenantId(tenantId);
+    const connection = await this.findChannelConnection(normalizedTenantId, connectionId);
     if (!connection) {
       return notFoundEnvelope("deleteChannelConnection", "channel_connection_not_found", `Channel connection ${connectionId} was not found.`, {
         connectionId
       });
     }
 
+    const now = new Date().toISOString();
     connection.status = "disabled";
-    connection.lastSyncAt = new Date().toISOString();
-    this.recordChannelConnectionEvent(connection.id, "channel.connection.disabled", "warn", payload.reason ?? `${connection.name} disabled`);
-    const auditEvent = this.persistChannelConnectionAuditEvent("channel.connection.disable", connection, payload.reason ?? "Channel connection disabled");
+    connection.lastSyncAt = now;
+    connection.updatedAt = now;
+    const saved = await this.integrationRepository.saveChannelConnectionAsync(connection);
+    await this.recordChannelConnectionEvent(saved.tenantId, saved.id, "channel.connection.disabled", "warn", payload.reason ?? `${saved.name} disabled`);
+    const auditEvent = await this.persistChannelConnectionAuditEvent("channel.connection.disable", saved, payload.reason ?? "Channel connection disabled");
 
     return createEnvelope({
       service: INTEGRATION_SERVICE,
       operation: "deleteChannelConnection",
       traceId: integrationTraceId("deleteChannelConnection"),
-      meta: apiMeta({ connectionId: connection.id, type: connection.type }),
+      meta: apiMeta({ connectionId: saved.id, tenantId: normalizedTenantId, type: saved.type }),
       data: {
         auditEvent,
         auditId: auditEvent.id,
-        connectionId: connection.id,
+        connectionId: saved.id,
         reason: payload.reason ?? null,
-        status: connection.status
+        status: saved.status
       }
     });
   }
 
-  async testChannelConnectionInstance(connectionId: string, payload: Omit<ChannelTestPayload, "channelId" | "connectionId">): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const connection = this.findChannelConnection(connectionId);
+  async testChannelConnectionInstance(tenantId: string, connectionId: string, payload: Omit<ChannelTestPayload, "channelId" | "connectionId">): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = normalizeTenantId(tenantId);
+    const connection = await this.findChannelConnection(normalizedTenantId, connectionId);
     if (!connection) {
       return notFoundEnvelope("testChannelConnectionInstance", "channel_connection_not_found", `Channel connection ${connectionId} was not found.`, {
         connectionId
@@ -286,14 +495,14 @@ export class IntegrationService {
     }
 
     const mode = payload.mode ?? "receive";
-    this.recordChannelConnectionEvent(connection.id, "channel.test", "info", `${mode} test queued for ${connection.name}`);
-    const auditEvent = this.persistChannelConnectionAuditEvent("channel.connection.test", connection, `${mode} test queued`);
+    await this.recordChannelConnectionEvent(connection.tenantId, connection.id, "channel.test", "info", `${mode} test queued for ${connection.name}`);
+    const auditEvent = await this.persistChannelConnectionAuditEvent("channel.connection.test", connection, `${mode} test queued`);
 
     return createEnvelope({
       service: INTEGRATION_SERVICE,
       operation: "testChannelConnectionInstance",
       traceId: integrationTraceId("testChannelConnectionInstance"),
-      meta: apiMeta({ connectionId: connection.id, type: connection.type }),
+      meta: apiMeta({ connectionId: connection.id, tenantId: normalizedTenantId, type: connection.type }),
       data: {
         auditEvent,
         auditId: auditEvent.id,
@@ -310,8 +519,9 @@ export class IntegrationService {
     });
   }
 
-  async fetchChannelConnectionEvents(connectionId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const connection = this.findChannelConnection(connectionId);
+  async fetchChannelConnectionEvents(tenantId: string, connectionId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedTenantId = normalizeTenantId(tenantId);
+    const connection = await this.findChannelConnection(normalizedTenantId, connectionId);
     if (!connection) {
       return notFoundEnvelope("fetchChannelConnectionEvents", "channel_connection_not_found", `Channel connection ${connectionId} was not found.`, {
         connectionId
@@ -322,10 +532,10 @@ export class IntegrationService {
       service: INTEGRATION_SERVICE,
       operation: "fetchChannelConnectionEvents",
       traceId: integrationTraceId("fetchChannelConnectionEvents"),
-      meta: apiMeta({ connectionId: connection.id, type: connection.type }),
+      meta: apiMeta({ connectionId: connection.id, tenantId: normalizedTenantId, type: connection.type }),
       data: {
         connectionId: connection.id,
-        events: clone(this.channelConnectionEvents.get(connection.id) ?? [])
+        events: await this.integrationRepository.listChannelConnectionEventsAsync(normalizedTenantId, connection.id)
       }
     });
   }
@@ -404,7 +614,7 @@ export class IntegrationService {
       status: fixtureKeyStatus(key),
       tenantId: DEFAULT_FIXTURE_TENANT_ID
     });
-    this.integrationRepository.saveApiKeyRotationJob(rotation);
+    await this.integrationRepository.saveApiKeyRotationJobAsync(rotation);
     await this.integrationRepository.saveApiKeyRotationAuditEvent({
       action: "public_api_key.rotation_queued",
       at: new Date().toISOString(),
@@ -427,7 +637,7 @@ export class IntegrationService {
   }
 
   async replayWebhookDelivery(payload: ReplayPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const delivery = this.findDelivery(payload.deliveryId ?? "");
+    const delivery = await this.findDelivery(payload.deliveryId ?? "");
 
     if (!delivery) {
       return notFoundEnvelope("replayWebhookDelivery", "webhook_delivery_not_found", `Webhook delivery ${payload.deliveryId ?? "(empty)"} was not found.`, {
@@ -436,7 +646,7 @@ export class IntegrationService {
     }
 
     const idempotencyKey = payload.idempotencyKey?.trim();
-    const cached = idempotencyKey ? this.findReplay(idempotencyKey) : undefined;
+    const cached = idempotencyKey ? await this.findReplay(idempotencyKey) : undefined;
 
     if (cached) {
       if (cached.deliveryId !== delivery.id) {
@@ -447,7 +657,7 @@ export class IntegrationService {
         });
       }
 
-      this.integrationRepository.saveWebhookReplayAuditEvent(createWebhookReplayAuditEvent({
+      await this.integrationRepository.saveWebhookReplayAuditEventAsync(createWebhookReplayAuditEvent({
         action: "webhook.replay.duplicate",
         auditId: String(cached.auditId),
         delivery,
@@ -477,7 +687,7 @@ export class IntegrationService {
       signatureVerified: delivery.status !== "signature_failed",
       status: "replay_queued"
     };
-    this.integrationRepository.saveWebhookReplayAuditEvent(createWebhookReplayAuditEvent({
+    await this.integrationRepository.saveWebhookReplayAuditEventAsync(createWebhookReplayAuditEvent({
       action: "webhook.replay.queued",
       auditId: replay.auditId,
       delivery,
@@ -488,7 +698,7 @@ export class IntegrationService {
 
     if (idempotencyKey) {
       this.replayIdempotency.set(idempotencyKey, clone(replay));
-      this.integrationRepository.saveWebhookReplay({
+      await this.integrationRepository.saveWebhookReplayAsync({
         auditId: replay.auditId,
         deliveryId: replay.deliveryId,
         idempotencyKey,
@@ -514,7 +724,7 @@ export class IntegrationService {
       return invalidEnvelope("fetchTelegramConnection", "tenant_id_required", "tenantId is required.", {});
     }
 
-    const connection = this.integrationRepository.findTelegramConnectionByTenantId(normalizedTenantId);
+    const connection = await this.integrationRepository.findTelegramConnectionByTenantIdAsync(normalizedTenantId);
     return telegramConnectionEnvelope("fetchTelegramConnection", {
       connection: toTelegramConnectionPublicView(connection, resolvePublicWebhookBaseUrl())
     });
@@ -534,14 +744,22 @@ export class IntegrationService {
     }
 
     try {
-      const existing = this.integrationRepository.findTelegramConnectionByTenantId(normalizedTenantId);
+      const existing = await this.integrationRepository.findTelegramConnectionByTenantIdAsync(normalizedTenantId);
+      const channelConnections = await this.integrationRepository.listChannelConnectionsAsync({ tenantId: normalizedTenantId, type: "telegram" });
+      const channelConnectionId = existing?.channelConnectionId ?? (channelConnections.length === 1 ? channelConnections[0].id : "");
+      if (!channelConnectionId) {
+        return invalidEnvelope("saveTelegramConnection", "telegram_channel_connection_required", "Select a Telegram channel connection before saving bot credentials.", {
+          tenantId: normalizedTenantId
+        });
+      }
       const saved = await saveTelegramConnectionRecord({
         botToken,
+        channelConnectionId,
         fetcher: options.fetcher,
         publicWebhookBaseUrl: resolvePublicWebhookBaseUrl(),
         tenantId: normalizedTenantId
       }, existing);
-      this.integrationRepository.saveTelegramConnection(saved);
+      await this.integrationRepository.saveTelegramConnectionAsync(saved);
 
       return telegramConnectionEnvelope("saveTelegramConnection", {
         connection: toTelegramConnectionPublicView(saved, resolvePublicWebhookBaseUrl())
@@ -556,7 +774,7 @@ export class IntegrationService {
 
   async disconnectTelegramConnection(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
     const normalizedTenantId = String(tenantId ?? "").trim();
-    const existing = this.integrationRepository.findTelegramConnectionByTenantId(normalizedTenantId);
+    const existing = await this.integrationRepository.findTelegramConnectionByTenantIdAsync(normalizedTenantId);
     if (!existing || existing.status === "disabled") {
       return notFoundEnvelope("disconnectTelegramConnection", "telegram_connection_not_found", "Telegram connection was not found.", {
         tenantId: normalizedTenantId
@@ -564,7 +782,7 @@ export class IntegrationService {
     }
 
     const disabled = disableTelegramConnectionRecord(existing);
-    this.integrationRepository.saveTelegramConnection(disabled);
+    await this.integrationRepository.saveTelegramConnectionAsync(disabled);
 
     return telegramConnectionEnvelope("disconnectTelegramConnection", {
       connection: toTelegramConnectionPublicView(disabled, resolvePublicWebhookBaseUrl())
@@ -572,14 +790,15 @@ export class IntegrationService {
   }
 
   async revokeSecuritySession(sessionId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const session = this.sessions.find((item) => item.id === sessionId);
+    const session = overlaySecuritySessions(this.sessions, await this.integrationRepository.listSecuritySessionsAsync())
+      .find((item) => item.id === sessionId);
 
     if (!session) {
       return notFoundEnvelope("revokeSecuritySession", "security_session_not_found", `Security session ${sessionId} was not found.`, { sessionId });
     }
 
     session.status = "revoked";
-    this.integrationRepository.saveSecuritySession(session);
+    await this.integrationRepository.saveSecuritySessionAsync(session);
 
     return createEnvelope({
       service: INTEGRATION_SERVICE,
@@ -599,26 +818,43 @@ export class IntegrationService {
     return this.apiKeys.find((key) => key.id === keyId);
   }
 
-  private findChannelConnection(connectionId: string): ChannelConnectionRecord | undefined {
-    return this.channelConnections.find((connection) => connection.id === connectionId);
+  private findChannelConnection(tenantId: string, connectionId: string): Promise<ChannelConnectionStoredRecord | undefined> {
+    return this.integrationRepository.findChannelConnectionAsync(tenantId, connectionId);
+  }
+
+  private async validateRoutingQueue(tenantId: string, queueId: string): Promise<BackendEnvelope<Record<string, unknown>> | null> {
+    if (!queueId) {
+      return invalidEnvelope("validateRoutingQueue", "routing_queue_required", "An active routing queue is required.", { tenantId });
+    }
+    if (!this.queueDirectoryRepository) {
+      return null;
+    }
+    const queue = await this.queueDirectoryRepository.findQueue(tenantId, queueId);
+    if (!queue || queue.status !== "active") {
+      return invalidEnvelope("validateRoutingQueue", "routing_queue_not_found", "The selected routing queue is not active in this tenant.", {
+        queueId,
+        tenantId
+      });
+    }
+    return null;
   }
 
   private findChannel(channelId: string): ChannelDetail | undefined {
     return this.channels.find((channel) => channel.id === channelId || channel.channel.toLowerCase() === channelId.toLowerCase());
   }
 
-  private findDelivery(deliveryId: string): WebhookDelivery | undefined {
+  private async findDelivery(deliveryId: string): Promise<WebhookDelivery | undefined> {
     const fixtureDelivery = this.deliveries.find((delivery) => delivery.id === deliveryId);
     if (fixtureDelivery) {
       return fixtureDelivery;
     }
 
-    const journalEntry = this.integrationRepository.findWebhookDeliveryJournalEntry(deliveryId);
+    const journalEntry = await this.integrationRepository.findWebhookDeliveryJournalEntryAsync(deliveryId);
     return journalEntry ? journalEntryToWebhookDelivery(journalEntry) : undefined;
   }
 
-  private findReplay(idempotencyKey: string): Record<string, unknown> | undefined {
-    const persisted = this.integrationRepository.findWebhookReplay(idempotencyKey);
+  private async findReplay(idempotencyKey: string): Promise<Record<string, unknown> | undefined> {
+    const persisted = await this.integrationRepository.findWebhookReplayAsync(idempotencyKey);
     if (persisted) {
       return {
         auditId: persisted.auditId,
@@ -633,20 +869,20 @@ export class IntegrationService {
     return this.replayIdempotency.get(idempotencyKey);
   }
 
-  private recordChannelConnectionEvent(connectionId: string, action: string, severity: string, message: string): void {
-    const current = this.channelConnectionEvents.get(connectionId) ?? [];
-    current.unshift({
+  private async recordChannelConnectionEvent(tenantId: string, connectionId: string, action: string, severity: string, message: string): Promise<void> {
+    await this.integrationRepository.saveChannelConnectionEventAsync({
       id: makeAuditId("channel_event"),
       action,
       at: new Date().toISOString(),
+      connectionId,
       message,
-      severity
+      severity,
+      tenantId
     });
-    this.channelConnectionEvents.set(connectionId, current);
   }
 
-  private persistChannelConnectionAuditEvent(action: string, connection: ChannelConnectionRecord, reason: string) {
-    const event = {
+  private persistChannelConnectionAuditEvent(action: string, connection: ChannelConnectionStoredRecord, reason: string): Promise<ChannelConnectionAuditEventRecord> {
+    const event: ChannelConnectionAuditEventRecord = {
       action,
       at: new Date().toISOString(),
       connectionId: connection.id,
@@ -657,9 +893,33 @@ export class IntegrationService {
       tenantId: connection.tenantId,
       type: connection.type
     };
-    this.channelConnectionAuditEvents.push(event);
-    return event;
+    return this.integrationRepository.saveChannelConnectionAuditEventAsync(event);
   }
+}
+
+function resolveTestTelegramFetch(botToken: string): TelegramHttpFetch | undefined {
+  if (!["development", "test"].includes(process.env.NODE_ENV ?? "test")) {
+    return undefined;
+  }
+
+  const token = String(botToken ?? "").trim();
+  if (!token.includes("qa-telegram-token")) {
+    return undefined;
+  }
+
+  return async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        ok: true,
+        result: {
+          id: 900001,
+          username: "qa_telegram_bot"
+        }
+      };
+    }
+  });
 }
 
 function apiMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -668,6 +928,15 @@ function apiMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {
     apiVersion: "v1",
     ...extra
   };
+}
+
+function buildSdkEventCatalog(): Array<[string, string]> {
+  return [
+    ["identifyUser", "Передает телефон, устройство и ID гигера"],
+    ["initConversation", "Инициирует диалог по номеру телефона"],
+    ["trackEntryPoint", "Фиксирует SDK, Telegram, MAX или VK"],
+    ["syncTopic", "Синхронизирует тематику и запрет закрытия"]
+  ];
 }
 
 function clone<T>(value: T): T {
@@ -832,62 +1101,7 @@ function maskApiKey(key: ApiEnvironmentKey): ApiEnvironmentKey {
   return clone(key);
 }
 
-function buildChannelConnectionRecords(channels: ChannelDetail[]): ChannelConnectionRecord[] {
-  const records = channels.flatMap((channel) => channel.connections.map((connection) => ({
-    chatLimit: parseChatLimit(channel.limit),
-    credentialsMasked: true,
-    environment: normalizeEnvironment(connection.env),
-    health: channel.health,
-    id: connection.rawId,
-    lastSyncAt: channel.lastSync,
-    name: connection.name,
-    rawExternalId: connection.rawId,
-    routingQueueId: routeToQueueId(channel.route),
-    status: normalizeConnectionStatus(connection.status),
-    tenantId: DEFAULT_FIXTURE_TENANT_ID,
-    traffic: connection.traffic,
-    type: channel.id,
-    webhookUrl: `https://api.support.local/webhooks/${channel.id}/${connection.id}`
-  })));
-
-  return [
-    ...records,
-    {
-      chatLimit: 8,
-      credentialsMasked: true,
-      environment: "beta",
-      health: 82,
-      id: "conn_max_beta",
-      lastSyncAt: "Сегодня, 11:56",
-      name: "MAX Business beta",
-      rawExternalId: "conn_max_beta",
-      routingQueueId: "queue-max-beta",
-      status: "warn",
-      tenantId: DEFAULT_FIXTURE_TENANT_ID,
-      traffic: "1 130 messages",
-      type: "max",
-      webhookUrl: "https://api.support.local/webhooks/max/beta"
-    },
-    {
-      chatLimit: 8,
-      credentialsMasked: true,
-      environment: "stage",
-      health: 76,
-      id: "conn_max_backup",
-      lastSyncAt: "Сегодня, 10:48",
-      name: "MAX backup webhook",
-      rawExternalId: "conn_max_backup",
-      routingQueueId: "queue-max-backup",
-      status: "paused",
-      tenantId: DEFAULT_FIXTURE_TENANT_ID,
-      traffic: "0 messages",
-      type: "max",
-      webhookUrl: "https://api.support.local/webhooks/max/backup"
-    }
-  ];
-}
-
-function maskChannelConnection(connection: ChannelConnectionRecord): Record<string, unknown> {
+function maskChannelConnection(connection: ChannelConnectionStoredRecord): Record<string, unknown> {
   return {
     chatLimit: connection.chatLimit,
     credentialsMasked: connection.credentialsMasked,
@@ -906,9 +1120,66 @@ function maskChannelConnection(connection: ChannelConnectionRecord): Record<stri
   };
 }
 
+function summarizeChannelTypeStatus(
+  type: string,
+  connections: ChannelConnectionStoredRecord[],
+  catalog: ChannelDetail[]
+): Record<string, unknown> {
+  const activeCount = connections.filter((connection) => connection.status === "active").length;
+  const channel = catalog.find((item) =>
+    normalizeOptionalType(item.id) === type
+    || normalizeOptionalType(item.channel) === type
+    || normalizeOptionalType(item.name) === type
+  );
+  const firstConnection = connections[0];
+
+  return {
+    activeCount,
+    disabledCount: connections.filter((connection) => connection.status === "disabled").length,
+    enabled: activeCount > 0,
+    limit: firstConnection?.chatLimit ?? 0,
+    name: channel?.name ?? channel?.channel ?? type,
+    staff: activeCount,
+    status: activeCount > 0 ? "active" : "disabled",
+    total: connections.length,
+    type
+  };
+}
+
 function normalizeOptionalType(type?: string): string | undefined {
   const value = String(type ?? "").trim().toLowerCase();
   return value || undefined;
+}
+
+function isTokenManagedChannelType(type: string): boolean {
+  return type === "telegram" || type === "max" || type === "vk";
+}
+
+function hasCredentialMaterial(credentials?: Record<string, unknown>): boolean {
+  return Boolean(extractCredentialMaterial(credentials));
+}
+
+function extractCredentialMaterial(credentials?: Record<string, unknown>): string {
+  if (!credentials || typeof credentials !== "object") {
+    return "";
+  }
+
+  return Object.values(credentials)
+    .map((value) => String(value ?? "").trim())
+    .find(Boolean) ?? "";
+}
+
+function resolveChannelServiceEndpoint(type: string, connectionId: string, providedWebhookUrl?: string): string {
+  if (!isTokenManagedChannelType(type)) {
+    return String(providedWebhookUrl ?? "").trim();
+  }
+
+  const baseUrl = resolvePublicWebhookBaseUrl().replace(/\/+$/g, "");
+  return `${baseUrl}/api/v1/integrations/${type}/webhook/${connectionId}`;
+}
+
+function normalizeTenantId(tenantId?: string): string {
+  return String(tenantId ?? "").trim();
 }
 
 function normalizeChatLimit(value?: number): number {
@@ -917,32 +1188,6 @@ function normalizeChatLimit(value?: number): number {
     return 8;
   }
   return Math.max(1, Math.min(50, Math.round(parsed)));
-}
-
-function parseChatLimit(limit: string): number {
-  const match = limit.match(/\d+/);
-  return match ? normalizeChatLimit(Number(match[0])) : 8;
-}
-
-function routeToQueueId(route: string): string {
-  return String(route)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "") || "queue-default";
-}
-
-function normalizeConnectionStatus(status: string): string {
-  const value = status.trim().toLowerCase();
-  if (value === "ok") {
-    return "active";
-  }
-  if (value === "warn") {
-    return "warn";
-  }
-  if (value === "paused") {
-    return "paused";
-  }
-  return value || "active";
 }
 
 function normalizeEnvironment(environment?: string): string {
@@ -962,6 +1207,10 @@ function overlaySecuritySessions(base: SecuritySession[], persisted: SecuritySes
     ...base.map((session) => clone(persistedById.get(session.id) ?? session)),
     ...persisted.filter((session) => !baseIds.has(session.id)).map((session) => clone(session))
   ];
+}
+
+function readInitialIntegrationState(repository: IntegrationRepository) {
+  return repository.readInitialState();
 }
 
 function resolvePublicWebhookBaseUrl(env: Record<string, string | undefined> = process.env): string {

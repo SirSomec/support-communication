@@ -57,8 +57,10 @@ model TenantUser {
   metadata     Json?
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  teamMemberships TeamMembership[]
 
   @@unique([tenantId, email], map: "tenant_users_tenant_id_email_key")
+  @@unique([tenantId, id], map: "tenant_users_tenant_id_id_key")
   @@index([tenantId, status], map: "tenant_users_tenant_id_status_idx")
   @@index([email], map: "tenant_users_email_idx")
   @@map("tenant_users")
@@ -148,6 +150,38 @@ model ServiceAdminAuditEvent {
   @@index([tenantId, at], map: "service_admin_audit_events_tenant_id_at_idx")
   @@index([action, at], map: "service_admin_audit_events_action_at_idx")
   @@map("service_admin_audit_events")
+}
+
+model ServiceAdminAuditExport {
+  id              String   @id
+  descriptorId    String   @map("descriptor_id")
+  filters         Json     @default("{}")
+  sourceEventIds  Json     @default("[]") @map("source_event_ids")
+  requesterId     String   @map("requester_id")
+  requesterName   String   @map("requester_name")
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz(3)
+  redactionPolicy String   @map("redaction_policy")
+  objectKey       String   @map("object_key")
+  descriptor      Json
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([requesterId, createdAt], map: "service_admin_audit_exports_requester_created_idx")
+  @@index([expiresAt], map: "service_admin_audit_exports_expires_at_idx")
+  @@map("service_admin_audit_exports")
+}
+
+model ServiceAdminAuditRedaction {
+  id        String   @id
+  eventId   String   @map("event_id")
+  reason    String
+  actor     String
+  actorName String   @map("actor_name")
+  overlay   Json
+  at        DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([eventId, createdAt], map: "service_admin_audit_redactions_event_created_idx")
+  @@map("service_admin_audit_redactions")
 }
 
 model ServiceAdminImpersonation {
@@ -254,6 +288,8 @@ model BillingSyncJob {
   @@index([status, queue, createdAt], map: "billing_sync_jobs_status_queue_created_at_idx")
   @@index([status, queue, lockedAt], map: "billing_sync_jobs_status_queue_locked_at_idx")
   @@index([status, queue, nextAttemptAt], map: "billing_sync_jobs_status_queue_next_attempt_at_idx")
+  @@index([status, queue, deadLetteredAt], map: "billing_sync_jobs_status_queue_dead_lettered_at_idx")
+  @@index([status, queue, publishedAt], map: "billing_sync_jobs_status_queue_published_at_idx")
   @@map("billing_sync_jobs")
 }
 
@@ -580,7 +616,7 @@ model BillingTaxDocument {
 
 model Conversation {
   id            String                     @id
-  tenantId      String                     @default("tenant-volga") @map("tenant_id")
+  tenantId      String                     @map("tenant_id")
   name          String
   initials      String
   avatar        String?
@@ -589,6 +625,8 @@ model Conversation {
   time          String
   preview       String
   status        String
+  resolutionOutcome String?                  @map("resolution_outcome")
+  rescueState   Json?                       @map("rescue_state")
   sla           String
   slaTone       String                     @map("sla_tone")
   topic         String
@@ -597,6 +635,13 @@ model Conversation {
   entry         String
   language      String
   clientSince   String                     @map("client_since")
+  operatorId    String?                    @map("operator_id")
+  operatorName  String?                    @map("operator_name")
+  queueId       String?                    @map("queue_id")
+  teamId        String?                    @map("team_id")
+  channelConnectionId String?              @map("channel_connection_id")
+  providerConversationId String?           @map("provider_conversation_id")
+  providerUserId String?                   @map("provider_user_id")
   tags          String[]                   @default([])
   previous      Json
   metadata      Json?
@@ -606,10 +651,96 @@ model Conversation {
   inboundEvents ConversationInboundEvent[]
   outboundDescriptors ConversationOutboundDescriptor[]
   deliveryReceipts ChannelDeliveryReceipt[]
+  providerMessageBindings ProviderMessageBinding[]
+  lifecycleEvents ConversationLifecycleEvent[]
+  queue         SupportQueue?                @relation(fields: [tenantId, queueId], references: [tenantId, id], onDelete: Restrict)
+  team          Team?                        @relation(fields: [tenantId, teamId], references: [tenantId, id], onDelete: Restrict)
+  channelConnection ChannelConnection?       @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Restrict)
 
+  @@unique([tenantId, id], map: "conversations_tenant_id_id_key")
   @@index([status, channel], map: "conversations_status_channel_idx")
   @@index([tenantId, status, updatedAt], map: "conversations_tenant_status_updated_at_idx")
+  @@index([tenantId, operatorId, updatedAt], map: "conversations_tenant_operator_updated_at_idx")
+  @@index([tenantId, queueId, teamId, updatedAt], map: "conversations_tenant_queue_team_updated_at_idx")
+  @@unique([tenantId, channelConnectionId, providerConversationId], map: "conversations_tenant_connection_provider_key")
   @@map("conversations")
+}
+
+model Team {
+  id          String
+  tenantId    String   @map("tenant_id")
+  name        String
+  scope       String
+  status      String   @default("active")
+  channels    String[] @default([])
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  conversations Conversation[]
+  memberships TeamMembership[]
+  queues      SupportQueue[] @relation("QueueDefaultTeam")
+
+  @@id([tenantId, id], map: "teams_pkey")
+  @@index([tenantId, status, name], map: "teams_tenant_status_name_idx")
+  @@map("teams")
+}
+
+model TeamMembership {
+  id         String   @id
+  tenantId   String   @map("tenant_id")
+  teamId     String   @map("team_id")
+  operatorId String   @map("operator_id")
+  role       String   @default("member")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  team       Team       @relation(fields: [tenantId, teamId], references: [tenantId, id], onDelete: Cascade)
+  operator   TenantUser @relation(fields: [tenantId, operatorId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, teamId, operatorId], map: "team_memberships_tenant_team_operator_key")
+  @@index([tenantId, operatorId, active], map: "team_memberships_tenant_operator_active_idx")
+  @@map("team_memberships")
+}
+
+model SupportQueue {
+  id            String
+  tenantId      String   @map("tenant_id")
+  name          String
+  status        String   @default("active")
+  defaultTeamId String?  @map("default_team_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  defaultTeam   Team?    @relation("QueueDefaultTeam", fields: [tenantId, defaultTeamId], references: [tenantId, id], onDelete: Restrict)
+  channelConnections ChannelConnection[]
+  conversations Conversation[]
+  memberships QueueMembership[]
+
+  @@id([tenantId, id], map: "support_queues_pkey")
+  @@index([tenantId, status, name], map: "support_queues_tenant_status_name_idx")
+  @@map("support_queues")
+}
+
+model ConversationLifecycleEvent {
+  id             String       @id
+  tenantId       String       @map("tenant_id")
+  conversationId String       @map("conversation_id")
+  conversation   Conversation @relation(fields: [tenantId, conversationId], references: [tenantId, id], onDelete: Restrict)
+  eventType      String       @map("event_type")
+  occurredAt     DateTime     @map("occurred_at") @db.Timestamptz(3)
+  ingestedAt     DateTime     @default(now()) @map("ingested_at") @db.Timestamptz(3)
+  actorType      String       @map("actor_type")
+  actorId        String?      @map("actor_id")
+  actorName      String?      @map("actor_name")
+  source         String
+  sourceEventId  String       @map("source_event_id")
+  reason         String?
+  traceId        String       @map("trace_id")
+  schemaVersion  String       @map("schema_version")
+  data           Json
+
+  @@unique([tenantId, source, sourceEventId], map: "conversation_lifecycle_events_source_key")
+  @@index([tenantId, conversationId, occurredAt, id], map: "conversation_lifecycle_events_tenant_conversation_idx")
+  @@index([tenantId, eventType, occurredAt], map: "conversation_lifecycle_events_tenant_type_idx")
+  @@map("conversation_lifecycle_events")
 }
 
 model ConversationMessage {
@@ -623,6 +754,7 @@ model ConversationMessage {
   time           String
   attachments    Json?
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  providerBindings ProviderMessageBinding[]
 
   @@index([conversationId, createdAt], map: "conversation_messages_conversation_id_created_at_idx")
   @@map("conversation_messages")
@@ -726,6 +858,7 @@ model WorkspaceFile {
   tenantId     String   @map("tenant_id")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  providerAttachmentTransfers ProviderAttachmentTransfer[]
 
   @@index([tenantId, fileId], map: "workspace_files_tenant_file_id_idx")
   @@index([storageState, scanState], map: "workspace_files_storage_scan_state_idx")
@@ -744,6 +877,26 @@ model WorkspaceFileScanResultIdempotency {
 
   @@index([fileId, createdAt], map: "workspace_file_scan_result_idem_file_created_idx")
   @@map("workspace_file_scan_result_idempotency")
+}
+
+model ClientExportJob {
+  exportId              String   @id @map("export_id")
+  tenantId              String   @map("tenant_id")
+  status                String
+  format                String
+  filters               Json
+  segment               Json?
+  fileDescriptor        Json     @map("file_descriptor")
+  auditEvent            Json     @map("audit_event")
+  itemCount             Int      @map("item_count")
+  reason                String
+  sensitiveFieldsMasked Boolean  @default(true) @map("sensitive_fields_masked")
+  createdAt             DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, createdAt], map: "client_export_jobs_tenant_created_idx")
+  @@index([tenantId, status, createdAt], map: "client_export_jobs_tenant_status_created_idx")
+  @@map("client_export_jobs")
 }
 
 model ClientProfile {
@@ -805,7 +958,7 @@ model ClientMergeConflict {
 
 model TemplateRecord {
   id        String   @id
-  tenantId  String   @default("tenant-volga") @map("tenant_id")
+  tenantId  String   @map("tenant_id")
   auditId   String?  @map("audit_id")
   channel   String
   scope     String
@@ -860,7 +1013,7 @@ model TemplateAuditEvent {
 
 model KnowledgeArticle {
   id              String   @id
-  tenantId        String   @default("tenant-volga") @map("tenant_id")
+  tenantId        String   @map("tenant_id")
   title           String
   status          String
   category        String
@@ -924,14 +1077,67 @@ model KnowledgeApprovalDecision {
 }
 
 model MfaChallenge {
+  attempts   Int       @default(0)
   id         String    @id
   consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   email      String
   expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  maxAttempts Int      @default(5) @map("max_attempts")
+  otpHash    String    @map("otp_hash")
 
   @@index([email, expiresAt], map: "mfa_challenges_email_expires_at_idx")
   @@map("mfa_challenges")
+}
+
+model ProviderMessageBinding {
+  id                     String              @id
+  tenantId               String              @map("tenant_id")
+  channelConnectionId    String              @map("channel_connection_id")
+  conversationId         String              @map("conversation_id")
+  internalMessageId      String              @map("internal_message_id")
+  providerConversationId String              @map("provider_conversation_id")
+  providerMessageId      String              @map("provider_message_id")
+  provider               String
+  status                 String
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  connection             ChannelConnection   @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Cascade)
+  conversation           Conversation        @relation(fields: [tenantId, conversationId], references: [tenantId, id], onDelete: Cascade)
+  internalMessage        ConversationMessage @relation(fields: [internalMessageId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, channelConnectionId, providerMessageId], map: "provider_message_bindings_provider_message_key")
+  @@unique([tenantId, internalMessageId, provider], map: "provider_message_bindings_internal_provider_key")
+  @@index([tenantId, providerConversationId, createdAt], map: "provider_message_bindings_conversation_idx")
+  @@map("provider_message_bindings")
+}
+
+model AuthInviteToken {
+  id         String    @id
+  tenantId   String    @map("tenant_id")
+  email      String
+  codeHash   String    @unique(map: "auth_invite_tokens_code_hash_key") @map("code_hash")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([email, expiresAt], map: "auth_invite_tokens_email_expires_at_idx")
+  @@index([expiresAt, consumedAt], map: "auth_invite_tokens_expiry_consumed_idx")
+  @@index([tenantId, expiresAt], map: "auth_invite_tokens_tenant_expires_at_idx")
+  @@map("auth_invite_tokens")
+}
+
+model AuthRecoveryToken {
+  id         String    @id
+  email      String
+  tokenHash  String    @unique(map: "auth_recovery_tokens_token_hash_key") @map("token_hash")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([email, expiresAt], map: "auth_recovery_tokens_email_expires_at_idx")
+  @@index([expiresAt, consumedAt], map: "auth_recovery_tokens_expiry_consumed_idx")
+  @@map("auth_recovery_tokens")
 }
 
 model ServiceAdminSession {
@@ -1172,6 +1378,7 @@ model QueueMembership {
   active     Boolean  @default(true)
   updatedAt  DateTime @map("updated_at") @db.Timestamptz(3)
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  queue      SupportQueue @relation(fields: [tenantId, queueId], references: [tenantId, id], onDelete: Cascade)
 
   @@unique([tenantId, queueId, operatorId], map: "queue_memberships_tenant_queue_operator_key")
   @@index([tenantId, queueId, active], map: "queue_memberships_tenant_queue_active_idx")
@@ -1210,6 +1417,42 @@ model RoutingAnalyticsRow {
   @@index([tenantId, occurredAt], map: "routing_analytics_rows_tenant_occurred_at_idx")
   @@index([tenantId, conversationId], map: "routing_analytics_rows_tenant_conversation_idx")
   @@map("routing_analytics_rows")
+}
+
+model RoutingJob {
+  id               String   @id
+  queue            String
+  action           String?
+  kind             String?
+  status           String?
+  conversationId   String?  @map("conversation_id")
+  redistributionId String?  @map("redistribution_id")
+  runAt            Json?    @map("run_at")
+  claimedAt        DateTime? @map("claimed_at") @db.Timestamptz(3)
+  leaseExpiresAt   DateTime? @map("lease_expires_at") @db.Timestamptz(3)
+  leaseOwner       String?   @map("lease_owner")
+  payload          Json
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([queue, status, updatedAt], map: "routing_jobs_queue_status_updated_idx")
+  @@index([queue, status, leaseExpiresAt], map: "routing_jobs_queue_status_lease_expires_idx")
+  @@index([queue, updatedAt], map: "routing_jobs_queue_updated_idx")
+  @@index([conversationId], map: "routing_jobs_conversation_idx")
+  @@map("routing_jobs")
+}
+
+model RoutingStateSnapshot {
+  id               String   @id
+  conversations    Json     @default("[]")
+  operators        Json     @default("[]")
+  queues           Json     @default("[]")
+  rescueReportRows Json     @default("[]") @map("rescue_report_rows")
+  version          Int      @default(1)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("routing_state_snapshots")
 }
 
 model MetricDefinition {
@@ -1287,6 +1530,7 @@ model SavedReportTemplate {
 
 model ReportExportJob {
   id                      String   @id
+  tenantId                String   @map("tenant_id")
   name                    String
   format                  String
   period                  String
@@ -1309,24 +1553,214 @@ model ReportExportJob {
   updatedAt               DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([queue, statusKey, createdAt], map: "report_export_jobs_queue_status_created_idx")
+  @@index([tenantId, createdAt], map: "report_export_jobs_tenant_created_idx")
+  @@index([tenantId, statusKey, createdAt], map: "report_export_jobs_tenant_status_created_idx")
   @@index([statusKey, createdAt], map: "report_export_jobs_status_created_idx")
   @@map("report_export_jobs")
 }
 
 model ReportIdempotencyKey {
-  key         String   @id
+  tenantId    String   @map("tenant_id")
+  key         String
   fingerprint String
   jobId       String   @map("job_id")
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
+  @@id([tenantId, key])
   @@index([jobId], map: "report_idempotency_keys_job_idx")
   @@map("report_idempotency_keys")
+}
+
+model ReportQueryExecution {
+  id             String   @id
+  metricKey      String   @map("metric_key")
+  parameters     Json?
+  status         String
+  failureCode    String?  @map("failure_code")
+  failureMessage String?  @map("failure_message")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([metricKey, status, createdAt], map: "report_query_executions_metric_status_created_idx")
+  @@map("report_query_executions")
+}
+
+model ReportFileDescriptor {
+  id                      String   @id
+  jobId                   String   @unique(map: "report_file_descriptors_job_id_key") @map("job_id")
+  tenantId                String   @map("tenant_id")
+  fileName                String   @map("file_name")
+  format                  String
+  contentType             String   @map("content_type")
+  objectKey               String   @map("object_key")
+  checksum                String
+  sizeBytes               Int      @map("size_bytes")
+  metricDefinitionVersion String   @map("metric_definition_version")
+  writtenAt               DateTime @map("written_at") @db.Timestamptz(3)
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, createdAt], map: "report_file_descriptors_tenant_created_idx")
+  @@map("report_file_descriptors")
+}
+
+model ReportNotificationDescriptor {
+  id             String   @id
+  tenantId       String   @map("tenant_id")
+  exportJobId    String   @map("export_job_id")
+  idempotencyKey String   @unique(map: "report_notification_descriptors_idempotency_key_key") @map("idempotency_key")
+  eventType      String   @map("event_type")
+  payload        Json
+  status         String
+  createdAt      DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, status, createdAt], map: "report_notification_descriptors_tenant_status_created_idx")
+  @@index([exportJobId], map: "report_notification_descriptors_export_job_idx")
+  @@map("report_notification_descriptors")
+}
+
+model ScheduledDigestDescriptor {
+  id         String   @id
+  tenantId   String   @map("tenant_id")
+  scheduleId String   @map("schedule_id")
+  periodKey  String   @map("period_key")
+  reportType String   @map("report_type")
+  dueAt      DateTime @map("due_at") @db.Timestamptz(3)
+  status     String
+  createdAt  DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, scheduleId, periodKey], map: "scheduled_digest_descriptors_tenant_schedule_period_key")
+  @@index([tenantId, status, dueAt], map: "scheduled_digest_descriptors_tenant_status_due_idx")
+  @@map("scheduled_digest_descriptors")
+}
+
+model ReportExportRetryAuditEvent {
+  auditId                 String   @id @map("audit_id")
+  action                  String
+  at                      DateTime @db.Timestamptz(3)
+  backendQueueId          String   @map("backend_queue_id")
+  format                  String
+  immutable               Boolean
+  jobId                   String   @map("job_id")
+  metricDefinitionVersion String   @map("metric_definition_version")
+  nextStatusKey           String   @map("next_status_key")
+  previousStatusKey       String   @map("previous_status_key")
+  queue                   String
+  reasonCode              String   @map("reason_code")
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([jobId, at], map: "report_export_retry_audit_events_job_at_idx")
+  @@map("report_export_retry_audit_events")
+}
+
+model Notification {
+  id              String    @id
+  tenantId        String    @map("tenant_id")
+  recipientUserId String?   @map("recipient_user_id")
+  category        String
+  type            String
+  typeKey         String    @map("type_key")
+  title           String
+  detail          String
+  meta            String
+  action          String
+  actionTarget    Json?     @map("action_target")
+  tone            String
+  history         String
+  readAt          DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt       DateTime  @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, recipientUserId, createdAt], map: "notifications_tenant_recipient_created_idx")
+  @@index([tenantId, readAt, createdAt], map: "notifications_tenant_read_created_idx")
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id                        String   @id
+  tenantId                  String   @map("tenant_id")
+  userId                    String?  @map("user_id")
+  browserPushEnabled        Boolean  @default(false) @map("browser_push_enabled")
+  browserPushEndpoint       String?  @map("browser_push_endpoint")
+  browserPushPermission     String?  @map("browser_push_permission")
+  browserPushSubscriptionId String?  @map("browser_push_subscription_id")
+  enabledExternalChannelIds String[] @default([]) @map("enabled_external_channel_ids")
+  mutedSoundRuleIds         String[] @default([]) @map("muted_sound_rule_ids")
+  mutedTypeKeys             String[] @default([]) @map("muted_type_keys")
+  updatedAt                 DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, userId], map: "notification_preferences_tenant_user_idx")
+  @@map("notification_preferences")
+}
+
+model BrowserPushSubscription {
+  id             String    @id
+  tenantId       String    @map("tenant_id")
+  userId         String?   @map("user_id")
+  endpoint       String
+  endpointHash   String    @map("endpoint_hash")
+  expirationTime Int?      @map("expiration_time")
+  keyAuth        String    @map("key_auth")
+  keyP256dh      String    @map("key_p256dh")
+  status         String
+  userAgent      String?   @map("user_agent")
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt      DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, userId, status], map: "browser_push_subscriptions_tenant_user_status_idx")
+  @@index([tenantId, endpointHash, status], map: "browser_push_subscriptions_tenant_endpoint_status_idx")
+  @@map("browser_push_subscriptions")
+}
+
+model NotificationDeliveryDescriptor {
+  id                String    @id
+  tenantId          String    @map("tenant_id")
+  userId            String?   @map("user_id")
+  notificationId    String    @map("notification_id")
+  subscriptionId    String    @map("subscription_id")
+  endpointHash      String    @map("endpoint_hash")
+  queue             String
+  type              String
+  status            String
+  payload           Json
+  attempts          Int       @default(0)
+  deliveredAt       DateTime? @map("delivered_at") @db.Timestamptz(3)
+  failedAt          DateTime? @map("failed_at") @db.Timestamptz(3)
+  lastError         String?   @map("last_error")
+  nextAttemptAt     DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  providerMessageId String?   @map("provider_message_id")
+  traceId           String    @map("trace_id")
+  createdAt         DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime  @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, status, createdAt], map: "notification_delivery_descriptors_tenant_status_created_idx")
+  @@index([status, nextAttemptAt, createdAt], map: "notification_delivery_descriptors_status_next_created_idx")
+  @@index([subscriptionId], map: "notification_delivery_descriptors_subscription_idx")
+  @@map("notification_delivery_descriptors")
+}
+
+model NotificationPreferenceAuditEvent {
+  id        String   @id
+  tenantId  String   @map("tenant_id")
+  userId    String?  @map("user_id")
+  action    String
+  at        DateTime @db.Timestamptz(3)
+  immutable Boolean
+  reason    String
+  result    String
+  traceId   String   @map("trace_id")
+
+  @@index([tenantId, at], map: "notification_preference_audit_events_tenant_at_idx")
+  @@map("notification_preference_audit_events")
 }
 
 model PublicApiKey {
   keyId       String   @id @map("key_id")
   tenantId    String   @map("tenant_id")
+  channelConnectionId String? @map("channel_connection_id")
   environment String
   name        String
   owner       String
@@ -1338,6 +1772,7 @@ model PublicApiKey {
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   revealState PublicApiKeyRevealState?
   rotationAuditEvents PublicApiKeyRotationAuditEvent[]
+  channelConnection ChannelConnection? @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Restrict)
 
   @@index([tenantId, environment, status], map: "public_api_keys_tenant_environment_status_idx")
   @@index([tenantId, keyId], map: "public_api_keys_tenant_key_idx")
@@ -1374,6 +1809,109 @@ model PublicApiKeyRotationAuditEvent {
   @@index([rotationId], map: "public_api_key_rotation_audit_events_rotation_idx")
   @@index([action, at], map: "public_api_key_rotation_audit_events_action_at_idx")
   @@map("public_api_key_rotation_audit_events")
+}
+
+model IntegrationApiKeyRotationJob {
+  rotationId     String   @id @map("rotation_id")
+  auditId        String   @map("audit_id")
+  environment    String
+  keyId          String   @map("key_id")
+  rawKeyShownOnce Boolean @map("raw_key_shown_once")
+  requires2fa    Boolean @map("requires_2fa")
+  status         String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([keyId, createdAt], map: "integration_api_key_rotation_jobs_key_created_idx")
+  @@index([status, createdAt], map: "integration_api_key_rotation_jobs_status_created_idx")
+  @@map("integration_api_key_rotation_jobs")
+}
+
+model PublicDemoRequest {
+  id                 String   @id
+  company            String
+  consent            Boolean
+  email              String
+  idempotencyKey     String?  @unique(map: "public_demo_requests_idempotency_key_key") @map("idempotency_key")
+  ipHash             String?  @map("ip_hash")
+  message            String
+  name               String
+  planInterest       String?  @map("plan_interest")
+  requestFingerprint String   @unique(map: "public_demo_requests_request_fingerprint_key") @map("request_fingerprint")
+  source             String
+  status             String
+  userAgentHash      String?  @map("user_agent_hash")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([source, createdAt], map: "public_demo_requests_source_created_idx")
+  @@index([status, createdAt], map: "public_demo_requests_status_created_idx")
+  @@map("public_demo_requests")
+}
+
+model PublicDemoRequestAuditEvent {
+  id                 String   @id
+  action             String
+  at                 DateTime @db.Timestamptz(3)
+  immutable          Boolean
+  leadId             String?  @map("lead_id")
+  requestFingerprint String   @map("request_fingerprint")
+  result             String
+  source             String
+
+  @@index([leadId, at], map: "public_demo_request_audit_events_lead_at_idx")
+  @@index([requestFingerprint, at], map: "public_demo_request_audit_events_fingerprint_at_idx")
+  @@map("public_demo_request_audit_events")
+}
+
+model PublicDemoRequestNotificationDescriptor {
+  id        String   @id
+  leadId    String   @map("lead_id")
+  payload   Json
+  queue     String
+  status    String
+  type      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([leadId], map: "public_demo_request_notification_descriptors_lead_idx")
+  @@index([queue, status, createdAt], map: "public_demo_request_notification_descriptors_queue_status_idx")
+  @@map("public_demo_request_notification_descriptors")
+}
+
+model WebhookReplayJournalEntry {
+  idempotencyKey    String   @id @map("idempotency_key")
+  auditId           String   @map("audit_id")
+  deliveryId        String   @map("delivery_id")
+  originalTraceId   String   @map("original_trace_id")
+  replayId          String   @map("replay_id")
+  signatureVerified Boolean  @map("signature_verified")
+  status            String
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([deliveryId], map: "webhook_replay_journal_delivery_idx")
+  @@index([replayId], map: "webhook_replay_journal_replay_idx")
+  @@map("webhook_replay_journal")
+}
+
+model WebhookReplayAuditEvent {
+  id                String   @id
+  action            String
+  at                DateTime @db.Timestamptz(3)
+  attempts          Int
+  auditId           String   @map("audit_id")
+  deliveryId        String   @map("delivery_id")
+  deliveryStatus    String   @map("delivery_status")
+  idempotencyKey    String?  @map("idempotency_key")
+  immutable         Boolean
+  originalTraceId   String   @map("original_trace_id")
+  replayId          String   @map("replay_id")
+  transition        String
+
+  @@index([deliveryId, at], map: "webhook_replay_audit_events_delivery_at_idx")
+  @@index([replayId, at], map: "webhook_replay_audit_events_replay_at_idx")
+  @@map("webhook_replay_audit_events")
 }
 
 model SignedWebhookReplayNonce {
@@ -1414,8 +1952,102 @@ model WebhookDeliveryJournalEntry {
   @@map("webhook_delivery_journal")
 }
 
+model SecuritySession {
+  id        String   @id
+  device    String
+  ip        String
+  lastSeen  String   @map("last_seen")
+  role      String
+  status    String
+  user      String
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status, lastSeen], map: "integration_security_sessions_status_last_seen_idx")
+  @@map("integration_security_sessions")
+}
+
+model ChannelConnection {
+  id                String   @id
+  tenantId          String   @map("tenant_id")
+  type              String
+  name              String
+  status            String
+  environment       String
+  chatLimit         Int      @map("chat_limit")
+  credentialsMasked Boolean  @map("credentials_masked")
+  health            Int
+  rawExternalId     String   @map("raw_external_id")
+  routingQueueId    String   @map("routing_queue_id")
+  traffic           String
+  webhookUrl        String   @map("webhook_url")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSyncAt        DateTime @map("last_sync_at") @db.Timestamptz(3)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  routingQueue      SupportQueue @relation(fields: [tenantId, routingQueueId], references: [tenantId, id], onDelete: Restrict)
+  publicApiKeys     PublicApiKey[]
+  telegramConnection TelegramConnection?
+  providerCredential ProviderConnectionCredential?
+  providerMessageBindings ProviderMessageBinding[]
+  providerAttachmentTransfers ProviderAttachmentTransfer[]
+  conversations Conversation[]
+
+  @@unique([tenantId, id], map: "integration_channel_connections_tenant_id_key")
+  @@index([tenantId, type, status], map: "integration_channel_connections_tenant_type_status_idx")
+  @@map("integration_channel_connections")
+}
+
+model ChannelConnectionEvent {
+  id           String   @id
+  tenantId     String   @map("tenant_id")
+  connectionId String   @map("connection_id")
+  action       String
+  at           DateTime @db.Timestamptz(3)
+  message      String
+  severity     String
+
+  @@index([tenantId, connectionId, at], map: "integration_channel_connection_events_tenant_connection_idx")
+  @@map("integration_channel_connection_events")
+}
+
+model ChannelConnectionAuditEvent {
+  id           String   @id
+  tenantId     String   @map("tenant_id")
+  connectionId String   @map("connection_id")
+  action       String
+  at           DateTime @db.Timestamptz(3)
+  immutable    Boolean
+  reason       String
+  result       String
+  type         String
+
+  @@index([tenantId, connectionId, at], map: "integration_channel_conn_audit_tenant_conn_idx")
+  @@index([action, at], map: "integration_channel_connection_audit_events_action_at_idx")
+  @@map("integration_channel_connection_audit_events")
+}
+
+model TelegramConnection {
+  channelConnectionId String @id @map("channel_connection_id")
+  tenantId      String   @map("tenant_id")
+  botId         String?  @map("bot_id")
+  botToken      String   @map("bot_token")
+  botUsername   String?  @map("bot_username")
+  pollingOffset Int      @default(0) @map("polling_offset")
+  status        String
+  tokenPreview  String   @map("token_preview")
+  webhookSecret String   @unique(map: "telegram_connections_webhook_secret_key") @map("webhook_secret")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  channelConnection ChannelConnection @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, channelConnectionId], map: "telegram_connections_tenant_channel_key")
+  @@index([tenantId, status, updatedAt], map: "telegram_connections_tenant_status_updated_idx")
+  @@index([status, updatedAt], map: "telegram_connections_status_updated_idx")
+  @@map("telegram_connections")
+}
+
 model BotScenario {
   id            String   @id
+  activeVersionId String? @map("active_version_id")
   tenantId      String   @map("tenant_id")
   name          String
   schemaVersion String   @map("schema_version")
@@ -1444,6 +2076,7 @@ model BotScenarioVersion {
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   scenario       BotScenario @relation(fields: [tenantId, scenarioId], references: [tenantId, id], onDelete: Cascade)
   publishAuditEvents BotPublishAuditEvent[]
+  runtimeInstances BotRuntimeInstance[]
 
   @@unique([tenantId, scenarioId, versionId], map: "bot_scenario_versions_tenant_scenario_version_key")
   @@index([tenantId, scenarioId, status], map: "bot_scenario_versions_tenant_scenario_status_idx")
@@ -1466,6 +2099,164 @@ model BotPublishAuditEvent {
 
   @@index([tenantId, scenarioId, createdAt], map: "bot_publish_audit_events_tenant_scenario_created_idx")
   @@map("bot_publish_audit_events")
+}
+
+model AutomationPublishIdempotencyKey {
+  tenantId    String   @map("tenant_id")
+  key         String
+  fingerprint String
+  result      Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([tenantId, key])
+  @@map("automation_publish_idempotency_keys")
+}
+
+model ProviderConnectionCredential {
+  channelConnectionId String   @id @map("channel_connection_id")
+  tenantId             String   @map("tenant_id")
+  provider             String
+  externalAccountId    String   @map("external_account_id")
+  accessTokenEncrypted String   @map("access_token_encrypted")
+  webhookSecretEncrypted String @map("webhook_secret_encrypted")
+  confirmationCodeEncrypted String? @map("confirmation_code_encrypted")
+  keyVersion           String   @map("key_version")
+  apiVersion           String?  @map("api_version")
+  status               String
+  lastWebhookAt        DateTime? @map("last_webhook_at") @db.Timestamptz(3)
+  lastError             String?  @map("last_error")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  channelConnection    ChannelConnection @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, channelConnectionId], map: "provider_connection_credentials_tenant_channel_key")
+  @@index([tenantId, provider, status], map: "provider_connection_credentials_tenant_provider_status_idx")
+  @@map("provider_connection_credentials")
+}
+
+model ProviderAttachmentTransfer {
+  id                      String   @id
+  tenantId                String   @map("tenant_id")
+  channelConnectionId     String   @map("channel_connection_id")
+  provider                String
+  fileId                  String   @map("file_id")
+  contentVersion          String   @map("content_version")
+  status                  String
+  providerAttachmentId    String?  @map("provider_attachment_id")
+  providerAttachmentToken String?  @map("provider_attachment_token")
+  error                   String?
+  attempts                Int      @default(0)
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  channelConnection       ChannelConnection @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Cascade)
+  file                    WorkspaceFile @relation(fields: [fileId], references: [fileId], onDelete: Cascade)
+
+  @@unique([tenantId, channelConnectionId, provider, fileId, contentVersion], map: "provider_attachment_transfers_identity_key")
+  @@index([tenantId, channelConnectionId, provider, status], map: "provider_attachment_transfers_connection_status_idx")
+  @@index([fileId, updatedAt], map: "provider_attachment_transfers_file_updated_idx")
+  @@map("provider_attachment_transfers")
+}
+
+model BotRuntimeInstance {
+  id                String   @id
+  tenantId          String   @map("tenant_id")
+  conversationId    String   @map("conversation_id")
+  scenarioId        String   @map("scenario_id")
+  versionId         String   @map("version_id")
+  currentNodeId     String   @map("current_node_id")
+  status            String
+  context           Json     @default("{}")
+  attempts          Int      @default(0)
+  nextAttemptAt     DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  lastError         String?  @map("last_error")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version           BotScenarioVersion @relation(fields: [tenantId, scenarioId, versionId], references: [tenantId, scenarioId, versionId], onDelete: Restrict)
+  steps             BotRuntimeStepJournal[]
+
+  @@unique([tenantId, conversationId], map: "bot_runtime_instances_tenant_conversation_key")
+  @@index([tenantId, status, nextAttemptAt], map: "bot_runtime_instances_tenant_status_retry_idx")
+  @@map("bot_runtime_instances")
+}
+
+model BotRuntimeStepJournal {
+  id              String   @id
+  runtimeId       String   @map("runtime_id")
+  tenantId        String   @map("tenant_id")
+  conversationId  String   @map("conversation_id")
+  inputEventId    String   @map("input_event_id")
+  inputEvent      Json     @map("input_event")
+  nodeId          String   @map("node_id")
+  nodeType        String   @map("node_type")
+  outcome         String
+  error           String?
+  webhookResponse Json?    @map("webhook_response")
+  handoffSummary  Json?    @map("handoff_summary")
+  sideEffects     Json     @default("[]") @map("side_effects")
+  lifecycleEvent  Json?    @map("lifecycle_event")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  runtime         BotRuntimeInstance @relation(fields: [runtimeId], references: [id], onDelete: Cascade)
+  effects         BotRuntimeSideEffect[]
+
+  @@unique([tenantId, conversationId, inputEventId], map: "bot_runtime_steps_tenant_conversation_event_key")
+  @@index([runtimeId, createdAt], map: "bot_runtime_steps_runtime_created_idx")
+  @@map("bot_runtime_step_journal")
+}
+
+model BotRuntimeSideEffect {
+  id             String   @id
+  stepId         String   @map("step_id")
+  tenantId       String   @map("tenant_id")
+  conversationId String   @map("conversation_id")
+  kind           String
+  payload        Json
+  status         String   @default("pending")
+  attempts       Int      @default(0)
+  nextAttemptAt  DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  leaseUntil     DateTime? @map("lease_until") @db.Timestamptz(3)
+  lastError      String?  @map("last_error")
+  deliveredAt    DateTime? @map("delivered_at") @db.Timestamptz(3)
+  deadLetteredAt DateTime? @map("dead_lettered_at") @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  step           BotRuntimeStepJournal @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@unique([stepId, id], map: "bot_runtime_side_effects_step_id_key")
+  @@index([status, nextAttemptAt, leaseUntil], map: "bot_runtime_side_effects_reconcile_idx")
+  @@index([tenantId, conversationId, createdAt], map: "bot_runtime_side_effects_tenant_conversation_idx")
+  @@map("bot_runtime_side_effects")
+}
+
+model AutomationBotTestRun {
+  testRunId String   @id @map("test_run_id")
+  tenantId  String   @map("tenant_id")
+  scenarioId String  @map("scenario_id")
+  auditId   String   @map("audit_id")
+  cases     Json     @default("[]")
+  queue     String
+  status    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, scenarioId], map: "automation_bot_test_runs_tenant_scenario_idx")
+  @@index([tenantId, status], map: "automation_bot_test_runs_tenant_status_idx")
+  @@map("automation_bot_test_runs")
+}
+
+model ProactiveRule {
+  id            String   @id
+  tenantId      String   @map("tenant_id")
+  activeVariant String?  @map("active_variant")
+  channels      String[] @default([])
+  cooldown      String?
+  segment       String?
+  status        String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, status], map: "proactive_rules_tenant_status_idx")
+  @@map("proactive_rules")
 }
 
 model ProactiveExecutionWindow {
@@ -1519,6 +2310,53 @@ model ProactiveExperimentAssignment {
   @@index([tenantId, ruleId, variant], map: "proactive_experiment_assignments_tenant_rule_variant_idx")
   @@index([tenantId, subjectId], map: "proactive_experiment_assignments_tenant_subject_idx")
   @@map("proactive_experiment_assignments")
+}
+
+model ProactiveDeliveryAttempt {
+  attemptId    String   @id @map("attempt_id")
+  tenantId     String   @map("tenant_id")
+  ruleId       String   @map("rule_id")
+  subjectId    String   @map("subject_id")
+  descriptorId String   @map("descriptor_id")
+  channel      String
+  status       String
+  traceId      String   @map("trace_id")
+  attemptedAt  DateTime @map("attempted_at") @db.Timestamptz(3)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, ruleId, attemptedAt], map: "proactive_delivery_attempts_tenant_rule_attempted_idx")
+  @@index([tenantId, subjectId], map: "proactive_delivery_attempts_tenant_subject_idx")
+  @@index([tenantId, status], map: "proactive_delivery_attempts_tenant_status_idx")
+  @@map("proactive_delivery_attempts")
+}
+
+model ProactiveDeliveryIdempotencyKey {
+  key         String   @id
+  tenantId    String   @map("tenant_id")
+  ruleId      String   @map("rule_id")
+  subjectId   String   @map("subject_id")
+  fingerprint String
+  result      Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, ruleId, subjectId], map: "proactive_delivery_idempotency_keys_tenant_rule_subject_idx")
+  @@map("proactive_delivery_idempotency_keys")
+}
+
+model ProactiveDeliveryAttribution {
+  attributionId String   @id @map("attribution_id")
+  tenantId      String   @map("tenant_id")
+  ruleId        String   @map("rule_id")
+  subjectId     String   @map("subject_id")
+  descriptorId  String   @map("descriptor_id")
+  experimentId  String   @map("experiment_id")
+  variant       String
+  assignedAt    DateTime @map("assigned_at") @db.Timestamptz(3)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, ruleId, assignedAt], map: "proactive_delivery_attributions_tenant_rule_assigned_idx")
+  @@index([tenantId, subjectId], map: "proactive_delivery_attributions_tenant_subject_idx")
+  @@map("proactive_delivery_attributions")
 }
 
 model QualityRating {
@@ -1579,6 +2417,107 @@ model AiScoringAudit {
   @@index([tenantId, traceId], map: "ai_scoring_audits_tenant_trace_idx")
   @@index([tenantId, providerId, providerResultId], map: "ai_scoring_audits_tenant_provider_result_idx")
   @@map("ai_scoring_audits")
+}
+
+model ProactiveExposure {
+  exposureId          String   @id @map("exposure_id")
+  tenantId            String   @map("tenant_id")
+  presenceSessionId   String   @map("presence_session_id")
+  channelConnectionId String   @map("channel_connection_id")
+  subjectId           String   @map("subject_id")
+  ruleId              String   @map("rule_id")
+  variant             String
+  experimentId        String   @map("experiment_id")
+  experimentVersion   String   @map("experiment_version")
+  segmentSnapshot     Json     @default("{}") @map("segment_snapshot")
+  occurrenceKey       String   @map("occurrence_key")
+  message             String
+  status              String
+  plannedAt           DateTime @map("planned_at") @db.Timestamptz(3)
+  deliveredAt         DateTime? @map("delivered_at") @db.Timestamptz(3)
+  shownAt             DateTime? @map("shown_at") @db.Timestamptz(3)
+  dismissedAt         DateTime? @map("dismissed_at") @db.Timestamptz(3)
+  acceptedAt          DateTime? @map("accepted_at") @db.Timestamptz(3)
+  attributionWindowEndsAt DateTime? @map("attribution_window_ends_at") @db.Timestamptz(3)
+  failedAt            DateTime? @map("failed_at") @db.Timestamptz(3)
+  conversationId      String?  @map("conversation_id")
+  failureCode         String?  @map("failure_code")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, ruleId, subjectId, occurrenceKey], map: "proactive_exposures_occurrence_key")
+  @@index([tenantId, presenceSessionId, status, plannedAt], map: "proactive_exposures_session_status_idx")
+  @@index([tenantId, ruleId, subjectId, plannedAt], map: "proactive_exposures_cooldown_idx")
+  @@index([tenantId, ruleId, variant, plannedAt], map: "proactive_exposures_metrics_idx")
+  @@map("proactive_exposures")
+}
+
+model ProactiveConversionEvent {
+  conversionId      String   @id @map("conversion_id")
+  tenantId          String   @map("tenant_id")
+  exposureId        String   @map("exposure_id")
+  ruleId            String   @map("rule_id")
+  variant           String
+  experimentId      String   @map("experiment_id")
+  experimentVersion String   @map("experiment_version")
+  conversationId    String   @map("conversation_id")
+  messageId         String?  @map("message_id")
+  trigger           String
+  occurredAt        DateTime @map("occurred_at") @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, exposureId], map: "proactive_conversion_events_tenant_exposure_key")
+  @@index([tenantId, ruleId, variant, occurredAt], map: "proactive_conversion_events_metrics_idx")
+  @@index([tenantId, conversationId, occurredAt], map: "proactive_conversion_events_conversation_idx")
+  @@map("proactive_conversion_events")
+}
+
+model SdkVisitorPresenceSession {
+  id                    String   @id
+  tenantId              String   @map("tenant_id")
+  channelConnectionId   String   @map("channel_connection_id")
+  subjectId             String   @map("subject_id")
+  sessionKeyHash        String   @map("session_key_hash")
+  pageUrl               String?  @map("page_url")
+  pagePath              String?  @map("page_path")
+  referrer              String?
+  connected             Boolean  @default(true)
+  firstSeenAt           DateTime @map("first_seen_at") @db.Timestamptz(3)
+  lastSeenAt            DateTime @map("last_seen_at") @db.Timestamptz(3)
+  disconnectedAt        DateTime? @map("disconnected_at") @db.Timestamptz(3)
+  expiresAt             DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, channelConnectionId, sessionKeyHash], map: "sdk_presence_tenant_connection_session_key")
+  @@index([connected, expiresAt], map: "sdk_presence_connected_expires_idx")
+  @@index([tenantId, subjectId, lastSeenAt], map: "sdk_presence_tenant_subject_seen_idx")
+  @@map("sdk_visitor_presence_sessions")
+}
+
+model AiSuggestionDecision {
+  decisionId       String   @map("decision_id")
+  tenantId         String   @map("tenant_id")
+  suggestionId     String   @map("suggestion_id")
+  conversationId   String   @map("conversation_id")
+  action           String
+  originalText     String   @map("original_text")
+  originalTextHash String   @map("original_text_hash")
+  finalText        String?  @map("final_text")
+  finalTextHash    String?  @map("final_text_hash")
+  operatorId       String   @map("operator_id")
+  operatorName     String?  @map("operator_name")
+  providerId       String?  @map("provider_id")
+  providerResultId String?  @map("provider_result_id")
+  scoringAuditId   String?  @map("scoring_audit_id")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([tenantId, decisionId], map: "ai_suggestion_decisions_pkey")
+  @@unique([tenantId, suggestionId], map: "ai_suggestion_decisions_tenant_suggestion_key")
+  @@index([tenantId, conversationId, createdAt], map: "ai_suggestion_decisions_tenant_conversation_created_idx")
+  @@index([tenantId, action, createdAt], map: "ai_suggestion_decisions_tenant_action_created_idx")
+  @@index([tenantId, providerId, providerResultId], map: "ai_suggestion_decisions_tenant_provider_result_idx")
+  @@map("ai_suggestion_decisions")
 }
 
 model PlatformTelemetrySample {
@@ -1696,6 +2635,21 @@ model PlatformOutboxRow {
   @@map("platform_outbox_rows")
 }
 
+model PlatformRuntimeRecord {
+  id         String   @id
+  collection String
+  entityKey  String   @map("entity_key")
+  filterKey  String?  @map("filter_key")
+  record     Json
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([collection, entityKey], map: "platform_runtime_records_collection_entity_key_key")
+  @@index([collection, filterKey, updatedAt], map: "platform_runtime_records_collection_filter_updated_idx")
+  @@index([collection, updatedAt], map: "platform_runtime_records_collection_updated_idx")
+  @@map("platform_runtime_records")
+}
+
 model OperationsPostgresRestoreCheckResult {
   id             String   @id
   drillId        String   @map("drill_id")
@@ -1729,6 +2683,21 @@ model OperationsObjectStorageRestoreCheckResult {
   @@map("operations_object_storage_restore_check_results")
 }
 
+model OperationsRuntimeRecord {
+  id         String   @id
+  collection String
+  entityKey  String   @map("entity_key")
+  filterKey  String?  @map("filter_key")
+  record     Json
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([collection, entityKey], map: "operations_runtime_records_collection_entity_key_key")
+  @@index([collection, filterKey, updatedAt], map: "operations_runtime_records_collection_filter_updated_idx")
+  @@index([collection, updatedAt], map: "operations_runtime_records_collection_updated_idx")
+  @@map("operations_runtime_records")
+}
+
 model OutboxEvent {
   id            String    @id
   aggregateId   String    @map("aggregate_id")
@@ -1749,5 +2718,8 @@ model OutboxEvent {
 
   @@index([status, queue, occurredAt], map: "outbox_events_status_queue_occurred_at_idx")
   @@index([status, queue, nextAttemptAt], map: "outbox_events_status_queue_next_attempt_at_idx")
+  @@index([status, queue, deadLetteredAt], map: "outbox_events_status_queue_dead_lettered_at_idx")
+  @@index([status, queue, lockedAt], map: "outbox_events_status_queue_locked_at_idx")
+  @@index([status, queue, publishedAt], map: "outbox_events_status_queue_published_at_idx")
   @@map("outbox_events")
 }

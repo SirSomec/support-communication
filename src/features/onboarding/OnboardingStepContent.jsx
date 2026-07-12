@@ -4,9 +4,6 @@ import {
   Gauge,
   KeyRound,
   Mail,
-  MessageSquare,
-  Send,
-  ShieldCheck,
   UserPlus,
   Users,
   X
@@ -22,7 +19,6 @@ export function OnboardingStepContent({
   handleAddEmployee,
   handleGenerateSlug,
   handleRemoveEmployee,
-  handleSendTest,
   limits,
   plan,
   setAdmin,
@@ -31,9 +27,7 @@ export function OnboardingStepContent({
   setNotice,
   setPlan,
   setTenant,
-  setTest,
-  tenant,
-  test
+  tenant
 }) {
   return (
     <>
@@ -302,42 +296,6 @@ export function OnboardingStepContent({
                     <span>Список приглашений пока пуст.</span>
                   </div>
                 )}
-              </div>
-            </div>
-          ) : null}
-
-          {activeStep === "test" ? (
-            <div className="onboarding-step">
-              <StepHeading
-                icon={<Send size={20} />}
-                title="Тестовое сообщение"
-                text="Отправьте тестовое сообщение, чтобы подтвердить готовность организации перед завершением."
-              />
-              <form className="onboarding-test-form" onSubmit={handleSendTest}>
-                <label className="onboarding-field">
-                  <span>Получатель</span>
-                  <input
-                    onChange={(event) => setTest((current) => ({ ...current, recipient: event.target.value, status: "idle" }))}
-                    placeholder="qa@company.ru"
-                    type="email"
-                    value={test.recipient}
-                  />
-                </label>
-                <label className="onboarding-field wide">
-                  <span>Сообщение</span>
-                  <textarea
-                    onChange={(event) => setTest((current) => ({ ...current, message: event.target.value, status: "idle" }))}
-                    value={test.message}
-                  />
-                </label>
-                <button className="onboarding-inline-primary" type="submit">
-                  <MessageSquare size={17} />
-                  Отправить тест
-                </button>
-              </form>
-              <div className={`onboarding-test-result ${test.status}`}>
-                <ShieldCheck size={18} />
-                <span>{test.log || "Тест еще не отправлен."}</span>
               </div>
             </div>
           ) : null}

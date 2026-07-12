@@ -12,7 +12,8 @@ import { IntegrationRepository } from "../apps/api-gateway/dist/integrations/int
 import {
   handleTelegramWebhookFromRoute,
   loadTelegramWebhookConfig,
-  resolveOrCreateTelegramConversation
+  resolveOrCreateTelegramConversation,
+  telegramConversationId
 } from "../apps/api-gateway/dist/integrations/telegram-webhook.route.js";
 import { ConversationService } from "../apps/api-gateway/dist/conversation/conversation.service.js";
 
@@ -52,12 +53,25 @@ describe("telegram webhook ingress contracts", () => {
     assert.equal(response.status, "ok");
     assert.equal(response.data.accepted, true);
     assert.equal(response.data.chatId, "99887766");
-    assert.equal(response.data.conversationId, "99887766");
+    const conversationId = telegramConversationId(TENANT_ID, "123456789", "99887766");
+    assert.equal(response.data.conversationId, conversationId);
 
-    const conversation = await ConversationRepository.default().findConversation("99887766");
+    const repository = ConversationRepository.default();
+    const conversation = await repository.findConversation(conversationId);
     assert.ok(conversation);
     assert.equal(conversation?.channel, "Telegram");
+    assert.equal(conversation?.phone, "99887766");
     assert.equal(conversation?.tenantId, TENANT_ID);
+
+    const lifecycleEvents = await repository.listLifecycleEvents({ conversationId, tenantId: TENANT_ID });
+    assert.deepEqual(lifecycleEvents.map((event) => event.eventType).sort(), ["conversation.created", "message.received"].sort());
+    const realtimeEvents = (await repository.listRealtimeEvents({ tenantId: TENANT_ID }))
+      .filter((event) => event.resourceId === conversationId);
+    assert.deepEqual(realtimeEvents.map((event) => event.eventName).sort(), ["conversation.created", "message.created"].sort());
+    assert.equal(lifecycleEvents[0]?.sourceEventId, realtimeEvents[0]?.eventId);
+    assert.equal(lifecycleEvents[0]?.traceId, realtimeEvents[0]?.traceId);
+    assert.equal(lifecycleEvents[1]?.sourceEventId, realtimeEvents[1]?.eventId);
+    assert.equal(lifecycleEvents[1]?.traceId, realtimeEvents[1]?.traceId);
     assert.equal(conversation?.messages.at(-1)?.text, "Здравствуйте, где мой заказ?");
   });
 
@@ -117,9 +131,16 @@ describe("telegram webhook ingress contracts", () => {
 
     assert.equal(first.status, "ok");
     assert.equal(duplicate.data.duplicate, true);
+
+    const conversationId = telegramConversationId(TENANT_ID, "123456789", "112233");
+    const lifecycleEvents = await repository.listLifecycleEvents({ conversationId, tenantId: TENANT_ID });
+    assert.deepEqual(lifecycleEvents.map((event) => event.eventType).sort(), ["conversation.created", "message.received"].sort());
+    const realtimeEvents = (await repository.listRealtimeEvents({ tenantId: TENANT_ID }))
+      .filter((event) => event.resourceId === conversationId);
+    assert.deepEqual(realtimeEvents.map((event) => event.eventName).sort(), ["conversation.created", "message.created"].sort());
   });
 
-  it("resolveOrCreateTelegramConversation uses chat id as conversation id for outbound delivery", async () => {
+  it("uses a tenant-scoped conversation id and keeps provider chat id for outbound delivery", async () => {
     const repository = ConversationRepository.inMemory();
     const conversation = await resolveOrCreateTelegramConversation({
       chatId: "55667788",
@@ -130,9 +151,82 @@ describe("telegram webhook ingress contracts", () => {
     });
 
     assert.ok(conversation);
-    assert.equal(conversation?.id, "55667788");
+    assert.equal(conversation?.id, telegramConversationId(TENANT_ID, undefined, "55667788"));
+    assert.equal(conversation?.phone, "55667788");
     assert.equal(conversation?.channel, "Telegram");
     assert.ok(conversation?.tags.includes("telegram"));
+
+    const lifecycleEvents = await repository.listLifecycleEvents({
+      conversationId: String(conversation?.id),
+      tenantId: TENANT_ID
+    });
+    assert.deepEqual(lifecycleEvents.map((event) => event.eventType), ["conversation.created"]);
+    const realtimeEvents = await repository.listRealtimeEvents({ tenantId: TENANT_ID });
+    assert.deepEqual(realtimeEvents.map((event) => event.eventName), ["conversation.created"]);
+  });
+
+  it("accepts an idempotent CSAT callback only for the canonical assigned conversation", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+    const integrationRepository = IntegrationRepository.inMemory(seedTelegramIntegrationState());
+    const config = loadTelegramWebhookConfig({ TELEGRAM_WEBHOOK_ENABLED: "true" });
+    const conversation = await resolveOrCreateTelegramConversation({
+      botId: "123456789",
+      chatId: "445566",
+      conversationRepository: repository,
+      displayName: "Rated Client",
+      tenantId: TENANT_ID
+    });
+    assert.ok(conversation);
+    await repository.saveConversation({ ...conversation!, operatorId: "operator-1", operatorName: "Operator One" });
+    const ratings: Array<Record<string, unknown>> = [];
+
+    const response = await handleTelegramWebhookFromRoute({
+      body: {
+        callback_query: { data: "quality:csat:5", id: "callback-55", message: { chat: { id: 445566 } } },
+        update_id: 9055
+      },
+      conversationRepository: repository,
+      conversationService: conversations,
+      headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+      integrationRepository,
+      recordQualityRating: async (payload) => {
+        ratings.push(payload);
+        return { data: { ratingId: "rating-55" }, error: null, meta: {}, operation: "record", service: "quality", status: "ok", traceId: "trace-rating" } as any;
+      }
+    }, config);
+
+    assert.equal(response.status, "ok");
+    assert.equal(response.data.ratingId, "rating-55");
+    assert.equal(ratings[0]?.conversationId, conversation!.id);
+    assert.equal(ratings[0]?.operator, "operator-1");
+    assert.equal(ratings[0]?.score, 5);
+    assert.equal(ratings[0]?.idempotencyKey, "telegram:123456789:callback-55");
+  });
+
+  it("keeps an active bot dialog unassigned and assigns it after bot handoff", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+    const integrationRepository = IntegrationRepository.inMemory(seedTelegramIntegrationState());
+    const config = loadTelegramWebhookConfig({ TELEGRAM_WEBHOOK_ENABLED: "true" });
+    let assignments = 0;
+    const input = (updateId: number, status: "active" | "handoff") => ({
+      autoAssignConversation: async () => { assignments += 1; return { data: {}, meta: {}, operation: "assign", service: "routing", status: "ok", traceId: "trace-assign" } as any; },
+      body: { message: { chat: { id: 778899 }, from: { first_name: "Bot Client" }, message_id: updateId, text: `message-${updateId}` }, update_id: updateId },
+      conversationRepository: repository,
+      conversationService: conversations,
+      headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+      integrationRepository,
+      runBotRuntime: async () => ({ instance: { status }, outcome: "committed" })
+    });
+
+    const active = await handleTelegramWebhookFromRoute(input(9101, "active"), config);
+    const handoff = await handleTelegramWebhookFromRoute(input(9102, "handoff"), config);
+
+    assert.equal(active.data.botRuntime?.status, "active");
+    assert.equal(active.data.autoAssignment, null);
+    assert.equal(handoff.data.botRuntime?.status, "handoff");
+    assert.equal(assignments, 1);
   });
 });
 

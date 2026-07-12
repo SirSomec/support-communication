@@ -1,15 +1,36 @@
 import { randomUUID } from "node:crypto";
+import {
+  createPrismaBillingSyncQueueSummaryStore,
+  createPrismaClient,
+  createPrismaOutboxQueueSummaryStore,
+  type BillingSyncQueueSummary,
+  type BillingSyncQueueSummaryStore,
+  type PrismaBillingSyncJobClient,
+  type PrismaOutboxClient,
+  type OutboxQueueSummary,
+  type OutboxQueueSummaryStore,
+  type StoredBillingSyncJob
+} from "@support-communication/database";
 import { createEnvelope, redactExportedDescriptor, type BackendEnvelope } from "@support-communication/envelope";
+import type { StoredOutboxEvent } from "@support-communication/events";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import {
+  AutomationRepository,
+  type AutomationProactiveDeliveryAttempt
+} from "../automation/automation.repository.js";
 import { type ServiceAdminActor } from "../identity/service-admin-auth.js";
 import {
-  backupDrills,
-  deadLetterMessages,
-  deadLetterQueues,
-  loadTestScenarios,
-  migrationCandidates,
-  securityControls
-} from "./operations.fixtures.js";
+  IntegrationRepository,
+  type PublicDemoRequestNotificationDescriptor,
+  type PublicDemoRequestNotificationDescriptorSummary,
+  type WebhookDeliveryJournalEntry
+} from "../integrations/integration.repository.js";
+import {
+  NotificationRepository,
+  type NotificationDeliveryDescriptor
+} from "../notifications/notification.repository.js";
+import { ReportRepository, type ScheduledDigestDescriptorRecord } from "../reports/report.repository.js";
+import type { ReportExportJob } from "../reports/report.types.js";
 import {
   OperationsRepository,
   type OperationsDeadLetterReplayRecord,
@@ -17,6 +38,7 @@ import {
   type OperationsMigrationRollbackCheckRecord,
   type OperationsRestoreCheckRecord
 } from "./operations.repository.js";
+import type { WorkerObservability } from "./operations.types.js";
 import {
   runDeadLetterReplayWorker,
   runMigrationRollbackTooling,
@@ -74,13 +96,22 @@ interface IdempotencyEntry {
   result: Record<string, unknown>;
 }
 
+interface WorkerQueueObservabilitySource extends BillingSyncQueueSummaryStore, OutboxQueueSummaryStore {}
+
 export class OperationsReadinessService {
   private readonly loadTestIdempotency: Map<string, IdempotencyEntry>;
   private readonly restoreCheckIdempotency: Map<string, IdempotencyEntry>;
   private readonly deadLetterIdempotency: Map<string, IdempotencyEntry>;
 
-  constructor(private readonly operationsRepository = OperationsRepository.default()) {
-    const state = this.operationsRepository.readState();
+  constructor(
+    private readonly operationsRepository = OperationsRepository.default(),
+    private readonly integrationRepository = IntegrationRepository.default(),
+    private readonly notificationRepository = NotificationRepository.default(),
+    private readonly reportRepository = ReportRepository.default(),
+    private readonly queueObservabilitySource = createDefaultQueueObservabilitySource(),
+    private readonly automationRepository = AutomationRepository.default()
+  ) {
+    const state = readInitialOperationsState(this.operationsRepository);
     this.loadTestIdempotency = new Map(state.loadTestIdempotencyKeys.map((item) => [item.key, {
       fingerprint: item.fingerprint,
       result: clone(item.result)
@@ -96,14 +127,22 @@ export class OperationsReadinessService {
   }
 
   async fetchReadinessDashboard(filters: ReadinessFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const loadTests = filterByDomain(loadTestScenarios, filters.domain);
-    const drills = filterByDomain(backupDrills, filters.domain);
-    const queues = filterByDomain(deadLetterQueues, filters.domain);
+    const loadTests = filterByDomain(this.operationsRepository.listLoadTestScenarios(), filters.domain);
+    const drills = filterByDomain(this.operationsRepository.listBackupDrills(), filters.domain);
+    const queues = filterByDomain(this.operationsRepository.listDeadLetterQueues(), filters.domain);
+    const workerObservability = await buildWorkerObservability(
+      this.integrationRepository,
+      this.notificationRepository,
+      this.reportRepository,
+      this.queueObservabilitySource,
+      this.automationRepository
+    );
     const blockers = [
       ...loadTests.flatMap((scenario) => scenario.blockers),
       ...drills.flatMap((drill) => drill.blockers),
       ...queues.filter((queue) => queue.status === "blocked").map((queue) => `${queue.name} dead-letter queue is blocked`),
-      ...securityControls.filter((control) => control.status === "blocked").map((control) => `${control.title} is blocked`)
+      ...workerObservability.filter((worker) => worker.health.status === "blocked").map((worker) => `${worker.queue} worker has dead-lettered deliveries`),
+      ...this.operationsRepository.listSecurityControls().filter((control) => control.status === "blocked").map((control) => `${control.title} is blocked`)
     ];
 
     return createEnvelope({
@@ -116,13 +155,14 @@ export class OperationsReadinessService {
         backupDrills: clone(drills),
         deadLetterQueues: clone(queues),
         loadTests: clone(loadTests),
-        migrationCandidates: clone(migrationCandidates),
+        migrationCandidates: clone(this.operationsRepository.listMigrationCandidates()),
         migrationPolicy: {
           compatibilityChecksRequired: true,
           requiresRollbackPlan: true,
           smokeRequiredBeforeDeploy: true
         },
-        securityControls: clone(securityControls),
+        securityControls: clone(this.operationsRepository.listSecurityControls()),
+        workerObservability: clone(workerObservability),
         summary: {
           blockers,
           productionReady: blockers.length === 0,
@@ -134,7 +174,7 @@ export class OperationsReadinessService {
 
   async queueLoadTestRun(payload: LoadTestRunPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const scenario = loadTestScenarios.find((item) => item.id === request.scenarioId);
+    const scenario = this.operationsRepository.listLoadTestScenarios().find((item) => item.id === request.scenarioId);
 
     if (!scenario) {
       return notFoundEnvelope("queueLoadTestRun", "load_test_scenario_not_found", `Load test scenario ${request.scenarioId ?? "(empty)"} was not found.`, {
@@ -149,7 +189,7 @@ export class OperationsReadinessService {
 
     const idempotencyKey = request.idempotencyKey?.trim();
     const fingerprint = JSON.stringify({ reason: normalizeReason(request.reason), scenarioId: scenario.id });
-    const persistedCached = idempotencyKey ? this.operationsRepository.findLoadTestIdempotencyKey(idempotencyKey) : undefined;
+    const persistedCached = idempotencyKey ? await this.operationsRepository.findLoadTestIdempotencyKeyAsync(idempotencyKey) : undefined;
     const cached = persistedCached ?? (idempotencyKey ? this.loadTestIdempotency.get(idempotencyKey) : undefined);
     if (cached) {
       if (cached.fingerprint !== fingerprint) {
@@ -182,10 +222,10 @@ export class OperationsReadinessService {
       reason: normalizeReason(request.reason),
       run: runDescriptor
     };
-    const persistedResult = this.operationsRepository.saveLoadTestRun(result as OperationsLoadTestRunRecord);
+    const persistedResult = await this.operationsRepository.saveLoadTestRunAsync(result as OperationsLoadTestRunRecord);
 
     if (idempotencyKey) {
-      const saved = this.operationsRepository.saveLoadTestIdempotencyKey({ key: idempotencyKey, fingerprint, result: { ...clone(persistedResult) } });
+      const saved = await this.operationsRepository.saveLoadTestIdempotencyKeyAsync({ key: idempotencyKey, fingerprint, result: { ...clone(persistedResult) } });
       this.loadTestIdempotency.set(idempotencyKey, {
         fingerprint: saved.fingerprint,
         result: clone(saved.result)
@@ -197,7 +237,7 @@ export class OperationsReadinessService {
 
   async queueRestoreCheck(payload: RestoreCheckPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const drill = backupDrills.find((item) => item.id === request.drillId);
+    const drill = this.operationsRepository.listBackupDrills().find((item) => item.id === request.drillId);
 
     if (!drill) {
       return notFoundEnvelope("queueRestoreCheck", "backup_drill_not_found", `Backup drill ${request.drillId ?? "(empty)"} was not found.`, {
@@ -212,7 +252,7 @@ export class OperationsReadinessService {
 
     const idempotencyKey = request.idempotencyKey?.trim();
     const fingerprint = JSON.stringify({ drillId: drill.id, reason: normalizeReason(request.reason) });
-    const persistedCached = idempotencyKey ? this.operationsRepository.findRestoreCheckIdempotencyKey(idempotencyKey) : undefined;
+    const persistedCached = idempotencyKey ? await this.operationsRepository.findRestoreCheckIdempotencyKeyAsync(idempotencyKey) : undefined;
     const cached = persistedCached ?? (idempotencyKey ? this.restoreCheckIdempotency.get(idempotencyKey) : undefined);
     if (cached) {
       if (cached.fingerprint !== fingerprint) {
@@ -249,10 +289,10 @@ export class OperationsReadinessService {
       restoreCheck: restoreCheckDescriptor,
       workerResults
     };
-    const persistedResult = this.operationsRepository.saveRestoreCheck(result as OperationsRestoreCheckRecord);
+    const persistedResult = await this.operationsRepository.saveRestoreCheckAsync(result as OperationsRestoreCheckRecord);
 
     if (idempotencyKey) {
-      const saved = this.operationsRepository.saveRestoreCheckIdempotencyKey({ key: idempotencyKey, fingerprint, result: { ...clone(persistedResult) } });
+      const saved = await this.operationsRepository.saveRestoreCheckIdempotencyKeyAsync({ key: idempotencyKey, fingerprint, result: { ...clone(persistedResult) } });
       this.restoreCheckIdempotency.set(idempotencyKey, {
         fingerprint: saved.fingerprint,
         result: clone(saved.result)
@@ -264,7 +304,7 @@ export class OperationsReadinessService {
 
   async checkMigrationRollback(payload: RollbackCheckPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const migration = migrationCandidates.find((item) => item.id === request.migrationId);
+    const migration = this.operationsRepository.listMigrationCandidates().find((item) => item.id === request.migrationId);
 
     if (!migration) {
       return notFoundEnvelope("checkMigrationRollback", "migration_not_found", `Migration ${request.migrationId ?? "(empty)"} was not found.`, {
@@ -277,7 +317,7 @@ export class OperationsReadinessService {
       return validation;
     }
 
-    const toolingExecution = runMigrationRollbackTooling({
+    const toolingExecution = await runMigrationRollbackTooling({
       migration,
       operationsRepository: this.operationsRepository,
       reason: normalizeReason(request.reason) ?? ""
@@ -303,7 +343,7 @@ export class OperationsReadinessService {
       toolingResults: clone(toolingExecution.toolingResults),
       toolingStatus: toolingExecution.result.status
     };
-    const persistedResult = this.operationsRepository.saveMigrationRollbackCheck({
+    const persistedResult = await this.operationsRepository.saveMigrationRollbackCheckAsync({
       ...result,
       compatibilityChecks: compatibilityChecks as unknown as Array<Record<string, unknown>>
     } as OperationsMigrationRollbackCheckRecord);
@@ -319,9 +359,9 @@ export class OperationsReadinessService {
   }
 
   async fetchDeadLetterDashboard(filters: DeadLetterFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const queues = deadLetterQueues.filter((queue) => !filters.queue || filters.queue === "all" || queue.name === filters.queue || queue.id === filters.queue);
+    const queues = this.operationsRepository.listDeadLetterQueues().filter((queue) => !filters.queue || filters.queue === "all" || queue.name === filters.queue || queue.id === filters.queue);
     const queueIds = new Set(queues.map((queue) => queue.id));
-    const messages = deadLetterMessages.filter((message) => queueIds.has(message.queueId));
+    const messages = this.operationsRepository.listDeadLetterMessages().filter((message) => queueIds.has(message.queueId));
 
     return createEnvelope({
       service: OPERATIONS_SERVICE,
@@ -344,7 +384,7 @@ export class OperationsReadinessService {
 
   async replayDeadLetterMessage(payload: DeadLetterReplayPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const message = deadLetterMessages.find((item) => item.id === request.messageId);
+    const message = this.operationsRepository.listDeadLetterMessages().find((item) => item.id === request.messageId);
 
     if (!message) {
       return notFoundEnvelope("replayDeadLetterMessage", "dead_letter_message_not_found", `Dead-letter message ${request.messageId ?? "(empty)"} was not found.`, {
@@ -379,7 +419,7 @@ export class OperationsReadinessService {
       );
     }
 
-    const persistedReplay = findPersistedDeadLetterReplay(this.operationsRepository, workerResult.replay.id);
+    const persistedReplay = await findPersistedDeadLetterReplay(this.operationsRepository, workerResult.replay.id);
     const result = {
       auditEvent: persistedReplay?.auditEvent ?? auditEvent("operations.dead_letter.replay", message.id, request.reason, request.actor),
       backendItem: workerResult.backendItem,
@@ -404,7 +444,7 @@ export class OperationsReadinessService {
       });
     }
 
-    const controls = securityControls.filter((control) => !filters.area || filters.area === "all" || control.area === filters.area);
+    const controls = this.operationsRepository.listSecurityControls().filter((control) => !filters.area || filters.area === "all" || control.area === filters.area);
 
     return createEnvelope({
       service: OPERATIONS_SERVICE,
@@ -425,11 +465,415 @@ export class OperationsReadinessService {
   }
 }
 
-function findPersistedDeadLetterReplay(
+async function findPersistedDeadLetterReplay(
   operationsRepository: OperationsRepository,
   replayId: string
-): OperationsDeadLetterReplayRecord | undefined {
-  return operationsRepository.readState().deadLetterReplays.find((item) => item.replay.id === replayId);
+): Promise<OperationsDeadLetterReplayRecord | undefined> {
+  return operationsRepository.findDeadLetterReplayAsync(replayId);
+}
+
+function readInitialOperationsState(operationsRepository: OperationsRepository) {
+  try {
+    return operationsRepository.readState();
+  } catch (error) {
+    if (error instanceof Error && error.message === "prisma_operations_async_required") {
+      return {
+        deadLetterReplayIdempotencyKeys: [],
+        loadTestIdempotencyKeys: [],
+        restoreCheckIdempotencyKeys: []
+      };
+    }
+    throw error;
+  }
+}
+
+let cachedDefaultQueueObservabilitySource: WorkerQueueObservabilitySource | null = null;
+
+function createDefaultQueueObservabilitySource(): WorkerQueueObservabilitySource {
+  if (cachedDefaultQueueObservabilitySource) {
+    return cachedDefaultQueueObservabilitySource;
+  }
+
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    cachedDefaultQueueObservabilitySource = emptyQueueObservabilitySource();
+    return cachedDefaultQueueObservabilitySource;
+  }
+
+  const client = createPrismaClient({ datasourceUrl: databaseUrl }) as PrismaBillingSyncJobClient & PrismaOutboxClient;
+  const outboxSummaryStore = createPrismaOutboxQueueSummaryStore(client);
+  const billingSyncSummaryStore = createPrismaBillingSyncQueueSummaryStore(client);
+  cachedDefaultQueueObservabilitySource = {
+    summarizeBillingSyncQueue: billingSyncSummaryStore.summarizeBillingSyncQueue,
+    summarizeOutboxQueue: outboxSummaryStore.summarizeOutboxQueue
+  };
+
+  return cachedDefaultQueueObservabilitySource;
+}
+
+function emptyQueueObservabilitySource(): WorkerQueueObservabilitySource {
+  return {
+    async summarizeBillingSyncQueue({ queue }: { queue: string }): Promise<BillingSyncQueueSummary> {
+      return {
+        deadLetterCount: 0,
+        latestJob: null,
+        queue,
+        queueDepth: 0
+      };
+    },
+    async summarizeOutboxQueue({ queue }: { queue: string }): Promise<OutboxQueueSummary> {
+      return {
+        deadLetterCount: 0,
+        latestEvent: null,
+        queue,
+        queueDepth: 0
+      };
+    }
+  };
+}
+
+async function buildWorkerObservability(
+  integrationRepository: IntegrationRepository,
+  notificationRepository: NotificationRepository,
+  reportRepository: ReportRepository,
+  queueObservabilitySource: WorkerQueueObservabilitySource,
+  automationRepository: AutomationRepository
+): Promise<WorkerObservability[]> {
+  const [
+    webhookDeliveryJournal,
+    leadNotificationSummary,
+    browserPushDescriptors,
+    reportExportJobs,
+    scheduledDigestDescriptors,
+    outboxSummary,
+    fileScanSummary,
+    billingSyncSummary,
+    proactiveDeliveryAttempts
+  ] = await Promise.all([
+    integrationRepository.listWebhookDeliveryJournalAsync(),
+    integrationRepository.summarizePublicDemoRequestNotificationDescriptorsAsync({ queue: "lead-notification" }),
+    notificationRepository.listNotificationDeliveryDescriptorsAsync({ queue: "browser-push" }),
+    reportRepository.listExportJobsAsync(),
+    reportRepository.listScheduledDigestDescriptorsAsync(),
+    queueObservabilitySource.summarizeOutboxQueue({ queue: "message-delivery" }),
+    queueObservabilitySource.summarizeOutboxQueue({ queue: "file-scan" }),
+    queueObservabilitySource.summarizeBillingSyncQueue({ queue: "billing-sync" }),
+    automationRepository.listProactiveDeliveryAttemptsAsync()
+  ]);
+  return [
+    ...(webhookDeliveryJournal.length ? [buildWebhookDeliveryWorkerObservability(webhookDeliveryJournal)] : []),
+    buildLeadNotificationWorkerObservability(leadNotificationSummary),
+    buildNotificationDeliveryWorkerObservability(browserPushDescriptors),
+    buildReportExportWorkerObservability(reportExportJobs),
+    buildReportDigestWorkerObservability(scheduledDigestDescriptors),
+    buildProactiveDeliveryWorkerObservability(proactiveDeliveryAttempts),
+    buildOutboxWorkerObservability(outboxSummary),
+    buildFileScanScannerWorkerObservability(fileScanSummary),
+    buildBillingSyncWorkerObservability(billingSyncSummary)
+  ];
+}
+
+function buildProactiveDeliveryWorkerObservability(
+  attempts: AutomationProactiveDeliveryAttempt[]
+): WorkerObservability {
+  const runningStatuses = new Set(["claimed", "planning", "running"]);
+  const failedStatuses = new Set(["dead_lettered", "failed"]);
+  const queueDepth = attempts.filter((attempt) => runningStatuses.has(attempt.status)).length;
+  const deadLetterCount = attempts.filter((attempt) => failedStatuses.has(attempt.status)).length;
+  const latest = [...attempts].sort((left, right) => right.attemptedAt.localeCompare(left.attemptedAt))[0];
+  const updatedAt = latest ? normalizeTimestamp(latest.attemptedAt) : new Date(0).toISOString();
+
+  return {
+    deadLetterCount,
+    evidenceSource: "automation.proactiveDeliveryAttempts",
+    health: workerQueueHealth(queueDepth, deadLetterCount),
+    lastDelivery: latest ? {
+      attemptedAt: updatedAt,
+      deliveryId: latest.descriptorId,
+      eventType: `proactive.delivery.${latest.status}`,
+      status: latest.status,
+      traceId: latest.traceId
+    } : null,
+    queue: "proactive-delivery",
+    queueDepth,
+    updatedAt,
+    workerId: "proactive-delivery-worker"
+  };
+}
+
+function buildWebhookDeliveryWorkerObservability(journal: WebhookDeliveryJournalEntry[]): WorkerObservability {
+  const queueDepth = journal.filter((entry) => ["queued", "retry_scheduled", "publishing"].includes(entry.status)).length;
+  const deadLetterCount = journal.filter((entry) => entry.status === "dead_lettered").length;
+  const latest = [...journal].sort((left, right) => deliveryJournalTimestamp(right).localeCompare(deliveryJournalTimestamp(left)))[0];
+  const updatedAt = latest ? deliveryJournalTimestamp(latest) : new Date(0).toISOString();
+
+  return {
+    deadLetterCount,
+    evidenceSource: "integration.webhookDeliveryJournal",
+    health: workerQueueHealth(queueDepth, deadLetterCount),
+    lastDelivery: latest ? {
+      attemptedAt: updatedAt,
+      deliveryId: latest.deliveryId,
+      eventType: latest.eventType,
+      status: latest.status,
+      traceId: latest.traceId
+    } : null,
+    queue: "webhook-delivery",
+    queueDepth,
+    updatedAt,
+    workerId: "webhook-delivery-worker"
+  };
+}
+
+function deliveryJournalTimestamp(entry: WebhookDeliveryJournalEntry): string {
+  return entry.lastAttemptAt ?? entry.lockedAt ?? entry.nextAttemptAt ?? entry.createdAt;
+}
+
+function buildLeadNotificationWorkerObservability(summary: PublicDemoRequestNotificationDescriptorSummary): WorkerObservability {
+  const latest = summary.latestDescriptor;
+  const updatedAt = latest ? leadNotificationTimestamp(latest) : new Date(0).toISOString();
+
+  return {
+    deadLetterCount: summary.deadLetterCount,
+    evidenceSource: "integration.publicDemoRequestNotificationDescriptors",
+    health: workerQueueHealth(summary.queueDepth, summary.deadLetterCount),
+    lastDelivery: latest ? {
+      attemptedAt: updatedAt,
+      deliveryId: latest.id,
+      eventType: latest.type,
+      status: latest.status,
+      traceId: latest.leadId
+    } : null,
+    queue: summary.queue,
+    queueDepth: summary.queueDepth,
+    updatedAt,
+    workerId: "lead-notification-worker"
+  };
+}
+
+function leadNotificationTimestamp(descriptor: PublicDemoRequestNotificationDescriptor): string {
+  return descriptor.payload.delivery?.failedAt
+    ?? descriptor.payload.delivery?.deliveredAt
+    ?? descriptor.createdAt;
+}
+
+function buildNotificationDeliveryWorkerObservability(descriptors: NotificationDeliveryDescriptor[]): WorkerObservability {
+  const queueDepth = descriptors.filter((descriptor) => descriptor.status === "queued").length;
+  const deadLetterCount = descriptors.filter((descriptor) => descriptor.status === "failed").length;
+  const latest = [...descriptors].sort((left, right) => notificationDeliveryTimestamp(right).localeCompare(notificationDeliveryTimestamp(left)))[0];
+  const updatedAt = latest ? notificationDeliveryTimestamp(latest) : new Date(0).toISOString();
+
+  return {
+    deadLetterCount,
+    evidenceSource: "notifications.deliveryDescriptors",
+    health: workerQueueHealth(queueDepth, deadLetterCount),
+    lastDelivery: latest ? {
+      attemptedAt: updatedAt,
+      deliveryId: latest.id,
+      eventType: latest.type,
+      status: latest.status,
+      traceId: latest.traceId
+    } : null,
+    queue: "browser-push",
+    queueDepth,
+    updatedAt,
+    workerId: "notification-delivery-worker"
+  };
+}
+
+function notificationDeliveryTimestamp(descriptor: NotificationDeliveryDescriptor): string {
+  return descriptor.deliveredAt
+    ?? descriptor.failedAt
+    ?? descriptor.updatedAt
+    ?? descriptor.nextAttemptAt
+    ?? descriptor.createdAt;
+}
+
+function buildReportExportWorkerObservability(jobs: ReportExportJob[]): WorkerObservability {
+  const queueJobs = jobs.filter((job) => reportExportQueue(job) === "report-export");
+  const deadLetterJobs = queueJobs.filter(isReportExportDeadLettered);
+  const queueDepth = queueJobs.filter((job) => job.statusKey === "queued" || job.statusKey === "running").length;
+  const deadLetterCount = deadLetterJobs.length;
+  const evidenceJobs = deadLetterJobs.length ? deadLetterJobs : queueJobs;
+  const latest = [...evidenceJobs].sort((left, right) => compareReportExportTimestamps(right, left))[0];
+  const updatedAt = latest ? reportExportTimestamp(latest) : new Date(0).toISOString();
+
+  return {
+    deadLetterCount,
+    evidenceSource: "reports.exportJobs",
+    health: workerQueueHealth(queueDepth, deadLetterCount),
+    lastDelivery: latest ? {
+      attemptedAt: updatedAt,
+      deliveryId: latest.id,
+      eventType: "report.export",
+      status: latest.statusKey,
+      traceId: latest.backendQueueId ?? latest.auditId
+    } : null,
+    queue: "report-export",
+    queueDepth,
+    updatedAt,
+    workerId: "report-export-worker"
+  };
+}
+
+function buildReportDigestWorkerObservability(descriptors: ScheduledDigestDescriptorRecord[]): WorkerObservability {
+  const queueDepth = descriptors.filter((descriptor) => descriptor.status === "due" || descriptor.status === "running").length;
+  const deadLetterDescriptors = descriptors.filter((descriptor) => descriptor.status === "failed");
+  const deadLetterCount = deadLetterDescriptors.length;
+  const evidenceDescriptors = deadLetterDescriptors.length ? deadLetterDescriptors : descriptors;
+  const latest = [...evidenceDescriptors].sort((left, right) => compareScheduledDigestTimestamps(right, left))[0];
+  const updatedAt = latest ? scheduledDigestTimestamp(latest) : new Date(0).toISOString();
+
+  return {
+    deadLetterCount,
+    evidenceSource: "reports.scheduledDigestDescriptors",
+    health: workerQueueHealth(queueDepth, deadLetterCount),
+    lastDelivery: latest ? {
+      attemptedAt: updatedAt,
+      deliveryId: latest.id,
+      eventType: "report.digest",
+      status: latest.status,
+      traceId: `${latest.scheduleId}:${latest.periodKey}`
+    } : null,
+    queue: "report-digest",
+    queueDepth,
+    updatedAt,
+    workerId: "report-digest-worker"
+  };
+}
+
+function buildOutboxWorkerObservability(summary: OutboxQueueSummary): WorkerObservability {
+  return buildOutboxQueueWorkerObservability(summary, "outbox-worker");
+}
+
+function buildFileScanScannerWorkerObservability(summary: OutboxQueueSummary): WorkerObservability {
+  return buildOutboxQueueWorkerObservability(summary, "file-scan-scanner-worker");
+}
+
+function buildOutboxQueueWorkerObservability(summary: OutboxQueueSummary, workerId: string): WorkerObservability {
+  const latest = summary.latestEvent;
+  const updatedAt = latest ? outboxQueueTimestamp(latest) : new Date(0).toISOString();
+
+  return {
+    deadLetterCount: summary.deadLetterCount,
+    evidenceSource: "database.outboxEvents",
+    health: workerQueueHealth(summary.queueDepth, summary.deadLetterCount),
+    lastDelivery: latest ? {
+      attemptedAt: updatedAt,
+      deliveryId: latest.id,
+      eventType: latest.type,
+      status: latest.status,
+      traceId: latest.traceId
+    } : null,
+    queue: summary.queue,
+    queueDepth: summary.queueDepth,
+    updatedAt,
+    workerId
+  };
+}
+
+function buildBillingSyncWorkerObservability(summary: BillingSyncQueueSummary): WorkerObservability {
+  const latest = summary.latestJob;
+  const updatedAt = latest ? billingSyncQueueTimestamp(latest) : new Date(0).toISOString();
+
+  return {
+    deadLetterCount: summary.deadLetterCount,
+    evidenceSource: "database.billingSyncJobs",
+    health: workerQueueHealth(summary.queueDepth, summary.deadLetterCount),
+    lastDelivery: latest ? {
+      attemptedAt: updatedAt,
+      deliveryId: latest.id,
+      eventType: billingSyncEventType(latest),
+      status: latest.status,
+      traceId: latest.traceId
+    } : null,
+    queue: summary.queue,
+    queueDepth: summary.queueDepth,
+    updatedAt,
+    workerId: "billing-sync-worker"
+  };
+}
+
+function reportExportQueue(job: ReportExportJob): string {
+  return typeof job.queue === "string" && job.queue.trim() ? job.queue.trim() : "report-export";
+}
+
+function reportExportTimestamp(job: ReportExportJob): string {
+  return normalizeTimestamp(job.deadLetteredAt ?? job.createdAt);
+}
+
+function isReportExportDeadLettered(job: ReportExportJob): boolean {
+  return job.statusKey === "error" || job.statusKey === "expired";
+}
+
+function compareReportExportTimestamps(left: ReportExportJob, right: ReportExportJob): number {
+  return compareTimestampStrings(reportExportTimestamp(left), reportExportTimestamp(right));
+}
+
+function scheduledDigestTimestamp(descriptor: ScheduledDigestDescriptorRecord): string {
+  return normalizeTimestamp(descriptor.updatedAt ?? descriptor.dueAt ?? descriptor.createdAt);
+}
+
+function compareScheduledDigestTimestamps(left: ScheduledDigestDescriptorRecord, right: ScheduledDigestDescriptorRecord): number {
+  return compareTimestampStrings(scheduledDigestTimestamp(left), scheduledDigestTimestamp(right));
+}
+
+function outboxQueueTimestamp(event: StoredOutboxEvent): string {
+  return event.publishedAt
+    ?? event.deadLetteredAt
+    ?? event.lockedAt
+    ?? event.nextAttemptAt
+    ?? event.occurredAt;
+}
+
+function billingSyncQueueTimestamp(job: StoredBillingSyncJob): string {
+  return job.publishedAt
+    ?? job.deadLetteredAt
+    ?? job.lockedAt
+    ?? job.nextAttemptAt
+    ?? job.createdAt;
+}
+
+function billingSyncEventType(job: StoredBillingSyncJob): string {
+  const eventType = typeof job.payload.eventType === "string" ? job.payload.eventType.trim() : "";
+  return eventType || "billing.sync";
+}
+
+function compareTimestampStrings(leftTimestamp: string, rightTimestamp: string): number {
+  const leftTime = Date.parse(leftTimestamp);
+  const rightTime = Date.parse(rightTimestamp);
+
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+
+  return leftTimestamp.localeCompare(rightTimestamp);
+}
+
+function normalizeTimestamp(value: string | null | undefined): string {
+  const time = Date.parse(value ?? "");
+  return Number.isFinite(time) ? new Date(time).toISOString() : new Date(0).toISOString();
+}
+
+function workerQueueHealth(queueDepth: number, deadLetterCount: number): WorkerObservability["health"] {
+  if (deadLetterCount > 0) {
+    return {
+      reason: "dead_lettered_deliveries_present",
+      status: "blocked"
+    };
+  }
+
+  if (queueDepth > 0) {
+    return {
+      reason: "pending_deliveries_present",
+      status: "degraded"
+    };
+  }
+
+  return {
+    reason: "no_pending_deliveries",
+    status: "healthy"
+  };
 }
 
 function apiMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {

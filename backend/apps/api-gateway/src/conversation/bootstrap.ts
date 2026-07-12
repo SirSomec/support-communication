@@ -1,5 +1,5 @@
 import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryKind, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
-import { ConversationRepository, type PrismaConversationClient } from "./conversation.repository.js";
+import { ConversationRepository, type ConversationState, type PrismaConversationClient } from "./conversation.repository.js";
 import { ConversationService } from "./conversation.service.js";
 import {
   createRealtimeFanoutAdapterFromEnv,
@@ -23,6 +23,7 @@ export interface ConversationRepositoryBootstrapSource {
 
 export interface ConversationRepositoryBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaConversationClient;
+  seed?: ConversationState;
 }
 
 export interface ConversationRealtimeFanoutBootstrapOptions {
@@ -34,7 +35,7 @@ export function configureConversationRepository(
   options: ConversationRepositoryBootstrapOptions = {}
 ): ConversationRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => ConversationRepository.open({ filePath }),
+    createJsonRepository: (filePath) => ConversationRepository.open({ filePath, seed: options.seed }),
     createPrismaRepository: (client) => ConversationRepository.prisma({ client }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "CONVERSATION_REPOSITORY",

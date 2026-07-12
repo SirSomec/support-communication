@@ -247,7 +247,7 @@ function normalizeResponseTelemetryRecord(
 ): QualityScoringResponseTelemetryRecord {
   return {
     recordedAt: record.recordedAt,
-    tenantId: bucketTenantId(record.tenantId ?? "tenant-demo", options),
+    tenantId: bucketTenantId(requireTenantId(record.tenantId), options),
     telemetry: normalizeResponseTelemetry(record.telemetry),
     telemetryId: bucketResponseTelemetryId(record.telemetryId, options)
   };
@@ -329,6 +329,14 @@ function bucketTenantId(
   }
 
   return `tenant-redacted:${hashUnsafeIdentifier(tenantId)}`;
+}
+
+function requireTenantId(tenantId: string): string {
+  const normalized = tenantId?.trim();
+  if (!normalized) {
+    throw new Error("quality_scoring_tenant_required");
+  }
+  return normalized;
 }
 
 function normalizeRequestTelemetry(

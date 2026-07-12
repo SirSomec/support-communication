@@ -14,7 +14,7 @@ export function mapApiConversation(input) {
   const channel = nonEmptyString(input?.channel, "SDK");
   const status = nonEmptyString(input?.status, "active");
   const statusMeta = getStatusMeta(status);
-  const messages = mapMessages(input?.messages);
+  const messages = mapConversationTimeline(input?.messages, input?.lifecycleEvents);
   const previewFallback = messages.at(-1)?.text ?? "";
 
   return {
@@ -37,7 +37,32 @@ export function mapApiConversation(input) {
     clientSince: nonEmptyString(input?.clientSince, DEFAULT_CLIENT_SINCE),
     tags: Array.isArray(input?.tags) ? input.tags.map((tag) => String(tag)) : [],
     previous: Array.isArray(input?.previous) ? input.previous : [],
-    messages
+    ...(nonEmptyString(input?.queueId) ? { queueId: nonEmptyString(input.queueId) } : {}),
+    ...(isRecord(input?.rescueState) ? { rescue: { ...input.rescueState } } : {}),
+    ...(nonEmptyString(input?.resolutionOutcome) ? { resolutionOutcome: nonEmptyString(input.resolutionOutcome) } : {}),
+    messages,
+    ...(nonEmptyString(input?.operatorId) ? { operatorId: nonEmptyString(input.operatorId) } : {}),
+    ...(nonEmptyString(input?.operatorName) ? { operatorName: nonEmptyString(input.operatorName) } : {}),
+    ...(nonEmptyString(input?.teamId) ? { teamId: nonEmptyString(input.teamId) } : {})
+  };
+}
+
+export function mapLifecycleEvent(input) {
+  const data = input?.data && typeof input.data === "object" ? input.data : {};
+  const detail = lifecycleEventDetail(input?.eventType, { ...data, reason: input?.reason });
+  return {
+    actor: nonEmptyString(input?.actorName, nonEmptyString(input?.actorId, "Система")),
+    createdAt: nonEmptyString(input?.occurredAt),
+    detail,
+    eventKind: nonEmptyString(input?.eventType, "event"),
+    fromStatus: nonEmptyString(data.fromStatus),
+    fromTopic: nonEmptyString(data.fromTopic),
+    id: nonEmptyString(input?.id, `lifecycle-${Date.now()}`),
+    text: detail,
+    time: mapTime(input?.occurredAt),
+    toStatus: nonEmptyString(data.toStatus),
+    toTopic: nonEmptyString(data.toTopic),
+    type: "event"
   };
 }
 
@@ -47,6 +72,11 @@ export function mapApiMessage(input) {
     text: nonEmptyString(input?.text),
     time: mapTime(input?.time)
   };
+
+  const createdAt = nonEmptyString(input?.createdAt);
+  if (createdAt) {
+    mapped.createdAt = createdAt;
+  }
 
   if (input?.side === "agent" || input?.side === "client") {
     mapped.side = input.side;
@@ -73,6 +103,57 @@ function mapMessages(messages) {
   }
 
   return messages.map((message) => mapApiMessage(message));
+}
+
+function mapConversationTimeline(messages, lifecycleEvents) {
+  const mappedMessages = mapMessages(messages);
+  if (!Array.isArray(lifecycleEvents) || lifecycleEvents.length === 0) {
+    return mappedMessages;
+  }
+  return [
+    ...mappedMessages.filter((message) => message.type !== "event"),
+    ...lifecycleEvents.map(mapLifecycleEvent)
+  ].sort((left, right) => {
+    const leftTime = Date.parse(left.createdAt ?? "");
+    const rightTime = Date.parse(right.createdAt ?? "");
+    if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return 0;
+    return leftTime - rightTime;
+  });
+}
+
+function lifecycleEventDetail(eventType, data) {
+  const labels = {
+    "assignment.changed": "Изменен ответственный оператор",
+    "conversation.created": "Создан диалог",
+    "internal_comment.created": "Добавлен внутренний комментарий",
+    "message.received": "Получено сообщение клиента",
+    "message.sent": "Отправлен ответ оператором",
+    "queue.entered": "Диалог возвращен в очередь",
+    "quality.assessment.appealed": "Оценка качества обжалована",
+    "quality.assessment.changed": "Оценка качества изменена",
+    "quality.assessment.completed": "Проверка качества завершена",
+    "quality.assessment.set": "Получена оценка качества",
+    "quality.ai-suggestion.decided": aiSuggestionDecisionDetail(data.action),
+    "rescue.auto_returned": "Диалог автоматически возвращен из спасения",
+    "rescue.resolved": "Спасение диалога завершено",
+    "rescue.started": "Запущено спасение диалога",
+    "sla.overdue": "Нарушен срок ответа",
+    "sla.paused": "Срок ответа приостановлен",
+    "sla.resumed": "Отсчет срока ответа возобновлен",
+    "status.changed": "Изменен статус диалога",
+    "topic.changed": "Изменена тема диалога"
+  };
+  const base = labels[eventType] ?? nonEmptyString(eventType, "Событие диалога");
+  return data.reason ? `${base}: ${data.reason}` : base;
+}
+
+function aiSuggestionDecisionDetail(action) {
+  const labels = {
+    accept: "AI-подсказка принята оператором",
+    edit: "AI-подсказка открыта на редактирование",
+    reject: "AI-подсказка отклонена оператором"
+  };
+  return labels[action] ?? "Оператор принял решение по AI-подсказке";
 }
 
 function mapTime(value) {
@@ -109,4 +190,8 @@ function nonEmptyString(value, fallback = "") {
 
   const normalized = value.trim();
   return normalized || fallback;
+}
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

@@ -1,11 +1,25 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
-import { createOutboxEvent } from "@support-communication/events";
+import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
-import { channelFixtures, type ConversationMessage, type ConversationRecord } from "./conversation.fixtures.js";
-import { ConversationRepository, type ConversationDeliveryReceipt, type ConversationOutboundDescriptor, type RealtimeEvent } from "./conversation.repository.js";
+import type { ConversationMessage, ConversationRecord } from "./conversation.types.js";
+import {
+  ConversationAssignmentConflictError,
+  ConversationRepository,
+  type ConversationAssignmentRecord,
+  type ConversationDeliveryReceipt,
+  type ConversationLifecycleEvent,
+  type ConversationMutationRecord,
+  type ConversationOutboundDescriptor,
+  type RealtimeEvent
+} from "./conversation.repository.js";
 import { createDisabledRealtimeFanoutAdapter, type RealtimeFanoutAdapter } from "./realtime.fanout.js";
 import { mergeRealtimeEvents } from "./realtime.merge.js";
+import { createObjectStorageSigner } from "../workspace/object-storage.js";
+import type { ObjectStorageSigner, SignedObjectStorageUrl } from "../workspace/workspace.service.js";
+import { WorkspaceRepository, type FileRecord } from "../workspace/workspace.repository.js";
+import { IdentityRepository } from "../identity/identity.repository.js";
+import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
 
 const DIALOG_SERVICE = "dialogService";
 const CHANNEL_SERVICE = "channelService";
@@ -23,22 +37,40 @@ const supportedStatuses = new Set([
   "closed",
   "reopened"
 ]);
+const supportedResolutionOutcomes = new Set([
+  "resolved",
+  "resolved_with_followup",
+  "duplicate",
+  "cancelled",
+  "spam",
+  "unresolved"
+]);
 
 interface DialogFilters {
   channel?: string;
   page?: number | string;
   pageSize?: number | string;
   query?: string;
+  queueId?: string;
   savedPresetId?: string;
   status?: string;
+  teamId?: string;
   topic?: string;
 }
 
 interface StatusPayload {
   conversationId: string;
   nextStatus?: string;
+  resolutionOutcome?: string;
   roleMode?: string;
+  reason?: string;
   topic?: string;
+}
+
+interface AssignmentPayload {
+  conversationId: string;
+  operatorId?: string;
+  reason?: string;
 }
 
 interface AppendMessagePayload {
@@ -53,6 +85,7 @@ interface UploadPayload {
   channel: string;
   fileName: string;
   idempotencyKey?: string;
+  mimeType?: string;
   sizeBytes?: number;
 }
 
@@ -66,6 +99,7 @@ interface OutboundPayload {
 }
 
 interface InboundPayload {
+  attachments?: Array<Record<string, unknown>>;
   conversationId?: string;
   eventId?: string;
   text?: string;
@@ -84,25 +118,81 @@ interface DeliveryReceiptPayload {
   traceId?: string;
 }
 
+export interface OutboundMessageDispatchRequest {
+  channel: string;
+  chatId: string;
+  conversationId: string;
+  descriptorId: string;
+  idempotencyKey: string;
+  messageId: string;
+  outboxEventId?: string | null;
+  tenantId: string;
+  text: string;
+  traceId: string;
+}
+
+export interface OutboundMessageDispatchResult {
+  providerMessageId?: string;
+  providerStatus?: number;
+  reason?: string;
+  status: "delivered" | "failed" | "skipped";
+}
+
+export interface OutboundMessageDispatcher {
+  deliverMessage(request: OutboundMessageDispatchRequest): Promise<OutboundMessageDispatchResult | void> | OutboundMessageDispatchResult | void;
+}
+
 interface ConversationServiceOptions {
+  attachmentStorage?: ConversationAttachmentStorage;
+  identityRepository?: Pick<IdentityRepository, "findTenantUsers">;
+  teamDirectoryRepository?: Pick<TeamDirectoryRepository, "findActiveTeamId">;
+  outboundMessageDispatcher?: OutboundMessageDispatcher;
   realtimeFanout?: RealtimeFanoutAdapter;
 }
 
+interface ConversationAttachmentStorage {
+  objectStorage: ObjectStorageSigner;
+  workspaceRepository: Pick<WorkspaceRepository, "findFile" | "saveFile">;
+}
+
 interface TenantScope {
+  actorId?: string;
+  actorName?: string;
+  actorType?: ConversationLifecycleEvent["actorType"];
   tenantId?: string;
 }
 
 let defaultRealtimeFanout = createDisabledRealtimeFanoutAdapter("realtime_fanout_not_configured");
+let defaultOutboundMessageDispatcher: OutboundMessageDispatcher = {
+  deliverMessage() {
+    return { status: "skipped", reason: "outbound_dispatcher_not_configured" };
+  }
+};
+
+function createDefaultAttachmentStorage(): ConversationAttachmentStorage {
+  return {
+    objectStorage: createObjectStorageSigner(),
+    workspaceRepository: WorkspaceRepository.default()
+  };
+}
 
 export class ConversationService {
+  private readonly attachmentStorage: ConversationAttachmentStorage;
+  private readonly identityRepository: Pick<IdentityRepository, "findTenantUsers">;
+  private readonly teamDirectoryRepository: Pick<TeamDirectoryRepository, "findActiveTeamId">;
   private lastRealtimeOccurredAtMs = 0;
   private readonly liveRealtimeEvents: RealtimeEvent[] = [];
+  private readonly outboundMessageDispatcher: OutboundMessageDispatcher;
   private readonly realtimeFanout: RealtimeFanoutAdapter;
 
   constructor(
     private readonly conversationRepository = ConversationRepository.default(),
     options: ConversationServiceOptions = {}
   ) {
+    this.attachmentStorage = options.attachmentStorage ?? createDefaultAttachmentStorage();
+    this.identityRepository = options.identityRepository ?? IdentityRepository.default();
+    this.teamDirectoryRepository = options.teamDirectoryRepository ?? TeamDirectoryRepository.default();
+    this.outboundMessageDispatcher = options.outboundMessageDispatcher ?? defaultOutboundMessageDispatcher;
     this.realtimeFanout = options.realtimeFanout ?? defaultRealtimeFanout;
     void this.realtimeFanout.subscribe((event) => {
       this.liveRealtimeEvents.push(event);
@@ -113,6 +203,10 @@ export class ConversationService {
 
   static useDefaultRealtimeFanout(adapter: RealtimeFanoutAdapter): void {
     defaultRealtimeFanout = adapter;
+  }
+
+  static useDefaultOutboundMessageDispatcher(dispatcher: OutboundMessageDispatcher): void {
+    defaultOutboundMessageDispatcher = dispatcher;
   }
 
   async fetchDialogs(filters: DialogFilters = {}, scope: TenantScope = {}): Promise<BackendEnvelope<{
@@ -127,6 +221,8 @@ export class ConversationService {
       }
       const statusMatches = !filters.status || filters.status === "all" || conversation.status === filters.status;
       const channelMatches = !filters.channel || filters.channel === "all" || conversation.channel.toLowerCase() === String(filters.channel).toLowerCase();
+      const queueMatches = !filters.queueId || filters.queueId === "all" || conversation.queueId === filters.queueId;
+      const teamMatches = !filters.teamId || filters.teamId === "all" || conversation.teamId === filters.teamId;
       const topicMatches = !filters.topic || filters.topic === "all" || (filters.topic === "none" ? !conversation.topic : conversation.topic === filters.topic);
       const query = String(filters.query ?? "").trim().toLowerCase();
       const queryMatches = !query || [
@@ -134,11 +230,13 @@ export class ConversationService {
         conversation.phone,
         conversation.preview,
         conversation.channel,
+        conversation.queueId ?? "",
+        conversation.teamId ?? "",
         conversation.topic,
         conversation.status
       ].some((value) => value.toLowerCase().includes(query));
 
-      return statusMatches && channelMatches && topicMatches && queryMatches;
+      return statusMatches && channelMatches && queueMatches && teamMatches && topicMatches && queryMatches;
     });
     const page = toPositiveInt(filters.page, 1);
     const pageSize = toPositiveInt(filters.pageSize, 25);
@@ -169,6 +267,11 @@ export class ConversationService {
     if (!conversation || !matchesTenantScope(conversation, scope.tenantId)) {
       return notFoundEnvelope(DIALOG_SERVICE, "fetchDialogDetail", "conversation_not_found", `Conversation ${conversationId} was not found.`, { conversationId });
     }
+    const lifecycleEvents = await this.conversationRepository.listLifecycleEvents({
+      conversationId,
+      limit: 200,
+      tenantId: conversation.tenantId
+    });
 
     return createEnvelope({
       service: DIALOG_SERVICE,
@@ -177,7 +280,194 @@ export class ConversationService {
       meta: apiMeta({ conversationId }),
       data: {
         conversation: clone(conversation),
+        lifecycleEvents: clone(lifecycleEvents),
         messages: clone(conversation.messages)
+      }
+    });
+  }
+
+  async fetchConversationTimeline(
+    conversationId: string,
+    filters: { cursor?: string; limit?: number | string; types?: string },
+    scope: TenantScope = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = String(scope.tenantId ?? "").trim();
+    if (!tenantId) return tenantContextRequiredEnvelope(DIALOG_SERVICE, "fetchConversationTimeline", { conversationId });
+    const conversation = await this.conversationRepository.findConversation(conversationId);
+    if (!conversation || !matchesTenantScope(conversation, tenantId)) {
+      return notFoundEnvelope(DIALOG_SERVICE, "fetchConversationTimeline", "conversation_not_found", `Conversation ${conversationId} was not found.`, { conversationId });
+    }
+    const limit = Math.max(1, Math.min(200, Number(filters.limit) || 50));
+    const events = await this.conversationRepository.listLifecycleEvents({
+      conversationId,
+      cursor: filters.cursor?.trim() || undefined,
+      eventTypes: String(filters.types ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+      limit,
+      tenantId
+    });
+    return createEnvelope({
+      service: DIALOG_SERVICE,
+      operation: "fetchConversationTimeline",
+      traceId: conversationTraceId(DIALOG_SERVICE, "fetchConversationTimeline"),
+      meta: apiMeta({ conversationId }),
+      data: {
+        events: clone(events),
+        nextCursor: events.length === limit ? events.at(-1)?.id ?? null : null
+      }
+    });
+  }
+
+  async fetchAssignees(scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = String(scope.tenantId ?? "").trim();
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "fetchAssignees", {});
+    }
+
+    const users = await this.identityRepository.findTenantUsers(tenantId);
+    const items = users
+      .filter((user) => user.status === "active")
+      .map((user) => ({
+        id: user.id,
+        name: user.name,
+        role: user.role
+      }));
+
+    return createEnvelope({
+      service: DIALOG_SERVICE,
+      operation: "fetchAssignees",
+      traceId: conversationTraceId(DIALOG_SERVICE, "fetchAssignees"),
+      meta: apiMeta(),
+      data: { items }
+    });
+  }
+
+  async assignConversation(payload: AssignmentPayload, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const conversation = await this.conversationRepository.findConversation(payload.conversationId);
+    if (!conversation || !matchesTenantScope(conversation, scope.tenantId)) {
+      return notFoundEnvelope(DIALOG_SERVICE, "assignConversation", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
+        conversationId: payload.conversationId
+      });
+    }
+
+    const tenantId = resolveConversationTenantId(conversation);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "assignConversation", { conversationId: conversation.id });
+    }
+    if (conversation.status === "closed") {
+      return conflictEnvelope(DIALOG_SERVICE, "assignConversation", "conversation_closed", "A closed conversation cannot be assigned.", {
+        conversationId: conversation.id
+      });
+    }
+
+    const operatorId = String(payload.operatorId ?? "").trim();
+    const reason = String(payload.reason ?? "").trim();
+    if (!operatorId) {
+      return invalidEnvelope(DIALOG_SERVICE, "assignConversation", "operator_required", "An operator is required.", {
+        conversationId: conversation.id
+      });
+    }
+    if (reason.length < 8) {
+      return invalidEnvelope(DIALOG_SERVICE, "assignConversation", "assignment_reason_too_short", "Assignment reason must contain at least 8 characters.", {
+        conversationId: conversation.id,
+        minimumLength: 8
+      });
+    }
+
+    const users = await this.identityRepository.findTenantUsers(tenantId);
+    const operator = users.find((user) => user.id === operatorId && user.status === "active");
+    if (!operator) {
+      return notFoundEnvelope(DIALOG_SERVICE, "assignConversation", "operator_not_available", `Operator ${operatorId} is not active in this tenant.`, {
+        conversationId: conversation.id,
+        operatorId
+      });
+    }
+    if (conversation.operatorId === operator.id) {
+      return conflictEnvelope(DIALOG_SERVICE, "assignConversation", "operator_unchanged", "The conversation is already assigned to this operator.", {
+        conversationId: conversation.id,
+        operatorId
+      });
+    }
+
+    const previousOperatorId = conversation.operatorId ?? null;
+    const previousOperatorName = conversation.operatorName ?? null;
+    const eventKind = previousOperatorId ? "transfer" : "assignment";
+    const occurredAt = new Date().toISOString();
+    conversation.operatorId = operator.id;
+    conversation.operatorName = operator.name;
+    conversation.teamId = await this.teamDirectoryRepository.findActiveTeamId(tenantId, operator.id)
+      ?? employeeTeamId(operator.metadata);
+    conversation.status = eventKind === "transfer" ? "transferred" : "assigned";
+    conversation.sla = statusSla(conversation.status);
+    conversation.slaTone = statusTone(conversation.status);
+    conversation.time = NOW_LABEL;
+    conversation.updatedAt = occurredAt;
+    conversation.messages.push({
+      createdAt: occurredAt,
+      id: makeMessageId(eventKind),
+      text: `${eventKind === "transfer" ? "Transferred" : "Assigned"}: ${previousOperatorName ?? "unassigned"} -> ${operator.name}. Reason: ${reason}`,
+      time: NOW_LABEL,
+      type: "event"
+    });
+
+    const realtimeEvent = this.createRealtimeEvent("conversation.updated", "conversation", conversation.id, {
+      action: eventKind,
+      fromOperatorId: previousOperatorId,
+      reason,
+      toOperatorId: operator.id
+    }, tenantId);
+    const lifecycleEvent = this.createLifecycleEvent("assignment.changed", conversation, realtimeEvent, scope, {
+      fromOperatorId: previousOperatorId,
+      fromOperatorName: previousOperatorName,
+      ...(conversation.queueId ? { queueId: conversation.queueId } : {}),
+      ...(conversation.teamId ? { teamId: conversation.teamId } : {}),
+      toOperatorId: operator.id,
+      toOperatorName: operator.name
+    }, reason);
+    let persisted: ConversationAssignmentRecord;
+    try {
+      persisted = await this.conversationRepository.assignConversation({
+        analyticsRow: {
+          channel: conversation.channel,
+          conversationId: conversation.id,
+          eventKind,
+          fromOperatorId: previousOperatorId,
+          id: makeQueueId(`analytics_${eventKind}`),
+          occurredAt,
+          source: "dialog-interface",
+          tenantId,
+          toOperatorId: operator.id
+        },
+        conversation,
+        lifecycleEvent,
+        realtimeEvent
+      });
+    } catch (error) {
+      if (error instanceof ConversationAssignmentConflictError) {
+        return conflictEnvelope(DIALOG_SERVICE, "assignConversation", error.code, "The responsible operator changed before this assignment was saved. Refresh the dialog and try again.", {
+          conversationId: conversation.id,
+          operatorId
+        });
+      }
+      throw error;
+    }
+    await this.publishRealtimeEvent(persisted.realtimeEvent);
+
+    return createEnvelope({
+      service: DIALOG_SERVICE,
+      operation: "assignConversation",
+      traceId: conversationTraceId(DIALOG_SERVICE, "assignConversation"),
+      meta: apiMeta({ conversationId: conversation.id }),
+      data: {
+        action: eventKind,
+        analyticsEventId: persisted.analyticsRow.id,
+        auditEvent: {
+          action: `conversation.${eventKind}`,
+          id: makeAuditId(eventKind),
+          immutable: true,
+          reason
+        },
+        conversation: clone(persisted.conversation),
+        realtimeEvent: persisted.realtimeEvent
       }
     });
   }
@@ -192,6 +482,11 @@ export class ConversationService {
       });
     }
 
+    const tenantId = resolveConversationTenantId(conversation);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "transitionConversationStatus", { conversationId: conversation.id });
+    }
+
     if (!supportedStatuses.has(nextStatus)) {
       return invalidEnvelope(DIALOG_SERVICE, "transitionConversationStatus", "status_unsupported", `Conversation status ${nextStatus || "(empty)"} is not supported.`, {
         conversationId: conversation.id,
@@ -199,7 +494,14 @@ export class ConversationService {
       });
     }
 
+    if (conversation.status === "closed" && nextStatus === "closed") {
+      return conflictEnvelope(DIALOG_SERVICE, "transitionConversationStatus", "conversation_already_closed", "The conversation is already closed.", {
+        conversationId: conversation.id
+      });
+    }
+
     const nextTopic = String(payload.topic ?? conversation.topic ?? "").trim();
+    const resolutionOutcome = String(payload.resolutionOutcome ?? "").trim().toLowerCase();
 
     if (nextStatus === "closed" && !nextTopic) {
       return createEnvelope({
@@ -222,9 +524,22 @@ export class ConversationService {
       });
     }
 
+    if (nextStatus === "closed" && !supportedResolutionOutcomes.has(resolutionOutcome)) {
+      return invalidEnvelope(DIALOG_SERVICE, "transitionConversationStatus", "resolution_outcome_required", "A valid resolution outcome is required before closing the dialog.", {
+        conversationId: conversation.id,
+        supportedOutcomes: [...supportedResolutionOutcomes]
+      });
+    }
+
     const previousStatus = conversation.status;
+    const previousTopic = conversation.topic;
     conversation.status = nextStatus;
     conversation.topic = nextTopic || conversation.topic;
+    if (nextStatus === "closed") {
+      conversation.resolutionOutcome = resolutionOutcome;
+    } else if (nextStatus === "reopened") {
+      conversation.resolutionOutcome = undefined;
+    }
     conversation.sla = statusSla(nextStatus);
     conversation.slaTone = statusTone(nextStatus);
     conversation.time = NOW_LABEL;
@@ -236,18 +551,50 @@ export class ConversationService {
       target: conversation.id,
       to: nextStatus
     };
-    const event = await this.recordRealtimeEvent("conversation.updated", "conversation", conversation.id, {
+    const event = this.createRealtimeEvent("conversation.updated", "conversation", conversation.id, {
       fromStatus: previousStatus,
+      resolutionOutcome: nextStatus === "closed" ? resolutionOutcome : null,
       toStatus: nextStatus,
       topic: conversation.topic
-    }, resolveConversationTenantId(conversation));
+    }, tenantId);
     conversation.messages.push({
+      createdAt: new Date().toISOString(),
       id: makeMessageId("event"),
       type: "event",
-      text: `Status changed: ${previousStatus} -> ${nextStatus}`,
+      text: `Status changed: ${previousStatus} -> ${nextStatus}${nextStatus === "closed" ? ` (${resolutionOutcome})` : ""}`,
       time: NOW_LABEL
     });
-    await this.conversationRepository.saveConversation(conversation);
+    const lifecycleEvent = this.createLifecycleEvent(
+      previousStatus === nextStatus && previousTopic !== conversation.topic ? "topic.changed" : "status.changed",
+      conversation,
+      event,
+      scope,
+      {
+        fromStatus: previousStatus,
+        fromTopic: previousTopic,
+        resolutionOutcome: nextStatus === "closed" ? resolutionOutcome : null,
+        toStatus: nextStatus,
+        toTopic: conversation.topic
+      },
+      payload.reason
+    );
+    const telegramSurvey = nextStatus === "closed" ? createTelegramCsatSurvey(conversation, event.traceId, tenantId) : null;
+    let csatSurveyDelivery: Record<string, unknown> | undefined;
+    let persisted: ConversationMutationRecord;
+    if (telegramSurvey) {
+      const queued = await this.conversationRepository.queueOutboundMessageReply({
+          conversation,
+          descriptor: telegramSurvey.descriptor,
+          lifecycleEvent,
+          outbox: telegramSurvey.outbox,
+          realtimeEvent: event
+        });
+      csatSurveyDelivery = outboundDeliveryFromDescriptor(queued.descriptor);
+      persisted = queued;
+    } else {
+      persisted = await this.conversationRepository.saveConversationMutation({ conversation, lifecycleEvent, realtimeEvent: event });
+    }
+    await this.publishRealtimeEvent(persisted.realtimeEvent);
 
     return createEnvelope({
       service: DIALOG_SERVICE,
@@ -256,10 +603,12 @@ export class ConversationService {
       meta: apiMeta({ conversationId: conversation.id }),
       data: {
         auditEvent,
-        conversation: clone(conversation),
+        conversation: clone(persisted.conversation),
         guard: "role_channel_topic",
         nextStatus,
-        realtimeEvent: event,
+        lifecycleEvent: persisted.lifecycleEvent,
+        realtimeEvent: persisted.realtimeEvent,
+        ...(csatSurveyDelivery ? { csatSurveyDelivery } : {}),
         roleMode: payload.roleMode,
         transitionId: makeQueueId("dialog_transition")
       }
@@ -273,6 +622,11 @@ export class ConversationService {
       return notFoundEnvelope(DIALOG_SERVICE, "appendMessage", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
         conversationId: payload.conversationId
       });
+    }
+
+    const tenantId = resolveConversationTenantId(conversation);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "appendMessage", { conversationId: conversation.id });
     }
 
     const text = String(payload.text ?? "").trim();
@@ -326,16 +680,51 @@ export class ConversationService {
       }
     }
 
+    const deliveryAttachments: Array<Record<string, unknown>> = [];
+    if (!internal) {
+      for (const attachment of attachments) {
+        const fileId = String(attachment.fileId ?? "").trim();
+        if (!fileId) {
+          return invalidEnvelope(DIALOG_SERVICE, "appendMessage", "attachment_file_id_required", "Every outbound attachment must reference an uploaded file.", {
+            conversationId: conversation.id
+          });
+        }
+        const file = await this.attachmentStorage.workspaceRepository.findFile(fileId, { tenantId });
+        if (!file || !attachmentFileIsReady(file)) {
+          return invalidEnvelope(DIALOG_SERVICE, "appendMessage", "attachment_not_ready", "Attachment must finish antivirus scanning before it can be sent.", {
+            conversationId: conversation.id,
+            fileId
+          });
+        }
+        const signedFile = await this.attachmentStorage.objectStorage.signDownload({
+          fileId: file.fileId,
+          fileName: file.fileName,
+          objectKey: file.objectKey,
+          tenantId
+        });
+        deliveryAttachments.push({
+          fileId,
+          fileName: file.fileName,
+          mimeType: file.mimeType,
+          sizeBytes: file.sizeBytes,
+          signedFile: signedObjectStorageUrlData(signedFile)
+        });
+      }
+    }
+
+    const messageCreatedAt = new Date().toISOString();
     const message: ConversationMessage = internal
       ? {
+          createdAt: messageCreatedAt,
           id: makeMessageId("internal"),
           type: "internal",
           text: messageText,
           attachments,
-          author: "Ivan P.",
+          author: scope.actorName ?? scope.actorId ?? "Operator",
           time: NOW_LABEL
         }
       : {
+          createdAt: messageCreatedAt,
           id: makeMessageId("agent"),
           side: "agent",
           text: messageText,
@@ -349,7 +738,7 @@ export class ConversationService {
     let event = this.createRealtimeEvent(internal ? "conversation.updated" : "message.created", "conversation", conversation.id, {
       messageId: message.id,
       mode: payload.mode ?? "reply"
-    }, resolveConversationTenantId(conversation));
+    }, tenantId);
     const auditEvent = {
       id: makeAuditId(internal ? "internal_note" : "message"),
       action: internal ? "message.internal_note.create" : "message.reply.send",
@@ -359,8 +748,13 @@ export class ConversationService {
     let outboundDelivery: Record<string, unknown> | null = null;
 
     if (internal) {
-      event = await this.appendAndPublishRealtimeEvent(event);
-      await this.conversationRepository.saveConversation(conversation);
+      const lifecycleEvent = this.createLifecycleEvent("internal_comment.created", conversation, event, scope, {
+        attachmentCount: attachments.length,
+        messageId: String(message.id)
+      });
+      const persisted = await this.conversationRepository.saveConversationMutation({ conversation, lifecycleEvent, realtimeEvent: event });
+      event = persisted.realtimeEvent;
+      await this.publishRealtimeEvent(event);
     } else {
       const descriptor = createConversationOutboundDescriptor({
         auditId: auditEvent.id,
@@ -373,14 +767,19 @@ export class ConversationService {
         messageId: String(message.id),
         payload: {
           attachmentCount: attachments.length,
+          ...(deliveryAttachments.length ? { attachments: deliveryAttachments } : {}),
+          ...(conversation.channelConnectionId ? { channelConnectionId: conversation.channelConnectionId } : {}),
           conversationId: conversation.id,
+          createdAt: message.createdAt,
           messageId: String(message.id),
+          providerConversationId: conversation.providerConversationId ?? (conversation.phone || conversation.id),
           queue: "message-delivery",
           text: message.text
         },
         requestFingerprint,
         retryable: true,
         status: "queued",
+        tenantId,
         traceId: event.traceId
       });
       const outbox = createOutboxEvent({
@@ -401,6 +800,10 @@ export class ConversationService {
       const queued = await this.conversationRepository.queueOutboundMessageReply({
         conversation,
         descriptor,
+        lifecycleEvent: this.createLifecycleEvent("message.sent", conversation, event, scope, {
+          attachmentCount: attachments.length,
+          messageId: String(message.id)
+        }),
         outbox,
         realtimeEvent: event
       });
@@ -416,6 +819,23 @@ export class ConversationService {
         queue: queued.outbox?.queue ?? queued.descriptor.payload.queue,
         retryable: true
       };
+      const dispatchResult = await this.dispatchOutboundMessageReply({
+        chatId: conversation.phone || conversation.id,
+        conversation,
+        descriptor: queued.descriptor,
+        event,
+        message,
+        outboxEventId: queued.outbox?.id ?? queued.descriptor.outboxEventId
+      });
+      if (dispatchResult?.status === "delivered" || dispatchResult?.status === "failed") {
+        outboundDelivery = {
+          ...outboundDelivery,
+          deliveryState: dispatchResult.status,
+          providerMessageId: dispatchResult.providerMessageId,
+          providerStatus: dispatchResult.providerStatus,
+          reason: dispatchResult.reason
+        };
+      }
     }
 
     return createEnvelope({
@@ -432,7 +852,7 @@ export class ConversationService {
     });
   }
 
-  async uploadAttachment(payload: UploadPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async uploadAttachment(payload: UploadPayload, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const channel = String(payload.channel ?? "").trim();
     const fileName = String(payload.fileName ?? "").trim();
     const { idempotencyKey: requestedIdempotencyKey } = payload;
@@ -450,9 +870,15 @@ export class ConversationService {
       });
     }
 
+    const tenantId = requiredTenantId(scope.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "uploadAttachment", { channel, fileName });
+    }
+
     const traceId = conversationTraceId(DIALOG_SERVICE, "uploadAttachment");
     const attachmentId = makeQueueId("attachment");
     const fileId = attachmentId;
+    const mimeType = normalizeMimeType(payload.mimeType);
     const idempotencyKey = normalizeIdempotencyKey(requestedIdempotencyKey, attachmentId);
     const requestFingerprint = createRequestFingerprint("attachment_upload", {
       channel,
@@ -481,6 +907,35 @@ export class ConversationService {
     }
 
     const auditId = makeAuditId("attachment");
+    const fileRecord: FileRecord = {
+      auditId,
+      channel,
+      fileId,
+      fileName: sanitizeAttachmentFileName(fileName),
+      mimeType,
+      objectKey: createAttachmentObjectKey(),
+      scanState: "pending",
+      sizeBytes,
+      storageState: "upload_descriptor_ready",
+      tenantId
+    };
+    const persistedFile = await this.attachmentStorage.workspaceRepository.saveFile(fileRecord);
+    const [signedUpload, signedFile] = await Promise.all([
+      this.attachmentStorage.objectStorage.signUpload({
+        contentType: persistedFile.mimeType,
+        fileId: persistedFile.fileId,
+        fileName: persistedFile.fileName,
+        objectKey: persistedFile.objectKey,
+        sizeBytes: persistedFile.sizeBytes,
+        tenantId: persistedFile.tenantId ?? tenantId
+      }),
+      this.attachmentStorage.objectStorage.signDownload({
+        fileId: persistedFile.fileId,
+        fileName: persistedFile.fileName,
+        objectKey: persistedFile.objectKey,
+        tenantId: persistedFile.tenantId ?? tenantId
+      })
+    ]);
     const descriptor = createConversationOutboundDescriptor({
       auditId,
       channel,
@@ -495,31 +950,28 @@ export class ConversationService {
         channel,
         deliveryState: "not_sent",
         fileId,
-        fileName,
+        fileName: persistedFile.fileName,
+        mimeType: persistedFile.mimeType,
         queue: "file-scan",
+        signedFile: signedObjectStorageUrlData(signedFile),
+        signedUpload: signedObjectStorageUrlData(signedUpload),
         sizeBytes,
         storageState: "upload_queued"
       },
       requestFingerprint,
       retryable: true,
       status: "upload_queued",
+      tenantId,
       traceId
     });
-    const outbox = createOutboxEvent({
-      aggregateId: attachmentId,
-      aggregateType: "attachment",
-      payload: {
-        channel,
-        descriptorId: descriptor.id,
-        fileId,
-        fileName,
-        sizeBytes
-      },
+    const persisted = await this.conversationRepository.recordOutboundDescriptor({ descriptor });
+    const uploadPolicy = {
+      deliveryState: "not_sent",
       queue: "file-scan",
-      traceId,
-      type: "attachment.upload.requested"
-    });
-    const persisted = await this.conversationRepository.recordOutboundDescriptor({ descriptor, outbox });
+      retryable: true,
+      scanState: "scan_pending",
+      storageState: "upload_queued"
+    };
 
     return createEnvelope({
       service: DIALOG_SERVICE,
@@ -530,20 +982,133 @@ export class ConversationService {
         id: attachmentId,
         fileId,
         channel,
-        fileName,
+        fileName: persistedFile.fileName,
+        mimeType: persistedFile.mimeType,
         sizeBytes,
         storageState: "upload_queued",
         antivirusState: "scan_pending",
         deliveryState: "not_sent",
+        objectKeyExposed: false,
         auditId,
         descriptorId: persisted.descriptor.id,
-        outboxEventId: persisted.outbox?.id,
-        queue: persisted.outbox?.queue
+        outboxEventId: null,
+        queue: uploadPolicy.queue,
+        signedUpload: signedObjectStorageUrlData(signedUpload),
+        uploadPolicy
       }
     });
   }
 
-  async createOutboundConversationRequest(payload: OutboundPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async finalizeAttachmentUpload(payload: { checksum?: string; fileId: string }, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const fileId = String(payload.fileId ?? "").trim();
+    if (!fileId) {
+      return invalidEnvelope(DIALOG_SERVICE, "finalizeAttachmentUpload", "attachment_file_id_required", "fileId is required.", {});
+    }
+
+    const tenantId = requiredTenantId(scope.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "finalizeAttachmentUpload", { fileId });
+    }
+
+    const { descriptor, file } = await this.findAttachmentUploadFile(fileId, tenantId);
+    if (!descriptor || !file) {
+      return notFoundEnvelope(DIALOG_SERVICE, "finalizeAttachmentUpload", "attachment_file_not_found", `Attachment file ${fileId} was not found.`, { fileId });
+    }
+
+    if (attachmentFileIsReady(file)) {
+      return createEnvelope({
+        service: DIALOG_SERVICE,
+        operation: "finalizeAttachmentUpload",
+        traceId: conversationTraceId(DIALOG_SERVICE, "finalizeAttachmentUpload"),
+        meta: apiMeta({ fileId }),
+        data: attachmentUploadDataFromFile(file, descriptor)
+      });
+    }
+
+    let objectMetadata: Awaited<ReturnType<NonNullable<ObjectStorageSigner["getObjectMetadata"]>>> | undefined;
+    if (this.attachmentStorage.objectStorage.getObjectMetadata) {
+      objectMetadata = await this.attachmentStorage.objectStorage.getObjectMetadata({
+        fileId: file.fileId,
+        fileName: file.fileName,
+        objectKey: file.objectKey,
+        tenantId: file.tenantId ?? tenantId
+      });
+
+      if (!objectMetadata) {
+        return attachmentFinalizeDeniedEnvelope(file, descriptor, "object_metadata_missing", "Uploaded object metadata was not found.");
+      }
+
+      if (objectMetadata.sizeBytes !== undefined && objectMetadata.sizeBytes !== file.sizeBytes) {
+        return attachmentFinalizeDeniedEnvelope(file, descriptor, "object_size_mismatch", "Uploaded object size does not match the upload descriptor.");
+      }
+
+      const checksum = String(payload.checksum ?? "").trim();
+      if (objectMetadata.checksum && checksum && objectMetadata.checksum !== checksum) {
+        return attachmentFinalizeDeniedEnvelope(file, descriptor, "object_checksum_mismatch", "Uploaded object checksum does not match the finalize checksum.");
+      }
+    }
+
+    const checksum = String(payload.checksum ?? objectMetadata?.checksum ?? "").trim();
+    const persisted = await this.attachmentStorage.workspaceRepository.saveFile({
+      ...file,
+      ...(checksum ? { checksum } : {}),
+      scanState: "scan_pending",
+      storageState: "uploaded"
+    });
+    const existingScanEvent = (await this.conversationRepository.listOutboxEvents())
+      .find((event) => event.type === "attachment.upload.requested" && stringValue(event.payload.fileId, "") === fileId);
+    if (!existingScanEvent) {
+      await this.conversationRepository.enqueueOutboxEvent(createOutboxEvent({
+        aggregateId: descriptor.id,
+        aggregateType: "attachment",
+        payload: {
+          channel: descriptor.channel,
+          descriptorId: descriptor.id,
+          fileId,
+          fileName: persisted.fileName,
+          sizeBytes: persisted.sizeBytes
+        },
+        queue: "file-scan",
+        traceId: descriptor.traceId,
+        type: "attachment.upload.requested"
+      }));
+    }
+
+    return createEnvelope({
+      service: DIALOG_SERVICE,
+      operation: "finalizeAttachmentUpload",
+      traceId: conversationTraceId(DIALOG_SERVICE, "finalizeAttachmentUpload"),
+      meta: apiMeta({ fileId }),
+      data: attachmentUploadDataFromFile(persisted, descriptor)
+    });
+  }
+
+  async fetchAttachmentUploadStatus(fileId: string, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const normalizedFileId = String(fileId ?? "").trim();
+    if (!normalizedFileId) {
+      return invalidEnvelope(DIALOG_SERVICE, "fetchAttachmentUploadStatus", "attachment_file_id_required", "fileId is required.", {});
+    }
+
+    const tenantId = requiredTenantId(scope.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "fetchAttachmentUploadStatus", { fileId: normalizedFileId });
+    }
+
+    const { descriptor, file } = await this.findAttachmentUploadFile(normalizedFileId, tenantId);
+    if (!descriptor || !file) {
+      return notFoundEnvelope(DIALOG_SERVICE, "fetchAttachmentUploadStatus", "attachment_file_not_found", `Attachment file ${normalizedFileId} was not found.`, { fileId: normalizedFileId });
+    }
+
+    return createEnvelope({
+      service: DIALOG_SERVICE,
+      operation: "fetchAttachmentUploadStatus",
+      traceId: conversationTraceId(DIALOG_SERVICE, "fetchAttachmentUploadStatus"),
+      meta: apiMeta({ fileId: normalizedFileId }),
+      data: attachmentUploadDataFromFile(file, descriptor)
+    });
+  }
+
+  async createOutboundConversationRequest(payload: OutboundPayload, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const channel = String(payload.channel ?? "").trim();
     const message = String(payload.message ?? "").trim();
     const phone = String(payload.phone ?? "").trim();
@@ -561,6 +1126,11 @@ export class ConversationService {
         channel,
         phone
       });
+    }
+
+    const tenantId = requiredTenantId(scope.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "createOutboundConversationRequest", { channel, phone });
     }
 
     const traceId = conversationTraceId(DIALOG_SERVICE, "createOutboundConversationRequest");
@@ -585,6 +1155,25 @@ export class ConversationService {
         });
       }
 
+      let queuedConversation = await this.conversationRepository.findConversation(existing.conversationId ?? existing.id);
+      if (!queuedConversation) {
+        const recovered = createQueuedOutboundConversationRecord(existing, message, clientName);
+        const recoveredRealtime = this.createRealtimeEvent("conversation.created", "conversation", recovered.id, {
+          channel,
+          direction: "outbound"
+        }, tenantId);
+        const mutation = await this.conversationRepository.saveConversationMutation({
+          conversation: recovered,
+          lifecycleEvent: this.createLifecycleEvent("conversation.created", recovered, recoveredRealtime, scope, {
+            channel,
+            direction: "outbound",
+            topic
+          }),
+          realtimeEvent: recoveredRealtime
+        });
+        queuedConversation = mutation.conversation;
+        await this.publishRealtimeEvent(mutation.realtimeEvent);
+      }
       return createEnvelope({
         service: DIALOG_SERVICE,
         operation: "createOutboundConversationRequest",
@@ -592,6 +1181,7 @@ export class ConversationService {
         meta: apiMeta({ channel }),
         data: {
           ...outboundConversationDataFromDescriptor(existing),
+          conversationId: queuedConversation.id,
           duplicate: true
         }
       });
@@ -601,7 +1191,7 @@ export class ConversationService {
     const descriptor = createConversationOutboundDescriptor({
       auditId,
       channel,
-      conversationId: null,
+      conversationId: backendQueueId,
       deliveryState: "queued",
       id: backendQueueId,
       idempotencyKey,
@@ -611,6 +1201,7 @@ export class ConversationService {
       requestFingerprint,
       retryable: true,
       status: "queued",
+      tenantId,
       traceId
     });
     const outbox = createOutboxEvent({
@@ -626,7 +1217,24 @@ export class ConversationService {
       traceId,
       type: "conversation.outbound.requested"
     });
-    const persisted = await this.conversationRepository.recordOutboundDescriptor({ descriptor, outbox });
+    const queuedConversationRecord = createQueuedOutboundConversationRecord(descriptor, message, clientName);
+    const realtimeEvent = this.createRealtimeEvent("conversation.created", "conversation", queuedConversationRecord.id, {
+      channel,
+      direction: "outbound"
+    }, tenantId);
+    const persisted = await this.conversationRepository.queueOutboundConversation({
+      conversation: queuedConversationRecord,
+      descriptor,
+      lifecycleEvent: this.createLifecycleEvent("conversation.created", queuedConversationRecord, realtimeEvent, scope, {
+        channel,
+        direction: "outbound",
+        topic
+      }),
+      outbox,
+      realtimeEvent
+    });
+    const queuedConversation = persisted.conversation;
+    await this.publishRealtimeEvent(persisted.realtimeEvent);
 
     return createEnvelope({
       service: DIALOG_SERVICE,
@@ -642,6 +1250,7 @@ export class ConversationService {
           topic
         }),
         backendQueueId,
+        conversationId: queuedConversation.id,
         status: "queued",
         consentCheck: "required_before_send",
         auditId,
@@ -652,7 +1261,8 @@ export class ConversationService {
     });
   }
 
-  async fetchChannels(): Promise<BackendEnvelope<{ items: typeof channelFixtures }>> {
+  async fetchChannels(): Promise<BackendEnvelope<{ items: Array<Record<string, unknown>> }>> {
+    const items = await this.conversationRepository.listChannelCatalog();
     return createEnvelope({
       service: CHANNEL_SERVICE,
       operation: "fetchChannels",
@@ -660,7 +1270,7 @@ export class ConversationService {
       partial: true,
       meta: apiMeta(),
       data: {
-        items: clone(channelFixtures)
+        items: clone(items)
       }
     });
   }
@@ -697,38 +1307,55 @@ export class ConversationService {
       });
     }
 
-    const text = String(payload.text ?? "").trim();
+    const tenantId = resolveConversationTenantId(conversation);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(CHANNEL_SERVICE, "normalizeInboundEvent", { channel, conversationId: conversation.id });
+    }
 
-    if (!text) {
-      return invalidEnvelope(CHANNEL_SERVICE, "normalizeInboundEvent", "message_content_required", "Inbound message text is required.", {
+    const text = String(payload.text ?? "").trim();
+    const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+
+    if (!text && !attachments.length) {
+      return invalidEnvelope(CHANNEL_SERVICE, "normalizeInboundEvent", "message_content_required", "Inbound message text or attachment is required.", {
         channel,
         conversationId: conversation.id
       });
     }
 
     const message: ConversationMessage = {
+      createdAt: new Date().toISOString(),
       id: makeMessageId("client"),
       side: "client",
-      text,
+      text: text || "Attachment received",
+      ...(attachments.length ? { attachments: clone(attachments) } : {}),
       time: NOW_LABEL
     };
     conversation.messages.push(message);
-    conversation.preview = text;
+    conversation.preview = message.text;
     conversation.time = NOW_LABEL;
-    const event = await this.recordRealtimeEvent("message.created", "conversation", conversation.id, {
+    const event = this.createRealtimeEvent("message.created", "conversation", conversation.id, {
       channel,
       eventId,
       messageId: message.id
-    }, resolveConversationTenantId(conversation));
-    await this.conversationRepository.saveConversation(conversation);
-    await this.conversationRepository.recordInboundEvent({
+    }, tenantId);
+    const receivedAt = new Date().toISOString();
+    const persisted = await this.conversationRepository.recordInboundMessage({
+      conversation,
+      lifecycleEvent: this.createLifecycleEvent("message.received", conversation, event, { actorType: "client", tenantId }, {
+        channel,
+        messageId: String(message.id)
+      }),
+      realtimeEvent: event,
+      inboundEvent: {
       channel,
       conversationId: conversation.id,
       eventId,
       messageId: String(message.id),
-      receivedAt: new Date().toISOString(),
+      receivedAt,
       traceId: event.traceId
+      }
     });
+    await this.publishRealtimeEvent(persisted.realtimeEvent);
 
     return createEnvelope({
       service: CHANNEL_SERVICE,
@@ -744,12 +1371,12 @@ export class ConversationService {
     });
   }
 
-  async recordDeliveryReceipt(channel: string, payload: DeliveryReceiptPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async recordDeliveryReceipt(channel: string, payload: DeliveryReceiptPayload, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const provider = String(payload.provider ?? "").trim();
     const providerEventId = String(payload.providerEventId ?? "").trim();
     const messageId = String(payload.messageId ?? "").trim();
     const status = String(payload.status ?? "").trim();
-    const tenantId = payload.tenantId ?? "tenant-volga";
+    const tenantId = requiredTenantId(scope.tenantId ?? payload.tenantId);
 
     if (!provider || !providerEventId) {
       return invalidEnvelope(CHANNEL_SERVICE, "recordDeliveryReceipt", "delivery_receipt_payload_required", "provider, providerEventId, messageId and status are required.", {
@@ -758,6 +1385,10 @@ export class ConversationService {
         provider,
         providerEventId
       });
+    }
+
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(CHANNEL_SERVICE, "recordDeliveryReceipt", { channel, messageId, provider, providerEventId });
     }
 
     const existingReceipt = (await this.conversationRepository.listDeliveryReceipts({ tenantId }))
@@ -785,12 +1416,12 @@ export class ConversationService {
       });
     }
 
-    const outboundDescriptors = await this.conversationRepository.listOutboundDescriptors({ channel });
+    const outboundDescriptors = await this.conversationRepository.listOutboundDescriptors({ channel, tenantId });
     const matchingDescriptor = outboundDescriptors.find((descriptor) => descriptor.messageId === messageId);
     const conversationId = String(payload.conversationId ?? matchingDescriptor?.conversationId ?? "").trim();
     const conversation = await this.conversationRepository.findConversation(conversationId);
 
-    if (!conversation) {
+    if (!conversation || !matchesTenantScope(conversation, tenantId)) {
       return notFoundEnvelope(CHANNEL_SERVICE, "recordDeliveryReceipt", "conversation_not_found", `Conversation ${conversationId || "(empty)"} was not found.`, {
         channel,
         conversationId,
@@ -878,9 +1509,52 @@ export class ConversationService {
     resourceType: string,
     resourceId: string,
     data: Record<string, unknown>,
-    tenantId = "tenant-volga"
+    tenantId: string
   ): Promise<RealtimeEvent> {
     return this.appendAndPublishRealtimeEvent(this.createRealtimeEvent(eventName, resourceType, resourceId, data, tenantId));
+  }
+
+  private async dispatchOutboundMessageReply(input: {
+    chatId: string;
+    conversation: ConversationRecord;
+    descriptor: ConversationOutboundDescriptor;
+    event: RealtimeEvent;
+    message: ConversationMessage;
+    outboxEventId?: string | null;
+  }): Promise<OutboundMessageDispatchResult | null> {
+    try {
+      const result = await this.outboundMessageDispatcher.deliverMessage({
+        channel: input.conversation.channel,
+        chatId: input.chatId,
+        conversationId: input.conversation.id,
+        descriptorId: input.descriptor.id,
+        idempotencyKey: input.descriptor.idempotencyKey ?? input.descriptor.id,
+        messageId: String(input.message.id),
+        outboxEventId: input.outboxEventId ?? null,
+        tenantId: resolveConversationTenantId(input.conversation),
+        text: input.message.text,
+        traceId: input.event.traceId
+      });
+      return result ?? null;
+    } catch (error) {
+      return {
+        reason: error instanceof Error ? error.message : "outbound_dispatch_failed",
+        status: "failed"
+      };
+    }
+  }
+
+  private async findAttachmentUploadFile(fileId: string, tenantId: string): Promise<{
+    descriptor?: ConversationOutboundDescriptor;
+    file?: FileRecord;
+  }> {
+    const [file, descriptors] = await Promise.all([
+      this.attachmentStorage.workspaceRepository.findFile(fileId, { tenantId }),
+      this.conversationRepository.listOutboundDescriptors({ kind: "attachment_upload", tenantId })
+    ]);
+    const descriptor = descriptors.find((item) => stringValue(item.payload.fileId, item.id) === fileId);
+
+    return { descriptor, file };
   }
 
   private async appendAndPublishRealtimeEvent(event: RealtimeEvent): Promise<RealtimeEvent> {
@@ -902,8 +1576,12 @@ export class ConversationService {
     resourceType: string,
     resourceId: string,
     data: Record<string, unknown>,
-    tenantId = "tenant-volga"
+    tenantId: string
   ): RealtimeEvent {
+    if (!tenantId) {
+      throw new Error("tenant_context_required");
+    }
+
     const occurredAtMs = Math.max(Date.now(), this.lastRealtimeOccurredAtMs + 1);
     this.lastRealtimeOccurredAtMs = occurredAtMs;
 
@@ -917,6 +1595,33 @@ export class ConversationService {
       tenantId,
       traceId: conversationTraceId(REALTIME_SERVICE, eventName),
       data
+    };
+  }
+
+  private createLifecycleEvent(
+    eventType: ConversationLifecycleEvent["eventType"],
+    conversation: ConversationRecord,
+    realtimeEvent: RealtimeEvent,
+    scope: TenantScope,
+    data: Record<string, unknown>,
+    reason?: string
+  ): ConversationLifecycleEvent {
+    return {
+      actorId: scope.actorId?.trim() || null,
+      actorName: scope.actorName?.trim() || null,
+      actorType: scope.actorType ?? "system",
+      conversationId: conversation.id,
+      data: clone(data),
+      eventType,
+      id: makeQueueId("lifecycle"),
+      ingestedAt: realtimeEvent.occurredAt,
+      occurredAt: realtimeEvent.occurredAt,
+      reason: reason?.trim() || null,
+      schemaVersion: "conversation-lifecycle/v1",
+      source: "conversation-service",
+      sourceEventId: realtimeEvent.eventId,
+      tenantId: realtimeEvent.tenantId,
+      traceId: realtimeEvent.traceId
     };
   }
 }
@@ -936,6 +1641,11 @@ function conversationTraceId(service: string, operation: string): string {
 function normalizeIdempotencyKey(value: unknown, fallback: string): string {
   const key = String(value ?? "").trim();
   return key || fallback;
+}
+
+function requiredTenantId(value: unknown): string | null {
+  const tenantId = String(value ?? "").trim();
+  return tenantId || null;
 }
 
 function createRequestFingerprint(scope: string, payload: Record<string, unknown>): string {
@@ -960,19 +1670,95 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-type CreateConversationOutboundDescriptorInput = Omit<ConversationOutboundDescriptor, "createdAt" | "outboxEventId" | "tenantId"> & {
+type CreateConversationOutboundDescriptorInput = Omit<ConversationOutboundDescriptor, "createdAt" | "outboxEventId"> & {
   createdAt?: string;
   outboxEventId?: string | null;
-  tenantId?: string;
 };
 
 function createConversationOutboundDescriptor(input: CreateConversationOutboundDescriptorInput): ConversationOutboundDescriptor {
+  if (!input.tenantId) {
+    throw new Error("tenant_context_required");
+  }
+
   return {
     ...input,
     createdAt: input.createdAt ?? new Date().toISOString(),
-    outboxEventId: input.outboxEventId ?? null,
-    tenantId: input.tenantId ?? "tenant-volga"
+    outboxEventId: input.outboxEventId ?? null
   };
+}
+
+function createTelegramCsatSurvey(
+  conversation: ConversationRecord,
+  traceId: string,
+  tenantId: string
+): { descriptor: ConversationOutboundDescriptor; outbox: OutboxEvent } | null {
+  if (conversation.channel.trim().toLowerCase() !== "telegram") {
+    return null;
+  }
+
+  const providerConversationId = telegramChatIdFromConversation(conversation);
+  if (!providerConversationId) {
+    return null;
+  }
+
+  const idempotencyKey = `quality:csat:${conversation.id}`;
+  const messageId = `csat-survey:${conversation.id}`;
+  const descriptor = createConversationOutboundDescriptor({
+    auditId: null,
+    channel: conversation.channel,
+    conversationId: conversation.id,
+    deliveryState: "queued",
+    id: makeQueueId("delivery"),
+    idempotencyKey,
+    kind: "message_delivery",
+    messageId,
+    payload: {
+      conversationId: conversation.id,
+      messageId,
+      providerConversationId,
+      purpose: "quality_csat_survey",
+      queue: "message-delivery",
+      replyMarkup: {
+        inline_keyboard: [[1, 2, 3, 4, 5].map((score) => ({
+          callback_data: `quality:csat:${score}`,
+          text: String(score)
+        }))]
+      },
+      text: "Оцените, пожалуйста, качество поддержки от 1 до 5."
+    },
+    requestFingerprint: createRequestFingerprint("message_delivery", {
+      conversationId: conversation.id,
+      purpose: "quality_csat_survey"
+    }),
+    retryable: true,
+    status: "queued",
+    tenantId,
+    traceId
+  });
+  const outbox = createOutboxEvent({
+    aggregateId: conversation.id,
+    aggregateType: "conversation",
+    payload: {
+      channel: conversation.channel,
+      conversationId: conversation.id,
+      descriptorId: descriptor.id,
+      idempotencyKey,
+      messageId,
+      retryable: true
+    },
+    queue: "message-delivery",
+    traceId,
+    type: "message.delivery.requested"
+  });
+
+  return { descriptor, outbox };
+}
+
+function telegramChatIdFromConversation(conversation: ConversationRecord): string {
+  const taggedChatId = conversation.tags
+    .map((tag) => tag.trim())
+    .find((tag) => /^(telegram-chat|telegram_chat_id):/i.test(tag));
+  return taggedChatId?.slice(taggedChatId.indexOf(":") + 1).trim() || conversation.phone.trim();
 }
 
 function outboundDeliveryFromDescriptor(descriptor: ConversationOutboundDescriptor): Record<string, unknown> {
@@ -988,11 +1774,20 @@ function outboundDeliveryFromDescriptor(descriptor: ConversationOutboundDescript
 }
 
 function outboundMessageFromDescriptor(descriptor: ConversationOutboundDescriptor, fallbackText: string, fallbackAttachments: Array<Record<string, unknown>>): Record<string, unknown> {
+  const createdAt = stringValue(descriptor.payload.createdAt, "");
+  const descriptorAttachments = Array.isArray(descriptor.payload.attachments)
+    ? descriptor.payload.attachments.map((attachment) => {
+        if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) return attachment;
+        const { signedFile: _signedFile, ...publicAttachment } = attachment as Record<string, unknown>;
+        return publicAttachment;
+      })
+    : fallbackAttachments;
   return {
+    ...(createdAt ? { createdAt } : {}),
     id: descriptor.messageId ?? stringValue(descriptor.payload.messageId, descriptor.id),
     side: "agent",
     text: stringValue(descriptor.payload.text, fallbackText),
-    attachments: Array.isArray(descriptor.payload.attachments) ? descriptor.payload.attachments : fallbackAttachments,
+    attachments: descriptorAttachments,
     time: NOW_LABEL
   };
 }
@@ -1003,15 +1798,113 @@ function attachmentUploadDataFromDescriptor(descriptor: ConversationOutboundDesc
     fileId: stringValue(descriptor.payload.fileId, descriptor.id),
     channel: descriptor.channel,
     fileName: stringValue(descriptor.payload.fileName, ""),
+    mimeType: stringValue(descriptor.payload.mimeType, "application/octet-stream"),
     sizeBytes: numberValue(descriptor.payload.sizeBytes, 0),
     storageState: stringValue(descriptor.payload.storageState, descriptor.status),
     antivirusState: stringValue(descriptor.payload.antivirusState, "scan_pending"),
     deliveryState: descriptor.deliveryState ?? stringValue(descriptor.payload.deliveryState, "not_sent"),
+    objectKeyExposed: false,
     auditId: descriptor.auditId,
     descriptorId: descriptor.id,
     outboxEventId: descriptor.outboxEventId,
-    queue: descriptor.payload.queue
+    queue: descriptor.payload.queue,
+    ...(isSignedObjectStorageUrlData(descriptor.payload.signedUpload) ? { signedUpload: descriptor.payload.signedUpload } : {})
   };
+}
+
+function attachmentUploadDataFromFile(file: FileRecord, descriptor: ConversationOutboundDescriptor): Record<string, unknown> {
+  const storageState = stringValue(file.storageState, stringValue(descriptor.payload.storageState, descriptor.status));
+  const antivirusState = attachmentAntivirusState(file);
+  const ready = attachmentFileIsReady(file);
+  const blocked = attachmentScanBlocked(antivirusState);
+  const deliveryState = ready ? "ready" : descriptor.deliveryState ?? stringValue(descriptor.payload.deliveryState, "not_sent");
+  const queue = stringValue(descriptor.payload.queue, "file-scan");
+
+  return {
+    id: descriptor.id,
+    fileId: file.fileId,
+    channel: descriptor.channel,
+    fileName: file.fileName,
+    mimeType: file.mimeType,
+    sizeBytes: file.sizeBytes,
+    storageState,
+    antivirusState,
+    deliveryState,
+    objectKeyExposed: false,
+    auditId: file.auditId,
+    descriptorId: descriptor.id,
+    outboxEventId: descriptor.outboxEventId,
+    queue,
+    uploadPolicy: {
+      deliveryState,
+      queue,
+      retryable: !ready && !blocked,
+      scanState: antivirusState,
+      storageState
+    },
+    downloadPolicy: {
+      permissionRequired: "files.read",
+      signedUrlAvailable: ready
+    },
+    ...(file.scanCheckedAt ? { scanCheckedAt: file.scanCheckedAt } : {}),
+    ...(file.scanReason ? { scanReason: file.scanReason } : {}),
+    ...(file.scanner ? { scanner: file.scanner } : {})
+  };
+}
+
+function attachmentFinalizeDeniedEnvelope(
+  file: FileRecord,
+  descriptor: ConversationOutboundDescriptor,
+  code: string,
+  message: string
+): BackendEnvelope<Record<string, unknown>> {
+  return createEnvelope({
+    service: DIALOG_SERVICE,
+    operation: "finalizeAttachmentUpload",
+    traceId: conversationTraceId(DIALOG_SERVICE, "finalizeAttachmentUpload"),
+    status: "denied",
+    meta: apiMeta({ fileId: file.fileId }),
+    data: {
+      ...attachmentUploadDataFromFile(file, descriptor),
+      auditEvent: {
+        id: file.auditId,
+        action: "dialog.attachment.finalize_denied",
+        fileId: file.fileId,
+        immutable: true,
+        objectKeyExposed: false
+      }
+    },
+    error: { code, message }
+  });
+}
+
+function attachmentAntivirusState(file: FileRecord): string {
+  const scanState = stringValue(file.scanState, "scan_pending");
+  if (scanState === "pending") {
+    return "scan_pending";
+  }
+
+  if (scanState === "clean") {
+    return "scan_clean";
+  }
+
+  if (scanState === "infected" || scanState === "blocked") {
+    return "scan_blocked";
+  }
+
+  if (scanState === "error" || scanState === "failed") {
+    return "scan_failed";
+  }
+
+  return scanState;
+}
+
+function attachmentFileIsReady(file: FileRecord): boolean {
+  return file.storageState === "uploaded" && ["clean", "scan_clean"].includes(file.scanState) && file.scanVerdict === "clean";
+}
+
+function attachmentScanBlocked(scanState: string): boolean {
+  return ["blocked", "infected", "scan_blocked"].includes(scanState);
 }
 
 function outboundConversationDataFromDescriptor(descriptor: ConversationOutboundDescriptor): Record<string, unknown> {
@@ -1021,6 +1914,7 @@ function outboundConversationDataFromDescriptor(descriptor: ConversationOutbound
     phone: stringValue(descriptor.payload.phone, ""),
     topic: stringValue(descriptor.payload.topic, ""),
     backendQueueId: descriptor.id,
+    conversationId: descriptor.conversationId ?? descriptor.id,
     status: descriptor.status,
     consentCheck: "required_before_send",
     auditId: descriptor.auditId,
@@ -1036,12 +1930,114 @@ function outboundConversationDataFromDescriptor(descriptor: ConversationOutbound
   return data;
 }
 
+function createQueuedOutboundConversationRecord(
+  descriptor: ConversationOutboundDescriptor,
+  fallbackMessage: string,
+  fallbackClientName: string
+): ConversationRecord {
+  const id = descriptor.conversationId ?? descriptor.id;
+  const channel = stringValue(descriptor.payload.channel, descriptor.channel);
+  const message = stringValue(descriptor.payload.message, fallbackMessage);
+  const name = stringValue(descriptor.payload.clientName, fallbackClientName) || "New client";
+  const phone = stringValue(descriptor.payload.phone, "");
+  const topic = stringValue(descriptor.payload.topic, "");
+
+  return {
+    avatar: "",
+    channel,
+    clientSince: "New contact",
+    device: stringValue(descriptor.payload.device, ""),
+    entry: channel,
+    id,
+    initials: initialsForName(name),
+    language: "Russian",
+    messages: [
+      {
+        createdAt: descriptor.createdAt,
+        id: `${id}-event`,
+        text: `Outbound conversation queued in ${stringValue(descriptor.payload.queue, "message-delivery")}; descriptor ${descriptor.id}; audit ${descriptor.auditId ?? "none"}`,
+        time: NOW_LABEL,
+        type: "event"
+      },
+      {
+        createdAt: descriptor.createdAt,
+        id: `${id}-agent`,
+        side: "agent",
+        text: message,
+        time: NOW_LABEL
+      }
+    ],
+    name,
+    phone,
+    preview: message,
+    previous: [],
+    sla: "Waiting",
+    slaTone: "hold",
+    status: descriptor.status,
+    tags: ["outbound", "queued", channel.toLowerCase()],
+    tenantId: descriptor.tenantId,
+    time: NOW_LABEL,
+    topic,
+    unread: false
+  };
+}
+
+function initialsForName(name: string): string {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return initials || "NC";
+}
+
 function stringValue(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
 }
 
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function createAttachmentObjectKey(): string {
+  return `objects/obj_${randomUUID()}`;
+}
+
+function isSignedObjectStorageUrlData(value: unknown): value is Record<string, unknown> {
+  return Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && typeof (value as Record<string, unknown>).expiresAt === "string"
+    && ((value as Record<string, unknown>).method === "GET" || (value as Record<string, unknown>).method === "PUT")
+    && typeof (value as Record<string, unknown>).url === "string";
+}
+
+function normalizeMimeType(value: unknown): string {
+  const mimeType = String(value ?? "").trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i.test(mimeType)
+    ? mimeType
+    : "application/octet-stream";
+}
+
+function sanitizeAttachmentFileName(fileName: string): string {
+  return fileName
+    .split(/[\\/]+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "." && segment !== "..")
+    .at(-1) ?? "upload.bin";
+}
+
+function signedObjectStorageUrlData(signedUrl: SignedObjectStorageUrl): Record<string, unknown> {
+  return {
+    expiresAt: signedUrl.expiresAt,
+    ...(signedUrl.headers ? { headers: signedUrl.headers } : {}),
+    method: signedUrl.method,
+    url: signedUrl.url
+  };
 }
 
 function clone<T>(value: T): T {
@@ -1082,6 +2078,10 @@ function notFoundEnvelope(service: string, operation: string, code: string, mess
     data,
     error: { code, message }
   });
+}
+
+function tenantContextRequiredEnvelope(service: string, operation: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
+  return invalidEnvelope(service, operation, "tenant_context_required", "Tenant context is required for tenant-owned writes.", data);
 }
 
 function makeAuditId(scope: string): string {
@@ -1141,5 +2141,14 @@ function matchesTenantScope(conversation: ConversationRecord, tenantId?: string)
 }
 
 function resolveConversationTenantId(conversation: ConversationRecord): string {
-  return conversation.tenantId ?? "tenant-volga";
+  return requiredTenantId(conversation.tenantId) ?? "";
+}
+
+function employeeTeamId(metadata: Record<string, unknown> | undefined): string | undefined {
+  const settings = metadata?.employeeSettings;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    return undefined;
+  }
+  const teamId = String((settings as Record<string, unknown>).groupId ?? "").trim();
+  return teamId || undefined;
 }

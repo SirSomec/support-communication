@@ -13,7 +13,7 @@ export function createDraftScenario(id) {
       return {
         id,
         name: "Новый сценарий",
-        status: "Черновик",
+        status: "draft",
         schemaVersion: "bot-flow/v1",
         owner: "Администратор",
         updatedAt: "сейчас",

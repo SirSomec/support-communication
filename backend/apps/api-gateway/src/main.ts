@@ -13,29 +13,40 @@ import { installRealtimeWebSocketReplay } from "./conversation/realtime.websocke
 import { EnvelopeHttpExceptionFilter } from "./http-exception.filter.js";
 import { configureIdentityRepository } from "./identity/bootstrap.js";
 import { configureIntegrationRepository } from "./integrations/bootstrap.js";
+import { configureNotificationRepository } from "./notifications/bootstrap.js";
 import { setupOpenApi } from "./openapi.js";
 import { configureOperationsRepository } from "./operations/bootstrap.js";
 import { configurePlatformRepository } from "./platform/bootstrap.js";
+import { configureQualityRepository } from "./quality/bootstrap.js";
 import { configureReportRepository } from "./reports/bootstrap.js";
 import { configureRoutingRepository } from "./routing/bootstrap.js";
 import { configureWorkspaceRepository } from "./workspace/bootstrap.js";
 import type { Server } from "node:http";
 import type { Socket } from "node:net";
+import type { LocalDevelopmentRepositorySeeds } from "./runtime/local-development-seed.js";
 
 export async function bootstrap(): Promise<void> {
   const config = loadBackendConfig();
-  configureAutomationRepository(config);
-  configureIdentityRepository(config);
-  configureBillingRepository(config);
-  configureConversationRepository(config);
+  if (config.NODE_ENV === "production" && process.env.ALLOW_DEMO_SERVICE_ADMIN_HEADERS === "true") {
+    throw new Error("Production startup blocked: ALLOW_DEMO_SERVICE_ADMIN_HEADERS must not be enabled.");
+  }
+  const localSeeds: LocalDevelopmentRepositorySeeds = config.LOCAL_DEVELOPMENT_SEED_ENABLED === "true"
+    ? (await import("./runtime/local-development-seed.js")).createLocalDevelopmentRepositorySeeds()
+    : {};
+  configureAutomationRepository(config, { seed: localSeeds.automation });
+  configureIdentityRepository(config, { seed: localSeeds.identity });
+  configureBillingRepository(config, { seed: localSeeds.billing });
+  configureConversationRepository(config, { seed: localSeeds.conversation });
   configureConversationRealtimeFanout(config);
-  configureWorkspaceRepository(config);
-  configureRoutingRepository(config);
-  configureReportRepository(config);
-  configureIntegrationRepository(config);
-  configurePlatformRepository(config);
-  configureOperationsRepository(config);
-
+  configureWorkspaceRepository(config, { seed: localSeeds.workspace });
+  const routingRepository = configureRoutingRepository(config, { seed: localSeeds.routing });
+  await routingRepository.hydrateStateSnapshot();
+  configureReportRepository(config, { seed: localSeeds.reports });
+  configureIntegrationRepository(config, { seed: localSeeds.integrations });
+  configureNotificationRepository(config);
+  configurePlatformRepository(config, { seed: localSeeds.platform });
+  configureQualityRepository(config, { seed: localSeeds.quality });
+  configureOperationsRepository(config, { seed: localSeeds.operations });
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true
   });
@@ -50,7 +61,6 @@ export async function bootstrap(): Promise<void> {
     config,
     conversationService: app.get(ConversationService)
   });
-
   await app.listen(config.PORT);
 
   writeStructuredLog("info", "API Gateway started", {

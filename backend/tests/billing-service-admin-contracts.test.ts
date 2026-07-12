@@ -2,15 +2,17 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
-import { BillingRepository } from "../apps/api-gateway/src/billing/billing.repository.ts";
+import { beforeEach, describe, it } from "node:test";
+import { BillingRepository as RuntimeBillingRepository } from "../apps/api-gateway/src/billing/billing.repository.ts";
+import { bootstrapBillingState } from "../apps/api-gateway/src/billing/seed.ts";
 import { changeTenantTariffFromRoute } from "../apps/api-gateway/src/billing/billing.route.ts";
 import { BillingService } from "../apps/api-gateway/src/billing/billing.service.ts";
 import {
   claimExpiredQuotaReservationsForWorker,
   releaseExpiredQuotaReservationForWorker
 } from "../apps/api-gateway/src/billing/quota-expiration.worker.ts";
-import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { IdentityRepository as RuntimeIdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { bootstrapIdentityState } from "../apps/api-gateway/src/identity/seed.ts";
 import { authorizeServiceAdminPolicy } from "../apps/api-gateway/src/identity/privileged-policy.ts";
 import { updateTenantStatusFromRoute } from "../apps/api-gateway/src/identity/tenant.route.ts";
 import { TenantService } from "../apps/api-gateway/src/identity/tenant.service.ts";
@@ -21,7 +23,22 @@ import {
 import { ServiceAdminService } from "../apps/api-gateway/src/service-admin/service-admin.service.ts";
 import { assertLogRecordsDoNotLeakCanonicalSecrets, canonicalSecretBearingFixtures } from "@support-communication/testing";
 
+type BillingRepository = RuntimeBillingRepository;
+const BillingRepository = {
+  inMemory: () => RuntimeBillingRepository.inMemory(bootstrapBillingState()),
+  open: ({ filePath }: { filePath: string }) => RuntimeBillingRepository.open({ filePath, seed: bootstrapBillingState() })
+};
+type IdentityRepository = RuntimeIdentityRepository;
+const IdentityRepository = {
+  inMemory: () => RuntimeIdentityRepository.inMemory(bootstrapIdentityState()),
+  open: ({ filePath }: { filePath: string }) => RuntimeIdentityRepository.open({ filePath, seed: bootstrapIdentityState() })
+};
+
 describe("phase 8 billing, quotas and service-admin backend contracts", () => {
+  beforeEach(() => {
+    RuntimeBillingRepository.useDefault(RuntimeBillingRepository.inMemory(bootstrapBillingState()));
+    RuntimeIdentityRepository.useDefault(RuntimeIdentityRepository.inMemory(bootstrapIdentityState()));
+  });
   it("returns tariff catalog and previews tariff changes with confirmation text", async () => {
     const billing = new BillingService();
 
@@ -51,6 +68,21 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.match(preview.data.confirmation.expectedText, /^CHANGE tenant-volga TO starter$/);
     assert.equal(preview.data.capacityCheck.users, "over_limit");
     assert.equal(preview.data.capacityCheck.workspaces, "over_limit");
+  });
+
+  it("exposes the canonical tariff catalog through the public read-only controller", async () => {
+    const controllerSource = readFileSync(
+      join(process.cwd(), "apps/api-gateway/src/billing/billing.controller.ts"),
+      "utf8"
+    );
+    const moduleSource = readFileSync(join(process.cwd(), "apps/api-gateway/src/billing/billing.module.ts"), "utf8");
+    const response = await new BillingService().fetchTariffs();
+
+    assert.match(controllerSource, /@Controller\("public\/catalog"\)[\s\S]*@Get\("tariffs"\)/);
+    assert.match(moduleSource, /controllers:\s*\[[^\]]*PublicBillingCatalogController/);
+    assert.equal(response.status, "ok");
+    assert.equal(response.data.currency, "RUB");
+    assert.deepEqual(response.data.items.map((tariff) => tariff.id), ["starter", "business", "scale", "enterprise"]);
   });
 
   it("changes tenant tariff only with reason, explicit confirmation and audit metadata", async () => {

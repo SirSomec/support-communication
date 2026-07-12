@@ -1,4 +1,5 @@
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import type { ConversationLifecycleEvent } from "../conversation/conversation.repository.js";
 
 export type QualityRatingScale = "CSAT" | "CSI" | "QA";
 
@@ -59,14 +60,61 @@ export interface AiScoringAuditFilter {
   tenantId?: string;
 }
 
+export type AiSuggestionDecisionAction = "accept" | "edit" | "reject";
+export interface AiSuggestionDecisionRecord {
+  action: AiSuggestionDecisionAction;
+  conversationId: string;
+  createdAt: string;
+  decisionId: string;
+  finalText: string | null;
+  finalTextHash: string | null;
+  operatorId: string;
+  operatorName: string | null;
+  originalText: string;
+  originalTextHash: string;
+  providerId: string | null;
+  providerResultId: string | null;
+  scoringAuditId: string | null;
+  suggestionId: string;
+  tenantId: string;
+}
+export interface AiSuggestionDecisionFilter { conversationId?: string; tenantId?: string; }
+
+export interface QualityWorkspaceSnapshot {
+  aiCoachingQueue: Array<Record<string, unknown>>;
+  aiEffectivenessMetrics: Array<Record<string, unknown>>;
+  aiRealtimeChecks: Array<Record<string, unknown>>;
+  aiSuggestions: Array<Record<string, unknown>>;
+  knowledgeArticles: Array<Record<string, unknown>>;
+  qualityMetrics: Array<Record<string, unknown>>;
+}
+
 export interface QualityState {
+  aiSuggestionDecisions: AiSuggestionDecisionRecord[];
   aiScoringAudits: AiScoringAuditRecord[];
+  lifecycleEvents?: ConversationLifecycleEvent[];
   manualQaReviews: ManualQaReviewRecord[];
   ratings: QualityRatingRecord[];
+  workspace: QualityWorkspaceSnapshot;
+}
+
+type MaybePromise<T> = T | Promise<T>;
+
+export interface QualityRepositoryPort {
+  listAiSuggestionDecisions(filter?: AiSuggestionDecisionFilter): MaybePromise<AiSuggestionDecisionRecord[]>;
+  listAiScoringAudits(filter?: AiScoringAuditFilter): MaybePromise<AiScoringAuditRecord[]>;
+  listManualQaReviews(filter?: ManualQaReviewFilter): MaybePromise<ManualQaReviewRecord[]>;
+  listQualityRatings(filter?: QualityRatingFilter): MaybePromise<QualityRatingRecord[]>;
+  readWorkspace(): MaybePromise<QualityWorkspaceSnapshot>;
+  saveAiScoringAudit(record: AiScoringAuditRecord, lifecycleEvent?: ConversationLifecycleEvent): MaybePromise<AiScoringAuditRecord>;
+  saveManualQaReview(record: ManualQaReviewRecord, lifecycleEvent?: ConversationLifecycleEvent): MaybePromise<ManualQaReviewRecord>;
+  saveQualityRating(record: QualityRatingRecord, lifecycleEvent?: ConversationLifecycleEvent): MaybePromise<QualityRatingRecord>;
+  saveAiSuggestionDecision(record: AiSuggestionDecisionRecord, lifecycleEvent: ConversationLifecycleEvent): MaybePromise<AiSuggestionDecisionRecord>;
 }
 
 export interface QualityRepositoryOptions {
   filePath: string;
+  seed?: Partial<QualityState>;
 }
 
 export interface PrismaQualityRepositoryOptions {
@@ -75,6 +123,7 @@ export interface PrismaQualityRepositoryOptions {
 }
 
 export interface PrismaQualityClient {
+  $transaction<TResult>(operation: (client: PrismaQualityTransactionalClient) => Promise<TResult>): Promise<TResult>;
   aiScoringAudit: {
     create(input: { data: PrismaAiScoringAuditCreateInput }): Promise<PrismaAiScoringAuditRow>;
     findMany(input: PrismaAiScoringAuditFindManyInput): Promise<PrismaAiScoringAuditRow[]>;
@@ -90,6 +139,39 @@ export interface PrismaQualityClient {
     findMany(input: PrismaQualityRatingFindManyInput): Promise<PrismaQualityRatingRow[]>;
     findUnique(input: PrismaQualityRatingFindUniqueInput): Promise<PrismaQualityRatingRow | null>;
   };
+  aiSuggestionDecision: {
+    create(input: { data: PrismaAiSuggestionDecisionCreateInput }): Promise<PrismaAiSuggestionDecisionRow>;
+    findMany(input: PrismaAiSuggestionDecisionFindManyInput): Promise<PrismaAiSuggestionDecisionRow[]>;
+    findUnique(input: PrismaAiSuggestionDecisionFindUniqueInput): Promise<PrismaAiSuggestionDecisionRow | null>;
+  };
+  conversationLifecycleEvent: {
+    create(input: { data: PrismaConversationLifecycleEventCreateInput }): Promise<unknown>;
+  };
+}
+
+type PrismaQualityTransactionalClient = Omit<PrismaQualityClient, "$transaction">;
+
+interface PrismaAiSuggestionDecisionCreateInput extends Omit<AiSuggestionDecisionRecord, "createdAt"> { createdAt: Date; }
+interface PrismaAiSuggestionDecisionRow extends PrismaAiSuggestionDecisionCreateInput {}
+interface PrismaAiSuggestionDecisionFindManyInput { orderBy: { createdAt: "desc" }; where: { conversationId?: string; tenantId: string }; }
+interface PrismaAiSuggestionDecisionFindUniqueInput { where: { tenantId_suggestionId: { suggestionId: string; tenantId: string } }; }
+
+interface PrismaConversationLifecycleEventCreateInput {
+  actorId: string | null;
+  actorName: string | null;
+  actorType: string;
+  conversationId: string;
+  data: Record<string, unknown>;
+  eventType: string;
+  id: string;
+  ingestedAt: Date;
+  occurredAt: Date;
+  reason: string | null;
+  schemaVersion: string;
+  source: string;
+  sourceEventId: string;
+  tenantId: string;
+  traceId: string;
 }
 
 interface PrismaAiScoringAuditCreateInput {
@@ -189,15 +271,33 @@ interface PrismaQualityRatingFindUniqueInput {
 
 interface PrismaQualityRatingRow extends PrismaQualityRatingCreateInput {}
 
+let defaultQualityRepository: QualityRepositoryPort | null = null;
+
 export class QualityRepository {
   private constructor(private readonly store: DurableStore<QualityState>) {}
 
-  static inMemory(seed: QualityState = seedQualityState()): QualityRepository {
+  static default(): QualityRepositoryPort {
+    if (defaultQualityRepository) {
+      return defaultQualityRepository;
+    }
+
+    return QualityRepository.inMemory();
+  }
+
+  static useDefault(repository: QualityRepositoryPort): void {
+    defaultQualityRepository = repository;
+  }
+
+  static clearDefault(): void {
+    defaultQualityRepository = null;
+  }
+
+  static inMemory(seed: Partial<QualityState> = seedQualityState()): QualityRepository {
     return new QualityRepository(new InMemoryStore(normalizeState(seed)));
   }
 
-  static open({ filePath }: QualityRepositoryOptions): QualityRepository {
-    return new QualityRepository(new JsonFileStore({ filePath, seed: seedQualityState() }));
+  static open({ filePath, seed = seedQualityState() }: QualityRepositoryOptions): QualityRepository {
+    return new QualityRepository(new JsonFileStore({ filePath, seed: normalizeState(seed) }));
   }
 
   static prisma({ client, fallback }: PrismaQualityRepositoryOptions): PrismaQualityRepository {
@@ -206,6 +306,10 @@ export class QualityRepository {
 
   readState(): QualityState {
     return clone(normalizeState(this.store.read()));
+  }
+
+  readWorkspace(): QualityWorkspaceSnapshot {
+    return clone(this.readState().workspace);
   }
 
   listQualityRatings(filter: QualityRatingFilter = {}): QualityRatingRecord[] {
@@ -241,8 +345,16 @@ export class QualityRepository {
     ));
   }
 
-  saveQualityRating(record: QualityRatingRecord): QualityRatingRecord {
+  listAiSuggestionDecisions(filter: AiSuggestionDecisionFilter = {}): AiSuggestionDecisionRecord[] {
+    if (!hasTenantScope(filter)) return [];
+    return clone(this.readState().aiSuggestionDecisions.filter((decision) =>
+      decision.tenantId === filter.tenantId && (!filter.conversationId || decision.conversationId === filter.conversationId)
+    ));
+  }
+
+  saveQualityRating(record: QualityRatingRecord, lifecycleEvent?: ConversationLifecycleEvent): QualityRatingRecord {
     const persisted = normalizeQualityRating(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
     let saved = persisted;
 
     this.store.update((state) => {
@@ -258,6 +370,7 @@ export class QualityRepository {
 
       return {
         ...current,
+        lifecycleEvents: appendLifecycleEvent(current.lifecycleEvents ?? [], event),
         ratings: [...current.ratings, persisted]
       };
     });
@@ -265,8 +378,9 @@ export class QualityRepository {
     return clone(saved);
   }
 
-  saveManualQaReview(record: ManualQaReviewRecord): ManualQaReviewRecord {
+  saveManualQaReview(record: ManualQaReviewRecord, lifecycleEvent?: ConversationLifecycleEvent): ManualQaReviewRecord {
     const persisted = normalizeManualQaReview(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
     let saved = persisted;
 
     this.store.update((state) => {
@@ -282,6 +396,7 @@ export class QualityRepository {
 
       return {
         ...current,
+        lifecycleEvents: appendLifecycleEvent(current.lifecycleEvents ?? [], event),
         manualQaReviews: [...current.manualQaReviews, persisted]
       };
     });
@@ -289,8 +404,9 @@ export class QualityRepository {
     return clone(saved);
   }
 
-  saveAiScoringAudit(record: AiScoringAuditRecord): AiScoringAuditRecord {
+  saveAiScoringAudit(record: AiScoringAuditRecord, lifecycleEvent?: ConversationLifecycleEvent): AiScoringAuditRecord {
     const persisted = normalizeAiScoringAudit(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
     let saved = persisted;
 
     this.store.update((state) => {
@@ -306,10 +422,24 @@ export class QualityRepository {
 
       return {
         ...current,
-        aiScoringAudits: [...current.aiScoringAudits, persisted]
+        aiScoringAudits: [...current.aiScoringAudits, persisted],
+        lifecycleEvents: appendLifecycleEvent(current.lifecycleEvents ?? [], event)
       };
     });
 
+    return clone(saved);
+  }
+
+  saveAiSuggestionDecision(record: AiSuggestionDecisionRecord, lifecycleEvent: ConversationLifecycleEvent): AiSuggestionDecisionRecord {
+    const persisted = normalizeAiSuggestionDecision(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
+    let saved = persisted;
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const existing = current.aiSuggestionDecisions.find((item) => item.tenantId === persisted.tenantId && item.suggestionId === persisted.suggestionId);
+      if (existing) { saved = existing; return current; }
+      return { ...current, aiSuggestionDecisions: [...current.aiSuggestionDecisions, persisted], lifecycleEvents: appendLifecycleEvent(current.lifecycleEvents ?? [], event) };
+    });
     return clone(saved);
   }
 }
@@ -319,6 +449,10 @@ export class PrismaQualityRepository {
 
   readState(): QualityState {
     return this.fallback.readState();
+  }
+
+  readWorkspace(): QualityWorkspaceSnapshot {
+    return this.fallback.readWorkspace();
   }
 
   async listQualityRatings(filter: QualityRatingFilter = {}): Promise<QualityRatingRecord[]> {
@@ -369,8 +503,18 @@ export class PrismaQualityRepository {
     return rows.map(toAiScoringAuditRecord);
   }
 
-  async saveQualityRating(record: QualityRatingRecord): Promise<QualityRatingRecord> {
+  async listAiSuggestionDecisions(filter: AiSuggestionDecisionFilter = {}): Promise<AiSuggestionDecisionRecord[]> {
+    if (!hasTenantScope(filter)) return [];
+    const rows = await this.client.aiSuggestionDecision.findMany({
+      orderBy: { createdAt: "desc" },
+      where: { ...(filter.conversationId ? { conversationId: filter.conversationId } : {}), tenantId: filter.tenantId }
+    });
+    return rows.map(toAiSuggestionDecisionRecord);
+  }
+
+  async saveQualityRating(record: QualityRatingRecord, lifecycleEvent?: ConversationLifecycleEvent): Promise<QualityRatingRecord> {
     const persisted = normalizeQualityRating(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
     const existing = await this.client.qualityRating.findUnique({
       where: {
         tenantId_ratingId: {
@@ -386,17 +530,29 @@ export class PrismaQualityRepository {
       return clone(saved);
     }
 
-    const row = await this.client.qualityRating.create({
-      data: toPrismaQualityRatingCreateInput(persisted)
-    });
+    let row: PrismaQualityRatingRow;
+    try {
+      row = await createPrismaQualityRecord(
+        this.client,
+        (transaction) => transaction.qualityRating.create({ data: toPrismaQualityRatingCreateInput(persisted) }),
+        event
+      );
+    } catch (error) {
+      const concurrent = await this.client.qualityRating.findUnique({
+        where: { tenantId_ratingId: { ratingId: persisted.ratingId, tenantId: persisted.tenantId } }
+      });
+      if (!concurrent) throw error;
+      row = concurrent;
+    }
     const saved = toQualityRatingRecord(row);
-    this.fallback.saveQualityRating(saved);
+    this.fallback.saveQualityRating(saved, event);
 
     return clone(saved);
   }
 
-  async saveManualQaReview(record: ManualQaReviewRecord): Promise<ManualQaReviewRecord> {
+  async saveManualQaReview(record: ManualQaReviewRecord, lifecycleEvent?: ConversationLifecycleEvent): Promise<ManualQaReviewRecord> {
     const persisted = normalizeManualQaReview(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
     const existing = await this.client.manualQaReview.findUnique({
       where: {
         tenantId_reviewId: {
@@ -412,17 +568,29 @@ export class PrismaQualityRepository {
       return clone(saved);
     }
 
-    const row = await this.client.manualQaReview.create({
-      data: toPrismaManualQaReviewCreateInput(persisted)
-    });
+    let row: PrismaManualQaReviewRow;
+    try {
+      row = await createPrismaQualityRecord(
+        this.client,
+        (transaction) => transaction.manualQaReview.create({ data: toPrismaManualQaReviewCreateInput(persisted) }),
+        event
+      );
+    } catch (error) {
+      const concurrent = await this.client.manualQaReview.findUnique({
+        where: { tenantId_reviewId: { reviewId: persisted.reviewId, tenantId: persisted.tenantId } }
+      });
+      if (!concurrent) throw error;
+      row = concurrent;
+    }
     const saved = toManualQaReviewRecord(row);
-    this.fallback.saveManualQaReview(saved);
+    this.fallback.saveManualQaReview(saved, event);
 
     return clone(saved);
   }
 
-  async saveAiScoringAudit(record: AiScoringAuditRecord): Promise<AiScoringAuditRecord> {
+  async saveAiScoringAudit(record: AiScoringAuditRecord, lifecycleEvent?: ConversationLifecycleEvent): Promise<AiScoringAuditRecord> {
     const persisted = normalizeAiScoringAudit(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
     const existing = await this.client.aiScoringAudit.findUnique({
       where: {
         tenantId_auditId: {
@@ -438,29 +606,139 @@ export class PrismaQualityRepository {
       return clone(saved);
     }
 
-    const row = await this.client.aiScoringAudit.create({
-      data: toPrismaAiScoringAuditCreateInput(persisted)
-    });
+    let row: PrismaAiScoringAuditRow;
+    try {
+      row = await createPrismaQualityRecord(
+        this.client,
+        (transaction) => transaction.aiScoringAudit.create({ data: toPrismaAiScoringAuditCreateInput(persisted) }),
+        event
+      );
+    } catch (error) {
+      const concurrent = await this.client.aiScoringAudit.findUnique({
+        where: { tenantId_auditId: { auditId: persisted.auditId, tenantId: persisted.tenantId } }
+      });
+      if (!concurrent) throw error;
+      row = concurrent;
+    }
     const saved = toAiScoringAuditRecord(row);
-    this.fallback.saveAiScoringAudit(saved);
+    this.fallback.saveAiScoringAudit(saved, event);
 
+    return clone(saved);
+  }
+
+  async saveAiSuggestionDecision(record: AiSuggestionDecisionRecord, lifecycleEvent: ConversationLifecycleEvent): Promise<AiSuggestionDecisionRecord> {
+    const persisted = normalizeAiSuggestionDecision(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
+    const where = { tenantId_suggestionId: { suggestionId: persisted.suggestionId, tenantId: persisted.tenantId } };
+    const existing = await this.client.aiSuggestionDecision.findUnique({ where });
+    if (existing) return toAiSuggestionDecisionRecord(existing);
+    let row: PrismaAiSuggestionDecisionRow;
+    try {
+      row = await createPrismaQualityRecord(this.client, (transaction) => transaction.aiSuggestionDecision.create({ data: toPrismaAiSuggestionDecisionCreateInput(persisted) }), event);
+    } catch (error) {
+      const concurrent = await this.client.aiSuggestionDecision.findUnique({ where });
+      if (!concurrent) throw error;
+      row = concurrent;
+    }
+    const saved = toAiSuggestionDecisionRecord(row);
+    this.fallback.saveAiSuggestionDecision(saved, event!);
     return clone(saved);
   }
 }
 
+async function createPrismaQualityRecord<TRow>(
+  client: PrismaQualityClient,
+  create: (transaction: PrismaQualityTransactionalClient) => Promise<TRow>,
+  lifecycleEvent: ConversationLifecycleEvent | undefined
+): Promise<TRow> {
+  if (!lifecycleEvent) {
+    return create(client);
+  }
+
+  return client.$transaction(async (transaction) => {
+    const row = await create(transaction);
+    await transaction.conversationLifecycleEvent.create({
+      data: toPrismaLifecycleEventCreateInput(lifecycleEvent)
+    });
+    return row;
+  });
+}
+
+function normalizeLifecycleEvent(
+  event: ConversationLifecycleEvent | undefined,
+  record: { conversationId: string; tenantId: string }
+): ConversationLifecycleEvent | undefined {
+  if (!event) return undefined;
+  if (event.tenantId !== record.tenantId || event.conversationId !== record.conversationId) {
+    throw new Error("quality_lifecycle_scope_mismatch");
+  }
+  return clone(event);
+}
+
+function appendLifecycleEvent(
+  events: ConversationLifecycleEvent[],
+  event: ConversationLifecycleEvent | undefined
+): ConversationLifecycleEvent[] {
+  if (!event || events.some((item) =>
+    item.tenantId === event.tenantId
+      && item.source === event.source
+      && item.sourceEventId === event.sourceEventId
+  )) {
+    return events;
+  }
+  return [...events, clone(event)];
+}
+
+function toPrismaLifecycleEventCreateInput(event: ConversationLifecycleEvent): PrismaConversationLifecycleEventCreateInput {
+  return {
+    actorId: event.actorId,
+    actorName: event.actorName,
+    actorType: event.actorType,
+    conversationId: event.conversationId,
+    data: clone(event.data),
+    eventType: event.eventType,
+    id: event.id,
+    ingestedAt: new Date(event.ingestedAt),
+    occurredAt: new Date(event.occurredAt),
+    reason: event.reason,
+    schemaVersion: event.schemaVersion,
+    source: event.source,
+    sourceEventId: event.sourceEventId,
+    tenantId: event.tenantId,
+    traceId: event.traceId
+  };
+}
+
+function emptyQualityWorkspace(): QualityWorkspaceSnapshot {
+  return {
+    aiCoachingQueue: [],
+    aiEffectivenessMetrics: [],
+    aiRealtimeChecks: [],
+    aiSuggestions: [],
+    knowledgeArticles: [],
+    qualityMetrics: []
+  };
+}
+
 function seedQualityState(): QualityState {
   return {
+    aiSuggestionDecisions: [],
     aiScoringAudits: [],
+    lifecycleEvents: [],
     manualQaReviews: [],
-    ratings: []
+    ratings: [],
+    workspace: emptyQualityWorkspace()
   };
 }
 
 function normalizeState(state: Partial<QualityState>): QualityState {
   return {
+    aiSuggestionDecisions: (state.aiSuggestionDecisions ?? []).map(normalizeAiSuggestionDecision),
     aiScoringAudits: (state.aiScoringAudits ?? []).map(normalizeAiScoringAudit),
+    lifecycleEvents: clone(state.lifecycleEvents ?? []),
     manualQaReviews: (state.manualQaReviews ?? []).map(normalizeManualQaReview),
-    ratings: (state.ratings ?? []).map(normalizeQualityRating)
+    ratings: (state.ratings ?? []).map(normalizeQualityRating),
+    workspace: state.workspace ?? emptyQualityWorkspace()
   };
 }
 
@@ -589,6 +867,37 @@ function normalizeManualQaReview(record: ManualQaReviewRecord): ManualQaReviewRe
     reviewId: requireString(record.reviewId),
     reviewer: requireString(record.reviewer),
     score: normalizeNullableScore(record.score),
+    tenantId: requireString(record.tenantId)
+  };
+}
+
+function toPrismaAiSuggestionDecisionCreateInput(record: AiSuggestionDecisionRecord): PrismaAiSuggestionDecisionCreateInput {
+  const normalized = normalizeAiSuggestionDecision(record);
+  return { ...normalized, createdAt: new Date(normalized.createdAt) };
+}
+
+function toAiSuggestionDecisionRecord(row: PrismaAiSuggestionDecisionRow): AiSuggestionDecisionRecord {
+  return normalizeAiSuggestionDecision({ ...row, createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt) });
+}
+
+function normalizeAiSuggestionDecision(record: AiSuggestionDecisionRecord): AiSuggestionDecisionRecord {
+  if (!(["accept", "edit", "reject"] as string[]).includes(record.action)) throw new Error("quality_suggestion_action_invalid");
+  const rejected = record.action === "reject";
+  return {
+    action: record.action,
+    conversationId: requireString(record.conversationId),
+    createdAt: requireString(record.createdAt),
+    decisionId: requireString(record.decisionId),
+    finalText: rejected ? null : requireString(record.finalText ?? ""),
+    finalTextHash: rejected ? null : requireString(record.finalTextHash ?? ""),
+    operatorId: requireString(record.operatorId),
+    operatorName: nullableString(record.operatorName),
+    originalText: requireString(record.originalText),
+    originalTextHash: requireString(record.originalTextHash),
+    providerId: nullableString(record.providerId),
+    providerResultId: nullableString(record.providerResultId),
+    scoringAuditId: nullableString(record.scoringAuditId),
+    suggestionId: requireString(record.suggestionId),
     tenantId: requireString(record.tenantId)
   };
 }

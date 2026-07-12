@@ -3,13 +3,32 @@ import { type ServiceAdminSessionRecord } from "@support-communication/auth-cont
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
 import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
 import { addMinutes, makeAuditId, makeMfaChallengeId } from "./backend-ids.js";
-import { permissionRoles, serviceAdminSession, tenantAuditEvents, tenants, tenantUsers } from "./identity.fixtures.js";
+import {
+  identityPermissionRoleCatalog,
+  identityServiceAdminTariffCatalog,
+  serviceAdminPrivilegedActions
+} from "./runtime-catalog.js";
+import type {
+  IdentityAvailableOrganization,
+  IdentityPermissionRole,
+  IdentityServiceAdminFeatureFlag,
+  IdentityServiceAdminIncident,
+  IdentityServiceAdminTariff,
+  IdentityTenant,
+  IdentityTenantAuditEvent,
+  IdentityTenantUser
+} from "./identity.types.js";
 import { createTenantOperatorSessionTokens, resolveTenantOperatorPermissions } from "./tenant-operator-auth.js";
 
-export type IdentityTenant = (typeof tenants)[number];
-export type IdentityTenantAuditEvent = (typeof tenantAuditEvents)[number] & { immutable?: boolean };
-export type IdentityTenantUser = (typeof tenantUsers)[number];
-export type IdentityPermissionRole = (typeof permissionRoles)[number];
+export type {
+  IdentityPermissionRole,
+  IdentityServiceAdminFeatureFlag,
+  IdentityServiceAdminIncident,
+  IdentityServiceAdminTariff,
+  IdentityTenant,
+  IdentityTenantAuditEvent,
+  IdentityTenantUser
+} from "./identity.types.js";
 
 export interface IdentityRbacPolicyVersion {
   activatedAt: string | null;
@@ -65,6 +84,31 @@ export interface IdentityServiceAdminAuditEvent {
   userId: string | null;
 }
 
+export interface IdentityServiceAdminAuditExport {
+  createdAt: string;
+  descriptor: Record<string, unknown>;
+  descriptorId: string;
+  expiresAt: string;
+  filters: Record<string, string>;
+  id: string;
+  objectKey: string;
+  redactionPolicy: string;
+  requesterId: string;
+  requesterName: string;
+  sourceEventIds: string[];
+}
+
+export interface IdentityServiceAdminAuditRedaction {
+  actor: string;
+  actorName: string;
+  at: string;
+  createdAt: string;
+  eventId: string;
+  id: string;
+  overlay: Record<string, unknown>;
+  reason: string;
+}
+
 export interface IdentityServiceAdminImpersonationSession {
   auditEventId?: string | null;
   approvalId: string | null;
@@ -111,11 +155,52 @@ export interface IdentityBreakGlassApproval {
 }
 
 export interface IdentityMfaChallenge {
+  attempts: number;
   id: string;
   consumedAt: string | null;
   createdAt: string;
   email: string;
   expiresAt: string;
+  maxAttempts: number;
+  otpHash: string;
+}
+
+export interface IdentityAuthInviteToken {
+  code: string;
+  consumedAt: string | null;
+  createdAt: string;
+  email: string;
+  expiresAt: string;
+  id: string;
+  tenantId: string;
+}
+
+export interface IdentityAuthInviteTokenRecord {
+  codeHash: string;
+  consumedAt: string | null;
+  createdAt: string;
+  email: string;
+  expiresAt: string;
+  id: string;
+  tenantId: string;
+}
+
+export interface IdentityAuthRecoveryToken {
+  consumedAt: string | null;
+  createdAt: string;
+  email: string;
+  expiresAt: string;
+  id: string;
+  token: string;
+}
+
+export interface IdentityAuthRecoveryTokenRecord {
+  consumedAt: string | null;
+  createdAt: string;
+  email: string;
+  expiresAt: string;
+  id: string;
+  tokenHash: string;
 }
 
 export interface IdentityPasswordCredential {
@@ -237,9 +322,44 @@ export type MfaChallengeConsumeResult =
       valid: true;
     }
   | {
-      code: "mfa_challenge_consumed" | "mfa_challenge_expired" | "mfa_challenge_mismatch" | "mfa_challenge_not_found" | "mfa_challenge_required";
+      code: "mfa_challenge_attempts_exceeded" | "mfa_challenge_consumed" | "mfa_challenge_expired" | "mfa_challenge_mismatch" | "mfa_challenge_not_found" | "mfa_challenge_required" | "mfa_otp_invalid";
       message: string;
       valid: false;
+    };
+
+export type InviteTokenConsumeResult =
+  | {
+      status: "consumed";
+      token: IdentityAuthInviteToken;
+    }
+  | {
+      code: "invite_email_mismatch" | "invite_expired" | "invite_not_found";
+      message: string;
+      status: "denied";
+    };
+
+export type RecoveryTokenConsumeResult =
+  | {
+      status: "consumed";
+      token: IdentityAuthRecoveryToken;
+    }
+  | {
+      code: "recovery_expired" | "recovery_not_found";
+      message: string;
+      status: "denied";
+    };
+
+export type PasswordRecoveryCompletionResult =
+  | {
+      credential: IdentityPasswordCredential;
+      revokedSessions: number;
+      revokedTokenPairs: number;
+      status: "consumed";
+    }
+  | {
+      code: "recovery_expired" | "recovery_not_found";
+      message: string;
+      status: "denied";
     };
 
 export type OidcCallbackDescriptorConsumeResult =
@@ -271,7 +391,7 @@ export interface StoredServiceAdminSession extends ServiceAdminSessionRecord {
   adminId: string;
   adminName: string;
   authState: "mfa_verified";
-  availableOrganizations: typeof serviceAdminSession.availableOrganizations;
+  availableOrganizations: IdentityAvailableOrganization[];
   currentTenantId: string;
   role: string;
   tenantScope: string;
@@ -301,7 +421,32 @@ export interface CreateTenantOperatorSessionResult {
   sessionId: string;
 }
 
+interface CreateInviteTokenInput {
+  code?: string;
+  email: string;
+  expiresAt?: string;
+  tenantId: string;
+}
+
+interface ConsumeInviteTokenInput {
+  code: string;
+  email: string;
+  now?: Date;
+}
+
+interface ConsumeRecoveryTokenInput {
+  email: string;
+  now?: Date;
+  token: string;
+}
+
+interface CompletePasswordRecoveryInput extends ConsumeRecoveryTokenInput {
+  credential: IdentityPasswordCredential;
+}
+
 export interface IdentityState {
+  authInviteTokens: IdentityAuthInviteTokenRecord[];
+  authRecoveryTokens: IdentityAuthRecoveryTokenRecord[];
   breakGlassApprovals: IdentityBreakGlassApproval[];
   credentialAuditEvents: IdentityCredentialAuditEvent[];
   mfaChallenges: IdentityMfaChallenge[];
@@ -317,12 +462,18 @@ export interface IdentityState {
   serviceAdminImpersonations: IdentityServiceAdminImpersonationSession[];
   serviceAdminSessions: StoredServiceAdminSession[];
   serviceAdminAuditEvents: IdentityServiceAdminAuditEvent[];
+  serviceAdminAuditExports: IdentityServiceAdminAuditExport[];
+  serviceAdminAuditRedactions: IdentityServiceAdminAuditRedaction[];
   tenantAuditEvents: IdentityTenantAuditEvent[];
   tenantUsers: IdentityTenantUser[];
   tenants: IdentityTenant[];
   permissionRoles: IdentityPermissionRole[];
+  privilegedServiceAdminActions: string[];
   rbacPolicyVersions: IdentityRbacPolicyVersion[];
   rbacRoleGrants: IdentityRbacRoleGrant[];
+  serviceAdminFeatureFlags: IdentityServiceAdminFeatureFlag[];
+  serviceAdminIncidents: IdentityServiceAdminIncident[];
+  serviceAdminTariffs: IdentityServiceAdminTariff[];
   serviceAdminTokenPairs: IdentityServiceAdminTokenPair[];
   serviceAdminTokenRotations: IdentityServiceAdminTokenRotationResult[];
   serviceAdminTokenRevocations: IdentityServiceAdminTokenRevokeResult[];
@@ -341,18 +492,23 @@ export interface IdentityRepositoryPort {
     approval: IdentityBreakGlassApproval;
     auditEvent: IdentityServiceAdminAuditEvent;
   }>;
+  createInviteToken(input: CreateInviteTokenInput): MaybePromise<IdentityAuthInviteToken>;
+  createRecoveryToken(email: string): MaybePromise<IdentityAuthRecoveryToken>;
   decideBreakGlassApproval(input: DecideBreakGlassApprovalInput): MaybePromise<{
     approval: IdentityBreakGlassApproval;
     auditEvent: IdentityServiceAdminAuditEvent;
   }>;
+  consumeInviteToken(input: ConsumeInviteTokenInput): MaybePromise<InviteTokenConsumeResult>;
   createServiceAdminImpersonation(input: CreateServiceAdminImpersonationInput): MaybePromise<{
     auditEvent: IdentityServiceAdminAuditEvent;
     session: IdentityServiceAdminImpersonationSession;
   }>;
   consumeMfaChallenge(input: ConsumeMfaChallengeInput): MaybePromise<MfaChallengeConsumeResult>;
+  consumeRecoveryToken(input: ConsumeRecoveryTokenInput): MaybePromise<RecoveryTokenConsumeResult>;
+  completePasswordRecovery(input: CompletePasswordRecoveryInput): MaybePromise<PasswordRecoveryCompletionResult>;
   consumeOidcCallbackDescriptor(input: ConsumeOidcCallbackDescriptorInput): MaybePromise<OidcCallbackDescriptorConsumeResult>;
   consumeSamlAcsRequestDescriptor(input: ConsumeSamlAcsRequestDescriptorInput): MaybePromise<SamlAcsRequestDescriptorConsumeResult>;
-  createMfaChallenge(email: string): MaybePromise<IdentityMfaChallenge>;
+  createMfaChallenge(input: CreateMfaChallengeInput): MaybePromise<IdentityMfaChallenge>;
   createTenantOperatorSession(input: CreateTenantOperatorSessionInput): MaybePromise<CreateTenantOperatorSessionResult>;
   createServiceAdminSession(input?: CreateServiceAdminSessionInput): MaybePromise<StoredServiceAdminSession>;
   createServiceAdminTokenPair(input: CreateServiceAdminTokenPairInput): MaybePromise<IdentityServiceAdminTokenPair>;
@@ -384,9 +540,15 @@ export interface IdentityRepositoryPort {
   listCredentialAuditEvents(subjectId: string): MaybePromise<IdentityCredentialAuditEvent[]>;
   listPermissionDenialEvents(input?: ListPermissionDenialEventsInput): MaybePromise<IdentityPermissionDenialEvent[]>;
   listServiceAdminAuditEvents(): MaybePromise<IdentityServiceAdminAuditEvent[]>;
+  listServiceAdminAuditExports(): MaybePromise<IdentityServiceAdminAuditExport[]>;
+  listServiceAdminAuditRedactions(): MaybePromise<IdentityServiceAdminAuditRedaction[]>;
   listTenants(): MaybePromise<IdentityTenant[]>;
   listPermissionRoles(): MaybePromise<IdentityPermissionRole[]>;
+  listPrivilegedServiceAdminActions(): MaybePromise<string[]>;
   listRbacRoleGrants(input?: ListRbacRoleGrantsInput): MaybePromise<IdentityRbacRoleGrant[]>;
+  listServiceAdminFeatureFlags(): MaybePromise<IdentityServiceAdminFeatureFlag[]>;
+  listServiceAdminIncidents(): MaybePromise<IdentityServiceAdminIncident[]>;
+  listServiceAdminTariffs(): MaybePromise<IdentityServiceAdminTariff[]>;
   recordCredentialAuditEvent(event: IdentityCredentialAuditEvent): MaybePromise<IdentityCredentialAuditEvent>;
   recordOidcCallbackDescriptor(descriptor: IdentityOidcCallbackDescriptor): MaybePromise<IdentityOidcCallbackDescriptor>;
   recordPermissionDenialEvent(event: IdentityPermissionDenialEvent): MaybePromise<IdentityPermissionDenialEvent>;
@@ -394,6 +556,8 @@ export interface IdentityRepositoryPort {
   recordSamlAcsRequestDescriptor(descriptor: IdentitySamlAcsRequestDescriptor): MaybePromise<IdentitySamlAcsRequestDescriptor>;
   recordSamlAssertionReplay(replay: IdentitySamlAssertionReplay): MaybePromise<IdentitySamlAssertionReplay>;
   recordServiceAdminAuditEvent(event: IdentityServiceAdminAuditEvent): MaybePromise<IdentityServiceAdminAuditEvent>;
+  recordServiceAdminAuditExport(exportRecord: IdentityServiceAdminAuditExport): MaybePromise<IdentityServiceAdminAuditExport>;
+  recordServiceAdminAuditRedaction(redaction: IdentityServiceAdminAuditRedaction): MaybePromise<IdentityServiceAdminAuditRedaction>;
   saveTenant(tenant: IdentityTenant): MaybePromise<IdentityTenant>;
   saveTenantUser(user: IdentityTenantUser): MaybePromise<IdentityTenantUser>;
   revokeTenantOperatorSession(input: { sessionId?: string; token?: string }): MaybePromise<boolean>;
@@ -418,6 +582,7 @@ export interface IdentityRepositoryPort {
 
 interface IdentityRepositoryOptions {
   filePath: string;
+  seed?: IdentityState;
 }
 
 interface CreateServiceAdminSessionInput {
@@ -425,7 +590,7 @@ interface CreateServiceAdminSessionInput {
   actorName?: string;
   adminEmail?: string;
   allowedActions?: string[];
-  availableOrganizations?: typeof serviceAdminSession.availableOrganizations;
+  availableOrganizations?: IdentityAvailableOrganization[];
   currentTenantId?: string;
   mfaVerified?: boolean;
   role?: string;
@@ -465,6 +630,13 @@ interface ConsumeMfaChallengeInput {
   challengeId?: string;
   email: string;
   now?: Date;
+  otpHash: string;
+}
+
+interface CreateMfaChallengeInput {
+  email: string;
+  maxAttempts?: number;
+  otpHash: string;
 }
 
 interface ConsumeOidcCallbackDescriptorInput {
@@ -543,12 +715,12 @@ export class IdentityRepository implements IdentityRepositoryPort {
     defaultRepository = repository;
   }
 
-  static inMemory(): IdentityRepository {
-    return new IdentityRepository(createDurableIdentityRepository(new InMemoryStore(seedIdentityState())));
+  static inMemory(seed: IdentityState = createEmptyIdentityState()): IdentityRepository {
+    return new IdentityRepository(createDurableIdentityRepository(new InMemoryStore(seed)));
   }
 
-  static open({ filePath }: IdentityRepositoryOptions): IdentityRepository {
-    return new IdentityRepository(createDurableIdentityRepository(new JsonFileStore({ filePath, seed: seedIdentityState() })));
+  static open({ filePath, seed = createEmptyIdentityState() }: IdentityRepositoryOptions): IdentityRepository {
+    return new IdentityRepository(createDurableIdentityRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client }: PrismaIdentityRepositoryOptions): IdentityRepository {
@@ -591,8 +763,32 @@ export class IdentityRepository implements IdentityRepositoryPort {
     return this.adapter.listServiceAdminAuditEvents();
   }
 
+  listServiceAdminAuditExports(): MaybePromise<IdentityServiceAdminAuditExport[]> {
+    return this.adapter.listServiceAdminAuditExports();
+  }
+
+  listServiceAdminAuditRedactions(): MaybePromise<IdentityServiceAdminAuditRedaction[]> {
+    return this.adapter.listServiceAdminAuditRedactions();
+  }
+
   listPermissionRoles(): MaybePromise<IdentityPermissionRole[]> {
     return this.adapter.listPermissionRoles();
+  }
+
+  listPrivilegedServiceAdminActions(): MaybePromise<string[]> {
+    return this.adapter.listPrivilegedServiceAdminActions();
+  }
+
+  listServiceAdminTariffs(): MaybePromise<IdentityServiceAdminTariff[]> {
+    return this.adapter.listServiceAdminTariffs();
+  }
+
+  listServiceAdminIncidents(): MaybePromise<IdentityServiceAdminIncident[]> {
+    return this.adapter.listServiceAdminIncidents();
+  }
+
+  listServiceAdminFeatureFlags(): MaybePromise<IdentityServiceAdminFeatureFlag[]> {
+    return this.adapter.listServiceAdminFeatureFlags();
   }
 
   getActiveRbacPolicyVersion(): MaybePromise<IdentityRbacPolicyVersion | undefined> {
@@ -621,6 +817,14 @@ export class IdentityRepository implements IdentityRepositoryPort {
 
   recordServiceAdminAuditEvent(event: IdentityServiceAdminAuditEvent): MaybePromise<IdentityServiceAdminAuditEvent> {
     return this.adapter.recordServiceAdminAuditEvent(event);
+  }
+
+  recordServiceAdminAuditExport(exportRecord: IdentityServiceAdminAuditExport): MaybePromise<IdentityServiceAdminAuditExport> {
+    return this.adapter.recordServiceAdminAuditExport(exportRecord);
+  }
+
+  recordServiceAdminAuditRedaction(redaction: IdentityServiceAdminAuditRedaction): MaybePromise<IdentityServiceAdminAuditRedaction> {
+    return this.adapter.recordServiceAdminAuditRedaction(redaction);
   }
 
   applyServiceAdminUserAction(input: ServiceAdminUserActionInput): MaybePromise<{
@@ -678,16 +882,36 @@ export class IdentityRepository implements IdentityRepositoryPort {
     return this.adapter.updateTenantStatus(input);
   }
 
-  createMfaChallenge(email: string): MaybePromise<IdentityMfaChallenge> {
-    return this.adapter.createMfaChallenge(email);
+  createMfaChallenge(input: CreateMfaChallengeInput): MaybePromise<IdentityMfaChallenge> {
+    return this.adapter.createMfaChallenge(input);
+  }
+
+  createInviteToken(input: CreateInviteTokenInput): MaybePromise<IdentityAuthInviteToken> {
+    return this.adapter.createInviteToken(input);
+  }
+
+  createRecoveryToken(email: string): MaybePromise<IdentityAuthRecoveryToken> {
+    return this.adapter.createRecoveryToken(email);
   }
 
   createTenantOperatorSession(input: CreateTenantOperatorSessionInput): MaybePromise<CreateTenantOperatorSessionResult> {
     return this.adapter.createTenantOperatorSession(input);
   }
 
+  consumeInviteToken(input: ConsumeInviteTokenInput): MaybePromise<InviteTokenConsumeResult> {
+    return this.adapter.consumeInviteToken(input);
+  }
+
   consumeMfaChallenge(input: ConsumeMfaChallengeInput): MaybePromise<MfaChallengeConsumeResult> {
     return this.adapter.consumeMfaChallenge(input);
+  }
+
+  consumeRecoveryToken(input: ConsumeRecoveryTokenInput): MaybePromise<RecoveryTokenConsumeResult> {
+    return this.adapter.consumeRecoveryToken(input);
+  }
+
+  completePasswordRecovery(input: CompletePasswordRecoveryInput): MaybePromise<PasswordRecoveryCompletionResult> {
+    return this.adapter.completePasswordRecovery(input);
   }
 
   consumeOidcCallbackDescriptor(input: ConsumeOidcCallbackDescriptorInput): MaybePromise<OidcCallbackDescriptorConsumeResult> {
@@ -831,6 +1055,24 @@ interface PrismaRawSqlClient {
 }
 
 interface PrismaIdentityDelegates {
+  authInviteToken: {
+    findUnique(input: { where: { codeHash: string } }): Promise<PrismaAuthInviteTokenRow | null>;
+    updateMany(input: { data: { consumedAt: Date }; where: { consumedAt: null; id: string } }): Promise<{ count: number }>;
+    upsert(input: {
+      create: PrismaAuthInviteTokenCreateInput;
+      update: PrismaAuthInviteTokenUpdateInput;
+      where: { codeHash: string };
+    }): Promise<PrismaAuthInviteTokenRow>;
+  };
+  authRecoveryToken: {
+    findUnique(input: { where: { tokenHash: string } }): Promise<PrismaAuthRecoveryTokenRow | null>;
+    updateMany(input: { data: { consumedAt: Date }; where: { consumedAt: null; id: string } }): Promise<{ count: number }>;
+    upsert(input: {
+      create: PrismaAuthRecoveryTokenCreateInput;
+      update: PrismaAuthRecoveryTokenUpdateInput;
+      where: { tokenHash: string };
+    }): Promise<PrismaAuthRecoveryTokenRow>;
+  };
   breakGlassApproval: {
     create(input: { data: PrismaBreakGlassApprovalCreateInput }): Promise<PrismaBreakGlassApprovalRow>;
     findUnique(input: { where: { id: string } }): Promise<PrismaBreakGlassApprovalRow | null>;
@@ -839,7 +1081,10 @@ interface PrismaIdentityDelegates {
   mfaChallenge: {
     create(input: { data: PrismaMfaChallengeCreateInput }): Promise<PrismaMfaChallengeRow>;
     findUnique(input: { where: { id: string } }): Promise<PrismaMfaChallengeRow | null>;
-    updateMany(input: { data: { consumedAt: Date }; where: { consumedAt: null; id: string } }): Promise<{ count: number }>;
+    updateMany(input: {
+      data: { attempts?: { increment: number }; consumedAt?: Date };
+      where: { attempts?: number; consumedAt: null; id: string };
+    }): Promise<{ count: number }>;
   };
   outboxEvent: {
     create(input: { data: PrismaOutboxEventCreateInput }): Promise<unknown>;
@@ -919,13 +1164,16 @@ interface PrismaIdentityDelegates {
   };
   serviceAdminSession: {
     create(input: { data: PrismaServiceAdminSessionCreateInput }): Promise<PrismaServiceAdminSessionRow>;
+    findMany(input: { where: { adminEmail: string; revokedAt?: null } }): Promise<PrismaServiceAdminSessionRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaServiceAdminSessionRow | null>;
     update(input: { data: { revokedAt: Date }; where: { id: string } }): Promise<PrismaServiceAdminSessionRow>;
+    updateMany(input: { data: { revokedAt: Date }; where: { id: { in: string[] }; revokedAt: null } }): Promise<{ count: number }>;
   };
   serviceAdminTokenPair: {
     create(input: { data: PrismaServiceAdminTokenPairCreateInput }): Promise<PrismaServiceAdminTokenPairRow>;
     findFirst(input: PrismaServiceAdminTokenPairFindFirstInput): Promise<PrismaServiceAdminTokenPairRow | null>;
     update(input: { data: PrismaServiceAdminTokenPairUpdateInput; where: { id: string } }): Promise<PrismaServiceAdminTokenPairRow>;
+    updateMany(input: { data: { revokedAt: Date }; where: { revokedAt: null; sessionId: { in: string[] } } }): Promise<{ count: number }>;
   };
   serviceAdminTokenRevocation: {
     create(input: { data: PrismaServiceAdminTokenRevocationCreateInput }): Promise<PrismaServiceAdminTokenRevocationRow>;
@@ -938,6 +1186,14 @@ interface PrismaIdentityDelegates {
   serviceAdminAuditEvent: {
     create(input: { data: PrismaServiceAdminAuditEventCreateInput }): Promise<PrismaServiceAdminAuditEventRow>;
     findMany(input: { orderBy: { at: "desc" } }): Promise<PrismaServiceAdminAuditEventRow[]>;
+  };
+  serviceAdminAuditExport: {
+    create(input: { data: PrismaServiceAdminAuditExportCreateInput }): Promise<PrismaServiceAdminAuditExportRow>;
+    findMany(input: { orderBy: { createdAt: "desc" } }): Promise<PrismaServiceAdminAuditExportRow[]>;
+  };
+  serviceAdminAuditRedaction: {
+    create(input: { data: PrismaServiceAdminAuditRedactionCreateInput }): Promise<PrismaServiceAdminAuditRedactionRow>;
+    findMany(input: { orderBy: { createdAt: "desc" } }): Promise<PrismaServiceAdminAuditRedactionRow[]>;
   };
   serviceAdminImpersonation: {
     create(input: { data: PrismaServiceAdminImpersonationCreateInput }): Promise<PrismaServiceAdminImpersonationRow>;
@@ -963,6 +1219,33 @@ interface PrismaIdentityDelegates {
     update(input: { data: PrismaTenantUserUpdateInput; where: { id: string } }): Promise<PrismaTenantUserRow>;
   };
 }
+
+interface PrismaAuthInviteTokenRow {
+  codeHash: string;
+  consumedAt: Date | null;
+  createdAt: Date;
+  email: string;
+  expiresAt: Date;
+  id: string;
+  tenantId: string;
+}
+
+interface PrismaAuthInviteTokenCreateInput extends PrismaAuthInviteTokenRow {}
+
+type PrismaAuthInviteTokenUpdateInput = Omit<PrismaAuthInviteTokenCreateInput, "createdAt" | "id">;
+
+interface PrismaAuthRecoveryTokenRow {
+  consumedAt: Date | null;
+  createdAt: Date;
+  email: string;
+  expiresAt: Date;
+  id: string;
+  tokenHash: string;
+}
+
+interface PrismaAuthRecoveryTokenCreateInput extends PrismaAuthRecoveryTokenRow {}
+
+type PrismaAuthRecoveryTokenUpdateInput = Omit<PrismaAuthRecoveryTokenCreateInput, "createdAt" | "id">;
 
 interface PrismaTenantRow {
   healthScore: number | null;
@@ -1051,6 +1334,31 @@ interface PrismaServiceAdminAuditEventRow {
   userId: string | null;
 }
 
+interface PrismaServiceAdminAuditExportRow {
+  createdAt: Date | string;
+  descriptor: unknown;
+  descriptorId: string;
+  expiresAt: Date | string;
+  filters: unknown;
+  id: string;
+  objectKey: string;
+  redactionPolicy: string;
+  requesterId: string;
+  requesterName: string;
+  sourceEventIds: unknown;
+}
+
+interface PrismaServiceAdminAuditRedactionRow {
+  actor: string;
+  actorName: string;
+  at: Date | string;
+  createdAt: Date | string;
+  eventId: string;
+  id: string;
+  overlay: unknown;
+  reason: string;
+}
+
 interface PrismaServiceAdminImpersonationRow {
   auditEventId?: string | null;
   approvalId: string | null;
@@ -1129,11 +1437,14 @@ interface PrismaPermissionDenialEventRow {
 }
 
 interface PrismaMfaChallengeRow {
+  attempts: number;
   consumedAt: Date | string | null;
   createdAt: Date | string;
   email: string;
   expiresAt: Date | string;
   id: string;
+  maxAttempts: number;
+  otpHash: string;
 }
 
 interface PrismaPasswordCredentialRow {
@@ -1279,11 +1590,14 @@ interface PrismaServiceAdminTokenRotationRowWithPairs extends PrismaServiceAdmin
 }
 
 interface PrismaMfaChallengeCreateInput {
+  attempts: number;
   consumedAt: Date | null;
   createdAt: Date;
   email: string;
   expiresAt: Date;
   id: string;
+  maxAttempts: number;
+  otpHash: string;
 }
 
 interface PrismaServiceAdminSessionCreateInput {
@@ -1294,7 +1608,7 @@ interface PrismaServiceAdminSessionCreateInput {
   adminName: string;
   allowedActions: string[];
   authState: "mfa_verified";
-  availableOrganizations: typeof serviceAdminSession.availableOrganizations;
+  availableOrganizations: IdentityAvailableOrganization[];
   currentTenantId: string;
   expiresAt: Date;
   id: string;
@@ -1527,6 +1841,31 @@ interface PrismaServiceAdminAuditEventCreateInput {
   userId: string | null;
 }
 
+interface PrismaServiceAdminAuditExportCreateInput {
+  createdAt: Date;
+  descriptor: Record<string, unknown>;
+  descriptorId: string;
+  expiresAt: Date;
+  filters: Record<string, string>;
+  id: string;
+  objectKey: string;
+  redactionPolicy: string;
+  requesterId: string;
+  requesterName: string;
+  sourceEventIds: string[];
+}
+
+interface PrismaServiceAdminAuditRedactionCreateInput {
+  actor: string;
+  actorName: string;
+  at: Date;
+  createdAt: Date;
+  eventId: string;
+  id: string;
+  overlay: Record<string, unknown>;
+  reason: string;
+}
+
 interface PrismaServiceAdminImpersonationCreateInput {
   auditEventId?: string | null;
   approvalId: string | null;
@@ -1674,9 +2013,50 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
     return clone(toServiceAdminAuditEvent(row));
   }
 
+  async listServiceAdminAuditExports(): Promise<IdentityServiceAdminAuditExport[]> {
+    const rows = await this.client.serviceAdminAuditExport.findMany({ orderBy: { createdAt: "desc" } });
+    return clone(rows.map(toServiceAdminAuditExport));
+  }
+
+  async recordServiceAdminAuditExport(exportRecord: IdentityServiceAdminAuditExport): Promise<IdentityServiceAdminAuditExport> {
+    const row = await this.client.serviceAdminAuditExport.create({
+      data: toPrismaServiceAdminAuditExportCreateInput(exportRecord)
+    });
+    return clone(toServiceAdminAuditExport(row));
+  }
+
+  async listServiceAdminAuditRedactions(): Promise<IdentityServiceAdminAuditRedaction[]> {
+    const rows = await this.client.serviceAdminAuditRedaction.findMany({ orderBy: { createdAt: "desc" } });
+    return clone(rows.map(toServiceAdminAuditRedaction));
+  }
+
+  async recordServiceAdminAuditRedaction(redaction: IdentityServiceAdminAuditRedaction): Promise<IdentityServiceAdminAuditRedaction> {
+    const row = await this.client.serviceAdminAuditRedaction.create({
+      data: toPrismaServiceAdminAuditRedactionCreateInput(redaction)
+    });
+    return clone(toServiceAdminAuditRedaction(row));
+  }
+
   async listPermissionRoles(): Promise<IdentityPermissionRole[]> {
     const rows = await this.client.permissionRole.findMany({ orderBy: { key: "asc" } });
-    return clone(rows.map(toPermissionRole));
+    const persistedRoles = rows.map(toPermissionRole);
+    return clone(persistedRoles.length ? persistedRoles : identityPermissionRoleCatalog);
+  }
+
+  async listPrivilegedServiceAdminActions(): Promise<string[]> {
+    return [...serviceAdminPrivilegedActions];
+  }
+
+  async listServiceAdminTariffs(): Promise<IdentityServiceAdminTariff[]> {
+    return clone(identityServiceAdminTariffCatalog);
+  }
+
+  async listServiceAdminIncidents(): Promise<IdentityServiceAdminIncident[]> {
+    return [];
+  }
+
+  async listServiceAdminFeatureFlags(): Promise<IdentityServiceAdminFeatureFlag[]> {
+    return [];
   }
 
   async getActiveRbacPolicyVersion(): Promise<IdentityRbacPolicyVersion | undefined> {
@@ -1965,22 +2345,94 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
     });
   }
 
-  async createMfaChallenge(email: string): Promise<IdentityMfaChallenge> {
+  async createMfaChallenge(input: CreateMfaChallengeInput): Promise<IdentityMfaChallenge> {
     const now = new Date();
     const challenge = await this.client.mfaChallenge.create({
       data: {
+        attempts: 0,
         consumedAt: null,
         createdAt: now,
-        email,
+        email: normalizeEmail(input.email),
         expiresAt: addMinutes(now, 10),
-        id: makeMfaChallengeId()
+        id: makeMfaChallengeId(),
+        maxAttempts: input.maxAttempts ?? 5,
+        otpHash: input.otpHash
       }
     });
 
     return clone(toMfaChallenge(challenge));
   }
 
-  async consumeMfaChallenge({ challengeId, email, now = new Date() }: ConsumeMfaChallengeInput): Promise<MfaChallengeConsumeResult> {
+  async createInviteToken(input: CreateInviteTokenInput): Promise<IdentityAuthInviteToken> {
+    const now = new Date();
+    const code = String(input.code ?? `invite_${randomUUID()}`).trim();
+    const token: IdentityAuthInviteToken = {
+      code,
+      consumedAt: null,
+      createdAt: now.toISOString(),
+      email: normalizeEmail(input.email),
+      expiresAt: input.expiresAt ?? addMinutes(now, 60 * 24 * 7).toISOString(),
+      id: `inv_${randomUUID()}`,
+      tenantId: input.tenantId
+    };
+    const inputRow = toPrismaAuthInviteTokenInput({
+      codeHash: hashAuthFlowToken(code),
+      consumedAt: token.consumedAt,
+      createdAt: token.createdAt,
+      email: token.email,
+      expiresAt: token.expiresAt,
+      id: token.id,
+      tenantId: token.tenantId
+    });
+    const row = await this.client.authInviteToken.upsert({
+      create: inputRow,
+      update: {
+        codeHash: inputRow.codeHash,
+        consumedAt: inputRow.consumedAt,
+        email: inputRow.email,
+        expiresAt: inputRow.expiresAt,
+        tenantId: inputRow.tenantId
+      },
+      where: { codeHash: inputRow.codeHash }
+    });
+
+    return clone(toInviteTokenDescriptor(row, code));
+  }
+
+  async createRecoveryToken(email: string): Promise<IdentityAuthRecoveryToken> {
+    const now = new Date();
+    const tokenValue = `recovery_${randomUUID()}`;
+    const token: IdentityAuthRecoveryToken = {
+      consumedAt: null,
+      createdAt: now.toISOString(),
+      email: normalizeEmail(email),
+      expiresAt: addMinutes(now, 30).toISOString(),
+      id: `rcv_${randomUUID()}`,
+      token: tokenValue
+    };
+    const inputRow = toPrismaAuthRecoveryTokenInput({
+      consumedAt: token.consumedAt,
+      createdAt: token.createdAt,
+      email: token.email,
+      expiresAt: token.expiresAt,
+      id: token.id,
+      tokenHash: hashAuthFlowToken(tokenValue)
+    });
+    const row = await this.client.authRecoveryToken.upsert({
+      create: inputRow,
+      update: {
+        consumedAt: inputRow.consumedAt,
+        email: inputRow.email,
+        expiresAt: inputRow.expiresAt,
+        tokenHash: inputRow.tokenHash
+      },
+      where: { tokenHash: inputRow.tokenHash }
+    });
+
+    return clone(toRecoveryTokenDescriptor(row, tokenValue));
+  }
+
+  async consumeMfaChallenge({ challengeId, email, now = new Date(), otpHash }: ConsumeMfaChallengeInput): Promise<MfaChallengeConsumeResult> {
     if (!challengeId) {
       return {
         code: "mfa_challenge_required",
@@ -1989,54 +2441,177 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
       };
     }
 
-    const challenge = await this.client.mfaChallenge.findUnique({ where: { id: challengeId } });
-    if (!challenge) {
-      return {
-        code: "mfa_challenge_not_found",
-        message: "MFA challenge was not found.",
-        valid: false
-      };
+    for (let retry = 0; retry < 3; retry += 1) {
+      const challenge = await this.client.mfaChallenge.findUnique({ where: { id: challengeId } });
+      const denial = resolveMfaChallengeDenial(challenge, email, now);
+      if (denial) {
+        return denial;
+      }
+      if (!challenge) {
+        throw new Error("MFA challenge denial resolver returned no result for a missing challenge.");
+      }
+
+      if (!secureStringEqual(challenge.otpHash, otpHash)) {
+        const persisted = await this.client.mfaChallenge.updateMany({
+          data: { attempts: { increment: 1 } },
+          where: { attempts: challenge.attempts, consumedAt: null, id: challengeId }
+        });
+        if (persisted.count === 0) {
+          continue;
+        }
+        return {
+          code: "mfa_otp_invalid",
+          message: "MFA one-time code is invalid.",
+          valid: false
+        };
+      }
+
+      const persisted = await this.client.mfaChallenge.updateMany({
+        data: { consumedAt: now },
+        where: { attempts: challenge.attempts, consumedAt: null, id: challengeId }
+      });
+      if (persisted.count === 0) {
+        continue;
+      }
+
+      return clone({
+        challenge: toMfaChallenge({ ...challenge, consumedAt: now }),
+        valid: true
+      });
     }
 
-    if (challenge.consumedAt) {
-      return {
-        code: "mfa_challenge_consumed",
-        message: "MFA challenge was already consumed.",
-        valid: false
-      };
+    return {
+      code: "mfa_challenge_consumed",
+      message: "MFA challenge changed during verification. Start a new login challenge.",
+      valid: false
+    };
+  }
+
+  async consumeInviteToken({ code, email, now = new Date() }: ConsumeInviteTokenInput): Promise<InviteTokenConsumeResult> {
+    const normalizedCode = String(code ?? "").trim();
+    const token = await this.client.authInviteToken.findUnique({ where: { codeHash: hashAuthFlowToken(normalizedCode) } });
+    if (!token) {
+      return { code: "invite_not_found", message: "Invite token was not found.", status: "denied" };
     }
 
-    if (challenge.email !== email) {
-      return {
-        code: "mfa_challenge_mismatch",
-        message: "MFA challenge does not belong to this login.",
-        valid: false
-      };
+    if (token.consumedAt) {
+      return { code: "invite_expired", message: "Invite token was already consumed.", status: "denied" };
     }
 
-    if (!Number.isFinite(Date.parse(toIso(challenge.expiresAt))) || Date.parse(toIso(challenge.expiresAt)) <= now.getTime()) {
-      return {
-        code: "mfa_challenge_expired",
-        message: "MFA challenge has expired.",
-        valid: false
-      };
+    if (!Number.isFinite(Date.parse(toIso(token.expiresAt))) || Date.parse(toIso(token.expiresAt)) <= now.getTime()) {
+      return { code: "invite_expired", message: "Invite token has expired.", status: "denied" };
     }
 
-    const persisted = await this.client.mfaChallenge.updateMany({
+    if (normalizeEmail(email) !== token.email) {
+      return { code: "invite_email_mismatch", message: "Invite email does not match the token.", status: "denied" };
+    }
+
+    const persisted = await this.client.authInviteToken.updateMany({
       data: { consumedAt: now },
-      where: { consumedAt: null, id: challengeId }
+      where: { consumedAt: null, id: token.id }
     });
     if (persisted.count === 0) {
-      return {
-        code: "mfa_challenge_consumed",
-        message: "MFA challenge was already consumed.",
-        valid: false
-      };
+      return { code: "invite_expired", message: "Invite token was already consumed.", status: "denied" };
     }
 
     return clone({
-      challenge: toMfaChallenge({ ...challenge, consumedAt: now }),
-      valid: true
+      status: "consumed",
+      token: toInviteTokenDescriptor({ ...token, consumedAt: now }, normalizedCode)
+    });
+  }
+
+  async consumeRecoveryToken({ email, now = new Date(), token }: ConsumeRecoveryTokenInput): Promise<RecoveryTokenConsumeResult> {
+    const normalizedToken = String(token ?? "").trim();
+    const record = await this.client.authRecoveryToken.findUnique({ where: { tokenHash: hashAuthFlowToken(normalizedToken) } });
+    if (!record) {
+      return { code: "recovery_not_found", message: "Recovery token was not found.", status: "denied" };
+    }
+
+    if (record.consumedAt || !Number.isFinite(Date.parse(toIso(record.expiresAt))) || Date.parse(toIso(record.expiresAt)) <= now.getTime()) {
+      return { code: "recovery_expired", message: "Recovery token has expired.", status: "denied" };
+    }
+
+    if (normalizeEmail(email) !== record.email) {
+      return { code: "recovery_not_found", message: "Recovery token was not found.", status: "denied" };
+    }
+
+    const persisted = await this.client.authRecoveryToken.updateMany({
+      data: { consumedAt: now },
+      where: { consumedAt: null, id: record.id }
+    });
+    if (persisted.count === 0) {
+      return { code: "recovery_expired", message: "Recovery token has expired.", status: "denied" };
+    }
+
+    return clone({
+      status: "consumed",
+      token: toRecoveryTokenDescriptor({ ...record, consumedAt: now }, normalizedToken)
+    });
+  }
+
+  async completePasswordRecovery({ credential, email, now = new Date(), token }: CompletePasswordRecoveryInput): Promise<PasswordRecoveryCompletionResult> {
+    const normalizedEmail = normalizeEmail(email);
+    if (normalizeEmail(credential.email) !== normalizedEmail) {
+      throw new Error("password_recovery_credential_email_mismatch");
+    }
+
+    const normalizedToken = String(token ?? "").trim();
+    return this.client.$transaction(async (transaction) => {
+      const record = await transaction.authRecoveryToken.findUnique({
+        where: { tokenHash: hashAuthFlowToken(normalizedToken) }
+      });
+      if (!record || normalizeEmail(record.email) !== normalizedEmail) {
+        return { code: "recovery_not_found", message: "Recovery token was not found.", status: "denied" as const };
+      }
+      if (record.consumedAt || !Number.isFinite(Date.parse(toIso(record.expiresAt))) || Date.parse(toIso(record.expiresAt)) <= now.getTime()) {
+        return { code: "recovery_expired", message: "Recovery token has expired.", status: "denied" as const };
+      }
+
+      const consumed = await transaction.authRecoveryToken.updateMany({
+        data: { consumedAt: now },
+        where: { consumedAt: null, id: record.id }
+      });
+      if (consumed.count === 0) {
+        return { code: "recovery_expired", message: "Recovery token has expired.", status: "denied" as const };
+      }
+
+      const credentialInput = toPrismaPasswordCredentialInput({
+        ...credential,
+        email: normalizedEmail
+      });
+      const credentialRow = await transaction.passwordCredential.upsert({
+        create: credentialInput,
+        update: credentialInput,
+        where: { email: normalizedEmail }
+      });
+      const persistedCredential = toPasswordCredential(credentialRow);
+      if (!persistedCredential) {
+        throw new Error(`Password credential ${normalizedEmail} was persisted with an unsupported algorithm.`);
+      }
+
+      const activeSessions = await transaction.serviceAdminSession.findMany({
+        where: { adminEmail: normalizedEmail, revokedAt: null }
+      });
+      const sessionIds = activeSessions.map((session) => session.id);
+      const revokedTokenPairs = sessionIds.length
+        ? await transaction.serviceAdminTokenPair.updateMany({
+            data: { revokedAt: now },
+            where: { revokedAt: null, sessionId: { in: sessionIds } }
+          })
+        : { count: 0 };
+      const revokedSessions = sessionIds.length
+        ? await transaction.serviceAdminSession.updateMany({
+            data: { revokedAt: now },
+            where: { id: { in: sessionIds }, revokedAt: null }
+          })
+        : { count: 0 };
+
+      return clone({
+        credential: persistedCredential,
+        revokedSessions: revokedSessions.count,
+        revokedTokenPairs: revokedTokenPairs.count,
+        status: "consumed" as const
+      });
     });
   }
 
@@ -2303,26 +2878,25 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
   }
 
   async createServiceAdminSession(input: CreateServiceAdminSessionInput = {}): Promise<StoredServiceAdminSession> {
-    const actorId = input.actorId ?? serviceAdminSession.actorId;
-    const actorName = input.actorName ?? serviceAdminSession.actorName;
+    const resolved = resolveServiceAdminSessionInput(input);
     const now = new Date();
     const row = await this.client.serviceAdminSession.create({
       data: {
-        actorId,
-        actorName,
-        adminEmail: input.adminEmail ?? serviceAdminSession.adminEmail,
-        adminId: actorId,
-        adminName: actorName,
-        allowedActions: input.allowedActions ?? [...serviceAdminSession.allowedActions],
+        actorId: resolved.actorId,
+        actorName: resolved.actorName,
+        adminEmail: resolved.adminEmail,
+        adminId: resolved.actorId,
+        adminName: resolved.actorName,
+        allowedActions: resolved.allowedActions,
         authState: "mfa_verified",
-        availableOrganizations: clone(input.availableOrganizations ?? serviceAdminSession.availableOrganizations),
-        currentTenantId: input.currentTenantId ?? serviceAdminSession.currentTenantId,
+        availableOrganizations: resolved.availableOrganizations,
+        currentTenantId: resolved.currentTenantId,
         expiresAt: addMinutes(now, input.ttlMinutes ?? 240),
         id: `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
         mfaVerifiedAt: input.mfaVerified === false ? null : now,
         revokedAt: null,
-        role: input.role ?? serviceAdminSession.role,
-        tenantScope: input.tenantScope ?? serviceAdminSession.tenantScope
+        role: resolved.role,
+        tenantScope: resolved.tenantScope
       }
     });
 
@@ -2636,8 +3210,6 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
 }
 
 function createDurableIdentityRepository(store: DurableStore<IdentityState>): IdentityRepositoryPort {
-  ensureSeedPasswordCredentials(store);
-
   return {
     listTenants(): IdentityTenant[] {
       return clone(store.read().tenants);
@@ -2666,7 +3238,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
 
     findTenantUsers(tenantId: string): IdentityTenantUser[] {
       const state = store.read();
-      return clone((state.tenantUsers ?? tenantUsers).filter((user) => user.tenantId === tenantId));
+      return clone((state.tenantUsers ?? []).filter((user) => user.tenantId === tenantId));
     },
 
     findTenantUser(userId: string | undefined): IdentityTenantUser | undefined {
@@ -2675,7 +3247,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       }
 
       const state = store.read();
-      return clone((state.tenantUsers ?? tenantUsers).find((user) => user.id === userId));
+      return clone((state.tenantUsers ?? []).find((user) => user.id === userId));
     },
 
     findTenantUserByEmail(email: string): IdentityTenantUser | undefined {
@@ -2685,12 +3257,12 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       }
 
       const state = store.read();
-      return clone((state.tenantUsers ?? tenantUsers).find((user) => normalizeEmail(user.email) === normalizedEmail));
+      return clone((state.tenantUsers ?? []).find((user) => normalizeEmail(user.email) === normalizedEmail));
     },
 
     saveTenantUser(user: IdentityTenantUser): IdentityTenantUser {
       store.update((state) => {
-        const currentTenantUsers = state.tenantUsers ?? clone(tenantUsers);
+        const currentTenantUsers = state.tenantUsers ?? [];
         return {
           ...state,
           tenantUsers: [
@@ -2716,8 +3288,51 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       return clone(event);
     },
 
+    listServiceAdminAuditExports(): IdentityServiceAdminAuditExport[] {
+      return clone(store.read().serviceAdminAuditExports ?? []);
+    },
+
+    recordServiceAdminAuditExport(exportRecord: IdentityServiceAdminAuditExport): IdentityServiceAdminAuditExport {
+      store.update((state) => ({
+        ...state,
+        serviceAdminAuditExports: [exportRecord, ...(state.serviceAdminAuditExports ?? [])]
+      }));
+
+      return clone(exportRecord);
+    },
+
+    listServiceAdminAuditRedactions(): IdentityServiceAdminAuditRedaction[] {
+      return clone(store.read().serviceAdminAuditRedactions ?? []);
+    },
+
+    recordServiceAdminAuditRedaction(redaction: IdentityServiceAdminAuditRedaction): IdentityServiceAdminAuditRedaction {
+      store.update((state) => ({
+        ...state,
+        serviceAdminAuditRedactions: [redaction, ...(state.serviceAdminAuditRedactions ?? [])]
+      }));
+
+      return clone(redaction);
+    },
+
     listPermissionRoles(): IdentityPermissionRole[] {
-      return clone(store.read().permissionRoles ?? permissionRoles);
+      const persistedRoles = store.read().permissionRoles;
+      return clone(persistedRoles?.length ? persistedRoles : identityPermissionRoleCatalog);
+    },
+
+    listPrivilegedServiceAdminActions(): string[] {
+      return clone(store.read().privilegedServiceAdminActions ?? serviceAdminPrivilegedActions);
+    },
+
+    listServiceAdminTariffs(): IdentityServiceAdminTariff[] {
+      return clone(store.read().serviceAdminTariffs ?? identityServiceAdminTariffCatalog);
+    },
+
+    listServiceAdminIncidents(): IdentityServiceAdminIncident[] {
+      return clone(store.read().serviceAdminIncidents ?? []);
+    },
+
+    listServiceAdminFeatureFlags(): IdentityServiceAdminFeatureFlag[] {
+      return clone(store.read().serviceAdminFeatureFlags ?? []);
     },
 
     getActiveRbacPolicyVersion(): IdentityRbacPolicyVersion | undefined {
@@ -2786,7 +3401,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       let result: { auditEvent: IdentityServiceAdminAuditEvent; user: IdentityTenantUser } | null = null;
 
       store.update((state) => {
-        const currentTenantUsers = state.tenantUsers ?? clone(tenantUsers);
+        const currentTenantUsers = state.tenantUsers ?? [];
         const existing = currentTenantUsers.find((user) => user.id === userId);
         if (!existing) {
           throw new Error(`User ${userId} was not found.`);
@@ -2957,7 +3572,8 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
           throw new Error(`Tenant ${tenantId} was not found.`);
         }
 
-        const updatedTenant = { ...tenant, status };
+        const normalizedStatus = tenantStatusFromRow(status);
+        const updatedTenant: IdentityTenant = { ...tenant, status: normalizedStatus };
         const auditEvent = {
           id: makeAuditId("tenant_status"),
           action: "tenant.status.change",
@@ -2966,7 +3582,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
           immutable: true,
           reason,
           result: "ok",
-          severity: status === "restricted" ? "warn" : "info",
+          severity: normalizedStatus === "restricted" ? "warn" : "info",
           target: tenant.id,
           tenantId: tenant.id,
           traceId
@@ -2974,7 +3590,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         const outbox = createOutboxEvent({
           aggregateId: tenant.id,
           aggregateType: "tenant",
-          payload: { from: tenant.status, reason, status },
+          payload: { from: tenant.status, reason, status: normalizedStatus },
           queue: "identity-events",
           traceId,
           type: "tenant.status.changed"
@@ -2997,13 +3613,16 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       return clone(result);
     },
 
-    createMfaChallenge(email: string): IdentityMfaChallenge {
+    createMfaChallenge(input: CreateMfaChallengeInput): IdentityMfaChallenge {
       const challenge = {
+        attempts: 0,
         id: makeMfaChallengeId(),
         consumedAt: null,
         createdAt: new Date().toISOString(),
-        email,
-        expiresAt: addMinutes(new Date(), 10).toISOString()
+        email: normalizeEmail(input.email),
+        expiresAt: addMinutes(new Date(), 10).toISOString(),
+        maxAttempts: input.maxAttempts ?? 5,
+        otpHash: input.otpHash
       };
 
       store.update((state) => ({
@@ -3014,16 +3633,90 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       return clone(challenge);
     },
 
+    createInviteToken(input: CreateInviteTokenInput): IdentityAuthInviteToken {
+      const now = new Date();
+      const code = String(input.code ?? `invite_${randomUUID()}`).trim();
+      const token: IdentityAuthInviteToken = {
+        code,
+        consumedAt: null,
+        createdAt: now.toISOString(),
+        email: normalizeEmail(input.email),
+        expiresAt: input.expiresAt ?? addMinutes(now, 60 * 24 * 7).toISOString(),
+        id: `inv_${randomUUID()}`,
+        tenantId: input.tenantId
+      };
+      const record: IdentityAuthInviteTokenRecord = {
+        codeHash: hashAuthFlowToken(code),
+        consumedAt: token.consumedAt,
+        createdAt: token.createdAt,
+        email: token.email,
+        expiresAt: token.expiresAt,
+        id: token.id,
+        tenantId: token.tenantId
+      };
+
+      store.update((state) => {
+        const tokens = state.authInviteTokens ?? [];
+        const existing = tokens.find((item) => item.codeHash === record.codeHash);
+        const nextRecord = existing ? { ...record, id: existing.id, createdAt: existing.createdAt } : record;
+        return {
+          ...state,
+          authInviteTokens: [
+            nextRecord,
+            ...tokens.filter((item) => item.codeHash !== record.codeHash)
+          ]
+        };
+      });
+
+      return clone(token);
+    },
+
+    createRecoveryToken(email: string): IdentityAuthRecoveryToken {
+      const now = new Date();
+      const tokenValue = `recovery_${randomUUID()}`;
+      const token: IdentityAuthRecoveryToken = {
+        consumedAt: null,
+        createdAt: now.toISOString(),
+        email: normalizeEmail(email),
+        expiresAt: addMinutes(now, 30).toISOString(),
+        id: `rcv_${randomUUID()}`,
+        token: tokenValue
+      };
+      const record: IdentityAuthRecoveryTokenRecord = {
+        consumedAt: token.consumedAt,
+        createdAt: token.createdAt,
+        email: token.email,
+        expiresAt: token.expiresAt,
+        id: token.id,
+        tokenHash: hashAuthFlowToken(tokenValue)
+      };
+
+      store.update((state) => {
+        const tokens = state.authRecoveryTokens ?? [];
+        const existing = tokens.find((item) => item.tokenHash === record.tokenHash);
+        const nextRecord = existing ? { ...record, id: existing.id, createdAt: existing.createdAt } : record;
+        return {
+          ...state,
+          authRecoveryTokens: [
+            nextRecord,
+            ...tokens.filter((item) => item.tokenHash !== record.tokenHash)
+          ]
+        };
+      });
+
+      return clone(token);
+    },
+
     createTenantOperatorSession(input: CreateTenantOperatorSessionInput): CreateTenantOperatorSessionResult {
-      const user = clone((store.read().tenantUsers ?? tenantUsers).find((item) => item.id === input.userId));
+      const user = clone((store.read().tenantUsers ?? []).find((item) => item.id === input.userId));
       if (!user || user.status !== "active" || user.tenantId !== input.tenantId) {
         throw new Error(`Tenant operator ${input.userId} is unavailable for tenant ${input.tenantId}.`);
       }
 
-      const permissions = resolveTenantOperatorPermissions(user.role, store.read().permissionRoles ?? permissionRoles);
+      const storedPermissionRoles = store.read().permissionRoles;
+      const permissions = resolveTenantOperatorPermissions(user.role, storedPermissionRoles?.length ? storedPermissionRoles : identityPermissionRoleCatalog);
       const now = new Date();
       const session: StoredServiceAdminSession = {
-        ...serviceAdminSession,
         actorId: user.id,
         actorName: user.name,
         adminEmail: user.email,
@@ -3084,7 +3777,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       });
     },
 
-    consumeMfaChallenge({ challengeId, email, now = new Date() }: ConsumeMfaChallengeInput): MfaChallengeConsumeResult {
+    consumeMfaChallenge({ challengeId, email, now = new Date(), otpHash }: ConsumeMfaChallengeInput): MfaChallengeConsumeResult {
       if (!challengeId) {
         return {
           code: "mfa_challenge_required",
@@ -3105,31 +3798,24 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
           return state;
         }
 
-        if (challenge.consumedAt) {
-          result = {
-            code: "mfa_challenge_consumed",
-            message: "MFA challenge was already consumed.",
-            valid: false
-          };
+        const denial = resolveMfaChallengeDenial(challenge, email, now);
+        if (denial) {
+          result = denial;
           return state;
         }
 
-        if (challenge.email !== email) {
+        if (!secureStringEqual(challenge.otpHash, otpHash)) {
           result = {
-            code: "mfa_challenge_mismatch",
-            message: "MFA challenge does not belong to this login.",
+            code: "mfa_otp_invalid",
+            message: "MFA one-time code is invalid.",
             valid: false
           };
-          return state;
-        }
-
-        if (!Number.isFinite(Date.parse(challenge.expiresAt)) || Date.parse(challenge.expiresAt) <= now.getTime()) {
-          result = {
-            code: "mfa_challenge_expired",
-            message: "MFA challenge has expired.",
-            valid: false
+          return {
+            ...state,
+            mfaChallenges: state.mfaChallenges.map((item) => item.id === challenge.id
+              ? { ...item, attempts: (item.attempts ?? 0) + 1 }
+              : item)
           };
-          return state;
         }
 
         const consumedChallenge = { ...challenge, consumedAt: now.toISOString() };
@@ -3146,6 +3832,59 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
 
       if (!result) {
         throw new Error(`MFA challenge ${challengeId} consume result was not persisted.`);
+      }
+
+      return clone(result);
+    },
+
+    consumeInviteToken({ code, email, now = new Date() }: ConsumeInviteTokenInput): InviteTokenConsumeResult {
+      const normalizedCode = String(code ?? "").trim();
+      let result: InviteTokenConsumeResult | null = null;
+      store.update((state) => {
+        const tokens = state.authInviteTokens ?? [];
+        const token = tokens.find((item) => item.codeHash === hashAuthFlowToken(normalizedCode));
+        if (!token) {
+          result = { code: "invite_not_found", message: "Invite token was not found.", status: "denied" };
+          return state;
+        }
+
+        if (token.consumedAt) {
+          result = { code: "invite_expired", message: "Invite token was already consumed.", status: "denied" };
+          return state;
+        }
+
+        if (!Number.isFinite(Date.parse(token.expiresAt)) || Date.parse(token.expiresAt) <= now.getTime()) {
+          result = { code: "invite_expired", message: "Invite token has expired.", status: "denied" };
+          return state;
+        }
+
+        if (normalizeEmail(email) !== token.email) {
+          result = { code: "invite_email_mismatch", message: "Invite email does not match the token.", status: "denied" };
+          return state;
+        }
+
+        const consumedRecord = { ...token, consumedAt: now.toISOString() };
+        result = {
+          status: "consumed",
+          token: {
+            code: normalizedCode,
+            consumedAt: consumedRecord.consumedAt,
+            createdAt: consumedRecord.createdAt,
+            email: consumedRecord.email,
+            expiresAt: consumedRecord.expiresAt,
+            id: consumedRecord.id,
+            tenantId: consumedRecord.tenantId
+          }
+        };
+
+        return {
+          ...state,
+          authInviteTokens: tokens.map((item) => item.id === token.id ? consumedRecord : item)
+        };
+      });
+
+      if (!result) {
+        throw new Error("Invite token consume result was not persisted.");
       }
 
       return clone(result);
@@ -3182,6 +3921,115 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       });
 
       return clone(normalizedCredential);
+    },
+
+    consumeRecoveryToken({ email, now = new Date(), token }: ConsumeRecoveryTokenInput): RecoveryTokenConsumeResult {
+      const normalizedToken = String(token ?? "").trim();
+      let result: RecoveryTokenConsumeResult | null = null;
+      store.update((state) => {
+        const tokens = state.authRecoveryTokens ?? [];
+        const record = tokens.find((item) => item.tokenHash === hashAuthFlowToken(normalizedToken));
+        if (!record) {
+          result = { code: "recovery_not_found", message: "Recovery token was not found.", status: "denied" };
+          return state;
+        }
+
+        if (record.consumedAt || !Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= now.getTime()) {
+          result = { code: "recovery_expired", message: "Recovery token has expired.", status: "denied" };
+          return state;
+        }
+
+        if (normalizeEmail(email) !== record.email) {
+          result = { code: "recovery_not_found", message: "Recovery token was not found.", status: "denied" };
+          return state;
+        }
+
+        const consumedRecord = { ...record, consumedAt: now.toISOString() };
+        result = {
+          status: "consumed",
+          token: {
+            consumedAt: consumedRecord.consumedAt,
+            createdAt: consumedRecord.createdAt,
+            email: consumedRecord.email,
+            expiresAt: consumedRecord.expiresAt,
+            id: consumedRecord.id,
+            token: normalizedToken
+          }
+        };
+
+        return {
+          ...state,
+          authRecoveryTokens: tokens.map((item) => item.id === record.id ? consumedRecord : item)
+        };
+      });
+
+      if (!result) {
+        throw new Error("Recovery token consume result was not persisted.");
+      }
+
+      return clone(result);
+    },
+
+    completePasswordRecovery({ credential, email, now = new Date(), token }: CompletePasswordRecoveryInput): PasswordRecoveryCompletionResult {
+      const normalizedEmail = normalizeEmail(email);
+      if (normalizeEmail(credential.email) !== normalizedEmail) {
+        throw new Error("password_recovery_credential_email_mismatch");
+      }
+
+      const normalizedToken = String(token ?? "").trim();
+      let result: PasswordRecoveryCompletionResult | null = null;
+      store.update((state) => {
+        const tokens = state.authRecoveryTokens ?? [];
+        const record = tokens.find((item) => item.tokenHash === hashAuthFlowToken(normalizedToken));
+        if (!record || normalizeEmail(record.email) !== normalizedEmail) {
+          result = { code: "recovery_not_found", message: "Recovery token was not found.", status: "denied" };
+          return state;
+        }
+        if (record.consumedAt || !Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= now.getTime()) {
+          result = { code: "recovery_expired", message: "Recovery token has expired.", status: "denied" };
+          return state;
+        }
+
+        const revokedAt = now.toISOString();
+        const activeSessionIds = new Set(state.serviceAdminSessions
+          .filter((session) => normalizeEmail(session.adminEmail) === normalizedEmail && !session.revokedAt)
+          .map((session) => session.id));
+        const revokedTokenPairs = (state.serviceAdminTokenPairs ?? [])
+          .filter((pair) => activeSessionIds.has(pair.sessionId) && !pair.revokedAt)
+          .length;
+        const normalizedCredential = {
+          ...credential,
+          email: normalizedEmail
+        };
+        result = {
+          credential: normalizedCredential,
+          revokedSessions: activeSessionIds.size,
+          revokedTokenPairs,
+          status: "consumed"
+        };
+
+        return {
+          ...state,
+          authRecoveryTokens: tokens.map((item) => item.id === record.id ? { ...item, consumedAt: revokedAt } : item),
+          passwordCredentials: [
+            normalizedCredential,
+            ...(state.passwordCredentials ?? []).filter((item) => normalizeEmail(item.email) !== normalizedEmail)
+          ],
+          serviceAdminSessions: state.serviceAdminSessions.map((session) => activeSessionIds.has(session.id)
+            ? { ...session, revokedAt }
+            : session),
+          serviceAdminTokenPairs: (state.serviceAdminTokenPairs ?? []).map((pair) => (
+            activeSessionIds.has(pair.sessionId) && !pair.revokedAt
+              ? { ...pair, revokedAt }
+              : pair
+          ))
+        };
+      });
+
+      if (!result) {
+        throw new Error("Password recovery result was not persisted.");
+      }
+      return clone(result);
     },
 
     getPasswordPolicy(scope: string): IdentityPasswordPolicy | undefined {
@@ -3441,22 +4289,20 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
     },
 
     createServiceAdminSession(input: CreateServiceAdminSessionInput = {}): StoredServiceAdminSession {
-      const actorId = input.actorId ?? serviceAdminSession.actorId;
-      const actorName = input.actorName ?? serviceAdminSession.actorName;
+      const resolved = resolveServiceAdminSessionInput(input);
       const now = new Date();
       const session: StoredServiceAdminSession = {
-        ...serviceAdminSession,
-        actorId,
-        actorName,
-        adminEmail: input.adminEmail ?? serviceAdminSession.adminEmail,
-        adminId: actorId,
-        adminName: actorName,
-        allowedActions: input.allowedActions ?? [...serviceAdminSession.allowedActions],
+        actorId: resolved.actorId,
+        actorName: resolved.actorName,
+        adminEmail: resolved.adminEmail,
+        adminId: resolved.actorId,
+        adminName: resolved.actorName,
+        allowedActions: resolved.allowedActions,
         authState: "mfa_verified",
-        availableOrganizations: clone(input.availableOrganizations ?? serviceAdminSession.availableOrganizations),
-        currentTenantId: input.currentTenantId ?? serviceAdminSession.currentTenantId,
-        role: input.role ?? serviceAdminSession.role,
-        tenantScope: input.tenantScope ?? serviceAdminSession.tenantScope,
+        availableOrganizations: resolved.availableOrganizations,
+        currentTenantId: resolved.currentTenantId,
+        role: resolved.role,
+        tenantScope: resolved.tenantScope,
         id: `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
         expiresAt: addMinutes(now, input.ttlMinutes ?? 240).toISOString(),
         mfaVerifiedAt: input.mfaVerified === false ? null : now.toISOString(),
@@ -3575,7 +4421,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         return undefined;
       }
 
-      const user = clone((store.read().tenantUsers ?? tenantUsers).find((item) => item.id === session.adminId));
+      const user = clone((store.read().tenantUsers ?? []).find((item) => item.id === session.adminId));
       if (!user || user.status !== "active") {
         return undefined;
       }
@@ -3627,7 +4473,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         if (!session || !isTenantOperatorSession(session)) {
           return undefined;
         }
-        const user = clone((store.read().tenantUsers ?? tenantUsers).find((item) => item.id === session.adminId));
+        const user = clone((store.read().tenantUsers ?? []).find((item) => item.id === session.adminId));
         if (!user || user.status !== "active") {
           return undefined;
         }
@@ -3790,6 +4636,67 @@ export function hashServiceAdminToken(token: string): string {
   return `sha256:${createHash("sha256").update(token).digest("hex")}`;
 }
 
+export function hashAuthFlowToken(token: string): string {
+  return `sha256:${createHash("sha256").update(token).digest("hex")}`;
+}
+
+type MfaChallengeDenial = Extract<MfaChallengeConsumeResult, { valid: false }>;
+
+function resolveMfaChallengeDenial(
+  challenge: {
+    attempts?: number;
+    consumedAt: Date | string | null;
+    email: string;
+    expiresAt: Date | string;
+    maxAttempts?: number;
+  } | null | undefined,
+  email: string,
+  now: Date
+): MfaChallengeDenial | null {
+  if (!challenge) {
+    return {
+      code: "mfa_challenge_not_found",
+      message: "MFA challenge was not found.",
+      valid: false
+    };
+  }
+  if (challenge.consumedAt) {
+    return {
+      code: "mfa_challenge_consumed",
+      message: "MFA challenge was already consumed.",
+      valid: false
+    };
+  }
+  if (normalizeEmail(challenge.email) !== normalizeEmail(email)) {
+    return {
+      code: "mfa_challenge_mismatch",
+      message: "MFA challenge does not belong to this login.",
+      valid: false
+    };
+  }
+  if (!Number.isFinite(Date.parse(toIso(challenge.expiresAt))) || Date.parse(toIso(challenge.expiresAt)) <= now.getTime()) {
+    return {
+      code: "mfa_challenge_expired",
+      message: "MFA challenge has expired.",
+      valid: false
+    };
+  }
+  if ((challenge.attempts ?? 0) >= (challenge.maxAttempts ?? 5)) {
+    return {
+      code: "mfa_challenge_attempts_exceeded",
+      message: "MFA challenge has exceeded the allowed verification attempts.",
+      valid: false
+    };
+  }
+  return null;
+}
+
+function secureStringEqual(expectedValue: string, actualValue: string): boolean {
+  const expected = Buffer.from(String(expectedValue ?? ""));
+  const actual = Buffer.from(String(actualValue ?? ""));
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
 function isTenantOperatorSession(session: StoredServiceAdminSession): boolean {
   return session.id.startsWith("top-session_");
 }
@@ -3842,6 +4749,34 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+function resolveServiceAdminSessionInput(input: CreateServiceAdminSessionInput): {
+  actorId: string;
+  actorName: string;
+  adminEmail: string;
+  allowedActions: string[];
+  availableOrganizations: IdentityAvailableOrganization[];
+  currentTenantId: string;
+  role: string;
+  tenantScope: string;
+} {
+  const actorId = String(input.actorId ?? "").trim();
+  if (!actorId) {
+    throw new Error("Service-admin session requires an authenticated actor id.");
+  }
+  const adminEmail = normalizeEmail(input.adminEmail ?? actorId);
+
+  return {
+    actorId,
+    actorName: String(input.actorName ?? adminEmail).trim() || adminEmail,
+    adminEmail,
+    allowedActions: clone(input.allowedActions ?? serviceAdminPrivilegedActions),
+    availableOrganizations: clone(input.availableOrganizations ?? []),
+    currentTenantId: String(input.currentTenantId ?? "").trim(),
+    role: String(input.role ?? "service_admin").trim() || "service_admin",
+    tenantScope: String(input.tenantScope ?? "platform").trim() || "platform"
+  };
+}
+
 function toIdentityTenant(row: PrismaTenantRow): IdentityTenant {
   const metadata = toJsonRecord(row.metadata);
   const healthScore = row.healthScore ?? numberFromMetadata(metadata.healthScore, 0);
@@ -3850,6 +4785,9 @@ function toIdentityTenant(row: PrismaTenantRow): IdentityTenant {
     activeUsers: numberFromMetadata(metadata.activeUsers, 0),
     arr: numberFromMetadata(metadata.arr, 0),
     domains: arrayFromMetadata(metadata.domains),
+    employeeGroups: Array.isArray(metadata.employeeGroups)
+      ? clone(metadata.employeeGroups) as IdentityTenant["employeeGroups"]
+      : undefined,
     flags: arrayFromMetadata(metadata.flags),
     healthScore,
     id: row.id,
@@ -3890,6 +4828,139 @@ function ensureSeedPasswordCredentials(store: DurableStore<IdentityState>): void
   }));
 }
 
+function ensureSeedServiceAdminOperationsAccess(store: DurableStore<IdentityState>): void {
+  const serviceAdminRole = identityPermissionRoleCatalog.find((role) => role.key === "service_admin");
+  const requiredActions = Array.from(new Set([...serviceAdminPrivilegedActions, ...(serviceAdminRole?.actions ?? [])]));
+
+  store.update((state) => {
+    let changed = false;
+    const activePolicy = (state.rbacPolicyVersions ?? [])
+      .filter((policy) => policy.status === "active")
+      .sort(compareRbacPolicyVersionsForActiveSelection)[0] ?? defaultRbacPolicyVersion();
+    const rbacPolicyVersions = state.rbacPolicyVersions?.some((policy) => policy.id === activePolicy.id)
+      ? state.rbacPolicyVersions
+      : [activePolicy, ...(state.rbacPolicyVersions ?? [])];
+    if (rbacPolicyVersions !== state.rbacPolicyVersions) {
+      changed = true;
+    }
+
+    const persistedRoles = state.permissionRoles?.length ? state.permissionRoles : identityPermissionRoleCatalog;
+    const nextPermissionRoles = persistedRoles.map((role) => {
+      if (role.key !== "service_admin") {
+        return role;
+      }
+
+      const actions = mergeActions(role.actions, requiredActions);
+      if (actions.length === role.actions.length) {
+        return role;
+      }
+
+      changed = true;
+      return { ...role, actions };
+    });
+
+    const privilegedServiceAdminActions = mergeActions(
+      state.privilegedServiceAdminActions ?? [],
+      serviceAdminPrivilegedActions
+    );
+    if (privilegedServiceAdminActions.length !== (state.privilegedServiceAdminActions ?? []).length) {
+      changed = true;
+    }
+
+    const serviceAdminSessions = (state.serviceAdminSessions ?? []).map((session) => {
+      if (!isSeedServiceAdminSession(session)) {
+        return session;
+      }
+
+      const allowedActions = mergeActions(session.allowedActions, serviceAdminPrivilegedActions);
+      if (allowedActions.length === session.allowedActions.length) {
+        return session;
+      }
+
+      changed = true;
+      return { ...session, allowedActions };
+    });
+
+    const rbacRoleGrants = [...(state.rbacRoleGrants ?? [])];
+    const grantIds = new Set(rbacRoleGrants.map((grant) => grant.id));
+    for (const action of requiredActions) {
+      const alreadyGranted = rbacRoleGrants.some((grant) => (
+        grant.action === action
+        && grant.effect === "allow"
+        && grant.policyVersionId === activePolicy.id
+        && grant.resource === "*"
+        && grant.roleKey === "service_admin"
+        && grant.tenantId === null
+      ));
+      if (alreadyGranted) {
+        continue;
+      }
+
+      changed = true;
+      let id = `rbac-grant-backfill-service_admin-${sanitizeGrantIdPart(action)}`;
+      let suffix = 1;
+      while (grantIds.has(id)) {
+        suffix += 1;
+        id = `rbac-grant-backfill-service_admin-${sanitizeGrantIdPart(action)}-${suffix}`;
+      }
+      grantIds.add(id);
+      rbacRoleGrants.push({
+        action,
+        createdAt: "2026-07-05T00:00:00.000Z",
+        createdBy: "system",
+        effect: "allow",
+        id,
+        policyVersionId: activePolicy.id,
+        resource: "*",
+        roleKey: "service_admin",
+        tenantId: null,
+        traceId: "trc_rbac_seed_backfill"
+      });
+    }
+
+    return changed
+      ? {
+          ...state,
+          permissionRoles: nextPermissionRoles,
+          privilegedServiceAdminActions,
+          rbacPolicyVersions,
+          rbacRoleGrants,
+          serviceAdminSessions
+        }
+      : state;
+  });
+}
+
+function isSeedServiceAdminSession(session: StoredServiceAdminSession): boolean {
+  if (session.role !== "service_admin" || isTenantOperatorSession(session)) {
+    return false;
+  }
+
+  const allowedActions = new Set(session.allowedActions);
+  return [
+    "auth.state",
+    "service-admin.users.read",
+    "service-admin.users.write",
+    "platform.read"
+  ].every((action) => allowedActions.has(action));
+}
+
+function mergeActions(existing: string[], required: string[]): string[] {
+  const merged = [...existing];
+  const seen = new Set(existing);
+  for (const action of required) {
+    if (!seen.has(action)) {
+      seen.add(action);
+      merged.push(action);
+    }
+  }
+  return merged;
+}
+
+function sanitizeGrantIdPart(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "action";
+}
+
 function toPrismaTenantCreateInput(tenant: IdentityTenant): PrismaTenantCreateInput {
   return {
     healthScore: tenant.healthScore,
@@ -3898,6 +4969,7 @@ function toPrismaTenantCreateInput(tenant: IdentityTenant): PrismaTenantCreateIn
       activeUsers: tenant.activeUsers,
       arr: tenant.arr,
       domains: tenant.domains,
+      employeeGroups: tenant.employeeGroups ?? [],
       flags: tenant.flags,
       incidentIds: tenant.incidentIds,
       lastSeenAt: tenant.lastSeenAt,
@@ -3941,6 +5013,7 @@ function toTenantUser(row: PrismaTenantUserRow): IdentityTenantUser {
     inviteStatus: row.inviteStatus,
     lastActiveAt: row.lastActiveAt ? toIso(row.lastActiveAt) : null,
     mfa: row.mfa,
+    metadata: toJsonRecord(row.metadata),
     name: row.name,
     risk: row.risk,
     role: row.role,
@@ -4013,11 +5086,60 @@ function toPermissionDenialEvent(row: PrismaPermissionDenialEventRow): IdentityP
 
 function toMfaChallenge(row: PrismaMfaChallengeRow): IdentityMfaChallenge {
   return {
+    attempts: row.attempts,
     consumedAt: row.consumedAt ? toIso(row.consumedAt) : null,
     createdAt: toIso(row.createdAt),
     email: row.email,
     expiresAt: toIso(row.expiresAt),
-    id: row.id
+    id: row.id,
+    maxAttempts: row.maxAttempts,
+    otpHash: row.otpHash
+  };
+}
+
+function toInviteTokenDescriptor(row: PrismaAuthInviteTokenRow, code: string): IdentityAuthInviteToken {
+  return {
+    code,
+    consumedAt: row.consumedAt ? toIso(row.consumedAt) : null,
+    createdAt: toIso(row.createdAt),
+    email: normalizeEmail(row.email),
+    expiresAt: toIso(row.expiresAt),
+    id: row.id,
+    tenantId: row.tenantId
+  };
+}
+
+function toRecoveryTokenDescriptor(row: PrismaAuthRecoveryTokenRow, token: string): IdentityAuthRecoveryToken {
+  return {
+    consumedAt: row.consumedAt ? toIso(row.consumedAt) : null,
+    createdAt: toIso(row.createdAt),
+    email: normalizeEmail(row.email),
+    expiresAt: toIso(row.expiresAt),
+    id: row.id,
+    token
+  };
+}
+
+function toPrismaAuthInviteTokenInput(token: IdentityAuthInviteTokenRecord): PrismaAuthInviteTokenCreateInput {
+  return {
+    codeHash: token.codeHash,
+    consumedAt: token.consumedAt ? new Date(token.consumedAt) : null,
+    createdAt: new Date(token.createdAt),
+    email: normalizeEmail(token.email),
+    expiresAt: new Date(token.expiresAt),
+    id: token.id,
+    tenantId: token.tenantId
+  };
+}
+
+function toPrismaAuthRecoveryTokenInput(token: IdentityAuthRecoveryTokenRecord): PrismaAuthRecoveryTokenCreateInput {
+  return {
+    consumedAt: token.consumedAt ? new Date(token.consumedAt) : null,
+    createdAt: new Date(token.createdAt),
+    email: normalizeEmail(token.email),
+    expiresAt: new Date(token.expiresAt),
+    id: token.id,
+    tokenHash: token.tokenHash
   };
 }
 
@@ -4138,7 +5260,7 @@ function toServiceAdminSession(row: PrismaServiceAdminSessionRow): StoredService
     adminName: row.adminName,
     allowedActions: [...row.allowedActions],
     authState: row.authState,
-    availableOrganizations: clone(row.availableOrganizations) as typeof serviceAdminSession.availableOrganizations,
+    availableOrganizations: clone(row.availableOrganizations) as IdentityAvailableOrganization[],
     currentTenantId: row.currentTenantId,
     expiresAt: toIso(row.expiresAt),
     id: row.id,
@@ -4179,6 +5301,35 @@ function toServiceAdminAuditEvent(row: PrismaServiceAdminAuditEventRow): Identit
     tenantId: row.tenantId,
     traceId: row.traceId,
     userId: row.userId
+  };
+}
+
+function toServiceAdminAuditExport(row: PrismaServiceAdminAuditExportRow): IdentityServiceAdminAuditExport {
+  return {
+    createdAt: toIso(row.createdAt),
+    descriptor: clone(row.descriptor) as Record<string, unknown>,
+    descriptorId: row.descriptorId,
+    expiresAt: toIso(row.expiresAt),
+    filters: clone(row.filters) as Record<string, string>,
+    id: row.id,
+    objectKey: row.objectKey,
+    redactionPolicy: row.redactionPolicy,
+    requesterId: row.requesterId,
+    requesterName: row.requesterName,
+    sourceEventIds: Array.isArray(row.sourceEventIds) ? [...row.sourceEventIds as string[]] : []
+  };
+}
+
+function toServiceAdminAuditRedaction(row: PrismaServiceAdminAuditRedactionRow): IdentityServiceAdminAuditRedaction {
+  return {
+    actor: row.actor,
+    actorName: row.actorName,
+    at: toIso(row.at),
+    createdAt: toIso(row.createdAt),
+    eventId: row.eventId,
+    id: row.id,
+    overlay: clone(row.overlay) as Record<string, unknown>,
+    reason: row.reason
   };
 }
 
@@ -4247,6 +5398,35 @@ function toPrismaServiceAdminAuditEventCreateInput(event: IdentityServiceAdminAu
     tenantId: event.tenantId,
     traceId: event.traceId,
     userId: event.userId
+  };
+}
+
+function toPrismaServiceAdminAuditExportCreateInput(exportRecord: IdentityServiceAdminAuditExport): PrismaServiceAdminAuditExportCreateInput {
+  return {
+    createdAt: new Date(exportRecord.createdAt),
+    descriptor: clone(exportRecord.descriptor),
+    descriptorId: exportRecord.descriptorId,
+    expiresAt: new Date(exportRecord.expiresAt),
+    filters: clone(exportRecord.filters),
+    id: exportRecord.id,
+    objectKey: exportRecord.objectKey,
+    redactionPolicy: exportRecord.redactionPolicy,
+    requesterId: exportRecord.requesterId,
+    requesterName: exportRecord.requesterName,
+    sourceEventIds: [...exportRecord.sourceEventIds]
+  };
+}
+
+function toPrismaServiceAdminAuditRedactionCreateInput(redaction: IdentityServiceAdminAuditRedaction): PrismaServiceAdminAuditRedactionCreateInput {
+  return {
+    actor: redaction.actor,
+    actorName: redaction.actorName,
+    at: new Date(redaction.at),
+    createdAt: new Date(redaction.createdAt),
+    eventId: redaction.eventId,
+    id: redaction.id,
+    overlay: clone(redaction.overlay),
+    reason: redaction.reason
   };
 }
 
@@ -4483,6 +5663,7 @@ function toPrismaTenantUserUpdateInput(changes: Partial<IdentityTenantUser>): Pr
   if (changes.email !== undefined) input.email = changes.email;
   if (changes.inviteStatus !== undefined) input.inviteStatus = changes.inviteStatus;
   if (changes.lastActiveAt !== undefined) input.lastActiveAt = changes.lastActiveAt ? new Date(changes.lastActiveAt) : null;
+  if (changes.metadata !== undefined) input.metadata = changes.metadata;
   if (changes.mfa !== undefined) input.mfa = changes.mfa;
   if (changes.name !== undefined) input.name = changes.name;
   if (changes.risk !== undefined) input.risk = changes.risk;
@@ -4502,7 +5683,7 @@ function toPrismaTenantUserCreateInput(user: IdentityTenantUser): PrismaTenantUs
     id: user.id,
     inviteStatus: user.inviteStatus,
     lastActiveAt: user.lastActiveAt ? new Date(user.lastActiveAt) : null,
-    metadata: {},
+    metadata: user.metadata ?? {},
     mfa: user.mfa,
     name: user.name,
     risk: user.risk,
@@ -4636,7 +5817,7 @@ function defaultRbacPolicyVersion(): IdentityRbacPolicyVersion {
     checksum: "sha256:default-rbac-policy",
     createdAt: "2026-06-28T00:00:00.000Z",
     createdBy: "system",
-    description: "Default RBAC policy generated from fixture permission roles.",
+    description: "Default RBAC policy generated from the canonical permission catalog.",
     id: "rbac-policy-default",
     status: "active",
     version: "2026.06.28-default"
@@ -4645,7 +5826,7 @@ function defaultRbacPolicyVersion(): IdentityRbacPolicyVersion {
 
 function defaultRbacRoleGrants(): IdentityRbacRoleGrant[] {
   const policy = defaultRbacPolicyVersion();
-  return permissionRoles.flatMap((role) => role.actions.map((action, index) => ({
+  return identityPermissionRoleCatalog.flatMap((role) => Array.from(new Set(role.actions)).map((action, index) => ({
     action,
     createdAt: "2026-06-28T00:00:00.000Z",
     createdBy: "system",
@@ -4659,15 +5840,17 @@ function defaultRbacRoleGrants(): IdentityRbacRoleGrant[] {
   })));
 }
 
-function seedIdentityState(): IdentityState {
+export function createEmptyIdentityState(): IdentityState {
   return {
+    authInviteTokens: [],
+    authRecoveryTokens: [],
     breakGlassApprovals: [],
     credentialAuditEvents: [],
     mfaChallenges: [],
     oidcCallbackDescriptors: [],
     oidcProviderConfigs: [],
     outbox: [],
-    passwordCredentials: seedIdentityPasswordCredentials(),
+    passwordCredentials: [],
     passwordPolicies: [{
       maxFailedAttempts: 5,
       minLength: 12,
@@ -4676,41 +5859,30 @@ function seedIdentityState(): IdentityState {
       updatedAt: "2026-06-28T00:00:00.000Z"
     }],
     permissionDenialEvents: [],
-    permissionRoles: clone(permissionRoles),
+    permissionRoles: clone(identityPermissionRoleCatalog),
+    privilegedServiceAdminActions: [...serviceAdminPrivilegedActions],
     rbacPolicyVersions: [defaultRbacPolicyVersion()],
     rbacRoleGrants: defaultRbacRoleGrants(),
+    serviceAdminFeatureFlags: [],
+    serviceAdminIncidents: [],
+    serviceAdminTariffs: clone(identityServiceAdminTariffCatalog),
     samlAcsRequestDescriptors: [],
     samlAssertionReplays: [],
     samlProviderMetadata: [],
     serviceAdminAuditEvents: [],
+    serviceAdminAuditExports: [],
+    serviceAdminAuditRedactions: [],
     serviceAdminImpersonations: [],
     serviceAdminSessions: [],
     serviceAdminTokenPairs: [],
     serviceAdminTokenRevocations: [],
     serviceAdminTokenRotations: [],
-    tenantAuditEvents: clone(tenantAuditEvents),
-    tenantUsers: clone(tenantUsers),
-    tenants: clone(tenants)
+    tenantAuditEvents: [],
+    tenantUsers: [],
+    tenants: []
   };
 }
 
 function seedIdentityPasswordCredentials(): IdentityPasswordCredential[] {
-  return [
-    {
-      algorithm: "sha256",
-      email: serviceAdminSession.adminEmail,
-      hash: hashPasswordCredential("correct-password"),
-      subjectId: serviceAdminSession.adminId,
-      updatedAt: "2026-06-28T00:00:00.000Z",
-      version: 1
-    },
-    ...tenantUsers.map((user) => ({
-      algorithm: "sha256" as const,
-      email: user.email,
-      hash: hashPasswordCredential("correct-password"),
-      subjectId: user.id,
-      updatedAt: "2026-06-28T00:00:00.000Z",
-      version: 1
-    }))
-  ];
+  return [];
 }

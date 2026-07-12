@@ -45,11 +45,40 @@ export const automationService = {
     });
   },
 
+  async createBotScenario(scenario = {}) {
+    return apiRequest("/automation/bot-scenarios", {
+      body: scenario,
+      method: "POST",
+      operation: "createBotScenario",
+      service: SERVICE
+    });
+  },
+
+  async updateBotScenario(scenarioId, scenario = {}) {
+    if (!hasRouteId(scenarioId)) {
+      return missingIdEnvelope("updateBotScenario", "Bot scenario id is required.");
+    }
+
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}`, {
+      body: scenario,
+      method: "PATCH",
+      operation: "updateBotScenario",
+      service: SERVICE
+    });
+  },
+
   getReadiness() {
     return {
       id: SERVICE,
       status: "ready",
-      operations: ["fetchAutomationWorkspace", "validateBotFlowImport", "publishBotScenario", "testBotScenario"],
+      operations: [
+        "fetchAutomationWorkspace",
+        "validateBotFlowImport",
+        "publishBotScenario",
+        "testBotScenario",
+        "createBotScenario",
+        "updateBotScenario"
+      ],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
       note: "Connected to API Gateway routes."

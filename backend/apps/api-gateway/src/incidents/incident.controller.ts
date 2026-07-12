@@ -1,11 +1,11 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
-import { DemoServiceAdminGuard } from "../identity/demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
 import { IncidentService } from "./incident.service.js";
 
 @ApiTags("incidents")
-@UseGuards(DemoServiceAdminGuard)
+@UseGuards(ServiceAdminSessionGuard)
 @Controller("incidents")
 export class IncidentController {
   constructor(private readonly incidentService: IncidentService) {}

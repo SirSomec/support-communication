@@ -2,18 +2,11 @@ import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import { type ServiceAdminActor } from "../identity/service-admin-auth.js";
-import {
-  incidentPostmortems,
-  maintenanceWindows,
-  platformComponents,
-  platformIncidents,
-  platformTenants,
-  type PlatformIncident
-} from "../platform/platform.fixtures.js";
+import type { PlatformIncident } from "../platform/platform.types.js";
 import { PlatformRepository } from "../platform/platform.repository.js";
 import {
   makeEphemeralPlatformMutationIdempotencyKey,
-  persistPlatformIncidentMutation
+  persistPlatformIncidentMutationAsync
 } from "../platform/platform-audit-outbox.js";
 
 const INCIDENT_SERVICE = "incidentService";
@@ -42,21 +35,27 @@ interface IncidentIdempotencyEntry {
 }
 
 export class IncidentService {
-  private readonly incidents: PlatformIncident[];
   private readonly idempotencyIndex: Map<string, IncidentIdempotencyEntry>;
 
   constructor(private readonly platformRepository = PlatformRepository.default()) {
-    this.incidents = overlayById(platformIncidents, this.platformRepository.listIncidents());
-    this.idempotencyIndex = new Map(
-      this.platformRepository.readState().incidentIdempotencyKeys.map((item) => [item.key, {
-        fingerprint: item.fingerprint,
-        result: clone(item.result)
-      }])
-    );
+    try {
+      this.idempotencyIndex = new Map(
+        this.platformRepository.readState().incidentIdempotencyKeys.map((item) => [item.key, {
+          fingerprint: item.fingerprint,
+          result: clone(item.result)
+        }])
+      );
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("prisma_platform_async_required")) {
+        throw error;
+      }
+
+      this.idempotencyIndex = new Map();
+    }
   }
 
   async fetchIncidents(filters: IncidentFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const items = this.incidents.filter((incident) => {
+    const items = (await this.platformRepository.listIncidentsAsync()).filter((incident) => {
       const statusMatches = !filters.status || filters.status === "all" || incident.status === filters.status;
       const severityMatches = !filters.severity || filters.severity === "all" || incident.severity === filters.severity;
       const componentMatches = !filters.componentId || filters.componentId === "all" || incident.componentId === filters.componentId;
@@ -71,16 +70,16 @@ export class IncidentService {
       partial: true,
       meta: apiMeta({ filters }),
       data: {
-        components: platformComponents.map(({ id, name, status }) => ({ id, name, status })),
+        components: (await this.platformRepository.listComponentsAsync()).map(({ id, name, status }) => ({ id, name, status })),
         filters,
         items: clone(items),
-        maintenanceWindows: clone(maintenanceWindows)
+        maintenanceWindows: clone(await this.platformRepository.listMaintenanceWindowsAsync())
       }
     });
   }
 
   async fetchIncidentDetail(incidentId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const incident = this.findIncident(incidentId);
+    const incident = await this.findIncident(incidentId);
 
     if (!incident) {
       return notFoundEnvelope("fetchIncidentDetail", "incident_not_found", `Incident ${incidentId} was not found.`, { incidentId });
@@ -91,13 +90,13 @@ export class IncidentService {
       operation: "fetchIncidentDetail",
       traceId: incidentTraceId("fetchIncidentDetail"),
       meta: apiMeta({ incidentId }),
-      data: incidentDetailPayload(incident)
+      data: await incidentDetailPayload(incident, this.platformRepository)
     });
   }
 
   async addIncidentUpdate(payload: IncidentUpdatePayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const incident = this.findIncident(request.incidentId ?? "");
+    const incident = await this.findIncident(request.incidentId ?? "");
 
     if (!incident) {
       return notFoundEnvelope("addIncidentUpdate", "incident_not_found", `Incident ${request.incidentId ?? "(empty)"} was not found.`, {
@@ -136,7 +135,7 @@ export class IncidentService {
 
     const idempotencyKey = request.idempotencyKey?.trim();
     const fingerprint = buildIncidentUpdateFingerprint(incident.id, request);
-    const persistedCached = idempotencyKey ? this.platformRepository.findIncidentIdempotencyKey(idempotencyKey) : undefined;
+    const persistedCached = idempotencyKey ? await this.platformRepository.findIncidentIdempotencyKeyAsync(idempotencyKey) : undefined;
     const cached = persistedCached ?? (idempotencyKey ? this.idempotencyIndex.get(idempotencyKey) : undefined);
     if (cached) {
       if (cached.fingerprint !== fingerprint) {
@@ -168,8 +167,8 @@ export class IncidentService {
     ];
 
     const traceId = incidentTraceId("addIncidentUpdate");
-    const persistedIncident = this.platformRepository.saveIncident(incident);
-    const mutationPersistence = persistPlatformIncidentMutation({
+    const persistedIncident = await this.platformRepository.saveIncidentAsync(incident);
+    const mutationPersistence = await persistPlatformIncidentMutationAsync({
       actor: request.actor,
       customerVisible,
       idempotencyKey: idempotencyKey ?? makeEphemeralPlatformMutationIdempotencyKey(`incident-${incident.id}`),
@@ -191,7 +190,7 @@ export class IncidentService {
     };
 
     if (idempotencyKey) {
-      const saved = this.platformRepository.saveIncidentIdempotencyKey({ key: idempotencyKey, fingerprint, result: clone(result) });
+      const saved = await this.platformRepository.saveIncidentIdempotencyKeyAsync({ key: idempotencyKey, fingerprint, result: clone(result) });
       this.idempotencyIndex.set(idempotencyKey, {
         fingerprint: saved.fingerprint,
         result: clone(saved.result)
@@ -207,8 +206,8 @@ export class IncidentService {
     });
   }
 
-  private findIncident(incidentId: string): PlatformIncident | undefined {
-    return this.incidents.find((incident) => incident.id === incidentId);
+  private async findIncident(incidentId: string): Promise<PlatformIncident | undefined> {
+    return (await this.platformRepository.listIncidentsAsync()).find((incident) => incident.id === incidentId);
   }
 }
 
@@ -250,7 +249,10 @@ function hasAuditReason(reason: unknown): boolean {
   return typeof reason === "string" && reason.trim().length >= 8;
 }
 
-function incidentDetailPayload(incident: PlatformIncident): Record<string, unknown> {
+async function incidentDetailPayload(incident: PlatformIncident, platformRepository: PlatformRepository): Promise<Record<string, unknown>> {
+  const platformTenants = await platformRepository.listPlatformTenantsAsync();
+  const platformComponents = await platformRepository.listComponentsAsync();
+  const incidentPostmortems = await platformRepository.listIncidentPostmortemsAsync();
   return {
     affectedTenants: platformTenants.filter((tenant) => incident.affectedTenantIds.includes(tenant.id)),
     component: platformComponents.find((component) => component.id === incident.componentId) ?? null,

@@ -5,6 +5,7 @@ import "./dialogs.css";
 
 export function DialogWorkspace({
   access,
+  assignees,
   aiSuggestions,
   allConversations,
   attachments,
@@ -23,6 +24,7 @@ export function DialogWorkspace({
   onCloseDialog,
   onConversationSelect,
   onDialogAction,
+  onAssignment,
   onFilter,
   onQuery,
   onQueueFilterChange,
@@ -44,6 +46,8 @@ export function DialogWorkspace({
   topics,
   transcriptMode
 }) {
+  const hasConversation = Boolean(conversation && conversation.id !== "empty");
+
   return (
     <div className="cockpit">
       <ConversationList
@@ -62,7 +66,8 @@ export function DialogWorkspace({
         topicOptions={topicOptions}
         closedIds={closedIds}
       />
-      <ChatPane
+      {hasConversation ? <ChatPane
+        assignees={assignees}
         conversation={conversation}
         topic={topic}
         onTopic={onTopic}
@@ -83,14 +88,20 @@ export function DialogWorkspace({
         templates={templates}
         onSaveTemplate={onSaveTemplate}
         onDialogAction={onDialogAction}
+        onAssignment={onAssignment}
         onCloseDialog={onCloseDialog}
         onStatusChange={onStatusChange}
         access={access}
         isClosed={isClosed}
         status={status}
         topicOptions={topicOptions}
-      />
-      <CustomerPanel
+      /> : (
+        <section className="dialog-empty-workspace" aria-label="Диалог не выбран">
+          <strong>Нет выбранного диалога</strong>
+          <span>Новые обращения появятся здесь после поступления из подключенных каналов.</span>
+        </section>
+      )}
+      {hasConversation ? <CustomerPanel
         conversation={conversation}
         topic={topic}
         onTopic={onTopic}
@@ -100,7 +111,7 @@ export function DialogWorkspace({
         access={access}
         isClosed={isClosed}
         topicOptions={topicOptions}
-      />
+      /> : <aside className="customer-panel customer-panel-empty" aria-label="Карточка клиента не выбрана" />}
     </div>
   );
 }

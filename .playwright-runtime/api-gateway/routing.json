@@ -1,0 +1,183 @@
+{
+  "conversations": [
+    {
+      "channel": "SDK",
+      "client": "Maria K.",
+      "id": "maria",
+      "persistedStatus": "active",
+      "queueId": "SDK",
+      "slaTone": "danger",
+      "sourceChannel": "SDK",
+      "status": "assigned",
+      "tenantId": "tenant-volga",
+      "topic": "Delivery / Status",
+      "rescue": {
+        "state": "active",
+        "startedAt": 1783807722436,
+        "deadlineAt": 1783807962436,
+        "durationSeconds": 240,
+        "reason": "Ручной запуск из карточки диалога",
+        "nextAction": "reply_or_return_to_sla_queue",
+        "source": "dialog_action_menu"
+      }
+    },
+    {
+      "channel": "Telegram",
+      "client": "Dmitry S.",
+      "id": "dmitry",
+      "persistedStatus": "waiting_operator",
+      "queueId": "Telegram",
+      "slaTone": "ok",
+      "sourceChannel": "Telegram",
+      "status": "queued",
+      "tenantId": "tenant-volga",
+      "topic": "Delivery / Address"
+    },
+    {
+      "channel": "MAX",
+      "client": "Irina P.",
+      "id": "irina",
+      "persistedStatus": "closed",
+      "queueId": "MAX",
+      "slaTone": "closed",
+      "sourceChannel": "MAX",
+      "status": "closed",
+      "tenantId": "tenant-volga",
+      "topic": "Payment / Refund"
+    },
+    {
+      "channel": "VK",
+      "client": "Alexey T.",
+      "id": "alexey",
+      "persistedStatus": "waiting_client",
+      "queueId": "VK",
+      "slaTone": "hold",
+      "sourceChannel": "VK",
+      "status": "queued",
+      "tenantId": "tenant-volga",
+      "topic": "Authorization / Code"
+    },
+    {
+      "channel": "SDK",
+      "client": "Olga L.",
+      "id": "olga",
+      "persistedStatus": "active",
+      "queueId": "SDK",
+      "slaTone": "warn",
+      "sourceChannel": "SDK",
+      "status": "active",
+      "tenantId": "tenant-volga",
+      "topic": "Payment / Refund"
+    },
+    {
+      "channel": "Telegram",
+      "client": "Vladimir B.",
+      "id": "vladimir",
+      "persistedStatus": "queued",
+      "queueId": "Telegram",
+      "slaTone": "danger",
+      "sourceChannel": "Telegram",
+      "status": "queued",
+      "tenantId": "tenant-volga"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "job_rescue_return_a93d1731-8926-4622-bd16-6b6d5020ea21",
+      "action": "return_to_sla_queue",
+      "conversationId": "maria",
+      "queue": "rescue-return",
+      "runAt": 1783807962436,
+      "status": "pending",
+      "tenantId": "tenant-volga"
+    }
+  ],
+  "operatorCapacities": [],
+  "operators": [
+    {
+      "availability": {
+        "online": null,
+        "source": "not_recorded"
+      },
+      "avgFirstResponseSeconds": 0,
+      "channels": [],
+      "chats": 0,
+      "id": "usr-volga-admin",
+      "limit": 0,
+      "metricSources": {
+        "avgFirstResponseSeconds": "not_recorded",
+        "chats": "canonical_conversations",
+        "limit": "not_recorded",
+        "rescueActive": "not_recorded",
+        "slaPercent": "canonical_conversations"
+      },
+      "name": "Sergey Markin",
+      "queueIds": [],
+      "rescueActive": 0,
+      "slaPercent": 0,
+      "status": "offline",
+      "tenantId": "tenant-volga"
+    }
+  ],
+  "queueMemberships": [],
+  "queues": [
+    {
+      "active": 0,
+      "channel": "queue-pilot-sdk-smoke",
+      "health": 0,
+      "limit": 0,
+      "memberIds": [],
+      "metricSources": {
+        "active": "canonical_conversations",
+        "health": "canonical_conversations",
+        "limit": "not_recorded",
+        "overdue": "canonical_conversations",
+        "waiting": "canonical_conversations"
+      },
+      "name": "Pilot SDK smoke",
+      "overdue": 0,
+      "queueId": "queue-pilot-sdk-smoke",
+      "tenantId": "tenant-volga",
+      "transportChannels": [],
+      "waiting": 0
+    }
+  ],
+  "routingAnalyticsRows": [
+    {
+      "channel": "SDK",
+      "conversationId": "maria",
+      "eventKind": "rescue",
+      "fromOperatorId": null,
+      "id": "analytics_rescue_9beb3bb0-4f61-47bc-85a0-ccc1cc95f8bd",
+      "occurredAt": "2026-07-11T22:08:42.436Z",
+      "source": "dialog_action_menu",
+      "tenantId": "tenant-volga",
+      "toOperatorId": null
+    }
+  ],
+  "rescueReportRows": [
+    {
+      "conversationId": "rescue-vk-queue",
+      "channel": "VK",
+      "operatorId": null,
+      "timerSeconds": 0,
+      "reason": "Queue overloaded, SLA 68%",
+      "outcome": "missed",
+      "resolution": "Timer expired before redistribution",
+      "digest": "daily_rescue",
+      "tenantId": "tenant-volga"
+    },
+    {
+      "conversationId": "rescue-olga",
+      "channel": "SDK",
+      "operatorId": "operator-ivan",
+      "timerSeconds": 78,
+      "reason": "Low previous CSAT",
+      "outcome": "saved",
+      "resolution": "Senior reviewed answer before close",
+      "digest": "quality_digest",
+      "tenantId": "tenant-volga"
+    }
+  ],
+  "routingRules": []
+}

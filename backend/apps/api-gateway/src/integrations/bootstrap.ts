@@ -1,33 +1,64 @@
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { IntegrationRepository } from "./integration.repository.js";
+import {
+  configureRepositoryBootstrap,
+  createPrismaClient,
+  resolveRepositoryStoreFile,
+  type PrismaClientFactoryOptions
+} from "@support-communication/database";
+import { IntegrationRepository, type IntegrationState, type PrismaIntegrationClient } from "./integration.repository.js";
 
 export interface IntegrationRepositoryBootstrapSource {
+  DATABASE_URL?: string;
+  INTEGRATION_REPOSITORY?: string;
   INTEGRATION_STORE_FILE?: string;
   NODE_ENV?: string;
   PORT?: number | string;
   SERVICE_NAME?: string;
 }
 
-export function configureIntegrationRepository(source: IntegrationRepositoryBootstrapSource = process.env): IntegrationRepository {
-  const repository = IntegrationRepository.open({ filePath: resolveIntegrationStoreFile(source) });
-  IntegrationRepository.useDefault(repository);
-  return repository;
+export interface IntegrationRepositoryBootstrapOptions {
+  prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaIntegrationClient;
+  seed?: IntegrationState;
+}
+
+export function configureIntegrationRepository(
+  source: IntegrationRepositoryBootstrapSource = process.env,
+  options: IntegrationRepositoryBootstrapOptions = {}
+): IntegrationRepository {
+  return configureRepositoryBootstrap({
+    createJsonRepository: (filePath) => {
+      const repository = IntegrationRepository.open({ filePath, ...(options.seed ? { seed: options.seed } : {}) });
+      ensureMissingSeedChannelConnections(repository, options.seed?.channelConnections ?? []);
+      return repository;
+    },
+    createPrismaRepository: (client) => IntegrationRepository.prisma({ client, ...(options.seed ? { seed: options.seed } : {}) }),
+    prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
+    repositoryEnv: "INTEGRATION_REPOSITORY",
+    source,
+    storeFileEnv: "INTEGRATION_STORE_FILE",
+    suffix: "integrations",
+    useDefault: (repository) => IntegrationRepository.useDefault(repository)
+  });
 }
 
 export function resolveIntegrationStoreFile(source: IntegrationRepositoryBootstrapSource = process.env): string {
-  const configuredPath = source.INTEGRATION_STORE_FILE?.trim();
-  if (configuredPath) {
-    return resolve(configuredPath);
-  }
-
-  const serviceName = sanitizePathSegment(source.SERVICE_NAME ?? "api-gateway");
-  const nodeEnv = sanitizePathSegment(source.NODE_ENV ?? "development");
-  const port = sanitizePathSegment(String(source.PORT ?? "4100"));
-
-  return join(tmpdir(), "support-communication", `${serviceName}-${nodeEnv}-${port}-integrations.json`);
+  return resolveRepositoryStoreFile({
+    source,
+    storeFileEnv: "INTEGRATION_STORE_FILE",
+    suffix: "integrations"
+  });
 }
 
-function sanitizePathSegment(value: string): string {
-  return value.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "default";
+function ensureMissingSeedChannelConnections(
+  repository: IntegrationRepository,
+  seedConnections: IntegrationState["channelConnections"]
+): void {
+  for (const connection of seedConnections) {
+    if (!repository.findChannelConnection(connection.tenantId, connection.id)) {
+      repository.saveChannelConnection(connection);
+    }
+  }
+}
+
+function defaultPrismaClientFactory(options: PrismaClientFactoryOptions): PrismaIntegrationClient {
+  return createPrismaClient(options) as PrismaIntegrationClient;
 }

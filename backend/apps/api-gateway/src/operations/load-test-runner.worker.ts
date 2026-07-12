@@ -230,6 +230,24 @@ export function claimQueuedLoadTestRuns(input: ClaimQueuedLoadTestRunsInput): Cl
   return { claimed };
 }
 
+export async function claimQueuedLoadTestRunsAsync(input: ClaimQueuedLoadTestRunsInput): Promise<ClaimQueuedLoadTestRunsResult> {
+  const limit = input.limit ?? 10;
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error("load_test_claim_limit_invalid");
+  }
+
+  const now = (input.now ?? new Date()).toISOString();
+  const queued = (await input.operationsRepository.listLoadTestRunExecutionsAsync({ status: "queued" })).slice(0, limit);
+  const claimed = await Promise.all(queued.map((execution) => input.operationsRepository.saveLoadTestRunExecutionAsync({
+    ...execution,
+    startedAt: execution.startedAt ?? now,
+    status: "running",
+    updatedAt: now
+  })));
+
+  return { claimed };
+}
+
 export async function executeLoadTestOperation(input: ExecuteLoadTestOperationInput): Promise<ExecuteLoadTestOperationResult> {
   const runningDescriptor: LoadTestOperationDescriptor = {
     ...input.descriptor,
@@ -284,11 +302,37 @@ export function transitionLoadTestRunStatus(
   });
 }
 
+export async function transitionLoadTestRunStatusAsync(
+  operationsRepository: OperationsRepository,
+  runId: string,
+  status: OperationsLoadTestRunExecutionRecord["status"],
+  now: Date = new Date()
+): Promise<OperationsLoadTestRunExecutionRecord> {
+  const existing = await operationsRepository.findLoadTestRunExecutionAsync(runId);
+  if (!existing) {
+    throw new Error(`load_test_run_not_found:${runId}`);
+  }
+
+  return operationsRepository.saveLoadTestRunExecutionAsync({
+    ...existing,
+    completedAt: status === "completed" || status === "failed" ? now.toISOString() : existing.completedAt ?? null,
+    status,
+    updatedAt: now.toISOString()
+  });
+}
+
 export function persistLoadTestRunMetrics(
   operationsRepository: OperationsRepository,
   metrics: OperationsLoadTestRunMetricsRecord
 ): OperationsLoadTestRunMetricsRecord {
   return operationsRepository.saveLoadTestRunMetrics(metrics);
+}
+
+export function persistLoadTestRunMetricsAsync(
+  operationsRepository: OperationsRepository,
+  metrics: OperationsLoadTestRunMetricsRecord
+): Promise<OperationsLoadTestRunMetricsRecord> {
+  return operationsRepository.saveLoadTestRunMetricsAsync(metrics);
 }
 
 export function persistLoadTestRunErrorSummary(
@@ -298,11 +342,25 @@ export function persistLoadTestRunErrorSummary(
   return operationsRepository.saveLoadTestRunErrorSummary(errorSummary);
 }
 
+export function persistLoadTestRunErrorSummaryAsync(
+  operationsRepository: OperationsRepository,
+  errorSummary: OperationsLoadTestRunErrorSummaryRecord
+): Promise<OperationsLoadTestRunErrorSummaryRecord> {
+  return operationsRepository.saveLoadTestRunErrorSummaryAsync(errorSummary);
+}
+
 export function getLoadTestRunStatus(
   operationsRepository: OperationsRepository,
   runId: string
 ): OperationsLoadTestRunExecutionRecord | undefined {
   return operationsRepository.findLoadTestRunExecution(runId);
+}
+
+export function getLoadTestRunStatusAsync(
+  operationsRepository: OperationsRepository,
+  runId: string
+): Promise<OperationsLoadTestRunExecutionRecord | undefined> {
+  return operationsRepository.findLoadTestRunExecutionAsync(runId);
 }
 
 export function getLoadTestRunMetrics(
@@ -312,11 +370,25 @@ export function getLoadTestRunMetrics(
   return operationsRepository.findLoadTestRunMetrics(runId);
 }
 
+export function getLoadTestRunMetricsAsync(
+  operationsRepository: OperationsRepository,
+  runId: string
+): Promise<OperationsLoadTestRunMetricsRecord | undefined> {
+  return operationsRepository.findLoadTestRunMetricsAsync(runId);
+}
+
 export function getLoadTestRunErrorSummary(
   operationsRepository: OperationsRepository,
   runId: string
 ): OperationsLoadTestRunErrorSummaryRecord | undefined {
   return operationsRepository.findLoadTestRunErrorSummary(runId);
+}
+
+export function getLoadTestRunErrorSummaryAsync(
+  operationsRepository: OperationsRepository,
+  runId: string
+): Promise<OperationsLoadTestRunErrorSummaryRecord | undefined> {
+  return operationsRepository.findLoadTestRunErrorSummaryAsync(runId);
 }
 
 export function createLoadTestRunnerFailureEnvelope(
@@ -543,6 +615,36 @@ export function seedLoadTestRunExecution(input: {
   });
 
   return input.operationsRepository.saveLoadTestRunExecution({
+    completedAt: null,
+    operations: operations as unknown as Array<Record<string, unknown>>,
+    runId: input.runId,
+    scenarioId: input.scenarioId,
+    startedAt: null,
+    status: "queued",
+    targetRps: input.targetRps,
+    traceId: input.traceId,
+    updatedAt: now
+  });
+}
+
+export function seedLoadTestRunExecutionAsync(input: {
+  operationsRepository: OperationsRepository;
+  runId: string;
+  scenarioId: string;
+  targetRps: number;
+  tenantId: string;
+  traceId: string;
+  workflows: string[];
+}): Promise<OperationsLoadTestRunExecutionRecord> {
+  const now = new Date().toISOString();
+  const operations = planLoadTestOperationDescriptors({
+    runId: input.runId,
+    tenantId: input.tenantId,
+    traceId: input.traceId,
+    workflows: input.workflows
+  });
+
+  return input.operationsRepository.saveLoadTestRunExecutionAsync({
     completedAt: null,
     operations: operations as unknown as Array<Record<string, unknown>>,
     runId: input.runId,

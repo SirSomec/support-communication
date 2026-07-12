@@ -1,0 +1,159 @@
+import type { ConversationMessage, ConversationRecord } from "./conversation.types.js";
+
+export const conversationFixtures: ConversationRecord[] = [
+  {
+    id: "maria",
+    tenantId: "tenant-volga",
+    name: "Maria K.",
+    initials: "MK",
+    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=128&q=80",
+    channel: "SDK",
+    phone: "+7 999 204-18-44",
+    time: "11:24",
+    preview: "Where is my order?",
+    status: "active",
+    sla: "02:15",
+    slaTone: "ok",
+    topic: "Delivery / Status",
+    unread: true,
+    device: "Android",
+    entry: "SDK",
+    language: "Russian",
+    clientSince: "2024-05-12",
+    tags: ["delivery", "order status", "important"],
+    previous: [["2024-05-05", "Return", "Closed"]],
+    messages: [
+      { id: 1, side: "client", text: "Where is my order?", time: "11:24" },
+      { id: 2, type: "event", text: "Assigned to Ivan P.", time: "11:24" },
+      { id: 3, side: "agent", text: "Hello Maria, I am checking your order.", time: "11:25" },
+      { id: 4, type: "internal", text: "Check courier service before final reply.", author: "Ivan P.", time: "11:25" }
+    ]
+  },
+  {
+    id: "dmitry",
+    tenantId: "tenant-volga",
+    name: "Dmitry S.",
+    initials: "DS",
+    channel: "Telegram",
+    phone: "+7 916 481-77-02",
+    time: "11:20",
+    preview: "Can I change the delivery address?",
+    status: "waiting_operator",
+    sla: "01:45",
+    slaTone: "ok",
+    topic: "Delivery / Address",
+    device: "iOS",
+    entry: "Telegram",
+    language: "Russian",
+    clientSince: "2024-06-03",
+    tags: ["delivery", "address"],
+    previous: [["2024-05-11", "Promo code", "Closed"]],
+    messages: [
+      { id: 1, side: "client", text: "Can I change the delivery address?", time: "11:20" },
+      { id: 2, side: "agent", text: "Send the new address and I will check the route.", time: "11:21" }
+    ]
+  },
+  {
+    id: "irina",
+    tenantId: "tenant-volga",
+    name: "Irina P.",
+    initials: "IP",
+    channel: "MAX",
+    phone: "+7 925 111-02-19",
+    time: "11:18",
+    preview: "Thanks, solved.",
+    status: "closed",
+    sla: "Closed",
+    slaTone: "closed",
+    topic: "Payment / Refund",
+    device: "Android",
+    entry: "MAX",
+    language: "Russian",
+    clientSince: "2024-01-24",
+    tags: ["payment", "refund"],
+    previous: [],
+    messages: [
+      { id: 1, side: "client", text: "Thanks, solved.", time: "11:18" },
+      { id: 2, type: "event", text: "Dialog closed with topic Payment / Refund", time: "11:19" }
+    ]
+  },
+  {
+    id: "alexey",
+    tenantId: "tenant-volga",
+    name: "Alexey T.",
+    initials: "AT",
+    channel: "VK",
+    phone: "+7 903 773-11-05",
+    time: "11:10",
+    preview: "Confirmation code is not arriving",
+    status: "waiting_client",
+    sla: "Waiting",
+    slaTone: "hold",
+    topic: "Authorization / Code",
+    device: "Web",
+    entry: "VK",
+    language: "Russian",
+    clientSince: "2024-02-09",
+    tags: ["authorization", "code"],
+    previous: [],
+    messages: [
+      { id: 1, side: "client", text: "Confirmation code is not arriving", time: "11:10" },
+      { id: 2, side: "agent", text: "Please send the last four phone digits.", time: "11:11" }
+    ]
+  },
+  {
+    id: "olga",
+    tenantId: "tenant-volga",
+    name: "Olga L.",
+    initials: "OL",
+    channel: "SDK",
+    phone: "+7 985 430-09-40",
+    time: "11:05",
+    preview: "Refund for canceled order",
+    status: "active",
+    sla: "SLA 00:30",
+    slaTone: "warn",
+    topic: "Payment / Refund",
+    device: "iOS",
+    entry: "SDK",
+    language: "Russian",
+    clientSince: "2024-03-14",
+    tags: ["refund", "important"],
+    previous: [["2024-05-28", "Card change", "Closed"]],
+    messages: [
+      { id: 1, side: "client", text: "When will the refund arrive?", time: "11:05" },
+      { id: 2, type: "event", text: "First response SLA expires in 30 minutes", time: "11:05" }
+    ]
+  },
+  {
+    id: "vladimir",
+    tenantId: "tenant-volga",
+    name: "Vladimir B.",
+    initials: "VB",
+    channel: "Telegram",
+    phone: "+7 921 991-12-53",
+    time: "10:58",
+    preview: "Product does not match the description",
+    status: "queued",
+    sla: "SLA overdue",
+    slaTone: "danger",
+    topic: "",
+    device: "Android",
+    entry: "Telegram",
+    language: "Russian",
+    clientSince: "2024-04-29",
+    tags: ["product", "complaint"],
+    previous: [],
+    messages: [
+      { id: 1, side: "client", text: "Product does not match the description. I want to return it.", time: "10:58" },
+      { id: 2, type: "event", text: "Choose a topic before closing", time: "10:59" }
+    ]
+  }
+];
+
+export const channelFixtures = [
+  { id: "sdk", name: "SDK", status: "operational", delivery: "websocket", inboundState: "ready" },
+  { id: "telegram", name: "Telegram", status: "operational", delivery: "bot-api", inboundState: "ready" },
+  { id: "max", name: "MAX", status: "degraded", delivery: "connector", inboundState: "retrying" },
+  { id: "vk", name: "VK", status: "operational", delivery: "callback-api", inboundState: "ready" }
+];

@@ -37,15 +37,15 @@ export function AiComposerPanel({ suggestions = [], disabled, onAction }) {
               {aiSuggestionStatusLabels[suggestion.state] ?? aiSuggestionStatusLabels.idle}
             </StatusBadge>
             <div>
-              <button disabled={disabled} onClick={() => onAction(suggestion, "accept")} type="button">
+              <button disabled={disabled || suggestion.pending} onClick={() => onAction(suggestion, "accept")} type="button">
                 <CheckCircle2 size={15} />
                 Принять
               </button>
-              <button disabled={disabled} onClick={() => onAction(suggestion, "edit")} type="button">
+              <button disabled={disabled || suggestion.pending} onClick={() => onAction(suggestion, "edit")} type="button">
                 <Pencil size={15} />
                 Редактировать
               </button>
-              <button disabled={disabled} onClick={() => onAction(suggestion, "reject")} type="button">
+              <button disabled={disabled || suggestion.pending} onClick={() => onAction(suggestion, "reject")} type="button">
                 <X size={15} />
                 Отклонить
               </button>

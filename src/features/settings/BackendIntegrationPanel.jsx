@@ -31,7 +31,7 @@ export function BackendIntegrationPanel() {
         <span>
           <ServerCog size={18} />
           <strong>{snapshot?.status ?? "loading"}</strong>
-          <small>{snapshot?.traceId ?? "waiting for mock backend envelope"}</small>
+          <small>{snapshot?.traceId ?? "waiting for API runtime envelope"}</small>
         </span>
         <span>
           <Activity size={18} />
@@ -60,7 +60,7 @@ export function BackendIntegrationPanel() {
               <StatusBadge tone="hold">loading</StatusBadge>
             </header>
             <code>trc_pending</code>
-            <p>Waiting for mock backend envelope.</p>
+            <p>Waiting for API runtime envelope.</p>
           </article>
         ) : null}
       </div>

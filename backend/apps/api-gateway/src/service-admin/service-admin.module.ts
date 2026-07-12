@@ -1,11 +1,11 @@
 import { Module } from "@nestjs/common";
-import { DemoServiceAdminGuard } from "../identity/demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { ServiceAdminController } from "./service-admin.controller.js";
 import { ServiceAdminService } from "./service-admin.service.js";
 
 @Module({
   controllers: [ServiceAdminController],
-  providers: [ServiceAdminService, DemoServiceAdminGuard],
+  providers: [ServiceAdminService, ServiceAdminSessionGuard],
   exports: [ServiceAdminService]
 })
 export class ServiceAdminModule {}

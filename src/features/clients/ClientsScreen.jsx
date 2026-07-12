@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Download, Filter, ShieldCheck, Sparkles, Tag } from "lucide-react";
+import { submitClientExport, submitClientMerge, submitClientUnmerge } from "../../app/clientProfileActions.js";
 import { maskPhone } from "../../app/dialogModel.js";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { clientService } from "../../services/clientService.js";
@@ -7,28 +8,100 @@ import { ChannelBadge, EntityTable, ProductScreen, SectionTitle, ToolbarSearch }
 import "./clients.css";
 
 function getClientId(client) {
-  return `gig-${client.id}-${client.phone.replace(/\D/g, "").slice(-4)}`;
+  const phoneSuffix = (client?.phone ?? "").replace(/\D/g, "").slice(-4) || "0000";
+  return `gig-${client?.id ?? "unknown"}-${phoneSuffix}`;
+}
+
+function getClientMutationProfileId(client) {
+  if (client?.sourceProfileId) {
+    return client.sourceProfileId;
+  }
+
+  if (client?.channel && client?.id) {
+    return `src_${String(client.channel).toLowerCase()}_${client.id}`;
+  }
+
+  return client?.id ?? "";
+}
+
+function clientMatchesSegment(client, segmentId) {
+  const [dimension, ...labelParts] = String(segmentId ?? "").split(":");
+  const label = labelParts.join(":");
+  if (!dimension || !label) {
+    return true;
+  }
+
+  if (dimension === "channel") {
+    return client.channel === label;
+  }
+
+  if (dimension === "device") {
+    return client.device === label;
+  }
+
+  if (dimension === "topic") {
+    return (client.topic || "No topic") === label;
+  }
+
+  return true;
 }
 
 export function ClientsScreen({ conversations, onBack, onToast, access }) {
   const [query, setQuery] = useState("");
+  const [segments, setSegments] = useState([]);
+  const [segmentsLoading, setSegmentsLoading] = useState(true);
+  const [segmentsError, setSegmentsError] = useState("");
+  const [selectedSegmentId, setSelectedSegmentId] = useState("");
+  const [exportPending, setExportPending] = useState(false);
   const [selectedId, setSelectedId] = useState(conversations[0]?.id ?? "");
   const [mergedIds, setMergedIds] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSegments() {
+      setSegmentsLoading(true);
+      setSegmentsError("");
+      const response = await clientService.fetchClientSegments();
+      if (cancelled) {
+        return;
+      }
+
+      if (response.status !== "ok") {
+        setSegments([]);
+        setSegmentsError(response.error?.message ?? "Не удалось загрузить сегменты клиентов.");
+        setSegmentsLoading(false);
+        return;
+      }
+
+      setSegments(Array.isArray(response.data?.segments) ? response.data.segments : []);
+      setSegmentsLoading(false);
+    }
+
+    void loadSegments();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const clients = useMemo(() => {
-    return conversations.filter((client) => `${client.name} ${client.phone} ${client.channel} ${client.device} ${client.topic}`.toLowerCase().includes(query.toLowerCase()));
-  }, [conversations, query]);
-  const selected = conversations.find((client) => client.id === selectedId) ?? clients[0] ?? conversations[0];
-  const canMergeProfiles = access.canViewSensitive;
-  const visiblePhone = access.canViewSensitive ? selected.phone : maskPhone(selected.phone);
-  const visibleClientId = access.canViewSensitive ? getClientId(selected) : `${getClientId(selected).slice(0, 8)}***`;
-  const duplicateCandidates = conversations
-    .filter((client) => client.id !== selected.id)
-    .map((client) => ({
-      ...client,
-      score: client.phone.slice(0, 6) === selected.phone.slice(0, 6) ? 94 : client.name.split(" ")[0] === selected.name.split(" ")[0] ? 82 : 64
-    }))
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 3);
+    return conversations
+      .filter((client) => clientMatchesSegment(client, selectedSegmentId))
+      .filter((client) => `${client.name} ${client.phone} ${client.channel} ${client.device} ${client.topic}`.toLowerCase().includes(query.toLowerCase()));
+  }, [conversations, query, selectedSegmentId]);
+  const selected = clients.find((client) => client.id === selectedId) ?? clients[0] ?? conversations[0] ?? null;
+  const canMergeProfiles = Boolean(selected) && access.canViewSensitive;
+  const canExportClients = !exportPending && !segmentsLoading && clients.length > 0;
+  const visiblePhone = selected ? (access.canViewSensitive ? selected.phone : maskPhone(selected.phone)) : "";
+  const visibleClientId = selected ? (access.canViewSensitive ? getClientId(selected) : `${getClientId(selected).slice(0, 8)}***`) : "";
+  const duplicateCandidates = selected
+    ? conversations
+      .filter((client) => client.id !== selected.id)
+      .map((client) => ({
+        ...client,
+        score: client.phone.slice(0, 6) === selected.phone.slice(0, 6) ? 94 : client.name.split(" ")[0] === selected.name.split(" ")[0] ? 82 : 64
+      }))
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 3)
+    : [];
 
   async function mergeClient(candidate) {
     if (!canMergeProfiles) {
@@ -36,12 +109,17 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
       return;
     }
 
-    if (mergedIds.includes(candidate.id)) {
+    if (mergedIds.includes(getClientMutationProfileId(candidate))) {
       return;
     }
 
-    await clientService.mergeClientProfiles({ candidate, primary: selected });
-    setMergedIds((current) => [...current, candidate.id]);
+    const result = await submitClientMerge({ candidate, primary: selected });
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    setMergedIds((current) => Array.from(new Set([...current, result.candidateId])));
     onToast(`${candidate.name} объединен с профилем ${selected.name}.`);
   }
 
@@ -51,9 +129,36 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
       return;
     }
 
-    await clientService.unmergeClientProfile({ candidate, primary: selected });
-    setMergedIds((current) => current.filter((id) => id !== candidate.id));
+    const result = await submitClientUnmerge({ candidate, primary: selected });
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    setMergedIds((current) => current.filter((id) => id !== result.candidateId));
     onToast(`${candidate.name} вынесен в отдельный профиль.`);
+  }
+
+  async function exportClients() {
+    if (!canExportClients) {
+      onToast(segmentsError || "Нет строк клиентов для экспорта.");
+      return;
+    }
+
+    setExportPending(true);
+    const result = await submitClientExport({
+      format: "json",
+      reason: "Client segment export requested from workspace",
+      ...(selectedSegmentId ? { segmentId: selectedSegmentId } : {})
+    });
+    setExportPending(false);
+
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    onToast(`Экспорт клиентов поставлен в очередь: ${result.fileName}.`);
   }
 
   return (
@@ -65,7 +170,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
         total: clients.length,
         empty: `${clients.length} профилей`,
         emptyWhenZero: "поиск без результатов",
-        errors: duplicateCandidates.filter((candidate) => candidate.score >= 90 && !mergedIds.includes(candidate.id)).length,
+        errors: duplicateCandidates.filter((candidate) => candidate.score >= 90 && !mergedIds.includes(getClientMutationProfileId(candidate))).length,
         errorLabel: "дублей нет"
       })}
       actions={
@@ -77,8 +182,16 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     >
       <div className="screen-toolbar">
         <ToolbarSearch value={query} onChange={setQuery} placeholder="Поиск по телефону, имени или каналу" />
-        <button><Filter size={17} /> Сегмент</button>
-        <button><Download size={17} /> Экспорт</button>
+        <label className="client-segment-control">
+          <Filter size={17} />
+          <select aria-label="Сегмент клиентов" disabled={segmentsLoading || Boolean(segmentsError)} onChange={(event) => setSelectedSegmentId(event.target.value)} value={selectedSegmentId}>
+            <option value="">{segmentsLoading ? "Загрузка сегментов" : "Все сегменты"}</option>
+            {segments.map((segment) => (
+              <option key={segment.id} value={segment.id}>{segment.label} · {segment.count}</option>
+            ))}
+          </select>
+        </label>
+        <button disabled={!canExportClients} onClick={() => void exportClients()} title={canExportClients ? "Создать backend descriptor экспорта" : (segmentsError || "Экспорт недоступен для пустой выборки.")} type="button"><Download size={17} /> {exportPending ? "Экспорт..." : "Экспорт"}</button>
       </div>
 
       <div className="clients-workspace">
@@ -93,7 +206,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
           ) : null}
         >
           {clients.map((client) => (
-            <button className={`entity-row ${selected.id === client.id ? "selected" : ""}`} key={client.id} onClick={() => setSelectedId(client.id)}>
+            <button className={`entity-row ${selected?.id === client.id ? "selected" : ""}`} key={client.id} onClick={() => setSelectedId(client.id)}>
               <strong>{client.name}</strong>
               <span>{access.canViewSensitive ? client.phone : maskPhone(client.phone)}</span>
               <ChannelBadge channel={client.channel} />
@@ -105,6 +218,8 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
         </EntityTable>
 
         <aside className="client-detail-panel">
+          {selected ? (
+            <>
           <section className="work-panel">
             <SectionTitle title="Профиль клиента" action={selected.channel} />
             <div className="client-profile-head">
@@ -143,7 +258,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
             ) : null}
             <div className="duplicate-list">
               {duplicateCandidates.map((candidate) => {
-                const isMerged = mergedIds.includes(candidate.id);
+                const isMerged = mergedIds.includes(getClientMutationProfileId(candidate));
 
                 return (
                   <article className={`duplicate-row ${isMerged ? "merged" : ""}`} key={candidate.id}>
@@ -181,6 +296,16 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
               ))}
             </div>
           </section>
+            </>
+          ) : (
+            <section className="work-panel">
+              <SectionTitle title="Профиль клиента" action="API" />
+              <div className="entity-empty">
+                <strong>Нет данных клиентов</strong>
+                <span>Backend вернул пустой список для текущего tenant.</span>
+              </div>
+            </section>
+          )}
         </aside>
       </div>
     </ProductScreen>

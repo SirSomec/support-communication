@@ -30,8 +30,13 @@ export function ConversationList({
     () => Array.from(new Set(allConversations.map((conversation) => conversation.channel))),
     [allConversations]
   );
+  const queueOptions = useMemo(
+    () => Array.from(new Set(allConversations.map((conversation) => conversation.queueId).filter(Boolean))),
+    [allConversations]
+  );
   const activeFilterCount = [
     queueFilters.channel !== "all",
+    queueFilters.queueId !== "all",
     queueFilters.topic !== "all",
     queueFilters.status !== "all",
     queueFilters.sort !== "time",
@@ -80,6 +85,13 @@ export function ConversationList({
               </select>
             </label>
             <label>
+              <span>Очередь</span>
+              <select value={queueFilters.queueId} onChange={(event) => onQueueFilterChange("queueId", event.target.value)}>
+                <option value="all">Все очереди</option>
+                {queueOptions.map((queueId) => <option value={queueId} key={queueId}>{queueId}</option>)}
+              </select>
+            </label>
+            <label>
               <span>Тематика</span>
               <select value={queueFilters.topic} onChange={(event) => onQueueFilterChange("topic", event.target.value)}>
                 <option value="all">Все тематики</option>
@@ -117,6 +129,7 @@ export function ConversationList({
         {activeFilterCount ? (
           <div className="active-filter-chips" aria-label="Активные фильтры">
             {queueFilters.channel !== "all" ? <span>Канал: {queueFilters.channel}</span> : null}
+            {queueFilters.queueId !== "all" ? <span>Очередь: {queueFilters.queueId}</span> : null}
             {queueFilters.topic !== "all" ? <span>{queueFilters.topic === "none" ? "Без тематики" : queueFilters.topic}</span> : null}
             {queueFilters.status !== "all" ? <span>Статус: {statusLabels[queueFilters.status]}</span> : null}
             {queueFilters.sort !== "time" ? <span>Сортировка: {queueFilters.sort === "sla" ? "SLA" : queueFilters.sort === "status" ? "статус" : "канал"}</span> : null}

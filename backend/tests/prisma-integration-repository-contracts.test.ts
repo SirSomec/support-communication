@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { configureIntegrationRepository } from "../apps/api-gateway/src/integrations/bootstrap.ts";
 import {
   IntegrationRepository,
   type PrismaIntegrationClient
 } from "../apps/api-gateway/src/integrations/integration.repository.ts";
 import { IntegrationService } from "../apps/api-gateway/src/integrations/integration.service.ts";
+import { bootstrapIntegrationState } from "../apps/api-gateway/src/integrations/seed.ts";
 import {
   hashPublicApiKeySecret,
   resolvePublicApiRequest
@@ -39,6 +44,380 @@ describe("Prisma-backed integration repository contracts", () => {
       () => IntegrationRepository.prisma({ client }),
       /prisma_integration_public_api_key_rotation_audit_delegate_required/
     );
+  });
+
+  it("fails closed when Prisma integration runtime delegates are incomplete", () => {
+    const { client } = createFakePrismaIntegrationClient();
+    delete (client as { webhookDeliveryJournalEntry?: unknown }).webhookDeliveryJournalEntry;
+
+    assert.throws(
+      () => IntegrationRepository.prisma({ client }),
+      /prisma_integration_webhook_delivery_journal_delegate_required/
+    );
+  });
+
+  it("bootstraps the default integration repository from a Prisma client factory", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "integration-prisma-bootstrap-"));
+    const filePath = join(workspace, "integration-store.json");
+    const { client } = createFakePrismaIntegrationClient();
+
+    try {
+      const repository = configureIntegrationRepository({
+        DATABASE_URL: "postgresql://support:support@localhost:5432/support_communication",
+        INTEGRATION_REPOSITORY: "prisma",
+        INTEGRATION_STORE_FILE: filePath,
+        NODE_ENV: "staging",
+        PORT: "4100",
+        SERVICE_NAME: "api-gateway"
+      }, {
+        prismaClientFactory: () => client
+      });
+
+      await repository.saveApiKeyRotationJobAsync({
+        auditId: "evt_integration_bootstrap",
+        environment: "stage",
+        keyId: "stage-key",
+        rawKeyShownOnce: false,
+        requires2fa: true,
+        rotationId: "rot_integration_bootstrap",
+        status: "rotation_queued"
+      });
+
+      const bootstrappedState = await IntegrationRepository.default().readStateAsync();
+
+      assert.equal(repository, IntegrationRepository.default());
+      assert.equal(existsSync(filePath), false);
+      assert.equal(bootstrappedState.apiKeyRotationJobs.some((job) => job.rotationId === "rot_integration_bootstrap"), true);
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+      IntegrationRepository.clearDefault();
+    }
+  });
+
+  it("persists mutable integration runtime state through Prisma delegates without JSON fallback", async () => {
+    const { client } = createFakePrismaIntegrationClient();
+    const first = IntegrationRepository.prisma({ client });
+
+    assert.throws(
+      () => first.readState(),
+      /prisma_integration_async_required/
+    );
+
+    await first.saveApiKeyRotationJobAsync({
+      auditId: "evt_rotation_runtime",
+      environment: "production",
+      keyId: "runtime-key",
+      rawKeyShownOnce: false,
+      requires2fa: true,
+      rotationId: "rot_runtime",
+      status: "rotation_queued"
+    });
+    await first.savePublicDemoRequestAsync({
+      company: "Runtime Co",
+      consent: true,
+      createdAt: "2026-07-03T08:00:00.000Z",
+      email: "lead@example.test",
+      id: "demo_runtime",
+      idempotencyKey: "demo-runtime-key",
+      ipHash: "ip_hash",
+      message: "Need an integration demo",
+      name: "Lead User",
+      planInterest: "enterprise",
+      requestFingerprint: "demo-runtime-fingerprint",
+      source: "landing",
+      status: "queued",
+      updatedAt: "2026-07-03T08:00:00.000Z",
+      userAgentHash: "ua_hash"
+    });
+    await first.savePublicDemoRequestAuditEventAsync({
+      action: "public_demo_request.created",
+      at: "2026-07-03T08:00:01.000Z",
+      id: "audit_demo_runtime",
+      immutable: true,
+      leadId: "demo_runtime",
+      requestFingerprint: "demo-runtime-fingerprint",
+      result: "ok",
+      source: "landing"
+    });
+    await first.savePublicDemoRequestNotificationDescriptorAsync({
+      createdAt: "2026-07-03T08:00:02.000Z",
+      id: "lead_notification_runtime",
+      leadId: "demo_runtime",
+      payload: {
+        company: "Runtime Co",
+        email: "lead@example.test",
+        messagePreview: "Need an integration demo",
+        name: "Lead User",
+        planInterest: "enterprise",
+        source: "landing"
+      },
+      queue: "lead-notification",
+      status: "queued",
+      type: "public.demo_request.notification.requested"
+    });
+    await first.saveWebhookReplayAsync({
+      auditId: "evt_webhook_runtime",
+      deliveryId: "dlv-runtime",
+      idempotencyKey: "webhook-runtime-key",
+      originalTraceId: "trc_original",
+      replayId: "webhook_replay_runtime",
+      signatureVerified: true,
+      status: "replay_queued"
+    });
+    await first.saveWebhookReplayAuditEventAsync({
+      action: "webhook.replay.queued",
+      at: "2026-07-03T08:01:00.000Z",
+      attempts: 2,
+      auditId: "evt_webhook_runtime",
+      deliveryId: "dlv-runtime",
+      deliveryStatus: "failed",
+      id: "evt_webhook_runtime_audit",
+      idempotencyKey: "webhook-runtime-key",
+      immutable: true,
+      originalTraceId: "trc_original",
+      replayId: "webhook_replay_runtime",
+      transition: "dead_letter"
+    });
+    await first.saveWebhookDeliveryJournalEntryAsync({
+      attempts: 0,
+      createdAt: "2026-07-03T08:02:00.000Z",
+      deliveryId: "wdj-runtime",
+      endpointId: "endpoint-runtime",
+      eventType: "message.created",
+      idempotencyKey: "wdj-runtime-key",
+      payloadRef: "s3://runtime/webhook.json",
+      queue: "webhook-delivery",
+      status: "queued",
+      targetUrl: "https://example.test/webhooks",
+      tenantId: "tenant-runtime",
+      traceId: "trc_wdj_runtime"
+    });
+    const claimed = await first.claimWebhookDeliveryJournalEntriesAsync({
+      limit: 1,
+      now: "2026-07-03T08:03:00.000Z",
+      queue: "webhook-delivery"
+    });
+    const retry = await first.recordWebhookDeliveryRetryStateAsync({
+      attempts: 1,
+      deliveryId: "wdj-runtime",
+      lastAttemptAt: "2026-07-03T08:04:00.000Z",
+      lastError: {
+        code: "provider_timeout",
+        message: "Authorization: Bearer secret-token failed",
+        statusCode: 504
+      },
+      nextAttemptAt: "2026-07-03T08:05:00.000Z"
+    });
+    await first.saveSecuritySessionAsync({
+      device: "Desktop",
+      id: "sess-runtime",
+      ip: "10.0.0.1",
+      lastSeen: "2026-07-03T08:06:00.000Z",
+      role: "Admin",
+      status: "revoked",
+      user: "Runtime User"
+    });
+    await first.saveChannelConnectionAsync({
+      chatLimit: 12,
+      createdAt: "2026-07-03T08:07:00.000Z",
+      credentialsMasked: true,
+      environment: "production",
+      health: 98,
+      id: "conn-runtime",
+      lastSyncAt: "2026-07-03T08:07:00.000Z",
+      name: "Runtime Telegram",
+      rawExternalId: "telegram:runtime",
+      routingQueueId: "queue-runtime",
+      status: "active",
+      tenantId: "tenant-runtime",
+      traffic: "0 events",
+      type: "telegram",
+      updatedAt: "2026-07-03T08:07:00.000Z",
+      webhookUrl: "https://example.test/telegram"
+    });
+    await first.saveChannelConnectionEventAsync({
+      action: "channel.connection.created",
+      at: "2026-07-03T08:08:00.000Z",
+      connectionId: "conn-runtime",
+      id: "evt_channel_runtime",
+      message: "Runtime Telegram created",
+      severity: "info",
+      tenantId: "tenant-runtime"
+    });
+    await first.saveChannelConnectionAuditEventAsync({
+      action: "channel.connection.create",
+      at: "2026-07-03T08:08:01.000Z",
+      connectionId: "conn-runtime",
+      id: "audit_channel_runtime",
+      immutable: true,
+      reason: "Created",
+      result: "ok",
+      tenantId: "tenant-runtime",
+      type: "telegram"
+    });
+    await first.saveTelegramConnectionAsync({
+      botId: "900001",
+      botToken: "123:runtime-token",
+      botUsername: "runtime_bot",
+      createdAt: "2026-07-03T08:09:00.000Z",
+      status: "active",
+      tenantId: "tenant-runtime",
+      tokenPreview: "123:****",
+      updatedAt: "2026-07-03T08:09:00.000Z",
+      webhookSecret: "tg_wh_runtime"
+    });
+
+    const second = IntegrationRepository.prisma({ client });
+    const state = await second.readStateAsync();
+    const foundDemo = await second.findPublicDemoRequestByIdempotencyKeyAsync("demo-runtime-key");
+    const foundReplay = await second.findWebhookReplayAsync("webhook-runtime-key");
+    const channelConnections = await second.listChannelConnectionsAsync({ tenantId: "tenant-runtime", type: "telegram" });
+    const telegram = await second.findTelegramConnectionByWebhookSecretAsync("tg_wh_runtime");
+
+    assert.deepEqual(claimed.map((entry) => entry.deliveryId), ["wdj-runtime"]);
+    assert.equal(retry?.status, "retry_scheduled");
+    assert.equal(retry?.lastError?.message.includes("secret-token"), false);
+    assert.equal(foundDemo?.id, "demo_runtime");
+    assert.equal(foundReplay?.replayId, "webhook_replay_runtime");
+    assert.equal(channelConnections[0]?.id, "conn-runtime");
+    assert.equal(telegram?.botUsername, "runtime_bot");
+    assert.equal(state.apiKeyRotationJobs.some((job) => job.rotationId === "rot_runtime"), true);
+    assert.equal(state.publicDemoRequests.some((request) => request.id === "demo_runtime"), true);
+    assert.equal(state.webhookReplayAuditEvents.some((event) => event.id === "evt_webhook_runtime_audit"), true);
+    assert.equal(state.webhookDeliveryJournal.some((entry) => entry.deliveryId === "wdj-runtime" && entry.status === "retry_scheduled"), true);
+    assert.equal(state.securitySessions.some((session) => session.id === "sess-runtime" && session.status === "revoked"), true);
+    assert.equal(state.channelConnectionEvents.some((event) => event.id === "evt_channel_runtime"), true);
+    assert.equal(state.channelConnectionAuditEvents.some((event) => event.id === "audit_channel_runtime"), true);
+  });
+
+  it("preserves Prisma public demo request notification terminal delivery status", async () => {
+    const { client } = createFakePrismaIntegrationClient();
+    const repository = IntegrationRepository.prisma({ client });
+    const queuedDescriptor = {
+      createdAt: "2026-07-03T08:30:00.000Z",
+      id: "lead_notification_prisma_terminal",
+      leadId: "demo_prisma_terminal",
+      payload: {
+        company: "Runtime Co",
+        email: "lead@example.test",
+        messagePreview: "Need an integration demo",
+        name: "Lead User",
+        planInterest: "enterprise",
+        source: "landing"
+      },
+      queue: "lead-notification" as const,
+      status: "queued" as const,
+      type: "public.demo_request.notification.requested" as const
+    };
+
+    await repository.savePublicDemoRequestNotificationDescriptorAsync(queuedDescriptor);
+    const delivered = await repository.savePublicDemoRequestNotificationDescriptorAsync({
+      ...queuedDescriptor,
+      payload: {
+        ...queuedDescriptor.payload,
+        delivery: {
+          attempts: 1,
+          deliveredAt: "2026-07-03T08:31:00.000Z",
+          providerMessageId: "local-lead-notification-terminal"
+        }
+      },
+      status: "delivered"
+    });
+
+    const queued = await repository.listPublicDemoRequestNotificationDescriptorsAsync({
+      queue: "lead-notification",
+      status: "queued"
+    });
+    const terminal = await repository.listPublicDemoRequestNotificationDescriptorsAsync({
+      queue: "lead-notification",
+      status: "delivered"
+    });
+    const state = await repository.readStateAsync();
+    const persisted = state.publicDemoRequestNotificationDescriptors.find((item) => item.id === queuedDescriptor.id);
+
+    assert.equal(delivered.status, "delivered");
+    assert.equal(delivered.payload.delivery?.providerMessageId, "local-lead-notification-terminal");
+    assert.deepEqual(queued.map((item) => item.id), []);
+    assert.deepEqual(terminal.map((item) => item.id), [queuedDescriptor.id]);
+    assert.equal(persisted?.status, "delivered");
+    assert.equal(persisted?.payload.delivery?.attempts, 1);
+  });
+
+  it("summarizes public demo request notification observability through Prisma delegates", async () => {
+    const { calls, client } = createFakePrismaIntegrationClient();
+    const repository = IntegrationRepository.prisma({ client });
+    const baseDescriptor = {
+      createdAt: "2026-07-03T08:30:00.000Z",
+      id: "lead_notification_prisma_summary",
+      leadId: "demo_prisma_summary",
+      payload: {
+        company: "Runtime Co",
+        email: "lead@example.test",
+        messagePreview: "Need an integration demo",
+        name: "Lead User",
+        planInterest: "enterprise",
+        source: "landing"
+      },
+      queue: "lead-notification" as const,
+      status: "queued" as const,
+      type: "public.demo_request.notification.requested" as const
+    };
+
+    await repository.savePublicDemoRequestNotificationDescriptorAsync({
+      ...baseDescriptor,
+      id: "lead_notification_prisma_summary_queued",
+      leadId: "demo_prisma_summary_queued"
+    });
+    await repository.savePublicDemoRequestNotificationDescriptorAsync({
+      ...baseDescriptor,
+      id: "lead_notification_prisma_summary_delivered",
+      leadId: "demo_prisma_summary_delivered",
+      payload: {
+        ...baseDescriptor.payload,
+        delivery: {
+          attempts: 1,
+          deliveredAt: "2026-07-03T08:35:00.000Z",
+          providerMessageId: "local-lead-notification-summary"
+        }
+      },
+      status: "delivered"
+    });
+    await repository.savePublicDemoRequestNotificationDescriptorAsync({
+      ...baseDescriptor,
+      id: "lead_notification_prisma_summary_failed",
+      leadId: "demo_prisma_summary_failed",
+      payload: {
+        ...baseDescriptor.payload,
+        delivery: {
+          attempts: 2,
+          failedAt: "2026-07-03T08:34:00.000Z",
+          lastError: {
+            code: "public_demo_request_notification_delivery_failed" as const,
+            message: "smtp token secret-summary-token"
+          }
+        }
+      },
+      status: "failed"
+    });
+
+    const summary = await repository.summarizePublicDemoRequestNotificationDescriptorsAsync({
+      queue: "lead-notification"
+    });
+
+    assert.equal(summary.queue, "lead-notification");
+    assert.equal(summary.queueDepth, 1);
+    assert.equal(summary.deadLetterCount, 1);
+    assert.equal(summary.latestDescriptor?.id, "lead_notification_prisma_summary_failed");
+    assert.equal(summary.latestDescriptor?.payload.delivery?.failedAt, "2026-07-03T08:34:00.000Z");
+    assert.deepEqual(
+      calls.publicDemoRequestNotificationDescriptorCounts.map((input) => input.where?.status).sort(),
+      ["failed", "queued"]
+    );
+    assert.deepEqual(
+      calls.publicDemoRequestNotificationDescriptorFindMany.map((input) => input.where?.status).sort(),
+      ["delivered", "failed", "queued"]
+    );
+    assert.equal(calls.publicDemoRequestNotificationDescriptorFindMany.every((input) => input.take === 25), true);
   });
 
   it("persists public API key hashes through Prisma delegates without raw secret material", async () => {
@@ -306,7 +685,7 @@ describe("Prisma-backed integration repository contracts", () => {
 
   it("rotates fixture API keys through Prisma after creating a safe public key reference for audit FK", async () => {
     const { calls, client } = createFakePrismaIntegrationClient();
-    const repository = IntegrationRepository.prisma({ client });
+    const repository = IntegrationRepository.prisma({ client, seed: bootstrapIntegrationState() });
     const integrations = new IntegrationService(repository);
 
     const rotated = await integrations.rotateApiKey("stage-key");
@@ -329,7 +708,7 @@ describe("Prisma-backed integration repository contracts", () => {
 
   it("keeps an existing Prisma public API key hash when preparing rotation audit references", async () => {
     const { calls, client } = createFakePrismaIntegrationClient();
-    const repository = IntegrationRepository.prisma({ client });
+    const repository = IntegrationRepository.prisma({ client, seed: bootstrapIntegrationState() });
     const integrations = new IntegrationService(repository);
     const rawSecret = "sk_test_existing_stage_secret_4400";
 
@@ -367,6 +746,18 @@ function createFakePrismaIntegrationClient(options: {
   const rows = new Map<string, FakePublicApiKeyRow>();
   const revealRows = new Map<string, FakePublicApiKeyRevealStateRow>();
   const rotationAuditRows = new Map<string, FakePublicApiKeyRotationAuditEventRow>();
+  const rotationJobRows = new Map<string, FakeRuntimeRow>();
+  const publicDemoRows = new Map<string, FakeRuntimeRow>();
+  const publicDemoAuditRows = new Map<string, FakeRuntimeRow>();
+  const publicDemoNotificationRows = new Map<string, FakeRuntimeRow>();
+  const webhookDeliveryRows = new Map<string, FakeRuntimeRow>();
+  const webhookReplayRows = new Map<string, FakeRuntimeRow>();
+  const webhookReplayAuditRows = new Map<string, FakeRuntimeRow>();
+  const securitySessionRows = new Map<string, FakeRuntimeRow>();
+  const channelConnectionRows = new Map<string, FakeRuntimeRow>();
+  const channelConnectionEventRows = new Map<string, FakeRuntimeRow>();
+  const channelConnectionAuditRows = new Map<string, FakeRuntimeRow>();
+  const telegramConnectionRows = new Map<string, FakeRuntimeRow>();
   const calls: {
     publicApiKeyCreates: Array<{ data: FakePublicApiKeyRow }>;
     publicApiKeyFindMany: Array<{ orderBy?: { createdAt: "asc" | "desc" }; where?: { status?: string } }>;
@@ -393,6 +784,14 @@ function createFakePrismaIntegrationClient(options: {
     publicApiKeyRotationAuditEventCreates: Array<{
       data: FakePublicApiKeyRotationAuditEventCreateInput;
     }>;
+    publicDemoRequestNotificationDescriptorCounts: Array<{
+      where?: FakeRuntimeRow;
+    }>;
+    publicDemoRequestNotificationDescriptorFindMany: Array<{
+      orderBy?: Record<string, "asc" | "desc">;
+      take?: number;
+      where?: FakeRuntimeRow;
+    }>;
   } = {
     publicApiKeyCreates: [],
     publicApiKeyFindMany: [],
@@ -402,9 +801,46 @@ function createFakePrismaIntegrationClient(options: {
     publicApiKeyRevealStateUpdates: [],
     publicApiKeyRevealStateUpserts: [],
     publicApiKeyRotationAuditEventCreates: [],
-    publicApiKeyUpserts: []
+    publicApiKeyUpserts: [],
+    publicDemoRequestNotificationDescriptorCounts: [],
+    publicDemoRequestNotificationDescriptorFindMany: []
   };
   const client: PrismaIntegrationClient = {
+    channelConnection: {
+      async findMany(input) {
+        return findRuntimeRows(channelConnectionRows, input.where, "createdAt");
+      },
+      async findUnique(input) {
+        return clone(channelConnectionRows.get(input.where.id) ?? null);
+      },
+      async upsert(input) {
+        return upsertRuntimeRow(channelConnectionRows, input.where.id, input.create, input.update);
+      }
+    },
+    channelConnectionAuditEvent: {
+      async create(input) {
+        return createRuntimeRow(channelConnectionAuditRows, input.data.id, input.data);
+      },
+      async findMany(input) {
+        return findRuntimeRows(channelConnectionAuditRows, input.where, "at");
+      }
+    },
+    channelConnectionEvent: {
+      async create(input) {
+        return createRuntimeRow(channelConnectionEventRows, input.data.id, input.data);
+      },
+      async findMany(input) {
+        return findRuntimeRows(channelConnectionEventRows, input.where, "at");
+      }
+    },
+    integrationApiKeyRotationJob: {
+      async findMany() {
+        return findRuntimeRows(rotationJobRows, undefined, "createdAt");
+      },
+      async upsert(input) {
+        return upsertRuntimeRow(rotationJobRows, input.where.rotationId, input.create, input.update);
+      }
+    },
     publicApiKey: {
       async create(input) {
         if (rows.has(input.data.keyId)) {
@@ -439,6 +875,9 @@ function createFakePrismaIntegrationClient(options: {
       }
     },
     publicApiKeyRevealState: {
+      async findMany() {
+        return [...revealRows.values()].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+      },
       async findUnique(input) {
         calls.publicApiKeyRevealStateFindUnique.push(clone(input));
         const snapshot = clone(revealRows.get(input.where.keyId) ?? null);
@@ -495,6 +934,105 @@ function createFakePrismaIntegrationClient(options: {
         rotationAuditRows.set(row.auditId, row);
 
         return clone(row);
+      },
+      async findMany() {
+        return [...rotationAuditRows.values()].sort((left, right) => left.at.getTime() - right.at.getTime());
+      }
+    },
+    publicDemoRequest: {
+      async findFirst(input) {
+        return clone([...publicDemoRows.values()].find((row) => matchesWhere(row, input.where)) ?? null);
+      },
+      async findMany() {
+        return findRuntimeRows(publicDemoRows, undefined, "createdAt");
+      },
+      async upsert(input) {
+        return upsertRuntimeRow(publicDemoRows, input.where.id, input.create, input.update);
+      }
+    },
+    publicDemoRequestAuditEvent: {
+      async create(input) {
+        return createRuntimeRow(publicDemoAuditRows, input.data.id, input.data);
+      },
+      async findMany() {
+        return findRuntimeRows(publicDemoAuditRows, undefined, "at");
+      }
+    },
+    publicDemoRequestNotificationDescriptor: {
+      async count(input) {
+        calls.publicDemoRequestNotificationDescriptorCounts.push(clone(input));
+        return findRuntimeRows(publicDemoNotificationRows, input.where, "createdAt").length;
+      },
+      async findMany(input) {
+        calls.publicDemoRequestNotificationDescriptorFindMany.push(clone(input));
+        const [orderByField, orderByDirection] = Object.entries(input.orderBy ?? { createdAt: "asc" })[0] ?? ["createdAt", "asc"];
+        const rows = findRuntimeRows(publicDemoNotificationRows, input.where, orderByField);
+        return (orderByDirection === "desc" ? rows.reverse() : rows).slice(0, input.take);
+      },
+      async upsert(input) {
+        return upsertRuntimeRow(publicDemoNotificationRows, input.where.id, input.create, input.update);
+      }
+    },
+    securitySession: {
+      async findMany() {
+        return findRuntimeRows(securitySessionRows, undefined, "lastSeen");
+      },
+      async upsert(input) {
+        return upsertRuntimeRow(securitySessionRows, input.where.id, input.create, input.update);
+      }
+    },
+    telegramConnection: {
+      async findFirst(input) {
+        return clone([...telegramConnectionRows.values()].find((row) => matchesWhere(row, input.where)) ?? null);
+      },
+      async findMany() {
+        return findRuntimeRows(telegramConnectionRows, undefined, "createdAt");
+      },
+      async findUnique(input) {
+        return clone(telegramConnectionRows.get(input.where.tenantId) ?? null);
+      },
+      async upsert(input) {
+        return upsertRuntimeRow(telegramConnectionRows, input.where.tenantId, input.create, input.update);
+      }
+    },
+    webhookDeliveryJournalEntry: {
+      async findMany(input) {
+        return findRuntimeRows(webhookDeliveryRows, input.where, "createdAt").slice(0, input.take);
+      },
+      async findUnique(input) {
+        return clone(webhookDeliveryRows.get(input.where.deliveryId) ?? null);
+      },
+      async update(input) {
+        const existing = webhookDeliveryRows.get(input.where.deliveryId);
+        if (!existing) {
+          throw new Error("fake_prisma_webhook_delivery_journal_not_found");
+        }
+
+        const next = { ...existing, ...clone(input.data) };
+        webhookDeliveryRows.set(input.where.deliveryId, next);
+        return clone(next);
+      },
+      async upsert(input) {
+        return upsertRuntimeRow(webhookDeliveryRows, input.where.deliveryId, input.create, input.update);
+      }
+    },
+    webhookReplayAuditEvent: {
+      async create(input) {
+        return createRuntimeRow(webhookReplayAuditRows, input.data.id, input.data);
+      },
+      async findMany() {
+        return findRuntimeRows(webhookReplayAuditRows, undefined, "at");
+      }
+    },
+    webhookReplayJournalEntry: {
+      async findMany() {
+        return findRuntimeRows(webhookReplayRows, undefined, "createdAt");
+      },
+      async findUnique(input) {
+        return clone(webhookReplayRows.get(input.where.idempotencyKey) ?? null);
+      },
+      async upsert(input) {
+        return upsertRuntimeRow(webhookReplayRows, input.where.idempotencyKey, input.create, input.update);
       }
     }
   };
@@ -538,6 +1076,74 @@ interface FakePublicApiKeyRotationAuditEventCreateInput {
 
 interface FakePublicApiKeyRotationAuditEventRow extends FakePublicApiKeyRotationAuditEventCreateInput {
   createdAt: Date;
+}
+
+type FakeRuntimeRow = Record<string, any>;
+
+function createRuntimeRow<T extends FakeRuntimeRow>(store: Map<string, T>, id: string, data: T): T {
+  if (store.has(id)) {
+    throw new Error(`fake_prisma_duplicate:${id}`);
+  }
+
+  const row = withRuntimeTimestamps(clone(data));
+  store.set(id, row);
+  return clone(row);
+}
+
+function upsertRuntimeRow<TCreate extends FakeRuntimeRow, TUpdate extends FakeRuntimeRow>(
+  store: Map<string, FakeRuntimeRow>,
+  id: string,
+  create: TCreate,
+  update: TUpdate
+): FakeRuntimeRow {
+  const existing = store.get(id);
+  const next = existing
+    ? withRuntimeTimestamps({ ...existing, ...clone(update), updatedAt: clone(update).updatedAt ?? new Date("2026-07-03T09:00:00.000Z") })
+    : withRuntimeTimestamps(clone(create));
+  store.set(id, next);
+  return clone(next);
+}
+
+function findRuntimeRows(
+  store: Map<string, FakeRuntimeRow>,
+  where: FakeRuntimeRow | undefined,
+  sortField: string
+): FakeRuntimeRow[] {
+  return [...store.values()]
+    .filter((row) => matchesWhere(row, where))
+    .sort((left, right) => dateValue(left[sortField]) - dateValue(right[sortField]))
+    .map((row) => clone(row));
+}
+
+function matchesWhere(row: FakeRuntimeRow, where: FakeRuntimeRow | undefined): boolean {
+  if (!where) {
+    return true;
+  }
+
+  return Object.entries(where).every(([key, expected]) => {
+    if (expected === undefined) {
+      return true;
+    }
+
+    if (expected && typeof expected === "object" && !Array.isArray(expected) && "in" in expected) {
+      return Array.isArray(expected.in) && expected.in.includes(row[key]);
+    }
+
+    return row[key] === expected;
+  });
+}
+
+function withRuntimeTimestamps<T extends FakeRuntimeRow>(row: T): T {
+  const now = new Date("2026-07-03T09:00:00.000Z");
+  return {
+    ...row,
+    createdAt: row.createdAt ?? now,
+    updatedAt: row.updatedAt ?? row.createdAt ?? now
+  };
+}
+
+function dateValue(value: unknown): number {
+  return value instanceof Date ? value.getTime() : new Date(String(value ?? 0)).getTime();
 }
 
 function createCallBarrier(targetCalls: number) {

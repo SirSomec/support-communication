@@ -1,38 +1,25 @@
-import { createHash, randomUUID } from "node:crypto";
-import { createEnvelope, redactExportedDescriptor, type BackendEnvelope } from "@support-communication/envelope";
+import { randomUUID } from "node:crypto";
+import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
-import { redactSensitiveValue } from "@support-communication/redaction";
-import { IdentityRepository, isActiveServiceAdminImpersonationConflict, type IdentityBreakGlassApproval, type IdentityServiceAdminAuditEvent, type IdentityServiceAdminImpersonationSession, type IdentityTenantUser } from "../identity/identity.repository.js";
+import { IdentityRepository, isActiveServiceAdminImpersonationConflict, type IdentityBreakGlassApproval, type IdentityServiceAdminAuditEvent, type IdentityServiceAdminImpersonationSession, type IdentityTenant, type IdentityTenantUser } from "../identity/identity.repository.js";
 import { type ServiceAdminActor } from "../identity/service-admin-auth.js";
-import { serviceAdminTenants, type ServiceAdminTenant, type ServiceAdminUser } from "./service-admin.fixtures.js";
+import { type ServiceAdminUser } from "./service-admin.types.js";
+import {
+  applyAuditRedactionOverlay,
+  AUDIT_EXPORT_COLUMNS,
+  AUDIT_EXPORT_REDACTION_POLICY,
+  buildAuditExportDescriptor,
+  createAuditExportRecord,
+  createAuditRedactionRecord,
+  isAuditExportExpired,
+  stableAuditExportFilters,
+  toAuditExportPayloadRow,
+  type AuditExportFilters
+} from "./service-admin-audit.persistence.js";
 
 const SUPPORT_ADMIN_SERVICE = "supportAdminService";
-const AUDIT_EXPORT_PERMISSION = "service-admin.audit.export";
-const AUDIT_EXPORT_REDACTION_POLICY = "canonical-secret-carriers/v1";
-const AUDIT_EXPORT_COLUMNS = [
-  "id",
-  "at",
-  "actor",
-  "action",
-  "result",
-  "severity",
-  "tenantId",
-  "userId",
-  "target"
-] as const;
 
-interface UserFilters {
-  action?: string;
-  actorId?: string;
-  cursor?: string;
-  limit?: number | string;
-  period?: string;
-  query?: string;
-  severity?: string;
-  status?: string;
-  target?: string;
-  tenantId?: string;
-  userId?: string;
+interface UserFilters extends AuditExportFilters {
 }
 
 interface UserActionPayload {
@@ -92,15 +79,15 @@ interface AuditRecordInput {
 type AuditRecordResult = { auditEvent: AuditEvent } | { envelope: BackendEnvelope<Record<string, unknown>> };
 
 export class ServiceAdminService {
-  private readonly tenants = clone(serviceAdminTenants);
-
   constructor(private readonly identityRepository = IdentityRepository.default()) {}
 
   async fetchSupportUsers(filters: UserFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const query = String(filters.query ?? "").trim().toLowerCase();
+    const tenants = await this.listTenants();
+    const tenantById = new Map(tenants.map((tenant) => [tenant.id, tenant]));
     const allUsers = await this.fetchRepositoryUsers();
     const items = allUsers.filter((user) => {
-      const tenant = this.findTenant(user.tenantId);
+      const tenant = tenantById.get(user.tenantId);
       const tenantMatches = !filters.tenantId || user.tenantId === filters.tenantId;
       const statusMatches = !filters.status || filters.status === "all" || user.status === filters.status;
       const queryMatches = !query || [user.id, user.name, user.email, user.role, tenant?.name ?? ""]
@@ -118,7 +105,7 @@ export class ServiceAdminService {
       data: {
         filters,
         items: clone(items),
-        tenants: clone(this.tenants)
+        tenants: clone(tenants)
       }
     });
   }
@@ -126,6 +113,7 @@ export class ServiceAdminService {
   async fetchAuditEvents(filters: UserFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const query = String(filters.query ?? "").trim().toLowerCase();
     const periodCutoff = auditPeriodCutoff(filters.period);
+    const redactionOverlays = await this.loadAuditRedactionOverlays();
     const allEvents = (await this.identityRepository.listServiceAdminAuditEvents())
       .sort(compareAuditEvents);
     const filteredItems = allEvents.filter((event) => {
@@ -156,7 +144,7 @@ export class ServiceAdminService {
       meta: apiMeta({ filters }),
       data: {
         filters,
-        items: items.map(redactAuditEventForReadSide),
+        items: items.map((event) => applyAuditRedactionOverlay(event, redactionOverlays.get(event.id))),
         page: {
           cursor: filters.cursor ?? null,
           limit,
@@ -168,31 +156,94 @@ export class ServiceAdminService {
     });
   }
 
-  async requestAuditExport(filters: UserFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async requestAuditExport(
+    filters: UserFilters = {},
+    actor: ServiceAdminActor | undefined = undefined
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
     const auditEvents = await this.fetchAuditEvents(filters);
     const items = auditEvents.data.items as AuditEvent[];
+    const descriptor = buildAuditExportDescriptor(filters, items);
+    const existingExports = await this.identityRepository.listServiceAdminAuditExports();
+    const descriptorId = String(descriptor.id);
+    const reusable = existingExports.find((record) => (
+      record.descriptorId === descriptorId
+      && stableExportFiltersMatch(record.filters, stableAuditExportFilters(filters))
+      && !isAuditExportExpired(record)
+    ));
+
+    const exportRecord = reusable ?? await this.identityRepository.recordServiceAdminAuditExport(
+      createAuditExportRecord({
+        descriptor,
+        filters,
+        requesterId: actor?.id ?? "service-admin",
+        requesterName: actor?.name ?? "Service Admin",
+        sourceEventIds: items.map((event) => event.id)
+      })
+    );
+
+    return buildAuditExportEnvelope(filters, items, exportRecord.descriptor);
+  }
+
+  async redactAuditEvent(payload: {
+    actor?: ServiceAdminActor;
+    eventId?: string;
+    fields?: string[];
+    reason?: string;
+  } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const eventId = String(payload.eventId ?? "").trim();
+    const reason = String(payload.reason ?? "").trim();
+
+    if (!eventId) {
+      return invalidEnvelope("redactAuditEvent", "audit_event_id_required", "Audit event id is required.", { eventId });
+    }
+
+    if (reason.length < 8) {
+      return invalidEnvelope("redactAuditEvent", "audit_redaction_reason_required", "Audit redaction reason must be at least 8 characters.", { eventId });
+    }
+
+    const original = (await this.identityRepository.listServiceAdminAuditEvents()).find((event) => event.id === eventId);
+    if (!original) {
+      return notFoundEnvelope("redactAuditEvent", "audit_event_not_found", `Audit event ${eventId} was not found.`, { eventId });
+    }
+
+    const redaction = await this.identityRepository.recordServiceAdminAuditRedaction(
+      createAuditRedactionRecord({
+        actor: payload.actor?.id ?? "service-admin",
+        actorName: payload.actor?.name ?? "Service Admin",
+        eventId,
+        fields: payload.fields,
+        original,
+        reason
+      })
+    );
+
+    const auditRecord = await this.recordAudit("redactAuditEvent", {
+      actor: payload.actor,
+      action: "audit.redact",
+      reason,
+      result: "applied",
+      severity: "warning",
+      target: eventId,
+      tenantId: original.tenantId,
+      userId: original.userId
+    });
+    if ("envelope" in auditRecord) {
+      return auditRecord.envelope;
+    }
 
     return createEnvelope({
       service: SUPPORT_ADMIN_SERVICE,
-      operation: "requestAuditExport",
-      traceId: supportTraceId("requestAuditExport"),
-      partial: true,
-      meta: apiMeta({ filters }),
+      operation: "redactAuditEvent",
+      traceId: supportTraceId("redactAuditEvent"),
+      meta: apiMeta({ eventId }),
       data: {
-        export: {
-          descriptor: auditExportDescriptor(filters, items),
-          format: "json",
-          filters: clone(filters),
-          payload: {
-            columns: [...AUDIT_EXPORT_COLUMNS],
-            contentType: "application/json",
-            redacted: true,
-            redactionPolicy: AUDIT_EXPORT_REDACTION_POLICY,
-            rows: items.map(toAuditExportPayloadRow)
-          },
-          sourceEventIds: items.map((event) => event.id),
-          totalRows: items.length
-        }
+        auditEvent: auditRecord.auditEvent,
+        overlay: redaction.overlay,
+        original: {
+          id: original.id,
+          immutable: original.immutable
+        },
+        redaction
       }
     });
   }
@@ -230,7 +281,7 @@ export class ServiceAdminService {
 
   async startImpersonation(payload: ImpersonationPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const tenant = this.findTenant(request.tenantId);
+    const tenant = await this.findTenant(request.tenantId);
 
     if (!tenant) {
       return this.notFoundWithAudit("startImpersonation", "tenant_not_found", `Tenant ${request.tenantId ?? "(empty)"} was not found.`, {
@@ -501,7 +552,7 @@ export class ServiceAdminService {
 
   async requestBreakGlassApproval(payload: BreakGlassPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
-    const tenant = request.tenantId ? this.findTenant(request.tenantId) : undefined;
+    const tenant = request.tenantId ? await this.findTenant(request.tenantId) : undefined;
 
     if (request.tenantId && !tenant) {
       return this.notFoundWithAudit("requestBreakGlassApproval", "tenant_not_found", `Tenant ${request.tenantId} was not found.`, {
@@ -538,7 +589,7 @@ export class ServiceAdminService {
       });
     }
 
-    const effectiveTenant = tenant ?? (user ? this.findTenant(user.tenantId) : undefined);
+    const effectiveTenant = tenant ?? (user ? await this.findTenant(user.tenantId) : undefined);
     const target = request.target ?? request.userId ?? request.tenantId ?? "global";
     const validation = await this.validatePrivilegedRequest("requestBreakGlassApproval", request, {
       action: "break_glass.request",
@@ -863,13 +914,23 @@ export class ServiceAdminService {
     });
   }
 
-  private findTenant(tenantId: string | undefined): ServiceAdminTenant | undefined {
-    return this.tenants.find((tenant) => tenant.id === tenantId);
+  private async listTenants(): Promise<Array<{ id: string; name: string; planId: string; status: string }>> {
+    const tenants = await this.identityRepository.listTenants();
+    return tenants.map(toServiceAdminTenant);
+  }
+
+  private async findTenant(tenantId: string | undefined): Promise<{ id: string; name: string; planId: string; status: string } | undefined> {
+    if (!tenantId) {
+      return undefined;
+    }
+
+    const tenant = await this.identityRepository.findTenant(tenantId);
+    return tenant ? toServiceAdminTenant(tenant) : undefined;
   }
 
   private async findUser(userId: string | undefined): Promise<ServiceAdminUser | undefined> {
     const user = await this.identityRepository.findTenantUser(userId);
-    if (!user || !this.findTenant(user.tenantId)) {
+    if (!user || !(await this.findTenant(user.tenantId))) {
       return undefined;
     }
 
@@ -877,8 +938,20 @@ export class ServiceAdminService {
   }
 
   private async fetchRepositoryUsers(): Promise<ServiceAdminUser[]> {
-    const tenantUsers = await Promise.all(this.tenants.map((tenant) => this.identityRepository.findTenantUsers(tenant.id)));
+    const tenants = await this.listTenants();
+    const tenantUsers = await Promise.all(tenants.map((tenant) => this.identityRepository.findTenantUsers(tenant.id)));
     return tenantUsers.flat().map(toServiceAdminUser);
+  }
+
+  private async loadAuditRedactionOverlays(): Promise<Map<string, Record<string, unknown>>> {
+    const redactions = await this.identityRepository.listServiceAdminAuditRedactions();
+    const overlays = new Map<string, Record<string, unknown>>();
+
+    for (const redaction of redactions) {
+      overlays.set(redaction.eventId, redaction.overlay);
+    }
+
+    return overlays;
   }
 
   private async findActiveImpersonation(tenantId: string, userId: string | null): Promise<ImpersonationSession | undefined> {
@@ -1304,75 +1377,50 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function redactAuditEventForReadSide(event: AuditEvent): AuditEvent {
-  return redactSensitiveValue(clone(event));
-}
-
-function auditExportDescriptor(filters: UserFilters, events: AuditEvent[]): Record<string, unknown> {
-  const id = auditExportDescriptorId(filters, events);
-  const fileName = auditExportFileName(filters);
-
-  return redactExportedDescriptor({
-    contentType: "application/json",
-    downloadUrl: `https://service-admin.local/audit-exports/${id}/${fileName}`,
-    expiresIn: "24h",
-    fileName,
-    format: "json",
-    id,
-    objectKey: `service-admin/audit-exports/${id}/${fileName}`,
-    objectKeyExposed: false,
-    permissionRequired: AUDIT_EXPORT_PERMISSION,
-    totalRows: events.length
+function buildAuditExportEnvelope(
+  filters: UserFilters,
+  items: AuditEvent[],
+  descriptor: Record<string, unknown>
+): BackendEnvelope<Record<string, unknown>> {
+  return createEnvelope({
+    service: SUPPORT_ADMIN_SERVICE,
+    operation: "requestAuditExport",
+    traceId: supportTraceId("requestAuditExport"),
+    partial: true,
+    meta: apiMeta({ filters }),
+    data: {
+      export: {
+        descriptor,
+        format: "json",
+        filters: clone(filters),
+        payload: {
+          columns: [...AUDIT_EXPORT_COLUMNS],
+          contentType: "application/json",
+          redacted: true,
+          redactionPolicy: AUDIT_EXPORT_REDACTION_POLICY,
+          rows: items.map(toAuditExportPayloadRow)
+        },
+        sourceEventIds: items.map((event) => event.id),
+        totalRows: items.length
+      }
+    }
   });
 }
 
-function auditExportDescriptorId(filters: UserFilters, events: AuditEvent[]): string {
-  const fingerprint = JSON.stringify({
-    filters: stableAuditExportFilters(filters),
-    sourceEventIds: events.map((event) => event.id)
+function stableExportFiltersMatch(left: Record<string, string>, right: Record<string, string>): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function notFoundEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
+  return createEnvelope({
+    service: SUPPORT_ADMIN_SERVICE,
+    operation,
+    traceId: supportTraceId(operation),
+    status: "not_found",
+    meta: apiMeta(),
+    data,
+    error: { code, message }
   });
-
-  return `audit-export-${createHash("sha256").update(fingerprint).digest("hex").slice(0, 16)}`;
-}
-
-function auditExportFileName(filters: UserFilters): string {
-  const scope = [filters.tenantId, filters.action]
-    .map((value) => sanitizeAuditExportFilePart(value))
-    .filter(Boolean)
-    .join("-") || "all";
-
-  return `service-admin-audit-${scope}.json`;
-}
-
-function sanitizeAuditExportFilePart(value: string | undefined): string {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function stableAuditExportFilters(filters: UserFilters): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(filters)
-      .filter(([, value]) => value !== undefined && String(value).trim() !== "")
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, value]) => [key, String(value)])
-  );
-}
-
-function toAuditExportPayloadRow(event: AuditEvent): Record<(typeof AUDIT_EXPORT_COLUMNS)[number], string | null> {
-  return {
-    action: event.action,
-    actor: event.actor,
-    at: event.at,
-    id: event.id,
-    result: event.result,
-    severity: event.severity,
-    target: event.target,
-    tenantId: event.tenantId,
-    userId: event.userId
-  };
 }
 
 function breakGlassDecisionAccess(approval: IdentityBreakGlassApproval): Record<string, unknown> {
@@ -1458,18 +1506,6 @@ function makeAuditId(scope: string): string {
   return `evt_${scope}_${randomUUID()}`;
 }
 
-function notFoundEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
-  return createEnvelope({
-    service: SUPPORT_ADMIN_SERVICE,
-    operation,
-    traceId: supportTraceId(operation),
-    status: "not_found",
-    meta: apiMeta(),
-    data,
-    error: { code, message }
-  });
-}
-
 function normalizeBreakGlassDecision(decision: unknown): "approved" | "rejected" | undefined {
   const value = String(decision ?? "").trim().toLowerCase();
   if (value === "approve" || value === "approved") {
@@ -1493,6 +1529,15 @@ function requestedImpersonationMode(request: ImpersonationPayload): Impersonatio
 
 function supportTraceId(operation: string): string {
   return getCurrentTraceId() ?? createRequestTraceId(SUPPORT_ADMIN_SERVICE, operation);
+}
+
+function toServiceAdminTenant(tenant: IdentityTenant): { id: string; name: string; planId: string; status: string } {
+  return {
+    id: tenant.id,
+    name: tenant.name,
+    planId: "planId" in tenant ? String((tenant as { planId?: string }).planId ?? "business") : "business",
+    status: tenant.status
+  };
 }
 
 function toServiceAdminUser(user: IdentityTenantUser): ServiceAdminUser {

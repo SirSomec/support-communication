@@ -68,6 +68,49 @@ X-Webhook-Signature = "sha256=" + HMAC_SHA256(webhook_secret, "{timestamp}.{raw_
 
 Replay the same nonce is denied as `webhook_nonce_replay`; retry with a new nonce only when the upstream event id is also new.
 
+## Public demo request
+
+Landing-page demo/contact requests are unauthenticated and use spam/rate-limit controls instead of public API bearer keys.
+
+```http
+POST /api/v1/public/demo-requests HTTP/1.1
+Host: api.support.local
+Content-Type: application/json
+Idempotency-Key: lead-acme-growth-001
+```
+
+```json
+{
+  "name": "Jane Owner",
+  "company": "Acme Retail",
+  "email": "jane@acme.test",
+  "message": "Need a demo for 20 operators and web SDK migration.",
+  "source": "landing-hero",
+  "planInterest": "Growth",
+  "consent": true,
+  "website": ""
+}
+```
+
+Expected response shape:
+
+```json
+{
+  "service": "publicLeadService",
+  "operation": "createDemoRequest",
+  "status": "ok",
+  "data": {
+    "accepted": true,
+    "duplicate": false,
+    "leadId": "demo_req_<uuid>",
+    "notificationDescriptor": {
+      "type": "public.demo_request.notification.requested",
+      "status": "queued"
+    }
+  }
+}
+```
+
 ## Production SDK identify
 
 Use production only after the client application is bound to a live public API key with the `clients:identify` scope.

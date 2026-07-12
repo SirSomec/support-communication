@@ -5,6 +5,7 @@ import { createRequestTraceId, getCurrentTraceId } from "@support-communication/
 export type PublicApiEnvironment = "production" | "stage";
 
 export interface PublicApiKeyRecord {
+  channelConnectionId?: string | null;
   environment: PublicApiEnvironment;
   keyId: string;
   scopes: string[];
@@ -14,6 +15,7 @@ export interface PublicApiKeyRecord {
 }
 
 export interface PublicApiAuthContext {
+  channelConnectionId?: string | null;
   environment: PublicApiEnvironment;
   keyId: string;
   scopes: string[];
@@ -79,6 +81,7 @@ export async function resolvePublicApiRequest(request: PublicApiAuthRequest): Pr
   return {
     allowed: true,
     context: {
+      ...(matchedKey.channelConnectionId ? { channelConnectionId: matchedKey.channelConnectionId } : {}),
       environment: matchedKey.environment,
       keyId: matchedKey.keyId,
       scopes: [...matchedKey.scopes],

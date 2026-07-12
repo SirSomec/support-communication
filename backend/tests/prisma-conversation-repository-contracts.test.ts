@@ -3,8 +3,24 @@ import { describe, it } from "node:test";
 import { createOutboxEvent } from "@support-communication/events";
 import { configureConversationRepository } from "../apps/api-gateway/src/conversation/bootstrap.ts";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
+import { bootstrapConversationState } from "../apps/api-gateway/src/conversation/seed.ts";
 
 describe("Prisma-backed conversation repository contracts", () => {
+  it("keeps repository defaults empty and requires explicit local seed injection", async () => {
+    assert.deepEqual(await ConversationRepository.inMemory().listConversations(), []);
+    assert.ok((await ConversationRepository.inMemory(bootstrapConversationState()).listConversations()).length > 0);
+  });
+
+  it("rejects conversation writes without explicit tenant ownership", async () => {
+    const seeded = ConversationRepository.inMemory(bootstrapConversationState());
+    const conversation = await seeded.findConversation("maria");
+    assert.ok(conversation);
+
+    await assert.rejects(
+      async () => seeded.saveConversation({ ...conversation, tenantId: undefined } as unknown as typeof conversation),
+      /conversation_tenant_id_required/
+    );
+  });
   it("maps Prisma conversation rows with ordered messages to frontend dialog records", async () => {
     const { client } = createFakePrismaConversationClient();
     const repository = ConversationRepository.prisma({ client });
@@ -17,6 +33,7 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.equal(detail?.name, "Maria K.");
     assert.equal(detail?.messages.length, 2);
     assert.equal(detail?.messages[0].text, "Where is my order?");
+    assert.equal(detail?.messages[0].createdAt, "2026-06-28T10:00:00.000Z");
     assert.equal(detail?.messages[1].type, "internal");
     assert.deepEqual(client.calls.conversationFindMany, [{
       include: { messages: { orderBy: { createdAt: "asc" } } },
@@ -35,6 +52,7 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.ok(conversation);
 
     conversation.status = "closed";
+    conversation.resolutionOutcome = "resolved";
     conversation.topic = "Delivery / Status";
     conversation.messages.push({
       id: "msg_agent_prisma",
@@ -47,6 +65,8 @@ describe("Prisma-backed conversation repository contracts", () => {
 
     assert.equal(client.calls.transactions, 1);
     assert.equal(saved.status, "closed");
+    assert.equal(saved.resolutionOutcome, "resolved");
+    assert.equal(client.calls.conversationUpserts[0].create.resolutionOutcome, "resolved");
     assert.equal(saved.messages.some((message) => message.id === "msg_agent_prisma"), true);
     assert.equal(client.calls.conversationUpserts.length, 1);
     assert.equal(client.calls.conversationMessageDeleteMany.length, 1);
@@ -55,14 +75,107 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.equal(client.calls.conversationMessageCreateMany[0].data.length, 3);
     assert.equal(client.calls.conversationMessageCreateMany[0].data[2].id, "msg_agent_prisma");
     assert.equal(client.calls.conversationMessageCreateMany[0].data.every((message) => message.createdAt instanceof Date), true);
-    assert.equal(
-      client.calls.conversationMessageCreateMany[0].data[0].createdAt.getTime()
-        < client.calls.conversationMessageCreateMany[0].data[1].createdAt.getTime(),
-      true
-    );
+    assert.equal(client.calls.conversationMessageCreateMany[0].data[0].createdAt.toISOString(), "2026-06-28T10:00:00.000Z");
+    assert.equal(client.calls.conversationMessageCreateMany[0].data[1].createdAt.toISOString(), "2026-06-28T10:01:00.000Z");
 
     const refetched = await repository.findConversation("maria");
     assert.deepEqual(refetched?.messages.map((message) => message.id), ["msg_1", "msg_2", "msg_agent_prisma"]);
+  });
+
+  it("persists assignment, realtime notification and routing analytics in one Prisma transaction", async () => {
+    const { client } = createFakePrismaConversationClient();
+    const repository = ConversationRepository.prisma({ client });
+    const conversation = await repository.findConversation("maria");
+    assert.ok(conversation);
+    conversation.operatorId = "usr-volga-admin";
+    conversation.operatorName = "Sergey Markin";
+    conversation.status = "assigned";
+
+    const persisted = await repository.assignConversation({
+      analyticsRow: {
+        channel: "SDK",
+        conversationId: "maria",
+        eventKind: "assignment",
+        fromOperatorId: null,
+        id: "analytics_assignment_prisma",
+        occurredAt: "2026-07-10T09:00:00.000Z",
+        source: "dialog-interface",
+        tenantId: "tenant-volga",
+        toOperatorId: "usr-volga-admin"
+      },
+      conversation,
+      lifecycleEvent: assignmentLifecycleEvent("lifecycle_assignment_prisma", "rt_assignment_prisma"),
+      realtimeEvent: {
+        data: { action: "assignment", toOperatorId: "usr-volga-admin" },
+        eventId: "rt_assignment_prisma",
+        eventName: "conversation.updated",
+        occurredAt: "2026-07-10T09:00:00.000Z",
+        resourceId: "maria",
+        resourceType: "conversation",
+        schemaVersion: "v1",
+        tenantId: "tenant-volga",
+        traceId: "trc_assignment_prisma"
+      }
+    });
+
+    assert.equal(client.calls.transactions, 1);
+    assert.equal(client.calls.conversationUpdateMany.length, 1);
+    assert.equal(client.calls.routingAnalyticsRowCreates.length, 1);
+    assert.equal(client.calls.conversationLifecycleEventCreates.length, 1);
+    assert.equal(client.calls.conversationLifecycleEventCreates[0].data.eventType, "assignment.changed");
+    assert.equal(client.calls.routingAnalyticsRowCreates[0].data.occurredAt instanceof Date, true);
+    assert.equal(client.calls.conversationRealtimeEventCreates[0].data.eventId, "rt_assignment_prisma");
+    assert.equal(persisted.conversation.operatorId, "usr-volga-admin");
+    assert.equal(persisted.analyticsRow.id, "analytics_assignment_prisma");
+    assert.equal(persisted.lifecycleEvent.id, "lifecycle_assignment_prisma");
+  });
+
+  it("rejects a stale assignment before writing realtime or analytics rows", async () => {
+    const { client } = createFakePrismaConversationClient();
+    const repository = ConversationRepository.prisma({ client });
+    const conversation = await repository.findConversation("maria");
+    assert.ok(conversation);
+    conversation.operatorId = "usr-volga-admin";
+    conversation.operatorName = "Sergey Markin";
+
+    await repository.assignConversation({
+      analyticsRow: {
+        channel: "SDK",
+        conversationId: "maria",
+        eventKind: "assignment",
+        fromOperatorId: null,
+        id: "analytics_assignment_first",
+        occurredAt: "2026-07-10T09:00:00.000Z",
+        source: "dialog-interface",
+        tenantId: "tenant-volga",
+        toOperatorId: "usr-volga-admin"
+      },
+      conversation,
+      lifecycleEvent: assignmentLifecycleEvent("lifecycle_assignment_first", "rt_assignment_first"),
+      realtimeEvent: assignmentRealtimeEvent("rt_assignment_first")
+    });
+
+    const staleConversation = { ...conversation, operatorId: "usr-ns-owner", operatorName: "Mira Volkova" };
+    await assert.rejects(() => repository.assignConversation({
+      analyticsRow: {
+        channel: "SDK",
+        conversationId: "maria",
+        eventKind: "assignment",
+        fromOperatorId: null,
+        id: "analytics_assignment_stale",
+        occurredAt: "2026-07-10T09:00:01.000Z",
+        source: "dialog-interface",
+        tenantId: "tenant-volga",
+        toOperatorId: "usr-ns-owner"
+      },
+      conversation: staleConversation,
+      lifecycleEvent: assignmentLifecycleEvent("lifecycle_assignment_stale", "rt_assignment_stale"),
+      realtimeEvent: assignmentRealtimeEvent("rt_assignment_stale")
+    }), /assignment changed before commit/);
+
+    assert.equal(client.calls.conversationUpdateMany.length, 2);
+    assert.equal(client.calls.routingAnalyticsRowCreates.length, 1);
+    assert.equal(client.calls.conversationRealtimeEventCreates.length, 1);
   });
 
   it("persists inbound idempotency and realtime events through Prisma delegates", async () => {
@@ -366,9 +479,12 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
         }
       ],
       name: "Maria K.",
+      operatorId: null,
+      operatorName: null,
       phone: "+7 999 204-18-44",
       preview: "Where is my order?",
       previous: [["2024-05-05", "Return", "Closed"]],
+      resolutionOutcome: null,
       sla: "02:15",
       slaTone: "ok",
       status: "active",
@@ -382,6 +498,7 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
   ]]);
   const deliveryReceipts = new Map<string, FakeChannelDeliveryReceiptRow>();
   const inboundEvents = new Map<string, FakeConversationInboundEventRow>();
+  const lifecycleEvents = new Map<string, FakeConversationLifecycleEventRow>();
   const outboundDescriptors = new Map<string, FakeConversationOutboundDescriptorRow>();
   const realtimeEvents = new Map<string, FakeConversationRealtimeEventRow>();
   const calls = {
@@ -392,6 +509,9 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
     conversationFindUnique: [] as unknown[],
     conversationInboundEventCreates: [] as Array<{ data: FakeConversationInboundEventCreateInput }>,
     conversationInboundEventFindUnique: [] as Array<{ where: { channel_eventId: { channel: string; eventId: string } } }>,
+    conversationLifecycleEventCreates: [] as Array<{ data: FakeConversationLifecycleEventCreateInput }>,
+    conversationLifecycleEventFindMany: [] as unknown[],
+    conversationLifecycleEventFindUnique: [] as unknown[],
     conversationMessageCreateMany: [] as Array<{ data: FakeConversationMessageCreateInput[] }>,
     conversationMessageDeleteMany: [] as Array<{ where: { conversationId: string } }>,
     conversationOutboundDescriptorCreates: [] as Array<{ data: FakeConversationOutboundDescriptorCreateInput }>,
@@ -400,7 +520,9 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
     conversationRealtimeEventCreates: [] as Array<{ data: FakeConversationRealtimeEventCreateInput }>,
     conversationRealtimeEventFindMany: [] as unknown[],
     conversationUpserts: [] as Array<{ create: FakeConversationUpsertInput; update: FakeConversationUpsertInput; where: { id: string } }>,
+    conversationUpdateMany: [] as Array<{ data: FakeConversationUpsertInput; where: { id: string; operatorId: string | null; tenantId: string } }>,
     outboxEventCreates: [] as Array<{ data: FakeOutboxEventCreateInput }>,
+    routingAnalyticsRowCreates: [] as Array<{ data: FakeRoutingAnalyticsRowCreateInput }>,
     transactions: 0
   };
 
@@ -442,6 +564,17 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
       findUnique: async (input: { where: { id: string } }) => {
         calls.conversationFindUnique.push(input);
         return conversations.get(input.where.id) ?? null;
+      },
+      updateMany: async (input: { data: FakeConversationUpsertInput; where: { id: string; operatorId: string | null; tenantId: string } }) => {
+        calls.conversationUpdateMany.push(input);
+        const existing = conversations.get(input.where.id);
+        if (!existing
+          || existing.tenantId !== input.where.tenantId
+          || (existing.operatorId ?? null) !== input.where.operatorId) {
+          return { count: 0 };
+        }
+        conversations.set(input.where.id, { ...existing, ...input.data });
+        return { count: 1 };
       },
       upsert: async (input: { create: FakeConversationUpsertInput; update: FakeConversationUpsertInput; where: { id: string } }) => {
         calls.conversationUpserts.push(input);
@@ -525,6 +658,32 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
         calls.outboxEventCreates.push(input);
         return input.data;
       }
+    },
+    conversationLifecycleEvent: {
+      create: async (input: { data: FakeConversationLifecycleEventCreateInput }) => {
+        calls.conversationLifecycleEventCreates.push(input);
+        lifecycleEvents.set(`${input.data.tenantId}:${input.data.source}:${input.data.sourceEventId}`, input.data);
+        return input.data;
+      },
+      findMany: async (input: { where: { conversationId?: string; eventType?: { in: string[] }; tenantId: string } }) => {
+        calls.conversationLifecycleEventFindMany.push(input);
+        return Array.from(lifecycleEvents.values()).filter((event) =>
+          event.tenantId === input.where.tenantId
+          && (!input.where.conversationId || event.conversationId === input.where.conversationId)
+          && (!input.where.eventType || input.where.eventType.in.includes(event.eventType))
+        );
+      },
+      findUnique: async (input: { where: { tenantId_source_sourceEventId: { source: string; sourceEventId: string; tenantId: string } } }) => {
+        calls.conversationLifecycleEventFindUnique.push(input);
+        const key = input.where.tenantId_source_sourceEventId;
+        return lifecycleEvents.get(`${key.tenantId}:${key.source}:${key.sourceEventId}`) ?? null;
+      }
+    },
+    routingAnalyticsRow: {
+      create: async (input: { data: FakeRoutingAnalyticsRowCreateInput }) => {
+        calls.routingAnalyticsRowCreates.push(input);
+        return { ...input.data, createdAt: input.data.occurredAt };
+      }
     }
   };
 
@@ -552,6 +711,8 @@ interface FakeConversationRowWithMessages {
   language: string;
   messages: FakeConversationMessageRow[];
   name: string;
+  operatorId: string | null;
+  operatorName: string | null;
   phone: string;
   preview: string;
   previous: unknown;
@@ -588,6 +749,8 @@ interface FakeConversationUpsertInput {
   initials: string;
   language: string;
   name: string;
+  operatorId: string | null;
+  operatorName: string | null;
   phone: string;
   preview: string;
   previous: unknown;
@@ -599,6 +762,18 @@ interface FakeConversationUpsertInput {
   time: string;
   topic: string;
   unread: boolean;
+}
+
+interface FakeRoutingAnalyticsRowCreateInput {
+  channel: string;
+  conversationId: string;
+  eventKind: "assignment" | "transfer";
+  fromOperatorId: string | null;
+  id: string;
+  occurredAt: Date;
+  source: string;
+  tenantId: string;
+  toOperatorId: string;
 }
 
 interface FakeConversationMessageCreateInput {
@@ -681,6 +856,60 @@ interface FakeConversationRealtimeEventCreateInput {
 }
 
 type FakeConversationRealtimeEventRow = FakeConversationRealtimeEventCreateInput;
+
+interface FakeConversationLifecycleEventCreateInput {
+  actorId: string | null;
+  actorName: string | null;
+  actorType: string;
+  conversationId: string;
+  data: Record<string, unknown>;
+  eventType: string;
+  id: string;
+  ingestedAt: Date;
+  occurredAt: Date;
+  reason: string | null;
+  schemaVersion: string;
+  source: string;
+  sourceEventId: string;
+  tenantId: string;
+  traceId: string;
+}
+
+type FakeConversationLifecycleEventRow = FakeConversationLifecycleEventCreateInput;
+
+function assignmentLifecycleEvent(id: string, sourceEventId: string) {
+  return {
+    actorId: "usr-volga-admin",
+    actorName: "Sergey Markin",
+    actorType: "operator" as const,
+    conversationId: "maria",
+    data: { toOperatorId: "usr-volga-admin" },
+    eventType: "assignment.changed",
+    id,
+    ingestedAt: "2026-07-10T09:00:00.000Z",
+    occurredAt: "2026-07-10T09:00:00.000Z",
+    reason: "Assigned for contract test",
+    schemaVersion: "conversation-lifecycle/v1" as const,
+    source: "conversation-service",
+    sourceEventId,
+    tenantId: "tenant-volga",
+    traceId: `trc_${sourceEventId}`
+  };
+}
+
+function assignmentRealtimeEvent(eventId: string) {
+  return {
+    data: { action: "assignment" },
+    eventId,
+    eventName: "conversation.updated",
+    occurredAt: "2026-07-10T09:00:00.000Z",
+    resourceId: "maria",
+    resourceType: "conversation",
+    schemaVersion: "v1",
+    tenantId: "tenant-volga",
+    traceId: `trc_${eventId}`
+  };
+}
 
 interface FakeOutboxEventCreateInput {
   aggregateId: string;

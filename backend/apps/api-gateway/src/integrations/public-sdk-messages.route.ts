@@ -1,13 +1,19 @@
 import { createHmac, createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
-import type { ConversationMessage, ConversationRecord } from "../conversation/conversation.fixtures.js";
+import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import type { ConversationMessage, ConversationRecord } from "../conversation/conversation.types.js";
 import type { ConversationService } from "../conversation/conversation.service.js";
-import type { ConversationRepository } from "../conversation/conversation.repository.js";
+import type {
+  ConversationLifecycleEvent,
+  ConversationRepository,
+  RealtimeEvent
+} from "../conversation/conversation.repository.js";
 import {
   resolvePublicApiRequest,
   type PublicApiEnvironment,
   type PublicApiKeyLookup
 } from "./public-api-auth.js";
+import type { ProactiveExposureRepository } from "../automation/proactive-exposure.repository.js";
 
 const INTEGRATION_SERVICE = "integrationService";
 const VISITOR_TOKEN_TTL_SECONDS = 60 * 15;
@@ -16,10 +22,12 @@ interface PublicSdkConversationIdentityInput {
   conversationId?: string;
   externalId?: string;
   pageUrl?: string;
+  queueId?: string;
   tenantId: string;
 }
 
 export interface PublicSdkMessageRouteInput {
+  autoAssignConversation?: (conversationId: string, tenantId: string) => Promise<BackendEnvelope<Record<string, unknown>>>;
   authorization?: string;
   body: {
     conversationId?: string;
@@ -27,11 +35,16 @@ export interface PublicSdkMessageRouteInput {
     pageUrl?: string;
     text?: string;
   };
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversation">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   environment: PublicApiEnvironment;
   lookup: PublicApiKeyLookup;
+  resolveQueueId?: (tenantId: string, channelConnectionId?: string | null) => Promise<string | undefined>;
+  recordProactiveConversion?: Pick<ProactiveExposureRepository, "recordMessageConversion">;
+  runBotRuntime?: BotRuntimeRunner;
 }
+
+type BotRuntimeRunner = (event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string }) => Promise<{ instance?: { status?: string }; outcome?: string }>;
 
 export interface PublicSdkPollRouteInput {
   authorization?: string;
@@ -43,9 +56,22 @@ export interface PublicSdkPollRouteInput {
   visitorSessionToken?: string;
 }
 
+export interface PublicSdkRatingRouteInput {
+  authorization?: string;
+  body: { idempotencyKey?: string; scale?: "CSAT" | "CSI"; score?: number; visitorSessionToken?: string };
+  conversationId: string;
+  conversationRepository: Pick<ConversationRepository, "findConversation">;
+  environment: PublicApiEnvironment;
+  lookup: PublicApiKeyLookup;
+  recordQualityRating: (payload: {
+    channel?: string; clientId?: string; conversationId?: string; idempotencyKey?: string;
+    operator?: string; scale?: "CSAT" | "CSI" | "QA"; score?: number; topic?: string;
+  }, context: { actorId?: string; actorType?: "client"; tenantId?: string }) => Promise<BackendEnvelope<Record<string, unknown>>>;
+}
+
 export async function resolveOrCreatePublicSdkConversation(
   input: PublicSdkConversationIdentityInput & {
-    conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversation">;
+    conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
   }
 ): Promise<ConversationRecord | null> {
   const externalId = String(input.externalId ?? "").trim();
@@ -80,16 +106,59 @@ export async function resolveOrCreatePublicSdkConversation(
     phone: externalId,
     preview: "",
     previous: [],
+    ...(input.queueId?.trim() ? { queueId: input.queueId.trim() } : {}),
     sla: "Active",
     slaTone: "ok",
     status: "active",
     tags: compactTags(["sdk", `external:${externalId}`, input.pageUrl ? `page:${input.pageUrl}` : ""]),
     tenantId: input.tenantId,
     time: "now",
-    topic: "SDK / Web widget"
+    topic: "SDK / Web widget",
+    updatedAt: new Date().toISOString()
   };
 
-  return input.conversationRepository.saveConversation(conversation);
+  const mutation = await input.conversationRepository.saveConversationMutation(
+    conversationCreatedMutation(conversation, "sdk")
+  );
+  return mutation.conversation;
+}
+
+function conversationCreatedMutation(
+  conversation: ConversationRecord,
+  channel: string
+): { conversation: ConversationRecord; lifecycleEvent: ConversationLifecycleEvent; realtimeEvent: RealtimeEvent } {
+  const occurredAt = new Date().toISOString();
+  const traceId = getCurrentTraceId() ?? createRequestTraceId(INTEGRATION_SERVICE, "conversation.created");
+  const realtimeEvent: RealtimeEvent = {
+    data: { channel, direction: "inbound", ...(conversation.queueId ? { queueId: conversation.queueId } : {}) },
+    eventId: `rt_${randomUUID()}`,
+    eventName: "conversation.created",
+    occurredAt,
+    resourceId: conversation.id,
+    resourceType: "conversation",
+    schemaVersion: "v1",
+    tenantId: conversation.tenantId,
+    traceId
+  };
+  const lifecycleEvent: ConversationLifecycleEvent = {
+    actorId: null,
+    actorName: null,
+    actorType: "client",
+    conversationId: conversation.id,
+    data: { channel, direction: "inbound", ...(conversation.queueId ? { queueId: conversation.queueId } : {}) },
+    eventType: "conversation.created",
+    id: `lifecycle_${randomUUID()}`,
+    ingestedAt: occurredAt,
+    occurredAt,
+    reason: null,
+    schemaVersion: "conversation-lifecycle/v1",
+    source: "integration-service",
+    sourceEventId: realtimeEvent.eventId,
+    tenantId: conversation.tenantId,
+    traceId
+  };
+
+  return { conversation, lifecycleEvent, realtimeEvent };
 }
 
 export async function handlePublicSdkMessageIngressFromRoute(
@@ -115,11 +184,24 @@ export async function handlePublicSdkMessageIngressFromRoute(
     });
   }
 
+  const queueId = input.resolveQueueId
+    ? await input.resolveQueueId(auth.context.tenantId, auth.context.channelConnectionId)
+    : undefined;
+  if (input.resolveQueueId && !queueId) {
+    return deniedEnvelope(
+      "sendPublicSdkMessage",
+      "sdk_routing_queue_unresolved",
+      "The API key is not linked to an active SDK connection and routing queue.",
+      { keyId: auth.context.keyId }
+    );
+  }
+
   const conversation = await resolveOrCreatePublicSdkConversation({
     conversationId: input.body.conversationId,
     conversationRepository: input.conversationRepository,
     externalId: input.body.externalId,
     pageUrl: input.body.pageUrl,
+    queueId,
     tenantId: auth.context.tenantId
   });
   if (!conversation) {
@@ -139,6 +221,17 @@ export async function handlePublicSdkMessageIngressFromRoute(
   });
   const normalizedMessage = normalized.data?.message as Record<string, unknown> | null | undefined;
   const messageId = normalizedMessage?.id ? String(normalizedMessage.id) : null;
+  const proactiveConversion = normalized.status === "ok" && input.recordProactiveConversion
+    ? await input.recordProactiveConversion.recordMessageConversion({ conversationId: conversation.id, messageId,
+      occurredAt: new Date().toISOString(), tenantId: auth.context.tenantId })
+    : null;
+  const botRuntime = normalized.status === "ok" && input.runBotRuntime
+    ? await tryBotRuntime(input.runBotRuntime, { channel: "SDK", conversationId: conversation.id, eventId, payload: { text }, tenantId: auth.context.tenantId, traceId: normalized.traceId })
+    : null;
+  const needsOperator = !botRuntime || ["handoff", "dead_lettered"].includes(String(botRuntime.instance?.status ?? ""));
+  const autoAssignment = normalized.status === "ok" && needsOperator && input.autoAssignConversation
+    ? await tryAutoAssignment(input.autoAssignConversation, conversation.id, auth.context.tenantId)
+    : null;
 
   return createEnvelope({
     service: INTEGRATION_SERVICE,
@@ -152,10 +245,14 @@ export async function handlePublicSdkMessageIngressFromRoute(
     },
     data: {
       accepted: normalized.status === "ok",
+      autoAssignment: autoAssignment?.data ?? null,
+      botRuntime: botRuntime ? { outcome: botRuntime.outcome ?? null, status: botRuntime.instance?.status ?? null } : null,
       conversationId: conversation.id,
       duplicate: normalized.data?.duplicate === true,
       eventId,
       messageId,
+      proactiveConversion: proactiveConversion ? { exposureId: proactiveConversion.exposureId, ruleId: proactiveConversion.ruleId,
+        variant: proactiveConversion.variant } : null,
       visitorSessionToken: createVisitorSessionToken({
         conversationId: conversation.id,
         tenantId: auth.context.tenantId
@@ -223,11 +320,93 @@ export async function handlePublicSdkMessagesPollFromRoute(
     },
     data: {
       conversationId,
+      conversationStatus: conversation.status,
       count: replies.length,
       messages: replies,
       since: since || null
     }
   });
+}
+
+export async function handlePublicSdkQualityRatingFromRoute(
+  input: PublicSdkRatingRouteInput
+): Promise<BackendEnvelope<Record<string, unknown>>> {
+  const auth = await resolvePublicApiRequest({
+    authorization: input.authorization,
+    environment: input.environment,
+    lookup: input.lookup,
+    requiredScope: "conversations:write"
+  });
+  if (!auth.allowed) {
+    return deniedEnvelope("recordPublicSdkQualityRating", auth.code, publicApiAuthMessage(auth.code), {
+      accepted: false, conversationId: input.conversationId
+    });
+  }
+
+  const conversationId = String(input.conversationId ?? "").trim();
+  const conversation = await input.conversationRepository.findConversation(conversationId);
+  if (!conversation || resolveConversationTenantId(conversation) !== auth.context.tenantId) {
+    return notFoundEnvelope("recordPublicSdkQualityRating", "conversation_not_found", `Conversation ${conversationId} was not found.`, {
+      accepted: false, conversationId
+    });
+  }
+
+  const tokenValidation = validateVisitorSessionToken(input.body.visitorSessionToken, {
+    conversationId,
+    tenantId: auth.context.tenantId
+  });
+  if (!tokenValidation.valid) {
+    return deniedEnvelope("recordPublicSdkQualityRating", tokenValidation.code,
+      "visitorSessionToken is invalid for this conversation or has expired.", { accepted: false, conversationId });
+  }
+
+  const scale = String(input.body.scale ?? "").trim().toUpperCase();
+  const score = input.body.score;
+  if ((scale !== "CSAT" && scale !== "CSI") || !Number.isInteger(score) || Number(score) < 1 || Number(score) > 5) {
+    return invalidEnvelope("recordPublicSdkQualityRating", "quality_rating_invalid",
+      "scale must be CSAT or CSI and score must be an integer from 1 to 5.", { accepted: false, conversationId });
+  }
+
+  const idempotencyKey = String(input.body.idempotencyKey ?? "").trim();
+  if (!idempotencyKey || idempotencyKey.length > 200) {
+    return invalidEnvelope("recordPublicSdkQualityRating", "idempotency_key_invalid",
+      "idempotencyKey is required and must not exceed 200 characters.", { accepted: false, conversationId });
+  }
+
+  const operator = String(conversation.operatorId ?? "").trim();
+  if (!operator) {
+    return invalidEnvelope("recordPublicSdkQualityRating", "quality_rating_operator_unresolved",
+      "The conversation does not have an assigned operator.", { accepted: false, conversationId });
+  }
+
+  const clientId = publicSdkClientId(conversation);
+  const recorded = await input.recordQualityRating({
+    channel: conversation.channel,
+    clientId,
+    conversationId,
+    idempotencyKey: `sdk:${conversationId}:${idempotencyKey}`,
+    operator,
+    scale,
+    score: Number(score),
+    topic: conversation.topic
+  }, { actorId: clientId, actorType: "client", tenantId: auth.context.tenantId });
+
+  return createEnvelope({
+    service: INTEGRATION_SERVICE,
+    operation: "recordPublicSdkQualityRating",
+    status: recorded.status,
+    meta: { source: "api", apiVersion: "v1", channel: "sdk", conversationId },
+    data: {
+      accepted: recorded.status === "ok",
+      conversationId,
+      ratingId: recorded.data?.ratingId ?? null
+    },
+    ...(recorded.error ? { error: recorded.error } : {})
+  });
+}
+
+async function tryBotRuntime(run: BotRuntimeRunner, event: Parameters<BotRuntimeRunner>[0]): Promise<Awaited<ReturnType<BotRuntimeRunner>> | null> {
+  try { return await run(event); } catch { return null; }
 }
 
 function operatorRepliesFromConversation(conversation: ConversationRecord, since: string): Array<Record<string, unknown>> {
@@ -355,7 +534,24 @@ function compactTags(tags: string[]): string[] {
 }
 
 function resolveConversationTenantId(conversation: ConversationRecord): string {
-  return conversation.tenantId ?? "tenant-volga";
+  return conversation.tenantId;
+}
+
+function publicSdkClientId(conversation: ConversationRecord): string {
+  const externalTag = conversation.tags.find((tag) => tag.startsWith("external:"));
+  return externalTag?.slice("external:".length).trim() || conversation.phone.trim() || conversation.id;
+}
+
+async function tryAutoAssignment(
+  assign: NonNullable<PublicSdkMessageRouteInput["autoAssignConversation"]>,
+  conversationId: string,
+  tenantId: string
+): Promise<BackendEnvelope<Record<string, unknown>> | null> {
+  try {
+    return await assign(conversationId, tenantId);
+  } catch {
+    return null;
+  }
 }
 
 function publicApiAuthMessage(code: string): string {

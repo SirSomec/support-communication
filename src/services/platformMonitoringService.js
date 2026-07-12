@@ -5,6 +5,7 @@ const SERVICE = "platformMonitoringService";
 export const platformMonitoringService = {
   async fetchPlatformSnapshot(filters = {}) {
     return apiRequest("/platform-monitoring/snapshot", {
+      authMode: "service-admin",
       operation: "fetchPlatformSnapshot",
       query: filters,
       service: SERVICE
@@ -17,6 +18,7 @@ export const platformMonitoringService = {
     }
 
     return apiRequest(`/platform-monitoring/components/${encodeURIComponent(componentId)}`, {
+      authMode: "service-admin",
       operation: "fetchComponentDrilldown",
       service: SERVICE
     });
@@ -28,6 +30,7 @@ export const platformMonitoringService = {
     }
 
     return apiRequest(`/platform-monitoring/components/${encodeURIComponent(componentId)}/acknowledgements`, {
+      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "acknowledgeComponentAlert",

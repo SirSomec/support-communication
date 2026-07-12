@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { PauseCircle, PlayCircle, PlugZap, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { ChannelBadge, SectionTitle } from "../../ui.jsx";
 import { integrationService } from "../../services/integrationService.js";
+import { routingService } from "../../services/routingService.js";
+import { settingsService } from "../../services/settingsService.js";
 
 const typeLabels = {
   max: "MAX",
@@ -20,8 +22,14 @@ const initialForm = {
   webhookUrl: ""
 };
 
-export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChange, onToast }) {
+const tokenManagedTypes = new Set(["telegram", "max"]);
+
+export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelType = "", focusConnectionId = "", onSummaryChange, onToast }) {
   const [connections, setConnections] = useState([]);
+  const [queues, setQueues] = useState([]);
+  const [newQueueName, setNewQueueName] = useState("");
+  const [newQueueTeamId, setNewQueueTeamId] = useState("");
+  const [teams, setTeams] = useState([]);
   const [availableTypes, setAvailableTypes] = useState(["sdk", "telegram", "max", "vk"]);
   const [selectedType, setSelectedType] = useState("all");
   const [selectedConnectionId, setSelectedConnectionId] = useState("");
@@ -32,28 +40,62 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const canMutateConnections = canEditSettings && !error;
+  const isTokenManagedType = tokenManagedTypes.has(form.type);
   const [testPayload, setTestPayload] = useState({
     message: "Тестовое сообщение из панели подключений",
     mode: "receive",
     recipient: "+7 999 000-00-00"
   });
   const [testResult, setTestResult] = useState(null);
+  const normalizedFocusChannelType = typeof focusChannelType === "string" ? focusChannelType.trim() : "";
+  const normalizedFocusConnectionId = typeof focusConnectionId === "string" ? focusConnectionId.trim() : "";
 
   useEffect(() => {
     loadConnections();
   }, []);
 
+  useEffect(() => {
+    if (queues.length && !queues.some((queue) => queue.id === form.routingQueueId)) {
+      setForm((current) => ({ ...current, routingQueueId: queues[0].id }));
+    }
+  }, [form.routingQueueId, queues]);
+
+  useEffect(() => {
+    if (normalizedFocusChannelType && availableTypes.includes(normalizedFocusChannelType) && selectedType !== normalizedFocusChannelType) {
+      setSelectedType(normalizedFocusChannelType);
+    }
+  }, [availableTypes, normalizedFocusChannelType, selectedType]);
+
   const filteredConnections = useMemo(() => {
     return connections.filter((connection) => selectedType === "all" || connection.type === selectedType);
   }, [connections, selectedType]);
 
-  const selectedConnection = connections.find((connection) => connection.id === selectedConnectionId) ?? filteredConnections[0] ?? connections[0] ?? null;
+  const selectedConnection = filteredConnections.find((connection) => connection.id === selectedConnectionId) ?? filteredConnections[0] ?? connections[0] ?? null;
 
   useEffect(() => {
     if (selectedConnection?.id && selectedConnection.id !== selectedConnectionId) {
       setSelectedConnectionId(selectedConnection.id);
     }
   }, [selectedConnection, selectedConnectionId]);
+
+  useEffect(() => {
+    if (normalizedFocusConnectionId) {
+      const focusedConnection = connections.find((connection) => connection.id === normalizedFocusConnectionId);
+      if (focusedConnection) {
+        setSelectedConnectionId(focusedConnection.id);
+        setSelectedType(focusedConnection.type);
+        return;
+      }
+    }
+
+    if (normalizedFocusChannelType) {
+      const focusedConnection = connections.find((connection) => connection.type === normalizedFocusChannelType);
+      if (focusedConnection) {
+        setSelectedConnectionId(focusedConnection.id);
+      }
+    }
+  }, [connections, normalizedFocusChannelType, normalizedFocusConnectionId]);
 
   useEffect(() => {
     if (!selectedConnection?.id) {
@@ -82,9 +124,15 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
   async function loadConnections() {
     setLoading(true);
     setError("");
-    const response = await integrationService.fetchChannelConnections();
-    if (response.status === "ok") {
+    const [response, queueResponse, employeeResponse] = await Promise.all([
+      integrationService.fetchChannelConnections(),
+      routingService.fetchQueues({ status: "active" }),
+      settingsService.fetchEmployees()
+    ]);
+    if (response.status === "ok" && queueResponse.status === "ok" && employeeResponse.status === "ok") {
       const nextConnections = response.data.connections ?? [];
+      setQueues(queueResponse.data.queues ?? []);
+      setTeams(employeeResponse.data.groups ?? []);
       setConnections(nextConnections);
       setAvailableTypes(response.data.availableTypes ?? availableTypes);
       onSummaryChange?.({
@@ -93,6 +141,10 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
       });
     } else {
       setError(response.error?.message ?? "Не удалось загрузить подключения.");
+      setConnections([]);
+      setQueues([]);
+      setTeams([]);
+      onSummaryChange?.({ active: 0, total: 0 });
     }
     setLoading(false);
   }
@@ -106,9 +158,47 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
     }
   }
 
+  async function createQueue() {
+    const name = newQueueName.trim();
+    if (!name || !canMutateConnections) return;
+    setBusy("create-queue");
+    setError("");
+    const selectedTeam = teams.find((team) => team.id === newQueueTeamId);
+    const response = await routingService.createQueue({
+      ...(selectedTeam ? { defaultTeamId: selectedTeam.id, memberIds: selectedTeam.memberIds ?? [] } : {}),
+      name
+    });
+    setBusy("");
+    if (response.status !== "ok") {
+      setError(response.error?.message ?? "Не удалось создать очередь.");
+      return;
+    }
+    setNewQueueName("");
+    await loadConnections();
+    setForm((current) => ({ ...current, routingQueueId: response.data.queue.id }));
+    onToast?.(`${response.data.queue.name}: очередь создана.`);
+  }
+
+  async function updateQueueTeam(queue, teamId) {
+    const team = teams.find((item) => item.id === teamId);
+    setBusy(`queue:${queue.id}`);
+    setError("");
+    const response = await routingService.updateQueue(queue.id, {
+      defaultTeamId: team?.id ?? null,
+      memberIds: team?.memberIds ?? []
+    });
+    setBusy("");
+    if (response.status !== "ok") {
+      setError(response.error?.message ?? "Не удалось изменить команду очереди.");
+      return;
+    }
+    await loadConnections();
+    onToast?.(`${queue.name}: команда очереди изменена.`);
+  }
+
   async function createConnection(event) {
     event.preventDefault();
-    if (!canEditSettings) {
+    if (!canMutateConnections) {
       return;
     }
 
@@ -120,15 +210,18 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
 
     setBusy("create");
     setError("");
-    const response = await integrationService.createChannelConnection({
+    const payload = {
       chatLimit: Number(form.chatLimit),
       credentials: form.credentials.trim() ? { token: form.credentials.trim() } : undefined,
       environment: form.environment,
       name,
       routingQueueId: form.routingQueueId.trim(),
-      type: form.type,
-      webhookUrl: form.webhookUrl.trim()
-    });
+      type: form.type
+    };
+    if (!isTokenManagedType) {
+      payload.webhookUrl = form.webhookUrl.trim();
+    }
+    const response = await integrationService.createChannelConnection(payload);
     setBusy("");
 
     if (response.status !== "ok") {
@@ -143,7 +236,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
   }
 
   async function updateConnection(connection, payload) {
-    if (!connection || !canEditSettings) {
+    if (!connection || !canMutateConnections) {
       return;
     }
 
@@ -166,7 +259,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
   }
 
   async function disableConnection(connection) {
-    if (!connection || !canEditSettings) {
+    if (!connection || !canMutateConnections) {
       return;
     }
 
@@ -194,7 +287,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
   }
 
   async function runConnectionTest(connection) {
-    if (!connection || !canEditSettings) {
+    if (!connection || !canMutateConnections) {
       return;
     }
 
@@ -236,6 +329,37 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
         ))}
       </div>
 
+      <div className="channel-type-toolbar" aria-label="Управление очередями">
+        <input
+          aria-label="Название новой очереди"
+          disabled={!canMutateConnections || busy === "create-queue"}
+          onChange={(event) => setNewQueueName(event.target.value)}
+          placeholder="Новая очередь"
+          value={newQueueName}
+        />
+        <select aria-label="Команда новой очереди" disabled={!canMutateConnections || busy === "create-queue"} onChange={(event) => setNewQueueTeamId(event.target.value)} value={newQueueTeamId}>
+          <option value="">Без команды</option>
+          {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+        </select>
+        <button disabled={!newQueueName.trim() || !canMutateConnections || busy === "create-queue"} onClick={createQueue} type="button">
+          <Plus size={16} /> Создать очередь
+        </button>
+      </div>
+
+      {queues.length ? (
+        <div className="channel-instance-list" aria-label="Список очередей">
+          {queues.map((queue) => (
+            <div className="connection-row" key={queue.id}>
+              <div><strong>{queue.name}</strong><span>{queue.memberCounts?.queue ?? 0} участников</span></div>
+              <select disabled={!canMutateConnections || busy === `queue:${queue.id}`} onChange={(event) => updateQueueTeam(queue, event.target.value)} value={queue.defaultTeamId ?? ""}>
+                <option value="">Без команды</option>
+                {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="channel-instance-layout">
         <div className="channel-instance-list">
           {loading ? <div className="channel-log-empty">Загружаем подключения.</div> : null}
@@ -266,38 +390,43 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
           </div>
           <label>
             <span>Тип</span>
-            <select disabled={!canEditSettings || busy === "create"} value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}>
+            <select disabled={!canMutateConnections || busy === "create"} value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}>
               {availableTypes.map((type) => <option key={type} value={type}>{typeLabels[type] ?? type}</option>)}
             </select>
           </label>
           <label>
             <span>Название</span>
-            <input disabled={!canEditSettings || busy === "create"} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Telegram VIP" />
+            <input disabled={!canMutateConnections || busy === "create"} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Telegram VIP" />
           </label>
           <label>
             <span>Среда</span>
-            <select disabled={!canEditSettings || busy === "create"} value={form.environment} onChange={(event) => setForm({ ...form, environment: event.target.value })}>
+            <select disabled={!canMutateConnections || busy === "create"} value={form.environment} onChange={(event) => setForm({ ...form, environment: event.target.value })}>
               <option value="production">production</option>
               <option value="sandbox">sandbox</option>
             </select>
           </label>
           <label>
             <span>Очередь</span>
-            <input disabled={!canEditSettings || busy === "create"} value={form.routingQueueId} onChange={(event) => setForm({ ...form, routingQueueId: event.target.value })} />
+            <select disabled={!canMutateConnections || busy === "create" || !queues.length} value={form.routingQueueId} onChange={(event) => setForm({ ...form, routingQueueId: event.target.value })}>
+              {!queues.length ? <option value="">Нет доступных очередей</option> : null}
+              {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
+            </select>
           </label>
           <label>
             <span>Лимит чатов</span>
-            <input disabled={!canEditSettings || busy === "create"} min="1" type="number" value={form.chatLimit} onChange={(event) => setForm({ ...form, chatLimit: event.target.value })} />
+            <input disabled={!canMutateConnections || busy === "create"} min="1" type="number" value={form.chatLimit} onChange={(event) => setForm({ ...form, chatLimit: event.target.value })} />
           </label>
-          <label>
-            <span>Webhook URL</span>
-            <input disabled={!canEditSettings || busy === "create"} value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} />
-          </label>
+          {!isTokenManagedType ? (
+            <label>
+              <span>Webhook URL</span>
+              <input disabled={!canMutateConnections || busy === "create"} value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} />
+            </label>
+          ) : null}
           <label>
             <span>Секрет или token</span>
-            <input disabled={!canEditSettings || busy === "create"} value={form.credentials} onChange={(event) => setForm({ ...form, credentials: event.target.value })} type="password" />
+            <input disabled={!canMutateConnections || busy === "create"} value={form.credentials} onChange={(event) => setForm({ ...form, credentials: event.target.value })} type="password" />
           </label>
-          <button disabled={!canEditSettings || busy === "create"} title={canEditSettings ? "Создать подключение" : access.reason} type="submit">
+          <button disabled={!canMutateConnections || busy === "create" || !form.routingQueueId} title={canMutateConnections ? "Создать подключение" : access.reason} type="submit">
             <Plus size={16} />
             Создать
           </button>
@@ -313,9 +442,9 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
               <span>{selectedConnection.status} · синхронизация {formatDate(selectedConnection.lastSyncAt)}</span>
             </div>
             <button
-              disabled={!canEditSettings || busy === `test:${selectedConnection.id}`}
+              disabled={!canMutateConnections || busy === `test:${selectedConnection.id}`}
               onClick={() => runConnectionTest(selectedConnection)}
-              title={canEditSettings ? "Проверить подключение" : access.reason}
+              title={canMutateConnections ? "Проверить подключение" : access.reason}
               type="button"
             >
               <PlayCircle size={16} />
@@ -327,23 +456,25 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
             <label>
               <span>Название</span>
               <input
-                disabled={!canEditSettings || busy === selectedConnection.id}
+                disabled={!canMutateConnections || busy === selectedConnection.id}
                 defaultValue={selectedConnection.name}
                 onBlur={(event) => updateConnection(selectedConnection, { name: event.target.value, reason: "Connection name changed" })}
               />
             </label>
             <label>
               <span>Маршрутизация</span>
-              <input
-                disabled={!canEditSettings || busy === selectedConnection.id}
-                defaultValue={selectedConnection.routingQueueId}
-                onBlur={(event) => updateConnection(selectedConnection, { routingQueueId: event.target.value, reason: "Routing queue changed" })}
-              />
+              <select
+                disabled={!canMutateConnections || busy === selectedConnection.id}
+                value={selectedConnection.routingQueueId}
+                onChange={(event) => updateConnection(selectedConnection, { routingQueueId: event.target.value, reason: "Routing queue changed" })}
+              >
+                {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
+              </select>
             </label>
             <label>
               <span>Лимит</span>
               <input
-                disabled={!canEditSettings || busy === selectedConnection.id}
+                disabled={!canMutateConnections || busy === selectedConnection.id}
                 defaultValue={selectedConnection.chatLimit}
                 min="1"
                 onBlur={(event) => updateConnection(selectedConnection, { chatLimit: Number(event.target.value), reason: "Chat limit changed" })}
@@ -357,15 +488,15 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
           </div>
 
           <div className="channel-action-row">
-            <button disabled={!canEditSettings || busy === selectedConnection.id} onClick={() => updateConnection(selectedConnection, { status: "active", reason: "Connection resumed" })} type="button">
+            <button disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => updateConnection(selectedConnection, { status: "active", reason: "Connection resumed" })} type="button">
               <RefreshCw size={16} />
               Возобновить
             </button>
-            <button disabled={!canEditSettings || busy === selectedConnection.id} onClick={() => updateConnection(selectedConnection, { status: "paused", reason: "Connection paused" })} type="button">
+            <button disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => updateConnection(selectedConnection, { status: "paused", reason: "Connection paused" })} type="button">
               <PauseCircle size={16} />
               Пауза
             </button>
-            <button className="danger" disabled={!canEditSettings || busy === selectedConnection.id} onClick={() => disableConnection(selectedConnection)} type="button">
+            <button className="danger" disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => disableConnection(selectedConnection)} type="button">
               <Trash2 size={16} />
               Отключить
             </button>
@@ -374,25 +505,25 @@ export function ChannelConnectionsPanel({ access, canEditSettings, onSummaryChan
           <div className="channel-test-panel">
             <div className="section-title compact-title">
               <h3>Тест приема/отправки</h3>
-              <span>{canEditSettings ? selectedConnection.id : "только администратор"}</span>
+              <span>{canMutateConnections ? selectedConnection.id : "только администратор"}</span>
             </div>
             <div className="channel-test-grid">
               <label>
                 <span>Направление</span>
-                <select disabled={!canEditSettings} value={testPayload.mode} onChange={(event) => setTestPayload({ ...testPayload, mode: event.target.value })}>
+                <select disabled={!canMutateConnections} value={testPayload.mode} onChange={(event) => setTestPayload({ ...testPayload, mode: event.target.value })}>
                   <option value="receive">Прием</option>
                   <option value="send">Отправка</option>
                 </select>
               </label>
               <label>
                 <span>Адресат</span>
-                <input disabled={!canEditSettings} value={testPayload.recipient} onChange={(event) => setTestPayload({ ...testPayload, recipient: event.target.value })} />
+                <input disabled={!canMutateConnections} value={testPayload.recipient} onChange={(event) => setTestPayload({ ...testPayload, recipient: event.target.value })} />
               </label>
               <label className="channel-test-message">
                 <span>Сообщение</span>
-                <textarea disabled={!canEditSettings} value={testPayload.message} onChange={(event) => setTestPayload({ ...testPayload, message: event.target.value })} />
+                <textarea disabled={!canMutateConnections} value={testPayload.message} onChange={(event) => setTestPayload({ ...testPayload, message: event.target.value })} />
               </label>
-              <button disabled={!canEditSettings || busy === `test:${selectedConnection.id}`} onClick={() => runConnectionTest(selectedConnection)} type="button">
+              <button disabled={!canMutateConnections || busy === `test:${selectedConnection.id}`} onClick={() => runConnectionTest(selectedConnection)} type="button">
                 <PlugZap size={16} />
                 Запустить
               </button>

@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { setSession } from "../../app/sessionStore.js";
-import { authService } from "../../services/authService.js";
+import { authService, mapAuthErrorToMode } from "../../services/authService.js";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -11,7 +10,6 @@ import {
   KeyRound,
   LockKeyhole,
   Mail,
-  RefreshCcw,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -30,6 +28,28 @@ import {
 import "./auth.css";
 
 const noop = () => {};
+const AUTH_STATE_SHORTCUTS_ENABLED = import.meta.env.DEV;
+const defaultTenantMfaContext = {
+  email: "",
+  inviteCode: "",
+  method: "password",
+  password: "",
+  recoveryToken: "",
+  tenantId: ""
+};
+
+function getLocalMailboxUrl() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const hostname = window.location.hostname;
+  if (!["127.0.0.1", "localhost", "::1"].includes(hostname)) {
+    return "";
+  }
+
+  return `http://${hostname === "::1" ? "[::1]" : hostname}:18025`;
+}
 
 export function AuthPage({
   initialMode = "login",
@@ -41,22 +61,73 @@ export function AuthPage({
   const [login, setLogin] = useState({ email: "", password: "", remember: true });
   const [sso, setSso] = useState({ provider: ssoProviders[0], domain: "" });
   const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [tenantMfaChallengeId, setTenantMfaChallengeId] = useState("");
+  const [tenantMfaContext, setTenantMfaContext] = useState(defaultTenantMfaContext);
   const [recoveryEmail, setRecoveryEmail] = useState("");
-  const [invite, setInvite] = useState({ code: "", email: "" });
+  const [recoveryToken, setRecoveryToken] = useState("");
+  const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [invite, setInvite] = useState({ code: "", email: "", password: "" });
+  const [memberships, setMemberships] = useState(organizationOptions);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState(organizationOptions[0].id);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const localMailboxUrl = getLocalMailboxUrl();
 
   const activeMode = authModes[mode];
   const selectedOrganization = useMemo(() => {
-    return organizationOptions.find((organization) => organization.id === selectedOrganizationId) ?? organizationOptions[0];
-  }, [selectedOrganizationId]);
+    return memberships.find((organization) => organization.id === selectedOrganizationId) ?? memberships[0];
+  }, [memberships, selectedOrganizationId]);
 
   function transition(nextMode, nextMessage = "") {
     setMode(getInitialMode(nextMode));
     setError("");
     setMessage(nextMessage);
+  }
+
+  function handleAuthDenial(response, fallbackMessage, mfaContext = {}) {
+    const nextMode = response.data?.nextStep === "otp" ? "twoFactor" : mapAuthErrorToMode(response.error?.code);
+    if (nextMode) {
+      if (nextMode === "organizationSelect" && Array.isArray(response.data?.memberships)) {
+        setMemberships(response.data.memberships.map(mapMembershipOption));
+      }
+      if (nextMode === "twoFactor") {
+        const contextEmail = String(
+          mfaContext.email
+          || tenantMfaContext.email
+          || login.email
+          || invite.email
+          || recoveryEmail
+        ).trim().toLowerCase();
+        const challengeId = response.data?.mfaChallengeId ?? tenantMfaChallengeId;
+
+        if (challengeId) {
+          setTenantMfaChallengeId(challengeId);
+        }
+        setTenantMfaContext({
+          ...defaultTenantMfaContext,
+          ...tenantMfaContext,
+          ...mfaContext,
+          email: contextEmail,
+          password: mfaContext.password ?? tenantMfaContext.password ?? login.password
+        });
+        setMode("twoFactor");
+
+        if (response.error) {
+          setError(response.error.message ?? fallbackMessage);
+          setMessage("");
+        } else {
+          setError("");
+          setMessage(`Код подтверждения отправлен на ${contextEmail}.`);
+          setTwoFactorCode("");
+        }
+        return;
+      }
+      transition(nextMode, response.error?.message ?? fallbackMessage);
+      return;
+    }
+
+    setError(response.error?.message ?? fallbackMessage);
   }
 
   async function handleLoginSubmit(event) {
@@ -73,28 +144,10 @@ export function AuthPage({
       return;
     }
 
-    if (email.includes("blocked")) {
-      transition("blocked");
-      return;
-    }
-
-    if (email.includes("maintenance")) {
-      transition("maintenance");
-      return;
-    }
-
-    if (email.includes("multi")) {
-      transition("organizationSelect", "Найдено несколько организаций. Выберите tenant для продолжения.");
-      return;
-    }
-
-    if (email.includes("agent")) {
-      transition("2fa", "Введите код 2FA для подтверждения входа.");
-      return;
-    }
-
     setError("");
     setMessage("");
+    setTenantMfaChallengeId("");
+    setTenantMfaContext(defaultTenantMfaContext);
     setIsSubmitting(true);
 
     try {
@@ -103,31 +156,29 @@ export function AuthPage({
         password: login.password
       });
 
-      if (response.status !== "ok" || !response.data?.accessToken) {
-        setError(response.error?.message ?? "Не удалось войти. Проверьте email и пароль.");
+      if (authService.persistTenantLogin(response)) {
+        onAuthSuccess({
+          method: "password",
+          email,
+          remember: login.remember,
+          organization: selectedOrganization,
+          tenantId: response.data.tenantId,
+          operator: response.data.operator
+        });
         return;
       }
 
-      setSession({
-        accessToken: response.data.accessToken,
-        tenantId: response.data.tenantId,
-        operator: response.data.operator
-      });
-
-      onAuthSuccess({
-        method: "password",
+      handleAuthDenial(response, "Не удалось войти. Проверьте email и пароль.", {
         email,
-        remember: login.remember,
-        organization: selectedOrganization,
-        tenantId: response.data.tenantId,
-        operator: response.data.operator
+        method: "password",
+        password: login.password
       });
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  function handleSsoSubmit(event) {
+  async function handleSsoSubmit(event) {
     event.preventDefault();
     const domain = sso.domain.trim().toLowerCase();
 
@@ -136,84 +187,170 @@ export function AuthPage({
       return;
     }
 
-    if (domain.includes("blocked")) {
-      transition("blocked");
-      return;
+    setError("");
+    setIsSubmitting(true);
+
+    try {
+      const redirectUri = `${window.location.origin}${window.location.pathname}#/auth/oidc/callback`;
+      const response = await authService.startOidcLogin({
+        providerId: mapSsoProviderId(sso.provider),
+        redirectUri
+      });
+
+      if (response.status !== "ok" || !response.data?.authorizationUrl) {
+        handleAuthDenial(response, "Не удалось начать SSO вход.");
+        return;
+      }
+
+      window.location.assign(response.data.authorizationUrl);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function submitTenantMfaChallenge() {
+    const context = tenantMfaContext;
+    const email = String(context.email || login.email).trim().toLowerCase();
+
+    if (context.method === "invite") {
+      return authService.acceptInvite({
+        code: context.inviteCode,
+        email,
+        mfaChallengeId: tenantMfaChallengeId,
+        otp: twoFactorCode,
+        password: context.password
+      });
     }
 
-    if (domain.includes("maintenance")) {
-      transition("maintenance");
-      return;
+    if (context.method === "recovery") {
+      return authService.completeRecovery({
+        email,
+        mfaChallengeId: tenantMfaChallengeId,
+        otp: twoFactorCode,
+        password: context.password,
+        token: context.recoveryToken
+      });
     }
 
-    if (domain.includes("multi")) {
-      transition("organizationSelect", `${sso.provider}: найдено несколько tenant для домена ${domain}.`);
-      return;
-    }
-
-    setDemoUiSession({
-      email: `${sso.provider.toLowerCase()}@${domain}`,
-      method: "sso",
-      organization: organizationOptions[0]
-    });
-    onAuthSuccess({
-      method: "sso",
-      provider: sso.provider,
-      domain,
-      organization: organizationOptions[0]
+    return authService.loginTenantOperator({
+      email,
+      mfaChallengeId: tenantMfaChallengeId,
+      password: context.password || login.password,
+      otp: twoFactorCode,
+      tenantId: context.tenantId || undefined
     });
   }
 
-  function handleTwoFactorSubmit(event) {
+  async function handleTwoFactorSubmit(event) {
     event.preventDefault();
-
-    if (twoFactorCode === "000000") {
-      setError("Код отклонен. Попробуйте резервный код или восстановление доступа.");
-      return;
-    }
 
     if (twoFactorCode.length !== 6) {
-      setError("Введите 6 цифр из приложения 2FA.");
-      return;
-    }
-
-    setDemoUiSession({
-      email: login.email.trim(),
-      method: "2fa",
-      organization: selectedOrganization
-    });
-    onAuthSuccess({
-      method: "password",
-      email: login.email.trim(),
-      remember: login.remember,
-      organization: selectedOrganization
-    });
-  }
-
-  function handleRecoverySubmit(event) {
-    event.preventDefault();
-
-    if (!hasEmailShape(recoveryEmail.trim())) {
-      setError("Введите email, привязанный к аккаунту.");
+      setError("Введите 6 цифр из письма.");
       return;
     }
 
     setError("");
-    setMessage(`Ссылка восстановления отправлена на ${recoveryEmail.trim()}.`);
+    setIsSubmitting(true);
+
+    try {
+      const response = await submitTenantMfaChallenge();
+      const method = tenantMfaContext.method === "invite" || tenantMfaContext.method === "recovery"
+        ? tenantMfaContext.method
+        : "password";
+      const email = String(tenantMfaContext.email || login.email).trim();
+
+      if (authService.persistTenantLogin(response)) {
+        onAuthSuccess({
+          method,
+          email,
+          remember: login.remember,
+          inviteCode: tenantMfaContext.inviteCode || undefined,
+          organization: selectedOrganization,
+          tenantId: response.data.tenantId,
+          operator: response.data.operator
+        });
+        return;
+      }
+
+      handleAuthDenial(response, "Код подтверждения отклонён.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
-  function handleInviteSubmit(event) {
+  async function handleRecoverySubmit(event) {
+    event.preventDefault();
+    const email = recoveryEmail.trim().toLowerCase();
+    const token = recoveryToken.trim();
+
+    if (!hasEmailShape(email)) {
+      setError("Введите email, привязанный к аккаунту.");
+      return;
+    }
+
+    if (token || recoveryPassword) {
+      if (!token || recoveryPassword.length < 8) {
+        setError("Recovery token and a new password with at least 8 characters are required.");
+        return;
+      }
+    }
+
+    setError("");
+    setIsSubmitting(true);
+
+    try {
+      if (token && recoveryPassword) {
+        const response = await authService.completeRecovery({
+          email,
+          password: recoveryPassword,
+          token
+        });
+
+        if (authService.persistTenantLogin(response)) {
+          onAuthSuccess({
+            method: "recovery",
+            email,
+            organization: selectedOrganization,
+            tenantId: response.data.tenantId,
+            operator: response.data.operator
+          });
+          return;
+        }
+
+        handleAuthDenial(response, "Не удалось завершить восстановление.", {
+          email,
+          method: "recovery",
+          password: recoveryPassword,
+          recoveryToken: token
+        });
+        return;
+      }
+
+      const response = await authService.requestRecovery({ email });
+      if (response.status !== "ok") {
+        handleAuthDenial(response, "Не удалось отправить ссылку восстановления.");
+        return;
+      }
+
+      setRecoveryToken(response.data?.recoveryToken ?? recoveryToken);
+      setMessage(`Ссылка восстановления отправлена на ${email}.`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleInviteSubmit(event) {
     event.preventDefault();
     const code = invite.code.trim();
-    const email = invite.email.trim();
+    const email = invite.email.trim().toLowerCase();
 
     if (!hasEmailShape(email)) {
       setError("Введите email из приглашения.");
       return;
     }
 
-    if (code.toLowerCase().includes("expired")) {
-      transition("expired");
+    if (invite.password.length < 8) {
+      setError("Пароль должен содержать минимум 8 символов.");
       return;
     }
 
@@ -222,31 +359,80 @@ export function AuthPage({
       return;
     }
 
-    setDemoUiSession({
-      email,
-      method: "invite",
-      organization: selectedOrganization
-    });
-    onAuthSuccess({
-      method: "invite",
-      email,
-      inviteCode: code,
-      organization: selectedOrganization
-    });
+    setError("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await authService.acceptInvite({
+        code,
+        email,
+        password: invite.password
+      });
+
+      if (authService.persistTenantLogin(response)) {
+        onAuthSuccess({
+          method: "invite",
+          email,
+          inviteCode: code,
+          organization: selectedOrganization
+        });
+        return;
+      }
+
+      handleAuthDenial(response, "Не удалось активировать приглашение.", {
+        email,
+        inviteCode: code,
+        method: "invite",
+        password: invite.password
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
-  function handleOrganizationContinue() {
-    const email = login.email.trim() || invite.email.trim() || `${selectedOrganization.id}@tenant.local`;
-    setDemoUiSession({
-      email,
-      method: "organizationSelect",
-      organization: selectedOrganization
-    });
-    onAuthSuccess({
-      method: "organizationSelect",
-      email,
-      organization: selectedOrganization
-    });
+  async function handleOrganizationContinue() {
+    const email = login.email.trim() || invite.email.trim();
+    if (!email || !selectedOrganization?.tenantId) {
+      setError("Выберите организацию для продолжения.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const selection = await authService.selectTenant({
+        email,
+        tenantId: selectedOrganization.tenantId ?? selectedOrganization.id
+      });
+
+      if (selection.status !== "ok") {
+        handleAuthDenial(selection, "Не удалось выбрать организацию.");
+        return;
+      }
+
+      const response = await authService.loginTenantOperator({
+        email,
+        password: login.password,
+        tenantId: selectedOrganization.tenantId ?? selectedOrganization.id
+      });
+
+      if (authService.persistTenantLogin(response)) {
+        onAuthSuccess({
+          method: "organizationSelect",
+          email,
+          organization: selectedOrganization
+        });
+        return;
+      }
+
+      handleAuthDenial(response, "Не удалось войти после выбора организации.", {
+        email,
+        method: "password",
+        password: login.password,
+        tenantId: selectedOrganization.tenantId ?? selectedOrganization.id
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -277,14 +463,16 @@ export function AuthPage({
             <span>Активация приглашений</span>
           </article>
         </div>
-        <div className="auth-state-shortcuts" aria-label="Состояния доступа">
-          <button className={mode === "login" ? "active" : ""} onClick={() => transition("login")} type="button">Login</button>
-          <button className={mode === "sso" ? "active" : ""} onClick={() => transition("sso")} type="button">SSO</button>
-          <button className={mode === "invite" ? "active" : ""} onClick={() => transition("invite")} type="button">Invite</button>
-          <button className={mode === "blocked" ? "active" : ""} onClick={() => transition("blocked")} type="button">Blocked</button>
-          <button className={mode === "expired" ? "active" : ""} onClick={() => transition("expired")} type="button">Expired</button>
-          <button className={mode === "maintenance" ? "active" : ""} onClick={() => transition("maintenance")} type="button">Maintenance</button>
-        </div>
+        {AUTH_STATE_SHORTCUTS_ENABLED ? (
+          <div className="auth-state-shortcuts" aria-label="Состояния доступа">
+            <button className={mode === "login" ? "active" : ""} onClick={() => transition("login")} type="button">Login</button>
+            <button className={mode === "sso" ? "active" : ""} onClick={() => transition("sso")} type="button">SSO</button>
+            <button className={mode === "invite" ? "active" : ""} onClick={() => transition("invite")} type="button">Invite</button>
+            <button className={mode === "blocked" ? "active" : ""} onClick={() => transition("blocked")} type="button">Blocked</button>
+            <button className={mode === "expired" ? "active" : ""} onClick={() => transition("expired")} type="button">Expired</button>
+            <button className={mode === "maintenance" ? "active" : ""} onClick={() => transition("maintenance")} type="button">Maintenance</button>
+          </div>
+        ) : null}
       </aside>
 
       <section className="auth-workspace" aria-labelledby="auth-title">
@@ -386,8 +574,8 @@ export function AuthPage({
                   />
                 </div>
               </label>
-              <button className="auth-primary-button" type="submit">
-                Продолжить через SSO
+              <button className="auth-primary-button" disabled={isSubmitting} type="submit">
+                {isSubmitting ? "Перенаправление..." : "Продолжить через SSO"}
                 <ArrowRight size={17} />
               </button>
               <button className="auth-link-button left" onClick={() => transition("login")} type="button">
@@ -400,33 +588,29 @@ export function AuthPage({
           {mode === "twoFactor" ? (
             <form className="auth-form" onSubmit={handleTwoFactorSubmit}>
               <label className="auth-field">
-                <span>Код 2FA</span>
+                <span>Код из письма</span>
                 <div className="auth-input-with-icon">
                   <KeyRound size={17} />
                   <input
+                    autoComplete="one-time-code"
                     inputMode="numeric"
                     maxLength={6}
                     onChange={(event) => setTwoFactorCode(normalizeCode(event.target.value))}
-                    placeholder="123456"
+                    pattern="[0-9]{6}"
+                    placeholder="000000"
                     value={twoFactorCode}
                   />
                 </div>
               </label>
-              <div className="auth-two-factor-grid" aria-label="Статус проверки">
-                <span>Устройство: authenticator</span>
-                <span>Окно: 30 секунд</span>
-                <span>Попытки: 3</span>
-              </div>
-              <button className="auth-primary-button" type="submit">
+              <button className="auth-primary-button" disabled={isSubmitting} type="submit">
                 Подтвердить вход
                 <ArrowRight size={17} />
               </button>
               <div className="auth-secondary-actions">
-                <button onClick={() => setMessage("Новый код отправлен в резервный канал.")} type="button">
-                  <RefreshCcw size={16} />
-                  Отправить снова
-                </button>
                 <button onClick={() => transition("recovery")} type="button">Нет доступа</button>
+                {localMailboxUrl ? (
+                  <a href={localMailboxUrl} rel="noreferrer" target="_blank">Открыть тестовую почту</a>
+                ) : null}
               </div>
             </form>
           ) : null}
@@ -446,7 +630,27 @@ export function AuthPage({
                   />
                 </div>
               </label>
-              <button className="auth-primary-button" type="submit">Отправить ссылку восстановления</button>
+              <label className="auth-field">
+                <span>Recovery token</span>
+                <input
+                  onChange={(event) => setRecoveryToken(event.target.value)}
+                  placeholder="recovery_..."
+                  value={recoveryToken}
+                />
+              </label>
+              <label className="auth-field">
+                <span>New password</span>
+                <input
+                  autoComplete="new-password"
+                  onChange={(event) => setRecoveryPassword(event.target.value)}
+                  placeholder="Minimum 8 characters"
+                  type="password"
+                  value={recoveryPassword}
+                />
+              </label>
+              <button className="auth-primary-button" disabled={isSubmitting} type="submit">
+                {recoveryToken || recoveryPassword ? "Complete recovery" : "Отправить ссылку восстановления"}
+              </button>
               <button className="auth-link-button left" onClick={() => transition("login")} type="button">
                 <ArrowLeft size={16} />
                 Назад ко входу
@@ -477,7 +681,17 @@ export function AuthPage({
                   value={invite.code}
                 />
               </label>
-              <button className="auth-primary-button" type="submit">
+              <label className="auth-field">
+                <span>Пароль</span>
+                <input
+                  autoComplete="new-password"
+                  onChange={(event) => setInvite((current) => ({ ...current, password: event.target.value }))}
+                  placeholder="Минимум 8 символов"
+                  type="password"
+                  value={invite.password}
+                />
+              </label>
+              <button className="auth-primary-button" disabled={isSubmitting} type="submit">
                 Активировать приглашение
                 <ArrowRight size={17} />
               </button>
@@ -491,7 +705,7 @@ export function AuthPage({
           {mode === "organizationSelect" ? (
             <div className="auth-organization-flow">
               <div className="auth-organization-list">
-                {organizationOptions.map((organization) => (
+                {memberships.map((organization) => (
                   <button
                     className={selectedOrganizationId === organization.id ? "selected" : ""}
                     key={organization.id}
@@ -501,10 +715,9 @@ export function AuthPage({
                     <Building2 size={18} />
                     <span>
                       <strong>{organization.name}</strong>
-                      <small>{organization.role} · {organization.tariff}</small>
+                      <small>{organization.role} · {organization.tariff ?? "tenant"}</small>
                     </span>
-                    <b>{organization.status}</b>
-                    <time>{organization.lastLogin}</time>
+                    <b>{organization.status ?? "active"}</b>
                   </button>
                 ))}
               </div>
@@ -513,7 +726,7 @@ export function AuthPage({
                   <ArrowLeft size={16} />
                   Назад
                 </button>
-                <button className="auth-primary-button compact" onClick={handleOrganizationContinue} type="button">
+                <button className="auth-primary-button compact" disabled={isSubmitting} onClick={handleOrganizationContinue} type="button">
                   Продолжить
                   <ArrowRight size={17} />
                 </button>
@@ -562,17 +775,22 @@ export function AuthPage({
   );
 }
 
-function setDemoUiSession({ email, method, organization }) {
-  setSession({
-    accessToken: `demo-ui-${method}-${organization.id}`,
-    tenantId: organization.id,
-    operator: {
-      email,
-      id: `demo-ui-${organization.id}`,
-      name: email.split("@")[0] || "Demo operator",
-      role: "Admin"
-    }
-  });
+function mapSsoProviderId(provider) {
+  if (provider === "SAML") {
+    return "saml-main";
+  }
+
+  return "oidc-main";
+}
+
+function mapMembershipOption(membership) {
+  return {
+    id: membership.id ?? membership.tenantId,
+    tenantId: membership.tenantId,
+    name: membership.tenantName ?? membership.tenantId,
+    role: membership.role ?? "Operator",
+    status: "active"
+  };
 }
 
 export default AuthPage;

@@ -1,30 +1,84 @@
-import React, { useMemo, useState } from "react";
-import {
-  activeSecuritySessions,
-  apiChangelog,
-  apiEnvironmentKeys,
-  securityAlerts,
-  securityControls,
-  webhookDeliveryLog,
-  webhookEndpoints
-} from "../../data.js";
+import React, { useEffect, useMemo, useState } from "react";
 import { AdminLockedPanel } from "./AdminLockedPanel.jsx";
 import { ApiGovernancePanel } from "./ApiGovernancePanel.jsx";
 import { BackendIntegrationPanel } from "./BackendIntegrationPanel.jsx";
 import { SecurityControlsPanel } from "./SecurityControlsPanel.jsx";
+import {
+  submitApiKeyRotation,
+  submitSecuritySessionRevoke,
+  submitWebhookReplay
+} from "../../app/integrationAdminActions.js";
 import { integrationService } from "../../services/integrationService.js";
 import "./settings.css";
 
+const EMPTY_WORKSPACE = {
+  activeSecuritySessions: [],
+  apiChangelog: [],
+  apiEnvironmentKeys: [],
+  securityAlerts: [],
+  securityControls: [],
+  webhookDeliveryLog: [],
+  webhookEndpoints: []
+};
+
 export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) {
-  const [selectedWebhookId, setSelectedWebhookId] = useState(webhookEndpoints[0].id);
+  const [workspace, setWorkspace] = useState(EMPTY_WORKSPACE);
+  const [loading, setLoading] = useState(true);
+  const [selectedWebhookId, setSelectedWebhookId] = useState("");
   const [rotatedKeyIds, setRotatedKeyIds] = useState([]);
   const [replayedDeliveryIds, setReplayedDeliveryIds] = useState([]);
   const [revokedSessionIds, setRevokedSessionIds] = useState([]);
 
-  const selectedWebhook = webhookEndpoints.find((endpoint) => endpoint.id === selectedWebhookId) ?? webhookEndpoints[0];
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWorkspace() {
+      setLoading(true);
+      const response = await integrationService.fetchIntegrationWorkspace();
+
+      if (cancelled) {
+        return;
+      }
+
+      if (response.status === "ok" && response.data) {
+        setWorkspace({
+          activeSecuritySessions: response.data.activeSecuritySessions ?? [],
+          apiChangelog: response.data.apiChangelog ?? [],
+          apiEnvironmentKeys: response.data.apiEnvironmentKeys ?? [],
+          securityAlerts: response.data.securityAlerts ?? [],
+          securityControls: response.data.securityControls ?? [],
+          webhookDeliveryLog: response.data.webhookDeliveryLog ?? [],
+          webhookEndpoints: response.data.webhookEndpoints ?? []
+        });
+        setSelectedWebhookId((current) => current || response.data.webhookEndpoints?.[0]?.id || "");
+      } else {
+        setWorkspace(EMPTY_WORKSPACE);
+      }
+
+      setLoading(false);
+    }
+
+    loadWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const {
+    activeSecuritySessions,
+    apiChangelog,
+    apiEnvironmentKeys,
+    securityAlerts,
+    securityControls,
+    webhookDeliveryLog,
+    webhookEndpoints
+  } = workspace;
+
+  const selectedWebhook = webhookEndpoints.find((endpoint) => endpoint.id === selectedWebhookId) ?? webhookEndpoints[0] ?? null;
   const visibleWebhookDeliveries = useMemo(
-    () => webhookDeliveryLog.filter((entry) => entry.endpointId === selectedWebhook.id),
-    [selectedWebhook.id]
+    () => (selectedWebhook ? webhookDeliveryLog.filter((entry) => entry.endpointId === selectedWebhook.id) : []),
+    [selectedWebhook, webhookDeliveryLog]
   );
 
   async function handleRotateApiKey(keyId) {
@@ -32,9 +86,14 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) 
       return;
     }
 
-    await integrationService.rotateApiKey(keyId);
-    setRotatedKeyIds((current) => current.includes(keyId) ? current : [...current, keyId]);
-    onToast(`${keyId}: ключ поставлен на ротацию, audit event подготовлен.`);
+    const result = await submitApiKeyRotation(keyId, integrationService);
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    setRotatedKeyIds((current) => current.includes(result.keyId) ? current : [...current, result.keyId]);
+    onToast(result.message);
   }
 
   async function handleReplayWebhook(delivery) {
@@ -42,9 +101,14 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) 
       return;
     }
 
-    await integrationService.replayWebhookDelivery(delivery);
-    setReplayedDeliveryIds((current) => current.includes(delivery.id) ? current : [...current, delivery.id]);
-    onToast(`${delivery.traceId}: manual replay поставлен в очередь.`);
+    const result = await submitWebhookReplay(delivery, integrationService);
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    setReplayedDeliveryIds((current) => current.includes(result.deliveryId) ? current : [...current, result.deliveryId]);
+    onToast(result.message);
   }
 
   async function handleRevokeSession(sessionId) {
@@ -52,13 +116,22 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) 
       return;
     }
 
-    await integrationService.revokeSecuritySession(sessionId);
-    setRevokedSessionIds((current) => current.includes(sessionId) ? current : [...current, sessionId]);
-    onToast(`${sessionId}: сессия отозвана и попадет в security audit.`);
+    const result = await submitSecuritySessionRevoke(sessionId, integrationService);
+    if (!result.ok) {
+      onToast(result.message);
+      return;
+    }
+
+    setRevokedSessionIds((current) => current.includes(result.sessionId) ? current : [...current, result.sessionId]);
+    onToast(result.message);
   }
 
   if (!canEditSettings) {
     return <AdminLockedPanel access={access} roleMode={roleMode} />;
+  }
+
+  if (loading) {
+    return <div className="admin-workspace-layout">Loading admin workspace...</div>;
   }
 
   return (

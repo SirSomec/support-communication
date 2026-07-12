@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import "./automation.css";
 import {
   AlertTriangle,
@@ -15,33 +15,129 @@ import {
   Zap
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
-import { auditEvents, botScenarios, proactiveRules } from "../../data.js";
+import { publishBotScenario, runBotScenarioTest, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { automationService } from "../../services/automationService.js";
 import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
 import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario } from "./automationModel.js";
 
 export function AutomationScreen({ onBack, onToast, access }) {
-  const [scenarioItems, setScenarioItems] = useState(botScenarios);
-  const [selectedScenarioId, setSelectedScenarioId] = useState(botScenarios[0].id);
-  const [selectedNodeId, setSelectedNodeId] = useState(botScenarios[0].flowNodes[0].id);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [auditEvents, setAuditEvents] = useState([]);
+  const [proactiveRules, setProactiveRules] = useState([]);
+  const [runtimeMetrics, setRuntimeMetrics] = useState([]);
+  const [scenarioItems, setScenarioItems] = useState([]);
+  const [selectedScenarioId, setSelectedScenarioId] = useState("");
+  const [selectedNodeId, setSelectedNodeId] = useState("");
   const [importDraft, setImportDraft] = useState("");
   const [importError, setImportError] = useState("");
-  const selectedScenario = scenarioItems.find((scenario) => scenario.id === selectedScenarioId) ?? scenarioItems[0];
-  const selectedNode = selectedScenario.flowNodes.find((node) => node.id === selectedNodeId) ?? selectedScenario.flowNodes[0];
+  const [savingAction, setSavingAction] = useState("");
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadWorkspace() {
+      setLoading(true);
+      setError("");
+      const response = await automationService.fetchAutomationWorkspace();
+      if (ignore) {
+        return;
+      }
+
+      if (response.status !== "ok") {
+        setError(response.error?.message ?? "Не удалось загрузить automation workspace.");
+        setLoading(false);
+        return;
+      }
+
+      const scenarios = normalizeScenarios(response.data?.botScenarios);
+      setAuditEvents(Array.isArray(response.data?.auditEvents) ? response.data.auditEvents : []);
+      setProactiveRules(Array.isArray(response.data?.proactiveRules) ? response.data.proactiveRules : []);
+      setRuntimeMetrics(normalizeRuntimeMetrics(response.data?.runtimeMetrics));
+      setScenarioItems(scenarios);
+      setSelectedScenarioId(scenarios[0]?.id ?? "");
+      setSelectedNodeId(scenarios[0]?.flowNodes?.[0]?.id ?? "");
+      setLoading(false);
+    }
+
+    void loadWorkspace();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const selectedScenario = scenarioItems.find((scenario) => scenario.id === selectedScenarioId) ?? scenarioItems[0] ?? null;
+  const selectedNode = selectedScenario?.flowNodes?.find((node) => node.id === selectedNodeId) ?? selectedScenario?.flowNodes?.[0] ?? null;
   const canManageAutomation = access.canManageSettings;
-  const enabledScenarios = scenarioItems.filter((scenario) => scenario.status.includes("Включ") || scenario.status.includes("Р’РєР»")).length;
-  const enabledProactive = proactiveRules.filter((rule) => rule.status.includes("Включ") || rule.status.includes("Р’РєР»")).length;
+  const isSaving = Boolean(savingAction);
+
+  if (loading) {
+    return (
+      <ProductScreen
+        title="Боты и automation"
+        subtitle="Загрузка..."
+        onBack={onBack}
+        stateItems={createScreenStateItems({
+          loading: "загружается...",
+          total: 0,
+          emptyWhenZero: "ожидание API",
+          errorLabel: "ошибок нет"
+        })}
+      />
+    );
+  }
+
+  if (error) {
+    return (
+      <ProductScreen
+        title="Боты и automation"
+        subtitle="Ошибка загрузки"
+        onBack={onBack}
+        stateItems={[
+          { label: "Загрузка", tone: "error", value: "ошибка" },
+          { label: "Данные", tone: "empty", value: "недоступны" },
+          { label: "Ошибки", tone: "error", value: error }
+        ]}
+      />
+    );
+  }
+
+  if (!selectedScenario || !selectedNode) {
+    return (
+      <ProductScreen
+        title="Боты и automation"
+        subtitle="Создайте первый сценарий, чтобы настроить ответы бота, переходы и передачу оператору."
+        onBack={onBack}
+        stateItems={createScreenStateItems({
+          total: 0,
+          emptyWhenZero: "сценариев ботов пока нет",
+          errorLabel: "ошибок нет"
+        })}
+        actions={
+          <button disabled={!canManageAutomation || isSaving} onClick={handleScenarioCreate} title={canManageAutomation ? "Создать первый сценарий" : access.reason} type="button">
+            <Plus size={17} />
+            Новый сценарий
+          </button>
+        }
+      >
+        <section className="work-panel bot-empty-state">
+          <Bot size={22} />
+          <strong>Сценариев пока нет</strong>
+          <span>Первый сценарий будет сохранен как черновик. Его можно отредактировать, проверить и опубликовать.</span>
+        </section>
+      </ProductScreen>
+    );
+  }
+  const enabledScenarios = scenarioItems.filter((scenario) => isEnabledAutomationStatus(scenario.status)).length;
+  const enabledProactive = proactiveRules.filter((rule) => isEnabledAutomationStatus(rule.status)).length;
   const automationChannels = ["SDK", "Telegram", "MAX", "VK"];
   const channelAssignments = automationChannels.map((channel) => ({
     channel,
     scenario: scenarioItems.find((scenario) => scenario.channels.includes(channel))
   }));
-  const botMetricRows = [
-    { label: "Диалогов с ботом", value: "312", detail: "24 часа" },
-    { label: "Успешно без оператора", value: "41%", detail: "по выбранным сценариям" },
-    { label: "Handoff rate", value: "37%", detail: selectedScenario.handoff },
-    { label: "Fallback", value: "8%", detail: "нет intent или данных" }
-  ];
+  const botMetricRows = runtimeMetrics.length
+    ? runtimeMetrics
+    : [{ label: "Bot runtime", value: "нет данных", detail: "runtimeMetrics не вернулись из backend" }];
   const afterHoursPolicy = {
     name: "Нерабочее время",
     window: "21:00-09:00",
@@ -74,6 +170,28 @@ export function AutomationScreen({ onBack, onToast, access }) {
     setImportError("");
   }
 
+  async function persistScenarioDraft(nextScenario, { selectNodeId, successMessage } = {}) {
+    setSavingAction(`save:${nextScenario.id}`);
+    try {
+      const result = await submitBotScenarioUpdate(nextScenario);
+      if (!result.ok) {
+        onToast(result.message);
+        return null;
+      }
+
+      const persisted = normalizeScenario({ ...nextScenario, ...result.scenario });
+      setScenarioItems((current) => replaceScenario(current, persisted));
+      setSelectedScenarioId(persisted.id);
+      setSelectedNodeId(selectNodeId ?? persisted.flowNodes[0]?.id ?? "");
+      if (successMessage) {
+        onToast(successMessage);
+      }
+      return persisted;
+    } finally {
+      setSavingAction("");
+    }
+  }
+
   function updateSelectedNode(field, value) {
     setScenarioItems((current) => current.map((scenario) => {
       if (scenario.id !== selectedScenario.id) {
@@ -90,7 +208,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
     }));
   }
 
-  function handleAddNode() {
+  async function handleAddNode() {
     if (!canManageAutomation) {
       onToast(access.reason);
       return;
@@ -106,22 +224,22 @@ export function AutomationScreen({ onBack, onToast, access }) {
       position: { x: 1, y: Math.ceil((selectedScenario.flowNodes.length + 1) / 2) }
     };
 
-    setScenarioItems((current) => current.map((scenario) => scenario.id === selectedScenario.id
-      ? {
-          ...scenario,
-          flowNodes: [...scenario.flowNodes, nextNode],
-          flowEdges: [
-            ...(scenario.flowEdges ?? []),
-            ...(scenario.flowNodes.length ? [{ from: scenario.flowNodes.at(-1).id, to: nextNode.id, label: "next" }] : [])
-          ]
-        }
-      : scenario
-    ));
-    setSelectedNodeId(nextNode.id);
-    onToast("Нода добавлена в canvas сценария.");
+    const nextScenario = {
+      ...selectedScenario,
+      flowNodes: [...selectedScenario.flowNodes, nextNode],
+      flowEdges: [
+        ...(selectedScenario.flowEdges ?? []),
+        ...(selectedScenario.flowNodes.length ? [{ from: selectedScenario.flowNodes.at(-1).id, to: nextNode.id, label: "next" }] : [])
+      ]
+    };
+
+    await persistScenarioDraft(nextScenario, {
+      selectNodeId: nextNode.id,
+      successMessage: "Нода добавлена и сохранена на backend."
+    });
   }
 
-  function handleScenarioCreate() {
+  async function handleScenarioCreate() {
     if (!canManageAutomation) {
       onToast(access.reason);
       return;
@@ -129,31 +247,68 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
     const id = `bot-draft-${Date.now()}`;
     const draftScenario = createDraftScenario(id);
+    setSavingAction(`create:${id}`);
+    const response = await automationService.createBotScenario(draftScenario);
+    setSavingAction("");
 
-    setScenarioItems((current) => [draftScenario, ...current]);
-    setSelectedScenarioId(id);
-    setSelectedNodeId(draftScenario.flowNodes[0].id);
+    if (response.status !== "ok") {
+      onToast(response.error?.message ?? "Не удалось создать сценарий.");
+      return;
+    }
+
+    const persisted = normalizeScenario(response.data?.scenario ?? draftScenario);
+    setScenarioItems((current) => [persisted, ...current]);
+    setSelectedScenarioId(persisted.id);
+    setSelectedNodeId(persisted.flowNodes[0].id);
     setImportDraft("");
     setImportError("");
-    onToast("Черновик сценария создан в конструкторе.");
+    onToast("Черновик сценария создан и сохранен на backend.");
   }
 
-  function handleAssignChannel(channel, scenarioId) {
+  async function handleAssignChannel(channel, scenarioId) {
     if (!canManageAutomation) {
       onToast(access.reason);
       return;
     }
 
     const targetScenario = scenarioItems.find((scenario) => scenario.id === scenarioId);
+    if (!targetScenario) {
+      onToast("Выберите сценарий для канала.");
+      return;
+    }
 
-    setScenarioItems((current) => current.map((scenario) => {
+    const nextScenarios = scenarioItems.map((scenario) => {
       const nextChannels = scenario.id === scenarioId
         ? Array.from(new Set([...scenario.channels, channel]))
         : scenario.channels.filter((item) => item !== channel);
 
       return { ...scenario, channels: nextChannels };
-    }));
-    onToast(`${channel}: назначен бот "${targetScenario?.name ?? "сценарий"}".`);
+    });
+    const changedScenarios = nextScenarios.filter((scenario) => {
+      const previous = scenarioItems.find((item) => item.id === scenario.id);
+      return previous && !sameStringList(previous.channels, scenario.channels);
+    });
+
+    setSavingAction(`channel:${channel}`);
+    try {
+      const persistedScenarios = [];
+      for (const scenario of changedScenarios) {
+        const result = await submitBotScenarioUpdate(scenario);
+        if (!result.ok) {
+          onToast(result.message);
+          return;
+        }
+        persistedScenarios.push(normalizeScenario({ ...scenario, ...result.scenario }));
+      }
+
+      setScenarioItems((current) => {
+        const persistedById = new Map(persistedScenarios.map((scenario) => [scenario.id, scenario]));
+        return current.map((scenario) => persistedById.get(scenario.id) ?? scenario);
+      });
+      onToast(`${channel}: назначен бот "${targetScenario.name}" и сохранен на backend.`);
+    } finally {
+      setSavingAction("");
+    }
   }
 
   async function handleScenarioTest() {
@@ -162,8 +317,57 @@ export function AutomationScreen({ onBack, onToast, access }) {
       return;
     }
 
-    const response = await automationService.testBotScenario(selectedScenario);
-    onToast(`Тестовый прогон "${selectedScenario.name}" запущен: ${response.data.testRunId}.`);
+    setSavingAction(`test:${selectedScenario.id}`);
+    try {
+      const result = await runBotScenarioTest(selectedScenario);
+      if (!result.ok) {
+        onToast(result.message);
+        return;
+      }
+
+      onToast(`Тестовый прогон "${selectedScenario.name}" запущен: ${result.testRunId}.`);
+    } finally {
+      setSavingAction("");
+    }
+  }
+
+  async function handleScenarioPublish() {
+    if (!canManageAutomation) {
+      onToast(access.reason);
+      return;
+    }
+
+    setSavingAction(`publish:${selectedScenario.id}`);
+    try {
+      const result = await publishBotScenario(selectedScenario);
+      if (!result.ok) {
+        onToast(result.message);
+        return;
+      }
+
+      const publishedScenario = normalizeScenario({
+        ...selectedScenario,
+        exportVersion: result.runtimeVersion,
+        status: result.versionState,
+        updatedAt: new Date().toISOString()
+      });
+      setScenarioItems((current) => replaceScenario(current, publishedScenario));
+      onToast(`Сценарий "${selectedScenario.name}" опубликован: ${result.runtimeVersion}.`);
+    } finally {
+      setSavingAction("");
+    }
+  }
+
+  async function handleSaveSelectedScenario() {
+    if (!canManageAutomation) {
+      onToast(access.reason);
+      return;
+    }
+
+    await persistScenarioDraft(selectedScenario, {
+      selectNodeId: selectedNode.id,
+      successMessage: `${selectedScenario.name}: сценарий сохранен на backend.`
+    });
   }
 
   async function handleImportFlow() {
@@ -187,32 +391,35 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
       const backendValidation = await automationService.validateBotFlowImport(payload);
       if (backendValidation.status !== "ok") {
-        throw new Error("JSON должен содержать name, flowNodes с валидными type и корректные flowEdges.");
+        throw new Error(backendValidation.error?.message ?? "JSON должен содержать name, flowNodes с валидными type и корректные flowEdges.");
       }
 
-      setScenarioItems((current) => current.map((scenario) => scenario.id === selectedScenario.id
-        ? {
-            ...scenario,
-            name: payload.name,
-            status: payload.status ?? scenario.status,
-            schemaVersion: payload.schemaVersion ?? scenario.schemaVersion,
-            owner: payload.owner ?? scenario.owner,
-            updatedAt: "сейчас",
-            trigger: payload.trigger ?? scenario.trigger,
-            channels: Array.isArray(payload.channels) ? payload.channels : scenario.channels,
-            handoff: payload.handoff ?? scenario.handoff,
-            flowNodes: payload.flowNodes.map((node) => ({ ...node, typeLabel: node.typeLabel ?? botNodeTypeLabels[node.type] })),
-            flowEdges: Array.isArray(payload.flowEdges) ? payload.flowEdges : scenario.flowEdges,
-            validationRules: Array.isArray(payload.validationRules) ? payload.validationRules : scenario.validationRules,
-            previewMessages: Array.isArray(payload.previewMessages) ? payload.previewMessages : scenario.previewMessages,
-            testCases: Array.isArray(payload.testCases) ? payload.testCases : scenario.testCases,
-            exportVersion: payload.exportVersion ?? payload.version ?? scenario.exportVersion
-          }
-        : scenario
-      ));
-      setSelectedNodeId(payload.flowNodes[0].id);
+      const validatedPayload = backendValidation.data?.payload ?? payload;
+      const nextScenario = normalizeScenario({
+        ...selectedScenario,
+        name: validatedPayload.name,
+        status: payload.status ?? selectedScenario.status,
+        schemaVersion: validatedPayload.schemaVersion ?? payload.schemaVersion ?? selectedScenario.schemaVersion,
+        owner: payload.owner ?? selectedScenario.owner,
+        updatedAt: "сейчас",
+        trigger: payload.trigger ?? selectedScenario.trigger,
+        channels: Array.isArray(payload.channels) ? payload.channels : selectedScenario.channels,
+        handoff: payload.handoff ?? selectedScenario.handoff,
+        flowNodes: validatedPayload.flowNodes,
+        flowEdges: Array.isArray(validatedPayload.flowEdges) ? validatedPayload.flowEdges : selectedScenario.flowEdges,
+        validationRules: Array.isArray(payload.validationRules) ? payload.validationRules : selectedScenario.validationRules,
+        previewMessages: Array.isArray(payload.previewMessages) ? payload.previewMessages : selectedScenario.previewMessages,
+        testCases: Array.isArray(payload.testCases) ? payload.testCases : selectedScenario.testCases,
+        exportVersion: payload.exportVersion ?? payload.version ?? selectedScenario.exportVersion
+      });
+      const persisted = await persistScenarioDraft(nextScenario, {
+        selectNodeId: nextScenario.flowNodes[0].id,
+        successMessage: `Импортирован flow: ${nextScenario.name} и сохранен на backend.`
+      });
+      if (!persisted) {
+        return;
+      }
       setImportError("");
-      onToast(`Импортирован flow: ${payload.name}.`);
     } catch (error) {
       setImportError(error.message || "Импорт не выполнен: вставьте валидный JSON flow.");
     }
@@ -248,11 +455,15 @@ export function AutomationScreen({ onBack, onToast, access }) {
       })}
       actions={
         <>
-          <button disabled={!canManageAutomation} onClick={handleScenarioCreate} title={canManageAutomation ? "Создать сценарий" : access.reason} type="button">
+          <button disabled={!canManageAutomation || isSaving} onClick={handleScenarioCreate} title={canManageAutomation ? "Создать сценарий" : access.reason} type="button">
             <Plus size={17} />
             Новый сценарий
           </button>
-          <button className="primary-action" disabled={!canManageAutomation} onClick={handleScenarioTest} title={canManageAutomation ? "Прогнать тест" : access.reason} type="button">
+          <button disabled={!canManageAutomation || isSaving} onClick={handleScenarioPublish} title={canManageAutomation ? "Опубликовать сценарий" : access.reason} type="button">
+            <CheckCircle2 size={17} />
+            Опубликовать
+          </button>
+          <button className="primary-action" disabled={!canManageAutomation || isSaving} onClick={handleScenarioTest} title={canManageAutomation ? "Прогнать тест" : access.reason} type="button">
             <PlayCircle size={17} />
             Прогнать тест
           </button>
@@ -274,7 +485,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
               <label key={channel}>
                 <span><ChannelBadge channel={channel} /> {scenario?.status ?? "Не назначен"}</span>
                 <select
-                  disabled={!canManageAutomation}
+                  disabled={!canManageAutomation || isSaving}
                   onChange={(event) => handleAssignChannel(channel, event.target.value)}
                   value={scenario?.id ?? ""}
                 >
@@ -294,7 +505,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
         </section>
 
         <section className="work-panel bot-metrics-card">
-          <SectionTitle title="Метрики ботов" action="срез демо-данных" />
+          <SectionTitle title="Метрики ботов" action="backend runtime" />
           <div className="bot-metric-list">
             {botMetricRows.map((metric) => (
               <span key={metric.label}>
@@ -325,7 +536,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
                 <header>
                   <Bot size={18} />
                   <strong>{scenario.name}</strong>
-                  <span>{scenario.status}</span>
+                  <span>{formatScenarioStatus(scenario.status)}</span>
                 </header>
                 <p>{scenario.trigger}</p>
                 <ol>
@@ -333,7 +544,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
                 </ol>
                 <footer>
                   <ChannelList channels={scenario.channels} />
-                  <b>{scenario.successRate}%</b>
+                  <b>{formatSuccessRate(scenario.successRate)}</b>
                   <button onClick={() => selectScenario(scenario)} type="button">Открыть</button>
                 </footer>
               </article>
@@ -357,7 +568,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
       </div>
 
       <section className="work-panel bot-builder-panel">
-        <SectionTitle title="Canvas сценария" action={`${selectedScenario.name} · ${selectedScenario.status}`} />
+        <SectionTitle title="Canvas сценария" action={`${selectedScenario.name} · ${formatScenarioStatus(selectedScenario.status)}`} />
         <div className="bot-builder-grid">
           <div className="bot-canvas-panel">
             <div className="bot-canvas-toolbar">
@@ -396,28 +607,28 @@ export function AutomationScreen({ onBack, onToast, access }) {
             </header>
             <label>
               <span>Тип</span>
-              <select disabled={!canManageAutomation} value={selectedNode.type} onChange={(event) => updateSelectedNode("type", event.target.value)}>
+              <select disabled={!canManageAutomation || isSaving} value={selectedNode.type} onChange={(event) => updateSelectedNode("type", event.target.value)}>
                 {botNodeTypeOptions.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
               </select>
             </label>
             <label>
               <span>Название</span>
-              <input disabled={!canManageAutomation} value={selectedNode.title} onChange={(event) => updateSelectedNode("title", event.target.value)} />
+              <input disabled={!canManageAutomation || isSaving} value={selectedNode.title} onChange={(event) => updateSelectedNode("title", event.target.value)} />
             </label>
             <label>
               <span>Каналы</span>
-              <input disabled={!canManageAutomation} value={selectedNode.channel} onChange={(event) => updateSelectedNode("channel", event.target.value)} />
+              <input disabled={!canManageAutomation || isSaving} value={selectedNode.channel} onChange={(event) => updateSelectedNode("channel", event.target.value)} />
             </label>
             <label>
               <span>Логика</span>
-              <textarea disabled={!canManageAutomation} value={selectedNode.detail} onChange={(event) => updateSelectedNode("detail", event.target.value)} />
+              <textarea disabled={!canManageAutomation || isSaving} value={selectedNode.detail} onChange={(event) => updateSelectedNode("detail", event.target.value)} />
             </label>
             <footer>
-              <button disabled={!canManageAutomation} onClick={handleAddNode} title={canManageAutomation ? "Добавить ноду" : access.reason} type="button">
+              <button disabled={!canManageAutomation || isSaving} onClick={handleAddNode} title={canManageAutomation ? "Добавить ноду" : access.reason} type="button">
                 <Plus size={16} />
                 Нода
               </button>
-              <button disabled={!canManageAutomation} onClick={() => onToast(`${selectedScenario.name}: изменения сохранены в черновике.`)} title={canManageAutomation ? "Сохранить сценарий" : access.reason} type="button">
+              <button disabled={!canManageAutomation || isSaving} onClick={handleSaveSelectedScenario} title={canManageAutomation ? "Сохранить сценарий" : access.reason} type="button">
                 <CheckCircle2 size={16} />
                 Сохранить
               </button>
@@ -449,7 +660,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
                 <strong>Import / Export</strong>
               </header>
               <textarea readOnly value={exportPayload} aria-label="JSON export сценария" />
-              <textarea disabled={!canManageAutomation} value={importDraft} onChange={(event) => setImportDraft(event.target.value)} placeholder="Вставьте JSON flow для импорта" />
+              <textarea disabled={!canManageAutomation || isSaving} value={importDraft} onChange={(event) => setImportDraft(event.target.value)} placeholder="Вставьте JSON flow для импорта" />
               {importError ? (
                 <div className="bot-import-error">
                   <AlertTriangle size={15} />
@@ -457,9 +668,9 @@ export function AutomationScreen({ onBack, onToast, access }) {
                 </div>
               ) : null}
               <footer>
-                <button disabled={!canManageAutomation} onClick={() => setImportDraft(exportPayload)} title={canManageAutomation ? "Скопировать export в импорт" : access.reason} type="button">Вставить export</button>
-                <button disabled={!canManageAutomation} onClick={handleImportFlow} title={canManageAutomation ? "Импортировать flow" : access.reason} type="button">Импорт</button>
-                <button disabled={!canManageAutomation} onClick={handleExportFlowDownload} title={canManageAutomation ? "Экспортировать JSON" : access.reason} type="button">
+                <button disabled={!canManageAutomation || isSaving} onClick={() => setImportDraft(exportPayload)} title={canManageAutomation ? "Скопировать export в импорт" : access.reason} type="button">Вставить export</button>
+                <button disabled={!canManageAutomation || isSaving} onClick={handleImportFlow} title={canManageAutomation ? "Импортировать flow" : access.reason} type="button">Импорт</button>
+                <button disabled={!canManageAutomation || isSaving} onClick={handleExportFlowDownload} title={canManageAutomation ? "Экспортировать JSON" : access.reason} type="button">
                   <Download size={15} />
                   Export
                 </button>
@@ -470,4 +681,129 @@ export function AutomationScreen({ onBack, onToast, access }) {
       </section>
     </ProductScreen>
   );
+}
+
+function normalizeScenarios(value) {
+  return Array.isArray(value) ? value.map((scenario) => normalizeScenario(scenario)) : [];
+}
+
+function normalizeScenario(scenario = {}) {
+  const scenarioId = String(scenario.id ?? `bot-${Date.now()}`);
+  const channels = normalizeStringList(scenario.channels, ["SDK"]);
+  const flowNodes = normalizeFlowNodes(scenario.flowNodes, scenarioId, channels);
+  const flowEdges = Array.isArray(scenario.flowEdges) ? scenario.flowEdges : [];
+  const name = String(scenario.name ?? scenarioId);
+
+  return {
+    ...scenario,
+    channels,
+    exportVersion: scenario.exportVersion ?? scenario.version ?? scenario.schemaVersion ?? "bot-flow/v1",
+    flowEdges,
+    flowNodes,
+    handoff: scenario.handoff ?? "operator handoff",
+    id: scenarioId,
+    name,
+    owner: scenario.owner ?? "backend",
+    previewMessages: Array.isArray(scenario.previewMessages) && scenario.previewMessages.length
+      ? scenario.previewMessages
+      : createPreviewMessages(flowNodes),
+    schemaVersion: scenario.schemaVersion ?? "bot-flow/v1",
+    status: String(scenario.status ?? "draft"),
+    steps: normalizeStringList(scenario.steps, flowNodes.map((node) => node.typeLabel ?? node.type)),
+    successRate: scenario.successRate ?? null,
+    testCases: Array.isArray(scenario.testCases) && scenario.testCases.length
+      ? scenario.testCases
+      : [{ id: `${scenarioId}-backend-test`, name: "Backend smoke", expected: "ok" }],
+    trigger: scenario.trigger ?? flowNodes[0]?.title ?? name,
+    updatedAt: scenario.updatedAt ?? "",
+    validationRules: normalizeStringList(scenario.validationRules, [])
+  };
+}
+
+function normalizeFlowNodes(value, scenarioId, channels) {
+  const sourceNodes = Array.isArray(value) && value.length
+    ? value
+    : [{ id: `${scenarioId}-start`, type: "message", title: "Start" }];
+
+  return sourceNodes.map((node, index) => {
+    const type = String(node.type ?? "message");
+    const title = String(node.title ?? node.id ?? `Node ${index + 1}`);
+    return {
+      ...node,
+      channel: node.channel ?? channels[0] ?? "SDK",
+      detail: node.detail ?? title,
+      id: String(node.id ?? `${scenarioId}-node-${index + 1}`),
+      position: node.position ?? { x: index + 1, y: 1 },
+      title,
+      type,
+      typeLabel: node.typeLabel ?? botNodeTypeLabels[type] ?? type
+    };
+  });
+}
+
+function normalizeRuntimeMetrics(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((metric) => ({
+    detail: String(metric.detail ?? metric.queue ?? "backend"),
+    label: String(metric.label ?? metric.id ?? "Metric"),
+    value: String(metric.value ?? "—")
+  }));
+}
+
+function createPreviewMessages(flowNodes) {
+  return flowNodes.slice(0, 3).map((node, index) => ({
+    side: index === 0 ? "client" : "bot",
+    speaker: index === 0 ? "Клиент" : "Бот",
+    text: node.detail ?? node.title,
+    time: `00:0${index + 1}`
+  }));
+}
+
+function replaceScenario(current, persisted) {
+  return current.map((scenario) => scenario.id === persisted.id ? persisted : scenario);
+}
+
+function normalizeStringList(value, fallback) {
+  return Array.isArray(value) ? value.map((item) => String(item)) : fallback;
+}
+
+function sameStringList(left = [], right = []) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((item, index) => item === sortedRight[index]);
+}
+
+function isEnabledAutomationStatus(status) {
+  const value = String(status ?? "").toLowerCase();
+  return value.includes("enabled") || value.includes("published") || value.includes("включ");
+}
+
+function formatScenarioStatus(status) {
+  const value = String(status ?? "").trim().toLowerCase();
+  const labels = {
+    archived: "\u0410\u0440\u0445\u0438\u0432",
+    draft: "\u0427\u0435\u0440\u043d\u043e\u0432\u0438\u043a",
+    published: "\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d"
+  };
+
+  return labels[value] ?? String(status ?? "");
+}
+
+function formatSuccessRate(value) {
+  if (typeof value === "number") {
+    return `${value}%`;
+  }
+
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+
+  return String(value).endsWith("%") ? String(value) : `${value}%`;
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type MigrationCandidate } from "./operations.fixtures.js";
+import { type MigrationCandidate } from "./operations.types.js";
 import {
   type OperationsMigrationRollbackCheckResultRecord,
   type OperationsRepository
@@ -294,11 +294,54 @@ export function executeMigrationRollbackCheck(
   return { result, toolingResults };
 }
 
+export async function executeMigrationRollbackCheckAsync(
+  input: ExecuteMigrationRollbackCheckInput
+): Promise<ExecuteMigrationRollbackCheckResult> {
+  const metadata = validateMigrationRollbackMetadata(input.metadata);
+  const beforeSnapshot = validateApiContractSnapshot(input.beforeSnapshot);
+  const afterSnapshot = validateApiContractSnapshot(input.afterSnapshot);
+  const toolingResults = [
+    checkAdditiveMigrationCompatibility({ metadata, migrationSql: input.migrationSql }),
+    checkEnvelopeContractDiff({ after: afterSnapshot, before: beforeSnapshot }),
+    checkOpenApiContractDiff({ after: afterSnapshot, before: beforeSnapshot })
+  ];
+  const status = aggregateRollbackCheckStatus(toolingResults);
+  const result = await persistMigrationRollbackCheckResultAsync(input.operationsRepository, {
+    afterSnapshot,
+    auditEvent: {
+      action: "operations.migration.rollback_check.tooling",
+      id: `evt_migration_rollback_check_${randomUUID()}`,
+      immutable: true,
+      migrationId: metadata.id,
+      reason: input.reason.trim(),
+      status,
+      target: metadata.id
+    },
+    beforeSnapshot,
+    checkedAt: (input.now ?? new Date()).toISOString(),
+    id: makeMigrationRollbackCheckResultId(),
+    metadata,
+    migrationId: metadata.id,
+    reason: input.reason.trim(),
+    status,
+    toolingResults
+  });
+
+  return { result, toolingResults };
+}
+
 export function persistMigrationRollbackCheckResult(
   operationsRepository: OperationsRepository,
   record: OperationsMigrationRollbackCheckResultRecord
 ): OperationsMigrationRollbackCheckResultRecord {
   return operationsRepository.saveMigrationRollbackCheckResult(record);
+}
+
+export function persistMigrationRollbackCheckResultAsync(
+  operationsRepository: OperationsRepository,
+  record: OperationsMigrationRollbackCheckResultRecord
+): Promise<OperationsMigrationRollbackCheckResultRecord> {
+  return operationsRepository.saveMigrationRollbackCheckResultAsync(record);
 }
 
 export function findMigrationRollbackCheckResult(

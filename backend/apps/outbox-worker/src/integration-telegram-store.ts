@@ -11,7 +11,19 @@ interface IntegrationStoreState {
 }
 
 export interface TelegramBotTokenResolver {
-  resolveBotToken(tenantId: string): string | undefined;
+  resolveBotToken(tenantId: string, channelConnectionId?: string): Promise<string | undefined> | string | undefined;
+}
+
+export interface PrismaTelegramConnectionTokenClient {
+  telegramConnection?: {
+    findUnique(input: { where: { channelConnectionId: string } }): Promise<PrismaTelegramConnectionTokenRow | null | undefined>;
+  };
+}
+
+export interface PrismaTelegramConnectionTokenRow {
+  botToken?: string | null;
+  status?: string | null;
+  tenantId?: string | null;
 }
 
 export function createIntegrationTelegramTokenResolver(
@@ -30,6 +42,33 @@ export function createIntegrationTelegramTokenResolver(
       const fromStore = readTelegramBotTokenFromStore(storeFilePath, normalizedTenantId);
       if (fromStore) {
         return fromStore;
+      }
+
+      return fallback || undefined;
+    }
+  };
+}
+
+export function createPrismaIntegrationTelegramTokenResolver(
+  client: PrismaTelegramConnectionTokenClient | undefined,
+  fallbackBotToken = ""
+): TelegramBotTokenResolver {
+  const fallback = String(fallbackBotToken ?? "").trim();
+
+  return {
+    async resolveBotToken(tenantId: string, channelConnectionId?: string): Promise<string | undefined> {
+      const normalizedTenantId = String(tenantId ?? "").trim();
+      const normalizedConnectionId = String(channelConnectionId ?? "").trim();
+      if (!normalizedTenantId || !normalizedConnectionId) {
+        return fallback || undefined;
+      }
+
+      const row = await client?.telegramConnection?.findUnique({
+        where: { channelConnectionId: normalizedConnectionId }
+      });
+      const token = String(row?.botToken ?? "").trim();
+      if (row?.tenantId === normalizedTenantId && row?.status === "active" && token) {
+        return token;
       }
 
       return fallback || undefined;

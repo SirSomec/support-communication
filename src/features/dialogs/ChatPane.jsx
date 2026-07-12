@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { getRescueRemainingSeconds, maskPhone } from "../../app/dialogModel.js";
-import { AuditTimeline, BotHandoffSummary } from "./AuditTimeline.jsx";
+import { getRescueRemainingSeconds } from "../../app/dialogModel.js";
+import { AuditTimeline } from "./AuditTimeline.jsx";
 import { ChatHeader } from "./ChatHeader.jsx";
 import { Composer } from "./Composer.jsx";
 import { TranscriptToolbar } from "./TranscriptToolbar.jsx";
 
 export function ChatPane({
+  assignees,
   conversation,
   topic,
   onTopic,
@@ -26,6 +27,7 @@ export function ChatPane({
   templates,
   onSaveTemplate,
   onDialogAction,
+  onAssignment,
   onCloseDialog,
   onStatusChange,
   access,
@@ -37,13 +39,6 @@ export function ChatPane({
   const activeRescue = conversation.rescue?.state === "active" && !isClosed ? conversation.rescue : null;
   const rescueRemainingSeconds = activeRescue ? getRescueRemainingSeconds(activeRescue, rescueNow) : 0;
   const isRescueExpired = Boolean(activeRescue && rescueRemainingSeconds === 0);
-  const visiblePhone = access.canViewSensitive ? conversation.phone : maskPhone(conversation.phone);
-  const botHandoffSummary = {
-    scenario: topic?.includes("Авторизация") ? "Код подтверждения" : topic?.includes("Оплата") ? "Первичный возврат" : "Статус доставки",
-    asked: ["подтверждение телефона", "последний заказ", "согласие на подключение оператора"],
-    received: [visiblePhone, topic || "тематика не выбрана", conversation.entry],
-    reason: conversation.slaTone === "danger" ? "бот передал из-за SLA-риска" : "бот передал после запроса человека"
-  };
 
   useEffect(() => {
     if (!activeRescue) {
@@ -60,9 +55,11 @@ export function ChatPane({
       <ChatHeader
         access={access}
         activeRescue={activeRescue}
+        assignees={assignees}
         conversation={conversation}
         isClosed={isClosed}
         onDialogAction={onDialogAction}
+        onAssignment={onAssignment}
         onStatusChange={onStatusChange}
         onTopic={onTopic}
         status={status}
@@ -80,8 +77,6 @@ export function ChatPane({
         topic={topic}
         transcriptMode={transcriptMode}
       />
-      <BotHandoffSummary summary={botHandoffSummary} />
-
       <AuditTimeline messages={conversation.messages} onSaveTemplate={onSaveTemplate} transcriptMode={transcriptMode} />
 
       <Composer

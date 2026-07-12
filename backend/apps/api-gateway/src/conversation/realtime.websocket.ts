@@ -89,8 +89,7 @@ export async function authorizeRealtimeSocket(headers: IncomingHttpHeaders, conf
     const decision = await resolveServiceAdminContextAsync({
       headers,
       requiredAction: realtimeReadAction,
-      sessionLookup: async (token) => (await IdentityRepository.default().findServiceAdminSessionByAccessToken(token))
-        ?? IdentityRepository.default().findServiceAdminSession(token)
+      sessionLookup: async (token) => IdentityRepository.default().findServiceAdminSessionByAccessToken(token)
     });
 
     return decision.allowed

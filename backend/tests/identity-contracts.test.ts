@@ -1,14 +1,51 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { describe, it } from "node:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeEach, describe, it } from "node:test";
 import { AuthService } from "../apps/api-gateway/src/identity/auth.service.ts";
-import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { resetIdentityAuthFlowStore } from "../apps/api-gateway/src/identity/identity-auth-flow.repository.ts";
+import { IdentityRepository as RuntimeIdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { bootstrapIdentityState } from "../apps/api-gateway/src/identity/seed.ts";
+import { createMfaOtpRuntime } from "../apps/api-gateway/src/identity/mfa-otp.ts";
 import { PermissionService } from "../apps/api-gateway/src/identity/permission.service.ts";
 import { SettingsEmployeeService } from "../apps/api-gateway/src/identity/settings-employee.service.ts";
 import { SettingsRulesService } from "../apps/api-gateway/src/identity/settings-rules.service.ts";
 import { TenantService } from "../apps/api-gateway/src/identity/tenant.service.ts";
 
+type IdentityRepository = RuntimeIdentityRepository;
+const IdentityRepository = {
+  inMemory: () => RuntimeIdentityRepository.inMemory(bootstrapIdentityState()),
+  open: ({ filePath }: { filePath: string }) => RuntimeIdentityRepository.open({ filePath, seed: bootstrapIdentityState() })
+};
+
+interface DeliveredRecoveryToken {
+  email: string;
+  expiresAt: string;
+  recoveryToken: string;
+  requestId: string;
+}
+
+function createTestMfaOtpRuntime(deliveredRecoveryTokens: DeliveredRecoveryToken[] = []) {
+  return createMfaOtpRuntime({
+    delivery: {
+      async send({ challengeId }) {
+        return { providerMessageId: `test-${challengeId}` };
+      },
+      async sendRecovery(input) {
+        deliveredRecoveryTokens.push({ ...input });
+        return { providerMessageId: `test-${input.requestId}` };
+      }
+    },
+    generateOtp: () => "123456",
+    hashKey: "identity-contract-mfa-otp-hash-key"
+  });
+}
+
 describe("phase 1 identity, tenant and RBAC backend contracts", () => {
+  beforeEach(() => {
+    RuntimeIdentityRepository.useDefault(RuntimeIdentityRepository.inMemory(bootstrapIdentityState()));
+  });
   it("models password and MFA login lifecycle with audit metadata", async () => {
     const auth = new AuthService();
 
@@ -32,29 +69,28 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
 
     const publicOtpCompletion = await auth.login({
       email: "service-admin@example.com",
-      password: "correct-password",
-      otp: "123456"
-    });
-    assert.equal(publicOtpCompletion.status, "denied");
-    assert.equal(publicOtpCompletion.error?.code, "service_admin_key_required");
-    assert.equal(publicOtpCompletion.data.authenticated, false);
-    assert.equal(publicOtpCompletion.data.authState, "mfa_required");
-
-    const verified = await auth.login({
-      email: "service-admin@example.com",
       mfaChallengeId: passwordOnly.data.mfaChallengeId,
       password: "correct-password",
       otp: "123456"
-    }, { privileged: true });
+    });
+    assert.equal(publicOtpCompletion.status, "ok");
+    assert.equal(publicOtpCompletion.data.authenticated, true);
+    assert.equal(publicOtpCompletion.data.authState, "mfa_verified");
+    assert.ok(publicOtpCompletion.data.accessToken || publicOtpCompletion.data.session?.id);
+
+    const verified = publicOtpCompletion;
     assert.equal(verified.status, "ok");
     assert.equal(verified.data.authenticated, true);
     assert.equal(verified.data.session.authState, "mfa_verified");
-    assert.equal(verified.data.session.currentTenantId, "tenant-volga");
+    assert.equal(verified.data.session.currentTenantId, "tenant-northstar");
     assert.equal(verified.data.session.adminId, "svc-admin-001");
-    assert.equal(verified.data.session.adminName, "Надя Орлова");
+    assert.equal(verified.data.session.adminName, "service-admin@example.com");
     assert.ok(Array.isArray(verified.data.session.allowedActions));
     assert.equal(verified.data.session.allowedActions.includes("service-admin.users.read"), true);
     assert.equal(verified.data.session.allowedActions.includes("service-admin.users.write"), true);
+    assert.equal(verified.data.session.allowedActions.includes("operations.read"), true);
+    assert.equal(verified.data.session.allowedActions.includes("operations.write"), true);
+    assert.equal(verified.data.session.allowedActions.includes("security.review"), true);
     assert.match(verified.data.auditEvent.id, /^evt_auth_/);
     assert.equal(verified.data.auditEvent.immutable, true);
   });
@@ -80,6 +116,385 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(auditEvents[0].action, "credential.password.verify");
     assert.equal(auditEvents[0].result, "denied");
     assert.equal(auditEvents[0].immutable, true);
+  });
+
+  it("denies tenant operator credentials on the service-admin login endpoint", async () => {
+    const repository = IdentityRepository.inMemory();
+    const auth = new AuthService(repository);
+
+    const denied = await auth.login({
+      email: "mira@northstar.example",
+      password: "correct-password"
+    });
+
+    assert.equal(denied.status, "denied");
+    assert.equal(denied.error?.code, "service_admin_subject_required");
+    assert.equal(denied.data.authenticated, false);
+    assert.equal((await repository.findServiceAdminSessionByAccessToken("correct-password")), undefined);
+  });
+
+  it("completes tenant operator MFA challenges without pilot bypass", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalPilotSkipMfa = process.env.PILOT_SKIP_MFA;
+    process.env.NODE_ENV = "staging";
+    process.env.PILOT_SKIP_MFA = "true";
+    try {
+      const repository = IdentityRepository.inMemory();
+      const auth = new AuthService(repository, createTestMfaOtpRuntime());
+
+      const passwordOnly = await auth.loginTenantOperator({
+        email: "sergey@volga.example",
+        password: "correct-password"
+      });
+      assert.equal(passwordOnly.status, "ok");
+      assert.equal(passwordOnly.partial, true);
+      assert.equal(passwordOnly.data.authenticated, false);
+      assert.equal(passwordOnly.data.tenantId, "tenant-volga");
+      assert.equal(passwordOnly.data.operator, null);
+      assert.match(String(passwordOnly.data.mfaChallengeId), /^mfa_/);
+      assert.equal(passwordOnly.data.nextStep, "otp");
+
+      const completed = await auth.loginTenantOperator({
+        mfaChallengeId: String(passwordOnly.data.mfaChallengeId),
+        otp: "123456"
+      });
+      assert.equal(completed.status, "ok");
+      assert.equal(completed.data.authenticated, true);
+      assert.equal(completed.data.tenantId, "tenant-volga");
+      assert.equal(typeof completed.data.accessToken, "string");
+      assert.equal(completed.data.operator?.email, "sergey@volga.example");
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      if (originalPilotSkipMfa === undefined) {
+        delete process.env.PILOT_SKIP_MFA;
+      } else {
+        process.env.PILOT_SKIP_MFA = originalPilotSkipMfa;
+      }
+    }
+  });
+
+  it("keeps tenant membership selection stateless across auth flow store resets", async () => {
+    const repository = IdentityRepository.inMemory();
+    const auth = new AuthService(repository);
+
+    const multiTenantChallenge = await auth.loginTenantOperator({
+      email: "multi@example.com",
+      password: "correct-password"
+    });
+
+    assert.equal(multiTenantChallenge.status, "denied");
+    assert.equal(multiTenantChallenge.error?.code, "multi_tenant_membership");
+    assert.equal(multiTenantChallenge.data.memberships?.length, 2);
+
+    resetIdentityAuthFlowStore();
+    const selected = await auth.selectTenant({
+      email: "multi@example.com",
+      tenantId: "tenant-lumen"
+    });
+
+    assert.equal(selected.status, "ok");
+    assert.equal(selected.data.tenantId, "tenant-lumen");
+    assert.equal(selected.data.role, "Senior operator");
+
+    resetIdentityAuthFlowStore();
+    const completed = await auth.loginTenantOperator({
+      email: "multi@example.com",
+      password: "correct-password",
+      tenantId: "tenant-lumen"
+    } as Parameters<AuthService["loginTenantOperator"]>[0] & { tenantId: string });
+
+    assert.equal(completed.status, "ok");
+    assert.equal(completed.data.authenticated, true);
+    assert.equal(completed.data.tenantId, "tenant-lumen");
+    assert.equal(completed.data.operator?.email, "multi@example.com");
+  });
+
+  it("continues invite acceptance MFA without replaying the consumed invite token", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalPilotSkipMfa = process.env.PILOT_SKIP_MFA;
+    process.env.NODE_ENV = "staging";
+    process.env.PILOT_SKIP_MFA = "false";
+    try {
+      const repository = IdentityRepository.inMemory();
+      const settings = new SettingsEmployeeService(repository);
+      const auth = new AuthService(repository, createTestMfaOtpRuntime());
+      const email = "invite-mfa@volga.example";
+      const password = "Invite-Mfa-2026!";
+
+      const invite = await settings.inviteEmployee({
+        email,
+        groupId: "group-line-1",
+        name: "Invite MFA",
+        roleKey: "employee"
+      }, { tenantId: "tenant-volga" });
+      assert.equal(invite.status, "ok");
+      assert.equal(typeof invite.data.inviteDescriptor?.code, "string");
+
+      const passwordAccepted = await auth.acceptInvite({
+        code: invite.data.inviteDescriptor.code,
+        email,
+        password
+      });
+      assert.equal(passwordAccepted.status, "ok");
+      assert.equal(passwordAccepted.partial, true);
+      assert.equal(passwordAccepted.data.authenticated, false);
+      assert.equal(passwordAccepted.data.nextStep, "otp");
+      assert.match(String(passwordAccepted.data.mfaChallengeId), /^mfa_/);
+
+      const completed = await auth.acceptInvite({
+        code: invite.data.inviteDescriptor.code,
+        email,
+        mfaChallengeId: String(passwordAccepted.data.mfaChallengeId),
+        otp: "123456",
+        password
+      });
+      assert.equal(completed.status, "ok");
+      assert.equal(completed.data.authenticated, true);
+      assert.equal(completed.data.tenantId, "tenant-volga");
+      assert.equal(completed.data.operator?.email, email);
+      assert.equal(completed.error?.code, undefined);
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      if (originalPilotSkipMfa === undefined) {
+        delete process.env.PILOT_SKIP_MFA;
+      } else {
+        process.env.PILOT_SKIP_MFA = originalPilotSkipMfa;
+      }
+    }
+  });
+
+  it("continues password recovery MFA without replaying the consumed recovery token", async () => {
+    const originalAuthRequireTenantMfa = process.env.AUTH_REQUIRE_TENANT_MFA;
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalPilotSkipMfa = process.env.PILOT_SKIP_MFA;
+    delete process.env.AUTH_REQUIRE_TENANT_MFA;
+    process.env.NODE_ENV = "test";
+    process.env.PILOT_SKIP_MFA = "false";
+    try {
+      const repository = IdentityRepository.inMemory();
+      const deliveredRecoveryTokens: DeliveredRecoveryToken[] = [];
+      const auth = new AuthService(repository, createTestMfaOtpRuntime(deliveredRecoveryTokens));
+      const email = "sergey@volga.example";
+      const password = "Recovered-Mfa-2026!";
+      const tenantUser = await repository.findTenantUserByEmail(email);
+      assert.ok(tenantUser);
+      const previousSession = await repository.createTenantOperatorSession({
+        tenantId: tenantUser.tenantId,
+        userId: tenantUser.id
+      });
+      assert.ok(await repository.findTenantOperatorSessionByAccessToken(previousSession.accessToken));
+
+      const recovery = await auth.requestRecovery({ email });
+      assert.equal(recovery.status, "ok");
+      assert.deepEqual(recovery.data, { queued: true });
+      assert.equal(deliveredRecoveryTokens.length, 1);
+      const recoveryToken = deliveredRecoveryTokens[0]?.recoveryToken;
+      assert.equal(typeof recoveryToken, "string");
+      assert.doesNotMatch(JSON.stringify(recovery), new RegExp(String(recoveryToken)));
+
+      const unknown = await auth.requestRecovery({ email: "unknown-recovery@example.com" });
+      assert.equal(unknown.status, recovery.status);
+      assert.deepEqual(unknown.data, recovery.data);
+      assert.equal(unknown.error, recovery.error);
+      assert.equal(deliveredRecoveryTokens.length, 1);
+
+      const passwordReset = await auth.completeRecovery({
+        email,
+        password,
+        token: recoveryToken
+      });
+      assert.equal(passwordReset.status, "ok");
+      assert.equal(passwordReset.partial, true);
+      assert.equal(passwordReset.data.authenticated, false);
+      assert.equal(passwordReset.data.nextStep, "otp");
+      assert.match(String(passwordReset.data.mfaChallengeId), /^mfa_/);
+      assert.equal("accessToken" in passwordReset.data, false);
+      assert.equal("refreshToken" in passwordReset.data, false);
+      assert.equal(await repository.findTenantOperatorSessionByAccessToken(previousSession.accessToken), undefined);
+      assert.ok((await repository.findServiceAdminSession(previousSession.sessionId))?.revokedAt);
+
+      const replay = await auth.completeRecovery({
+        email,
+        password: "Replay-Must-Fail-2026!",
+        token: recoveryToken
+      });
+      assert.equal(replay.status, "denied");
+      assert.equal(replay.data.authenticated, false);
+      assert.equal(replay.error?.code, "recovery_expired");
+
+      const completed = await auth.completeRecovery({
+        email,
+        mfaChallengeId: String(passwordReset.data.mfaChallengeId),
+        otp: "123456",
+        password,
+        token: recoveryToken
+      });
+      assert.equal(completed.status, "ok");
+      assert.equal(completed.data.authenticated, true);
+      assert.equal(completed.data.tenantId, "tenant-volga");
+      assert.equal(completed.data.operator?.email, email);
+      assert.equal(completed.error?.code, undefined);
+    } finally {
+      if (originalAuthRequireTenantMfa === undefined) {
+        delete process.env.AUTH_REQUIRE_TENANT_MFA;
+      } else {
+        process.env.AUTH_REQUIRE_TENANT_MFA = originalAuthRequireTenantMfa;
+      }
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      if (originalPilotSkipMfa === undefined) {
+        delete process.env.PILOT_SKIP_MFA;
+      } else {
+        process.env.PILOT_SKIP_MFA = originalPilotSkipMfa;
+      }
+    }
+  });
+
+  it("persists invite tokens through the identity repository across process restarts", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "identity-invite-token-"));
+    try {
+      const filePath = join(workspace, "identity.json");
+      const issuingRepository = IdentityRepository.open({ filePath });
+      const settings = new SettingsEmployeeService(issuingRepository);
+      const email = `durable-invite-${Date.now()}@volga.example`;
+      const password = "Durable-Invite-2026!";
+
+      const invite = await settings.inviteEmployee({
+        email,
+        groupId: "group-line-1",
+        name: "Durable Invite",
+        roleKey: "employee"
+      }, { tenantId: "tenant-volga" });
+      assert.equal(invite.status, "ok");
+      assert.equal(typeof invite.data.inviteDescriptor?.code, "string");
+
+      resetIdentityAuthFlowStore();
+      const acceptingRepository = IdentityRepository.open({ filePath });
+      const auth = new AuthService(acceptingRepository);
+      const accepted = await auth.acceptInvite({
+        code: invite.data.inviteDescriptor.code,
+        email,
+        password
+      });
+
+      assert.equal(accepted.status, "ok");
+      assert.notEqual(accepted.error?.code, "invite_not_found");
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+    }
+  });
+
+  it("persists recovery tokens through the identity repository across process restarts", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "identity-recovery-token-"));
+    try {
+      const filePath = join(workspace, "identity.json");
+      const issuingRepository = IdentityRepository.open({ filePath });
+      const deliveredRecoveryTokens: DeliveredRecoveryToken[] = [];
+      const issuingAuth = new AuthService(
+        issuingRepository,
+        createTestMfaOtpRuntime(deliveredRecoveryTokens)
+      );
+      const email = "sergey@volga.example";
+      const password = "Durable-Recovery-2026!";
+
+      const recovery = await issuingAuth.requestRecovery({ email });
+      assert.equal(recovery.status, "ok");
+      assert.deepEqual(recovery.data, { queued: true });
+      assert.equal(deliveredRecoveryTokens.length, 1);
+      const recoveryToken = deliveredRecoveryTokens[0]?.recoveryToken;
+      assert.equal(typeof recoveryToken, "string");
+      assert.doesNotMatch(JSON.stringify(recovery), new RegExp(String(recoveryToken)));
+
+      resetIdentityAuthFlowStore();
+      const completingRepository = IdentityRepository.open({ filePath });
+      const completingAuth = new AuthService(completingRepository);
+      const completed = await completingAuth.completeRecovery({
+        email,
+        password,
+        token: recoveryToken
+      });
+
+      assert.equal(completed.status, "ok");
+      assert.notEqual(completed.error?.code, "recovery_not_found");
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+    }
+  });
+
+  it("does not mutate persisted service-admin permissions implicitly on JSON store restart", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "identity-service-admin-backfill-"));
+    try {
+      const filePath = join(workspace, "identity.json");
+      const staleRepository = IdentityRepository.open({ filePath });
+      const staleSession = await staleRepository.createServiceAdminSession({
+        actorId: "stale-service-admin",
+        actorName: "Stale Service Admin",
+        adminEmail: "stale-service-admin@example.com",
+        allowedActions: ["tenants.read"],
+        availableOrganizations: [],
+        currentTenantId: "",
+        role: "service_admin"
+      });
+      const staleState = JSON.parse(readFileSync(filePath, "utf8")) as {
+        permissionRoles: Array<{ actions: string[]; key: string }>;
+        privilegedServiceAdminActions: string[];
+        rbacRoleGrants: Array<{ action: string; roleKey: string }>;
+        serviceAdminSessions: Array<{ allowedActions: string[]; id: string; role: string }>;
+      };
+      staleState.permissionRoles = staleState.permissionRoles.map((role) => (
+        role.key === "service_admin"
+          ? { ...role, actions: role.actions.filter((action) => !["operations.read", "operations.write", "security.review"].includes(action)) }
+          : role
+      ));
+      staleState.privilegedServiceAdminActions = staleState.privilegedServiceAdminActions
+        .filter((action) => !["operations.read", "operations.write", "security.review"].includes(action));
+      staleState.rbacRoleGrants = staleState.rbacRoleGrants.filter((grant) => (
+        grant.roleKey !== "service_admin" || !["operations.read", "operations.write", "security.review"].includes(grant.action)
+      ));
+      staleState.serviceAdminSessions = staleState.serviceAdminSessions.map((session) => (
+        session.id === staleSession.id
+          ? {
+              ...session,
+              allowedActions: session.allowedActions
+                .filter((action) => !["operations.read", "operations.write", "security.review"].includes(action))
+            }
+          : session
+      ));
+      writeFileSync(filePath, `${JSON.stringify(staleState, null, 2)}\n`);
+
+      const backfilledRepository = IdentityRepository.open({ filePath });
+      const backfilledSession = await backfilledRepository.findServiceAdminSession(staleSession.id);
+      const serviceAdminRole = (await backfilledRepository.listPermissionRoles())
+        .find((role) => role.key === "service_admin");
+      const privilegedActions = await backfilledRepository.listPrivilegedServiceAdminActions();
+      const serviceAdminGrants = await backfilledRepository.listRbacRoleGrants({ roleKey: "service_admin" });
+
+      assert.equal(backfilledSession?.allowedActions.includes("operations.read"), false);
+      assert.equal(backfilledSession?.allowedActions.includes("operations.write"), false);
+      assert.equal(backfilledSession?.allowedActions.includes("security.review"), false);
+      assert.equal(serviceAdminRole?.actions.includes("operations.read"), false);
+      assert.equal(serviceAdminRole?.actions.includes("operations.write"), false);
+      assert.equal(serviceAdminRole?.actions.includes("security.review"), false);
+      assert.equal(privilegedActions.includes("operations.read"), false);
+      assert.equal(privilegedActions.includes("operations.write"), false);
+      assert.equal(privilegedActions.includes("security.review"), false);
+      assert.equal(serviceAdminGrants.some((grant) => grant.action === "operations.read" && grant.effect === "allow"), false);
+      assert.equal(serviceAdminGrants.some((grant) => grant.action === "operations.write" && grant.effect === "allow"), false);
+      assert.equal(serviceAdminGrants.some((grant) => grant.action === "security.review" && grant.effect === "allow"), false);
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+    }
   });
 
   it("starts and completes OIDC callbacks with replay protection", async () => {
@@ -454,7 +869,7 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
       groupId: "group-vip",
       roleKey: "senior",
       sensitiveData: true
-    });
+    }, { tenantId: "tenant-northstar" });
     assert.equal(updated.status, "ok");
     assert.equal(updated.data.employee.chatLimit, 9);
     assert.deepEqual(updated.data.employee.channels, ["Telegram", "MAX"]);
@@ -463,11 +878,15 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.match(updated.data.auditEvent.id, /^evt_settings_employee_/);
     assert.equal(settings.listSettingsAuditEvents().some((event) => event.id === updated.data.auditEvent.id), true);
 
-    const passwordReset = await settings.resetEmployeePassword("usr-ns-agent", { reason: "Operator requested password reset" });
+    const passwordReset = await settings.resetEmployeePassword("usr-ns-agent", {
+      reason: "Operator requested password reset"
+    }, { tenantId: "tenant-northstar" });
     assert.equal(passwordReset.status, "ok");
     assert.equal(passwordReset.data.employee.credentials.passwordStatus, "reset_sent");
 
-    const mfaReset = await settings.resetEmployeeMfa("usr-ns-agent", { reason: "Phone replacement approved" });
+    const mfaReset = await settings.resetEmployeeMfa("usr-ns-agent", {
+      reason: "Phone replacement approved"
+    }, { tenantId: "tenant-northstar" });
     assert.equal(mfaReset.status, "ok");
     assert.equal(mfaReset.data.employee.mfaStatus, "reset_pending");
 
@@ -486,19 +905,121 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
       channels: ["Telegram"],
       name: "Escalation",
       scope: "Escalation handoff"
-    });
+    }, { tenantId: "tenant-northstar" });
     assert.equal(group.status, "ok");
     assert.equal(settings.listSettingsAuditEvents().some((event) => event.id === group.data.auditEvent.id), true);
 
-    const ownerDeactivation = await settings.deactivateEmployee("usr-ns-owner", { reason: "Need to test guard" });
+    const ownerDeactivation = await settings.deactivateEmployee("usr-ns-owner", {
+      reason: "Need to test guard"
+    }, { tenantId: "tenant-northstar" });
     assert.equal(ownerDeactivation.status, "invalid");
     assert.equal(ownerDeactivation.error?.code, "last_admin_required");
+  });
+
+  it("scopes settings employee reads and mutations to the authenticated tenant context", async () => {
+    const source = readFileSync(new URL("../apps/api-gateway/src/identity/settings.controller.ts", import.meta.url), "utf8");
+
+    assert.match(source, /ServiceAdminRequest/);
+    assert.match(source, /tenantId:\s*request\.serviceAdminContext\?\.currentTenantId \?\? query\.tenantId/);
+    assert.match(source, /tenantId:\s*request\.serviceAdminContext\?\.currentTenantId \?\? payload\.tenantId/);
+    assert.match(source, /updateEmployee\(employeeId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
+    assert.match(source, /resetEmployeePassword\(employeeId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
+    assert.match(source, /deactivateEmployee\(employeeId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
+
+    const repository = IdentityRepository.inMemory();
+    const settings = new SettingsEmployeeService(repository);
+
+    const volgaInvite = await settings.inviteEmployee({
+      email: "scoped-volga@volga.example",
+      groupId: "group-line-1",
+      name: "Scoped Volga",
+      roleKey: "employee"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(volgaInvite.status, "ok");
+    assert.equal(volgaInvite.data.employee.tenantId, "tenant-volga");
+    assert.equal(volgaInvite.data.inviteDescriptor.tenantId, "tenant-volga");
+
+    const crossTenantUpdate = await settings.updateEmployee("usr-ns-agent", {
+      roleKey: "admin"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(crossTenantUpdate.status, "denied");
+    assert.equal(crossTenantUpdate.error?.code, "employee_tenant_mismatch");
+
+    const crossTenantReset = await settings.resetEmployeePassword("usr-ns-agent", {
+      reason: "Cross tenant reset should be blocked"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(crossTenantReset.status, "denied");
+    assert.equal(crossTenantReset.error?.code, "employee_tenant_mismatch");
+
+    const crossTenantDeactivate = await settings.deactivateEmployee("usr-ns-agent", {
+      reason: "Cross tenant deactivate should be blocked"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(crossTenantDeactivate.status, "denied");
+    assert.equal(crossTenantDeactivate.error?.code, "employee_tenant_mismatch");
+  });
+
+  it("scopes settings groups and rules to the authenticated tenant context", async () => {
+    const source = readFileSync(new URL("../apps/api-gateway/src/identity/settings.controller.ts", import.meta.url), "utf8");
+
+    assert.match(source, /fetchGroups\(@Query\(\) query: \{ tenantId\?: string \}, @Req\(\) request: ServiceAdminRequest\)/);
+    assert.match(source, /this\.settingsEmployeeService\.fetchGroups\(\{ tenantId: request\.serviceAdminContext\?\.currentTenantId \?\? query\.tenantId \}\)/);
+    assert.match(source, /this\.settingsEmployeeService\.createGroup\(payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
+    assert.match(source, /this\.settingsEmployeeService\.updateGroup\(groupId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
+    assert.match(source, /this\.settingsRulesService\.fetchRules\(\{[\s\S]*tenantId: request\.serviceAdminContext\?\.currentTenantId \?\? query\.tenantId/);
+    assert.match(source, /this\.settingsRulesService\.updateRule\(ruleId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
+    assert.match(source, /this\.settingsRulesService\.testRule\(ruleId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
+
+    const settings = new SettingsEmployeeService(IdentityRepository.inMemory());
+    const volgaGroup = await settings.createGroup({
+      channels: ["Telegram"],
+      name: "Volga Escalation",
+      scope: "Volga scoped group"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(volgaGroup.status, "ok");
+    assert.equal(volgaGroup.data.group.tenantId, "tenant-volga");
+    assert.equal(volgaGroup.data.auditEvent.tenantId, "tenant-volga");
+
+    const volgaGroups = await settings.fetchGroups({ tenantId: "tenant-volga" });
+    const northstarGroups = await settings.fetchGroups({ tenantId: "tenant-northstar" });
+    assert.equal(volgaGroups.data.groups.some((group: Record<string, unknown>) => group.id === volgaGroup.data.group.id), true);
+    assert.equal(northstarGroups.data.groups.some((group: Record<string, unknown>) => group.id === volgaGroup.data.group.id), false);
+
+    const updatedVolgaGroup = await settings.updateGroup(String(volgaGroup.data.group.id), {
+      name: "Volga Priority Escalation"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(updatedVolgaGroup.status, "ok");
+    assert.equal(updatedVolgaGroup.data.group.tenantId, "tenant-volga");
+    assert.equal(updatedVolgaGroup.data.auditEvent.tenantId, "tenant-volga");
+
+    const rules = new SettingsRulesService();
+    const volgaRules = await rules.fetchRules({ tenantId: "tenant-volga" });
+    assert.equal(volgaRules.status, "ok");
+    assert.equal(volgaRules.data.rules.length > 0, true);
+    assert.equal(volgaRules.data.rules.every((rule: Record<string, unknown>) => rule.tenantId === "tenant-volga"), true);
+
+    const updatedVolgaRule = await rules.updateRule("operator-chat-limit", {
+      parameters: { defaultLimit: 5 },
+      reason: "Volga scoped limit"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(updatedVolgaRule.status, "ok");
+    assert.equal(updatedVolgaRule.data.rule.tenantId, "tenant-volga");
+    assert.equal(updatedVolgaRule.data.rule.parameters.defaultLimit, 5);
+    assert.equal(updatedVolgaRule.data.auditEvent.tenantId, "tenant-volga");
+
+    const northstarRules = await rules.fetchRules({ tenantId: "tenant-northstar" });
+    const northstarLimit = northstarRules.data.rules.find((rule: Record<string, unknown>) => rule.id === "operator-chat-limit");
+    assert.equal(northstarLimit.parameters.defaultLimit, 8);
+
+    const testRun = await rules.testRule("operator-chat-limit", { sampleSize: 12 }, { tenantId: "tenant-volga" });
+    assert.equal(testRun.status, "ok");
+    assert.equal(testRun.data.rule.tenantId, "tenant-volga");
+    assert.equal(testRun.data.auditEvent.tenantId, "tenant-volga");
   });
 
   it("manages settings rules with critical confirmation and impact tests", async () => {
     const settingsRules = new SettingsRulesService();
 
-    const workspace = await settingsRules.fetchRules();
+    const workspace = await settingsRules.fetchRules({ tenantId: "tenant-northstar" });
     assert.equal(workspace.status, "ok");
     assert.equal(workspace.data.totals.active, 8);
     assert.ok(workspace.data.rules.some((rule) => rule.id === "close-topic-required" && rule.severity === "critical"));
@@ -510,20 +1031,20 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     const deniedCriticalDisable = await settingsRules.updateRule("close-topic-required", {
       enabled: false,
       reason: "QA attempts unsafe disable"
-    });
+    }, { tenantId: "tenant-northstar" });
     assert.equal(deniedCriticalDisable.status, "invalid");
     assert.equal(deniedCriticalDisable.error?.code, "critical_rule_confirmation_required");
 
     const updatedLimit = await settingsRules.updateRule("operator-chat-limit", {
       parameters: { defaultLimit: 6 },
       reason: "Lower shared queue capacity"
-    });
+    }, { tenantId: "tenant-northstar" });
     assert.equal(updatedLimit.status, "ok");
     assert.equal(updatedLimit.data.rule.parameters.defaultLimit, 6);
     assert.match(updatedLimit.data.auditEvent.id, /^evt_settings_rule_/);
     assert.equal(settingsRules.listSettingsAuditEvents().some((event) => event.id === updatedLimit.data.auditEvent.id), true);
 
-    const testRun = await settingsRules.testRule("operator-chat-limit", { sampleSize: 50 });
+    const testRun = await settingsRules.testRule("operator-chat-limit", { sampleSize: 50 }, { tenantId: "tenant-northstar" });
     assert.equal(testRun.status, "ok");
     assert.equal(testRun.data.result.sampleSize, 50);
     assert.equal(testRun.data.result.affectedWorkflows.includes("routing"), true);
@@ -533,7 +1054,7 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
       confirmed: true,
       enabled: false,
       reason: "Emergency tenant override"
-    });
+    }, { tenantId: "tenant-northstar" });
     assert.equal(confirmedDisable.status, "ok");
     assert.equal(confirmedDisable.data.rule.enabled, false);
     assert.equal(confirmedDisable.data.workspace.totals.disabled, 1);
@@ -542,7 +1063,7 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
   it("guards settings management and reset routes with service-admin permissions", () => {
     const source = readFileSync(new URL("../apps/api-gateway/src/identity/settings.controller.ts", import.meta.url), "utf8");
 
-    assert.match(source, /@UseGuards\(DemoServiceAdminGuard\)[\s\S]*@Controller\("settings"\)/);
+    assert.match(source, /@UseGuards\(ServiceAdminSessionGuard\)[\s\S]*@Controller\("settings"\)/);
     assert.match(source, /@Get\("employees"\)[\s\S]*@RequireServiceAdminAction\("settings\.read"\)[\s\S]*fetchEmployees\(/);
     assert.match(source, /@Post\("employees\/invites"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*inviteEmployee\(/);
     assert.match(source, /@Patch\("employees\/:employeeId"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*updateEmployee\(/);

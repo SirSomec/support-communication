@@ -1,21 +1,239 @@
 services:
   frontend:
+    profiles: ["prisma-postgres"]
     build:
       args:
-        VITE_DEMO_SERVICE_ADMIN_KEY: pilot-local-service-admin-key
         VITE_ENABLE_SERVICE_ADMIN: "true"
 
   api-gateway:
+    profiles: ["prisma-postgres"]
+    depends_on:
+      pilot-bootstrap:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      LOCAL_DEVELOPMENT_SEED_ENABLED: "false"
       DEMO_SERVICE_ADMIN_KEY: pilot-local-service-admin-key
-      ALLOW_DEMO_SERVICE_ADMIN_HEADERS: "true"
+      FILE_SCAN_CALLBACK_TOKEN: ${FILE_SCAN_CALLBACK_TOKEN:-pilot-local-service-admin-key}
+      JWT_ACCESS_SECRET: pilot-local-access-secret-16
+      JWT_REFRESH_SECRET: pilot-local-refresh-secret-16
+      MFA_OTP_DELIVERY_MODE: ${MFA_OTP_DELIVERY_MODE:-smtp}
+      MFA_OTP_SMTP_FROM: ${MFA_OTP_SMTP_FROM:-noreply@support-communication.local}
+      MFA_OTP_SMTP_HOST: ${MFA_OTP_SMTP_HOST:-mailpit}
+      MFA_OTP_SMTP_PORT: ${MFA_OTP_SMTP_PORT:-1025}
+      MFA_OTP_SMTP_SECURE: ${MFA_OTP_SMTP_SECURE:-false}
+      MFA_OTP_SMTP_TLS_REJECT_UNAUTHORIZED: ${MFA_OTP_SMTP_TLS_REJECT_UNAUTHORIZED:-true}
+      PUBLIC_API_KEY_SECRET: pilot-local-public-api-secret
+      AUTOMATION_REPOSITORY: prisma
       IDENTITY_REPOSITORY: prisma
       BILLING_REPOSITORY: prisma
       CONVERSATION_REPOSITORY: prisma
       WORKSPACE_REPOSITORY: prisma
+      INTEGRATION_REPOSITORY: prisma
+      NOTIFICATION_REPOSITORY: prisma
+      OPERATIONS_REPOSITORY: prisma
+      PLATFORM_REPOSITORY: prisma
+      QUALITY_REPOSITORY: prisma
+      REPORT_REPOSITORY: prisma
+      REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
+      ROUTING_REPOSITORY: prisma
       REALTIME_REDIS_FANOUT_ENABLED: "true"
-      TELEGRAM_WEBHOOK_ENABLED: "true"
+      TELEGRAM_INGRESS_MODE: polling
+      TELEGRAM_WEBHOOK_ENABLED: "false"
       PUBLIC_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_BASE_URL:-http://127.0.0.1:4100}
       OUTBOX_TELEGRAM_ENABLED: "true"
       OUTBOX_TELEGRAM_CHANNEL: Telegram
+      BROWSER_PUSH_PUBLIC_KEY: ${BROWSER_PUSH_PUBLIC_KEY:-}
+
+  pilot-bootstrap:
+    profiles: ["prisma-postgres"]
+    build:
+      context: .
+      target: api-gateway
+    command: ["npm", "run", "pilot:bootstrap"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      INTEGRATION_STORE_FILE: .runtime/docker/integration-store.json
+      PILOT_TENANT_SLUG: ${PILOT_TENANT_SLUG:-pilot-client}
+      PILOT_OPERATOR_EMAIL: ${PILOT_OPERATOR_EMAIL:-operator@pilot-client.test}
+      PILOT_OPERATOR_PASSWORD: ${PILOT_OPERATOR_PASSWORD:-Pilot-Operator-2026!}
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+    restart: "no"
+
+  notification-delivery-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      NOTIFICATION_REPOSITORY: prisma
+      BROWSER_PUSH_ENABLED: ${BROWSER_PUSH_ENABLED:-false}
+      BROWSER_PUSH_PUBLIC_KEY: ${BROWSER_PUSH_PUBLIC_KEY:-}
+      BROWSER_PUSH_PRIVATE_KEY: ${BROWSER_PUSH_PRIVATE_KEY:-}
+      BROWSER_PUSH_SUBJECT: ${BROWSER_PUSH_SUBJECT:-mailto:ops@support-communication.local}
+      NOTIFICATION_DELIVERY_PROVIDER_MODE: ${NOTIFICATION_DELIVERY_PROVIDER_MODE:-disabled}
+
+  lead-notification-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      INTEGRATION_REPOSITORY: prisma
+      PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE: ${PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE:-smtp}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_FROM: ${PUBLIC_DEMO_NOTIFICATION_SMTP_FROM:-noreply@support-communication.local}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_HOST: ${PUBLIC_DEMO_NOTIFICATION_SMTP_HOST:-mailpit}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_PASSWORD: ${PUBLIC_DEMO_NOTIFICATION_SMTP_PASSWORD:-}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_PORT: ${PUBLIC_DEMO_NOTIFICATION_SMTP_PORT:-1025}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_SECURE: ${PUBLIC_DEMO_NOTIFICATION_SMTP_SECURE:-false}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_TLS_REJECT_UNAUTHORIZED: ${PUBLIC_DEMO_NOTIFICATION_SMTP_TLS_REJECT_UNAUTHORIZED:-true}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_TO: ${PUBLIC_DEMO_NOTIFICATION_SMTP_TO:-sales@support-communication.local}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_USERNAME: ${PUBLIC_DEMO_NOTIFICATION_SMTP_USERNAME:-}
+
+  webhook-delivery-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      INTEGRATION_REPOSITORY: prisma
+      WEBHOOK_DELIVERY_PROVIDER_MODE: ${WEBHOOK_DELIVERY_PROVIDER_MODE:-http}
+      WEBHOOK_DELIVERY_SIGNING_SECRET: ${WEBHOOK_DELIVERY_SIGNING_SECRET:-pilot-local-webhook-signing-secret}
+      WEBHOOK_DELIVERY_INTERVAL_MS: 10000
+      WEBHOOK_DELIVERY_LIMIT: 50
+      WEBHOOK_DELIVERY_MAX_ATTEMPTS: 3
+      WEBHOOK_DELIVERY_RETRY_BACKOFF_MS: 60000
+      WEBHOOK_DELIVERY_HTTP_TIMEOUT_MS: 5000
+
+  telegram-polling-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      INTEGRATION_REPOSITORY: prisma
+      CONVERSATION_REPOSITORY: prisma
+      TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-true}
+      TELEGRAM_INGRESS_MODE: polling
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
+      TELEGRAM_POLLING_INTERVAL_MS: ${TELEGRAM_POLLING_INTERVAL_MS:-5000}
+      TELEGRAM_POLLING_LIMIT: ${TELEGRAM_POLLING_LIMIT:-50}
+      TELEGRAM_POLLING_TIMEOUT_MS: ${TELEGRAM_POLLING_TIMEOUT_MS:-10000}
+
+  proactive-delivery-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      AUTOMATION_REPOSITORY: prisma
+      CONVERSATION_REPOSITORY: prisma
+      PROACTIVE_DELIVERY_ACTIVE_VARIANTS: A,B
+      PROACTIVE_DELIVERY_INTERVAL_MS: 10000
+      PROACTIVE_DELIVERY_LIMIT: 50
+      PROACTIVE_DELIVERY_VISITOR_TTL_MS: 900000
+
+  bot-runtime-reconciliation-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      AUTOMATION_REPOSITORY: prisma
+      CONVERSATION_REPOSITORY: prisma
+      BOT_RUNTIME_RECONCILIATION_INTERVAL_MS: 5000
+      BOT_RUNTIME_RECONCILIATION_LEASE_MS: 30000
+      BOT_RUNTIME_RECONCILIATION_LIMIT: 50
+      BOT_RUNTIME_RECONCILIATION_MAX_ATTEMPTS: 5
+      BOT_RUNTIME_RECONCILIATION_RETRY_MS: 5000
+
+  report-digest-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      REPORT_REPOSITORY: prisma
+      REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: support-communication-local
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio-password
+
+  report-export-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      REPORT_REPOSITORY: prisma
+      REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: support-communication-local
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio-password
+
+  sla-timer-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      ROUTING_REPOSITORY: prisma
+      SLA_TIMER_WORKER_HEALTH_PORT: 4110
+      SLA_TIMER_WORKER_INTERVAL_MS: 5000
+      SLA_TIMER_WORKER_LIMIT: 50
+      SLA_TIMER_WORKER_MAX_ATTEMPTS: 5
+      SLA_TIMER_WORKER_RETRY_BACKOFF_MS: 60000
+
+  rescue-return-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      ROUTING_REPOSITORY: prisma
+      RESCUE_RETURN_WORKER_HEALTH_PORT: 4110
+      RESCUE_RETURN_WORKER_INTERVAL_MS: 5000
+      RESCUE_RETURN_WORKER_LIMIT: 50
+      RESCUE_RETURN_WORKER_MAX_ATTEMPTS: 5
+      RESCUE_RETURN_WORKER_RETRY_BACKOFF_MS: 60000
+
+  outbox-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      INTEGRATION_REPOSITORY: prisma
+      OUTBOX_TELEGRAM_ENABLED: ${OUTBOX_TELEGRAM_ENABLED:-true}
+      OUTBOX_TELEGRAM_CHANNEL: ${OUTBOX_TELEGRAM_CHANNEL:-Telegram}
+      OUTBOX_TELEGRAM_API_BASE_URL: ${OUTBOX_TELEGRAM_API_BASE_URL:-https://api.telegram.org}
+      OUTBOX_TELEGRAM_BOT_TOKEN: ${OUTBOX_TELEGRAM_BOT_TOKEN:-}
+      PROVIDER_CREDENTIAL_MASTER_KEY: ${PROVIDER_CREDENTIAL_MASTER_KEY:-ERERERERERERERERERERERERERERERERERERERERERE=}
+      OUTBOX_VK_ENABLED: ${OUTBOX_VK_ENABLED:-true}
+      OUTBOX_VK_ENDPOINT: ${OUTBOX_VK_API_BASE_URL:-https://api.vk.com}
+      OUTBOX_VK_CHANNEL: VK
+      OUTBOX_MAX_ENABLED: ${OUTBOX_MAX_ENABLED:-true}
+      OUTBOX_MAX_ENDPOINT: ${OUTBOX_MAX_API_BASE_URL:-https://platform-api2.max.ru}
+      OUTBOX_MAX_CHANNEL: MAX
+
+  billing-sync-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      BILLING_REPOSITORY: prisma
+      BILLING_SYNC_PROVIDER_MODE: ${BILLING_SYNC_PROVIDER_MODE:-disabled}
+      BILLING_SYNC_PROVIDER_URL: ${BILLING_SYNC_PROVIDER_URL:-}
+
+  file-scan-scanner-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      OUTBOX_SCANNER_ENABLED: ${OUTBOX_SCANNER_ENABLED:-true}
+      OUTBOX_SCANNER_PROVIDER_MODE: ${OUTBOX_SCANNER_PROVIDER_MODE:-http}
+      OUTBOX_SCANNER_LOCAL_VERDICT: ${OUTBOX_SCANNER_LOCAL_VERDICT:-clean}
+      OUTBOX_SCANNER_URL: ${OUTBOX_SCANNER_URL:-http://clamav-scanner:4120/scan}
+      OUTBOX_SCANNER_BEARER_TOKEN: ${OUTBOX_SCANNER_BEARER_TOKEN:-}
+      OUTBOX_FILE_SCAN_RESULT_BASE_URL: http://api-gateway:4100/api/v1
+      OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN: ${FILE_SCAN_CALLBACK_TOKEN:-pilot-local-service-admin-key}

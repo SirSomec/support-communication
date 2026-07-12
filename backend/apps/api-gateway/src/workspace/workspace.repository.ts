@@ -72,12 +72,27 @@ export interface ClientMergeConflictRecord {
   tenantId?: string;
 }
 
+export interface ClientExportJobRecord {
+  auditEvent: Record<string, unknown>;
+  createdAt: string;
+  exportId: string;
+  fileDescriptor: Record<string, unknown>;
+  filters: Record<string, unknown>;
+  format: string;
+  itemCount: number;
+  reason: string;
+  segment?: Record<string, unknown>;
+  sensitiveFieldsMasked: true;
+  status: string;
+  tenantId?: string;
+}
+
 export interface TemplateRecord {
   auditId?: string;
   channel: string;
   id: string;
   scope: string;
-  tenantId?: string;
+  tenantId: string;
   text: string;
   title: string;
   topic: string;
@@ -118,7 +133,7 @@ export interface KnowledgeArticle {
   id: string;
   owner: string;
   status: string;
-  tenantId?: string;
+  tenantId: string;
   title: string;
   topics: string[];
   updated: string;
@@ -162,6 +177,7 @@ export interface KnowledgeApprovalDecisionRecord {
 }
 
 export interface WorkspaceState {
+  clientExportJobs: ClientExportJobRecord[];
   clientMergeConflicts: ClientMergeConflictRecord[];
   clientMergeEvents: ClientMergeEvent[];
   clientProfiles: ClientProfileRecord[];
@@ -189,6 +205,7 @@ export interface WorkspaceRepositoryPort {
   listFiles(scope?: WorkspaceTenantScope): FileRecord[] | Promise<FileRecord[]>;
   listClientMergeConflicts(filters?: ClientMergeConflictFilters): ClientMergeConflictRecord[] | Promise<ClientMergeConflictRecord[]>;
   listClientMergeEvents(filters?: ClientMergeEventFilters): ClientMergeEvent[] | Promise<ClientMergeEvent[]>;
+  listClientExportJobs(scope?: WorkspaceTenantScope): ClientExportJobRecord[] | Promise<ClientExportJobRecord[]>;
   listClientProfiles(scope?: WorkspaceTenantScope): ClientProfileRecord[] | Promise<ClientProfileRecord[]>;
   listKnowledgeApprovalDecisions(articleId: string, scope?: WorkspaceTenantScope): KnowledgeApprovalDecisionRecord[] | Promise<KnowledgeApprovalDecisionRecord[]>;
   listKnowledgeArticles(scope?: WorkspaceTenantScope): KnowledgeArticle[] | Promise<KnowledgeArticle[]>;
@@ -198,6 +215,7 @@ export interface WorkspaceRepositoryPort {
   listTemplateVersions(templateId: string): TemplateVersionRecord[] | Promise<TemplateVersionRecord[]>;
   saveClientMergeEvent(event: ClientMergeEvent): ClientMergeEvent | Promise<ClientMergeEvent>;
   saveClientMergeConflict(conflict: ClientMergeConflictRecord): ClientMergeConflictRecord | Promise<ClientMergeConflictRecord>;
+  saveClientExportJob(job: ClientExportJobRecord): ClientExportJobRecord | Promise<ClientExportJobRecord>;
   saveClientProfile(profile: ClientProfileRecord): ClientProfileRecord | Promise<ClientProfileRecord>;
   saveFileScanResultIdempotency(record: FileScanResultIdempotencyRecord): FileScanResultIdempotencyRecord | Promise<FileScanResultIdempotencyRecord>;
   saveFile(file: FileRecord): FileRecord | Promise<FileRecord>;
@@ -215,6 +233,7 @@ export interface WorkspaceRepositoryPort {
 
 interface WorkspaceRepositoryOptions {
   filePath: string;
+  seed?: WorkspaceState;
 }
 
 interface WorkspaceTenantScope {
@@ -247,12 +266,12 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     defaultRepository = repository;
   }
 
-  static inMemory(seed: WorkspaceState = seedWorkspaceState()): WorkspaceRepository {
+  static inMemory(seed: WorkspaceState = createEmptyWorkspaceState()): WorkspaceRepository {
     return new WorkspaceRepository(createDurableWorkspaceRepository(new InMemoryStore(seed)));
   }
 
-  static open({ filePath }: WorkspaceRepositoryOptions): WorkspaceRepository {
-    return new WorkspaceRepository(createDurableWorkspaceRepository(new JsonFileStore({ filePath, seed: seedWorkspaceState() })));
+  static open({ filePath, seed = createEmptyWorkspaceState() }: WorkspaceRepositoryOptions): WorkspaceRepository {
+    return new WorkspaceRepository(createDurableWorkspaceRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client, fallback }: PrismaWorkspaceRepositoryOptions): WorkspaceRepository {
@@ -311,6 +330,10 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     return this.adapter.listClientMergeEvents(filters);
   }
 
+  listClientExportJobs(scope: WorkspaceTenantScope = {}): ClientExportJobRecord[] | Promise<ClientExportJobRecord[]> {
+    return this.adapter.listClientExportJobs(scope);
+  }
+
   listClientProfiles(scope: WorkspaceTenantScope = {}): ClientProfileRecord[] | Promise<ClientProfileRecord[]> {
     return this.adapter.listClientProfiles(scope);
   }
@@ -347,6 +370,10 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     return this.adapter.saveClientMergeConflict(conflict);
   }
 
+  saveClientExportJob(job: ClientExportJobRecord): ClientExportJobRecord | Promise<ClientExportJobRecord> {
+    return this.adapter.saveClientExportJob(job);
+  }
+
   saveClientProfile(profile: ClientProfileRecord): ClientProfileRecord | Promise<ClientProfileRecord> {
     return this.adapter.saveClientProfile(profile);
   }
@@ -364,7 +391,7 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
   }
 
   saveKnowledgeArticle(article: KnowledgeArticle): KnowledgeArticle | Promise<KnowledgeArticle> {
-    return this.adapter.saveKnowledgeArticle(article);
+    return this.adapter.saveKnowledgeArticle({ ...article, tenantId: requireWorkspaceTenantId(article.tenantId) });
   }
 
   saveKnowledgeDraftVersion(version: KnowledgeDraftVersionRecord): KnowledgeDraftVersionRecord | Promise<KnowledgeDraftVersionRecord> {
@@ -376,7 +403,7 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
   }
 
   saveTemplate(template: TemplateRecord): TemplateRecord | Promise<TemplateRecord> {
-    return this.adapter.saveTemplate(template);
+    return this.adapter.saveTemplate({ ...template, tenantId: requireWorkspaceTenantId(template.tenantId) });
   }
 
   saveTemplateVersion(version: TemplateVersionRecord): TemplateVersionRecord | Promise<TemplateVersionRecord> {
@@ -416,6 +443,10 @@ export interface PrismaWorkspaceClient {
       findMany(input: PrismaClientMergeEventFindManyInput): Promise<PrismaClientMergeEventRow[]>;
       upsert(input: PrismaClientMergeEventUpsertInput): Promise<PrismaClientMergeEventRow>;
     };
+  clientExportJob: {
+    findMany(input: PrismaClientExportJobFindManyInput): Promise<PrismaClientExportJobRow[]>;
+    upsert(input: PrismaClientExportJobUpsertInput): Promise<PrismaClientExportJobRow>;
+  };
   clientProfile: {
     findFirst(input: PrismaClientProfileFindFirstInput): Promise<PrismaClientProfileRow | null>;
     findMany(input: PrismaClientProfileFindManyInput): Promise<PrismaClientProfileRow[]>;
@@ -465,6 +496,38 @@ export interface PrismaWorkspaceClient {
     update(input: PrismaWorkspaceFileUpdateScanInput): Promise<PrismaWorkspaceFileRow>;
     upsert(input: PrismaWorkspaceFileUpsertInput): Promise<PrismaWorkspaceFileRow>;
   };
+}
+
+interface PrismaClientExportJobFindManyInput {
+  orderBy: { createdAt: "desc" };
+  where?: { tenantId?: string };
+}
+
+interface PrismaClientExportJobUpsertInput {
+  create: PrismaClientExportJobCreateInput;
+  update: PrismaClientExportJobUpdateInput;
+  where: { exportId: string };
+}
+
+interface PrismaClientExportJobCreateInput {
+  auditEvent: Record<string, unknown>;
+  createdAt: Date;
+  exportId: string;
+  fileDescriptor: Record<string, unknown>;
+  filters: Record<string, unknown>;
+  format: string;
+  itemCount: number;
+  reason: string;
+  segment: Record<string, unknown> | null;
+  sensitiveFieldsMasked: boolean;
+  status: string;
+  tenantId: string;
+}
+
+type PrismaClientExportJobUpdateInput = Omit<PrismaClientExportJobCreateInput, "exportId">;
+
+interface PrismaClientExportJobRow extends PrismaClientExportJobCreateInput {
+  updatedAt?: Date;
 }
 
 interface PrismaClientProfileFindFirstInput {
@@ -876,11 +939,7 @@ interface PrismaWorkspaceFileScanUpdateInput {
 interface PrismaWorkspaceFileRow extends PrismaWorkspaceFileCreateInput {}
 
 class PrismaWorkspaceRepository implements WorkspaceRepositoryPort {
-  private readonly fallback: WorkspaceRepositoryPort;
-
-  constructor(private readonly client: PrismaWorkspaceClient, fallback: WorkspaceRepositoryPort = WorkspaceRepository.inMemory()) {
-    this.fallback = fallback;
-  }
+  constructor(private readonly client: PrismaWorkspaceClient, _fallback?: WorkspaceRepositoryPort) {}
 
   async completeFileScanResultIdempotency(key: string, result: Record<string, unknown>): Promise<FileScanResultIdempotencyRecord | undefined> {
     try {
@@ -1016,6 +1075,15 @@ class PrismaWorkspaceRepository implements WorkspaceRepositoryPort {
     return rows.map(toClientMergeEvent);
   }
 
+  async listClientExportJobs(scope: WorkspaceTenantScope = {}): Promise<ClientExportJobRecord[]> {
+    const rows = await this.client.clientExportJob.findMany({
+      orderBy: { createdAt: "desc" },
+      where: scope.tenantId ? { tenantId: scope.tenantId } : undefined
+    });
+
+    return rows.map(toClientExportJobRecord);
+  }
+
   async listClientProfiles(scope: WorkspaceTenantScope = {}): Promise<ClientProfileRecord[]> {
     const rows = await this.client.clientProfile.findMany({
       orderBy: { updatedAt: "desc" },
@@ -1144,6 +1212,17 @@ class PrismaWorkspaceRepository implements WorkspaceRepositoryPort {
     });
 
     return toClientMergeConflictRecord(row);
+  }
+
+  async saveClientExportJob(job: ClientExportJobRecord): Promise<ClientExportJobRecord> {
+    const create = toPrismaClientExportJobCreateInput(job);
+    const row = await this.client.clientExportJob.upsert({
+      create,
+      update: toPrismaClientExportJobUpdateInput(create),
+      where: { exportId: create.exportId }
+    });
+
+    return toClientExportJobRecord(row);
   }
 
   async saveClientProfile(profile: ClientProfileRecord): Promise<ClientProfileRecord> {
@@ -1467,6 +1546,10 @@ function createDurableWorkspaceRepository(store: DurableStore<WorkspaceState>): 
       return clone(readState(store).clientMergeEvents.filter((event) => isClientMergeEventInScope(event, filters)));
     },
 
+    listClientExportJobs(scope: WorkspaceTenantScope = {}): ClientExportJobRecord[] {
+      return clone(readState(store).clientExportJobs.filter((job) => !scope.tenantId || job.tenantId === scope.tenantId));
+    },
+
     listClientProfiles(scope: WorkspaceTenantScope = {}): ClientProfileRecord[] {
       return clone(readState(store).clientProfiles.filter((profile) => isClientProfileInScope(profile, scope)));
     },
@@ -1557,6 +1640,29 @@ function createDurableWorkspaceRepository(store: DurableStore<WorkspaceState>): 
 
       if (!persisted) {
         throw new Error(`Client merge conflict ${conflict.id} was not persisted.`);
+      }
+
+      return clone(persisted);
+    },
+
+    saveClientExportJob(job: ClientExportJobRecord): ClientExportJobRecord {
+      let persisted: ClientExportJobRecord | null = null;
+      store.update((state) => {
+        const current = normalizeState(state);
+        const nextJob = clone(job);
+        persisted = nextJob;
+        const exists = current.clientExportJobs.some((item) => item.exportId === nextJob.exportId);
+
+        return {
+          ...current,
+          clientExportJobs: exists
+            ? current.clientExportJobs.map((item) => item.exportId === nextJob.exportId ? nextJob : item)
+            : [...current.clientExportJobs, nextJob]
+        };
+      });
+
+      if (!persisted) {
+        throw new Error(`Client export job ${job.exportId} was not persisted.`);
       }
 
       return clone(persisted);
@@ -1899,8 +2005,9 @@ function createDurableWorkspaceRepository(store: DurableStore<WorkspaceState>): 
   };
 }
 
-function seedWorkspaceState(): WorkspaceState {
+export function createEmptyWorkspaceState(): WorkspaceState {
   return {
+    clientExportJobs: [],
     clientMergeConflicts: [],
     clientMergeEvents: [],
     clientProfiles: [],
@@ -1917,6 +2024,7 @@ function seedWorkspaceState(): WorkspaceState {
 
 function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   return {
+    clientExportJobs: normalizeClientExportJobs(state.clientExportJobs),
     clientMergeConflicts: state.clientMergeConflicts ?? [],
     clientMergeEvents: state.clientMergeEvents ?? [],
     clientProfiles: state.clientProfiles ?? [],
@@ -1931,6 +2039,23 @@ function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   };
 }
 
+function normalizeClientExportJobs(jobs: ClientExportJobRecord[] | undefined): ClientExportJobRecord[] {
+  return (jobs ?? []).map((job) => ({
+    auditEvent: clone(job.auditEvent ?? {}),
+    createdAt: String(job.createdAt ?? ""),
+    exportId: String(job.exportId ?? ""),
+    fileDescriptor: clone(job.fileDescriptor ?? {}),
+    filters: clone(job.filters ?? {}),
+    format: String(job.format ?? "json"),
+    itemCount: Number.isFinite(Number(job.itemCount)) ? Number(job.itemCount) : 0,
+    reason: String(job.reason ?? ""),
+    ...(job.segment ? { segment: clone(job.segment) } : {}),
+    sensitiveFieldsMasked: true,
+    status: String(job.status ?? "queued"),
+    ...(job.tenantId ? { tenantId: String(job.tenantId) } : {})
+  }));
+}
+
 function readState(store: DurableStore<WorkspaceState>): WorkspaceState {
   return normalizeState(store.read());
 }
@@ -1940,11 +2065,11 @@ function isClientProfileInScope(profile: ClientProfileRecord, scope: WorkspaceTe
 }
 
 function isTemplateInScope(template: TemplateRecord, scope: WorkspaceTenantScope): boolean {
-  return !scope.tenantId || (template.tenantId ?? "tenant-volga") === scope.tenantId;
+  return !scope.tenantId || template.tenantId === scope.tenantId;
 }
 
 function isKnowledgeArticleInScope(article: KnowledgeArticle, scope: WorkspaceTenantScope): boolean {
-  return !scope.tenantId || (article.tenantId ?? "tenant-volga") === scope.tenantId;
+  return !scope.tenantId || article.tenantId === scope.tenantId;
 }
 
 function isClientMergeEventInScope(event: ClientMergeEvent, filters: ClientMergeEventFilters): boolean {
@@ -1994,7 +2119,7 @@ function isSameTemplateVersion(left: TemplateVersionRecord, right: TemplateVersi
 
 function isSameKnowledgeArticleIdentity(left: KnowledgeArticle, right: KnowledgeArticle): boolean {
   return left.id === right.id
-    && (left.tenantId ?? "tenant-volga") === (right.tenantId ?? "tenant-volga");
+    && left.tenantId === right.tenantId;
 }
 
 function isDuplicateKnowledgeDraftVersionReplay(left: KnowledgeDraftVersionRecord, right: KnowledgeDraftVersionRecord): boolean {
@@ -2036,7 +2161,7 @@ function isSameClientMergeEventPayload(left: ClientMergeEvent, right: ClientMerg
 }
 
 function clientMergeEventTenantId(event: ClientMergeEvent): string {
-  return event.tenantId ?? "tenant-volga";
+  return requireWorkspaceTenantId(event.tenantId);
 }
 
 function parseClientMergeConflictState(state: string): ClientMergeConflictState {
@@ -2063,7 +2188,7 @@ function toPrismaWorkspaceFileCreateInput(file: FileRecord): PrismaWorkspaceFile
     scanner: file.scanner ?? null,
     sizeBytes: BigInt(file.sizeBytes),
     storageState: file.storageState,
-    tenantId: file.tenantId ?? "tenant-volga"
+    tenantId: requireWorkspaceTenantId(file.tenantId)
   };
 }
 
@@ -2125,6 +2250,56 @@ function toFileRecord(row: PrismaWorkspaceFileRow): FileRecord {
   };
 }
 
+function toPrismaClientExportJobCreateInput(job: ClientExportJobRecord): PrismaClientExportJobCreateInput {
+  return {
+    auditEvent: clone(job.auditEvent),
+    createdAt: new Date(job.createdAt),
+    exportId: job.exportId,
+    fileDescriptor: clone(job.fileDescriptor),
+    filters: clone(job.filters),
+    format: job.format,
+    itemCount: job.itemCount,
+    reason: job.reason,
+    segment: job.segment ? clone(job.segment) : null,
+    sensitiveFieldsMasked: true,
+    status: job.status,
+    tenantId: requireWorkspaceTenantId(job.tenantId)
+  };
+}
+
+function toPrismaClientExportJobUpdateInput(job: PrismaClientExportJobCreateInput): PrismaClientExportJobUpdateInput {
+  return {
+    auditEvent: clone(job.auditEvent),
+    createdAt: job.createdAt,
+    fileDescriptor: clone(job.fileDescriptor),
+    filters: clone(job.filters),
+    format: job.format,
+    itemCount: job.itemCount,
+    reason: job.reason,
+    segment: job.segment ? clone(job.segment) : null,
+    sensitiveFieldsMasked: true,
+    status: job.status,
+    tenantId: job.tenantId
+  };
+}
+
+function toClientExportJobRecord(row: PrismaClientExportJobRow): ClientExportJobRecord {
+  return {
+    auditEvent: clone(row.auditEvent),
+    createdAt: row.createdAt.toISOString(),
+    exportId: row.exportId,
+    fileDescriptor: clone(row.fileDescriptor),
+    filters: clone(row.filters),
+    format: row.format,
+    itemCount: row.itemCount,
+    reason: row.reason,
+    ...(row.segment ? { segment: clone(row.segment) } : {}),
+    sensitiveFieldsMasked: true,
+    status: row.status,
+    tenantId: row.tenantId
+  };
+}
+
 function toPrismaClientProfileCreateInput(profile: ClientProfileRecord): PrismaClientProfileCreateInput {
   return {
     channel: profile.channel,
@@ -2136,7 +2311,7 @@ function toPrismaClientProfileCreateInput(profile: ClientProfileRecord): PrismaC
     phone: profile.phone,
     previous: clone(profile.previous),
     sourceProfileId: profile.sourceProfileId,
-    tenantId: profile.tenantId ?? "tenant-volga",
+    tenantId: requireWorkspaceTenantId(profile.tenantId),
     topic: profile.topic
   };
 }
@@ -2180,7 +2355,7 @@ function toPrismaClientMergeEventCreateInput(event: ClientMergeEvent): PrismaCli
     mergeGraphEdge: event.mergeGraphEdge,
     primaryProfileId: event.primaryProfileId,
     reason: event.reason ?? null,
-    tenantId: event.tenantId ?? "tenant-volga"
+    tenantId: requireWorkspaceTenantId(event.tenantId)
   };
 }
 
@@ -2219,7 +2394,7 @@ function toPrismaClientMergeConflictCreateInput(conflict: ClientMergeConflictRec
     primaryProfileId: conflict.primaryProfileId,
     reason: conflict.reason,
     state: parseClientMergeConflictState(conflict.state),
-    tenantId: conflict.tenantId ?? "tenant-volga"
+    tenantId: requireWorkspaceTenantId(conflict.tenantId)
   };
 }
 
@@ -2257,7 +2432,7 @@ function toPrismaKnowledgeArticleCreateInput(article: KnowledgeArticle): PrismaK
     id: article.id,
     owner: article.owner,
     status: article.status,
-    tenantId: article.tenantId ?? "tenant-volga",
+    tenantId: requireWorkspaceTenantId(article.tenantId),
     title: article.title,
     topics: clone(article.topics),
     updatedAt: new Date(article.updated),
@@ -2393,7 +2568,7 @@ function toPrismaTemplateRecordCreateInput(template: TemplateRecord): PrismaTemp
     channel: template.channel,
     id: template.id,
     scope: template.scope,
-    tenantId: template.tenantId ?? "tenant-volga",
+    tenantId: requireWorkspaceTenantId(template.tenantId),
     text: template.text,
     title: template.title,
     topic: template.topic,
@@ -2533,6 +2708,14 @@ function clone<T>(value: T): T {
   }
 
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function requireWorkspaceTenantId(value: unknown): string {
+  const tenantId = String(value ?? "").trim();
+  if (!tenantId) {
+    throw new Error("workspace_tenant_id_required");
+  }
+  return tenantId;
 }
 
 function isPrismaNotFoundError(error: unknown): boolean {

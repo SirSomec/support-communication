@@ -1,9 +1,5 @@
-import {
-  createAuditEvent,
-  formatRescueTimer,
-  rescueDurationSeconds,
-  statusLabels
-} from "./dialogModel.js";
+import { statusLabels } from "./dialogModel.js";
+import { routingService } from "../services/routingService.js";
 
 export function useDialogActions({
   access,
@@ -15,6 +11,7 @@ export function useDialogActions({
   composeMode,
   draft,
   isClosed,
+  refreshInbox,
   selected,
   selectedStatus,
   selectedTopic,
@@ -24,28 +21,25 @@ export function useDialogActions({
   setFilter,
   setToast,
   setTopics,
-  topics
+  topics,
+  startRescueRequest = routingService.startRescue
 }) {
   function handleTopicChange(value) {
     const previousTopic = topics[selected.id] ?? "";
     setTopics((current) => ({ ...current, [selected.id]: value }));
 
     if (value && value !== previousTopic) {
-      appendMessage(selected.id, {
-        actor: "Иван П.",
-        detail: previousTopic ? `Тематика изменена: ${previousTopic} -> ${value}` : `Проставлена тематика: ${value}`,
+      applyConversationStatus(selected.id, selectedStatus, {
+        detail: previousTopic ? `Topic changed: ${previousTopic} -> ${value}` : `Topic selected: ${value}`,
         eventKind: "topic",
-        fromTopic: previousTopic || "Не выбрана",
-        text: previousTopic ? `Тематика изменена: ${previousTopic} -> ${value}` : `Проставлена тематика: ${value}`,
-        toTopic: value,
-        type: "event",
-        time: "сейчас"
+        fromTopic: previousTopic || "Not selected",
+        toTopic: value
       });
-      setToast("Тематика сохранена и попадет в audit trail.");
+      setToast("Тематика сохранена в audit trail.");
     }
   }
 
-  function handleStatusChange(nextStatus) {
+  function handleStatusChange(nextStatus, options = {}) {
     if (!access.canManageDialogs) {
       setToast(access.reason);
       return;
@@ -56,7 +50,7 @@ export function useDialogActions({
     }
 
     if (nextStatus === "closed") {
-      handleClose();
+      handleClose(options);
       return;
     }
 
@@ -82,7 +76,7 @@ export function useDialogActions({
     setToast(`Статус: ${statusLabels[nextStatus]}`);
   }
 
-  function handleRescueStart(actionConfig) {
+  async function handleRescueStart(actionConfig) {
     if (!access.canManageDialogs) {
       setToast(access.reason);
       return;
@@ -98,50 +92,34 @@ export function useDialogActions({
       return;
     }
 
-    const startedAt = Date.now();
-    const deadlineAt = startedAt + rescueDurationSeconds * 1000;
-    const nextStatus = actionConfig.nextStatus ?? "assigned";
-    const rescue = {
-      state: "active",
-      startedAt,
-      deadlineAt,
-      durationSeconds: rescueDurationSeconds,
-      reason: "Ручной запуск: диалог требует ответа или возврата в очередь",
-      nextAction: "Ответить клиенту или вернуть в SLA-очередь",
-      owner: "Иван П.",
-      source: actionConfig.title
-    };
+    const reason = actionConfig.reason ?? "Ручной запуск из карточки диалога";
+    const source = actionConfig.source ?? "dialog_action_menu";
+    const response = await startRescueRequest({
+      conversationId: selected.id,
+      reason,
+      source
+    });
 
-    setConversationItems((current) =>
-      current.map((conversation) => {
-        if (conversation.id !== selected.id) {
-          return conversation;
-        }
+    if (response.status !== "ok") {
+      setToast(rescueErrorMessage(response));
+      return { ok: false, response };
+    }
 
-        const previousStatus = conversation.status ?? "active";
-        const auditEvent = createAuditEvent({
-          eventKind: "rescue",
-          fromStatus: previousStatus,
-          toStatus: nextStatus,
-          detail: `Запущен rescue timer ${formatRescueTimer(rescueDurationSeconds)}: ${rescue.nextAction}`,
-          text: `Запущен rescue timer ${formatRescueTimer(rescueDurationSeconds)}: ${rescue.nextAction}`
-        });
-
-        return {
-          ...conversation,
-          status: nextStatus,
-          sla: `Rescue ${formatRescueTimer(rescueDurationSeconds)}`,
-          slaTone: "danger",
-          rescue,
-          messages: [...conversation.messages, auditEvent],
-          preview: "Запущен rescue timer: нужен ответ или возврат в очередь",
-          time: "сейчас"
-        };
-      })
-    );
+    const serverConversation = response.data?.conversation;
+    const serverRescue = response.data?.rescue ?? serverConversation?.rescue;
+    if (serverConversation && serverRescue) {
+      setConversationItems((current) => current.map((conversation) => (
+        conversation.id === selected.id
+          ? mergeRescueResponse(conversation, serverConversation, serverRescue)
+          : conversation
+      )));
+    } else if (refreshInbox) {
+      await refreshInbox();
+    }
 
     setFilter("rescue");
-    setToast(`${actionConfig.title}: таймер ${formatRescueTimer(rescueDurationSeconds)} запущен, диалог добавлен в фильтр "Спасти".`);
+    setToast(`${actionConfig.title}: Rescue запущен, диалог добавлен в фильтр "Спасти".`);
+    return { ok: true, response };
   }
 
   function handleDialogAction(actionConfig) {
@@ -151,8 +129,7 @@ export function useDialogActions({
     }
 
     if (actionConfig.id === "rescue") {
-      handleRescueStart(actionConfig);
-      return;
+      return handleRescueStart(actionConfig);
     }
 
     if (actionConfig.nextStatus) {
@@ -173,19 +150,21 @@ export function useDialogActions({
     setToast(`${actionConfig.title} зафиксировано в истории диалога.`);
   }
 
-  function handleClose() {
+  async function handleClose({ resolutionOutcome } = {}) {
     if (!selectedTopic) {
       setToast("Для закрытия диалога выберите тематику.");
       return;
     }
 
-    const next = new Set(closedIds);
-    next.add(selected.id);
-    setClosedIds(next);
-    applyConversationStatus(selected.id, "closed", {
+    const result = await applyConversationStatus(selected.id, "closed", {
       detail: `Диалог закрыт с тематикой ${selectedTopic}`,
-      eventKind: "close"
+      eventKind: "close",
+      resolutionOutcome,
+      toTopic: selectedTopic
     });
+    if (!result?.ok) {
+      return;
+    }
     setToast("Диалог закрыт и попадет в ежедневный отчет.");
   }
 
@@ -234,4 +213,27 @@ export function useDialogActions({
     handleStatusChange,
     handleTopicChange
   };
+}
+
+function mergeRescueResponse(conversation, serverConversation, serverRescue) {
+  return {
+    ...conversation,
+    ...(serverConversation.status ? { status: serverConversation.status } : {}),
+    ...(serverConversation.sla ? { sla: serverConversation.sla } : {}),
+    ...(serverConversation.slaTone ? { slaTone: serverConversation.slaTone } : {}),
+    ...(serverConversation.operatorId ? { operatorId: serverConversation.operatorId } : {}),
+    ...(serverConversation.operatorName ? { operatorName: serverConversation.operatorName } : {}),
+    rescue: serverRescue
+  };
+}
+
+function rescueErrorMessage(response) {
+  const messages = {
+    conversation_closed: "Закрытый диалог нельзя поставить на Rescue.",
+    conversation_not_found: "Диалог не найден. Обновите список и попробуйте снова.",
+    rescue_already_active: "Rescue уже запущен для этого диалога."
+  };
+  const code = response.error?.code;
+  return messages[code]
+    ?? `Не удалось запустить Rescue. ${response.error?.message ?? "Попробуйте ещё раз."}`;
 }

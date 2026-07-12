@@ -3,7 +3,7 @@ import { makeAuditId } from "./backend-ids.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
 
 const SERVICE = "settingsService";
-const DEFAULT_TENANT_ID = "tenant-northstar";
+const SEED_TENANT_ID = "tenant-northstar";
 
 interface SettingsRule {
   affectedWorkflows: string[];
@@ -25,10 +25,15 @@ interface RuleMutationPayload {
   enabled?: boolean;
   parameters?: Record<string, unknown>;
   reason?: string;
+  tenantId?: string;
+}
+
+interface SettingsTenantOptions {
+  tenantId?: string;
 }
 
 export class SettingsRulesService {
-  private readonly rules = new Map<string, SettingsRule>(seedRules.map((rule) => [rule.id, cloneRule(rule)]));
+  private readonly rules = new Map<string, SettingsRule>();
   private readonly auditEvents: Array<Record<string, unknown>> = [];
 
   listSettingsAuditEvents() {
@@ -37,6 +42,10 @@ export class SettingsRulesService {
 
   async fetchRules(filters: { tenantId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = normalizeTenantId(filters.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope("fetchRules");
+    }
+
     const rules = this.listTenantRules(tenantId);
 
     return createEnvelope({
@@ -48,14 +57,19 @@ export class SettingsRulesService {
     });
   }
 
-  async updateRule(ruleId: string, payload: RuleMutationPayload = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const rule = this.rules.get(ruleId);
+  async updateRule(ruleId: string, payload: RuleMutationPayload = {}, options: SettingsTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = normalizeTenantId(payload.tenantId ?? options.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope("updateRule", { ruleId });
+    }
+
+    const rule = this.getRule(tenantId, ruleId);
     if (!rule) {
-      return invalidEnvelope("updateRule", "rule_not_found", "Settings rule was not found.", { ruleId });
+      return invalidEnvelope("updateRule", "rule_not_found", "Settings rule was not found.", { ruleId, tenantId });
     }
 
     if (rule.severity === "critical" && rule.enabled && payload.enabled === false && payload.confirmed !== true) {
-      return invalidEnvelope("updateRule", "critical_rule_confirmation_required", "Critical rules require explicit confirmation before disabling.", { ruleId });
+      return invalidEnvelope("updateRule", "critical_rule_confirmation_required", "Critical rules require explicit confirmation before disabling.", { ruleId, tenantId });
     }
 
     const nextRule: SettingsRule = {
@@ -67,38 +81,43 @@ export class SettingsRulesService {
         ...normalizeParameters(payload.parameters)
       }
     };
-    this.rules.set(ruleId, nextRule);
-    const auditEvent = this.persistAuditEvent(buildAuditEvent("settings.rule.update", ruleId, payload.reason));
+    this.rules.set(ruleKey(tenantId, ruleId), nextRule);
+    const auditEvent = this.persistAuditEvent(buildAuditEvent("settings.rule.update", tenantId, ruleId, payload.reason));
 
     return createEnvelope({
       service: SERVICE,
       operation: "updateRule",
       traceId: identityTraceId(SERVICE, "updateRule"),
-      meta: apiMeta({ ruleId }),
+      meta: apiMeta({ ruleId, tenantId }),
       data: {
         auditEvent,
         rule: toPublicRule(nextRule),
-        workspace: buildRulesWorkspace(this.listTenantRules(nextRule.tenantId))
+        workspace: buildRulesWorkspace(this.listTenantRules(tenantId))
       }
     });
   }
 
-  async testRule(ruleId: string, payload: { sampleSize?: number } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const rule = this.rules.get(ruleId);
+  async testRule(ruleId: string, payload: { sampleSize?: number } = {}, options: SettingsTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = normalizeTenantId(options.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope("testRule", { ruleId });
+    }
+
+    const rule = this.getRule(tenantId, ruleId);
     if (!rule) {
-      return invalidEnvelope("testRule", "rule_not_found", "Settings rule was not found.", { ruleId });
+      return invalidEnvelope("testRule", "rule_not_found", "Settings rule was not found.", { ruleId, tenantId });
     }
 
     const sampleSize = clampNumber(payload.sampleSize, 25, 1, 500);
     const affectedCount = Math.max(0, Math.round(sampleSize * affectedRatio(rule)));
 
-    const auditEvent = this.persistAuditEvent(buildAuditEvent("settings.rule.test", ruleId));
+    const auditEvent = this.persistAuditEvent(buildAuditEvent("settings.rule.test", tenantId, ruleId));
 
     return createEnvelope({
       service: SERVICE,
       operation: "testRule",
       traceId: identityTraceId(SERVICE, "testRule"),
-      meta: apiMeta({ ruleId, sampleSize }),
+      meta: apiMeta({ ruleId, sampleSize, tenantId }),
       data: {
         auditEvent,
         result: {
@@ -116,9 +135,24 @@ export class SettingsRulesService {
   }
 
   private listTenantRules(tenantId: string) {
+    this.ensureDefaultRulesForTenant(tenantId);
     return Array.from(this.rules.values())
       .filter((rule) => rule.tenantId === tenantId)
       .sort((left, right) => severityRank(left.severity) - severityRank(right.severity) || left.title.localeCompare(right.title));
+  }
+
+  private getRule(tenantId: string, ruleId: string): SettingsRule | undefined {
+    this.ensureDefaultRulesForTenant(tenantId);
+    return this.rules.get(ruleKey(tenantId, ruleId));
+  }
+
+  private ensureDefaultRulesForTenant(tenantId: string): void {
+    for (const rule of seedRules) {
+      const key = ruleKey(tenantId, rule.id);
+      if (!this.rules.has(key)) {
+        this.rules.set(key, cloneRule({ ...rule, tenantId }));
+      }
+    }
   }
 
   private persistAuditEvent<TEvent extends Record<string, unknown>>(event: TEvent): TEvent {
@@ -151,13 +185,14 @@ function toPublicRule(rule: SettingsRule) {
   };
 }
 
-function buildAuditEvent(action: string, ruleId: string, reason = "Settings rule mutation") {
+function buildAuditEvent(action: string, tenantId: string, ruleId: string, reason = "Settings rule mutation") {
   return {
     action,
     id: makeAuditId("settings_rule"),
     immutable: true,
     reason,
-    ruleId
+    ruleId,
+    tenantId
   };
 }
 
@@ -174,7 +209,18 @@ function invalidEnvelope(operation: string, code: string, message: string, data:
 }
 
 function normalizeTenantId(tenantId?: string) {
-  return String(tenantId ?? DEFAULT_TENANT_ID).trim() || DEFAULT_TENANT_ID;
+  return String(tenantId ?? "").trim();
+}
+
+function tenantContextRequiredEnvelope(operation: string, data: Record<string, unknown> = {}) {
+  return invalidEnvelope(operation, "tenant_context_required", "Tenant context is required for settings operations.", {
+    ...data,
+    tenantId: null
+  });
+}
+
+function ruleKey(tenantId: string, ruleId: string): string {
+  return `${tenantId}:${ruleId}`;
 }
 
 function normalizeParameters(parameters?: Record<string, unknown>) {
@@ -234,7 +280,7 @@ const seedRules: SettingsRule[] = [
     parameters: { blockClose: true },
     scope: "Все каналы",
     severity: "critical",
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId: SEED_TENANT_ID,
     title: "Нельзя закрыть диалог без тематики"
   },
   {
@@ -248,7 +294,7 @@ const seedRules: SettingsRule[] = [
     parameters: { redactPrivateNote: true },
     scope: "SDK, Telegram, MAX, VK",
     severity: "critical",
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId: SEED_TENANT_ID,
     title: "Внутренний комментарий не отправляется клиенту"
   },
   {
@@ -262,7 +308,7 @@ const seedRules: SettingsRule[] = [
     parameters: { defaultLimit: 8, supervisorOverride: true },
     scope: "Очереди и сотрудники",
     severity: "high",
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId: SEED_TENANT_ID,
     title: "Оператор не получает чаты сверх лимита"
   },
   {
@@ -276,7 +322,7 @@ const seedRules: SettingsRule[] = [
     parameters: { allowedRoles: "senior,admin" },
     scope: "Очереди и сотрудники",
     severity: "high",
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId: SEED_TENANT_ID,
     title: "Override лимита доступен только разрешенным ролям"
   },
   {
@@ -290,7 +336,7 @@ const seedRules: SettingsRule[] = [
     parameters: { maskPhones: true, maskPaymentData: true },
     scope: "Диалоги, клиенты, отчеты",
     severity: "critical",
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId: SEED_TENANT_ID,
     title: "Чувствительные данные маскируются по роли"
   },
   {
@@ -304,7 +350,7 @@ const seedRules: SettingsRule[] = [
     parameters: { retainDays: 365 },
     scope: "Отчеты",
     severity: "medium",
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId: SEED_TENANT_ID,
     title: "Экспорт отчетов фиксируется в аудите"
   },
   {
@@ -318,7 +364,7 @@ const seedRules: SettingsRule[] = [
     parameters: { afterHoursQueue: "queue-night", respectTopicTarget: true },
     scope: "Все входящие очереди",
     severity: "high",
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId: SEED_TENANT_ID,
     title: "Маршрутизация учитывает канал, тематику, время и группу"
   },
   {
@@ -332,7 +378,7 @@ const seedRules: SettingsRule[] = [
     parameters: { fallbackQueue: "queue-overflow", escalationMinutes: 15 },
     scope: "Очереди и SLA",
     severity: "high",
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId: SEED_TENANT_ID,
     title: "Перегрузка включает fallback и эскалацию"
   }
 ];

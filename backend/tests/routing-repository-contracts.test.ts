@@ -12,8 +12,22 @@ import {
   type RoutingPriorityStrategy,
   type RoutingRuleRecord
 } from "../apps/api-gateway/src/routing/routing.repository.ts";
+import { bootstrapRoutingState } from "../apps/api-gateway/src/routing/seed.ts";
 
 describe("Phase 4.1 routing rule, queue membership and operator capacity repository contracts", () => {
+  it("starts empty unless a routing seed is explicitly injected", () => {
+    const empty = RoutingRepository.inMemory().readState();
+    const seeded = RoutingRepository.inMemory(bootstrapRoutingState()).readState();
+
+    assert.deepEqual(empty.conversations, []);
+    assert.deepEqual(empty.operators, []);
+    assert.deepEqual(empty.queues, []);
+    assert.deepEqual(empty.rescueReportRows, []);
+    assert.ok(seeded.conversations.length > 0);
+    assert.ok(seeded.operators.length > 0);
+    assert.ok(seeded.queues.length > 0);
+  });
+
   it("persists tenant routing rules with channel-scoped lookup", async () => {
     const repository = RoutingRepository.inMemory();
     const rule = routingRule({

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { redactSensitiveText } from "@support-communication/redaction";
-import { type DeadLetterMessage } from "./operations.fixtures.js";
+import { type DeadLetterMessage } from "./operations.types.js";
 import {
   type OperationsDeadLetterReplayRequeueAuditRecord,
   type OperationsDeadLetterReplayValidationDenialRecord,
@@ -216,6 +216,40 @@ export function validateDeadLetterReplayIdempotency(input: {
   };
 }
 
+export async function validateDeadLetterReplayIdempotencyAsync(input: {
+  fingerprint: string;
+  idempotencyKey?: string;
+  operationsRepository: OperationsRepository;
+}): Promise<{
+  cachedResult?: Record<string, unknown>;
+  code?: "idempotency_key_reused";
+  duplicate?: boolean;
+  ok: boolean;
+}> {
+  const idempotencyKey = input.idempotencyKey?.trim();
+  if (!idempotencyKey) {
+    return { ok: true };
+  }
+
+  const cached = await input.operationsRepository.findDeadLetterReplayIdempotencyKeyAsync(idempotencyKey);
+  if (!cached) {
+    return { ok: true };
+  }
+
+  if (cached.fingerprint !== input.fingerprint) {
+    return {
+      code: "idempotency_key_reused",
+      ok: false
+    };
+  }
+
+  return {
+    cachedResult: cached.result,
+    duplicate: true,
+    ok: true
+  };
+}
+
 export async function requeueDeadLetterThroughReplayHelper<TItem extends DeadLetterReplayBackendItem>(input: {
   backendStore: DeadLetterReplayBackendStore<TItem>;
   id: string;
@@ -259,7 +293,7 @@ export async function executeDeadLetterReplayWorker(input: {
 }): Promise<DeadLetterReplayWorkerResult> {
   const ownership = validateDeadLetterQueueOwnership(input.message);
   if (!ownership.ok) {
-    return denyDeadLetterReplay({
+    return denyDeadLetterReplayAsync({
       code: ownership.code ?? "dead_letter_queue_unknown",
       message: ownership.message ?? "Dead-letter replay was denied.",
       messageId: input.message.id,
@@ -274,14 +308,14 @@ export async function executeDeadLetterReplayWorker(input: {
     reason: input.reason,
     resourceId: input.message.resourceId
   });
-  const idempotency = validateDeadLetterReplayIdempotency({
+  const asyncIdempotency = await validateDeadLetterReplayIdempotencyAsync({
     fingerprint,
     idempotencyKey: input.idempotencyKey,
     operationsRepository: input.operationsRepository
   });
-  if (!idempotency.ok) {
-    return denyDeadLetterReplay({
-      code: idempotency.code ?? "idempotency_key_reused",
+  if (!asyncIdempotency.ok) {
+    return denyDeadLetterReplayAsync({
+      code: asyncIdempotency.code ?? "idempotency_key_reused",
       message: "Idempotency key was already used for a different dead-letter replay request.",
       messageId: input.message.id,
       operationsRepository: input.operationsRepository,
@@ -290,12 +324,12 @@ export async function executeDeadLetterReplayWorker(input: {
     });
   }
 
-  if (idempotency.duplicate && idempotency.cachedResult) {
+  if (asyncIdempotency.duplicate && asyncIdempotency.cachedResult) {
     return {
-      audit: requeueAuditFromCached(idempotency.cachedResult, input.message, input.reason),
-      backendItem: backendItemFromCached(idempotency.cachedResult),
+      audit: requeueAuditFromCached(asyncIdempotency.cachedResult, input.message, input.reason),
+      backendItem: backendItemFromCached(asyncIdempotency.cachedResult),
       duplicate: true,
-      replay: replayFromCached(idempotency.cachedResult),
+      replay: replayFromCached(asyncIdempotency.cachedResult),
       status: "requeued"
     };
   }
@@ -310,7 +344,7 @@ export async function executeDeadLetterReplayWorker(input: {
       reason: input.reason
     });
   } catch (error) {
-    return denyDeadLetterReplay({
+    return denyDeadLetterReplayAsync({
       code: deadLetterReplayBackendFailureCode(error),
       message: deadLetterReplayBackendFailureMessage(error, input.message.queueName),
       messageId: input.message.id,
@@ -327,7 +361,7 @@ export async function executeDeadLetterReplayWorker(input: {
     queue: "dead-letter-replay",
     sourceQueue: input.message.queueName
   };
-  const persistedReplay = input.operationsRepository.saveDeadLetterReplay({
+  const persistedReplay = await input.operationsRepository.saveDeadLetterReplayAsync({
     auditEvent: {
       action: "operations.dead_letter.replay",
       id: `evt_operations_dead_letter_${randomUUID()}`,
@@ -338,7 +372,7 @@ export async function executeDeadLetterReplayWorker(input: {
     reason: normalizeReason(input.reason),
     replay
   });
-  const requeueAudit = persistDeadLetterReplayRequeueAudit(input.operationsRepository, {
+  const requeueAudit = await input.operationsRepository.saveDeadLetterReplayRequeueAuditAsync({
     auditEvent: {
       action: "operations.dead_letter.replay.requeued",
       backendAuditId: requeued.auditEvent.id,
@@ -357,7 +391,7 @@ export async function executeDeadLetterReplayWorker(input: {
   });
 
   if (input.idempotencyKey?.trim()) {
-    input.operationsRepository.saveDeadLetterReplayIdempotencyKey({
+    await input.operationsRepository.saveDeadLetterReplayIdempotencyKeyAsync({
       fingerprint,
       key: input.idempotencyKey.trim(),
       result: {
@@ -490,6 +524,45 @@ function denyDeadLetterReplay(input: {
     target: input.messageId
   };
   const validationDenial = persistDeadLetterReplayValidationDenial(input.operationsRepository, {
+    auditEvent: { ...audit },
+    code: input.code,
+    messageId: input.messageId,
+    queueName: input.queueName,
+    reason: normalizeReason(input.reason)
+  });
+
+  return {
+    audit,
+    envelope: createDeadLetterReplayConflictEnvelope({
+      code: input.code,
+      message: input.message,
+      messageId: input.messageId,
+      queueName: input.queueName
+    }),
+    status: "denied",
+    validationDenial
+  };
+}
+
+async function denyDeadLetterReplayAsync(input: {
+  code: string;
+  message: string;
+  messageId: string;
+  operationsRepository: OperationsRepository;
+  queueName: string;
+  reason: string;
+}): Promise<DeadLetterReplayWorkerDenied> {
+  const audit: DeadLetterReplayValidationDenialAudit = {
+    action: "operations.dead_letter.replay.validation_denied",
+    code: input.code,
+    id: `evt_dead_letter_validation_denied_${randomUUID()}`,
+    immutable: true,
+    messageId: input.messageId,
+    queueName: input.queueName,
+    reason: normalizeReason(input.reason) ?? "",
+    target: input.messageId
+  };
+  const validationDenial = await input.operationsRepository.saveDeadLetterReplayValidationDenialAsync({
     auditEvent: { ...audit },
     code: input.code,
     messageId: input.messageId,

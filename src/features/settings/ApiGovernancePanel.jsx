@@ -2,22 +2,28 @@ import React from "react";
 import { ChannelBadge, SectionTitle } from "../../ui.jsx";
 
 export function ApiGovernancePanel({
-  apiChangelog,
-  apiEnvironmentKeys,
+  apiChangelog = [],
+  apiEnvironmentKeys = [],
   onReplayDelivery,
   onRotateKey,
   onSelectWebhook,
-  replayedDeliveryIds,
-  rotatedKeyIds,
+  replayedDeliveryIds = [],
+  rotatedKeyIds = [],
   selectedWebhook,
-  visibleWebhookDeliveries,
-  webhookEndpoints
+  visibleWebhookDeliveries = [],
+  webhookEndpoints = []
 }) {
+  const safeApiKeys = apiEnvironmentKeys.filter(Boolean);
+  const safeEndpoints = webhookEndpoints.filter(Boolean);
+  const safeDeliveries = visibleWebhookDeliveries.filter(Boolean);
+  const safeChangelog = apiChangelog.filter(Boolean);
+  const activeWebhook = selectedWebhook ?? safeEndpoints[0] ?? null;
+
   return (
     <section className="work-panel api-governance-panel">
       <SectionTitle title="Webhooks / API keys" action="signed delivery, replay, changelog" />
       <div className="api-key-grid">
-        {apiEnvironmentKeys.map((key) => {
+        {safeApiKeys.map((key) => {
           const isRotated = rotatedKeyIds.includes(key.id);
 
           return (
@@ -30,7 +36,7 @@ export function ApiGovernancePanel({
               <code>{key.keyPreview}</code>
               <p>{key.protection}</p>
               <footer>
-                <small>{key.scopes.join(", ")}</small>
+                <small>{(key.scopes ?? []).join(", ")}</small>
                 <button onClick={() => onRotateKey(key.id)} title="Поставить ключ на ротацию" type="button">
                   Rotate key
                 </button>
@@ -42,10 +48,10 @@ export function ApiGovernancePanel({
 
       <div className="webhook-workspace">
         <div className="webhook-endpoint-list">
-          {webhookEndpoints.map((endpoint) => (
+          {safeEndpoints.map((endpoint) => (
             <button
-              aria-pressed={selectedWebhook.id === endpoint.id}
-              className={`webhook-endpoint ${selectedWebhook.id === endpoint.id ? "selected" : ""}`}
+              aria-pressed={activeWebhook?.id === endpoint.id}
+              className={`webhook-endpoint ${activeWebhook?.id === endpoint.id ? "selected" : ""}`}
               key={endpoint.id}
               onClick={() => onSelectWebhook(endpoint.id)}
               type="button"
@@ -60,43 +66,49 @@ export function ApiGovernancePanel({
         </div>
 
         <div className="webhook-detail">
-          <header>
-            <div>
-              <strong>{selectedWebhook.name}</strong>
-              <span>{selectedWebhook.url}</span>
-            </div>
-            <b>{selectedWebhook.signature}</b>
-          </header>
-          <div className="webhook-meta-grid">
-            <div><span>Retries</span><strong>{selectedWebhook.retries}</strong></div>
-            <div><span>Last delivery</span><strong>{selectedWebhook.lastDelivery}</strong></div>
-            <div><span>Failure rate</span><strong>{selectedWebhook.failureRate}</strong></div>
-          </div>
-          <div className="webhook-delivery-log">
-            {visibleWebhookDeliveries.map((delivery) => {
-              const isReplayed = replayedDeliveryIds.includes(delivery.id);
-
-              return (
-                <div className={`webhook-delivery-row ${delivery.status}`} key={delivery.id}>
-                  <time>{delivery.time}</time>
-                  <span>
-                    <strong>{delivery.event}</strong>
-                    <small>{delivery.traceId}</small>
-                  </span>
-                  <b>{isReplayed ? "replay_queued" : delivery.status}</b>
-                  <span>{delivery.httpStatus} · {delivery.attempts} попытки</span>
-                  <button onClick={() => onReplayDelivery(delivery)} title="Повторить доставку" type="button">
-                    Replay
-                  </button>
+          {activeWebhook ? (
+            <>
+              <header>
+                <div>
+                  <strong>{activeWebhook.name}</strong>
+                  <span>{activeWebhook.url}</span>
                 </div>
-              );
-            })}
-          </div>
+                <b>{activeWebhook.signature}</b>
+              </header>
+              <div className="webhook-meta-grid">
+                <div><span>Retries</span><strong>{activeWebhook.retries}</strong></div>
+                <div><span>Last delivery</span><strong>{activeWebhook.lastDelivery}</strong></div>
+                <div><span>Failure rate</span><strong>{activeWebhook.failureRate}</strong></div>
+              </div>
+              <div className="webhook-delivery-log">
+                {safeDeliveries.map((delivery) => {
+                  const isReplayed = replayedDeliveryIds.includes(delivery.id);
+
+                  return (
+                    <div className={`webhook-delivery-row ${delivery.status}`} key={delivery.id}>
+                      <time>{delivery.time}</time>
+                      <span>
+                        <strong>{delivery.event}</strong>
+                        <small>{delivery.traceId}</small>
+                      </span>
+                      <b>{isReplayed ? "replay_queued" : delivery.status}</b>
+                      <span>{delivery.httpStatus} · {delivery.attempts} попытки</span>
+                      <button onClick={() => onReplayDelivery(delivery)} title="Повторить доставку" type="button">
+                        Replay
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="entity-empty"><strong>Webhook endpoints не настроены</strong></div>
+          )}
         </div>
       </div>
 
       <div className="api-changelog">
-        {apiChangelog.map((entry) => (
+        {safeChangelog.map((entry) => (
           <article key={entry.version}>
             <b>{entry.version}</b>
             <span>

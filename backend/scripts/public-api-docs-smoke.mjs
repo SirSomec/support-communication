@@ -24,8 +24,10 @@ const checks = [
     file: "docs/public-api-examples.md",
     patterns: [
       /## Sandbox SDK identify/,
+      /## Public demo request/,
       /## Production SDK identify/,
       /## Signed webhook receive/,
+      /POST \/api\/v1\/public\/demo-requests/,
       /Authorization: Bearer sk_test_<sandbox_public_api_key>/,
       /Authorization: Bearer sk_live_<production_public_api_key>/,
       /X-Webhook-Signature: sha256=<hmac_sha256_hex>/

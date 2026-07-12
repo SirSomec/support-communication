@@ -156,11 +156,11 @@ describe("Prisma database and transactional outbox contracts", () => {
     assert.match(schema, /datasource\s+db\s+\{[\s\S]*provider\s+=\s+"postgresql"/);
     assert.match(schema, /generator\s+client\s+\{[\s\S]*provider\s+=\s+"prisma-client-js"/);
 
-    for (const model of ["Tenant", "TenantAuditEvent", "TenantUser", "PermissionRole", "ServiceAdminAuditEvent", "ServiceAdminImpersonation", "BreakGlassApproval", "BillingTenantState", "BillingSyncJob", "BillingQuotaLedgerEntry", "BillingQuotaReservation", "BillingSubscription", "BillingInvoice", "BillingProviderSyncEvent", "Conversation", "ConversationMessage", "ConversationInboundEvent", "ConversationRealtimeEvent", "ConversationOutboundDescriptor", "ChannelDeliveryReceipt", "MfaChallenge", "ServiceAdminSession", "PasswordCredential", "PasswordPolicy", "CredentialAuditEvent", "OidcProviderConfig", "OidcCallbackDescriptor", "SamlProviderMetadata", "SamlAcsRequestDescriptor", "SamlAssertionReplay", "OutboxEvent"]) {
+    for (const model of ["Tenant", "TenantAuditEvent", "TenantUser", "PermissionRole", "ServiceAdminAuditEvent", "ServiceAdminImpersonation", "BreakGlassApproval", "BillingTenantState", "BillingSyncJob", "BillingQuotaLedgerEntry", "BillingQuotaReservation", "BillingSubscription", "BillingInvoice", "BillingProviderSyncEvent", "Conversation", "ConversationMessage", "ConversationInboundEvent", "ConversationRealtimeEvent", "ConversationOutboundDescriptor", "ChannelDeliveryReceipt", "MfaChallenge", "AuthInviteToken", "AuthRecoveryToken", "ServiceAdminSession", "PasswordCredential", "PasswordPolicy", "CredentialAuditEvent", "OidcProviderConfig", "OidcCallbackDescriptor", "SamlProviderMetadata", "SamlAcsRequestDescriptor", "SamlAssertionReplay", "OutboxEvent"]) {
       assert.match(schema, new RegExp(`model\\s+${model}\\s+\\{`), `${model} model is required`);
     }
 
-    for (const table of ["tenants", "tenant_audit_events", "tenant_users", "permission_roles", "service_admin_audit_events", "service_admin_impersonations", "break_glass_approvals", "billing_tenant_states", "billing_sync_jobs", "billing_quota_ledger_entries", "billing_quota_reservations", "billing_subscriptions", "billing_invoices", "billing_provider_sync_events", "conversations", "conversation_messages", "conversation_inbound_events", "conversation_realtime_events", "conversation_outbound_descriptors", "channel_delivery_receipts", "mfa_challenges", "service_admin_sessions", "service_admin_token_pairs", "service_admin_token_rotations", "service_admin_token_revocations", "password_credentials", "password_policies", "credential_audit_events", "oidc_provider_configs", "oidc_callback_descriptors", "saml_provider_metadata", "saml_acs_request_descriptors", "saml_assertion_replays", "outbox_events"]) {
+    for (const table of ["tenants", "tenant_audit_events", "tenant_users", "permission_roles", "service_admin_audit_events", "service_admin_impersonations", "break_glass_approvals", "billing_tenant_states", "billing_sync_jobs", "billing_quota_ledger_entries", "billing_quota_reservations", "billing_subscriptions", "billing_invoices", "billing_provider_sync_events", "conversations", "conversation_messages", "conversation_inbound_events", "conversation_realtime_events", "conversation_outbound_descriptors", "channel_delivery_receipts", "mfa_challenges", "auth_invite_tokens", "auth_recovery_tokens", "service_admin_sessions", "service_admin_token_pairs", "service_admin_token_rotations", "service_admin_token_revocations", "password_credentials", "password_policies", "credential_audit_events", "oidc_provider_configs", "oidc_callback_descriptors", "saml_provider_metadata", "saml_acs_request_descriptors", "saml_assertion_replays", "outbox_events"]) {
       assert.match(schema, new RegExp(`@@map\\("${table}"\\)`), `${table} table mapping is required`);
     }
     assert.match(schema, /model BillingSyncJob \{[\s\S]*attempts\s+Int\s+@default\(0\)/);
@@ -169,6 +169,8 @@ describe("Prisma database and transactional outbox contracts", () => {
     assert.match(schema, /model BillingSyncJob \{[\s\S]*nextAttemptAt\s+DateTime\?\s+@map\("next_attempt_at"\)/);
     assert.match(schema, /model BillingSyncJob \{[\s\S]*deadLetteredAt\s+DateTime\?\s+@map\("dead_lettered_at"\)/);
     assert.match(schema, /model BillingSyncJob \{[\s\S]*publishedAt\s+DateTime\?\s+@map\("published_at"\)/);
+    assert.match(schema, /model BillingSyncJob \{[\s\S]*@@index\(\[status, queue, deadLetteredAt\], map: "billing_sync_jobs_status_queue_dead_lettered_at_idx"\)/);
+    assert.match(schema, /model BillingSyncJob \{[\s\S]*@@index\(\[status, queue, publishedAt\], map: "billing_sync_jobs_status_queue_published_at_idx"\)/);
     assert.match(schema, /model TenantAuditEvent \{[\s\S]*immutable\s+Boolean\s+@default\(true\)/);
     assert.match(schema, /model ServiceAdminImpersonation \{[\s\S]*auditEventId\s+String\?\s+@map\("audit_event_id"\)/);
     assert.match(schema, /model BillingQuotaLedgerEntry \{[\s\S]*auditEvent\s+Json\?\s+@map\("audit_event"\)/);
@@ -181,6 +183,9 @@ describe("Prisma database and transactional outbox contracts", () => {
     assert.match(schema, /model ChannelDeliveryReceipt \{[\s\S]*idempotencyKey\s+String\s+@unique\(map: "channel_delivery_receipts_idempotency_key_key"\)\s+@map\("idempotency_key"\)/);
     assert.match(schema, /model OutboxEvent \{[\s\S]*nextAttemptAt\s+DateTime\?\s+@map\("next_attempt_at"\)/);
     assert.match(schema, /model OutboxEvent \{[\s\S]*deadLetteredAt\s+DateTime\?\s+@map\("dead_lettered_at"\)/);
+    assert.match(schema, /model OutboxEvent \{[\s\S]*@@index\(\[status, queue, deadLetteredAt\], map: "outbox_events_status_queue_dead_lettered_at_idx"\)/);
+    assert.match(schema, /model OutboxEvent \{[\s\S]*@@index\(\[status, queue, lockedAt\], map: "outbox_events_status_queue_locked_at_idx"\)/);
+    assert.match(schema, /model OutboxEvent \{[\s\S]*@@index\(\[status, queue, publishedAt\], map: "outbox_events_status_queue_published_at_idx"\)/);
     assert.match(schema, /model OutboxEvent \{[\s\S]*deadLetterReplayAuditEvents\s+Json\s+@default\("\[\]"\)\s+@map\("dead_letter_replay_audit_events"\)/);
     assert.match(schema, /model BillingSyncJob \{[\s\S]*deadLetterReplayAuditEvents\s+Json\s+@default\("\[\]"\)\s+@map\("dead_letter_replay_audit_events"\)/);
   });
@@ -223,6 +228,26 @@ describe("Prisma database and transactional outbox contracts", () => {
     assert.match(sql, /CREATE UNIQUE INDEX "password_policies_scope_key"/);
     assert.match(sql, /CREATE TABLE "credential_audit_events"/);
     assert.match(sql, /CREATE INDEX "credential_audit_events_subject_id_at_idx"/);
+  });
+
+  it("ships an additive migration for invite and recovery auth-flow tokens", async () => {
+    const migrationsUrl = new URL("../prisma/migrations", import.meta.url);
+    const migrationDirectories = await readdir(migrationsUrl);
+    const authFlowDirectory = migrationDirectories.find((name) => /identity_auth_flow_tokens/.test(name));
+    assert.ok(authFlowDirectory, "an identity auth-flow token migration directory is required");
+
+    const sqlUrl = new URL(`../prisma/migrations/${authFlowDirectory}/migration.sql`, import.meta.url);
+    assert.equal(existsSync(sqlUrl), true, "identity auth-flow token migration.sql must exist");
+
+    const sql = readFileSync(sqlUrl, "utf8");
+    assert.match(sql, /CREATE TABLE "auth_invite_tokens"/);
+    assert.match(sql, /"code_hash" TEXT NOT NULL/);
+    assert.match(sql, /CREATE UNIQUE INDEX "auth_invite_tokens_code_hash_key"/);
+    assert.match(sql, /CREATE INDEX "auth_invite_tokens_expiry_consumed_idx"/);
+    assert.match(sql, /CREATE TABLE "auth_recovery_tokens"/);
+    assert.match(sql, /"token_hash" TEXT NOT NULL/);
+    assert.match(sql, /CREATE UNIQUE INDEX "auth_recovery_tokens_token_hash_key"/);
+    assert.match(sql, /CREATE INDEX "auth_recovery_tokens_expiry_consumed_idx"/);
   });
 
   it("ships an additive migration for service-admin token lifecycle rows", async () => {
@@ -1092,6 +1117,23 @@ describe("Prisma database and transactional outbox contracts", () => {
     assert.match(sql, /ALTER TABLE "outbox_events"/);
     assert.match(sql, /ADD COLUMN "dead_letter_replay_audit_events" JSONB NOT NULL DEFAULT '\[\]'::jsonb/);
     assert.match(sql, /ALTER TABLE "billing_sync_jobs"/);
+  });
+
+  it("ships additive indexes for worker queue summary evidence timestamps", async () => {
+    const migrationsUrl = new URL("../prisma/migrations", import.meta.url);
+    const migrationDirectories = await readdir(migrationsUrl);
+    const summaryIndexDirectory = migrationDirectories.find((name) => /worker_queue_summary_indexes/.test(name));
+    assert.ok(summaryIndexDirectory, "a worker queue summary indexes migration directory is required");
+
+    const sqlUrl = new URL(`../prisma/migrations/${summaryIndexDirectory}/migration.sql`, import.meta.url);
+    assert.equal(existsSync(sqlUrl), true, "worker queue summary indexes migration.sql must exist");
+
+    const sql = readFileSync(sqlUrl, "utf8");
+    assert.match(sql, /CREATE INDEX(?: IF NOT EXISTS)? "outbox_events_status_queue_dead_lettered_at_idx"/);
+    assert.match(sql, /CREATE INDEX(?: IF NOT EXISTS)? "outbox_events_status_queue_locked_at_idx"/);
+    assert.match(sql, /CREATE INDEX(?: IF NOT EXISTS)? "outbox_events_status_queue_published_at_idx"/);
+    assert.match(sql, /CREATE INDEX(?: IF NOT EXISTS)? "billing_sync_jobs_status_queue_dead_lettered_at_idx"/);
+    assert.match(sql, /CREATE INDEX(?: IF NOT EXISTS)? "billing_sync_jobs_status_queue_published_at_idx"/);
   });
 
   it("ships an additive migration for persistent conversation storage", async () => {
@@ -2605,27 +2647,33 @@ describe("Prisma database and transactional outbox contracts", () => {
   it("loads conversation outbound descriptors through a Prisma-backed worker descriptor store", async () => {
     const database = await import("@support-communication/database");
     const calls: unknown[] = [];
+    const updates: unknown[] = [];
+    const descriptorRow = {
+      channel: "WHATSAPP",
+      conversationId: "conv_prisma_descriptor",
+      id: "descriptor_prisma_001",
+      idempotencyKey: "delivery-key-001",
+      kind: "message_delivery",
+      messageId: "msg_prisma_descriptor",
+      payload: { text: "Prisma descriptor dispatch" },
+      tenantId: "tenant-prisma-descriptor"
+    };
     const fakeClient = {
       conversationOutboundDescriptor: {
         findUnique: async (input: unknown) => {
           calls.push(input);
-          return {
-            channel: "WHATSAPP",
-            conversationId: "conv_prisma_descriptor",
-            id: "descriptor_prisma_001",
-            idempotencyKey: "delivery-key-001",
-            kind: "message_delivery",
-            messageId: "msg_prisma_descriptor",
-            payload: { text: "Prisma descriptor dispatch" },
-            tenantId: "tenant-prisma-descriptor"
-          };
+          return descriptorRow;
+        },
+        update: async (input: unknown) => {
+          updates.push(input);
+          return descriptorRow;
         }
       }
     };
 
-    const descriptor = await database
-      .createPrismaConversationOutboundDescriptorStore(fakeClient)
-      .findOutboundDescriptorById("descriptor_prisma_001");
+    const store = database.createPrismaConversationOutboundDescriptorStore(fakeClient);
+    const descriptor = await store.findOutboundDescriptorById("descriptor_prisma_001");
+    await store.markOutboundDescriptorDelivery?.("descriptor_prisma_001", "delivered");
 
     assert.deepEqual(calls, [{ where: { id: "descriptor_prisma_001" } }]);
     assert.deepEqual(descriptor, {
@@ -2638,6 +2686,18 @@ describe("Prisma database and transactional outbox contracts", () => {
       payload: { text: "Prisma descriptor dispatch" },
       tenantId: "tenant-prisma-descriptor"
     });
+    assert.equal(updates.length, 1);
+    assert.deepEqual((updates[0] as { data: Record<string, unknown>; where: Record<string, unknown> }).where, { id: "descriptor_prisma_001" });
+    assert.deepEqual({
+      ...(updates[0] as { data: Record<string, unknown> }).data,
+      updatedAt: "date"
+    }, {
+      deliveryState: "delivered",
+      retryable: false,
+      status: "delivered",
+      updatedAt: "date"
+    });
+    assert.equal((updates[0] as { data: { updatedAt: unknown } }).data.updatedAt instanceof Date, true);
   });
 
   it("persists channel delivery receipts through a Prisma-backed receipt store with provider replay", async () => {
@@ -2929,6 +2989,168 @@ describe("Prisma database and transactional outbox contracts", () => {
     ]);
   });
 
+  it("summarizes Prisma outbox queue observability with exact counts and bounded evidence queries", async () => {
+    const database = await import("@support-communication/database");
+    assert.equal(typeof database.createPrismaOutboxQueueSummaryStore, "function");
+    const rows = [
+      prismaOutboxRow({
+        id: "outbox-summary-pending",
+        occurredAt: new Date("2026-07-04T13:00:00.000Z"),
+        status: "pending"
+      }),
+      prismaOutboxRow({
+        id: "outbox-summary-publishing",
+        lockedAt: new Date("2026-07-04T13:02:00.000Z"),
+        occurredAt: new Date("2026-07-04T13:01:00.000Z"),
+        status: "publishing"
+      }),
+      prismaOutboxRow({
+        id: "outbox-summary-failed",
+        lastError: "provider token secret-outbox-summary-token leaked",
+        nextAttemptAt: new Date("2026-07-04T13:10:00.000Z"),
+        occurredAt: new Date("2026-07-04T13:02:00.000Z"),
+        status: "failed"
+      }),
+      prismaOutboxRow({
+        deadLetteredAt: new Date("2026-07-04T13:05:00.000Z"),
+        id: "outbox-summary-dead",
+        lastError: "provider token secret-outbox-summary-token leaked",
+        occurredAt: new Date("2026-07-04T13:03:00.000Z"),
+        status: "dead_lettered"
+      }),
+      prismaOutboxRow({
+        id: "outbox-summary-published",
+        occurredAt: new Date("2026-07-04T13:04:00.000Z"),
+        publishedAt: new Date("2026-07-04T13:06:00.000Z"),
+        status: "published"
+      }),
+      prismaOutboxRow({
+        id: "outbox-summary-other-queue-dead",
+        queue: "file-scan",
+        status: "dead_lettered"
+      })
+    ];
+    const countCalls: Array<{ where: { queue?: string; status?: string | { in: string[] } } }> = [];
+    const findManyCalls: Array<{ orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }> = [];
+    const fakeClient = {
+      outboxEvent: {
+        count: async (input: { where: { queue?: string; status?: string | { in: string[] } } }) => {
+          countCalls.push(input);
+          return rows.filter((row) => matchesQueueStatus(row, input.where)).length;
+        },
+        create: async ({ data }: { data: unknown }) => data,
+        findMany: async (input: { orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }) => {
+          findManyCalls.push(input);
+          return findSummaryEvidenceRows(rows, input, "occurredAt");
+        }
+      }
+    };
+
+    const summary = await database
+      .createPrismaOutboxQueueSummaryStore(fakeClient)
+      .summarizeOutboxQueue({ queue: "message-delivery" });
+
+    assert.equal(summary.queue, "message-delivery");
+    assert.equal(summary.queueDepth, 3);
+    assert.equal(summary.deadLetterCount, 1);
+    assert.equal(summary.latestEvent?.id, "outbox-summary-dead");
+    assert.equal(summary.latestEvent?.deadLetteredAt, "2026-07-04T13:05:00.000Z");
+    assert.deepEqual(
+      countCalls.map((input) => input.where.status).sort(),
+      ["dead_lettered", "failed", "pending", "publishing"]
+    );
+    assert.deepEqual(findManyCalls.map((input) => input.where.status), ["dead_lettered", "dead_lettered"]);
+    assert.equal(findManyCalls.every((input) => input.take === 25), true);
+    assert.deepEqual(findManyCalls.flatMap((input) => Object.keys(input.orderBy)).sort(), ["deadLetteredAt", "occurredAt"]);
+    assert.equal(findManyCalls.every((input) => Object.values(input.orderBy)[0] === "desc"), true);
+
+    const fileScanSummary = await database
+      .createPrismaOutboxQueueSummaryStore(fakeClient)
+      .summarizeOutboxQueue({ queue: "file-scan" });
+
+    assert.equal(fileScanSummary.queue, "file-scan");
+    assert.equal(fileScanSummary.queueDepth, 0);
+    assert.equal(fileScanSummary.deadLetterCount, 1);
+    assert.equal(fileScanSummary.latestEvent?.id, "outbox-summary-other-queue-dead");
+  });
+
+  it("selects latest outbox queue evidence by delivery timestamp before bounded sampling", async () => {
+    const database = await import("@support-communication/database");
+    const rows = [
+      ...Array.from({ length: 30 }, (_, index) => prismaOutboxRow({
+        deadLetteredAt: new Date(`2026-07-04T13:${String(index).padStart(2, "0")}:00.000Z`),
+        id: `outbox-summary-recent-occurrence-dead-${index}`,
+        occurredAt: new Date(`2026-07-04T14:${String(index).padStart(2, "0")}:00.000Z`),
+        status: "dead_lettered"
+      })),
+      prismaOutboxRow({
+        deadLetteredAt: new Date("2026-07-04T15:30:00.000Z"),
+        id: "outbox-summary-latest-dead-letter-old-occurrence",
+        occurredAt: new Date("2026-07-01T00:00:00.000Z"),
+        status: "dead_lettered"
+      })
+    ];
+    const findManyCalls: Array<{ orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }> = [];
+    const fakeClient = {
+      outboxEvent: {
+        count: async (input: { where: { queue?: string; status?: string | { in: string[] } } }) => rows.filter((row) => matchesQueueStatus(row, input.where)).length,
+        create: async ({ data }: { data: unknown }) => data,
+        findMany: async (input: { orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }) => {
+          findManyCalls.push(input);
+          return findSummaryEvidenceRows(rows, input, "occurredAt");
+        }
+      }
+    };
+
+    const summary = await database
+      .createPrismaOutboxQueueSummaryStore(fakeClient)
+      .summarizeOutboxQueue({ queue: "message-delivery" });
+
+    assert.equal(summary.deadLetterCount, 31);
+    assert.equal(summary.latestEvent?.id, "outbox-summary-latest-dead-letter-old-occurrence");
+    assert.ok(findManyCalls.some((input) => "deadLetteredAt" in input.orderBy));
+    assert.equal(findManyCalls.every((input) => input.take === 25), true);
+  });
+
+  it("filters null outbox delivery timestamps before bounded evidence sampling", async () => {
+    const database = await import("@support-communication/database");
+    const rows = [
+      ...Array.from({ length: 30 }, (_, index) => prismaOutboxRow({
+        deadLetteredAt: null,
+        id: `outbox-summary-null-dead-letter-${index}`,
+        occurredAt: new Date(`2026-07-04T16:${String(index).padStart(2, "0")}:00.000Z`),
+        status: "dead_lettered"
+      })),
+      prismaOutboxRow({
+        deadLetteredAt: new Date("2026-07-04T18:00:00.000Z"),
+        id: "outbox-summary-latest-non-null-dead-letter",
+        occurredAt: new Date("2026-07-01T00:00:00.000Z"),
+        status: "dead_lettered"
+      })
+    ];
+    const findManyCalls: Array<{ orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }> = [];
+    const fakeClient = {
+      outboxEvent: {
+        count: async (input: { where: { queue?: string; status?: string | { in: string[] } } }) => rows.filter((row) => matchesQueueStatus(row, input.where)).length,
+        create: async ({ data }: { data: unknown }) => data,
+        findMany: async (input: { orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }) => {
+          findManyCalls.push(input);
+          return findSummaryEvidenceRows(rows, input, "occurredAt");
+        }
+      }
+    };
+
+    const summary = await database
+      .createPrismaOutboxQueueSummaryStore(fakeClient)
+      .summarizeOutboxQueue({ queue: "message-delivery" });
+
+    const deadLetteredAtCall = findManyCalls.find((input) => "deadLetteredAt" in input.orderBy);
+    assert.equal(summary.deadLetterCount, 31);
+    assert.equal(summary.latestEvent?.id, "outbox-summary-latest-non-null-dead-letter");
+    assert.deepEqual((deadLetteredAtCall?.where as Record<string, unknown>)?.deadLetteredAt, { not: null });
+    assert.equal(findManyCalls.every((input) => input.take === 25), true);
+  });
+
   it("claims Prisma billing sync jobs with a single skip-locked lease query", async () => {
     const database = await import("@support-communication/database");
     const now = new Date("2026-06-28T10:00:00.000Z");
@@ -3162,6 +3384,156 @@ describe("Prisma database and transactional outbox contracts", () => {
     ]);
   });
 
+  it("summarizes Prisma billing sync queue observability with exact counts and bounded evidence queries", async () => {
+    const database = await import("@support-communication/database");
+    assert.equal(typeof database.createPrismaBillingSyncQueueSummaryStore, "function");
+    const rows = [
+      prismaBillingSyncJobRow({
+        createdAt: new Date("2026-07-04T14:00:00.000Z"),
+        id: "billing-summary-pending",
+        status: "pending"
+      }),
+      prismaBillingSyncJobRow({
+        createdAt: new Date("2026-07-04T14:01:00.000Z"),
+        id: "billing-summary-publishing",
+        lockedAt: new Date("2026-07-04T14:02:00.000Z"),
+        status: "publishing"
+      }),
+      prismaBillingSyncJobRow({
+        createdAt: new Date("2026-07-04T14:02:00.000Z"),
+        id: "billing-summary-failed",
+        lastError: "provider api key secret-billing-summary-token leaked",
+        nextAttemptAt: new Date("2026-07-04T14:10:00.000Z"),
+        status: "failed"
+      }),
+      prismaBillingSyncJobRow({
+        createdAt: new Date("2026-07-04T14:03:00.000Z"),
+        deadLetteredAt: new Date("2026-07-04T14:08:00.000Z"),
+        id: "billing-summary-dead",
+        lastError: "provider api key secret-billing-summary-token leaked",
+        status: "dead_lettered"
+      }),
+      prismaBillingSyncJobRow({
+        createdAt: new Date("2026-07-04T14:04:00.000Z"),
+        id: "billing-summary-published",
+        publishedAt: new Date("2026-07-04T14:07:00.000Z"),
+        status: "published"
+      }),
+      prismaBillingSyncJobRow({
+        id: "billing-summary-other-queue-dead",
+        queue: "billing-provider-events",
+        status: "dead_lettered"
+      })
+    ];
+    const countCalls: Array<{ where: { queue?: string; status?: string | { in: string[] } } }> = [];
+    const findManyCalls: Array<{ orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }> = [];
+    const fakeClient = {
+      billingSyncJob: {
+        count: async (input: { where: { queue?: string; status?: string | { in: string[] } } }) => {
+          countCalls.push(input);
+          return rows.filter((row) => matchesQueueStatus(row, input.where)).length;
+        },
+        findMany: async (input: { orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }) => {
+          findManyCalls.push(input);
+          return findSummaryEvidenceRows(rows, input, "createdAt");
+        }
+      }
+    };
+
+    const summary = await database
+      .createPrismaBillingSyncQueueSummaryStore(fakeClient)
+      .summarizeBillingSyncQueue({ queue: "billing-sync" });
+
+    assert.equal(summary.queue, "billing-sync");
+    assert.equal(summary.queueDepth, 3);
+    assert.equal(summary.deadLetterCount, 1);
+    assert.equal(summary.latestJob?.id, "billing-summary-dead");
+    assert.equal(summary.latestJob?.deadLetteredAt, "2026-07-04T14:08:00.000Z");
+    assert.deepEqual(
+      countCalls.map((input) => input.where.status).sort(),
+      ["dead_lettered", "failed", "pending", "publishing"]
+    );
+    assert.deepEqual(findManyCalls.map((input) => input.where.status), ["dead_lettered", "dead_lettered"]);
+    assert.equal(findManyCalls.every((input) => input.take === 25), true);
+    assert.deepEqual(findManyCalls.flatMap((input) => Object.keys(input.orderBy)).sort(), ["createdAt", "deadLetteredAt"]);
+    assert.equal(findManyCalls.every((input) => Object.values(input.orderBy)[0] === "desc"), true);
+  });
+
+  it("selects latest billing sync evidence by delivery timestamp before bounded sampling", async () => {
+    const database = await import("@support-communication/database");
+    const rows = [
+      ...Array.from({ length: 30 }, (_, index) => prismaBillingSyncJobRow({
+        createdAt: new Date(`2026-07-04T15:${String(index).padStart(2, "0")}:00.000Z`),
+        deadLetteredAt: new Date(`2026-07-04T14:${String(index).padStart(2, "0")}:00.000Z`),
+        id: `billing-summary-recent-created-dead-${index}`,
+        status: "dead_lettered"
+      })),
+      prismaBillingSyncJobRow({
+        createdAt: new Date("2026-07-01T00:00:00.000Z"),
+        deadLetteredAt: new Date("2026-07-04T16:30:00.000Z"),
+        id: "billing-summary-latest-dead-letter-old-created",
+        status: "dead_lettered"
+      })
+    ];
+    const findManyCalls: Array<{ orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }> = [];
+    const fakeClient = {
+      billingSyncJob: {
+        count: async (input: { where: { queue?: string; status?: string | { in: string[] } } }) => rows.filter((row) => matchesQueueStatus(row, input.where)).length,
+        findMany: async (input: { orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }) => {
+          findManyCalls.push(input);
+          return findSummaryEvidenceRows(rows, input, "createdAt");
+        }
+      }
+    };
+
+    const summary = await database
+      .createPrismaBillingSyncQueueSummaryStore(fakeClient)
+      .summarizeBillingSyncQueue({ queue: "billing-sync" });
+
+    assert.equal(summary.deadLetterCount, 31);
+    assert.equal(summary.latestJob?.id, "billing-summary-latest-dead-letter-old-created");
+    assert.ok(findManyCalls.some((input) => "deadLetteredAt" in input.orderBy));
+    assert.equal(findManyCalls.every((input) => input.take === 25), true);
+  });
+
+  it("filters null billing sync delivery timestamps before bounded evidence sampling", async () => {
+    const database = await import("@support-communication/database");
+    const rows = [
+      ...Array.from({ length: 30 }, (_, index) => prismaBillingSyncJobRow({
+        createdAt: new Date(`2026-07-04T17:${String(index).padStart(2, "0")}:00.000Z`),
+        deadLetteredAt: null,
+        id: `billing-summary-null-dead-letter-${index}`,
+        status: "dead_lettered"
+      })),
+      prismaBillingSyncJobRow({
+        createdAt: new Date("2026-07-01T00:00:00.000Z"),
+        deadLetteredAt: new Date("2026-07-04T19:00:00.000Z"),
+        id: "billing-summary-latest-non-null-dead-letter",
+        status: "dead_lettered"
+      })
+    ];
+    const findManyCalls: Array<{ orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }> = [];
+    const fakeClient = {
+      billingSyncJob: {
+        count: async (input: { where: { queue?: string; status?: string | { in: string[] } } }) => rows.filter((row) => matchesQueueStatus(row, input.where)).length,
+        findMany: async (input: { orderBy: Record<string, "asc" | "desc">; take?: number; where: { queue?: string; status?: string | { in: string[] } } }) => {
+          findManyCalls.push(input);
+          return findSummaryEvidenceRows(rows, input, "createdAt");
+        }
+      }
+    };
+
+    const summary = await database
+      .createPrismaBillingSyncQueueSummaryStore(fakeClient)
+      .summarizeBillingSyncQueue({ queue: "billing-sync" });
+
+    const deadLetteredAtCall = findManyCalls.find((input) => "deadLetteredAt" in input.orderBy);
+    assert.equal(summary.deadLetterCount, 31);
+    assert.equal(summary.latestJob?.id, "billing-summary-latest-non-null-dead-letter");
+    assert.deepEqual((deadLetteredAtCall?.where as Record<string, unknown>)?.deadLetteredAt, { not: null });
+    assert.equal(findManyCalls.every((input) => input.take === 25), true);
+  });
+
   it("publishes pending outbox events and records success or retryable failure", async () => {
     const events = await import("@support-communication/events");
     assert.equal(typeof events.InMemoryOutboxStore, "function");
@@ -3373,3 +3745,118 @@ describe("Prisma database and transactional outbox contracts", () => {
     assert.equal(staleClaim[0].lockedAt, "2026-06-27T10:01:01.000Z");
   });
 });
+
+function prismaOutboxRow(overrides: Record<string, unknown> = {}) {
+  return {
+    aggregateId: "conversation-summary",
+    aggregateType: "conversation",
+    attempts: 0,
+    deadLetteredAt: null,
+    deadLetterReplayAuditEvents: [],
+    id: "outbox-summary-row",
+    lastError: null,
+    lockedAt: null,
+    nextAttemptAt: null,
+    occurredAt: new Date("2026-07-04T13:00:00.000Z"),
+    payload: {
+      body: "Private outbound message",
+      providerToken: "secret-outbox-summary-token"
+    },
+    publishedAt: null,
+    queue: "message-delivery",
+    status: "pending",
+    traceId: "trc_outbox_summary",
+    type: "message.delivery.requested",
+    ...overrides
+  };
+}
+
+function prismaBillingSyncJobRow(overrides: Record<string, unknown> = {}) {
+  return {
+    actor: "billing-provider",
+    actorName: "stripe",
+    attempts: 0,
+    auditEventId: "evt_billing_summary",
+    createdAt: new Date("2026-07-04T14:00:00.000Z"),
+    deadLetteredAt: null,
+    deadLetterReplayAuditEvents: [],
+    fromPlanId: "starter",
+    id: "billing-summary-row",
+    lastError: null,
+    lockedAt: null,
+    nextAttemptAt: null,
+    payload: {
+      providerApiKey: "secret-billing-summary-token",
+      tenantId: "tenant-summary"
+    },
+    publishedAt: null,
+    queue: "billing-sync",
+    reason: "billing.tenant.plan_changed",
+    status: "pending",
+    tenantId: "tenant-summary",
+    toPlanId: "business",
+    traceId: "trc_billing_summary",
+    ...overrides
+  };
+}
+
+function findSummaryEvidenceRows<T extends { queue: string; status: string; [key: string]: unknown }>(
+  rows: T[],
+  input: {
+    orderBy: Record<string, "asc" | "desc">;
+    take?: number;
+    where: { queue?: string; status?: string | { in: string[] } };
+  },
+  fallbackOrderField: string
+): T[] {
+  const [orderField, direction] = Object.entries(input.orderBy)[0] ?? [fallbackOrderField, "desc"];
+  return rows
+    .filter((row) => matchesQueueStatus(row, input.where as { queue?: string; status?: string | { in: string[] }; [key: string]: unknown }))
+    .sort((left, right) => comparePostgresNullableTimestamp(left[orderField], right[orderField], direction))
+    .slice(0, input.take);
+}
+
+function comparePostgresNullableTimestamp(leftValue: unknown, rightValue: unknown, direction: "asc" | "desc"): number {
+  const leftNull = leftValue === null || leftValue === undefined;
+  const rightNull = rightValue === null || rightValue === undefined;
+
+  if (leftNull || rightNull) {
+    if (leftNull && rightNull) {
+      return 0;
+    }
+    return direction === "desc"
+      ? (leftNull ? -1 : 1)
+      : (leftNull ? 1 : -1);
+  }
+
+  const leftTime = Number(leftValue);
+  const rightTime = Number(rightValue);
+  const multiplier = direction === "asc" ? 1 : -1;
+  return (leftTime - rightTime) * multiplier;
+}
+
+function matchesQueueStatus(
+  row: { queue: string; status: string; [key: string]: unknown },
+  where: { queue?: string; status?: string | { in: string[] }; [key: string]: unknown }
+): boolean {
+  const status = where.status;
+  const statusMatches = typeof status === "string"
+    ? row.status === status
+    : status === undefined || status.in.includes(row.status);
+
+  const nullableFiltersMatch = Object.entries(where).every(([key, value]) => {
+    if (key === "queue" || key === "status") {
+      return true;
+    }
+    return !(isNonNullFilter(value) && row[key] == null);
+  });
+
+  return (!where.queue || row.queue === where.queue) && statusMatches && nullableFiltersMatch;
+}
+
+function isNonNullFilter(value: unknown): value is { not: null } {
+  return typeof value === "object"
+    && value !== null
+    && "not" in value
+    && (value as { not: unknown }).not === null;
+}

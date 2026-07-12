@@ -64,13 +64,34 @@ export function createTenantOperatorSessionTokens({
 }
 
 export function resolveTenantOperatorPermissions(role: string, permissionRoles: IdentityPermissionRole[]): string[] {
-  const normalizedRole = role.trim().toLowerCase();
+  const normalizedRole = normalizeTenantOperatorRole(role);
   const permissionRole = permissionRoles.find((item) =>
     item.key.toLowerCase() === normalizedRole
     || item.aliases.some((alias) => alias.toLowerCase() === normalizedRole)
   );
 
   return permissionRole ? [...permissionRole.actions] : [];
+}
+
+function normalizeTenantOperatorRole(role: string): string {
+  const normalizedRole = role.trim().toLowerCase();
+  if (["admin", "administrator", "owner", "владелец", "админ", "администратор"].includes(normalizedRole)) {
+    return "admin";
+  }
+
+  if (["employee", "operator", "line_1", "line-1", "сотрудник"].includes(normalizedRole)) {
+    return "employee";
+  }
+
+  if (normalizedRole === "senior operator") {
+    return "senior";
+  }
+
+  if (["senior", "senior_operator", "lead", "старший", "старший сотрудник"].includes(normalizedRole)) {
+    return "senior";
+  }
+
+  return normalizedRole;
 }
 
 export function readBearerTokenFromAuthorization(authorizationHeader: string): string {

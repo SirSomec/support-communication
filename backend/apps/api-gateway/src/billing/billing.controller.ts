@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
-import { DemoServiceAdminGuard } from "../identity/demo-service-admin.guard.js";
+import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
 import { type BillingInvoiceState, type BillingSubscriptionState } from "./billing.repository.js";
 import { changeTenantTariffFromRoute } from "./billing.route.js";
@@ -45,7 +45,7 @@ interface ProviderSyncBody {
 }
 
 @ApiTags("billing")
-@UseGuards(DemoServiceAdminGuard)
+@UseGuards(ServiceAdminSessionGuard)
 @Controller("billing")
 export class BillingController {
   constructor(private readonly billingService: BillingService) {}
@@ -143,8 +143,20 @@ export class BillingController {
   }
 }
 
+@ApiTags("public")
+@Controller("public/catalog")
+export class PublicBillingCatalogController {
+  constructor(private readonly billingService: BillingService) {}
+
+  @Get("tariffs")
+  @ApiOkResponse({ description: "Public canonical tariff catalog envelope" })
+  fetchTariffs() {
+    return this.billingService.fetchTariffs();
+  }
+}
+
 @ApiTags("quotas")
-@UseGuards(DemoServiceAdminGuard)
+@UseGuards(ServiceAdminSessionGuard)
 @Controller("quotas")
 export class QuotaController {
   constructor(private readonly billingService: BillingService) {}

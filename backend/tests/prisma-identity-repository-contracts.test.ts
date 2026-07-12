@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { resolveServiceAdminContextAsync } from "@support-communication/auth-context";
 import { configureIdentityRepository } from "../apps/api-gateway/src/identity/bootstrap.ts";
-import { DemoServiceAdminGuard } from "../apps/api-gateway/src/identity/demo-service-admin.guard.ts";
-import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { ServiceAdminSessionGuard } from "../apps/api-gateway/src/identity/service-admin-session.guard.ts";
+import { IdentityRepository, hashAuthFlowToken, hashServiceAdminToken } from "../apps/api-gateway/src/identity/identity.repository.ts";
 import { PermissionService } from "../apps/api-gateway/src/identity/permission.service.ts";
 import { TenantService } from "../apps/api-gateway/src/identity/tenant.service.ts";
 import { ServiceAdminService } from "../apps/api-gateway/src/service-admin/service-admin.service.ts";
@@ -170,7 +170,7 @@ describe("Prisma-backed identity repository contracts", () => {
     assert.deepEqual(decision.data.groupIds, ["custom-admins"]);
 
     const model = await permissionService.fetchPermissionModel();
-    assert.deepEqual(model.data.roles, ["custom_admin"]);
+    assert.deepEqual(model.data.roles.map((role) => role.key), ["custom_admin"]);
     assert.deepEqual(model.data.groups, ["custom-admins"]);
     assert.deepEqual(client.calls.tenantUserFindMany, [{
       orderBy: { name: "asc" },
@@ -409,15 +409,28 @@ describe("Prisma-backed identity repository contracts", () => {
     const session = await repository.createServiceAdminSession({
       actorId: "svc-admin-prod",
       actorName: "Production Admin",
+      adminEmail: "production-admin@example.com",
       allowedActions: ["tenants.manage"],
+      availableOrganizations: [{ id: "tenant-volga", name: "Volga Logistics", role: "service_admin" }],
+      currentTenantId: "tenant-volga",
       mfaVerified: true,
       ttlMinutes: 30
     });
-    const guard = new DemoServiceAdminGuard(reflectorForAction("billing.change"));
+    await repository.createServiceAdminTokenPair({
+      accessTokenExpiresAt: "2099-12-31T23:59:59.000Z",
+      accessTokenHash: hashServiceAdminToken("prisma-guard-access-token"),
+      id: "prisma-guard-token-pair",
+      issuedAt: "2026-07-02T00:00:00.000Z",
+      refreshTokenExpiresAt: "2100-01-01T23:59:59.000Z",
+      refreshTokenHash: hashServiceAdminToken("prisma-guard-refresh-token"),
+      sessionId: session.id,
+      subjectId: session.adminId
+    });
+    const guard = new ServiceAdminSessionGuard(reflectorForAction("billing.change"));
 
     try {
       await assert.rejects(
-        () => guard.canActivate(executionContextForRequest({ headers: { authorization: `Bearer ${session.id}` } })),
+        () => guard.canActivate(executionContextForRequest({ headers: { authorization: "Bearer prisma-guard-access-token" } })),
         /permission_denied|permission/
       );
       const denials = await repository.listPermissionDenialEvents() as Array<Record<string, unknown>>;
@@ -758,15 +771,21 @@ describe("Prisma-backed identity repository contracts", () => {
     const { client } = createFakePrismaIdentityClient();
     const repository = IdentityRepository.prisma({ client });
 
-    const challenge = await repository.createMfaChallenge("service-admin@example.com");
+    const otpHash = `hmac-sha256:${"a".repeat(64)}`;
+    const challenge = await repository.createMfaChallenge({
+      email: "service-admin@example.com",
+      otpHash
+    });
     assert.match(challenge.id, /^mfa_/);
     assert.equal(client.calls.mfaCreates[0].data.email, "service-admin@example.com");
+    assert.equal(client.calls.mfaCreates[0].data.otpHash, otpHash);
     assert.equal(client.calls.mfaCreates[0].data.expiresAt instanceof Date, true);
 
     const consumed = await repository.consumeMfaChallenge({
       challengeId: challenge.id,
       email: "service-admin@example.com",
-      now: new Date("2026-06-27T10:00:00.000Z")
+      now: new Date("2026-06-27T10:00:00.000Z"),
+      otpHash
     });
     assert.equal(consumed.valid, true);
     assert.equal(client.calls.mfaUpdateMany[0].where.id, challenge.id);
@@ -775,7 +794,8 @@ describe("Prisma-backed identity repository contracts", () => {
     const reused = await repository.consumeMfaChallenge({
       challengeId: challenge.id,
       email: "service-admin@example.com",
-      now: new Date("2026-06-27T10:01:00.000Z")
+      now: new Date("2026-06-27T10:01:00.000Z"),
+      otpHash
     });
     assert.equal(reused.valid, false);
     assert.equal(reused.code, "mfa_challenge_consumed");
@@ -783,7 +803,10 @@ describe("Prisma-backed identity repository contracts", () => {
     const session = await repository.createServiceAdminSession({
       actorId: "svc-prisma-admin",
       actorName: "Prisma Admin",
+      adminEmail: "prisma-admin@example.com",
       allowedActions: ["tenants.manage"],
+      availableOrganizations: [{ id: "tenant-volga", name: "Volga Logistics", role: "service_admin" }],
+      currentTenantId: "tenant-volga",
       mfaVerified: true,
       ttlMinutes: 30
     });
@@ -802,13 +825,76 @@ describe("Prisma-backed identity repository contracts", () => {
     assert.equal(client.calls.sessionUpdates[0].data.revokedAt instanceof Date, true);
   });
 
+  it("persists invite and recovery auth-flow tokens through Prisma delegates without raw secrets", async () => {
+    const { client } = createFakePrismaIdentityClient();
+    const repository = IdentityRepository.prisma({ client });
+
+    const invite = await repository.createInviteToken({
+      code: "invite-prisma-contract",
+      email: "Prisma.Invite@Volga.Example",
+      expiresAt: "2099-07-04T12:00:00.000Z",
+      tenantId: "tenant-volga"
+    });
+    assert.equal(invite.code, "invite-prisma-contract");
+    assert.equal(invite.email, "prisma.invite@volga.example");
+    assert.equal(client.calls.authInviteTokenUpserts.length, 1);
+    assert.equal(client.calls.authInviteTokenUpserts[0].where.codeHash, hashAuthFlowToken("invite-prisma-contract"));
+    assert.equal("code" in client.calls.authInviteTokenUpserts[0].create, false);
+
+    const consumedInvite = await repository.consumeInviteToken({
+      code: "invite-prisma-contract",
+      email: "prisma.invite@volga.example",
+      now: new Date("2026-07-04T12:00:00.000Z")
+    });
+    assert.equal(consumedInvite.status, "consumed");
+    assert.equal(consumedInvite.token.tenantId, "tenant-volga");
+    assert.equal(client.calls.authInviteTokenUpdateMany[0].where.id, invite.id);
+    assert.equal(client.calls.authInviteTokenUpdateMany[0].where.consumedAt, null);
+
+    const replayedInvite = await repository.consumeInviteToken({
+      code: "invite-prisma-contract",
+      email: "prisma.invite@volga.example",
+      now: new Date("2026-07-04T12:01:00.000Z")
+    });
+    assert.equal(replayedInvite.status, "denied");
+    assert.equal(replayedInvite.code, "invite_expired");
+
+    const recovery = await repository.createRecoveryToken("Prisma.Recovery@Volga.Example");
+    assert.match(recovery.token, /^recovery_/);
+    assert.equal(recovery.email, "prisma.recovery@volga.example");
+    assert.equal(client.calls.authRecoveryTokenUpserts.length, 1);
+    assert.equal(client.calls.authRecoveryTokenUpserts[0].where.tokenHash, hashAuthFlowToken(recovery.token));
+    assert.equal("token" in client.calls.authRecoveryTokenUpserts[0].create, false);
+
+    const consumedRecovery = await repository.consumeRecoveryToken({
+      email: "prisma.recovery@volga.example",
+      now: new Date("2026-07-04T12:00:00.000Z"),
+      token: recovery.token
+    });
+    assert.equal(consumedRecovery.status, "consumed");
+    assert.equal(consumedRecovery.token.email, "prisma.recovery@volga.example");
+    assert.equal(client.calls.authRecoveryTokenUpdateMany[0].where.id, recovery.id);
+    assert.equal(client.calls.authRecoveryTokenUpdateMany[0].where.consumedAt, null);
+
+    const replayedRecovery = await repository.consumeRecoveryToken({
+      email: "prisma.recovery@volga.example",
+      now: new Date("2026-07-04T12:01:00.000Z"),
+      token: recovery.token
+    });
+    assert.equal(replayedRecovery.status, "denied");
+    assert.equal(replayedRecovery.code, "recovery_expired");
+  });
+
   it("persists service-admin token lifecycle through Prisma delegates", async () => {
     const { client } = createFakePrismaIdentityClient();
     const repository = IdentityRepository.prisma({ client });
     const session = await repository.createServiceAdminSession({
       actorId: "svc-prisma-token-admin",
       actorName: "Prisma Token Admin",
+      adminEmail: "prisma-token-admin@example.com",
       allowedActions: ["tenants.manage"],
+      availableOrganizations: [{ id: "tenant-volga", name: "Volga Logistics", role: "service_admin" }],
+      currentTenantId: "tenant-volga",
       mfaVerified: true,
       ttlMinutes: 30
     });
@@ -1364,6 +1450,8 @@ function createFakePrismaIdentityClient(options: { omitTransactionRawSql?: boole
     traceId: "trc_rbac_default"
   })));
   const permissionDenialEvents: FakePermissionDenialEventRow[] = [];
+  const authInviteTokensByHash = new Map<string, FakeAuthInviteTokenRow>();
+  const authRecoveryTokensByHash = new Map<string, FakeAuthRecoveryTokenRow>();
   const breakGlassApprovals = new Map<string, FakeBreakGlassApprovalRow>();
   const credentialAuditEvents: FakeCredentialAuditEventRow[] = [];
   const impersonations = new Map<string, FakeServiceAdminImpersonationRow>();
@@ -1380,10 +1468,24 @@ function createFakePrismaIdentityClient(options: { omitTransactionRawSql?: boole
   const samlProviderMetadata = new Map<string, FakeSamlProviderMetadataRow>();
   const sessions = new Map<string, FakeServiceAdminSessionRow>();
   const serviceAdminAuditEvents = new Map<string, FakeServiceAdminAuditEventRow>();
+  const serviceAdminAuditExports = new Map<string, Record<string, unknown>>();
+  const serviceAdminAuditRedactions = new Map<string, Record<string, unknown>>();
   const serviceAdminTokenPairs = new Map<string, FakeServiceAdminTokenPairRow>();
   const serviceAdminTokenRevocations = new Map<string, FakeServiceAdminTokenRevocationRow>();
   const serviceAdminTokenRotations = new Map<string, FakeServiceAdminTokenRotationRow>();
   const calls = {
+    authInviteTokenUpserts: [] as Array<{
+      create: FakeAuthInviteTokenCreateInput;
+      update: FakeAuthInviteTokenUpdateInput;
+      where: { codeHash: string };
+    }>,
+    authInviteTokenUpdateMany: [] as Array<{ data: { consumedAt: Date }; where: { consumedAt: null; id: string } }>,
+    authRecoveryTokenUpserts: [] as Array<{
+      create: FakeAuthRecoveryTokenCreateInput;
+      update: FakeAuthRecoveryTokenUpdateInput;
+      where: { tokenHash: string };
+    }>,
+    authRecoveryTokenUpdateMany: [] as Array<{ data: { consumedAt: Date }; where: { consumedAt: null; id: string } }>,
     breakGlassApprovalCreates: [] as Array<{ data: FakeBreakGlassApprovalCreateInput }>,
     breakGlassApprovalUpdates: [] as Array<{ data: { status: string }; where: { id: string; status: string } }>,
     credentialAuditCreates: [] as Array<{ data: FakeCredentialAuditEventCreateInput }>,
@@ -1449,6 +1551,54 @@ function createFakePrismaIdentityClient(options: { omitTransactionRawSql?: boole
   };
 
   const delegates = {
+    authInviteToken: {
+      findUnique: async (input: { where: { codeHash: string } }) => authInviteTokensByHash.get(input.where.codeHash) ?? null,
+      updateMany: async (input: { data: { consumedAt: Date }; where: { consumedAt: null; id: string } }) => {
+        calls.authInviteTokenUpdateMany.push(input);
+        const row = [...authInviteTokensByHash.values()].find((item) => item.id === input.where.id);
+        if (!row || row.consumedAt !== null) {
+          return { count: 0 };
+        }
+
+        authInviteTokensByHash.set(row.codeHash, { ...row, consumedAt: input.data.consumedAt });
+        return { count: 1 };
+      },
+      upsert: async (input: {
+        create: FakeAuthInviteTokenCreateInput;
+        update: FakeAuthInviteTokenUpdateInput;
+        where: { codeHash: string };
+      }) => {
+        calls.authInviteTokenUpserts.push(input);
+        const existing = authInviteTokensByHash.get(input.where.codeHash);
+        const row = existing ? { ...existing, ...input.update } : input.create;
+        authInviteTokensByHash.set(input.where.codeHash, row);
+        return row;
+      }
+    },
+    authRecoveryToken: {
+      findUnique: async (input: { where: { tokenHash: string } }) => authRecoveryTokensByHash.get(input.where.tokenHash) ?? null,
+      updateMany: async (input: { data: { consumedAt: Date }; where: { consumedAt: null; id: string } }) => {
+        calls.authRecoveryTokenUpdateMany.push(input);
+        const row = [...authRecoveryTokensByHash.values()].find((item) => item.id === input.where.id);
+        if (!row || row.consumedAt !== null) {
+          return { count: 0 };
+        }
+
+        authRecoveryTokensByHash.set(row.tokenHash, { ...row, consumedAt: input.data.consumedAt });
+        return { count: 1 };
+      },
+      upsert: async (input: {
+        create: FakeAuthRecoveryTokenCreateInput;
+        update: FakeAuthRecoveryTokenUpdateInput;
+        where: { tokenHash: string };
+      }) => {
+        calls.authRecoveryTokenUpserts.push(input);
+        const existing = authRecoveryTokensByHash.get(input.where.tokenHash);
+        const row = existing ? { ...existing, ...input.update } : input.create;
+        authRecoveryTokensByHash.set(input.where.tokenHash, row);
+        return row;
+      }
+    },
     breakGlassApproval: {
       create: async (input: { data: FakeBreakGlassApprovalCreateInput }) => {
         calls.breakGlassApprovalCreates.push(input);
@@ -1475,24 +1625,34 @@ function createFakePrismaIdentityClient(options: { omitTransactionRawSql?: boole
       create: async (input: { data: FakeMfaChallengeCreateInput }) => {
         calls.mfaCreates.push(input);
         const row = {
+          attempts: input.data.attempts,
           consumedAt: input.data.consumedAt ?? null,
           createdAt: input.data.createdAt,
           email: input.data.email,
           expiresAt: input.data.expiresAt,
-          id: input.data.id
+          id: input.data.id,
+          maxAttempts: input.data.maxAttempts,
+          otpHash: input.data.otpHash
         };
         mfaChallenges.set(row.id, row);
         return row;
       },
       findUnique: async (input: { where: { id: string } }) => mfaChallenges.get(input.where.id) ?? null,
-      updateMany: async (input: { data: { consumedAt: Date }; where: { consumedAt: null; id: string } }) => {
+      updateMany: async (input: {
+        data: { attempts?: { increment: number }; consumedAt?: Date };
+        where: { attempts?: number; consumedAt: null; id: string };
+      }) => {
         calls.mfaUpdateMany.push(input);
         const row = mfaChallenges.get(input.where.id);
-        if (!row || row.consumedAt !== null) {
+        if (!row || row.consumedAt !== null || (input.where.attempts !== undefined && row.attempts !== input.where.attempts)) {
           return { count: 0 };
         }
 
-        mfaChallenges.set(row.id, { ...row, consumedAt: input.data.consumedAt });
+        mfaChallenges.set(row.id, {
+          ...row,
+          attempts: input.data.attempts ? row.attempts + input.data.attempts.increment : row.attempts,
+          consumedAt: input.data.consumedAt ?? row.consumedAt
+        });
         return { count: 1 };
       }
     },
@@ -1833,6 +1993,22 @@ function createFakePrismaIdentityClient(options: { omitTransactionRawSql?: boole
       findMany: async () => Array.from(serviceAdminAuditEvents.values())
         .sort((left, right) => right.at.getTime() - left.at.getTime())
     },
+    serviceAdminAuditExport: {
+      create: async (input: { data: Record<string, unknown> }) => {
+        serviceAdminAuditExports.set(String(input.data.id), input.data);
+        return input.data;
+      },
+      findMany: async () => Array.from(serviceAdminAuditExports.values())
+        .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    },
+    serviceAdminAuditRedaction: {
+      create: async (input: { data: Record<string, unknown> }) => {
+        serviceAdminAuditRedactions.set(String(input.data.id), input.data);
+        return input.data;
+      },
+      findMany: async () => Array.from(serviceAdminAuditRedactions.values())
+        .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    },
     serviceAdminImpersonation: {
       create: async (input: { data: FakeServiceAdminImpersonationCreateInput }) => {
         calls.serviceAdminImpersonationCreates.push(input);
@@ -2046,12 +2222,42 @@ interface FakePermissionDenialEventCreateInput {
 
 interface FakePermissionDenialEventRow extends FakePermissionDenialEventCreateInput {}
 
+interface FakeAuthInviteTokenCreateInput {
+  codeHash: string;
+  consumedAt: Date | null;
+  createdAt: Date;
+  email: string;
+  expiresAt: Date;
+  id: string;
+  tenantId: string;
+}
+
+type FakeAuthInviteTokenUpdateInput = Omit<FakeAuthInviteTokenCreateInput, "createdAt" | "id">;
+
+interface FakeAuthInviteTokenRow extends FakeAuthInviteTokenCreateInput {}
+
+interface FakeAuthRecoveryTokenCreateInput {
+  consumedAt: Date | null;
+  createdAt: Date;
+  email: string;
+  expiresAt: Date;
+  id: string;
+  tokenHash: string;
+}
+
+type FakeAuthRecoveryTokenUpdateInput = Omit<FakeAuthRecoveryTokenCreateInput, "createdAt" | "id">;
+
+interface FakeAuthRecoveryTokenRow extends FakeAuthRecoveryTokenCreateInput {}
+
 interface FakeMfaChallengeCreateInput {
+  attempts: number;
   consumedAt?: Date | null;
   createdAt: Date;
   email: string;
   expiresAt: Date;
   id: string;
+  maxAttempts: number;
+  otpHash: string;
 }
 
 interface FakeMfaChallengeRow extends FakeMfaChallengeCreateInput {

@@ -4,9 +4,11 @@ import { createEnvelope, type BackendEnvelope } from "@support-communication/env
 const INTEGRATION_SERVICE = "integrationService";
 
 export interface TelegramConnectionRecord {
+  channelConnectionId: string;
   botId: string | null;
   botToken: string;
   botUsername: string | null;
+  pollingOffset?: number;
   createdAt: string;
   status: "active" | "disabled";
   tenantId: string;
@@ -38,6 +40,7 @@ export interface TelegramGetMeResponse {
 
 export interface SaveTelegramConnectionInput {
   botToken: string;
+  channelConnectionId: string;
   fetcher?: TelegramHttpFetch;
   now?: Date;
   publicWebhookBaseUrl: string;
@@ -154,8 +157,9 @@ export async function saveTelegramConnectionRecord(
   existing?: TelegramConnectionRecord
 ): Promise<TelegramConnectionRecord> {
   const tenantId = String(input.tenantId ?? "").trim();
+  const channelConnectionId = String(input.channelConnectionId ?? "").trim();
   const botToken = String(input.botToken ?? "").trim();
-  if (!tenantId || !botToken) {
+  if (!tenantId || !channelConnectionId || !botToken) {
     throw new Error("telegram_connection_fields_required");
   }
 
@@ -164,9 +168,11 @@ export async function saveTelegramConnectionRecord(
   const now = (input.now ?? new Date()).toISOString();
 
   return {
+    channelConnectionId,
     botId: validated.botId,
     botToken,
     botUsername: validated.botUsername,
+    pollingOffset: existing?.pollingOffset ?? 0,
     createdAt: existing?.createdAt ?? now,
     status: "active",
     tenantId,

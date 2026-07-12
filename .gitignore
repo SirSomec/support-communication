@@ -8,3 +8,4 @@ playwright-report/
 !.env.example
 !**/.env.example
 backend/.runtime/
+.runtime/

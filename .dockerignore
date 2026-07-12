@@ -10,8 +10,6 @@ test-results
 
 .runtime
 **/.runtime
-runtime
-**/runtime
 coverage
 **/coverage
 *.tsbuildinfo

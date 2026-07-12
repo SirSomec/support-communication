@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { resolveServiceAdminContext } from "@support-communication/auth-context";
 import { configureRepositoryBootstrap, JsonFileStore, resolveRepositoryKind, resolveRepositoryStoreFile } from "@support-communication/database";
 import { createOutboxEvent } from "@support-communication/events";
@@ -11,21 +11,26 @@ import { configureAutomationRepository } from "../apps/api-gateway/src/automatio
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { AutomationService } from "../apps/api-gateway/src/automation/automation.service.ts";
 import { configureBillingRepository } from "../apps/api-gateway/src/billing/bootstrap.ts";
-import { BillingRepository } from "../apps/api-gateway/src/billing/billing.repository.ts";
+import { BillingRepository as RuntimeBillingRepository } from "../apps/api-gateway/src/billing/billing.repository.ts";
 import { BillingService } from "../apps/api-gateway/src/billing/billing.service.ts";
+import { bootstrapBillingState } from "../apps/api-gateway/src/billing/seed.ts";
 import { configureConversationRepository } from "../apps/api-gateway/src/conversation/bootstrap.ts";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
+import { bootstrapConversationState } from "../apps/api-gateway/src/conversation/seed.ts";
 import { configureIdentityRepository } from "../apps/api-gateway/src/identity/bootstrap.ts";
 import { AuthService } from "../apps/api-gateway/src/identity/auth.service.ts";
-import { DemoServiceAdminGuard } from "../apps/api-gateway/src/identity/demo-service-admin.guard.ts";
-import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { ServiceAdminSessionGuard } from "../apps/api-gateway/src/identity/service-admin-session.guard.ts";
+import { IdentityRepository as RuntimeIdentityRepository, hashServiceAdminToken } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { bootstrapIdentityState } from "../apps/api-gateway/src/identity/seed.ts";
+import { createMfaOtpRuntime } from "../apps/api-gateway/src/identity/mfa-otp.ts";
 import { TenantService } from "../apps/api-gateway/src/identity/tenant.service.ts";
 import { FeatureFlagService } from "../apps/api-gateway/src/feature-flags/feature-flag.service.ts";
 import { IncidentService } from "../apps/api-gateway/src/incidents/incident.service.ts";
 import { configureIntegrationRepository } from "../apps/api-gateway/src/integrations/bootstrap.ts";
 import { IntegrationRepository } from "../apps/api-gateway/src/integrations/integration.repository.ts";
 import { IntegrationService } from "../apps/api-gateway/src/integrations/integration.service.ts";
+import { bootstrapIntegrationState } from "../apps/api-gateway/src/integrations/seed.ts";
 import { createDeterministicDeadLetterReplayBackendStore } from "../apps/api-gateway/src/operations/dead-letter-replay.worker.ts";
 import { configureOperationsRepository } from "../apps/api-gateway/src/operations/bootstrap.ts";
 import {
@@ -34,19 +39,40 @@ import {
 } from "../apps/api-gateway/src/operations/operations-dead-letter-backend.registry.ts";
 import { OperationsReadinessService } from "../apps/api-gateway/src/operations/operations-readiness.service.ts";
 import { OperationsRepository } from "../apps/api-gateway/src/operations/operations.repository.ts";
+import { bootstrapOperationsState } from "../apps/api-gateway/src/operations/seed.ts";
 import { configurePlatformRepository } from "../apps/api-gateway/src/platform/bootstrap.ts";
 import { PlatformRepository } from "../apps/api-gateway/src/platform/platform.repository.ts";
 import { PlatformMonitoringService } from "../apps/api-gateway/src/platform/platform-monitoring.service.ts";
+import { bootstrapPlatformState } from "../apps/api-gateway/src/platform/seed.ts";
 import { configureReportRepository } from "../apps/api-gateway/src/reports/bootstrap.ts";
 import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
+import { exportJobFixtures } from "../apps/api-gateway/src/reports/seed-catalog.ts";
+import { bootstrapReportState } from "../apps/api-gateway/src/reports/seed.ts";
 import { configureRoutingRepository } from "../apps/api-gateway/src/routing/bootstrap.ts";
 import { RoutingRepository } from "../apps/api-gateway/src/routing/routing.repository.ts";
 import { RoutingService } from "../apps/api-gateway/src/routing/routing.service.ts";
+import { bootstrapRoutingState } from "../apps/api-gateway/src/routing/seed.ts";
 import { ServiceAdminService } from "../apps/api-gateway/src/service-admin/service-admin.service.ts";
 import { configureWorkspaceRepository } from "../apps/api-gateway/src/workspace/bootstrap.ts";
 import { WorkspaceRepository } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 import { WorkspaceService } from "../apps/api-gateway/src/workspace/workspace.service.ts";
+import { bootstrapWorkspaceState } from "../apps/api-gateway/src/workspace/seed.ts";
+
+type BillingRepository = RuntimeBillingRepository;
+const BillingRepository = {
+  default: () => RuntimeBillingRepository.default(),
+  inMemory: () => RuntimeBillingRepository.inMemory(bootstrapBillingState()),
+  open: ({ filePath }: { filePath: string }) => RuntimeBillingRepository.open({ filePath, seed: bootstrapBillingState() }),
+  useDefault: (repository: RuntimeBillingRepository) => RuntimeBillingRepository.useDefault(repository)
+};
+type IdentityRepository = RuntimeIdentityRepository;
+const IdentityRepository = {
+  default: () => RuntimeIdentityRepository.default(),
+  inMemory: () => RuntimeIdentityRepository.inMemory(bootstrapIdentityState()),
+  open: ({ filePath }: { filePath: string }) => RuntimeIdentityRepository.open({ filePath, seed: bootstrapIdentityState() }),
+  useDefault: (repository: RuntimeIdentityRepository) => RuntimeIdentityRepository.useDefault(repository)
+};
 
 function usePersistentOperationsDeadLetterBackendRegistry(): void {
   const registry = new OperationsDeadLetterBackendRegistry();
@@ -56,6 +82,10 @@ function usePersistentOperationsDeadLetterBackendRegistry(): void {
 }
 
 describe("persistent backend foundation and identity services", () => {
+  beforeEach(() => {
+    RuntimeBillingRepository.useDefault(RuntimeBillingRepository.inMemory(bootstrapBillingState()));
+    RuntimeIdentityRepository.useDefault(RuntimeIdentityRepository.inMemory(bootstrapIdentityState()));
+  });
   it("uses shared repository bootstrap helpers for JSON and Prisma fallback selection", () => {
     assert.equal(resolveRepositoryKind({ SUPPORT_REPOSITORY: " prisma " }, "SUPPORT_REPOSITORY"), "prisma");
     assert.equal(resolveRepositoryKind({ SUPPORT_REPOSITORY: "json" }, "SUPPORT_REPOSITORY"), "json");
@@ -190,7 +220,7 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "conversation.json");
-      const firstRepository = ConversationRepository.open({ filePath });
+      const firstRepository = ConversationRepository.open({ filePath, seed: bootstrapConversationState() });
       const firstConversations = new ConversationService(firstRepository);
 
       const closed = await firstConversations.transitionConversationStatus({
@@ -214,7 +244,7 @@ describe("persistent backend foundation and identity services", () => {
         channel: "SDK",
         fileName: "invoice.pdf",
         sizeBytes: 2048
-      });
+      }, { tenantId: "tenant-volga" });
       assert.equal(upload.status, "ok");
 
       const outbound = await firstConversations.createOutboundConversationRequest({
@@ -222,7 +252,7 @@ describe("persistent backend foundation and identity services", () => {
         message: "Persistent proactive message",
         phone: "+7 999 111-22-33",
         topic: "Delivery / Status"
-      });
+      }, { tenantId: "tenant-volga" });
       assert.equal(outbound.status, "ok");
 
       const inbound = await firstConversations.normalizeInboundEvent("telegram", {
@@ -2101,12 +2131,15 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-identity.json");
-      configureIdentityRepository({ IDENTITY_STORE_FILE: filePath });
+      configureIdentityRepository({ IDENTITY_STORE_FILE: filePath }, { seed: bootstrapIdentityState() });
       const first = IdentityRepository.default();
       const session = first.createServiceAdminSession({
         actorId: "runtime-admin",
         actorName: "Runtime Admin",
+        adminEmail: "runtime-admin@example.com",
         allowedActions: ["tenants.manage"],
+        availableOrganizations: [{ id: "tenant-volga", name: "Volga Logistics", role: "service_admin" }],
+        currentTenantId: "tenant-volga",
         mfaVerified: true,
         ttlMinutes: 30
       });
@@ -2125,7 +2158,7 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-billing.json");
-      configureBillingRepository({ BILLING_STORE_FILE: filePath });
+      configureBillingRepository({ BILLING_STORE_FILE: filePath }, { seed: bootstrapBillingState() });
       const first = new BillingService();
 
       const applied = await first.changeTenantTariff({
@@ -2151,7 +2184,7 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-conversation.json");
-      configureConversationRepository({ CONVERSATION_STORE_FILE: filePath });
+      configureConversationRepository({ CONVERSATION_STORE_FILE: filePath }, { seed: bootstrapConversationState() });
       const first = new ConversationService();
 
       const reply = await first.appendMessage({
@@ -2185,7 +2218,7 @@ describe("persistent backend foundation and identity services", () => {
         fileName: "runtime-map.pdf",
         mimeType: "application/pdf",
         sizeBytes: 4096
-      });
+      }, { tenantId: "tenant-volga" });
       assert.equal(upload.status, "ok");
       const finalized = await first.finalizeUpload({
         checksum: "sha256-runtime",
@@ -2193,7 +2226,7 @@ describe("persistent backend foundation and identity services", () => {
       });
       assert.equal(finalized.status, "ok");
 
-      configureWorkspaceRepository({ WORKSPACE_STORE_FILE: filePath });
+      configureWorkspaceRepository({ WORKSPACE_STORE_FILE: filePath }, { seed: bootstrapWorkspaceState() });
       const second = new WorkspaceService();
       const denied = await second.getDownloadPolicy(String(upload.data.fileId));
       const scanPending = await second.getDownloadPolicy(String(upload.data.fileId), { canDownload: true });
@@ -2214,7 +2247,7 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-workspace.json");
-      configureWorkspaceRepository({ WORKSPACE_STORE_FILE: filePath });
+      configureWorkspaceRepository({ WORKSPACE_STORE_FILE: filePath }, { seed: bootstrapWorkspaceState() });
       const first = new WorkspaceService();
 
       const savedTemplate = await first.saveTemplate({
@@ -2222,19 +2255,19 @@ describe("persistent backend foundation and identity services", () => {
         text: "Use the durable template after restart.",
         title: "Runtime durable template",
         topic: "Delivery"
-      });
+      }, { tenantId: "tenant-volga" });
       const savedDraft = await first.saveKnowledgeArticleDraft({
         articleId: "kb-delivery-tracking",
         body: "Durable runtime draft body.",
         reason: "Persist draft through restart"
-      });
+      }, { tenantId: "tenant-volga" });
       assert.equal(savedTemplate.status, "ok");
       assert.equal(savedDraft.status, "ok");
 
       configureWorkspaceRepository({ WORKSPACE_STORE_FILE: filePath });
       const second = new WorkspaceService();
-      const templates = await second.fetchTemplates({ operatorId: "operator-1" });
-      const article = await second.fetchKnowledgeArticle("kb-delivery-tracking");
+      const templates = await second.fetchTemplates({ operatorId: "operator-1" }, { tenantId: "tenant-volga" });
+      const article = await second.fetchKnowledgeArticle("kb-delivery-tracking", { tenantId: "tenant-volga" });
 
       assert.equal(existsSync(filePath), true);
       assert.ok((templates.data.items as Array<Record<string, unknown>>).some((template) => template.id === savedTemplate.data.id));
@@ -2252,25 +2285,25 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-workspace.json");
-      configureWorkspaceRepository({ WORKSPACE_STORE_FILE: filePath });
+      configureWorkspaceRepository({ WORKSPACE_STORE_FILE: filePath }, { seed: bootstrapWorkspaceState() });
       const first = new WorkspaceService();
 
       const merge = await first.mergeClientProfiles({
         candidateProfileId: "src_telegram_dmitry",
         primaryProfileId: "src_sdk_maria",
         reason: "Runtime duplicate client profile"
-      });
+      }, { tenantId: "tenant-volga" });
       const unmerge = await first.unmergeClientProfile({
         detachedProfileId: "src_telegram_dmitry",
         primaryProfileId: "src_sdk_maria",
         reason: "Runtime profile detach"
-      });
+      }, { tenantId: "tenant-volga" });
       assert.equal(merge.status, "ok");
       assert.equal(unmerge.status, "ok");
 
       configureWorkspaceRepository({ WORKSPACE_STORE_FILE: filePath });
       const second = new WorkspaceService();
-      const profiles = await second.fetchClientProfiles({ page: 1, pageSize: 5 });
+      const profiles = await second.fetchClientProfiles({ page: 1, pageSize: 5 }, { tenantId: "tenant-volga" });
       const mergeEvents = profiles.data.mergeEvents as Array<Record<string, unknown>>;
 
       assert.equal(existsSync(filePath), true);
@@ -2288,29 +2321,30 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-routing.json");
-      configureRoutingRepository({ ROUTING_STORE_FILE: filePath });
+      configureRoutingRepository({ ROUTING_STORE_FILE: filePath }, { seed: bootstrapRoutingState() });
       const first = new RoutingService();
+      const routingContext = { tenantId: "tenant-volga" };
 
       const assigned = await first.createAssignment({
         action: "assign",
         conversationId: "alexey",
         reason: "Runtime persistent assignment",
         targetOperatorId: "operator-anna"
-      });
+      }, routingContext);
       const paused = await first.pauseSla({
         conversationId: "maria",
         durationMinutes: 15,
         reason: "Runtime persistent SLA pause"
-      });
+      }, routingContext);
       const rescue = await first.startRescue({
         conversationId: "vladimir",
         reason: "Runtime persistent rescue"
-      });
+      }, routingContext);
       const resolved = await first.resolveRescue({
         conversationId: "vladimir",
         outcome: "returned_to_queue",
         reason: "Runtime persistent rescue return"
-      });
+      }, routingContext);
       assert.equal(assigned.status, "ok");
       assert.equal(paused.status, "ok");
       assert.equal(rescue.status, "ok");
@@ -2318,8 +2352,8 @@ describe("persistent backend foundation and identity services", () => {
 
       configureRoutingRepository({ ROUTING_STORE_FILE: filePath });
       const second = new RoutingService();
-      const workload = await second.fetchWorkload({ channel: "VK" });
-      const rescueReport = await second.fetchRescueReport({ period: "today" });
+      const workload = await second.fetchWorkload({ channel: "VK" }, routingContext);
+      const rescueReport = await second.fetchRescueReport({ period: "today" }, routingContext);
       const routingRepository = RoutingRepository.open({ filePath });
       const jobs = await routingRepository.listJobs();
 
@@ -2343,8 +2377,12 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-reports.json");
-      configureReportRepository({ REPORT_STORE_FILE: filePath });
+      const reportRepository = configureReportRepository({ REPORT_STORE_FILE: filePath });
+      for (const fixture of structuredClone(exportJobFixtures)) {
+        reportRepository.saveExportJob({ ...fixture, tenantId: "tenant-volga" });
+      }
       const first = new ReportService();
+      const reportContext = { requesterUserId: "operator-anna", tenantId: "tenant-volga" };
 
       const queued = await first.requestReportExport({
         channel: "VK",
@@ -2353,17 +2391,17 @@ describe("persistent backend foundation and identity services", () => {
         idempotencyKey: "runtime-durable-report-export",
         period: "today",
         reportType: "SLA"
-      });
+      }, reportContext);
       const retried = await first.retryReportExport({
         jobId: "export-2420",
         reason: "Runtime persistent retry"
-      });
+      }, reportContext);
       assert.equal(queued.status, "ok");
       assert.equal(retried.status, "ok");
 
       configureReportRepository({ REPORT_STORE_FILE: filePath });
       const second = new ReportService();
-      const workspaceEnvelope = await second.fetchReportWorkspace({ channel: "VK", period: "today", reportType: "SLA" });
+      const workspaceEnvelope = await second.fetchReportWorkspace({ channel: "VK", period: "today", reportType: "SLA" }, reportContext);
       const duplicate = await second.requestReportExport({
         channel: "VK",
         columns: ["metric", "today", "status"],
@@ -2371,7 +2409,7 @@ describe("persistent backend foundation and identity services", () => {
         idempotencyKey: "runtime-durable-report-export",
         period: "today",
         reportType: "SLA"
-      });
+      }, reportContext);
       const reusedKey = await second.requestReportExport({
         channel: "VK",
         columns: ["metric", "previous"],
@@ -2379,16 +2417,16 @@ describe("persistent backend foundation and identity services", () => {
         idempotencyKey: "runtime-durable-report-export",
         period: "today",
         reportType: "SLA"
-      });
+      }, reportContext);
       const retryAgain = await second.retryReportExport({
         jobId: "export-2420",
         reason: "Already running after restart"
-      });
-      const untouchedReadyDescriptor = await second.getExportFileDescriptor("export-2418", { canDownload: true });
+      }, reportContext);
+      const untouchedReadyDescriptor = await second.getExportFileDescriptor("export-2418", { canDownload: true, ...reportContext });
 
       const exportJobs = workspaceEnvelope.data.exportJobs as Array<Record<string, unknown>>;
-      const reportRepository = ReportRepository.open({ filePath });
-      const state = reportRepository.readState();
+      const reopenedReportRepository = ReportRepository.open({ filePath });
+      const state = reopenedReportRepository.readState();
 
       assert.equal(existsSync(filePath), true);
       assert.ok(exportJobs.some((job) => job.id === queued.data.job.id && job.statusKey === "queued"));
@@ -2767,6 +2805,9 @@ describe("persistent backend foundation and identity services", () => {
         idempotencyKey: "shared-report-key",
         period: "today",
         reportType: "SLA"
+      }, {
+        requesterUserId: "operator-anna",
+        tenantId: "tenant-volga"
       });
       const state = ReportRepository.open({ filePath }).readState();
 
@@ -2785,7 +2826,7 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-template-conflict-replay.json");
-      configureReportRepository({ REPORT_STORE_FILE: filePath });
+      configureReportRepository({ REPORT_STORE_FILE: filePath }, { seed: bootstrapReportState() });
       const first = new ReportService();
 
       const saved = await first.saveSavedReportTemplate({
@@ -2802,7 +2843,7 @@ describe("persistent backend foundation and identity services", () => {
         tenantId: "tenant-volga"
       });
 
-      configureReportRepository({ REPORT_STORE_FILE: filePath });
+      configureReportRepository({ REPORT_STORE_FILE: filePath }, { seed: bootstrapReportState() });
       const second = new ReportService();
       const conflict = await second.saveSavedReportTemplate({
         columns: ["metric", "previous"],
@@ -2817,7 +2858,7 @@ describe("persistent backend foundation and identity services", () => {
         requesterUserId: "operator-anna",
         tenantId: "tenant-volga"
       });
-      const crossTenantConflict = await second.saveSavedReportTemplate({
+      const crossTenantReplay = await second.saveSavedReportTemplate({
         columns: ["metric", "today"],
         filters: {
           channel: "VK",
@@ -2830,15 +2871,22 @@ describe("persistent backend foundation and identity services", () => {
         requesterUserId: "operator-anna",
         tenantId: "tenant-ladoga"
       });
-      const state = ReportRepository.open({ filePath }).readState();
+      const state = ReportRepository.open({ filePath, seed: bootstrapReportState() }).readState();
 
       assert.equal(saved.status, "ok");
       assert.equal(conflict.status, "conflict");
       assert.equal(conflict.error?.code, "idempotency_key_reused");
-      assert.equal(crossTenantConflict.status, "conflict");
-      assert.equal(crossTenantConflict.error?.code, "idempotency_key_reused");
-      assert.equal(state.savedReportTemplates.length, 1);
+      assert.equal(crossTenantReplay.status, "ok");
+      assert.equal(crossTenantReplay.data.duplicate, false);
+      assert.equal(state.savedReportTemplates.length, 2);
       assert.equal(state.savedReportTemplates[0].id, saved.data.template.id);
+      assert.deepEqual(
+        state.idempotencyKeys
+          .filter((item) => item.key === "saveSavedReportTemplate:save-template-conflict")
+          .map((item) => item.tenantId)
+          .sort(),
+        ["tenant-ladoga", "tenant-volga"]
+      );
     } finally {
       rmSync(workspace, { force: true, recursive: true });
       ReportRepository.clearDefault();
@@ -2849,7 +2897,7 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-integrations.json");
-      configureIntegrationRepository({ INTEGRATION_STORE_FILE: filePath });
+      configureIntegrationRepository({ INTEGRATION_STORE_FILE: filePath }, { seed: bootstrapIntegrationState() });
       const first = new IntegrationService();
 
       const rotated = await first.rotateApiKey("stage-key");
@@ -2862,14 +2910,14 @@ describe("persistent backend foundation and identity services", () => {
       assert.equal(replay.status, "ok");
       assert.equal(revoked.status, "ok");
 
-      configureIntegrationRepository({ INTEGRATION_STORE_FILE: filePath });
+      configureIntegrationRepository({ INTEGRATION_STORE_FILE: filePath }, { seed: bootstrapIntegrationState() });
       const second = new IntegrationService();
       const workspaceEnvelope = await second.fetchIntegrationWorkspace();
       const duplicateReplay = await second.replayWebhookDelivery({
         deliveryId: "dlv-441",
         idempotencyKey: "runtime-webhook-replay"
       });
-      const repository = IntegrationRepository.open({ filePath });
+      const repository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
       const state = repository.readState();
 
       const riskSession = (workspaceEnvelope.data.activeSecuritySessions as Array<Record<string, unknown>>).find((session) => session.id === "sess-risk");
@@ -2905,26 +2953,26 @@ describe("persistent backend foundation and identity services", () => {
         flowNodes: [{ id: "start", type: "message" }],
         flowEdges: [],
         idempotencyKey: "persistent-bot-publish"
-      });
+      }, { tenantId: "tenant-demo" });
       const testRun = await first.testBotScenario({
         id: "bot-persistent",
         name: "Persistent bot",
         testCases: [{ id: "happy-path", expected: "handoff" }]
-      });
+      }, { tenantId: "tenant-demo" });
       const proactive = await first.saveProactiveRule({
         id: "rule-persistent",
         channels: ["VK"],
         activeVariant: "B",
         cooldown: "12h",
         segment: "returning"
-      });
+      }, { tenantId: "tenant-demo" });
       assert.equal(published.status, "ok");
       assert.equal(testRun.status, "ok");
       assert.equal(proactive.status, "ok");
 
       configureAutomationRepository({ AUTOMATION_STORE_FILE: filePath });
       const second = new AutomationService();
-      const workspaceEnvelope = await second.fetchAutomationWorkspace();
+      const workspaceEnvelope = await second.fetchAutomationWorkspace({ tenantId: "tenant-demo" });
       const duplicate = await second.publishBotScenario({
         id: "bot-persistent",
         name: "Persistent bot",
@@ -2932,7 +2980,7 @@ describe("persistent backend foundation and identity services", () => {
         flowNodes: [{ id: "start", type: "message" }],
         flowEdges: [],
         idempotencyKey: "persistent-bot-publish"
-      });
+      }, { tenantId: "tenant-demo" });
       const repository = AutomationRepository.open({ filePath });
       const state = repository.readState();
 
@@ -2968,7 +3016,8 @@ describe("persistent backend foundation and identity services", () => {
         id: "bot-json-parity",
         name: "JSON parity bot",
         schemaVersion: "bot-flow/v1",
-        status: "draft"
+        status: "draft",
+        tenantId: "tenant-demo"
       });
 
       const second = AutomationRepository.open({ filePath });
@@ -2999,7 +3048,7 @@ describe("persistent backend foundation and identity services", () => {
         name: "JSON parity bot updated",
         schemaVersion: "bot-flow/v1",
         status: "published",
-        tenantId: "tenant-spoofed"
+        tenantId: "tenant-demo"
       });
       const updated = second.findBotScenario("bot-json-parity") as Record<string, unknown> | undefined;
 
@@ -3028,6 +3077,7 @@ describe("persistent backend foundation and identity services", () => {
         ],
         scenarioId: "bot-version-json-parity",
         status: "draft",
+        tenantId: "tenant-demo",
         versionId: "bot-version-json-parity-v1"
       });
 
@@ -3049,7 +3099,7 @@ describe("persistent backend foundation and identity services", () => {
         flowNodes: [{ id: "changed", title: "Changed", type: "message" }],
         scenarioId: "bot-version-json-parity",
         status: "published",
-        tenantId: "tenant-spoofed",
+        tenantId: "tenant-demo",
         versionId: "bot-version-json-parity-v1"
       } as Parameters<AutomationRepository["saveBotScenarioVersion"]>[0]);
       const listed = second.listBotScenarioVersions("bot-version-json-parity") as Array<Record<string, unknown>>;
@@ -3079,6 +3129,7 @@ describe("persistent backend foundation and identity services", () => {
         immutable: true,
         runtimeVersion: "runtime-bot-json-v1",
         scenarioId: "bot-publish-json",
+        tenantId: "tenant-demo",
         versionId: "bot-publish-json-v1"
       });
 
@@ -3105,7 +3156,7 @@ describe("persistent backend foundation and identity services", () => {
         immutable: true,
         runtimeVersion: "runtime-bot-json-v2",
         scenarioId: "bot-publish-json",
-        tenantId: "tenant-spoofed",
+        tenantId: "tenant-demo",
         versionId: "bot-publish-json-v1"
       } as Parameters<AutomationRepository["saveBotPublishAuditEvent"]>[0]);
       const listed = second.listBotPublishAuditEvents("bot-publish-json") as Array<Record<string, unknown>>;
@@ -3124,7 +3175,7 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-platform.json");
-      configurePlatformRepository({ PLATFORM_STORE_FILE: filePath });
+      configurePlatformRepository({ PLATFORM_STORE_FILE: filePath }, { seed: bootstrapPlatformState() });
       const firstPlatform = new PlatformMonitoringService();
       const firstIncidents = new IncidentService();
       const firstFlags = new FeatureFlagService();
@@ -3153,7 +3204,7 @@ describe("persistent backend foundation and identity services", () => {
       assert.equal(incidentUpdate.status, "ok");
       assert.equal(flagUpdate.status, "ok");
 
-      configurePlatformRepository({ PLATFORM_STORE_FILE: filePath });
+      configurePlatformRepository({ PLATFORM_STORE_FILE: filePath }, { seed: bootstrapPlatformState() });
       const secondPlatform = new PlatformMonitoringService();
       const secondIncidents = new IncidentService();
       const secondFlags = new FeatureFlagService();
@@ -3168,7 +3219,7 @@ describe("persistent backend foundation and identity services", () => {
       const platformDrilldown = await secondPlatform.fetchComponentDrilldown("cmp-webhooks");
       const incidentDetail = await secondIncidents.fetchIncidentDetail("inc-webhook-retry");
       const flagList = await secondFlags.fetchFeatureFlags({ query: "billing" });
-      const repository = PlatformRepository.open({ filePath });
+      const repository = PlatformRepository.open({ filePath, seed: bootstrapPlatformState() });
       const state = repository.readState();
 
       const billingFlag = (flagList.data.items as Array<Record<string, unknown>>).find((flag) => flag.id === "flag-billing-v2");
@@ -3191,7 +3242,7 @@ describe("persistent backend foundation and identity services", () => {
     const workspace = makeTempWorkspace();
     try {
       const filePath = join(workspace, "runtime-operations.json");
-      configureOperationsRepository({ OPERATIONS_STORE_FILE: filePath });
+      configureOperationsRepository({ OPERATIONS_STORE_FILE: filePath }, { seed: bootstrapOperationsState() });
       usePersistentOperationsDeadLetterBackendRegistry();
       const first = new OperationsReadinessService();
 
@@ -3223,7 +3274,7 @@ describe("persistent backend foundation and identity services", () => {
       assert.equal(replay.status, "ok");
       assert.equal(rollback.status, "ok");
 
-      configureOperationsRepository({ OPERATIONS_STORE_FILE: filePath });
+      configureOperationsRepository({ OPERATIONS_STORE_FILE: filePath }, { seed: bootstrapOperationsState() });
       usePersistentOperationsDeadLetterBackendRegistry();
       const second = new OperationsReadinessService();
       const duplicateLoadRun = await second.queueLoadTestRun({
@@ -3262,7 +3313,7 @@ describe("persistent backend foundation and identity services", () => {
         messageId: "dlm-report-001",
         reason: "Persistent dead letter conflict"
       });
-      const repository = OperationsRepository.open({ filePath });
+      const repository = OperationsRepository.open({ filePath, seed: bootstrapOperationsState() });
       const state = repository.readState();
 
       assert.equal(existsSync(filePath), true);
@@ -3342,11 +3393,21 @@ describe("persistent backend foundation and identity services", () => {
       mfaVerified: true,
       ttlMinutes: 30
     });
+    repository.createServiceAdminTokenPair({
+      accessTokenExpiresAt: "2099-12-31T23:59:59.000Z",
+      accessTokenHash: hashServiceAdminToken("prod-access-token"),
+      id: "prod-token-pair",
+      issuedAt: "2026-07-02T00:00:00.000Z",
+      refreshTokenExpiresAt: "2100-01-01T23:59:59.000Z",
+      refreshTokenHash: hashServiceAdminToken("prod-refresh-token"),
+      sessionId: session.id,
+      subjectId: session.adminId
+    });
 
-    const guard = new DemoServiceAdminGuard(reflectorForAction("tenants.manage"));
+    const guard = new ServiceAdminSessionGuard(reflectorForAction("tenants.manage"));
     const request = {
       headers: {
-        authorization: `Bearer ${session.id}`,
+        authorization: "Bearer prod-access-token",
         "x-demo-service-admin-actor-id": "spoofed-admin",
         "x-demo-service-admin-actor-name": "Spoofed Admin",
         "x-demo-service-admin-mfa-verified": "true",
@@ -3357,13 +3418,13 @@ describe("persistent backend foundation and identity services", () => {
 
     assert.equal(await guard.canActivate(executionContextForRequest(request)), true);
     assert.equal(request.serviceAdminContext.actor.id, "svc-admin-prod");
-    assert.equal(request.serviceAdminContext.currentTenantId, session.currentTenantId);
+    assert.equal(request.serviceAdminContext.currentTenantId, undefined);
     assert.equal(request.serviceAdminContext.sessionId, session.id);
     assert.deepEqual(request.serviceAdminContext.permissions, ["tenants.manage"]);
 
-    const deniedGuard = new DemoServiceAdminGuard(reflectorForAction("billing.change"));
+    const deniedGuard = new ServiceAdminSessionGuard(reflectorForAction("billing.change"));
     await assert.rejects(
-      () => deniedGuard.canActivate(executionContextForRequest({ headers: { authorization: `Bearer ${session.id}`, "x-demo-service-admin-permissions": "*" } })),
+      () => deniedGuard.canActivate(executionContextForRequest({ headers: { authorization: "Bearer prod-access-token", "x-demo-service-admin-permissions": "*" } })),
       /permission_denied|permission/
     );
     const denials = await repository.listPermissionDenialEvents();
@@ -3371,12 +3432,12 @@ describe("persistent backend foundation and identity services", () => {
     assert.equal(denials[0].actorId, "svc-admin-prod");
     assert.equal(denials[0].action, "billing.change");
     assert.equal(denials[0].resource, "service-admin");
-    assert.equal(denials[0].roleKey, "admin");
+    assert.equal(denials[0].roleKey, "service_admin");
     assert.equal(denials[0].immutable, true);
 
     repository.revokeServiceAdminSession(session.id);
     await assert.rejects(
-      () => guard.canActivate(executionContextForRequest({ headers: { authorization: `Bearer ${session.id}` } })),
+      () => guard.canActivate(executionContextForRequest({ headers: { authorization: "Bearer prod-access-token" } })),
       /session_revoked|revoked/
     );
   });
@@ -3402,7 +3463,7 @@ describe("persistent backend foundation and identity services", () => {
       subjectId: "svc-admin-token-prod"
     });
 
-    const guard = new DemoServiceAdminGuard(reflectorForAction("tenants.manage"));
+    const guard = new ServiceAdminSessionGuard(reflectorForAction("tenants.manage"));
     const request = {
       headers: {
         authorization: "Bearer guard-access-token",
@@ -3466,7 +3527,7 @@ describe("persistent backend foundation and identity services", () => {
         ttlMinutes: 30
       });
 
-      const guard = new DemoServiceAdminGuard(reflectorForAction("tenants.manage"));
+      const guard = new ServiceAdminSessionGuard(reflectorForAction("tenants.manage"));
       await assert.rejects(
         () => guard.canActivate(executionContextForRequest({
           headers: {
@@ -3490,7 +3551,7 @@ describe("persistent backend foundation and identity services", () => {
         NODE_ENV: "production"
       }));
 
-      const guard = new DemoServiceAdminGuard(reflectorForAction("tenants.manage"));
+      const guard = new ServiceAdminSessionGuard(reflectorForAction("tenants.manage"));
       await assert.rejects(
         () => guard.canActivate(executionContextForRequest({
           headers: {
@@ -3509,7 +3570,7 @@ describe("persistent backend foundation and identity services", () => {
     }
   });
 
-  it("rejects demo-key service-admin login completion outside development and test", async () => {
+  it("creates persisted service-admin sessions after MFA without demo headers in production", async () => {
     const previous = snapshotEnv();
     try {
       Object.assign(process.env, requiredConfigEnv({
@@ -3517,7 +3578,15 @@ describe("persistent backend foundation and identity services", () => {
         NODE_ENV: "production"
       }));
       const repository = IdentityRepository.inMemory();
-      const auth = new AuthService(repository);
+      const auth = new AuthService(repository, createMfaOtpRuntime({
+        delivery: {
+          async send({ challengeId }) {
+            return { providerMessageId: `test-${challengeId}` };
+          }
+        },
+        generateOtp: () => "123456",
+        hashKey: "production-session-contract-mfa-key"
+      }));
       const challenge = await auth.login({
         email: "service-admin@example.com",
         password: "correct-password"
@@ -3534,11 +3603,12 @@ describe("persistent backend foundation and identity services", () => {
         mfaChallengeId: challenge.data.mfaChallengeId,
         otp: "123456",
         password: "correct-password"
-      }, { privileged: true });
+      });
 
-      assert.equal(completion.status, "denied");
-      assert.equal(completion.error?.code, "production_identity_provider_required");
-      assert.equal(sessionsCreated, 0);
+      assert.equal(completion.status, "ok");
+      assert.equal(completion.data.authenticated, true);
+      assert.equal(typeof completion.data.accessToken, "string");
+      assert.equal(sessionsCreated, 1);
     } finally {
       restoreEnv(previous);
     }
@@ -3550,7 +3620,7 @@ describe("persistent backend foundation and identity services", () => {
 
     for (const fileUrl of listControllerFiles(controllerRoot)) {
       const content = readFileSync(fileUrl, "utf8");
-      if (!content.includes("DemoServiceAdminGuard")) {
+      if (!content.includes("ServiceAdminSessionGuard")) {
         continue;
       }
 
@@ -3565,13 +3635,13 @@ describe("persistent backend foundation and identity services", () => {
         }
 
         if (/^export class \w+/.test(trimmed)) {
-          classGuarded = decorators.some((decorator) => decorator.includes("DemoServiceAdminGuard"));
+          classGuarded = decorators.some((decorator) => decorator.includes("ServiceAdminSessionGuard"));
           decorators = [];
           continue;
         }
 
         const routeDecorated = decorators.some((decorator) => /^@(Delete|Get|Patch|Post|Put)\b/.test(decorator));
-        const methodGuarded = decorators.some((decorator) => decorator.includes("DemoServiceAdminGuard"));
+        const methodGuarded = decorators.some((decorator) => decorator.includes("ServiceAdminSessionGuard"));
         const methodMatch = /^([a-zA-Z_$][\w$]*)\s*\(/.exec(trimmed);
         if (routeDecorated && methodMatch && (classGuarded || methodGuarded) && !decorators.some((decorator) => decorator.startsWith("@RequireServiceAdminAction"))) {
           missing.push(`${fileUrl.pathname}:${index + 1}:${methodMatch[1]}`);
@@ -3614,19 +3684,27 @@ function reflectorForAction(action: string) {
 function requiredConfigEnv(overrides: Record<string, string>): Record<string, string> {
   return {
     API_VERSION: "v1",
+    BILLING_REPOSITORY: "prisma",
+    CONVERSATION_REPOSITORY: "prisma",
     DATABASE_URL: "postgresql://support:support@127.0.0.1:5432/support_communication",
     DEMO_SERVICE_ADMIN_KEY: "dev-service-admin-key",
+    IDENTITY_REPOSITORY: "prisma",
+    JWT_ACCESS_SECRET: "test-access-secret-16chars",
+    JWT_REFRESH_SECRET: "test-refresh-secret-16chars",
     LOG_LEVEL: "info",
     MAIL_HOST: "127.0.0.1",
     MAIL_PORT: "1025",
     NODE_ENV: "test",
     PORT: "4191",
+    PUBLIC_API_KEY_SECRET: "test-public-api-secret",
     REDIS_URL: "redis://127.0.0.1:6379",
+    ROUTING_REPOSITORY: "prisma",
     S3_ACCESS_KEY: "minio",
     S3_BUCKET: "support-communication-local",
     S3_ENDPOINT: "http://127.0.0.1:9000",
     S3_SECRET_KEY: "minio-password",
     SERVICE_NAME: "api-gateway",
+    WORKSPACE_REPOSITORY: "prisma",
     ...overrides
   };
 }

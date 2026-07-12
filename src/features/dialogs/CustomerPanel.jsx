@@ -1,8 +1,24 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Copy, FileText, Lock, Plus, ShieldCheck, Smartphone } from "lucide-react";
-import { maskPhone } from "../../app/dialogModel.js";
+import { maskPhone, resolutionOutcomeLabels } from "../../app/dialogModel.js";
+import { knowledgeService } from "../../services/knowledgeService.js";
 
 export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic, setDraft, templates, onClose, access, isClosed }) {
+  const [resolutionOutcome, setResolutionOutcome] = useState("resolved");
+  const [previewArticle, setPreviewArticle] = useState(null);
+  const channelTemplates = templates.filter((template) => sameValue(template.channel, conversation.channel));
+  const recommendedTemplates = channelTemplates.length ? channelTemplates : templates;
+  const [knowledgeArticles, setKnowledgeArticles] = useState([]);
+  const recommendedArticles = useMemo(() => rankArticles(knowledgeArticles, conversation, topic), [conversation, knowledgeArticles, topic]);
+
+  useEffect(() => {
+    let ignore = false;
+    void knowledgeService.fetchArticles({ visibility: "public" }).then((response) => {
+      if (!ignore && response.status === "ok") setKnowledgeArticles(Array.isArray(response.data?.items) ? response.data.items : []);
+    });
+    return () => { ignore = true; };
+  }, [conversation.id, conversation.channel, topic]);
+
   return (
     <aside className="customer-panel" aria-label="Карточка клиента">
       <PanelSection title="О клиенте" action={<button aria-label="Копировать"><Copy size={18} /></button>}>
@@ -43,7 +59,7 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
 
       <PanelSection title="Рекомендуемые шаблоны">
         <div className="template-list">
-          {templates.slice(0, 3).map((template) => (
+          {recommendedTemplates.slice(0, 3).map((template) => (
             <button key={template.id} onClick={() => setDraft(template.text)}>
               <span>
                 <strong>{template.title}</strong>
@@ -57,15 +73,16 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
 
       <PanelSection title="Рекомендуемые статьи">
         <div className="article-list">
-          {["Отслеживание заказа", "Сроки и условия доставки"].map((title) => (
-            <button key={title}>
+          {recommendedArticles.map((article) => (
+            <button key={article.id} onClick={() => setPreviewArticle(article)} title="Открыть статью">
               <span>
-                <strong>{title}</strong>
-                <small>{title === "Отслеживание заказа" ? "Инструкция" : "Статья"}</small>
+                <strong>{article.title}</strong>
+                <small>{article.category}</small>
               </span>
               <FileText size={17} />
             </button>
           ))}
+          {!recommendedArticles.length ? <p>Опубликованных статей для этого канала пока нет.</p> : null}
         </div>
       </PanelSection>
 
@@ -79,7 +96,15 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
             ))}
           </select>
         </label>
-        <button className="close-button" onClick={onClose} disabled={isClosed || !topic}>
+        {!isClosed ? (
+          <label className="close-topic">
+            <span>Результат</span>
+            <select value={resolutionOutcome} onChange={(event) => setResolutionOutcome(event.target.value)}>
+              {Object.entries(resolutionOutcomeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+        ) : null}
+        <button className="close-button" onClick={() => onClose({ resolutionOutcome })} disabled={isClosed || !topic}>
           {isClosed ? <ShieldCheck size={17} /> : <Lock size={17} />}
           {isClosed ? "Закрыт" : "Закрыть"}
         </button>
@@ -90,8 +115,40 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
           </p>
         ) : null}
       </PanelSection>
+      {previewArticle ? (
+        <div className="article-preview-overlay" role="presentation" onMouseDown={() => setPreviewArticle(null)}>
+          <section aria-modal="true" className="article-preview-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-label={`Статья: ${previewArticle.title}`}>
+            <header>
+              <div>
+                <span>{previewArticle.category}</span>
+                <h2>{previewArticle.title}</h2>
+              </div>
+              <button aria-label="Закрыть статью" onClick={() => setPreviewArticle(null)} type="button">×</button>
+            </header>
+            <p>{previewArticle.body}</p>
+            <footer>
+              <button onClick={() => setPreviewArticle(null)} type="button">Закрыть</button>
+              <button className="primary-action" onClick={() => { setDraft(previewArticle.body); setPreviewArticle(null); }} type="button">Вставить в ответ</button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </aside>
   );
+}
+
+function sameValue(left, right) {
+  return String(left ?? "").trim().toLowerCase() === String(right ?? "").trim().toLowerCase();
+}
+
+function rankArticles(articles, conversation, topic) {
+  const channel = String(conversation?.channel ?? "").trim().toLowerCase();
+  const query = `${topic ?? ""} ${conversation?.topic ?? ""}`.toLowerCase();
+  return articles
+    .filter((article) => article.channels?.some((item) => sameValue(item, channel)))
+    .map((article) => ({ ...article, score: Number(`${article.title} ${article.category} ${(article.topics ?? []).join(" ")}`.toLowerCase().includes(query)) + Number(article.helpfulRate ?? 0) / 100 }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 3);
 }
 
 function PanelSection({ title, action, children }) {

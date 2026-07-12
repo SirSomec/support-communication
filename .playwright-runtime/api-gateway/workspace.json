@@ -1,0 +1,308 @@
+{
+  "clientExportJobs": [],
+  "clientMergeConflicts": [],
+  "clientMergeEvents": [],
+  "clientProfiles": [
+    {
+      "id": "maria",
+      "tenantId": "tenant-volga",
+      "sourceProfileId": "src_sdk_maria",
+      "name": "Maria K.",
+      "channel": "SDK",
+      "phone": "+7 999 204-18-44",
+      "device": "Android",
+      "entry": "SDK",
+      "topic": "Delivery / Status",
+      "clientSince": "2024-05-12",
+      "previous": [
+        [
+          "2024-05-05",
+          "Return",
+          "Closed"
+        ]
+      ]
+    },
+    {
+      "id": "dmitry",
+      "tenantId": "tenant-volga",
+      "sourceProfileId": "src_telegram_dmitry",
+      "name": "Dmitry S.",
+      "channel": "Telegram",
+      "phone": "+7 916 481-77-02",
+      "device": "iOS",
+      "entry": "Telegram",
+      "topic": "Delivery / Address",
+      "clientSince": "2024-06-03",
+      "previous": [
+        [
+          "2024-05-11",
+          "Promo code",
+          "Closed"
+        ]
+      ]
+    },
+    {
+      "id": "olga",
+      "tenantId": "tenant-volga",
+      "sourceProfileId": "src_sdk_olga",
+      "name": "Olga L.",
+      "channel": "SDK",
+      "phone": "+7 985 430-09-40",
+      "device": "iOS",
+      "entry": "SDK",
+      "topic": "Payment / Refund",
+      "clientSince": "2024-03-14",
+      "previous": [
+        [
+          "2024-05-28",
+          "Card change",
+          "Closed"
+        ]
+      ]
+    }
+  ],
+  "fileScanResultIdempotency": [],
+  "files": [
+    {
+      "auditId": "evt_attachment_2d593e90-3d38-4b67-a121-7cda3933e67b",
+      "channel": "SDK",
+      "fileId": "attachment_565fa641-b2e1-4f33-a401-4df48f249f6d",
+      "fileName": "receipt.pdf",
+      "mimeType": "application/pdf",
+      "objectKey": "objects/obj_475f3f36-7b3c-4349-b654-880ddb35abda",
+      "scanState": "scan_pending",
+      "sizeBytes": 15,
+      "storageState": "uploaded",
+      "tenantId": "tenant-volga"
+    }
+  ],
+  "knowledgeApprovalDecisions": [],
+  "knowledgeArticles": [
+    {
+      "id": "kb-delivery-tracking",
+      "tenantId": "tenant-volga",
+      "title": "Order tracking",
+      "status": "published",
+      "category": "Delivery",
+      "topics": [
+        "Delivery / Status"
+      ],
+      "channels": [
+        "SDK",
+        "Telegram",
+        "MAX",
+        "VK"
+      ],
+      "visibility": "public",
+      "version": "v4.2",
+      "updated": "2026-06-27T10:40:00.000Z",
+      "owner": "Elena S.",
+      "usage": 312,
+      "helpfulRate": 89,
+      "body": "Check the order status in OMS and give the customer the current delivery stage.",
+      "attachments": [
+        {
+          "id": "att-delivery-map",
+          "name": "delivery-status-map.pdf",
+          "type": "PDF",
+          "size": "1.8 MB",
+          "status": "ready"
+        }
+      ],
+      "versions": [
+        {
+          "id": "kb-delivery-v42",
+          "label": "v4.2",
+          "status": "published",
+          "author": "Elena S.",
+          "updated": "2026-06-27T10:40:00.000Z"
+        },
+        {
+          "id": "kb-delivery-v41",
+          "label": "v4.1",
+          "status": "archived",
+          "author": "Ivan P.",
+          "updated": "2026-06-20T15:10:00.000Z"
+        }
+      ],
+      "approvalHistory": [
+        {
+          "id": "approval-delivery-3",
+          "actor": "Elena S.",
+          "action": "published",
+          "tone": "ok"
+        },
+        {
+          "id": "approval-delivery-2",
+          "actor": "Anna R.",
+          "action": "sent_for_review",
+          "tone": "info"
+        }
+      ]
+    },
+    {
+      "id": "kb-refund-terms",
+      "tenantId": "tenant-volga",
+      "title": "Refund timelines",
+      "status": "review",
+      "category": "Payment",
+      "topics": [
+        "Payment / Refund"
+      ],
+      "channels": [
+        "SDK",
+        "VK"
+      ],
+      "visibility": "public",
+      "version": "v2.0",
+      "updated": "2026-06-26T17:05:00.000Z",
+      "owner": "Anna R.",
+      "usage": 147,
+      "helpfulRate": 82,
+      "body": "Refund timing depends on payment method. Always include the next step and request number.",
+      "attachments": [
+        {
+          "id": "att-refund-policy",
+          "name": "refund-policy.pdf",
+          "type": "PDF",
+          "size": "920 KB",
+          "status": "ready"
+        }
+      ],
+      "versions": [
+        {
+          "id": "kb-refund-v20",
+          "label": "v2.0",
+          "status": "review",
+          "author": "Anna R.",
+          "updated": "2026-06-26T17:05:00.000Z"
+        }
+      ],
+      "approvalHistory": [
+        {
+          "id": "approval-refund-2",
+          "actor": "Anna R.",
+          "action": "sent_for_review",
+          "tone": "info"
+        }
+      ]
+    },
+    {
+      "id": "kb-auth-code",
+      "tenantId": "tenant-volga",
+      "title": "Confirmation code not received",
+      "status": "draft",
+      "category": "Authorization",
+      "topics": [
+        "Authorization / Code"
+      ],
+      "channels": [
+        "VK",
+        "MAX"
+      ],
+      "visibility": "internal",
+      "version": "v0.7",
+      "updated": "2026-06-22T12:00:00.000Z",
+      "owner": "Oleg N.",
+      "usage": 38,
+      "helpfulRate": 74,
+      "body": "Check code send limits and phone freshness before publishing.",
+      "attachments": [
+        {
+          "id": "att-auth-checklist",
+          "name": "auth-checklist.md",
+          "type": "MD",
+          "size": "24 KB",
+          "status": "ready"
+        }
+      ],
+      "versions": [
+        {
+          "id": "kb-auth-v07",
+          "label": "v0.7",
+          "status": "draft",
+          "author": "Oleg N.",
+          "updated": "2026-06-22T12:00:00.000Z"
+        }
+      ],
+      "approvalHistory": [
+        {
+          "id": "approval-auth-1",
+          "actor": "Oleg N.",
+          "action": "created_draft",
+          "tone": "info"
+        }
+      ]
+    }
+  ],
+  "knowledgeDraftVersions": [],
+  "templateAuditEvents": [
+    {
+      "action": "template.saved",
+      "id": "evt_template_d5a6251b-c5b0-46c1-b7d3-7b97177ee58f",
+      "immutable": true,
+      "templateId": "tpl_fcf7dc1e-5e8b-47c1-963b-4c9c0f9bb3e1",
+      "timestamp": "2026-07-11T22:09:40.510Z"
+    },
+    {
+      "action": "template.saved",
+      "id": "evt_template_335ec787-2230-4c93-8e31-ed1e35edb6c5",
+      "immutable": true,
+      "templateId": "tpl_d8665644-31ae-4421-884e-f13a622f8631",
+      "timestamp": "2026-07-11T22:10:53.440Z"
+    }
+  ],
+  "templates": [
+    {
+      "id": "delay",
+      "tenantId": "tenant-volga",
+      "title": "Delivery delay",
+      "scope": "team",
+      "channel": "SDK",
+      "topic": "Delivery",
+      "usage": 184,
+      "updated": "2026-06-27T08:04:00.000Z",
+      "text": "I understand the wait. I will check the order status and return with the delivery window.",
+      "version": 3
+    },
+    {
+      "id": "refund",
+      "tenantId": "tenant-volga",
+      "title": "Refund status",
+      "scope": "team",
+      "channel": "VK",
+      "topic": "Payment",
+      "usage": 73,
+      "updated": "2026-06-20T12:00:00.000Z",
+      "text": "I will check the refund status and confirm the expected posting date.",
+      "version": 2
+    },
+    {
+      "channel": "Telegram",
+      "scope": "team",
+      "text": "I understand the wait. I will check the order and return with a clear delivery time.",
+      "title": "Delivery delay",
+      "topic": "Product / Mismatch",
+      "id": "tpl_fcf7dc1e-5e8b-47c1-963b-4c9c0f9bb3e1",
+      "tenantId": "tenant-volga",
+      "updated": "2026-07-11T22:09:40.510Z",
+      "usage": 0,
+      "version": 1,
+      "auditId": "evt_template_d5a6251b-c5b0-46c1-b7d3-7b97177ee58f"
+    },
+    {
+      "title": "Status",
+      "text": "Проверю заказ и вернусь с точным сроком доставки. {client_name}",
+      "topic": "Delivery / Status",
+      "channel": "SDK",
+      "id": "tpl_d8665644-31ae-4421-884e-f13a622f8631",
+      "scope": "team",
+      "tenantId": "tenant-volga",
+      "updated": "2026-07-11T22:10:53.440Z",
+      "usage": 0,
+      "version": 1,
+      "auditId": "evt_template_335ec787-2230-4c93-8e31-ed1e35edb6c5"
+    }
+  ],
+  "templateVersions": []
+}

@@ -40,6 +40,19 @@ export const integrationService = {
     });
   },
 
+  async updateChannelTypeStatus({ type, ...payload } = {}) {
+    if (!hasRouteId(type)) {
+      return missingIdEnvelope("updateChannelTypeStatus", "Channel type is required.");
+    }
+
+    return apiRequest(`/integrations/channels/types/${encodeURIComponent(type)}/status`, {
+      body: payload,
+      method: "PATCH",
+      operation: "updateChannelTypeStatus",
+      service: SERVICE
+    });
+  },
+
   async deleteChannelConnection({ connectionId, ...payload } = {}) {
     if (!hasRouteId(connectionId)) {
       return missingIdEnvelope("deleteChannelConnection", "Channel connection id is required.");
@@ -158,6 +171,7 @@ export const integrationService = {
         "fetchChannelConnections",
         "createChannelConnection",
         "updateChannelConnection",
+        "updateChannelTypeStatus",
         "deleteChannelConnection",
         "testChannelConnectionInstance",
         "fetchChannelConnectionEvents",

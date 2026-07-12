@@ -787,3 +787,48 @@
   border-color: #f0d9a8;
   background: #fff8eb;
 }
+
+.scenario-ai-readiness {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7f9fc;
+}
+
+.scenario-ai-readiness--ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.scenario-ai-readiness--warn {
+  border-color: #f0d9a8;
+  background: #fff8eb;
+}
+
+.scenario-ai-readiness p,
+.scenario-ai-readiness small {
+  margin: 6px 0 0;
+  color: #33445c;
+  line-height: 1.4;
+}
+
+.scenario-ai-precreate {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.scenario-ai-precreate ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  color: #33445c;
+}

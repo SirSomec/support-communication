@@ -60,6 +60,9 @@ export function createScenarioFromWizard(id, values = {}) {
     ? values.triggerPhrases.map((phrase) => String(phrase).trim()).filter(Boolean)
     : [];
   const sourceBindings = normalizeSourceBindings(values.sourceBindings);
+  const language = findOption(scenarioLanguageOptions, values.language, "ru").id;
+  const tone = findOption(scenarioToneOptions, values.tone, "neutral").id;
+  const fallbackMessage = String(values.fallbackMessage ?? "").trim() || DEFAULT_AI_FALLBACK_MESSAGE;
   const triggerRules = trigger.id === "keyword"
     ? [{ id: "phrase-1", type: "phrase", phrases: triggerPhrases, matchMode: values.matchMode ?? "contains", priority: Number(values.triggerPriority) || 0 }]
     : [{ id: "new-conversation", type: trigger.id === "first_message" ? "new_conversation" : "manual", priority: Number(values.triggerPriority) || 0 }];
@@ -80,7 +83,22 @@ export function createScenarioFromWizard(id, values = {}) {
     successRate: 0,
     flowNodes: [
       { id: `${id}-trigger`, type: "message", typeLabel: "Сообщение", title: triggerTitle, detail: `${trigger.description} Каналы: ${channels.join(", ")}.`, channel: primaryChannel, position: { x: 1, y: 1 } },
-      { id: `${id}-reply`, type: "ai_reply", typeLabel: "AI-ответ", title: "Ответ AI по базе знаний", detail: firstMessage, config: { instructions: firstMessage }, channel: primaryChannel, position: { x: 2, y: 1 } },
+      {
+        id: `${id}-reply`,
+        type: "ai_reply",
+        typeLabel: "AI-ответ",
+        title: "Ответ AI по базе знаний",
+        detail: firstMessage,
+        config: {
+          fallbackMessage,
+          handoffQueue,
+          instructions: firstMessage,
+          language,
+          tone
+        },
+        channel: primaryChannel,
+        position: { x: 2, y: 1 }
+      },
       { id: `${id}-condition`, type: "condition", typeLabel: "Условие", title: handoffRule.label, detail: handoffRule.description, channel: primaryChannel, position: { x: 3, y: 1 } },
       { id: `${id}-handoff`, type: "handoff", typeLabel: "Handoff", title: `Передать в «${handoffQueue}»`, detail: `Оператор получит историю диалога, выбранный канал и причину: ${handoffRule.label.toLowerCase()}.`, channel: primaryChannel, position: { x: 4, y: 1 } }
     ],
@@ -159,16 +177,66 @@ function findOption(options, value, fallbackId) {
 export const scenarioWizardSteps = ["Задача", "Запуск", "Как помогает", "Знания и передача", "Проверка"];
 export const SCENARIO_WIZARD_DRAFT_KEY = "bot-scenario-wizard-draft-v1";
 
+export const scenarioLanguageOptions = [
+  { id: "ru", label: "Русский", description: "Бот отвечает по-русски." },
+  { id: "en", label: "English", description: "The bot answers in English." }
+];
+
+export const scenarioToneOptions = [
+  { id: "friendly", label: "Дружелюбный", description: "Тёплый и простой тон, без канцелярита." },
+  { id: "neutral", label: "Нейтральный", description: "Спокойный деловой тон по умолчанию." },
+  { id: "formal", label: "Официальный", description: "Сдержанный тон для формальных обращений." }
+];
+
+export const DEFAULT_AI_FALLBACK_MESSAGE = "Сейчас я не могу надёжно ответить по материалам. Передам вопрос специалисту.";
+
+export function describeAiReadiness(readiness = {}) {
+  const status = String(readiness.status ?? "not_configured");
+  if (status === "ready") {
+    return {
+      canFix: false,
+      fixHint: null,
+      reason: readiness.readyConnectionCount
+        ? `Проверено подключений: ${readiness.readyConnectionCount}. Бот сможет опираться на выбранные источники.`
+        : "AI-подключение проверено и готово к ответам по выбранным источникам.",
+      status,
+      title: "AI готов",
+      tone: "ok"
+    };
+  }
+  if (status === "unavailable") {
+    return {
+      canFix: true,
+      fixHint: "Исправить в Service Admin → AI-подключения",
+      reason: "Ключ есть, но не прошёл проверку или отключён. Черновик сохранить можно, а AI-ответы не запустятся, пока подключение не исправят.",
+      status,
+      title: "AI пока недоступен",
+      tone: "warn"
+    };
+  }
+  return {
+    canFix: true,
+    fixHint: "Настроить в Service Admin → AI-подключения",
+    reason: "Для организации ещё нет рабочего AI-ключа. Сценарий можно подготовить; после настройки ключа администратором сервиса AI-ответы заработают.",
+    status: "not_configured",
+    title: "AI ещё не настроен",
+    tone: "warn"
+  };
+}
+
 export function createDefaultWizardForm() {
   return {
     channels: ["SDK"],
+    fallbackMessage: DEFAULT_AI_FALLBACK_MESSAGE,
     firstMessage: scenarioGoalOptions[0].defaultMessage,
     goal: scenarioGoalOptions[0].id,
     handoffQueue: "Очередь 1-я линия",
     handoffRule: scenarioHandoffOptions[0].id,
+    language: scenarioLanguageOptions[0].id,
     matchMode: "contains",
     name: scenarioGoalOptions[0].suggestedName,
     selectedSourceIds: [],
+    tone: "neutral",
     trigger: scenarioTriggerOptions[0].id,
     triggerPhrases: []
   };

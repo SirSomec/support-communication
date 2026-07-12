@@ -163,7 +163,7 @@ export class BotRuntimeService {
       } catch (error) {
         const reason = error instanceof Error ? error.message : "bot_ai_unavailable";
         const handoffSummary = { botId: event.scenarioId ?? "", collectedFields: redactObject(context), nodeId: node.id, queue: String(node.config?.handoffQueue ?? "default"), reason: "ai_unavailable" };
-        return { aiResponse: { citations: [], model: "unavailable", text: "Сейчас я не могу надёжно ответить по материалам. Передам вопрос специалисту." }, context: { ...context, lastAiFailure: reason }, handoffSummary, outcome: "ai_handoff_requested", status: "handoff" as const };
+        return { aiResponse: { citations: [], model: "unavailable", text: String(node.config?.fallbackMessage ?? "Сейчас я не могу надёжно ответить по материалам. Передам вопрос специалисту.") }, context: { ...context, lastAiFailure: reason }, handoffSummary, outcome: "ai_handoff_requested", status: "handoff" as const };
       }
     }
     if (node.type === "fallback") return { context, outcome: "fallback", status: "active" as const };

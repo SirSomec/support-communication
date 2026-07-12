@@ -189,7 +189,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
           selectedScenarioId={selectedScenarioId}
           versions={scenarioVersions}
         />
-        {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} /> : null}
+        {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} /> : null}
       </ProductScreen>
     );
   }
@@ -840,7 +840,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
           </aside>
         </div>
       </section>
-      {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} /> : null}
+      {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} /> : null}
     </ProductScreen>
   );
 }

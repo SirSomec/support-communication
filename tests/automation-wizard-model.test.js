@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createScenarioFromWizard } from "../src/features/automation/automationModel.js";
 import {
   buildClientExperiencePreview,
   clearWizardDraft,
   createDefaultWizardForm,
+  createScenarioFromWizard,
+  describeAiReadiness,
+  findTriggerPhraseConflicts,
   loadWizardDraft,
+  previewKeywordTrigger,
   saveWizardDraft,
   scenarioWizardSteps
 } from "../src/features/automation/automationModel.js";
@@ -84,8 +87,25 @@ describe("scenario creation wizard model", () => {
     assert.equal(loadWizardDraft(storage), null);
   });
 
-  it("previews keyword matches and detects phrase conflicts without raw enum labels", async () => {
-    const { findTriggerPhraseConflicts, previewKeywordTrigger } = await import("../src/features/automation/automationModel.js");
+  it("explains AI readiness, language, tone and editable fallback before draft creation", () => {
+    const ready = describeAiReadiness({ readyConnectionCount: 1, status: "ready" });
+    const missing = describeAiReadiness({ status: "not_configured" });
+    assert.equal(ready.tone, "ok");
+    assert.equal(missing.canFix, true);
+    assert.match(missing.reason, /ключа/i);
+
+    const scenario = createScenarioFromWizard("bot-ai-transparent", {
+      fallbackMessage: "Не нашёл ответ — передам оператору.",
+      language: "en",
+      tone: "formal"
+    });
+    const aiNode = scenario.flowNodes.find((node) => node.type === "ai_reply");
+    assert.equal(aiNode.config.language, "en");
+    assert.equal(aiNode.config.tone, "formal");
+    assert.equal(aiNode.config.fallbackMessage, "Не нашёл ответ — передам оператору.");
+  });
+
+  it("previews keyword matches and detects phrase conflicts without raw enum labels", () => {
     const hit = previewKeywordTrigger("Подскажите где мой заказ пожалуйста", ["где мой заказ"], "contains");
     const miss = previewKeywordTrigger("хочу вернуть товар", ["где мой заказ"], "exact");
     assert.equal(hit.matches, true);

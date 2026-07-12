@@ -817,6 +817,53 @@
   text-transform: uppercase;
 }
 
+.bot-handoff-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.bot-handoff-feedback button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #c9daf0;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #24354f;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.bot-handoff-feedback button.is-selected,
+.bot-handoff-feedback button:hover:not(:disabled) {
+  border-color: #7aa7e3;
+  background: #eef5ff;
+}
+
+.bot-handoff-feedback button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.bot-handoff-feedback-note,
+.bot-handoff-feedback-error {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bot-handoff-feedback-note {
+  color: #1f6b3a;
+}
+
+.bot-handoff-feedback-error {
+  color: #9b1c1c;
+}
+
 @media (max-height: 800px) {
   .chat-pane {
     --operator-transcript-min-height: 96px;

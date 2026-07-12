@@ -252,6 +252,30 @@ export class AutomationController {
   ) {
     return this.automationService.createBotHandoffSummary({ ...payload, ...automationContextFromRequest(request) });
   }
+
+  @Post("bot-feedback")
+  @RequireTenantOperatorPermission("automation.read")
+  @RequireServiceAdminAction("automation.read")
+  @HttpCode(HttpStatus.OK)
+  @ApiHeader({ name: "idempotency-key", required: false })
+  @ApiOkResponse({ description: "Record operator/admin bot AI feedback without mutating knowledge" })
+  recordBotAiFeedback(
+    @Body()
+    payload: {
+      citationSourceIds?: string[];
+      comment?: string;
+      conversationId?: string;
+      outcome?: "helped" | "not_helped" | "wrong_source";
+      scenarioId?: string;
+    },
+    @Headers("idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: TenantOperatorRequest
+  ) {
+    return this.automationService.recordBotAiFeedback(
+      payload,
+      automationContextFromRequest(request, { idempotencyKey: idempotencyKey?.trim() || undefined })
+    );
+  }
 }
 
 function automationContextFromRequest(request: TenantOperatorRequest, extra: Partial<AutomationRequestContext> = {}): AutomationRequestContext {

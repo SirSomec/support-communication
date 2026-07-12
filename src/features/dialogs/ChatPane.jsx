@@ -80,8 +80,10 @@ export function ChatPane({
       />
       <BotHandoffSummary
         canViewSensitive={access?.canViewSensitive}
+        conversationId={conversation.id}
         handoff={conversation.botHandoff}
         phone={conversation.phone}
+        scenarioId={conversation.botHandoff?.botId}
         topic={topic || conversation.topic}
       />
       <AuditTimeline messages={conversation.messages} onSaveTemplate={onSaveTemplate} transcriptMode={transcriptMode} />

@@ -91,6 +91,27 @@ export const automationService = {
     return lifecycleRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/disable`, "POST", "disableBotScenario", options);
   },
 
+  async recordBotAiFeedback(payload = {}) {
+    const conversationId = String(payload.conversationId ?? "").trim();
+    if (!conversationId) {
+      return missingIdEnvelope("recordBotAiFeedback", "conversationId is required.");
+    }
+    const idempotencyKey = String(payload.idempotencyKey ?? "").trim();
+    return apiRequest("/automation/bot-feedback", {
+      body: {
+        citationSourceIds: payload.citationSourceIds,
+        comment: payload.comment,
+        conversationId,
+        outcome: payload.outcome,
+        scenarioId: payload.scenarioId
+      },
+      ...(idempotencyKey ? { headers: { "idempotency-key": idempotencyKey } } : {}),
+      method: "POST",
+      operation: "recordBotAiFeedback",
+      service: SERVICE
+    });
+  },
+
   getReadiness() {
     return {
       id: SERVICE,
@@ -106,7 +127,8 @@ export const automationService = {
         "updateBotScenario",
         "disableBotScenario",
         "archiveBotScenario",
-        "restoreBotScenario"
+        "restoreBotScenario",
+        "recordBotAiFeedback"
       ],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],

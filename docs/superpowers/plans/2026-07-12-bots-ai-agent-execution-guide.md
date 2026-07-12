@@ -251,11 +251,11 @@ flowchart LR
 - [x] **BAI-700 — Добавить observability.** Метрики trigger match/no-match, retrieval quality, source errors, AI latency/errors, cache hit, tokens/cost, handoff и publish failures с tenant/scenario labels без PII explosion. Зависимость: Gate F.
 - [x] **BAI-701 — Ввести алерты и runbook.** Provider outage, ingestion backlog, quota spike, unsafe source/MCP denial, runtime dead-letter и высокий fallback rate имеют owner и действия восстановления. Зависимость: BAI-700.
 - [x] **BAI-702 — Подготовить operator handoff view.** В операторском диалоге видны цель, краткое state, последний AI outcome, citations и причина передачи; оператор может продолжить без поиска скрытого контекста. Зависимость: BAI-507.
-- [ ] **BAI-703 — Реализовать feedback loop.** Оператор/администратор отмечает «помогло / не помогло / неверный источник»; feedback tenant-scoped и не меняет знания автоматически без review. Зависимость: BAI-702.
-- [ ] **BAI-704 — Провести нагрузочные и отказоустойчивые тесты.** Очередь, retry, dead letter, provider 429/5xx/timeout, повтор delivery, concurrent publish, migration compatibility и restoration. Зависимость: BAI-700.
-- [ ] **BAI-705 — Провести security/privacy review.** Threat model URL/MCP/secret/prompt injection/tenant isolation, dependency scan, log review, retention/deletion и least privilege. Зависимость: все P0 фазы.
-- [ ] **BAI-706 — Запустить пилот через feature flag.** Один внутренний tenant → ограниченная группа клиентов → метрики/feedback → расширение. Есть kill switch, rollback сценария/connection/source и коммуникационный runbook. Зависимость: BAI-701–705.
-- [ ] **BAI-707 — Актуализировать пользовательскую и операционную документацию.** Как настроить источник, фразу, AI, handoff, удалить/восстановить сценарий, диагностировать ошибки и эскалировать инцидент. Зависимость: BAI-706.
+- [x] **BAI-703 — Реализовать feedback loop.** Оператор/администратор отмечает «помогло / не помогло / неверный источник»; feedback tenant-scoped и не меняет знания автоматически без review. Зависимость: BAI-702.
+- [x] **BAI-704 — Провести нагрузочные и отказоустойчивые тесты.** Очередь, retry, dead letter, provider 429/5xx/timeout, повтор delivery, concurrent publish, migration compatibility и restoration. Зависимость: BAI-700.
+- [x] **BAI-705 — Провести security/privacy review.** Threat model URL/MCP/secret/prompt injection/tenant isolation, dependency scan, log review, retention/deletion и least privilege. Зависимость: все P0 фазы.
+- [x] **BAI-706 — Запустить пилот через feature flag.** Один внутренний tenant → ограниченная группа клиентов → метрики/feedback → расширение. Есть kill switch, rollback сценария/connection/source и коммуникационный runbook. Зависимость: BAI-701–705.
+- [x] **BAI-707 — Актуализировать пользовательскую и операционную документацию.** Как настроить источник, фразу, AI, handoff, удалить/восстановить сценарий, диагностировать ошибки и эскалировать инцидент. Зависимость: BAI-706.
 
 **Gate H:** функция наблюдаема, безопасно отключаемая и проверена на пилоте; support и операторы могут объяснить и восстановить её работу.
 

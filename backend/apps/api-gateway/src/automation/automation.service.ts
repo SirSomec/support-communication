@@ -19,9 +19,16 @@ import {
   buildScenarioOperationalSummariesFromState,
   buildTenantAiUsageSummary
 } from "./scenario-operational-summary.js";
-import { recordBotPublishFailure, recordBotSourceError } from "./bot-observability.js";
+import { recordBotAiFeedback, recordBotPublishFailure, recordBotSourceError } from "./bot-observability.js";
 import { evaluateBotAlerts, summarizeBotMetricsForAlerts } from "./bot-alert-catalog.js";
 import { buildOperatorHandoffView } from "./operator-handoff-view.js";
+import {
+  BotFeedbackRepository,
+  isBotAiFeedbackOutcome,
+  type BotAiFeedbackRecord,
+  type BotFeedbackRepositoryPort
+} from "./bot-feedback.repository.js";
+import { featureFlags as platformFeatureFlags } from "../platform/seed-catalog.js";
 import { metricsRegistry } from "@support-communication/observability";
 
 const AUTOMATION_SERVICE = "automationService";
@@ -81,6 +88,15 @@ interface CreateBotHandoffPayload {
   topic?: string;
 }
 
+interface RecordBotAiFeedbackPayload {
+  citationSourceIds?: string[];
+  comment?: string;
+  conversationId?: string;
+  idempotencyKey?: string;
+  outcome?: string;
+  scenarioId?: string;
+}
+
 export interface AutomationRequestContext {
   actor?: string;
   idempotencyKey?: string;
@@ -98,9 +114,12 @@ export class AutomationService {
   private readonly rules: ProactiveRule[];
   private readonly publishIdempotency = new Map<string, { fingerprint: string; result: Record<string, unknown> }>();
 
-  constructor(private readonly automationRepository: AutomationRepository = AutomationRepository.default(),
+  constructor(
+    private readonly automationRepository: AutomationRepository = AutomationRepository.default(),
     private readonly exposureRepository: ProactiveExposureRepository = ProactiveExposureRepository.default(),
-    private readonly knowledgeSourceRepository: KnowledgeSourceRepository = KnowledgeSourceRepository.default()) {
+    private readonly knowledgeSourceRepository: KnowledgeSourceRepository = KnowledgeSourceRepository.default(),
+    private readonly botFeedbackRepository: BotFeedbackRepositoryPort = BotFeedbackRepository.default()
+  ) {
     this.scenarios = [];
     this.rules = [];
   }
@@ -135,6 +154,7 @@ export class AutomationService {
         scenarioOperations: clone(buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)),
         telemetry: {
           alerts: evaluateBotAlerts(summarizeBotMetricsForAlerts(metricsRegistry().snapshot())),
+          feedback: await Promise.resolve(this.botFeedbackRepository.listFeedback({ tenantId })),
           metrics: metricsRegistry().snapshot().filter((metric) => metric.name.startsWith("bot_")),
           runbookPath: "docs/bots-ai-operations-runbook.md"
         },
@@ -691,6 +711,67 @@ export class AutomationService {
     });
   }
 
+  async recordBotAiFeedback(
+    payload: RecordBotAiFeedbackPayload | null | undefined,
+    context: AutomationRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const request = payload ?? {};
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("recordBotAiFeedback");
+    const actorId = String(context.actor ?? "").trim();
+    if (!actorId) {
+      return invalidEnvelope("recordBotAiFeedback", "bot_feedback_actor_required", "Authenticated operator context is required.", {});
+    }
+    const conversationId = String(request.conversationId ?? "").trim();
+    const outcome = request.outcome;
+    if (!conversationId || !isBotAiFeedbackOutcome(outcome)) {
+      return invalidEnvelope(
+        "recordBotAiFeedback",
+        "bot_feedback_context_required",
+        "conversationId and outcome (helped | not_helped | wrong_source) are required.",
+        {}
+      );
+    }
+    const idempotencyKey = String(request.idempotencyKey ?? context.idempotencyKey ?? "").trim()
+      || `bot_feedback:${tenantId}:${conversationId}:${outcome}`;
+    const createdAt = new Date().toISOString();
+    const feedbackId = `bot_fb_${randomUUID()}`;
+    const citationSourceIds = Array.isArray(request.citationSourceIds)
+      ? request.citationSourceIds.map((id) => String(id ?? "").trim()).filter(Boolean)
+      : [];
+    const record: BotAiFeedbackRecord = {
+      actorId,
+      citationSourceIds,
+      comment: request.comment == null ? null : String(request.comment).trim() || null,
+      conversationId,
+      createdAt,
+      feedbackId,
+      idempotencyKey,
+      knowledgeMutated: false,
+      outcome,
+      reviewRequired: outcome === "wrong_source" || outcome === "not_helped",
+      scenarioId: request.scenarioId == null ? null : String(request.scenarioId).trim() || null,
+      tenantId
+    };
+    const persisted = await Promise.resolve(this.botFeedbackRepository.saveFeedback(record));
+    const duplicate = persisted.feedbackId !== feedbackId;
+    if (!duplicate) {
+      recordBotAiFeedback({ outcome: persisted.outcome, scenarioId: persisted.scenarioId ?? undefined, tenantId });
+    }
+    return createEnvelope({
+      service: AUTOMATION_SERVICE,
+      operation: "recordBotAiFeedback",
+      traceId: automationTraceId("recordBotAiFeedback"),
+      meta: apiMeta({ conversationId, tenantId }),
+      data: {
+        duplicate,
+        feedback: clone(persisted),
+        knowledgeMutated: false,
+        reviewRequired: persisted.reviewRequired
+      }
+    });
+  }
+
   async createBotHandoffSummary(payload: CreateBotHandoffPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
     const tenantId = String(request.tenantId ?? "").trim();
@@ -854,7 +935,9 @@ export class AutomationService {
   }
 
   async handleBotRuntimeInboundEvent(event: BotRuntimeInboundEvent, options: BotRuntimeOptions = {}) {
-    return new BotRuntimeService(this.automationRepository, options).handleInboundEvent(event);
+    const featureFlags = options.featureFlags
+      ?? (String(process.env.BOT_AI_AGENTS_PILOT_ENFORCE ?? "").trim() === "1" ? platformFeatureFlags : undefined);
+    return new BotRuntimeService(this.automationRepository, { ...options, featureFlags }).handleInboundEvent(event);
   }
 
   async rollbackBotRuntimeVersion(tenantId: string, scenarioId: string, versionId: string) {

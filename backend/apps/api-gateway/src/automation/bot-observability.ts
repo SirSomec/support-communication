@@ -13,6 +13,7 @@ export function botMetrics(registry: MetricsRegistry = metricsRegistry()) {
     aiRequests: registry.counter("bot_ai_requests_total", "AI completion attempts"),
     aiTokens: registry.counter("bot_ai_tokens_total", "AI tokens recorded after successful completion"),
     deliveryFailures: registry.counter("bot_delivery_failures_total", "Outbound bot delivery or handoff failures"),
+    feedback: registry.counter("bot_ai_feedback_total", "Operator/admin bot AI feedback outcomes"),
     handoffs: registry.counter("bot_handoff_total", "Bot handoffs to operators"),
     publishFailures: registry.counter("bot_publish_failures_total", "Bot scenario publish failures"),
     retrievalPassages: registry.histogram("bot_retrieval_passages", "Passages returned by retrieval", METRIC_BUCKETS.counts),
@@ -89,6 +90,17 @@ export function recordBotHandoff(input: { reason: string; scenarioId?: string; t
   botMetrics().handoffs.inc({
     ...baseLabels(input),
     reason: sanitizeMetricLabel(input.reason)
+  });
+}
+
+export function recordBotAiFeedback(input: {
+  outcome: string;
+  scenarioId?: string;
+  tenantId: string;
+}): void {
+  botMetrics().feedback.inc({
+    ...baseLabels(input),
+    outcome: sanitizeMetricLabel(input.outcome)
   });
 }
 

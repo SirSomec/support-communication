@@ -590,12 +590,32 @@
   .bot-builder-grid {
     grid-template-columns: 1fr;
   }
+
+  .automation-insight-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 820px) {
   .bot-metric-list,
   .bot-flow-canvas {
     grid-template-columns: 1fr;
+  }
+
+  .automation-insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-ops-lists {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-card-actions {
+    flex-wrap: wrap;
+  }
+
+  .scenario-card-actions button {
+    flex: 1 1 auto;
   }
 
   .bot-flow-canvas {
@@ -642,6 +662,28 @@
   .scenario-wizard-step,
   .scenario-wizard-progress {
     padding-inline: 14px;
+  }
+
+  .scenario-wizard-intro h3:focus {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+}
+
+@media (max-width: 430px) {
+  .scenario-list-panel__header,
+  .scenario-card header,
+  .scenario-ops-summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .bot-mode-toggle label {
+    align-items: flex-start;
+  }
+
+  .scenario-lifecycle-modal {
+    gap: 10px;
   }
 }
 

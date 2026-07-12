@@ -329,7 +329,9 @@ export function buildPublishChecklist(scenario = {}, context = {}) {
       blocking: true,
       id: "trigger",
       label: phraseRule ? "Добавлена хотя бы одна ключевая фраза" : "Задан триггер запуска",
-      ok: phraseRule ? Boolean(phraseRule.phrases?.length) : rules.length > 0
+      ok: phraseRule
+        ? Boolean(phraseRule.phrases?.length)
+        : rules.length > 0 || Boolean(String(scenario.trigger ?? "").trim()) || nodes.length > 0
     }
   ];
   if (hasAi) {

@@ -847,8 +847,10 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   await expect(page.locator(".automation-insight-grid")).toContainText("Боты по каналам");
   await page.locator(".bot-assignment-list select").first().selectOption({ label: "Auth code" });
   await expect(page.locator(".toast")).toContainText('SDK: назначен бот "Auth code" и сохранен на backend.');
-  await expect(page.locator(".bot-handoff-card")).toContainText("Поля:");
+  await expect(page.locator(".scenario-ops-panel")).toContainText("Эксплуатация сценария");
 
+  await page.locator(".bot-mode-toggle input[type='checkbox']").check();
+  await expect(page.locator(".bot-builder-panel")).toBeVisible();
   await expect(page.locator(".bot-flow-node")).toHaveCount(3);
   for (const label of ["Сообщение", "Запрос контакта", "Handoff"]) {
     await expect(page.locator(".bot-flow-canvas")).toContainText(label);
@@ -865,6 +867,9 @@ test("bot builder supports canonical nodes and import validation", async ({ page
     && response.request().method() === "POST"
   );
   await page.getByRole("button", { name: "Опубликовать" }).click();
+  const publishDialog = page.getByRole("dialog", { name: /Публикация/ });
+  await expect(publishDialog).toBeVisible();
+  await publishDialog.getByRole("button", { name: "Опубликовать" }).click();
   const publishResponse = await publishPromise;
   expect(publishResponse.ok()).toBeTruthy();
   const publishPayload = await publishResponse.json();
@@ -906,6 +911,44 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   await expect(page.locator(".bot-builder-panel .section-title")).toContainText("Импортированный сценарий");
   await expect(page.locator(".bot-flow-node.selected")).toContainText("Импортированная нода");
   await expectHealthyPage(page);
+});
+
+test("scenario wizard keeps keyboard focus, aria steps and responsive layout", async ({ page }) => {
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 900 },
+    { width: 1024, height: 900 },
+    { width: 1440, height: 900 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await openAppShell(page);
+    await selectRole(page, "Администратор");
+    await openSection(page, "Боты");
+
+    await expect(page.locator(".scenario-list-panel")).toBeVisible();
+    await expect(page.locator(".scenario-ops-panel")).toBeVisible();
+    await expectNoElementOverflow(page, ".automation-insight-grid");
+    await expectNoElementOverflow(page, ".scenario-ops-panel");
+
+    await page.getByRole("button", { name: "Создать в мастере" }).click();
+    const wizard = page.getByRole("dialog", { name: "Мастер создания сценария" });
+    await expect(wizard).toBeVisible();
+    await expect(wizard).toHaveAttribute("aria-modal", "true");
+    await expect(wizard.locator(".scenario-wizard-progress [role='progressbar']")).toHaveAttribute("aria-valuenow", "1");
+    await expect(wizard.locator(".scenario-wizard-progress li[aria-current='step']")).toContainText("Задача");
+
+    await wizard.getByRole("radio", { name: /Ответить на частый вопрос/ }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(wizard.getByRole("radio", { checked: true })).toContainText("Собрать данные для обращения");
+
+    await wizard.getByRole("button", { name: "Далее" }).click();
+    await expect(wizard.locator("#scenario-wizard-step-trigger")).toBeFocused();
+    await expect(wizard.locator(".scenario-wizard-progress [role='progressbar']")).toHaveAttribute("aria-valuenow", "2");
+
+    await page.keyboard.press("Escape");
+    await expect(wizard).toHaveCount(0);
+    await expectHealthyPage(page);
+  }
 });
 
 test("audit screen filters events and exposes event detail", async ({ page }) => {

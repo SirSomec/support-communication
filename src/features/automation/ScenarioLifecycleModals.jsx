@@ -29,11 +29,15 @@ export function ScenarioArchiveConfirmModal({ isSaving, onClose, onConfirm, scen
         <label className="scenario-wizard-field">
           <span>Введите название сценария для подтверждения</span>
           <input
+            aria-invalid={!matches && typedName.length > 0}
             autoFocus
             onChange={(event) => setTypedName(event.target.value)}
             placeholder={scenario?.name}
             value={typedName}
           />
+          {!matches && typedName.length > 0 ? (
+            <small className="scenario-field-error" role="alert">Название не совпадает — удаление недоступно.</small>
+          ) : null}
         </label>
       </div>
     </Modal>
@@ -82,7 +86,7 @@ export function ScenarioPublishChecklistModal({
         </ul>
         <p className="scenario-lifecycle-note">{checklist.retentionNote}</p>
         {!checklist.canPublish ? (
-          <p className="scenario-field-error">Исправьте обязательные пункты, затем повторите публикацию.</p>
+          <p className="scenario-field-error" role="alert">Исправьте обязательные пункты, затем повторите публикацию.</p>
         ) : null}
       </div>
     </Modal>

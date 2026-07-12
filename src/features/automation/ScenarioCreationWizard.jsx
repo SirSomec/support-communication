@@ -28,6 +28,7 @@ import {
   scenarioTriggerOptions,
   scenarioWizardSteps
 } from "./automationModel.js";
+import { getNextRadioOptionId, isRadioGroupNavigationKey } from "./automationA11y.js";
 import { ScenarioKnowledgeSourceSelector } from "./ScenarioKnowledgeSourceSelector.jsx";
 import { StatusBadge } from "../../ui.jsx";
 
@@ -106,8 +107,26 @@ export function ScenarioCreationWizard({
     setDraftSavedAt("сохранён");
   }, [form, step]);
 
+  useEffect(() => {
+    const heading = document.getElementById(scenarioWizardSteps[step]
+      ? `scenario-wizard-step-${["goal", "trigger", "help", "knowledge", "review"][step]}`
+      : null);
+    heading?.focus();
+  }, [step]);
+
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function onRadioGroupKeyDown(event, options, currentId, applyId) {
+    if (!isRadioGroupNavigationKey(event.key)) return;
+    event.preventDefault();
+    const nextId = getNextRadioOptionId(options, currentId, event.key);
+    if (!nextId) return;
+    applyId(nextId);
+    const nextIndex = options.findIndex((item) => item.id === nextId);
+    const radios = event.currentTarget.querySelectorAll('[role="radio"]');
+    radios[nextIndex]?.focus();
   }
 
   function chooseGoal(goal) {
@@ -210,10 +229,40 @@ export function ScenarioCreationWizard({
       {step === 0 ? (
         <section className="scenario-wizard-step" aria-labelledby="scenario-wizard-step-goal">
           <WizardIntro icon={<Bot size={20} />} id="scenario-wizard-step-goal" title="Для чего нужен сценарий?">Выберите задачу. Мы подготовим стартовый поток: его можно править после сохранения черновика.</WizardIntro>
-          <div className="scenario-goal-grid" role="radiogroup" aria-label="Задача сценария">
-            {scenarioGoalOptions.map((goal) => <button aria-checked={form.goal === goal.id} className={form.goal === goal.id ? "selected" : ""} key={goal.id} onClick={() => chooseGoal(goal)} role="radio" type="button"><strong>{goal.label}</strong><span>{goal.description}</span></button>)}
+          <div
+            className="scenario-goal-grid"
+            onKeyDown={(event) => onRadioGroupKeyDown(event, scenarioGoalOptions, form.goal, (id) => {
+              const goal = scenarioGoalOptions.find((item) => item.id === id);
+              if (goal) chooseGoal(goal);
+            })}
+            role="radiogroup"
+            aria-label="Задача сценария"
+          >
+            {scenarioGoalOptions.map((goal) => (
+              <button
+                aria-checked={form.goal === goal.id}
+                className={form.goal === goal.id ? "selected" : ""}
+                key={goal.id}
+                onClick={() => chooseGoal(goal)}
+                role="radio"
+                tabIndex={form.goal === goal.id ? 0 : -1}
+                type="button"
+              >
+                <strong>{goal.label}</strong>
+                <span>{goal.description}</span>
+              </button>
+            ))}
           </div>
-          <label className="scenario-wizard-field"><span>Название сценария</span><input onChange={(event) => update("name", event.target.value)} placeholder="Например, Статус заказа" value={form.name} /><small>{clientPreview.teamSees}</small></label>
+          <label className="scenario-wizard-field">
+            <span>Название сценария</span>
+            <input
+              aria-invalid={form.name.trim().length === 0}
+              onChange={(event) => update("name", event.target.value)}
+              placeholder="Например, Статус заказа"
+              value={form.name}
+            />
+            {form.name.trim().length === 0 ? <small className="scenario-field-error" role="alert">Укажите название сценария.</small> : <small>{clientPreview.teamSees}</small>}
+          </label>
           <ClientPreview lines={[clientPreview.teamSees, "Клиент пока ничего не увидит — сценарий ещё черновик."]} />
         </section>
       ) : null}
@@ -221,8 +270,29 @@ export function ScenarioCreationWizard({
       {step === 1 ? (
         <section className="scenario-wizard-step" aria-labelledby="scenario-wizard-step-trigger">
           <WizardIntro icon={<Route size={20} />} id="scenario-wizard-step-trigger" title="Когда запускать сценарий?">Настройте условие старта и каналы. Один сценарий можно использовать в нескольких каналах.</WizardIntro>
-          <div className="scenario-option-list" role="radiogroup" aria-label="Условие запуска">
-            {scenarioTriggerOptions.map((trigger) => <button aria-checked={form.trigger === trigger.id} className={form.trigger === trigger.id ? "selected" : ""} key={trigger.id} onClick={() => chooseTrigger(trigger)} role="radio" type="button"><strong>{trigger.label}</strong><span>{trigger.description}</span></button>)}
+          <div
+            className="scenario-option-list"
+            onKeyDown={(event) => onRadioGroupKeyDown(event, scenarioTriggerOptions, form.trigger, (id) => {
+              const trigger = scenarioTriggerOptions.find((item) => item.id === id);
+              if (trigger) chooseTrigger(trigger);
+            })}
+            role="radiogroup"
+            aria-label="Условие запуска"
+          >
+            {scenarioTriggerOptions.map((trigger) => (
+              <button
+                aria-checked={form.trigger === trigger.id}
+                className={form.trigger === trigger.id ? "selected" : ""}
+                key={trigger.id}
+                onClick={() => chooseTrigger(trigger)}
+                role="radio"
+                tabIndex={form.trigger === trigger.id ? 0 : -1}
+                type="button"
+              >
+                <strong>{trigger.label}</strong>
+                <span>{trigger.description}</span>
+              </button>
+            ))}
           </div>
           {form.trigger === "keyword" ? (
             <fieldset className="scenario-keyword-config">
@@ -232,6 +302,7 @@ export function ScenarioCreationWizard({
                 <label className="sr-only" htmlFor="scenario-trigger-phrase">Ключевая фраза</label>
                 <input
                   aria-describedby="scenario-trigger-phrase-help"
+                  aria-invalid={Boolean(phraseError) || !keywordTriggerIsConfigured}
                   id="scenario-trigger-phrase"
                   maxLength={MAX_TRIGGER_PHRASE_LENGTH}
                   onChange={(event) => setPhraseInput(event.target.value)}
@@ -280,10 +351,10 @@ export function ScenarioCreationWizard({
                   </span>
                 </div>
               ) : null}
-              {!keywordTriggerIsConfigured || phraseError ? <small className="scenario-field-error">{phraseError || "Добавьте хотя бы одну ключевую фразу."}</small> : null}
+              {!keywordTriggerIsConfigured || phraseError ? <small className="scenario-field-error" role="alert">{phraseError || "Добавьте хотя бы одну ключевую фразу."}</small> : null}
             </fieldset>
           ) : null}
-          <fieldset className="scenario-channel-picker"><legend>Каналы запуска</legend><p>Клиент увидит один и тот же первый ответ в выбранных каналах.</p><div>{channelOptions.map((channel) => <button aria-pressed={form.channels.includes(channel)} className={form.channels.includes(channel) ? "selected" : ""} key={channel} onClick={() => toggleChannel(channel)} type="button">{channel}</button>)}</div>{form.channels.length === 0 ? <small className="scenario-field-error">Выберите хотя бы один канал.</small> : null}</fieldset>
+          <fieldset className="scenario-channel-picker"><legend>Каналы запуска</legend><p>Клиент увидит один и тот же первый ответ в выбранных каналах.</p><div>{channelOptions.map((channel) => <button aria-pressed={form.channels.includes(channel)} className={form.channels.includes(channel) ? "selected" : ""} key={channel} onClick={() => toggleChannel(channel)} type="button">{channel}</button>)}</div>{form.channels.length === 0 ? <small className="scenario-field-error" role="alert">Выберите хотя бы один канал.</small> : null}</fieldset>
           <ClientPreview lines={clientPreview.clientSees.slice(0, 2)} />
         </section>
       ) : null}
@@ -304,19 +375,19 @@ export function ScenarioCreationWizard({
             onFix={onOpenAiConnections}
             status={aiStatus}
           />
-          <div className="scenario-option-list compact" role="radiogroup" aria-label="Язык ответа">
+          <div className="scenario-option-list compact" role="radiogroup" aria-label="Язык ответа" onKeyDown={(event) => onRadioGroupKeyDown(event, scenarioLanguageOptions, form.language, (id) => update("language", id))}>
             <strong>Язык ответа</strong>
             {scenarioLanguageOptions.map((option) => (
-              <button aria-checked={form.language === option.id} className={form.language === option.id ? "selected" : ""} key={option.id} onClick={() => update("language", option.id)} role="radio" type="button">
+              <button aria-checked={form.language === option.id} className={form.language === option.id ? "selected" : ""} key={option.id} onClick={() => update("language", option.id)} role="radio" tabIndex={form.language === option.id ? 0 : -1} type="button">
                 <strong>{option.label}</strong>
                 <span>{option.description}</span>
               </button>
             ))}
           </div>
-          <div className="scenario-option-list compact" role="radiogroup" aria-label="Тон ответа">
+          <div className="scenario-option-list compact" role="radiogroup" aria-label="Тон ответа" onKeyDown={(event) => onRadioGroupKeyDown(event, scenarioToneOptions, form.tone, (id) => update("tone", id))}>
             <strong>Тон</strong>
             {scenarioToneOptions.map((option) => (
-              <button aria-checked={form.tone === option.id} className={form.tone === option.id ? "selected" : ""} key={option.id} onClick={() => update("tone", option.id)} role="radio" type="button">
+              <button aria-checked={form.tone === option.id} className={form.tone === option.id ? "selected" : ""} key={option.id} onClick={() => update("tone", option.id)} role="radio" tabIndex={form.tone === option.id ? 0 : -1} type="button">
                 <strong>{option.label}</strong>
                 <span>{option.description}</span>
               </button>
@@ -335,7 +406,7 @@ export function ScenarioCreationWizard({
             <textarea onChange={(event) => update("fallbackMessage", event.target.value)} value={form.fallbackMessage} />
             <small>Клиент увидит этот текст перед передачей оператору, если знания или AI недоступны.</small>
           </label>
-          <div className="scenario-option-list compact" role="radiogroup" aria-label="Правило передачи оператору"><strong>Передать оператору, если</strong>{scenarioHandoffOptions.map((rule) => <button aria-checked={form.handoffRule === rule.id} className={form.handoffRule === rule.id ? "selected" : ""} key={rule.id} onClick={() => update("handoffRule", rule.id)} role="radio" type="button"><strong>{rule.label}</strong><span>{rule.description}</span></button>)}</div>
+          <div className="scenario-option-list compact" role="radiogroup" aria-label="Правило передачи оператору" onKeyDown={(event) => onRadioGroupKeyDown(event, scenarioHandoffOptions, form.handoffRule, (id) => update("handoffRule", id))}><strong>Передать оператору, если</strong>{scenarioHandoffOptions.map((rule) => <button aria-checked={form.handoffRule === rule.id} className={form.handoffRule === rule.id ? "selected" : ""} key={rule.id} onClick={() => update("handoffRule", rule.id)} role="radio" tabIndex={form.handoffRule === rule.id ? 0 : -1} type="button"><strong>{rule.label}</strong><span>{rule.description}</span></button>)}</div>
           <label className="scenario-wizard-field"><span>Очередь операторов</span><input onChange={(event) => update("handoffQueue", event.target.value)} value={form.handoffQueue} /><small>Оператор получит историю диалога и причину передачи до первого ручного сообщения.</small></label>
           <aside className="scenario-ai-precreate" aria-label="Перед созданием черновика">
             <strong>Перед созданием черновика</strong>
@@ -395,7 +466,15 @@ function AiReadinessPanel({ canFix, onFix, status }) {
 }
 
 function WizardIntro({ children, icon, id, title }) {
-  return <div className="scenario-wizard-intro">{icon}<div><h3 id={id}>{title}</h3><p>{children}</p></div></div>;
+  return (
+    <div className="scenario-wizard-intro">
+      {icon}
+      <div>
+        <h3 id={id} tabIndex={-1}>{title}</h3>
+        <p>{children}</p>
+      </div>
+    </div>
+  );
 }
 
 function ScenarioSummary({ index, title, value }) {

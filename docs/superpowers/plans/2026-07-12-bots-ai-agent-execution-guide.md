@@ -228,7 +228,7 @@ flowchart LR
 - [~] **BAI-505 — Интегрировать AI-node в существующий runtime.** Добавлен `ai_reply` node: он использует обычные dedupe, retry, pinned version, outbound delivery и compact session state. До полного выполнения остаются policy/quota, agent-run audit и безопасный handoff. Зависимость: BAI-502–504.
 - [x] **BAI-506 — Ввести кэши с корректной инвалидацией.** Retrieval/result cache tenant- и revision-aware; cache hit не обходит policy/quota/audit. Добавить метрики hit/miss и контролируемый purge при изменении policy/source. Зависимость: BAI-501.
 - [~] **BAI-507 — Реализовать trace, usage и redaction.** Service Admin видит текущий месячный token usage по подключению без раскрытия API-ключа; AI outbound descriptor содержит citations использованных источников, а runtime сохраняет только redacted metadata. До полного выполнения остаются их отображение оператору, агрегаты/trace и retention controls. Зависимость: BAI-505.
-- [ ] **BAI-508 — Добавить комплексные tests.** Новый пользователь, длинный диалог, compaction, cache invalidation, no-answer/handoff, provider timeout, duplicate event, cross-tenant, pinned old revision и budget exhaustion. Зависимость: BAI-500–507.
+- [x] **BAI-508 — Добавить комплексные tests.** Новый пользователь, длинный диалог, compaction, cache invalidation, no-answer/handoff, provider timeout, duplicate event, cross-tenant, pinned old revision и budget exhaustion. Зависимость: BAI-500–507.
 
 **Gate F:** runtime отвечает только по разрешённым источникам или передаёт оператору, а повторное сообщение не требует пересылать всю историю или знания.
 

@@ -31,7 +31,7 @@ async function openServiceAdmin(page, session) {
   await page.addInitScript((accessToken) => {
     window.sessionStorage.setItem("sc_service_admin_access_token", accessToken);
   }, session.accessToken);
-  await page.goto("/#/service-admin", { waitUntil: "domcontentloaded" });
+  await page.goto("/service-admin", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("route-service-admin")).toBeVisible();
 }
 
@@ -55,6 +55,12 @@ function collectTenantShellRequests(page) {
 
   return requests;
 }
+
+test("legacy hash redirects to path entry", async ({ page }) => {
+  await page.goto("/#/service-admin/login", { waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/\/service-admin\/login/);
+  await expect(page.getByTestId("route-service-admin-login")).toBeVisible();
+});
 
 test("service-admin runtime uses bearer session for support users", async ({ page, request }) => {
   const session = await loginServiceAdmin(request);

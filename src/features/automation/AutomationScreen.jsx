@@ -21,6 +21,7 @@ import { knowledgeService } from "../../services/knowledgeService.js";
 import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
 import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
+import { ScenarioArchiveConfirmModal, ScenarioPauseConfirmModal, ScenarioPublishChecklistModal } from "./ScenarioLifecycleModals.jsx";
 import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScenarioFromWizard, formatScenarioStatusLabel } from "./automationModel.js";
 
 export function AutomationScreen({ onBack, onToast, access }) {
@@ -44,6 +45,10 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [workspacePartial, setWorkspacePartial] = useState(false);
   const [sandboxMessage, setSandboxMessage] = useState("");
   const [sandboxPreview, setSandboxPreview] = useState(null);
+  const [sandboxVerifiedScenarioId, setSandboxVerifiedScenarioId] = useState("");
+  const [archiveTarget, setArchiveTarget] = useState(null);
+  const [pauseTarget, setPauseTarget] = useState(null);
+  const [publishChecklistOpen, setPublishChecklistOpen] = useState(false);
 
   async function loadWorkspace({ ignoreSignal } = {}) {
     setLoading(true);
@@ -236,26 +241,40 @@ export function AutomationScreen({ onBack, onToast, access }) {
   }
 
   async function archiveScenario(scenario) {
-    if (!canManageAutomation || !window.confirm(`Удалить сценарий «${scenario.name}»? Его можно будет восстановить из архива.`)) return;
+    if (!canManageAutomation) return;
+    setArchiveTarget(scenario);
+  }
+
+  async function confirmArchiveScenario(scenario) {
+    if (!canManageAutomation || !scenario) return;
     setSavingAction(`archive:${scenario.id}`);
     try {
       const result = await changeBotScenarioLifecycle(scenario.id, "archive");
       if (!result.ok) return onToast(result.message);
       const archived = normalizeScenario(result.scenario);
-      setScenarioItems((current) => replaceScenario(current, archived)); selectScenario(archived);
-      onToast(`Сценарий «${scenario.name}» перемещён в архив.`);
+      setScenarioItems((current) => replaceScenario(current, archived));
+      selectScenario(archived);
+      setArchiveTarget(null);
+      onToast(`Сценарий «${scenario.name}» перемещён в архив. Его можно восстановить в течение срока хранения.`);
     } finally { setSavingAction(""); }
   }
 
   async function disableScenario(scenario) {
-    if (!canManageAutomation || !window.confirm(`Остановить сценарий «${scenario.name}»? Новые диалоги больше не будут запускать его.`)) return;
+    if (!canManageAutomation) return;
+    setPauseTarget(scenario);
+  }
+
+  async function confirmDisableScenario(scenario) {
+    if (!canManageAutomation || !scenario) return;
     setSavingAction(`disable:${scenario.id}`);
     try {
       const result = await changeBotScenarioLifecycle(scenario.id, "disable");
       if (!result.ok) return onToast(result.message);
       const disabled = normalizeScenario(result.scenario);
-      setScenarioItems((current) => replaceScenario(current, disabled)); selectScenario(disabled);
-      onToast(`Сценарий «${scenario.name}» остановлен.`);
+      setScenarioItems((current) => replaceScenario(current, disabled));
+      selectScenario(disabled);
+      setPauseTarget(null);
+      onToast(`Сценарий «${scenario.name}» остановлен. Чтобы включить снова — опубликуйте после проверки.`);
     } finally { setSavingAction(""); }
   }
 
@@ -266,8 +285,9 @@ export function AutomationScreen({ onBack, onToast, access }) {
       const result = await changeBotScenarioLifecycle(scenario.id, "restore");
       if (!result.ok) return onToast(result.message);
       const restored = normalizeScenario(result.scenario);
-      setScenarioItems((current) => replaceScenario(current, restored)); selectScenario(restored);
-      onToast(`Сценарий «${scenario.name}» восстановлен и выключен: проверьте настройки перед публикацией.`);
+      setScenarioItems((current) => replaceScenario(current, restored));
+      selectScenario(restored);
+      onToast(`Сценарий «${scenario.name}» восстановлен и выключен: проверьте настройки и опубликуйте заново.`);
     } finally { setSavingAction(""); }
   }
 
@@ -485,6 +505,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
       }
 
       setSandboxPreview(result.preview);
+      setSandboxVerifiedScenarioId(selectedScenario.id);
       onToast(`Песочница «${selectedScenario.name}» выполнена: реальные диалоги не затронуты.`);
     } finally {
       setSavingAction("");
@@ -493,6 +514,14 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
   async function handleScenarioPublish() {
     if (!canManageAutomation) {
+      onToast(access.reason);
+      return;
+    }
+    setPublishChecklistOpen(true);
+  }
+
+  async function confirmScenarioPublish() {
+    if (!canManageAutomation || !selectedScenario) {
       onToast(access.reason);
       return;
     }
@@ -507,12 +536,16 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
       const publishedScenario = normalizeScenario({
         ...selectedScenario,
+        activeVersionId: result.runtimeVersion,
+        enabled: true,
         exportVersion: result.runtimeVersion,
-        status: result.versionState,
+        status: result.versionState || "published",
         updatedAt: new Date().toISOString()
       });
       setScenarioItems((current) => replaceScenario(current, publishedScenario));
-      onToast(`Сценарий "${selectedScenario.name}" опубликован: ${result.runtimeVersion}.`);
+      selectScenario(publishedScenario);
+      setPublishChecklistOpen(false);
+      onToast(`Сценарий «${selectedScenario.name}» опубликован: ${result.runtimeVersion}.`);
     } finally {
       setSavingAction("");
     }
@@ -859,6 +892,19 @@ export function AutomationScreen({ onBack, onToast, access }) {
         </div>
       </section>
       {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} /> : null}
+      {archiveTarget ? <ScenarioArchiveConfirmModal isSaving={isSaving} onClose={() => setArchiveTarget(null)} onConfirm={(scenario) => void confirmArchiveScenario(scenario)} scenario={archiveTarget} /> : null}
+      {pauseTarget ? <ScenarioPauseConfirmModal isSaving={isSaving} onClose={() => setPauseTarget(null)} onConfirm={(scenario) => void confirmDisableScenario(scenario)} scenario={pauseTarget} /> : null}
+      {publishChecklistOpen && selectedScenario ? (
+        <ScenarioPublishChecklistModal
+          aiReadiness={aiReadiness}
+          isSaving={isSaving}
+          knowledgeSources={knowledgeSources}
+          onClose={() => setPublishChecklistOpen(false)}
+          onConfirm={() => void confirmScenarioPublish()}
+          sandboxVerified={sandboxVerifiedScenarioId === selectedScenario.id}
+          scenario={selectedScenario}
+        />
+      ) : null}
     </ProductScreen>
   );
 }

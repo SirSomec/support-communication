@@ -113,7 +113,10 @@ export function ScenarioListPanel({
                     <MoreHorizontal size={15} aria-hidden="true" />
                     <button onClick={() => onOpen?.(scenario)} type="button">Открыть</button>
                     {canManage && row.status === "published" ? (
-                      <button disabled={isSaving} onClick={() => onDisable?.(scenario)} type="button">Остановить</button>
+                      <button disabled={isSaving} onClick={() => onDisable?.(scenario)} type="button">Пауза</button>
+                    ) : null}
+                    {canManage && (row.status === "disabled" || row.status === "draft") ? (
+                      <button disabled={isSaving} onClick={() => onOpen?.(scenario)} type="button">Проверить и опубликовать</button>
                     ) : null}
                     {canManage && row.status === "archived" ? (
                       <button disabled={isSaving} onClick={() => onRestore?.(scenario)} type="button">

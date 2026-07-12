@@ -832,3 +832,40 @@
   gap: 4px;
   color: #33445c;
 }
+
+.scenario-lifecycle-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.scenario-lifecycle-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.scenario-publish-checklist {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scenario-publish-checklist li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.scenario-publish-checklist li.ok {
+  background: #f0fdf4;
+}
+
+.scenario-publish-checklist li.fail {
+  background: #fff8eb;
+}

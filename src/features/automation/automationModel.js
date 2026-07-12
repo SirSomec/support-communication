@@ -299,6 +299,55 @@ export function buildClientExperiencePreview(form = {}, context = {}) {
   };
 }
 
+export const SCENARIO_ARCHIVE_RETENTION_DAYS = 30;
+
+export function buildPublishChecklist(scenario = {}, context = {}) {
+  const aiReadiness = context.aiReadiness ?? { status: "not_configured" };
+  const channels = Array.isArray(scenario.channels) ? scenario.channels : [];
+  const nodes = Array.isArray(scenario.flowNodes) ? scenario.flowNodes : [];
+  const bindings = Array.isArray(scenario.sourceBindings) ? scenario.sourceBindings : [];
+  const rules = Array.isArray(scenario.triggerRules) ? scenario.triggerRules : [];
+  const hasAi = nodes.some((node) => node.type === "ai_reply");
+  const phraseRule = rules.find((rule) => rule.type === "phrase");
+  const items = [
+    { blocking: true, id: "name", label: "Указано название сценария", ok: Boolean(String(scenario.name ?? "").trim()) },
+    { blocking: true, id: "channels", label: "Выбран хотя бы один канал", ok: channels.length > 0 },
+    { blocking: true, id: "nodes", label: "Есть шаги сценария", ok: nodes.length > 0 },
+    {
+      blocking: true,
+      id: "trigger",
+      label: phraseRule ? "Добавлена хотя бы одна ключевая фраза" : "Задан триггер запуска",
+      ok: phraseRule ? Boolean(phraseRule.phrases?.length) : rules.length > 0
+    }
+  ];
+  if (hasAi) {
+    items.push({
+      blocking: true,
+      id: "ai",
+      label: "AI-подключение организации готово",
+      ok: aiReadiness.status === "ready"
+    });
+    items.push({
+      blocking: true,
+      id: "sources",
+      label: "Выбран хотя бы один источник знаний",
+      ok: bindings.length > 0
+    });
+  }
+  items.push({
+    blocking: false,
+    id: "test",
+    label: "Рекомендуется прогнать тест в песочнице перед публикацией",
+    ok: Boolean(context.sandboxVerified)
+  });
+
+  return {
+    canPublish: items.every((item) => !item.blocking || item.ok),
+    items,
+    retentionNote: `Удалённые сценарии хранятся в архиве ${SCENARIO_ARCHIVE_RETENTION_DAYS} дней и остаются доступными для восстановления.`
+  };
+}
+
 export function normalizeTriggerPreviewText(value, locale = "ru") {
   return String(value ?? "").normalize("NFC").toLocaleLowerCase(locale).replace(/\s+/gu, " ").trim();
 }

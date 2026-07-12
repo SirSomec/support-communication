@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildClientExperiencePreview,
+  buildPublishChecklist,
   clearWizardDraft,
   createDefaultWizardForm,
   createScenarioFromWizard,
@@ -10,6 +11,7 @@ import {
   loadWizardDraft,
   previewKeywordTrigger,
   saveWizardDraft,
+  SCENARIO_ARCHIVE_RETENTION_DAYS,
   scenarioWizardSteps
 } from "../src/features/automation/automationModel.js";
 
@@ -117,6 +119,28 @@ describe("scenario creation wizard model", () => {
     ]);
     assert.equal(conflicts.length, 1);
     assert.equal(conflicts[0].scenarioName, "Старый статус");
+  });
+
+  it("builds a publish checklist with retention guidance and blocks incomplete AI scenarios", () => {
+    const incomplete = buildPublishChecklist({
+      channels: ["SDK"],
+      flowNodes: [{ id: "a", type: "ai_reply" }],
+      name: "AI bot",
+      sourceBindings: [],
+      triggerRules: [{ type: "new_conversation" }]
+    }, { aiReadiness: { status: "not_configured" } });
+    assert.equal(incomplete.canPublish, false);
+    assert.ok(incomplete.items.some((item) => item.id === "ai" && item.ok === false));
+    assert.match(incomplete.retentionNote, new RegExp(String(SCENARIO_ARCHIVE_RETENTION_DAYS)));
+
+    const ready = buildPublishChecklist({
+      channels: ["SDK"],
+      flowNodes: [{ id: "a", type: "ai_reply" }],
+      name: "AI bot",
+      sourceBindings: [{ sourceId: "faq" }],
+      triggerRules: [{ type: "new_conversation" }]
+    }, { aiReadiness: { status: "ready" }, sandboxVerified: true });
+    assert.equal(ready.canPublish, true);
   });
 });
 

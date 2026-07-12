@@ -11,6 +11,7 @@ import type { KnowledgeSourceBinding } from "./automation.types.js";
 import { recordBotAiRequest } from "./bot-observability.js";
 
 export interface AiBotResponseInput {
+  basePrompt?: string;
   conversationId?: string;
   instructions?: string;
   message: string;
@@ -48,7 +49,12 @@ export class AiBotResponseService {
       const secret = new SecretStore({ keyVersion: this.environment.AI_CONNECTIONS_KEY_VERSION ?? "local-v1", masterKeyBase64: this.environment.AI_CONNECTIONS_MASTER_KEY ?? this.environment.PROVIDER_CREDENTIAL_MASTER_KEY ?? "" }).decrypt(connection.secret);
       const provider = createOpenAiCompatibleChatProvider({ apiKey: secret, baseUrl: connection.baseUrl, maxRetries: 1, model: connection.chatModel, timeoutMs: 12_000 });
       const completion = await provider.complete({ maxTokens: 500, temperature: 0.2, messages: [
-        { role: "system", content: systemPrompt(input.instructions, materials.map((item) => item.content).join("\n\n"), session ? formatSessionForPrompt(session) : undefined) },
+        { role: "system", content: buildAiBotSystemPrompt({
+          basePrompt: input.basePrompt,
+          instructions: input.instructions,
+          knowledge: materials.map((item) => item.content).join("\n\n"),
+          sessionState: session ? formatSessionForPrompt(session) : undefined
+        }) },
         { role: "user", content: input.message.slice(0, 4_000) }
       ] });
       const tokens = completion.usage.totalTokens ?? 500;
@@ -117,15 +123,22 @@ export function extractRelevantKnowledge(document: string, question: string, bud
   return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
 }
 
-function systemPrompt(instructions: string | undefined, knowledge: string, sessionState?: string): string {
+/** Order: tenant base prompt → platform safety rails → node instructions → session → knowledge. */
+export function buildAiBotSystemPrompt(input: {
+  basePrompt?: string;
+  instructions?: string;
+  knowledge: string;
+  sessionState?: string;
+}): string {
   return [
+    input.basePrompt?.trim() ? input.basePrompt.trim().slice(0, 4_000) : "",
     "You are a customer-support consultation assistant.",
     "Answer only from the supplied knowledge. Do not invent facts, policies, prices, or actions.",
     "If the answer is not in the knowledge, say that you cannot confirm it and offer a human operator.",
     "Do not access CRM data and do not claim that you did.",
-    instructions?.trim() ? `Scenario guidance: ${instructions.trim().slice(0, 1500)}` : "",
-    sessionState?.trim() ? sessionState.trim().slice(0, 2_000) : "",
-    `Approved knowledge:\n${knowledge}`
+    input.instructions?.trim() ? `Scenario guidance: ${input.instructions.trim().slice(0, 1500)}` : "",
+    input.sessionState?.trim() ? input.sessionState.trim().slice(0, 2_000) : "",
+    `Approved knowledge:\n${input.knowledge}`
   ].filter(Boolean).join("\n\n");
 }
 

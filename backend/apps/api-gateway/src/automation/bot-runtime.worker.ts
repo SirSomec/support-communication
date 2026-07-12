@@ -68,7 +68,7 @@ export interface BotRuntimeHandoffDescriptor {
     botId: string;
     nodeId: string;
     queue: string;
-    reason: "handoff_requested";
+    reason: string;
   };
   tenantId: string;
   traceId: string;

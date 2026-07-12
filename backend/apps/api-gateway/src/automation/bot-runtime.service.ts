@@ -68,12 +68,21 @@ export class BotRuntimeService {
         traceId: event.traceId
       });
       const node = resolved.scenario.flowNodes.find((item) => item.id === transition.nextNodeId)!;
-      const executed = await this.executeNode(node, event, existing?.context ?? {}, resolved.scenario.sourceBindings ?? [], resolved.version.versionId, resolved.scenario.id);
+      const executed = await this.executeNode(
+        node,
+        event,
+        existing?.context ?? {},
+        resolved.scenario.sourceBindings ?? [],
+        resolved.version.versionId,
+        resolved.scenario.id,
+        resolved.scenario.basePrompt
+      );
       applyGeneratedMessage(transition.sideEffects, executed.aiResponse);
       if (executed.outcome === "ai_handoff_requested" && executed.handoffSummary) transition.sideEffects.push(createAiFailureHandoff(event, node, executed.handoffSummary));
       if (executed.outcome === "handed_off" || executed.outcome === "ai_handoff_requested") {
+        const context = executed.context as Record<string, unknown>;
         recordBotHandoff({
-          reason: String(executed.handoffSummary?.reason ?? executed.context?.lastAiFailure ?? executed.outcome),
+          reason: String(executed.handoffSummary?.reason ?? context.lastAiFailure ?? executed.outcome),
           scenarioId: resolved.scenario.id,
           tenantId: event.tenantId
         });
@@ -103,6 +112,7 @@ export class BotRuntimeService {
     return this.repository.saveBotScenario({
       ...scenario,
       activeVersionId: version.versionId,
+      basePrompt: version.basePrompt ?? scenario.basePrompt,
       flowEdges: version.flowEdges,
       flowNodes: version.flowNodes,
       priority: version.priority ?? scenario.priority,
@@ -144,6 +154,7 @@ export class BotRuntimeService {
     return {
       scenario: {
         ...scenario,
+        basePrompt: version.basePrompt ?? scenario.basePrompt,
         flowEdges: version.flowEdges,
         flowNodes: version.flowNodes,
         priority: version.priority ?? scenario.priority,
@@ -160,7 +171,8 @@ export class BotRuntimeService {
     previous: Record<string, unknown>,
     sourceBindings: import("./automation.types.js").KnowledgeSourceBinding[],
     scenarioRevisionId?: string,
-    scenarioId?: string
+    scenarioId?: string,
+    basePrompt?: string
   ) {
     const context = { ...previous, ...(event.payload?.context as Record<string, unknown> | undefined ?? {}) };
     if (node.type === "contact_request") {
@@ -215,6 +227,7 @@ export class BotRuntimeService {
       }
       try {
         const aiResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({
+          basePrompt,
           conversationId: event.conversationId,
           instructions: typeof node.config?.instructions === "string" ? node.config.instructions : node.title,
           message,

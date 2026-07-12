@@ -180,20 +180,20 @@ export function evaluateBotAlerts(
       evidence: { fallbackRatio: Number(fallbackRatio.toFixed(3)), handoffCount },
       id: "high_fallback_rate" as const
     }
-  ]).filter((item) => item.active);
+  ] as BotAlertEvaluation[]).filter((item) => item.active);
 }
 
 export function summarizeBotMetricsForAlerts(snapshot: Array<{
   name: string;
-  samples: Array<{ labels: Record<string, string>; value: number }>;
+  samples: Array<{ labels: Record<string, string>; value?: number }>;
   type: string;
 }>): BotAlertEvaluationInput {
   const sum = (name: string, predicate?: (labels: Record<string, string>) => boolean): number => {
     const metric = snapshot.find((item) => item.name === name);
     if (!metric) return 0;
     return metric.samples
-      .filter((sample) => (predicate ? predicate(sample.labels) : true))
-      .reduce((total, sample) => total + sample.value, 0);
+      .filter((sample) => typeof sample.value === "number" && (predicate ? predicate(sample.labels) : true))
+      .reduce((total, sample) => total + Number(sample.value ?? 0), 0);
   };
 
   return {

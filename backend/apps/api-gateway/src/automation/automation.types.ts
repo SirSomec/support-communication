@@ -59,6 +59,8 @@ export interface BotScenario {
   /** Set on archive; no value means that the scenario is retained indefinitely. */
   retentionUntil?: string;
   schemaVersion: "bot-flow/v1";
+  /** Scenario-level AI instructions prepended to the system prompt. */
+  basePrompt?: string;
   sourceBindings?: KnowledgeSourceBinding[];
   status: string;
   tenantId: string;

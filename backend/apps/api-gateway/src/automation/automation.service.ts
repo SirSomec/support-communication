@@ -60,6 +60,7 @@ interface ValidatedBotFlow {
 }
 
 interface PublishBotScenarioPayload extends BotFlowImportPayload {
+  basePrompt?: string;
   channels?: string[];
   id?: string;
   idempotencyKey?: string;
@@ -206,6 +207,7 @@ export class AutomationService {
     const request = payload ?? {};
     const scenarioId = String(request.id ?? `bot-${randomUUID()}`).trim();
     const scenario: BotScenario = {
+      basePrompt: normalizeScenarioBasePrompt(request.basePrompt),
       channels: clone(request.channels ?? ["SDK"]),
       flowEdges: clone(request.flowEdges ?? []),
       flowNodes: clone(request.flowNodes ?? [{ id: "start", type: "message", title: "Start" }]),
@@ -265,6 +267,9 @@ export class AutomationService {
     const scenario: BotScenario = {
       ...existing,
       ...request,
+      basePrompt: request.basePrompt !== undefined
+        ? normalizeScenarioBasePrompt(request.basePrompt)
+        : existing.basePrompt,
       channels: clone(request.channels ?? existing.channels),
       enabled: existing.enabled ?? true,
       flowEdges: clone(request.flowEdges ?? existing.flowEdges),
@@ -528,6 +533,7 @@ export class AutomationService {
 
     const scenario: BotScenario = {
       activeVersionId: String(result.runtimeVersion),
+      basePrompt: normalizeScenarioBasePrompt(request.basePrompt ?? existing.basePrompt),
       channels: clone(request.channels ?? existing.channels),
       enabled: true,
       flowEdges: clone(validation.payload?.flowEdges ?? existing.flowEdges),
@@ -544,6 +550,7 @@ export class AutomationService {
     this.upsertScenario(scenario);
     await this.automationRepository.saveBotScenario(scenario);
     await this.automationRepository.saveBotScenarioVersion({
+      basePrompt: scenario.basePrompt,
       createdAt: new Date().toISOString(),
       flowEdges: clone(scenario.flowEdges),
       flowNodes: clone(scenario.flowNodes),
@@ -790,7 +797,15 @@ export class AutomationService {
     const traceId = automationTraceId("createBotHandoffSummary");
     const operatorView = buildOperatorHandoffView({
       aiOutcome: request.aiOutcome,
-      citations: request.citations,
+      citations: Array.isArray(request.citations)
+        ? request.citations
+          .map((item) => ({
+            sourceId: String(item?.sourceId ?? "").trim(),
+            title: String(item?.title ?? "").trim(),
+            version: typeof item?.version === "number" ? item.version : undefined
+          }))
+          .filter((item) => item.sourceId)
+        : [],
       collectedFields: maskCollectedFields(request.collectedFields ?? {}),
       goal: request.goal,
       queue: request.queue,
@@ -1312,6 +1327,12 @@ function defaultScenarioTriggerRules(): BotTriggerRule[] {
 function normalizeScenarioPriority(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isInteger(parsed) ? Math.max(-10_000, Math.min(10_000, parsed)) : 0;
+}
+
+function normalizeScenarioBasePrompt(value: unknown): string | undefined {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  return text.slice(0, 4_000);
 }
 
 function resolveScenarioTriggerRules(

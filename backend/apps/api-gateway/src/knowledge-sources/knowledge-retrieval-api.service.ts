@@ -9,7 +9,16 @@ export class KnowledgeRetrievalApiService {
     if (!scenario || scenario.tenantId !== input.tenantId || scenario.status === "archived") return result("invalid", input.tenantId, { passages: [], tokenBudget: 0, tokensUsed: 0 }, "knowledge_retrieval_scenario_not_found");
     const query = String(input.query ?? "").trim();
     if (!query) return result("invalid", input.tenantId, { passages: [], tokenBudget: 0, tokensUsed: 0 }, "knowledge_retrieval_query_required");
-    return result("ok", input.tenantId, await this.retrieval.retrieve({ query, sourceBindings: scenario.sourceBindings ?? [], tenantId: input.tenantId, tokenBudget: input.tokenBudget }));
+    return result(
+      "ok",
+      input.tenantId,
+      (await this.retrieval.retrieve({
+        query,
+        sourceBindings: scenario.sourceBindings ?? [],
+        tenantId: input.tenantId,
+        tokenBudget: input.tokenBudget
+      })) as unknown as Record<string, unknown>
+    );
   }
 }
 function result(status: "invalid" | "ok", tenantId: string, data: Record<string, unknown>, code?: string): BackendEnvelope<Record<string, unknown>> { return createEnvelope({ service: "knowledgeRetrievalService", operation: "retrieveScenarioKnowledge", traceId: `trc_knowledge_retrieval_${Date.now()}`, status, meta: { apiVersion: "v1", generatedAt: new Date().toISOString(), tenantId }, data, error: code ? { code, message: code } : null }); }

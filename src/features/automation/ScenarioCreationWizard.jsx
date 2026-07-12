@@ -402,6 +402,16 @@ export function ScenarioCreationWizard({
           />
           {onAddUrlSource ? <button className="scenario-wizard-secondary" disabled={isSaving} onClick={onAddUrlSource} type="button">Добавить URL-страницу</button> : null}
           <label className="scenario-wizard-field">
+            <span>Базовый промпт сценария</span>
+            <textarea
+              onChange={(event) => update("basePrompt", event.target.value)}
+              placeholder="Например: отвечайте кратко, на «вы», не обещайте скидки без источника."
+              rows={4}
+              value={form.basePrompt}
+            />
+            <small>Эти инструкции идут в начало system prompt для всех AI-ответов сценария. До 4000 символов.</small>
+          </label>
+          <label className="scenario-wizard-field">
             <span>Сообщение, если AI не смог ответить</span>
             <textarea onChange={(event) => update("fallbackMessage", event.target.value)} value={form.fallbackMessage} />
             <small>Клиент увидит этот текст перед передачей оператору, если знания или AI недоступны.</small>
@@ -413,6 +423,7 @@ export function ScenarioCreationWizard({
             <ul>
               <li>AI: {aiStatus.title}</li>
               <li>Источники: {selectedSourceLabels.length ? selectedSourceLabels.join(", ") : "не выбраны"}</li>
+              <li>Базовый промпт: {form.basePrompt.trim() ? `${form.basePrompt.trim().slice(0, 80)}${form.basePrompt.trim().length > 80 ? "…" : ""}` : "не задан"}</li>
               <li>Язык / тон: {selectedLanguage.label} · {selectedTone.label}</li>
               <li>Handoff: {selectedHandoffRule.label} → {form.handoffQueue.trim() || "Очередь 1-я линия"}</li>
               <li>Fallback: {form.fallbackMessage.trim() || "не задан"}</li>

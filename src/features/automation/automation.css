@@ -115,6 +115,79 @@
   background: #f8fbff;
 }
 
+.bot-canvas-sources {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e5edf7;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.bot-canvas-sources .scenario-knowledge-source-selector {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.bot-canvas-base-prompt {
+  display: grid;
+  gap: 6px;
+}
+
+.bot-canvas-base-prompt > span {
+  font-size: 12px;
+  font-weight: 750;
+  color: #24354f;
+}
+
+.bot-canvas-base-prompt textarea {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid #c9daf0;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #24354f;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.bot-canvas-base-prompt textarea:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+  background: #f3f6fb;
+}
+
+.bot-canvas-base-prompt small {
+  color: #5b6b82;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.bot-canvas-add-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #c9daf0;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #24354f;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.bot-canvas-add-source:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
 .bot-canvas-toolbar strong,
 .bot-canvas-toolbar span {
   min-width: 0;

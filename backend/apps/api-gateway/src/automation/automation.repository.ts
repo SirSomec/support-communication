@@ -24,6 +24,7 @@ export interface AutomationBotTestRun {
 }
 
 export interface AutomationBotScenarioVersion {
+  basePrompt?: string;
   createdAt: string;
   flowEdges: BotScenario["flowEdges"];
   flowNodes: BotScenario["flowNodes"];
@@ -565,6 +566,7 @@ interface PrismaBotScenarioCreateInput {
   archiveReason?: string | null;
   archivedAt?: Date | null;
   archivedBy?: string | null;
+  basePrompt?: string | null;
   channels: string[];
   createdAt: Date;
   disabledAt?: Date | null;
@@ -600,6 +602,7 @@ interface PrismaBotScenarioRow {
   archiveReason?: string | null;
   archivedAt?: Date | string | null;
   archivedBy?: string | null;
+  basePrompt?: string | null;
   channels: string[];
   createdAt: Date | string;
   disabledAt?: Date | string | null;
@@ -634,6 +637,7 @@ interface PrismaBotScenarioVersionFindUniqueInput {
 }
 
 interface PrismaBotScenarioVersionCreateInput {
+  basePrompt?: string | null;
   createdAt: Date;
   flowEdges: unknown;
   flowNodes: unknown;
@@ -647,6 +651,7 @@ interface PrismaBotScenarioVersionCreateInput {
 }
 
 interface PrismaBotScenarioVersionRow {
+  basePrompt?: string | null;
   createdAt: Date | string;
   flowEdges: unknown;
   flowNodes: unknown;
@@ -2418,6 +2423,7 @@ function normalizeBotScenarioRecord(scenario: BotScenario, existing?: BotScenari
         }
       : {}),
     priority: normalizeBotScenarioPriority(scenario.priority ?? existing?.priority),
+    basePrompt: normalizeBasePrompt(scenario.basePrompt ?? existing?.basePrompt),
     sourceBindings: normalizeSourceBindings(scenario.sourceBindings ?? existing?.sourceBindings ?? []),
     tenantId: existing
       ? requireMatchingAutomationTenantId(existing.tenantId, scenario.tenantId)
@@ -2425,6 +2431,12 @@ function normalizeBotScenarioRecord(scenario: BotScenario, existing?: BotScenari
     triggerRules: normalizeBotTriggerRules(scenario.triggerRules ?? existing?.triggerRules ?? []),
     updatedAt: existing ? now : scenario.updatedAt ?? now
   };
+}
+
+function normalizeBasePrompt(value: unknown): string | undefined {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  return text.slice(0, 4_000);
 }
 
 function normalizeRetentionUntil(value: string | undefined, now: string): string {
@@ -2487,6 +2499,7 @@ function normalizeSourceBindings(value: unknown): KnowledgeSourceBinding[] {
 function normalizeBotScenarioVersionRecord(version: AutomationBotScenarioVersion): AutomationBotScenarioVersion {
   return {
     ...version,
+    basePrompt: normalizeBasePrompt(version.basePrompt),
     priority: normalizeBotScenarioPriority(version.priority),
     tenantId: requireAutomationTenantId(version.tenantId),
     triggerRules: normalizeBotTriggerRules(version.triggerRules ?? [])
@@ -2585,6 +2598,7 @@ function toBotScenario(row: PrismaBotScenarioRow): BotScenario {
     ...(row.archiveReason ? { archiveReason: row.archiveReason } : {}),
     ...(row.archivedAt ? { archivedAt: toIsoString(row.archivedAt) } : {}),
     ...(row.archivedBy ? { archivedBy: row.archivedBy } : {}),
+    ...(normalizeBasePrompt(row.basePrompt) ? { basePrompt: normalizeBasePrompt(row.basePrompt) } : {}),
     channels: clone(row.channels),
     createdAt: toIsoString(row.createdAt),
     ...(row.disabledAt ? { disabledAt: toIsoString(row.disabledAt) } : {}),
@@ -2620,6 +2634,7 @@ function toPrismaBotScenarioCreateInput(scenario: BotScenario): PrismaBotScenari
     archiveReason: scenario.archiveReason ?? null,
     archivedAt: scenario.archivedAt ? new Date(scenario.archivedAt) : null,
     archivedBy: scenario.archivedBy ?? null,
+    basePrompt: normalizeBasePrompt(scenario.basePrompt) ?? null,
     channels: clone(scenario.channels),
     createdAt: new Date(scenario.createdAt ?? new Date().toISOString()),
     disabledAt: scenario.disabledAt ? new Date(scenario.disabledAt) : null,
@@ -2655,6 +2670,7 @@ function toPrismaBotScenarioUpdateInput(scenario: BotScenario): PrismaBotScenari
     archiveReason: scenario.archiveReason ?? null,
     archivedAt: scenario.archivedAt ? new Date(scenario.archivedAt) : null,
     archivedBy: scenario.archivedBy ?? null,
+    basePrompt: normalizeBasePrompt(scenario.basePrompt) ?? null,
     channels: clone(scenario.channels),
     disabledAt: scenario.disabledAt ? new Date(scenario.disabledAt) : null,
     disabledBy: scenario.disabledBy ?? null,
@@ -2679,6 +2695,7 @@ function toPrismaBotScenarioUpdateInput(scenario: BotScenario): PrismaBotScenari
 
 function toBotScenarioVersion(row: PrismaBotScenarioVersionRow): AutomationBotScenarioVersion {
   return {
+    ...(normalizeBasePrompt(row.basePrompt) ? { basePrompt: normalizeBasePrompt(row.basePrompt) } : {}),
     createdAt: toIsoString(row.createdAt),
     flowEdges: clone(row.flowEdges) as AutomationBotScenarioVersion["flowEdges"],
     flowNodes: clone(row.flowNodes) as AutomationBotScenarioVersion["flowNodes"],
@@ -2696,6 +2713,7 @@ function toPrismaBotScenarioVersionCreateInput(
   version: AutomationBotScenarioVersion
 ): PrismaBotScenarioVersionCreateInput {
   return {
+    basePrompt: normalizeBasePrompt(version.basePrompt) ?? null,
     createdAt: new Date(version.createdAt),
     flowEdges: clone(version.flowEdges),
     flowNodes: clone(version.flowNodes),

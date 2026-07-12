@@ -7,7 +7,20 @@ import {
 } from "@support-communication/observability";
 
 /** Bot/AI automation metrics with bounded labels (tenant/scenario/reason codes only). */
-export function botMetrics(registry: MetricsRegistry = metricsRegistry()) {
+export function botMetrics(registry: MetricsRegistry = metricsRegistry()): {
+  aiLatencyMs: { observe(labels?: MetricLabels, value?: number): void };
+  aiRequests: { inc(labels?: MetricLabels, value?: number): void };
+  aiTokens: { inc(labels?: MetricLabels, value?: number): void };
+  deliveryFailures: { inc(labels?: MetricLabels, value?: number): void };
+  feedback: { inc(labels?: MetricLabels, value?: number): void };
+  handoffs: { inc(labels?: MetricLabels, value?: number): void };
+  publishFailures: { inc(labels?: MetricLabels, value?: number): void };
+  retrievalPassages: { observe(labels?: MetricLabels, value?: number): void };
+  retrievalRequests: { inc(labels?: MetricLabels, value?: number): void };
+  retrievalTopScore: { observe(labels?: MetricLabels, value?: number): void };
+  sourceErrors: { inc(labels?: MetricLabels, value?: number): void };
+  triggerMatches: { inc(labels?: MetricLabels, value?: number): void };
+} {
   return {
     aiLatencyMs: registry.histogram("bot_ai_latency_ms", "AI provider latency in milliseconds", METRIC_BUCKETS.latencyMs),
     aiRequests: registry.counter("bot_ai_requests_total", "AI completion attempts"),

@@ -2074,6 +2074,7 @@ model BotScenario {
   retentionUntil DateTime? @map("retention_until") @db.Timestamptz(3)
   sourceBindings Json    @default("[]") @map("source_bindings")
   triggerRules  Json     @default("[]") @map("trigger_rules")
+  basePrompt    String?  @map("base_prompt") @db.Text
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   versions      BotScenarioVersion[]
@@ -2098,6 +2099,7 @@ model BotScenarioVersion {
   flowEdges      Json        @map("flow_edges")
   sourceBindings Json        @default("[]") @map("source_bindings")
   triggerRules   Json        @default("[]") @map("trigger_rules")
+  basePrompt     String?     @map("base_prompt") @db.Text
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   scenario       BotScenario @relation(fields: [tenantId, scenarioId], references: [tenantId, id], onDelete: Cascade)
   publishAuditEvents BotPublishAuditEvent[]

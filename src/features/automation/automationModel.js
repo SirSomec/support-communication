@@ -60,6 +60,7 @@ export function createScenarioFromWizard(id, values = {}) {
     ? values.triggerPhrases.map((phrase) => String(phrase).trim()).filter(Boolean)
     : [];
   const sourceBindings = normalizeSourceBindings(values.sourceBindings);
+  const basePrompt = String(values.basePrompt ?? "").trim().slice(0, 4000);
   const language = findOption(scenarioLanguageOptions, values.language, "ru").id;
   const tone = findOption(scenarioToneOptions, values.tone, "neutral").id;
   const fallbackMessage = String(values.fallbackMessage ?? "").trim() || DEFAULT_AI_FALLBACK_MESSAGE;
@@ -72,6 +73,7 @@ export function createScenarioFromWizard(id, values = {}) {
     name,
     status: "draft",
     schemaVersion: "bot-flow/v1",
+    ...(basePrompt ? { basePrompt } : {}),
     sourceBindings,
     owner: "Администратор",
     updatedAt: "сейчас",
@@ -226,6 +228,7 @@ export function describeAiReadiness(readiness = {}) {
 
 export function createDefaultWizardForm() {
   return {
+    basePrompt: "",
     channels: ["SDK"],
     fallbackMessage: DEFAULT_AI_FALLBACK_MESSAGE,
     firstMessage: scenarioGoalOptions[0].defaultMessage,

@@ -23,6 +23,7 @@ import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
 import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
 import { ScenarioArchiveConfirmModal, ScenarioPauseConfirmModal, ScenarioPublishChecklistModal } from "./ScenarioLifecycleModals.jsx";
 import { ScenarioOperationalPanel } from "./ScenarioOperationalPanel.jsx";
+import { ScenarioKnowledgeSourceSelector } from "./ScenarioKnowledgeSourceSelector.jsx";
 import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScenarioFromWizard, formatScenarioStatusLabel, loadAdvancedModePreference, saveAdvancedModePreference } from "./automationModel.js";
 
 export function AutomationScreen({ onBack, onToast, access }) {
@@ -200,6 +201,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
           onArchive={archiveScenario}
           onDisable={disableScenario}
           onOpen={selectScenario}
+          onPublish={requestScenarioPublish}
           onRestore={restoreScenario}
           onRetry={() => void loadWorkspace()}
           partial={workspacePartial}
@@ -251,6 +253,15 @@ export function AutomationScreen({ onBack, onToast, access }) {
     setSelectedNodeId(scenario.flowNodes[0]?.id ?? "");
     setImportDraft("");
     setImportError("");
+  }
+
+  function requestScenarioPublish(scenario) {
+    if (!canManageAutomation) {
+      onToast(access.reason);
+      return;
+    }
+    selectScenario(scenario);
+    setPublishChecklistOpen(true);
   }
 
   async function archiveScenario(scenario) {
@@ -358,6 +369,30 @@ export function AutomationScreen({ onBack, onToast, access }) {
         )
       };
     }));
+  }
+
+  function updateScenarioSourceBindings(selectedSourceIds) {
+    if (!canManageAutomation || !selectedScenario) {
+      return;
+    }
+    const sourceBindings = (Array.isArray(selectedSourceIds) ? selectedSourceIds : [])
+      .map((sourceId) => String(sourceId ?? "").trim())
+      .filter(Boolean)
+      .map((sourceId) => ({ sourceId }));
+
+    setScenarioItems((current) => current.map((scenario) => (
+      scenario.id === selectedScenario.id ? { ...scenario, sourceBindings } : scenario
+    )));
+  }
+
+  function updateScenarioBasePrompt(value) {
+    if (!canManageAutomation || !selectedScenario) {
+      return;
+    }
+    const basePrompt = String(value ?? "").slice(0, 4000);
+    setScenarioItems((current) => current.map((scenario) => (
+      scenario.id === selectedScenario.id ? { ...scenario, basePrompt } : scenario
+    )));
   }
 
   async function handleAddNode() {
@@ -611,6 +646,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
         trigger: payload.trigger ?? selectedScenario.trigger,
         triggerRules: validatedPayload.triggerRules ?? payload.triggerRules ?? selectedScenario.triggerRules,
         sourceBindings: validatedPayload.sourceBindings ?? payload.sourceBindings ?? selectedScenario.sourceBindings,
+        basePrompt: validatedPayload.basePrompt ?? payload.basePrompt ?? selectedScenario.basePrompt,
         channels: Array.isArray(payload.channels) ? payload.channels : selectedScenario.channels,
         handoff: payload.handoff ?? selectedScenario.handoff,
         flowNodes: validatedPayload.flowNodes,
@@ -743,6 +779,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
           onArchive={archiveScenario}
           onDisable={disableScenario}
           onOpen={selectScenario}
+          onPublish={requestScenarioPublish}
           onRestore={restoreScenario}
           onRetry={() => void loadWorkspace()}
           partial={workspacePartial}
@@ -817,6 +854,46 @@ export function AutomationScreen({ onBack, onToast, access }) {
             <div className="bot-canvas-toolbar">
               <strong>{selectedScenario.trigger}</strong>
               <span>{selectedScenario.handoff} · {selectedScenario.schemaVersion} · {selectedScenario.owner}</span>
+            </div>
+            <div className="bot-canvas-sources">
+              <ScenarioKnowledgeSourceSelector
+                disabled={!canManageAutomation || isSaving || selectedScenario.status === "published"}
+                emptyMessage="Нет готовых источников. Добавьте URL или подготовьте документ, затем выберите его здесь."
+                error={knowledgeSourcesError}
+                id={`canvas-sources-${selectedScenario.id}`}
+                isLoading={knowledgeSourcesLoading}
+                onSelectedSourceIdsChange={updateScenarioSourceBindings}
+                selectedSourceIds={(selectedScenario.sourceBindings ?? []).map((binding) => binding.sourceId).filter(Boolean)}
+                sources={knowledgeSources}
+              />
+              {canManageAutomation ? (
+                <button
+                  className="bot-canvas-add-source"
+                  disabled={isSaving || selectedScenario.status === "published"}
+                  onClick={() => void addUrlKnowledgeSource()}
+                  type="button"
+                >
+                  <Plus size={15} />
+                  Добавить URL-страницу
+                </button>
+              ) : null}
+              <label className="bot-canvas-base-prompt" htmlFor={`canvas-base-prompt-${selectedScenario.id}`}>
+                <span>Базовый промпт сценария</span>
+                <textarea
+                  disabled={!canManageAutomation || isSaving || selectedScenario.status === "published"}
+                  id={`canvas-base-prompt-${selectedScenario.id}`}
+                  onChange={(event) => updateScenarioBasePrompt(event.target.value)}
+                  placeholder="Основные инструкции для AI: тон, ограничения, что нельзя обещать."
+                  rows={4}
+                  value={selectedScenario.basePrompt ?? ""}
+                />
+                <small>Передаётся в начало system prompt до safety rails и инструкций ноды. Сохраните черновик, чтобы записать на backend.</small>
+              </label>
+              {selectedScenario.status === "published" ? (
+                <p className="bot-advanced-hint">Опубликованный сценарий нельзя менять. Поставьте на паузу, обновите источники и опубликуйте снова.</p>
+              ) : (
+                <p className="bot-advanced-hint">Источники и базовый промпт относятся ко всему сценарию. Нажмите «Сохранить», чтобы записать на backend.</p>
+              )}
             </div>
             <div className="bot-flow-canvas" aria-label="Ноды сценария">
               {selectedScenario.flowNodes.map((node, index) => (
@@ -961,6 +1038,7 @@ function normalizeScenario(scenario = {}) {
 
   return {
     ...scenario,
+    basePrompt: String(scenario.basePrompt ?? "").slice(0, 4000),
     channels,
     exportVersion: scenario.exportVersion ?? scenario.version ?? scenario.schemaVersion ?? "bot-flow/v1",
     flowEdges,
@@ -974,6 +1052,11 @@ function normalizeScenario(scenario = {}) {
       : createPreviewMessages(flowNodes),
     schemaVersion: scenario.schemaVersion ?? "bot-flow/v1",
     status: String(scenario.status ?? "draft"),
+    sourceBindings: Array.isArray(scenario.sourceBindings)
+      ? scenario.sourceBindings
+        .map((binding) => ({ sourceId: String(binding?.sourceId ?? "").trim() }))
+        .filter((binding) => binding.sourceId)
+      : [],
     steps: normalizeStringList(scenario.steps, flowNodes.map((node) => node.typeLabel ?? node.type)),
     successRate: scenario.successRate ?? null,
     testCases: Array.isArray(scenario.testCases) && scenario.testCases.length

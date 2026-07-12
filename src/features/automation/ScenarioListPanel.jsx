@@ -13,6 +13,7 @@ export function ScenarioListPanel({
   onArchive,
   onDisable,
   onOpen,
+  onPublish,
   onRestore,
   onRetry,
   partial,
@@ -116,7 +117,13 @@ export function ScenarioListPanel({
                       <button disabled={isSaving} onClick={() => onDisable?.(scenario)} type="button">Пауза</button>
                     ) : null}
                     {canManage && (row.status === "disabled" || row.status === "draft") ? (
-                      <button disabled={isSaving} onClick={() => onOpen?.(scenario)} type="button">Проверить и опубликовать</button>
+                      <button
+                        disabled={isSaving}
+                        onClick={() => (onPublish ?? onOpen)?.(scenario)}
+                        type="button"
+                      >
+                        Проверить и опубликовать
+                      </button>
                     ) : null}
                     {canManage && row.status === "archived" ? (
                       <button disabled={isSaving} onClick={() => onRestore?.(scenario)} type="button">

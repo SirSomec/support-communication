@@ -1,12 +1,12 @@
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
-import { isLocalRuntime } from "../runtime/local-runtime.js";
-import { bootstrapReportState } from "./seed.js";
+import { REPORT_COLUMN_OPTIONS, REPORT_METRIC_DEFINITION_VERSION } from "./report-definition.js";
 import type { ReportExportJob } from "./report.types.js";
 
 export interface ReportIdempotencyRecord {
   fingerprint: string;
   jobId: string;
   key: string;
+  tenantId: string;
 }
 
 export type ReportExportJobIdempotencyWriteResult =
@@ -185,6 +185,14 @@ export interface ConversationReportSourceRow {
   channel: string;
   createdAt: string;
   id: string;
+  lifecycleEvents?: Array<{
+    data?: Record<string, unknown>;
+    eventType: string;
+    id?: string;
+    ingestedAt?: string;
+    occurredAt: string;
+    source?: string;
+  }>;
   messages: Array<{
     createdAt: string;
     id: string;
@@ -193,8 +201,12 @@ export interface ConversationReportSourceRow {
     time: string;
     type?: string;
   }>;
+  operatorId?: string;
+  operatorName?: string;
+  queueId?: string;
   slaTone: string;
   status: string;
+  teamId?: string;
   topic: string;
   updatedAt: string;
 }
@@ -249,6 +261,25 @@ export interface PrismaReportRepositoryOptions {
 type MaybePromise<T> = T | Promise<T>;
 
 interface PrismaReportDataClient {
+  conversationLifecycleEvent?: {
+    findMany(input: {
+      orderBy: { occurredAt: "asc" };
+      select: {
+        conversation: { select: { channel: true; operatorId: true; operatorName: true; queueId: true; status: true; teamId: true; topic: true } };
+        conversationId: true;
+        data: true;
+        eventType: true;
+        id: true;
+        ingestedAt: true;
+        occurredAt: true;
+        source: true;
+      };
+      where: {
+        occurredAt: { gte: Date; lt: Date };
+        tenantId: string;
+      };
+    }): Promise<PrismaConversationLifecycleReportRow[]>;
+  };
   conversation?: {
     findMany(input: {
       include: { messages: { orderBy: { createdAt: "asc" } } };
@@ -294,11 +325,11 @@ interface PrismaReportDataClient {
   };
   reportIdempotencyKey: {
     create(input: { data: PrismaReportIdempotencyKeyCreateInput }): Promise<PrismaReportIdempotencyKeyRow>;
-    findUnique(input: { where: { key: string } }): Promise<PrismaReportIdempotencyKeyRow | null>;
+    findUnique(input: { where: PrismaReportIdempotencyKeyWhereUniqueInput }): Promise<PrismaReportIdempotencyKeyRow | null>;
     upsert(input: {
       create: PrismaReportIdempotencyKeyCreateInput;
       update: PrismaReportIdempotencyKeyUpdateInput;
-      where: { key: string };
+      where: PrismaReportIdempotencyKeyWhereUniqueInput;
     }): Promise<PrismaReportIdempotencyKeyRow>;
   };
   reportExportJob: {
@@ -378,6 +409,9 @@ interface PrismaConversationReportRow {
   channel: string;
   createdAt: Date;
   id: string;
+  operatorId: string | null;
+  operatorName: string | null;
+  queueId: string | null;
   messages: Array<{
     createdAt: Date;
     id: string;
@@ -388,8 +422,28 @@ interface PrismaConversationReportRow {
   }>;
   slaTone: string;
   status: string;
+  teamId: string | null;
   topic: string;
   updatedAt: Date;
+}
+
+interface PrismaConversationLifecycleReportRow {
+  conversation: {
+    channel: string;
+    operatorId: string | null;
+    operatorName: string | null;
+    queueId: string | null;
+    status: string;
+    teamId: string | null;
+    topic: string;
+  };
+  conversationId: string;
+  data: unknown;
+  eventType: string;
+  id: string;
+  ingestedAt: Date;
+  occurredAt: Date;
+  source: string;
 }
 
 interface PrismaRoutingActivityReportWhereInput {
@@ -471,11 +525,19 @@ interface PrismaReportIdempotencyKeyRow {
   fingerprint: string;
   jobId: string;
   key: string;
+  tenantId: string;
 }
 
 interface PrismaReportIdempotencyKeyCreateInput extends PrismaReportIdempotencyKeyRow {}
 
-type PrismaReportIdempotencyKeyUpdateInput = Omit<PrismaReportIdempotencyKeyCreateInput, "key">;
+type PrismaReportIdempotencyKeyUpdateInput = Omit<PrismaReportIdempotencyKeyCreateInput, "key" | "tenantId">;
+
+interface PrismaReportIdempotencyKeyWhereUniqueInput {
+  tenantId_key: {
+    key: string;
+    tenantId: string;
+  };
+}
 
 interface PrismaReportExportJobRow {
   auditId: string;
@@ -640,10 +702,6 @@ export class ReportRepository {
       return defaultRepository;
     }
 
-    if (isLocalRuntime()) {
-      return ReportRepository.inMemory(bootstrapReportState());
-    }
-
     return ReportRepository.inMemory();
   }
 
@@ -656,17 +714,16 @@ export class ReportRepository {
   }
 
   static inMemory(seed?: ReportState): ReportRepository {
-    const resolved = seed ?? (isLocalRuntime() ? bootstrapReportState() : seedReportState());
-    return new ReportRepository(new InMemoryStore(resolved));
+    return new ReportRepository(new InMemoryStore(seed ?? createEmptyReportState()));
   }
 
-  static open({ filePath, seed = seedReportState() }: ReportRepositoryOptions): ReportRepository {
+  static open({ filePath, seed = createEmptyReportState() }: ReportRepositoryOptions): ReportRepository {
     return new ReportRepository(new JsonFileStore({ filePath, seed }));
   }
 
   static prisma({ client }: PrismaReportRepositoryOptions): ReportRepository {
     assertCompletePrismaReportClient(client);
-    return new ReportRepository(new InMemoryStore(seedReportState()), client);
+    return new ReportRepository(new InMemoryStore(createEmptyReportState()), client);
   }
 
   readState(): ReportState {
@@ -682,6 +739,54 @@ export class ReportRepository {
     tenantId: string;
     to: Date;
   }): Promise<ConversationReportSourceRow[]> {
+    if (this.prismaClient?.conversationLifecycleEvent) {
+      const events = await this.prismaClient.conversationLifecycleEvent.findMany({
+        orderBy: { occurredAt: "asc" },
+        select: {
+          conversation: { select: { channel: true, operatorId: true, operatorName: true, queueId: true, status: true, teamId: true, topic: true } },
+          conversationId: true,
+          data: true,
+          eventType: true,
+          id: true,
+          ingestedAt: true,
+          occurredAt: true,
+          source: true
+        },
+        where: {
+          occurredAt: { gte: input.from, lt: input.to },
+          tenantId: input.tenantId
+        }
+      });
+      const grouped = new Map<string, ConversationReportSourceRow>();
+      for (const event of events) {
+        const current: ConversationReportSourceRow = grouped.get(event.conversationId) ?? {
+          channel: event.conversation.channel,
+          createdAt: "",
+          id: event.conversationId,
+          lifecycleEvents: [],
+          messages: [],
+          ...(event.conversation.operatorId ? { operatorId: event.conversation.operatorId } : {}),
+          ...(event.conversation.operatorName ? { operatorName: event.conversation.operatorName } : {}),
+          ...(event.conversation.queueId ? { queueId: event.conversation.queueId } : {}),
+          slaTone: "",
+          status: event.conversation.status,
+          ...(event.conversation.teamId ? { teamId: event.conversation.teamId } : {}),
+          topic: event.conversation.topic,
+          updatedAt: ""
+        };
+        current.lifecycleEvents!.push({
+          ...(isRecord(event.data) ? { data: event.data } : {}),
+          eventType: event.eventType,
+          id: event.id,
+          ingestedAt: event.ingestedAt.toISOString(),
+          occurredAt: event.occurredAt.toISOString(),
+          source: event.source
+        });
+        grouped.set(event.conversationId, current);
+      }
+      return [...grouped.values()];
+    }
+
     if (!this.prismaClient?.conversation) {
       return [];
     }
@@ -707,8 +812,12 @@ export class ReportRepository {
         time: message.time,
         ...(message.type ? { type: message.type } : {})
       })),
+      ...(row.operatorId ? { operatorId: row.operatorId } : {}),
+      ...(row.operatorName ? { operatorName: row.operatorName } : {}),
+      ...(row.queueId ? { queueId: row.queueId } : {}),
       slaTone: row.slaTone,
       status: row.status,
+      ...(row.teamId ? { teamId: row.teamId } : {}),
       topic: row.topic,
       updatedAt: row.updatedAt.toISOString()
     }));
@@ -775,7 +884,7 @@ export class ReportRepository {
       return rows.map(toReportExportJob);
     }
 
-    return this.listExportJobs().filter((job) => !filters.tenantId || reportExportJobTenantId(job) === filters.tenantId);
+    return this.listExportJobs().filter((job) => !filters.tenantId || readReportExportJobTenantId(job) === filters.tenantId);
   }
 
   async claimQueuedExportJobsAsync(input: ClaimQueuedReportExportJobsInput = {}): Promise<ReportExportJob[]> {
@@ -1115,7 +1224,10 @@ export class ReportRepository {
 
   saveExportJobWithIdempotency(job: ReportExportJob, idempotencyKey: ReportIdempotencyRecord): MaybePromise<ReportExportJobIdempotencyWriteResult> {
     const persistedJob = clone(job);
-    const persistedKey = clone(idempotencyKey);
+    const persistedKey = normalizeReportIdempotencyRecord(idempotencyKey);
+    if (persistedJob.tenantId !== persistedKey.tenantId) {
+      throw new Error("report_idempotency_tenant_mismatch");
+    }
     let result: ReportExportJobIdempotencyWriteResult | undefined;
 
     if (this.prismaClient) {
@@ -1124,7 +1236,9 @@ export class ReportRepository {
 
     this.store.update((state) => {
       const current = normalizeState(state);
-      const existingKey = current.idempotencyKeys.find((item) => item.key === persistedKey.key);
+      const existingKey = current.idempotencyKeys.find((item) =>
+        item.tenantId === persistedKey.tenantId && item.key === persistedKey.key
+      );
 
       if (existingKey && existingKey.fingerprint !== persistedKey.fingerprint) {
         result = {
@@ -1155,7 +1269,9 @@ export class ReportRepository {
         ...current,
         exportJobs: [persistedJob, ...current.exportJobs.filter((item) => item.id !== persistedJob.id)],
         idempotencyKeys: existingKey
-          ? current.idempotencyKeys.map((item) => item.key === persistedKey.key ? persistedKey : item)
+          ? current.idempotencyKeys.map((item) =>
+            item.tenantId === persistedKey.tenantId && item.key === persistedKey.key ? persistedKey : item
+          )
           : [...current.idempotencyKeys, persistedKey]
       };
     });
@@ -1217,33 +1333,37 @@ export class ReportRepository {
     return clone(this.readState().exportRetryAuditEvents);
   }
 
-  findIdempotencyKey(key: string): MaybePromise<ReportIdempotencyRecord | undefined> {
+  findIdempotencyKey(tenantId: string, key: string): MaybePromise<ReportIdempotencyRecord | undefined> {
     if (this.prismaClient) {
-      return this.prismaClient.reportIdempotencyKey.findUnique({ where: { key } })
+      return this.prismaClient.reportIdempotencyKey.findUnique({ where: reportIdempotencyWhere(tenantId, key) })
         .then((row) => row ? toReportIdempotencyRecord(row) : undefined);
     }
 
-    return clone(this.readState().idempotencyKeys.find((item) => item.key === key));
+    return clone(this.readState().idempotencyKeys.find((item) => item.tenantId === tenantId && item.key === key));
   }
 
   saveIdempotencyKey(record: ReportIdempotencyRecord): MaybePromise<ReportIdempotencyRecord> {
-    const persisted = clone(record);
+    const persisted = normalizeReportIdempotencyRecord(record);
     if (this.prismaClient) {
       return this.prismaClient.reportIdempotencyKey.upsert({
         create: toPrismaReportIdempotencyKeyCreateInput(persisted),
         update: toPrismaReportIdempotencyKeyUpdateInput(persisted),
-        where: { key: persisted.key }
+        where: reportIdempotencyWhere(persisted.tenantId, persisted.key)
       }).then(toReportIdempotencyRecord);
     }
 
     this.store.update((state) => {
       const current = normalizeState(state);
-      const exists = current.idempotencyKeys.some((item) => item.key === persisted.key);
+      const exists = current.idempotencyKeys.some((item) =>
+        item.tenantId === persisted.tenantId && item.key === persisted.key
+      );
 
       return {
         ...current,
         idempotencyKeys: exists
-          ? current.idempotencyKeys.map((item) => item.key === persisted.key ? persisted : item)
+          ? current.idempotencyKeys.map((item) =>
+            item.tenantId === persisted.tenantId && item.key === persisted.key ? persisted : item
+          )
           : [...current.idempotencyKeys, persisted]
       };
     });
@@ -1550,7 +1670,9 @@ export class ReportRepository {
     const client = this.prismaClient!;
     try {
       return await client.$transaction(async (transaction) => {
-        const existingKey = await transaction.reportIdempotencyKey.findUnique({ where: { key: idempotencyKey.key } });
+        const existingKey = await transaction.reportIdempotencyKey.findUnique({
+          where: reportIdempotencyWhere(idempotencyKey.tenantId, idempotencyKey.key)
+        });
         if (existingKey) {
           return resolvePrismaExportIdempotency(transaction, toReportIdempotencyRecord(existingKey), idempotencyKey.fingerprint);
         }
@@ -1576,7 +1698,9 @@ export class ReportRepository {
         throw error;
       }
 
-      const existingKey = await client.reportIdempotencyKey.findUnique({ where: { key: idempotencyKey.key } });
+      const existingKey = await client.reportIdempotencyKey.findUnique({
+        where: reportIdempotencyWhere(idempotencyKey.tenantId, idempotencyKey.key)
+      });
       if (!existingKey) {
         throw error;
       }
@@ -1586,7 +1710,7 @@ export class ReportRepository {
   }
 }
 
-function seedReportState(): ReportState {
+export function createEmptyReportState(): ReportState {
   return {
     exportRetryAuditEvents: [],
     exportJobs: [],
@@ -1605,10 +1729,10 @@ function seedReportState(): ReportState {
 
 function emptyReportWorkspace(): ReportWorkspaceCatalog {
   return {
-    metricDefinitionVersion: "metrics/v1",
+    metricDefinitionVersion: REPORT_METRIC_DEFINITION_VERSION,
     reportBars: [],
     reportChartBlocks: [],
-    reportColumnOptions: [],
+    reportColumnOptions: clone(REPORT_COLUMN_OPTIONS),
     reportRows: [],
     rescueOutcomeSummary: [],
     rescueReportRows: []
@@ -1692,7 +1816,7 @@ function normalizeState(state: Partial<ReportState>): ReportState {
   return {
     exportRetryAuditEvents: state.exportRetryAuditEvents ?? [],
     exportJobs: state.exportJobs ?? [],
-    idempotencyKeys: state.idempotencyKeys ?? [],
+    idempotencyKeys: (state.idempotencyKeys ?? []).map(normalizeReportIdempotencyRecord),
     metricDefinitions: (state.metricDefinitions ?? []).map(normalizeMetricDefinition),
     metricTenantOverrides: (state.metricTenantOverrides ?? []).map(normalizeMetricTenantOverride),
     metricVersions: (state.metricVersions ?? []).map(normalizeMetricVersion),
@@ -2134,7 +2258,8 @@ function toPrismaReportIdempotencyKeyCreateInput(record: ReportIdempotencyRecord
   return {
     fingerprint: record.fingerprint,
     jobId: record.jobId,
-    key: record.key
+    key: record.key,
+    tenantId: requireNonEmpty(record.tenantId, "report_idempotency_tenant_required")
   };
 }
 
@@ -2149,7 +2274,28 @@ function toReportIdempotencyRecord(row: PrismaReportIdempotencyKeyRow): ReportId
   return {
     fingerprint: row.fingerprint,
     jobId: row.jobId,
-    key: row.key
+    key: row.key,
+    tenantId: requireNonEmpty(row.tenantId, "report_idempotency_tenant_required")
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeReportIdempotencyRecord(record: ReportIdempotencyRecord): ReportIdempotencyRecord {
+  return {
+    ...clone(record),
+    tenantId: requireNonEmpty(record.tenantId, "report_idempotency_tenant_required")
+  };
+}
+
+function reportIdempotencyWhere(tenantId: string, key: string): PrismaReportIdempotencyKeyWhereUniqueInput {
+  return {
+    tenantId_key: {
+      key,
+      tenantId: requireNonEmpty(tenantId, "report_idempotency_tenant_required")
+    }
   };
 }
 
@@ -2230,8 +2376,11 @@ function toReportExportJob(row: PrismaReportExportJobRow): ReportExportJob {
 }
 
 function reportExportJobTenantId(job: ReportExportJob): string {
-  const filterTenantId = typeof job.filters?.tenantId === "string" ? job.filters.tenantId.trim() : "";
-  return job.tenantId?.trim() || filterTenantId || "tenant-volga";
+  return requireNonEmpty(readReportExportJobTenantId(job) ?? "", "report_export_job_tenant_id_required");
+}
+
+function readReportExportJobTenantId(job: ReportExportJob): string | undefined {
+  return job.tenantId?.trim() || undefined;
 }
 
 function parseReportExportFormat(format: string): ReportExportJob["format"] {

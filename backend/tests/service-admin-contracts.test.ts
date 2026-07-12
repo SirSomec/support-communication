@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { createSeededIdentityRepository } from "../apps/api-gateway/src/identity/seed.ts";
 import { ServiceAdminService } from "../apps/api-gateway/src/service-admin/service-admin.service.ts";
 
 describe("service-admin workspace contracts", () => {
   it("loads support users and tenants from repository state", async () => {
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
     const support = new ServiceAdminService(repository);
 
     const users = await support.fetchSupportUsers({ tenantId: "tenant-northstar" });
@@ -17,7 +18,7 @@ describe("service-admin workspace contracts", () => {
   });
 
   it("supports MFA reset, forced logout, block/unblock and invite resend", async () => {
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
     const support = new ServiceAdminService(repository);
     const userId = "usr-lumen-invite";
 
@@ -60,7 +61,7 @@ describe("service-admin workspace contracts", () => {
   });
 
   it("starts and stops impersonation with audit evidence", async () => {
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
     const support = new ServiceAdminService(repository);
 
     const started = await support.startImpersonation({
@@ -82,7 +83,7 @@ describe("service-admin workspace contracts", () => {
   });
 
   it("returns denied envelopes when privileged actions miss confirmation", async () => {
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
     const support = new ServiceAdminService(repository);
 
     const denied = await support.blockUser({
@@ -97,7 +98,7 @@ describe("service-admin workspace contracts", () => {
   });
 
   it("streams service-admin audit events for privileged actions", async () => {
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
     const support = new ServiceAdminService(repository);
 
     await repository.recordServiceAdminAuditEvent({

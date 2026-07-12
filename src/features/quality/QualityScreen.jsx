@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { AlertTriangle, BookOpen, Filter, Sparkles, Star } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, Filter, ShieldCheck, Sparkles, Star } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { scoreAiSuggestionBatch, submitManualQaReview } from "../../app/qualityAiActions.js";
 import { qualityService } from "../../services/qualityService.js";
@@ -7,9 +7,7 @@ import { ChannelBadge, MetricTile, ProductScreen, ScreenStateStrip, SectionTitle
 import { AiQualityWorkspace } from "./AiQualityWorkspace.jsx";
 import { KnowledgeBaseWorkspace } from "./KnowledgeBaseWorkspace.jsx";
 
-const defaultAiSuggestionActions = ["accept", "edit", "reject"];
-
-export function QualityScreen({ onBack, onToast, operator }) {
+export function QualityScreen({ access, onBack, onToast, operator }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [qualityScores, setQualityScores] = useState([]);
@@ -20,10 +18,39 @@ export function QualityScreen({ onBack, onToast, operator }) {
   const [knowledgeArticles, setKnowledgeArticles] = useState([]);
   const [showLowScoresOnly, setShowLowScoresOnly] = useState(false);
   const [reviewingScoreId, setReviewingScoreId] = useState("");
+  const [reviewDraft, setReviewDraft] = useState(null);
   const [manualReviewIds, setManualReviewIds] = useState({});
   const [batchScoring, setBatchScoring] = useState(false);
-  const [scoringSuggestionId, setScoringSuggestionId] = useState("");
   const [scoredSuggestions, setScoredSuggestions] = useState({});
+  const [capabilities, setCapabilities] = useState({ aiProviderConnected: false, scoringMode: "rules" });
+  const [aiConsent, setAiConsent] = useState(false);
+
+  function applyWorkspace(data = {}) {
+    const loadedQualityScores = Array.isArray(data.qualityScores) ? data.qualityScores : Array.isArray(data.qualityMetrics) ? data.qualityMetrics : [];
+    setQualityScores(loadedQualityScores);
+    setManualReviewIds(Object.fromEntries(
+      loadedQualityScores
+        .filter((score) => score?.id && score?.manualReviewId)
+        .map((score) => [score.id, score.manualReviewId])
+    ));
+    setAiSuggestions(Array.isArray(data.aiSuggestions) ? data.aiSuggestions : []);
+    setAiRealtimeChecks(Array.isArray(data.aiRealtimeChecks) ? data.aiRealtimeChecks : []);
+    setAiCoachingQueue(Array.isArray(data.aiCoachingQueue) ? data.aiCoachingQueue : []);
+    setAiEffectivenessMetrics(Array.isArray(data.aiEffectivenessMetrics) ? data.aiEffectivenessMetrics : []);
+    setKnowledgeArticles(Array.isArray(data.knowledgeArticles) ? data.knowledgeArticles : []);
+    setCapabilities({
+      aiProviderConnected: Boolean(data.capabilities?.aiProviderConnected),
+      scoringMode: data.capabilities?.scoringMode ?? "rules"
+    });
+  }
+
+  async function refreshWorkspace() {
+    const response = await qualityService.fetchQualityWorkspace();
+    if (response.status === "ok") {
+      applyWorkspace(response.data);
+    }
+    return response;
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -42,13 +69,7 @@ export function QualityScreen({ onBack, onToast, operator }) {
         return;
       }
 
-      const data = response.data ?? {};
-      setQualityScores(Array.isArray(data.qualityScores) ? data.qualityScores : Array.isArray(data.qualityMetrics) ? data.qualityMetrics : []);
-      setAiSuggestions(Array.isArray(data.aiSuggestions) ? data.aiSuggestions : []);
-      setAiRealtimeChecks(Array.isArray(data.aiRealtimeChecks) ? data.aiRealtimeChecks : []);
-      setAiCoachingQueue(Array.isArray(data.aiCoachingQueue) ? data.aiCoachingQueue : []);
-      setAiEffectivenessMetrics(Array.isArray(data.aiEffectivenessMetrics) ? data.aiEffectivenessMetrics : []);
-      setKnowledgeArticles(Array.isArray(data.knowledgeArticles) ? data.knowledgeArticles : []);
+      applyWorkspace(response.data);
       setLoading(false);
     }
 
@@ -75,6 +96,8 @@ export function QualityScreen({ onBack, onToast, operator }) {
 
     setReviewingScoreId(score.id);
     const result = await submitManualQaReview(score, {
+      criteria: reviewDraft.criteria,
+      reviewScore: calculateQaScore(reviewDraft.criteria),
       reviewer: resolveManualQaReviewer(operator)
     });
     setReviewingScoreId("");
@@ -84,20 +107,18 @@ export function QualityScreen({ onBack, onToast, operator }) {
       return;
     }
 
-    setManualReviewIds((current) => ({
-      ...current,
-      [score.id]: result.reviewId
-    }));
-    onToast(`Manual QA review saved: ${result.reviewId} ${result.auditId}`);
+    await refreshWorkspace();
+    setReviewDraft(null);
+    onToast(`Ручная проверка сохранена: ${result.reviewId}.`);
   }
 
   async function handleScoreAiSuggestions(suggestions = aiSuggestions) {
-    if (batchScoring || scoringSuggestionId) {
+    if (batchScoring) {
       return;
     }
 
     setBatchScoring(true);
-    const result = await scoreAiSuggestionBatch(suggestions);
+    const result = await scoreAiSuggestionBatch(suggestions, { aiConsent });
     setBatchScoring(false);
 
     if (!result.ok) {
@@ -110,41 +131,14 @@ export function QualityScreen({ onBack, onToast, operator }) {
       ...current,
       ...Object.fromEntries(suggestions.map((suggestion) => [suggestion.id, { auditId: result.auditId, score: result.score, scoredAt }]))
     }));
-    onToast(`AI batch scoring saved: ${result.score}/100 ${result.auditId}`);
-  }
-
-  async function handleAiSuggestionAction(suggestion, action) {
-    const actionId = `${suggestion.id}:${action}`;
-
-    if (batchScoring || scoringSuggestionId) {
-      return;
-    }
-
-    setScoringSuggestionId(actionId);
-    const result = await scoreAiSuggestionBatch([{ ...suggestion, action }]);
-    setScoringSuggestionId("");
-
-    if (!result.ok) {
-      onToast(result.message);
-      return;
-    }
-
-    setScoredSuggestions((current) => ({
-      ...current,
-      [suggestion.id]: {
-        action,
-        auditId: result.auditId,
-        score: result.score,
-        scoredAt: new Date().toISOString()
-      }
-    }));
-    onToast(`${action}: backend scoring saved ${result.score}/100 ${result.auditId}`);
+    await refreshWorkspace();
+    onToast(`Проверка по правилам сохранена: ${result.score}/100.`);
   }
 
   if (loading) {
     return (
       <ProductScreen
-        title="Качество, CSAT и AI"
+        title="Качество и CSAT"
         subtitle="Загрузка..."
         onBack={onBack}
         stateItems={createScreenStateItems({
@@ -160,7 +154,7 @@ export function QualityScreen({ onBack, onToast, operator }) {
   if (error) {
     return (
       <ProductScreen
-        title="Качество, CSAT и AI"
+        title="Качество и CSAT"
         subtitle="Ошибка загрузки"
         onBack={onBack}
         stateItems={[
@@ -174,12 +168,12 @@ export function QualityScreen({ onBack, onToast, operator }) {
 
   return (
     <ProductScreen
-      title="Качество, CSAT и AI"
-      subtitle="Оценки клиентов, ручной QA, низкие оценки, AI-подсказки и управление статьями базы знаний."
+      title="Качество и CSAT"
+      subtitle="Оценки клиентов, ручные проверки, локальная проверка текста и база знаний."
       onBack={onBack}
       stateItems={createScreenStateItems({
         total: qualityScores.length + aiSuggestions.length + aiRealtimeChecks.length + aiCoachingQueue.length + knowledgeArticles.length,
-        empty: `${qualityScores.length} оценок, ${aiSuggestions.length} AI, ${aiCoachingQueue.length} coaching`,
+        empty: `${qualityScores.length} оценок, ${aiSuggestions.length} подсказок, ${aiCoachingQueue.length} рекомендаций`,
         emptyWhenZero: "качество без данных",
         errors: lowScores.length,
         errorLabel: "низких оценок нет"
@@ -198,13 +192,13 @@ export function QualityScreen({ onBack, onToast, operator }) {
           </button>
           <button
             className="primary-action"
-            disabled={batchScoring || !aiSuggestions.length}
+            disabled={!access.canScoreQuality || batchScoring || !aiSuggestions.length}
             onClick={() => void handleScoreAiSuggestions()}
-            title={aiSuggestions.length ? "Отправить AI-подсказки на backend scoring." : "AI-подсказок для проверки нет."}
+            title={!access.canScoreQuality ? access.reason : aiSuggestions.length ? "Проверить подсказки локальными правилами." : "Подсказок для проверки нет."}
             type="button"
           >
-            <Sparkles size={17} />
-            {batchScoring ? "AI-проверка..." : "AI-проверка"}
+            <ShieldCheck size={17} />
+            {batchScoring ? "Проверка..." : "Проверить текст"}
           </button>
         </>
       }
@@ -212,11 +206,24 @@ export function QualityScreen({ onBack, onToast, operator }) {
       {!qualityScores.length && !aiSuggestions.length && !knowledgeArticles.length ? (
         <ScreenStateStrip items={[{ label: "Quality", tone: "empty", value: "Нет данных качества для tenant" }]} />
       ) : null}
+      {!capabilities.aiProviderConnected ? (
+        <ScreenStateStrip items={[{
+          label: "Проверка текста",
+          tone: "partial",
+          value: "Работают локальные правила. Внешний ИИ-провайдер не подключен"
+        }]} />
+      ) : null}
+      {capabilities.aiProviderConnected ? (
+        <label className="quality-ai-consent">
+          <input checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} type="checkbox" />
+          <span>Разрешить передачу обезличенного текста подключенному AI-провайдеру для этой сессии</span>
+        </label>
+      ) : null}
 
       <div className="metric-strip">
         <MetricTile icon={<Star size={21} />} label="CSAT" value={`${averageCsat}%`} detail="по закрытым диалогам" />
         <MetricTile icon={<AlertTriangle size={21} />} label="Низкие оценки" value={lowScores.length} detail="нужна проверка старшего" tone="danger" />
-        <MetricTile icon={<Sparkles size={21} />} label="AI-подсказки" value={aiSuggestions.length} detail="accept / edit / reject" />
+        <MetricTile icon={<CheckCircle2 size={21} />} label="Подсказки" value={aiSuggestions.length} detail="принять / изменить / отклонить" />
         <MetricTile icon={<BookOpen size={21} />} label="Статьи" value={knowledgeArticles.length} detail="рекомендации в чате" />
       </div>
 
@@ -235,21 +242,47 @@ export function QualityScreen({ onBack, onToast, operator }) {
                 <footer>
                   <span>{score.operator} · {score.topic}</span>
                   <button
-                    disabled={reviewingScoreId === score.id || Boolean(manualReviewIds[score.id])}
-                    onClick={() => void handleManualQaReview(score)}
-                    title={manualReviewIds[score.id] ? `Backend review: ${manualReviewIds[score.id]}` : "Создать backend manual QA review."}
+                    disabled={!access.canReviewQuality || reviewingScoreId === score.id || Boolean(manualReviewIds[score.id])}
+                    onClick={() => setReviewDraft(createQaReviewDraft(score))}
+                    title={!access.canReviewQuality ? access.reason : manualReviewIds[score.id] ? `Backend review: ${manualReviewIds[score.id]}` : "Создать ручную проверку."}
                     type="button"
                   >
                     {reviewingScoreId === score.id ? "Проверка..." : manualReviewIds[score.id] ? "Проверено" : "Проверить"}
                   </button>
                 </footer>
+                {reviewDraft?.qualityScoreId === score.id ? (
+                  <form className="qa-review-form" onSubmit={(event) => { event.preventDefault(); void handleManualQaReview(score); }}>
+                    <strong>Ручная проверка</strong>
+                    {QA_CRITERIA.map((criterion) => (
+                      <label key={criterion.id}>
+                        <span>{criterion.label}</span>
+                        <select
+                          value={reviewDraft.criteria[criterion.id]}
+                          onChange={(event) => setReviewDraft((current) => ({
+                            ...current,
+                            criteria: { ...current.criteria, [criterion.id]: Number(event.target.value) }
+                          }))}
+                        >
+                          {[0, 1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value} из 5</option>)}
+                        </select>
+                      </label>
+                    ))}
+                    <div className="qa-review-actions">
+                      <b>Итог: {calculateQaScore(reviewDraft.criteria)} / 100</b>
+                      <button type="button" onClick={() => setReviewDraft(null)}>Отмена</button>
+                      <button className="primary-action" disabled={Boolean(reviewingScoreId)} type="submit">
+                        {reviewingScoreId ? "Сохранение..." : "Сохранить проверку"}
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
               </article>
             ))}
           </div>
         </section>
 
         <section className="work-panel">
-          <SectionTitle title="AI-помощник оператора" action="контролируемые действия" />
+          <SectionTitle title="Подсказки оператору" action="требуют решения оператора" />
           <div className="ai-suggestion-list">
             {aiSuggestions.map((suggestion) => (
               <article className="ai-suggestion" key={suggestion.id}>
@@ -263,19 +296,7 @@ export function QualityScreen({ onBack, onToast, operator }) {
                 {scoredSuggestions[suggestion.id] ? (
                   <small>{scoredSuggestions[suggestion.id].score}/100 · {scoredSuggestions[suggestion.id].auditId}</small>
                 ) : null}
-                <footer>
-                  {getAiSuggestionActions(suggestion).map((action) => (
-                    <button
-                      disabled={scoringSuggestionId === `${suggestion.id}:${action}` || batchScoring}
-                      key={action}
-                      onClick={() => void handleAiSuggestionAction(suggestion, action)}
-                      title="Отправить действие AI-подсказки на backend scoring."
-                      type="button"
-                    >
-                      {scoringSuggestionId === `${suggestion.id}:${action}` ? "..." : action}
-                    </button>
-                  ))}
-                </footer>
+                <footer><span>Только просмотр: решения по подсказкам еще не подключены.</span></footer>
               </article>
             ))}
           </div>
@@ -283,8 +304,9 @@ export function QualityScreen({ onBack, onToast, operator }) {
       </div>
 
       <section className="work-panel">
-        <SectionTitle title="AI real-time scoring" action="исправления до отправки и эффективность подсказок" />
+        <SectionTitle title="Автоматическая проверка текста" action="локальные правила до отправки" />
         <AiQualityWorkspace
+          aiConsent={aiConsent}
           coachingQueue={aiCoachingQueue}
           effectivenessMetrics={aiEffectivenessMetrics}
           onToast={onToast}
@@ -294,7 +316,7 @@ export function QualityScreen({ onBack, onToast, operator }) {
 
       <section className="work-panel">
         <SectionTitle title="База знаний" action="редактор и публикация статей" />
-        <KnowledgeBaseWorkspace articles={knowledgeArticles} onToast={onToast} operator={operator} />
+        <KnowledgeBaseWorkspace articles={knowledgeArticles} canWrite={access.canManageKnowledge} onToast={onToast} operator={operator} />
       </section>
     </ProductScreen>
   );
@@ -304,10 +326,22 @@ function resolveManualQaReviewer(operator) {
   return String(operator?.id ?? operator?.email ?? operator?.name ?? "senior-qa").trim() || "senior-qa";
 }
 
-function getAiSuggestionActions(suggestion) {
-  const actions = Array.isArray(suggestion?.actions)
-    ? suggestion.actions.map((action) => String(action ?? "").trim()).filter(Boolean)
-    : [];
+const QA_CRITERIA = [
+  { id: "accuracy", label: "Точность ответа" },
+  { id: "completeness", label: "Полнота решения" },
+  { id: "communication", label: "Понятность и тон" },
+  { id: "process", label: "Соблюдение процесса" }
+];
 
-  return actions.length ? actions : defaultAiSuggestionActions;
+function createQaReviewDraft(score) {
+  const initial = Math.max(0, Math.min(5, Math.round(Number(score?.score ?? 0))));
+  return {
+    criteria: Object.fromEntries(QA_CRITERIA.map((criterion) => [criterion.id, initial])),
+    qualityScoreId: score.id
+  };
+}
+
+function calculateQaScore(criteria = {}) {
+  const values = QA_CRITERIA.map((criterion) => Number(criteria[criterion.id] ?? 0));
+  return Math.round((values.reduce((sum, value) => sum + value, 0) / (values.length * 5)) * 100);
 }

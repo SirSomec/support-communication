@@ -3,16 +3,32 @@ import { type ServiceAdminSessionRecord } from "@support-communication/auth-cont
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
 import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
 import { addMinutes, makeAuditId, makeMfaChallengeId } from "./backend-ids.js";
-import { featureFlags, incidents, permissionRoles, serviceAdminSession, tariffs, tenantAuditEvents, tenants, tenantUsers } from "./seed-catalog.js";
+import {
+  identityPermissionRoleCatalog,
+  identityServiceAdminTariffCatalog,
+  serviceAdminPrivilegedActions
+} from "./runtime-catalog.js";
+import type {
+  IdentityAvailableOrganization,
+  IdentityPermissionRole,
+  IdentityServiceAdminFeatureFlag,
+  IdentityServiceAdminIncident,
+  IdentityServiceAdminTariff,
+  IdentityTenant,
+  IdentityTenantAuditEvent,
+  IdentityTenantUser
+} from "./identity.types.js";
 import { createTenantOperatorSessionTokens, resolveTenantOperatorPermissions } from "./tenant-operator-auth.js";
 
-export type IdentityTenant = (typeof tenants)[number];
-export type IdentityTenantAuditEvent = (typeof tenantAuditEvents)[number] & { immutable?: boolean };
-export type IdentityTenantUser = (typeof tenantUsers)[number];
-export type IdentityPermissionRole = (typeof permissionRoles)[number];
-export type IdentityServiceAdminTariff = (typeof tariffs)[number];
-export type IdentityServiceAdminIncident = (typeof incidents)[number];
-export type IdentityServiceAdminFeatureFlag = (typeof featureFlags)[number];
+export type {
+  IdentityPermissionRole,
+  IdentityServiceAdminFeatureFlag,
+  IdentityServiceAdminIncident,
+  IdentityServiceAdminTariff,
+  IdentityTenant,
+  IdentityTenantAuditEvent,
+  IdentityTenantUser
+} from "./identity.types.js";
 
 export interface IdentityRbacPolicyVersion {
   activatedAt: string | null;
@@ -375,7 +391,7 @@ export interface StoredServiceAdminSession extends ServiceAdminSessionRecord {
   adminId: string;
   adminName: string;
   authState: "mfa_verified";
-  availableOrganizations: typeof serviceAdminSession.availableOrganizations;
+  availableOrganizations: IdentityAvailableOrganization[];
   currentTenantId: string;
   role: string;
   tenantScope: string;
@@ -566,6 +582,7 @@ export interface IdentityRepositoryPort {
 
 interface IdentityRepositoryOptions {
   filePath: string;
+  seed?: IdentityState;
 }
 
 interface CreateServiceAdminSessionInput {
@@ -573,7 +590,7 @@ interface CreateServiceAdminSessionInput {
   actorName?: string;
   adminEmail?: string;
   allowedActions?: string[];
-  availableOrganizations?: typeof serviceAdminSession.availableOrganizations;
+  availableOrganizations?: IdentityAvailableOrganization[];
   currentTenantId?: string;
   mfaVerified?: boolean;
   role?: string;
@@ -698,12 +715,12 @@ export class IdentityRepository implements IdentityRepositoryPort {
     defaultRepository = repository;
   }
 
-  static inMemory(): IdentityRepository {
-    return new IdentityRepository(createDurableIdentityRepository(new InMemoryStore(seedIdentityState())));
+  static inMemory(seed: IdentityState = createEmptyIdentityState()): IdentityRepository {
+    return new IdentityRepository(createDurableIdentityRepository(new InMemoryStore(seed)));
   }
 
-  static open({ filePath }: IdentityRepositoryOptions): IdentityRepository {
-    return new IdentityRepository(createDurableIdentityRepository(new JsonFileStore({ filePath, seed: seedIdentityState() })));
+  static open({ filePath, seed = createEmptyIdentityState() }: IdentityRepositoryOptions): IdentityRepository {
+    return new IdentityRepository(createDurableIdentityRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client }: PrismaIdentityRepositoryOptions): IdentityRepository {
@@ -1591,7 +1608,7 @@ interface PrismaServiceAdminSessionCreateInput {
   adminName: string;
   allowedActions: string[];
   authState: "mfa_verified";
-  availableOrganizations: typeof serviceAdminSession.availableOrganizations;
+  availableOrganizations: IdentityAvailableOrganization[];
   currentTenantId: string;
   expiresAt: Date;
   id: string;
@@ -2023,23 +2040,23 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
   async listPermissionRoles(): Promise<IdentityPermissionRole[]> {
     const rows = await this.client.permissionRole.findMany({ orderBy: { key: "asc" } });
     const persistedRoles = rows.map(toPermissionRole);
-    return clone(persistedRoles.length ? persistedRoles : permissionRoles);
+    return clone(persistedRoles.length ? persistedRoles : identityPermissionRoleCatalog);
   }
 
   async listPrivilegedServiceAdminActions(): Promise<string[]> {
-    return clone(serviceAdminSession.allowedActions);
+    return [...serviceAdminPrivilegedActions];
   }
 
   async listServiceAdminTariffs(): Promise<IdentityServiceAdminTariff[]> {
-    return clone(tariffs);
+    return clone(identityServiceAdminTariffCatalog);
   }
 
   async listServiceAdminIncidents(): Promise<IdentityServiceAdminIncident[]> {
-    return clone(incidents);
+    return [];
   }
 
   async listServiceAdminFeatureFlags(): Promise<IdentityServiceAdminFeatureFlag[]> {
-    return clone(featureFlags);
+    return [];
   }
 
   async getActiveRbacPolicyVersion(): Promise<IdentityRbacPolicyVersion | undefined> {
@@ -2861,26 +2878,25 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
   }
 
   async createServiceAdminSession(input: CreateServiceAdminSessionInput = {}): Promise<StoredServiceAdminSession> {
-    const actorId = input.actorId ?? serviceAdminSession.actorId;
-    const actorName = input.actorName ?? serviceAdminSession.actorName;
+    const resolved = resolveServiceAdminSessionInput(input);
     const now = new Date();
     const row = await this.client.serviceAdminSession.create({
       data: {
-        actorId,
-        actorName,
-        adminEmail: input.adminEmail ?? serviceAdminSession.adminEmail,
-        adminId: actorId,
-        adminName: actorName,
-        allowedActions: input.allowedActions ?? [...serviceAdminSession.allowedActions],
+        actorId: resolved.actorId,
+        actorName: resolved.actorName,
+        adminEmail: resolved.adminEmail,
+        adminId: resolved.actorId,
+        adminName: resolved.actorName,
+        allowedActions: resolved.allowedActions,
         authState: "mfa_verified",
-        availableOrganizations: clone(input.availableOrganizations ?? serviceAdminSession.availableOrganizations),
-        currentTenantId: input.currentTenantId ?? serviceAdminSession.currentTenantId,
+        availableOrganizations: resolved.availableOrganizations,
+        currentTenantId: resolved.currentTenantId,
         expiresAt: addMinutes(now, input.ttlMinutes ?? 240),
         id: `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
         mfaVerifiedAt: input.mfaVerified === false ? null : now,
         revokedAt: null,
-        role: input.role ?? serviceAdminSession.role,
-        tenantScope: input.tenantScope ?? serviceAdminSession.tenantScope
+        role: resolved.role,
+        tenantScope: resolved.tenantScope
       }
     });
 
@@ -3194,9 +3210,6 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
 }
 
 function createDurableIdentityRepository(store: DurableStore<IdentityState>): IdentityRepositoryPort {
-  ensureSeedPasswordCredentials(store);
-  ensureSeedServiceAdminOperationsAccess(store);
-
   return {
     listTenants(): IdentityTenant[] {
       return clone(store.read().tenants);
@@ -3225,7 +3238,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
 
     findTenantUsers(tenantId: string): IdentityTenantUser[] {
       const state = store.read();
-      return clone((state.tenantUsers ?? tenantUsers).filter((user) => user.tenantId === tenantId));
+      return clone((state.tenantUsers ?? []).filter((user) => user.tenantId === tenantId));
     },
 
     findTenantUser(userId: string | undefined): IdentityTenantUser | undefined {
@@ -3234,7 +3247,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       }
 
       const state = store.read();
-      return clone((state.tenantUsers ?? tenantUsers).find((user) => user.id === userId));
+      return clone((state.tenantUsers ?? []).find((user) => user.id === userId));
     },
 
     findTenantUserByEmail(email: string): IdentityTenantUser | undefined {
@@ -3244,12 +3257,12 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       }
 
       const state = store.read();
-      return clone((state.tenantUsers ?? tenantUsers).find((user) => normalizeEmail(user.email) === normalizedEmail));
+      return clone((state.tenantUsers ?? []).find((user) => normalizeEmail(user.email) === normalizedEmail));
     },
 
     saveTenantUser(user: IdentityTenantUser): IdentityTenantUser {
       store.update((state) => {
-        const currentTenantUsers = state.tenantUsers ?? clone(tenantUsers);
+        const currentTenantUsers = state.tenantUsers ?? [];
         return {
           ...state,
           tenantUsers: [
@@ -3303,23 +3316,23 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
 
     listPermissionRoles(): IdentityPermissionRole[] {
       const persistedRoles = store.read().permissionRoles;
-      return clone(persistedRoles?.length ? persistedRoles : permissionRoles);
+      return clone(persistedRoles?.length ? persistedRoles : identityPermissionRoleCatalog);
     },
 
     listPrivilegedServiceAdminActions(): string[] {
-      return clone(store.read().privilegedServiceAdminActions ?? serviceAdminSession.allowedActions);
+      return clone(store.read().privilegedServiceAdminActions ?? serviceAdminPrivilegedActions);
     },
 
     listServiceAdminTariffs(): IdentityServiceAdminTariff[] {
-      return clone(store.read().serviceAdminTariffs ?? tariffs);
+      return clone(store.read().serviceAdminTariffs ?? identityServiceAdminTariffCatalog);
     },
 
     listServiceAdminIncidents(): IdentityServiceAdminIncident[] {
-      return clone(store.read().serviceAdminIncidents ?? incidents);
+      return clone(store.read().serviceAdminIncidents ?? []);
     },
 
     listServiceAdminFeatureFlags(): IdentityServiceAdminFeatureFlag[] {
-      return clone(store.read().serviceAdminFeatureFlags ?? featureFlags);
+      return clone(store.read().serviceAdminFeatureFlags ?? []);
     },
 
     getActiveRbacPolicyVersion(): IdentityRbacPolicyVersion | undefined {
@@ -3388,7 +3401,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       let result: { auditEvent: IdentityServiceAdminAuditEvent; user: IdentityTenantUser } | null = null;
 
       store.update((state) => {
-        const currentTenantUsers = state.tenantUsers ?? clone(tenantUsers);
+        const currentTenantUsers = state.tenantUsers ?? [];
         const existing = currentTenantUsers.find((user) => user.id === userId);
         if (!existing) {
           throw new Error(`User ${userId} was not found.`);
@@ -3559,7 +3572,8 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
           throw new Error(`Tenant ${tenantId} was not found.`);
         }
 
-        const updatedTenant = { ...tenant, status };
+        const normalizedStatus = tenantStatusFromRow(status);
+        const updatedTenant: IdentityTenant = { ...tenant, status: normalizedStatus };
         const auditEvent = {
           id: makeAuditId("tenant_status"),
           action: "tenant.status.change",
@@ -3568,7 +3582,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
           immutable: true,
           reason,
           result: "ok",
-          severity: status === "restricted" ? "warn" : "info",
+          severity: normalizedStatus === "restricted" ? "warn" : "info",
           target: tenant.id,
           tenantId: tenant.id,
           traceId
@@ -3576,7 +3590,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         const outbox = createOutboxEvent({
           aggregateId: tenant.id,
           aggregateType: "tenant",
-          payload: { from: tenant.status, reason, status },
+          payload: { from: tenant.status, reason, status: normalizedStatus },
           queue: "identity-events",
           traceId,
           type: "tenant.status.changed"
@@ -3694,16 +3708,15 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
     },
 
     createTenantOperatorSession(input: CreateTenantOperatorSessionInput): CreateTenantOperatorSessionResult {
-      const user = clone((store.read().tenantUsers ?? tenantUsers).find((item) => item.id === input.userId));
+      const user = clone((store.read().tenantUsers ?? []).find((item) => item.id === input.userId));
       if (!user || user.status !== "active" || user.tenantId !== input.tenantId) {
         throw new Error(`Tenant operator ${input.userId} is unavailable for tenant ${input.tenantId}.`);
       }
 
       const storedPermissionRoles = store.read().permissionRoles;
-      const permissions = resolveTenantOperatorPermissions(user.role, storedPermissionRoles?.length ? storedPermissionRoles : permissionRoles);
+      const permissions = resolveTenantOperatorPermissions(user.role, storedPermissionRoles?.length ? storedPermissionRoles : identityPermissionRoleCatalog);
       const now = new Date();
       const session: StoredServiceAdminSession = {
-        ...serviceAdminSession,
         actorId: user.id,
         actorName: user.name,
         adminEmail: user.email,
@@ -4276,22 +4289,20 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
     },
 
     createServiceAdminSession(input: CreateServiceAdminSessionInput = {}): StoredServiceAdminSession {
-      const actorId = input.actorId ?? serviceAdminSession.actorId;
-      const actorName = input.actorName ?? serviceAdminSession.actorName;
+      const resolved = resolveServiceAdminSessionInput(input);
       const now = new Date();
       const session: StoredServiceAdminSession = {
-        ...serviceAdminSession,
-        actorId,
-        actorName,
-        adminEmail: input.adminEmail ?? serviceAdminSession.adminEmail,
-        adminId: actorId,
-        adminName: actorName,
-        allowedActions: input.allowedActions ?? [...serviceAdminSession.allowedActions],
+        actorId: resolved.actorId,
+        actorName: resolved.actorName,
+        adminEmail: resolved.adminEmail,
+        adminId: resolved.actorId,
+        adminName: resolved.actorName,
+        allowedActions: resolved.allowedActions,
         authState: "mfa_verified",
-        availableOrganizations: clone(input.availableOrganizations ?? serviceAdminSession.availableOrganizations),
-        currentTenantId: input.currentTenantId ?? serviceAdminSession.currentTenantId,
-        role: input.role ?? serviceAdminSession.role,
-        tenantScope: input.tenantScope ?? serviceAdminSession.tenantScope,
+        availableOrganizations: resolved.availableOrganizations,
+        currentTenantId: resolved.currentTenantId,
+        role: resolved.role,
+        tenantScope: resolved.tenantScope,
         id: `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
         expiresAt: addMinutes(now, input.ttlMinutes ?? 240).toISOString(),
         mfaVerifiedAt: input.mfaVerified === false ? null : now.toISOString(),
@@ -4410,7 +4421,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         return undefined;
       }
 
-      const user = clone((store.read().tenantUsers ?? tenantUsers).find((item) => item.id === session.adminId));
+      const user = clone((store.read().tenantUsers ?? []).find((item) => item.id === session.adminId));
       if (!user || user.status !== "active") {
         return undefined;
       }
@@ -4462,7 +4473,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         if (!session || !isTenantOperatorSession(session)) {
           return undefined;
         }
-        const user = clone((store.read().tenantUsers ?? tenantUsers).find((item) => item.id === session.adminId));
+        const user = clone((store.read().tenantUsers ?? []).find((item) => item.id === session.adminId));
         if (!user || user.status !== "active") {
           return undefined;
         }
@@ -4738,6 +4749,34 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+function resolveServiceAdminSessionInput(input: CreateServiceAdminSessionInput): {
+  actorId: string;
+  actorName: string;
+  adminEmail: string;
+  allowedActions: string[];
+  availableOrganizations: IdentityAvailableOrganization[];
+  currentTenantId: string;
+  role: string;
+  tenantScope: string;
+} {
+  const actorId = String(input.actorId ?? "").trim();
+  if (!actorId) {
+    throw new Error("Service-admin session requires an authenticated actor id.");
+  }
+  const adminEmail = normalizeEmail(input.adminEmail ?? actorId);
+
+  return {
+    actorId,
+    actorName: String(input.actorName ?? adminEmail).trim() || adminEmail,
+    adminEmail,
+    allowedActions: clone(input.allowedActions ?? serviceAdminPrivilegedActions),
+    availableOrganizations: clone(input.availableOrganizations ?? []),
+    currentTenantId: String(input.currentTenantId ?? "").trim(),
+    role: String(input.role ?? "service_admin").trim() || "service_admin",
+    tenantScope: String(input.tenantScope ?? "platform").trim() || "platform"
+  };
+}
+
 function toIdentityTenant(row: PrismaTenantRow): IdentityTenant {
   const metadata = toJsonRecord(row.metadata);
   const healthScore = row.healthScore ?? numberFromMetadata(metadata.healthScore, 0);
@@ -4746,6 +4785,9 @@ function toIdentityTenant(row: PrismaTenantRow): IdentityTenant {
     activeUsers: numberFromMetadata(metadata.activeUsers, 0),
     arr: numberFromMetadata(metadata.arr, 0),
     domains: arrayFromMetadata(metadata.domains),
+    employeeGroups: Array.isArray(metadata.employeeGroups)
+      ? clone(metadata.employeeGroups) as IdentityTenant["employeeGroups"]
+      : undefined,
     flags: arrayFromMetadata(metadata.flags),
     healthScore,
     id: row.id,
@@ -4787,9 +4829,8 @@ function ensureSeedPasswordCredentials(store: DurableStore<IdentityState>): void
 }
 
 function ensureSeedServiceAdminOperationsAccess(store: DurableStore<IdentityState>): void {
-  const seedServiceAdminRole = permissionRoles.find((role) => role.key === serviceAdminSession.role);
-  const seedActions = seedServiceAdminRole?.actions ?? serviceAdminSession.allowedActions;
-  const requiredActions = Array.from(new Set([...serviceAdminSession.allowedActions, ...seedActions]));
+  const serviceAdminRole = identityPermissionRoleCatalog.find((role) => role.key === "service_admin");
+  const requiredActions = Array.from(new Set([...serviceAdminPrivilegedActions, ...(serviceAdminRole?.actions ?? [])]));
 
   store.update((state) => {
     let changed = false;
@@ -4803,9 +4844,9 @@ function ensureSeedServiceAdminOperationsAccess(store: DurableStore<IdentityStat
       changed = true;
     }
 
-    const persistedRoles = state.permissionRoles?.length ? state.permissionRoles : permissionRoles;
+    const persistedRoles = state.permissionRoles?.length ? state.permissionRoles : identityPermissionRoleCatalog;
     const nextPermissionRoles = persistedRoles.map((role) => {
-      if (role.key !== serviceAdminSession.role) {
+      if (role.key !== "service_admin") {
         return role;
       }
 
@@ -4820,7 +4861,7 @@ function ensureSeedServiceAdminOperationsAccess(store: DurableStore<IdentityStat
 
     const privilegedServiceAdminActions = mergeActions(
       state.privilegedServiceAdminActions ?? [],
-      serviceAdminSession.allowedActions
+      serviceAdminPrivilegedActions
     );
     if (privilegedServiceAdminActions.length !== (state.privilegedServiceAdminActions ?? []).length) {
       changed = true;
@@ -4831,7 +4872,7 @@ function ensureSeedServiceAdminOperationsAccess(store: DurableStore<IdentityStat
         return session;
       }
 
-      const allowedActions = mergeActions(session.allowedActions, serviceAdminSession.allowedActions);
+      const allowedActions = mergeActions(session.allowedActions, serviceAdminPrivilegedActions);
       if (allowedActions.length === session.allowedActions.length) {
         return session;
       }
@@ -4848,7 +4889,7 @@ function ensureSeedServiceAdminOperationsAccess(store: DurableStore<IdentityStat
         && grant.effect === "allow"
         && grant.policyVersionId === activePolicy.id
         && grant.resource === "*"
-        && grant.roleKey === serviceAdminSession.role
+        && grant.roleKey === "service_admin"
         && grant.tenantId === null
       ));
       if (alreadyGranted) {
@@ -4856,11 +4897,11 @@ function ensureSeedServiceAdminOperationsAccess(store: DurableStore<IdentityStat
       }
 
       changed = true;
-      let id = `rbac-grant-backfill-${serviceAdminSession.role}-${sanitizeGrantIdPart(action)}`;
+      let id = `rbac-grant-backfill-service_admin-${sanitizeGrantIdPart(action)}`;
       let suffix = 1;
       while (grantIds.has(id)) {
         suffix += 1;
-        id = `rbac-grant-backfill-${serviceAdminSession.role}-${sanitizeGrantIdPart(action)}-${suffix}`;
+        id = `rbac-grant-backfill-service_admin-${sanitizeGrantIdPart(action)}-${suffix}`;
       }
       grantIds.add(id);
       rbacRoleGrants.push({
@@ -4871,7 +4912,7 @@ function ensureSeedServiceAdminOperationsAccess(store: DurableStore<IdentityStat
         id,
         policyVersionId: activePolicy.id,
         resource: "*",
-        roleKey: serviceAdminSession.role,
+        roleKey: "service_admin",
         tenantId: null,
         traceId: "trc_rbac_seed_backfill"
       });
@@ -4891,7 +4932,7 @@ function ensureSeedServiceAdminOperationsAccess(store: DurableStore<IdentityStat
 }
 
 function isSeedServiceAdminSession(session: StoredServiceAdminSession): boolean {
-  if (session.role !== serviceAdminSession.role || isTenantOperatorSession(session)) {
+  if (session.role !== "service_admin" || isTenantOperatorSession(session)) {
     return false;
   }
 
@@ -4928,6 +4969,7 @@ function toPrismaTenantCreateInput(tenant: IdentityTenant): PrismaTenantCreateIn
       activeUsers: tenant.activeUsers,
       arr: tenant.arr,
       domains: tenant.domains,
+      employeeGroups: tenant.employeeGroups ?? [],
       flags: tenant.flags,
       incidentIds: tenant.incidentIds,
       lastSeenAt: tenant.lastSeenAt,
@@ -4971,6 +5013,7 @@ function toTenantUser(row: PrismaTenantUserRow): IdentityTenantUser {
     inviteStatus: row.inviteStatus,
     lastActiveAt: row.lastActiveAt ? toIso(row.lastActiveAt) : null,
     mfa: row.mfa,
+    metadata: toJsonRecord(row.metadata),
     name: row.name,
     risk: row.risk,
     role: row.role,
@@ -5217,7 +5260,7 @@ function toServiceAdminSession(row: PrismaServiceAdminSessionRow): StoredService
     adminName: row.adminName,
     allowedActions: [...row.allowedActions],
     authState: row.authState,
-    availableOrganizations: clone(row.availableOrganizations) as typeof serviceAdminSession.availableOrganizations,
+    availableOrganizations: clone(row.availableOrganizations) as IdentityAvailableOrganization[],
     currentTenantId: row.currentTenantId,
     expiresAt: toIso(row.expiresAt),
     id: row.id,
@@ -5620,6 +5663,7 @@ function toPrismaTenantUserUpdateInput(changes: Partial<IdentityTenantUser>): Pr
   if (changes.email !== undefined) input.email = changes.email;
   if (changes.inviteStatus !== undefined) input.inviteStatus = changes.inviteStatus;
   if (changes.lastActiveAt !== undefined) input.lastActiveAt = changes.lastActiveAt ? new Date(changes.lastActiveAt) : null;
+  if (changes.metadata !== undefined) input.metadata = changes.metadata;
   if (changes.mfa !== undefined) input.mfa = changes.mfa;
   if (changes.name !== undefined) input.name = changes.name;
   if (changes.risk !== undefined) input.risk = changes.risk;
@@ -5639,7 +5683,7 @@ function toPrismaTenantUserCreateInput(user: IdentityTenantUser): PrismaTenantUs
     id: user.id,
     inviteStatus: user.inviteStatus,
     lastActiveAt: user.lastActiveAt ? new Date(user.lastActiveAt) : null,
-    metadata: {},
+    metadata: user.metadata ?? {},
     mfa: user.mfa,
     name: user.name,
     risk: user.risk,
@@ -5773,7 +5817,7 @@ function defaultRbacPolicyVersion(): IdentityRbacPolicyVersion {
     checksum: "sha256:default-rbac-policy",
     createdAt: "2026-06-28T00:00:00.000Z",
     createdBy: "system",
-    description: "Default RBAC policy generated from fixture permission roles.",
+    description: "Default RBAC policy generated from the canonical permission catalog.",
     id: "rbac-policy-default",
     status: "active",
     version: "2026.06.28-default"
@@ -5782,7 +5826,7 @@ function defaultRbacPolicyVersion(): IdentityRbacPolicyVersion {
 
 function defaultRbacRoleGrants(): IdentityRbacRoleGrant[] {
   const policy = defaultRbacPolicyVersion();
-  return permissionRoles.flatMap((role) => Array.from(new Set(role.actions)).map((action, index) => ({
+  return identityPermissionRoleCatalog.flatMap((role) => Array.from(new Set(role.actions)).map((action, index) => ({
     action,
     createdAt: "2026-06-28T00:00:00.000Z",
     createdBy: "system",
@@ -5796,7 +5840,7 @@ function defaultRbacRoleGrants(): IdentityRbacRoleGrant[] {
   })));
 }
 
-function seedIdentityState(): IdentityState {
+export function createEmptyIdentityState(): IdentityState {
   return {
     authInviteTokens: [],
     authRecoveryTokens: [],
@@ -5806,7 +5850,7 @@ function seedIdentityState(): IdentityState {
     oidcCallbackDescriptors: [],
     oidcProviderConfigs: [],
     outbox: [],
-    passwordCredentials: seedIdentityPasswordCredentials(),
+    passwordCredentials: [],
     passwordPolicies: [{
       maxFailedAttempts: 5,
       minLength: 12,
@@ -5815,13 +5859,13 @@ function seedIdentityState(): IdentityState {
       updatedAt: "2026-06-28T00:00:00.000Z"
     }],
     permissionDenialEvents: [],
-    permissionRoles: clone(permissionRoles),
-    privilegedServiceAdminActions: clone(serviceAdminSession.allowedActions),
+    permissionRoles: clone(identityPermissionRoleCatalog),
+    privilegedServiceAdminActions: [...serviceAdminPrivilegedActions],
     rbacPolicyVersions: [defaultRbacPolicyVersion()],
     rbacRoleGrants: defaultRbacRoleGrants(),
-    serviceAdminFeatureFlags: clone(featureFlags),
-    serviceAdminIncidents: clone(incidents),
-    serviceAdminTariffs: clone(tariffs),
+    serviceAdminFeatureFlags: [],
+    serviceAdminIncidents: [],
+    serviceAdminTariffs: clone(identityServiceAdminTariffCatalog),
     samlAcsRequestDescriptors: [],
     samlAssertionReplays: [],
     samlProviderMetadata: [],
@@ -5833,29 +5877,12 @@ function seedIdentityState(): IdentityState {
     serviceAdminTokenPairs: [],
     serviceAdminTokenRevocations: [],
     serviceAdminTokenRotations: [],
-    tenantAuditEvents: clone(tenantAuditEvents),
-    tenantUsers: clone(tenantUsers),
-    tenants: clone(tenants)
+    tenantAuditEvents: [],
+    tenantUsers: [],
+    tenants: []
   };
 }
 
 function seedIdentityPasswordCredentials(): IdentityPasswordCredential[] {
-  return [
-    {
-      algorithm: "sha256",
-      email: serviceAdminSession.adminEmail,
-      hash: hashPasswordCredential("correct-password"),
-      subjectId: serviceAdminSession.adminId,
-      updatedAt: "2026-06-28T00:00:00.000Z",
-      version: 1
-    },
-    ...tenantUsers.map((user) => ({
-      algorithm: "sha256" as const,
-      email: user.email,
-      hash: hashPasswordCredential("correct-password"),
-      subjectId: user.id,
-      updatedAt: "2026-06-28T00:00:00.000Z",
-      version: 1
-    }))
-  ];
+  return [];
 }

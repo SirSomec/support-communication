@@ -2,15 +2,22 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { AuthService } from "../apps/api-gateway/src/identity/auth.service.ts";
 import { resetIdentityAuthFlowStore } from "../apps/api-gateway/src/identity/identity-auth-flow.repository.ts";
-import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { IdentityRepository as RuntimeIdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { bootstrapIdentityState } from "../apps/api-gateway/src/identity/seed.ts";
 import { createMfaOtpRuntime } from "../apps/api-gateway/src/identity/mfa-otp.ts";
 import { PermissionService } from "../apps/api-gateway/src/identity/permission.service.ts";
 import { SettingsEmployeeService } from "../apps/api-gateway/src/identity/settings-employee.service.ts";
 import { SettingsRulesService } from "../apps/api-gateway/src/identity/settings-rules.service.ts";
 import { TenantService } from "../apps/api-gateway/src/identity/tenant.service.ts";
+
+type IdentityRepository = RuntimeIdentityRepository;
+const IdentityRepository = {
+  inMemory: () => RuntimeIdentityRepository.inMemory(bootstrapIdentityState()),
+  open: ({ filePath }: { filePath: string }) => RuntimeIdentityRepository.open({ filePath, seed: bootstrapIdentityState() })
+};
 
 interface DeliveredRecoveryToken {
   email: string;
@@ -36,6 +43,9 @@ function createTestMfaOtpRuntime(deliveredRecoveryTokens: DeliveredRecoveryToken
 }
 
 describe("phase 1 identity, tenant and RBAC backend contracts", () => {
+  beforeEach(() => {
+    RuntimeIdentityRepository.useDefault(RuntimeIdentityRepository.inMemory(bootstrapIdentityState()));
+  });
   it("models password and MFA login lifecycle with audit metadata", async () => {
     const auth = new AuthService();
 
@@ -72,9 +82,9 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(verified.status, "ok");
     assert.equal(verified.data.authenticated, true);
     assert.equal(verified.data.session.authState, "mfa_verified");
-    assert.equal(verified.data.session.currentTenantId, "tenant-volga");
+    assert.equal(verified.data.session.currentTenantId, "tenant-northstar");
     assert.equal(verified.data.session.adminId, "svc-admin-001");
-    assert.equal(verified.data.session.adminName, "Надя Орлова");
+    assert.equal(verified.data.session.adminName, "service-admin@example.com");
     assert.ok(Array.isArray(verified.data.session.allowedActions));
     assert.equal(verified.data.session.allowedActions.includes("service-admin.users.read"), true);
     assert.equal(verified.data.session.allowedActions.includes("service-admin.users.write"), true);
@@ -422,12 +432,18 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     }
   });
 
-  it("backfills persisted service-admin operations permissions across JSON store restarts", async () => {
+  it("does not mutate persisted service-admin permissions implicitly on JSON store restart", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "identity-service-admin-backfill-"));
     try {
       const filePath = join(workspace, "identity.json");
       const staleRepository = IdentityRepository.open({ filePath });
       const staleSession = await staleRepository.createServiceAdminSession({
+        actorId: "stale-service-admin",
+        actorName: "Stale Service Admin",
+        adminEmail: "stale-service-admin@example.com",
+        allowedActions: ["tenants.read"],
+        availableOrganizations: [],
+        currentTenantId: "",
         role: "service_admin"
       });
       const staleState = JSON.parse(readFileSync(filePath, "utf8")) as {
@@ -464,18 +480,18 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
       const privilegedActions = await backfilledRepository.listPrivilegedServiceAdminActions();
       const serviceAdminGrants = await backfilledRepository.listRbacRoleGrants({ roleKey: "service_admin" });
 
-      assert.equal(backfilledSession?.allowedActions.includes("operations.read"), true);
-      assert.equal(backfilledSession?.allowedActions.includes("operations.write"), true);
-      assert.equal(backfilledSession?.allowedActions.includes("security.review"), true);
-      assert.equal(serviceAdminRole?.actions.includes("operations.read"), true);
-      assert.equal(serviceAdminRole?.actions.includes("operations.write"), true);
-      assert.equal(serviceAdminRole?.actions.includes("security.review"), true);
-      assert.equal(privilegedActions.includes("operations.read"), true);
-      assert.equal(privilegedActions.includes("operations.write"), true);
-      assert.equal(privilegedActions.includes("security.review"), true);
-      assert.equal(serviceAdminGrants.some((grant) => grant.action === "operations.read" && grant.effect === "allow"), true);
-      assert.equal(serviceAdminGrants.some((grant) => grant.action === "operations.write" && grant.effect === "allow"), true);
-      assert.equal(serviceAdminGrants.some((grant) => grant.action === "security.review" && grant.effect === "allow"), true);
+      assert.equal(backfilledSession?.allowedActions.includes("operations.read"), false);
+      assert.equal(backfilledSession?.allowedActions.includes("operations.write"), false);
+      assert.equal(backfilledSession?.allowedActions.includes("security.review"), false);
+      assert.equal(serviceAdminRole?.actions.includes("operations.read"), false);
+      assert.equal(serviceAdminRole?.actions.includes("operations.write"), false);
+      assert.equal(serviceAdminRole?.actions.includes("security.review"), false);
+      assert.equal(privilegedActions.includes("operations.read"), false);
+      assert.equal(privilegedActions.includes("operations.write"), false);
+      assert.equal(privilegedActions.includes("security.review"), false);
+      assert.equal(serviceAdminGrants.some((grant) => grant.action === "operations.read" && grant.effect === "allow"), false);
+      assert.equal(serviceAdminGrants.some((grant) => grant.action === "operations.write" && grant.effect === "allow"), false);
+      assert.equal(serviceAdminGrants.some((grant) => grant.action === "security.review" && grant.effect === "allow"), false);
     } finally {
       rmSync(workspace, { force: true, recursive: true });
     }

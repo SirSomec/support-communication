@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { TenantOperatorOrServiceAdminGuard } from "../conversation/tenant-operator-or-service-admin.guard.js";
 import { RequireServiceAdminAction } from "../identity/service-admin-auth.js";
@@ -23,8 +23,8 @@ export class AutomationController {
   @RequireTenantOperatorPermission("visitors.read")
   @RequireServiceAdminAction("visitors.read")
   @ApiOkResponse({ description: "Visitor and proactive workspace envelope" })
-  fetchVisitorWorkspace(@Req() request: TenantOperatorRequest) {
-    return this.automationService.fetchVisitorWorkspace(automationContextFromRequest(request));
+  fetchVisitorWorkspace(@Req() request: TenantOperatorRequest, @Query("from") from?: string, @Query("to") to?: string) {
+    return this.automationService.fetchVisitorWorkspace(automationContextFromRequest(request), { from, to });
   }
 
   @Post("bot-flow/validate")

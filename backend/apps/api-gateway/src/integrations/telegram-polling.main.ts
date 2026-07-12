@@ -1,8 +1,16 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { writeStructuredLog } from "@support-communication/observability";
+import { configureAutomationRepository } from "../automation/bootstrap.js";
+import { AutomationService } from "../automation/automation.service.js";
 import { configureConversationRepository } from "../conversation/bootstrap.js";
 import { ConversationService } from "../conversation/conversation.service.js";
+import { configureIdentityRepository } from "../identity/bootstrap.js";
+import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
+import { configureRoutingRepository } from "../routing/bootstrap.js";
+import { CanonicalRoutingConversationRepository } from "../routing/canonical-routing-conversation.repository.js";
+import { CanonicalRoutingWorkloadAdapter } from "../routing/canonical-routing-workload.adapter.js";
+import { RoutingService } from "../routing/routing.service.js";
 import { configureIntegrationRepository } from "./bootstrap.js";
 import { pollTelegramUpdatesOnce, startTelegramPollingWorker } from "./telegram-polling.worker.js";
 
@@ -18,7 +26,15 @@ interface TelegramPollingRuntimeConfig {
 export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = process.env): void {
   const config = loadTelegramPollingRuntimeConfig(source);
   const conversationRepository = configureConversationRepository(source);
+  const automationService = new AutomationService(configureAutomationRepository(source));
+  configureIdentityRepository(source);
   const integrationRepository = configureIntegrationRepository(source);
+  const routingService = new RoutingService(
+    configureRoutingRepository(source),
+    new CanonicalRoutingWorkloadAdapter(),
+    new CanonicalRoutingConversationRepository(conversationRepository),
+    TeamDirectoryRepository.default()
+  );
   const conversationService = new ConversationService(conversationRepository);
   const offsets = new Map<string, number>();
 
@@ -37,9 +53,11 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
             conversationRepository,
             conversationService,
             integrationRepository,
-            apiBaseUrl: config.apiBaseUrl,
+          apiBaseUrl: config.apiBaseUrl,
+            autoAssignConversation: (conversationId, tenantId) => routingService.autoAssignConversation(conversationId, { tenantId }),
             limit: config.limit,
             offsets,
+            runBotRuntime: (event) => automationService.handleBotRuntimeInboundEvent(event),
             timeoutMs: config.timeoutMs
           })
         : { accepted: 0, duplicates: 0, failed: 0, polled: 0 };

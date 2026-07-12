@@ -293,6 +293,27 @@ describe("quality and knowledge workflow actions", () => {
     assert.match(result.message, /backend manual QA evidence/);
   });
 
+  it("submits reviewer criteria and their calculated score instead of copying CSAT", async () => {
+    const score = { conversationId: "conv-reviewed", id: "csat-reviewed", scale: "CSAT", score: 1 };
+    const criteria = { accuracy: 5, communication: 4, completeness: 3, process: 2 };
+    let capturedPayload;
+
+    const result = await submitManualQaReview(score, {
+      criteria,
+      recordManualQaReview: async (payload) => {
+        capturedPayload = payload;
+        return { data: { auditId: "audit-review", reviewId: "review-1", score: 70 }, status: "ok" };
+      },
+      reviewer: "qa-lead",
+      reviewScore: 70
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(capturedPayload.criteria, criteria);
+    assert.equal(capturedPayload.score, 70);
+    assert.equal(capturedPayload.reviewer, "qa-lead");
+  });
+
   it("builds and submits AI suggestion batch scoring payloads to the quality backend", async () => {
     const suggestions = [
       {
@@ -370,6 +391,6 @@ describe("quality and knowledge workflow actions", () => {
     );
 
     assert.equal(result.ok, false);
-    assert.match(result.message, /backend scoring audit evidence/);
+    assert.match(result.message, /не подтвердил сохранение результата/);
   });
 });

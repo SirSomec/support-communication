@@ -5,9 +5,10 @@ import type {
   ConversationOutboundDescriptorRecord,
   ConversationRepository
 } from "../conversation/conversation.repository.js";
-import type { ConversationRecord } from "../conversation/conversation.types.js";
+import type { IntegrationRepository } from "../integrations/integration.repository.js";
 import type { ProactiveRule } from "./automation.types.js";
 import type { AutomationRepository } from "./automation.repository.js";
+import { ProactiveExposureRepository } from "./proactive-exposure.repository.js";
 import {
   evaluateProactiveExperimentAssignmentEligibilityAsync,
   evaluateProactiveExperimentAssignmentEligibility,
@@ -59,7 +60,9 @@ export interface ProactiveDeliveryPersistenceInput {
 export interface ProactiveDeliveryWorkerRunInput {
   activeVariants?: string[];
   automationRepository: AutomationRepository;
-  conversationRepository: Pick<ConversationRepository, "listConversations" | "recordOutboundDescriptor">;
+  conversationRepository: Pick<ConversationRepository, "recordOutboundDescriptor">;
+  integrationRepository: Pick<IntegrationRepository, "listLiveSdkVisitorPresence">;
+  exposureRepository?: ProactiveExposureRepository;
   evaluatedAt?: string;
   limit?: number;
   traceId?: string;
@@ -77,8 +80,9 @@ export interface ProactiveDeliveryWorkerRunResult {
 
 interface ActiveProactiveVisitor {
   channel: string;
+  channelConnectionId: string;
   message: string;
-  phone: string;
+  presenceSessionId: string;
   segment?: string;
   subjectId: string;
   tenantId: string;
@@ -295,16 +299,14 @@ export async function runProactiveDeliveryWorkerOnce(
 ): Promise<ProactiveDeliveryWorkerRunResult> {
   const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
   const limit = normalizeLimit(input.limit);
-  const visitorTtlMs = normalizeVisitorTtlMs(input.visitorTtlMs);
   const activeVariants = normalizeVariants(input.activeVariants);
-  const state = await input.automationRepository.readStateAsync();
+  const exposureRepository = input.exposureRepository ?? ProactiveExposureRepository.default();
   const rules = await input.automationRepository.listProactiveRulesAsync();
-  const visitors = state.activeVisitors?.length
-    ? state.activeVisitors.slice(0, limit)
-    : (await input.conversationRepository.listConversations())
-      .filter((conversation) => isActiveConversation(conversation, evaluatedAt, visitorTtlMs))
-      .slice(0, limit)
-      .map(activeVisitorFromConversation);
+  const visitors = (await input.integrationRepository.listLiveSdkVisitorPresence({ at: evaluatedAt, limit }))
+    .map((presence) => ({ channel: "SDK", channelConnectionId: presence.channelConnectionId,
+      page: presence.pagePath ?? presence.pageUrl ?? undefined, presenceSessionId: presence.id,
+      segment: segmentFromPath(presence.pagePath),
+      subjectId: presence.subjectId, tenantId: presence.tenantId }));
   const result: ProactiveDeliveryWorkerRunResult = {
     conflicted: 0,
     duplicate: 0,
@@ -332,7 +334,7 @@ export async function runProactiveDeliveryWorkerOnce(
         channel: visitor.channel,
         evaluatedAt,
         message: visitor.message,
-        phone: visitor.phone,
+        phone: "",
         repository: input.automationRepository,
         rules: eligibleRules,
         subjectId: visitor.subjectId,
@@ -345,63 +347,27 @@ export async function runProactiveDeliveryWorkerOnce(
         continue;
       }
 
-      const idempotencyKey = plan.descriptor.idempotencyKey;
-      if (!idempotencyKey) {
-        result.failed += 1;
-        continue;
-      }
-      const descriptorId = plan.descriptor.id;
-      const outboxEventId = plan.outbox.id;
       const variant = String(plan.descriptor.payload.variant ?? "A");
-      const commit = await input.automationRepository.commitProactiveDeliveryAsync({
-        attemptedAt: evaluatedAt,
-        attribution: {
-          assignedAt: evaluatedAt,
-          attributionId: `attribution_${descriptorId}`,
-          descriptorId,
-          experimentId: `exp-${plan.ruleId}`,
-          ruleId: plan.ruleId,
-          subjectId: visitor.subjectId,
-          tenantId: visitor.tenantId,
-          variant
-        },
-        attempt: {
-          attemptedAt: evaluatedAt,
-          attemptId: `attempt_${descriptorId}`,
-          channel: visitor.channel,
-          descriptorId,
-          ruleId: plan.ruleId,
-          status: "queued",
-          subjectId: visitor.subjectId,
-          tenantId: visitor.tenantId,
-          traceId: plan.descriptor.traceId
-        },
-        conversationRepository: input.conversationRepository,
-        descriptor: plan.descriptor,
-        evaluatedAt,
-        idempotencyRecord: {
-          fingerprint: plan.requestFingerprint,
-          key: idempotencyKey,
-          result: {
-            descriptorId,
-            outboxEventId
-          },
-          ruleId: plan.ruleId,
-          subjectId: visitor.subjectId,
-          tenantId: visitor.tenantId
-        },
-        outbox: plan.outbox,
-        ruleId: plan.ruleId,
-        tenantId: visitor.tenantId
-      });
-      if (commit.outcome === "queued") {
+      const rule = eligibleRules.find((item) => item.id === plan.ruleId)!;
+      const cooldownMs = parseCooldownMs(rule.cooldown);
+      if (cooldownMs > 0) {
+        const recent = await exposureRepository.listRecent(visitor.tenantId, rule.id, visitor.subjectId,
+          new Date(Date.parse(evaluatedAt) - cooldownMs).toISOString());
+        if (recent.some((item) => item.status !== "failed")) { result.skipped += 1; continue; }
+      }
+      const occurrenceKey = occurrencePeriodKey(evaluatedAt, await resolveFrequencyPeriod(input.automationRepository,
+        visitor.tenantId, rule.id));
+      const experimentId = `exp-${rule.id}`;
+      const experimentVersion = createHash("sha256").update(stableStringify({ activeVariants, rule })).digest("hex").slice(0, 16);
+      const created = await exposureRepository.createPlanned({ channelConnectionId: visitor.channelConnectionId,
+        experimentId, experimentVersion, message: visitor.message, occurrenceKey, plannedAt: evaluatedAt,
+        presenceSessionId: visitor.presenceSessionId, ruleId: rule.id,
+        segmentSnapshot: { page: visitor.topic, segment: visitor.segment ?? null }, subjectId: visitor.subjectId,
+        tenantId: visitor.tenantId, variant });
+      if (created.created) {
         result.queued += 1;
-      } else if (commit.outcome === "duplicate") {
-        result.duplicate += 1;
-      } else if (commit.outcome === "conflicted") {
-        result.conflicted += 1;
       } else {
-        result.skipped += 1;
+        result.duplicate += 1;
       }
     } catch {
       result.failed += 1;
@@ -419,16 +385,19 @@ function normalizeActiveVisitor(value: Record<string, unknown>): ActiveProactive
   const tenantId = firstNonEmptyString(value.tenantId);
   const subjectId = firstNonEmptyString(value.subjectId, value.clientId, value.userId, value.id);
   const channel = firstNonEmptyString(value.channel);
-  if (!tenantId || !subjectId || !channel) {
+  const channelConnectionId = firstNonEmptyString(value.channelConnectionId);
+  const presenceSessionId = firstNonEmptyString(value.presenceSessionId);
+  if (!tenantId || !subjectId || !channel || !channelConnectionId || !presenceSessionId) {
     return null;
   }
 
   const segment = firstNonEmptyString(value.segment);
   return {
     channel,
+    channelConnectionId,
     message: firstNonEmptyString(value.message, value.proactiveMessage)
       ?? "Hello! We are available to help with this session.",
-    phone: firstNonEmptyString(value.phone) ?? "",
+    presenceSessionId,
     ...(segment ? { segment } : {}),
     subjectId,
     tenantId,
@@ -436,41 +405,27 @@ function normalizeActiveVisitor(value: Record<string, unknown>): ActiveProactive
   };
 }
 
-function activeVisitorFromConversation(conversation: ConversationRecord): Record<string, unknown> {
-  const segment = conversation.tags
-    .find((tag) => tag.toLowerCase().startsWith("segment:"))
-    ?.slice("segment:".length)
-    .trim();
-  const page = conversation.tags
-    .find((tag) => tag.toLowerCase().startsWith("page:"))
-    ?.slice("page:".length)
-    .trim();
-
-  return {
-    channel: conversation.channel,
-    id: conversation.id,
-    ...(page ? { page } : {}),
-    phone: conversation.phone,
-    ...(segment ? { segment } : {}),
-    tenantId: conversation.tenantId,
-    topic: conversation.topic
-  };
+async function resolveFrequencyPeriod(repository: AutomationRepository, tenantId: string, ruleId: string): Promise<"hour" | "day" | "week"> {
+  const caps = await repository.listProactiveFrequencyCapsAsync({ ruleId, tenantId });
+  return caps.find((cap) => cap.active)?.period ?? "hour";
 }
 
-function isActiveConversation(conversation: ConversationRecord, evaluatedAt: string, visitorTtlMs: number): boolean {
-  if (String(conversation.channel).trim().toLowerCase() !== "sdk") {
-    return false;
-  }
-  if (!["active", "new", "open", "unassigned"].includes(String(conversation.status).trim().toLowerCase())) {
-    return false;
-  }
+function occurrencePeriodKey(at: string, period: "hour" | "day" | "week"): string {
+  const date = new Date(at);
+  if (period === "hour") return date.toISOString().slice(0, 13);
+  if (period === "day") return date.toISOString().slice(0, 10);
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() - day + 1);
+  return date.toISOString().slice(0, 10);
+}
 
-  const evaluatedTime = Date.parse(evaluatedAt);
-  const updatedTime = Date.parse(conversation.updatedAt ?? "");
-  return Number.isFinite(evaluatedTime)
-    && Number.isFinite(updatedTime)
-    && updatedTime <= evaluatedTime
-    && evaluatedTime - updatedTime <= visitorTtlMs;
+function parseCooldownMs(value: string | undefined): number {
+  if (!value) return 0;
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  const compact = /^(\d+)\s*(s|m|h|d)$/i.exec(value.trim());
+  if (compact) return Number(compact[1]) * ({ s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[compact[2]!.toLowerCase()] ?? 0);
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i.exec(value);
+  return match ? (Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0)) * 1000 : 0;
 }
 
 function firstNonEmptyString(...values: unknown[]): string | undefined {
@@ -480,6 +435,10 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
     }
   }
   return undefined;
+}
+
+function segmentFromPath(path: string | null): string | undefined {
+  return path?.split("/").map((item) => item.trim()).filter(Boolean)[0]?.toLowerCase();
 }
 
 function normalizeLimit(value: number | undefined): number {

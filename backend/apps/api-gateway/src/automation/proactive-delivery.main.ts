@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeStructuredLog } from "@support-communication/observability";
 import { configureConversationRepository } from "../conversation/bootstrap.js";
+import { configureIntegrationRepository } from "../integrations/bootstrap.js";
 import { configureAutomationRepository } from "./bootstrap.js";
 import { runProactiveDeliveryWorkerOnce } from "./proactive-delivery.worker.js";
 
@@ -22,6 +23,7 @@ export async function runProactiveDeliveryWorkerFromEnv(
   const config = loadProactiveDeliveryWorkerRuntimeConfig(source, argv);
   const automationRepository = configureAutomationRepository(source);
   const conversationRepository = configureConversationRepository(source);
+  const integrationRepository = configureIntegrationRepository(source);
   let running = false;
 
   const runOnce = async () => {
@@ -29,6 +31,7 @@ export async function runProactiveDeliveryWorkerFromEnv(
       activeVariants: config.activeVariants,
       automationRepository,
       conversationRepository,
+      integrationRepository,
       ...(config.evaluatedAt ? { evaluatedAt: config.evaluatedAt } : {}),
       limit: config.limit,
       ...(config.traceId ? { traceId: config.traceId } : {}),

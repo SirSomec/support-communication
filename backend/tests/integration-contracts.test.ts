@@ -12,6 +12,7 @@ import {
 } from "../apps/api-gateway/src/integrations/public-api-auth.ts";
 import { IntegrationService } from "../apps/api-gateway/src/integrations/integration.service.ts";
 import { IntegrationRepository } from "../apps/api-gateway/src/integrations/integration.repository.ts";
+import { ProviderConnectionCrypto } from "../apps/api-gateway/src/integrations/provider-connection-crypto.ts";
 import { configureIntegrationRepository } from "../apps/api-gateway/src/integrations/bootstrap.ts";
 import { bootstrapIntegrationState } from "../apps/api-gateway/src/integrations/seed.ts";
 import { identifyPublicClientFromRoute } from "../apps/api-gateway/src/integrations/public-api.route.ts";
@@ -21,10 +22,12 @@ import {
   recordWebhookDeliveryAttemptSuccess,
   recordWebhookDeliveryFailureForRetry,
   resolveWebhookDeliveryFailureState,
-  runWebhookDeliveryWorkerOnce
+  runWebhookDeliveryWorkerOnce,
+  createHttpWebhookDeliveryProvider
 } from "../apps/api-gateway/src/integrations/webhook-delivery.worker.ts";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
+import { bootstrapConversationState } from "../apps/api-gateway/src/conversation/seed.ts";
 
 function telegramFetchOk(username = "support_bot") {
   return async (_input: string) => ({
@@ -35,8 +38,17 @@ function telegramFetchOk(username = "support_bot") {
 }
 
 describe("phase 6 public API, webhooks and SDK integration backend contracts", () => {
+  it("keeps unseeded integration repositories honest and empty", () => {
+    const state = IntegrationRepository.inMemory().readState();
+
+    assert.deepEqual(state.channelConnections, []);
+    assert.deepEqual(state.securitySessions, []);
+    assert.deepEqual(state.workspace.channelDetails, []);
+    assert.deepEqual(state.workspace.apiEnvironmentKeys, []);
+  });
+
   it("returns integration workspace without exposing raw API keys or secrets", async () => {
-    const integrations = new IntegrationService();
+    const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 
     const workspace = await integrations.fetchIntegrationWorkspace();
 
@@ -54,7 +66,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("queues channel test messages with environment isolation and validation", async () => {
-    const integrations = new IntegrationService();
+    const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 
     const invalid = await integrations.testChannelConnection({
       channelId: "sdk",
@@ -92,7 +104,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("manages generic multi-instance channel connections without exposing secrets", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const integrations = new IntegrationService(repository, { telegramFetch: telegramFetchOk() });
     const tenantId = "tenant-acme";
 
@@ -154,7 +166,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("lists active seeded tenant channel connections for notification delivery preferences", async () => {
-    const integrations = new IntegrationService(IntegrationRepository.inMemory());
+    const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 
     const list = await integrations.fetchChannelConnections("tenant-volga");
     const connections = list.data.connections as Array<Record<string, unknown>>;
@@ -170,7 +182,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("updates tenant channel type status through an audited aggregate mutation", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const integrations = new IntegrationService(repository);
 
     const disabled = await integrations.updateChannelTypeStatus("tenant-volga", "telegram", {
@@ -223,12 +235,15 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
         seed: bootstrapIntegrationState({ channelConnections: [existingAdminTelegram] })
       });
 
-      const repository = configureIntegrationRepository({
-        INTEGRATION_STORE_FILE: filePath,
-        NODE_ENV: "test",
-        PORT: 4101,
-        SERVICE_NAME: "api-gateway-test"
-      });
+      const repository = configureIntegrationRepository(
+        {
+          INTEGRATION_STORE_FILE: filePath,
+          NODE_ENV: "test",
+          PORT: 4101,
+          SERVICE_NAME: "api-gateway-test"
+        },
+        { seed: bootstrapIntegrationState() }
+      );
       const state = repository.readState();
 
       assert.equal(repository.findChannelConnection("tenant-volga", "conn_admin_telegram")?.name, "Existing Admin Telegram");
@@ -243,9 +258,14 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("provisions Telegram and MAX channel connections from token without manual webhook URL", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
+    const providerCredentialCrypto = new ProviderConnectionCrypto({
+      keyVersion: "test-v1",
+      masterKeyBase64: Buffer.alloc(32, 7).toString("base64")
+    });
     let telegramGetMeUrl = "";
     const integrations = new IntegrationService(repository, {
+      providerCredentialCrypto,
       telegramFetch: async (input) => {
         telegramGetMeUrl = input;
         return {
@@ -277,6 +297,10 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(repository.findTelegramConnectionByTenantId(tenantId)?.botUsername, "support_bot");
     assert.equal(JSON.stringify(telegram.data).includes("telegramToken_123"), false);
     assert.equal(JSON.stringify(max.data).includes("max-token"), false);
+    assert.match(String(max.data.providerRuntime.webhookSecret), /^[0-9a-f-]{36}$/);
+    const maxCredential = repository.findProviderConnectionCredential(tenantId, String(max.data.connection.id));
+    assert.equal(maxCredential?.provider, "max");
+    assert.equal(providerCredentialCrypto.decrypt(JSON.parse(String(maxCredential?.accessTokenEncrypted))), "max-token");
   });
 
   it("persists tenant channel connections across JSON repository reopen without raw secrets", async () => {
@@ -285,7 +309,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     const tenantId = "tenant-durable";
 
     try {
-      const firstRepository = IntegrationRepository.open({ filePath });
+      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
       const firstService = new IntegrationService(firstRepository, { telegramFetch: telegramFetchOk("durable_bot") });
       const created = await firstService.createChannelConnection(tenantId, {
         credentials: { botToken: "123:durable-secret" },
@@ -311,7 +335,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("queues API key rotation without returning raw key material", async () => {
-    const integrations = new IntegrationService();
+    const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 
     const missing = await integrations.rotateApiKey("missing-key");
     assert.equal(missing.status, "not_found");
@@ -330,7 +354,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("persists immutable public API key rotation audit rows without raw key material", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const integrations = new IntegrationService(repository);
 
     const rotated = await integrations.rotateApiKey("stage-key");
@@ -367,7 +391,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     const workspace = mkdtempSync(join(tmpdir(), "integration-rotation-audit-"));
     try {
       const filePath = join(workspace, "integration-rotation-audit.json");
-      const firstRepository = IntegrationRepository.open({ filePath });
+      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
       const integrations = new IntegrationService(firstRepository);
 
       const rotated = await integrations.rotateApiKey("stage-key");
@@ -391,7 +415,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("replays webhook deliveries idempotently while preserving original trace id", async () => {
-    const integrations = new IntegrationService();
+    const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 
     const missing = await integrations.replayWebhookDelivery({
       deliveryId: "missing-delivery"
@@ -430,7 +454,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("documents webhook replay idempotency key examples", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const integrations = new IntegrationService(repository);
 
     const first = await integrations.replayWebhookDelivery({
@@ -471,7 +495,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("persists immutable webhook replay audit events for retry, duplicate and dead-letter transitions", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const integrations = new IntegrationService(repository);
 
     const retryReplay = await integrations.replayWebhookDelivery({
@@ -510,7 +534,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("replays webhook deliveries from the durable delivery journal read-side", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     repository.saveWebhookDeliveryJournalEntry({
       attempts: 4,
       createdAt: "2026-06-30T14:15:00.000Z",
@@ -559,7 +583,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("exposes webhook delivery status read-side from the durable journal without secrets", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     repository.saveWebhookDeliveryJournalEntry({
       attempts: 3,
       createdAt: "2026-06-30T14:25:00.000Z",
@@ -601,7 +625,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("exposes sanitized webhook delivery dead-letter read-side from the durable journal", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     repository.saveWebhookDeliveryJournalEntry({
       attempts: 5,
       createdAt: "2026-06-30T14:35:00.000Z",
@@ -661,7 +685,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("keeps webhook replay journal first-write-wins for reused idempotency keys", () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
 
     const first = repository.saveWebhookReplay({
       auditId: "evt_webhook_first",
@@ -691,7 +715,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("persists webhook delivery journal rows first-write-wins without endpoint secrets", () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
 
     const first = repository.saveWebhookDeliveryJournalEntry({
       attempts: 0,
@@ -738,7 +762,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("records webhook delivery retry state without storing provider secrets", () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
 
     repository.saveWebhookDeliveryJournalEntry({
       attempts: 0,
@@ -799,7 +823,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("claims due webhook delivery journal rows once and recovers stale leases", () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
 
     repository.saveWebhookDeliveryJournalEntry({
       attempts: 0,
@@ -921,7 +945,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("persists webhook delivery retry schedule after a failed claimed delivery", () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     repository.saveWebhookDeliveryJournalEntry({
       attempts: 2,
       createdAt: "2026-06-30T13:45:00.000Z",
@@ -1007,7 +1031,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("persists webhook delivery attempt success without storing provider response secrets", () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     repository.saveWebhookDeliveryJournalEntry({
       attempts: 1,
       createdAt: "2026-06-30T13:55:00.000Z",
@@ -1078,7 +1102,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("sanitizes webhook delivery worker provider failure carriers before persistence", () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     repository.saveWebhookDeliveryJournalEntry({
       attempts: 0,
       createdAt: "2026-06-30T14:05:00.000Z",
@@ -1121,7 +1145,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("runs webhook delivery worker once and persists provider delivery outcomes", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const deliveredCalls: Array<{ deliveryId: string; targetUrl: string }> = [];
     repository.saveWebhookDeliveryJournalEntry({
       attempts: 0,
@@ -1239,6 +1263,38 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(journalJson.includes("terminal-secret"), false);
   });
 
+  it("signs HTTP webhook deliveries with the canonical timestamp and body", async () => {
+    const received: { body?: string; headers?: HeadersInit } = {};
+    const provider = createHttpWebhookDeliveryProvider({
+      fetchImpl: async (_url, init) => {
+        received.body = String(init?.body ?? "");
+        received.headers = init?.headers;
+        return new Response("accepted", { status: 202 });
+      },
+      signingSecret: "webhook-outbound-contract-secret"
+    });
+    await provider.deliver({
+      attempts: 0,
+      createdAt: "2026-07-12T00:00:00.000Z",
+      deliveryId: "wdj-signature-001",
+      endpointId: "endpoint-signature-001",
+      eventType: "conversation.message.created",
+      idempotencyKey: "idempotency-signature-001",
+      payloadRef: "payload-signature-001",
+      queue: "webhook-delivery",
+      status: "publishing",
+      targetUrl: "https://hooks.example.test/signed",
+      tenantId: "tenant-signature-001",
+      traceId: "trace-signature-001"
+    });
+
+    const headers = new Headers(received.headers);
+    const timestamp = headers.get("x-webhook-timestamp");
+    const signature = headers.get("x-webhook-signature");
+    assert.ok(timestamp);
+    assert.equal(signature, `sha256=${createHmac("sha256", "webhook-outbound-contract-secret").update(`${timestamp}.${received.body}`).digest("hex")}`);
+  });
+
   it("exposes webhook delivery worker runtime wiring and release smoke", () => {
     const backendPackageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
     const releaseChecklist = readFileSync(new URL("../scripts/release-checklist.mjs", import.meta.url), "utf8");
@@ -1265,7 +1321,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("revokes security sessions with audit metadata", async () => {
-    const integrations = new IntegrationService();
+    const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 
     const missing = await integrations.revokeSecuritySession("missing-session");
     assert.equal(missing.status, "not_found");
@@ -1393,7 +1449,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("persists public API keys as hashes with masked previews and no raw secret", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const rawSecret = "sk_live_contract_hash_secret_9876";
     const spacedRawSecret = "  sk_test_contract_hash_secret_1122  ";
     const shortRawSecret = "abc";
@@ -1470,7 +1526,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     try {
       const filePath = join(workspace, "integration-public-key.json");
       const rawSecret = "sk_live_json_hash_secret_4411";
-      const firstRepository = IntegrationRepository.open({ filePath });
+      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
       await firstRepository.savePublicApiKey({
         createdAt: "2026-06-30T09:10:00.000Z",
         environment: "production",
@@ -1508,7 +1564,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("reveals public API key secrets only once without storing raw secret in state", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const rawSecret = "sk_live_reveal_once_secret_7788";
 
     await repository.savePublicApiKey({
@@ -1555,7 +1611,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     const workspace = mkdtempSync(join(tmpdir(), "integration-reveal-"));
     try {
       const filePath = join(workspace, "integration-reveal.json");
-      const firstRepository = IntegrationRepository.open({ filePath });
+      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
       await firstRepository.savePublicApiKey({
         createdAt: "2026-06-30T10:05:00.000Z",
         environment: "production",
@@ -1595,7 +1651,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     try {
       const filePath = join(workspace, "integration-reveal-consumed.json");
       const rawSecret = "sk_live_reveal_json_secret_5566";
-      const firstRepository = IntegrationRepository.open({ filePath });
+      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
       await firstRepository.savePublicApiKey({
         createdAt: "2026-06-30T10:10:00.000Z",
         environment: "production",
@@ -1638,7 +1694,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("does not reopen one-time public API key reveal state when key creation is replayed", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const rawSecret = "sk_live_replay_reveal_secret_6677";
 
     await repository.savePublicApiKey({
@@ -1779,7 +1835,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("documents signed webhook header examples without leaking signature material", async () => {
-    const conversationRepository = ConversationRepository.inMemory();
+    const conversationRepository = ConversationRepository.inMemory(bootstrapConversationState());
     const conversationService = new ConversationService(conversationRepository);
     const nonceStore = new InMemorySignedWebhookNonceStore();
     const body = JSON.stringify({
@@ -1861,7 +1917,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("routes verified signed inbound webhooks through normalization descriptors", async () => {
-    const conversationRepository = ConversationRepository.inMemory();
+    const conversationRepository = ConversationRepository.inMemory(bootstrapConversationState());
     const conversationService = new ConversationService(conversationRepository);
     const nonceStore = new InMemorySignedWebhookNonceStore();
     const body = JSON.stringify({
@@ -1924,7 +1980,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
   });
 
   it("returns conflict envelopes for verified inbound webhook event duplicates", async () => {
-    const conversationRepository = ConversationRepository.inMemory();
+    const conversationRepository = ConversationRepository.inMemory(bootstrapConversationState());
     const conversationService = new ConversationService(conversationRepository);
     const nonceStore = new InMemorySignedWebhookNonceStore();
     const secret = "signed_route_secret";

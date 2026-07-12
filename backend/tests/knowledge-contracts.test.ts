@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { WorkspaceRepository, type KnowledgeArticle } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 import { WorkspaceService } from "../apps/api-gateway/src/workspace/workspace.service.ts";
+import { bootstrapWorkspaceState } from "../apps/api-gateway/src/workspace/seed.ts";
 
 describe("knowledge workspace contracts", () => {
   it("lists knowledge articles for tenant workspace reads", async () => {
@@ -10,6 +11,18 @@ describe("knowledge workspace contracts", () => {
 
     assert.equal(articles.status, "ok");
     assert.ok(Array.isArray(articles.data.items));
+  });
+
+  it("rejects knowledge writes without an authenticated tenant context", async () => {
+    const workspace = createWorkspace();
+    const result = await workspace.submitKnowledgeArticleForReview({
+      actor: "author-anna",
+      articleId: "kb-auth-code",
+      reason: "Ready for senior knowledge review"
+    });
+
+    assert.equal(result.status, "invalid");
+    assert.equal(result.error.code, "tenant_context_required");
   });
 
   it("submits draft articles for backend review and persists approval evidence", async () => {
@@ -209,7 +222,7 @@ describe("knowledge workspace contracts", () => {
 });
 
 function createWorkspace(): WorkspaceService {
-  return new WorkspaceService(WorkspaceRepository.inMemory());
+  return new WorkspaceService(WorkspaceRepository.inMemory(bootstrapWorkspaceState()));
 }
 
 function knowledgeArticleFixture(id: string, overrides: Partial<KnowledgeArticle> = {}): KnowledgeArticle {

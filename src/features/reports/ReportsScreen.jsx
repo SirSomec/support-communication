@@ -36,6 +36,18 @@ export function ReportsScreen({ onBack, onToast, access }) {
   const [rescueOutcomeSummary, setRescueOutcomeSummary] = useState([]);
   const [rescueReportRows, setRescueReportRows] = useState([]);
   const [reportExportJobs, setReportExportJobs] = useState([]);
+  const [dataQuality, setDataQuality] = useState(null);
+  const [reportSnapshotAt, setReportSnapshotAt] = useState("");
+  const [reportFilterOptions, setReportFilterOptions] = useState({});
+  const [reportFilters, setReportFilters] = useState({
+    operatorId: "all",
+    outcome: "all",
+    queueId: "all",
+    resolutionOutcome: "all",
+    status: "all",
+    teamId: "all",
+    topic: "all"
+  });
   const [selectedColumns, setSelectedColumns] = useState([]);
   const [exportError, setExportError] = useState("");
   const [exportHistoryOpen, setExportHistoryOpen] = useState(false);
@@ -54,7 +66,12 @@ export function ReportsScreen({ onBack, onToast, access }) {
     async function loadWorkspace() {
       setLoading(true);
       setError("");
-      const response = await reportService.fetchReportWorkspace({ channel, period });
+      const response = await reportService.fetchReportWorkspace({
+        channel,
+        ...reportFilters,
+        period,
+        timezoneOffsetMinutes: -new Date().getTimezoneOffset()
+      });
 
       if (ignore) {
         return;
@@ -77,6 +94,9 @@ export function ReportsScreen({ onBack, onToast, access }) {
       setRescueOutcomeSummary(Array.isArray(data.rescueOutcomeSummary) ? data.rescueOutcomeSummary : []);
       setRescueReportRows(Array.isArray(data.rescueReportRows) ? data.rescueReportRows : []);
       setReportExportJobs(Array.isArray(data.exportJobs) ? data.exportJobs : []);
+      setDataQuality(data.dataQuality ?? null);
+      setReportSnapshotAt(data.snapshotAt ?? "");
+      setReportFilterOptions(data.filterOptions ?? {});
       setSelectedColumns(columns.map((column) => column.id));
       setLoading(false);
     }
@@ -85,7 +105,34 @@ export function ReportsScreen({ onBack, onToast, access }) {
     return () => {
       ignore = true;
     };
-  }, [channel, period]);
+  }, [channel, period, reportFilters.operatorId, reportFilters.outcome, reportFilters.queueId, reportFilters.resolutionOutcome, reportFilters.status, reportFilters.teamId, reportFilters.topic]);
+
+  const hasPendingExports = reportExportJobs.some((job) => job.statusKey === "queued" || job.statusKey === "running");
+
+  useEffect(() => {
+    if (!hasPendingExports) {
+      return undefined;
+    }
+
+    let ignore = false;
+    const refreshExportJobs = async () => {
+      const response = await reportService.fetchReportWorkspace({
+        channel,
+        period,
+        timezoneOffsetMinutes: -new Date().getTimezoneOffset()
+      });
+      if (!ignore && response.status === "ok") {
+        setReportExportJobs(Array.isArray(response.data?.exportJobs) ? response.data.exportJobs : []);
+      }
+    };
+    const timer = window.setInterval(() => void refreshExportJobs(), 3000);
+    void refreshExportJobs();
+
+    return () => {
+      ignore = true;
+      window.clearInterval(timer);
+    };
+  }, [channel, hasPendingExports, period]);
 
   useEffect(() => {
     let ignore = false;
@@ -157,6 +204,11 @@ export function ReportsScreen({ onBack, onToast, access }) {
     const response = await reportService.requestReportExport({
       channel,
       columns: exportColumns,
+      filters: {
+        ...reportFilters,
+        snapshotAt: reportSnapshotAt,
+        timezoneOffsetMinutes: -new Date().getTimezoneOffset()
+      },
       period,
       reportType: "Диалоги"
     });
@@ -204,7 +256,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
     }
 
     setReportExportJobs((current) => current.map((job) => job.id === jobId
-      ? { ...job, ...response.data.job, status: "Повторная подготовка" }
+      ? { ...job, ...response.data.job, status: "Повторная подготовка", statusKey: response.data.job?.statusKey ?? "queued" }
       : job
     ));
     setExportError("");
@@ -244,6 +296,20 @@ export function ReportsScreen({ onBack, onToast, access }) {
     return <span>{row.status}</span>;
   }
 
+  function chartPointHeight(points, point) {
+    const values = (Array.isArray(points) ? points : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value >= 0);
+    const maximum = Math.max(1, ...values);
+    const value = Number(point);
+
+    if (!Number.isFinite(value) || value <= 0) {
+      return 18;
+    }
+
+    return Math.max(18, Math.min(100, Math.round(value / maximum * 100)));
+  }
+
   if (loading) {
     return (
       <ProductScreen
@@ -275,7 +341,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
     );
   }
 
-  const headlineMetrics = metrics.length ? metrics : [
+  const headlineMetrics = hasActivity && metrics.length ? metrics : [
     { label: "Новых", value: "—", detail: "нет данных" },
     { label: "Закрыто", value: "—", detail: "нет данных" },
     { label: "Первый ответ", value: "—", detail: "нет данных" },
@@ -309,6 +375,18 @@ export function ReportsScreen({ onBack, onToast, access }) {
       {!hasActivity ? (
         <ScreenStateStrip items={[{ label: "Отчёты", tone: "empty", value: "За выбранный период диалогов нет" }]} />
       ) : null}
+      {dataQuality ? (
+        <ScreenStateStrip items={[
+          { label: "Источник", tone: "ok", value: "Журнал реальных событий диалогов" },
+          { label: "События", tone: "ok", value: `${Number(dataQuality.eventCount ?? 0)} событий в ${Number(dataQuality.conversationCount ?? 0)} диалогах` },
+          { label: "Обновление", tone: dataQuality.latestEventAt ? "ok" : "empty", value: dataQuality.latestEventAt ? formatReportTimestamp(dataQuality.latestEventAt) : "Событий нет" },
+          { label: "Задержка", tone: Number(dataQuality.freshnessLagSeconds ?? 0) > 60 ? "partial" : "ok", value: dataQuality.freshnessLagSeconds === null ? "Нет данных" : `${Number(dataQuality.freshnessLagSeconds ?? 0)} сек.` },
+          { label: "Покрытие", tone: Number(dataQuality.dimensionCoverage?.teamId?.unknown ?? 0) > 0 ? "partial" : "ok", value: `Команды ${Number(dataQuality.dimensionCoverage?.teamId?.known ?? 0)}/${Number(dataQuality.conversationCount ?? 0)}, результаты ${Number(dataQuality.dimensionCoverage?.resolutionOutcome?.known ?? 0)}/${Number(dataQuality.conversationCount ?? 0)}` },
+          ...(Array.isArray(dataQuality.historicalLimitations) && dataQuality.historicalLimitations.length
+            ? [{ label: "История", tone: "partial", value: dataQuality.backfillBoundary ? `Неполное восстановление до ${formatReportTimestamp(dataQuality.backfillBoundary)}` : "События до включения журнала восстановлены не полностью" }]
+            : [])
+        ]} />
+      ) : null}
 
       <div className="metric-strip">
         {headlineMetrics.slice(0, 4).map((metric, index) => {
@@ -328,8 +406,16 @@ export function ReportsScreen({ onBack, onToast, access }) {
 
       <div className="screen-toolbar report-toolbar">
         <select className="inline-select" value={channel} onChange={(event) => setChannel(event.target.value)} aria-label="Канал отчета">
-          {["Все каналы", "SDK", "Telegram", "MAX", "VK"].map((option) => <option key={option}>{option}</option>)}
+          <option>Все каналы</option>
+          {(reportFilterOptions.channels ?? []).map((option) => <option key={option}>{option}</option>)}
         </select>
+        <ReportFacetSelect label="Оператор" options={reportFilterOptions.operatorId} value={reportFilters.operatorId} onChange={(value) => setReportFilters((current) => ({ ...current, operatorId: value }))} />
+        <ReportFacetSelect label="Тема" options={reportFilterOptions.topic} value={reportFilters.topic} onChange={(value) => setReportFilters((current) => ({ ...current, topic: value }))} />
+        <ReportFacetSelect label="Статус в периоде" options={reportFilterOptions.status} value={reportFilters.status} onChange={(value) => setReportFilters((current) => ({ ...current, status: value }))} />
+        <ReportFacetSelect label="Результат закрытия" options={reportFilterOptions.resolutionOutcome} value={reportFilters.resolutionOutcome} onChange={(value) => setReportFilters((current) => ({ ...current, resolutionOutcome: value }))} />
+        <ReportFacetSelect label="Результат rescue" options={reportFilterOptions.outcome} value={reportFilters.outcome} onChange={(value) => setReportFilters((current) => ({ ...current, outcome: value }))} />
+        <ReportFacetSelect label="Очередь" options={reportFilterOptions.queueId} value={reportFilters.queueId} onChange={(value) => setReportFilters((current) => ({ ...current, queueId: value }))} />
+        <ReportFacetSelect label="Команда" options={reportFilterOptions.teamId} value={reportFilters.teamId} onChange={(value) => setReportFilters((current) => ({ ...current, teamId: value }))} />
         <button onClick={handleOpenExportHistory} type="button"><CalendarDays size={17} /> История</button>
       </div>
 
@@ -483,7 +569,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
               <b>{chart.value}</b>
               <div className="mini-chart" aria-label={chart.title} role="img">
                 {(chart.points ?? []).map((point, index) => (
-                  <i style={{ height: `${Math.max(18, point)}%` }} key={`${chart.id}-${index}`} />
+                  <i style={{ height: `${chartPointHeight(chart.points, point)}%` }} key={`${chart.id}-${index}`} />
                 ))}
               </div>
               <footer>
@@ -568,6 +654,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
       <section className="work-panel export-queue-panel">
         <SectionTitle title="Очередь и история выгрузок" action="каждый экспорт фиксируется в audit" />
         <div className="export-job-list">
+          {!reportExportJobs.length ? <p>Выгрузок пока нет.</p> : null}
           {reportExportJobs.map((job) => (
             <article className={`export-job ${job.statusKey === "error" ? "danger" : ""}`} key={job.id}>
               <header>
@@ -608,4 +695,22 @@ export function ReportsScreen({ onBack, onToast, access }) {
       </section>
     </ProductScreen>
   );
+}
+
+function ReportFacetSelect({ label, onChange, options = [], value }) {
+  if (!Array.isArray(options) || !options.length) {
+    return null;
+  }
+
+  return (
+    <select aria-label={label} className="inline-select" onChange={(event) => onChange(event.target.value)} value={value}>
+      <option value="all">Все: {label.toLocaleLowerCase("ru")}</option>
+      {options.map((option) => <option key={option} value={option}>{option}</option>)}
+    </select>
+  );
+}
+
+function formatReportTimestamp(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Нет данных" : parsed.toLocaleString("ru-RU");
 }

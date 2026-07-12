@@ -31,4 +31,18 @@ describe("workspace template contracts", () => {
     const foreign = await workspace.fetchTemplates({}, { tenantId: "tenant-ladoga" });
     assert.equal(foreign.data.items.length, 0);
   });
+
+  it("rejects template writes without a tenant context", async () => {
+    const workspace = new WorkspaceService();
+    const saved = await workspace.saveTemplate({
+      channel: "SDK",
+      title: "Unsafe template",
+      topic: "Delivery",
+      text: "Must not be saved without a tenant."
+    });
+
+    assert.equal(saved.status, "invalid");
+    assert.equal(saved.error.code, "tenant_context_required");
+    assert.equal((await WorkspaceRepository.default().listTemplates()).length, 0);
+  });
 });

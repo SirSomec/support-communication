@@ -28,6 +28,12 @@ export function bootstrapAutomationState(base?: Partial<AutomationState>): Autom
 
     botPublishAuditEvents: base?.botPublishAuditEvents ?? [],
 
+    botRuntimeInstances: base?.botRuntimeInstances ?? [],
+
+    botRuntimeSideEffects: base?.botRuntimeSideEffects ?? [],
+
+    botRuntimeSteps: base?.botRuntimeSteps ?? [],
+
     botScenarios: base?.botScenarios ?? clone(botScenarios),
 
     botScenarioVersions: base?.botScenarioVersions ?? [],

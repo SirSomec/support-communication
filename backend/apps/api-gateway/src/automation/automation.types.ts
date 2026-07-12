@@ -1,4 +1,5 @@
 export interface BotFlowNode {
+  config?: Record<string, unknown>;
   id: string;
   type: string;
   title?: string;
@@ -11,6 +12,7 @@ export interface BotFlowEdge {
 }
 
 export interface BotScenario {
+  activeVersionId?: string;
   channels: string[];
   createdAt?: string;
   flowEdges: BotFlowEdge[];
@@ -19,7 +21,7 @@ export interface BotScenario {
   name: string;
   schemaVersion: "bot-flow/v1";
   status: string;
-  tenantId?: string;
+  tenantId: string;
   updatedAt?: string;
 }
 
@@ -30,5 +32,5 @@ export interface ProactiveRule {
   id: string;
   segment?: string;
   status?: string;
-  tenantId?: string;
+  tenantId: string;
 }

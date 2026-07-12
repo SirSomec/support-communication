@@ -5,7 +5,10 @@ import { navigationItems } from "../../app/navigationModel.js";
 import { NotificationCenter } from "../notifications/NotificationCenter.jsx";
 import "./app-shell.css";
 
-export function Sidebar({ active, access, onSelect }) {
+export function Sidebar({ active, access, onSelect, operator }) {
+  const operatorName = operator?.name || operator?.email || "Сотрудник";
+  const operatorInitials = buildInitials(operatorName);
+
   return (
     <aside className="sidebar">
       <div className="brand-mark">
@@ -32,15 +35,11 @@ export function Sidebar({ active, access, onSelect }) {
         })}
       </nav>
       <div className="operator-card">
-        <img
-          alt=""
-          src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=96&q=80"
-        />
+        <span className="operator-avatar" aria-hidden="true">{operatorInitials}</span>
         <div>
-          <strong>Иван П.</strong>
-          <span><i /> Онлайн</span>
+          <strong>{operatorName}</strong>
+          <span>Статус не задан</span>
         </div>
-        <ChevronDown size={16} />
       </div>
     </aside>
   );
@@ -58,6 +57,7 @@ export function TopBar({
   onRoleMode,
   onToast,
   notificationsEnabled = true,
+  operatorConversationCount = 0,
   roleMode,
   showRoleSwitcher = true
 }) {
@@ -65,14 +65,11 @@ export function TopBar({
     <header className="topbar">
       <div className="topbar-left">
         <button className="status-select">
-          <span className="presence-dot" />
-          Онлайн
-          <ChevronDown size={16} />
+          Статус не задан
         </button>
         <button className="status-select">
           <UsersRound size={17} />
-          7 / 12 чатов
-          <ChevronDown size={16} />
+          {operatorConversationCount} {conversationWord(operatorConversationCount)}
         </button>
         {showRoleSwitcher ? (
           <label className="role-switcher">
@@ -120,4 +117,22 @@ export function TopBar({
       </div>
     </header>
   );
+}
+
+function buildInitials(name) {
+  return String(name)
+    .split(/[\s@._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "--";
+}
+
+function conversationWord(count) {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return "диалогов";
+  if (mod10 === 1) return "диалог";
+  if (mod10 >= 2 && mod10 <= 4) return "диалога";
+  return "диалогов";
 }

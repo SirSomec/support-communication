@@ -43,7 +43,8 @@ describe("bot runtime worker contracts", () => {
     assert.equal(transition.tenantId, "tenant-demo");
     assert.equal(transition.traceId, "trc_bot_runtime_state");
     assert.equal(transition.eventId, "evt_inbound_001");
-    assert.equal(transition.sideEffects.length, 0);
+    assert.equal(transition.sideEffects.length, 1);
+    assert.equal(transition.sideEffects[0]?.kind, "message_delivery");
   });
 
   it("rejects ambiguous scenario-step transitions before choosing an arbitrary edge", () => {
@@ -124,7 +125,7 @@ describe("bot runtime worker contracts", () => {
         flowEdges: [{ from: "start", to: "handoff" }],
         flowNodes: [
           { id: "start", title: "Start", type: "message" },
-          { id: "handoff", title: "Transfer to operator", type: "handoff" }
+          { config: { queueId: "queue-priority" }, id: "handoff", title: "Transfer to operator", type: "handoff" }
         ],
         id: "bot-runtime-handoff",
         name: "Handoff runtime bot",
@@ -247,7 +248,7 @@ describe("bot runtime worker contracts", () => {
         flowEdges: [{ from: "start", to: "handoff" }],
         flowNodes: [
           { id: "start", title: "Start", type: "message" },
-          { id: "handoff", title: "Priority operators", type: "handoff" }
+          { config: { queueId: "queue-priority" }, id: "handoff", title: "Priority operators", type: "handoff" }
         ],
         id: "bot-runtime-handoff-persist",
         name: "Persist handoff runtime bot",
@@ -291,7 +292,7 @@ describe("bot runtime worker contracts", () => {
     assert.deepEqual(events[0].data, {
       botId: "bot-runtime-handoff-persist",
       nodeId: "handoff",
-      queue: "Priority operators",
+      queue: "queue-priority",
       reason: "handoff_requested"
     });
   });

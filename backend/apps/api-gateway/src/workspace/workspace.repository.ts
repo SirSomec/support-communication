@@ -92,7 +92,7 @@ export interface TemplateRecord {
   channel: string;
   id: string;
   scope: string;
-  tenantId?: string;
+  tenantId: string;
   text: string;
   title: string;
   topic: string;
@@ -133,7 +133,7 @@ export interface KnowledgeArticle {
   id: string;
   owner: string;
   status: string;
-  tenantId?: string;
+  tenantId: string;
   title: string;
   topics: string[];
   updated: string;
@@ -233,6 +233,7 @@ export interface WorkspaceRepositoryPort {
 
 interface WorkspaceRepositoryOptions {
   filePath: string;
+  seed?: WorkspaceState;
 }
 
 interface WorkspaceTenantScope {
@@ -265,12 +266,12 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     defaultRepository = repository;
   }
 
-  static inMemory(seed: WorkspaceState = seedWorkspaceState()): WorkspaceRepository {
+  static inMemory(seed: WorkspaceState = createEmptyWorkspaceState()): WorkspaceRepository {
     return new WorkspaceRepository(createDurableWorkspaceRepository(new InMemoryStore(seed)));
   }
 
-  static open({ filePath }: WorkspaceRepositoryOptions): WorkspaceRepository {
-    return new WorkspaceRepository(createDurableWorkspaceRepository(new JsonFileStore({ filePath, seed: seedWorkspaceState() })));
+  static open({ filePath, seed = createEmptyWorkspaceState() }: WorkspaceRepositoryOptions): WorkspaceRepository {
+    return new WorkspaceRepository(createDurableWorkspaceRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client, fallback }: PrismaWorkspaceRepositoryOptions): WorkspaceRepository {
@@ -390,7 +391,7 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
   }
 
   saveKnowledgeArticle(article: KnowledgeArticle): KnowledgeArticle | Promise<KnowledgeArticle> {
-    return this.adapter.saveKnowledgeArticle(article);
+    return this.adapter.saveKnowledgeArticle({ ...article, tenantId: requireWorkspaceTenantId(article.tenantId) });
   }
 
   saveKnowledgeDraftVersion(version: KnowledgeDraftVersionRecord): KnowledgeDraftVersionRecord | Promise<KnowledgeDraftVersionRecord> {
@@ -402,7 +403,7 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
   }
 
   saveTemplate(template: TemplateRecord): TemplateRecord | Promise<TemplateRecord> {
-    return this.adapter.saveTemplate(template);
+    return this.adapter.saveTemplate({ ...template, tenantId: requireWorkspaceTenantId(template.tenantId) });
   }
 
   saveTemplateVersion(version: TemplateVersionRecord): TemplateVersionRecord | Promise<TemplateVersionRecord> {
@@ -2004,7 +2005,7 @@ function createDurableWorkspaceRepository(store: DurableStore<WorkspaceState>): 
   };
 }
 
-function seedWorkspaceState(): WorkspaceState {
+export function createEmptyWorkspaceState(): WorkspaceState {
   return {
     clientExportJobs: [],
     clientMergeConflicts: [],
@@ -2064,11 +2065,11 @@ function isClientProfileInScope(profile: ClientProfileRecord, scope: WorkspaceTe
 }
 
 function isTemplateInScope(template: TemplateRecord, scope: WorkspaceTenantScope): boolean {
-  return !scope.tenantId || (template.tenantId ?? "tenant-volga") === scope.tenantId;
+  return !scope.tenantId || template.tenantId === scope.tenantId;
 }
 
 function isKnowledgeArticleInScope(article: KnowledgeArticle, scope: WorkspaceTenantScope): boolean {
-  return !scope.tenantId || (article.tenantId ?? "tenant-volga") === scope.tenantId;
+  return !scope.tenantId || article.tenantId === scope.tenantId;
 }
 
 function isClientMergeEventInScope(event: ClientMergeEvent, filters: ClientMergeEventFilters): boolean {
@@ -2118,7 +2119,7 @@ function isSameTemplateVersion(left: TemplateVersionRecord, right: TemplateVersi
 
 function isSameKnowledgeArticleIdentity(left: KnowledgeArticle, right: KnowledgeArticle): boolean {
   return left.id === right.id
-    && (left.tenantId ?? "tenant-volga") === (right.tenantId ?? "tenant-volga");
+    && left.tenantId === right.tenantId;
 }
 
 function isDuplicateKnowledgeDraftVersionReplay(left: KnowledgeDraftVersionRecord, right: KnowledgeDraftVersionRecord): boolean {
@@ -2160,7 +2161,7 @@ function isSameClientMergeEventPayload(left: ClientMergeEvent, right: ClientMerg
 }
 
 function clientMergeEventTenantId(event: ClientMergeEvent): string {
-  return event.tenantId ?? "tenant-volga";
+  return requireWorkspaceTenantId(event.tenantId);
 }
 
 function parseClientMergeConflictState(state: string): ClientMergeConflictState {
@@ -2187,7 +2188,7 @@ function toPrismaWorkspaceFileCreateInput(file: FileRecord): PrismaWorkspaceFile
     scanner: file.scanner ?? null,
     sizeBytes: BigInt(file.sizeBytes),
     storageState: file.storageState,
-    tenantId: file.tenantId ?? "tenant-volga"
+    tenantId: requireWorkspaceTenantId(file.tenantId)
   };
 }
 
@@ -2262,7 +2263,7 @@ function toPrismaClientExportJobCreateInput(job: ClientExportJobRecord): PrismaC
     segment: job.segment ? clone(job.segment) : null,
     sensitiveFieldsMasked: true,
     status: job.status,
-    tenantId: job.tenantId ?? "tenant-volga"
+    tenantId: requireWorkspaceTenantId(job.tenantId)
   };
 }
 
@@ -2310,7 +2311,7 @@ function toPrismaClientProfileCreateInput(profile: ClientProfileRecord): PrismaC
     phone: profile.phone,
     previous: clone(profile.previous),
     sourceProfileId: profile.sourceProfileId,
-    tenantId: profile.tenantId ?? "tenant-volga",
+    tenantId: requireWorkspaceTenantId(profile.tenantId),
     topic: profile.topic
   };
 }
@@ -2354,7 +2355,7 @@ function toPrismaClientMergeEventCreateInput(event: ClientMergeEvent): PrismaCli
     mergeGraphEdge: event.mergeGraphEdge,
     primaryProfileId: event.primaryProfileId,
     reason: event.reason ?? null,
-    tenantId: event.tenantId ?? "tenant-volga"
+    tenantId: requireWorkspaceTenantId(event.tenantId)
   };
 }
 
@@ -2393,7 +2394,7 @@ function toPrismaClientMergeConflictCreateInput(conflict: ClientMergeConflictRec
     primaryProfileId: conflict.primaryProfileId,
     reason: conflict.reason,
     state: parseClientMergeConflictState(conflict.state),
-    tenantId: conflict.tenantId ?? "tenant-volga"
+    tenantId: requireWorkspaceTenantId(conflict.tenantId)
   };
 }
 
@@ -2431,7 +2432,7 @@ function toPrismaKnowledgeArticleCreateInput(article: KnowledgeArticle): PrismaK
     id: article.id,
     owner: article.owner,
     status: article.status,
-    tenantId: article.tenantId ?? "tenant-volga",
+    tenantId: requireWorkspaceTenantId(article.tenantId),
     title: article.title,
     topics: clone(article.topics),
     updatedAt: new Date(article.updated),
@@ -2567,7 +2568,7 @@ function toPrismaTemplateRecordCreateInput(template: TemplateRecord): PrismaTemp
     channel: template.channel,
     id: template.id,
     scope: template.scope,
-    tenantId: template.tenantId ?? "tenant-volga",
+    tenantId: requireWorkspaceTenantId(template.tenantId),
     text: template.text,
     title: template.title,
     topic: template.topic,
@@ -2707,6 +2708,14 @@ function clone<T>(value: T): T {
   }
 
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function requireWorkspaceTenantId(value: unknown): string {
+  const tenantId = String(value ?? "").trim();
+  if (!tenantId) {
+    throw new Error("workspace_tenant_id_required");
+  }
+  return tenantId;
 }
 
 function isPrismaNotFoundError(error: unknown): boolean {

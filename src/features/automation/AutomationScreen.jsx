@@ -106,14 +106,26 @@ export function AutomationScreen({ onBack, onToast, access }) {
     return (
       <ProductScreen
         title="Боты и automation"
-        subtitle="Нет сценариев"
+        subtitle="Создайте первый сценарий, чтобы настроить ответы бота, переходы и передачу оператору."
         onBack={onBack}
         stateItems={createScreenStateItems({
           total: 0,
           emptyWhenZero: "сценариев ботов пока нет",
           errorLabel: "ошибок нет"
         })}
-      />
+        actions={
+          <button disabled={!canManageAutomation || isSaving} onClick={handleScenarioCreate} title={canManageAutomation ? "Создать первый сценарий" : access.reason} type="button">
+            <Plus size={17} />
+            Новый сценарий
+          </button>
+        }
+      >
+        <section className="work-panel bot-empty-state">
+          <Bot size={22} />
+          <strong>Сценариев пока нет</strong>
+          <span>Первый сценарий будет сохранен как черновик. Его можно отредактировать, проверить и опубликовать.</span>
+        </section>
+      </ProductScreen>
     );
   }
   const enabledScenarios = scenarioItems.filter((scenario) => isEnabledAutomationStatus(scenario.status)).length;
@@ -235,7 +247,9 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
     const id = `bot-draft-${Date.now()}`;
     const draftScenario = createDraftScenario(id);
+    setSavingAction(`create:${id}`);
     const response = await automationService.createBotScenario(draftScenario);
+    setSavingAction("");
 
     if (response.status !== "ok") {
       onToast(response.error?.message ?? "Не удалось создать сценарий.");
@@ -522,7 +536,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
                 <header>
                   <Bot size={18} />
                   <strong>{scenario.name}</strong>
-                  <span>{scenario.status}</span>
+                  <span>{formatScenarioStatus(scenario.status)}</span>
                 </header>
                 <p>{scenario.trigger}</p>
                 <ol>
@@ -554,7 +568,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
       </div>
 
       <section className="work-panel bot-builder-panel">
-        <SectionTitle title="Canvas сценария" action={`${selectedScenario.name} · ${selectedScenario.status}`} />
+        <SectionTitle title="Canvas сценария" action={`${selectedScenario.name} · ${formatScenarioStatus(selectedScenario.status)}`} />
         <div className="bot-builder-grid">
           <div className="bot-canvas-panel">
             <div className="bot-canvas-toolbar">
@@ -769,6 +783,17 @@ function sameStringList(left = [], right = []) {
 function isEnabledAutomationStatus(status) {
   const value = String(status ?? "").toLowerCase();
   return value.includes("enabled") || value.includes("published") || value.includes("включ");
+}
+
+function formatScenarioStatus(status) {
+  const value = String(status ?? "").trim().toLowerCase();
+  const labels = {
+    archived: "\u0410\u0440\u0445\u0438\u0432",
+    draft: "\u0427\u0435\u0440\u043d\u043e\u0432\u0438\u043a",
+    published: "\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d"
+  };
+
+  return labels[value] ?? String(status ?? "");
 }
 
 function formatSuccessRate(value) {

@@ -18,12 +18,12 @@ export interface PlatformTenant {
 export interface PlatformComponent {
   id: string;
   name: string;
-  status: "degraded" | "operational" | "partial_outage";
+  status: "degraded" | "operational" | "partial_outage" | "unknown";
   ownerTeam: string;
   region: string;
-  latencyMs: number;
-  errorRate: number;
-  uptime: number;
+  latencyMs: number | null;
+  errorRate: number | null;
+  uptime: number | null;
   tenantImpact: number;
   dependencies: string[];
   signals: Array<{ label: string; tone: "danger" | "ok" | "warn"; value: string }>;

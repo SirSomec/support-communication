@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { TenantOperatorOrServiceAdminGuard } from "../conversation/tenant-operator-or-service-admin.guard.js";
 import { AuthController } from "./auth.controller.js";
 import { AuthService } from "./auth.service.js";
 import { ServiceAdminSessionGuard } from "./service-admin-session.guard.js";
@@ -17,6 +18,7 @@ import { TenantOperatorAuthGuard } from "./tenant-operator-auth.guard.js";
   controllers: [AuthController, PermissionController, SettingsController, TenantController, TenantProvisionController],
   providers: [
     AuthService,
+    TenantOperatorOrServiceAdminGuard,
     ServiceAdminSessionGuard,
     TenantOperatorAuthGuard,
     PermissionService,

@@ -7,7 +7,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const requiredServices = new Map([
   ["api-gateway", { health: "healthy" }],
   ["billing-sync-worker", {}],
+  ["bot-runtime-reconciliation-worker", {}],
+  ["clamav", { health: "healthy" }],
+  ["clamav-scanner", { health: "healthy" }],
+  ["file-scan-scanner-worker", {}],
   ["frontend", {}],
+  ["identity-events-worker", {}],
   ["lead-notification-worker", {}],
   ["mailpit", { health: "healthy" }],
   ["minio", { health: "healthy" }],
@@ -17,7 +22,9 @@ const requiredServices = new Map([
   ["proactive-delivery-worker", {}],
   ["report-digest-worker", {}],
   ["report-export-worker", {}],
+  ["rescue-return-worker", { health: "healthy" }],
   ["redis", { health: "healthy" }],
+  ["sla-timer-worker", { health: "healthy" }],
   ["telegram-polling-worker", {}],
   ["webhook-delivery-worker", {}]
 ]);

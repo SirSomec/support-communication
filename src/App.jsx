@@ -26,11 +26,15 @@ import { settingsService } from "./services/settingsService.js";
 import { ScreenStateStrip, Toast } from "./ui.jsx";
 
 const SERVICE_ADMIN_DEMO_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_SERVICE_ADMIN === "true";
+const ROLE_SWITCHER_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROLE_SWITCHER === "true";
 const LandingPage = lazy(() => import("./features/public/index.js"));
 const AuthPage = lazy(() => import("./features/auth/index.js"));
 const OrganizationOnboarding = lazy(() => import("./features/onboarding/index.js"));
 const ServiceAdminDashboard = lazy(() => import("./features/service-admin/index.js").then((module) => ({
   default: module.ServiceAdminDashboard
+})));
+const ServiceAdminLogin = lazy(() => import("./features/service-admin/ServiceAdminLogin.jsx").then((module) => ({
+  default: module.ServiceAdminLogin
 })));
 
 function App() {
@@ -64,6 +68,7 @@ function App() {
     closedIds,
     conversationItems,
     error: inboxError,
+    loadConversationDetail,
     loading: inboxLoading,
     refreshInbox,
     setClosedIds,
@@ -135,6 +140,11 @@ function App() {
     setToast,
     initialSelectedId: "maria"
   });
+  useEffect(() => {
+    if (tenantSession.authenticated && selectedId) {
+      void loadConversationDetail(selectedId);
+    }
+  }, [loadConversationDetail, selectedId, tenantSession.authenticated]);
   const selectedTopic = topics[selected.id] ?? "";
   const {
     closeSaveTemplateDialog,
@@ -156,7 +166,7 @@ function App() {
     suggestions: aiSuggestions,
     selectedId: selected.id,
     isClosed,
-    appendMessage,
+    refreshInbox,
     setComposeMode,
     setDraft,
     setToast
@@ -177,6 +187,7 @@ function App() {
     composeMode,
     draft,
     isClosed,
+    refreshInbox,
     selected,
     selectedStatus,
     selectedTopic,
@@ -384,6 +395,14 @@ function App() {
     );
   }
 
+  if (route.namespace === "service-admin" && route.view === "login") {
+    return (
+      <Suspense fallback={<RouteLoading label="Загрузка входа администратора сервиса" />}>
+        <ServiceAdminLogin onBack={routeActions.openLanding} onSuccess={routeActions.openServiceAdmin} />
+      </Suspense>
+    );
+  }
+
   if (route.namespace === "service-admin" && appShellAccess.canServiceAdmin) {
     return (
       <div data-testid="route-service-admin" className="app-shell">
@@ -442,7 +461,7 @@ function App() {
 
   return (
     <div className="app-shell" data-testid="route-app-shell">
-      <Sidebar active={section} access={access} onSelect={handleSectionSelect} />
+      <Sidebar active={section} access={access} onSelect={handleSectionSelect} operator={tenantSession.operator} />
       <main className="workspace">
         <TopBar
           access={appShellAccess}
@@ -455,7 +474,9 @@ function App() {
           onOutbound={handleOutboundRequest}
           onRoleMode={handleRoleModeChange}
           onToast={setToast}
+          operatorConversationCount={conversationItems.filter((item) => item.operatorId === tenantSession.operator?.id).length}
           roleMode={roleMode}
+          showRoleSwitcher={ROLE_SWITCHER_ENABLED}
         />
         {section === "dialogs" ? (
           <>

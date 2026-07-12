@@ -68,6 +68,8 @@ export function bootstrapIntegrationState(base?: Partial<IntegrationState>): Int
 
     channelConnections: base?.channelConnections ?? seedChannelConnections(),
 
+    providerConnectionCredentials: base?.providerConnectionCredentials ?? [],
+
     publicApiKeys: base?.publicApiKeys ?? [],
 
     publicApiKeyRevealStates: base?.publicApiKeyRevealStates ?? [],
@@ -79,6 +81,8 @@ export function bootstrapIntegrationState(base?: Partial<IntegrationState>): Int
     publicDemoRequests: base?.publicDemoRequests ?? [],
 
     securitySessions: base?.securitySessions ?? clone(activeSecuritySessions),
+
+    sdkVisitorPresenceSessions: base?.sdkVisitorPresenceSessions ?? [],
 
     telegramConnections: base?.telegramConnections ?? [],
 
@@ -193,4 +197,3 @@ function seedChannelConnections(): IntegrationState["channelConnections"] {
     }
   ];
 }
-

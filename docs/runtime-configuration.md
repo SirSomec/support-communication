@@ -56,6 +56,7 @@ VITE_API_BASE_URL=http://127.0.0.1:4100 npm run dev
 | Variable | Purpose |
 | --- | --- |
 | `RUNTIME_PROFILE=local` | Keep local/test JSON fallbacks enabled. Set `RUNTIME_PROFILE=production-like` only for the guarded PostgreSQL profile. |
+| `LOCAL_DEVELOPMENT_SEED_ENABLED=true` | Explicitly load sample users and workspace data for the local JSON profile. Startup rejects this switch outside local development/test. |
 | `ALLOW_DEMO_SERVICE_ADMIN_HEADERS=true` | Allow demo service-admin headers in dev/test only |
 | `VITE_ENABLE_SERVICE_ADMIN=true` | Expose service-admin route in frontend dev builds |
 | `REALTIME_REDIS_FANOUT_ENABLED=true` | Enable Redis-backed realtime fanout |
@@ -74,6 +75,7 @@ Repository defaults:
 | `NOTIFICATION_REPOSITORY` | JSON store unless set to `prisma` |
 | `OPERATIONS_REPOSITORY` | JSON store unless set to `prisma` |
 | `PLATFORM_REPOSITORY` | JSON store unless set to `prisma` |
+| `QUALITY_REPOSITORY` | JSON store unless set to `prisma` |
 | `ROUTING_REPOSITORY` | JSON store unless set to `prisma` |
 | `REPORT_REPOSITORY` | JSON store unless set to `prisma` |
 
@@ -188,7 +190,7 @@ Pilot/local bootstrap helpers live under `backend/scripts/`.
 - Webhook delivery long-running command: `cd backend && npm run start:webhook-delivery-worker`
 - Compose service: `webhook-delivery-worker`
 - Local deterministic webhook delivery: `WEBHOOK_DELIVERY_PROVIDER_MODE=local`.
-- HTTP webhook delivery: `WEBHOOK_DELIVERY_PROVIDER_MODE=http`; the worker posts each claimed delivery to the row-owned `targetUrl`, sends idempotency and trace headers, and persists delivered, retry-scheduled, or dead-lettered state with redacted provider errors.
+- HTTP webhook delivery: `WEBHOOK_DELIVERY_PROVIDER_MODE=http` with `WEBHOOK_DELIVERY_SIGNING_SECRET`; the worker posts each claimed delivery to the row-owned `targetUrl`, sends idempotency and trace headers plus `x-webhook-timestamp` and an HMAC-SHA256 `x-webhook-signature` over `timestamp.body`, and persists delivered, retry-scheduled, or dead-lettered state with redacted provider errors.
 - Webhook delivery smoke: `cd backend && npm run webhook:worker:once` seeds one Prisma `webhookDeliveryJournalEntry`, starts a local HTTP fake provider, runs the compiled worker main once, verifies exactly one provider request, and asserts the row is delivered. The smoke requires `DATABASE_URL`.
 - Outbound channel worker command: `cd backend && npm run outbox:worker:once`
 - Outbound channel long-running command: `cd backend && npm run start:outbox-worker`
@@ -205,14 +207,14 @@ Pilot/local bootstrap helpers live under `backend/scripts/`.
 - External channel delivery still requires configured provider env such as `OUTBOX_CHANNEL_CONNECTORS` or `OUTBOX_TELEGRAM_ENABLED=true`. In production-like Prisma mode, Telegram bot tokens resolve from active `telegram_connections` rows by tenant, with `OUTBOX_TELEGRAM_BOT_TOKEN` as an env fallback.
 - Provider runtime smoke: `cd backend && npm run provider:outbox:smoke` is skip-safe unless `OUTBOX_PROVIDER_SMOKE_ENABLED=true`. Backend `release:checklist` enables it with local provider endpoints by default. When enabled it seeds one queued descriptor each for Telegram, VK and MAX, starts local provider endpoints, runs `outbox-worker --once` through `OUTBOX_TELEGRAM_*`, `OUTBOX_VK_*` and `OUTBOX_MAX_*` runtime env, and verifies 3 published dispatches. Disable individual providers with `OUTBOX_PROVIDER_SMOKE_TELEGRAM_ENABLED=false`, `OUTBOX_PROVIDER_SMOKE_VK_ENABLED=false` or `OUTBOX_PROVIDER_SMOKE_MAX_ENABLED=false`.
 - Telegram live provider smoke: `cd backend && npm run provider:telegram-live-smoke` skips unless `OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true`. Root `npm run release:gate` includes it after production-like API readiness with host PostgreSQL and `INTEGRATION_REPOSITORY=prisma`; set `OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID` plus either `OUTBOX_TELEGRAM_BOT_TOKEN` or an active Prisma `telegram_connections` token for `OUTBOX_PROVIDER_LIVE_SMOKE_TENANT_ID` to send one real Telegram message and verify the outbox event is published.
-- VK/MAX live proxy smoke: `cd backend && npm run provider:vk-max-live-smoke` skips unless `OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED=true`. Root `npm run release:gate` includes it after production-like API readiness with host PostgreSQL; set `OUTBOX_VK_ENDPOINT`/`OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_PEER_ID` and `OUTBOX_MAX_ENDPOINT`/`OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_DIALOG_ID` to send one staged VK and MAX message through the existing HTTP provider proxy adapters. Disable either side with `OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_ENABLED=false` or `OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_ENABLED=false`. This smoke verifies the product proxy contract and outbox persistence; direct official VK/MAX auth and API-version semantics belong in the provider proxy or a future adapter contract.
+- VK/MAX live official-provider smoke: `cd backend && npm run provider:vk-max-live-smoke` skips unless `OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED=true`. It requires the ids of existing encrypted tenant connections (`..._VK_CONNECTION_ID`, `..._MAX_CONNECTION_ID`) plus a real VK peer id and MAX chat id. The worker resolves each saved credential, sends through the official API and verifies durable outbox delivery state. Disable either provider explicitly with its `..._ENABLED=false` flag.
 
 ```bash
 OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID=123456789 OUTBOX_TELEGRAM_BOT_TOKEN=123456:token DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication INTEGRATION_REPOSITORY=prisma npm run --prefix backend provider:telegram-live-smoke
 ```
 
 ```bash
-OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED=true OUTBOX_VK_ENDPOINT=https://provider-proxy.example.test/vk/messages.send OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_PEER_ID=123456 OUTBOX_MAX_ENDPOINT=https://provider-proxy.example.test/max/messages OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_DIALOG_ID=dialog-123 DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication npm run --prefix backend provider:vk-max-live-smoke
+OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED=true OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_CONNECTION_ID=vk-connection-id OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_PEER_ID=123456 OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_CONNECTION_ID=max-connection-id OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_DIALOG_ID=chat-123 DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication npm run --prefix backend provider:vk-max-live-smoke
 ```
 
 ## Public SDK Pilot Smoke
@@ -236,7 +238,7 @@ OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED=true OUTBOX_VK_ENDPOINT=https://provid
 - Worker command: `cd backend && npm run file-scan:worker:once`
 - Long-running command: `cd backend && npm run start:file-scan-scanner-worker`
 - Runtime scanner execution requires `OUTBOX_SCANNER_ENABLED=true`, `OUTBOX_FILE_SCAN_RESULT_BASE_URL`, and `OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN`.
-- Local/pilot deterministic scanner: `OUTBOX_SCANNER_PROVIDER_MODE=local` with `OUTBOX_SCANNER_LOCAL_VERDICT=clean|infected|error`.
+- The production-like compose stack starts ClamAV, `clamav-scanner`, and `file-scan-scanner-worker` by default. The worker uses `OUTBOX_SCANNER_PROVIDER_MODE=http` and the internal `http://clamav-scanner:4120/scan` endpoint; local deterministic verdicts remain test-only.
 - External scanner: set `OUTBOX_SCANNER_PROVIDER_MODE=http` and provide `OUTBOX_SCANNER_URL`. If the scanner endpoint requires authentication, set `OUTBOX_SCANNER_BEARER_TOKEN`; the worker sends it as `Authorization: Bearer ...` only on scanner dispatch. Scanner requests forward safe descriptor metadata plus optional `signedFile` access (`method`, `url`, `expiresAt`, optional headers) when the queued descriptor payload provides it; raw object storage keys are not sent to the scanner. Dialog attachment uploads now create a `workspaceFile`, return a client `signedUpload` policy, seed the scan descriptor with `signedFile` access for the scanner, finalize uploaded bytes through `POST /api/v1/dialogs/attachments/:fileId/finalize`, and expose scan readiness through `GET /api/v1/dialogs/attachments/:fileId/status` without exposing `objectKey`.
 - External scanner smoke command for a production-like compose API:
 
@@ -245,6 +247,10 @@ FILE_SCAN_EXTERNAL_SCANNER_SMOKE_ENABLED=true OUTBOX_SCANNER_URL=https://scanner
 ```
 
 - Compose service: enable the optional `scanner-runtime` profile. By default it uses the deterministic local scanner so the profile does not depend on an undeclared `scanner` container; set HTTP mode only when a reachable scanner service is configured.
+
+## Quality AI Runtime
+
+External quality scoring uses an OpenAI-compatible `chat/completions` endpoint. It is disabled unless all of `QUALITY_AI_ENABLED=true`, `QUALITY_AI_BASE_URL`, `QUALITY_AI_API_KEY`, and `QUALITY_AI_MODEL` are set. `QUALITY_AI_TIMEOUT_MS`, `QUALITY_AI_MAX_RETRIES`, and `QUALITY_AI_RATE_LIMIT_PER_MINUTE` bound provider calls. The UI requires explicit per-session consent; email and phone values are redacted before transmission, and failures fall back to local rules.
 
 ## Docker Compose
 
@@ -274,7 +280,7 @@ OUTBOX_SCANNER_PROVIDER_MODE=http OUTBOX_SCANNER_URL=https://scanner.example.tes
 ```
 
 This command is the production-like Prisma/PostgreSQL gate. It should start without JSON fallback store blockers when every product-critical repository variable is set to `prisma`.
-The pilot overlay also runs `notification-delivery-worker` with `RUNTIME_PROFILE=production-like`, `NOTIFICATION_REPOSITORY=prisma`, and browser push fully disabled by default on both API and worker. Supplying `BROWSER_PUSH_ENABLED=true` or VAPID key material activates the fail-fast live-provider gate; set `NOTIFICATION_DELIVERY_PROVIDER_MODE=web-push` with complete credentials. It runs `lead-notification-worker` with `INTEGRATION_REPOSITORY=prisma` and provider dispatch disabled unless a real lead notification provider is configured. It runs `webhook-delivery-worker` with `INTEGRATION_REPOSITORY=prisma`; set `WEBHOOK_DELIVERY_PROVIDER_MODE=http` when replay/delivery rows should call their `targetUrl`, otherwise the pilot default is disabled. It also runs `outbox-worker` and `billing-sync-worker` as persistent queue processors backed by PostgreSQL. The `scanner-runtime` profile adds `file-scan-scanner-worker` with production-like database/callback settings and deterministic local scanner mode by default; external scanner delivery is available through explicit HTTP mode.
+The pilot overlay also runs `notification-delivery-worker` with `RUNTIME_PROFILE=production-like`, `NOTIFICATION_REPOSITORY=prisma`, and browser push fully disabled by default on both API and worker. Supplying `BROWSER_PUSH_ENABLED=true` or VAPID key material activates the fail-fast live-provider gate; set `NOTIFICATION_DELIVERY_PROVIDER_MODE=web-push` with complete credentials. It runs `lead-notification-worker` with `INTEGRATION_REPOSITORY=prisma` and provider dispatch disabled unless a real lead notification provider is configured. It runs `webhook-delivery-worker` with `INTEGRATION_REPOSITORY=prisma`; set `WEBHOOK_DELIVERY_PROVIDER_MODE=http` when replay/delivery rows should call their `targetUrl`, otherwise the pilot default is disabled. It also runs `outbox-worker`, `billing-sync-worker`, ClamAV and the persistent file scanner worker backed by PostgreSQL. An external scanner remains available by overriding `OUTBOX_SCANNER_URL` and the HTTP provider credentials.
 The pilot overlay passes `PUBLIC_DEMO_NOTIFICATION_SMTP_USERNAME`, `PUBLIC_DEMO_NOTIFICATION_SMTP_PASSWORD`, `PUBLIC_DEMO_NOTIFICATION_SMTP_SECURE`, and `PUBLIC_DEMO_NOTIFICATION_SMTP_TLS_REJECT_UNAUTHORIZED` into `lead-notification-worker` so production-like SMTP auth/SMTPS settings match the live smoke contract.
 
 Health checks:

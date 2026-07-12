@@ -8,7 +8,8 @@ import {
   routingOperatorFixtures,
   routingQueueFixtures
 } from "../apps/api-gateway/src/routing/seed-catalog.ts";
-import { RoutingRepository } from "../apps/api-gateway/src/routing/routing.repository.ts";
+import { bootstrapRoutingState } from "../apps/api-gateway/src/routing/seed.ts";
+import { RoutingRepository, type RoutingLifecycleEvent } from "../apps/api-gateway/src/routing/routing.repository.ts";
 import { RoutingService } from "../apps/api-gateway/src/routing/routing.service.ts";
 
 const VOLGA_CONTEXT = { tenantId: "tenant-volga" };
@@ -22,7 +23,7 @@ function cloneWithVolgaTenant<T extends { tenantId?: string }>(records: T[]): T[
 
 describe("phase 4 routing, SLA and rescue backend contracts", () => {
   beforeEach(() => {
-    RoutingRepository.useDefault(RoutingRepository.inMemory());
+    RoutingRepository.useDefault(RoutingRepository.inMemory(bootstrapRoutingState()));
   });
 
   afterEach(() => {
@@ -178,7 +179,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("uses persisted routing rules and operator capacities for workload and assignment limits", async () => {
-    const repository = RoutingRepository.inMemory();
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
     await repository.saveRoutingRule({
       channel: "VK",
       enabled: true,
@@ -221,7 +222,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("uses active queue memberships as channel access grants", async () => {
-    const repository = RoutingRepository.inMemory();
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
     await repository.saveQueueMembership({
       active: true,
       id: "membership_vk_ivan_runtime",
@@ -250,7 +251,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("simulates assignment candidates with validated workload, access and capacity inputs", async () => {
-    const repository = RoutingRepository.inMemory();
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
     await repository.saveQueueMembership({
       active: true,
       id: "membership_vk_ivan_simulation",
@@ -345,7 +346,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("ranks assignment candidates with primary queue membership before backup membership", async () => {
-    const repository = RoutingRepository.inMemory();
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
     await repository.saveQueueMembership({
       active: true,
       id: "membership_vk_ivan_ranking",
@@ -390,7 +391,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("ranks assignment candidates with equal load by greater available chat capacity", async () => {
-    const repository = RoutingRepository.inMemory();
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
     await repository.saveQueueMembership({
       active: true,
       id: "membership_vk_ivan_capacity_ranking",
@@ -598,7 +599,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("rejects batch redistribution when any selected queue has no eligible capacity", async () => {
-    const repository = RoutingRepository.inMemory();
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
     await repository.saveOperatorCapacity({
       channel: "VK",
       chatLimit: 10,
@@ -627,7 +628,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("writes assignment routing analytics rows when assigning a conversation", async () => {
-    const repository = RoutingRepository.inMemory();
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
     const routing = new RoutingService(repository);
 
     const assignment = await routing.createAssignment({
@@ -652,7 +653,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("writes transfer routing analytics rows when transferring a conversation", async () => {
-    const repository = RoutingRepository.inMemory();
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
     const routing = new RoutingService(repository);
 
     const transfer = await routing.createAssignment({
@@ -677,7 +678,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("writes rescue routing analytics rows when starting rescue", async () => {
-    const repository = RoutingRepository.inMemory();
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
     const routing = new RoutingService(repository);
 
     const rescue = await routing.startRescue({
@@ -808,7 +809,9 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("requires an explicit SLA pause reason and creates a resume job", async () => {
-    const routing = new RoutingService();
+    const worker = await import("../apps/api-gateway/src/routing/sla-timer.worker.ts");
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
+    const routing = new RoutingService(repository);
 
     const missingReason = await routing.pauseSla({
       conversationId: "maria",
@@ -829,6 +832,70 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(paused.data.sla.durationMinutes, 15);
     assert.equal(paused.data.schedulerJob.queue, "sla-timers");
     assert.equal(paused.data.auditEvent.action, "sla.pause");
+
+    const [resumeJob] = repository.listJobs();
+    assert.equal(resumeJob.action, "resume_sla");
+    assert.equal(resumeJob.conversationId, "maria");
+    assert.equal(resumeJob.tenantId, "tenant-volga");
+    assert.equal(resumeJob.status, "pending");
+    assert.equal(typeof resumeJob.runAt, "string");
+
+    const transition = worker.planSlaTimerTransition({
+      conversation: repository.readState().conversations.find((conversation) => conversation.id === "maria")!,
+      job: resumeJob,
+      now: new Date(new Date(resumeJob.runAt!).getTime() + 1)
+    });
+    assert.equal(transition.status, "ready");
+    assert.equal(transition.conversationId, "maria");
+  });
+
+  it("appends tenant-scoped lifecycle events with routing state changes", async () => {
+    const captured: RoutingLifecycleEvent[] = [];
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
+    const saveWithEvents = repository.saveStateWithLifecycleEvents.bind(repository);
+    repository.saveStateWithLifecycleEvents = (state, events) => {
+      captured.push(...events);
+      return saveWithEvents(state, events);
+    };
+    const routing = new RoutingService(repository);
+    const context = { actorId: "operator-anna", actorType: "operator" as const, tenantId: "tenant-volga" };
+
+    await routing.createAssignment({
+      action: "assign",
+      conversationId: "alexey",
+      reason: "Lifecycle assignment",
+      targetOperatorId: "operator-anna"
+    }, context);
+    await routing.createAssignment({
+      action: "return_queue",
+      conversationId: "alexey",
+      reason: "Lifecycle queue return"
+    }, context);
+    await routing.pauseSla({
+      conversationId: "maria",
+      durationMinutes: 10,
+      reason: "Lifecycle SLA pause"
+    }, context);
+    await routing.startRescue({
+      conversationId: "vladimir",
+      reason: "Lifecycle rescue start"
+    }, context);
+    await routing.resolveRescue({
+      conversationId: "vladimir",
+      outcome: "saved",
+      reason: "Lifecycle rescue resolved"
+    }, context);
+
+    assert.deepEqual(captured.map((event) => event.eventType), [
+      "assignment.changed",
+      "queue.entered",
+      "sla.paused",
+      "rescue.started",
+      "rescue.resolved"
+    ]);
+    assert.equal(captured.every((event) => event.tenantId === "tenant-volga"), true);
+    assert.equal(captured.every((event) => event.actorId === "operator-anna"), true);
+    assert.equal(captured.every((event) => event.schemaVersion === "conversation-lifecycle/v1"), true);
   });
 
   it("plans a paused SLA timer transition without mutating the conversation", async () => {
@@ -1010,6 +1077,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.deepEqual(result.claimed.map((job: { id: string }) => job.id), ["job_sla_atomic_claim"]);
     assert.deepEqual(claimCalls, [{
       claimedAt: "2026-06-29T13:16:00.000Z",
+      expectedLeaseExpiresAt: null,
+      expectedLeaseOwner: null,
       expectedStatus: "pending",
       jobId: "job_sla_atomic_claim",
       queue: "sla-timers"
@@ -1026,6 +1095,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         operatorId: "operator-ivan",
         slaTone: "hold",
         status: "paused",
+        tenantId: "tenant-volga",
         topic: "Delivery / Status"
       }],
       jobs: [{
@@ -1034,7 +1104,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         id: "job_sla_resume_claimed",
         queue: "sla-timers",
         runAt: "2026-06-29T13:15:00.000Z",
-        status: "claimed"
+        status: "claimed",
+        tenantId: "tenant-volga"
       }],
       operatorCapacities: [],
       operators: [],
@@ -1170,6 +1241,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         operatorId: "operator-kirill",
         slaTone: "warn",
         status: "assigned",
+        tenantId: "tenant-volga",
         topic: "Delivery / Status"
       }],
       jobs: [{
@@ -1178,7 +1250,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         id: "job_sla_overdue_claimed",
         queue: "sla-timers",
         runAt: "2026-06-29T13:15:00.000Z",
-        status: "claimed"
+        status: "claimed",
+        tenantId: "tenant-volga"
       }],
       operatorCapacities: [],
       operators: [],
@@ -1218,6 +1291,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         operatorId: "operator-kirill",
         slaTone: "warn",
         status: "assigned",
+        tenantId: "tenant-volga",
         topic: "Delivery / Status"
       }],
       jobs: [{
@@ -1226,7 +1300,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         id: "job_sla_overdue_descriptor",
         queue: "sla-timers",
         runAt: "2026-06-29T13:15:00.000Z",
-        status: "claimed"
+        status: "claimed",
+        tenantId: "tenant-volga"
       }],
       operatorCapacities: [],
       operators: [],
@@ -1264,6 +1339,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         operatorId: "operator-kirill",
         slaTone: "warn",
         status: "assigned",
+        tenantId: "tenant-volga",
         topic: "Delivery / Status"
       }],
       jobs: [{
@@ -1272,7 +1348,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
         id: "job_sla_overdue_realtime",
         queue: "sla-timers",
         runAt: "2026-06-29T13:15:00.000Z",
-        status: "claimed"
+        status: "claimed",
+        tenantId: "tenant-volga"
       }],
       operatorCapacities: [],
       operators: [],
@@ -1410,6 +1487,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
           action: "resume_sla",
           claimedAt: "2026-06-29T13:24:30.000Z",
           id: "job_already_claimed",
+          leaseExpiresAt: "2026-06-29T13:26:00.000Z",
+          leaseOwner: "sla-worker-current",
           queue: "sla-timers",
           runAt: "2026-06-29T13:24:00.000Z",
           status: "claimed"
@@ -2384,7 +2463,9 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   });
 
   it("starts rescue with a server-owned timer and blocks closed dialogs", async () => {
-    const routing = new RoutingService();
+    const worker = await import("../apps/api-gateway/src/routing/rescue-return.worker.ts");
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
+    const routing = new RoutingService(repository);
 
     const closed = await routing.startRescue({
       conversationId: "closed-dialog",
@@ -2410,6 +2491,9 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(rescue.data.schedulerJob.action, "return_to_sla_queue");
     assert.equal(rescue.data.schedulerJob.conversationId, "vladimir");
     assert.equal(rescue.data.schedulerJob.queue, "rescue-return");
+    assert.equal(rescue.data.schedulerJob.status, "pending");
+    assert.equal(rescue.data.schedulerJob.tenantId, "tenant-volga");
+    assert.equal(typeof rescue.data.schedulerJob.runAt, "number");
     assert.equal(rescue.data.realtimeEvent.eventName, "rescue.started");
 
     const duplicateStart = await routing.startRescue({
@@ -2419,6 +2503,176 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(duplicateStart.status, "conflict");
     assert.equal(duplicateStart.error?.code, "rescue_already_active");
     assert.equal(duplicateStart.data.rescue.deadlineAt, rescue.data.rescue.deadlineAt);
+
+    const claimed = await worker.claimExpiredRescueReturnJobs({
+      now: new Date(rescue.data.schedulerJob.runAt + 1),
+      routingRepository: repository
+    });
+    assert.deepEqual(claimed.claimed.map((job) => job.id), [rescue.data.schedulerJob.id]);
+    assert.equal(claimed.claimed[0].conversationId, "vladimir");
+    assert.equal(claimed.claimed[0].tenantId, "tenant-volga");
+  });
+
+  it("reclaims an expired SLA claim after a worker crash but not before lease expiry", async () => {
+    const worker = await import("../apps/api-gateway/src/routing/sla-timer.worker.ts");
+    const repository = RoutingRepository.inMemory({
+      ...bootstrapRoutingState(),
+      jobs: [{
+        action: "resume_sla",
+        conversationId: "maria",
+        id: "job_sla_crash_reclaim",
+        queue: "sla-timers",
+        runAt: "2026-07-11T09:00:00.000Z",
+        status: "pending",
+        tenantId: "tenant-volga"
+      }]
+    });
+    const first = await worker.claimDueSlaTimerJobs({
+      leaseDurationMs: 30_000,
+      now: new Date("2026-07-11T09:01:00.000Z"),
+      routingRepository: repository,
+      workerId: "sla-worker-crashed"
+    });
+    const early = await worker.claimDueSlaTimerJobs({
+      leaseDurationMs: 30_000,
+      now: new Date("2026-07-11T09:01:29.999Z"),
+      routingRepository: repository,
+      workerId: "sla-worker-recovery"
+    });
+    const recovered = await worker.claimDueSlaTimerJobs({
+      leaseDurationMs: 30_000,
+      now: new Date("2026-07-11T09:01:30.000Z"),
+      routingRepository: repository,
+      workerId: "sla-worker-recovery"
+    });
+
+    assert.equal(first.claimed[0]?.leaseOwner, "sla-worker-crashed");
+    assert.deepEqual(early.claimed, []);
+    assert.equal(recovered.claimed[0]?.leaseOwner, "sla-worker-recovery");
+  });
+
+  it("allows only one of two workers to reclaim the same expired job", async () => {
+    const worker = await import("../apps/api-gateway/src/routing/sla-timer.worker.ts");
+    const repository = RoutingRepository.inMemory({
+      ...bootstrapRoutingState(),
+      jobs: [{
+        action: "resume_sla",
+        claimedAt: "2026-07-11T09:00:00.000Z",
+        conversationId: "maria",
+        id: "job_sla_reclaim_race",
+        leaseExpiresAt: "2026-07-11T09:00:30.000Z",
+        leaseOwner: "sla-worker-crashed",
+        queue: "sla-timers",
+        runAt: "2026-07-11T09:00:00.000Z",
+        status: "claimed",
+        tenantId: "tenant-volga"
+      }]
+    });
+    const now = new Date("2026-07-11T09:01:00.000Z");
+    const [left, right] = await Promise.all([
+      worker.claimDueSlaTimerJobs({ leaseDurationMs: 30_000, now, routingRepository: repository, workerId: "sla-worker-left" }),
+      worker.claimDueSlaTimerJobs({ leaseDurationMs: 30_000, now, routingRepository: repository, workerId: "sla-worker-right" })
+    ]);
+
+    assert.equal(left.claimed.length + right.claimed.length, 1);
+    assert.equal(["sla-worker-left", "sla-worker-right"].includes(repository.listJobs()[0]?.leaseOwner ?? ""), true);
+  });
+
+  it("fences stale SLA and rescue workers after another worker reclaims their jobs", async () => {
+    const slaWorker = await import("../apps/api-gateway/src/routing/sla-timer.worker.ts");
+    const rescueWorker = await import("../apps/api-gateway/src/routing/rescue-return.worker.ts");
+    const state = bootstrapRoutingState();
+    state.conversations = state.conversations.map((conversation) => conversation.id === "maria"
+      ? { ...conversation, slaTone: "hold" as const, status: "paused" as const }
+      : conversation.id === "vladimir"
+        ? {
+            ...conversation,
+            rescue: {
+              deadlineAt: new Date("2026-07-11T09:00:00.000Z").getTime(),
+              durationSeconds: 240,
+              nextAction: "reply_or_return_to_sla_queue",
+              reason: "Lease fencing rescue",
+              source: "manual",
+              startedAt: new Date("2026-07-11T08:56:00.000Z").getTime(),
+              state: "active" as const
+            },
+            status: "assigned" as const
+          }
+        : conversation);
+    state.jobs = [{
+      action: "resume_sla",
+      claimedAt: "2026-07-11T09:00:00.000Z",
+      conversationId: "maria",
+      id: "job_sla_fenced",
+      leaseExpiresAt: "2026-07-11T09:00:30.000Z",
+      leaseOwner: "old-sla-worker",
+      queue: "sla-timers",
+      status: "claimed",
+      tenantId: "tenant-volga"
+    }, {
+      action: "return_to_sla_queue",
+      claimedAt: "2026-07-11T09:00:00.000Z",
+      conversationId: "vladimir",
+      id: "job_rescue_fenced",
+      leaseExpiresAt: "2026-07-11T09:00:30.000Z",
+      leaseOwner: "old-rescue-worker",
+      queue: "rescue-return",
+      status: "claimed",
+      tenantId: "tenant-volga"
+    }];
+    const repository = RoutingRepository.inMemory(state);
+    const oldSlaJob = repository.listJobs().find((job) => job.id === "job_sla_fenced")!;
+    const oldRescueJob = repository.listJobs().find((job) => job.id === "job_rescue_fenced")!;
+    const now = new Date("2026-07-11T09:01:00.000Z");
+    await slaWorker.claimDueSlaTimerJobs({ now, routingRepository: repository, workerId: "new-sla-worker" });
+    await rescueWorker.claimExpiredRescueReturnJobs({ now, routingRepository: repository, workerId: "new-rescue-worker" });
+
+    const oldSlaTransition = slaWorker.planSlaTimerTransition({ conversation: state.conversations.find((item) => item.id === "maria")!, job: oldSlaJob, now });
+    const staleSla = await slaWorker.applySlaTimerTransition({ completedAt: now, routingRepository: repository, transition: oldSlaTransition });
+    const staleRescue = await rescueWorker.applyRescueReturnTransition({ completedAt: now, job: oldRescueJob, routingRepository: repository });
+
+    assert.equal(staleSla.status, "skipped");
+    assert.equal(staleSla.reason, "lease_lost");
+    assert.equal(staleRescue.status, "skipped");
+    assert.equal(staleRescue.reason, "lease_lost");
+    assert.equal(repository.readState().conversations.find((item) => item.id === "maria")?.status, "paused");
+    assert.equal(repository.readState().conversations.find((item) => item.id === "vladimir")?.rescue?.state, "active");
+  });
+
+  it("cancels the original pending or claimed rescue timer on manual resolution", async () => {
+    for (const initialStatus of ["pending", "claimed"] as const) {
+      const repository = RoutingRepository.inMemory(bootstrapRoutingState());
+      const routing = new RoutingService(repository);
+      const started = await routing.startRescue({
+        conversationId: "vladimir",
+        reason: "No operator answer after accept"
+      }, VOLGA_CONTEXT);
+      const originalJob = started.data.schedulerJob;
+
+      if (initialStatus === "claimed") {
+        await repository.claimJob({
+          claimedAt: new Date().toISOString(),
+          expectedStatus: "pending",
+          jobId: originalJob.id,
+          queue: "rescue-return"
+        });
+      }
+
+      const resolved = await routing.resolveRescue({
+        conversationId: "vladimir",
+        outcome: "saved",
+        reason: "Operator answered manually"
+      }, VOLGA_CONTEXT);
+      const jobs = repository.listJobs();
+
+      assert.equal(resolved.status, "ok");
+      assert.equal(resolved.data.queueJob.id, originalJob.id);
+      assert.equal(resolved.data.queueJob.status, "canceled");
+      assert.equal(jobs.length, 1);
+      assert.equal(jobs[0].id, originalJob.id);
+      assert.equal(jobs[0].status, "canceled");
+      assert.equal(typeof jobs[0].completedAt, "string");
+    }
   });
 
   it("updates rescue workload counters and validates rescue outcomes", async () => {
@@ -2461,7 +2715,7 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
   it("resolves rescue into queue and exposes a report-ready descriptor", async () => {
     const routing = new RoutingService();
 
-    await routing.startRescue({
+    const started = await routing.startRescue({
       conversationId: "vladimir",
       reason: "No operator answer after accept"
     }, VOLGA_CONTEXT);
@@ -2477,7 +2731,8 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(resolved.data.queueJob.action, "return_to_sla_queue");
     assert.equal(resolved.data.queueJob.conversationId, "vladimir");
     assert.equal(resolved.data.queueJob.queue, "rescue-return");
-    assert.equal(resolved.data.queueJob.status, "pending");
+    assert.equal(resolved.data.queueJob.id, started.data.schedulerJob.id);
+    assert.equal(resolved.data.queueJob.status, "canceled");
     assert.equal(resolved.data.reportEvent.eventName, "rescue.report.ready");
     assert.equal(resolved.data.reportEvent.digest, "daily_rescue");
 

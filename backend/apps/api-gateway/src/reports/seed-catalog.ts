@@ -1,6 +1,7 @@
+import { REPORT_COLUMN_OPTIONS, REPORT_METRIC_DEFINITION_VERSION } from "./report-definition.js";
 import type { ReportExportJob } from "./report.types.js";
 
-export const METRIC_DEFINITION_VERSION = "metrics/v1";
+export const METRIC_DEFINITION_VERSION = REPORT_METRIC_DEFINITION_VERSION;
 
 export const reportRows = [
   { metric: "Новые обращения", today: "486", previous: "438", delta: "+11%", status: "Рост нагрузки" },
@@ -99,13 +100,7 @@ export const rescueReportRows = [
   }
 ];
 
-export const reportColumnOptions = [
-  { id: "metric", label: "Показатель", locked: true },
-  { id: "today", label: "Текущий период" },
-  { id: "previous", label: "Сравнение" },
-  { id: "delta", label: "Динамика" },
-  { id: "status", label: "Комментарий" }
-];
+export const reportColumnOptions = REPORT_COLUMN_OPTIONS;
 
 export const exportJobFixtures: ReportExportJob[] = [
   {

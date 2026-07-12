@@ -78,6 +78,12 @@ describe("conversationApiMapper", () => {
     assert.equal(mapped[0].status, "active");
   });
 
+  it("restores persisted Rescue state after an inbox refresh", () => {
+    const rescueState = { state: "active", startedAt: 1000, deadlineAt: 241000, durationSeconds: 240 };
+    const mapped = mapApiConversation({ id: "conv-rescue", rescueState });
+    assert.deepEqual(mapped.rescue, rescueState);
+  });
+
   it("preserves message timestamps for dynamic dialog time labels", () => {
     const mapped = mapApiMessage({
       id: "m-time",
@@ -88,6 +94,52 @@ describe("conversationApiMapper", () => {
     });
 
     assert.equal(mapped.createdAt, "2026-07-02T12:00:00.000");
+  });
+
+  it("uses the immutable lifecycle journal instead of legacy event placeholders", () => {
+    const mapped = mapApiConversation({
+      id: "conv-journal",
+      name: "Journal User",
+      messages: [
+        { id: "message-1", side: "client", text: "Hello", time: "10:00" },
+        { id: "legacy-event", type: "event", text: "Legacy status", time: "10:01" }
+      ],
+      lifecycleEvents: [
+        {
+          id: "event-1",
+          eventType: "status.changed",
+          occurredAt: "2026-07-11T07:02:00.000Z",
+          actorName: "Anna",
+          reason: "Issue resolved",
+          data: { from: "active", to: "closed" }
+        }
+      ]
+    });
+
+    assert.equal(mapped.messages.some((message) => message.id === "legacy-event"), false);
+    assert.equal(mapped.messages.some((message) => message.id === "message-1"), true);
+    const lifecycleMessage = mapped.messages.find((message) => message.id === "event-1");
+    assert.equal(lifecycleMessage.type, "event");
+    assert.equal(lifecycleMessage.actor, "Anna");
+    assert.match(lifecycleMessage.text, /Issue resolved/);
+  });
+
+  it("shows routing, rescue and quality journal events in human language", () => {
+    const mapped = mapApiConversation({
+      id: "conv-human-events",
+      lifecycleEvents: [
+        { eventType: "sla.overdue", id: "sla-event", occurredAt: "2026-07-11T08:00:00.000Z" },
+        { eventType: "rescue.started", id: "rescue-event", occurredAt: "2026-07-11T08:01:00.000Z" },
+        { eventType: "quality.assessment.changed", id: "quality-event", occurredAt: "2026-07-11T08:02:00.000Z" }
+      ],
+      messages: []
+    });
+
+    assert.deepEqual(mapped.messages.map((message) => message.text), [
+      "Нарушен срок ответа",
+      "Запущено спасение диалога",
+      "Оценка качества изменена"
+    ]);
   });
 });
 
@@ -134,6 +186,91 @@ describe("useConversationInbox", () => {
 });
 
 describe("dialog operator workflow", () => {
+  it("starts Rescue through routingService data and keeps server timestamps", async () => {
+    const requests = [];
+    const toasts = [];
+    let conversations = [{ id: "conv-42", messages: [], rescue: null, status: "active" }];
+    const serverRescue = {
+      state: "active",
+      startedAt: 1_789_000_000_000,
+      deadlineAt: 1_789_000_240_000,
+      durationSeconds: 240,
+      reason: "Ручной запуск из карточки диалога",
+      nextAction: "reply_or_return_to_sla_queue",
+      source: "dialog_action_menu"
+    };
+    const actions = useDialogActions({
+      access: { canManageDialogs: true, reason: "" },
+      appendMessage: () => {},
+      applyConversationStatus: () => {},
+      attachments: [],
+      clearAttachments: () => {},
+      closedIds: new Set(),
+      composeMode: "reply",
+      draft: "",
+      isClosed: false,
+      refreshInbox: () => assert.fail("canonical refresh is not needed when the server returns the conversation"),
+      selected: conversations[0],
+      selectedStatus: "active",
+      selectedTopic: "",
+      setClosedIds: () => {},
+      setConversationItems: (updater) => {
+        conversations = updater(conversations);
+      },
+      setDraft: () => {},
+      setFilter: () => {},
+      setToast: (message) => toasts.push(message),
+      setTopics: () => {},
+      startRescueRequest: async (payload) => {
+        requests.push(payload);
+        return {
+          status: "ok",
+          data: {
+            conversation: { id: "conv-42", status: "assigned", slaTone: "danger" },
+            rescue: serverRescue
+          }
+        };
+      },
+      topics: {}
+    });
+
+    const result = await actions.handleDialogAction({ id: "rescue", title: "Запустить спасение" });
+
+    assert.deepEqual(requests, [{
+      conversationId: "conv-42",
+      reason: "Ручной запуск из карточки диалога",
+      source: "dialog_action_menu"
+    }]);
+    assert.equal(result.ok, true);
+    assert.equal(conversations[0].status, "assigned");
+    assert.equal(conversations[0].rescue, serverRescue);
+    assert.equal(conversations[0].rescue.startedAt, 1_789_000_000_000);
+    assert.equal("owner" in conversations[0].rescue, false);
+    assert.match(toasts.at(-1), /Rescue запущен/);
+  });
+
+  it("shows a clear message when Rescue cannot be started", async () => {
+    const toasts = [];
+    const actions = useDialogActions({
+      access: { canManageDialogs: true, reason: "" },
+      attachments: [],
+      closedIds: new Set(),
+      isClosed: false,
+      selected: { id: "conv-42", rescue: null, status: "active" },
+      setToast: (message) => toasts.push(message),
+      startRescueRequest: async () => ({
+        status: "error",
+        error: { code: "conversation_not_found", message: "Conversation not found" }
+      }),
+      topics: {}
+    });
+
+    const result = await actions.handleRescueStart({ id: "rescue", title: "Запустить спасение" });
+
+    assert.equal(result.ok, false);
+    assert.equal(toasts.at(-1), "Диалог не найден. Обновите список и попробуйте снова.");
+  });
+
   it("keeps topic selection internal and does not append a client-visible message", () => {
     const appendedMessages = [];
     const toasts = [];

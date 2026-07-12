@@ -1,175 +1,160 @@
 {
   "conversations": [
     {
-      "id": "vladimir",
-      "client": "Vladimir B.",
-      "channel": "Telegram",
-      "operatorId": "operator-kirill",
-      "status": "assigned",
-      "slaTone": "danger",
-      "topic": "Delivery / Status",
-      "tenantId": "tenant-volga"
-    },
-    {
-      "id": "maria",
+      "channel": "SDK",
       "client": "Maria K.",
-      "channel": "SDK",
-      "operatorId": "operator-ivan",
-      "status": "active",
-      "slaTone": "ok",
-      "topic": "Delivery / Status",
-      "tenantId": "tenant-volga"
-    },
-    {
-      "id": "alexey",
-      "client": "Alexey T.",
-      "channel": "VK",
-      "status": "queued",
+      "id": "maria",
+      "persistedStatus": "active",
+      "queueId": "SDK",
       "slaTone": "danger",
-      "topic": "Authorization / Code",
-      "tenantId": "tenant-volga"
+      "sourceChannel": "SDK",
+      "status": "assigned",
+      "tenantId": "tenant-volga",
+      "topic": "Delivery / Status",
+      "rescue": {
+        "state": "active",
+        "startedAt": 1783807722436,
+        "deadlineAt": 1783807962436,
+        "durationSeconds": 240,
+        "reason": "Ручной запуск из карточки диалога",
+        "nextAction": "reply_or_return_to_sla_queue",
+        "source": "dialog_action_menu"
+      }
     },
     {
-      "id": "closed-dialog",
-      "client": "Closed Client",
-      "channel": "SDK",
-      "operatorId": "operator-elena",
-      "status": "closed",
+      "channel": "Telegram",
+      "client": "Dmitry S.",
+      "id": "dmitry",
+      "persistedStatus": "waiting_operator",
+      "queueId": "Telegram",
+      "slaTone": "ok",
+      "sourceChannel": "Telegram",
+      "status": "queued",
+      "tenantId": "tenant-volga",
+      "topic": "Delivery / Address"
+    },
+    {
+      "channel": "MAX",
+      "client": "Irina P.",
+      "id": "irina",
+      "persistedStatus": "closed",
+      "queueId": "MAX",
       "slaTone": "closed",
-      "topic": "Payment / Refund",
+      "sourceChannel": "MAX",
+      "status": "closed",
+      "tenantId": "tenant-volga",
+      "topic": "Payment / Refund"
+    },
+    {
+      "channel": "VK",
+      "client": "Alexey T.",
+      "id": "alexey",
+      "persistedStatus": "waiting_client",
+      "queueId": "VK",
+      "slaTone": "hold",
+      "sourceChannel": "VK",
+      "status": "queued",
+      "tenantId": "tenant-volga",
+      "topic": "Authorization / Code"
+    },
+    {
+      "channel": "SDK",
+      "client": "Olga L.",
+      "id": "olga",
+      "persistedStatus": "active",
+      "queueId": "SDK",
+      "slaTone": "warn",
+      "sourceChannel": "SDK",
+      "status": "active",
+      "tenantId": "tenant-volga",
+      "topic": "Payment / Refund"
+    },
+    {
+      "channel": "Telegram",
+      "client": "Vladimir B.",
+      "id": "vladimir",
+      "persistedStatus": "queued",
+      "queueId": "Telegram",
+      "slaTone": "danger",
+      "sourceChannel": "Telegram",
+      "status": "queued",
       "tenantId": "tenant-volga"
     }
   ],
-  "jobs": [],
+  "jobs": [
+    {
+      "id": "job_rescue_return_a93d1731-8926-4622-bd16-6b6d5020ea21",
+      "action": "return_to_sla_queue",
+      "conversationId": "maria",
+      "queue": "rescue-return",
+      "runAt": 1783807962436,
+      "status": "pending",
+      "tenantId": "tenant-volga"
+    }
+  ],
   "operatorCapacities": [],
   "operators": [
     {
-      "id": "operator-ivan",
-      "name": "Ivan P.",
-      "status": "online",
-      "chats": 7,
-      "limit": 12,
-      "avgFirstResponseSeconds": 78,
-      "slaPercent": 96,
-      "rescueActive": 1,
-      "channels": [
-        "SDK",
-        "Telegram"
-      ],
-      "tenantId": "tenant-volga"
-    },
-    {
-      "id": "operator-anna",
-      "name": "Anna R.",
-      "status": "online",
-      "chats": 10,
-      "limit": 12,
-      "avgFirstResponseSeconds": 102,
-      "slaPercent": 91,
-      "rescueActive": 0,
-      "channels": [
-        "MAX",
-        "VK"
-      ],
-      "tenantId": "tenant-volga"
-    },
-    {
-      "id": "operator-kirill",
-      "name": "Kirill M.",
-      "status": "break",
-      "chats": 3,
-      "limit": 8,
-      "avgFirstResponseSeconds": 131,
-      "slaPercent": 88,
-      "rescueActive": 1,
-      "channels": [
-        "Telegram"
-      ],
-      "tenantId": "tenant-volga"
-    },
-    {
-      "id": "operator-elena",
-      "name": "Elena S.",
-      "status": "online",
-      "chats": 5,
-      "limit": 10,
-      "avgFirstResponseSeconds": 65,
-      "slaPercent": 98,
-      "rescueActive": 0,
-      "channels": [
-        "SDK"
-      ],
-      "tenantId": "tenant-volga"
-    },
-    {
-      "id": "operator-oleg",
-      "name": "Oleg N.",
-      "status": "offline",
+      "availability": {
+        "online": null,
+        "source": "not_recorded"
+      },
+      "avgFirstResponseSeconds": 0,
+      "channels": [],
       "chats": 0,
-      "limit": 8,
-      "avgFirstResponseSeconds": 200,
-      "slaPercent": 82,
+      "id": "usr-volga-admin",
+      "limit": 0,
+      "metricSources": {
+        "avgFirstResponseSeconds": "not_recorded",
+        "chats": "canonical_conversations",
+        "limit": "not_recorded",
+        "rescueActive": "not_recorded",
+        "slaPercent": "canonical_conversations"
+      },
+      "name": "Sergey Markin",
+      "queueIds": [],
       "rescueActive": 0,
-      "channels": [
-        "VK"
-      ],
-      "tenantId": "tenant-volga"
-    },
-    {
-      "id": "operator-full",
-      "name": "Full VK Operator",
-      "status": "online",
-      "chats": 8,
-      "limit": 8,
-      "avgFirstResponseSeconds": 144,
-      "slaPercent": 83,
-      "rescueActive": 2,
-      "channels": [
-        "VK"
-      ],
+      "slaPercent": 0,
+      "status": "offline",
       "tenantId": "tenant-volga"
     }
   ],
   "queueMemberships": [],
   "queues": [
     {
-      "channel": "SDK",
-      "active": 42,
-      "waiting": 8,
-      "overdue": 2,
-      "limit": 12,
-      "health": 82,
-      "tenantId": "tenant-volga"
-    },
-    {
-      "channel": "Telegram",
-      "active": 35,
-      "waiting": 11,
-      "overdue": 3,
-      "limit": 8,
-      "health": 74,
-      "tenantId": "tenant-volga"
-    },
-    {
-      "channel": "MAX",
-      "active": 24,
-      "waiting": 5,
-      "overdue": 1,
-      "limit": 8,
-      "health": 89,
-      "tenantId": "tenant-volga"
-    },
-    {
-      "channel": "VK",
-      "active": 25,
-      "waiting": 9,
-      "overdue": 4,
-      "limit": 8,
-      "health": 68,
-      "tenantId": "tenant-volga"
+      "active": 0,
+      "channel": "queue-pilot-sdk-smoke",
+      "health": 0,
+      "limit": 0,
+      "memberIds": [],
+      "metricSources": {
+        "active": "canonical_conversations",
+        "health": "canonical_conversations",
+        "limit": "not_recorded",
+        "overdue": "canonical_conversations",
+        "waiting": "canonical_conversations"
+      },
+      "name": "Pilot SDK smoke",
+      "overdue": 0,
+      "queueId": "queue-pilot-sdk-smoke",
+      "tenantId": "tenant-volga",
+      "transportChannels": [],
+      "waiting": 0
     }
   ],
-  "routingAnalyticsRows": [],
+  "routingAnalyticsRows": [
+    {
+      "channel": "SDK",
+      "conversationId": "maria",
+      "eventKind": "rescue",
+      "fromOperatorId": null,
+      "id": "analytics_rescue_9beb3bb0-4f61-47bc-85a0-ccc1cc95f8bd",
+      "occurredAt": "2026-07-11T22:08:42.436Z",
+      "source": "dialog_action_menu",
+      "tenantId": "tenant-volga",
+      "toOperatorId": null
+    }
+  ],
   "rescueReportRows": [
     {
       "conversationId": "rescue-vk-queue",

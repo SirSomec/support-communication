@@ -12,6 +12,14 @@ function readJson(relativePath) {
 }
 
 describe("product release gate", () => {
+  it("keeps the frontend API proxy resilient to an API container restart", () => {
+    const nginx = readFileSync(join(root, "docker/nginx.conf"), "utf8");
+
+    assert.match(nginx, /resolver 127\.0\.0\.11 ipv6=off valid=10s/);
+    assert.match(nginx, /set \$api_gateway_upstream api-gateway:4100/);
+    assert.match(nginx, /proxy_pass http:\/\/\$api_gateway_upstream\$request_uri/);
+  });
+
   it("exposes a single root command for the Phase 10 release gate", () => {
     const packageJson = readJson("package.json");
 

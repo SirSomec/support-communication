@@ -9,6 +9,7 @@ import { redactExportedDescriptor } from "../packages/envelope/dist/index.js";
 import { createRuntimeOutboxHandlers, runOutboxWorker } from "../apps/outbox-worker/dist/index.js";
 import { OperationsReadinessService } from "../apps/api-gateway/dist/operations/operations-readiness.service.js";
 import { OperationsRepository } from "../apps/api-gateway/dist/operations/operations.repository.js";
+import { bootstrapOperationsState } from "../apps/api-gateway/dist/operations/seed.js";
 import { ReportService } from "../apps/api-gateway/dist/reports/report.service.js";
 import { ReportRepository } from "../apps/api-gateway/dist/reports/report.repository.js";
 import { exportJobFixtures } from "../apps/api-gateway/dist/reports/seed-catalog.js";
@@ -240,9 +241,16 @@ async function runScannerSmoke() {
 
 async function runExportSmoke() {
   const reportRepository = ReportRepository.inMemory();
-  reportRepository.saveExportJob(structuredClone(exportJobFixtures.find((job) => job.id === "export-2418")));
-  const reportDescriptor = await new ReportService(reportRepository).getExportFileDescriptor("export-2418", { canDownload: true });
-  const restoreDescriptor = await new OperationsReadinessService(OperationsRepository.default()).queueRestoreCheck({
+  reportRepository.saveExportJob({
+    ...structuredClone(exportJobFixtures.find((job) => job.id === "export-2418")),
+    tenantId: "tenant-volga"
+  });
+  const reportDescriptor = await new ReportService(reportRepository).getExportFileDescriptor("export-2418", {
+    canDownload: true,
+    tenantId: "tenant-volga"
+  });
+  const operationsRepository = OperationsRepository.inMemory(bootstrapOperationsState());
+  const restoreDescriptor = await new OperationsReadinessService(operationsRepository).queueRestoreCheck({
     confirmed: true,
     drillId: "backup-postgres-nightly",
     idempotencyKey: "restore-redaction-runtime-smoke",

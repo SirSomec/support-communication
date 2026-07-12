@@ -15,8 +15,14 @@ import {
   type TemplateRecord,
   type TemplateVersionRecord
 } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
+import { bootstrapWorkspaceState } from "../apps/api-gateway/src/workspace/seed.ts";
 
 describe("Prisma-backed workspace repository contracts", () => {
+  it("keeps repository defaults empty and applies local fixtures only when explicitly injected", async () => {
+    assert.deepEqual(await WorkspaceRepository.inMemory().listKnowledgeArticles(), []);
+    assert.deepEqual(await WorkspaceRepository.inMemory().listTemplates(), []);
+    assert.ok((await WorkspaceRepository.inMemory(bootstrapWorkspaceState()).listKnowledgeArticles()).length > 0);
+  });
   it("persists workspace file metadata through Prisma delegates", async () => {
     const { client } = createFakePrismaWorkspaceClient();
     const repository = WorkspaceRepository.prisma({ client });
@@ -34,7 +40,8 @@ describe("Prisma-backed workspace repository contracts", () => {
       scanCheckedAt: "2026-06-28T12:20:00.000Z",
       scanReason: "Queued after upload finalize",
       scanVerdict: "pending",
-      scanner: "clamav"
+      scanner: "clamav",
+      tenantId: "tenant-volga"
     } as FileRecord & {
       scanCheckedAt: string;
       scanReason: string;
@@ -237,7 +244,8 @@ describe("Prisma-backed workspace repository contracts", () => {
       objectKey: "tenant-volga/file_bootstrap_001/bootstrap.txt",
       scanState: "pending",
       sizeBytes: 120,
-      storageState: "upload_descriptor_ready"
+      storageState: "upload_descriptor_ready",
+      tenantId: "tenant-volga"
     });
     const refetched = await WorkspaceRepository.default().findFile("file_bootstrap_001");
     assert.equal(refetched?.fileName, "bootstrap.txt");
@@ -566,6 +574,7 @@ describe("Prisma-backed workspace repository contracts", () => {
       text: "We are checking your delivery status.",
       title: "Delivery status",
       topic: "Delivery",
+      tenantId: "tenant-volga",
       updated: "2026-06-29T10:30:00.000Z",
       usage: 4,
       version: 2
@@ -884,7 +893,8 @@ describe("Prisma-backed workspace repository contracts", () => {
       objectKey: "tenant-volga/file_empty_checksum/empty.txt",
       scanState: "scan_pending",
       sizeBytes: 1,
-      storageState: "uploaded"
+      storageState: "uploaded",
+      tenantId: "tenant-volga"
     });
 
     const refetched = await repository.findFile("file_empty_checksum");
@@ -933,11 +943,11 @@ describe("Prisma-backed workspace repository contracts", () => {
     }]);
   });
 
-  it("does not infer tenant ownership from opaque object keys", async () => {
+  it("requires explicit tenant ownership for opaque object keys", async () => {
     const { client } = createFakePrismaWorkspaceClient();
     const repository = WorkspaceRepository.prisma({ client });
 
-    await repository.saveFile({
+    const missingTenant = {
       auditId: "evt_file_opaque_tenant",
       channel: "SDK",
       fileId: "file_opaque_tenant",
@@ -947,7 +957,10 @@ describe("Prisma-backed workspace repository contracts", () => {
       scanState: "pending",
       sizeBytes: 1,
       storageState: "upload_descriptor_ready"
-    });
+    };
+
+    await assert.rejects(() => repository.saveFile(missingTenant), /workspace_tenant_id_required/);
+    await repository.saveFile({ ...missingTenant, tenantId: "tenant-volga" });
 
     assert.equal(client.calls.workspaceFileUpserts[0].create.tenantId, "tenant-volga");
   });
@@ -1793,6 +1806,7 @@ function knowledgeArticle(input: {
     id: input.id,
     owner: "Support Ops",
     status: "draft",
+    tenantId: "tenant-volga",
     title: input.title,
     topics: ["Delivery"],
     updated: "2026-06-29T10:00:00.000Z",

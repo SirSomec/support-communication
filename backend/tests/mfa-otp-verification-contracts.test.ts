@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { AuthService } from "../apps/api-gateway/src/identity/auth.service.js";
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.js";
+import { createSeededIdentityRepository } from "../apps/api-gateway/src/identity/seed.js";
 import { createMfaOtpRuntime, createMfaOtpRuntimeFromEnv } from "../apps/api-gateway/src/identity/mfa-otp.js";
 
 const backendRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -30,7 +31,7 @@ describe("MFA OTP verification", () => {
   it("denies an arbitrary non-empty OTP and issues a session only for the delivered code", async () => {
     const delivered: Array<{ challengeId: string; email: string; otp: string }> = [];
     const auth = new AuthService(
-      IdentityRepository.inMemory(),
+      createSeededIdentityRepository(),
       createMfaOtpRuntime({
         delivery: {
           async send(input) {

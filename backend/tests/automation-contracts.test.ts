@@ -25,6 +25,7 @@ describe("automation bot scenario contracts", () => {
 
     assert.equal(created.status, "ok");
     assert.equal(created.data.scenario.id, "bot-draft-1");
+    assert.equal(created.data.scenario.status, "draft");
 
     const updated = await automation.updateBotScenario("bot-draft-1", {
       name: "Draft bot updated"
@@ -32,6 +33,22 @@ describe("automation bot scenario contracts", () => {
 
     assert.equal(updated.status, "ok");
     assert.equal(updated.data.scenario.name, "Draft bot updated");
+  });
+
+  it("normalizes legacy localized draft statuses before persistence", async () => {
+    const automation = new AutomationService();
+
+    const created = await automation.createBotScenario({
+      id: "bot-localized-draft",
+      name: "Localized draft",
+      status: "\u0427\u0435\u0440\u043d\u043e\u0432\u0438\u043a",
+      channels: ["SDK"],
+      flowNodes: [{ id: "start", type: "message", title: "Start" }],
+      flowEdges: []
+    }, { tenantId: "tenant-volga" });
+
+    assert.equal(created.status, "ok");
+    assert.equal(created.data.scenario.status, "draft");
   });
 
   it("scopes bot scenario workspace and draft updates to the tenant context", async () => {

@@ -8,6 +8,7 @@ import { SettingsRulesService } from "../apps/api-gateway/src/identity/settings-
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
 import { PermissionService } from "../apps/api-gateway/src/identity/permission.service.ts";
 import { permissionRoles, serviceAdminSession } from "../apps/api-gateway/src/identity/seed-catalog.ts";
+import { createSeededIdentityRepository } from "../apps/api-gateway/src/identity/seed.ts";
 
 function telegramFetchOk(username = "settings_bot") {
   return async (_input: string) => ({
@@ -46,7 +47,7 @@ describe("settings runtime contracts", () => {
   });
 
   it("manages tenant employee settings with role, group, channel and reset audit evidence", async () => {
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
     const settings = new SettingsEmployeeService(repository);
 
     const workspace = await settings.fetchEmployees({ tenantId: "tenant-northstar" });
@@ -63,6 +64,23 @@ describe("settings runtime contracts", () => {
     }, { tenantId: "tenant-northstar" });
     assert.equal(updated.status, "ok");
     assert.deepEqual(updated.data.employee.channels, ["Telegram", "MAX"]);
+
+    const restartedSettings = new SettingsEmployeeService(repository);
+    const afterRestart = await restartedSettings.fetchEmployees({ tenantId: "tenant-northstar" });
+    const persistedEmployee = afterRestart.data.employees.find((employee) => employee.id === "usr-ns-agent");
+    assert.equal(persistedEmployee.groupId, "group-vip");
+    assert.equal(persistedEmployee.chatLimit, 9);
+    assert.deepEqual(persistedEmployee.channels, ["Telegram", "MAX"]);
+
+    const createdGroup = await restartedSettings.createGroup({
+      channels: ["SDK"],
+      memberIds: ["usr-ns-agent"],
+      name: "Payment support",
+      scope: "Payments"
+    }, { tenantId: "tenant-northstar" });
+    const afterGroupRestart = new SettingsEmployeeService(repository);
+    const persistedGroups = await afterGroupRestart.fetchGroups({ tenantId: "tenant-northstar" });
+    assert.ok(persistedGroups.data.groups.some((group) => group.id === createdGroup.data.group.id && group.name === "Payment support"));
   });
 
   it("manages settings rules with critical confirmation and impact tests", async () => {
@@ -113,17 +131,17 @@ describe("settings runtime contracts", () => {
     assert.ok(snapshot.data.services.some((service) => service.id === "settingsService"));
   });
 
-  it("guards settings management routes with service-admin permissions", () => {
+  it("allows tenant administrators and service administrators to access settings routes", () => {
     const source = readFileSync(new URL("../apps/api-gateway/src/identity/settings.controller.ts", import.meta.url), "utf8");
 
-    assert.match(source, /@UseGuards\(ServiceAdminSessionGuard\)[\s\S]*@Controller\("settings"\)/);
-    assert.match(source, /@Get\("employees"\)[\s\S]*@RequireServiceAdminAction\("settings\.read"\)/);
-    assert.match(source, /@Patch\("rules\/:ruleId"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)/);
+    assert.match(source, /@UseGuards\(TenantOperatorOrServiceAdminGuard\)[\s\S]*@Controller\("settings"\)/);
+    assert.match(source, /@Get\("employees"\)[\s\S]*@RequireTenantOperatorPermission\("settings\.read"\)[\s\S]*@RequireServiceAdminAction\("settings\.read"\)/);
+    assert.match(source, /@Patch\("rules\/:ruleId"\)[\s\S]*@RequireTenantOperatorPermission\("settings\.manage"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)/);
   });
 
   it("grants seeded service-admin settings permissions through the active RBAC policy", async () => {
     const serviceAdminRole = permissionRoles.find((role) => role.key === serviceAdminSession.role);
-    const permissions = new PermissionService(IdentityRepository.inMemory());
+    const permissions = new PermissionService(createSeededIdentityRepository());
 
     assert.ok(serviceAdminSession.allowedActions.includes("settings.read"));
     assert.ok(serviceAdminSession.allowedActions.includes("settings.manage"));

@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
+import {
+  AutomationRepository,
+  createEmptyAutomationState
+} from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { AutomationService } from "../apps/api-gateway/src/automation/automation.service.ts";
 import { runProactiveDeliveryWorkerOnce } from "../apps/api-gateway/src/automation/proactive-delivery.worker.ts";
+import { ProactiveExposureRepository } from "../apps/api-gateway/src/automation/proactive-exposure.repository.ts";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
+import { IntegrationRepository } from "../apps/api-gateway/src/integrations/integration.repository.ts";
 
 describe("automation proactive visitor workspace contracts", () => {
   beforeEach(() => {
@@ -12,10 +17,14 @@ describe("automation proactive visitor workspace contracts", () => {
 
   afterEach(() => {
     AutomationRepository.clearDefault();
+    ProactiveExposureRepository.clearDefault();
   });
 
   it("returns tenant-scoped visitor workspace payload", async () => {
-    const automation = new AutomationService();
+    const automation = new AutomationService(AutomationRepository.inMemory({
+      ...createEmptyAutomationState(),
+      activeVisitors: [{ id: "visitor-volga", tenantId: "tenant-volga" }]
+    }));
 
     const volga = await automation.fetchVisitorWorkspace({ tenantId: "tenant-volga" });
     const ladoga = await automation.fetchVisitorWorkspace({ tenantId: "tenant-ladoga" });
@@ -72,7 +81,7 @@ describe("automation proactive visitor workspace contracts", () => {
   it("queues each eligible active visitor once with delivery evidence", async () => {
     const automationRepository = AutomationRepository.inMemory({
       activeVisitors: [{
-        channel: "Telegram",
+        channel: "SDK",
         id: "client-42",
         message: "Delivery slot is open today.",
         phone: "+7 900 000-00-00",
@@ -110,7 +119,7 @@ describe("automation proactive visitor workspace contracts", () => {
       }],
       proactiveRules: [{
         activeVariant: "B",
-        channels: ["Telegram"],
+        channels: ["SDK"],
         id: "rule-checkout",
         segment: "checkout",
         status: "enabled",
@@ -122,10 +131,17 @@ describe("automation proactive visitor workspace contracts", () => {
       workspaceRuntimeMetrics: []
     });
     const conversationRepository = ConversationRepository.inMemory();
+    const exposureRepository = ProactiveExposureRepository.inMemory();
+    const integrationRepository = IntegrationRepository.inMemory();
+    await integrationRepository.upsertSdkVisitorPresence({ channelConnectionId: "conn-sdk", expiresAt: "2026-06-30T08:32:00.000Z",
+      lastSeenAt: "2026-06-30T08:29:00.000Z", pagePath: "/checkout", pageUrl: "https://example.test/checkout",
+      referrer: null, sessionKeyHash: "session-42", subjectId: "client-42", tenantId: "tenant-demo" });
     const input = {
       activeVariants: ["A", "B"],
       automationRepository,
       conversationRepository,
+      exposureRepository,
+      integrationRepository,
       evaluatedAt: "2026-06-30T08:30:00.000Z",
       limit: 10,
       traceId: "trc_proactive_worker_contract"
@@ -137,20 +153,8 @@ describe("automation proactive visitor workspace contracts", () => {
       ...input,
       evaluatedAt: "2026-06-30T08:31:00.000Z"
     });
-    const descriptors = await conversationRepository.listOutboundDescriptors({
-      idempotencyKey: "proactive-delivery:tenant-demo:rule-checkout:client-42",
-      tenantId: "tenant-demo"
-    });
-    const outboxEvents = await conversationRepository.listOutboxEvents();
-    const attempts = await automationRepository.listProactiveDeliveryAttemptsAsync({ tenantId: "tenant-demo" });
-    const attributions = await automationRepository.listProactiveDeliveryAttributionsAsync({ tenantId: "tenant-demo" });
-    const frequencyCaps = await automationRepository.listProactiveFrequencyCapsAsync({
-      ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
-    });
-    const idempotencyRecord = await automationRepository.findProactiveDeliveryIdempotencyKeyAsync(
-      "proactive-delivery:tenant-demo:rule-checkout:client-42"
-    );
+    const exposures = await exposureRepository.listPendingForSession("tenant-demo",
+      (await integrationRepository.listLiveSdkVisitorPresence({ at: input.evaluatedAt }))[0]!.id);
 
     assert.deepEqual(first, {
       conflicted: 0,
@@ -176,20 +180,13 @@ describe("automation proactive visitor workspace contracts", () => {
       scanned: 1,
       skipped: 0
     });
-    assert.equal(descriptors.length, 1);
-    assert.equal(descriptors[0].id, "proactive_rule_checkout_tenant_demo_client_42");
-    assert.equal(outboxEvents.filter((event) => event.aggregateId === descriptors[0].id).length, 1);
-    assert.equal(attempts.length, 1);
-    assert.equal(attempts[0].status, "queued");
-    assert.equal(attempts[0].descriptorId, descriptors[0].id);
-    assert.equal(attributions.length, 1);
-    assert.equal(attributions[0].descriptorId, descriptors[0].id);
-    assert.equal(attributions[0].variant, "A");
-    assert.equal(frequencyCaps[0].used, 1);
-    assert.equal(idempotencyRecord?.fingerprint, descriptors[0].requestFingerprint);
+    assert.equal(exposures.length, 1);
+    assert.equal(exposures[0].status, "planned");
+    assert.equal(exposures[0].variant, "A");
+    assert.equal(exposures[0].presenceSessionId.length > 0, true);
   });
 
-  it("uses active conversation state when the Prisma-shaped automation state has no visitor rows", async () => {
+  it("uses only live SDK presence and ignores stale or disconnected sessions", async () => {
     const baseState = AutomationRepository.inMemory().readState();
     const automationRepository = AutomationRepository.inMemory({
       ...baseState,
@@ -227,46 +224,29 @@ describe("automation proactive visitor workspace contracts", () => {
       }]
     });
     const conversationRepository = ConversationRepository.inMemory();
-    const [template] = await conversationRepository.listConversations();
-    assert.ok(template);
-    await conversationRepository.saveConversation({
-      ...template,
-      channel: "SDK",
-      id: "conversation-stale-visitor",
-      phone: "visitor-stale",
-      status: "active",
-      tags: ["segment:checkout"],
-      tenantId: "tenant-conversation-fallback",
-      topic: "Checkout",
-      updatedAt: "2026-06-30T07:00:00.000Z"
-    });
-    await conversationRepository.saveConversation({
-      ...template,
-      channel: "SDK",
-      id: "conversation-active-visitor",
-      phone: "visitor-42",
-      status: "active",
-      tags: ["segment:checkout"],
-      tenantId: "tenant-conversation-fallback",
-      topic: "Checkout",
-      updatedAt: "2026-06-30T08:29:00.000Z"
-    });
+    const exposureRepository = ProactiveExposureRepository.inMemory();
+    const integrationRepository = IntegrationRepository.inMemory();
+    await integrationRepository.upsertSdkVisitorPresence({ channelConnectionId: "conn-sdk", expiresAt: "2026-06-30T08:31:00.000Z",
+      lastSeenAt: "2026-06-30T08:29:00.000Z", pagePath: "/checkout", pageUrl: null, referrer: null,
+      sessionKeyHash: "active", subjectId: "visitor-42", tenantId: "tenant-conversation-fallback" });
+    await integrationRepository.upsertSdkVisitorPresence({ channelConnectionId: "conn-sdk", expiresAt: "2026-06-30T08:00:00.000Z",
+      lastSeenAt: "2026-06-30T07:59:00.000Z", pagePath: "/checkout", pageUrl: null, referrer: null,
+      sessionKeyHash: "stale", subjectId: "visitor-stale", tenantId: "tenant-conversation-fallback" });
 
     const result = await runProactiveDeliveryWorkerOnce({
       automationRepository,
       conversationRepository,
+      exposureRepository,
+      integrationRepository,
       evaluatedAt: "2026-06-30T08:30:00.000Z",
       limit: 50,
       traceId: "trc_proactive_conversation_fallback",
-      visitorTtlMs: 15 * 60 * 1000
     });
-    const descriptors = await conversationRepository.listOutboundDescriptors({
-      idempotencyKey: "proactive-delivery:tenant-conversation-fallback:rule-conversation-fallback:conversation-active-visitor",
-      tenantId: "tenant-conversation-fallback"
-    });
+    const livePresence = await integrationRepository.listLiveSdkVisitorPresence({ at: "2026-06-30T08:30:00.000Z" });
+    const exposures = await exposureRepository.listPendingForSession("tenant-conversation-fallback", livePresence[0]!.id);
 
     assert.equal(result.queued, 1);
     assert.equal(result.failed, 0);
-    assert.equal(descriptors.length, 1);
+    assert.equal(exposures.length, 1);
   });
 });

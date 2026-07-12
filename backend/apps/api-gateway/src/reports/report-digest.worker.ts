@@ -84,7 +84,7 @@ export async function queueScheduledDigestExportJob(input: ScheduledDigestExport
     idempotencyKey: scheduledDigestExportIdempotencyKey(descriptor),
     period: descriptor.periodKey,
     reportType: descriptor.reportType
-  });
+  }, { tenantId: descriptor.tenantId });
   const persistedDescriptor = await input.reportRepository.saveScheduledDigestDescriptorAsync({
     ...descriptor,
     status: exportEnvelope.status === "ok" ? "completed" : "failed",

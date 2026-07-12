@@ -17,7 +17,7 @@ export function useDialogQueueFilters({ conversationItems, topics }) {
       .filter((conversation) => {
         const topic = topics[conversation.id] ?? "";
         const hasInternalComment = conversation.messages.some((message) => message.type === "internal");
-        const matchesQuery = `${conversation.name} ${conversation.phone} ${conversation.preview} ${conversation.channel} ${topic} ${conversation.status}`
+        const matchesQuery = `${conversation.name} ${conversation.phone} ${conversation.preview} ${conversation.channel} ${conversation.queueId ?? ""} ${topic} ${conversation.status}`
           .toLowerCase()
           .includes(query.toLowerCase());
         const matchesFilter =
@@ -28,6 +28,7 @@ export function useDialogQueueFilters({ conversationItems, topics }) {
           (filter === "quality" && conversation.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))) ||
           filter === "all";
         const matchesChannel = queueFilters.channel === "all" || conversation.channel === queueFilters.channel;
+        const matchesQueue = queueFilters.queueId === "all" || conversation.queueId === queueFilters.queueId;
         const matchesTopic =
           queueFilters.topic === "all" ||
           (queueFilters.topic === "none" && !topic) ||
@@ -35,7 +36,7 @@ export function useDialogQueueFilters({ conversationItems, topics }) {
         const matchesStatus = queueFilters.status === "all" || conversation.status === queueFilters.status;
         const matchesInternal = !queueFilters.onlyInternal || hasInternalComment;
 
-        return matchesQuery && matchesFilter && matchesChannel && matchesTopic && matchesStatus && matchesInternal;
+        return matchesQuery && matchesFilter && matchesChannel && matchesQueue && matchesTopic && matchesStatus && matchesInternal;
       })
       .sort((left, right) => {
         if (queueFilters.sort === "sla") {

@@ -5,9 +5,16 @@ export type LiveReportTone = "danger" | "ok" | "warn";
 
 export type LiveReportMessage = ConversationMessage;
 
+export interface LiveReportLifecycleEvent {
+  data?: Record<string, unknown>;
+  eventType: string;
+  occurredAt: string;
+}
+
 export interface LiveReportConversation extends Pick<ConversationRecord, "channel" | "messages" | "slaTone" | "status" | "updatedAt"> {
   closedAt?: string;
   createdAt?: string;
+  lifecycleEvents?: LiveReportLifecycleEvent[];
 }
 
 export interface LiveReportWorkspaceOptions {
@@ -198,6 +205,9 @@ function startOfDay(timestamp: number, offsetMinutes: number): number {
 }
 
 function toConversationFacts(conversation: LiveReportConversation): ConversationFacts {
+  if (conversation.lifecycleEvents?.length) {
+    return lifecycleConversationFacts(conversation);
+  }
   const messages = conversation.messages
     .filter(isReportMessage)
     .map((message) => ({ message, timestamp: optionalTimestamp(message.createdAt) }))
@@ -219,6 +229,31 @@ function toConversationFacts(conversation: LiveReportConversation): Conversation
     slaViolated: SLA_VIOLATION_TONES.has(conversation.slaTone.trim().toLocaleLowerCase("en-US")),
     ...(startedAt === undefined ? {} : { startedAt })
   };
+}
+
+function lifecycleConversationFacts(conversation: LiveReportConversation): ConversationFacts {
+  const events = [...(conversation.lifecycleEvents ?? [])]
+    .map((event) => ({ event, timestamp: optionalTimestamp(event.occurredAt) }))
+    .filter((item): item is typeof item & { timestamp: number } => item.timestamp !== undefined)
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const created = events.find(({ event }) => event.eventType === "conversation.created");
+  const firstClient = events.find(({ event }) => event.eventType === "message.received");
+  const firstAgent = firstClient === undefined
+    ? undefined
+    : events.find(({ event, timestamp }) => event.eventType === "message.sent" && timestamp >= firstClient.timestamp);
+  const closed = events.find(({ event }) => event.eventType === "status.changed" && isClosedStatus(event.data?.toStatus));
+
+  return {
+    channel: conversation.channel.trim() || "Unknown channel",
+    ...(closed ? { closedAt: closed.timestamp } : {}),
+    ...(firstClient && firstAgent ? { firstResponseSeconds: Math.max(0, (firstAgent.timestamp - firstClient.timestamp) / 1_000) } : {}),
+    slaViolated: events.some(({ event }) => event.eventType === "sla.overdue"),
+    ...(created ? { startedAt: created.timestamp } : {})
+  };
+}
+
+function isClosedStatus(value: unknown): boolean {
+  return typeof value === "string" && CLOSED_STATUSES.has(value.trim().toLocaleLowerCase("ru-RU"));
 }
 
 function isReportMessage(message: ConversationMessage): message is ConversationMessage & { side: "agent" | "client" } {

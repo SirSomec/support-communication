@@ -18,8 +18,16 @@ export class ReportController {
   @ApiOkResponse({ description: "Report workspace read model envelope" })
   fetchReportWorkspace(@Query() query: {
     channel?: string;
+    operatorId?: string;
+    outcome?: string;
     period?: string;
+    queueId?: string;
+    resolutionOutcome?: string;
     reportType?: string;
+    status?: string;
+    teamId?: string;
+    timezoneOffsetMinutes?: string;
+    topic?: string;
   }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) {
     return this.reportService.fetchReportWorkspace(query, reportContextFromServiceAdminRequest(request));
   }
@@ -54,7 +62,7 @@ export class ReportController {
   }
 
   @Post("templates")
-  @RequireTenantOperatorPermission("reports.read")
+  @RequireTenantOperatorPermission("reports.write")
   @RequireServiceAdminAction("reports.write")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "Saved report template envelope" })

@@ -1,14 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import type { RealtimeEvent } from "../conversation/conversation.repository.js";
+import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
 import type { RescueReportRow, RoutingConversation, RoutingOperator, RoutingQueue, RoutingRescueState } from "./routing.types.js";
+import { CanonicalRoutingConversationRepository, type CanonicalRoutingConversation } from "./canonical-routing-conversation.repository.js";
+import { CanonicalRoutingWorkloadAdapter } from "./canonical-routing-workload.adapter.js";
 import {
   RoutingRepository,
   type OperatorCapacityRecord,
   type QueueMembershipRecord,
   type RoutingAnalyticsRow,
   type RoutingJobDescriptor,
-  type RoutingRuleRecord
+  type RoutingLifecycleEvent,
+  type RoutingRuleRecord,
+  type RoutingState
 } from "./routing.repository.js";
 
 const ROUTING_SERVICE = "routingService";
@@ -86,6 +92,9 @@ interface RescueReportFilters {
 }
 
 export interface RoutingRequestContext {
+  actorId?: string;
+  actorName?: string;
+  actorType?: "operator" | "service_admin";
   tenantId?: string;
 }
 
@@ -95,7 +104,12 @@ export class RoutingService {
   private queues: RoutingQueue[];
   private rescueReportRows: RescueReportRow[];
 
-  constructor(private readonly routingRepository = RoutingRepository.default()) {
+  constructor(
+    private readonly routingRepository = RoutingRepository.default(),
+    private readonly canonicalWorkload?: CanonicalRoutingWorkloadAdapter,
+    private readonly canonicalConversations?: CanonicalRoutingConversationRepository,
+    private readonly canonicalTeams?: TeamDirectoryRepository
+  ) {
     const state = routingRepository.readState();
     this.conversations = clone(state.conversations);
     this.operators = clone(state.operators);
@@ -110,14 +124,21 @@ export class RoutingService {
     }
 
     const channel = normalizeChannel(filters.channel);
-    const queues = this.filterQueues(channel, tenantId);
+    const canonical = this.canonicalWorkload ? await this.canonicalWorkload.readWorkload(tenantId) : null;
+    const queues = canonical
+      ? canonical.queues.filter((queue) => !channel || queue.queueId === channel || queue.transportChannels.includes(channel))
+      : this.filterQueues(channel, tenantId);
     const memberships = await this.listActiveQueueMemberships(channel, tenantId);
     const capacities = await this.listOperatorCapacities(channel, tenantId);
     const routingPolicy = await this.resolveRoutingPolicy(channel, tenantId);
     const routingAnalyticsRows = await this.routingRepository.listRoutingAnalyticsRows({ tenantId });
-    const operators = this.operators
-      .filter((operator) => this.operatorBelongsToTenant(operator, tenantId))
-      .filter((operator) => this.operatorCanAccessChannel(operator, channel, memberships))
+    const visibleQueueIds = new Set(queues.map((queue) => queue.channel));
+    const operatorSource = canonical
+      ? canonical.operators.filter((operator) => !channel || operator.queueIds.some((queueId) => visibleQueueIds.has(queueId)))
+      : this.operators
+        .filter((operator) => this.operatorBelongsToTenant(operator, tenantId))
+        .filter((operator) => this.operatorCanAccessChannel(operator, channel, memberships));
+    const operators = operatorSource
       .map((operator) => operatorProjection(
         operator,
         channel,
@@ -137,6 +158,11 @@ export class RoutingService {
         refreshedAt: new Date().toISOString(),
         routingAnalytics: routingAnalyticsProjection(routingAnalyticsRows, channel, tenantId),
         routingPolicy,
+        dataQuality: canonical ? {
+          canonical: true,
+          operatorPresence: "not_recorded",
+          queueMetrics: "canonical_conversations"
+        } : { canonical: false },
         totals: {
           activeChats: sumBy(queues, "active"),
           onlineOperators: operators.filter((operator) => operator.status === "online").length,
@@ -154,7 +180,10 @@ export class RoutingService {
       return tenantContextRequiredEnvelope("createAssignment");
     }
 
-    const conversation = this.findConversationForTenant(payload.conversationId, tenantId);
+    const canonicalConversation = await this.hydrateCanonicalRoutingState(tenantId, payload.conversationId);
+    const conversation = canonicalConversation
+      ? clone(canonicalConversation)
+      : this.findConversationForTenant(payload.conversationId, tenantId);
     const action = normalizeAssignmentAction(payload.action);
 
     if (!conversation) {
@@ -186,7 +215,7 @@ export class RoutingService {
     }
 
     if (action === "return_queue") {
-      return this.returnConversationToQueue(conversation, tenantId, payload.reason);
+      return this.returnConversationToQueue(conversation, tenantId, payload.reason, context, canonicalConversation);
     }
 
     const operator = this.findOperatorForTenant(payload.targetOperatorId ?? "", tenantId);
@@ -208,7 +237,7 @@ export class RoutingService {
       });
     }
 
-    if (operator.status !== "online") {
+    if (operator.status !== "online" && !hasUnknownCanonicalPresence(operator)) {
       return deniedEnvelope("createAssignment", "operator_unavailable", "Operator is not online.", {
         guard: "operator_channel_limit",
         operatorId: operator.id,
@@ -233,7 +262,11 @@ export class RoutingService {
 
     const previousOperatorId = conversation.operatorId ?? null;
     const previousStatus = conversation.status;
+    const assignedTeamId = canonicalConversation && this.canonicalTeams
+      ? await this.canonicalTeams.findActiveTeamId(tenantId, operator.id)
+      : undefined;
     conversation.operatorId = operator.id;
+    if (assignedTeamId) conversation.teamId = assignedTeamId;
     conversation.status = action === "transfer" ? "transferred" : "assigned";
     conversation.slaTone = conversation.slaTone === "closed" ? "ok" : conversation.slaTone;
     this.moveOperatorAssignment(previousOperatorId, operator.id, tenantId);
@@ -241,10 +274,10 @@ export class RoutingService {
       this.moveQueueWaitingToActive(conversation.channel, tenantId);
     }
     const assignmentJob = queueJob("assignment.commit", "routing-assignments");
-    await this.saveJob(assignmentJob);
+    const analyticsRows: RoutingAnalyticsRow[] = [];
     if (action === "assign" || action === "transfer") {
-      await this.routingRepository.saveRoutingAnalyticsRow({
-        channel: conversation.channel,
+      analyticsRows.push({
+        channel: canonicalConversation?.sourceChannel ?? conversation.channel,
         conversationId: conversation.id,
         eventKind: action === "transfer" ? "transfer" : "assignment",
         fromOperatorId: previousOperatorId,
@@ -255,7 +288,35 @@ export class RoutingService {
         toOperatorId: operator.id
       });
     }
-    await this.persistState();
+    const lifecycleEvent = routingLifecycleEvent({
+        context,
+        conversationId: conversation.id,
+        data: { action, fromOperatorId: previousOperatorId, fromStatus: previousStatus, queueId: conversation.channel, toOperatorId: operator.id, toStatus: conversation.status },
+        eventType: "assignment.changed",
+        reason: payload.reason,
+        sourceEventId: `${assignmentJob.id}:${action}`
+      });
+    const assignmentRealtimeEvent = realtimeEvent("routing.assignment.updated", conversation.id, tenantId, {
+      action,
+      fromStatus: previousStatus,
+      toStatus: conversation.status
+    });
+    if (canonicalConversation) {
+      await this.persistManualTransition({
+        action,
+        analyticsRows,
+        canonicalConversation,
+        conversation,
+        events: [lifecycleEvent],
+        jobs: [assignmentJob],
+        operatorName: operator.name,
+        realtimeEvent: assignmentRealtimeEvent,
+        teamId: assignedTeamId ?? null,
+        tenantId
+      });
+    } else {
+      await this.persistState({ analyticsRows, events: [lifecycleEvent], jobs: [assignmentJob] });
+    }
 
     return createEnvelope({
       service: ROUTING_SERVICE,
@@ -273,11 +334,7 @@ export class RoutingService {
         conversation: clone(conversation),
         guard: "operator_channel_limit",
         queueJob: assignmentJob,
-        realtimeEvent: realtimeEvent("routing.assignment.updated", conversation.id, tenantId, {
-          action,
-          fromStatus: previousStatus,
-          toStatus: conversation.status
-        })
+        realtimeEvent: assignmentRealtimeEvent
       }
     });
   }
@@ -288,7 +345,8 @@ export class RoutingService {
       return tenantContextRequiredEnvelope("simulateAssignment");
     }
 
-    const conversation = this.findConversationForTenant(payload.conversationId, tenantId);
+    const canonicalConversation = await this.hydrateCanonicalRoutingState(tenantId, payload.conversationId);
+    const conversation = canonicalConversation ? clone(canonicalConversation) : this.findConversationForTenant(payload.conversationId, tenantId);
     if (!conversation) {
       return notFoundEnvelope("simulateAssignment", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
         conversationId: payload.conversationId
@@ -312,6 +370,41 @@ export class RoutingService {
     });
   }
 
+  async autoAssignConversation(conversationId: string, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = requiredTenantId(context);
+    if (!tenantId) return tenantContextRequiredEnvelope("autoAssignConversation");
+    const conversation = await this.hydrateCanonicalRoutingState(tenantId, conversationId);
+    if (!conversation) {
+      return notFoundEnvelope("autoAssignConversation", "conversation_not_found", `Conversation ${conversationId} was not found.`, { conversationId });
+    }
+    if (conversation.operatorId) {
+      return createEnvelope({
+        service: ROUTING_SERVICE,
+        operation: "autoAssignConversation",
+        traceId: routingTraceId("autoAssignConversation"),
+        meta: apiMeta({ idempotent: true }),
+        data: { assigned: true, conversationId, idempotent: true, operatorId: conversation.operatorId }
+      });
+    }
+    const candidates = await this.buildAssignmentCandidates(conversation, tenantId);
+    const candidate = candidates.find((item) => item.recommendation === "eligible");
+    if (!candidate) {
+      return createEnvelope({
+        service: ROUTING_SERVICE,
+        operation: "autoAssignConversation",
+        traceId: routingTraceId("autoAssignConversation"),
+        meta: apiMeta({ reason: "no_eligible_operator" }),
+        data: { assigned: false, candidates, conversationId, queued: true }
+      });
+    }
+    return this.createAssignment({
+      action: "assign",
+      conversationId,
+      reason: "Automatic least-loaded queue assignment",
+      targetOperatorId: String(candidate.operatorId)
+    }, context);
+  }
+
   async previewRedistribution(payload: RedistributionPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
@@ -323,6 +416,7 @@ export class RoutingService {
       return normalized.error;
     }
 
+    await this.hydrateCanonicalRoutingState(tenantId);
     const preview = await this.buildRedistributionPlan(normalized.value, tenantId);
 
     return createEnvelope({
@@ -373,6 +467,10 @@ export class RoutingService {
       });
     }
 
+    await this.hydrateCanonicalRoutingState(tenantId);
+    const canonicalById = new Map(this.conversations
+      .filter((conversation): conversation is CanonicalRoutingConversation => conversation.tenantId === tenantId && "persistedStatus" in conversation)
+      .map((conversation) => [conversation.id, clone(conversation)]));
     const preview = await this.buildRedistributionPlan(normalized.value, tenantId);
     if (preview.capacityConflicts.length > 0) {
       return conflictEnvelope("commitRedistribution", "redistribution_capacity_conflict", "Batch redistribution cannot be committed because at least one queued conversation has no eligible operator capacity.", {
@@ -390,7 +488,18 @@ export class RoutingService {
       });
     }
 
-    const appliedAssignments = preview.plan.map((assignment) => {
+    const appliedAssignments: Array<Record<string, any>> = [];
+    const batchTransitions: Array<{
+      conversationId: string;
+      expectedOperatorId: string | null;
+      expectedStatus: string;
+      operatorId: string;
+      operatorName: string;
+      slaTone: string;
+      status: string;
+      teamId?: string | null;
+    }> = [];
+    for (const assignment of preview.plan) {
       const conversation = this.findConversationForTenant(String(assignment.conversationId), tenantId);
       const operator = this.findOperatorForTenant(String(assignment.targetOperatorId), tenantId);
       if (!conversation || !operator) {
@@ -399,7 +508,10 @@ export class RoutingService {
 
       const previousOperatorId = conversation.operatorId ?? null;
       const previousStatus = conversation.status;
+      const canonical = canonicalById.get(conversation.id);
+      const assignedTeamId = canonical && this.canonicalTeams ? await this.canonicalTeams.findActiveTeamId(tenantId, operator.id) : undefined;
       conversation.operatorId = operator.id;
+      if (assignedTeamId) conversation.teamId = assignedTeamId;
       conversation.status = "assigned";
       conversation.slaTone = conversation.slaTone === "closed" ? "ok" : conversation.slaTone;
       this.moveOperatorAssignment(previousOperatorId, operator.id, tenantId);
@@ -407,17 +519,29 @@ export class RoutingService {
         this.moveQueueWaitingToActive(conversation.channel, tenantId);
       }
 
-      return {
+      appliedAssignments.push({
         action: "assign",
-        channel: conversation.channel,
+        channel: canonical?.sourceChannel ?? conversation.channel,
         conversationId: conversation.id,
         fromOperatorId: previousOperatorId,
         previousStatus,
         targetOperatorId: operator.id
-      };
-    });
+      });
+      if (canonical) {
+        batchTransitions.push({
+          conversationId: conversation.id,
+          expectedOperatorId: canonical.operatorId ?? null,
+          expectedStatus: canonical.persistedStatus,
+          operatorId: operator.id,
+          operatorName: operator.name,
+          slaTone: conversation.slaTone,
+          status: conversation.status,
+          ...(assignedTeamId !== undefined ? { teamId: assignedTeamId } : {})
+        });
+      }
+    }
     const audit = auditEvent("routing_redistribution", "routing.redistribution.commit", normalized.value.reason);
-    const assignmentJob = await this.saveJob({
+    const assignmentJob: RoutingJobDescriptor = {
       action: "redistribute",
       appliedAssignments,
       auditEvent: audit,
@@ -427,9 +551,12 @@ export class RoutingService {
       redistributionId,
       selectedQueues: normalized.value.selectedQueues,
       status: "committed"
-    });
+    };
+    const analyticsRows: RoutingAnalyticsRow[] = [];
+    const lifecycleEvents: RoutingLifecycleEvent[] = [];
+    const realtimeEvents: RealtimeEvent[] = [];
     for (const assignment of appliedAssignments) {
-      await this.routingRepository.saveRoutingAnalyticsRow({
+      analyticsRows.push({
         channel: assignment.channel,
         conversationId: assignment.conversationId,
         eventKind: "assignment",
@@ -440,8 +567,25 @@ export class RoutingService {
         tenantId,
         toOperatorId: assignment.targetOperatorId
       });
+      lifecycleEvents.push(routingLifecycleEvent({
+        context,
+        conversationId: assignment.conversationId,
+        data: { action: "assign", fromOperatorId: assignment.fromOperatorId, fromStatus: assignment.previousStatus, queueId: assignment.channel, redistributionId, toOperatorId: assignment.targetOperatorId, toStatus: "assigned" },
+        eventType: "assignment.changed",
+        reason: normalized.value.reason,
+        sourceEventId: `${jobId}:${assignment.conversationId}:assign`
+      }));
+      realtimeEvents.push(realtimeEvent("routing.assignment.updated", assignment.conversationId, tenantId, {
+        action: "assign",
+        redistributionId,
+        targetOperatorId: assignment.targetOperatorId
+      }));
     }
-    await this.persistState();
+    if (batchTransitions.length === appliedAssignments.length) {
+      await this.persistBatchTransition({ analyticsRows, batchTransitions, events: lifecycleEvents, jobs: [assignmentJob], realtimeEvents, tenantId });
+    } else {
+      await this.persistState({ analyticsRows, events: lifecycleEvents, jobs: [assignmentJob] });
+    }
 
     return createEnvelope({
       service: ROUTING_SERVICE,
@@ -470,7 +614,8 @@ export class RoutingService {
       return tenantContextRequiredEnvelope("pauseSla");
     }
 
-    const conversation = this.findConversationForTenant(payload.conversationId, tenantId);
+    const canonicalConversation = await this.hydrateCanonicalRoutingState(tenantId, payload.conversationId);
+    const conversation = canonicalConversation ? clone(canonicalConversation) : this.findConversationForTenant(payload.conversationId, tenantId);
 
     if (!conversation) {
       return notFoundEnvelope("pauseSla", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
@@ -493,17 +638,36 @@ export class RoutingService {
     }
 
     const durationMinutes = toPositiveInt(payload.durationMinutes, 15);
+    const previousStatus = conversation.status;
     conversation.status = "paused";
     conversation.slaTone = "hold";
     const pausedUntil = addMinutes(durationMinutes);
-    const schedulerJob = {
+    const schedulerJob: RoutingJobDescriptor = {
       id: makeId("job_sla_resume"),
       action: "resume_sla",
+      conversationId: conversation.id,
       queue: "sla-timers",
-      runAt: pausedUntil.toISOString()
+      runAt: pausedUntil.toISOString(),
+      status: "pending",
+      tenantId
     };
-    await this.saveJob(schedulerJob);
-    await this.persistState();
+    const lifecycleEvent = routingLifecycleEvent({
+        context,
+        conversationId: conversation.id,
+        data: { durationMinutes, fromStatus: previousStatus, pausedUntil: pausedUntil.toISOString(), toStatus: "paused" },
+        eventType: "sla.paused",
+        reason: payload.reason,
+        sourceEventId: `${schedulerJob.id}:pause_sla`
+      });
+    const slaRealtimeEvent = realtimeEvent("sla.paused", conversation.id, tenantId, {
+      durationMinutes,
+      reason: payload.reason
+    });
+    if (canonicalConversation) {
+      await this.persistManualTransition({ action: "pause_sla", canonicalConversation, conversation, events: [lifecycleEvent], jobs: [schedulerJob], realtimeEvent: slaRealtimeEvent, tenantId });
+    } else {
+      await this.persistState({ events: [lifecycleEvent], jobs: [schedulerJob] });
+    }
 
     return createEnvelope({
       service: ROUTING_SERVICE,
@@ -513,10 +677,7 @@ export class RoutingService {
       data: {
         auditEvent: auditEvent("sla", "sla.pause", payload.reason),
         conversation: clone(conversation),
-        realtimeEvent: realtimeEvent("sla.paused", conversation.id, tenantId, {
-          durationMinutes,
-          reason: payload.reason
-        }),
+        realtimeEvent: slaRealtimeEvent,
         schedulerJob,
         sla: {
           durationMinutes,
@@ -534,7 +695,8 @@ export class RoutingService {
       return tenantContextRequiredEnvelope("startRescue");
     }
 
-    const conversation = this.findConversationForTenant(payload.conversationId, tenantId);
+    const canonicalConversation = await this.hydrateCanonicalRoutingState(tenantId, payload.conversationId);
+    const conversation = canonicalConversation ? clone(canonicalConversation) : this.findConversationForTenant(payload.conversationId, tenantId);
 
     if (!conversation) {
       return notFoundEnvelope("startRescue", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
@@ -575,17 +737,17 @@ export class RoutingService {
     if (previousStatus === "queued") {
       this.moveQueueWaitingToActive(conversation.channel, tenantId);
     }
-    const schedulerJob = {
+    const schedulerJob: RoutingJobDescriptor = {
       id: makeId("job_rescue_return"),
       action: "return_to_sla_queue",
       conversationId: conversation.id,
       queue: "rescue-return",
       runAt: rescue.deadlineAt,
+      status: "pending",
       tenantId
     };
-    await this.saveJob(schedulerJob);
-    await this.routingRepository.saveRoutingAnalyticsRow({
-      channel: conversation.channel,
+    const rescueAnalytics: RoutingAnalyticsRow = {
+      channel: canonicalConversation?.sourceChannel ?? conversation.channel,
       conversationId: conversation.id,
       eventKind: "rescue",
       fromOperatorId: null,
@@ -594,8 +756,24 @@ export class RoutingService {
       source: rescue.source,
       tenantId,
       toOperatorId: conversation.operatorId ?? null
+    };
+    const lifecycleEvent = routingLifecycleEvent({
+        context,
+        conversationId: conversation.id,
+        data: { deadlineAt: rescue.deadlineAt, durationSeconds: rescue.durationSeconds, fromStatus: previousStatus, source: rescue.source, toStatus: conversation.status },
+        eventType: "rescue.started",
+        reason: rescue.reason,
+        sourceEventId: `${schedulerJob.id}:start_rescue`
+      });
+    const rescueRealtimeEvent = realtimeEvent("rescue.started", conversation.id, tenantId, {
+      deadlineAt: rescue.deadlineAt,
+      durationSeconds: rescue.durationSeconds
     });
-    await this.persistState();
+    if (canonicalConversation) {
+      await this.persistManualTransition({ action: "start_rescue", analyticsRows: [rescueAnalytics], canonicalConversation, conversation, events: [lifecycleEvent], jobs: [schedulerJob], realtimeEvent: rescueRealtimeEvent, tenantId });
+    } else {
+      await this.persistState({ analyticsRows: [rescueAnalytics], events: [lifecycleEvent], jobs: [schedulerJob] });
+    }
 
     return createEnvelope({
       service: ROUTING_SERVICE,
@@ -606,10 +784,7 @@ export class RoutingService {
         auditEvent: auditEvent("rescue", "rescue.start", rescue.reason),
         conversation: clone(conversation),
         queuePriority: "rescue",
-        realtimeEvent: realtimeEvent("rescue.started", conversation.id, tenantId, {
-          deadlineAt: rescue.deadlineAt,
-          durationSeconds: rescue.durationSeconds
-        }),
+        realtimeEvent: rescueRealtimeEvent,
         reportEvent: reportEvent("rescue.started", "active"),
         rescue: clone(rescue),
         schedulerJob
@@ -623,7 +798,8 @@ export class RoutingService {
       return tenantContextRequiredEnvelope("resolveRescue");
     }
 
-    const conversation = this.findConversationForTenant(payload.conversationId, tenantId);
+    const canonicalConversation = await this.hydrateCanonicalRoutingState(tenantId, payload.conversationId);
+    const conversation = canonicalConversation ? clone(canonicalConversation) : this.findConversationForTenant(payload.conversationId, tenantId);
 
     if (!conversation) {
       return notFoundEnvelope("resolveRescue", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
@@ -679,19 +855,46 @@ export class RoutingService {
       tenantId,
       digest: "daily_rescue"
     });
-    const rescueReturnJob = outcome === "returned_to_queue" || outcome === "missed"
+    const pendingRescueReturnJob = (await this.routingRepository.listJobs()).find((job) =>
+      job.queue === "rescue-return"
+      && job.action === "return_to_sla_queue"
+      && job.conversationId === conversation.id
+      && job.tenantId === tenantId
+      && (job.status === "pending" || job.status === "claimed")
+    );
+    const rescueReturnJob: RoutingJobDescriptor | null = pendingRescueReturnJob
       ? {
-          ...queueJob("rescue.return_queue", "rescue-return"),
-          action: "return_to_sla_queue",
-          conversationId: conversation.id,
-          status: "pending",
-          tenantId
+          ...pendingRescueReturnJob,
+          completedAt: new Date().toISOString(),
+          leaseExpiresAt: undefined,
+          leaseOwner: undefined,
+          status: "canceled"
         }
       : null;
-    if (rescueReturnJob) {
-      await this.saveJob(rescueReturnJob);
+    const resolutionEventId = rescueReturnJob?.id ?? makeId("rescue_resolution");
+    const lifecycleEvent = routingLifecycleEvent({
+        context,
+        conversationId: conversation.id,
+        data: { fromOperatorId: previousOperatorId, outcome, toOperatorId: conversation.operatorId ?? null, toStatus: conversation.status },
+        eventType: "rescue.resolved",
+        reason: payload.reason,
+        sourceEventId: `${resolutionEventId}:resolve_rescue`
+      });
+    const rescueRealtimeEvent = realtimeEvent("rescue.resolved", conversation.id, tenantId, { outcome });
+    if (canonicalConversation) {
+      await this.persistManualTransition({
+        action: "resolve_rescue",
+        canonicalConversation,
+        conversation,
+        events: [lifecycleEvent],
+        jobs: rescueReturnJob ? [rescueReturnJob] : [],
+        ...(outcome === "returned_to_queue" || outcome === "missed" ? { queueId: canonicalConversation.queueId } : {}),
+        realtimeEvent: rescueRealtimeEvent,
+        tenantId
+      });
+    } else {
+      await this.persistState({ events: [lifecycleEvent], jobs: rescueReturnJob ? [rescueReturnJob] : [] });
     }
-    await this.persistState();
 
     return createEnvelope({
       service: ROUTING_SERVICE,
@@ -702,7 +905,7 @@ export class RoutingService {
         auditEvent: auditEvent("rescue", "rescue.resolve", payload.reason),
         conversation: clone(conversation),
         queueJob: rescueReturnJob,
-        realtimeEvent: realtimeEvent("rescue.resolved", conversation.id, tenantId, { outcome }),
+        realtimeEvent: rescueRealtimeEvent,
         reportEvent: reportEvent("rescue.report.ready", outcome),
         rescue: clone(conversation.rescue)
       }
@@ -875,7 +1078,7 @@ export class RoutingService {
         const plannedChats = operator.chats + (plannedOperatorLoad.get(operator.id) ?? 0);
         const channelAccess = this.operatorCanAccessChannel(operator, conversation.channel, memberships);
         const availableCapacity = Math.max(0, chatLimit - plannedChats);
-        const online = operator.status === "online";
+        const online = operator.status === "online" || hasUnknownCanonicalPresence(operator);
         const explain = [
           channelAccess ? "channel_access:granted" : "channel_access:denied",
           `status:${operator.status}`,
@@ -898,7 +1101,13 @@ export class RoutingService {
       }).sort(compareAssignmentCandidates);
   }
 
-  private async returnConversationToQueue(conversation: RoutingConversation, tenantId: string, reason?: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+  private async returnConversationToQueue(
+    conversation: RoutingConversation,
+    tenantId: string,
+    reason: string | undefined,
+    context: RoutingRequestContext,
+    canonicalConversation?: CanonicalRoutingConversation
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
     const previousOperatorId = conversation.operatorId ?? null;
     const previousStatus = conversation.status;
     conversation.operatorId = undefined;
@@ -909,8 +1118,32 @@ export class RoutingService {
       this.moveQueueActiveToWaiting(conversation.channel, tenantId);
     }
     const assignmentJob = queueJob("assignment.return_queue", "routing-assignments");
-    await this.saveJob(assignmentJob);
-    await this.persistState();
+    const lifecycleEvent = routingLifecycleEvent({
+        context,
+        conversationId: conversation.id,
+        data: { action: "return_queue", fromOperatorId: previousOperatorId, fromStatus: previousStatus, queueId: conversation.channel, toOperatorId: null, toStatus: "queued" },
+        eventType: "queue.entered",
+        reason,
+        sourceEventId: `${assignmentJob.id}:return_queue`
+      });
+    const assignmentRealtimeEvent = realtimeEvent("routing.assignment.updated", conversation.id, tenantId, {
+      action: "return_queue",
+      toStatus: conversation.status
+    });
+    if (canonicalConversation) {
+      await this.persistManualTransition({
+        action: "return_queue",
+        canonicalConversation,
+        conversation,
+        events: [lifecycleEvent],
+        jobs: [assignmentJob],
+        operatorName: null,
+        realtimeEvent: assignmentRealtimeEvent,
+        tenantId
+      });
+    } else {
+      await this.persistState({ events: [lifecycleEvent], jobs: [assignmentJob] });
+    }
 
     return createEnvelope({
       service: ROUTING_SERVICE,
@@ -928,10 +1161,7 @@ export class RoutingService {
         conversation: clone(conversation),
         guard: "operator_channel_limit",
         queueJob: assignmentJob,
-        realtimeEvent: realtimeEvent("routing.assignment.updated", conversation.id, tenantId, {
-          action: "return_queue",
-          toStatus: conversation.status
-        })
+        realtimeEvent: assignmentRealtimeEvent
       }
     });
   }
@@ -1070,23 +1300,149 @@ export class RoutingService {
     return row.tenantId === tenantId;
   }
 
-  private async persistState(): Promise<void> {
+  private async persistState(input: {
+    analyticsRows?: RoutingAnalyticsRow[];
+    events?: RoutingLifecycleEvent[];
+    jobs?: RoutingJobDescriptor[];
+  } = {}): Promise<void> {
     const current = this.routingRepository.readState();
-    await this.routingRepository.saveState({
+    const state: RoutingState = {
       conversations: this.conversations,
-      jobs: await this.routingRepository.listJobs(),
+      jobs: mergeRecords(await this.routingRepository.listJobs(), input.jobs ?? []),
       operatorCapacities: current.operatorCapacities,
       operators: this.operators,
       queueMemberships: current.queueMemberships,
       queues: this.queues,
-      routingAnalyticsRows: current.routingAnalyticsRows,
+      routingAnalyticsRows: mergeRecords(current.routingAnalyticsRows, input.analyticsRows ?? []),
       rescueReportRows: this.rescueReportRows,
       routingRules: current.routingRules
-    });
+    };
+    try {
+      if ((input.events?.length ?? 0) > 0) {
+        await this.routingRepository.saveStateWithLifecycleEvents(state, input.events!);
+      } else {
+        await this.routingRepository.saveState(state);
+      }
+    } catch (error) {
+      this.conversations = clone(current.conversations);
+      this.operators = clone(current.operators);
+      this.queues = clone(current.queues);
+      this.rescueReportRows = clone(current.rescueReportRows);
+      throw error;
+    }
   }
 
-  private async saveJob(job: Record<string, unknown>): Promise<RoutingJobDescriptor> {
-    return this.routingRepository.saveJob(job as unknown as RoutingJobDescriptor);
+  private async hydrateCanonicalRoutingState(tenantId: string, conversationId?: string): Promise<CanonicalRoutingConversation | undefined> {
+    if (!this.canonicalWorkload || !this.canonicalConversations) return undefined;
+    const [workload, conversations] = await Promise.all([
+      this.canonicalWorkload.readWorkload(tenantId),
+      this.canonicalConversations.listConversations(tenantId)
+    ]);
+    this.operators = replaceTenantRecords(this.operators, workload.operators, tenantId);
+    this.queues = replaceTenantRecords(this.queues, workload.queues, tenantId);
+    this.conversations = replaceTenantRecords(this.conversations, conversations, tenantId);
+    return conversationId ? conversations.find((conversation) => conversation.id === conversationId) : undefined;
+  }
+
+  private async persistManualTransition(input: {
+    action: "assign" | "pause_sla" | "resolve_rescue" | "return_queue" | "start_rescue" | "transfer";
+    analyticsRows?: RoutingAnalyticsRow[];
+    canonicalConversation: CanonicalRoutingConversation;
+    conversation: RoutingConversation;
+    events: RoutingLifecycleEvent[];
+    jobs: RoutingJobDescriptor[];
+    operatorName?: string | null;
+    queueId?: string;
+    realtimeEvent: RealtimeEvent;
+    teamId?: string | null;
+    tenantId: string;
+  }): Promise<void> {
+    const current = this.routingRepository.readState();
+    this.conversations = this.conversations.map((conversation) =>
+      conversation.id === input.conversation.id && conversation.tenantId === input.tenantId
+        ? clone(input.conversation)
+        : conversation
+    );
+    const state: RoutingState = {
+      ...current,
+      conversations: this.conversations,
+      jobs: mergeRecords(await this.routingRepository.listJobs(), input.jobs),
+      operators: this.operators,
+      queues: this.queues,
+      routingAnalyticsRows: mergeRecords(current.routingAnalyticsRows, input.analyticsRows ?? []),
+      rescueReportRows: this.rescueReportRows
+    };
+    try {
+      const persisted = await this.routingRepository.saveManualRoutingTransition({
+        action: input.action,
+        conversationId: input.conversation.id,
+        expectedOperatorId: input.canonicalConversation.operatorId ?? null,
+        expectedStatus: input.canonicalConversation.persistedStatus,
+        lifecycleEvents: input.events,
+        ...(input.operatorName !== undefined ? { operatorName: input.operatorName } : {}),
+        ...(input.queueId ? { queueId: input.queueId } : {}),
+        realtimeEvent: input.realtimeEvent,
+        state,
+        ...(input.teamId !== undefined ? { teamId: input.teamId } : {}),
+        tenantId: input.tenantId
+      });
+      this.conversations = clone(persisted.conversations);
+      this.operators = clone(persisted.operators);
+      this.queues = clone(persisted.queues);
+      this.rescueReportRows = clone(persisted.rescueReportRows);
+    } catch (error) {
+      this.conversations = clone(current.conversations);
+      this.operators = clone(current.operators);
+      this.queues = clone(current.queues);
+      this.rescueReportRows = clone(current.rescueReportRows);
+      throw error;
+    }
+  }
+
+  private async persistBatchTransition(input: {
+    analyticsRows: RoutingAnalyticsRow[];
+    batchTransitions: Array<{
+      conversationId: string;
+      expectedOperatorId: string | null;
+      expectedStatus: string;
+      operatorId: string;
+      operatorName: string;
+      slaTone: string;
+      status: string;
+      teamId?: string | null;
+    }>;
+    events: RoutingLifecycleEvent[];
+    jobs: RoutingJobDescriptor[];
+    realtimeEvents: RealtimeEvent[];
+    tenantId: string;
+  }): Promise<void> {
+    const current = this.routingRepository.readState();
+    const state: RoutingState = {
+      ...current,
+      conversations: this.conversations,
+      jobs: mergeRecords(await this.routingRepository.listJobs(), input.jobs),
+      operators: this.operators,
+      queues: this.queues,
+      routingAnalyticsRows: mergeRecords(current.routingAnalyticsRows, input.analyticsRows),
+      rescueReportRows: this.rescueReportRows
+    };
+    try {
+      const persisted = await this.routingRepository.saveBatchRoutingTransition({
+        lifecycleEvents: input.events,
+        realtimeEvents: input.realtimeEvents,
+        state,
+        tenantId: input.tenantId,
+        transitions: input.batchTransitions
+      });
+      this.conversations = clone(persisted.conversations);
+      this.operators = clone(persisted.operators);
+      this.queues = clone(persisted.queues);
+    } catch (error) {
+      this.conversations = clone(current.conversations);
+      this.operators = clone(current.operators);
+      this.queues = clone(current.queues);
+      throw error;
+    }
   }
 }
 
@@ -1105,6 +1461,42 @@ function auditEvent(scope: string, action: string, reason?: string): Record<stri
     immutable: true,
     reason: reason?.trim() || null
   };
+}
+
+function routingLifecycleEvent(input: {
+  context: RoutingRequestContext;
+  conversationId: string;
+  data: Record<string, unknown>;
+  eventType: string;
+  reason?: string;
+  sourceEventId: string;
+}): RoutingLifecycleEvent {
+  const occurredAt = new Date().toISOString();
+  return {
+    actorId: input.context.actorId ?? null,
+    actorName: input.context.actorName ?? null,
+    actorType: input.context.actorType ?? "system",
+    conversationId: input.conversationId,
+    data: input.data,
+    eventType: input.eventType,
+    id: `lifecycle_routing_${randomUUID()}`,
+    ingestedAt: occurredAt,
+    occurredAt,
+    reason: input.reason?.trim() || null,
+    schemaVersion: "conversation-lifecycle/v1",
+    source: "routing-api",
+    sourceEventId: input.sourceEventId,
+    tenantId: input.context.tenantId!,
+    traceId: getCurrentTraceId() ?? createRequestTraceId(`routing:${input.eventType}`)
+  };
+}
+
+function mergeRecords<T extends { id: string }>(current: T[], updates: T[]): T[] {
+  const byId = new Map(current.map((record) => [record.id, record]));
+  for (const update of updates) {
+    byId.set(update.id, update);
+  }
+  return Array.from(byId.values());
 }
 
 function clone<T>(value: T): T {
@@ -1298,7 +1690,9 @@ function operatorProjection(
 function queueProjection(queue: RoutingQueue): Record<string, unknown> {
   return {
     ...clone(queue),
-    name: queue.channel
+    name: typeof (queue as RoutingQueue & { name?: string }).name === "string"
+      ? (queue as RoutingQueue & { name: string }).name
+      : queue.channel
   };
 }
 
@@ -1374,7 +1768,7 @@ function formatDuration(totalSeconds: number): string {
   return `${minutes}:${seconds}`;
 }
 
-function queueJob(kind: string, queue: string): Record<string, unknown> {
+function queueJob(kind: string, queue: string): RoutingJobDescriptor {
   return {
     id: makeId("job_routing"),
     kind,
@@ -1383,7 +1777,7 @@ function queueJob(kind: string, queue: string): Record<string, unknown> {
   };
 }
 
-function realtimeEvent(eventName: string, resourceId: string, tenantId: string, data: Record<string, unknown>): Record<string, unknown> {
+function realtimeEvent(eventName: string, resourceId: string, tenantId: string, data: Record<string, unknown>): RealtimeEvent {
   return {
     eventId: makeId("rt_routing"),
     eventName,
@@ -1395,6 +1789,14 @@ function realtimeEvent(eventName: string, resourceId: string, tenantId: string, 
     traceId: routingTraceId(eventName),
     data
   };
+}
+
+function hasUnknownCanonicalPresence(operator: RoutingOperator): boolean {
+  return (operator as RoutingOperator & { availability?: { source?: string } }).availability?.source === "not_recorded";
+}
+
+function replaceTenantRecords<T extends { tenantId?: string }>(current: T[], canonical: T[], tenantId: string): T[] {
+  return [...current.filter((record) => record.tenantId !== tenantId), ...canonical];
 }
 
 function reportEvent(eventName: string, outcome: string): Record<string, unknown> {

@@ -143,6 +143,18 @@ export class BillingController {
   }
 }
 
+@ApiTags("public")
+@Controller("public/catalog")
+export class PublicBillingCatalogController {
+  constructor(private readonly billingService: BillingService) {}
+
+  @Get("tariffs")
+  @ApiOkResponse({ description: "Public canonical tariff catalog envelope" })
+  fetchTariffs() {
+    return this.billingService.fetchTariffs();
+  }
+}
+
 @ApiTags("quotas")
 @UseGuards(ServiceAdminSessionGuard)
 @Controller("quotas")

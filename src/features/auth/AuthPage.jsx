@@ -28,6 +28,7 @@ import {
 import "./auth.css";
 
 const noop = () => {};
+const AUTH_STATE_SHORTCUTS_ENABLED = import.meta.env.DEV;
 const defaultTenantMfaContext = {
   email: "",
   inviteCode: "",
@@ -462,14 +463,16 @@ export function AuthPage({
             <span>Активация приглашений</span>
           </article>
         </div>
-        <div className="auth-state-shortcuts" aria-label="Состояния доступа">
-          <button className={mode === "login" ? "active" : ""} onClick={() => transition("login")} type="button">Login</button>
-          <button className={mode === "sso" ? "active" : ""} onClick={() => transition("sso")} type="button">SSO</button>
-          <button className={mode === "invite" ? "active" : ""} onClick={() => transition("invite")} type="button">Invite</button>
-          <button className={mode === "blocked" ? "active" : ""} onClick={() => transition("blocked")} type="button">Blocked</button>
-          <button className={mode === "expired" ? "active" : ""} onClick={() => transition("expired")} type="button">Expired</button>
-          <button className={mode === "maintenance" ? "active" : ""} onClick={() => transition("maintenance")} type="button">Maintenance</button>
-        </div>
+        {AUTH_STATE_SHORTCUTS_ENABLED ? (
+          <div className="auth-state-shortcuts" aria-label="Состояния доступа">
+            <button className={mode === "login" ? "active" : ""} onClick={() => transition("login")} type="button">Login</button>
+            <button className={mode === "sso" ? "active" : ""} onClick={() => transition("sso")} type="button">SSO</button>
+            <button className={mode === "invite" ? "active" : ""} onClick={() => transition("invite")} type="button">Invite</button>
+            <button className={mode === "blocked" ? "active" : ""} onClick={() => transition("blocked")} type="button">Blocked</button>
+            <button className={mode === "expired" ? "active" : ""} onClick={() => transition("expired")} type="button">Expired</button>
+            <button className={mode === "maintenance" ? "active" : ""} onClick={() => transition("maintenance")} type="button">Maintenance</button>
+          </div>
+        ) : null}
       </aside>
 
       <section className="auth-workspace" aria-labelledby="auth-title">

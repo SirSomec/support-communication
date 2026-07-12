@@ -1,6 +1,7 @@
 import { type BackendConfig } from "@support-communication/config";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import { connect } from "node:net";
 
 interface DependencyStatus {
   configured: boolean;
@@ -21,8 +22,9 @@ export interface HealthResponse {
 
 export interface ReadinessResponse {
   service: string;
-  status: "ready";
+  status: "ready" | "unready";
   version: string;
+  dependencies?: Record<string, { status: "up" | "down" }>;
 }
 
 const SERVICE = "api-gateway";
@@ -62,7 +64,7 @@ function hasObjectStorageConfig(config: BackendConfig): boolean {
   );
 }
 
-export function buildReadinessEnvelope(config: BackendConfig, requestId?: string): BackendEnvelope<ReadinessResponse> {
+export function buildReadinessEnvelope(config: BackendConfig, requestId?: string, dependencies?: Record<string, { status: "up" | "down" }>): BackendEnvelope<ReadinessResponse> {
   const traceId = requestId ?? getCurrentTraceId() ?? createRequestTraceId(SERVICE, "ready");
 
   return createEnvelope({
@@ -75,8 +77,45 @@ export function buildReadinessEnvelope(config: BackendConfig, requestId?: string
     },
     data: {
       service: SERVICE,
-      status: "ready",
+      status: dependencies && Object.values(dependencies).some((dependency) => dependency.status === "down") ? "unready" : "ready",
+      ...(dependencies ? { dependencies } : {}),
       version: config.API_VERSION
     }
   });
+}
+
+export async function checkRuntimeDependencies(config: BackendConfig, timeoutMs = 2_000): Promise<Record<string, { status: "up" | "down" }>> {
+  const checks = await Promise.all([
+    dependency("database", () => tcpProbe(config.DATABASE_URL, 5432, timeoutMs)),
+    dependency("redis", () => tcpProbe(config.REDIS_URL, 6379, timeoutMs)),
+    dependency("objectStorage", () => httpProbe(config.S3_ENDPOINT, "/minio/health/ready", timeoutMs)),
+    dependency("mail", () => tcpProbe(`tcp://${config.MAIL_HOST}:${config.MAIL_PORT}`, 25, timeoutMs))
+  ]);
+  return Object.fromEntries(checks);
+}
+
+async function dependency(name: string, check: () => Promise<void>): Promise<[string, { status: "up" | "down" }]> {
+  try { await check(); return [name, { status: "up" }]; }
+  catch { return [name, { status: "down" }]; }
+}
+
+function tcpProbe(value: string | undefined, defaultPort: number, timeoutMs: number): Promise<void> {
+  if (!value) return Promise.reject(new Error("dependency_not_configured"));
+  const url = new URL(value.includes("://") ? value : `tcp://${value}`);
+  return new Promise((resolve, reject) => {
+    const socket = connect({ host: url.hostname, port: Number(url.port) || defaultPort });
+    const timer = setTimeout(() => socket.destroy(new Error("dependency_timeout")), timeoutMs);
+    socket.once("connect", () => { clearTimeout(timer); socket.end(); resolve(); });
+    socket.once("error", (error) => { clearTimeout(timer); reject(error); });
+  });
+}
+
+async function httpProbe(endpoint: string | undefined, path: string, timeoutMs: number): Promise<void> {
+  if (!endpoint) throw new Error("dependency_not_configured");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${endpoint.replace(/\/+$/, "")}${path}`, { signal: controller.signal });
+    if (!response.ok) throw new Error(`dependency_http_${response.status}`);
+  } finally { clearTimeout(timer); }
 }

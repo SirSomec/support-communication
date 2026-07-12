@@ -1,5 +1,5 @@
 import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryKind, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
-import { BillingRepository, type PrismaBillingClient } from "./billing.repository.js";
+import { BillingRepository, type BillingState, type PrismaBillingClient } from "./billing.repository.js";
 
 export interface BillingRepositoryBootstrapSource {
   BILLING_REPOSITORY?: string;
@@ -12,6 +12,7 @@ export interface BillingRepositoryBootstrapSource {
 
 export interface BillingRepositoryBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaBillingClient;
+  seed?: BillingState;
 }
 
 export function configureBillingRepository(
@@ -19,7 +20,7 @@ export function configureBillingRepository(
   options: BillingRepositoryBootstrapOptions = {}
 ): BillingRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => BillingRepository.open({ filePath }),
+    createJsonRepository: (filePath) => BillingRepository.open({ filePath, seed: options.seed }),
     createPrismaRepository: (client) => BillingRepository.prisma({ client }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "BILLING_REPOSITORY",

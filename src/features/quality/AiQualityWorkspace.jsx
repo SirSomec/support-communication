@@ -19,7 +19,7 @@ function getAverageScore(checks) {
   return Math.round(checks.reduce((sum, check) => sum + check.score, 0) / checks.length);
 }
 
-export function AiQualityWorkspace({ coachingQueue, effectivenessMetrics, realtimeChecks, onToast }) {
+export function AiQualityWorkspace({ aiConsent = false, coachingQueue, effectivenessMetrics, realtimeChecks, onToast }) {
   const [activeFilter, setActiveFilter] = useState("Все");
   const [scoringId, setScoringId] = useState("");
   const [scoredDrafts, setScoredDrafts] = useState({});
@@ -35,7 +35,7 @@ export function AiQualityWorkspace({ coachingQueue, effectivenessMetrics, realti
     }
 
     setScoringId(item.id);
-    const result = await scoreCoachingDraft(item);
+    const result = await scoreCoachingDraft(item, { aiConsent });
     setScoringId("");
 
     if (!result.ok) {
@@ -51,7 +51,7 @@ export function AiQualityWorkspace({ coachingQueue, effectivenessMetrics, realti
         score: result.score
       }
     }));
-    onToast(`AI scoring: ${item.trigger} ${result.score}/100 ${result.auditId}`);
+    onToast(`Проверка по правилам: ${item.trigger}, ${result.score}/100.`);
   }
 
   return (
@@ -59,12 +59,12 @@ export function AiQualityWorkspace({ coachingQueue, effectivenessMetrics, realti
       <section className="ai-live-score-card">
         <header>
           <Gauge size={18} />
-          <strong>Real-time scoring</strong>
+          <strong>Проверка текста</strong>
           <StatusBadge tone={averageScore >= 80 ? "ok" : averageScore >= 60 ? "hold" : "warn"}>{averageScore}/100</StatusBadge>
         </header>
         <div className="ai-score-ring" style={{ "--score": `${averageScore}%` }}>
           <strong>{averageScore}</strong>
-          <span>live score</span>
+          <span>оценка правил</span>
         </div>
         <div className="ai-signal-list">
           {realtimeChecks.map((check) => (
@@ -88,7 +88,7 @@ export function AiQualityWorkspace({ coachingQueue, effectivenessMetrics, realti
           <span>{filteredCoaching.length} активны</span>
         </header>
         <SegmentedControl
-          ariaLabel="Фильтр AI coaching"
+          ariaLabel="Фильтр рекомендаций"
           className="ai-coaching-filters"
           onChange={setActiveFilter}
           options={coachingFilters}

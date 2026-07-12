@@ -36,7 +36,7 @@ const smoke = {
       url: signedFileUrl
     }
   } : {}),
-  tenantId: "tenant-volga",
+  tenantId: stringValue(process.env.FILE_SCAN_EXTERNAL_SCANNER_SMOKE_TENANT_ID) || "tenant-volga",
   traceId: `trc_${runId}`
 };
 

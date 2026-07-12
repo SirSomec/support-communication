@@ -12,6 +12,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
   const [operators, setOperators] = useState([]);
   const [queues, setQueues] = useState([]);
   const [totals, setTotals] = useState(null);
+  const [dataQuality, setDataQuality] = useState(null);
   const [reloadVersion, setReloadVersion] = useState(0);
   const [redistributionBusy, setRedistributionBusy] = useState(false);
   const [redistributionPayload, setRedistributionPayload] = useState(null);
@@ -23,9 +24,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
     async function loadWorkload() {
       setLoading(true);
       setError("");
-      const response = await routingService.fetchWorkload({
-        channel: channel === "Все каналы" ? undefined : channel
-      });
+      const response = await routingService.fetchWorkload();
 
       if (ignore) {
         return;
@@ -36,6 +35,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
         setOperators([]);
         setQueues([]);
         setTotals(null);
+        setDataQuality(null);
         setLoading(false);
         return;
       }
@@ -43,6 +43,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
       setOperators(Array.isArray(response.data?.operators) ? response.data.operators : []);
       setQueues(Array.isArray(response.data?.queues) ? response.data.queues : []);
       setTotals(response.data?.totals ?? null);
+      setDataQuality(response.data?.dataQuality ?? null);
       setLoading(false);
     }
 
@@ -50,14 +51,18 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
     return () => {
       ignore = true;
     };
-  }, [channel, reloadVersion]);
+  }, [reloadVersion]);
 
-  const visibleQueues = queues;
+  const visibleQueues = channel === "Все каналы" ? queues : queues.filter((queue) => queue.channel === channel);
   const activeChats = totals?.activeChats ?? visibleQueues.reduce((sum, queue) => sum + (queue.active ?? 0), 0);
   const waitingChats = totals?.waitingChats ?? visibleQueues.reduce((sum, queue) => sum + (queue.waiting ?? 0), 0);
   const overdueChats = totals?.overdueChats ?? visibleQueues.reduce((sum, queue) => sum + (queue.overdue ?? 0), 0);
-  const onlineOperators = totals?.onlineOperators ?? operators.filter((operator) => operator.status === "online").length;
-  const channelOptions = ["Все каналы", ...new Set(queues.map((queue) => queue.name ?? queue.channel).filter(Boolean))];
+  const presenceRecorded = dataQuality?.operatorPresence !== "not_recorded";
+  const onlineOperators = presenceRecorded ? totals?.onlineOperators ?? operators.filter((operator) => operator.status === "online").length : "—";
+  const channelOptions = [
+    { label: "Все каналы", value: "Все каналы" },
+    ...queues.map((queue) => ({ label: queue.name ?? queue.channel, value: queue.channel }))
+  ];
   const selectedQueuesForRedistribution = resolveRedistributionQueues(visibleQueues, channel);
   const panelNotificationContext = resolvePanelNotificationContext(navigationTarget, overdueChats);
   const canRedistribute = access.canRedistribute && selectedQueuesForRedistribution.length > 0 && !redistributionBusy;
@@ -167,7 +172,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
       actions={
         <>
           <select className="inline-select" value={channel} onChange={(event) => setChannel(event.target.value)}>
-            {channelOptions.map((option) => <option key={option}>{option}</option>)}
+            {channelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
           <button className="primary-action" disabled={!canRedistribute} onClick={() => void openRedistributionPreview()} title={canRedistribute ? "Предпросмотр перераспределения" : redistributeUnavailableReason} type="button">
             <Workflow size={17} />
@@ -234,7 +239,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
       ) : null}
 
       <div className={`metric-strip ${panelNotificationContext?.focus === "sla" ? "sla-focused" : ""}`}>
-        <MetricTile icon={<UsersRound size={21} />} label="Операторы онлайн" value={onlineOperators} detail={`${operators.length} в смене`} />
+        <MetricTile icon={<UsersRound size={21} />} label={presenceRecorded ? "Операторы онлайн" : "Доступность"} value={onlineOperators} detail={presenceRecorded ? `${operators.length} в смене` : "не фиксируется"} />
         <MetricTile icon={<Inbox size={21} />} label="Активные диалоги" value={activeChats} detail="по выбранным очередям" />
         <MetricTile icon={<Clock3 size={21} />} label="Ожидают ответа" value={waitingChats} detail="первый ответ" />
         <MetricTile icon={<AlertTriangle size={21} />} label="SLA-риски" value={overdueChats} detail="требуют старшего" tone="danger" />
@@ -246,9 +251,9 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
           <div className="operator-table">
             {operators.map((operator) => (
               <div className="operator-row" key={operator.id ?? operator.name}>
-                <span className={`operator-presence ${operator.status}`} />
+                <span className={`operator-presence ${presenceRecorded ? operator.status : "unknown"}`} />
                 <strong className="operator-name">{operator.name}</strong>
-                <span className="operator-status">{operator.status === "break" ? "Перерыв" : operator.status === "offline" ? "Офлайн" : "Онлайн"}</span>
+                <span className="operator-status">{presenceRecorded ? operator.status === "break" ? "Перерыв" : operator.status === "offline" ? "Офлайн" : "Онлайн" : "Нет данных"}</span>
                 <div className="load-meter">
                   <i style={{ width: `${Math.min(100, ((operator.chats ?? 0) / (operator.limit || 1)) * 100)}%` }} />
                 </div>
@@ -262,7 +267,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
         </section>
 
         <section className="work-panel">
-          <SectionTitle title="Очереди и каналы" action="Порог ожидания 3 мин" />
+          <SectionTitle title="Очереди и каналы" action="Текущая нагрузка" />
           <div className="queue-health-list">
             {visibleQueues.map((queue) => (
               <article className="queue-health" key={queue.name ?? queue.channel}>
@@ -273,7 +278,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
                 <div className="queue-health-grid">
                   <span>Ожидают <b>{queue.waiting}</b></span>
                   <span>SLA <b>{queue.overdue}</b></span>
-                  <span>Лимит <b>{queue.limit}</b></span>
+                  <span>Лимит <b>{queue.limit > 0 ? queue.limit : "—"}</b></span>
                 </div>
                 <div className="health-bar">
                   <i style={{ width: `${queue.health ?? 0}%` }} />
@@ -294,7 +299,7 @@ function resolveRedistributionQueues(queues, channel) {
 
   return queues
     .filter((queue) => (queue.waiting ?? 0) > 0)
-    .map((queue) => queue.name ?? queue.channel)
+    .map((queue) => queue.channel)
     .filter(Boolean);
 }
 

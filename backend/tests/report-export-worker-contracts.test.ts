@@ -543,6 +543,7 @@ describe("report export worker contracts", () => {
     assert.equal(job?.progress, 100);
     assert.equal(job?.rows, 4);
     assert.equal(job?.fileName, "export-worker-runtime.xlsx");
+    assert.equal(job?.filters?.eventWatermark, null);
     assert.equal(object.objectKey, "reports/tenant-volga/export-worker-runtime/export-worker-runtime.xlsx");
     assert.equal(object.contentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     assert.equal(descriptor?.jobId, "export-worker-runtime");
@@ -550,6 +551,67 @@ describe("report export worker contracts", () => {
     assert.equal(descriptor?.checksum, object.checksum);
     assert.equal(descriptor?.sizeBytes, object.sizeBytes);
     assert.equal(descriptor?.tenantId, "tenant-volga");
+  });
+
+  it("regenerates a failed export after retry", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({
+      exportJobs: [],
+      reportFileDescriptors: []
+    }));
+    repository.saveExportJob(reportExportJob({
+      columns: ["metric", "today"],
+      filters: { tenantId: "tenant-volga" },
+      format: "XLSX",
+      id: "export-worker-retry",
+      progress: 100,
+      queue: "report-export",
+      status: "Failed",
+      statusKey: "error"
+    }));
+
+    const retry = await new ReportService(repository).retryReportExport({
+      jobId: "export-worker-retry",
+      reason: "Retry failed export"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(retry.data.job.statusKey, "queued");
+
+    const result = await executeReportExportWorkerOnce({
+      limit: 1,
+      queue: "report-export",
+      reportRepository: repository,
+      storage: createReportObjectStoragePort(createDeterministicReportObjectStorageAdapter())
+    });
+    const job = repository.listExportJobs().find((item) => item.id === "export-worker-retry");
+
+    assert.deepEqual(result, { failed: 0, ready: 1, scanned: 1 });
+    assert.equal(job?.statusKey, "ready");
+    assert.ok(repository.findReportFileDescriptor("export-worker-retry"));
+  });
+
+  it("marks persisted export jobs without a tenant as corrupt instead of assigning a default tenant", async () => {
+    const repository = ReportRepository.inMemory();
+    const corrupt = reportExportJob({
+      columns: ["metric"],
+      id: "export-worker-missing-tenant",
+      queue: "report-export-smoke"
+    });
+    delete corrupt.tenantId;
+    corrupt.filters = {};
+    repository.saveExportJob(corrupt);
+    const storage = createDeterministicReportObjectStorageAdapter();
+
+    const result = await executeReportExportWorkerOnce({
+      queue: "report-export-smoke",
+      reportRepository: repository,
+      storage
+    });
+    const failed = repository.listExportJobs().find((job) => job.id === corrupt.id);
+
+    assert.deepEqual(result, { failed: 1, ready: 0, scanned: 1 });
+    assert.equal(failed?.statusKey, "error");
+    assert.equal(failed?.failureMessage, "report_export_job_tenant_id_required");
+    assert.deepEqual(storage.listObjects(), []);
+    assert.equal(repository.findReportFileDescriptor(corrupt.id), undefined);
   });
 
   it("claims due scheduled digest descriptors as running without claiming future or completed periods", () => {
@@ -650,7 +712,9 @@ describe("report export worker contracts", () => {
     assert.equal(first.exportEnvelope.data.job.period, "2026-06-30");
     assert.equal(first.exportEnvelope.data.job.reportType, undefined);
     assert.deepEqual(first.exportEnvelope.data.job.columns, ["metric", "today", "previous", "delta", "status"]);
-    assert.deepEqual(first.exportEnvelope.data.job.filters, {
+    const { snapshotAt, ...persistedFilters } = first.exportEnvelope.data.job.filters;
+    assert.ok(Number.isFinite(Date.parse(snapshotAt)));
+    assert.deepEqual(persistedFilters, {
       channel: "Все каналы",
       periodKey: "2026-06-30",
       scheduleId: "digest-volga-daily",
@@ -729,7 +793,7 @@ describe("report export worker contracts", () => {
       idempotencyKey: "scheduled-digest-export:tenant-volga:digest-volga-daily:2026-07-03",
       period: "2026-07-03",
       reportType: "daily_support_digest"
-    });
+    }, { tenantId: "tenant-volga" });
     const conflictRunning = repository.saveScheduledDigestDescriptor({
       createdAt: "2026-06-30T12:00:00.000Z",
       dueAt: "2026-07-03T14:00:00.000Z",
@@ -1068,6 +1132,7 @@ function reportExportJob(overrides: Partial<ReportExportJob> = {}): ReportExport
     rows: 0,
     status: "Queued",
     statusKey: "queued",
+    tenantId: "tenant-volga",
     ...overrides
   };
 }

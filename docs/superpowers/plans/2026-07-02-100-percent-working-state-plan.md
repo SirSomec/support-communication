@@ -1,517 +1,437 @@
-# Plan: bring Support Communication to a fully working product state
-
-> **For implementers:** REQUIRED SUB-SKILL: Use test-driven-development for each implementation phase below.
-
-## Objective
-
-Make the product release-ready by eliminating visible stubs, disabled planned controls, UI-only toast actions, and production-like runtime fallbacks for product-critical state.
-
-Definition of "100% working" for this plan:
-
-- Every visible primary action in the app either calls a real backend route and persists/audits the result, or is removed from the UI because it is outside product scope.
-- Disabled controls remain only for access, validation, loading, closed-state, or genuinely unavailable external browser permissions.
-- The production-like Docker profile uses durable repositories for product-critical domains, or blocks startup with an explicit configuration error.
-- The release gate includes automated checks that prevent new visible stubs from entering the product.
-
-## Current Baseline
-
-- Local containers from the current branch were rebuilt and started through `docker compose up -d --build --force-recreate frontend api-gateway`.
-- `http://127.0.0.1:8080/`, `http://127.0.0.1:8080/api/v1/health`, and `http://127.0.0.1:4101/api/v1/health` respond successfully.
-- Current local verification covers full smoke, backend suite, backend build, service adapters, tenant isolation, audit immutability, quality, automation, UI mutation guards, and pilot flow tests.
-- Quality manual QA / AI actions and Knowledge governance are implemented and tracked as completed in `docs/product-completeness-register.md`.
-- Notification preference persistence, sound/type subscriptions, active external channel selection, critical-alert test notification creation, fail-closed channel validation, browser push subscription storage, service-worker registration, queued browser-push delivery descriptors, notification delivery worker execution, retry/failure state, and real `web-push` provider mode are implemented.
-- The remaining risk is not basic startup; it is product completeness and production-like durability.
-
-## Audit Snapshot
-
-| Priority | Area | Evidence | Gap | Plan direction |
-| --- | --- | --- | --- | --- |
-| Done | Quality manual QA and AI batch actions | `src/features/quality/QualityScreen.jsx`; `src/services/qualityService.js`; `tests/quality-workflows.test.js` | Completed: controls call backend manual QA and draft-score APIs through service/action helpers with audit evidence. | Keep regression coverage in smoke and quality workflow tests. |
-| Done | Knowledge review, publish, reject, status workflow, attachments | `src/features/quality/KnowledgeBaseWorkspace.jsx`; `src/services/knowledgeService.js`; `backend/apps/api-gateway/src/workspace/knowledge.controller.ts`; `backend/tests/knowledge-contracts.test.ts` | Completed: workflow and attachment controls call backend routes with persisted status transitions, immutable decision/audit evidence, and scan-policy publication checks. | Keep regression coverage in smoke, frontend workflow tests, and backend contracts. |
-| Done | Notification preferences and active external channel settings | `src/features/notifications/NotificationCenter.jsx`; `src/services/notificationService.js`; `backend/apps/api-gateway/src/notifications/notification.controller.ts`; `backend/apps/api-gateway/src/integrations/seed.ts`; `backend/tests/notification-contracts.test.ts`; `backend/tests/integration-contracts.test.ts` | Completed: subscription and sound controls are backend-confirmed and audited; external critical channels load from active tenant channel connections; unknown/disabled/foreign channels fail closed; preferences persist through local JSON and production-like Prisma repositories. | Keep regression coverage in smoke, service tests, UI mutation guards, integration contracts, notification contracts, and Prisma notification repository contracts. |
-| Done | Browser push subscription and notification delivery worker | `src/features/notifications/NotificationCenter.jsx`; `backend/apps/api-gateway/src/notifications/notification.service.ts`; `backend/apps/api-gateway/src/notifications/notification-delivery.worker.ts`; `backend/tests/notification-delivery-worker-contracts.test.ts` | Completed: browser push stores tenant/user PushSubscription records, registers a Vite-served service worker, uses VAPID public-key discovery, queues browser-push delivery descriptors, and `notification-delivery-worker` claims due descriptors with retry/failure state through local or real `web-push` provider mode. Browser push subscriptions and delivery descriptors have Prisma parity for production-like runtime. | Keep contract coverage for subscription storage, descriptor creation, provider adapter mapping, redacted failures, worker once command, and Prisma notification repository contracts. |
-| Done | Client segmentation and export | `src/features/clients/ClientsScreen.jsx`; `backend/apps/api-gateway/src/workspace/clients.controller.ts`; `backend/tests/workspace-contracts.test.ts`; `tests/smoke.spec.js` | Completed: `/clients/segments` returns segment descriptors/counts, `/clients/exports` creates masked export descriptors with immutable audit evidence, the Clients screen applies backend segment ids plus export confirmation, and client export jobs have Prisma parity. | Keep regression coverage in workspace contracts, service route tests, UI mutation guards, and smoke. |
-| Done | Shift panel mass redistribution | `src/features/panel/PanelScreen.jsx`; `backend/apps/api-gateway/src/routing/routing.service.ts`; `backend/tests/routing-contracts.test.ts`; `tests/smoke.spec.js` | Completed: panel uses backend preview/commit routes with idempotency key, capacity conflicts, immutable audit/job evidence, workload reload, and Prisma-backed batch job descriptors. | Keep regression coverage in routing contracts, service route tests, UI mutation guards, and smoke. |
-| Done | Public demo/contact request | `src/features/public/LandingPage.jsx`; `src/App.jsx`; `src/services/publicLeadService.js`; `backend/apps/api-gateway/src/integrations/public-demo-request.controller.ts`; `backend/tests/public-demo-request-contracts.test.ts`; `tests/smoke.spec.js` | Completed: landing demo/contact buttons are enabled, open a real form, submit unauthenticated public requests, and backend persists sanitized lead metadata with immutable audit evidence, duplicate/rate-limit controls, and a queued notification descriptor. Lead notification worker delivery now has deterministic local coverage, embedded SMTP provider smoke through `lead-notification:worker:once`, compose Mailpit SMTP/API smoke through root `release:gate`, and skip-safe external SMTP acceptance smoke through `lead-notification:smtp-live-smoke`. | Keep backend contract, service adapter, no-visible-stubs, smoke, embedded SMTP worker-smoke, Mailpit release-gate coverage, and external SMTP acceptance smoke with target credentials. |
-| Done | Settings aggregate channel status toggle | `src/features/settings/SettingsAccessPanel.jsx`; `src/app/settingsChannelActions.js`; `backend/apps/api-gateway/src/integrations/integration.controller.ts`; `backend/tests/integration-contracts.test.ts`; `tests/smoke.spec.js` | Completed: integration API owns aggregate channel type status, `PATCH /integrations/channels/types/:type/status` updates tenant connection records with immutable audit events, and Settings Access updates only after backend audit evidence. | Keep numeric limits read-only here; connection-specific edits remain in the channel connections panel. |
-| Done | Audit/report deep links | `src/features/audit/AuditScreen.jsx`; `src/features/reports/ReportsScreen.jsx`; `tests/smoke.spec.js` | Completed: Audit related object opens a read-only panel with target, tenant, user, trace, and immutable status; Reports History opens backend export descriptors; Report Audit opens an embedded immutable audit descriptor panel with queue and metric-version evidence. | Keep focused smoke coverage for Reports history/audit and Audit related-object panels. |
-| Done | Base reports from real tenant activity | `src/features/reports/ReportsScreen.jsx`; `backend/apps/api-gateway/src/reports/report-live-workspace.ts`; `backend/apps/api-gateway/src/reports/report.service.ts`; `backend/apps/api-gateway/src/reports/report-export.worker.ts` | Completed: new/closed conversations, first response, SLA, channel shares and charts are calculated from persisted conversations/messages for the authenticated tenant and selected period/channel. Export files use the same aggregation. Demo jobs, fake rescue rows and unsupported detailed filters are no longer shown. | Keep the live Public SDK to Reports smoke and tenant-isolation/export parity contracts in release verification. |
-| Done | Direct dialog assignment and routing report bridge | `src/features/dialogs/ChatHeader.jsx`; `src/app/useConversationInbox.js`; `backend/apps/api-gateway/src/conversation/conversation.service.ts`; `backend/apps/api-gateway/src/conversation/conversation.repository.ts`; `tests/pilot-smoke.test.js` | Completed: the operator can assign or transfer any persisted SDK/Telegram dialog from the working chat screen to an active user in the same tenant. Conversation ownership, audit message, realtime event and routing analytics row commit together. The Reports screen then shows the factual assignment/transfer without fixture data. Desktop and mobile browser QA cover assignment, transfer, overflow and report counters. | Keep conversation/Prisma contracts, frontend service contracts, live pilot roundtrip and rendered desktop/mobile interaction coverage. |
-| P1 | Advanced operational reports | Reports, routing, quality and conversation event models | First slice completed: the Reports screen now shows tenant-scoped operator assignment and transfer activity from `routing_analytics_rows`, with period/channel/operator/event filters and no fixture fallback. Team/topic/status/rescue/CSAT breakdowns still lack a complete historical event model. Current SLA uses the conversation's persisted outcome, not a transition ledger. | Persist topic/status, rescue outcome, SLA transition and quality events; aggregate them by historical period; then add the remaining filters, tables and export parity. |
-| Done | SDK snippet and Audit JSON copy | `src/features/settings/SdkConsolePanel.jsx`; `src/features/audit/AuditScreen.jsx`; `src/services/clipboardService.js`; `tests/clipboard-service.test.js` | Completed: both buttons use Clipboard API with textarea fallback and browser smoke verifies clipboard contents. | Keep unit and smoke coverage. |
-| Done | Sensitive integration admin actions | `backend/apps/api-gateway/src/integrations/integration.controller.ts`; `backend/apps/api-gateway/src/integrations/integration.module.ts`; `backend/apps/api-gateway/src/identity/seed-catalog.ts`; `src/app/integrationAdminActions.js`; `src/features/settings/AdminWorkspaces.jsx`; `backend/tests/integration-contracts.test.ts`; `backend/tests/settings-contracts.test.ts`; `tests/ui-mutation-guards.test.js` | Completed: API key rotation, webhook replay, and security-session revoke routes are guarded through tenant-operator or service-admin permissions; the seeded service-admin role and active RBAC policy include `settings.read`/`settings.manage`; Admin workspace updates local state only after backend `status: "ok"` plus rotation/replay/revoke audit evidence. Live production-like compose smoke confirms all three sensitive routes return backend audit evidence instead of `403 permission_denied`. | Keep settings/integration contracts, live service-admin route smoke, and UI mutation guards. |
-| Done | Production-like persistence | `backend/packages/config/src/index.ts`, `docs/runtime-configuration.md:73`, `backend/README.md:29`, `docker-compose.pilot.yml:14` | Local compose intentionally uses JSON stores. `RUNTIME_PROFILE=production-like` now blocks explicit JSON fallback store files, and non-local runtime requires Prisma for automation, identity, billing, conversation, workspace, integrations, notifications, operations, platform, routing and reports. Automation, integrations, operations, workspace, notifications, routing, reports and platform Prisma parity are implemented for the current production-like slice. | Keep release-gate coverage for production-like startup and repository mode regressions. |
-| Done | Webhook replay delivery runtime | `backend/apps/api-gateway/src/integrations/webhook-delivery.worker.ts`; `backend/apps/api-gateway/src/integrations/webhook-delivery.main.ts`; `backend/scripts/webhook-delivery-worker-smoke.mjs`; `backend/package.json`; `docker-compose.yml`; `docker-compose.pilot.yml`; `scripts/compose-health-check.mjs`; `backend/tests/integration-contracts.test.ts` | Completed: replay/delivery journal rows are claimed by `webhook-delivery-worker`, delivered through local or HTTP provider mode, and persisted as delivered, retry-scheduled, or dead-lettered with redacted failure evidence. `webhook:worker:once` seeds a Prisma row, starts a local HTTP fake provider, runs the compiled worker main, and verifies one real provider request plus delivered persistence. Production-like compose now includes `webhook-delivery-worker` and compose health requires it. | Keep the worker smoke in backend release checklist and compose health. Configure `WEBHOOK_DELIVERY_PROVIDER_MODE=http` where real webhook endpoints should be called; pilot defaults to disabled until provider dispatch is explicitly enabled. |
-| Done | Telegram inbound and outbound pilot runtime | `backend/apps/api-gateway/src/integrations/telegram-polling.worker.ts`; `backend/apps/api-gateway/src/integrations/telegram-polling.main.ts`; `backend/apps/outbox-worker/src/index.ts`; `backend/scripts/telegram-polling-worker-smoke.mjs`; `docker-compose.yml`; `docker-compose.pilot.yml`; `scripts/compose-health-check.mjs` | Completed: one dedicated production-like worker reads active tenant bot connections from Prisma, persists a per-bot polling cursor across restarts, isolates provider ids by tenant and bot, and creates durable dialogs/messages. Outbound delivery is owned only by the outbox worker and persists descriptor delivery state. Live pilot evidence imported messages for `tenant-mygig` and published queued replies. | Keep polling/outbound contracts, the deterministic polling worker smoke, and the 15-service compose health check. Use a public webhook instead of polling only when a reachable HTTPS base URL is configured. |
-| Done | Proactive delivery runtime | `backend/apps/api-gateway/src/automation/proactive-delivery.worker.ts`; `backend/apps/api-gateway/src/automation/proactive-delivery.main.ts`; `backend/scripts/proactive-delivery-worker-smoke.mjs`; `backend/scripts/proactive-delivery-prisma-concurrency-smoke.mjs`; `backend/tests/automation-proactive-contracts.test.ts`; `backend/tests/prisma-proactive-delivery-transaction-contracts.test.ts`; `backend/package.json`; `docker-compose.yml`; `docker-compose.pilot.yml`; `scripts/compose-health-check.mjs` | Completed for multi-replica scheduling: the compiled worker reads active visitor snapshots or fresh SDK conversation presence within TTL in Prisma mode, applies tenant-owned rules, windows, exact segment targeting, experiment assignment and frequency caps, and atomically reserves idempotency, consumes caps and writes descriptor/outbox/attempt/attribution evidence. Serializable retry handles Prisma transaction conflicts; assignment creation replays unique races. Four concurrent worker processes persist exactly one delivery and one cap use in PostgreSQL. Operations readiness exposes durable attempt evidence. | Keep both proactive worker smokes in the backend release checklist and require `proactive-delivery-worker` in compose health. Downstream provider dispatch remains owned by the existing outbox worker claim/lease boundary. |
-| Done | Proactive delivery atomic reservation and multi-replica safety | `backend/apps/api-gateway/src/automation/proactive-delivery.worker.ts`; `backend/apps/api-gateway/src/automation/automation.repository.ts`; `backend/tests/prisma-proactive-delivery-transaction-contracts.test.ts`; `backend/scripts/proactive-delivery-prisma-concurrency-smoke.mjs` | Completed: one Serializable Prisma transaction reserves the tenant/rule/subject idempotency key, performs CAS cap updates, and writes outbound descriptor, outbox, attempt and attribution evidence. Unique and serialization races replay or retry safely; injected failure rolls the transaction back; two subjects competing for the final cap slot produce one queued delivery and one exhausted result. | Keep unit crash-recovery/cap-race contracts and the real PostgreSQL multi-process smoke in release verification. Revisit the idempotency scope only if product requirements allow repeat delivery after cooldown/reset. |
-| Done | Public SDK non-skipping local smoke | `tests/pilot-smoke.test.js`; `scripts/release-gate.mjs`; `src/features/settings/SdkConsolePanel.jsx`; `tests/sdk-console-fail-closed.spec.js` | Completed: SDK playground is fail-closed, and the release-gate Public SDK smoke never skips or requires an external key. It creates an ephemeral Prisma operator/password/key, executes widget identify/message, operator login/reply and visitor polling against the live production-like API, then removes auth and conversation evidence. Repeated execution passes without stale state. | Keep the self-seeded live roundtrip and fail-closed browser scenarios in release verification. Use a separate environment-gated check for a real external SDK tenant/key when needed. |
-| Done | Browser push production-like provider gate | `docker-compose.pilot.yml`; `tests/release-gate.test.js`; `backend/apps/api-gateway/src/notifications/notification-delivery.main.ts`; `backend/tests/browser-push-provider-gate-contracts.test.ts` | Completed: pilot disables browser push on both API and worker when no VAPID configuration exists. Explicit enablement or any VAPID key material requires `web-push` mode and a complete public/private pair before the worker can scan descriptors. Release config scrubs provider env for deterministic local verification and compose health catches worker fail-fast exits. | Keep provider-gate contracts and production-like compose health. Supply `BROWSER_PUSH_ENABLED=true`, `NOTIFICATION_DELIVERY_PROVIDER_MODE=web-push` and complete VAPID credentials together in live environments. |
-| Done | MFA email OTP verification | `backend/apps/api-gateway/src/identity/auth.service.ts`; `backend/apps/api-gateway/src/identity/identity.repository.ts`; `backend/apps/api-gateway/src/identity/mfa-otp.ts`; `backend/apps/api-gateway/src/identity/mfa-otp-delivery.ts`; `backend/tests/mfa-otp-verification-contracts.test.ts`; `backend/tests/mfa-otp-delivery-contracts.test.ts`; `tests/pilot-smoke.test.js` | Completed: password login issues a cryptographically random six-digit code, persists only its HMAC, delivers it through fail-closed SMTP in production-like runtime, limits invalid attempts, consumes the challenge atomically and rejects replay. Staging no longer honors `PILOT_SKIP_MFA`; live release smokes retrieve the actual Mailpit message instead of using a fixed code. | Keep repository, delivery, tenant HTTP and live Mailpit contracts in release verification. |
-| Done | Password recovery token delivery and old-session revocation | `backend/apps/api-gateway/src/identity/auth.service.ts`; `backend/apps/api-gateway/src/identity/identity.repository.ts`; `backend/apps/api-gateway/src/identity/mfa-otp.ts`; `backend/apps/api-gateway/src/identity/mfa-otp-delivery.ts`; `backend/tests/identity-contracts.test.ts`; `tests/pilot-smoke.test.js` | Completed: recovery requests do not disclose account existence or the one-time token. The token is delivered through the configured mail boundary and is single-use. Password replacement atomically revokes every older session/token pair for the account, and a new session is issued only after email OTP. | Keep deterministic delivery, SMTP staging, consume/replay, unknown-email, mandatory-OTP, repository revocation and live old-bearer rejection contracts. |
-| Done | Tenant/service-admin bearer separation | `backend/apps/api-gateway/src/identity/service-admin-session.guard.ts`; `backend/tests/service-admin-session-guard.test.ts` | Completed for the current token/session model: a tenant operator bearer cannot enter service-admin routes even when its tenant permissions contain `*`; a valid service-admin bearer continues to work. | Replace the prefix-based distinction with an explicit persisted session kind when the identity schema is next revised. |
-| P1 | Authenticator TOTP enrollment and recovery codes | `src/features/auth/AuthPage.jsx`; identity auth controller/service/schema | Email OTP and password-reset session revocation are operational, but authenticator-app enrollment, encrypted TOTP seeds, backup codes and self-service disable/regeneration are not implemented. | Add an encrypted MFA credential model, enrollment/verification/status endpoints, one-time recovery-code hashes and authenticated UI controls if authenticator TOTP is part of the target product. |
-| Done | Release database target preflight | `backend/scripts/release-database-preflight.mjs`; `backend/scripts/release-checklist.mjs`; `scripts/release-gate.mjs`; `tests/release-gate.test.js` | Completed: migrations and seed cannot run until `DATABASE_URL` passes a local-host allowlist or a remote target is explicitly acknowledged with both an allow flag and environment name. Root release gate pins the local production-like PostgreSQL URL instead of inheriting an arbitrary caller URL. | Keep local, denied-remote and explicitly-approved-remote contracts in release verification. |
-| P1 | Workers and provider runtime | `docker-compose.yml`; `docker-compose.pilot.yml`; `scripts/compose-health-check.mjs`; integration/outbox modules | Persistent compose runtime now includes `notification-delivery-worker`, `lead-notification-worker`, `webhook-delivery-worker`, `report-digest-worker`, `outbox-worker`, and `billing-sync-worker`; `file-scan-scanner-worker` is profile-gated but no longer depends on an undeclared scanner container because local deterministic scanner mode is the default. Telegram delivery in `outbox-worker` resolves active tenant bot tokens from Prisma integration state with env fallback. Operations readiness exposes queue depth, dead-letter count and last-delivery evidence for webhook, lead notification, browser push, report export, report digest, outbox, file-scan scanner and billing-sync workers. Public demo lead notification now supports SMTP provider mode with optional `AUTH PLAIN` credentials and implicit TLS/SMTPS config; `lead-notification:worker:once` verifies one SMTP delivery through an embedded SMTP endpoint, root `release:gate` verifies the same path through compose Mailpit SMTP/API, and `lead-notification:smtp-live-smoke` verifies external SMTP acceptance plus Prisma delivery persistence when target endpoint credentials are supplied. `webhook:worker:once` verifies one HTTP fake-provider delivery through the compiled worker and Prisma delivery journal. `provider:outbox:smoke` is now enabled by backend `release:checklist` and verifies Telegram, VK and MAX runtime adapters through local provider endpoints. File-scan HTTP scanner runtime now supports scanner bearer auth and safe descriptor `signedFile` access without raw object keys; dialog attachment upload now creates a real `workspaceFile`, returns client `signedUpload`, seeds scanner `signedFile` metadata, uploads bytes through the signed policy, finalizes the dialog attachment file, and polls dialog attachment status until scan-ready/blocked/failed. Root `release:gate` also verifies file-scan scanner callback delivery through the live production-like API route and Prisma persistence, plus skip-safe external scanner, Telegram live provider, VK/MAX live provider-proxy, and external SMTP acceptance smokes when their explicit env gates are enabled. Remaining provider-runtime work is executing live/staging public SDK and external SMTP checks with real credentials, adding mailbox/inbox validation only if required, direct official VK/MAX adapter work if provider proxy is not the target boundary, non-skipping scanner auth/signed-file execution against the chosen scanner endpoint, and stricter scan-worker finalize gating only if that endpoint cannot tolerate early scan retries. | Keep provider runtime smoke in the checklist, Mailpit smoke, webhook worker smoke, file-scan API callback smoke, skip-safe external scanner smoke, skip-safe Telegram live smoke, skip-safe VK/MAX proxy smoke, and skip-safe external SMTP acceptance smoke in the root release gate; add live/staging credentials for public SDK, external SMTP and the chosen scanner endpoint when target environments are available. |
-| P1 | Security and release hardening | `backend/apps/api-gateway/src/main.ts:31`, runtime docs | Production blocks demo service-admin headers, but release still needs a single gate for env, secrets, audit, backups, and npm audit triage. | Add release checklist command that includes stub scan, production-like compose smoke, secret redaction, backup/restore smoke, and dependency triage. |
+# План доведения Support Communication до полностью рабочего состояния
+
+Актуализирован: 2026-07-11.
+
+## Текущий результат этапа 2026-07-11
+
+Завершено и проверено:
+
+- единый неизменяемый журнал истории диалога с разделением по организациям;
+- запись создания диалога, входящих и исходящих сообщений, внутренних комментариев, статуса, темы и назначения оператора;
+- запись очереди, паузы/возобновления/нарушения SLA, запуска/завершения/автовозврата rescue;
+- запись клиентских оценок, изменений оценки, ручных проверок и обжалований;
+- расчет основных отчетов и XLSX из журнала событий с часовым поясом пользователя и честным состоянием «нет данных»;
+- начальное заполнение точных времен создания и сообщений для существующих диалогов без выдумывания старых смен статуса;
+- постоянные SLA и rescue workers с health check, retry, dead letter, lease, восстановлением после падения и защитой от старого worker;
+- загрузка фактической истории при открытии диалога в интерфейсе;
+- 110 миграций успешно применяются к текущей и к чистой базе, полный backend test suite и frontend guards проходят.
+
+Следующие обязательные блоки до полного рабочего состояния:
+
+1. Автоматически применять правила маршрутизации к каждому новому входящему диалогу и провести приемку с двумя экземплярами API/workers.
+2. Завершить VK и MAX: входящие сообщения, вложения, ответы, подтверждения доставки и постоянные workers.
+3. Подключить опубликованные bot-сценарии к реальным входящим сообщениям и реализовать постоянный bot runtime.
+4. Подключить реальный AI provider или переименовать rule-based функции так, чтобы они не выдавались за AI.
+5. Включить внешний антивирус/сканер файлов и вынести выгрузки отчетов в MinIO/S3.
+6. Включить и проверить реальные notification/email/webhook/billing provider delivery режимы.
+7. Реализовать TOTP/recovery codes, проверить backup/restore и провести полный ролевой браузерный acceptance на пересобранных контейнерах.
+
+Этот документ является главным планом завершения продукта. Старые frontend/backend roadmap используются как источник требований, но их отметка `[x]` не считается доказательством готовности без сквозной проверки.
+
+## 1. Что означает «100% работает»
+
+Функция считается завершенной только когда одновременно выполнены все условия:
+
+1. Пользователь может выполнить действие в реальном интерфейсе с нужной ролью.
+2. Интерфейс вызывает настоящий API, а не меняет данные только на экране.
+3. Результат сохраняется в PostgreSQL или объектном хранилище и остается после перезапуска.
+4. Повторное открытие страницы показывает сохраненный результат.
+5. Фоновая операция действительно выполняется постоянно запущенным обработчиком.
+6. Внешняя отправка подтверждена целевым сервисом, а не только локальным имитатором.
+7. Ошибка, повторная попытка и окончательный сбой видны пользователю и администратору.
+8. Действие изолировано по организации, защищено правами и оставляет запись в истории, если это требуется.
+9. Есть автоматический сквозной тест и проверка в браузере на собранных контейнерах.
+10. В рабочем режиме нет тестовых организаций, записей, метрик или скрытых подстановок.
+
+Наличие экрана, маршрута API, структуры ответа, записи «descriptor», unit-теста или отдельного файла worker само по себе не означает готовность.
+
+## 2. Проверенное состояние на 2026-07-11
+
+### Подтверждено
+
+- Frontend собирается успешно.
+- Backend: 1227 тестов из 1227 проходят.
+- Проверка зависимостей: 0 critical, high, moderate и low уязвимостей.
+- PostgreSQL, Redis, MinIO, Mailpit, API, frontend и основные обработчики запущены.
+- В production-like профиле основные репозитории используют PostgreSQL.
+- Авторизация по паролю и email-коду, Public SDK, Telegram polling, сохранение диалогов, ответы оператора и ручное назначение оператора имеют рабочую основу.
+- Учетная запись `a.samoylov@mygig.ru` и ее парольная запись существуют в текущей базе; отдельный стабильный сценарий восстановления тестового доступа все еще нужен.
+
+### Не позволяет считать продукт готовым
+
+| Область | Фактическое состояние | Статус |
+| --- | --- | --- |
+| Отчеты | Базовые числа по диалогам считаются из базы. Нет полной истории статусов, тематик, SLA, rescue, CSAT/QA и команд. | Частично |
+| Качество и «ИИ» | Экран вызывает API, но ручные проверки и результаты scoring не сохраняются сервисом. Рабочий scoring основан на простых правилах, а не на подключенном AI-провайдере. | Блокер |
+| Telegram | Входящие сообщения и ответы работают через отдельный polling worker. Нужны диагностика подключения, приемка на реальном боте и регрессия нескольких ботов. | Рабочая основа |
+| MAX и VK | Есть настройки и необязательные исходящие proxy-адаптеры. Нет полного входящего контура и подтвержденных официальных интеграций. | Не завершено |
+| Боты | Сценарии можно сохранять, публиковать и тестировать. Runtime worker не подключен к входящим сообщениям и не запущен отдельным сервисом. | Не завершено |
+| Маршрутизация и SLA | Автоназначение SDK и Telegram работает по реальным очередям и лимитам. Ручное назначение, возврат, массовое перераспределение, SLA и rescue сохраняются в основном диалоге; фоновые таймеры постоянно запущены в контейнерах. Осталась отказоустойчивая приемка в нескольких экземплярах. | Функционально завершено |
+| Уведомления | Настройки и очереди есть. В pilot профиль реальная доставка выключена (`disabled`). | Частично |
+| Webhooks | Очередь и обработчик есть. В pilot профиль реальная HTTP-доставка выключена. | Частично |
+| Вложения | Загрузка и scan-контракт есть. Scanner worker не входит в текущий запущенный профиль и по умолчанию использует локальный вердикт. | Не завершено |
+| Биллинг | Состояние и очередь есть. Синхронизация с реальным провайдером в pilot выключена; payment retry/dunning не закрыты в основном backend-плане. | Не завершено |
+| Клиенты, шаблоны, база знаний | Основные операции и хранилище есть. В runtime-коде еще присутствуют встроенные шаблоны/статьи и автоматическое заполнение в отдельных режимах. | Частично |
+| Мониторинг и service-admin | Экраны и API широкие, но часть метрик берется из статического каталога. Не все operation/incident workers имеют постоянный runtime. | Частично |
+| Резервное восстановление | Файлы проверок существуют, но обязательное восстановление PostgreSQL и объектов не подтверждено релизным прогоном. | Не завершено |
+| Безопасность сессий | Tenant и service-admin сессии разделяются косвенным признаком. Явный тип сессии и TOTP/recovery codes не завершены. | Частично |
+| Заглушки и тестовые данные | Все домены пусты по умолчанию; примеры подключаются только явным локальным режимом. Guards запрещают runtime seed-зависимости, tenant fallbacks и Prisma defaults. Platform показывает сохраненную telemetry или честное отсутствие данных. | Работает |
+| Браузерная приемка | Playwright-тесты есть. Полная ручная приемка текущего образа во встроенном браузере в этом аудите не состоялась из-за отсутствия подключения к browser webview. | Требуется |
+
+Дополнительные технические сигналы:
+
+- В рабочей базе на момент аудита: 1 диалог Telegram, 10 сообщений, 0 routing analytics, 0 quality ratings, 0 manual QA, 0 AI scoring audit, 0 bot scenarios и 0 proactive rules.
+- Production-like профиль запускает workers, которые могут работать в режиме `disabled`; сам факт работающего контейнера не доказывает доставку.
+- [x] `file-scan-scanner-worker` входит в основной production-like запуск и проверяет реальные байты через ClamAV; чистый файл, EICAR и полный callback в PostgreSQL подтверждены живой проверкой.
+- Default tenant для Conversation, TemplateRecord и KnowledgeArticle удален из Prisma; Automation bot test runs стали обязательными по tenant после безопасного backfill.
+- Runtime-код больше не подмешивает fixtures ни в одном домене. Integrations, Operations, Platform, Quality и Routing также очищены; Platform metrics рассчитываются из сохраненной telemetry, health rollups и incidents.
+- Экспорт отчетов в pilot пишет файлы в локальную `.runtime/report-exports`, а не в общее S3-хранилище.
+- Frontend build предупреждает о основном bundle больше 500 kB.
+
+## 3. Единый реестр статусов
+
+Для каждого требования из `docs/functional-requirements-support-communication-platform.md` создать одну строку со следующими полями:
+
+- ID требования;
+- пользователь и его цель;
+- экран и действие;
+- API;
+- таблицы/объекты;
+- фоновый процесс;
+- внешний провайдер;
+- права и аудит;
+- автоматический тест;
+- browser-приемка;
+- статус: `working`, `partial`, `descriptor-only`, `disabled-runtime`, `fixture-backed`, `missing`, `out-of-scope`;
+- ссылка на доказательство последней приемки.
 
-## Phase 0: Product Scope Lock And Stub Gate
-
-Deliverables:
-
-- Create `docs/product-completeness-register.md` with every current visible incomplete control, owner, desired user outcome, backend route, tests, and release status.
-- Add an automated stub guard test, for example `tests/no-visible-stubs.test.js`, scanning production UI code for phrases such as `ожидает backend`, `ожидает API`, `будет доступ`, `не имеет готов`, `read-only preview`, `coming soon`, and permanently disabled primary actions.
-- Maintain a small allowlist for legitimate disabled states: access denied, loading, form validation, closed conversations, browser permission denied.
-- Add the guard to the regular verification command used before releases.
-
-Acceptance:
-
-- New visible stubs fail CI unless registered as intentionally out of scope.
-- The register contains zero unclassified product-facing gaps.
-
-Verification commands:
-
-```bash
-npm run test:no-demo-runtime
-npm run test:services
-npm run test:ui-mutation-guards
-npm run test:smoke
-```
+Статус `working` разрешен только при выполнении Definition of Done из раздела 1.
 
-## Phase 1: Connect Existing Quality APIs
-
-Backend work:
+## 4. Этап 0. Правдивый контроль готовности
 
-- Confirm contracts for `POST /quality/manual-reviews`, `POST /quality/draft-score`, and `POST /quality/draft-scores` in `backend/apps/api-gateway/src/quality/quality.controller.ts`.
-- Ensure manual QA review and AI batch scoring emit immutable audit evidence and refresh `GET /quality/workspace` data.
+### 0.1. Пересобрать матрицу требований
 
-Frontend work:
+- [ ] Разнести все требования по пользовательским сценариям, а не по наличию экранов/API.
+- [ ] Сопоставить frontend, backend, схему данных, workers и compose services.
+- [ ] Переклассифицировать старые отметки `Done`, которые подтверждают только контракт или макет.
+- [ ] Отдельно отметить функции, зависящие от решения по внешнему провайдеру.
 
-- Extend `src/services/qualityService.js` with `recordManualQaReview(payload)` and `scoreDraftResponses(payload)` if the batch alias is needed by the screen.
-- Replace disabled controls in `src/features/quality/QualityScreen.jsx` with real handlers:
-  - "Низкие оценки" filters low-score/manual-review queue.
-  - "AI-проверка" submits batch scoring for selected or visible conversations.
-  - "Проверить" opens or submits a manual QA review.
-  - AI suggestion actions call a backend mutation or are removed if not a committed feature.
+### 0.2. Усилить автоматические guards
 
-Tests:
+- [ ] Запретить runtime import из `seed-catalog` во всех service, controller, worker, repository и adapter файлах.
+- [ ] Запретить production defaults для tenant/user/provider IDs в TypeScript и Prisma.
+- [x] Guard покрывает service/controller/worker/repository/adapter и останавливает появление новых runtime fixtures и hardcoded tenant/user/provider defaults.
+- [x] Удалить зарегистрированные старые нарушения, после чего убрать временный список допустимого долга из guard.
+- [ ] Находить встроенные массивы доменных записей, статические метрики и автоматический bootstrap тестовых данных.
+- [ ] Проверять не только наличие записи в completeness register, но и допустимость ее статуса для релиза.
+- [ ] Находить действия, которые возвращают success/audit ID без фактической записи в хранилище.
+- [ ] Находить workers без runtime entrypoint, compose service и health evidence.
+- [ ] Находить provider mode `disabled/local/fake` в целевом профиле.
 
-- Backend contract tests for manual review idempotency, tenant isolation, and audit rows.
-- Frontend service tests for success/error envelopes.
-- Smoke coverage proving the buttons are enabled for a permitted admin and disabled only for missing access.
+Выполнено 2026-07-11: guard сканирует service/controller/worker/repository/adapter/bootstrap/main, считает `seed.ts` скрытой fixture-зависимостью, проверяет Prisma ID defaults и tenant fallback `tenant-demo`/`tenant-volga`. Все зарегистрированные runtime seed imports, Prisma defaults и tenant fallbacks удалены; временный список допустимого долга пуст, новые совпадения блокируют проверку.
 
-Acceptance:
+### 0.3. Очистить тестовые данные из рабочего runtime
 
-- No Quality button remains disabled because of missing backend.
-- Manual review and AI scoring results survive reload and appear in audit/workspace data.
+- [x] Удалить default tenant из Prisma schema и добавить безопасные миграции/backfill.
+- [x] Перенести встроенные шаблоны, статьи, диалоги, отчеты, automation, billing и identity примеры в явную local/test seed-композицию.
+- [x] Отделить seed от Integrations, Operations, Platform, Quality и Routing; заменить статические Platform metrics реальной telemetry.
+- [x] Новый tenant должен начинаться с честного пустого состояния или продуктового onboarding-шаблона, явно созданного для него.
+- [x] Production-like запуск не должен сам добавлять demo/Volga записи.
+- [x] Сделать idempotency keys отчетов и публикации ботов составными `(tenant_id, key)`, чтобы одинаковые клиентские ключи разных организаций не конфликтовали.
 
-## Phase 2: Complete Knowledge Governance
+Приемка этапа: пустая новая организация не видит чужих или демонстрационных данных; попытка добавить новую заглушку ломает release gate.
 
-Backend work:
+Выполнено 2026-07-11: все домены отделены от неявного seed, Platform читает реальные сохраненные наблюдения, а отсутствующие показатели не выдумываются. Report и bot publish idempotency разделены по организациям составным ключом `(tenant_id, key)`. Текущая и чистая базы успешно применили все 107 миграций. Локальные примеры включаются только через `LOCAL_DEVELOPMENT_SEED_ENABLED=true`; production-like профиль использует `false`.
 
-- Extend `backend/apps/api-gateway/src/workspace/knowledge.controller.ts` with routes:
-  - `POST /knowledge/:articleId/submit-review`
-  - `POST /knowledge/:articleId/approve`
-  - `POST /knowledge/:articleId/reject`
-  - `POST /knowledge/:articleId/publish`
-  - `POST /knowledge/:articleId/archive`
-  - `POST /knowledge/:articleId/attachments`
-  - `DELETE /knowledge/:articleId/attachments/:attachmentId`
-- Persist article status transitions, approval history, version references, attachment descriptors, scan state, and audit events.
-- Enforce allowed transitions: draft to review, review to approved/rejected, approved to published, published to archived.
+## 5. Этап 1. Стабильный доступ и тестовые учетные записи
 
-Frontend work:
+### 1.1. Рабочая авторизация
 
-- Add knowledge service methods in `src/services/knowledgeService.js`.
-- Enable status workflow controls in `src/features/quality/KnowledgeBaseWorkspace.jsx`.
-- Keep direct status select disabled unless it becomes an explicit admin-only override with audit reason.
-- Use the existing file descriptor/scan policy for article attachments.
+- [ ] Прогнать login, email OTP, logout, refresh, password recovery и отзыв старых сессий для обычного пользователя и service-admin.
+- [ ] Добавить явный `session_kind` для tenant operator, service admin и impersonation вместо косвенного определения.
+- [ ] Проверять блокировку, деактивацию пользователя, истечение приглашения и смену организации.
+- [ ] Добавить TOTP enrollment, отключение и одноразовые recovery codes, если 2FA через приложение остается в полном объеме продукта. По умолчанию включить в scope.
 
-Tests:
+### 1.2. Предсказуемое тестирование разработки
 
-- Backend transition tests for valid/invalid status moves and tenant isolation.
-- Frontend workflow tests for draft save, submit review, approve, publish, reject, and attachment delete.
-- Playwright smoke for a complete article lifecycle.
+- [ ] Добавить одну команду, которая создает временную организацию и учетные записи всех ролей.
+- [ ] Команда должна выводить только локальные тестовые реквизиты и URL Mailpit, не изменяя реальные учетные записи.
+- [ ] Добавить безопасный reset пароля тестового пользователя и cleanup тестовой организации.
+- [ ] Зафиксировать smoke для `a.samoylov@mygig.ru` без хранения его реального пароля в репозитории: существование, recovery flow, успешная новая сессия, доступ к своей организации.
 
-Acceptance:
+Приемка этапа: разработчик всегда может получить чистую тестовую организацию и проверить роли без ручного изменения базы.
 
-- Article governance works end to end without local-only approval history.
-- Attachments cannot be published until clean scan status is confirmed.
+## 6. Этап 2. Диалоги и все каналы
 
-## Phase 3: Notification Preferences And Delivery
+### 2.1. Общий жизненный цикл диалога
 
-Backend work:
+- [ ] Сохранить исторический ledger создания, смены статуса, темы, исполнителя, очереди, SLA и закрытия.
+- [ ] Подключить открытие, ожидание, возврат, закрытие с обязательной темой и повторное открытие.
+- [ ] Сохранить внутренние комментарии отдельно от клиентской переписки.
+- [ ] Подтвердить поиск, пагинацию, фильтры и realtime обновления на нескольких экземплярах API.
 
-- Add notification preference persistence:
-  - muted notification types,
-  - sound rule preferences,
-  - external critical channel routes backed by active tenant channel connections,
-  - test critical alert dispatch.
-- Add routes under `backend/apps/api-gateway/src/notifications/notification.controller.ts`:
-  - `GET /notifications/preferences`
-  - `PATCH /notifications/preferences`
-  - `POST /notifications/test-critical-alert`
+### 2.2. SDK
 
-Completed on 2026-07-03:
+- [ ] Подтвердить identify, входящее сообщение, ответ, polling/realtime, повтор запроса и восстановление после restart.
+- [x] Подключить реальные visitor presence/events для proactive, а не выводить присутствие из свежести диалога.
+- [ ] Добавить версионирование и совместимость web widget.
 
-- `GET/PATCH /notifications/preferences` persist durable tenant/user preferences via `NOTIFICATION_STORE_FILE`.
-- Preference updates emit immutable audit evidence.
-- External critical channel ids are validated through tenant-owned active `IntegrationRepository` channel connections.
-- NotificationCenter loads external delivery channels from `/integrations/channels` instead of a hard-coded list.
-- Critical alert test creates a visible backend notification and fails closed for missing/disabled/foreign channels or browser push without a subscription.
-- `GET /notifications/push-subscriptions/public-key`, `POST /notifications/push-subscriptions`, and `DELETE /notifications/push-subscriptions/:subscriptionId` are implemented.
-- Browser push enablement registers `/browser-push-service-worker.js`, calls `PushManager.subscribe`, stores sanitized subscription/audit evidence in `NotificationRepository`, and updates UI state only after immutable backend audit evidence.
-- Critical alert browser push no longer returns a synthetic queued result; it writes a queued `browser-push.critical-alert.test` delivery descriptor tied to the stored subscription id and endpoint hash.
-- `notification-delivery-worker` claims due queued browser-push descriptors, resolves active PushSubscription records, calls a provider port, records delivered provider message ids, retries transient failures with redacted errors, and marks missing/revoked subscriptions failed.
-- Runtime supports `NOTIFICATION_DELIVERY_PROVIDER_MODE=local` for deterministic local compose and `NOTIFICATION_DELIVERY_PROVIDER_MODE=web-push` with `BROWSER_PUSH_PRIVATE_KEY`/`BROWSER_PUSH_SUBJECT` for real provider dispatch.
+### 2.3. Telegram
 
-Remaining provider-runtime work:
+- [ ] Проверить создание нового подключения, тест токена, первый входящий диалог, ответ и повторный запуск worker.
+- [ ] Добавить видимый connection health: bot username, последний poll, offset, последняя ошибка, webhook conflict.
+- [ ] Поддержать несколько Telegram ботов одной организации без пересечения сообщений.
+- [ ] Добавить live acceptance с реальным тестовым ботом в staging.
 
-- Add staging/live provider smoke with real VAPID keys and browser endpoints when secrets and target environment are available.
+### 2.4. VK и MAX
 
-Frontend work:
+- [ ] Зафиксировать целевую границу: официальный API или утвержденный provider proxy. По умолчанию использовать официальный API.
+- [ ] Реализовать хранение секретов, connection test и masking.
+- [ ] Реализовать входящие сообщения, idempotency, attachments и создание диалогов.
+- [ ] Реализовать ответы, исходящий старт диалога, delivery receipts, retry/dead-letter.
+- [ ] Добавить по одному постоянному inbound worker/webhook adapter на канал.
+- [ ] Провести non-skipping staging smoke для обоих каналов.
 
-- Extend `src/services/notificationService.js`.
-- Enable controls in `src/features/notifications/NotificationCenter.jsx`.
-- Treat browser permission denial as a real browser state, not a product stub.
+### 2.5. Вложения
 
-Tests:
+- [ ] Включить scanner worker в основной production-like профиль.
+- [ ] Заменить локальный автоматический verdict на целевой antivirus/scanner provider.
+- [ ] Проверить upload, checksum/size, finalize, scan, preview/download, блокировку зараженного файла и retry.
+- [ ] Проверить ограничения каждого канала и квоты до загрузки.
 
-- Preference persistence contract tests.
-- UI tests for toggling subscriptions, sound rules, external routes, and test alert.
-- Smoke test confirming preferences survive reload.
+Приемка этапа: сообщение из каждого заявленного канала создает диалог, оператор отвечает, доставка подтверждается, а ошибка видна и может быть повторена.
 
-Acceptance:
+## 7. Этап 3. Маршрутизация, SLA и rescue
 
-- Notification settings alter actual backend state.
-- Test critical alert creates a visible notification or outbound delivery descriptor.
+### 3.1. Правила назначения
 
-## Phase 4: Clients Segmentation And Export
+- [ ] Применять правила к каждому новому входящему диалогу.
+- [x] Учитывать канал, очередь, группу, роль, зафиксированную доступность оператора и лимит активных чатов. Если присутствие не измеряется, это явно отмечается как неизвестное.
+- [x] Сохранять объяснение, почему выбран конкретный оператор или очередь.
+- [x] Поддержать ручное назначение, transfer, возврат в очередь и атомарное массовое перераспределение канонических диалогов.
 
-Backend work:
+### 3.2. Постоянные workers
 
-- Extend clients API in `backend/apps/api-gateway/src/workspace/clients.controller.ts`:
-  - `GET /clients/segments` for available segment descriptors and counts.
-  - `GET /clients/export` or `POST /clients/exports` for export jobs/descriptors.
-- Persist export jobs with audit event, tenant ownership, status, file descriptor, and redacted sensitive fields.
+- [x] Добавить runtime main и compose service для SLA timer.
+- [x] Добавить runtime main и compose service для rescue auto-return.
+- [x] Добавить lease, retry, dead-letter, health и queue depth.
+- [x] Проверить работу после restart и при двух одновременно запущенных workers.
 
-Completed on 2026-07-03:
+### 3.3. История результатов
 
-- Added `GET /clients/segments` and `POST /clients/exports`.
-- Segment descriptors include channel/device/topic counts and `segmentId` filters are accepted by `GET /clients`.
-- Export descriptors are saved in the durable workspace JSON repository with masked preview rows and immutable audit evidence.
-- `clientService`, `submitClientExport`, and `ClientsScreen` now use backend-confirmed segment/export state.
+- [x] Сохранять assignment, transfer, queue wait, SLA pause/resume/breach, rescue start/outcome/auto-return.
+- [x] Использовать эти события в истории диалога и отчетах.
 
-Frontend work:
+Приемка этапа: новый диалог автоматически попадает правильному оператору, SLA меняется по времени без открытого браузера, rescue автоматически завершается и отражается в истории.
 
-- Add `fetchClientSegments` and `createClientExport` to `src/services/clientService.js`.
-- Enable Segment and Export controls in `src/features/clients/ClientsScreen.jsx`.
-- Show export status using the same descriptor pattern as reports.
+## 8. Этап 4. Отчеты, качество и AI
 
-Tests:
+### 4.1. Единая событийная модель отчетов
 
-- Backend tests for segment filters, export idempotency, masking, and tenant isolation.
-- Frontend tests for segment selection, export creation, and error states.
+- [x] Добавить события статусов, тем, исполнителей, команд, SLA, rescue, CSAT/CSI и QA.
+- [ ] Добавить отдельные события решения оператора по подсказке: принять, изменить, отклонить и применить к диалогу.
+- [x] Зафиксировать правила расчета базовых метрик, часовой пояс и версию определения.
+- [x] Сделать backfill существующих данных с маркировкой ограниченной точности.
 
-Acceptance:
+### 4.2. Полные отчеты
 
-- Segment and Export controls perform real data operations and have deterministic empty/error states.
+- [x] Реализовать базовый ежедневный отчет, digest и отчеты по диалогам, routing, SLA и rescue.
+- [x] Добавить единые серверные фильтры по очереди, команде, оператору, теме, статусу и результату. Экран и экспорт используют общие фильтры; команды и очереди постоянны и связаны с новыми диалогами и маршрутизацией. Исторически недоказуемые значения остаются неизвестными и отражаются в покрытии данных.
+- [x] Дополнить качество данных количеством событий, временем последнего события, задержкой обновления и точной границей backfill; предупреждение о неполной истории уже показано.
+- [x] Сохранять момент снимка периода при создании export и исключать более поздние lifecycle events, чтобы экран и файл не расходились во времени.
+- [x] Добавить event watermark/последний event ID в descriptor для доказуемого воспроизведения снимка.
+- [ ] Добавить сквозной тест: создать export, дождаться готовности, скачать и сравнить XLSX с экраном.
+- [x] Автоматически обновлять статус export в интерфейсе и исправить полный цикл повторного запуска failed/expired export.
+- [x] Перенести export files в S3/MinIO с подписанной загрузкой и сроком действия. Живая проверка подтвердила запись, чтение без искажений и сохранность после перезапуска API и export worker.
 
-## Phase 5: Routing Batch Redistribution
+### 4.3. Сохранение качества
 
-Completed on 2026-07-03:
+- [x] `recordClientQualityRating`, `recordManualQaReview` и rule-based scoring записывают tenant-scoped Prisma/JSON rows и возвращают успех только после сохранения.
+- [x] Разделить права просмотра и изменения; повтор одного запроса не создает дубликаты, включая одновременный повтор в PostgreSQL.
+- [x] Записывать неизменяемый общий audit и реальный conversation lifecycle/realtime event для оценки и ручной проверки.
+- [x] После действия обновлять workspace из базы и сохранять результат после restart.
+- [x] Сделать QA queue из реальных оценок и правил выборки, а не из seed-массива в production-like режиме.
 
-- Added `POST /routing/redistribution/preview` and `POST /routing/redistribution/commit`.
-- Reused assignment candidate ranking for single simulation and batch redistribution with virtual planned capacity.
-- Added idempotency-key based redistribution ids/job ids, conflict responses for capacity gaps, immutable audit descriptors, queue job descriptors, realtime descriptors, and assignment analytics rows.
-- Replaced the disabled panel action with a backend-backed preview/confirm dialog and workload refresh after commit.
+Выполнено 2026-07-11: Quality repository подключен к Prisma; ratings, manual QA, scoring audits и решения по AI-подсказкам читаются обратно по tenant и записываются в общий журнал. Ручная проверка использует отдельную форму с критериями. SDK показывает опрос после закрытия, Telegram атомарно ставит опрос с кнопками в надежную очередь доставки, оба канала принимают защищенные оценки.
 
-Backend work:
+### 4.4. Реальный AI-контур
 
-- Add batch routes to `backend/apps/api-gateway/src/routing/routing.controller.ts`:
-  - `POST /routing/redistribution/preview`
-  - `POST /routing/redistribution/commit`
-- Use existing assignment/simulation logic as the core engine where possible.
-- Require idempotency key, reason, selected queues, target rules, and operator capacity constraints.
-- Persist audit events and assignment descriptors.
+- [x] Не называть rule-based проверки AI. Оставить их как локальные проверки текста.
+- [x] Подключить OpenAI-compatible AI provider через существующий provider port.
+- [x] Добавить timeout, retry, rate limit, usage, redaction, consent и безопасный fallback.
+- [x] Сохранять provider result ID, версию модели, решение оператора accept/edit/reject и итоговую эффективность.
+- [x] Строить coaching и effectiveness только по сохраненным событиям.
 
-Frontend work:
+Приемка этапа: пользователь создает новый диалог и оценку, после чего все цифры на экране и в выгрузке изменяются одинаково и объяснимо.
 
-- Add `previewRedistribution` and `commitRedistribution` to `src/services/routingService.js`.
-- Replace the disabled button in `src/features/panel/PanelScreen.jsx` with a preview modal and confirm action.
-- Show capacity conflicts and SLA impact before commit.
+## 9. Этап 5. Боты и proactive
 
-Tests:
+### 5.1. Bot runtime
 
-- Backend tests for preview, commit, idempotency, capacity limits, and tenant isolation.
-- UI tests for preview modal, confirm, conflict display, and reload persistence.
+- [x] Добавить отдельный bot-runtime service и постоянное состояние выполнения сценария на диалог.
+- [x] Подключить опубликованную версию сценария к входящим событиям SDK, Telegram webhook и Telegram polling.
+- [x] Реализовать message, quick replies, condition, contact request, webhook, fallback и handoff nodes.
+- [x] Сохранять каждый шаг, ошибку, webhook response, handoff summary и состояние доставки side effect.
+- [x] Обеспечить неизменность опубликованной версии, безопасный rollback, retry/dead-letter и crash recovery постоянным reconciliation worker.
 
-Acceptance:
+### 5.2. Proactive
 
-- A permitted shift lead can redistribute workload from the panel and see the resulting queue/operator state refresh from API.
+- [x] Ввести tenant-scoped SDK presence session: heartbeat, disconnect, `lastSeenAt`, TTL и единый список активных посетителей для worker и интерфейса.
+- [x] Подключить web-widget к heartbeat и убрать созданный диалог как суррогат активного визита.
+- [x] Ввести exposure со статусами planned/shown/dismissed/accepted/failed и считать cooldown от сохраненного события.
+- [x] Сделать повторяемость по occurrence/frequency period вместо lifetime-once idempotency key.
+- [x] Стабильно назначать A/B variant и сохранять experiment assignment.
+- [x] Версионировать experiment/assignment и сохранять снимок segment evaluation.
+- [x] Доставлять приглашение в конкретную живую SDK session через realtime и принимать acknowledgement.
+- [x] Сохранять conversion event и связывать его с exposure в пределах attribution window.
+- [ ] Строить реальные метрики eligible/shown/delivered/dismissed/accepted/converted по rule и variant и показывать их в интерфейсе.
 
-## Phase 6: Public Demo Request
+Приемка этапа: опубликованный бот реально отвечает в канале, передает диалог оператору, а proactive сообщение отправляется подходящему посетителю и попадает в аналитику.
 
-Completed on 2026-07-03:
+## 10. Этап 6. Клиенты, темы, шаблоны и база знаний
 
-- Added unauthenticated `POST /api/v1/public/demo-requests` under the integrations/public boundary.
-- Stored sanitized lead metadata in `IntegrationRepository` with request fingerprint, idempotency-key conflict detection, hashed IP/User-Agent context, immutable audit event, and queued `public.demo_request.notification.requested` descriptor.
-- Added spam controls for honeypot payloads and duplicate fingerprints.
-- Added `src/services/publicLeadService.js`, enabled landing demo/contact CTAs from `src/App.jsx`, and added a modal form in `src/features/public/LandingPage.jsx`.
-- Added backend contract tests, frontend service adapter coverage, and public landing smoke coverage.
+### 6.1. Клиентский профиль
 
-Remaining delivery note:
+- [ ] Собрать профиль из реальных identity/channel events.
+- [ ] Проверить merge/unmerge, конфликты, историю контактов, согласия и маскирование.
+- [ ] Сделать сегменты и экспорт из текущей базы с одинаковыми фильтрами.
 
-- The current product stores a queued notification descriptor and has deterministic plus SMTP `lead-notification:worker:once` provider boundaries that mark descriptors delivered or failed with redacted error evidence. The backend release smoke runs the worker in SMTP mode against an embedded SMTP endpoint and persists a `smtp-*` provider message id; the root release gate also runs `lead-notification:mailpit-smoke` against compose Mailpit SMTP/API and skip-safe `lead-notification:smtp-live-smoke` against an external SMTP endpoint when credentials are supplied.
+### 6.2. Темы
 
-Backend work:
+- [ ] Поддержать иерархию, архив/восстановление, историю изменений и ссылки из диалогов.
+- [ ] Сохранять тему на временной шкале, чтобы исторический отчет не менялся после переименования.
+- [ ] Подключить topic suggestions к реальным данным/AI или явно оставить rule-based.
 
-- Done: add a public route, `POST /public/demo-requests`, with validation, rate limiting, spam controls, and audit/notification descriptor.
-- Done: store lead metadata without sensitive overcollection: name, company, email, message, source, plan interest, consent flag, hashed request context, and request fingerprint.
-- Done: deliver queued descriptors through `lead-notification:worker:once` with deterministic local provider evidence, SMTP provider evidence and redacted failure state.
-- Done: run the same SMTP mode against compose Mailpit through `lead-notification:mailpit-smoke` in root `release:gate`.
-- Done: support external SMTP credentials and implicit TLS/SMTPS through `PUBLIC_DEMO_NOTIFICATION_SMTP_USERNAME`, `PUBLIC_DEMO_NOTIFICATION_SMTP_PASSWORD`, `PUBLIC_DEMO_NOTIFICATION_SMTP_SECURE`, and `PUBLIC_DEMO_NOTIFICATION_SMTP_TLS_REJECT_UNAUTHORIZED`.
-- Done: add skip-safe external SMTP acceptance smoke through `lead-notification:smtp-live-smoke` in root `release:gate`; it validates SMTP acceptance and Prisma delivery persistence when `LEAD_NOTIFICATION_SMTP_LIVE_SMOKE_ENABLED=true` and target credentials are supplied.
+### 6.3. Шаблоны и знания
 
-Frontend work:
+- [x] Удалить runtime fixtures и автоматический seed из service/repository; локальные примеры подключаются только явным development switch.
+- [ ] Реализовать переменные с preview и fail-closed неизвестными значениями.
+- [ ] Проверить версии, review/approve/reject/publish/archive и channel visibility.
+- [ ] Проверить attachments через общий antivirus pipeline.
 
-- Done: add a small request modal/form to `src/features/public/LandingPage.jsx`.
-- Done: pass `demoRequestEnabled` and `onRequestDemo` from `src/App.jsx`.
-- Done: add service method under `src/services/publicLeadService.js`.
+Приемка этапа: все изменения переживают restart, видны только своей организации и корректно отражаются в диалогах и отчетах.
 
-Tests:
+## 11. Этап 7. Уведомления, webhooks и внешняя доставка
 
-- Done: public API validation/rate-limit/idempotency tests.
-- Done: landing page smoke for enabled button and successful submission. Validation/network error UI coverage remains a useful follow-up.
+### 7.1. Уведомления
 
-Acceptance:
+- [ ] Включить реальный provider mode в staging: browser push и выбранные внешние каналы.
+- [ ] Проверить permission prompt, subscription rotation, unsubscribe, delivery, retry и expired subscription cleanup.
+- [ ] Проверить sound/preferences и deep links для всех типов уведомлений.
 
-- "Демо по запросу" and "Контакт по запросу" are enabled and create a backend lead/request.
+### 7.2. Webhooks и публичный API
 
-## Phase 7: Settings, Audit, Reports, And Clipboard Actions
+- [ ] Включить HTTP delivery в staging и запретить `disabled` в release profile.
+- [ ] Проверить подпись, timestamp, replay protection, delivery retry, dead-letter и ручной replay.
+- [ ] Проверить API key create/reveal/rotate/revoke и разделение sandbox/production.
+- [ ] Выполнить live SDK/webhook smoke из внешней сети.
 
-Completed on 2026-07-03:
+### 7.3. Email и заявки с лендинга
 
-- Added `src/services/clipboardService.js` with Clipboard API write, textarea fallback, and fail-closed unavailable state.
-- Wired Audit event JSON and SDK snippet copy buttons to the real clipboard service.
-- Added unit coverage for Clipboard API, fallback, and unavailable paths, plus smoke coverage that reads clipboard contents in Chromium.
-- Replaced Audit related-object toast with an embedded read-only panel that preserves the selected event context and shows target, tenant, user, trace, and immutable evidence.
-- Replaced Reports History and export Audit toasts with visible panels backed by report workspace export job descriptors, including backend queue id and metric definition version.
-- Wired Settings aggregate channel status to integration-owned backend mutation `PATCH /integrations/channels/types/:type/status`; UI updates only after matching backend channel state plus immutable audit evidence.
+- [ ] Подключить целевой SMTP, а не только Mailpit.
+- [ ] Проверить прием письма и при необходимости bounce/inbox placement.
+- [ ] Показывать администратору недоставленные заявки.
 
-Settings:
+Приемка этапа: каждая внешняя доставка подтверждена получателем в staging и имеет видимый путь восстановления после ошибки.
 
-- Done: integration/channel management API owns aggregate channel status; Settings Access calls it through `integrationService.updateChannelTypeStatus`.
-- Done: UI mutation guard requires immutable audit evidence before changing the aggregate toggle state.
-- Done: numeric channel limits remain read-only in this panel because connection-specific settings own limit mutations.
+## 12. Этап 8. Биллинг, лимиты и service-admin
 
-Audit and reports:
+### 8.1. Биллинг
 
-- Done: `src/features/audit/AuditScreen.jsx` related-object action opens a read-only panel instead of a toast.
-- Done: JSON copy uses actual clipboard write with fallback.
-- Done: `src/features/reports/ReportsScreen.jsx` History and Audit actions open embedded panels from backend export descriptors instead of toasts.
+- [ ] Выбрать и подключить целевого платежного провайдера.
+- [ ] Закрыть payment retry, dunning, reconciliation conflict и идемпотентное повторение.
+- [ ] Запустить quota expiration worker как постоянный сервис.
+- [ ] Проверить изменение тарифа, счета, оплату, задолженность, блокировку и восстановление.
 
-SDK:
+### 8.2. Service-admin
 
-- Done: `src/features/settings/SdkConsolePanel.jsx` copy uses `navigator.clipboard.writeText` with fallback through `clipboardService`.
+- [ ] Пересчитать dashboard из реальной telemetry и tenant data без статического каталога.
+- [ ] Проверить user support, impersonation, break-glass, tenant freeze, feature flags и incident updates.
+- [ ] Запустить incident communication и status page publisher runtime.
+- [ ] Сделать аудит всех привилегированных действий экспортируемым и неизменяемым.
 
-Tests:
+Приемка этапа: платежное событие меняет состояние клиента, а service-admin видит реальное состояние и может безопасно устранить проблему.
 
-- Done: UI tests for channel status mutation in `tests/smoke.spec.js` and `tests/ui-mutation-guards.test.js`.
-- Done: Audit/report panel tests in `tests/smoke.spec.js`.
-- Done: Clipboard success and fallback tests.
+## 13. Этап 9. Эксплуатация и восстановление
 
-Acceptance:
+### 9.1. Все фоновые процессы в runtime
 
-- No primary UI action only displays a success toast without doing the claimed operation.
+- [ ] Составить полный список очередей и назначить по одному владельцу обработки.
+- [ ] Для каждого worker добавить main, compose service, readiness/liveness, метрики, retry, dead-letter и replay.
+- [ ] Обязательный список включает outbox, Telegram/VK/MAX inbound, channel outbound, bot runtime, proactive, SLA, rescue, file scan, notification, lead email, webhook, report export/digest, billing sync, quota expiration, incident communication и status page publishing.
 
-## Phase 8: Production-Like Persistence Parity
+### 9.2. Резервное копирование
 
-Completed on 2026-07-03:
+- [ ] Автоматизировать backup PostgreSQL и MinIO.
+- [ ] В отдельном чистом окружении восстановить backup и прогнать login/dialog/report/download smoke.
+- [ ] Проверить migration deploy и rollback/forward-fix на копии данных.
+- [ ] Зафиксировать RPO/RTO и ответственного.
 
-- Added `RUNTIME_PROFILE=production-like` config validation.
-- `NODE_ENV=staging|production` and production-like profile now require `AUTOMATION_REPOSITORY`, `IDENTITY_REPOSITORY`, `BILLING_REPOSITORY`, `CONVERSATION_REPOSITORY`, `WORKSPACE_REPOSITORY`, `INTEGRATION_REPOSITORY`, `NOTIFICATION_REPOSITORY`, `OPERATIONS_REPOSITORY`, `PLATFORM_REPOSITORY`, `ROUTING_REPOSITORY`, and `REPORT_REPOSITORY` to be `prisma`.
-- Production-like startup no longer needs a JSON fallback store blocker for platform when `PLATFORM_REPOSITORY=prisma`.
-- `docker-compose.pilot.yml` declares `RUNTIME_PROFILE=production-like`, supplies local pilot JWT/public API secrets, and no longer enables demo service-admin headers.
-- Workspace Prisma parity now includes client export jobs.
-- Routing Prisma parity now includes assignment/SLA/rescue job descriptors and a PostgreSQL-backed runtime snapshot for conversation/operator/queue state plus rescue report rows.
-- Routing SLA/rescue workers now claim due jobs through repository-owned compare-and-set updates, so a completed or already-claimed job is not overwritten by a stale worker snapshot.
-- Routing SLA/rescue apply workers now re-read the authoritative current job row and current conversation state before mutation, and Prisma `saveState()` fails snapshot-version races before writing side-table jobs/analytics/rules.
-- Routing SLA/rescue apply outcomes now persist through repository-owned apply hooks. Prisma mode wraps job completion, snapshot state, rescue report rows, analytics rows, and returned descriptors in the routing transaction boundary. Rescue auto-return analytics resolve tenant ownership from the apply input or conversation snapshot before falling back for legacy snapshots.
-- Reports Prisma parity now includes bootstrap via `REPORT_REPOSITORY=prisma`, metric definitions/versions/overrides, saved templates, idempotency keys, export jobs, query executions, export file descriptors, notification descriptors, scheduled digest descriptors, and immutable retry audit events.
-- Notifications Prisma parity now includes bootstrap via `NOTIFICATION_REPOSITORY=prisma`, inbox notifications, tenant/user preferences, browser push subscriptions, delivery descriptors, and immutable preference audit events.
-- Automation Prisma parity now includes bootstrap via `AUTOMATION_REPOSITORY=prisma`, bot scenarios, runtime versions, publish audit rows, publish idempotency keys, bot test runs, proactive rules, execution windows, frequency caps, experiment assignments, delivery attempts, delivery idempotency keys, delivery attributions, and async proactive eligibility/planning helpers.
-- Integrations Prisma parity now includes bootstrap via `INTEGRATION_REPOSITORY=prisma`, public API keys/reveal state/rotation audit, rotation jobs, public demo request lead/audit/notification descriptors, webhook delivery/replay journals and audit events, security sessions, channel connections/events/audit events, Telegram connection state, and async runtime readers for notification, Telegram polling, Telegram webhook and outbound dispatch paths.
-- Operations Prisma parity now includes bootstrap via `OPERATIONS_REPOSITORY=prisma`, load-test runs/executions/metrics/error summaries, restore checks/results, dead-letter replay records/audit/denials, migration rollback-check records/results and idempotency keys.
-- Platform Prisma parity now includes bootstrap via `PLATFORM_REPOSITORY=prisma`, telemetry samples, health rollups, alert routing rules, feature flag rules, platform audit/outbox rows, incidents, incident idempotency keys, feature flag runtime state, alert acknowledgements and incident communication attempts/retries/dead letters.
+### 9.3. Наблюдаемость и производительность
 
-Backend work:
+- [ ] Убрать статические platform metrics и подключить реальные HTTP/worker/queue/database/storage показатели.
+- [ ] Добавить алерты на остановку worker, рост очереди, dead letters, ошибки провайдера и задержку отчетов.
+- [ ] Разделить frontend bundle и проверить время первого открытия на целевых устройствах.
+- [ ] Провести нагрузку на сообщения, realtime, отчеты и массовые операции.
 
-- Continue hardening provider/runtime smoke for product-critical repositories now that production-like Prisma repository coverage is complete.
+Приемка этапа: остановка любого критичного процесса обнаруживается автоматически, а продукт восстанавливается из backup по документированной процедуре.
 
-Runtime work:
+## 14. Этап 10. Финальная приемка и релиз
 
-- Update `docker-compose.pilot.yml` to use Prisma repositories for all product-critical state.
-- Keep root `docker-compose.yml` clearly local-only.
-- Update `docs/runtime-configuration.md` and `backend/README.md` only after the implementation is real.
+### 10.1. Автоматический release gate
 
-Tests:
+- [ ] Сборка frontend/backend и все unit/contract/integration тесты.
+- [ ] Миграции на чистой базе и на копии предыдущей версии.
+- [ ] Guards на fixtures/default tenants/descriptor-only success/disabled providers/missing workers.
+- [ ] Сквозные browser tests на собранных контейнерах, а не на подмененных API.
+- [ ] Backup/restore smoke, dependency audit, secret scan и redaction tests.
+- [ ] Проверка health/readiness всех обязательных сервисов.
 
-```bash
-npm run backend:release:checklist
-npm run backend:tenant-isolation:verify
-npm run backend:audit-immutability:verify
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build
-curl.exe -fsS http://127.0.0.1:8080/api/v1/health
-curl.exe -fsS http://127.0.0.1:4101/api/v1/health
-```
+### 10.2. Пользовательская приемка по ролям
 
-Acceptance:
+- [ ] Клиент: SDK и каждый внешний канал, история, вложения, оценка.
+- [ ] Оператор: inbox, ответ, внутренний комментарий, тема, статус, шаблон, handoff.
+- [ ] Старший: панель, маршрутизация, rescue, SLA, QA, отчеты.
+- [ ] Администратор организации: сотрудники, роли, каналы, webhooks, API keys, правила, audit.
+- [ ] Service-admin: tenant support, billing, incidents, feature flags, impersonation, recovery.
 
-- Production-like profile does not rely on JSON for product-critical mutable state.
-- Release docs no longer describe repository gaps as follow-up work.
+### 10.3. Staging acceptance с реальными провайдерами
 
-## Phase 9: Workers And External Provider Runtime
+- [ ] Telegram, VK, MAX.
+- [ ] SMTP и browser push.
+- [ ] Webhook receiver и Public SDK с внешней сети.
+- [ ] Antivirus/scanner.
+- [ ] AI provider.
+- [ ] Billing provider.
+- [ ] S3/MinIO download/upload и report exports.
 
-Completed on 2026-07-04:
+Релиз разрешен только если в едином реестре нет `missing`, `descriptor-only`, `fixture-backed` и `disabled-runtime` для функций полного scope. Для `out-of-scope` требуется явное продуктовое решение и удаление соответствующего интерфейса.
 
-- Added production-like compose services for `outbox-worker` and `billing-sync-worker`.
-- `outbox-worker` runs `apps/outbox-worker/dist/main.js` continuously against PostgreSQL and is scoped to `OUTBOX_QUEUE=message-delivery`.
-- `billing-sync-worker` runs `apps/outbox-worker/dist/main.js --billing-sync` continuously against PostgreSQL and is scoped to `OUTBOX_QUEUE=billing-sync`.
-- `docker-compose.pilot.yml` now applies `RUNTIME_PROFILE=production-like` and durable database env to both workers.
-- `scripts/compose-health-check.mjs` now fails release verification when either persistent worker is missing or stopped.
-- `tests/release-gate.test.js` covers both compose services, their production-like env, and the health-check guard.
-- `outbox-worker` Telegram delivery now supports async tenant credential resolution and reads active Prisma `telegram_connections` rows when `INTEGRATION_REPOSITORY=prisma`, with `OUTBOX_TELEGRAM_BOT_TOKEN` as fallback.
-- `file-scan-scanner-worker` now supports `OUTBOX_SCANNER_PROVIDER_MODE=local` as the default scanner-runtime mode, using a deterministic local scanner without requiring an undeclared `scanner` compose service. Explicit `OUTBOX_SCANNER_PROVIDER_MODE=http` plus `OUTBOX_SCANNER_URL` keeps external scanner delivery available.
+## 15. Порядок выполнения
 
-Completed on 2026-07-05:
+1. Этап 0: правдивый реестр и guards.
+2. Этап 1: доступ и воспроизводимые тестовые учетные записи.
+3. Этапы 2 и 3: каналы, диалоги, маршрутизация, SLA.
+4. Этап 4: реальные события, отчеты, качество и AI.
+5. Этапы 5 и 6: боты, proactive и рабочие справочники.
+6. Этапы 7 и 8: внешняя доставка, биллинг и service-admin.
+7. Этап 9: эксплуатация, backup, мониторинг и нагрузка.
+8. Этап 10: полная приемка на staging.
 
-- Operations readiness now exposes `report-digest-worker` from durable `reports.scheduledDigestDescriptors` evidence with queue depth, dead-letter count and last delivery status.
-- Release gate now includes pilot-flow, settings runtime, service-admin runtime and live backend API smoke coverage.
-- Live backend API smoke now authenticates through `POST /api/v1/auth/tenant/login` and bearer tenant routes instead of demo service-admin headers.
-- Operations readiness now exposes `file-scan-scanner-worker` from durable `database.outboxEvents` queue `file-scan` evidence, and service-admin renders the worker row with queue depth, dead-letter count, evidence source and last-delivery event type/status/trace.
+Этапы можно выполнять параллельно только после завершения этапа 0. Один vertical slice должен включать данные, API, UI, worker, provider и приемку; нельзя закрывать эти части разными статусами «готово».
 
-Remaining provider-runtime work:
+## 16. Ближайший исполняемый пакет P0
 
-- Done: add `provider:outbox:smoke` for Telegram, VK and MAX runtime adapters. Direct runs skip safely unless `OUTBOX_PROVIDER_SMOKE_ENABLED=true`; backend `release:checklist` sets that env and verifies provider-specific `OUTBOX_TELEGRAM_*`, `OUTBOX_VK_*` and `OUTBOX_MAX_*` dispatch against local endpoints.
-- Done: add a non-skipping self-seeded `test:pilot-smoke` to `release:gate` after compose readiness. It creates its temporary Prisma operator/key, verifies the complete Public SDK roundtrip, and cleans up without external credentials.
-- Done: add the production-like browser-push provider gate. Pilot disables the API feature when credentials are absent; explicit enablement or key material requires live `web-push` mode and complete VAPID credentials before worker scanning.
-- Done: add compose Mailpit SMTP/API smoke through `lead-notification:mailpit-smoke` in root `release:gate` after local infrastructure startup.
-- Done: add external SMTP auth and implicit TLS/SMTPS configuration support plus skip-safe `lead-notification:smtp-live-smoke` in root `release:gate`; non-skipping execution still requires real target credentials.
-- Done: add `file-scan:api-callback-smoke` to root `release:gate` after production-like API readiness; it checks worker-to-API scan-result callback delivery and Prisma persistence.
-- Done: add skip-safe `file-scan:external-scanner-smoke` to root `release:gate` after production-like API readiness; it runs only with `FILE_SCAN_EXTERNAL_SCANNER_SMOKE_ENABLED=true` and a real `OUTBOX_SCANNER_URL`.
-- Done: add HTTP scanner provider auth through `OUTBOX_SCANNER_BEARER_TOKEN` plus safe descriptor `signedFile` payload forwarding without raw `objectKey`; external scanner smoke can seed `FILE_SCAN_EXTERNAL_SCANNER_SIGNED_FILE_URL` for real provider checks.
-- Done: connect dialog attachment producer to real workspace file state and object-storage signing: `dialogs/attachments` returns `signedUpload`, stores the internal file record, seeds scanner `signedFile`, the composer uploads bytes to the signed policy, calls `dialogs/attachments/:fileId/finalize`, and polls `dialogs/attachments/:fileId/status` until the backend reports scan-ready, blocked, failed, or still pending.
-- Done: add `webhook-delivery-worker` runtime with `webhook:worker:once`, compiled main, local/HTTP/disabled provider modes, retry/dead-letter persistence with redacted provider errors, production-like compose service, compose health requirement, and Prisma fake-provider smoke that verifies one real HTTP delivery attempt.
-- Done: add skip-safe `provider:telegram-live-smoke` to root `release:gate`; it sends one real Telegram message only when `OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true`, `OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID` and a Telegram token source are supplied.
-- Done: add skip-safe `provider:vk-max-live-smoke` to root `release:gate`; it sends one VK and one MAX message through staged HTTP provider proxy endpoints only when `OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED=true`, endpoint env and peer/dialog ids are supplied.
-- Remaining: run live/staging public SDK and non-skipping external SMTP smokes with real target credentials; add mailbox/inbox validation only if required; add direct official VK/MAX adapter contracts if provider proxy is not the intended integration boundary; run scanner auth/signed-file smoke against the chosen scanner endpoint and add strict scan-worker finalize gating only if that endpoint cannot tolerate upload/scan retry timing.
+1. [x] Исправить completeness guards и удалить default tenant/runtime fixtures.
+2. [x] Исправить сохранение Quality/QA.
+3. [ ] Подключить настоящий AI provider; честная маркировка локальных правил уже выполнена.
+4. [x] Добавить event ledger для статусов, тем, SLA, rescue и quality; расширенные фильтры и snapshot export остаются отдельными задачами этапа 4.
+5. [ ] SLA и rescue workers запущены; отдельно остаются bot runtime и production scanner.
+6. [x] Перевести report exports в MinIO/S3 и подтвердить сохранность файлов после перезапуска сервисов.
+7. [ ] Включить staging provider modes для webhook, notifications и billing с fail-fast конфигурацией.
+8. [ ] Реализовать полный VK/MAX inbound/outbound контур.
+9. [ ] Добавить стабильную команду создания/очистки тестовой организации всех ролей.
+10. [ ] Прогнать browser acceptance и backup/restore на собранных контейнерах.
+11. [ ] Заменить публичные SLA/queue/status цифры живой публичной телеметрией либо явно маркировать весь cockpit как иллюстративный; не рекламировать неподключенные AI/VK/MAX как рабочие.
 
-Backend work:
-
-- Add service-specific worker commands and Docker services for outbox, billing, scanner, notification delivery, report export, webhook replay, and channel outbound delivery.
-- Add live/staging credentials for public SDK and external SMTP smoke execution; add direct official VK/MAX adapter contracts if the provider proxy is not the intended integration boundary; run external scanner smoke with provider auth/file-content access against the chosen scanner and add strict scan-worker finalize gating only if required.
-- Ensure idempotent retries, dead-letter replay, redaction, and immutable audit evidence.
-
-Frontend/admin work:
-
-- Surface worker health, queue depth, dead-letter count, and last delivery evidence in operations/service-admin screens.
-
-Tests:
-
-- Worker once commands for every critical queue.
-- Fake-provider integration tests for outbound, inbound webhook, retry, and replay.
-- Optional sandbox smoke gated by environment variables.
-
-Acceptance:
-
-- Critical async workflows continue after API process restart and can be observed/replayed safely.
-
-## Phase 10: Release Gate
-
-Add a single release command or documented sequence that must pass before the product is called 100% working:
-
-```bash
-npm run test:no-demo-runtime
-npm run test:services
-npm run test:api-client
-npm run test:ui-mutation-guards
-npm run test:smoke
-npm run test:pilot-flow
-npm run test:settings-runtime
-npm run test:service-admin-runtime
-npm run backend:test
-npm run backend:tenant-isolation:verify
-npm run backend:audit-immutability:verify
-npm run backend:release:checklist
-npm run backend:notification:worker:once
-npm run build
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build
-curl.exe -fsS http://127.0.0.1:8080/
-curl.exe -fsS http://127.0.0.1:8080/api/v1/health
-curl.exe -fsS http://127.0.0.1:4101/api/v1/health
-RUN_BACKEND_API_SMOKE=1 BACKEND_API_BASE_URL=http://127.0.0.1:4101/api/v1 npm run test:backend-api-smoke
-```
-
-The release gate also includes:
-
-- Stub guard has zero findings outside the scope register.
-- `npm audit` findings are triaged into fixed, accepted-with-reason, or blocked-with-owner.
-- Backup/restore smoke exists for PostgreSQL and object storage metadata.
-- Browser smoke covers admin, operator, landing/onboarding, clients, quality, notifications, panel, settings, reports, audit, and service-admin paths.
-
-Completed on 2026-07-03:
-
-- Backend `release:checklist` now includes `notification:worker:once` alongside outbox and billing worker once smokes.
-- Root `npm run release:gate` now provides the single Phase 10 command for UI stub/demo guards, frontend service/API/smoke tests, backend release checklist, build, production-like compose startup, and HTTP health checks.
-- Production-like compose now runs `notification-delivery-worker` with staging/production-like Prisma notification repository configuration instead of inheriting local JSON/dev worker settings.
-- Backend `release:checklist` now includes `lead-notification:worker:once` for public demo request lead notification descriptors.
-
-Completed on 2026-07-04:
-
-- Release-gate compose contract now requires persistent `outbox-worker` and `billing-sync-worker` services.
-- `node scripts/compose-health-check.mjs` now checks 11 production-like services, including `outbox-worker`, `billing-sync-worker`, `notification-delivery-worker`, `lead-notification-worker`, and `report-digest-worker`.
-
-Completed on 2026-07-05:
-
-- Root `npm run release:gate` now blocks on `npm run test:pilot-flow`, `npm run test:settings-runtime`, `npm run test:service-admin-runtime`, and live bearer-authenticated `npm run test:backend-api-smoke` after compose and HTTP readiness.
-- The release-gate contract covers the new runtime suites and the env-enabled backend API smoke command.
-- Operations readiness and service-admin runtime tests now cover `file-scan-scanner-worker` observability from durable outbox queue evidence.
-- Backend `release:checklist` now includes `provider:outbox:smoke` with `OUTBOX_PROVIDER_SMOKE_ENABLED=true`; it seeds one Telegram, VK and MAX queued descriptor and verifies three provider-specific runtime dispatches through local provider endpoints.
-- Root `npm run release:gate` now starts local infrastructure before backend release checklist, scrubs live provider env from compose startup, and includes skip-safe `npm run test:pilot-smoke` after compose readiness with `BACKEND_API_BASE_URL=http://127.0.0.1:4101/api/v1` and `PILOT_PUBLIC_API_ENVIRONMENT=stage`.
-- Root `npm run release:gate` now runs `lead-notification:mailpit-smoke` after backend `release:checklist` with `LEAD_NOTIFICATION_MAILPIT_SMOKE_ENABLED=true`, Mailpit API `http://127.0.0.1:18025`, and SMTP `127.0.0.1:11025`.
-- Public demo lead notification SMTP now supports optional external SMTP credentials and implicit TLS/SMTPS configuration, with backend contracts covering `AUTH PLAIN` command order and secure SMTP delivery against a local TLS SMTP server.
-- Root `npm run release:gate` now includes skip-safe `lead-notification:smtp-live-smoke`; with `LEAD_NOTIFICATION_SMTP_LIVE_SMOKE_ENABLED=true` and real SMTP endpoint credentials it verifies external SMTP acceptance plus persisted `smtp-*` delivery evidence.
-- Root `npm run release:gate` now runs `file-scan:api-callback-smoke` after production-like API readiness with `FILE_SCAN_API_CALLBACK_SMOKE_ENABLED=true`, host PostgreSQL `DATABASE_URL`, and `BACKEND_API_BASE_URL=http://127.0.0.1:4101/api/v1`.
-- Root `npm run release:gate` now also includes skip-safe `file-scan:external-scanner-smoke` after production-like API readiness; it only calls a real scanner when `FILE_SCAN_EXTERNAL_SCANNER_SMOKE_ENABLED=true` and `OUTBOX_SCANNER_URL` are supplied.
-- Root `npm run release:gate` now also includes skip-safe `provider:telegram-live-smoke`; it only sends a real Telegram message when `OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true`, `OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID`, and a Telegram token source are supplied.
-- Root `npm run release:gate` now also includes skip-safe `provider:vk-max-live-smoke`; it only calls staged VK/MAX provider proxy endpoints when `OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED=true`, endpoint env and peer/dialog ids are supplied.
-
-Completed on 2026-07-10:
-
-- Added the persistent `proactive-delivery-worker` runtime, compiled once entrypoint and JSON-store smoke. The worker reads configured active visitor snapshots and uses active durable conversation rows as the production-like Prisma source when automation state has no visitor rows.
-- Eligible deliveries now persist outbound descriptor/outbox, attempt, idempotency and A/B attribution evidence, consume frequency caps once, reject segment and tenant mismatches, and replay without duplicate delivery records even when the polling timestamp changes. Production-like visitor fallback uses fresh SDK conversations within a configurable TTL.
-- Proactive rules now carry tenant ownership in JSON and Prisma, API reads are tenant-filtered, foreign rule-id overwrites fail closed, and the worker is visible in Operations readiness through durable delivery-attempt evidence.
-- Local and production-like Compose include the worker; compose health now requires 14 services and the backend release checklist runs `proactive-delivery:worker:once`.
-- Proactive persistence now uses a Serializable Prisma transaction with bounded `P2034`/CAS retry. Idempotency reservation, cap consumption, descriptor, outbox, attempt and attribution commit or roll back together; concurrent assignment creation replays the winning row after `P2002`.
-- Added fake-transaction crash-recovery and final-cap contention contracts plus `proactive-delivery:prisma-concurrency-smoke`, which runs four compiled workers against PostgreSQL and verifies one durable delivery. Backend release verification now explicitly regenerates Prisma Client before runtime smokes.
-- SDK playground success is fail-closed on backend evidence. Focused Playwright coverage verifies ok, non-ok, rejected and malformed service responses.
-- Public SDK release smoke is non-skipping and self-seeded through Prisma, including isolated operator auth and cleanup.
-- Browser push production-like startup now fails closed when the feature is enabled without a live provider or complete VAPID pair; the default pilot profile disables the feature consistently on API and worker.
-
-## Recommended Execution Order
-
-1. Keep Phase 0 active, because it prevents new stubs while implementation proceeds.
-2. Keep completed Phase 4-8 regression tests in the release gate.
-3. Add authenticator TOTP enrollment and recovery codes only if they are part of the target authentication requirements; verified email OTP is complete.
-4. Finish the remaining security/release hardening gaps, including real backup/restore execution, migration rollback coverage and dependency triage evidence.
-5. Continue Phase 9 external provider work: live/staging external SMTP execution with target credentials, scanner auth/signed-file execution, and direct VK/MAX adapters only if the provider proxy is not the intended boundary.
-6. Finish Phase 10 by making the release gate green end to end in the target environment, including Docker image pulls/builds, compose health and HTTP readiness.
-
-## Product Decisions To Make Before Implementation
-
-- Keep and implement every visible planned control, or remove the ones that are not in the committed product scope. Default for this plan is to implement all visible controls found in the audit.
-- Decide whether Panel redistribution is truly batch redistribution or should become a smaller single-assignment workflow based on the existing routing API.
-- Aggregate channel status belongs to the integration/channel management API and is surfaced in Settings Access as a backend-confirmed bulk toggle; connection-specific limits remain in the channel setup screens.
-- Decide what "100% working" means for external providers without live credentials: sandbox/fake-provider passing is required; live smoke can be environment-gated.
-- Decide whether proactive delivery is lifetime-once per tenant/rule/subject, as implemented now, or repeats after cooldown/frequency-period reset. Repeat delivery requires a period/cooldown scope in descriptor and idempotency keys.
+После этого повторить аудит матрицы. Следующий пакет формируется только из оставшихся строк со статусом не `working`.

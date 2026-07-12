@@ -19,6 +19,16 @@ export interface BotRuntimeStateTransitionInput {
   traceId: string;
 }
 
+export interface BotRuntimeNodeSelectionInput extends BotRuntimeStateTransitionInput {
+  edgeLabel?: string;
+}
+
+export function planBotRuntimeLabeledTransition(input: BotRuntimeNodeSelectionInput): BotRuntimeStateTransition {
+  const edges = input.scenario.flowEdges.filter((edge) => edge.from === input.currentNodeId && (input.edgeLabel === undefined || edge.label === input.edgeLabel));
+  if (edges.length !== 1) throw new Error(edges.length ? "bot_runtime_transition_ambiguous" : "bot_runtime_transition_edge_not_found");
+  return planBotRuntimeStateTransition({ ...input, scenario: { ...input.scenario, flowEdges: edges } });
+}
+
 export interface BotRuntimeStateTransition {
   conversationId: string;
   eventId: string;
@@ -277,7 +287,7 @@ function createStateTransitionSideEffects(
   input: BotRuntimeStateTransitionInput,
   node: BotScenario["flowNodes"][number]
 ): BotRuntimeSideEffect[] {
-  if (node.type !== "message") {
+  if (!["message", "quick_replies", "contact_request", "fallback"].includes(node.type)) {
     if (node.type === "handoff") {
       return [createBotRuntimeHandoffSideEffect(input, node)];
     }
@@ -303,6 +313,8 @@ function createStateTransitionSideEffects(
       payload: {
         messageId,
         nodeId: node.id,
+        ...(node.type === "quick_replies" ? { quickReplies: node.config?.quickReplies ?? [] } : {}),
+        ...(node.type === "contact_request" ? { contactField: node.config?.field ?? "contact" } : {}),
         scenarioId: input.scenario.id,
         text: node.title ?? ""
       },
@@ -336,7 +348,7 @@ function createBotRuntimeHandoffSideEffect(
       summary: {
         botId: input.scenario.id,
         nodeId: node.id,
-        queue: node.title ?? "default",
+        queue: String(node.config?.queueId ?? ""),
         reason: "handoff_requested"
       },
       tenantId: input.tenantId,

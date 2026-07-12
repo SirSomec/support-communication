@@ -593,7 +593,7 @@ describe("outbox worker runtime contracts", () => {
 
     assert.equal(calls[0].url, "https://api.example.test/api/v1/files/file_callback_http/scan-result");
     assert.deepEqual(calls[0].init.headers, {
-      authorization: "Bearer service-admin-scan-token",
+      "x-file-scan-callback-token": "service-admin-scan-token",
       "content-type": "application/json",
       "idempotency-key": "scan-result-http-key",
       "x-trace-id": "trc_scan_result_http"
@@ -713,7 +713,7 @@ describe("outbox worker runtime contracts", () => {
         },
         outboundDescriptorStore: {
           findOutboundDescriptorById: async () => ({
-            channel: "SDK",
+            channel: "Email",
             conversationId: null,
             id: "attachment_runtime_missing_callback",
             idempotencyKey: "runtime-missing-callback-key",
@@ -1022,27 +1022,27 @@ describe("outbox worker runtime contracts", () => {
 
   it("resolves active Telegram bot tokens from Prisma integration state with env fallback", async () => {
     const tokenStore = await import("../apps/outbox-worker/src/integration-telegram-store.ts");
-    const requestedTenants: string[] = [];
+    const requestedConnections: string[] = [];
     const resolver = tokenStore.createPrismaIntegrationTelegramTokenResolver({
       telegramConnection: {
-        async findUnique(input: { where: { tenantId: string } }) {
-          requestedTenants.push(input.where.tenantId);
-          if (input.where.tenantId === "tenant-active") {
-            return { botToken: "111111:PRISMA_ACTIVE", status: "active" };
+        async findUnique(input: { where: { channelConnectionId: string } }) {
+          requestedConnections.push(input.where.channelConnectionId);
+          if (input.where.channelConnectionId === "connection-active") {
+            return { botToken: "111111:PRISMA_ACTIVE", status: "active", tenantId: "tenant-active" };
           }
-          if (input.where.tenantId === "tenant-disabled") {
-            return { botToken: "222222:DISABLED", status: "disabled" };
+          if (input.where.channelConnectionId === "connection-disabled") {
+            return { botToken: "222222:DISABLED", status: "disabled", tenantId: "tenant-disabled" };
           }
           return null;
         }
       }
     }, "333333:ENV_FALLBACK");
 
-    assert.equal(await resolver.resolveBotToken("tenant-active"), "111111:PRISMA_ACTIVE");
-    assert.equal(await resolver.resolveBotToken("tenant-disabled"), "333333:ENV_FALLBACK");
-    assert.equal(await resolver.resolveBotToken("tenant-missing"), "333333:ENV_FALLBACK");
+    assert.equal(await resolver.resolveBotToken("tenant-active", "connection-active"), "111111:PRISMA_ACTIVE");
+    assert.equal(await resolver.resolveBotToken("tenant-disabled", "connection-disabled"), "333333:ENV_FALLBACK");
+    assert.equal(await resolver.resolveBotToken("tenant-missing", "connection-missing"), "333333:ENV_FALLBACK");
     assert.equal(await resolver.resolveBotToken(""), "333333:ENV_FALLBACK");
-    assert.deepEqual(requestedTenants, ["tenant-active", "tenant-disabled", "tenant-missing"]);
+    assert.deepEqual(requestedConnections, ["connection-active", "connection-disabled", "connection-missing"]);
   });
 
   it("keeps Telegram runtime provider failures sanitized in worker state and logs", async () => {
@@ -1166,6 +1166,70 @@ describe("outbox worker runtime contracts", () => {
       chat_id: "tg-runtime-chat",
       disable_web_page_preview: true,
       text: "Runtime descriptor hello"
+    });
+  });
+
+  it("delivers Telegram CSAT surveys with an inline keyboard and records delivery state", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    await store.append(createOutboxEvent({
+      aggregateId: "tg-csat-chat",
+      aggregateType: "conversation",
+      payload: { descriptorId: "telegram_csat_descriptor" },
+      queue: "message-delivery",
+      traceId: "trc_telegram_csat",
+      type: "message.delivery.requested"
+    }));
+    const calls: Array<Record<string, unknown>> = [];
+    const deliveryStates: string[] = [];
+    const replyMarkup = {
+      inline_keyboard: [[1, 2, 3, 4, 5].map((score) => ({
+        callback_data: `quality:csat:${score}`,
+        text: String(score)
+      }))]
+    };
+    const handlers = worker.createRuntimeOutboxHandlers({
+      env: {
+        OUTBOX_TELEGRAM_API_BASE_URL: "https://telegram.provider.example.test",
+        OUTBOX_TELEGRAM_BOT_TOKEN: "123456:SECRET",
+        OUTBOX_TELEGRAM_ENABLED: "true"
+      },
+      fetcher: async (_url: string, init: { body?: string }) => {
+        calls.push(JSON.parse(init.body ?? "{}") as Record<string, unknown>);
+        return { ok: true, status: 200, text: async () => "" };
+      },
+      outboundDescriptorStore: {
+        findOutboundDescriptorById: async () => ({
+          channel: "Telegram",
+          conversationId: "tg-csat-chat",
+          id: "telegram_csat_descriptor",
+          idempotencyKey: "quality:csat:tg-csat-chat",
+          kind: "message_delivery",
+          messageId: "csat-survey:tg-csat-chat",
+          payload: {
+            providerConversationId: "99887766",
+            replyMarkup,
+            text: "Оцените, пожалуйста, качество поддержки от 1 до 5."
+          },
+          tenantId: "tenant-volga"
+        }),
+        markOutboundDescriptorDelivery: async (_descriptorId: string, state: "delivered" | "failed") => {
+          deliveryStates.push(state);
+          return null;
+        }
+      },
+      writeLog: () => undefined
+    });
+
+    const result = await worker.runOutboxWorker({ handlers, once: true, queue: "message-delivery", store });
+
+    assert.equal(result.published, 1);
+    assert.deepEqual(deliveryStates, ["delivered"]);
+    assert.deepEqual(calls[0], {
+      chat_id: "99887766",
+      disable_web_page_preview: true,
+      reply_markup: replyMarkup,
+      text: "Оцените, пожалуйста, качество поддержки от 1 до 5."
     });
   });
 
@@ -1600,7 +1664,7 @@ describe("outbox worker runtime contracts", () => {
       outboundDescriptorStore: {
         findOutboundDescriptorById: async (descriptorId: string) => descriptorId === "delivery_runtime_missing_adapter"
           ? {
-            channel: "SDK",
+            channel: "Email",
             conversationId: "maria",
             id: descriptorId,
             idempotencyKey: "delivery-runtime-missing-adapter",
@@ -1640,7 +1704,7 @@ describe("outbox worker runtime contracts", () => {
     assert.equal(scanResult.failed, 1);
     assert.equal(scanResult.published, 0);
     const failed = await store.list({ statuses: ["failed"] });
-    assert.match(failed.find((event) => event.id === delivery.id)?.lastError ?? "", /channel_connector_not_registered:SDK/);
+    assert.match(failed.find((event) => event.id === delivery.id)?.lastError ?? "", /channel_connector_not_registered:Email/);
     assert.match(failed.find((event) => event.id === scan.id)?.lastError ?? "", /file_scanner_not_configured/);
   });
 

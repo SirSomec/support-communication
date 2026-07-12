@@ -23,7 +23,7 @@ export class ChannelController {
   @ApiOkResponse({ description: "Idempotent inbound channel event normalization envelope" })
   normalizeInboundEvent(
     @Param("channel") channel: string,
-    @Body() payload: { conversationId?: string; eventId?: string; text?: string }
+    @Body() payload: { attachments?: Array<Record<string, unknown>>; conversationId?: string; eventId?: string; text?: string }
   ) {
     return this.conversationService.normalizeInboundEvent(channel, payload);
   }

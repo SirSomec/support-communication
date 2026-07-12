@@ -7,7 +7,7 @@ import {
   JsonFileStore
 } from "@support-communication/database";
 import { type OutboxEvent } from "@support-communication/events";
-import { conversationFixtures, channelFixtures } from "./seed-catalog.js";
+import { Prisma } from "@prisma/client";
 import { type ConversationMessage, type ConversationRecord } from "./conversation.types.js";
 
 export interface RealtimeEvent {
@@ -20,6 +20,41 @@ export interface RealtimeEvent {
   tenantId: string;
   traceId: string;
   data: Record<string, unknown>;
+}
+
+export type ConversationLifecycleEventType =
+  | "assignment.changed"
+  | "conversation.created"
+  | "internal_comment.created"
+  | "message.received"
+  | "message.sent"
+  | "status.changed"
+  | "topic.changed";
+
+export interface ConversationLifecycleEvent {
+  actorId: string | null;
+  actorName: string | null;
+  actorType: "client" | "operator" | "service_admin" | "system" | "worker";
+  conversationId: string;
+  data: Record<string, unknown>;
+  eventType: ConversationLifecycleEventType | string;
+  id: string;
+  ingestedAt: string;
+  occurredAt: string;
+  reason: string | null;
+  schemaVersion: "conversation-lifecycle/v1";
+  source: string;
+  sourceEventId: string;
+  tenantId: string;
+  traceId: string;
+}
+
+export interface ConversationLifecycleEventFilter {
+  conversationId?: string;
+  cursor?: string;
+  eventTypes?: string[];
+  limit?: number;
+  tenantId: string;
 }
 
 export interface ConversationInboundEvent {
@@ -80,12 +115,34 @@ export interface ConversationOutboundDescriptorRecord {
 
 export interface ConversationOutboundMessageReplyInput extends ConversationOutboundDescriptorRecordInput {
   conversation: ConversationRecord;
+  lifecycleEvent: ConversationLifecycleEvent;
   realtimeEvent: RealtimeEvent;
 }
 
 export interface ConversationOutboundMessageReplyRecord extends ConversationOutboundDescriptorRecord {
   conversation: ConversationRecord;
+  lifecycleEvent: ConversationLifecycleEvent;
   realtimeEvent: RealtimeEvent;
+}
+
+export interface ConversationOutboundConversationInput extends ConversationOutboundDescriptorRecordInput, ConversationMutationRecordInput {}
+
+export interface ConversationOutboundConversationRecord extends ConversationOutboundDescriptorRecord, ConversationMutationRecord {}
+
+export interface ConversationMutationRecordInput {
+  conversation: ConversationRecord;
+  lifecycleEvent: ConversationLifecycleEvent;
+  realtimeEvent: RealtimeEvent;
+}
+
+export interface ConversationMutationRecord extends ConversationMutationRecordInput {}
+
+export interface ConversationInboundMessageRecordInput extends ConversationMutationRecordInput {
+  inboundEvent: ConversationInboundEvent;
+}
+
+export interface ConversationInboundMessageRecord extends ConversationMutationRecord {
+  inboundEvent: ConversationInboundEvent;
 }
 
 export interface ConversationAssignmentAnalyticsRow {
@@ -103,6 +160,7 @@ export interface ConversationAssignmentAnalyticsRow {
 export interface ConversationAssignmentRecordInput {
   analyticsRow: ConversationAssignmentAnalyticsRow;
   conversation: ConversationRecord;
+  lifecycleEvent: ConversationLifecycleEvent;
   realtimeEvent: RealtimeEvent;
 }
 
@@ -122,6 +180,7 @@ export interface ConversationState {
   conversations: ConversationRecord[];
   deliveryReceipts: ConversationDeliveryReceipt[];
   inboundEvents: ConversationInboundEvent[];
+  lifecycleEvents?: ConversationLifecycleEvent[];
   outboundDescriptors: ConversationOutboundDescriptor[];
   outboxEvents: OutboxEvent[];
   realtimeEvents: RealtimeEvent[];
@@ -131,24 +190,30 @@ export interface ConversationState {
 export interface ConversationRepositoryPort {
   assignConversation(input: ConversationAssignmentRecordInput): MaybePromise<ConversationAssignmentRecord>;
   appendRealtimeEvent(event: RealtimeEvent): MaybePromise<RealtimeEvent>;
+  enqueueOutboxEvent(event: OutboxEvent): MaybePromise<OutboxEvent>;
   findConversation(conversationId: string): MaybePromise<ConversationRecord | undefined>;
   findInboundEvent(channel: string, eventId: string): MaybePromise<ConversationInboundEvent | undefined>;
   findOutboundDescriptorByIdempotencyKey(idempotencyKey: string): MaybePromise<ConversationOutboundDescriptor | undefined>;
   listDeliveryReceipts(filter?: ConversationDeliveryReceiptFilter): MaybePromise<ConversationDeliveryReceipt[]>;
   listConversations(): MaybePromise<ConversationRecord[]>;
+  listLifecycleEvents(filter: ConversationLifecycleEventFilter): MaybePromise<ConversationLifecycleEvent[]>;
   listChannelCatalog(): MaybePromise<Array<Record<string, unknown>>>;
   listOutboundDescriptors(filter?: ConversationOutboundDescriptorFilter): MaybePromise<ConversationOutboundDescriptor[]>;
   listOutboxEvents(): MaybePromise<OutboxEvent[]>;
   listRealtimeEvents(filter?: ConversationRealtimeEventFilter): MaybePromise<RealtimeEvent[]>;
+  queueOutboundConversation(input: ConversationOutboundConversationInput): MaybePromise<ConversationOutboundConversationRecord>;
   queueOutboundMessageReply(input: ConversationOutboundMessageReplyInput): MaybePromise<ConversationOutboundMessageReplyRecord>;
   recordDeliveryReceipt(receipt: ConversationDeliveryReceipt): MaybePromise<ConversationDeliveryReceipt>;
   recordOutboundDescriptor(input: ConversationOutboundDescriptorRecordInput): MaybePromise<ConversationOutboundDescriptorRecord>;
   recordInboundEvent(event: ConversationInboundEvent): MaybePromise<ConversationInboundEvent>;
+  recordInboundMessage(input: ConversationInboundMessageRecordInput): MaybePromise<ConversationInboundMessageRecord>;
   saveConversation(conversation: ConversationRecord): MaybePromise<ConversationRecord>;
+  saveConversationMutation(input: ConversationMutationRecordInput): MaybePromise<ConversationMutationRecord>;
 }
 
 interface ConversationRepositoryOptions {
   filePath: string;
+  seed?: ConversationState;
 }
 
 type MaybePromise<T> = T | Promise<T>;
@@ -166,12 +231,12 @@ export class ConversationRepository implements ConversationRepositoryPort {
     defaultRepository = repository;
   }
 
-  static inMemory(): ConversationRepository {
-    return new ConversationRepository(createDurableConversationRepository(new InMemoryStore(seedConversationState())));
+  static inMemory(seed: ConversationState = createEmptyConversationState()): ConversationRepository {
+    return new ConversationRepository(createDurableConversationRepository(new InMemoryStore(seed)));
   }
 
-  static open({ filePath }: ConversationRepositoryOptions): ConversationRepository {
-    return new ConversationRepository(createDurableConversationRepository(new JsonFileStore({ filePath, seed: seedConversationState() })));
+  static open({ filePath, seed = createEmptyConversationState() }: ConversationRepositoryOptions): ConversationRepository {
+    return new ConversationRepository(createDurableConversationRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client }: PrismaConversationRepositoryOptions): ConversationRepository {
@@ -199,11 +264,15 @@ export class ConversationRepository implements ConversationRepositoryPort {
   }
 
   saveConversation(conversation: ConversationRecord): MaybePromise<ConversationRecord> {
-    return this.adapter.saveConversation(conversation);
+    return this.adapter.saveConversation(requireConversationTenant(conversation));
+  }
+
+  saveConversationMutation(input: ConversationMutationRecordInput): MaybePromise<ConversationMutationRecord> {
+    return this.adapter.saveConversationMutation({ ...input, conversation: requireConversationTenant(input.conversation) });
   }
 
   assignConversation(input: ConversationAssignmentRecordInput): MaybePromise<ConversationAssignmentRecord> {
-    return this.adapter.assignConversation(input);
+    return this.adapter.assignConversation({ ...input, conversation: requireConversationTenant(input.conversation) });
   }
 
   findInboundEvent(channel: string, eventId: string): MaybePromise<ConversationInboundEvent | undefined> {
@@ -226,12 +295,20 @@ export class ConversationRepository implements ConversationRepositoryPort {
     return this.adapter.recordInboundEvent(event);
   }
 
+  recordInboundMessage(input: ConversationInboundMessageRecordInput): MaybePromise<ConversationInboundMessageRecord> {
+    return this.adapter.recordInboundMessage({ ...input, conversation: requireConversationTenant(input.conversation) });
+  }
+
   appendRealtimeEvent(event: RealtimeEvent): MaybePromise<RealtimeEvent> {
     return this.adapter.appendRealtimeEvent(event);
   }
 
+  enqueueOutboxEvent(event: OutboxEvent): MaybePromise<OutboxEvent> {
+    return this.adapter.enqueueOutboxEvent(event);
+  }
+
   queueOutboundMessageReply(input: ConversationOutboundMessageReplyInput): MaybePromise<ConversationOutboundMessageReplyRecord> {
-    return this.adapter.queueOutboundMessageReply(input);
+    return this.adapter.queueOutboundMessageReply({ ...input, conversation: requireConversationTenant(input.conversation) });
   }
 
   recordOutboundDescriptor(input: ConversationOutboundDescriptorRecordInput): MaybePromise<ConversationOutboundDescriptorRecord> {
@@ -240,6 +317,14 @@ export class ConversationRepository implements ConversationRepositoryPort {
 
   listRealtimeEvents(filter: ConversationRealtimeEventFilter = {}): MaybePromise<RealtimeEvent[]> {
     return this.adapter.listRealtimeEvents(filter);
+  }
+
+  queueOutboundConversation(input: ConversationOutboundConversationInput): MaybePromise<ConversationOutboundConversationRecord> {
+    return this.adapter.queueOutboundConversation({ ...input, conversation: requireConversationTenant(input.conversation) });
+  }
+
+  listLifecycleEvents(filter: ConversationLifecycleEventFilter): MaybePromise<ConversationLifecycleEvent[]> {
+    return this.adapter.listLifecycleEvents({ ...filter, tenantId: requireConversationTenantId(filter.tenantId) });
   }
 }
 
@@ -264,6 +349,11 @@ interface PrismaConversationDelegates {
   conversationInboundEvent: {
     create(input: { data: PrismaConversationInboundEventCreateInput }): Promise<PrismaConversationInboundEventRow>;
     findUnique(input: PrismaConversationInboundEventFindUniqueInput): Promise<PrismaConversationInboundEventRow | null>;
+  };
+  conversationLifecycleEvent: {
+    create(input: { data: PrismaConversationLifecycleEventCreateInput }): Promise<PrismaConversationLifecycleEventRow>;
+    findMany(input: PrismaConversationLifecycleEventFindManyInput): Promise<PrismaConversationLifecycleEventRow[]>;
+    findUnique(input: PrismaConversationLifecycleEventFindUniqueInput): Promise<PrismaConversationLifecycleEventRow | null>;
   };
   conversationMessage: {
     createMany(input: { data: PrismaConversationMessageCreateInput[] }): Promise<{ count: number }>;
@@ -335,6 +425,7 @@ interface PrismaConversationRow extends PrismaConversationUpsertData {
 interface PrismaConversationUpsertData {
   avatar: string | null;
   channel: string;
+  channelConnectionId: string | null;
   clientSince: string;
   device: string;
   entry: string;
@@ -347,10 +438,16 @@ interface PrismaConversationUpsertData {
   phone: string;
   preview: string;
   previous: unknown;
+  providerConversationId: string | null;
+  providerUserId: string | null;
+  queueId: string | null;
+  rescueState: unknown;
+  resolutionOutcome: string | null;
   sla: string;
   slaTone: string;
   status: string;
   tags: string[];
+  teamId: string | null;
   tenantId: string;
   time: string;
   topic: string;
@@ -468,6 +565,45 @@ interface PrismaConversationRealtimeEventCreateInput {
   traceId: string;
 }
 
+interface PrismaConversationLifecycleEventCreateInput {
+  actorId: string | null;
+  actorName: string | null;
+  actorType: string;
+  conversationId: string;
+  data: Record<string, unknown>;
+  eventType: string;
+  id: string;
+  ingestedAt: Date;
+  occurredAt: Date;
+  reason: string | null;
+  schemaVersion: string;
+  source: string;
+  sourceEventId: string;
+  tenantId: string;
+  traceId: string;
+}
+
+interface PrismaConversationLifecycleEventRow extends PrismaConversationLifecycleEventCreateInput {}
+
+interface PrismaConversationLifecycleEventFindManyInput {
+  orderBy: Array<{ occurredAt: "asc" } | { id: "asc" }>;
+  where: {
+    conversationId?: string;
+    eventType?: { in: string[] };
+    tenantId: string;
+  };
+}
+
+interface PrismaConversationLifecycleEventFindUniqueInput {
+  where: {
+    tenantId_source_sourceEventId: {
+      source: string;
+      sourceEventId: string;
+      tenantId: string;
+    };
+  };
+}
+
 interface PrismaConversationUpdateManyInput {
   data: PrismaConversationUpsertData;
   where: {
@@ -540,6 +676,16 @@ async function appendPrismaRealtimeEvent(transaction: PrismaConversationTransact
   return toRealtimeEvent(row);
 }
 
+async function appendPrismaLifecycleEvent(
+  transaction: PrismaConversationTransactionalClient,
+  event: ConversationLifecycleEvent
+): Promise<ConversationLifecycleEvent> {
+  const row = await transaction.conversationLifecycleEvent.create({
+    data: toPrismaConversationLifecycleEventCreateInput(event)
+  });
+  return toConversationLifecycleEvent(row);
+}
+
 async function recordPrismaOutboundDescriptor(
   transaction: PrismaConversationTransactionalClient,
   descriptor: ConversationOutboundDescriptor,
@@ -563,6 +709,10 @@ async function recordPrismaOutboundDescriptor(
 }
 
 class PrismaConversationRepository implements ConversationRepositoryPort {
+  async enqueueOutboxEvent(event: OutboxEvent): Promise<OutboxEvent> {
+    await this.client.outboxEvent.create({ data: toPrismaOutboxEventCreateInput(event) });
+    return clone(event);
+  }
   constructor(private readonly client: PrismaConversationClient) {}
 
   async listConversations(): Promise<ConversationRecord[]> {
@@ -587,6 +737,15 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
     return this.client.$transaction((transaction) => savePrismaConversation(transaction, conversation));
   }
 
+  saveConversationMutation(input: ConversationMutationRecordInput): Promise<ConversationMutationRecord> {
+    return this.client.$transaction(async (transaction) => {
+      const conversation = await savePrismaConversation(transaction, input.conversation);
+      const lifecycleEvent = await appendPrismaLifecycleEvent(transaction, input.lifecycleEvent);
+      const realtimeEvent = await appendPrismaRealtimeEvent(transaction, input.realtimeEvent);
+      return { conversation, lifecycleEvent, realtimeEvent };
+    });
+  }
+
   assignConversation(input: ConversationAssignmentRecordInput): Promise<ConversationAssignmentRecord> {
     return this.client.$transaction(async (transaction) => {
       const conversationData = toPrismaConversationUpsertData(input.conversation);
@@ -603,6 +762,7 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
       }
       await replacePrismaConversationMessages(transaction, input.conversation);
       const conversation = clone(input.conversation);
+      const lifecycleEvent = await appendPrismaLifecycleEvent(transaction, input.lifecycleEvent);
       const realtimeEvent = await appendPrismaRealtimeEvent(transaction, input.realtimeEvent);
       await transaction.routingAnalyticsRow.create({
         data: {
@@ -614,6 +774,7 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
       return {
         analyticsRow: clone(input.analyticsRow),
         conversation,
+        lifecycleEvent,
         realtimeEvent
       };
     });
@@ -703,15 +864,55 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
     return rows.map(toRealtimeEvent);
   }
 
+  async recordInboundMessage(input: ConversationInboundMessageRecordInput): Promise<ConversationInboundMessageRecord> {
+    return this.client.$transaction(async (transaction) => {
+      const conversation = await savePrismaConversation(transaction, input.conversation);
+      const lifecycleEvent = await appendPrismaLifecycleEvent(transaction, input.lifecycleEvent);
+      const realtimeEvent = await appendPrismaRealtimeEvent(transaction, input.realtimeEvent);
+      const row = await transaction.conversationInboundEvent.create({
+        data: {
+          channel: input.inboundEvent.channel,
+          conversationId: input.inboundEvent.conversationId,
+          eventId: input.inboundEvent.eventId,
+          id: makePersistenceId("inbound", input.inboundEvent.channel, input.inboundEvent.eventId),
+          messageId: input.inboundEvent.messageId,
+          payload: null,
+          receivedAt: new Date(input.inboundEvent.receivedAt),
+          traceId: input.inboundEvent.traceId
+        }
+      });
+      return {
+        conversation,
+        inboundEvent: toConversationInboundEvent(row),
+        lifecycleEvent,
+        realtimeEvent
+      };
+    });
+  }
+
+  async listLifecycleEvents(filter: ConversationLifecycleEventFilter): Promise<ConversationLifecycleEvent[]> {
+    const rows = await this.client.conversationLifecycleEvent.findMany({
+      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+      where: {
+        tenantId: requireConversationTenantId(filter.tenantId),
+        ...(filter.conversationId ? { conversationId: filter.conversationId } : {}),
+        ...(filter.eventTypes?.length ? { eventType: { in: filter.eventTypes } } : {})
+      }
+    });
+    return paginateLifecycleEvents(rows.map(toConversationLifecycleEvent), filter);
+  }
+
   async queueOutboundMessageReply(input: ConversationOutboundMessageReplyInput): Promise<ConversationOutboundMessageReplyRecord> {
     try {
       return await this.client.$transaction(async (transaction) => {
         const conversation = await savePrismaConversation(transaction, input.conversation);
+        const lifecycleEvent = await appendPrismaLifecycleEvent(transaction, input.lifecycleEvent);
         const realtimeEvent = await appendPrismaRealtimeEvent(transaction, input.realtimeEvent);
         const outbound = await recordPrismaOutboundDescriptor(transaction, input.descriptor, input.outbox);
 
         return {
           conversation,
+          lifecycleEvent,
           realtimeEvent,
           ...outbound
         };
@@ -724,8 +925,30 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
 
       return {
         conversation: clone(input.conversation),
+        lifecycleEvent: clone(input.lifecycleEvent),
         realtimeEvent: clone(input.realtimeEvent),
         descriptor: existing
+      };
+    }
+  }
+
+  async queueOutboundConversation(input: ConversationOutboundConversationInput): Promise<ConversationOutboundConversationRecord> {
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const conversation = await savePrismaConversation(transaction, input.conversation);
+        const lifecycleEvent = await appendPrismaLifecycleEvent(transaction, input.lifecycleEvent);
+        const realtimeEvent = await appendPrismaRealtimeEvent(transaction, input.realtimeEvent);
+        const outbound = await recordPrismaOutboundDescriptor(transaction, input.descriptor, input.outbox);
+        return { conversation, lifecycleEvent, realtimeEvent, ...outbound };
+      });
+    } catch (error) {
+      const existing = await this.findExistingOutboundAfterUniqueError(error, input.descriptor.idempotencyKey);
+      if (!existing) throw error;
+      return {
+        conversation: clone(input.conversation),
+        descriptor: existing,
+        lifecycleEvent: clone(input.lifecycleEvent),
+        realtimeEvent: clone(input.realtimeEvent)
       };
     }
   }
@@ -790,6 +1013,16 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
 
     listOutboxEvents(): OutboxEvent[] {
       return clone(store.read().outboxEvents ?? []);
+    },
+
+    enqueueOutboxEvent(event: OutboxEvent): OutboxEvent {
+      store.update((state) => ({
+        ...state,
+        outboxEvents: (state.outboxEvents ?? []).some((item) => item.id === event.id)
+          ? state.outboxEvents ?? []
+          : [...(state.outboxEvents ?? []), clone(event)]
+      }));
+      return clone(event);
     },
 
     findConversation(conversationId: string): ConversationRecord | undefined {
@@ -861,6 +1094,36 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
       return clone(persisted);
     },
 
+    saveConversationMutation(input: ConversationMutationRecordInput): ConversationMutationRecord {
+      let persisted: ConversationMutationRecord | null = null;
+      store.update((state) => {
+        const lifecycleEvents = state.lifecycleEvents ?? [];
+        const duplicate = lifecycleEvents.find((event) => lifecycleEventIdentityMatches(event, input.lifecycleEvent));
+        if (duplicate) {
+          persisted = {
+            conversation: clone(input.conversation),
+            lifecycleEvent: clone(duplicate),
+            realtimeEvent: clone(input.realtimeEvent)
+          };
+          return state;
+        }
+        const nextConversation = clone(input.conversation);
+        const nextLifecycleEvent = clone(input.lifecycleEvent);
+        const nextRealtimeEvent = clone(input.realtimeEvent);
+        persisted = { conversation: nextConversation, lifecycleEvent: nextLifecycleEvent, realtimeEvent: nextRealtimeEvent };
+        return {
+          ...state,
+          conversations: upsertConversationRows(state.conversations, nextConversation),
+          lifecycleEvents: [...lifecycleEvents, nextLifecycleEvent],
+          realtimeEvents: (state.realtimeEvents ?? []).some((event) => event.eventId === nextRealtimeEvent.eventId)
+            ? state.realtimeEvents
+            : [...(state.realtimeEvents ?? []), nextRealtimeEvent]
+        };
+      });
+      if (!persisted) throw new Error(`Conversation mutation ${input.lifecycleEvent.id} was not persisted.`);
+      return clone(persisted);
+    },
+
     assignConversation(input: ConversationAssignmentRecordInput): ConversationAssignmentRecord {
       let persisted: ConversationAssignmentRecord | null = null;
       store.update((state) => {
@@ -871,17 +1134,20 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
           throw new ConversationAssignmentConflictError(input.conversation.id);
         }
         const nextConversation = clone(input.conversation);
+        const nextLifecycleEvent = clone(input.lifecycleEvent);
         const nextRealtimeEvent = clone(input.realtimeEvent);
         const nextAnalyticsRow = clone(input.analyticsRow);
         persisted = {
           analyticsRow: nextAnalyticsRow,
           conversation: nextConversation,
+          lifecycleEvent: nextLifecycleEvent,
           realtimeEvent: nextRealtimeEvent
         };
 
         return {
           ...state,
           conversations: upsertConversationRows(state.conversations, nextConversation),
+          lifecycleEvents: lifecycleEventsWithEvent(state.lifecycleEvents ?? [], nextLifecycleEvent),
           realtimeEvents: (state.realtimeEvents ?? []).some((event) => event.eventId === nextRealtimeEvent.eventId)
             ? state.realtimeEvents
             : [...(state.realtimeEvents ?? []), nextRealtimeEvent],
@@ -906,6 +1172,7 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
           const existingOutbox = findOutboundDescriptorOutbox(state, existing);
           persisted = {
             conversation: clone(input.conversation),
+            lifecycleEvent: clone(input.lifecycleEvent),
             realtimeEvent: clone(input.realtimeEvent),
             descriptor: clone(existing),
             ...(existingOutbox ? { outbox: clone(existingOutbox) } : {})
@@ -914,6 +1181,7 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
         }
 
         const nextConversation = clone(input.conversation);
+        const nextLifecycleEvent = clone(input.lifecycleEvent);
         const nextRealtimeEvent = clone(input.realtimeEvent);
         const conversations = upsertConversationRows(state.conversations, nextConversation);
         const realtimeEvents = (state.realtimeEvents ?? []).some((event) => event.eventId === nextRealtimeEvent.eventId)
@@ -922,11 +1190,13 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
         const recorded = recordOutboundDescriptorInState({
           ...state,
           conversations,
+          lifecycleEvents: lifecycleEventsWithEvent(state.lifecycleEvents ?? [], nextLifecycleEvent),
           realtimeEvents
         }, input.descriptor, input.outbox);
 
         persisted = {
           conversation: nextConversation,
+          lifecycleEvent: nextLifecycleEvent,
           realtimeEvent: nextRealtimeEvent,
           descriptor: recorded.descriptor,
           ...(recorded.outbox ? { outbox: recorded.outbox } : {})
@@ -991,6 +1261,82 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
       return clone(persisted);
     },
 
+    queueOutboundConversation(input: ConversationOutboundConversationInput): ConversationOutboundConversationRecord {
+      let persisted: ConversationOutboundConversationRecord | null = null;
+      store.update((state) => {
+        const existing = findExistingOutboundDescriptor(state, input.descriptor);
+        if (existing) {
+          const existingOutbox = findOutboundDescriptorOutbox(state, existing);
+          persisted = {
+            conversation: clone(input.conversation),
+            descriptor: clone(existing),
+            lifecycleEvent: clone(input.lifecycleEvent),
+            realtimeEvent: clone(input.realtimeEvent),
+            ...(existingOutbox ? { outbox: clone(existingOutbox) } : {})
+          };
+          return state;
+        }
+        const nextConversation = clone(input.conversation);
+        const nextLifecycleEvent = clone(input.lifecycleEvent);
+        const nextRealtimeEvent = clone(input.realtimeEvent);
+        const recorded = recordOutboundDescriptorInState({
+          ...state,
+          conversations: upsertConversationRows(state.conversations, nextConversation),
+          lifecycleEvents: lifecycleEventsWithEvent(state.lifecycleEvents ?? [], nextLifecycleEvent),
+          realtimeEvents: lifecycleRealtimeEventsWithEvent(state.realtimeEvents ?? [], nextRealtimeEvent)
+        }, input.descriptor, input.outbox);
+        persisted = {
+          conversation: nextConversation,
+          descriptor: recorded.descriptor,
+          lifecycleEvent: nextLifecycleEvent,
+          realtimeEvent: nextRealtimeEvent,
+          ...(recorded.outbox ? { outbox: recorded.outbox } : {})
+        };
+        return recorded.state;
+      });
+      if (!persisted) throw new Error(`Outbound conversation ${input.descriptor.id} was not persisted.`);
+      return clone(persisted);
+    },
+
+    recordInboundMessage(input: ConversationInboundMessageRecordInput): ConversationInboundMessageRecord {
+      let persisted: ConversationInboundMessageRecord | null = null;
+      store.update((state) => {
+        const existing = state.inboundEvents.find((event) =>
+          event.channel === input.inboundEvent.channel && event.eventId === input.inboundEvent.eventId
+        );
+        if (existing) {
+          persisted = {
+            conversation: clone(input.conversation),
+            inboundEvent: clone(existing),
+            lifecycleEvent: clone(input.lifecycleEvent),
+            realtimeEvent: clone(input.realtimeEvent)
+          };
+          return state;
+        }
+        const nextConversation = clone(input.conversation);
+        const nextInboundEvent = clone(input.inboundEvent);
+        const nextLifecycleEvent = clone(input.lifecycleEvent);
+        const nextRealtimeEvent = clone(input.realtimeEvent);
+        persisted = {
+          conversation: nextConversation,
+          inboundEvent: nextInboundEvent,
+          lifecycleEvent: nextLifecycleEvent,
+          realtimeEvent: nextRealtimeEvent
+        };
+        return {
+          ...state,
+          conversations: upsertConversationRows(state.conversations, nextConversation),
+          inboundEvents: [...state.inboundEvents, nextInboundEvent],
+          lifecycleEvents: lifecycleEventsWithEvent(state.lifecycleEvents ?? [], nextLifecycleEvent),
+          realtimeEvents: (state.realtimeEvents ?? []).some((event) => event.eventId === nextRealtimeEvent.eventId)
+            ? state.realtimeEvents
+            : [...(state.realtimeEvents ?? []), nextRealtimeEvent]
+        };
+      });
+      if (!persisted) throw new Error(`Inbound message ${input.inboundEvent.channel}:${input.inboundEvent.eventId} was not persisted.`);
+      return clone(persisted);
+    },
+
     appendRealtimeEvent(event: RealtimeEvent): RealtimeEvent {
       const nextEvent = clone(event);
       store.update((state) => ({
@@ -1004,6 +1350,15 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
     listRealtimeEvents(filter: ConversationRealtimeEventFilter = {}): RealtimeEvent[] {
       return clone((store.read().realtimeEvents ?? [])
         .filter((event) => !filter.tenantId || event.tenantId === filter.tenantId));
+    },
+
+    listLifecycleEvents(filter: ConversationLifecycleEventFilter): ConversationLifecycleEvent[] {
+      const rows = (store.read().lifecycleEvents ?? [])
+        .filter((event) => event.tenantId === filter.tenantId)
+        .filter((event) => !filter.conversationId || event.conversationId === filter.conversationId)
+        .filter((event) => !filter.eventTypes?.length || filter.eventTypes.includes(event.eventType))
+        .sort(compareLifecycleEvents);
+      return clone(paginateLifecycleEvents(rows, filter));
     }
   };
 }
@@ -1118,6 +1473,7 @@ function toConversationRecord(row: PrismaConversationRow): ConversationRecord {
   return {
     ...(row.avatar ? { avatar: row.avatar } : {}),
     channel: row.channel,
+    ...(row.channelConnectionId ? { channelConnectionId: row.channelConnectionId } : {}),
     clientSince: row.clientSince,
     device: row.device,
     entry: row.entry,
@@ -1131,10 +1487,16 @@ function toConversationRecord(row: PrismaConversationRow): ConversationRecord {
     phone: row.phone,
     preview: row.preview,
     previous: stringMatrixFromJson(row.previous),
+    ...(row.providerConversationId ? { providerConversationId: row.providerConversationId } : {}),
+    ...(row.providerUserId ? { providerUserId: row.providerUserId } : {}),
+    ...(row.queueId ? { queueId: row.queueId } : {}),
+    ...(recordFromJson(row.rescueState) ? { rescueState: recordFromJson(row.rescueState) } : {}),
+    ...(row.resolutionOutcome ? { resolutionOutcome: row.resolutionOutcome } : {}),
     sla: row.sla,
     slaTone: row.slaTone,
     status: row.status,
     tags: [...row.tags],
+    ...(row.teamId ? { teamId: row.teamId } : {}),
     tenantId: row.tenantId,
     time: row.time,
     topic: row.topic,
@@ -1160,6 +1522,7 @@ function toPrismaConversationUpsertData(conversation: ConversationRecord): Prism
   return {
     avatar: conversation.avatar ?? null,
     channel: conversation.channel,
+    channelConnectionId: conversation.channelConnectionId ?? null,
     clientSince: conversation.clientSince,
     device: conversation.device,
     entry: conversation.entry,
@@ -1172,10 +1535,16 @@ function toPrismaConversationUpsertData(conversation: ConversationRecord): Prism
     phone: conversation.phone,
     preview: conversation.preview,
     previous: conversation.previous,
+    providerConversationId: conversation.providerConversationId ?? null,
+    providerUserId: conversation.providerUserId ?? null,
+    queueId: conversation.queueId ?? null,
+    rescueState: conversation.rescueState ?? Prisma.JsonNull,
+    resolutionOutcome: conversation.resolutionOutcome ?? null,
     sla: conversation.sla,
     slaTone: conversation.slaTone,
     status: conversation.status,
     tags: [...conversation.tags],
+    teamId: conversation.teamId ?? null,
     tenantId: requireConversationTenantId(conversation.tenantId),
     time: conversation.time,
     topic: conversation.topic,
@@ -1354,16 +1723,112 @@ function toIso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-function seedConversationState(): ConversationState {
+function parseLifecycleActorType(value: string): ConversationLifecycleEvent["actorType"] {
+  if (value === "customer") {
+    return "client";
+  }
+  if (value === "client" || value === "operator" || value === "service_admin" || value === "system" || value === "worker") {
+    return value;
+  }
+  return "system";
+}
+
+function recordFromJson(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : undefined;
+}
+
+function lifecycleEventIdentityMatches(left: ConversationLifecycleEvent, right: ConversationLifecycleEvent): boolean {
+  return left.tenantId === right.tenantId && left.source === right.source && left.sourceEventId === right.sourceEventId;
+}
+
+function lifecycleEventsWithEvent(
+  events: ConversationLifecycleEvent[],
+  event: ConversationLifecycleEvent
+): ConversationLifecycleEvent[] {
+  return events.some((item) => lifecycleEventIdentityMatches(item, event)) ? events : [...events, event];
+}
+
+function lifecycleRealtimeEventsWithEvent(events: RealtimeEvent[], event: RealtimeEvent): RealtimeEvent[] {
+  return events.some((item) => item.eventId === event.eventId) ? events : [...events, event];
+}
+
+function compareLifecycleEvents(left: ConversationLifecycleEvent, right: ConversationLifecycleEvent): number {
+  const occurred = Date.parse(left.occurredAt) - Date.parse(right.occurredAt);
+  return occurred === 0 ? left.id.localeCompare(right.id) : occurred;
+}
+
+function paginateLifecycleEvents(
+  rows: ConversationLifecycleEvent[],
+  filter: ConversationLifecycleEventFilter
+): ConversationLifecycleEvent[] {
+  const cursorIndex = filter.cursor ? rows.findIndex((event) => event.id === filter.cursor) : -1;
+  const start = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+  const limit = Math.max(1, Math.min(200, Number.isFinite(filter.limit) ? Number(filter.limit) : 50));
+  return rows.slice(start, start + limit);
+}
+
+export function createEmptyConversationState(): ConversationState {
   return {
-    channelCatalog: clone(channelFixtures),
-    conversations: clone(conversationFixtures),
+    channelCatalog: [],
+    conversations: [],
     deliveryReceipts: [],
     inboundEvents: [],
+    lifecycleEvents: [],
     outboundDescriptors: [],
     outboxEvents: [],
     realtimeEvents: [],
     routingAnalyticsRows: []
+  };
+}
+
+function toPrismaConversationLifecycleEventCreateInput(
+  event: ConversationLifecycleEvent
+): PrismaConversationLifecycleEventCreateInput {
+  return {
+    actorId: event.actorId,
+    actorName: event.actorName,
+    actorType: event.actorType,
+    conversationId: event.conversationId,
+    data: clone(event.data),
+    eventType: event.eventType,
+    id: event.id,
+    ingestedAt: new Date(event.ingestedAt),
+    occurredAt: new Date(event.occurredAt),
+    reason: event.reason,
+    schemaVersion: event.schemaVersion,
+    source: event.source,
+    sourceEventId: event.sourceEventId,
+    tenantId: requireConversationTenantId(event.tenantId),
+    traceId: event.traceId
+  };
+}
+
+function toConversationLifecycleEvent(row: PrismaConversationLifecycleEventRow): ConversationLifecycleEvent {
+  return {
+    actorId: row.actorId,
+    actorName: row.actorName,
+    actorType: parseLifecycleActorType(row.actorType),
+    conversationId: row.conversationId,
+    data: toJsonRecord(row.data),
+    eventType: row.eventType,
+    id: row.id,
+    ingestedAt: toIso(row.ingestedAt),
+    occurredAt: toIso(row.occurredAt),
+    reason: row.reason,
+    schemaVersion: "conversation-lifecycle/v1",
+    source: row.source,
+    sourceEventId: row.sourceEventId,
+    tenantId: row.tenantId,
+    traceId: row.traceId
+  };
+}
+
+function requireConversationTenant(conversation: ConversationRecord): ConversationRecord {
+  return {
+    ...conversation,
+    tenantId: requireConversationTenantId(conversation.tenantId)
   };
 }
 

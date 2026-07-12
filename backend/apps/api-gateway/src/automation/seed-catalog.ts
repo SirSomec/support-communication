@@ -6,6 +6,7 @@ export const botScenarios: BotScenario[] = [
     name: "Delivery status",
     status: "enabled",
     schemaVersion: "bot-flow/v1",
+    tenantId: "tenant-demo",
     channels: ["SDK", "Telegram"],
     flowNodes: [
       { id: "delivery-message", type: "message", title: "Accept delivery question" },
@@ -22,6 +23,7 @@ export const botScenarios: BotScenario[] = [
     name: "Auth code",
     status: "test",
     schemaVersion: "bot-flow/v1",
+    tenantId: "tenant-demo",
     channels: ["VK", "MAX"],
     flowNodes: [
       { id: "auth-message", type: "message", title: "Accept auth issue" },
@@ -62,14 +64,16 @@ export const automationAuditEvents = [
     action: "bot.publish",
     actor: "system",
     target: "bot-delivery-status",
-    immutable: true
+    immutable: true,
+    tenantId: "tenant-demo"
   },
   {
     id: "audit-proactive-1002",
     action: "proactive.rule.update",
     actor: "senior-operator",
     target: "rule-checkout",
-    immutable: true
+    immutable: true,
+    tenantId: "tenant-demo"
   }
 ];
 

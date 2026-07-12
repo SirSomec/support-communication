@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "test": "node --test test/*.test.js",
     "preview": "vite preview --host 127.0.0.1"
   },
   "devDependencies": {

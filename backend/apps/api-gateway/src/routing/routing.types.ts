@@ -39,6 +39,7 @@ export interface RoutingConversation {
   rescue?: RoutingRescueState;
   slaTone: "closed" | "danger" | "hold" | "ok" | "warn";
   status: "active" | "assigned" | "closed" | "paused" | "queued" | "transferred";
+  teamId?: string;
   tenantId?: string;
   topic?: string;
 }

@@ -4,7 +4,12 @@ import {
   resolveRepositoryStoreFile,
   type PrismaClientFactoryOptions
 } from "@support-communication/database";
-import { AutomationRepository, type PrismaAutomationClient } from "./automation.repository.js";
+import {
+  AutomationRepository,
+  type AutomationState,
+  type PrismaAutomationClient
+} from "./automation.repository.js";
+import { ProactiveExposureRepository, type PrismaExposureClient } from "./proactive-exposure.repository.js";
 
 export interface AutomationRepositoryBootstrapSource {
   AUTOMATION_REPOSITORY?: string;
@@ -17,6 +22,7 @@ export interface AutomationRepositoryBootstrapSource {
 
 export interface AutomationRepositoryBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaAutomationClient;
+  seed?: AutomationState;
 }
 
 export function configureAutomationRepository(
@@ -24,8 +30,14 @@ export function configureAutomationRepository(
   options: AutomationRepositoryBootstrapOptions = {}
 ): AutomationRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => AutomationRepository.open({ filePath }),
-    createPrismaRepository: (client) => AutomationRepository.prisma({ client }),
+    createJsonRepository: (filePath) => {
+      ProactiveExposureRepository.useDefault(ProactiveExposureRepository.open(filePath.replace(/\.json$/i, "-proactive-exposures.json")));
+      return AutomationRepository.open({ filePath, seed: options.seed });
+    },
+    createPrismaRepository: (client) => {
+      ProactiveExposureRepository.useDefault(ProactiveExposureRepository.prisma(client as unknown as PrismaExposureClient));
+      return AutomationRepository.prisma({ client });
+    },
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "AUTOMATION_REPOSITORY",
     source,

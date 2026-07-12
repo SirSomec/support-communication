@@ -331,6 +331,7 @@ export interface WorkerConversationOutboundDescriptor {
 export interface ConversationOutboundDescriptorStore {
   findOutboundDescriptorById(descriptorId: string): Promise<WorkerConversationOutboundDescriptor | null | undefined> | WorkerConversationOutboundDescriptor | null | undefined;
   markOutboundDescriptorDelivery?(descriptorId: string, deliveryState: "delivered" | "failed"): Promise<WorkerConversationOutboundDescriptor | null>;
+  recordProviderMessageBinding?(input: { channelConnectionId: string; conversationId: string; internalMessageId: string; provider: string; providerConversationId: string; providerMessageId: string; tenantId: string }): Promise<void>;
 }
 
 export interface PrismaConversationOutboundDescriptorClient {
@@ -340,6 +341,13 @@ export interface PrismaConversationOutboundDescriptorClient {
       data: { deliveryState: string; retryable: boolean; status: string; updatedAt: Date };
       where: { id: string };
     }): Promise<PrismaConversationOutboundDescriptorRow>;
+  };
+  providerMessageBinding?: {
+    upsert(input: {
+      create: Record<string, unknown>;
+      update: { providerConversationId: string; providerMessageId: string; status: string; updatedAt: Date };
+      where: { tenantId_internalMessageId_provider: { internalMessageId: string; provider: string; tenantId: string } };
+    }): Promise<unknown>;
   };
 }
 
@@ -1119,6 +1127,26 @@ export function createPrismaConversationOutboundDescriptorStore(client: PrismaCo
         where: { id: descriptorId }
       });
       return toWorkerConversationOutboundDescriptor(row);
+    },
+    async recordProviderMessageBinding(input) {
+      if (!client.providerMessageBinding) throw new Error("provider_message_binding_store_required");
+      const now = new Date();
+      await client.providerMessageBinding.upsert({
+        create: {
+          ...input,
+          id: `provider_binding_${randomUUID()}`,
+          status: "sent",
+          createdAt: now,
+          updatedAt: now
+        },
+        update: {
+          providerConversationId: input.providerConversationId,
+          providerMessageId: input.providerMessageId,
+          status: "sent",
+          updatedAt: now
+        },
+        where: { tenantId_internalMessageId_provider: { internalMessageId: input.internalMessageId, provider: input.provider, tenantId: input.tenantId } }
+      });
     }
   };
 }

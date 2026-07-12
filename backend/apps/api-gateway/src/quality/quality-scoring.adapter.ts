@@ -15,7 +15,6 @@ import {
 
 const DEFAULT_CHANNEL = "SDK";
 const DEFAULT_CONVERSATION_ID = "draft";
-const DEFAULT_TENANT_ID = "tenant-demo";
 const allowedTelemetryChannels = new Set(["Email", "MAX", "SDK", "Telegram", "VK"]);
 
 export interface QualityScoringProviderRequestContext {
@@ -120,7 +119,7 @@ export function createQualityScoringProviderRequest(
     mode: stringOrUndefined(payload.mode) === "internal" ? "internal" : "reply",
     portVersion: QUALITY_SCORING_PROVIDER_PORT_VERSION,
     requestedAt: context.requestedAt,
-    tenantId: stringOrDefault(payload.tenantId, DEFAULT_TENANT_ID),
+    tenantId: requiredString(payload.tenantId, "quality_scoring_tenant_required"),
     traceId: context.traceId
   };
 }
@@ -287,6 +286,14 @@ function mapSuggestions(suggestions: unknown): Array<Record<string, unknown>> {
 
 function stringOrDefault(value: unknown, fallback: string): string {
   return stringOrUndefined(value) ?? fallback;
+}
+
+function requiredString(value: unknown, code: string): string {
+  const normalized = stringOrUndefined(value);
+  if (!normalized) {
+    throw new Error(code);
+  }
+  return normalized;
 }
 
 function stringOrUndefined(value: unknown): string | undefined {

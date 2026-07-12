@@ -1,6 +1,5 @@
 import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
-import { bootstrapReportState } from "./seed.js";
-import { ReportRepository, type PrismaReportClient } from "./report.repository.js";
+import { ReportRepository, type PrismaReportClient, type ReportState } from "./report.repository.js";
 
 export interface ReportRepositoryBootstrapSource {
   DATABASE_URL?: string;
@@ -13,6 +12,7 @@ export interface ReportRepositoryBootstrapSource {
 
 export interface ReportRepositoryBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaReportClient;
+  seed?: ReportState;
 }
 
 export function configureReportRepository(
@@ -20,7 +20,7 @@ export function configureReportRepository(
   options: ReportRepositoryBootstrapOptions = {}
 ): ReportRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => ReportRepository.open({ filePath, seed: bootstrapReportState() }),
+    createJsonRepository: (filePath) => ReportRepository.open({ filePath, ...(options.seed ? { seed: options.seed } : {}) }),
     createPrismaRepository: (client) => ReportRepository.prisma({ client }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "REPORT_REPOSITORY",

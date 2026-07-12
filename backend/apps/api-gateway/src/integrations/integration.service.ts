@@ -7,10 +7,10 @@ import {
   type ChannelConnectionAuditEventRecord,
   type ChannelConnectionStoredRecord,
   type IntegrationWorkspaceCatalog,
+  type ProviderConnectionCredentialRecord,
   type WebhookDeliveryJournalEntry,
   type WebhookReplayAuditEvent
 } from "./integration.repository.js";
-import { bootstrapIntegrationState } from "./seed.js";
 import {
   disableTelegramConnectionRecord,
   saveTelegramConnectionRecord,
@@ -18,6 +18,8 @@ import {
   toTelegramConnectionPublicView,
   type TelegramHttpFetch
 } from "./telegram-channel-connection.js";
+import { QueueDirectoryRepository } from "../routing/queue-directory.repository.js";
+import { ProviderConnectionCrypto } from "./provider-connection-crypto.js";
 
 const INTEGRATION_SERVICE = "integrationService";
 const DEFAULT_FIXTURE_TENANT_ID = "tenant-volga";
@@ -54,6 +56,8 @@ interface ReplayPayload {
 }
 
 interface IntegrationServiceOptions {
+  providerCredentialCrypto?: ProviderConnectionCrypto;
+  queueDirectoryRepository?: Pick<QueueDirectoryRepository, "findQueue">;
   telegramFetch?: TelegramHttpFetch;
 }
 
@@ -64,11 +68,14 @@ export class IntegrationService {
   private readonly deliveries: WebhookDelivery[];
   private readonly sessions: SecuritySession[];
   private readonly replayIdempotency = new Map<string, Record<string, unknown>>();
+  private readonly queueDirectoryRepository?: Pick<QueueDirectoryRepository, "findQueue">;
 
   constructor(
     private readonly integrationRepository: IntegrationRepository = IntegrationRepository.default(),
     private readonly options: IntegrationServiceOptions = {}
   ) {
+    this.queueDirectoryRepository = options.queueDirectoryRepository
+      ?? (process.env.INTEGRATION_REPOSITORY === "prisma" ? new QueueDirectoryRepository() : undefined);
     const state = readInitialIntegrationState(this.integrationRepository);
     this.workspace = this.integrationRepository.readWorkspaceCatalog();
     this.channels = clone(this.workspace.channelDetails);
@@ -212,19 +219,25 @@ export class IntegrationService {
         type
       });
     }
+    const routingQueueId = String(payload.routingQueueId ?? (this.queueDirectoryRepository ? "" : `queue-${type}`)).trim();
+    const queueError = await this.validateRoutingQueue(normalizedTenantId, routingQueueId);
+    if (queueError) {
+      return queueError;
+    }
+    const connectionId = `conn_${type}_${randomUUID()}`;
     let rawExternalId = `raw_${type}_${randomUUID()}`;
+    let telegramConnection: Awaited<ReturnType<typeof saveTelegramConnectionRecord>> | null = null;
     if (type === "telegram") {
       const botToken = extractCredentialMaterial(payload.credentials);
       try {
-        const existing = await this.integrationRepository.findTelegramConnectionByTenantIdAsync(normalizedTenantId);
         const telegramFetch = this.options.telegramFetch ?? resolveTestTelegramFetch(botToken);
-        const telegramConnection = await saveTelegramConnectionRecord({
+        telegramConnection = await saveTelegramConnectionRecord({
           botToken,
+          channelConnectionId: connectionId,
           fetcher: telegramFetch,
           publicWebhookBaseUrl: resolvePublicWebhookBaseUrl(),
           tenantId: normalizedTenantId
-        }, existing);
-        await this.integrationRepository.saveTelegramConnectionAsync(telegramConnection);
+        });
         rawExternalId = `telegram:${telegramConnection.botUsername ?? telegramConnection.botId ?? "bot"}`;
       } catch (error) {
         const code = error instanceof Error ? error.message : "telegram_bot_token_rejected";
@@ -238,7 +251,6 @@ export class IntegrationService {
     }
 
     const now = new Date().toISOString();
-    const connectionId = `conn_${type}_${randomUUID()}`;
     const connection: ChannelConnectionStoredRecord = {
       chatLimit: normalizeChatLimit(payload.chatLimit),
       createdAt: now,
@@ -249,7 +261,7 @@ export class IntegrationService {
       lastSyncAt: now,
       name,
       rawExternalId,
-      routingQueueId: String(payload.routingQueueId ?? `queue-${type}`).trim(),
+      routingQueueId,
       status: String(payload.status ?? "active").trim().toLowerCase(),
       tenantId: normalizedTenantId,
       traffic: "0 events",
@@ -257,7 +269,40 @@ export class IntegrationService {
       updatedAt: now,
       webhookUrl: resolveChannelServiceEndpoint(type, connectionId, payload.webhookUrl)
     };
+    const providerCrypto = type === "vk" || type === "max"
+      ? (this.options.providerCredentialCrypto ?? ProviderConnectionCrypto.fromEnvironment(
+          process.env.PROVIDER_CREDENTIAL_KEY_VERSION?.trim() || "v1"
+        ))
+      : null;
     const saved = await this.integrationRepository.saveChannelConnectionAsync(connection);
+    let providerCredential: ProviderConnectionCredentialRecord | null = null;
+    let webhookSecret: string | null = null;
+    if (type === "vk" || type === "max") {
+      const token = extractCredentialMaterial(payload.credentials);
+      const crypto = providerCrypto!;
+      webhookSecret = randomUUID();
+      providerCredential = await this.integrationRepository.saveProviderConnectionCredentialAsync({
+        accessTokenEncrypted: JSON.stringify(crypto.encrypt(token)),
+        apiVersion: type === "vk" ? String(payload.credentials?.apiVersion ?? "5.199") : null,
+        channelConnectionId: saved.id,
+        confirmationCodeEncrypted: type === "vk" && payload.credentials?.confirmationCode
+          ? JSON.stringify(crypto.encrypt(String(payload.credentials.confirmationCode)))
+          : null,
+        createdAt: now,
+        externalAccountId: String(payload.credentials?.groupId ?? payload.credentials?.botId ?? "pending").trim() || "pending",
+        keyVersion: crypto.keyVersion,
+        lastError: null,
+        lastWebhookAt: null,
+        provider: type,
+        status: saved.status,
+        tenantId: normalizedTenantId,
+        updatedAt: now,
+        webhookSecretEncrypted: JSON.stringify(crypto.encrypt(webhookSecret))
+      });
+    }
+    if (telegramConnection) {
+      await this.integrationRepository.saveTelegramConnectionAsync(telegramConnection);
+    }
     await this.recordChannelConnectionEvent(saved.tenantId, saved.id, "channel.connection.created", "info", `${name} created`);
     const auditEvent = await this.persistChannelConnectionAuditEvent("channel.connection.create", saved, "Channel connection created");
 
@@ -269,7 +314,8 @@ export class IntegrationService {
       data: {
         auditEvent,
         auditId: auditEvent.id,
-        connection: maskChannelConnection(saved)
+        connection: maskChannelConnection(saved),
+        ...(providerCredential ? { providerRuntime: { keyVersion: providerCredential.keyVersion, provider: providerCredential.provider, webhookSecret } } : {})
       }
     });
   }
@@ -290,7 +336,12 @@ export class IntegrationService {
       connection.environment = normalizeEnvironment(payload.environment);
     }
     if (payload.routingQueueId !== undefined) {
-      connection.routingQueueId = String(payload.routingQueueId).trim() || connection.routingQueueId;
+      const routingQueueId = String(payload.routingQueueId).trim();
+      const queueError = await this.validateRoutingQueue(normalizedTenantId, routingQueueId);
+      if (queueError) {
+        return queueError;
+      }
+      connection.routingQueueId = routingQueueId;
     }
     if (payload.chatLimit !== undefined) {
       connection.chatLimit = normalizeChatLimit(payload.chatLimit);
@@ -694,8 +745,16 @@ export class IntegrationService {
 
     try {
       const existing = await this.integrationRepository.findTelegramConnectionByTenantIdAsync(normalizedTenantId);
+      const channelConnections = await this.integrationRepository.listChannelConnectionsAsync({ tenantId: normalizedTenantId, type: "telegram" });
+      const channelConnectionId = existing?.channelConnectionId ?? (channelConnections.length === 1 ? channelConnections[0].id : "");
+      if (!channelConnectionId) {
+        return invalidEnvelope("saveTelegramConnection", "telegram_channel_connection_required", "Select a Telegram channel connection before saving bot credentials.", {
+          tenantId: normalizedTenantId
+        });
+      }
       const saved = await saveTelegramConnectionRecord({
         botToken,
+        channelConnectionId,
         fetcher: options.fetcher,
         publicWebhookBaseUrl: resolvePublicWebhookBaseUrl(),
         tenantId: normalizedTenantId
@@ -761,6 +820,23 @@ export class IntegrationService {
 
   private findChannelConnection(tenantId: string, connectionId: string): Promise<ChannelConnectionStoredRecord | undefined> {
     return this.integrationRepository.findChannelConnectionAsync(tenantId, connectionId);
+  }
+
+  private async validateRoutingQueue(tenantId: string, queueId: string): Promise<BackendEnvelope<Record<string, unknown>> | null> {
+    if (!queueId) {
+      return invalidEnvelope("validateRoutingQueue", "routing_queue_required", "An active routing queue is required.", { tenantId });
+    }
+    if (!this.queueDirectoryRepository) {
+      return null;
+    }
+    const queue = await this.queueDirectoryRepository.findQueue(tenantId, queueId);
+    if (!queue || queue.status !== "active") {
+      return invalidEnvelope("validateRoutingQueue", "routing_queue_not_found", "The selected routing queue is not active in this tenant.", {
+        queueId,
+        tenantId
+      });
+    }
+    return null;
   }
 
   private findChannel(channelId: string): ChannelDetail | undefined {
@@ -1076,7 +1152,7 @@ function normalizeOptionalType(type?: string): string | undefined {
 }
 
 function isTokenManagedChannelType(type: string): boolean {
-  return type === "telegram" || type === "max";
+  return type === "telegram" || type === "max" || type === "vk";
 }
 
 function hasCredentialMaterial(credentials?: Record<string, unknown>): boolean {
@@ -1134,15 +1210,7 @@ function overlaySecuritySessions(base: SecuritySession[], persisted: SecuritySes
 }
 
 function readInitialIntegrationState(repository: IntegrationRepository) {
-  try {
-    return repository.readState();
-  } catch (error) {
-    if (error instanceof Error && error.message === "prisma_integration_async_required") {
-      return bootstrapIntegrationState();
-    }
-
-    throw error;
-  }
+  return repository.readInitialState();
 }
 
 function resolvePublicWebhookBaseUrl(env: Record<string, string | undefined> = process.env): string {

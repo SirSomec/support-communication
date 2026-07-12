@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
-import { resolveReportStoreFile } from "../apps/api-gateway/src/reports/bootstrap.ts";
+import { configureReportRepository, resolveReportStoreFile } from "../apps/api-gateway/src/reports/bootstrap.ts";
 import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
 import { bootstrapReportState, exportJobFixtures } from "../apps/api-gateway/src/reports/seed.ts";
@@ -77,6 +77,35 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       }).map((metric) => metric.id), ["metric_json_first_response"]);
       assert.equal(second.findMetricDefinition("metric_json_first_response", { tenantId: "tenant-volga" })?.unit, "seconds");
     } finally {
+      rmSync(workspace, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps default and JSON report repositories empty unless fixtures are explicitly injected", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "report-empty-bootstrap-"));
+    try {
+      ReportRepository.clearDefault();
+      const inMemory = ReportRepository.inMemory();
+      assert.deepEqual(inMemory.readState().exportJobs, []);
+      assert.deepEqual(inMemory.readWorkspaceCatalog().reportRows, []);
+      assert.ok(inMemory.readWorkspaceCatalog().reportColumnOptions.length > 0);
+
+      const empty = configureReportRepository({
+        NODE_ENV: "development",
+        REPORT_REPOSITORY: "json",
+        REPORT_STORE_FILE: join(workspace, "empty.json")
+      });
+      assert.deepEqual(empty.readState().exportJobs, []);
+      assert.deepEqual(empty.readWorkspaceCatalog().reportRows, []);
+
+      const seeded = configureReportRepository({
+        NODE_ENV: "development",
+        REPORT_REPOSITORY: "json",
+        REPORT_STORE_FILE: join(workspace, "seeded.json")
+      }, { seed: bootstrapReportState() });
+      assert.ok(seeded.readWorkspaceCatalog().reportRows.length > 0);
+    } finally {
+      ReportRepository.clearDefault();
       rmSync(workspace, { force: true, recursive: true });
     }
   });
@@ -377,7 +406,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       channel: "VK",
       period: "today",
       reportType: "SLA"
-    });
+    }, { tenantId: "tenant-volga" });
 
     assert.equal(workspace.service, "reportService");
     assert.equal(workspace.status, "ok");
@@ -385,7 +414,27 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.equal(workspace.meta.source, "api");
     assert.equal(workspace.data.metricDefinitionVersion, "metrics/v1");
     assert.deepEqual(workspace.data.filters, { channel: "VK", period: "today", reportType: "SLA" });
-    assert.equal(workspace.data.source, "tenant_conversations");
+    assert.equal(workspace.data.source, "conversation_lifecycle_events");
+    assert.deepEqual(workspace.data.dataQuality, {
+      backfillBoundary: null,
+      complete: true,
+      conversationCount: 0,
+      dimensionCoverage: {
+        queueId: { known: 0, unknown: 0 },
+        resolutionOutcome: { known: 0, unknown: 0 },
+        teamId: { known: 0, unknown: 0 }
+      },
+      eventCount: 0,
+      freshnessLagSeconds: null,
+      historicalLimitations: [
+        "Status transitions and SLA breaches before lifecycle journaling are unavailable",
+        "Conversation creation and message timestamps were backfilled from persisted records"
+      ],
+      latestEventAt: null,
+      latestIngestedAt: null,
+      metricDefinitionVersion: "metrics/v1",
+      source: "conversation_lifecycle_events"
+    });
     assert.equal(workspace.data.rows.length, 4);
     assert.equal(workspace.data.rows.every((row) => ["0", "00:00", "0%"].includes(row.today)), true);
     assert.deepEqual(workspace.data.bars, []);
@@ -396,8 +445,24 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.deepEqual(workspace.data.exportJobs, []);
   });
 
-  it("executes current rescue report metrics as a deterministic query", async () => {
-    const reports = new ReportService();
+  it("denies tenant-scoped report API operations without an explicit tenant", async () => {
+    const repository = ReportRepository.inMemory();
+    const reports = new ReportService(repository);
+    const workspace = await reports.fetchReportWorkspace();
+    const exportRequest = await reports.requestReportExport({ columns: ["metric"] });
+    const template = await reports.saveSavedReportTemplate({ columns: ["metric"] });
+    const descriptor = await reports.getExportFileDescriptor("missing", { canDownload: true });
+
+    for (const envelope of [workspace, exportRequest, template, descriptor]) {
+      assert.equal(envelope.status, "denied");
+      assert.equal(envelope.error?.code, "report_tenant_scope_required");
+    }
+    assert.deepEqual(repository.readState().exportJobs, []);
+    assert.deepEqual(repository.readState().savedReportTemplates, []);
+  });
+
+  it("does not use workspace catalog placeholders for current rescue metrics", async () => {
+    const reports = new ReportService(ReportRepository.inMemory(bootstrapReportState()));
 
     const execution = await reports.executeReportQuery({
       metricKey: "rescue.current",
@@ -415,18 +480,19 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.deepEqual(execution.data.parameters, {
       channel: "all",
       period: "today",
+      timezoneOffsetMinutes: 0,
       tenantId: "tenant-volga"
     });
     assert.deepEqual(execution.data.rows, [
-      { key: "rescue.total", label: "Total rescue cases", value: 3, unit: "cases" },
-      { key: "rescue.saved", label: "Saved rescue cases", value: 2, unit: "cases" },
-      { key: "rescue.missed", label: "Missed rescue cases", value: 1, unit: "cases" },
-      { key: "rescue.average_timer_seconds", label: "Average rescue timer", value: 40, unit: "seconds" }
+      { key: "rescue.total", label: "Total rescue cases", value: 0, unit: "cases" },
+      { key: "rescue.saved", label: "Saved rescue cases", value: 0, unit: "cases" },
+      { key: "rescue.missed", label: "Missed rescue cases", value: 0, unit: "cases" },
+      { key: "rescue.average_timer_seconds", label: "Average rescue timer", value: 0, unit: "seconds" }
     ]);
   });
 
-  it("executes current conversation report metrics as a deterministic query", async () => {
-    const reports = new ReportService();
+  it("does not use workspace catalog placeholders for current conversation metrics", async () => {
+    const reports = new ReportService(ReportRepository.inMemory(bootstrapReportState()));
 
     const execution = await reports.executeReportQuery({
       metricKey: "conversation.current",
@@ -444,13 +510,14 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.deepEqual(execution.data.parameters, {
       channel: "all",
       period: "today",
+      timezoneOffsetMinutes: 0,
       tenantId: "tenant-volga"
     });
     assert.deepEqual(execution.data.rows, [
-      { key: "conversation.new", label: "New conversations", value: 486, unit: "conversations" },
-      { key: "conversation.closed", label: "Closed conversations", value: 451, unit: "conversations" },
-      { key: "conversation.first_response_seconds", label: "First response time", value: 96, unit: "seconds" },
-      { key: "conversation.sla_met_percent", label: "SLA met", value: 91, unit: "percent" }
+      { key: "conversation.new", label: "New conversations", value: 0, unit: "conversations" },
+      { key: "conversation.closed", label: "Closed conversations", value: 0, unit: "conversations" },
+      { key: "conversation.first_response_seconds", label: "First response time", value: 0, unit: "seconds" },
+      { key: "conversation.sla_met_percent", label: "SLA met", value: 0, unit: "percent" }
     ]);
   });
 
@@ -483,6 +550,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
         parameters: {
           channel: "all",
           period: "today",
+          timezoneOffsetMinutes: 0,
           tenantId: "tenant-volga"
         },
         status: "completed"
@@ -539,7 +607,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       columns: [],
       period: "today",
       reportType: "SLA"
-    });
+    }, { tenantId: "tenant-volga" });
     assert.equal(missingColumns.status, "invalid");
     assert.equal(missingColumns.error?.code, "report_columns_required");
 
@@ -550,7 +618,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       idempotencyKey: "report-export-vk-today",
       period: "today",
       reportType: "SLA"
-    });
+    }, { tenantId: "tenant-volga" });
     assert.equal(queued.status, "ok");
     assert.equal(queued.data.job.statusKey, "queued");
     assert.equal(queued.data.job.queue, "report-export");
@@ -558,6 +626,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.match(queued.data.job.auditId, /^evt_report_/);
     assert.equal(queued.data.job.metricDefinitionVersion, "metrics/v1");
     assert.equal(queued.data.job.permissionRequired, "reports.export");
+    assert.equal(queued.data.job.filters.snapshotAt, queued.data.job.createdAt);
     assert.equal(queued.data.exportReadyEvent, null);
 
     const duplicate = await reports.requestReportExport({
@@ -567,7 +636,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       idempotencyKey: "report-export-vk-today",
       period: "today",
       reportType: "SLA"
-    });
+    }, { tenantId: "tenant-volga" });
     assert.equal(duplicate.status, "ok");
     assert.equal(duplicate.data.duplicate, true);
     assert.equal(duplicate.data.job.id, queued.data.job.id);
@@ -580,9 +649,22 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       idempotencyKey: "report-export-vk-today",
       period: "today",
       reportType: "SLA"
-    });
+    }, { tenantId: "tenant-volga" });
     assert.equal(reusedKeyWithDifferentPayload.status, "conflict");
     assert.equal(reusedKeyWithDifferentPayload.error?.code, "idempotency_key_reused");
+
+    const crossTenantReplay = await reports.requestReportExport({
+      channel: "VK",
+      columns: ["metric", "today", "status"],
+      filters: { sla: "overdue" },
+      idempotencyKey: "report-export-vk-today",
+      period: "today",
+      reportType: "SLA"
+    }, { tenantId: "tenant-ladoga" });
+    assert.equal(crossTenantReplay.status, "ok");
+    assert.equal(crossTenantReplay.data.duplicate, false);
+    assert.notEqual(crossTenantReplay.data.job.id, queued.data.job.id);
+    assert.equal(crossTenantReplay.data.job.tenantId, "tenant-ladoga");
   });
 
   it("merges durable export writes from co-existing report service instances", async () => {
@@ -596,14 +678,14 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       idempotencyKey: "coexisting-report-a",
       period: "today",
       reportType: "SLA"
-    });
+    }, { tenantId: "tenant-volga" });
     const secondQueued = await second.requestReportExport({
       channel: "Telegram",
       columns: ["metric", "status"],
       idempotencyKey: "coexisting-report-b",
       period: "today",
       reportType: "Load"
-    });
+    }, { tenantId: "tenant-volga" });
 
     const state = repository.readState();
     assert.ok(state.exportJobs.some((job) => job.id === firstQueued.data.job.id));
@@ -617,7 +699,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       idempotencyKey: "coexisting-report-a",
       period: "today",
       reportType: "SLA"
-    });
+    }, { tenantId: "tenant-volga" });
     assert.equal(duplicateFromFreshInstance.data.duplicate, true);
     assert.equal(duplicateFromFreshInstance.data.job.id, firstQueued.data.job.id);
   });
@@ -645,10 +727,10 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     const running = await reports.retryReportExport({
       jobId: "export-2420",
       reason: "Manual retry after transport issue"
-    });
+    }, { tenantId: "tenant-volga" });
     assert.equal(running.status, "ok");
-    assert.equal(running.data.job.statusKey, "running");
-    assert.equal(running.data.job.progress, 28);
+    assert.equal(running.data.job.statusKey, "queued");
+    assert.equal(running.data.job.progress, 0);
     assert.equal(running.data.job.metricDefinitionVersion, "metrics/v1");
     assert.match(running.data.job.backendQueueId, /^report_/);
     assert.equal(running.data.auditEvent.action, "report.export.retry");
@@ -656,14 +738,14 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     const expiredRetry = await reports.retryReportExport({
       jobId: "export-2421",
       reason: "Expired signed file should be regenerated"
-    });
+    }, { tenantId: "tenant-volga" });
     assert.equal(expiredRetry.status, "ok");
-    assert.equal(expiredRetry.data.job.statusKey, "running");
+    assert.equal(expiredRetry.data.job.statusKey, "queued");
 
     const readyRetry = await reports.retryReportExport({
       jobId: "export-2418",
       reason: "Ready exports must not be replayed"
-    });
+    }, { tenantId: "tenant-volga" });
     assert.equal(readyRetry.status, "conflict");
     assert.equal(readyRetry.error?.code, "report_export_retry_not_allowed");
     assert.equal(readyRetry.data.statusKey, "ready");
@@ -671,29 +753,29 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     const alreadyRunningRetry = await reports.retryReportExport({
       jobId: "export-2419",
       reason: "Already running"
-    });
+    }, { tenantId: "tenant-volga" });
     assert.equal(alreadyRunningRetry.status, "conflict");
     assert.equal(alreadyRunningRetry.error?.code, "report_export_retry_not_allowed");
     assert.equal(alreadyRunningRetry.data.statusKey, "running");
 
-    const missing = await reports.getExportFileDescriptor("export-missing");
+    const missing = await reports.getExportFileDescriptor("export-missing", { tenantId: "tenant-volga" });
     assert.equal(missing.status, "not_found");
     assert.equal(missing.error?.code, "report_export_not_found");
 
-    const notReady = await reports.getExportFileDescriptor("export-2419");
+    const notReady = await reports.getExportFileDescriptor("export-2419", { tenantId: "tenant-volga" });
     assert.equal(notReady.status, "denied");
     assert.equal(notReady.error?.code, "report_export_not_ready");
 
-    const descriptor = await reports.getExportFileDescriptor("export-2418", { canDownload: true });
+    const descriptor = await reports.getExportFileDescriptor("export-2418", { canDownload: true, tenantId: "tenant-volga" });
     assert.equal(descriptor.status, "ok");
     assert.equal(descriptor.data.jobId, "export-2418");
     assert.equal(descriptor.data.objectKeyExposed, false);
     assert.equal(descriptor.data.permissionRequired, "reports.export");
     assert.equal(descriptor.data.metricDefinitionVersion, "metrics/v1");
     assert.match(descriptor.data.fileName, /\.xlsx$/);
-    assert.match(descriptor.data.downloadUrl, /^https:\/\/reports\.local\/download\//);
+    assert.match(String(descriptor.data.downloadUrl), /^\/api\/v1\/reports\/exports\/[^/]+\/download$/);
 
-    const denied = await reports.getExportFileDescriptor("export-2418");
+    const denied = await reports.getExportFileDescriptor("export-2418", { tenantId: "tenant-volga" });
     assert.equal(denied.status, "denied");
     assert.equal(denied.error?.code, "report_export_download_denied");
   });
@@ -705,23 +787,23 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     const failedRetry = await reports.retryReportExport({
       jobId: "export-2420",
       reason: "Manual retry after transport issue https://reports.local/download/secret objectKey=reports/raw.csv"
-    });
+    }, { tenantId: "tenant-volga" });
     const expiredRetry = await reports.retryReportExport({
       jobId: "export-2421",
       reason: "Expired signed file should be regenerated"
-    });
+    }, { tenantId: "tenant-volga" });
     const readyRetry = await reports.retryReportExport({
       jobId: "export-2418",
       reason: "Ready exports must not be replayed"
-    });
+    }, { tenantId: "tenant-volga" });
     const runningRetry = await reports.retryReportExport({
       jobId: "export-2419",
       reason: "Already running"
-    });
+    }, { tenantId: "tenant-volga" });
     const missingRetry = await reports.retryReportExport({
       jobId: "export-missing",
       reason: "Missing export"
-    });
+    }, { tenantId: "tenant-volga" });
 
     const state = repository.readState();
     const auditEvents = state.exportRetryAuditEvents;
@@ -735,7 +817,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.deepEqual(auditEvents.map((event) => event.action), ["report.export.retry", "report.export.retry"]);
     assert.deepEqual(auditEvents.map((event) => event.immutable), [true, true]);
     assert.deepEqual(auditEvents.map((event) => event.previousStatusKey), ["error", "expired"]);
-    assert.deepEqual(auditEvents.map((event) => event.nextStatusKey), ["running", "running"]);
+    assert.deepEqual(auditEvents.map((event) => event.nextStatusKey), ["queued", "queued"]);
     assert.equal(failedRetry.data.auditEvent.reasonCode, "operator_requested");
     assert.equal("reason" in failedRetry.data.auditEvent, false);
     assert.equal(JSON.stringify(failedRetry.data.auditEvent).includes("reports.local"), false);
@@ -805,7 +887,8 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       requestedBy: "operator-anna",
       rows: 2,
       status: "Ready",
-      statusKey: "ready"
+      statusKey: "ready",
+      tenantId: "tenant-volga"
     });
     repository.saveReportFileDescriptor({
       checksum: "sha256-json-export-006",
@@ -822,7 +905,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       writtenAt: "2026-06-30T11:45:00.000Z"
     });
 
-    const descriptor = await new ReportService(repository).getExportFileDescriptor("export-json-006", { canDownload: true });
+    const descriptor = await new ReportService(repository).getExportFileDescriptor("export-json-006", { canDownload: true, tenantId: "tenant-volga" });
 
     assert.equal(descriptor.status, "ok");
     assert.equal(descriptor.data.jobId, "export-json-006");
@@ -833,7 +916,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.equal(descriptor.data.writtenAt, "2026-06-30T11:45:00.000Z");
     assert.equal(descriptor.data.objectKeyExposed, false);
     assert.equal(descriptor.data.permissionRequired, "reports.export");
-    assert.match(String(descriptor.data.downloadUrl), /^https:\/\/reports\.local\/download\/export-json-006\/conversation-report\.json/);
+    assert.equal(descriptor.data.downloadUrl, "/api/v1/reports/exports/export-json-006/download");
     assert.equal(JSON.stringify(descriptor.data).includes("reports/tenant-volga/export-json-006/report.json"), false);
   });
 
@@ -855,7 +938,8 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       requestedBy: "operator-anna",
       rows: 2,
       status: "Ready",
-      statusKey: "ready"
+      statusKey: "ready",
+      tenantId: "tenant-volga"
     });
     repository.saveReportFileDescriptor({
       checksum: "sha256:download-runtime",
@@ -919,7 +1003,8 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       requestedBy: "operator-anna",
       rows: 5,
       status: "Ready",
-      statusKey: "ready"
+      statusKey: "ready",
+      tenantId: "tenant-volga"
     });
     const objects = new Map();
     const reports = new ReportService(repository, {
@@ -978,7 +1063,8 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       requestedBy: "operator-anna",
       rows: 0,
       status: "Error",
-      statusKey: "error"
+      statusKey: "error",
+      tenantId: "tenant-volga"
     });
     repository.saveReportFileDescriptor({
       checksum: "sha256-stale-json-export-007",
@@ -998,10 +1084,10 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     const retry = await new ReportService(repository).retryReportExport({
       jobId: "export-json-007",
       reason: "retry stale descriptor"
-    });
+    }, { tenantId: "tenant-volga" });
 
     assert.equal(retry.status, "ok");
-    assert.equal(retry.data.job.statusKey, "running");
+    assert.equal(retry.data.job.statusKey, "queued");
     assert.equal(repository.findReportFileDescriptor("export-json-007"), undefined);
   });
 
@@ -1024,7 +1110,8 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       requestedBy: "operator-anna",
       rows: 2,
       status: "Running",
-      statusKey: "running"
+      statusKey: "running",
+      tenantId: "tenant-volga"
     });
     repository.saveReportFileDescriptor({
       checksum: "sha256-stale-json-export-008",
@@ -1045,7 +1132,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       failureCode: "object_storage_put_failed",
       failureMessage: "Object storage write failed.",
       jobId: "export-json-008"
-    });
+    }, { tenantId: "tenant-volga" });
 
     assert.equal(deadLetter.status, "ok");
     assert.equal(deadLetter.data.job.statusKey, "error");
@@ -1075,7 +1162,8 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       requestedBy: "operator-anna",
       rows: 2,
       status: "Ready",
-      statusKey: "ready"
+      statusKey: "ready",
+      tenantId: "tenant-volga"
     });
     repository.saveReportFileDescriptor({
       checksum: "sha256-json-export-009",
@@ -1151,6 +1239,9 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     const controller = readFileSync(new URL("../apps/api-gateway/src/reports/report.controller.ts", import.meta.url), "utf8");
 
     assert.match(controller, /@Post\("templates"\)/);
+    assert.match(controller, /@RequireTenantOperatorPermission\("reports\.write"\)/);
+    assert.match(controller, /@RequireServiceAdminAction\("reports\.write"\)/);
+    assert.doesNotMatch(controller.match(/@Post\("templates"\)[\s\S]*?saveSavedReportTemplate/)?.[0] ?? "", /@RequireTenantOperatorPermission\("reports\.read"\)/);
     assert.match(controller, /saveSavedReportTemplate\(@Body\(\) payload:/);
     assert.match(controller, /@Req\(\) request: TenantOperatorRequest & ServiceAdminRequest/);
     assert.match(controller, /return this\.reportService\.saveSavedReportTemplate\(payload, reportContextFromServiceAdminRequest\(request\)\);/);
@@ -1408,6 +1499,9 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
 
 function reportRepositoryWithExportFixtures(): ReportRepository {
   return ReportRepository.inMemory(bootstrapReportState({
-    exportJobs: structuredClone(exportJobFixtures)
+    exportJobs: structuredClone(exportJobFixtures).map((job) => ({
+      ...job,
+      tenantId: "tenant-volga"
+    }))
   }));
 }

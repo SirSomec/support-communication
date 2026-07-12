@@ -1,8 +1,10 @@
 import { createPrismaBillingSyncJobStore, createPrismaClient, createPrismaConversationOutboundDescriptorStore, createPrismaOutboxStore, type PrismaBillingSyncJobClient, type PrismaConversationOutboundDescriptorClient, type PrismaOutboxClient } from "@support-communication/database";
 import { createBullMqWorkerBridge, createRuntimeBillingSyncHandlers, createRuntimeOutboxHandlers, loadBullMqWorkerConfig, loadOutboxWorkerConfig, runBillingSyncWorker, runOutboxWorker, runRuntimeFileScanScannerWorker } from "./index.js";
 import { createIntegrationTelegramTokenResolver, createPrismaIntegrationTelegramTokenResolver, type PrismaTelegramConnectionTokenClient } from "./integration-telegram-store.js";
+import { resolveProviderConnectionCredential, type PrismaProviderConnectionCredentialClient } from "./provider-connection-store.js";
+import { createPrismaProviderAttachmentTransferStore, type PrismaProviderAttachmentTransferClient } from "./provider-attachment-transfer-store.js";
 
-interface DisconnectableWorkerPrismaClient extends PrismaOutboxClient, PrismaBillingSyncJobClient, PrismaConversationOutboundDescriptorClient, PrismaTelegramConnectionTokenClient {
+interface DisconnectableWorkerPrismaClient extends PrismaOutboxClient, PrismaBillingSyncJobClient, PrismaConversationOutboundDescriptorClient, PrismaTelegramConnectionTokenClient, PrismaProviderConnectionCredentialClient, PrismaProviderAttachmentTransferClient {
   $disconnect?: () => Promise<void>;
 }
 
@@ -10,9 +12,16 @@ const client = createPrismaClient({
   datasourceUrl: process.env.DATABASE_URL
 }) as DisconnectableWorkerPrismaClient;
 const outboundDescriptorStore = createPrismaConversationOutboundDescriptorStore(client);
+const providerAttachmentTransferStore = createPrismaProviderAttachmentTransferStore(client);
 const telegramBotTokenResolver = process.env.INTEGRATION_REPOSITORY === "prisma"
   ? createPrismaIntegrationTelegramTokenResolver(client, process.env.OUTBOX_TELEGRAM_BOT_TOKEN)
   : createIntegrationTelegramTokenResolver(process.env.INTEGRATION_STORE_FILE, process.env.OUTBOX_TELEGRAM_BOT_TOKEN);
+const providerCredentialResolver = {
+  async resolve(input: { channelConnectionId: string; provider: "max" | "vk"; tenantId: string }) {
+    const credential = await resolveProviderConnectionCredential(client, input.tenantId, input.channelConnectionId, input.provider);
+    return { accessToken: credential.token, apiVersion: credential.apiVersion, externalAccountId: credential.externalAccountId };
+  }
+};
 
 try {
   const config = loadOutboxWorkerConfig();
@@ -43,7 +52,7 @@ try {
         : runOutboxWorker({
           ...config,
           once: true,
-          handlers: createRuntimeOutboxHandlers({ outboundDescriptorStore, telegramBotTokenResolver }),
+          handlers: createRuntimeOutboxHandlers({ outboundDescriptorStore, providerAttachmentTransferStore, providerCredentialResolver, telegramBotTokenResolver }),
           store: createPrismaOutboxStore(client)
         }),
       service
@@ -83,7 +92,7 @@ try {
     })
     : await runOutboxWorker({
       ...config,
-      handlers: createRuntimeOutboxHandlers({ outboundDescriptorStore, telegramBotTokenResolver }),
+      handlers: createRuntimeOutboxHandlers({ outboundDescriptorStore, providerAttachmentTransferStore, providerCredentialResolver, telegramBotTokenResolver }),
       store: createPrismaOutboxStore(client)
     });
 

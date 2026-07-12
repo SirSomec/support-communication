@@ -5,6 +5,7 @@ import {
   History,
   Paperclip,
   Pencil,
+  Plus,
   RotateCcw,
   ShieldCheck,
   UploadCloud,
@@ -19,6 +20,7 @@ import {
   submitKnowledgeArticleDraft,
   submitKnowledgeArticleForReview
 } from "../../app/knowledgeArticleActions.js";
+import { knowledgeService } from "../../services/knowledgeService.js";
 import { ChannelList, SegmentedControl, StatusBadge, ToolbarSearch } from "../../ui.jsx";
 import "./knowledge-base.css";
 
@@ -114,7 +116,7 @@ function formatFileSize(bytes = 0) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
+export function KnowledgeBaseWorkspace({ articles, canWrite = false, onToast, operator }) {
   const attachmentInputRef = useRef(null);
   const [selectedArticleId, setSelectedArticleId] = useState(articles[0]?.id ?? "");
   const [articleDrafts, setArticleDrafts] = useState(() =>
@@ -128,13 +130,41 @@ export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
   const [pendingAction, setPendingAction] = useState("");
   const [widgetQuery, setWidgetQuery] = useState("");
 
-  const selectedArticle = articleDrafts[selectedArticleId] ?? Object.values(articleDrafts)[0];
-  const selectedVersionId = selectedVersionByArticle[selectedArticle.id] ?? selectedArticle.versions[0]?.id;
-  const selectedVersion = selectedArticle.versions.find((version) => version.id === selectedVersionId) ?? selectedArticle.versions[0];
-  const selectedArticleIsPublished = selectedArticle.visibility === "public" && isPublishedArticle(selectedArticle);
+  const selectedArticle = articleDrafts[selectedArticleId] ?? Object.values(articleDrafts)[0] ?? null;
+  const selectedVersionId = selectedArticle
+    ? selectedVersionByArticle[selectedArticle.id] ?? selectedArticle.versions[0]?.id
+    : undefined;
+  const selectedVersion = selectedArticle
+    ? selectedArticle.versions.find((version) => version.id === selectedVersionId) ?? selectedArticle.versions[0]
+    : undefined;
+  const selectedArticleIsPublished = Boolean(selectedArticle?.visibility === "public" && isPublishedArticle(selectedArticle));
   const widgetArticles = useMemo(() => getWidgetArticles(articleDrafts, widgetQuery), [articleDrafts, widgetQuery]);
   const actor = resolveKnowledgeActor(operator);
   const workflowBusy = Boolean(pendingAction);
+
+  async function createNewArticle() {
+    if (!canWrite || workflowBusy) return;
+    setPendingAction("create");
+    const response = await knowledgeService.createArticle({ body: "", category: "General", channels: ["SDK"], title: "New knowledge article", topics: ["General"], visibility: "internal" });
+    setPendingAction("");
+    if (response.status !== "ok" || !response.data?.article) {
+      onToast(response.error?.message ?? "Не удалось создать статью.");
+      return;
+    }
+    const created = createArticleDraft(response.data.article);
+    setArticleDrafts((current) => ({ ...current, [created.id]: created }));
+    setSelectedArticleId(created.id);
+    onToast("Создан черновик новой статьи.");
+  }
+
+  if (!selectedArticle) {
+    return (
+      <div className="knowledge-base-workspace">
+        <p className="knowledge-empty-state">Статей базы знаний пока нет.</p>
+        <button disabled={!canWrite || workflowBusy} onClick={() => void createNewArticle()} type="button"><Plus size={16} /> Новая статья</button>
+      </div>
+    );
+  }
 
   function updateSelectedArticle(updater) {
     setArticleDrafts((current) => ({
@@ -193,8 +223,7 @@ export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
     const articleAtStart = selectedArticle;
     setPendingAction(actionKey);
     const result = await requestAction(articleAtStart, {
-      actor,
-      draftId: selectedVersionId
+      actor
     });
     setPendingAction("");
 
@@ -294,6 +323,7 @@ export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
   return (
     <div className="knowledge-workspace">
       <div className="knowledge-table">
+        <button disabled={!canWrite || workflowBusy} onClick={() => void createNewArticle()} type="button"><Plus size={16} /> Новая статья</button>
         {Object.values(articleDrafts).map((article) => (
           <button
             className={`knowledge-row ${selectedArticle.id === article.id ? "selected" : ""}`}
@@ -327,7 +357,7 @@ export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
             </label>
             <label>
               <span>Видимость</span>
-              <select value={selectedArticle.visibility} onChange={(event) => updateArticleDraft("visibility", event.target.value)}>
+              <select disabled={!canWrite} value={selectedArticle.visibility} onChange={(event) => updateArticleDraft("visibility", event.target.value)}>
                 {visibilityOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -336,13 +366,14 @@ export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
           </div>
           <label>
             <span>Текст статьи</span>
-            <textarea value={selectedArticle.body} onChange={(event) => updateArticleDraft("body", event.target.value)} />
+            <textarea disabled={!canWrite} value={selectedArticle.body} onChange={(event) => updateArticleDraft("body", event.target.value)} />
           </label>
           <div className="knowledge-channel-picker" aria-label="Каналы статьи">
             {articleChannels.map((channel) => (
               <button
                 aria-pressed={selectedArticle.channels.includes(channel)}
                 className={selectedArticle.channels.includes(channel) ? "active" : ""}
+                disabled={!canWrite}
                 key={channel}
                 onClick={() => toggleArticleChannel(channel)}
                 type="button"
@@ -352,23 +383,23 @@ export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
             ))}
           </div>
           <footer>
-            <button disabled={savingDraft || workflowBusy} onClick={() => void saveDraftVersion()} type="button">
+            <button disabled={!canWrite || savingDraft || workflowBusy} onClick={() => void saveDraftVersion()} type="button">
               <Pencil size={16} />
               {savingDraft ? "Сохранение..." : "Сохранить"}
             </button>
-            <button className="primary-action" disabled={workflowBusy || !isReviewableArticle(selectedArticle)} onClick={() => void runGovernanceAction("submit-review", submitKnowledgeArticleForReview, (article) => `${article.title}: статья отправлена на проверку.`)} title={isReviewableArticle(selectedArticle) ? "Отправить статью на проверку" : "Статья должна быть в черновике"} type="button">
+            <button className="primary-action" disabled={!canWrite || workflowBusy || !isReviewableArticle(selectedArticle)} onClick={() => void runGovernanceAction("submit-review", submitKnowledgeArticleForReview, (article) => `${article.title}: статья отправлена на проверку.`)} title={isReviewableArticle(selectedArticle) ? "Отправить статью на проверку" : "Статья должна быть в черновике"} type="button">
               <CheckCircle2 size={16} />
               На проверку
             </button>
-            <button disabled={workflowBusy || !isPublishableArticle(selectedArticle)} onClick={() => void runGovernanceAction("publish", publishKnowledgeArticle, (article) => `${article.title}: статья опубликована.`)} title={isPublishableArticle(selectedArticle) ? "Опубликовать статью" : "Сначала отправьте статью на проверку"} type="button">
+            <button disabled={!canWrite || workflowBusy || !isPublishableArticle(selectedArticle)} onClick={() => void runGovernanceAction("publish", publishKnowledgeArticle, (article) => `${article.title}: статья опубликована.`)} title={isPublishableArticle(selectedArticle) ? "Опубликовать статью" : "Сначала отправьте статью на проверку"} type="button">
               <ShieldCheck size={16} />
               Опубликовать
             </button>
-            <button disabled={workflowBusy || !isPublishableArticle(selectedArticle)} onClick={() => void runGovernanceAction("reject", rejectKnowledgeArticle, (article) => `${article.title}: статья возвращена на доработку.`)} title={isPublishableArticle(selectedArticle) ? "Вернуть статью на доработку" : "Возврат доступен только на проверке"} type="button">
+            <button disabled={!canWrite || workflowBusy || !isPublishableArticle(selectedArticle)} onClick={() => void runGovernanceAction("reject", rejectKnowledgeArticle, (article) => `${article.title}: статья возвращена на доработку.`)} title={isPublishableArticle(selectedArticle) ? "Вернуть статью на доработку" : "Возврат доступен только на проверке"} type="button">
               <RotateCcw size={16} />
               На доработку
             </button>
-            <button disabled={workflowBusy || !isPublishedArticle(selectedArticle)} onClick={() => void runGovernanceAction("archive", archiveKnowledgeArticle, (article) => `${article.title}: статья перенесена в архив.`)} title={isPublishedArticle(selectedArticle) ? "Перенести статью в архив" : "Архив доступен только для опубликованной статьи"} type="button">
+            <button disabled={!canWrite || workflowBusy || !isPublishedArticle(selectedArticle)} onClick={() => void runGovernanceAction("archive", archiveKnowledgeArticle, (article) => `${article.title}: статья перенесена в архив.`)} title={isPublishedArticle(selectedArticle) ? "Перенести статью в архив" : "Архив доступен только для опубликованной статьи"} type="button">
               <X size={16} />
               В архив
             </button>
@@ -455,7 +486,7 @@ export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
           <header>
             <Paperclip size={17} />
             <strong>Вложения</strong>
-            <button disabled={workflowBusy} onClick={() => attachmentInputRef.current?.click()} title="Добавить вложение к статье" type="button"><UploadCloud size={15} /> Добавить</button>
+            <button disabled={!canWrite || workflowBusy} onClick={() => attachmentInputRef.current?.click()} title="Добавить вложение к статье" type="button"><UploadCloud size={15} /> Добавить</button>
             <input
               ref={attachmentInputRef}
               className="knowledge-file-input"
@@ -475,7 +506,7 @@ export function KnowledgeBaseWorkspace({ articles, onToast, operator }) {
                   <strong>{attachment.name}</strong>
                   <span>{attachment.type} · {attachment.size}</span>
                 </div>
-                <button aria-label={`Удалить ${attachment.name}`} disabled={workflowBusy} onClick={() => void deleteAttachment(attachment)} title="Удалить вложение" type="button">
+                <button aria-label={`Удалить ${attachment.name}`} disabled={!canWrite || workflowBusy} onClick={() => void deleteAttachment(attachment)} title="Удалить вложение" type="button">
                   <X size={15} />
                 </button>
               </article>

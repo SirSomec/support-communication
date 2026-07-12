@@ -1,7 +1,8 @@
 import { qualityService } from "../services/qualityService.js";
 
-export function buildCoachingDraftScorePayload(item) {
+export function buildCoachingDraftScorePayload(item, { aiConsent = false } = {}) {
   return {
+    aiConsent,
     conversationId: item?.conversationId ?? item?.id ?? "quality-coaching-draft",
     mode: "quality-coaching",
     suggestions: [
@@ -17,28 +18,30 @@ export function buildCoachingDraftScorePayload(item) {
   };
 }
 
-export function buildManualQaReviewPayload(score, { reviewer = "senior-qa" } = {}) {
-  const normalizedScore = normalizeManualQaScore(score);
+export function buildManualQaReviewPayload(score, { criteria, reviewer = "senior-qa", reviewScore } = {}) {
+  const normalizedScore = Number.isFinite(Number(reviewScore))
+    ? clampScore(reviewScore)
+    : normalizeManualQaScore(score);
 
   return {
     conversationId: score?.conversationId ?? score?.id ?? "",
-    criteria: {
+    criteria: criteria ?? {
       customerScore: Number(score?.score ?? 0),
       normalizedScore
     },
-    overrideReason: `Manual QA review from quality workspace for ${score?.id ?? score?.conversationId ?? "score"}.`,
     reviewer,
     score: normalizedScore
   };
 }
 
-export function buildAiSuggestionBatchScorePayload(suggestions = []) {
+export function buildAiSuggestionBatchScorePayload(suggestions = [], { aiConsent = false } = {}) {
   const list = Array.isArray(suggestions) ? suggestions : [];
   const ids = list.map((suggestion) => suggestion?.id).filter(Boolean);
   const conversationIds = list.map((suggestion) => suggestion?.conversationId).filter(Boolean);
   const primaryConversationId = conversationIds[0] ?? ids[0];
 
   return {
+    aiConsent,
     conversationId: primaryConversationId ?? `quality-ai-batch-${ids.join("-").slice(0, 80) || "suggestions"}`,
     mode: "quality-ai-batch",
     suggestions: list.map((suggestion) => ({
@@ -61,9 +64,9 @@ export function buildAiSuggestionBatchScorePayload(suggestions = []) {
 
 export async function scoreCoachingDraft(
   item,
-  { scoreDraftResponse = qualityService.scoreDraftResponse } = {}
+  { aiConsent = false, scoreDraftResponse = qualityService.scoreDraftResponse } = {}
 ) {
-  const response = await scoreDraftResponse(buildCoachingDraftScorePayload(item));
+  const response = await scoreDraftResponse(buildCoachingDraftScorePayload(item, { aiConsent }));
 
   if (response?.status !== "ok") {
     return {
@@ -83,11 +86,13 @@ export async function scoreCoachingDraft(
 export async function submitManualQaReview(
   score,
   {
+    criteria,
     recordManualQaReview = qualityService.recordManualQaReview,
-    reviewer = "senior-qa"
+    reviewer = "senior-qa",
+    reviewScore
   } = {}
 ) {
-  const response = await recordManualQaReview(buildManualQaReviewPayload(score, { reviewer }));
+  const response = await recordManualQaReview(buildManualQaReviewPayload(score, { criteria, reviewer, reviewScore }));
 
   if (response?.status !== "ok") {
     return {
@@ -116,14 +121,14 @@ export async function submitManualQaReview(
 
 export async function scoreAiSuggestionBatch(
   suggestions,
-  { scoreDraftResponses = qualityService.scoreDraftResponses } = {}
+  { aiConsent = false, scoreDraftResponses = qualityService.scoreDraftResponses } = {}
 ) {
-  const payload = buildAiSuggestionBatchScorePayload(suggestions);
+  const payload = buildAiSuggestionBatchScorePayload(suggestions, { aiConsent });
 
   if (!payload.suggestions.length) {
     return {
       ok: false,
-      message: "No AI suggestions are available for backend scoring."
+      message: "Нет подсказок для проверки по правилам."
     };
   }
 
@@ -132,7 +137,7 @@ export async function scoreAiSuggestionBatch(
   if (response?.status !== "ok") {
     return {
       ok: false,
-      message: response?.error?.message ?? "AI suggestion scoring was not accepted by the backend."
+      message: response?.error?.message ?? "Сервер не принял проверку подсказок."
     };
   }
 
@@ -141,7 +146,7 @@ export async function scoreAiSuggestionBatch(
   if (!auditId) {
     return {
       ok: false,
-      message: "AI suggestion scoring was not confirmed by backend scoring audit evidence."
+      message: "Сервер не подтвердил сохранение результата проверки."
     };
   }
 
@@ -161,4 +166,8 @@ function normalizeManualQaScore(score) {
   }
 
   return Math.max(0, Math.min(100, Math.round((numericScore / 5) * 100)));
+}
+
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
 }

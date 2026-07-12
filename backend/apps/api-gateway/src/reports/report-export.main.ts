@@ -3,16 +3,15 @@ import { fileURLToPath } from "node:url";
 import { writeStructuredLog } from "@support-communication/observability";
 import { configureReportRepository } from "./bootstrap.js";
 import {
-  createLocalReportObjectStorageAdapter,
   createReportObjectStoragePort,
   executeReportExportWorkerOnce
 } from "./report-export.worker.js";
+import { createSharedReportObjectStorage } from "./report-object-storage.js";
 
 interface ReportExportWorkerRuntimeConfig {
   intervalMs: number;
   limit: number;
   now?: Date;
-  objectRootDir: string;
   once: boolean;
   queue: string;
 }
@@ -29,9 +28,8 @@ export async function runReportExportWorkerFromEnv(
 ): Promise<void> {
   const config = loadReportExportWorkerRuntimeConfig(source, argv);
   const reportRepository = configureReportRepository(source);
-  const storage = createReportObjectStoragePort(createLocalReportObjectStorageAdapter({
-    now: () => config.now ?? new Date(),
-    rootDir: config.objectRootDir
+  const storage = createReportObjectStoragePort(createSharedReportObjectStorage(source, {
+    now: () => config.now ?? new Date()
   }));
 
   const runOnce = async (): Promise<ReportExportWorkerRunResult> => {
@@ -81,7 +79,6 @@ export function loadReportExportWorkerRuntimeConfig(
     intervalMs: positiveInteger(source.REPORT_EXPORT_WORKER_INTERVAL_MS, 10_000),
     limit: positiveInteger(source.REPORT_EXPORT_WORKER_LIMIT, 10),
     now: now ? new Date(now) : undefined,
-    objectRootDir: source.REPORT_EXPORT_OBJECT_ROOT?.trim() || ".runtime/report-exports",
     once: argv.includes("--once") || source.REPORT_EXPORT_WORKER_ONCE === "true",
     queue: source.REPORT_EXPORT_WORKER_QUEUE?.trim() || "report-export"
   };

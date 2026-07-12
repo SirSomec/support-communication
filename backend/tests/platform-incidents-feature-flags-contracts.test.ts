@@ -5,10 +5,84 @@ import { FeatureFlagService } from "../apps/api-gateway/src/feature-flags/featur
 import { IncidentService } from "../apps/api-gateway/src/incidents/incident.service.ts";
 import { PlatformRepository } from "../apps/api-gateway/src/platform/platform.repository.ts";
 import { PlatformMonitoringService } from "../apps/api-gateway/src/platform/platform-monitoring.service.ts";
+import { bootstrapPlatformState } from "../apps/api-gateway/src/platform/seed.ts";
+
+function seededPlatformRepository(): PlatformRepository {
+  return PlatformRepository.inMemory(bootstrapPlatformState());
+}
 
 describe("phase 9 platform monitoring, incidents and feature flag backend contracts", () => {
-  it("defines repository contracts for platform telemetry samples", () => {
+  it("keeps the default platform workspace empty when no seed or telemetry is present", async () => {
     const repository = PlatformRepository.inMemory();
+    const snapshot = await new PlatformMonitoringService(repository).fetchPlatformSnapshot();
+
+    assert.deepEqual(repository.listComponents(), []);
+    assert.deepEqual(repository.listIncidents(), []);
+    assert.deepEqual(repository.listStaticMetrics(), []);
+    assert.equal(snapshot.data.dataState, "empty");
+    assert.deepEqual(snapshot.data.components, []);
+    assert.deepEqual(snapshot.data.healthRollups, []);
+    assert.deepEqual(snapshot.data.incidents, []);
+    assert.deepEqual(snapshot.data.metrics, []);
+    assert.deepEqual(snapshot.data.summary, {
+      affectedTenants: 0,
+      degraded: 0,
+      globalUptime: null,
+      openIncidents: 0,
+      sloBurnRate: null
+    });
+  });
+
+  it("derives the platform workspace from persisted health and telemetry", async () => {
+    const repository = PlatformRepository.inMemory();
+    repository.saveTelemetrySample({
+      componentId: "cmp-runtime-only",
+      id: "telemetry-runtime-only",
+      metricKey: "slo_burn_rate",
+      sampledAt: "2026-07-11T08:20:00.000Z",
+      source: "service-metrics",
+      tags: {},
+      tenantId: null,
+      unit: "ratio",
+      value: 0.75
+    });
+    repository.saveHealthRollup({
+      availability: 99.8,
+      componentId: "cmp-runtime-only",
+      errorRate: 0.02,
+      generatedAt: "2026-07-11T08:21:00.000Z",
+      id: "health-runtime-only",
+      incidentIds: [],
+      latencyP95Ms: 240,
+      sampleCount: 20,
+      status: "degraded",
+      windowEnd: "2026-07-11T08:20:00.000Z",
+      windowStart: "2026-07-11T08:15:00.000Z"
+    });
+
+    const snapshot = await new PlatformMonitoringService(repository).fetchPlatformSnapshot();
+
+    assert.equal(snapshot.data.dataState, "available");
+    assert.deepEqual(snapshot.data.components, [{
+      dependencies: [],
+      errorRate: 0.02,
+      id: "cmp-runtime-only",
+      latencyMs: 240,
+      name: "cmp-runtime-only",
+      ownerTeam: "unknown",
+      recentEvents: [],
+      region: "unknown",
+      signals: [],
+      status: "degraded",
+      tenantImpact: 0,
+      uptime: 99.8
+    }]);
+    assert.equal(snapshot.data.metrics[0].id, "telemetry-runtime-only");
+    assert.equal(snapshot.data.summary.sloBurnRate, 0.75);
+  });
+
+  it("defines repository contracts for platform telemetry samples", () => {
+    const repository = seededPlatformRepository();
 
     const saved = repository.saveTelemetrySample({
       componentId: "cmp-webhooks",
@@ -63,7 +137,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("defines repository contracts for component health rollups", () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
 
     const saved = repository.saveHealthRollup({
       availability: 99.91,
@@ -123,7 +197,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("defines repository contracts for alert routing rules", () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
 
     const saved = repository.saveAlertRoutingRule({
       componentIds: ["cmp-webhooks"],
@@ -239,7 +313,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("defines repository contracts for alert acknowledgement audit rows", () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
 
     const saved = repository.savePlatformAuditRow({
       action: "platform.alert.acknowledge",
@@ -320,7 +394,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("persists alert routing rule updates through the platform runtime", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
 
     const created = await platform.saveAlertRoutingRule({
@@ -363,7 +437,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("returns platform snapshot metrics and component drilldown", async () => {
-    const platform = new PlatformMonitoringService();
+    const platform = new PlatformMonitoringService(seededPlatformRepository());
 
     const snapshot = await platform.fetchPlatformSnapshot({ status: "degraded" });
     assert.equal(snapshot.service, "platformMonitoringService");
@@ -373,14 +447,14 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
     assert.ok(snapshot.data.incidents.every((incident) => snapshot.data.components.some((component) => component.id === incident.componentId)));
     assert.ok(snapshot.data.metrics.every((metric) => snapshot.data.components.some((component) => component.id === metric.componentId)));
     assert.equal(typeof snapshot.data.summary.globalUptime, "number");
-    assert.equal(typeof snapshot.data.summary.sloBurnRate, "number");
+    assert.equal(snapshot.data.summary.sloBurnRate, null);
     assert.ok(snapshot.data.metrics.some((metric) => metric.id === "webhook_retry_queue"));
 
     const drilldown = await platform.fetchComponentDrilldown("cmp-webhooks");
     assert.equal(drilldown.status, "ok");
     assert.equal(drilldown.data.component.id, "cmp-webhooks");
     assert.ok(drilldown.data.affectedTenants.some((tenant) => tenant.id === "tenant-volga"));
-    assert.ok(drilldown.data.runbooks.length > 0);
+    assert.deepEqual(drilldown.data.runbooks, []);
 
     const missing = await platform.fetchComponentDrilldown("cmp-missing");
     assert.equal(missing.status, "not_found");
@@ -388,7 +462,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("ingests platform telemetry samples with bounded retention metadata", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
 
     const ingested = await platform.ingestTelemetrySample({
@@ -418,7 +492,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("writes component health rollups with bounded retention metadata", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
 
     const written = await platform.writeHealthRollup({
@@ -449,7 +523,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("includes persisted telemetry samples in platform snapshot metrics", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     repository.saveTelemetrySample({
       componentId: "cmp-webhooks",
       id: "telemetry-webhook-latency-live",
@@ -476,7 +550,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("includes persisted health rollups in platform snapshot read side", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     repository.saveHealthRollup({
       availability: 99.93,
       componentId: "cmp-webhooks",
@@ -503,7 +577,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("rejects malformed telemetry sample tags without persisting the sample", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
 
     const rejected = await platform.ingestTelemetrySample({
@@ -523,7 +597,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("rejects telemetry samples already outside the retention window", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
 
     const rejected = await platform.ingestTelemetrySample({
@@ -543,7 +617,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("rejects health rollups already outside the retention window", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
 
     const rejected = await platform.writeHealthRollup({
@@ -565,7 +639,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("requires reason and confirmation to acknowledge platform alerts", async () => {
-    const platform = new PlatformMonitoringService();
+    const platform = new PlatformMonitoringService(seededPlatformRepository());
 
     const missingReason = await platform.acknowledgeComponentAlert({
       componentId: "cmp-webhooks",
@@ -602,7 +676,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("persists alert acknowledgement audit rows idempotently at runtime", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
 
     const first = await platform.acknowledgeComponentAlert({
@@ -639,7 +713,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("emits notification descriptors for routed platform alerts", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
 
     await platform.saveAlertRoutingRule({
@@ -682,7 +756,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("suppresses duplicate routed alert notifications across acknowledgement replays", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
 
     await platform.saveAlertRoutingRule({
@@ -730,7 +804,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("lists incidents, returns details and validates customer-visible updates", async () => {
-    const incidents = new IncidentService();
+    const incidents = new IncidentService(seededPlatformRepository());
 
     const list = await incidents.fetchIncidents({ componentId: "cmp-webhooks", status: "investigating" });
     assert.equal(list.service, "incidentService");
@@ -834,7 +908,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("refreshes platform incident read models after same-process incident updates", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
     const incidents = new IncidentService(repository);
 
@@ -856,7 +930,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("previews, updates and internally tests feature flag rollout rules", async () => {
-    const flags = new FeatureFlagService();
+    const flags = new FeatureFlagService(seededPlatformRepository());
 
     const list = await flags.fetchFeatureFlags({ query: "ai", status: "on" });
     assert.equal(list.service, "featureFlagService");
@@ -944,7 +1018,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   });
 
   it("persists feature flag rollout audit rows idempotently at runtime", async () => {
-    const repository = PlatformRepository.inMemory();
+    const repository = seededPlatformRepository();
     const flags = new FeatureFlagService(repository);
 
     const first = await flags.updateFeatureFlag({

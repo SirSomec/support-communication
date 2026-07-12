@@ -12,6 +12,7 @@ export interface ConversationMessage {
 export interface ConversationRecord {
   avatar?: string;
   channel: string;
+  channelConnectionId?: string;
   clientSince: string;
   device: string;
   entry: string;
@@ -25,11 +26,17 @@ export interface ConversationRecord {
   phone: string;
   preview: string;
   previous: string[][];
+  providerConversationId?: string;
+  providerUserId?: string;
+  queueId?: string;
+  rescueState?: Record<string, unknown>;
+  resolutionOutcome?: string;
   sla: string;
   slaTone: string;
   status: string;
   tags: string[];
-  tenantId?: string;
+  teamId?: string;
+  tenantId: string;
   time: string;
   topic: string;
   unread?: boolean;

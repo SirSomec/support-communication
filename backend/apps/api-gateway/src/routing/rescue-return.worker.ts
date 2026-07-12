@@ -1,9 +1,11 @@
 import type { RoutingJobDescriptor, RoutingRepository, RoutingRescueReturnApplyResult } from "./routing.repository.js";
 
 interface RescueReturnClaimWorkerInput {
+  leaseDurationMs?: number;
   limit?: number;
   now?: Date;
   routingRepository: Pick<RoutingRepository, "claimJob" | "listJobs">;
+  workerId?: string;
 }
 
 interface RescueReturnApplyWorkerInput {
@@ -31,9 +33,13 @@ export async function claimExpiredRescueReturnJobs(input: RescueReturnClaimWorke
   for (const job of dueJobs) {
     const current = await input.routingRepository.claimJob({
       claimedAt: now.toISOString(),
+      expectedLeaseExpiresAt: job.leaseExpiresAt ?? null,
+      expectedLeaseOwner: job.leaseOwner ?? null,
       expectedStatus: job.status ?? null,
       jobId: job.id,
-      queue: job.queue
+      ...(input.leaseDurationMs ? { leaseDurationMs: input.leaseDurationMs } : {}),
+      queue: job.queue,
+      ...(input.workerId ? { workerId: input.workerId } : {})
     });
     if (current) {
       claimed.push(current);
@@ -49,6 +55,7 @@ export async function applyRescueReturnTransition(input: RescueReturnApplyWorker
     completedAt,
     fallbackConversationId: input.job.conversationId ?? null,
     jobId: input.job.id,
+    ...(input.job.leaseOwner ? { leaseOwner: input.job.leaseOwner } : {}),
     tenantId: input.job.tenantId
   });
 }
@@ -64,7 +71,9 @@ function isDue(runAt: RoutingJobDescriptor["runAt"], now: Date): boolean {
 function isClaimableRescueReturnJob(job: RoutingJobDescriptor, now: Date): boolean {
   return job.queue === "rescue-return"
     && job.action === "return_to_sla_queue"
-    && (job.status ?? "pending") === "pending"
+    && ((job.status ?? "pending") === "pending"
+      || ((job.status ?? "pending") === "claimed"
+        && (typeof job.leaseExpiresAt !== "string" || isDue(job.leaseExpiresAt, now))))
     && isDue(job.runAt, now);
 }
 

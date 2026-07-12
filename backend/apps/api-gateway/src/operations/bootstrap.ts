@@ -20,9 +20,7 @@ import {
 
 import { isLocalRuntime } from "../runtime/local-runtime.js";
 
-import { bootstrapOperationsState } from "./seed.js";
-
-import { OperationsRepository, type PrismaOperationsClient } from "./operations.repository.js";
+import { OperationsRepository, type OperationsState, type PrismaOperationsClient } from "./operations.repository.js";
 
 
 
@@ -53,6 +51,7 @@ export interface OperationsRepositoryBootstrapSource {
 
 export interface OperationsRepositoryBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaOperationsClient;
+  seed?: OperationsState;
 }
 
 
@@ -67,8 +66,8 @@ export function configureOperationsRepository(
 ): OperationsRepository {
 
   const repository = configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => OperationsRepository.open({ filePath, seed: bootstrapOperationsState() }),
-    createPrismaRepository: (client) => OperationsRepository.prisma({ client }),
+    createJsonRepository: (filePath) => OperationsRepository.open({ filePath, ...(options.seed ? { seed: options.seed } : {}) }),
+    createPrismaRepository: (client) => OperationsRepository.prisma({ client, ...(options.seed ? { seed: options.seed } : {}) }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "OPERATIONS_REPOSITORY",
     source,

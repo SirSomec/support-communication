@@ -406,8 +406,17 @@ export class AuthService {
       });
     }
 
+    const availableOrganizations = (await this.identityRepository.listTenants()).map((tenant) => ({
+      id: tenant.id,
+      name: tenant.name,
+      role: "service_admin"
+    }));
     const session = await this.identityRepository.createServiceAdminSession({
+      actorId: credential.subjectId,
+      actorName: loginEmail,
       adminEmail: loginEmail,
+      availableOrganizations,
+      currentTenantId: availableOrganizations[0]?.id ?? "",
       mfaVerified: true
     });
     const tokenPair = createTenantOperatorSessionTokens({

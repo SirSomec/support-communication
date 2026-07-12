@@ -55,6 +55,7 @@ try {
 function createVkProviderSmoke() {
   return createMessageProviderSmoke({
     channel: stringValue(process.env.OUTBOX_VK_CHANNEL) || "VK",
+    channelConnectionId: requireConfigured(process.env.OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_CONNECTION_ID, "OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_CONNECTION_ID"),
     conversationId: requireConfigured(
       process.env.OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_PEER_ID,
       "OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_PEER_ID"
@@ -68,6 +69,7 @@ function createVkProviderSmoke() {
 function createMaxProviderSmoke() {
   return createMessageProviderSmoke({
     channel: stringValue(process.env.OUTBOX_MAX_CHANNEL) || "MAX",
+    channelConnectionId: requireConfigured(process.env.OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_CONNECTION_ID, "OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_CONNECTION_ID"),
     conversationId: requireConfigured(
       process.env.OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_DIALOG_ID,
       "OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_DIALOG_ID"
@@ -78,10 +80,11 @@ function createMaxProviderSmoke() {
   });
 }
 
-function createMessageProviderSmoke({ channel, conversationId, key, text }) {
+function createMessageProviderSmoke({ channel, channelConnectionId, conversationId, key, text }) {
   return {
     auditId: `audit_${key}_${runId}`,
     channel,
+    channelConnectionId,
     conversationId,
     descriptorId: `descriptor_${key}_${runId}`,
     idempotencyKey: `idempotency_${key}_${runId}`,
@@ -147,8 +150,10 @@ async function seedSmokeOutboxEvents(prisma, providers) {
           outboxEventId: provider.outboxEventId,
           payload: {
             channel: provider.channel,
+            channelConnectionId: provider.channelConnectionId,
             conversationId: provider.conversationId,
             messageId: provider.messageId,
+            providerConversationId: provider.conversationId,
             text: provider.text
           },
           requestFingerprint: provider.requestFingerprint,

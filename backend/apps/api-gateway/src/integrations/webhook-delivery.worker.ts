@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import type {
   ClaimWebhookDeliveryJournalEntriesInput,
   RecordWebhookDeliveryDeadLetterStateInput,
@@ -234,6 +235,7 @@ export function createDisabledWebhookDeliveryProvider(reason = "webhook_delivery
 
 export function createHttpWebhookDeliveryProvider(options: {
   fetchImpl?: typeof fetch;
+  signingSecret?: string;
   timeoutMs?: number;
 } = {}): WebhookDeliveryProvider {
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -242,35 +244,41 @@ export function createHttpWebhookDeliveryProvider(options: {
     async deliver(entry) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs ?? 10_000);
+      const body = JSON.stringify({
+        deliveryId: entry.deliveryId,
+        endpointId: entry.endpointId,
+        eventType: entry.eventType,
+        idempotencyKey: entry.idempotencyKey,
+        payloadRef: entry.payloadRef,
+        tenantId: entry.tenantId,
+        traceId: entry.traceId
+      });
+      const timestamp = new Date().toISOString();
       try {
         const response = await fetchImpl(entry.targetUrl, {
-          body: JSON.stringify({
-            deliveryId: entry.deliveryId,
-            endpointId: entry.endpointId,
-            eventType: entry.eventType,
-            idempotencyKey: entry.idempotencyKey,
-            payloadRef: entry.payloadRef,
-            tenantId: entry.tenantId,
-            traceId: entry.traceId
-          }),
+          body,
           headers: {
             "content-type": "application/json",
             "idempotency-key": entry.idempotencyKey,
             "x-webhook-delivery-id": entry.deliveryId,
-            "x-webhook-trace-id": entry.traceId
+            "x-webhook-trace-id": entry.traceId,
+            ...(options.signingSecret ? {
+              "x-webhook-signature": `sha256=${createHmac("sha256", options.signingSecret).update(`${timestamp}.${body}`).digest("hex")}`,
+              "x-webhook-timestamp": timestamp
+            } : {})
           },
           method: "POST",
           signal: controller.signal
         });
-        const body = await response.text();
+        const responseBody = await response.text();
         if (!response.ok) {
-          throw Object.assign(new Error(`Webhook provider responded ${response.status}: ${body.slice(0, 300)}`), {
+          throw Object.assign(new Error(`Webhook provider responded ${response.status}: ${responseBody.slice(0, 300)}`), {
             code: "provider_http_error",
             statusCode: response.status
           });
         }
         return {
-          body,
+          body: responseBody,
           statusCode: response.status
         };
       } finally {

@@ -4,8 +4,7 @@ import {
   resolveRepositoryStoreFile,
   type PrismaClientFactoryOptions
 } from "@support-communication/database";
-import { IntegrationRepository, type PrismaIntegrationClient } from "./integration.repository.js";
-import { bootstrapIntegrationState } from "./seed.js";
+import { IntegrationRepository, type IntegrationState, type PrismaIntegrationClient } from "./integration.repository.js";
 
 export interface IntegrationRepositoryBootstrapSource {
   DATABASE_URL?: string;
@@ -18,6 +17,7 @@ export interface IntegrationRepositoryBootstrapSource {
 
 export interface IntegrationRepositoryBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaIntegrationClient;
+  seed?: IntegrationState;
 }
 
 export function configureIntegrationRepository(
@@ -26,12 +26,11 @@ export function configureIntegrationRepository(
 ): IntegrationRepository {
   return configureRepositoryBootstrap({
     createJsonRepository: (filePath) => {
-      const seed = bootstrapIntegrationState();
-      const repository = IntegrationRepository.open({ filePath, seed });
-      ensureMissingSeedChannelConnections(repository, seed.channelConnections);
+      const repository = IntegrationRepository.open({ filePath, ...(options.seed ? { seed: options.seed } : {}) });
+      ensureMissingSeedChannelConnections(repository, options.seed?.channelConnections ?? []);
       return repository;
     },
-    createPrismaRepository: (client) => IntegrationRepository.prisma({ client }),
+    createPrismaRepository: (client) => IntegrationRepository.prisma({ client, ...(options.seed ? { seed: options.seed } : {}) }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "INTEGRATION_REPOSITORY",
     source,
@@ -51,7 +50,7 @@ export function resolveIntegrationStoreFile(source: IntegrationRepositoryBootstr
 
 function ensureMissingSeedChannelConnections(
   repository: IntegrationRepository,
-  seedConnections: ReturnType<typeof bootstrapIntegrationState>["channelConnections"]
+  seedConnections: IntegrationState["channelConnections"]
 ): void {
   for (const connection of seedConnections) {
     if (!repository.findChannelConnection(connection.tenantId, connection.id)) {

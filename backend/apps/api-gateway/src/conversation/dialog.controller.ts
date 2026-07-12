@@ -16,7 +16,7 @@ export class DialogController {
   @RequireServiceAdminAction("dialogs.read")
   @ApiOkResponse({ description: "Dialog list envelope with backend-ready pagination" })
   fetchDialogs(
-    @Query() filters: { channel?: string; page?: string; pageSize?: string; query?: string; savedPresetId?: string; status?: string; topic?: string },
+    @Query() filters: { channel?: string; page?: string; pageSize?: string; query?: string; queueId?: string; savedPresetId?: string; status?: string; teamId?: string; topic?: string },
     @Req() request: TenantOperatorRequest & ServiceAdminRequest
   ) {
     return this.conversationService.fetchDialogs(filters, dialogContextFromRequest(request));
@@ -75,6 +75,18 @@ export class DialogController {
     return this.conversationService.fetchAssignees(dialogContextFromRequest(request));
   }
 
+  @Get(":conversationId/timeline")
+  @RequireTenantOperatorPermission("dialogs.read")
+  @RequireServiceAdminAction("dialogs.read")
+  @ApiOkResponse({ description: "Immutable conversation lifecycle timeline" })
+  fetchConversationTimeline(
+    @Param("conversationId") conversationId: string,
+    @Query() filters: { cursor?: string; limit?: string; types?: string },
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
+  ) {
+    return this.conversationService.fetchConversationTimeline(conversationId, filters, dialogContextFromRequest(request));
+  }
+
   @Get(":conversationId")
   @RequireTenantOperatorPermission("dialogs.read")
   @RequireServiceAdminAction("dialogs.read")
@@ -103,7 +115,7 @@ export class DialogController {
   @ApiOkResponse({ description: "Dialog status transition envelope" })
   transitionConversationStatus(
     @Param("conversationId") conversationId: string,
-    @Body() payload: { nextStatus?: string; roleMode?: string; topic?: string },
+    @Body() payload: { nextStatus?: string; reason?: string; resolutionOutcome?: string; roleMode?: string; topic?: string },
     @Req() request: TenantOperatorRequest & ServiceAdminRequest
   ) {
     return this.conversationService.transitionConversationStatus({ ...payload, conversationId }, dialogContextFromRequest(request));
@@ -123,7 +135,28 @@ export class DialogController {
   }
 }
 
-function dialogContextFromRequest(request: TenantOperatorRequest & ServiceAdminRequest): { tenantId?: string } {
+function dialogContextFromRequest(request: TenantOperatorRequest & ServiceAdminRequest): {
+  actorId?: string;
+  actorName?: string;
+  actorType?: "operator" | "service_admin";
+  tenantId?: string;
+} {
   const tenantId = request.tenantOperatorContext?.tenantId ?? request.serviceAdminContext?.currentTenantId;
-  return tenantId ? { tenantId } : {};
+  if (request.tenantOperatorContext) {
+    return {
+      actorId: request.tenantOperatorContext.userId,
+      actorName: request.tenantOperatorContext.userId,
+      actorType: "operator",
+      tenantId
+    };
+  }
+  if (request.serviceAdminContext?.currentTenantId) {
+    return {
+      actorId: request.serviceAdminContext.actor.id,
+      actorName: request.serviceAdminContext.actor.name,
+      actorType: "service_admin",
+      tenantId
+    };
+  }
+  return {};
 }

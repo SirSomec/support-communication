@@ -4,8 +4,7 @@ import {
   resolveRepositoryStoreFile,
   type PrismaClientFactoryOptions
 } from "@support-communication/database";
-import { bootstrapPlatformState } from "./seed.js";
-import { PlatformRepository, type PrismaPlatformClient } from "./platform.repository.js";
+import { PlatformRepository, type PlatformState, type PrismaPlatformClient } from "./platform.repository.js";
 
 export interface PlatformRepositoryBootstrapSource {
   DATABASE_URL?: string;
@@ -18,6 +17,7 @@ export interface PlatformRepositoryBootstrapSource {
 
 export interface PlatformRepositoryBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaPlatformClient;
+  seed?: PlatformState;
 }
 
 export function configurePlatformRepository(
@@ -25,8 +25,8 @@ export function configurePlatformRepository(
   options: PlatformRepositoryBootstrapOptions = {}
 ): PlatformRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => PlatformRepository.open({ filePath, seed: bootstrapPlatformState() }),
-    createPrismaRepository: (client) => PlatformRepository.prisma({ client }),
+    createJsonRepository: (filePath) => PlatformRepository.open({ filePath, seed: options.seed }),
+    createPrismaRepository: (client) => PlatformRepository.prisma({ client, seed: options.seed }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "PLATFORM_REPOSITORY",
     source,

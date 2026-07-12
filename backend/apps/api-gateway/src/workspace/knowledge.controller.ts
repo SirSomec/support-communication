@@ -11,6 +11,14 @@ import { type WorkspaceRequestContext, WorkspaceService } from "./workspace.serv
 export class KnowledgeController {
   constructor(private readonly workspaceService: WorkspaceService) {}
 
+  @Post()
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  createKnowledgeArticle(@Body() payload: { body?: string; category?: string; channels?: string[]; title?: string; topics?: string[]; visibility?: string }, @Req() request: TenantOperatorRequest & ServiceAdminRequest): Promise<unknown> {
+    return this.workspaceService.createKnowledgeArticle(payload, tenantContextFromRequest(request));
+  }
+
   @Get()
   @RequireTenantOperatorPermission("knowledge.read")
   @RequireServiceAdminAction("knowledge.read")

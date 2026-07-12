@@ -1,13 +1,58 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { configureQualityRepository } from "../apps/api-gateway/src/quality/bootstrap.ts";
+import type { ConversationLifecycleEvent } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import {
   QualityRepository,
   type AiScoringAuditRecord,
+  type AiSuggestionDecisionRecord,
   type ManualQaReviewRecord,
   type QualityRatingRecord
 } from "../apps/api-gateway/src/quality/quality.repository.ts";
 
 describe("Prisma-backed quality repository contracts", () => {
+  it("persists an AI suggestion decision and lifecycle event atomically with tenant-scoped replay", async () => {
+    const { client, calls } = createFakePrismaQualityClient();
+    const repository = QualityRepository.prisma({ client });
+    const decision: AiSuggestionDecisionRecord = {
+      action: "accept", conversationId: "conv-ai", createdAt: "2026-07-11T12:00:00.000Z",
+      decisionId: "decision-ai", finalText: "Answer", finalTextHash: "final-hash",
+      operatorId: "operator-ai", operatorName: "Operator AI", originalText: "Answer",
+      originalTextHash: "original-hash", providerId: "provider-ai", providerResultId: "result-ai",
+      scoringAuditId: "audit-ai", suggestionId: "suggestion-ai", tenantId: "tenant-ai"
+    };
+    const event = qualityLifecycleEvent(decision, decision.decisionId, "quality.ai-suggestion.decided");
+
+    const saved = await repository.saveAiSuggestionDecision(decision, event);
+    const replay = await repository.saveAiSuggestionDecision({ ...decision, action: "reject", finalText: null, finalTextHash: null }, event);
+    const rows = await repository.listAiSuggestionDecisions({ tenantId: "tenant-ai" });
+
+    assert.equal(saved.action, "accept");
+    assert.equal(replay.action, "accept");
+    assert.equal(rows.length, 1);
+    assert.equal(calls.aiSuggestionDecisionCreates.length, 1);
+    assert.equal(calls.lifecycleEventCreates.length, 1);
+    assert.equal(calls.transactions, 1);
+  });
+
+  it("bootstraps the production quality repository from Prisma", () => {
+    const { client } = createFakePrismaQualityClient();
+    QualityRepository.clearDefault();
+
+    const repository = configureQualityRepository({
+      DATABASE_URL: "postgresql://quality:quality@127.0.0.1:5432/quality",
+      NODE_ENV: "staging",
+      QUALITY_REPOSITORY: "prisma",
+      SERVICE_NAME: "quality-contract"
+    }, {
+      prismaClientFactory: () => client
+    });
+
+    assert.equal(repository.constructor.name, "PrismaQualityRepository");
+    assert.equal(QualityRepository.default(), repository);
+    QualityRepository.clearDefault();
+  });
+
   it("persists quality ratings through Prisma with tenant-scoped first-write-wins replay", async () => {
     const { client, calls } = createFakePrismaQualityClient();
     const repository = QualityRepository.prisma({ client });
@@ -26,7 +71,8 @@ describe("Prisma-backed quality repository contracts", () => {
       topic: "Delivery"
     };
 
-    const saved = await repository.saveQualityRating(rating);
+    const lifecycleEvent = qualityLifecycleEvent(rating, rating.ratingId, "quality.assessment.set");
+    const saved = await repository.saveQualityRating(rating, lifecycleEvent);
     rating.score = 1;
     saved.score = 1;
     const replay = await repository.saveQualityRating({
@@ -64,6 +110,11 @@ describe("Prisma-backed quality repository contracts", () => {
     assert.equal(missingRows.length, 0);
     assert.equal(unscopedRows.length, 0);
     assert.deepEqual(calls.qualityRatingCreates.map((call) => call.data.tenantId), ["tenant-demo", "tenant-other"]);
+    assert.equal(calls.transactions, 1);
+    assert.equal(calls.lifecycleEventCreates.length, 1);
+    assert.equal(calls.lifecycleEventCreates[0].data.tenantId, "tenant-demo");
+    assert.equal(calls.lifecycleEventCreates[0].data.conversationId, "conv-rating-prisma");
+    assert.equal(calls.lifecycleEventCreates[0].data.eventType, "quality.assessment.set");
     assert.equal(calls.qualityRatingCreates[0].data.createdAt instanceof Date, true);
     assert.deepEqual(calls.qualityRatingFindUnique[0], {
       where: { tenantId_ratingId: { ratingId: "quality_rating_prisma", tenantId: "tenant-demo" } }
@@ -94,7 +145,10 @@ describe("Prisma-backed quality repository contracts", () => {
       tenantId: "tenant-demo"
     };
 
-    const saved = await repository.saveManualQaReview(review);
+    const saved = await repository.saveManualQaReview(
+      review,
+      qualityLifecycleEvent(review, review.reviewId, "quality.assessment.appealed", review.overrideReason)
+    );
     review.criteria.tone = 1;
     saved.criteria.tone = 1;
     const replay = await repository.saveManualQaReview({
@@ -134,6 +188,9 @@ describe("Prisma-backed quality repository contracts", () => {
     assert.equal(missingRows.length, 0);
     assert.equal(unscopedRows.length, 0);
     assert.deepEqual(calls.manualQaReviewCreates.map((call) => call.data.tenantId), ["tenant-demo", "tenant-other"]);
+    assert.equal(calls.transactions, 1);
+    assert.equal(calls.lifecycleEventCreates[0].data.eventType, "quality.assessment.appealed");
+    assert.equal(calls.lifecycleEventCreates[0].data.reason, "senior_review");
     assert.equal(calls.manualQaReviewCreates[0].data.createdAt instanceof Date, true);
     assert.deepEqual(calls.manualQaReviewCreates[0].data.criteria, {
       completeness: 5,
@@ -166,7 +223,10 @@ describe("Prisma-backed quality repository contracts", () => {
       traceId: "trc_quality_scoring_prisma"
     };
 
-    const saved = await repository.saveAiScoringAudit(audit);
+    const saved = await repository.saveAiScoringAudit(
+      audit,
+      qualityLifecycleEvent(audit, audit.auditId, "quality.assessment.completed")
+    );
     audit.score = 10;
     saved.score = 10;
     const replay = await repository.saveAiScoringAudit({
@@ -212,6 +272,8 @@ describe("Prisma-backed quality repository contracts", () => {
     assert.equal(missingRows.length, 0);
     assert.equal(unscopedRows.length, 0);
     assert.deepEqual(calls.aiScoringAuditCreates.map((call) => call.data.tenantId), ["tenant-demo", "tenant-other"]);
+    assert.equal(calls.transactions, 1);
+    assert.equal(calls.lifecycleEventCreates[0].data.eventType, "quality.assessment.completed");
     assert.equal(calls.aiScoringAuditCreates[0].data.createdAt instanceof Date, true);
     assert.equal(calls.aiScoringAuditCreates[1].data.providerResultId, null);
     assert.deepEqual(calls.aiScoringAuditFindUnique[0], {
@@ -225,10 +287,12 @@ describe("Prisma-backed quality repository contracts", () => {
 });
 
 function createFakePrismaQualityClient() {
+  const aiSuggestionDecisions = new Map<string, any>();
   const aiScoringAudits = new Map<string, FakeAiScoringAuditRow>();
   const ratings = new Map<string, FakeQualityRatingRow>();
   const manualReviews = new Map<string, FakeManualQaReviewRow>();
   const calls = {
+    aiSuggestionDecisionCreates: [] as Array<{ data: any }>,
     aiScoringAuditCreates: [] as Array<{ data: FakeAiScoringAuditCreateInput }>,
     aiScoringAuditFindMany: [] as Array<{
       orderBy: { createdAt: "desc" };
@@ -252,9 +316,32 @@ function createFakePrismaQualityClient() {
     }>,
     qualityRatingFindUnique: [] as Array<{
       where: { tenantId_ratingId: { ratingId: string; tenantId: string } };
-    }>
+    }>,
+    lifecycleEventCreates: [] as Array<{ data: FakeLifecycleEventCreateInput }>,
+    transactions: 0
   };
-  const client = {
+  const client: any = {
+    async $transaction<TResult>(operation: (transaction: typeof client) => Promise<TResult>): Promise<TResult> {
+      calls.transactions += 1;
+      return operation(client);
+    },
+    aiSuggestionDecision: {
+      async create(input: { data: any }) {
+        calls.aiSuggestionDecisionCreates.push(input);
+        const row = clone(input.data);
+        aiSuggestionDecisions.set(`${row.tenantId}:${row.suggestionId}`, row);
+        return clone(row);
+      },
+      async findMany(input: any) {
+        return Array.from(aiSuggestionDecisions.values())
+          .filter((row: any) => row.tenantId === input.where.tenantId && (!input.where.conversationId || row.conversationId === input.where.conversationId))
+          .map(clone);
+      },
+      async findUnique(input: any) {
+        const key = input.where.tenantId_suggestionId;
+        return clone(aiSuggestionDecisions.get(`${key.tenantId}:${key.suggestionId}`) ?? null);
+      }
+    },
     aiScoringAudit: {
       async create(input: { data: FakeAiScoringAuditCreateInput }): Promise<FakeAiScoringAuditRow> {
         calls.aiScoringAuditCreates.push(input);
@@ -338,6 +425,12 @@ function createFakePrismaQualityClient() {
         const key = ratingKey(input.where.tenantId_ratingId.tenantId, input.where.tenantId_ratingId.ratingId);
         return clone(ratings.get(key) ?? null);
       }
+    },
+    conversationLifecycleEvent: {
+      async create(input: { data: FakeLifecycleEventCreateInput }): Promise<FakeLifecycleEventCreateInput> {
+        calls.lifecycleEventCreates.push(clone(input));
+        return clone(input.data);
+      }
     }
   };
 
@@ -389,6 +482,49 @@ interface FakeAiScoringAuditCreateInput {
 }
 
 type FakeAiScoringAuditRow = FakeAiScoringAuditCreateInput;
+
+interface FakeLifecycleEventCreateInput {
+  actorId: string | null;
+  actorName: string | null;
+  actorType: string;
+  conversationId: string;
+  data: Record<string, unknown>;
+  eventType: string;
+  id: string;
+  ingestedAt: Date;
+  occurredAt: Date;
+  reason: string | null;
+  schemaVersion: string;
+  source: string;
+  sourceEventId: string;
+  tenantId: string;
+  traceId: string;
+}
+
+function qualityLifecycleEvent(
+  record: { conversationId: string; createdAt: string; tenantId: string },
+  sourceEventId: string,
+  eventType: string,
+  reason: string | null = null
+): ConversationLifecycleEvent {
+  return {
+    actorId: "operator-prisma",
+    actorName: "Prisma Operator",
+    actorType: "operator",
+    conversationId: record.conversationId,
+    data: { sourceEventId },
+    eventType,
+    id: `lifecycle_${sourceEventId}`,
+    ingestedAt: record.createdAt,
+    occurredAt: record.createdAt,
+    reason,
+    schemaVersion: "conversation-lifecycle/v1",
+    source: "quality.rating",
+    sourceEventId,
+    tenantId: record.tenantId,
+    traceId: "trc_quality_rating_prisma"
+  };
+}
 
 function ratingKey(tenantId: string, ratingId: string): string {
   return `${tenantId}:${ratingId}`;

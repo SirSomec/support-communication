@@ -199,6 +199,50 @@
   line-height: 1.45;
 }
 
+.qa-review-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+  background: #f8fafc;
+}
+
+.qa-review-form label {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 120px;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.qa-review-form select {
+  min-height: 34px;
+}
+
+.qa-review-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qa-review-actions b {
+  margin-right: auto;
+}
+
+.quality-ai-consent {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: #344054;
+  font-size: 13px;
+}
+
 .ai-coaching-score {
   display: inline-flex;
   width: fit-content;

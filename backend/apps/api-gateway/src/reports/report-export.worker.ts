@@ -4,7 +4,12 @@ import { dirname, resolve, sep } from "node:path";
 import { redactExportedDescriptor } from "@support-communication/envelope";
 import { ReportRepository, type ReportFileDescriptorRecord } from "./report.repository.js";
 import { buildLiveReportWorkspace, type LiveReportConversation, type LiveReportWorkspaceOptions } from "./report-live-workspace.js";
-import { reportColumnOptions } from "./seed-catalog.js";
+import { REPORT_COLUMN_OPTIONS, REPORT_METRIC_DEFINITION_VERSION } from "./report-definition.js";
+import {
+  buildConversationReportEventWatermark,
+  filterReportConversations,
+  type ConversationReportEventWatermark
+} from "./report-conversation-filters.js";
 import type { ReportExportJob } from "./report.types.js";
 
 export interface ReportCsvColumn {
@@ -467,11 +472,12 @@ export async function executeReportExportWorkerOnce(input: ReportExportWorkerOnc
       const tenantId = reportExportTenantId(job);
       const fileName = reportExportFileName(job);
       const objectKey = `reports/${tenantId}/${job.id}/${fileName}`;
-      const rows = await reportExportRows(input.reportRepository, job);
+      const snapshot = await reportExportSnapshot(input.reportRepository, job);
+      const rows = snapshot.rows;
       const exportInput = {
         columns: reportExportColumns(job),
         jobId: job.id,
-        metricDefinitionVersion: job.metricDefinitionVersion ?? "metrics/v1",
+        metricDefinitionVersion: job.metricDefinitionVersion ?? REPORT_METRIC_DEFINITION_VERSION,
         objectKey,
         rows,
         storage: input.storage
@@ -489,6 +495,10 @@ export async function executeReportExportWorkerOnce(input: ReportExportWorkerOnc
       await input.reportRepository.saveExportJobAsync({
         ...job,
         fileName: descriptor.fileName,
+        filters: {
+          ...(job.filters ?? {}),
+          eventWatermark: snapshot.eventWatermark
+        },
         progress: 100,
         rows: rows.length,
         status: "Ready",
@@ -574,9 +584,9 @@ function requireNonEmptyString(value: string, code: string): string {
 }
 
 function reportExportColumns(job: ReportExportJob): ReportCsvColumn[] {
-  const requested = job.columns?.length ? job.columns : reportColumnOptions.map((column) => column.id);
+  const requested = job.columns?.length ? job.columns : REPORT_COLUMN_OPTIONS.map((column) => column.id);
   return requested.map((id) => {
-    const option = reportColumnOptions.find((column) => column.id === id);
+    const option = REPORT_COLUMN_OPTIONS.find((column) => column.id === id);
     return {
       id,
       label: option?.label ?? id
@@ -584,32 +594,67 @@ function reportExportColumns(job: ReportExportJob): ReportCsvColumn[] {
   });
 }
 
-async function reportExportRows(repository: ReportRepository, job: ReportExportJob): Promise<Array<Record<string, unknown>>> {
+async function reportExportSnapshot(repository: ReportRepository, job: ReportExportJob): Promise<{
+  eventWatermark: ConversationReportEventWatermark | null;
+  rows: Array<Record<string, unknown>>;
+}> {
+  const snapshotAt = reportSnapshotAt(job);
   const options: LiveReportWorkspaceOptions = {
     channel: typeof job.filters?.channel === "string" ? job.filters.channel : undefined,
-    now: new Date(),
-    period: job.period as LiveReportWorkspaceOptions["period"]
+    now: snapshotAt,
+    period: job.period as LiveReportWorkspaceOptions["period"],
+    timezoneOffsetMinutes: reportTimezoneOffset(job.filters?.timezoneOffsetMinutes)
   };
   const emptyWorkspace = buildLiveReportWorkspace([], options);
   const conversations = await repository.listConversationReportSourceRowsAsync({
     from: new Date(emptyWorkspace.windows.previous.from),
     tenantId: reportExportTenantId(job),
-    to: new Date(emptyWorkspace.windows.current.to)
+    to: new Date(Math.min(new Date(emptyWorkspace.windows.current.to).getTime(), snapshotAt.getTime()))
   });
-  const workspace = buildLiveReportWorkspace(conversations as LiveReportConversation[], options);
-
-  return workspace.rows.map((row) => ({
-    delta: row.delta,
-    metric: row.metric,
-    previous: row.previous,
-    status: row.status,
-    today: row.current
+  const snapshotConversations = conversations.map((conversation) => ({
+    ...conversation,
+    lifecycleEvents: (conversation.lifecycleEvents ?? []).filter((event) => new Date(event.occurredAt).getTime() <= snapshotAt.getTime())
   }));
+  const filteredConversations = filterReportConversations(snapshotConversations, {
+    operatorId: stringFilter(job.filters?.operatorId),
+    outcome: stringFilter(job.filters?.outcome),
+    queueId: stringFilter(job.filters?.queueId),
+    resolutionOutcome: stringFilter(job.filters?.resolutionOutcome),
+    status: stringFilter(job.filters?.status),
+    teamId: stringFilter(job.filters?.teamId),
+    topic: stringFilter(job.filters?.topic)
+  });
+  const workspace = buildLiveReportWorkspace(filteredConversations as LiveReportConversation[], options);
+
+  return {
+    eventWatermark: buildConversationReportEventWatermark(filteredConversations, snapshotAt),
+    rows: workspace.rows.map((row) => ({
+      delta: row.delta,
+      metric: row.metric,
+      previous: row.previous,
+      status: row.status,
+      today: row.current
+    }))
+  };
+}
+
+function stringFilter(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function reportSnapshotAt(job: ReportExportJob): Date {
+  const requested = typeof job.filters?.snapshotAt === "string" ? job.filters.snapshotAt : job.createdAt;
+  const parsed = new Date(requested);
+  return Number.isFinite(parsed.getTime()) ? parsed : new Date(job.createdAt);
+}
+
+function reportTimezoneOffset(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(parsed) && Math.abs(parsed) <= 14 * 60 ? parsed : 0;
 }
 
 function reportExportTenantId(job: ReportExportJob): string {
-  const tenantId = typeof job.filters?.tenantId === "string" ? job.filters.tenantId.trim() : "";
-  return job.tenantId?.trim() || tenantId || "tenant-volga";
+  return requireNonEmptyString(job.tenantId ?? "", "report_export_job_tenant_id_required");
 }
 
 function reportExportFileName(job: ReportExportJob): string {
@@ -632,7 +677,7 @@ function toReportFileDescriptor(input: {
     format: input.job.format,
     id: `file_${input.job.id}`,
     jobId: input.job.id,
-    metricDefinitionVersion: input.job.metricDefinitionVersion ?? "metrics/v1",
+    metricDefinitionVersion: input.job.metricDefinitionVersion ?? REPORT_METRIC_DEFINITION_VERSION,
     objectKey: input.descriptor.objectKey,
     sizeBytes: input.descriptor.sizeBytes,
     tenantId: input.tenantId,

@@ -3,6 +3,32 @@ import { apiRequest } from "./apiClient.js";
 const SERVICE = "routingService";
 
 export const routingService = {
+  async fetchQueues(filters = {}) {
+    return apiRequest("/routing/queues", {
+      operation: "fetchQueues",
+      query: filters,
+      service: SERVICE
+    });
+  },
+
+  async createQueue(payload = {}) {
+    return apiRequest("/routing/queues", {
+      body: payload,
+      method: "POST",
+      operation: "createQueue",
+      service: SERVICE
+    });
+  },
+
+  async updateQueue(queueId, payload = {}) {
+    return apiRequest(`/routing/queues/${encodeURIComponent(queueId)}`, {
+      body: payload,
+      method: "PATCH",
+      operation: "updateQueue",
+      service: SERVICE
+    });
+  },
+
   async fetchWorkload(filters = {}) {
     return apiRequest("/routing/workload", {
       operation: "fetchWorkload",

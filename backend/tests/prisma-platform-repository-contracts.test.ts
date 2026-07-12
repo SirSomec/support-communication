@@ -18,8 +18,20 @@ import {
 } from "../apps/api-gateway/src/platform/platform.repository.ts";
 import type { FeatureFlag, PlatformIncident } from "../apps/api-gateway/src/platform/platform.types.ts";
 import type { PlatformFeatureFlagRule } from "../apps/api-gateway/src/feature-flags/feature-flag-rollout.engine.ts";
+import { bootstrapPlatformState } from "../apps/api-gateway/src/platform/seed.ts";
 
 describe("Prisma-backed platform repository contracts", () => {
+  it("starts Prisma platform catalogs empty unless a seed is injected", async () => {
+    const { client } = createFakePrismaPlatformClient();
+    const repository = PlatformRepository.prisma({ client });
+
+    assert.deepEqual(repository.listComponents(), []);
+    assert.deepEqual(repository.listPlatformTenants(), []);
+    assert.deepEqual(repository.listStaticMetrics(), []);
+    assert.deepEqual(await repository.listIncidentsAsync(), []);
+    assert.deepEqual(await repository.listFeatureFlagsAsync(), []);
+  });
+
   it("fails closed when Prisma platform runtime delegates are incomplete", () => {
     const { client } = createFakePrismaPlatformClient();
     delete (client as { platformRuntimeRecord?: unknown }).platformRuntimeRecord;
@@ -44,7 +56,8 @@ describe("Prisma-backed platform repository contracts", () => {
         PORT: "4100",
         SERVICE_NAME: "api-gateway"
       }, {
-        prismaClientFactory: () => client
+        prismaClientFactory: () => client,
+        seed: bootstrapPlatformState()
       });
 
       await repository.saveTelemetrySampleAsync(telemetrySample({ id: "telemetry-prisma-bootstrap" }));
@@ -62,7 +75,7 @@ describe("Prisma-backed platform repository contracts", () => {
 
   it("persists mutable platform runtime state through Prisma delegates without JSON fallback", async () => {
     const { calls, client } = createFakePrismaPlatformClient();
-    const first = PlatformRepository.prisma({ client });
+    const first = PlatformRepository.prisma({ client, seed: bootstrapPlatformState() });
 
     assert.throws(
       () => first.readState(),
@@ -148,7 +161,7 @@ describe("Prisma-backed platform repository contracts", () => {
       externalId: "status-page-provider-prisma"
     });
 
-    const second = PlatformRepository.prisma({ client });
+    const second = PlatformRepository.prisma({ client, seed: bootstrapPlatformState() });
     const state = await second.readStateAsync();
 
     assert.equal(savedIncidentKey.result.incident.id, "inc-prisma-runtime");
@@ -186,7 +199,7 @@ describe("Prisma-backed platform repository contracts", () => {
 
   it("drives platform services through Prisma-backed repositories without sync JSON fallback", async () => {
     const { calls, client } = createFakePrismaPlatformClient();
-    const repository = PlatformRepository.prisma({ client });
+    const repository = PlatformRepository.prisma({ client, seed: bootstrapPlatformState() });
     const platform = new PlatformMonitoringService(repository);
     const incidents = new IncidentService(repository);
     const flags = new FeatureFlagService(repository);

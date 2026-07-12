@@ -132,6 +132,10 @@
   font-size: 24px;
 }
 
+.report-chart-card .mini-chart {
+  overflow: hidden;
+}
+
 .report-chart-card.warn .mini-chart i {
   background: linear-gradient(180deg, var(--amber), var(--blue));
 }

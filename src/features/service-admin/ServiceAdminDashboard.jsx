@@ -54,6 +54,10 @@ const workspaceOptions = [
   { label: "Аудит", value: "audit" }
 ];
 
+function formatMeasuredValue(value, suffix) {
+  return typeof value === "number" ? `${value} ${suffix}` : "Нет данных";
+}
+
 export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, onToast = noop }) {
   const requestedWorkspace = resolveServiceAdminWorkspace(navigationTarget);
   const [activeWorkspace, setActiveWorkspace] = useState(requestedWorkspace || "tenants");
@@ -67,6 +71,7 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
     userCount: 0
   });
   const [feedback, setFeedback] = useState(null);
+  const [loadError, setLoadError] = useState("");
   const [impersonation, setImpersonation] = useState(null);
   const [workerObservability, setWorkerObservability] = useState([]);
   const [clockTick, setClockTick] = useState(Date.now());
@@ -82,59 +87,57 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
     }
   }, [activeWorkspace, requestedWorkspace]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDashboard = useCallback(async () => {
+    setLoadError("");
+    const [tenants, users, incidents, flags, platform, operations, audit] = await Promise.all([
+      tenantService.fetchTenants(),
+      supportAdminService.fetchSupportUsers(),
+      incidentService.fetchIncidents(),
+      featureFlagService.fetchFeatureFlags(),
+      platformMonitoringService.fetchPlatformSnapshot(),
+      operationsService.fetchReadinessDashboard({ domain: "delivery" }),
+      auditService.fetchAuditEvents({ limit: 20 })
+    ]);
 
-    async function loadDashboard() {
-      const [tenants, users, incidents, flags, platform, operations, audit] = await Promise.all([
-        tenantService.fetchTenants(),
-        supportAdminService.fetchSupportUsers(),
-        incidentService.fetchIncidents(),
-        featureFlagService.fetchFeatureFlags(),
-        platformMonitoringService.fetchPlatformSnapshot(),
-        operationsService.fetchReadinessDashboard({ domain: "delivery" }),
-        auditService.fetchAuditEvents({ limit: 20 })
-      ]);
-
-      if (cancelled) {
-        return;
-      }
-
-      const tenantItems = tenants.status === "ok" ? tenants.data?.items ?? [] : [];
-      const userItems = users.status === "ok" ? users.data?.items ?? [] : [];
-      const incidentItems = incidents.status === "ok" ? incidents.data?.items ?? [] : [];
-      const flagItems = flags.status === "ok" ? flags.data?.items ?? [] : [];
-      const components = platform.status === "ok" ? platform.data?.components ?? [] : [];
-      const workers = operations.status === "ok" ? operations.data?.workerObservability ?? [] : [];
-      const auditItems = audit.status === "ok" ? audit.data?.items ?? [] : [];
-
-      setDashboard({
-        degradedComponents: components.filter((component) => component.status !== "operational").length,
-        guardedFlags: flagItems.filter((flag) => flag.killSwitch).length,
-        openIncidentCount: incidentItems.filter((incident) => incident.status !== "resolved").length,
-        riskyUsers: userItems.filter((user) => ["high", "critical"].includes(user.risk)).length,
-        tenantCount: tenantItems.length,
-        userCount: userItems.length
-      });
-      setWorkerObservability(workers);
-      setAuditEvents(auditItems.map((event) => ({
-        id: event.id,
-        action: event.action,
-        actor: event.actorName ?? event.actor,
-        at: event.at,
-        reason: event.reason,
-        result: event.result,
-        severity: event.severity === "critical" ? "critical" : event.severity === "warning" ? "warn" : "info",
-        target: event.target,
-        traceId: event.traceId
-      })));
+    const responses = [tenants, users, incidents, flags, platform, operations, audit];
+    const firstError = responses.find((response) => response.status !== "ok");
+    if (firstError) {
+      setLoadError(firstError.error?.message ?? "Не удалось загрузить данные администрирования сервиса.");
     }
 
-    loadDashboard();
-    return () => {
-      cancelled = true;
-    };
+    const tenantItems = tenants.status === "ok" ? tenants.data?.items ?? [] : [];
+    const userItems = users.status === "ok" ? users.data?.items ?? [] : [];
+    const incidentItems = incidents.status === "ok" ? incidents.data?.items ?? [] : [];
+    const flagItems = flags.status === "ok" ? flags.data?.items ?? [] : [];
+    const components = platform.status === "ok" ? platform.data?.components ?? [] : [];
+    const workers = operations.status === "ok" ? operations.data?.workerObservability ?? [] : [];
+    const auditItems = audit.status === "ok" ? audit.data?.items ?? [] : [];
+
+    setDashboard({
+      degradedComponents: components.filter((component) => component.status !== "operational").length,
+      guardedFlags: flagItems.filter((flag) => flag.killSwitch).length,
+      openIncidentCount: incidentItems.filter((incident) => incident.status !== "resolved").length,
+      riskyUsers: userItems.filter((user) => ["high", "critical"].includes(user.risk)).length,
+      tenantCount: tenantItems.length,
+      userCount: userItems.length
+    });
+    setWorkerObservability(workers);
+    setAuditEvents(auditItems.map((event) => ({
+      id: event.id,
+      action: event.action,
+      actor: event.actorName ?? event.actor,
+      at: event.at,
+      reason: event.reason,
+      result: event.result,
+      severity: event.severity === "critical" ? "critical" : event.severity === "warning" ? "warn" : "info",
+      target: event.target,
+      traceId: event.traceId
+    })));
   }, []);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
 
   const remainingSeconds = useMemo(() => {
     if (!impersonation) {
@@ -236,6 +239,10 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
             <RefreshCw size={17} />
             Состояние входа
           </button>
+          <button onClick={loadDashboard} type="button">
+            <RefreshCw size={17} />
+            Обновить данные
+          </button>
         </>
       }
     >
@@ -246,6 +253,8 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
           remainingSeconds={remainingSeconds}
         />
       ) : null}
+
+      {loadError ? <div className="service-admin-feedback error" role="alert">{loadError}</div> : null}
 
       <div className="metric-strip service-admin-metrics">
         <MetricTile icon={<Building2 size={21} />} label="Организации" value={dashboard.tenantCount} detail="активные аккаунты сервиса" />
@@ -324,7 +333,7 @@ function WorkerObservabilityPanel({ workers = [] }) {
 
   return (
     <section className="work-panel service-admin-worker-observability" data-testid="service-admin-worker-observability">
-      <SectionTitle title="РћС‡РµСЂРµРґРё runtime worker" action={`${blockedCount} Р±Р»РѕРєРёСЂСѓСЋС‰РёС… / ${queuedCount} РІ РѕС‡РµСЂРµРґРё`} />
+      <SectionTitle title="Очереди фоновых задач" action={`${blockedCount} заблокировано / ${queuedCount} в очереди`} />
       {workers.length ? (
         <div className="service-admin-worker-grid">
           {workers.map((worker) => (
@@ -338,7 +347,7 @@ function WorkerObservabilityPanel({ workers = [] }) {
                 <StatusBadge tone={getStatusTone(worker.health?.status)}>{formatLabel(worker.health?.status)}</StatusBadge>
               </header>
               <div className="service-admin-signal-grid">
-                <span><Gauge size={17} /> {worker.queueDepth ?? 0} РІ РѕС‡РµСЂРµРґРё</span>
+                <span><Gauge size={17} /> {worker.queueDepth ?? 0} в очереди</span>
                 <span><AlertTriangle size={17} /> {worker.deadLetterCount ?? 0} dead letters</span>
                 <span><Clock3 size={17} /> {formatDateTime(worker.updatedAt)}</span>
                 <span><ShieldCheck size={17} /> {worker.evidenceSource}</span>
@@ -352,7 +361,7 @@ function WorkerObservabilityPanel({ workers = [] }) {
                 </div>
               ) : (
                 <div className="service-admin-worker-delivery empty">
-                  <span>РЅРµС‚ СЃРѕР±С‹С‚РёР№</span>
+                  <span>нет событий</span>
                 </div>
               )}
             </article>
@@ -360,8 +369,8 @@ function WorkerObservabilityPanel({ workers = [] }) {
         </div>
       ) : (
         <div className="service-admin-empty">
-          <strong>РќРµС‚ runtime evidence</strong>
-          <span>Durable delivery journal РїРѕРєР° РЅРµ СЃРѕРґРµСЂР¶РёС‚ worker-СЃРѕР±С‹С‚РёР№.</span>
+          <strong>Нет данных о фоновых задачах</strong>
+          <span>Журнал доставки пока не содержит событий фоновых задач.</span>
         </div>
       )}
     </section>
@@ -504,9 +513,9 @@ function PlatformSnapshotPanel({ onEnvelope }) {
             <StatusBadge tone={getStatusTone(detail.component.status)}>{formatLabel(detail.component.status)}</StatusBadge>
           </header>
           <div className="service-admin-signal-grid">
-            <span><Gauge size={17} /> {detail.component.latencyMs} мс p95</span>
-            <span><AlertTriangle size={17} /> {detail.component.errorRate}% ошибок</span>
-            <span><ShieldCheck size={17} /> {detail.component.uptime}% аптайм</span>
+            <span><Gauge size={17} /> {formatMeasuredValue(detail.component.latencyMs, "мс p95")}</span>
+            <span><AlertTriangle size={17} /> {formatMeasuredValue(detail.component.errorRate, "% ошибок")}</span>
+            <span><ShieldCheck size={17} /> {formatMeasuredValue(detail.component.uptime, "% аптайм")}</span>
             <span><RadioTower size={17} /> {detail.affectedTenants.length} организаций</span>
           </div>
           <div className="service-admin-mini-list">

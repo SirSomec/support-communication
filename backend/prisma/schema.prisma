@@ -57,8 +57,10 @@ model TenantUser {
   metadata     Json?
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  teamMemberships TeamMembership[]
 
   @@unique([tenantId, email], map: "tenant_users_tenant_id_email_key")
+  @@unique([tenantId, id], map: "tenant_users_tenant_id_id_key")
   @@index([tenantId, status], map: "tenant_users_tenant_id_status_idx")
   @@index([email], map: "tenant_users_email_idx")
   @@map("tenant_users")
@@ -614,7 +616,7 @@ model BillingTaxDocument {
 
 model Conversation {
   id            String                     @id
-  tenantId      String                     @default("tenant-volga") @map("tenant_id")
+  tenantId      String                     @map("tenant_id")
   name          String
   initials      String
   avatar        String?
@@ -623,6 +625,8 @@ model Conversation {
   time          String
   preview       String
   status        String
+  resolutionOutcome String?                  @map("resolution_outcome")
+  rescueState   Json?                       @map("rescue_state")
   sla           String
   slaTone       String                     @map("sla_tone")
   topic         String
@@ -633,6 +637,11 @@ model Conversation {
   clientSince   String                     @map("client_since")
   operatorId    String?                    @map("operator_id")
   operatorName  String?                    @map("operator_name")
+  queueId       String?                    @map("queue_id")
+  teamId        String?                    @map("team_id")
+  channelConnectionId String?              @map("channel_connection_id")
+  providerConversationId String?           @map("provider_conversation_id")
+  providerUserId String?                   @map("provider_user_id")
   tags          String[]                   @default([])
   previous      Json
   metadata      Json?
@@ -642,11 +651,96 @@ model Conversation {
   inboundEvents ConversationInboundEvent[]
   outboundDescriptors ConversationOutboundDescriptor[]
   deliveryReceipts ChannelDeliveryReceipt[]
+  providerMessageBindings ProviderMessageBinding[]
+  lifecycleEvents ConversationLifecycleEvent[]
+  queue         SupportQueue?                @relation(fields: [tenantId, queueId], references: [tenantId, id], onDelete: Restrict)
+  team          Team?                        @relation(fields: [tenantId, teamId], references: [tenantId, id], onDelete: Restrict)
+  channelConnection ChannelConnection?       @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Restrict)
 
+  @@unique([tenantId, id], map: "conversations_tenant_id_id_key")
   @@index([status, channel], map: "conversations_status_channel_idx")
   @@index([tenantId, status, updatedAt], map: "conversations_tenant_status_updated_at_idx")
   @@index([tenantId, operatorId, updatedAt], map: "conversations_tenant_operator_updated_at_idx")
+  @@index([tenantId, queueId, teamId, updatedAt], map: "conversations_tenant_queue_team_updated_at_idx")
+  @@unique([tenantId, channelConnectionId, providerConversationId], map: "conversations_tenant_connection_provider_key")
   @@map("conversations")
+}
+
+model Team {
+  id          String
+  tenantId    String   @map("tenant_id")
+  name        String
+  scope       String
+  status      String   @default("active")
+  channels    String[] @default([])
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  conversations Conversation[]
+  memberships TeamMembership[]
+  queues      SupportQueue[] @relation("QueueDefaultTeam")
+
+  @@id([tenantId, id], map: "teams_pkey")
+  @@index([tenantId, status, name], map: "teams_tenant_status_name_idx")
+  @@map("teams")
+}
+
+model TeamMembership {
+  id         String   @id
+  tenantId   String   @map("tenant_id")
+  teamId     String   @map("team_id")
+  operatorId String   @map("operator_id")
+  role       String   @default("member")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  team       Team       @relation(fields: [tenantId, teamId], references: [tenantId, id], onDelete: Cascade)
+  operator   TenantUser @relation(fields: [tenantId, operatorId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, teamId, operatorId], map: "team_memberships_tenant_team_operator_key")
+  @@index([tenantId, operatorId, active], map: "team_memberships_tenant_operator_active_idx")
+  @@map("team_memberships")
+}
+
+model SupportQueue {
+  id            String
+  tenantId      String   @map("tenant_id")
+  name          String
+  status        String   @default("active")
+  defaultTeamId String?  @map("default_team_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  defaultTeam   Team?    @relation("QueueDefaultTeam", fields: [tenantId, defaultTeamId], references: [tenantId, id], onDelete: Restrict)
+  channelConnections ChannelConnection[]
+  conversations Conversation[]
+  memberships QueueMembership[]
+
+  @@id([tenantId, id], map: "support_queues_pkey")
+  @@index([tenantId, status, name], map: "support_queues_tenant_status_name_idx")
+  @@map("support_queues")
+}
+
+model ConversationLifecycleEvent {
+  id             String       @id
+  tenantId       String       @map("tenant_id")
+  conversationId String       @map("conversation_id")
+  conversation   Conversation @relation(fields: [tenantId, conversationId], references: [tenantId, id], onDelete: Restrict)
+  eventType      String       @map("event_type")
+  occurredAt     DateTime     @map("occurred_at") @db.Timestamptz(3)
+  ingestedAt     DateTime     @default(now()) @map("ingested_at") @db.Timestamptz(3)
+  actorType      String       @map("actor_type")
+  actorId        String?      @map("actor_id")
+  actorName      String?      @map("actor_name")
+  source         String
+  sourceEventId  String       @map("source_event_id")
+  reason         String?
+  traceId        String       @map("trace_id")
+  schemaVersion  String       @map("schema_version")
+  data           Json
+
+  @@unique([tenantId, source, sourceEventId], map: "conversation_lifecycle_events_source_key")
+  @@index([tenantId, conversationId, occurredAt, id], map: "conversation_lifecycle_events_tenant_conversation_idx")
+  @@index([tenantId, eventType, occurredAt], map: "conversation_lifecycle_events_tenant_type_idx")
+  @@map("conversation_lifecycle_events")
 }
 
 model ConversationMessage {
@@ -660,6 +754,7 @@ model ConversationMessage {
   time           String
   attachments    Json?
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  providerBindings ProviderMessageBinding[]
 
   @@index([conversationId, createdAt], map: "conversation_messages_conversation_id_created_at_idx")
   @@map("conversation_messages")
@@ -763,6 +858,7 @@ model WorkspaceFile {
   tenantId     String   @map("tenant_id")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  providerAttachmentTransfers ProviderAttachmentTransfer[]
 
   @@index([tenantId, fileId], map: "workspace_files_tenant_file_id_idx")
   @@index([storageState, scanState], map: "workspace_files_storage_scan_state_idx")
@@ -862,7 +958,7 @@ model ClientMergeConflict {
 
 model TemplateRecord {
   id        String   @id
-  tenantId  String   @default("tenant-volga") @map("tenant_id")
+  tenantId  String   @map("tenant_id")
   auditId   String?  @map("audit_id")
   channel   String
   scope     String
@@ -917,7 +1013,7 @@ model TemplateAuditEvent {
 
 model KnowledgeArticle {
   id              String   @id
-  tenantId        String   @default("tenant-volga") @map("tenant_id")
+  tenantId        String   @map("tenant_id")
   title           String
   status          String
   category        String
@@ -992,6 +1088,28 @@ model MfaChallenge {
 
   @@index([email, expiresAt], map: "mfa_challenges_email_expires_at_idx")
   @@map("mfa_challenges")
+}
+
+model ProviderMessageBinding {
+  id                     String              @id
+  tenantId               String              @map("tenant_id")
+  channelConnectionId    String              @map("channel_connection_id")
+  conversationId         String              @map("conversation_id")
+  internalMessageId      String              @map("internal_message_id")
+  providerConversationId String              @map("provider_conversation_id")
+  providerMessageId      String              @map("provider_message_id")
+  provider               String
+  status                 String
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  connection             ChannelConnection   @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Cascade)
+  conversation           Conversation        @relation(fields: [tenantId, conversationId], references: [tenantId, id], onDelete: Cascade)
+  internalMessage        ConversationMessage @relation(fields: [internalMessageId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, channelConnectionId, providerMessageId], map: "provider_message_bindings_provider_message_key")
+  @@unique([tenantId, internalMessageId, provider], map: "provider_message_bindings_internal_provider_key")
+  @@index([tenantId, providerConversationId, createdAt], map: "provider_message_bindings_conversation_idx")
+  @@map("provider_message_bindings")
 }
 
 model AuthInviteToken {
@@ -1260,6 +1378,7 @@ model QueueMembership {
   active     Boolean  @default(true)
   updatedAt  DateTime @map("updated_at") @db.Timestamptz(3)
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  queue      SupportQueue @relation(fields: [tenantId, queueId], references: [tenantId, id], onDelete: Cascade)
 
   @@unique([tenantId, queueId, operatorId], map: "queue_memberships_tenant_queue_operator_key")
   @@index([tenantId, queueId, active], map: "queue_memberships_tenant_queue_active_idx")
@@ -1309,11 +1428,15 @@ model RoutingJob {
   conversationId   String?  @map("conversation_id")
   redistributionId String?  @map("redistribution_id")
   runAt            Json?    @map("run_at")
+  claimedAt        DateTime? @map("claimed_at") @db.Timestamptz(3)
+  leaseExpiresAt   DateTime? @map("lease_expires_at") @db.Timestamptz(3)
+  leaseOwner       String?   @map("lease_owner")
   payload          Json
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([queue, status, updatedAt], map: "routing_jobs_queue_status_updated_idx")
+  @@index([queue, status, leaseExpiresAt], map: "routing_jobs_queue_status_lease_expires_idx")
   @@index([queue, updatedAt], map: "routing_jobs_queue_updated_idx")
   @@index([conversationId], map: "routing_jobs_conversation_idx")
   @@map("routing_jobs")
@@ -1437,12 +1560,14 @@ model ReportExportJob {
 }
 
 model ReportIdempotencyKey {
-  key         String   @id
+  tenantId    String   @map("tenant_id")
+  key         String
   fingerprint String
   jobId       String   @map("job_id")
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
+  @@id([tenantId, key])
   @@index([jobId], map: "report_idempotency_keys_job_idx")
   @@map("report_idempotency_keys")
 }
@@ -1635,6 +1760,7 @@ model NotificationPreferenceAuditEvent {
 model PublicApiKey {
   keyId       String   @id @map("key_id")
   tenantId    String   @map("tenant_id")
+  channelConnectionId String? @map("channel_connection_id")
   environment String
   name        String
   owner       String
@@ -1646,6 +1772,7 @@ model PublicApiKey {
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   revealState PublicApiKeyRevealState?
   rotationAuditEvents PublicApiKeyRotationAuditEvent[]
+  channelConnection ChannelConnection? @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Restrict)
 
   @@index([tenantId, environment, status], map: "public_api_keys_tenant_environment_status_idx")
   @@index([tenantId, keyId], map: "public_api_keys_tenant_key_idx")
@@ -1856,6 +1983,13 @@ model ChannelConnection {
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   lastSyncAt        DateTime @map("last_sync_at") @db.Timestamptz(3)
   updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  routingQueue      SupportQueue @relation(fields: [tenantId, routingQueueId], references: [tenantId, id], onDelete: Restrict)
+  publicApiKeys     PublicApiKey[]
+  telegramConnection TelegramConnection?
+  providerCredential ProviderConnectionCredential?
+  providerMessageBindings ProviderMessageBinding[]
+  providerAttachmentTransfers ProviderAttachmentTransfer[]
+  conversations Conversation[]
 
   @@unique([tenantId, id], map: "integration_channel_connections_tenant_id_key")
   @@index([tenantId, type, status], map: "integration_channel_connections_tenant_type_status_idx")
@@ -1892,7 +2026,8 @@ model ChannelConnectionAuditEvent {
 }
 
 model TelegramConnection {
-  tenantId      String   @id @map("tenant_id")
+  channelConnectionId String @id @map("channel_connection_id")
+  tenantId      String   @map("tenant_id")
   botId         String?  @map("bot_id")
   botToken      String   @map("bot_token")
   botUsername   String?  @map("bot_username")
@@ -1902,13 +2037,17 @@ model TelegramConnection {
   webhookSecret String   @unique(map: "telegram_connections_webhook_secret_key") @map("webhook_secret")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  channelConnection ChannelConnection @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Cascade)
 
+  @@unique([tenantId, channelConnectionId], map: "telegram_connections_tenant_channel_key")
+  @@index([tenantId, status, updatedAt], map: "telegram_connections_tenant_status_updated_idx")
   @@index([status, updatedAt], map: "telegram_connections_status_updated_idx")
   @@map("telegram_connections")
 }
 
 model BotScenario {
   id            String   @id
+  activeVersionId String? @map("active_version_id")
   tenantId      String   @map("tenant_id")
   name          String
   schemaVersion String   @map("schema_version")
@@ -1937,6 +2076,7 @@ model BotScenarioVersion {
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   scenario       BotScenario @relation(fields: [tenantId, scenarioId], references: [tenantId, id], onDelete: Cascade)
   publishAuditEvents BotPublishAuditEvent[]
+  runtimeInstances BotRuntimeInstance[]
 
   @@unique([tenantId, scenarioId, versionId], map: "bot_scenario_versions_tenant_scenario_version_key")
   @@index([tenantId, scenarioId, status], map: "bot_scenario_versions_tenant_scenario_status_idx")
@@ -1962,18 +2102,135 @@ model BotPublishAuditEvent {
 }
 
 model AutomationPublishIdempotencyKey {
-  key         String   @id
+  tenantId    String   @map("tenant_id")
+  key         String
   fingerprint String
   result      Json
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  @@id([tenantId, key])
   @@map("automation_publish_idempotency_keys")
+}
+
+model ProviderConnectionCredential {
+  channelConnectionId String   @id @map("channel_connection_id")
+  tenantId             String   @map("tenant_id")
+  provider             String
+  externalAccountId    String   @map("external_account_id")
+  accessTokenEncrypted String   @map("access_token_encrypted")
+  webhookSecretEncrypted String @map("webhook_secret_encrypted")
+  confirmationCodeEncrypted String? @map("confirmation_code_encrypted")
+  keyVersion           String   @map("key_version")
+  apiVersion           String?  @map("api_version")
+  status               String
+  lastWebhookAt        DateTime? @map("last_webhook_at") @db.Timestamptz(3)
+  lastError             String?  @map("last_error")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  channelConnection    ChannelConnection @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, channelConnectionId], map: "provider_connection_credentials_tenant_channel_key")
+  @@index([tenantId, provider, status], map: "provider_connection_credentials_tenant_provider_status_idx")
+  @@map("provider_connection_credentials")
+}
+
+model ProviderAttachmentTransfer {
+  id                      String   @id
+  tenantId                String   @map("tenant_id")
+  channelConnectionId     String   @map("channel_connection_id")
+  provider                String
+  fileId                  String   @map("file_id")
+  contentVersion          String   @map("content_version")
+  status                  String
+  providerAttachmentId    String?  @map("provider_attachment_id")
+  providerAttachmentToken String?  @map("provider_attachment_token")
+  error                   String?
+  attempts                Int      @default(0)
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  channelConnection       ChannelConnection @relation(fields: [tenantId, channelConnectionId], references: [tenantId, id], onDelete: Cascade)
+  file                    WorkspaceFile @relation(fields: [fileId], references: [fileId], onDelete: Cascade)
+
+  @@unique([tenantId, channelConnectionId, provider, fileId, contentVersion], map: "provider_attachment_transfers_identity_key")
+  @@index([tenantId, channelConnectionId, provider, status], map: "provider_attachment_transfers_connection_status_idx")
+  @@index([fileId, updatedAt], map: "provider_attachment_transfers_file_updated_idx")
+  @@map("provider_attachment_transfers")
+}
+
+model BotRuntimeInstance {
+  id                String   @id
+  tenantId          String   @map("tenant_id")
+  conversationId    String   @map("conversation_id")
+  scenarioId        String   @map("scenario_id")
+  versionId         String   @map("version_id")
+  currentNodeId     String   @map("current_node_id")
+  status            String
+  context           Json     @default("{}")
+  attempts          Int      @default(0)
+  nextAttemptAt     DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  lastError         String?  @map("last_error")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version           BotScenarioVersion @relation(fields: [tenantId, scenarioId, versionId], references: [tenantId, scenarioId, versionId], onDelete: Restrict)
+  steps             BotRuntimeStepJournal[]
+
+  @@unique([tenantId, conversationId], map: "bot_runtime_instances_tenant_conversation_key")
+  @@index([tenantId, status, nextAttemptAt], map: "bot_runtime_instances_tenant_status_retry_idx")
+  @@map("bot_runtime_instances")
+}
+
+model BotRuntimeStepJournal {
+  id              String   @id
+  runtimeId       String   @map("runtime_id")
+  tenantId        String   @map("tenant_id")
+  conversationId  String   @map("conversation_id")
+  inputEventId    String   @map("input_event_id")
+  inputEvent      Json     @map("input_event")
+  nodeId          String   @map("node_id")
+  nodeType        String   @map("node_type")
+  outcome         String
+  error           String?
+  webhookResponse Json?    @map("webhook_response")
+  handoffSummary  Json?    @map("handoff_summary")
+  sideEffects     Json     @default("[]") @map("side_effects")
+  lifecycleEvent  Json?    @map("lifecycle_event")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  runtime         BotRuntimeInstance @relation(fields: [runtimeId], references: [id], onDelete: Cascade)
+  effects         BotRuntimeSideEffect[]
+
+  @@unique([tenantId, conversationId, inputEventId], map: "bot_runtime_steps_tenant_conversation_event_key")
+  @@index([runtimeId, createdAt], map: "bot_runtime_steps_runtime_created_idx")
+  @@map("bot_runtime_step_journal")
+}
+
+model BotRuntimeSideEffect {
+  id             String   @id
+  stepId         String   @map("step_id")
+  tenantId       String   @map("tenant_id")
+  conversationId String   @map("conversation_id")
+  kind           String
+  payload        Json
+  status         String   @default("pending")
+  attempts       Int      @default(0)
+  nextAttemptAt  DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  leaseUntil     DateTime? @map("lease_until") @db.Timestamptz(3)
+  lastError      String?  @map("last_error")
+  deliveredAt    DateTime? @map("delivered_at") @db.Timestamptz(3)
+  deadLetteredAt DateTime? @map("dead_lettered_at") @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  step           BotRuntimeStepJournal @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@unique([stepId, id], map: "bot_runtime_side_effects_step_id_key")
+  @@index([status, nextAttemptAt, leaseUntil], map: "bot_runtime_side_effects_reconcile_idx")
+  @@index([tenantId, conversationId, createdAt], map: "bot_runtime_side_effects_tenant_conversation_idx")
+  @@map("bot_runtime_side_effects")
 }
 
 model AutomationBotTestRun {
   testRunId String   @id @map("test_run_id")
-  tenantId  String?  @map("tenant_id")
+  tenantId  String   @map("tenant_id")
   scenarioId String  @map("scenario_id")
   auditId   String   @map("audit_id")
   cases     Json     @default("[]")
@@ -2160,6 +2417,107 @@ model AiScoringAudit {
   @@index([tenantId, traceId], map: "ai_scoring_audits_tenant_trace_idx")
   @@index([tenantId, providerId, providerResultId], map: "ai_scoring_audits_tenant_provider_result_idx")
   @@map("ai_scoring_audits")
+}
+
+model ProactiveExposure {
+  exposureId          String   @id @map("exposure_id")
+  tenantId            String   @map("tenant_id")
+  presenceSessionId   String   @map("presence_session_id")
+  channelConnectionId String   @map("channel_connection_id")
+  subjectId           String   @map("subject_id")
+  ruleId              String   @map("rule_id")
+  variant             String
+  experimentId        String   @map("experiment_id")
+  experimentVersion   String   @map("experiment_version")
+  segmentSnapshot     Json     @default("{}") @map("segment_snapshot")
+  occurrenceKey       String   @map("occurrence_key")
+  message             String
+  status              String
+  plannedAt           DateTime @map("planned_at") @db.Timestamptz(3)
+  deliveredAt         DateTime? @map("delivered_at") @db.Timestamptz(3)
+  shownAt             DateTime? @map("shown_at") @db.Timestamptz(3)
+  dismissedAt         DateTime? @map("dismissed_at") @db.Timestamptz(3)
+  acceptedAt          DateTime? @map("accepted_at") @db.Timestamptz(3)
+  attributionWindowEndsAt DateTime? @map("attribution_window_ends_at") @db.Timestamptz(3)
+  failedAt            DateTime? @map("failed_at") @db.Timestamptz(3)
+  conversationId      String?  @map("conversation_id")
+  failureCode         String?  @map("failure_code")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, ruleId, subjectId, occurrenceKey], map: "proactive_exposures_occurrence_key")
+  @@index([tenantId, presenceSessionId, status, plannedAt], map: "proactive_exposures_session_status_idx")
+  @@index([tenantId, ruleId, subjectId, plannedAt], map: "proactive_exposures_cooldown_idx")
+  @@index([tenantId, ruleId, variant, plannedAt], map: "proactive_exposures_metrics_idx")
+  @@map("proactive_exposures")
+}
+
+model ProactiveConversionEvent {
+  conversionId      String   @id @map("conversion_id")
+  tenantId          String   @map("tenant_id")
+  exposureId        String   @map("exposure_id")
+  ruleId            String   @map("rule_id")
+  variant           String
+  experimentId      String   @map("experiment_id")
+  experimentVersion String   @map("experiment_version")
+  conversationId    String   @map("conversation_id")
+  messageId         String?  @map("message_id")
+  trigger           String
+  occurredAt        DateTime @map("occurred_at") @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, exposureId], map: "proactive_conversion_events_tenant_exposure_key")
+  @@index([tenantId, ruleId, variant, occurredAt], map: "proactive_conversion_events_metrics_idx")
+  @@index([tenantId, conversationId, occurredAt], map: "proactive_conversion_events_conversation_idx")
+  @@map("proactive_conversion_events")
+}
+
+model SdkVisitorPresenceSession {
+  id                    String   @id
+  tenantId              String   @map("tenant_id")
+  channelConnectionId   String   @map("channel_connection_id")
+  subjectId             String   @map("subject_id")
+  sessionKeyHash        String   @map("session_key_hash")
+  pageUrl               String?  @map("page_url")
+  pagePath              String?  @map("page_path")
+  referrer              String?
+  connected             Boolean  @default(true)
+  firstSeenAt           DateTime @map("first_seen_at") @db.Timestamptz(3)
+  lastSeenAt            DateTime @map("last_seen_at") @db.Timestamptz(3)
+  disconnectedAt        DateTime? @map("disconnected_at") @db.Timestamptz(3)
+  expiresAt             DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, channelConnectionId, sessionKeyHash], map: "sdk_presence_tenant_connection_session_key")
+  @@index([connected, expiresAt], map: "sdk_presence_connected_expires_idx")
+  @@index([tenantId, subjectId, lastSeenAt], map: "sdk_presence_tenant_subject_seen_idx")
+  @@map("sdk_visitor_presence_sessions")
+}
+
+model AiSuggestionDecision {
+  decisionId       String   @map("decision_id")
+  tenantId         String   @map("tenant_id")
+  suggestionId     String   @map("suggestion_id")
+  conversationId   String   @map("conversation_id")
+  action           String
+  originalText     String   @map("original_text")
+  originalTextHash String   @map("original_text_hash")
+  finalText        String?  @map("final_text")
+  finalTextHash    String?  @map("final_text_hash")
+  operatorId       String   @map("operator_id")
+  operatorName     String?  @map("operator_name")
+  providerId       String?  @map("provider_id")
+  providerResultId String?  @map("provider_result_id")
+  scoringAuditId   String?  @map("scoring_audit_id")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([tenantId, decisionId], map: "ai_suggestion_decisions_pkey")
+  @@unique([tenantId, suggestionId], map: "ai_suggestion_decisions_tenant_suggestion_key")
+  @@index([tenantId, conversationId, createdAt], map: "ai_suggestion_decisions_tenant_conversation_created_idx")
+  @@index([tenantId, action, createdAt], map: "ai_suggestion_decisions_tenant_action_created_idx")
+  @@index([tenantId, providerId, providerResultId], map: "ai_suggestion_decisions_tenant_provider_result_idx")
+  @@map("ai_suggestion_decisions")
 }
 
 model PlatformTelemetrySample {

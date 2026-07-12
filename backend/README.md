@@ -57,7 +57,7 @@ The root `docker-compose.yml` is the fast local, non-production mode: it starts 
 docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build
 ```
 
-That overlay sets `RUNTIME_PROFILE=production-like`, disables demo service-admin header auth, and switches automation, identity, billing, conversation, workspace, integrations, notifications, operations, platform, routing and reports repositories to Prisma. It should start without JSON fallback store blockers when those repository modes are active.
+That overlay sets `RUNTIME_PROFILE=production-like`, disables demo service-admin header auth, and switches automation, identity, billing, conversation, workspace, integrations, notifications, operations, platform, quality, routing and reports repositories to Prisma. It should start without JSON fallback store blockers when those repository modes are active.
 
 ## Frontend Real API Mode
 

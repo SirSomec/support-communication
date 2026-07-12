@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
-import { isLocalRuntime } from "../runtime/local-runtime.js";
-import { bootstrapPlatformState } from "./seed.js";
 import type { FeatureFlag, PlatformComponent, PlatformIncident, PlatformMetric, PlatformTenant } from "./platform.types.js";
 import type {
   PlatformFeatureFlagRule,
@@ -553,10 +551,6 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
       return defaultRepository;
     }
 
-    if (isLocalRuntime()) {
-      return PlatformRepository.inMemory(bootstrapPlatformState());
-    }
-
     return PlatformRepository.inMemory();
   }
 
@@ -569,17 +563,16 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
   }
 
   static inMemory(seed?: PlatformState): PlatformRepository {
-    const resolved = seed ?? (isLocalRuntime() ? bootstrapPlatformState() : seedPlatformState());
-    return new PlatformRepository(new InMemoryStore(resolved));
+    return new PlatformRepository(new InMemoryStore(seed ?? seedPlatformState()));
   }
 
   static open({ filePath, seed = seedPlatformState() }: PlatformRepositoryOptions): PlatformRepository {
     return new PlatformRepository(new JsonFileStore({ filePath, seed }));
   }
 
-  static prisma({ client }: { client: PrismaPlatformClient }): PlatformRepository {
+  static prisma({ client, seed }: { client: PrismaPlatformClient; seed?: PlatformState }): PlatformRepository {
     assertCompletePrismaPlatformClient(client);
-    return new PlatformRepository(new InMemoryStore(bootstrapPlatformState()), client);
+    return new PlatformRepository(new InMemoryStore(seed ?? seedPlatformState()), client);
   }
 
   readState(): PlatformState {
@@ -595,7 +588,8 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
       return this.readState();
     }
 
-    const state = bootstrapPlatformState();
+    const seed = normalizeState(this.store.read());
+    const state = clone(seed);
     const [
       runtimeRows,
       telemetryRows,
@@ -633,8 +627,8 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
     state.featureFlagRules = featureFlagRuleRows.map(toFeatureFlagRule);
     state.platformAuditRows = auditRows.map(toPlatformAuditRow);
     state.platformOutboxRows = outboxRows.map(toPlatformOutboxRow);
-    state.incidents = overlayById(bootstrapPlatformState().incidents, state.incidents);
-    state.featureFlags = overlayById(bootstrapPlatformState().featureFlags, state.featureFlags);
+    state.incidents = overlayById(seed.incidents, state.incidents);
+    state.featureFlags = overlayById(seed.featureFlags, state.featureFlags);
 
     return normalizeState(state);
   }
@@ -648,7 +642,7 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
       return this.listIncidents();
     }
 
-    return overlayById(bootstrapPlatformState().incidents, await this.listRuntimeRecords<PlatformIncident>("incidents"));
+    return overlayById(this.readCatalogState().incidents, await this.listRuntimeRecords<PlatformIncident>("incidents"));
   }
 
   listPlatformTenants(): PlatformTenant[] {
@@ -766,7 +760,7 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
       return this.listFeatureFlags();
     }
 
-    return overlayById(bootstrapPlatformState().featureFlags, await this.listRuntimeRecords<FeatureFlag>("featureFlags"));
+    return overlayById(this.readCatalogState().featureFlags, await this.listRuntimeRecords<FeatureFlag>("featureFlags"));
   }
 
   saveFeatureFlag(flag: FeatureFlag): FeatureFlag {
@@ -1553,7 +1547,7 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
   }
 
   private readCatalogState(): PlatformState {
-    return this.prismaClient ? bootstrapPlatformState() : this.readState();
+    return this.prismaClient ? normalizeState(this.store.read()) : this.readState();
   }
 
   private assertSyncRuntimeAvailable(): void {
@@ -2054,33 +2048,27 @@ function seedPlatformState(): PlatformState {
 }
 
 function normalizeState(state: Partial<PlatformState>): PlatformState {
-  const bootstrap = bootstrapPlatformState();
-
   return {
     alertAcknowledgements: state.alertAcknowledgements ?? [],
     alertRoutingRules: state.alertRoutingRules ?? [],
-    components: nonEmptyArray(state.components, bootstrap.components),
+    components: state.components ?? [],
     featureFlagOutbox: state.featureFlagOutbox ?? [],
     featureFlagRules: state.featureFlagRules ?? [],
-    featureFlags: nonEmptyArray(state.featureFlags, bootstrap.featureFlags),
+    featureFlags: state.featureFlags ?? [],
     healthRollups: state.healthRollups ?? [],
     incidentCommunicationAttempts: state.incidentCommunicationAttempts ?? [],
     incidentCommunicationDeadLetters: state.incidentCommunicationDeadLetters ?? [],
     incidentCommunicationRetries: state.incidentCommunicationRetries ?? [],
     incidentIdempotencyKeys: state.incidentIdempotencyKeys ?? [],
-    incidentPostmortems: nonEmptyArray(state.incidentPostmortems, bootstrap.incidentPostmortems),
-    incidents: nonEmptyArray(state.incidents, bootstrap.incidents),
-    maintenanceWindows: nonEmptyArray(state.maintenanceWindows, bootstrap.maintenanceWindows),
+    incidentPostmortems: state.incidentPostmortems ?? [],
+    incidents: state.incidents ?? [],
+    maintenanceWindows: state.maintenanceWindows ?? [],
     platformAuditRows: state.platformAuditRows ?? [],
     platformOutboxRows: state.platformOutboxRows ?? [],
-    platformTenants: nonEmptyArray(state.platformTenants, bootstrap.platformTenants),
-    staticMetrics: nonEmptyArray(state.staticMetrics, bootstrap.staticMetrics),
+    platformTenants: state.platformTenants ?? [],
+    staticMetrics: state.staticMetrics ?? [],
     telemetrySamples: state.telemetrySamples ?? []
   };
-}
-
-function nonEmptyArray<T>(value: T[] | undefined, fallback: T[]): T[] {
-  return value?.length ? value : fallback;
 }
 
 function parseOptionalTime(value: string | undefined): number | null {

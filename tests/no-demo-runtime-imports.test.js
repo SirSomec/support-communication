@@ -37,18 +37,20 @@ function toProjectPath(absolutePath) {
   return relative(root, absolutePath).replaceAll("\\", "/");
 }
 
-const BACKEND_RUNTIME_GLOB_SUFFIXES = [".service.ts", ".controller.ts", ".route.ts", ".worker.ts"];
-const BACKEND_FIXTURE_ALLOW_PREFIXES = [
-  "backend/apps/api-gateway/src/",
-  "backend/tests/",
-  "backend/scripts/"
-];
-const BACKEND_FIXTURE_ALLOW_SUFFIXES = [
+const BACKEND_RUNTIME_GLOB_SUFFIXES = [
+  ".service.ts",
+  ".controller.ts",
+  ".route.ts",
+  ".worker.ts",
   ".repository.ts",
-  "seed.ts",
-  "seed-catalog.ts",
-  "bootstrap.ts"
+  ".adapter.ts",
+  ".bootstrap.ts",
+  "/bootstrap.ts",
+  ".main.ts"
 ];
+const KNOWN_RUNTIME_SEED_IMPORTS = new Set();
+const KNOWN_PRISMA_ID_DEFAULTS = new Set();
+const KNOWN_RUNTIME_TENANT_FALLBACKS = new Set();
 
 function isBackendRuntimeFile(projectPath) {
   if (!projectPath.startsWith("backend/apps/api-gateway/src/")) {
@@ -58,32 +60,54 @@ function isBackendRuntimeFile(projectPath) {
   return BACKEND_RUNTIME_GLOB_SUFFIXES.some((suffix) => projectPath.endsWith(suffix));
 }
 
-function isBackendFixtureImportAllowed(projectPath) {
-  if (projectPath.startsWith("backend/tests/")) {
-    return true;
-  }
-
-  if (projectPath.startsWith("backend/scripts/")) {
-    return true;
-  }
-
-  if (projectPath.includes("/seed") || projectPath.endsWith("seed.ts") || projectPath.endsWith("bootstrap.ts")) {
-    return true;
-  }
-
-  if (projectPath.endsWith(".repository.ts")) {
-    return true;
-  }
-
-  return false;
-}
-
 const DATA_IMPORT_PATTERN = /from\s+["'](?:\.\.\/)+data(?:\.js)?["']|from\s+["'](?:\.\.\/)+data\/[^"']+["']|from\s+["'][^"']*\/src\/data(?:\/[^"']+)?["']|from\s+["']\.\/data(?:\/[^"']+)?["']/;
 const MOCK_BACKEND_PATTERN = /mockBackend\.js/;
 const DEMO_UI_TOKEN_PATTERN = /demo-ui-/;
 const ONBOARDING_UI_TOKEN_PATTERN = /onboarding-ui-/;
-const FIXTURE_IMPORT_PATTERN = /from\s+["'][^"']*\.(?:fixtures|seed-catalog)(?:\.(?:js|ts))?["']/;
-const DEMO_TENANT_PATTERN = /tenant-demo/;
+const TENANT_FALLBACK_PATTERN = /(?:\?\?|\|\|)\s*["']tenant-(?:demo|volga)["']|DEFAULT_TENANT_ID\s*=\s*["']tenant-(?:demo|volga)["']/;
+
+function extractModuleSpecifiers(source) {
+  const specifiers = [];
+  for (const match of source.matchAll(/\bfrom\s+["']([^"']+)["']/g)) {
+    specifiers.push(match[1]);
+  }
+  for (const match of source.matchAll(/\bimport\s+["']([^"']+)["']/g)) {
+    specifiers.push(match[1]);
+  }
+  return specifiers;
+}
+
+function isFixtureModuleSpecifier(specifier) {
+  return /(?:^|\/)(?:seed(?:-catalog)?|[^/]+\.fixtures)(?:\.(?:js|ts))?$/.test(specifier);
+}
+
+function collectPrismaIdDefaults(source) {
+  const violations = [];
+  let model = "";
+  for (const line of source.split(/\r?\n/)) {
+    const modelMatch = line.match(/^model\s+(\w+)\s*\{/);
+    if (modelMatch) {
+      model = modelMatch[1];
+      continue;
+    }
+    if (line.trim() === "}") {
+      model = "";
+      continue;
+    }
+    const fieldMatch = line.match(/^\s*(tenantId|userId|providerId)\s+\w+[^\n]*@default\(\s*["'][^"']+["']\s*\)/);
+    if (model && fieldMatch) {
+      violations.push(`${model}.${fieldMatch[1]}`);
+    }
+  }
+  return violations.sort();
+}
+
+function methodBody(source, methodName) {
+  const start = source.indexOf(`async ${methodName}(`);
+  if (start === -1) return "";
+  const next = source.indexOf("\n  async ", start + 1);
+  return source.slice(start, next === -1 ? source.length : next);
+}
 
 describe("runtime demo-data guard", () => {
   it("does not allow frontend runtime imports from src/data or mockBackend", () => {
@@ -140,7 +164,7 @@ describe("runtime demo-data guard", () => {
     );
   });
 
-  it("does not allow backend runtime imports from *.fixtures.ts", () => {
+  it("detects backend runtime imports from fixture and seed catalogs", () => {
     const backendRoot = join(root, "backend/apps/api-gateway/src");
     const files = walkFiles(backendRoot, {
       extensions: [".ts"],
@@ -151,31 +175,54 @@ describe("runtime demo-data guard", () => {
     for (const absolutePath of files) {
       const projectPath = toProjectPath(absolutePath);
 
-      if (!isBackendRuntimeFile(projectPath) && !projectPath.endsWith(".ts")) {
+      if (!isBackendRuntimeFile(projectPath)) {
         continue;
       }
-
-      if (!FIXTURE_IMPORT_PATTERN.test(read(projectPath))) {
-        continue;
-      }
-
-      if (isBackendFixtureImportAllowed(projectPath)) {
-        continue;
-      }
-
-      if (isBackendRuntimeFile(projectPath)) {
-        violations.push(`${projectPath}: imports *.fixtures.ts in runtime path`);
+      if (extractModuleSpecifiers(read(projectPath)).some(isFixtureModuleSpecifier)) {
+        violations.push(projectPath);
       }
     }
 
+    const unexpected = violations.filter((path) => !KNOWN_RUNTIME_SEED_IMPORTS.has(path));
     assert.deepEqual(
-      violations,
+      unexpected,
       [],
-      `Backend runtime services must not import fixtures:\n${violations.join("\n")}`
+      `New backend runtime fixture imports are forbidden:\n${unexpected.join("\n")}`
     );
+    assert.match(read("docs/product-completeness-register.md"), /product-gap:runtime-fixtures/);
   });
 
-  it("does not allow tenant-demo fallbacks in backend runtime paths", () => {
+  it("classifies seed-catalog and fixture module specifiers without false positives", () => {
+    assert.equal(isFixtureModuleSpecifier("./seed-catalog.js"), true);
+    assert.equal(isFixtureModuleSpecifier("../catalog/conversation.fixtures.ts"), true);
+    assert.equal(isFixtureModuleSpecifier("./seed.ts"), true);
+    assert.equal(isFixtureModuleSpecifier("./fixture-model.js"), false);
+  });
+
+  it("detects hardcoded Prisma defaults for tenant, user and provider ids", () => {
+    const violations = collectPrismaIdDefaults(read("backend/prisma/schema.prisma"));
+    const unexpected = violations.filter((item) => !KNOWN_PRISMA_ID_DEFAULTS.has(item));
+
+    assert.deepEqual(unexpected, [], `New hardcoded Prisma id defaults are forbidden:\n${unexpected.join("\n")}`);
+    assert.match(read("docs/product-completeness-register.md"), /product-gap:runtime-fixtures/);
+  });
+
+  it("requires Quality write APIs to persist before returning success evidence", () => {
+    const source = read("backend/apps/api-gateway/src/quality/quality.service.ts");
+    const contracts = [
+      ["recordClientQualityRating", "await this.qualityRepository.saveQualityRating("],
+      ["recordManualQaReview", "await this.qualityRepository.saveManualQaReview("],
+      ["scoreDraftResponse", "await this.qualityRepository.saveAiScoringAudit("]
+    ];
+
+    for (const [methodName, persistenceCall] of contracts) {
+      const body = methodBody(source, methodName);
+      assert.ok(body.includes(persistenceCall), `${methodName} must persist through ${persistenceCall}`);
+      assert.ok(body.indexOf(persistenceCall) < body.lastIndexOf("return createEnvelope("), `${methodName} must persist before success`);
+    }
+  });
+
+  it("does not allow demo or Volga tenant fallbacks in backend runtime paths", () => {
     const backendRoot = join(root, "backend/apps/api-gateway/src");
     const files = walkFiles(backendRoot, {
       extensions: [".ts"],
@@ -189,15 +236,17 @@ describe("runtime demo-data guard", () => {
         continue;
       }
 
-      if (DEMO_TENANT_PATTERN.test(read(projectPath))) {
-        violations.push(`${projectPath}: contains tenant-demo runtime fallback`);
+      if (TENANT_FALLBACK_PATTERN.test(read(projectPath))) {
+        violations.push(`${projectPath}: contains hardcoded tenant runtime fallback`);
       }
     }
 
+    const unexpected = violations.filter((entry) => !KNOWN_RUNTIME_TENANT_FALLBACKS.has(entry.split(": contains")[0]));
     assert.deepEqual(
-      violations,
+      unexpected,
       [],
-      `Backend runtime services must require tenant context instead of tenant-demo:\n${violations.join("\n")}`
+      `Backend runtime services must require tenant context instead of demo/Volga fallback:\n${unexpected.join("\n")}`
     );
+    assert.match(read("docs/product-completeness-register.md"), /product-gap:runtime-fixtures/);
   });
 });

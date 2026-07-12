@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { ServiceAdminSessionGuard } from "../apps/api-gateway/src/identity/service-admin-session.guard.ts";
 import { IdentityRepository, hashServiceAdminToken } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { createSeededIdentityRepository } from "../apps/api-gateway/src/identity/seed.ts";
 
 describe("service admin session guard", () => {
   const previousEnv = { ...process.env };
@@ -58,7 +59,7 @@ describe("service admin session guard", () => {
 
   it("rejects tenant admin bearer sessions even when they have wildcard permissions", async () => {
     Object.assign(process.env, requiredConfigEnv({ NODE_ENV: "test" }));
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
     IdentityRepository.useDefault(repository);
     const tenantSession = await repository.createTenantOperatorSession({
       tenantId: "tenant-volga",
@@ -80,12 +81,15 @@ describe("service admin session guard", () => {
 
   it("allows service-admin bearer sessions with wildcard permissions", async () => {
     Object.assign(process.env, requiredConfigEnv({ NODE_ENV: "test" }));
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
     IdentityRepository.useDefault(repository);
     const session = await repository.createServiceAdminSession({
       actorId: "svc-admin-wildcard",
       actorName: "Wildcard Service Admin",
+      adminEmail: "wildcard-service-admin@example.com",
       allowedActions: ["*"],
+      availableOrganizations: [],
+      currentTenantId: "",
       mfaVerified: true,
       ttlMinutes: 30
     });
@@ -110,12 +114,15 @@ describe("service admin session guard", () => {
 
   it("accepts bearer service-admin access tokens, rejects raw session ids and records permission denials", async () => {
     Object.assign(process.env, requiredConfigEnv({ NODE_ENV: "test" }));
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
     IdentityRepository.useDefault(repository);
     const session = await repository.createServiceAdminSession({
       actorId: "svc-admin-prod",
       actorName: "Production Admin",
+      adminEmail: "production-admin@example.com",
       allowedActions: ["tenants.manage"],
+      availableOrganizations: [],
+      currentTenantId: "",
       mfaVerified: true,
       ttlMinutes: 30
     });

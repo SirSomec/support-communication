@@ -111,150 +111,6 @@ export interface KnowledgeAttachmentDeletePayload {
   reason?: string;
 }
 
-const clientProfiles: ClientProfileRecord[] = [
-  {
-    id: "maria",
-    sourceProfileId: "src_sdk_maria",
-    name: "Maria K.",
-    channel: "SDK",
-    phone: "+7 999 204-18-44",
-    device: "Android",
-    entry: "SDK",
-    topic: "Delivery / Status",
-    clientSince: "2024-05-12",
-    previous: [["2024-05-05", "Return", "Closed"]]
-  },
-  {
-    id: "dmitry",
-    sourceProfileId: "src_telegram_dmitry",
-    name: "Dmitry S.",
-    channel: "Telegram",
-    phone: "+7 916 481-77-02",
-    device: "iOS",
-    entry: "Telegram",
-    topic: "Delivery / Address",
-    clientSince: "2024-06-03",
-    previous: [["2024-05-11", "Promo code", "Closed"]]
-  },
-  {
-    id: "olga",
-    sourceProfileId: "src_sdk_olga",
-    name: "Olga L.",
-    channel: "SDK",
-    phone: "+7 985 430-09-40",
-    device: "iOS",
-    entry: "SDK",
-    topic: "Payment / Refund",
-    clientSince: "2024-03-14",
-    previous: [["2024-05-28", "Card change", "Closed"]]
-  }
-];
-
-const templateFixtures: TemplateRecord[] = [
-  {
-    id: "delay",
-    title: "Delivery delay",
-    scope: "team",
-    channel: "SDK",
-    topic: "Delivery",
-    usage: 184,
-    updated: "2026-06-27T08:04:00.000Z",
-    text: "I understand the wait. I will check the order status and return with the delivery window.",
-    version: 3
-  },
-  {
-    id: "refund",
-    title: "Refund status",
-    scope: "team",
-    channel: "VK",
-    topic: "Payment",
-    usage: 73,
-    updated: "2026-06-20T12:00:00.000Z",
-    text: "I will check the refund status and confirm the expected posting date.",
-    version: 2
-  }
-];
-
-const knowledgeFixtures: KnowledgeArticle[] = [
-  {
-    id: "kb-delivery-tracking",
-    tenantId: "tenant-volga",
-    title: "Order tracking",
-    status: "published",
-    category: "Delivery",
-    topics: ["Delivery / Status"],
-    channels: ["SDK", "Telegram", "MAX", "VK"],
-    visibility: "public",
-    version: "v4.2",
-    updated: "2026-06-27T10:40:00.000Z",
-    owner: "Elena S.",
-    usage: 312,
-    helpfulRate: 89,
-    body: "Check the order status in OMS and give the customer the current delivery stage.",
-    attachments: [
-      { id: "att-delivery-map", name: "delivery-status-map.pdf", type: "PDF", size: "1.8 MB", status: "ready" }
-    ],
-    versions: [
-      { id: "kb-delivery-v42", label: "v4.2", status: "published", author: "Elena S.", updated: "2026-06-27T10:40:00.000Z" },
-      { id: "kb-delivery-v41", label: "v4.1", status: "archived", author: "Ivan P.", updated: "2026-06-20T15:10:00.000Z" }
-    ],
-    approvalHistory: [
-      { id: "approval-delivery-3", actor: "Elena S.", action: "published", tone: "ok" },
-      { id: "approval-delivery-2", actor: "Anna R.", action: "sent_for_review", tone: "info" }
-    ]
-  },
-  {
-    id: "kb-refund-terms",
-    tenantId: "tenant-volga",
-    title: "Refund timelines",
-    status: "review",
-    category: "Payment",
-    topics: ["Payment / Refund"],
-    channels: ["SDK", "VK"],
-    visibility: "public",
-    version: "v2.0",
-    updated: "2026-06-26T17:05:00.000Z",
-    owner: "Anna R.",
-    usage: 147,
-    helpfulRate: 82,
-    body: "Refund timing depends on payment method. Always include the next step and request number.",
-    attachments: [
-      { id: "att-refund-policy", name: "refund-policy.pdf", type: "PDF", size: "920 KB", status: "ready" }
-    ],
-    versions: [
-      { id: "kb-refund-v20", label: "v2.0", status: "review", author: "Anna R.", updated: "2026-06-26T17:05:00.000Z" }
-    ],
-    approvalHistory: [
-      { id: "approval-refund-2", actor: "Anna R.", action: "sent_for_review", tone: "info" }
-    ]
-  },
-  {
-    id: "kb-auth-code",
-    tenantId: "tenant-volga",
-    title: "Confirmation code not received",
-    status: "draft",
-    category: "Authorization",
-    topics: ["Authorization / Code"],
-    channels: ["VK", "MAX"],
-    visibility: "internal",
-    version: "v0.7",
-    updated: "2026-06-22T12:00:00.000Z",
-    owner: "Oleg N.",
-    usage: 38,
-    helpfulRate: 74,
-    body: "Check code send limits and phone freshness before publishing.",
-    attachments: [
-      { id: "att-auth-checklist", name: "auth-checklist.md", type: "MD", size: "24 KB", status: "ready" }
-    ],
-    versions: [
-      { id: "kb-auth-v07", label: "v0.7", status: "draft", author: "Oleg N.", updated: "2026-06-22T12:00:00.000Z" }
-    ],
-    approvalHistory: [
-      { id: "approval-auth-1", actor: "Oleg N.", action: "created_draft", tone: "info" }
-    ]
-  }
-];
-
 export class WorkspaceService {
   private readonly fileUploadQuota?: FileUploadQuotaChecker;
   private readonly objectStorage: ObjectStorageSigner;
@@ -267,14 +123,14 @@ export class WorkspaceService {
     this.objectStorage = options.objectStorage ?? createObjectStorageSigner();
   }
 
-  async fetchClientProfiles(filters: { maskSensitive?: boolean | string; page?: number | string; pageSize?: number | string; segmentId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async fetchClientProfiles(filters: { maskSensitive?: boolean | string; page?: number | string; pageSize?: number | string; segmentId?: string } = {}, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const page = toPositiveInt(filters.page, 1);
     const pageSize = toPositiveInt(filters.pageSize, 25);
     const maskSensitive = true;
-    const allProfiles = await this.listClientProfiles();
+    const allProfiles = await this.listClientProfiles(context);
     const segment = resolveClientSegment(allProfiles, filters.segmentId);
     const profiles = filterClientProfilesBySegment(allProfiles, segment);
-    const mergeEvents = await this.workspaceRepository.listClientMergeEvents();
+    const mergeEvents = await this.workspaceRepository.listClientMergeEvents({ tenantId: context.tenantId });
     const items = profiles.slice((page - 1) * pageSize, page * pageSize).map((profile) => ({
       ...profile,
       phone: maskPhone(profile.phone)
@@ -301,8 +157,8 @@ export class WorkspaceService {
     });
   }
 
-  async fetchClientSegments(): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const profiles = await this.listClientProfiles();
+  async fetchClientSegments(context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const profiles = await this.listClientProfiles(context);
     const segments = buildClientSegments(profiles);
 
     return createEnvelope({
@@ -318,14 +174,17 @@ export class WorkspaceService {
     });
   }
 
-  async createClientExport(payload: { format?: string; reason?: string; segmentId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async createClientExport(payload: { format?: string; reason?: string; segmentId?: string } = {}, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     if (!hasReason(payload.reason)) {
       return invalidEnvelope(CLIENT_SERVICE, "createClientExport", "reason_required", "A client export reason of at least 8 characters is required.", {
         segmentId: payload.segmentId ?? null
       });
     }
+    if (!context.tenantId) {
+      return tenantContextRequiredEnvelope(CLIENT_SERVICE, "createClientExport");
+    }
 
-    const allProfiles = await this.listClientProfiles();
+    const allProfiles = await this.listClientProfiles(context);
     const segment = resolveClientSegment(allProfiles, payload.segmentId);
     const profiles = filterClientProfilesBySegment(allProfiles, segment);
     const format = normalizeClientExportFormat(payload.format);
@@ -350,7 +209,8 @@ export class WorkspaceService {
       reason: String(payload.reason ?? "").trim(),
       ...(segment ? { segment } : {}),
       sensitiveFieldsMasked: true,
-      status: "queued"
+      status: "queued",
+      tenantId: context.tenantId
     };
     const saved = await this.workspaceRepository.saveClientExportJob(job);
 
@@ -366,15 +226,17 @@ export class WorkspaceService {
     });
   }
 
-  async mergeClientProfiles(payload: { candidateProfileId: string; primaryProfileId: string; reason?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async mergeClientProfiles(payload: { candidateProfileId: string; primaryProfileId: string; reason?: string }, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     if (!hasReason(payload.reason)) {
       return invalidEnvelope(CLIENT_SERVICE, "mergeClientProfiles", "reason_required", "A merge reason of at least 8 characters is required.", {
         candidateProfileId: payload.candidateProfileId,
         primaryProfileId: payload.primaryProfileId
       });
     }
+    if (!context.tenantId) {
+      return tenantContextRequiredEnvelope(CLIENT_SERVICE, "mergeClientProfiles");
+    }
 
-    await this.seedClientProfilesIfNeeded();
     const audit = auditEvent("client_merge", "client.merge", payload.reason);
     const mergeEvent = await this.workspaceRepository.saveClientMergeEvent({
       action: "client.merge",
@@ -383,7 +245,8 @@ export class WorkspaceService {
       immutable: true,
       mergeGraphEdge: `${payload.primaryProfileId}->${payload.candidateProfileId}`,
       primaryProfileId: payload.primaryProfileId,
-      reason: payload.reason
+      reason: payload.reason,
+      tenantId: context.tenantId
     });
 
     return createEnvelope({
@@ -395,22 +258,24 @@ export class WorkspaceService {
         primaryProfileId: payload.primaryProfileId,
         mergedProfileId: payload.candidateProfileId,
         mergeGraphEdge: `${payload.primaryProfileId}->${payload.candidateProfileId}`,
-        conflictResolution: await this.detectConflict(payload.primaryProfileId, payload.candidateProfileId),
+        conflictResolution: await this.detectConflict(payload.primaryProfileId, payload.candidateProfileId, context),
         sourceProfileIds: [payload.primaryProfileId, payload.candidateProfileId],
         auditEvent: mergeEvent
       }
     });
   }
 
-  async unmergeClientProfile(payload: { detachedProfileId: string; primaryProfileId: string; reason?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async unmergeClientProfile(payload: { detachedProfileId: string; primaryProfileId: string; reason?: string }, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     if (!hasReason(payload.reason)) {
       return invalidEnvelope(CLIENT_SERVICE, "unmergeClientProfile", "reason_required", "An unmerge reason of at least 8 characters is required.", {
         detachedProfileId: payload.detachedProfileId,
         primaryProfileId: payload.primaryProfileId
       });
     }
+    if (!context.tenantId) {
+      return tenantContextRequiredEnvelope(CLIENT_SERVICE, "unmergeClientProfile");
+    }
 
-    await this.seedClientProfilesIfNeeded();
     const audit = auditEvent("client_merge", "client.unmerge", payload.reason);
     const mergeEvent = await this.workspaceRepository.saveClientMergeEvent({
       action: "client.unmerge",
@@ -419,7 +284,8 @@ export class WorkspaceService {
       immutable: true,
       mergeGraphEdge: `${payload.primaryProfileId}->${payload.detachedProfileId}`,
       primaryProfileId: payload.primaryProfileId,
-      reason: payload.reason
+      reason: payload.reason,
+      tenantId: context.tenantId
     });
 
     return createEnvelope({
@@ -443,6 +309,9 @@ export class WorkspaceService {
   ): Promise<BackendEnvelope<Record<string, unknown>>> {
     if (!String(payload.fileName ?? "").trim()) {
       return invalidEnvelope(FILE_SERVICE, "createUploadDescriptor", "file_name_required", "fileName is required.", {});
+    }
+    if (!context.tenantId) {
+      return tenantContextRequiredEnvelope(FILE_SERVICE, "createUploadDescriptor");
     }
     const tenantId = sanitizeTenantId(context.tenantId);
     if (!ATTACHMENT_CHANNELS.has(String(payload.channel ?? "").trim())) {
@@ -506,7 +375,7 @@ export class WorkspaceService {
       fileName: persisted.fileName,
       objectKey: persisted.objectKey,
       sizeBytes: persisted.sizeBytes,
-      tenantId: persisted.tenantId ?? "tenant-volga"
+      tenantId: requireWorkspaceTenantId(persisted.tenantId)
     });
 
     return createEnvelope({
@@ -533,7 +402,7 @@ export class WorkspaceService {
         fileId: file.fileId,
         fileName: file.fileName,
         objectKey: file.objectKey,
-        tenantId: file.tenantId ?? "tenant-volga"
+        tenantId: requireWorkspaceTenantId(file.tenantId)
       });
 
       if (!objectMetadata) {
@@ -777,7 +646,7 @@ export class WorkspaceService {
       fileId: file.fileId,
       fileName: file.fileName,
       objectKey: file.objectKey,
-      tenantId: file.tenantId ?? "tenant-volga"
+      tenantId: requireWorkspaceTenantId(file.tenantId)
     });
 
     return createEnvelope({
@@ -812,13 +681,15 @@ export class WorkspaceService {
   }
 
   async saveTemplate(template: { channel: string; id?: string; text: string; title: string; topic: string; version?: number }, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    await this.seedTemplatesIfNeeded();
+    if (!context.tenantId) {
+      return tenantContextRequiredEnvelope(TEMPLATE_SERVICE, "saveTemplate");
+    }
     const auditId = makeAuditId("template");
     const saved = await this.workspaceRepository.saveTemplate({
       ...template,
       id: template.id ?? `tpl_${randomUUID()}`,
       scope: "team",
-      tenantId: context.tenantId ?? "tenant-volga",
+      tenantId: context.tenantId,
       updated: new Date().toISOString(),
       usage: 0,
       version: template.version ?? 1,
@@ -879,6 +750,21 @@ export class WorkspaceService {
     });
   }
 
+  async createKnowledgeArticle(payload: { body?: string; category?: string; channels?: string[]; title?: string; topics?: string[]; visibility?: string }, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = String(context.tenantId ?? "").trim();
+    const title = normalizeText(payload.title);
+    if (!tenantId) return tenantContextRequiredEnvelope(KNOWLEDGE_SERVICE, "createKnowledgeArticle", {});
+    if (!title) return invalidEnvelope(KNOWLEDGE_SERVICE, "createKnowledgeArticle", "knowledge_article_title_required", "Knowledge article title is required.", {});
+    const now = new Date().toISOString();
+    const id = `kb-${randomUUID()}`;
+    const article: KnowledgeArticle = {
+      approvalHistory: [{ action: "created_draft", actor: "current-operator", id: `evt_knowledge_${randomUUID()}`, immutable: true, timestamp: now, tone: "info" }],
+      attachments: [], body: normalizeText(payload.body) ?? "", category: normalizeText(payload.category) ?? "General", channels: normalizeStringList(payload.channels) ?? ["SDK"], helpfulRate: 0, id, owner: "current-operator", status: "draft", tenantId, title, topics: normalizeStringList(payload.topics) ?? ["General"], updated: now, usage: 0, version: "v1.0-draft", versions: [{ author: "current-operator", id: `${id}-v1`, label: "v1.0-draft", status: "draft", updated: now }], visibility: normalizeText(payload.visibility) ?? "internal"
+    };
+    const saved = await this.workspaceRepository.saveKnowledgeArticle(article);
+    return createEnvelope({ service: KNOWLEDGE_SERVICE, operation: "createKnowledgeArticle", traceId: workspaceTraceId(KNOWLEDGE_SERVICE, "createKnowledgeArticle"), meta: apiMeta({ articleId: id, tenantId }), data: { article: saved, auditEvent: auditEvent("knowledge", "knowledge.article.created", "Created a new knowledge article draft.") } });
+  }
+
   async saveKnowledgeArticleDraft(
     payload: {
       articleId: string;
@@ -898,7 +784,9 @@ export class WorkspaceService {
       });
     }
 
-    await this.seedKnowledgeIfNeeded(context);
+    if (!context.tenantId) {
+      return tenantContextRequiredEnvelope(KNOWLEDGE_SERVICE, "saveKnowledgeArticleDraft", { articleId: payload.articleId });
+    }
     const article = await this.workspaceRepository.findKnowledgeArticle(payload.articleId, { tenantId: context.tenantId });
 
     if (!article) {
@@ -913,7 +801,7 @@ export class WorkspaceService {
       category: normalizeText(payload.category) ?? article.category,
       channels: normalizeStringList(payload.channels) ?? article.channels,
       status: "draft",
-      tenantId: article.tenantId ?? context.tenantId,
+      tenantId: article.tenantId,
       title: normalizeText(payload.title) ?? article.title,
       topics: normalizeStringList(payload.topics) ?? article.topics,
       version: nextDraftVersion(article.version),
@@ -1036,7 +924,9 @@ export class WorkspaceService {
       });
     }
 
-    await this.seedKnowledgeIfNeeded(context);
+    if (!context.tenantId) {
+      return tenantContextRequiredEnvelope(KNOWLEDGE_SERVICE, "addKnowledgeArticleAttachment", { articleId: payload.articleId });
+    }
     const article = await this.workspaceRepository.findKnowledgeArticle(payload.articleId, { tenantId: context.tenantId });
     if (!article) {
       return notFoundEnvelope(KNOWLEDGE_SERVICE, "addKnowledgeArticleAttachment", "knowledge_article_not_found", `Article ${payload.articleId} was not found.`, {
@@ -1080,7 +970,7 @@ export class WorkspaceService {
         ...article.approvalHistory
       ],
       status: article.status === "published" ? "draft" : article.status,
-      tenantId: article.tenantId ?? context.tenantId,
+      tenantId: article.tenantId,
       updated: now,
       visibility: article.status === "published" ? "internal" : article.visibility
     });
@@ -1109,7 +999,9 @@ export class WorkspaceService {
       });
     }
 
-    await this.seedKnowledgeIfNeeded(context);
+    if (!context.tenantId) {
+      return tenantContextRequiredEnvelope(KNOWLEDGE_SERVICE, "deleteKnowledgeArticleAttachment", { articleId: payload.articleId });
+    }
     const article = await this.workspaceRepository.findKnowledgeArticle(payload.articleId, { tenantId: context.tenantId });
     if (!article) {
       return notFoundEnvelope(KNOWLEDGE_SERVICE, "deleteKnowledgeArticleAttachment", "knowledge_article_not_found", `Article ${payload.articleId} was not found.`, {
@@ -1147,7 +1039,7 @@ export class WorkspaceService {
       ],
       attachments: article.attachments.filter((item) => knowledgeAttachmentId(item) !== payload.attachmentId),
       status: article.status === "published" ? "draft" : article.status,
-      tenantId: article.tenantId ?? context.tenantId,
+      tenantId: article.tenantId,
       updated: now,
       visibility: article.status === "published" ? "internal" : article.visibility
     });
@@ -1208,7 +1100,13 @@ export class WorkspaceService {
       };
     }
 
-    await this.seedKnowledgeIfNeeded(context);
+    if (!context.tenantId) {
+      return {
+        ok: false,
+        envelope: tenantContextRequiredEnvelope(KNOWLEDGE_SERVICE, operation, { articleId: payload.articleId })
+      };
+    }
+
     const article = await this.workspaceRepository.findKnowledgeArticle(payload.articleId, { tenantId: context.tenantId });
     if (!article) {
       return {
@@ -1264,7 +1162,7 @@ export class WorkspaceService {
         ...article.approvalHistory
       ],
       status: transition.nextStatus,
-      tenantId: article.tenantId ?? context.tenantId,
+      tenantId: article.tenantId,
       updated: now,
       versions: updateKnowledgeVersionStatuses(article, transition.nextStatus, now, actor, payload.reason),
       visibility: transition.nextVisibility
@@ -1289,61 +1187,23 @@ export class WorkspaceService {
     });
   }
 
-  private async detectConflict(primaryProfileId: string, candidateProfileId: string): Promise<string> {
-    const profiles = await this.listClientProfiles();
+  private async detectConflict(primaryProfileId: string, candidateProfileId: string, context: WorkspaceRequestContext = {}): Promise<string> {
+    const profiles = await this.listClientProfiles(context);
     return detectConflict(profiles, primaryProfileId, candidateProfileId);
   }
 
-  private async listClientProfiles(): Promise<ClientProfileRecord[]> {
-    const profiles = await this.workspaceRepository.listClientProfiles();
-    return profiles.length ? profiles : clone(clientProfiles);
+  private async listClientProfiles(context: WorkspaceRequestContext = {}): Promise<ClientProfileRecord[]> {
+    return this.workspaceRepository.listClientProfiles({ tenantId: context.tenantId });
   }
 
   private async listKnowledgeArticles(context: WorkspaceRequestContext = {}): Promise<KnowledgeArticle[]> {
-    await this.seedKnowledgeIfNeeded(context);
-    const articles = await this.workspaceRepository.listKnowledgeArticles({ tenantId: context.tenantId });
-    return articles.length ? articles : context.tenantId ? [] : clone(knowledgeFixtures);
+    return this.workspaceRepository.listKnowledgeArticles({ tenantId: context.tenantId });
   }
 
   private async listTemplates(context: WorkspaceRequestContext = {}): Promise<TemplateRecord[]> {
-    const templates = await this.workspaceRepository.listTemplates({ tenantId: context.tenantId });
-    return templates.length ? templates : context.tenantId ? [] : clone(templateFixtures);
+    return this.workspaceRepository.listTemplates({ tenantId: context.tenantId });
   }
 
-  private async seedKnowledgeIfNeeded(context: WorkspaceRequestContext = {}): Promise<void> {
-    const articles = await this.workspaceRepository.listKnowledgeArticles({ tenantId: context.tenantId });
-    if (articles.length > 0) {
-      return;
-    }
-
-    for (const article of knowledgeFixtures) {
-      if (!context.tenantId || article.tenantId === context.tenantId) {
-        await this.workspaceRepository.saveKnowledgeArticle({ ...article, tenantId: article.tenantId ?? context.tenantId });
-      }
-    }
-  }
-
-  private async seedClientProfilesIfNeeded(): Promise<void> {
-    const profiles = await this.workspaceRepository.listClientProfiles();
-    if (profiles.length > 0) {
-      return;
-    }
-
-    for (const profile of clientProfiles) {
-      await this.workspaceRepository.saveClientProfile(profile);
-    }
-  }
-
-  private async seedTemplatesIfNeeded(): Promise<void> {
-    const templates = await this.workspaceRepository.listTemplates();
-    if (templates.length > 0) {
-      return;
-    }
-
-    for (const template of templateFixtures) {
-      await this.workspaceRepository.saveTemplate(template);
-    }
-  }
 }
 
 function apiMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -1515,6 +1375,20 @@ function invalidEnvelope(service: string, operation: string, code: string, messa
   });
 }
 
+function tenantContextRequiredEnvelope(
+  service: string,
+  operation: string,
+  data: Record<string, unknown> = {}
+): BackendEnvelope<Record<string, unknown>> {
+  return invalidEnvelope(
+    service,
+    operation,
+    "tenant_context_required",
+    "A current tenant is required for this operation.",
+    data
+  );
+}
+
 function conflictEnvelope(service: string, operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
   return createEnvelope({
     service,
@@ -1571,9 +1445,20 @@ function sanitizeFileName(fileName: string): string {
     .at(-1) ?? "upload.bin";
 }
 
-function sanitizeTenantId(tenantId?: string): string {
-  const normalized = String(tenantId ?? "tenant-volga").trim().replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");
-  return normalized && normalized !== "." && normalized !== ".." ? normalized : "tenant-volga";
+function sanitizeTenantId(tenantId: string): string {
+  const normalized = tenantId.trim().replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");
+  if (!normalized || normalized === "." || normalized === "..") {
+    throw new Error("workspace_tenant_id_invalid");
+  }
+  return normalized;
+}
+
+function requireWorkspaceTenantId(value: unknown): string {
+  const tenantId = String(value ?? "").trim();
+  if (!tenantId) {
+    throw new Error("workspace_tenant_id_required");
+  }
+  return tenantId;
 }
 
 function createOpaqueObjectKey(): string {

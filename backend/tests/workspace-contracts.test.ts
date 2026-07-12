@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { createDeterministicObjectStorageSigner, createS3CompatibleObjectStorageSigner } from "../apps/api-gateway/src/workspace/object-storage.ts";
 import { WorkspaceRepository, type ClientProfileRecord, type KnowledgeArticle, type TemplateRecord } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
-import { WorkspaceService } from "../apps/api-gateway/src/workspace/workspace.service.ts";
+import { WorkspaceService as RuntimeWorkspaceService, type WorkspaceRequestContext } from "../apps/api-gateway/src/workspace/workspace.service.ts";
+import { bootstrapWorkspaceState } from "../apps/api-gateway/src/workspace/seed.ts";
 import { TopicDirectoryService } from "../apps/api-gateway/src/workspace/topic-directory.service.ts";
 
 type ClientProfileIdentityRepository = {
@@ -18,6 +19,38 @@ type ClientProfileIdentityRepository = {
   saveClientProfile(profile: ClientProfileIdentityRecord): ClientProfileIdentityRecord | Promise<ClientProfileIdentityRecord>;
   updateClientMergeConflictState(conflictId: string, state: ClientMergeConflictState): ClientMergeConflictRecord | Promise<ClientMergeConflictRecord | undefined> | undefined;
 };
+
+beforeEach(() => {
+  WorkspaceRepository.useDefault(WorkspaceRepository.inMemory(bootstrapWorkspaceState()));
+});
+
+const TEST_TENANT_CONTEXT: WorkspaceRequestContext = { tenantId: "tenant-volga" };
+
+class WorkspaceService extends RuntimeWorkspaceService {
+  override createClientExport(payload: Parameters<RuntimeWorkspaceService["createClientExport"]>[0] = {}, context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.createClientExport(payload, context);
+  }
+
+  override mergeClientProfiles(payload: Parameters<RuntimeWorkspaceService["mergeClientProfiles"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.mergeClientProfiles(payload, context);
+  }
+
+  override unmergeClientProfile(payload: Parameters<RuntimeWorkspaceService["unmergeClientProfile"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.unmergeClientProfile(payload, context);
+  }
+
+  override createUploadDescriptor(payload: Parameters<RuntimeWorkspaceService["createUploadDescriptor"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.createUploadDescriptor(payload, context);
+  }
+
+  override saveTemplate(payload: Parameters<RuntimeWorkspaceService["saveTemplate"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.saveTemplate(payload, context);
+  }
+
+  override saveKnowledgeArticleDraft(payload: Parameters<RuntimeWorkspaceService["saveKnowledgeArticleDraft"]>[0], context: WorkspaceRequestContext = TEST_TENANT_CONTEXT) {
+    return super.saveKnowledgeArticleDraft(payload, context);
+  }
+}
 
 describe("topic directory settings contracts", () => {
   it("manages hierarchical topics and preserves archived topics out of active options", async () => {
@@ -1570,9 +1603,10 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     const source = readFileSync(new URL("../apps/api-gateway/src/workspace/files.controller.ts", import.meta.url), "utf8");
 
     assert.match(source, /getDownloadPolicy\(fileId,\s*\{\s*canDownload:\s*true,\s*\.\.\.tenantContextFromServiceAdminRequest\(request\)\s*\}\)/s);
-    assert.match(source, /@Post\(":fileId\/scan-result"\)/);
+    assert.match(source, /export class FileScanCallbackController/);
+    assert.match(source, /@Post\(":fileId\/scan-result"\)\s+@UseGuards\(FileScanCallbackGuard\)/s);
     assert.match(source, /@Headers\("idempotency-key"\)\s+idempotencyKey/);
-    assert.match(source, /recordScanResult\(\s*\{\s*\.\.\.payload,\s*fileId,\s*idempotencyKey:\s*idempotencyKey\s*\?\?\s*payload\.idempotencyKey\s*\},\s*tenantContextFromServiceAdminRequest\(request\)\s*\)/s);
+    assert.match(source, /recordScanResult\(\s*\{\s*\.\.\.payload,\s*fileId,\s*idempotencyKey:\s*idempotencyKey\s*\?\?\s*payload\.idempotencyKey\s*\}\s*\)/s);
     assert.match(source, /tenantContextFromServiceAdminRequest\(request\)/);
   });
 
@@ -2337,6 +2371,7 @@ function templateRecord(input: {
     channel: "SDK",
     id: input.id,
     scope: "team",
+    tenantId: "tenant-volga",
     text: input.text,
     title: input.title,
     topic: input.topic ?? "Delivery",

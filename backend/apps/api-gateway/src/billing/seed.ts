@@ -7,6 +7,7 @@ import {
   tenantBillingStates
 } from "./seed-catalog.js";
 import type { BillingState } from "./billing.repository.js";
+import { BillingRepository } from "./billing.repository.js";
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -30,4 +31,8 @@ export function bootstrapBillingState(base?: Partial<BillingState>): BillingStat
     tariffs: clone(billingTariffs),
     tenants: clone(tenantBillingStates)
   };
+}
+
+export function createSeededBillingRepository(base?: Partial<BillingState>): BillingRepository {
+  return BillingRepository.inMemory(bootstrapBillingState(base));
 }

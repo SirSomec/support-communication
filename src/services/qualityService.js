@@ -37,11 +37,20 @@ export const qualityService = {
     });
   },
 
+  async recordSuggestionDecision(payload = {}) {
+    return apiRequest("/quality/ai-suggestion-decisions", {
+      body: payload,
+      method: "POST",
+      operation: "recordSuggestionDecision",
+      service: SERVICE
+    });
+  },
+
   getReadiness() {
     return {
       id: SERVICE,
       status: "ready",
-      operations: ["fetchQualityWorkspace", "scoreDraftResponse", "scoreDraftResponses", "recordManualQaReview"],
+      operations: ["fetchQualityWorkspace", "scoreDraftResponse", "scoreDraftResponses", "recordManualQaReview", "recordSuggestionDecision"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
       note: "Connected to API Gateway routes."

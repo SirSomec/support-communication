@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "backup:runtime": "node scripts/runtime-backup.mjs",
+    "restore-drill:runtime": "node scripts/runtime-restore-drill.mjs",
+    "health:compose": "node scripts/compose-health-check.mjs",
+    "test:backup-restore": "node scripts/backup-restore-gate.mjs",
+    "monitor:runtime": "node scripts/runtime-watchdog.mjs",
+    "monitor:runtime:once": "node scripts/runtime-watchdog.mjs --once",
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",

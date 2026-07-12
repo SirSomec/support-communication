@@ -8,9 +8,11 @@ interface SlaTimerTransitionInput {
 }
 
 interface SlaTimerClaimWorkerInput {
+  leaseDurationMs?: number;
   limit?: number;
   now?: Date;
   routingRepository: Pick<RoutingRepository, "claimJob" | "listJobs">;
+  workerId?: string;
 }
 
 interface SlaTimerFailureInput {
@@ -39,6 +41,8 @@ interface SlaTimerTransitionReady {
   conversationId: string;
   fromStatus: "paused";
   jobId: string;
+  leaseOwner?: string;
+  tenantId?: string;
   status: "ready";
   toStatus: "active";
 }
@@ -48,6 +52,8 @@ interface SlaTimerOverdueTransitionReady {
   conversationId: string;
   fromStatus: "active" | "assigned";
   jobId: string;
+  leaseOwner?: string;
+  tenantId?: string;
   status: "ready";
   toSlaTone: "danger";
   toStatus: "active" | "assigned";
@@ -77,9 +83,13 @@ export async function claimDueSlaTimerJobs(input: SlaTimerClaimWorkerInput): Pro
   for (const job of dueJobs) {
     const current = await input.routingRepository.claimJob({
       claimedAt: now.toISOString(),
+      expectedLeaseExpiresAt: job.leaseExpiresAt ?? null,
+      expectedLeaseOwner: job.leaseOwner ?? null,
       expectedStatus: job.status ?? null,
       jobId: job.id,
-      queue: job.queue
+      ...(input.leaseDurationMs ? { leaseDurationMs: input.leaseDurationMs } : {}),
+      queue: job.queue,
+      ...(input.workerId ? { workerId: input.workerId } : {})
     });
     if (current) {
       claimed.push(current);
@@ -109,6 +119,8 @@ export async function recordSlaTimerJobFailure(input: SlaTimerFailureInput): Pro
     completedAt: undefined,
     deadLetteredAt: exhausted ? failedAt.toISOString() : undefined,
     lastError: typeof input.error === "string" ? input.error : input.error.message,
+    leaseExpiresAt: undefined,
+    leaseOwner: undefined,
     nextAttemptAt,
     status: exhausted ? "dead_lettered" : "failed"
   });
@@ -130,6 +142,8 @@ export async function applySlaTimerTransition(input: SlaTimerApplyWorkerInput): 
     completedAt,
     conversationId: transition.conversationId,
     jobId: transition.jobId,
+    ...(transition.leaseOwner ? { leaseOwner: transition.leaseOwner } : {}),
+    ...(transition.tenantId ? { tenantId: transition.tenantId } : {}),
     ...(transition.action === "mark_sla_overdue" ? { toSlaTone: transition.toSlaTone } : {}),
     toStatus: transition.toStatus
   });
@@ -157,6 +171,8 @@ export function planSlaTimerTransition(input: SlaTimerTransitionInput): SlaTimer
       conversationId: input.conversation.id,
       fromStatus: input.conversation.status,
       jobId: input.job.id,
+      ...(input.job.leaseOwner ? { leaseOwner: input.job.leaseOwner } : {}),
+      ...(input.job.tenantId ? { tenantId: input.job.tenantId } : {}),
       status: "ready",
       toSlaTone: "danger",
       toStatus: input.conversation.status
@@ -172,6 +188,8 @@ export function planSlaTimerTransition(input: SlaTimerTransitionInput): SlaTimer
     conversationId: input.conversation.id,
     fromStatus: "paused",
     jobId: input.job.id,
+    ...(input.job.leaseOwner ? { leaseOwner: input.job.leaseOwner } : {}),
+    ...(input.job.tenantId ? { tenantId: input.job.tenantId } : {}),
     status: "ready",
     toStatus: "active"
   };
@@ -202,6 +220,9 @@ function isClaimableSlaTimerJob(job: RoutingJobDescriptor, now: Date): boolean {
   }
   if (status === "failed") {
     return typeof job.nextAttemptAt === "string" && isDue(job.nextAttemptAt, now);
+  }
+  if (status === "claimed") {
+    return typeof job.leaseExpiresAt !== "string" || isDue(job.leaseExpiresAt, now);
   }
 
   return false;

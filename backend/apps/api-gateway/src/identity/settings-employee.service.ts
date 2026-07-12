@@ -3,6 +3,7 @@ import { createEnvelope, type BackendEnvelope } from "@support-communication/env
 import { makeAuditId } from "./backend-ids.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
 import { IdentityRepository, type IdentityTenantUser } from "./identity.repository.js";
+import { TeamDirectoryRepository } from "./team-directory.repository.js";
 
 const SERVICE = "settingsService";
 const supportedChannels = ["SDK", "Telegram", "MAX", "VK"];
@@ -59,9 +60,13 @@ interface EmployeeGroup {
 export class SettingsEmployeeService {
   private readonly employeeSettings = new Map<string, EmployeeSettingsOverlay>();
   private readonly groups = new Map<string, EmployeeGroup>();
+  private readonly hydratedGroupTenants = new Set<string>();
   private readonly auditEvents: Array<Record<string, unknown>> = [];
 
-  constructor(private readonly identityRepository = IdentityRepository.default()) {}
+  constructor(
+    private readonly identityRepository = IdentityRepository.default(),
+    private readonly teamDirectoryRepository = TeamDirectoryRepository.default()
+  ) {}
 
   listSettingsAuditEvents() {
     return this.auditEvents.map((event) => ({ ...event }));
@@ -73,8 +78,11 @@ export class SettingsEmployeeService {
       return tenantContextRequiredEnvelope("fetchEmployees");
     }
 
+    await this.hydrateGroups(tenantId);
+
     const users = await this.identityRepository.findTenantUsers(tenantId);
     const employees = users.map((user) => this.toEmployee(user));
+    await this.persistGroups(tenantId);
     const filtered = employees
       .filter((employee) => !filters.status || filters.status === "all" || employee.status === filters.status)
       .filter((employee) => !filters.roleKey || filters.roleKey === "all" || employee.roleKey === filters.roleKey)
@@ -124,6 +132,7 @@ export class SettingsEmployeeService {
     if (!tenantId) {
       return tenantContextRequiredEnvelope("inviteEmployee");
     }
+    await this.hydrateGroups(tenantId);
 
     const email = String(payload.email ?? "").trim().toLowerCase();
     const name = String(payload.name ?? "").trim();
@@ -147,6 +156,16 @@ export class SettingsEmployeeService {
       role: roleNameFromKey(roleKey),
       status: "invited",
       mfa: "not_configured",
+      metadata: {
+        employeeSettings: {
+          canOverride: roleKey !== "employee",
+          channels: ["SDK", "Telegram"],
+          chatLimit: roleKey === "admin" ? 20 : 8,
+          groupId,
+          roleKey,
+          sensitiveData: roleKey !== "employee"
+        }
+      },
       inviteStatus: "pending",
       lastActiveAt: null,
       sessions: 0,
@@ -169,6 +188,7 @@ export class SettingsEmployeeService {
       sensitiveData: roleKey !== "employee"
     });
     this.syncGroupMember(groupId, saved.id, saved.tenantId);
+    await this.persistGroups(tenantId);
 
     return createEnvelope({
       service: SERVICE,
@@ -200,6 +220,8 @@ export class SettingsEmployeeService {
       return tenantMismatch;
     }
 
+    await this.hydrateGroups(user.tenantId);
+
     const current = this.getEmployeeSettings(user);
     const nextRoleKey = payload.roleKey === undefined ? current.roleKey : normalizeRoleKey(payload.roleKey);
     const nextGroupId = payload.groupId === undefined ? current.groupId : normalizeGroupId(payload.groupId, nextRoleKey);
@@ -215,11 +237,13 @@ export class SettingsEmployeeService {
 
     const saved = await this.identityRepository.saveTenantUser({
       ...user,
+      metadata: { ...(user.metadata ?? {}), employeeSettings: next },
       role: roleNameFromKey(next.roleKey),
       status: payload.status ?? user.status
     });
     this.employeeSettings.set(saved.id, next);
     this.syncGroupMember(next.groupId, saved.id, saved.tenantId);
+    await this.persistGroups(saved.tenantId);
 
     return createEnvelope({
       service: SERVICE,
@@ -336,6 +360,8 @@ export class SettingsEmployeeService {
       return tenantContextRequiredEnvelope("fetchGroups");
     }
 
+    await this.hydrateGroups(tenantId);
+
     return createEnvelope({
       service: SERVICE,
       operation: "fetchGroups",
@@ -350,6 +376,8 @@ export class SettingsEmployeeService {
     if (!tenantId) {
       return tenantContextRequiredEnvelope("createGroup");
     }
+
+    await this.hydrateGroups(tenantId);
 
     const name = String(payload.name ?? "").trim();
     if (!name) {
@@ -367,6 +395,7 @@ export class SettingsEmployeeService {
       updatedAt: new Date().toISOString()
     };
     this.groups.set(groupKey(tenantId, group.id), group);
+    await this.persistGroups(tenantId);
 
     return createEnvelope({
       service: SERVICE,
@@ -385,6 +414,8 @@ export class SettingsEmployeeService {
     if (!tenantId) {
       return tenantContextRequiredEnvelope("updateGroup", { groupId });
     }
+
+    await this.hydrateGroups(tenantId);
 
     this.ensureDefaultGroupsForTenant(tenantId);
     const group = this.groups.get(groupKey(tenantId, groupId));
@@ -409,6 +440,7 @@ export class SettingsEmployeeService {
       updatedAt: new Date().toISOString()
     };
     this.groups.set(groupKey(tenantId, groupId), updated);
+    await this.persistGroups(tenantId);
 
     return createEnvelope({
       service: SERVICE,
@@ -461,7 +493,8 @@ export class SettingsEmployeeService {
     }
 
     const roleKey = normalizeRoleKey(user.role);
-    const settings: EmployeeSettingsOverlay = {
+    const persisted = employeeSettingsFromMetadata(user.metadata);
+    const settings: EmployeeSettingsOverlay = persisted ?? {
       canOverride: roleKey !== "employee",
       channels: roleKey === "admin" ? supportedChannels : roleKey === "senior" ? ["SDK", "Telegram", "VK"] : ["SDK", "Telegram"],
       chatLimit: roleKey === "admin" ? 20 : roleKey === "senior" ? 14 : 8,
@@ -515,6 +548,46 @@ export class SettingsEmployeeService {
     });
   }
 
+  private async hydrateGroups(tenantId: string): Promise<void> {
+    if (this.hydratedGroupTenants.has(tenantId)) {
+      return;
+    }
+
+    const tenant = await this.identityRepository.findTenant(tenantId);
+    const persistedTeams = await this.teamDirectoryRepository.listTeams(tenantId);
+    const compatibleGroups = persistedTeams.length ? persistedTeams : tenant?.employeeGroups ?? [];
+    for (const group of compatibleGroups) {
+      if (group.tenantId === tenantId && group.id) {
+        this.groups.set(groupKey(tenantId, group.id), {
+          ...group,
+          channels: normalizeChannels(group.channels),
+          memberIds: Array.from(new Set(group.memberIds.map(String).filter(Boolean)))
+        });
+      }
+    }
+    this.hydratedGroupTenants.add(tenantId);
+    this.ensureDefaultGroupsForTenant(tenantId);
+  }
+
+  private async persistGroups(tenantId: string): Promise<void> {
+    const tenant = await this.identityRepository.findTenant(tenantId);
+    if (!tenant) {
+      return;
+    }
+    const users = await this.identityRepository.findTenantUsers(tenantId);
+    const validUserIds = new Set(users.map((user) => user.id));
+    const groups = this.listGroups(tenantId).map((group) => ({
+      ...group,
+      memberIds: group.memberIds.filter((memberId) => validUserIds.has(memberId)),
+      status: "active"
+    }));
+    await Promise.all(groups.map((group) => this.teamDirectoryRepository.saveTeam(group)));
+    await this.identityRepository.saveTenant({
+      ...tenant,
+      employeeGroups: groups
+    });
+  }
+
   private persistAuditEvent<TEvent extends Record<string, unknown>>(event: TEvent): TEvent {
     this.auditEvents.push({ ...event });
     return event;
@@ -540,6 +613,24 @@ const defaultGroups: Array<Omit<EmployeeGroup, "tenantId">> = [
 
 function groupKey(tenantId: string, groupId: string): string {
   return `${tenantId}:${groupId}`;
+}
+
+function employeeSettingsFromMetadata(metadata: Record<string, unknown> | undefined): EmployeeSettingsOverlay | null {
+  const candidate = metadata?.employeeSettings;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return null;
+  }
+
+  const value = candidate as Record<string, unknown>;
+  const roleKey = normalizeRoleKey(value.roleKey);
+  return {
+    canOverride: Boolean(value.canOverride),
+    channels: normalizeChannels(Array.isArray(value.channels) ? value.channels.map(String) : []),
+    chatLimit: normalizeChatLimit(value.chatLimit),
+    groupId: normalizeGroupId(value.groupId, roleKey),
+    roleKey,
+    sensitiveData: Boolean(value.sensitiveData)
+  };
 }
 
 function auditEvent(action: string, tenantId: string, targetId: string, reason: string, at = new Date().toISOString()) {

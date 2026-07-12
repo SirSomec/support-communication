@@ -8,6 +8,7 @@ import {
   OperationsRepository,
   type PrismaOperationsClient
 } from "../apps/api-gateway/src/operations/operations.repository.ts";
+import { bootstrapOperationsState } from "../apps/api-gateway/src/operations/seed.ts";
 
 describe("Prisma-backed operations repository contracts", () => {
   it("fails closed when Prisma operations runtime delegates are incomplete", () => {
@@ -57,7 +58,7 @@ describe("Prisma-backed operations repository contracts", () => {
 
   it("persists mutable operations runtime state through Prisma delegates without JSON fallback", async () => {
     const { calls, client } = createFakePrismaOperationsClient();
-    const first = OperationsRepository.prisma({ client });
+    const first = OperationsRepository.prisma({ client, seed: bootstrapOperationsState() });
 
     assert.throws(
       () => first.readState(),

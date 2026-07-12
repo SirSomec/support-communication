@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { createEnvelope, redactExportedDescriptor, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import {
-  createLocalReportObjectStorageAdapter,
   executeCsvReportExport,
   executeXlsxReportExport,
   type ReportCsvColumn,
@@ -10,6 +9,7 @@ import {
   type ReportObjectStorageReader,
   type ReportObjectStorageWriter
 } from "./report-export.worker.js";
+import { createSharedReportObjectStorage, type ReportObjectStorageDownloadSigner } from "./report-object-storage.js";
 import type { ReportExportJob } from "./report.types.js";
 import {
   ReportRepository,
@@ -22,16 +22,23 @@ import {
 } from "./report.repository.js";
 import { buildLiveReportWorkspace, type LiveReportConversation, type LiveReportWorkspace, type LiveReportWorkspaceOptions } from "./report-live-workspace.js";
 import {
-  METRIC_DEFINITION_VERSION,
-  reportColumnOptions as defaultReportColumnOptions
-} from "./seed-catalog.js";
+  REPORT_COLUMN_OPTIONS as defaultReportColumnOptions,
+  REPORT_METRIC_DEFINITION_VERSION
+} from "./report-definition.js";
+import {
+  buildConversationReportDataQuality,
+  buildConversationReportFilterOptions,
+  filterReportConversations,
+  type ConversationReportFilters
+} from "./report-conversation-filters.js";
 
 const REPORT_SERVICE = "reportService";
 
-interface ReportWorkspaceFilters {
+interface ReportWorkspaceFilters extends ConversationReportFilters {
   channel?: string;
   period?: string;
   reportType?: string;
+  timezoneOffsetMinutes?: number | string;
 }
 
 export interface RoutingActivityReportFilters {
@@ -86,30 +93,32 @@ interface ReportQueryPayload {
   parameters?: {
     channel?: string;
     period?: string;
+    timezoneOffsetMinutes?: number | string;
   };
   tenantId?: string;
 }
 
 interface ReportServiceOptions {
   now?: () => Date;
-  objectStorage?: ReportObjectStorageReader & Partial<ReportObjectStorageWriter>;
+  objectStorage?: ReportObjectStorageReader & Partial<ReportObjectStorageWriter & ReportObjectStorageDownloadSigner>;
 }
 
 export class ReportService {
   private readonly idempotencyIndex: Map<string, { fingerprint: string; jobId: string }>;
   private readonly now: () => Date;
-  private readonly objectStorage: ReportObjectStorageReader & Partial<ReportObjectStorageWriter>;
+  private readonly objectStorage: ReportObjectStorageReader & Partial<ReportObjectStorageWriter & ReportObjectStorageDownloadSigner>;
 
   constructor(
     private readonly reportRepository: ReportRepository = ReportRepository.default(),
     options: ReportServiceOptions = {}
   ) {
     const state = this.reportRepository.readState();
-    this.idempotencyIndex = new Map(state.idempotencyKeys.map((item) => [item.key, { fingerprint: item.fingerprint, jobId: item.jobId }]));
+    this.idempotencyIndex = new Map(state.idempotencyKeys.map((item) => [
+      reportTenantIdempotencyKey(item.tenantId, item.key),
+      { fingerprint: item.fingerprint, jobId: item.jobId }
+    ]));
     this.now = options.now ?? (() => new Date());
-    this.objectStorage = options.objectStorage ?? createLocalReportObjectStorageAdapter({
-      rootDir: process.env.REPORT_EXPORT_OBJECT_ROOT?.trim() || ".runtime/report-exports"
-    });
+    this.objectStorage = options.objectStorage ?? createSharedReportObjectStorage(process.env);
   }
 
   private readWorkspaceCatalog(): ReportWorkspaceCatalog {
@@ -213,12 +222,17 @@ export class ReportService {
   }
 
   async fetchReportWorkspace(filters: ReportWorkspaceFilters = {}, context: ReportRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const tenantId = context.tenantId ?? "tenant-volga";
+    const tenantId = context.tenantId?.trim();
+    if (!tenantId) {
+      return tenantScopeRequiredEnvelope("fetchReportWorkspace");
+    }
     const requesterUserId = context.requesterUserId ?? "current-operator";
     const requesterPermissions = normalizeStringList(context.requesterPermissions);
     const requesterRoles = normalizeStringList(context.requesterRoles);
     const workspace = this.readWorkspaceCatalog();
-    const liveWorkspace = await this.buildTenantConversationWorkspace(tenantId, filters);
+    const snapshotAt = this.now();
+    const reportSource = await this.buildTenantConversationWorkspace(tenantId, filters, snapshotAt);
+    const liveWorkspace = reportSource.workspace;
     const hasConversationActivity = liveWorkspace.current.newConversations > 0
       || liveWorkspace.previous.newConversations > 0
       || liveWorkspace.current.closedConversations > 0
@@ -253,33 +267,66 @@ export class ReportService {
           metricTileFromRow(liveWorkspace, "slaPercent", "SLA без нарушения")
         ],
         operators: [],
-        filterOptions: {},
+        filterOptions: {
+          ...buildConversationReportFilterOptions(reportSource.sourceRows),
+          channels: [...new Set(reportSource.sourceRows.map((row) => row.channel).filter(Boolean))]
+            .sort((left, right) => left.localeCompare(right, "ru"))
+        },
         savedReportTemplates: await this.reportRepository.listSavedReportTemplates({ requesterPermissions, requesterRoles, requesterUserId, tenantId }),
         filters,
         metricDefinitionVersion: this.metricDefinitionVersion(),
-        source: "tenant_conversations",
+        snapshotAt: snapshotAt.toISOString(),
+        source: "conversation_lifecycle_events",
+        dataQuality: {
+          ...buildConversationReportDataQuality(reportSource.filteredRows, snapshotAt),
+          historicalLimitations: [
+            "Status transitions and SLA breaches before lifecycle journaling are unavailable",
+            "Conversation creation and message timestamps were backfilled from persisted records"
+          ],
+          metricDefinitionVersion: this.metricDefinitionVersion(),
+          source: "conversation_lifecycle_events"
+        },
         windows: liveWorkspace.windows
       }
     });
   }
 
-  private async buildTenantConversationWorkspace(tenantId: string, filters: ReportWorkspaceFilters): Promise<LiveReportWorkspace> {
+  private async buildTenantConversationWorkspace(
+    tenantId: string,
+    filters: ReportWorkspaceFilters,
+    snapshotAt = this.now()
+  ): Promise<{
+    filteredRows: Awaited<ReturnType<ReportRepository["listConversationReportSourceRowsAsync"]>>;
+    sourceRows: Awaited<ReturnType<ReportRepository["listConversationReportSourceRowsAsync"]>>;
+    workspace: LiveReportWorkspace;
+  }> {
     const options: LiveReportWorkspaceOptions = {
       channel: filters.channel,
-      now: new Date(),
-      period: filters.period as LiveReportWorkspaceOptions["period"]
+      now: snapshotAt,
+      period: filters.period as LiveReportWorkspaceOptions["period"],
+      timezoneOffsetMinutes: normalizeTimezoneOffset(filters.timezoneOffsetMinutes)
     };
     const emptyWorkspace = buildLiveReportWorkspace([], options);
-    const conversations = await this.reportRepository.listConversationReportSourceRowsAsync({
+    const sourceRows = await this.reportRepository.listConversationReportSourceRowsAsync({
       from: new Date(emptyWorkspace.windows.previous.from),
       tenantId,
       to: new Date(emptyWorkspace.windows.current.to)
     });
 
-    return buildLiveReportWorkspace(conversations as LiveReportConversation[], options);
+    const conversations = filterReportConversations(sourceRows, filters);
+    return {
+      filteredRows: conversations,
+      sourceRows,
+      workspace: buildLiveReportWorkspace(conversations as LiveReportConversation[], options)
+    };
   }
 
   async executeReportQuery(payload: ReportQueryPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = payload.tenantId?.trim();
+    if (!tenantId) {
+      return tenantScopeRequiredEnvelope("executeReportQuery");
+    }
+
     if (payload.metricKey !== "rescue.current" && payload.metricKey !== "conversation.current") {
       await this.reportRepository.saveReportQueryExecutionAsync({
         failureEnvelope: {
@@ -299,9 +346,9 @@ export class ReportService {
     const parameters = {
       channel: payload.parameters?.channel ?? "all",
       period: payload.parameters?.period ?? "today",
-      tenantId: payload.tenantId ?? "default"
+      timezoneOffsetMinutes: normalizeTimezoneOffset(payload.parameters?.timezoneOffsetMinutes),
+      tenantId
     };
-    const workspace = this.readWorkspaceCatalog();
     const executionRecord = await this.reportRepository.saveReportQueryExecutionAsync({
       id: makeQueueId("report_query"),
       metricKey: payload.metricKey,
@@ -310,6 +357,7 @@ export class ReportService {
     });
 
     if (payload.metricKey === "conversation.current") {
+      const liveWorkspace = await this.buildTenantConversationWorkspace(tenantId, parameters);
       return createEnvelope({
         service: REPORT_SERVICE,
         operation: "executeReportQuery",
@@ -326,17 +374,35 @@ export class ReportService {
             source: "report_rows"
           },
           parameters,
-          rows: currentConversationMetricRows(workspace.reportRows)
+          rows: currentConversationMetricRows(liveWorkspace.workspace.rows.map((row) => ({ today: row.current })))
         }
       });
     }
 
-    const rows = rescueRowsForChannel(workspace.rescueReportRows as Array<Record<string, unknown>>, parameters.channel);
-    const missed = rows.filter(isMissedRescueRow).length;
-    const total = rows.length;
+    const emptyWorkspace = buildLiveReportWorkspace([], {
+      channel: parameters.channel,
+      period: parameters.period as LiveReportWorkspaceOptions["period"],
+      timezoneOffsetMinutes: parameters.timezoneOffsetMinutes
+    });
+    const conversations = await this.reportRepository.listConversationReportSourceRowsAsync({
+      from: new Date(emptyWorkspace.windows.current.from),
+      tenantId,
+      to: new Date(emptyWorkspace.windows.current.to)
+    });
+    const rescueEvents = conversations
+      .filter((conversation) => parameters.channel === "all" || conversation.channel.toLowerCase() === parameters.channel.toLowerCase())
+      .flatMap((conversation) => conversation.lifecycleEvents ?? [])
+      .filter((event) => event.eventType === "rescue.resolved" || event.eventType === "rescue.auto_returned");
+    const missed = rescueEvents.filter((event) => event.eventType === "rescue.auto_returned" || event.data?.outcome === "missed").length;
+    const total = rescueEvents.length;
     const saved = total - missed;
-    const averageTimerSeconds = total
-      ? Math.round(rows.reduce((sum, row) => sum + parseTimerSeconds(String(row.timer ?? "00:00")), 0) / total)
+    const startedDurations = conversations
+      .flatMap((conversation) => conversation.lifecycleEvents ?? [])
+      .filter((event) => event.eventType === "rescue.started")
+      .map((event) => Number(event.data?.durationSeconds))
+      .filter(Number.isFinite);
+    const averageTimerSeconds = startedDurations.length
+      ? Math.round(startedDurations.reduce((sum, value) => sum + value, 0) / startedDurations.length)
       : 0;
 
     return createEnvelope({
@@ -366,6 +432,11 @@ export class ReportService {
   }
 
   async saveSavedReportTemplate(payload: SaveSavedReportTemplatePayload, context: ReportRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = context.tenantId?.trim();
+    if (!tenantId) {
+      return tenantScopeRequiredEnvelope("saveSavedReportTemplate");
+    }
+
     const columns = payload.columns ?? [];
     if (!columns.length) {
       return invalidEnvelope("saveSavedReportTemplate", "report_template_columns_required", "At least one report template column must be selected.", {
@@ -373,12 +444,11 @@ export class ReportService {
       });
     }
 
-    const tenantId = context.tenantId ?? "tenant-volga";
     const requesterUserId = context.requesterUserId ?? "current-operator";
     const idempotencyKey = payload.idempotencyKey?.trim();
     const fingerprint = savedTemplateFingerprint({ ...payload, columns }, { requesterUserId, tenantId });
     const idempotencyStoreKey = idempotencyKey ? reportIdempotencyKey("saveSavedReportTemplate", idempotencyKey) : undefined;
-    const existingRequest = idempotencyStoreKey ? await this.findIdempotencyRequest(idempotencyStoreKey) : undefined;
+    const existingRequest = idempotencyStoreKey ? await this.findIdempotencyRequest(tenantId, idempotencyStoreKey) : undefined;
 
     if (existingRequest) {
       if (existingRequest.fingerprint !== fingerprint) {
@@ -420,8 +490,8 @@ export class ReportService {
     });
     if (idempotencyKey) {
       const storeKey = reportIdempotencyKey("saveSavedReportTemplate", idempotencyKey);
-      this.idempotencyIndex.set(storeKey, { fingerprint, jobId: template.id });
-      await this.reportRepository.saveIdempotencyKey({ key: storeKey, fingerprint, jobId: template.id });
+      this.idempotencyIndex.set(reportTenantIdempotencyKey(tenantId, storeKey), { fingerprint, jobId: template.id });
+      await this.reportRepository.saveIdempotencyKey({ key: storeKey, fingerprint, jobId: template.id, tenantId });
     }
 
     return createEnvelope({
@@ -437,7 +507,10 @@ export class ReportService {
   }
 
   async getSavedReportTemplate(templateId: string, context: ReportRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const tenantId = context.tenantId ?? "tenant-volga";
+    const tenantId = context.tenantId?.trim();
+    if (!tenantId) {
+      return tenantScopeRequiredEnvelope("getSavedReportTemplate");
+    }
     const template = await this.reportRepository.findSavedReportTemplate(templateId, {
       requesterPermissions: normalizeStringList(context.requesterPermissions),
       requesterRoles: normalizeStringList(context.requesterRoles),
@@ -463,7 +536,10 @@ export class ReportService {
   }
 
   async requestReportExport(payload: RequestReportExportPayload, context: ReportRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const tenantId = context.tenantId ?? "tenant-volga";
+    const tenantId = context.tenantId?.trim();
+    if (!tenantId) {
+      return tenantScopeRequiredEnvelope("requestReportExport");
+    }
     const columns = payload.columns ?? [];
 
     if (!columns.length) {
@@ -475,8 +551,8 @@ export class ReportService {
     }
 
     const idempotencyKey = payload.idempotencyKey?.trim();
-    const fingerprint = requestFingerprint({ ...payload, columns });
-    const existingRequest = idempotencyKey ? await this.findIdempotencyRequest(idempotencyKey) : undefined;
+    const fingerprint = requestFingerprint({ ...payload, columns }, tenantId);
+    const existingRequest = idempotencyKey ? await this.findIdempotencyRequest(tenantId, idempotencyKey) : undefined;
 
     if (existingRequest) {
       if (existingRequest.fingerprint !== fingerprint) {
@@ -502,6 +578,10 @@ export class ReportService {
       }
     }
 
+    const createdAt = this.now().toISOString();
+    const requestedSnapshotAt = typeof payload.filters?.snapshotAt === "string"
+      ? payload.filters.snapshotAt
+      : createdAt;
     const job: ReportExportJob = {
       id: `export-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
       name: `${payload.reportType ?? "Report"}: ${payload.channel ?? "all"}`,
@@ -511,7 +591,7 @@ export class ReportService {
       status: "Queued",
       progress: 8,
       requestedBy: "current-operator",
-      createdAt: new Date().toISOString(),
+      createdAt,
       rows: 0,
       columns: clone(columns),
       backendQueueId: makeQueueId("report"),
@@ -521,13 +601,19 @@ export class ReportService {
       tenantId,
       filters: {
         ...clone(payload.filters ?? {}),
+        snapshotAt: requestedSnapshotAt,
         channel: payload.channel ?? "Все каналы",
         tenantId
       }
     };
 
     if (idempotencyKey) {
-      const writeResult = await this.reportRepository.saveExportJobWithIdempotency(job, { key: idempotencyKey, fingerprint, jobId: job.id });
+      const writeResult = await this.reportRepository.saveExportJobWithIdempotency(job, {
+        key: idempotencyKey,
+        fingerprint,
+        jobId: job.id,
+        tenantId
+      });
       if (writeResult.status === "conflict") {
         return conflictEnvelope("requestReportExport", "idempotency_key_reused", "Idempotency key was already used for a different report export request.", {
           idempotencyKey,
@@ -535,7 +621,10 @@ export class ReportService {
         });
       }
 
-      this.idempotencyIndex.set(idempotencyKey, { fingerprint, jobId: writeResult.job.id });
+      this.idempotencyIndex.set(reportTenantIdempotencyKey(tenantId, idempotencyKey), {
+        fingerprint,
+        jobId: writeResult.job.id
+      });
       return createEnvelope({
         service: REPORT_SERVICE,
         operation: "requestReportExport",
@@ -565,7 +654,10 @@ export class ReportService {
   }
 
   async retryReportExport(payload: RetryExportPayload, context: ReportRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const tenantId = context.tenantId ?? "tenant-volga";
+    const tenantId = context.tenantId?.trim();
+    if (!tenantId) {
+      return tenantScopeRequiredEnvelope("retryReportExport");
+    }
     const job = await this.findExportJob(payload.jobId, tenantId);
 
     if (!job) {
@@ -583,9 +675,9 @@ export class ReportService {
 
     const previousStatusKey = job.statusKey;
     const retryAuditEvent = auditEvent("report.export.retry");
-    job.statusKey = "running";
-    job.status = "Retry running";
-    job.progress = 28;
+    job.statusKey = "queued";
+    job.status = "Retry queued";
+    job.progress = 0;
     job.rows = 0;
     job.backendQueueId = makeQueueId("report");
     job.metricDefinitionVersion = this.metricDefinitionVersion();
@@ -610,8 +702,12 @@ export class ReportService {
     });
   }
 
-  async deadLetterReportExport(payload: DeadLetterExportPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const job = await this.findExportJob(payload.jobId);
+  async deadLetterReportExport(payload: DeadLetterExportPayload, context: ReportRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = context.tenantId?.trim();
+    if (!tenantId) {
+      return tenantScopeRequiredEnvelope("deadLetterReportExport");
+    }
+    const job = await this.findExportJob(payload.jobId, tenantId);
 
     if (!job) {
       return notFoundEnvelope("deadLetterReportExport", "report_export_not_found", `Report export ${payload.jobId} was not found.`, {
@@ -640,7 +736,11 @@ export class ReportService {
   }
 
   async getExportFileDescriptor(jobId: string, context: { canDownload?: boolean; tenantId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const job = await this.findExportJob(jobId, context.tenantId);
+    const tenantId = context.tenantId?.trim();
+    if (!tenantId) {
+      return tenantScopeRequiredEnvelope("getExportFileDescriptor");
+    }
+    const job = await this.findExportJob(jobId, tenantId);
 
     if (!job) {
       return notFoundEnvelope("getExportFileDescriptor", "report_export_not_found", `Report export ${jobId} was not found.`, { jobId });
@@ -660,14 +760,23 @@ export class ReportService {
       });
     }
 
-    const persistedDescriptor = await this.reportRepository.findReportFileDescriptorAsync(job.id);
+    let persistedDescriptor = await this.reportRepository.findReportFileDescriptorAsync(job.id);
+    if (!persistedDescriptor && tenantId === reportExportTenantId(job)) {
+      persistedDescriptor = await this.materializeReadyExportFile(job);
+    }
     if (persistedDescriptor) {
-      if (context.tenantId && persistedDescriptor.tenantId !== context.tenantId) {
+      if (persistedDescriptor.tenantId !== tenantId) {
         return notFoundEnvelope("getExportFileDescriptor", "report_export_file_descriptor_not_found", `Report export file descriptor ${jobId} was not found.`, {
           jobId
         });
       }
 
+      const signedDownload = await this.signReportDownload({
+        fileName: persistedDescriptor.fileName,
+        jobId: job.id,
+        objectKey: persistedDescriptor.objectKey,
+        tenantId
+      });
       return createEnvelope({
         service: REPORT_SERVICE,
         operation: "getExportFileDescriptor",
@@ -677,8 +786,8 @@ export class ReportService {
           ...redactExportedDescriptor({
             checksum: persistedDescriptor.checksum,
             contentType: persistedDescriptor.contentType,
-            downloadUrl: `https://reports.local/download/${job.id}/${persistedDescriptor.fileName}`,
-            expiresIn: "24h",
+            downloadUrl: signedDownload.downloadUrl,
+            expiresAt: signedDownload.expiresAt,
             fileName: persistedDescriptor.fileName,
             jobId: job.id,
             metricDefinitionVersion: persistedDescriptor.metricDefinitionVersion,
@@ -691,31 +800,15 @@ export class ReportService {
       });
     }
 
-    const extension = job.format.toLowerCase();
-    const fileName = `${slugify(job.name)}.${extension}`;
-
-    return createEnvelope({
-      service: REPORT_SERVICE,
-      operation: "getExportFileDescriptor",
-      traceId: reportTraceId("getExportFileDescriptor"),
-      meta: apiMeta({ jobId }),
-      data: {
-        ...redactExportedDescriptor({
-          auditId: job.auditId,
-          downloadUrl: `https://reports.local/download/${job.id}/${fileName}`,
-          expiresIn: "24h",
-          fileName,
-          jobId: job.id,
-          metricDefinitionVersion: job.metricDefinitionVersion ?? this.metricDefinitionVersion(),
-          objectKeyExposed: false,
-          permissionRequired: "reports.export"
-        })
-      }
-    });
+    return notFoundEnvelope("getExportFileDescriptor", "report_export_file_descriptor_not_found", `Report export file descriptor ${jobId} was not found.`, { jobId });
   }
 
   async getExportFileDownload(jobId: string, context: { canDownload?: boolean; tenantId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const job = await this.findExportJob(jobId, context.tenantId);
+    const tenantId = context.tenantId?.trim();
+    if (!tenantId) {
+      return tenantScopeRequiredEnvelope("getExportFileDownload");
+    }
+    const job = await this.findExportJob(jobId, tenantId);
 
     if (!job) {
       return notFoundEnvelope("getExportFileDownload", "report_export_not_found", `Report export ${jobId} was not found.`, { jobId });
@@ -736,10 +829,10 @@ export class ReportService {
     }
 
     let descriptor = await this.reportRepository.findReportFileDescriptorAsync(job.id);
-    if (!descriptor && (!context.tenantId || context.tenantId === reportExportTenantId(job))) {
+    if (!descriptor && tenantId === reportExportTenantId(job)) {
       descriptor = await this.materializeReadyExportFile(job);
     }
-    if (!descriptor || (context.tenantId && descriptor.tenantId !== context.tenantId)) {
+    if (!descriptor || descriptor.tenantId !== tenantId) {
       return notFoundEnvelope("getExportFileDownload", "report_export_file_descriptor_not_found", `Report export file descriptor ${jobId} was not found.`, {
         jobId
       });
@@ -786,9 +879,17 @@ export class ReportService {
     const objectKey = `reports/${tenantId}/${job.id}/${fileName}`;
     const liveWorkspace = await this.buildTenantConversationWorkspace(tenantId, {
       channel: typeof job.filters?.channel === "string" ? job.filters.channel : undefined,
-      period: job.period
+      operatorId: typeof job.filters?.operatorId === "string" ? job.filters.operatorId : undefined,
+      outcome: typeof job.filters?.outcome === "string" ? job.filters.outcome : undefined,
+      period: job.period,
+      queueId: typeof job.filters?.queueId === "string" ? job.filters.queueId : undefined,
+      resolutionOutcome: typeof job.filters?.resolutionOutcome === "string" ? job.filters.resolutionOutcome : undefined,
+      status: typeof job.filters?.status === "string" ? job.filters.status : undefined,
+      teamId: typeof job.filters?.teamId === "string" ? job.filters.teamId : undefined,
+      timezoneOffsetMinutes: job.filters?.timezoneOffsetMinutes as number | string | undefined,
+      topic: typeof job.filters?.topic === "string" ? job.filters.topic : undefined
     });
-    const rows = liveWorkspace.rows.map((row) => ({
+    const rows = liveWorkspace.workspace.rows.map((row) => ({
       delta: row.delta,
       metric: row.metric,
       previous: row.previous,
@@ -827,17 +928,24 @@ export class ReportService {
     return (await this.currentExportJobs(tenantId)).find((job) => job.id === jobId);
   }
 
-  private async findIdempotencyRequest(key: string): Promise<{ fingerprint: string; jobId: string } | undefined> {
-    const record = await this.reportRepository.findIdempotencyKey(key);
+  private async findIdempotencyRequest(tenantId: string, key: string): Promise<{ fingerprint: string; jobId: string } | undefined> {
+    const record = await this.reportRepository.findIdempotencyKey(tenantId, key);
     if (record) {
       return { fingerprint: record.fingerprint, jobId: record.jobId };
     }
 
-    return this.idempotencyIndex.get(key);
+    return this.idempotencyIndex.get(reportTenantIdempotencyKey(tenantId, key));
   }
 
   private async currentExportJobs(tenantId?: string): Promise<ReportExportJob[]> {
     return this.reportRepository.listExportJobsAsync({ tenantId });
+  }
+
+  private async signReportDownload(input: { fileName: string; jobId: string; objectKey: string; tenantId: string }): Promise<{ downloadUrl: string; expiresAt: string }> {
+    if (typeof this.objectStorage.signDownload !== "function") {
+      throw new Error("report_object_storage_download_sign_required");
+    }
+    return this.objectStorage.signDownload(input);
   }
 }
 
@@ -847,6 +955,19 @@ function apiMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {
     apiVersion: "v1",
     ...extra
   };
+}
+
+function normalizeTimezoneOffset(value: number | string | undefined): number {
+  if (value === undefined || value === "") return 0;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed) || Math.abs(parsed) > 14 * 60) {
+    throw new RangeError("timezoneOffsetMinutes must be between -840 and 840.");
+  }
+  return parsed;
+}
+
+function reportTenantIdempotencyKey(tenantId: string, key: string): string {
+  return `${tenantId}\u0000${key}`;
 }
 
 function metricTileFromRow(workspace: LiveReportWorkspace, key: LiveReportWorkspace["rows"][number]["key"], label: string) {
@@ -884,7 +1005,7 @@ function createExportRetryAuditEvent({
     format: job.format,
     immutable: true,
     jobId: job.id,
-    metricDefinitionVersion: job.metricDefinitionVersion ?? "metrics/v1",
+    metricDefinitionVersion: job.metricDefinitionVersion ?? REPORT_METRIC_DEFINITION_VERSION,
     nextStatusKey: job.statusKey,
     previousStatusKey,
     queue: job.queue ?? "report-export",
@@ -898,7 +1019,7 @@ function clone<T>(value: T): T {
 
 function withReportWorkspaceDefaults(workspace: ReportWorkspaceCatalog): ReportWorkspaceCatalog {
   return {
-    metricDefinitionVersion: workspace.metricDefinitionVersion || METRIC_DEFINITION_VERSION,
+    metricDefinitionVersion: workspace.metricDefinitionVersion || REPORT_METRIC_DEFINITION_VERSION,
     reportBars: clone(workspace.reportBars ?? []),
     reportChartBlocks: clone(workspace.reportChartBlocks ?? []),
     reportColumnOptions: withDefaultList(workspace.reportColumnOptions, defaultReportColumnOptions),
@@ -908,8 +1029,17 @@ function withReportWorkspaceDefaults(workspace: ReportWorkspaceCatalog): ReportW
   };
 }
 
-function withDefaultList<T>(value: T[] | undefined, fallback: T[]): T[] {
-  return Array.isArray(value) && value.length ? value : clone(fallback);
+function withDefaultList<T>(value: T[] | undefined, fallback: readonly T[]): T[] {
+  return Array.isArray(value) && value.length ? value : clone([...fallback]);
+}
+
+function tenantScopeRequiredEnvelope(operation: string): BackendEnvelope<Record<string, unknown>> {
+  return deniedEnvelope(
+    operation,
+    "report_tenant_scope_required",
+    "Report operation requires an explicit tenant scope.",
+    {}
+  );
 }
 
 function deniedEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
@@ -1005,13 +1135,14 @@ function exportJobPayload(job: ReportExportJob): Record<string, unknown> {
   };
 }
 
-function requestFingerprint(payload: RequestReportExportPayload): string {
+function requestFingerprint(payload: RequestReportExportPayload, tenantId: string): string {
   return stableStringify({
     channel: payload.channel ?? null,
     columns: payload.columns ?? [],
     filters: payload.filters ?? {},
     period: payload.period ?? null,
-    reportType: payload.reportType ?? null
+    reportType: payload.reportType ?? null,
+    tenantId
   });
 }
 
@@ -1073,8 +1204,11 @@ function reportExportColumns(job: ReportExportJob, catalog: ReportWorkspaceCatal
 }
 
 function reportExportTenantId(job: ReportExportJob): string {
-  const tenantId = typeof job.filters?.tenantId === "string" ? job.filters.tenantId.trim() : "";
-  return job.tenantId?.trim() || tenantId || "tenant-volga";
+  const resolved = job.tenantId?.trim();
+  if (!resolved) {
+    throw new Error("report_export_job_tenant_id_required");
+  }
+  return resolved;
 }
 
 function reportExportFileName(job: ReportExportJob): string {

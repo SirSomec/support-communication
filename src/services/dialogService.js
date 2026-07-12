@@ -45,6 +45,14 @@ export const dialogService = {
     });
   },
 
+  async fetchConversationTimeline(conversationId, filters = {}) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/timeline`, {
+      operation: "fetchConversationTimeline",
+      query: filters,
+      service: SERVICE
+    });
+  },
+
   async fetchAssignees() {
     return apiRequest("/dialogs/assignees", {
       operation: "fetchAssignees",
@@ -93,6 +101,7 @@ export const dialogService = {
       operations: [
         "fetchDialogs",
         "fetchDialogDetail",
+        "fetchConversationTimeline",
         "fetchAssignees",
         "assignConversation",
         "appendMessage",

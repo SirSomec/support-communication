@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
-import { isLocalRuntime } from "../runtime/local-runtime.js";
 import { redactSensitiveText } from "@support-communication/redaction";
-import { bootstrapIntegrationState } from "./seed.js";
 import type { ApiEnvironmentKey, ChannelDetail, SecuritySession, WebhookDelivery } from "./integration.types.js";
 import { hashPublicApiKeySecret, type PublicApiEnvironment, type PublicApiKeyRecord } from "./public-api-auth.js";
 
@@ -215,6 +213,7 @@ export interface PublicDemoRequestNotificationDescriptorSummary {
 }
 
 export interface SavePublicApiKeyInput {
+  channelConnectionId?: string | null;
   createdAt: string;
   environment: PublicApiEnvironment;
   keyId: string;
@@ -227,6 +226,7 @@ export interface SavePublicApiKeyInput {
 }
 
 export interface EnsurePublicApiKeyReferenceInput {
+  channelConnectionId?: string | null;
   createdAt: string;
   environment: PublicApiEnvironment;
   keyId: string;
@@ -254,12 +254,14 @@ export interface IntegrationState {
   channelConnectionAuditEvents: ChannelConnectionAuditEventRecord[];
   channelConnectionEvents: ChannelConnectionEventRecord[];
   channelConnections: ChannelConnectionStoredRecord[];
+  providerConnectionCredentials?: ProviderConnectionCredentialRecord[];
   publicApiKeys: PublicApiKeyStoredRecord[];
   publicApiKeyRevealStates: PublicApiKeyRevealStateRecord[];
   publicDemoRequestAuditEvents: PublicDemoRequestAuditEvent[];
   publicDemoRequestNotificationDescriptors: PublicDemoRequestNotificationDescriptor[];
   publicDemoRequests: PublicDemoRequestRecord[];
   securitySessions: SecuritySession[];
+  sdkVisitorPresenceSessions: SdkVisitorPresenceSessionRecord[];
   telegramConnections: TelegramConnectionStoredRecord[];
   webhookDeliveryJournal: WebhookDeliveryJournalEntry[];
   webhookReplayAuditEvents: WebhookReplayAuditEvent[];
@@ -267,7 +269,38 @@ export interface IntegrationState {
   workspace: IntegrationWorkspaceCatalog;
 }
 
+export interface SdkVisitorPresenceSessionRecord {
+  channelConnectionId: string;
+  connected: boolean;
+  createdAt: string;
+  disconnectedAt: string | null;
+  expiresAt: string;
+  firstSeenAt: string;
+  id: string;
+  lastSeenAt: string;
+  pagePath: string | null;
+  pageUrl: string | null;
+  referrer: string | null;
+  sessionKeyHash: string;
+  subjectId: string;
+  tenantId: string;
+  updatedAt: string;
+}
+
+export interface UpsertSdkVisitorPresenceInput {
+  channelConnectionId: string;
+  expiresAt: string;
+  lastSeenAt: string;
+  pagePath: string | null;
+  pageUrl: string | null;
+  referrer: string | null;
+  sessionKeyHash: string;
+  subjectId: string;
+  tenantId: string;
+}
+
 export interface TelegramConnectionStoredRecord {
+  channelConnectionId: string;
   botId: string | null;
   botToken: string;
   botUsername: string | null;
@@ -278,6 +311,23 @@ export interface TelegramConnectionStoredRecord {
   tokenPreview: string;
   updatedAt: string;
   webhookSecret: string;
+}
+
+export interface ProviderConnectionCredentialRecord {
+  accessTokenEncrypted: string;
+  apiVersion: string | null;
+  channelConnectionId: string;
+  confirmationCodeEncrypted: string | null;
+  createdAt: string;
+  externalAccountId: string;
+  keyVersion: string;
+  lastError: string | null;
+  lastWebhookAt: string | null;
+  provider: string;
+  status: string;
+  tenantId: string;
+  updatedAt: string;
+  webhookSecretEncrypted: string;
 }
 
 export interface ChannelConnectionStoredRecord {
@@ -328,6 +378,7 @@ interface IntegrationRepositoryOptions {
 
 export interface PrismaIntegrationRepositoryOptions {
   client: PrismaIntegrationClient;
+  seed?: IntegrationState;
 }
 
 type MaybePromise<T> = T | Promise<T>;
@@ -420,14 +471,28 @@ export interface PrismaIntegrationClient {
       where: { id: string };
     }): MaybePromise<PrismaSecuritySessionRow>;
   };
+  sdkVisitorPresenceSession?: {
+    findMany(input: { orderBy?: { lastSeenAt: "asc" | "desc" }; take?: number; where?: Record<string, unknown> }): MaybePromise<PrismaSdkVisitorPresenceRow[]>;
+    findUnique(input: { where: { tenantId_channelConnectionId_sessionKeyHash: { channelConnectionId: string; sessionKeyHash: string; tenantId: string } } }): MaybePromise<PrismaSdkVisitorPresenceRow | null>;
+    upsert(input: { create: PrismaSdkVisitorPresenceCreateInput; update: Partial<PrismaSdkVisitorPresenceCreateInput>; where: { tenantId_channelConnectionId_sessionKeyHash: { channelConnectionId: string; sessionKeyHash: string; tenantId: string } } }): MaybePromise<PrismaSdkVisitorPresenceRow>;
+  };
+  providerConnectionCredential: {
+    findMany(input: { orderBy?: { createdAt: "asc" | "desc" }; where?: PrismaProviderConnectionCredentialWhereInput }): MaybePromise<PrismaProviderConnectionCredentialRow[]>;
+    findUnique(input: { where: { channelConnectionId: string } }): MaybePromise<PrismaProviderConnectionCredentialRow | null>;
+    upsert(input: {
+      create: PrismaProviderConnectionCredentialCreateInput;
+      update: PrismaProviderConnectionCredentialUpdateInput;
+      where: { channelConnectionId: string };
+    }): MaybePromise<PrismaProviderConnectionCredentialRow>;
+  };
   telegramConnection: {
     findFirst(input: { where: PrismaTelegramConnectionWhereInput }): MaybePromise<PrismaTelegramConnectionRow | null>;
     findMany(input: { orderBy?: { createdAt: "asc" | "desc" } }): MaybePromise<PrismaTelegramConnectionRow[]>;
-    findUnique(input: { where: { tenantId: string } }): MaybePromise<PrismaTelegramConnectionRow | null>;
+    findUnique(input: { where: { channelConnectionId: string } }): MaybePromise<PrismaTelegramConnectionRow | null>;
     upsert(input: {
       create: PrismaTelegramConnectionCreateInput;
       update: PrismaTelegramConnectionUpdateInput;
-      where: { tenantId: string };
+      where: { channelConnectionId: string };
     }): MaybePromise<PrismaTelegramConnectionRow>;
   };
   webhookDeliveryJournalEntry: {
@@ -458,11 +523,20 @@ export interface PrismaIntegrationClient {
   };
 }
 
+interface PrismaSdkVisitorPresenceCreateInput {
+  channelConnectionId: string; connected: boolean; createdAt: Date; disconnectedAt: Date | null;
+  expiresAt: Date; firstSeenAt: Date; id: string; lastSeenAt: Date; pagePath: string | null;
+  pageUrl: string | null; referrer: string | null; sessionKeyHash: string; subjectId: string;
+  tenantId: string; updatedAt: Date;
+}
+interface PrismaSdkVisitorPresenceRow extends PrismaSdkVisitorPresenceCreateInput {}
+
 interface PrismaPublicApiKeyWhereInput {
   status?: PublicApiKeyRecord["status"];
 }
 
 interface PrismaPublicApiKeyCreateInput {
+  channelConnectionId?: string | null;
   createdAt: Date;
   environment: PublicApiEnvironment;
   keyId: string;
@@ -753,7 +827,34 @@ interface PrismaTelegramConnectionWhereInput {
   webhookSecret?: string;
 }
 
+interface PrismaProviderConnectionCredentialWhereInput {
+  provider?: string;
+  status?: string;
+  tenantId?: string;
+}
+
+interface PrismaProviderConnectionCredentialCreateInput {
+  accessTokenEncrypted: string;
+  apiVersion: string | null;
+  channelConnectionId: string;
+  confirmationCodeEncrypted: string | null;
+  createdAt: Date;
+  externalAccountId: string;
+  keyVersion: string;
+  lastError: string | null;
+  lastWebhookAt: Date | null;
+  provider: string;
+  status: string;
+  tenantId: string;
+  updatedAt: Date;
+  webhookSecretEncrypted: string;
+}
+
+type PrismaProviderConnectionCredentialUpdateInput = Omit<PrismaProviderConnectionCredentialCreateInput, "channelConnectionId" | "createdAt">;
+interface PrismaProviderConnectionCredentialRow extends PrismaProviderConnectionCredentialCreateInput {}
+
 interface PrismaTelegramConnectionCreateInput {
+  channelConnectionId: string;
   botId: string | null;
   botToken: string;
   botUsername: string | null;
@@ -766,7 +867,7 @@ interface PrismaTelegramConnectionCreateInput {
   webhookSecret: string;
 }
 
-type PrismaTelegramConnectionUpdateInput = Omit<PrismaTelegramConnectionCreateInput, "createdAt" | "tenantId">;
+type PrismaTelegramConnectionUpdateInput = Omit<PrismaTelegramConnectionCreateInput, "channelConnectionId" | "createdAt" | "tenantId">;
 interface PrismaTelegramConnectionRow extends PrismaTelegramConnectionCreateInput {}
 
 let defaultRepository: IntegrationRepository | null = null;
@@ -783,10 +884,6 @@ export class IntegrationRepository {
       return defaultRepository;
     }
 
-    if (isLocalRuntime()) {
-      return IntegrationRepository.inMemory(bootstrapIntegrationState());
-    }
-
     return IntegrationRepository.inMemory();
   }
 
@@ -799,24 +896,26 @@ export class IntegrationRepository {
   }
 
   static inMemory(seed?: IntegrationState): IntegrationRepository {
-    const resolved = seed ?? (isLocalRuntime() ? bootstrapIntegrationState() : seedIntegrationState());
-    return new IntegrationRepository(new InMemoryStore(resolved));
+    return new IntegrationRepository(new InMemoryStore(seed ?? createEmptyIntegrationState()));
   }
 
   static open({ filePath, seed }: IntegrationRepositoryOptions): IntegrationRepository {
-    const resolved = seed ?? (isLocalRuntime() ? bootstrapIntegrationState() : seedIntegrationState());
-    return new IntegrationRepository(new JsonFileStore({ filePath, seed: resolved }));
+    return new IntegrationRepository(new JsonFileStore({ filePath, seed: seed ?? createEmptyIntegrationState() }));
   }
 
-  static prisma({ client }: PrismaIntegrationRepositoryOptions): IntegrationRepository {
+  static prisma({ client, seed }: PrismaIntegrationRepositoryOptions): IntegrationRepository {
     assertCompletePrismaIntegrationClient(client);
 
-    return new IntegrationRepository(new InMemoryStore(bootstrapIntegrationState()), new Map(), client);
+    return new IntegrationRepository(new InMemoryStore(seed ?? createEmptyIntegrationState()), new Map(), client);
   }
 
   readState(): IntegrationState {
     this.assertSyncRuntimeAvailable();
     return normalizeState(this.store.read());
+  }
+
+  readInitialState(): IntegrationState {
+    return this.prismaClient ? normalizeState(this.store.read()) : this.readState();
   }
 
   async readStateAsync(): Promise<IntegrationState> {
@@ -830,6 +929,7 @@ export class IntegrationRepository {
       channelConnectionAuditEvents,
       channelConnectionEvents,
       channelConnections,
+      providerConnectionCredentials,
       publicApiKeys,
       publicApiKeyRevealStates,
       publicDemoRequestAuditEvents,
@@ -851,6 +951,8 @@ export class IntegrationRepository {
         .then((rows) => rows.map(toChannelConnectionEvent)),
       Promise.resolve(this.prismaClient.channelConnection.findMany({ orderBy: { createdAt: "asc" } }))
         .then((rows) => rows.map(toChannelConnection)),
+      Promise.resolve(this.prismaClient.providerConnectionCredential.findMany({ orderBy: { createdAt: "asc" } }))
+        .then((rows) => rows.map(toProviderConnectionCredential)),
       Promise.resolve(this.prismaClient.publicApiKey.findMany({ orderBy: { createdAt: "asc" } }))
         .then((rows) => rows.map(toPublicApiKeyStoredRecord)),
       Promise.resolve(this.prismaClient.publicApiKeyRevealState.findMany({ orderBy: { createdAt: "asc" } }))
@@ -874,12 +976,13 @@ export class IntegrationRepository {
     ]);
 
     return normalizeState({
-      ...seedIntegrationState(),
+      ...createEmptyIntegrationState(),
       apiKeyRotationAuditEvents,
       apiKeyRotationJobs,
       channelConnectionAuditEvents,
       channelConnectionEvents,
       channelConnections,
+      providerConnectionCredentials,
       publicApiKeys,
       publicApiKeyRevealStates,
       publicDemoRequestAuditEvents,
@@ -890,16 +993,12 @@ export class IntegrationRepository {
       webhookDeliveryJournal,
       webhookReplayAuditEvents,
       webhookReplayJournal,
-      workspace: bootstrapIntegrationState().workspace
+      workspace: this.readWorkspaceCatalog()
     });
   }
 
   readWorkspaceCatalog(): IntegrationWorkspaceCatalog {
-    if (this.prismaClient) {
-      return clone(bootstrapIntegrationState().workspace);
-    }
-
-    return clone(this.readState().workspace);
+    return clone(normalizeState(this.store.read()).workspace);
   }
 
   saveApiKeyRotationJob(job: ApiKeyRotationJob): ApiKeyRotationJob {
@@ -940,6 +1039,7 @@ export class IntegrationRepository {
 
   ensurePublicApiKeyReference(input: EnsurePublicApiKeyReferenceInput): MaybePromise<PublicApiKeyStoredRecord> {
     const persisted: PublicApiKeyStoredRecord = {
+      channelConnectionId: input.channelConnectionId ?? null,
       createdAt: input.createdAt,
       environment: input.environment,
       keyId: input.keyId,
@@ -976,6 +1076,7 @@ export class IntegrationRepository {
   savePublicApiKey(input: SavePublicApiKeyInput): MaybePromise<PublicApiKeyStoredRecord> {
     const normalizedSecret = input.rawSecret.trim();
     const persisted: PublicApiKeyStoredRecord = {
+      channelConnectionId: input.channelConnectionId ?? null,
       createdAt: input.createdAt,
       environment: input.environment,
       keyId: input.keyId,
@@ -1990,6 +2091,71 @@ export class IntegrationRepository {
     return rows.map(toChannelConnection);
   }
 
+  async upsertSdkVisitorPresence(input: UpsertSdkVisitorPresenceInput): Promise<SdkVisitorPresenceSessionRecord> {
+    const now = input.lastSeenAt;
+    if (!this.prismaClient) {
+      let saved!: SdkVisitorPresenceSessionRecord;
+      this.store.update((state) => {
+        const current = normalizeState(state);
+        const existing = current.sdkVisitorPresenceSessions.find((item) => item.tenantId === input.tenantId
+          && item.channelConnectionId === input.channelConnectionId && item.sessionKeyHash === input.sessionKeyHash);
+        saved = normalizeSdkVisitorPresence({
+          ...(existing ?? { createdAt: now, firstSeenAt: now, id: `sdk_presence_${randomUUID()}` }),
+          ...input, connected: true, disconnectedAt: null, updatedAt: now
+        });
+        return { ...current, sdkVisitorPresenceSessions: existing
+          ? current.sdkVisitorPresenceSessions.map((item) => item.id === existing.id ? saved : item)
+          : [...current.sdkVisitorPresenceSessions, saved] };
+      });
+      return clone(saved);
+    }
+    const delegate = this.prismaClient.sdkVisitorPresenceSession;
+    if (!delegate) throw new Error("prisma_sdk_visitor_presence_delegate_required");
+    const key = { channelConnectionId: input.channelConnectionId, sessionKeyHash: input.sessionKeyHash, tenantId: input.tenantId };
+    const row = await delegate.upsert({
+      create: toPrismaSdkVisitorPresence({ ...input, connected: true, createdAt: now, disconnectedAt: null,
+        firstSeenAt: now, id: `sdk_presence_${randomUUID()}`, updatedAt: now }),
+      update: { connected: true, disconnectedAt: null, expiresAt: new Date(input.expiresAt), lastSeenAt: new Date(now),
+        pagePath: input.pagePath, pageUrl: input.pageUrl, referrer: input.referrer, subjectId: input.subjectId, updatedAt: new Date(now) },
+      where: { tenantId_channelConnectionId_sessionKeyHash: key }
+    });
+    return fromPrismaSdkVisitorPresence(row);
+  }
+
+  async disconnectSdkVisitorPresence(input: { channelConnectionId: string; disconnectedAt: string; sessionKeyHash: string; tenantId: string }): Promise<SdkVisitorPresenceSessionRecord | null> {
+    if (!this.prismaClient) {
+      const existing = this.readState().sdkVisitorPresenceSessions.find((item) => item.tenantId === input.tenantId
+        && item.channelConnectionId === input.channelConnectionId && item.sessionKeyHash === input.sessionKeyHash);
+      if (!existing) return null;
+      const saved = normalizeSdkVisitorPresence({ ...existing, connected: false, disconnectedAt: input.disconnectedAt,
+        expiresAt: input.disconnectedAt, lastSeenAt: input.disconnectedAt, updatedAt: input.disconnectedAt });
+      this.store.update((state) => ({ ...normalizeState(state), sdkVisitorPresenceSessions:
+        normalizeState(state).sdkVisitorPresenceSessions.map((item) => item.id === saved.id ? saved : item) }));
+      return clone(saved);
+    }
+    const delegate = this.prismaClient.sdkVisitorPresenceSession;
+    if (!delegate) throw new Error("prisma_sdk_visitor_presence_delegate_required");
+    const where = { tenantId_channelConnectionId_sessionKeyHash: { channelConnectionId: input.channelConnectionId,
+      sessionKeyHash: input.sessionKeyHash, tenantId: input.tenantId } };
+    const existing = await delegate.findUnique({ where });
+    if (!existing) return null;
+    const row = await delegate.upsert({ create: existing, update: { connected: false, disconnectedAt: new Date(input.disconnectedAt),
+      expiresAt: new Date(input.disconnectedAt), lastSeenAt: new Date(input.disconnectedAt), updatedAt: new Date(input.disconnectedAt) }, where });
+    return fromPrismaSdkVisitorPresence(row);
+  }
+
+  async listLiveSdkVisitorPresence(input: { at: string; limit?: number; tenantId?: string } ): Promise<SdkVisitorPresenceSessionRecord[]> {
+    const limit = Number.isInteger(input.limit) && Number(input.limit) > 0 ? Number(input.limit) : 50;
+    if (!this.prismaClient) return this.readState().sdkVisitorPresenceSessions
+      .filter((item) => item.connected && item.expiresAt > input.at && (!input.tenantId || item.tenantId === input.tenantId))
+      .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)).slice(0, limit).map(clone);
+    const delegate = this.prismaClient.sdkVisitorPresenceSession;
+    if (!delegate) throw new Error("prisma_sdk_visitor_presence_delegate_required");
+    const rows = await delegate.findMany({ orderBy: { lastSeenAt: "desc" }, take: limit,
+      where: { connected: true, expiresAt: { gt: new Date(input.at) }, ...(input.tenantId ? { tenantId: input.tenantId } : {}) } });
+    return rows.map(fromPrismaSdkVisitorPresence);
+  }
+
   findChannelConnection(tenantId: string, connectionId: string): ChannelConnectionStoredRecord | undefined {
     this.assertSyncRuntimeAvailable();
     const normalizedTenantId = String(tenantId ?? "").trim();
@@ -2152,6 +2318,81 @@ export class IntegrationRepository {
     return toChannelConnectionAuditEvent(row);
   }
 
+  findProviderConnectionCredential(tenantId: string, channelConnectionId: string): ProviderConnectionCredentialRecord | undefined {
+    this.assertSyncRuntimeAvailable();
+    const normalizedTenantId = String(tenantId ?? "").trim();
+    const normalizedConnectionId = String(channelConnectionId ?? "").trim();
+    return clone((this.readState().providerConnectionCredentials ?? []).find((item) =>
+      item.tenantId === normalizedTenantId && item.channelConnectionId === normalizedConnectionId
+    ));
+  }
+
+  async findProviderConnectionCredentialAsync(tenantId: string, channelConnectionId: string): Promise<ProviderConnectionCredentialRecord | undefined> {
+    const normalizedTenantId = String(tenantId ?? "").trim();
+    const normalizedConnectionId = String(channelConnectionId ?? "").trim();
+    if (!normalizedTenantId || !normalizedConnectionId) return undefined;
+    if (!this.prismaClient) return this.findProviderConnectionCredential(normalizedTenantId, normalizedConnectionId);
+    const row = await this.prismaClient.providerConnectionCredential.findUnique({ where: { channelConnectionId: normalizedConnectionId } });
+    return row?.tenantId === normalizedTenantId ? toProviderConnectionCredential(row) : undefined;
+  }
+
+  async findProviderConnectionCredentialByConnectionIdAsync(channelConnectionId: string): Promise<ProviderConnectionCredentialRecord | undefined> {
+    const normalizedConnectionId = String(channelConnectionId ?? "").trim();
+    if (!normalizedConnectionId) return undefined;
+    if (!this.prismaClient) {
+      this.assertSyncRuntimeAvailable();
+      return clone((this.readState().providerConnectionCredentials ?? []).find((item) => item.channelConnectionId === normalizedConnectionId));
+    }
+    const row = await this.prismaClient.providerConnectionCredential.findUnique({ where: { channelConnectionId: normalizedConnectionId } });
+    return row ? toProviderConnectionCredential(row) : undefined;
+  }
+
+  listActiveProviderConnectionCredentials(tenantId: string, provider: string): ProviderConnectionCredentialRecord[] {
+    this.assertSyncRuntimeAvailable();
+    const normalizedTenantId = String(tenantId ?? "").trim();
+    const normalizedProvider = String(provider ?? "").trim().toLowerCase();
+    return clone((this.readState().providerConnectionCredentials ?? []).filter((item) =>
+      item.tenantId === normalizedTenantId && item.provider === normalizedProvider && item.status === "active"
+    ));
+  }
+
+  async listActiveProviderConnectionCredentialsAsync(tenantId: string, provider: string): Promise<ProviderConnectionCredentialRecord[]> {
+    const normalizedTenantId = String(tenantId ?? "").trim();
+    const normalizedProvider = String(provider ?? "").trim().toLowerCase();
+    if (!normalizedTenantId || !normalizedProvider) return [];
+    if (!this.prismaClient) return this.listActiveProviderConnectionCredentials(normalizedTenantId, normalizedProvider);
+    const rows = await this.prismaClient.providerConnectionCredential.findMany({
+      orderBy: { createdAt: "asc" },
+      where: { provider: normalizedProvider, status: "active", tenantId: normalizedTenantId }
+    });
+    return rows.map(toProviderConnectionCredential);
+  }
+
+  saveProviderConnectionCredential(credential: ProviderConnectionCredentialRecord): ProviderConnectionCredentialRecord {
+    this.assertSyncRuntimeAvailable();
+    const persisted = normalizeProviderConnectionCredential(credential);
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const credentials = current.providerConnectionCredentials ?? [];
+      const exists = credentials.some((item) => item.channelConnectionId === persisted.channelConnectionId);
+      return { ...current, providerConnectionCredentials: exists
+        ? credentials.map((item) => item.channelConnectionId === persisted.channelConnectionId ? persisted : item)
+        : [...credentials, persisted] };
+    });
+    return clone(persisted);
+  }
+
+  async saveProviderConnectionCredentialAsync(credential: ProviderConnectionCredentialRecord): Promise<ProviderConnectionCredentialRecord> {
+    const persisted = normalizeProviderConnectionCredential(credential);
+    if (!this.prismaClient) return this.saveProviderConnectionCredential(persisted);
+    const row = await this.prismaClient.providerConnectionCredential.upsert({
+      create: toPrismaProviderConnectionCredentialCreateInput(persisted),
+      update: toPrismaProviderConnectionCredentialUpdateInput(persisted),
+      where: { channelConnectionId: persisted.channelConnectionId }
+    });
+    return toProviderConnectionCredential(row);
+  }
+
   findTelegramConnectionByTenantId(tenantId: string): TelegramConnectionStoredRecord | undefined {
     this.assertSyncRuntimeAvailable();
     const normalizedTenantId = String(tenantId ?? "").trim();
@@ -2168,7 +2409,7 @@ export class IntegrationRepository {
       return this.findTelegramConnectionByTenantId(normalizedTenantId);
     }
 
-    const row = await this.prismaClient.telegramConnection.findUnique({
+    const row = await this.prismaClient.telegramConnection.findFirst({
       where: { tenantId: normalizedTenantId }
     });
 
@@ -2222,12 +2463,12 @@ export class IntegrationRepository {
     const persisted = clone(connection);
     this.store.update((state) => {
       const current = normalizeState(state);
-      const exists = current.telegramConnections.some((item) => item.tenantId === persisted.tenantId);
+      const exists = current.telegramConnections.some((item) => item.channelConnectionId === persisted.channelConnectionId);
 
       return {
         ...current,
         telegramConnections: exists
-          ? current.telegramConnections.map((item) => item.tenantId === persisted.tenantId ? persisted : item)
+          ? current.telegramConnections.map((item) => item.channelConnectionId === persisted.channelConnectionId ? persisted : item)
           : [...current.telegramConnections, persisted]
       };
     });
@@ -2244,7 +2485,7 @@ export class IntegrationRepository {
     const row = await this.prismaClient.telegramConnection.upsert({
       create: toPrismaTelegramConnectionCreateInput(persisted),
       update: toPrismaTelegramConnectionUpdateInput(persisted),
-      where: { tenantId: persisted.tenantId }
+      where: { channelConnectionId: persisted.channelConnectionId }
     });
 
     return toTelegramConnection(row);
@@ -2269,19 +2510,21 @@ function emptyIntegrationWorkspace(): IntegrationWorkspaceCatalog {
   };
 }
 
-function seedIntegrationState(): IntegrationState {
+export function createEmptyIntegrationState(): IntegrationState {
   return {
     apiKeyRotationAuditEvents: [],
     apiKeyRotationJobs: [],
     channelConnectionAuditEvents: [],
     channelConnectionEvents: [],
     channelConnections: [],
+    providerConnectionCredentials: [],
     publicApiKeys: [],
     publicApiKeyRevealStates: [],
     publicDemoRequestAuditEvents: [],
     publicDemoRequestNotificationDescriptors: [],
     publicDemoRequests: [],
     securitySessions: [],
+    sdkVisitorPresenceSessions: [],
     telegramConnections: [],
     webhookDeliveryJournal: [],
     webhookReplayAuditEvents: [],
@@ -2297,12 +2540,14 @@ function normalizeState(state: Partial<IntegrationState>): IntegrationState {
     channelConnectionAuditEvents: normalizeChannelConnectionAuditEvents(state.channelConnectionAuditEvents),
     channelConnectionEvents: normalizeChannelConnectionEvents(state.channelConnectionEvents),
     channelConnections: normalizeChannelConnections(state.channelConnections),
+    providerConnectionCredentials: normalizeProviderConnectionCredentials(state.providerConnectionCredentials),
     publicApiKeys: normalizePublicApiKeys(state.publicApiKeys),
     publicApiKeyRevealStates: normalizePublicApiKeyRevealStates(state.publicApiKeyRevealStates),
     publicDemoRequestAuditEvents: normalizePublicDemoRequestAuditEvents(state.publicDemoRequestAuditEvents),
     publicDemoRequestNotificationDescriptors: normalizePublicDemoRequestNotificationDescriptors(state.publicDemoRequestNotificationDescriptors),
     publicDemoRequests: normalizePublicDemoRequests(state.publicDemoRequests),
     securitySessions: state.securitySessions ?? [],
+    sdkVisitorPresenceSessions: (state.sdkVisitorPresenceSessions ?? []).map(normalizeSdkVisitorPresence),
     telegramConnections: normalizeTelegramConnections(state.telegramConnections),
     webhookDeliveryJournal: normalizeWebhookDeliveryJournal(state.webhookDeliveryJournal),
     webhookReplayAuditEvents: state.webhookReplayAuditEvents ?? [],
@@ -2311,8 +2556,35 @@ function normalizeState(state: Partial<IntegrationState>): IntegrationState {
   };
 }
 
+function normalizeSdkVisitorPresence(value: SdkVisitorPresenceSessionRecord): SdkVisitorPresenceSessionRecord {
+  return {
+    ...value,
+    channelConnectionId: String(value.channelConnectionId ?? "").trim(),
+    connected: Boolean(value.connected),
+    pagePath: value.pagePath || null,
+    pageUrl: value.pageUrl || null,
+    referrer: value.referrer || null,
+    sessionKeyHash: String(value.sessionKeyHash ?? "").trim(),
+    subjectId: String(value.subjectId ?? "").trim(),
+    tenantId: String(value.tenantId ?? "").trim()
+  };
+}
+
+function toPrismaSdkVisitorPresence(value: SdkVisitorPresenceSessionRecord): PrismaSdkVisitorPresenceCreateInput {
+  return { ...value, createdAt: new Date(value.createdAt), disconnectedAt: value.disconnectedAt ? new Date(value.disconnectedAt) : null,
+    expiresAt: new Date(value.expiresAt), firstSeenAt: new Date(value.firstSeenAt), lastSeenAt: new Date(value.lastSeenAt),
+    updatedAt: new Date(value.updatedAt) };
+}
+
+function fromPrismaSdkVisitorPresence(value: PrismaSdkVisitorPresenceRow): SdkVisitorPresenceSessionRecord {
+  return normalizeSdkVisitorPresence({ ...value, createdAt: value.createdAt.toISOString(),
+    disconnectedAt: value.disconnectedAt?.toISOString() ?? null, expiresAt: value.expiresAt.toISOString(),
+    firstSeenAt: value.firstSeenAt.toISOString(), lastSeenAt: value.lastSeenAt.toISOString(), updatedAt: value.updatedAt.toISOString() });
+}
+
 function normalizeTelegramConnections(connections: TelegramConnectionStoredRecord[] | undefined): TelegramConnectionStoredRecord[] {
   return (connections ?? []).map((connection) => ({
+    channelConnectionId: String(connection.channelConnectionId ?? "").trim(),
     botId: connection.botId ?? null,
     botToken: String(connection.botToken ?? ""),
     botUsername: connection.botUsername ?? null,
@@ -2328,6 +2600,34 @@ function normalizeTelegramConnections(connections: TelegramConnectionStoredRecor
 
 function normalizeChannelConnections(connections: ChannelConnectionStoredRecord[] | undefined): ChannelConnectionStoredRecord[] {
   return (connections ?? []).map(normalizeChannelConnection);
+}
+
+function normalizeProviderConnectionCredentials(credentials: ProviderConnectionCredentialRecord[] | undefined): ProviderConnectionCredentialRecord[] {
+  return (credentials ?? []).map(normalizeProviderConnectionCredential);
+}
+
+function normalizeProviderConnectionCredential(credential: ProviderConnectionCredentialRecord): ProviderConnectionCredentialRecord {
+  const now = new Date().toISOString();
+  const nullable = (value: unknown): string | null => {
+    const normalized = String(value ?? "").trim();
+    return normalized || null;
+  };
+  return {
+    accessTokenEncrypted: String(credential.accessTokenEncrypted ?? "").trim(),
+    apiVersion: nullable(credential.apiVersion),
+    channelConnectionId: String(credential.channelConnectionId ?? "").trim(),
+    confirmationCodeEncrypted: nullable(credential.confirmationCodeEncrypted),
+    createdAt: credential.createdAt ?? now,
+    externalAccountId: String(credential.externalAccountId ?? "").trim(),
+    keyVersion: String(credential.keyVersion ?? "").trim(),
+    lastError: nullable(credential.lastError),
+    lastWebhookAt: credential.lastWebhookAt ?? null,
+    provider: String(credential.provider ?? "").trim().toLowerCase(),
+    status: normalizeChannelStatus(credential.status),
+    tenantId: String(credential.tenantId ?? "").trim(),
+    updatedAt: credential.updatedAt ?? credential.createdAt ?? now,
+    webhookSecretEncrypted: String(credential.webhookSecretEncrypted ?? "").trim()
+  };
 }
 
 function normalizeChannelConnection(connection: ChannelConnectionStoredRecord): ChannelConnectionStoredRecord {
@@ -2474,6 +2774,7 @@ function redactWebhookDeliveryErrorMessage(message: string): string {
 
 function normalizePublicApiKeys(keys: PublicApiKeyStoredRecord[] | undefined): PublicApiKeyStoredRecord[] {
   return (keys ?? []).map((key) => ({
+    ...(key.channelConnectionId ? { channelConnectionId: key.channelConnectionId } : {}),
     createdAt: key.createdAt,
     environment: key.environment,
     keyId: key.keyId,
@@ -2721,6 +3022,14 @@ function assertCompletePrismaIntegrationClient(client: PrismaIntegrationClient):
   }
 
   if (
+    !client.providerConnectionCredential?.findMany
+    || !client.providerConnectionCredential.findUnique
+    || !client.providerConnectionCredential.upsert
+  ) {
+    throw new Error("prisma_integration_provider_connection_credential_delegate_required");
+  }
+
+  if (
     !client.telegramConnection?.findFirst
     || !client.telegramConnection.findMany
     || !client.telegramConnection.findUnique
@@ -2732,6 +3041,7 @@ function assertCompletePrismaIntegrationClient(client: PrismaIntegrationClient):
 
 function toPrismaPublicApiKeyCreateInput(key: PublicApiKeyStoredRecord): PrismaPublicApiKeyCreateInput {
   return {
+    ...(key.channelConnectionId ? { channelConnectionId: key.channelConnectionId } : {}),
     createdAt: new Date(key.createdAt),
     environment: key.environment,
     keyId: key.keyId,
@@ -2748,6 +3058,7 @@ function toPrismaPublicApiKeyCreateInput(key: PublicApiKeyStoredRecord): PrismaP
 
 function toPrismaPublicApiKeyUpdateInput(key: PrismaPublicApiKeyCreateInput): PrismaPublicApiKeyUpdateInput {
   return {
+    ...(key.channelConnectionId ? { channelConnectionId: key.channelConnectionId } : {}),
     environment: key.environment,
     keyPreview: key.keyPreview,
     name: key.name,
@@ -2766,6 +3077,7 @@ function toPrismaPublicApiKeyReferenceUpdateInput(_key: PrismaPublicApiKeyCreate
 
 function toPublicApiKeyStoredRecord(row: PrismaPublicApiKeyRow): PublicApiKeyStoredRecord {
   return {
+    ...(row.channelConnectionId ? { channelConnectionId: row.channelConnectionId } : {}),
     createdAt: row.createdAt.toISOString(),
     environment: row.environment,
     keyId: row.keyId,
@@ -2781,6 +3093,7 @@ function toPublicApiKeyStoredRecord(row: PrismaPublicApiKeyRow): PublicApiKeySto
 
 function toPublicApiKeyRecord(row: PrismaPublicApiKeyRow): PublicApiKeyRecord {
   return {
+    ...(row.channelConnectionId ? { channelConnectionId: row.channelConnectionId } : {}),
     environment: row.environment,
     keyId: row.keyId,
     scopes: [...row.scopes],
@@ -3178,6 +3491,39 @@ function toPrismaChannelConnectionCreateInput(connection: ChannelConnectionStore
   };
 }
 
+function toPrismaProviderConnectionCredentialCreateInput(credential: ProviderConnectionCredentialRecord): PrismaProviderConnectionCredentialCreateInput {
+  return {
+    accessTokenEncrypted: credential.accessTokenEncrypted,
+    apiVersion: credential.apiVersion,
+    channelConnectionId: credential.channelConnectionId,
+    confirmationCodeEncrypted: credential.confirmationCodeEncrypted,
+    createdAt: new Date(credential.createdAt),
+    externalAccountId: credential.externalAccountId,
+    keyVersion: credential.keyVersion,
+    lastError: credential.lastError,
+    lastWebhookAt: credential.lastWebhookAt ? new Date(credential.lastWebhookAt) : null,
+    provider: credential.provider,
+    status: credential.status,
+    tenantId: credential.tenantId,
+    updatedAt: new Date(credential.updatedAt),
+    webhookSecretEncrypted: credential.webhookSecretEncrypted
+  };
+}
+
+function toPrismaProviderConnectionCredentialUpdateInput(credential: ProviderConnectionCredentialRecord): PrismaProviderConnectionCredentialUpdateInput {
+  const { channelConnectionId: _channelConnectionId, createdAt: _createdAt, ...update } = toPrismaProviderConnectionCredentialCreateInput(credential);
+  return update;
+}
+
+function toProviderConnectionCredential(row: PrismaProviderConnectionCredentialRow): ProviderConnectionCredentialRecord {
+  return normalizeProviderConnectionCredential({
+    ...row,
+    createdAt: row.createdAt.toISOString(),
+    lastWebhookAt: row.lastWebhookAt?.toISOString() ?? null,
+    updatedAt: row.updatedAt.toISOString()
+  });
+}
+
 function toPrismaChannelConnectionUpdateInput(connection: ChannelConnectionStoredRecord): PrismaChannelConnectionUpdateInput {
   const create = toPrismaChannelConnectionCreateInput(connection);
   return {
@@ -3275,6 +3621,7 @@ function toChannelConnectionAuditEvent(row: PrismaChannelConnectionAuditEventRow
 
 function toPrismaTelegramConnectionCreateInput(connection: TelegramConnectionStoredRecord): PrismaTelegramConnectionCreateInput {
   return {
+    channelConnectionId: connection.channelConnectionId,
     botId: connection.botId,
     botToken: connection.botToken,
     botUsername: connection.botUsername,
@@ -3303,6 +3650,7 @@ function toPrismaTelegramConnectionUpdateInput(connection: TelegramConnectionSto
 
 function toTelegramConnection(row: PrismaTelegramConnectionRow): TelegramConnectionStoredRecord {
   return normalizeTelegramConnections([{
+    channelConnectionId: row.channelConnectionId,
     botId: row.botId,
     botToken: row.botToken,
     botUsername: row.botUsername,

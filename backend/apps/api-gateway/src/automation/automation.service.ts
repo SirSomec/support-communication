@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import type { BotFlowEdge, BotFlowNode, BotScenario, ProactiveRule } from "./automation.types.js";
-import { AutomationRepository, type AutomationBotTestRun } from "./automation.repository.js";
+import {
+  AutomationRepository,
+  type AutomationBotTestRun,
+  type AutomationPublishIdempotencyRecord
+} from "./automation.repository.js";
+import { BotRuntimeService, type BotRuntimeInboundEvent, type BotRuntimeOptions } from "./bot-runtime.service.js";
+import { DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS, ProactiveExposureRepository } from "./proactive-exposure.repository.js";
 
 const AUTOMATION_SERVICE = "automationService";
 const VALID_NODE_TYPES = new Set(["message", "quick_replies", "condition", "contact_request", "webhook", "handoff", "fallback"]);
@@ -41,12 +47,15 @@ export interface AutomationRequestContext {
   tenantId?: string;
 }
 
+export interface VisitorMetricsRange { from?: string; to?: string; }
+
 export class AutomationService {
   private readonly scenarios: BotScenario[];
   private readonly rules: ProactiveRule[];
   private readonly publishIdempotency = new Map<string, { fingerprint: string; result: Record<string, unknown> }>();
 
-  constructor(private readonly automationRepository: AutomationRepository = AutomationRepository.default()) {
+  constructor(private readonly automationRepository: AutomationRepository = AutomationRepository.default(),
+    private readonly exposureRepository: ProactiveExposureRepository = ProactiveExposureRepository.default()) {
     this.scenarios = [];
     this.rules = [];
   }
@@ -67,7 +76,7 @@ export class AutomationService {
       meta: apiMeta({ tenantId }),
       data: {
         auditEvents: [
-          ...clone(state.workspaceAuditEvents),
+          ...clone(state.workspaceAuditEvents.filter((event) => scenarioTenantId(event) === tenantId)),
           ...clone(state.botPublishAuditEvents.filter((event) => scenarioTenantId(event) === tenantId))
         ],
         botScenarios: clone(scopedBotScenarios(state.botScenarios, tenantId)),
@@ -79,7 +88,7 @@ export class AutomationService {
     });
   }
 
-  async fetchVisitorWorkspace(context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async fetchVisitorWorkspace(context: AutomationRequestContext = {}, range: VisitorMetricsRange = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = resolveAutomationTenantId(context);
     if (!tenantId) {
       return tenantRequiredEnvelope("fetchVisitorWorkspace");
@@ -87,11 +96,15 @@ export class AutomationService {
     const state = await this.automationRepository.readStateAsync();
     this.syncLocalCaches(state);
     const activeVisitors = state.activeVisitors?.length
-      ? clone(state.activeVisitors).filter((visitor) => String(visitor.tenantId ?? tenantId) === tenantId)
-      : defaultActiveVisitors(tenantId);
+      ? clone(state.activeVisitors).filter((visitor) => String(visitor.tenantId ?? "").trim() === tenantId)
+      : [];
     const rescueChats = state.rescueChats?.length
-      ? clone(state.rescueChats).filter((chat) => String(chat.tenantId ?? tenantId) === tenantId)
-      : defaultRescueChats(tenantId);
+      ? clone(state.rescueChats).filter((chat) => String(chat.tenantId ?? "").trim() === tenantId)
+      : [];
+    const metricsRange = resolveVisitorMetricsRange(range);
+    const proactiveRules = clone(state.proactiveRules.filter((rule) => proactiveRuleTenantId(rule) === tenantId));
+    const proactiveMetrics = await this.exposureRepository.aggregateMetrics({ from: metricsRange.from,
+      ruleVariants: proactiveRules.map((rule) => ({ ruleId: rule.id, variant: String(rule.activeVariant ?? "A") })), tenantId, to: metricsRange.to });
 
     return createEnvelope({
       service: AUTOMATION_SERVICE,
@@ -101,7 +114,9 @@ export class AutomationService {
       meta: apiMeta({ tenantId }),
       data: {
         activeVisitors,
-        proactiveRules: clone(state.proactiveRules.filter((rule) => proactiveRuleTenantId(rule) === tenantId)),
+        proactiveMetrics: { attributionWindowHours: DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS / (60 * 60 * 1000),
+          byRuleVariant: proactiveMetrics, range: metricsRange },
+        proactiveRules,
         rescueChats,
         tenantId
       }
@@ -122,7 +137,7 @@ export class AutomationService {
       id: scenarioId,
       name: String(request.name ?? "Новый сценарий"),
       schemaVersion: "bot-flow/v1",
-      status: request.status ?? "draft",
+      status: normalizeBotScenarioStatus(request.status, "draft"),
       tenantId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -160,6 +175,7 @@ export class AutomationService {
       id: scenarioId,
       name: String(request.name ?? existing.name),
       schemaVersion: "bot-flow/v1",
+      status: normalizeBotScenarioStatus(request.status, existing.status),
       tenantId,
       updatedAt: new Date().toISOString()
     };
@@ -234,7 +250,7 @@ export class AutomationService {
       name: validation.payload?.name,
       tenantId
     });
-    const cached = idempotencyKey ? await this.findPublishIdempotency(idempotencyKey) : undefined;
+    const cached = idempotencyKey ? await this.findPublishIdempotency(tenantId, idempotencyKey) : undefined;
 
     if (cached) {
       if (cached.fingerprint !== fingerprint) {
@@ -274,6 +290,7 @@ export class AutomationService {
     };
 
     const scenario: BotScenario = {
+      activeVersionId: String(result.runtimeVersion),
       channels: clone(request.channels ?? []),
       flowEdges: clone(validation.payload?.flowEdges ?? []),
       flowNodes: clone(validation.payload?.flowNodes ?? []),
@@ -299,7 +316,7 @@ export class AutomationService {
       actor: "automation-admin",
       auditId: result.auditId,
       createdAt: new Date().toISOString(),
-      idempotencyKey: idempotencyKey ?? result.auditId,
+      idempotencyKey: idempotencyKey ? `bot-publish:${tenantId}:${idempotencyKey}` : result.auditId,
       immutable: true,
       runtimeVersion: String(result.runtimeVersion),
       scenarioId,
@@ -308,8 +325,16 @@ export class AutomationService {
     });
 
     if (idempotencyKey) {
-      this.publishIdempotency.set(idempotencyKey, { fingerprint, result: clone(result) });
-      await this.automationRepository.savePublishIdempotencyKeyAsync({ key: idempotencyKey, fingerprint, result: clone(result) });
+      this.publishIdempotency.set(automationTenantIdempotencyKey(tenantId, idempotencyKey), {
+        fingerprint,
+        result: clone(result)
+      });
+      await this.automationRepository.savePublishIdempotencyKeyAsync({
+        key: idempotencyKey,
+        fingerprint,
+        result: clone(result),
+        tenantId
+      });
     }
 
     return createEnvelope({
@@ -498,20 +523,35 @@ export class AutomationService {
     }
   }
 
-  private async findPublishIdempotency(key: string): Promise<{ fingerprint: string; result: Record<string, unknown> } | undefined> {
-    const persisted = await this.automationRepository.findPublishIdempotencyKeyAsync(key);
+  private async findPublishIdempotency(tenantId: string, key: string): Promise<{ fingerprint: string; result: Record<string, unknown> } | undefined> {
+    const persisted = await this.automationRepository.findPublishIdempotencyKeyAsync(tenantId, key);
     if (persisted) {
       return { fingerprint: persisted.fingerprint, result: clone(persisted.result) };
     }
 
-    return this.publishIdempotency.get(key);
+    return this.publishIdempotency.get(automationTenantIdempotencyKey(tenantId, key));
   }
 
-  private syncLocalCaches(state: { botScenarios: BotScenario[]; proactiveRules: ProactiveRule[]; publishIdempotencyKeys: Array<{ fingerprint: string; key: string; result: Record<string, unknown> }> }): void {
+  async handleBotRuntimeInboundEvent(event: BotRuntimeInboundEvent, options: BotRuntimeOptions = {}) {
+    return new BotRuntimeService(this.automationRepository, options).handleInboundEvent(event);
+  }
+
+  async rollbackBotRuntimeVersion(tenantId: string, scenarioId: string, versionId: string) {
+    return new BotRuntimeService(this.automationRepository).rollbackToPublishedVersion(tenantId, scenarioId, versionId);
+  }
+
+  async retryBotRuntimeInboundEvent(event: BotRuntimeInboundEvent, options: BotRuntimeOptions = {}) {
+    return new BotRuntimeService(this.automationRepository, options).retryInboundEvent(event);
+  }
+
+  private syncLocalCaches(state: { botScenarios: BotScenario[]; proactiveRules: ProactiveRule[]; publishIdempotencyKeys: AutomationPublishIdempotencyRecord[] }): void {
     this.scenarios.splice(0, this.scenarios.length, ...clone(state.botScenarios));
     this.rules.splice(0, this.rules.length, ...clone(state.proactiveRules));
     state.publishIdempotencyKeys.forEach((item) => {
-      this.publishIdempotency.set(item.key, { fingerprint: item.fingerprint, result: clone(item.result) });
+      this.publishIdempotency.set(automationTenantIdempotencyKey(item.tenantId, item.key), {
+        fingerprint: item.fingerprint,
+        result: clone(item.result)
+      });
     });
   }
 }
@@ -721,8 +761,38 @@ function scenarioTenantId(item: { tenantId?: string }): string | null {
   return String(item.tenantId ?? "").trim() || null;
 }
 
-function proactiveRuleTenantId(rule: ProactiveRule): string {
-  return String(rule.tenantId ?? "tenant-volga").trim() || "tenant-volga";
+function normalizeBotScenarioStatus(value: unknown, fallback: string): string {
+  const status = String(value ?? "").trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    archived: "archived",
+    draft: "draft",
+    published: "published",
+    "\u0430\u0440\u0445\u0438\u0432": "archived",
+    "\u0447\u0435\u0440\u043d\u043e\u0432\u0438\u043a": "draft",
+    "\u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d": "published"
+  };
+
+  return aliases[status] ?? fallback;
+}
+
+function resolveVisitorMetricsRange(input: VisitorMetricsRange): { from: string; to: string } {
+  const now = new Date();
+  const to = validRangeDate(input.to) ?? now;
+  const from = validRangeDate(input.from) ?? new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+  if (from.getTime() > to.getTime()) return { from: new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString(), to: to.toISOString() };
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
+function validRangeDate(value: string | undefined): Date | null {
+  return value && Number.isFinite(Date.parse(value)) ? new Date(value) : null;
+}
+
+function automationTenantIdempotencyKey(tenantId: string, key: string): string {
+  return `${tenantId}\u0000${key}`;
+}
+
+function proactiveRuleTenantId(rule: ProactiveRule): string | null {
+  return String(rule.tenantId ?? "").trim() || null;
 }
 
 function scopedBotScenarios(scenarios: BotScenario[], tenantId: string): BotScenario[] {
@@ -731,31 +801,4 @@ function scopedBotScenarios(scenarios: BotScenario[], tenantId: string): BotScen
 
 function tenantRequiredEnvelope(operation: string): BackendEnvelope<Record<string, unknown>> {
   return invalidEnvelope(operation, "tenant_context_required", "Tenant context is required for automation runtime operations.", {});
-}
-
-function defaultActiveVisitors(tenantId: string): Array<Record<string, unknown>> {
-  if (tenantId !== "tenant-volga") {
-    return [];
-  }
-
-  return [{
-    channel: "SDK",
-    id: "visitor-volga-001",
-    page: "/checkout",
-    status: "browsing",
-    tenantId
-  }];
-}
-
-function defaultRescueChats(tenantId: string): Array<Record<string, unknown>> {
-  if (tenantId !== "tenant-volga") {
-    return [];
-  }
-
-  return [{
-    conversationId: "conv-rescue-volga-001",
-    id: "rescue-volga-001",
-    status: "active",
-    tenantId
-  }];
 }

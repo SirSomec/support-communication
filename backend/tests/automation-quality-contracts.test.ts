@@ -9,6 +9,7 @@ import {
 } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { AutomationService } from "../apps/api-gateway/src/automation/automation.service.ts";
+import { bootstrapAutomationState } from "../apps/api-gateway/src/automation/seed.ts";
 import {
   planEligibleProactiveRuleDelivery,
   persistProactiveDeliveryPlan,
@@ -35,10 +36,23 @@ import { createDeterministicQualityScoringProvider } from "../apps/api-gateway/s
 import { QualityRepository } from "../apps/api-gateway/src/quality/quality.repository.ts";
 import { QualityScoringRepository } from "../apps/api-gateway/src/quality/quality-scoring.repository.ts";
 import { QualityService } from "../apps/api-gateway/src/quality/quality.service.ts";
+import { bootstrapQualityState } from "../apps/api-gateway/src/quality/seed.ts";
 
 describe("phase 7 automation, bot runtime, proactive and quality backend contracts", () => {
+  it("loads automation fixtures only when a seed is passed explicitly", () => {
+    const empty = AutomationRepository.inMemory().readState();
+    const seeded = AutomationRepository.inMemory(bootstrapAutomationState()).readState();
+
+    assert.equal(empty.botScenarios.length, 0);
+    assert.equal(empty.proactiveRules.length, 0);
+    assert.ok(seeded.botScenarios.length > 0);
+    assert.ok(seeded.proactiveRules.length > 0);
+    assert.ok(seeded.botScenarios.every((scenario) => scenario.tenantId === "tenant-demo"));
+    assert.equal(seeded.botScenarios.some((scenario) => scenario.tenantId === "tenant-volga"), false);
+  });
+
   it("returns automation workspace with bot scenarios, proactive rules and audit events", async () => {
-    const automation = new AutomationService();
+    const automation = new AutomationService(AutomationRepository.inMemory(bootstrapAutomationState()));
 
     const workspace = await automation.fetchAutomationWorkspace({ tenantId: "tenant-demo" });
 
@@ -120,6 +134,18 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(reusedKey.status, "conflict");
     assert.equal(reusedKey.error?.code, "idempotency_key_reused");
 
+    const crossTenantPublish = await automation.publishBotScenario({
+      id: "bot-checkout-ladoga",
+      name: "Checkout bot Ladoga",
+      channels: ["SDK"],
+      flowNodes: [{ id: "start", type: "message" }],
+      flowEdges: [],
+      idempotencyKey: "publish-bot-checkout"
+    }, { tenantId: "tenant-ladoga" });
+    assert.equal(crossTenantPublish.status, "ok");
+    assert.equal(crossTenantPublish.data.duplicate, false);
+    assert.equal(crossTenantPublish.data.tenantId, "tenant-ladoga");
+
     const testRun = await automation.testBotScenario({
       id: "bot-checkout",
       name: "Checkout bot",
@@ -141,19 +167,30 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     const first = repository.savePublishIdempotencyKey({
       key: "publish-race",
       fingerprint: "first-fingerprint",
-      result: { runtimeVersion: "runtime-first" }
+      result: { runtimeVersion: "runtime-first", tenantId: "tenant-demo" },
+      tenantId: "tenant-demo"
     });
     const second = repository.savePublishIdempotencyKey({
       key: "publish-race",
       fingerprint: "second-fingerprint",
-      result: { runtimeVersion: "runtime-second" }
+      result: { runtimeVersion: "runtime-second", tenantId: "tenant-demo" },
+      tenantId: "tenant-demo"
     });
-    const stored = repository.findPublishIdempotencyKey("publish-race");
+    const stored = repository.findPublishIdempotencyKey("tenant-demo", "publish-race");
 
     assert.equal(first.fingerprint, "first-fingerprint");
     assert.equal(second.fingerprint, "first-fingerprint");
     assert.equal(stored?.fingerprint, "first-fingerprint");
     assert.equal(stored?.result.runtimeVersion, "runtime-first");
+
+    const otherTenant = repository.savePublishIdempotencyKey({
+      key: "publish-race",
+      fingerprint: "ladoga-fingerprint",
+      result: { runtimeVersion: "runtime-ladoga", tenantId: "tenant-ladoga" },
+      tenantId: "tenant-ladoga"
+    });
+    assert.equal(otherTenant.fingerprint, "ladoga-fingerprint");
+    assert.equal(repository.findPublishIdempotencyKey("tenant-ladoga", "publish-race")?.result.runtimeVersion, "runtime-ladoga");
   });
 
   it("writes durable bot publish version and audit rows from publish runtime", async () => {
@@ -187,7 +224,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(version?.status, "published");
     assert.equal(audit?.action, "bot.publish");
     assert.equal(audit?.auditId, publish.data.auditId);
-    assert.equal(audit?.idempotencyKey, "publish-hardening-key");
+    assert.equal(audit?.idempotencyKey, "bot-publish:tenant-demo:publish-hardening-key");
     assert.equal(audit?.immutable, true);
     assert.equal(audit?.runtimeVersion, publish.data.runtimeVersion);
     assert.equal(audit?.tenantId, "tenant-demo");
@@ -236,7 +273,8 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       id: "bot-scenario-contract",
       name: "Scenario contract bot",
       schemaVersion: "bot-flow/v1" as const,
-      status: "draft"
+      status: "draft",
+      tenantId: "tenant-demo"
     };
 
     const saved = repository.saveBotScenario(scenario);
@@ -275,6 +313,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       ],
       scenarioId: "bot-version-contract",
       status: "draft",
+      tenantId: "tenant-demo",
       versionId: "bot-version-contract-v1"
     };
 
@@ -320,6 +359,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       idempotencyKey: "publish-audit-contract",
       runtimeVersion: "runtime-bot-audit-v1",
       scenarioId: "bot-publish-audit-contract",
+      tenantId: "tenant-demo",
       versionId: "bot-publish-audit-contract-v1"
     };
 
@@ -459,7 +499,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(ruleWindows[0].active, true);
     assert.deepEqual(ruleWindows[0].daysOfWeek, [1, 2, 3, 4]);
 
-    const fallbackTenant = repository.saveProactiveExecutionWindow({
+    assert.throws(() => repository.saveProactiveExecutionWindow({
       active: false,
       daysOfWeek: [6, 0],
       endsAt: "21:00",
@@ -467,9 +507,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       startsAt: "12:00",
       timezone: "Europe/Moscow",
       windowId: "win-rule-weekend"
-    });
-
-    assert.equal(fallbackTenant.tenantId, "tenant-demo");
+    }), /automation_tenant_required/);
   });
 
   it("persists proactive frequency caps as tenant-scoped rule records without shared mutable references", () => {
@@ -500,7 +538,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       tenantId: "tenant-demo"
     });
     const otherTenantCaps = repository.listProactiveFrequencyCaps({ tenantId: "tenant-other" });
-    const fallbackTenant = repository.saveProactiveFrequencyCap({
+    assert.throws(() => repository.saveProactiveFrequencyCap({
       active: false,
       capId: "cap-rule-weekend-hourly",
       limit: 1,
@@ -508,7 +546,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       resetAt: "2026-06-30T20:00:00.000Z",
       ruleId: "rule-weekend",
       used: 0
-    });
+    }), /automation_tenant_required/);
 
     assert.equal(tenantCaps.length, 1);
     assert.equal(ruleCaps.length, 1);
@@ -521,7 +559,6 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(ruleCaps[0].used, 2);
     assert.equal(ruleCaps[0].resetAt, "2026-07-01T00:00:00.000Z");
     assert.equal(ruleCaps[0].active, true);
-    assert.equal(fallbackTenant.tenantId, "tenant-demo");
   });
 
   it("persists proactive experiment assignments as tenant-scoped rule records without shared mutable references", () => {
@@ -557,14 +594,14 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       tenantId: "tenant-demo"
     });
     const otherTenantAssignments = repository.listProactiveExperimentAssignments({ tenantId: "tenant-other" });
-    const fallbackTenant = repository.saveProactiveExperimentAssignment({
+    assert.throws(() => repository.saveProactiveExperimentAssignment({
       assignedAt: "2026-06-30T19:32:00.000Z",
       assignmentId: "exp-rule-weekend-client-99",
       experimentId: "exp-rule-weekend",
       ruleId: "rule-weekend",
       subjectId: "client-99",
       variant: "holdout"
-    });
+    }), /automation_tenant_required/);
 
     assert.equal(tenantAssignments.length, 1);
     assert.equal(ruleAssignments.length, 1);
@@ -577,7 +614,50 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(ruleAssignments[0].tenantId, "tenant-demo");
     assert.equal(ruleAssignments[0].variant, "B");
     assert.equal(ruleAssignments[0].assignedAt, "2026-06-30T19:30:00.000Z");
-    assert.equal(fallbackTenant.tenantId, "tenant-demo");
+  });
+
+  it("rejects every persisted automation record that has no tenant", () => {
+    const repository = AutomationRepository.inMemory();
+    const required = /automation_tenant_required/;
+
+    assert.throws(() => repository.saveBotScenario({
+      channels: ["SDK"], flowEdges: [], flowNodes: [], id: "missing-tenant-scenario",
+      name: "Missing tenant", schemaVersion: "bot-flow/v1", status: "draft"
+    } as never), required);
+    assert.throws(() => repository.saveBotScenarioVersion({
+      createdAt: "2026-07-10T00:00:00.000Z", flowEdges: [], flowNodes: [],
+      scenarioId: "missing-tenant-scenario", status: "draft", versionId: "missing-tenant-version"
+    } as never), required);
+    assert.throws(() => repository.saveBotPublishAuditEvent({
+      action: "bot.publish", actor: "tester", auditId: "missing-tenant-audit",
+      createdAt: "2026-07-10T00:00:00.000Z", idempotencyKey: "missing-tenant-audit-key",
+      immutable: true, runtimeVersion: "runtime-v1", scenarioId: "missing-tenant-scenario", versionId: "v1"
+    } as never), required);
+    assert.throws(() => repository.saveBotTestRun({
+      auditId: "missing-tenant-test-audit", cases: [], queue: "bot-runtime",
+      scenarioId: "missing-tenant-scenario", status: "running", testRunId: "missing-tenant-test"
+    } as never), required);
+    assert.throws(() => repository.saveProactiveRule({
+      channels: ["SDK"], id: "missing-tenant-rule", status: "enabled"
+    } as never), required);
+    assert.throws(() => repository.saveProactiveDeliveryAttempt({
+      attemptedAt: "2026-07-10T00:00:00.000Z", attemptId: "missing-tenant-attempt", channel: "SDK",
+      descriptorId: "descriptor", ruleId: "rule", status: "queued", subjectId: "subject", traceId: "trace"
+    }), required);
+    assert.throws(() => repository.saveProactiveDeliveryIdempotencyKey({
+      fingerprint: "fingerprint", key: "missing-tenant-key", result: {}, ruleId: "rule", subjectId: "subject"
+    }), required);
+    assert.throws(() => repository.saveProactiveDeliveryAttribution({
+      assignedAt: "2026-07-10T00:00:00.000Z", attributionId: "missing-tenant-attribution",
+      descriptorId: "descriptor", experimentId: "experiment", ruleId: "rule", subjectId: "subject", variant: "A"
+    }), required);
+    assert.throws(() => repository.savePublishIdempotencyKey({
+      fingerprint: "fingerprint", key: "missing-tenant-publish", result: {}
+    } as never), required);
+    assert.throws(() => AutomationRepository.inMemory({
+      ...repository.readState(),
+      workspaceAuditEvents: [{ id: "missing-tenant-workspace-audit" }]
+    }).readState(), required);
   });
 
   it("evaluates proactive execution windows from tenant-scoped active windows using replay time", () => {
@@ -1469,6 +1549,10 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       requestedAt: "2026-06-30T11:00:00.000Z",
       traceId: "trc_quality_request_adapter"
     });
+    assert.throws(
+      () => createQualityScoringProviderRequest({ text: "Missing tenant" }, { requestedAt: "2026-06-30T12:00:00.000Z", traceId: "trc-missing-tenant" }),
+      /quality_scoring_tenant_required/
+    );
     const internalRequest = createQualityScoringProviderRequest({
       ...payload,
       mode: " internal "
@@ -2164,7 +2248,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(repository.listResponseTelemetry({ status: "ok", tenantId: unsafeTenantTwo.tenantId }).length, 1);
   });
 
-  it("migrates legacy quality scoring response telemetry rows without tenant ids", () => {
+  it("rejects legacy quality scoring response telemetry rows without tenant ids", () => {
     const telemetry = createQualityScoringResponseTelemetry({
       checks: [],
       explainability: {
@@ -2193,11 +2277,10 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       }]
     } as Parameters<typeof QualityScoringRepository.inMemory>[0]);
 
-    const rows = repository.listResponseTelemetry({ tenantId: "tenant-demo" });
-
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].tenantId, "tenant-demo");
-    assert.equal(rows[0].telemetryId, "quality-response-telemetry-legacy");
+    assert.throws(
+      () => repository.listResponseTelemetry({ tenantId: "tenant-demo" }),
+      /quality_scoring_tenant_required/
+    );
   });
 
   it("persists sanitized quality scoring failure envelopes without prompt leakage", () => {
@@ -2865,7 +2948,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
   });
 
   it("returns quality workspace and scores draft responses with explainable telemetry", async () => {
-    const quality = new QualityService();
+    const quality = new QualityService(QualityRepository.inMemory(bootstrapQualityState()));
 
     const workspace = await quality.fetchQualityWorkspace({ tenantId: "tenant-demo" });
     assert.equal(workspace.service, "qualityService");
@@ -2883,7 +2966,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(empty.status, "ok");
     assert.equal(empty.data.checks[0].id, "empty");
     assert.equal(empty.data.checks[0].tone, "danger");
-    assert.equal(empty.data.telemetry.model, "quality-rules/v1");
+    assert.equal(empty.data.telemetry.model, "quality-deterministic/v1");
     assert.match(empty.data.telemetry.auditId, /^evt_ai_/);
 
     const risky = await quality.scoreDraftResponse({

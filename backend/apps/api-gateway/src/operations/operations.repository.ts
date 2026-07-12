@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
-import { isLocalRuntime } from "../runtime/local-runtime.js";
-import { bootstrapOperationsState } from "./seed.js";
 import type {
   BackupDrill,
   DeadLetterMessage,
@@ -375,10 +373,6 @@ export class OperationsRepository {
       return defaultRepository;
     }
 
-    if (isLocalRuntime()) {
-      return OperationsRepository.inMemory(bootstrapOperationsState());
-    }
-
     return OperationsRepository.inMemory();
   }
 
@@ -391,17 +385,16 @@ export class OperationsRepository {
   }
 
   static inMemory(seed?: OperationsState): OperationsRepository {
-    const resolved = seed ?? (isLocalRuntime() ? bootstrapOperationsState() : seedOperationsState());
-    return new OperationsRepository(new InMemoryStore(resolved));
+    return new OperationsRepository(new InMemoryStore(seed ?? createEmptyOperationsState()));
   }
 
-  static open({ filePath, seed = seedOperationsState() }: OperationsRepositoryOptions): OperationsRepository {
+  static open({ filePath, seed = createEmptyOperationsState() }: OperationsRepositoryOptions): OperationsRepository {
     return new OperationsRepository(new JsonFileStore({ filePath, seed }));
   }
 
-  static prisma({ client }: { client: PrismaOperationsClient }): OperationsRepository {
+  static prisma({ client, seed }: { client: PrismaOperationsClient; seed?: OperationsState }): OperationsRepository {
     assertCompletePrismaOperationsClient(client);
-    return new OperationsRepository(new InMemoryStore(bootstrapOperationsState()), client);
+    return new OperationsRepository(new InMemoryStore(seed ?? createEmptyOperationsState()), client);
   }
 
   readState(): OperationsState {
@@ -417,7 +410,7 @@ export class OperationsRepository {
       return this.readState();
     }
 
-    const state = bootstrapOperationsState();
+    const state = normalizeState(this.store.read());
     const [runtimeRows, postgresRows, objectStorageRows] = await Promise.all([
       this.prismaClient.operationsRuntimeRecord.findMany({ orderBy: { updatedAt: "desc" } }),
       this.prismaClient.operationsPostgresRestoreCheckResult.findMany({ orderBy: { executedAt: "desc" } }),
@@ -1022,7 +1015,7 @@ export class OperationsRepository {
   }
 
   private readCatalogState(): OperationsState {
-    return this.prismaClient ? bootstrapOperationsState() : this.readState();
+    return this.prismaClient ? normalizeState(this.store.read()) : this.readState();
   }
 
   private assertSyncRuntimeAvailable(): void {
@@ -1496,7 +1489,7 @@ function toJsonRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function seedOperationsState(): OperationsState {
+export function createEmptyOperationsState(): OperationsState {
   return {
     backupDrills: [],
     deadLetterMessages: [],

@@ -29,6 +29,7 @@ const backendConfigSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(16).optional(),
   JWT_REFRESH_SECRET: z.string().min(16).optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  LOCAL_DEVELOPMENT_SEED_ENABLED: z.enum(["true", "false"]).default("false"),
   MAIL_HOST: z.string().min(1).default("127.0.0.1"),
   MAIL_PORT: z.coerce.number().int().positive().default(1025),
   NODE_ENV: z.enum(["development", "test", "staging", "production"]).default("development"),
@@ -46,6 +47,8 @@ const backendConfigSchema = z.object({
   PLATFORM_STORE_FILE: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().default(4100),
   PUBLIC_API_KEY_SECRET: z.string().min(16).optional(),
+  QUALITY_REPOSITORY: z.enum(["json", "prisma"]).default("json"),
+  QUALITY_STORE_FILE: z.string().min(1).optional(),
   REDIS_URL: z.string().url(),
   REPORT_REPOSITORY: z.enum(["json", "prisma"]).default("json"),
   REPORT_STORE_FILE: z.string().min(1).optional(),
@@ -65,6 +68,14 @@ const backendConfigSchema = z.object({
 
   if (allowsLocalFallbacks) {
     return;
+  }
+
+  if (config.LOCAL_DEVELOPMENT_SEED_ENABLED === "true") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["LOCAL_DEVELOPMENT_SEED_ENABLED"],
+      message: "Local development seed cannot be enabled outside the local development/test profile."
+    });
   }
 
   if (config.ALLOW_DEMO_SERVICE_ADMIN_HEADERS === "true") {
@@ -129,6 +140,7 @@ const productCriticalRepositoryEnvs = [
   "NOTIFICATION_REPOSITORY",
   "OPERATIONS_REPOSITORY",
   "PLATFORM_REPOSITORY",
+  "QUALITY_REPOSITORY",
   "REPORT_REPOSITORY",
   "ROUTING_REPOSITORY"
 ] as const;

@@ -65,6 +65,47 @@ describe("Prisma-backed report repository contracts", () => {
     }
   });
 
+  it("reads tenant report facts from immutable lifecycle events", async () => {
+    const { calls, client, seedConversationLifecycleEvent } = createFakePrismaReportClient();
+    seedConversationLifecycleEvent({
+      conversation: {
+        channel: "Telegram",
+        operatorId: "operator-anna",
+        operatorName: "Anna",
+        status: "closed",
+        topic: "payment"
+      },
+      conversationId: "conversation-report-journal",
+      data: { toStatus: "closed" },
+      eventType: "status.changed",
+      id: "evt-report-status-closed",
+      ingestedAt: new Date("2026-07-11T09:00:01.000Z"),
+      occurredAt: new Date("2026-07-11T09:00:00.000Z"),
+      source: "conversation-service",
+      tenantId: "tenant-volga"
+    });
+    const repository = ReportRepository.prisma({ client });
+
+    const rows = await repository.listConversationReportSourceRowsAsync({
+      from: new Date("2026-07-11T00:00:00.000Z"),
+      tenantId: "tenant-volga",
+      to: new Date("2026-07-12T00:00:00.000Z")
+    });
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].channel, "Telegram");
+    assert.deepEqual(rows[0].lifecycleEvents, [{
+      data: { toStatus: "closed" },
+      eventType: "status.changed",
+      id: "evt-report-status-closed",
+      ingestedAt: "2026-07-11T09:00:01.000Z",
+      occurredAt: "2026-07-11T09:00:00.000Z",
+      source: "conversation-service"
+    }]);
+    assert.equal(calls.conversationLifecycleEventFindMany.length, 1);
+    assert.equal(calls.conversationLifecycleEventFindMany[0].where.tenantId, "tenant-volga");
+  });
+
   it("persists metric definitions through Prisma delegates", async () => {
     const { calls, client } = createFakePrismaReportClient();
     const repository = ReportRepository.prisma({ client });
@@ -260,7 +301,8 @@ describe("Prisma-backed report repository contracts", () => {
     await repository.saveIdempotencyKey({
       fingerprint: "fingerprint-template-prisma",
       jobId: saved.id,
-      key: "saveSavedReportTemplate:template-prisma-key"
+      key: "saveSavedReportTemplate:template-prisma-key",
+      tenantId: "tenant-volga"
     });
     const refetched = await repository.findSavedReportTemplate("template_prisma_saved", {
       requesterRoles: ["supervisor"],
@@ -282,7 +324,7 @@ describe("Prisma-backed report repository contracts", () => {
       requesterUserId: "operator-boris",
       tenantId: "tenant-volga"
     });
-    const idempotency = await repository.findIdempotencyKey("saveSavedReportTemplate:template-prisma-key");
+    const idempotency = await repository.findIdempotencyKey("tenant-volga", "saveSavedReportTemplate:template-prisma-key");
 
     assert.equal(saved.name, "Prisma saved report");
     assert.equal(refetched?.id, "template_prisma_saved");
@@ -292,7 +334,8 @@ describe("Prisma-backed report repository contracts", () => {
     assert.deepEqual(idempotency, {
       fingerprint: "fingerprint-template-prisma",
       jobId: "template_prisma_saved",
-      key: "saveSavedReportTemplate:template-prisma-key"
+      key: "saveSavedReportTemplate:template-prisma-key",
+      tenantId: "tenant-volga"
     });
     assert.deepEqual(calls.savedReportTemplateUpserts[0], {
       create: {
@@ -333,13 +376,19 @@ describe("Prisma-backed report repository contracts", () => {
       create: {
         fingerprint: "fingerprint-template-prisma",
         jobId: "template_prisma_saved",
-        key: "saveSavedReportTemplate:template-prisma-key"
+        key: "saveSavedReportTemplate:template-prisma-key",
+        tenantId: "tenant-volga"
       },
       update: {
         fingerprint: "fingerprint-template-prisma",
         jobId: "template_prisma_saved"
       },
-      where: { key: "saveSavedReportTemplate:template-prisma-key" }
+      where: {
+        tenantId_key: {
+          key: "saveSavedReportTemplate:template-prisma-key",
+          tenantId: "tenant-volga"
+        }
+      }
     });
   });
 
@@ -350,7 +399,8 @@ describe("Prisma-backed report repository contracts", () => {
     const idempotencyKey: ReportIdempotencyRecord = {
       fingerprint: "digest-export-fingerprint",
       jobId: "export-prisma-first",
-      key: "scheduled-digest-export:tenant-volga:digest-volga-daily:2026-07-01"
+      key: "scheduled-digest-export:tenant-volga:digest-volga-daily:2026-07-01",
+      tenantId: "tenant-volga"
     };
 
     const first = await firstRepository.saveExportJobWithIdempotency(reportExportJob({
@@ -368,7 +418,18 @@ describe("Prisma-backed report repository contracts", () => {
     }), {
       fingerprint: "different-fingerprint",
       jobId: "export-prisma-conflict",
-      key: idempotencyKey.key
+      key: idempotencyKey.key,
+      tenantId: "tenant-volga"
+    });
+    const otherTenant = await secondRepository.saveExportJobWithIdempotency(reportExportJob({
+      auditId: "evt_report_prisma_export_ladoga",
+      id: "export-prisma-ladoga",
+      tenantId: "tenant-ladoga"
+    }), {
+      fingerprint: "ladoga-fingerprint",
+      jobId: "export-prisma-ladoga",
+      key: idempotencyKey.key,
+      tenantId: "tenant-ladoga"
     });
     const jobs = await secondRepository.listExportJobsAsync();
 
@@ -377,10 +438,11 @@ describe("Prisma-backed report repository contracts", () => {
     assert.equal(duplicate.status, "duplicate");
     assert.equal(duplicate.job.id, "export-prisma-first");
     assert.equal(conflict.status, "conflict");
-    assert.deepEqual(jobs.map((job) => job.id), ["export-prisma-first"]);
-    assert.equal(calls.reportExportJobUpserts.length, 1);
-    assert.equal(calls.reportIdempotencyKeyCreates.length, 1);
-    assert.equal(calls.transactions.length, 3);
+    assert.equal(otherTenant.status, "created");
+    assert.deepEqual(jobs.map((job) => job.id), ["export-prisma-first", "export-prisma-ladoga"]);
+    assert.equal(calls.reportExportJobUpserts.length, 2);
+    assert.equal(calls.reportIdempotencyKeyCreates.length, 2);
+    assert.equal(calls.transactions.length, 4);
   });
 
   it("persists report runtime descriptors through Prisma delegates without JSON fallback", async () => {
@@ -487,6 +549,7 @@ describe("Prisma-backed report repository contracts", () => {
 });
 
 function createFakePrismaReportClient() {
+  const conversationLifecycleEvents: FakeConversationLifecycleEvent[] = [];
   const metricDefinitions = new Map<string, FakeMetricDefinitionCreateInput>();
   const metricTenantOverrides = new Map<string, FakeMetricTenantOverrideCreateInput>();
   const metricVersions = new Map<string, FakeMetricVersionCreateInput>();
@@ -499,6 +562,7 @@ function createFakePrismaReportClient() {
   const scheduledDigestDescriptors = new Map<string, FakeScheduledDigestDescriptorCreateInput>();
   const reportExportRetryAuditEvents = new Map<string, FakeReportExportRetryAuditEventCreateInput>();
   const calls = {
+    conversationLifecycleEventFindMany: [] as Array<Record<string, any>>,
     metricDefinitionFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }>,
     metricDefinitionFindUnique: [] as Array<{ where: { id: string } }>,
     metricDefinitionUpserts: [] as Array<{
@@ -520,12 +584,12 @@ function createFakePrismaReportClient() {
       update: FakeMetricTenantOverrideUpdateInput;
       where: { id: string };
     }>,
-    reportIdempotencyKeyFindUnique: [] as Array<{ where: { key: string } }>,
+    reportIdempotencyKeyFindUnique: [] as Array<{ where: FakeReportIdempotencyKeyWhereUniqueInput }>,
     reportIdempotencyKeyCreates: [] as Array<{ data: FakeReportIdempotencyKeyCreateInput }>,
     reportIdempotencyKeyUpserts: [] as Array<{
       create: FakeReportIdempotencyKeyCreateInput;
       update: FakeReportIdempotencyKeyUpdateInput;
-      where: { key: string };
+      where: FakeReportIdempotencyKeyWhereUniqueInput;
     }>,
     reportExportJobFindMany: [] as Array<{ orderBy: { createdAt: "desc" } }>,
     reportExportJobFindUnique: [] as Array<{ where: { id: string } }>,
@@ -571,10 +635,22 @@ function createFakePrismaReportClient() {
 
   return {
     calls,
+    seedConversationLifecycleEvent(row: FakeConversationLifecycleEvent) {
+      conversationLifecycleEvents.push(row);
+    },
     seedMetricVersion(row: FakeMetricVersionCreateInput) {
       metricVersions.set(row.id, row);
     },
     client: {
+      conversationLifecycleEvent: {
+        findMany(input: Record<string, any>) {
+          calls.conversationLifecycleEventFindMany.push(input);
+          const { gte, lt } = input.where.occurredAt as { gte: Date; lt: Date };
+          return Promise.resolve(conversationLifecycleEvents
+            .filter((row) => row.tenantId === input.where.tenantId && row.occurredAt >= gte && row.occurredAt < lt)
+            .sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime()));
+        }
+      },
       metricDefinition: {
         findMany(input: { orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }) {
           calls.metricDefinitionFindMany.push(input);
@@ -653,30 +729,34 @@ function createFakePrismaReportClient() {
       reportIdempotencyKey: {
         create(input: { data: FakeReportIdempotencyKeyCreateInput }) {
           calls.reportIdempotencyKeyCreates.push(input);
-          if (reportIdempotencyKeys.has(input.data.key)) {
-            const error = new Error("Unique constraint failed on the fields: (`key`)") as Error & { code?: string };
+          const mapKey = fakeReportIdempotencyMapKey(input.data.tenantId, input.data.key);
+          if (reportIdempotencyKeys.has(mapKey)) {
+            const error = new Error("Unique constraint failed on the fields: (`tenant_id`,`key`)") as Error & { code?: string };
             error.code = "P2002";
             return Promise.reject(error);
           }
 
-          reportIdempotencyKeys.set(input.data.key, input.data);
+          reportIdempotencyKeys.set(mapKey, input.data);
           return Promise.resolve(input.data);
         },
-        findUnique(input: { where: { key: string } }) {
+        findUnique(input: { where: FakeReportIdempotencyKeyWhereUniqueInput }) {
           calls.reportIdempotencyKeyFindUnique.push(input);
-          return Promise.resolve(reportIdempotencyKeys.get(input.where.key) ?? null);
+          const { key, tenantId } = input.where.tenantId_key;
+          return Promise.resolve(reportIdempotencyKeys.get(fakeReportIdempotencyMapKey(tenantId, key)) ?? null);
         },
         upsert(input: {
           create: FakeReportIdempotencyKeyCreateInput;
           update: FakeReportIdempotencyKeyUpdateInput;
-          where: { key: string };
+          where: FakeReportIdempotencyKeyWhereUniqueInput;
         }) {
           calls.reportIdempotencyKeyUpserts.push(input);
-          const current = reportIdempotencyKeys.get(input.where.key);
+          const { key, tenantId } = input.where.tenantId_key;
+          const mapKey = fakeReportIdempotencyMapKey(tenantId, key);
+          const current = reportIdempotencyKeys.get(mapKey);
           const next: FakeReportIdempotencyKeyCreateInput = current
-            ? { ...current, ...input.update, key: current.key }
+            ? { ...current, ...input.update, key: current.key, tenantId: current.tenantId }
             : input.create;
-          reportIdempotencyKeys.set(input.where.key, next);
+          reportIdempotencyKeys.set(mapKey, next);
           return Promise.resolve(next);
         }
       },
@@ -889,9 +969,21 @@ interface FakeReportIdempotencyKeyCreateInput {
   fingerprint: string;
   jobId: string;
   key: string;
+  tenantId: string;
 }
 
-type FakeReportIdempotencyKeyUpdateInput = Omit<FakeReportIdempotencyKeyCreateInput, "key">;
+type FakeReportIdempotencyKeyUpdateInput = Omit<FakeReportIdempotencyKeyCreateInput, "key" | "tenantId">;
+
+interface FakeReportIdempotencyKeyWhereUniqueInput {
+  tenantId_key: {
+    key: string;
+    tenantId: string;
+  };
+}
+
+function fakeReportIdempotencyMapKey(tenantId: string, key: string): string {
+  return `${tenantId}\u0000${key}`;
+}
 
 interface FakeReportExportJobCreateInput {
   auditId: string;
@@ -1012,6 +1104,24 @@ interface FakeReportExportRetryAuditEventCreateInput {
 
 type FakeReportExportRetryAuditEventUpdateInput = Omit<FakeReportExportRetryAuditEventCreateInput, "auditId" | "createdAt">;
 
+interface FakeConversationLifecycleEvent {
+  conversation: {
+    channel: string;
+    operatorId: string | null;
+    operatorName: string | null;
+    status: string;
+    topic: string;
+  };
+  conversationId: string;
+  data: Record<string, unknown>;
+  eventType: string;
+  id: string;
+  ingestedAt: Date;
+  occurredAt: Date;
+  source: string;
+  tenantId: string;
+}
+
 function reportExportJob(overrides: Partial<ReportExportJob> = {}): ReportExportJob {
   return {
     auditId: "evt_report_prisma_export",
@@ -1034,6 +1144,7 @@ function reportExportJob(overrides: Partial<ReportExportJob> = {}): ReportExport
     rows: 0,
     status: "Queued",
     statusKey: "queued",
+    tenantId: "tenant-volga",
     ...overrides
   };
 }

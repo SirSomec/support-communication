@@ -13,6 +13,15 @@ import type { ReportExportJob } from "../apps/api-gateway/src/reports/report.typ
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
 
 describe("phase 10 operations hardening and production readiness backend contracts", () => {
+  it("keeps unseeded operations repositories honest and empty", () => {
+    const state = OperationsRepository.inMemory().readState();
+
+    assert.deepEqual(state.loadTestScenarios, []);
+    assert.deepEqual(state.backupDrills, []);
+    assert.deepEqual(state.deadLetterQueues, []);
+    assert.deepEqual(state.securityControls, []);
+  });
+
   it("returns production readiness posture across load, backup, dead-letter, migration and security domains", async () => {
     OperationsRepository.useDefault(OperationsRepository.inMemory(bootstrapOperationsState()));
     const operations = new OperationsReadinessService();
@@ -981,7 +990,7 @@ describe("phase 10 operations hardening and production readiness backend contrac
   });
 
   it("queues load test runs with target workflow coverage, audit metadata and idempotency", async () => {
-    const operations = new OperationsReadinessService();
+    const operations = new OperationsReadinessService(OperationsRepository.inMemory(bootstrapOperationsState()));
 
     const missingReason = await operations.queueLoadTestRun({
       confirmed: true,
@@ -1041,7 +1050,7 @@ describe("phase 10 operations hardening and production readiness backend contrac
   });
 
   it("queues backup restore checks and migration rollback compatibility checks", async () => {
-    const operations = new OperationsReadinessService();
+    const operations = new OperationsReadinessService(OperationsRepository.inMemory(bootstrapOperationsState()));
 
     const restore = await operations.queueRestoreCheck({
       confirmed: true,
@@ -1110,7 +1119,7 @@ describe("phase 10 operations hardening and production readiness backend contrac
   });
 
   it("exposes dead-letter replay tooling and security review controls without leaking secrets", async () => {
-    const repository = OperationsRepository.inMemory();
+    const repository = OperationsRepository.inMemory(bootstrapOperationsState());
     const operations = new OperationsReadinessService(repository);
 
     const deadLetters = await operations.fetchDeadLetterDashboard({ queue: "webhook-delivery" });

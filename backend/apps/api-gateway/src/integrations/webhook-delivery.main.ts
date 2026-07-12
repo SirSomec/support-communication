@@ -91,7 +91,12 @@ export function createWebhookDeliveryProviderFromEnv(
   config: WebhookDeliveryWorkerRuntimeConfig
 ) {
   if (config.providerMode === "http") {
+    const signingSecret = source.WEBHOOK_DELIVERY_SIGNING_SECRET?.trim();
+    if (!signingSecret && !isLocalRuntime(source.NODE_ENV)) {
+      throw new Error("webhook_delivery_signing_secret_required");
+    }
     return createHttpWebhookDeliveryProvider({
+      signingSecret,
       timeoutMs: config.timeoutMs
     });
   }

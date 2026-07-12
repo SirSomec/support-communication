@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { createSeededIdentityRepository } from "../apps/api-gateway/src/identity/seed.ts";
 import { ServiceAdminService } from "../apps/api-gateway/src/service-admin/service-admin.service.ts";
 import { isAuditExportExpired } from "../apps/api-gateway/src/service-admin/service-admin-audit.persistence.ts";
 
 describe("service-admin audit export contracts", () => {
   it("creates service-admin audit export contracts over filtered rows", async () => {
-    const identityRepository = IdentityRepository.inMemory();
+    const identityRepository = createSeededIdentityRepository();
     const support = new ServiceAdminService(identityRepository);
 
     await identityRepository.recordServiceAdminAuditEvent({
@@ -55,7 +56,7 @@ describe("service-admin audit export contracts", () => {
   });
 
   it("applies redaction overlays without mutating immutable audit rows", async () => {
-    const identityRepository = IdentityRepository.inMemory();
+    const identityRepository = createSeededIdentityRepository();
     const support = new ServiceAdminService(identityRepository);
 
     await identityRepository.recordServiceAdminAuditEvent({

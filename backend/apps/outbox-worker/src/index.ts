@@ -9,6 +9,7 @@ import {
 import { type BillingSyncJobStore, type StoredBillingSyncJob } from "@support-communication/database";
 import { type LogContext, writeStructuredLog } from "@support-communication/observability";
 import { createIntegrationTelegramTokenResolver, type TelegramBotTokenResolver } from "./integration-telegram-store.js";
+import type { ProviderAttachmentTransferStore } from "./provider-attachment-transfer-store.js";
 
 export type OutboxEventHandler = (event: StoredOutboxEvent) => Promise<void> | void;
 export type BillingSyncJobHandler = (job: StoredBillingSyncJob) => Promise<void> | void;
@@ -20,11 +21,12 @@ export type WorkerHttpResponse = {
   ok: boolean;
   status: number;
   text(): Promise<string>;
+  arrayBuffer?(): Promise<ArrayBuffer>;
 };
 export interface WorkerHttpRequestInit {
-  body: string;
+  body?: string | Uint8Array;
   headers: Record<string, string>;
-  method: "POST";
+  method: "GET" | "POST";
   signal?: AbortSignal;
 }
 export type WorkerHttpFetch = (url: string, init: WorkerHttpRequestInit) => Promise<WorkerHttpResponse> | WorkerHttpResponse;
@@ -55,6 +57,7 @@ export interface BillingSyncProvider {
 export interface ChannelConnectorRequest {
   attachments?: Array<Record<string, unknown>>;
   channel: string;
+  channelConnectionId?: string;
   descriptorId: string;
   idempotencyKey: string;
   outboxEventId: string;
@@ -64,15 +67,18 @@ export interface ChannelConnectorRequest {
   message?: string;
   messageId?: string;
   phone?: string;
+  replyMarkup?: Record<string, unknown>;
   tenantId?: string;
   text?: string;
   topic?: string;
 }
 
 export interface ChannelConnector {
-  deliverMessage(request: ChannelConnectorRequest): Promise<void> | void;
-  startConversation(request: ChannelConnectorRequest): Promise<void> | void;
+  deliverMessage(request: ChannelConnectorRequest): Promise<ChannelConnectorDeliveryResult | void> | ChannelConnectorDeliveryResult | void;
+  startConversation(request: ChannelConnectorRequest): Promise<ChannelConnectorDeliveryResult | void> | ChannelConnectorDeliveryResult | void;
 }
+
+export interface ChannelConnectorDeliveryResult { providerMessageId: string; }
 
 export interface AttachmentScanRequest {
   channel: string;
@@ -141,6 +147,7 @@ export interface WorkerOutboundDescriptor {
 export interface OutboundDescriptorStore {
   findOutboundDescriptorById(descriptorId: string): Promise<WorkerOutboundDescriptor | null | undefined> | WorkerOutboundDescriptor | null | undefined;
   markOutboundDescriptorDelivery?(descriptorId: string, deliveryState: "delivered" | "failed"): Promise<WorkerOutboundDescriptor | null | undefined> | WorkerOutboundDescriptor | null | undefined;
+  recordProviderMessageBinding?(input: { channelConnectionId: string; conversationId: string; internalMessageId: string; provider: string; providerConversationId: string; providerMessageId: string; tenantId: string }): Promise<void> | void;
 }
 
 export interface WorkerHandlerRegistryOptions {
@@ -201,6 +208,8 @@ export interface RuntimeOutboxHandlerOptions {
   env?: Record<string, string | undefined>;
   fetcher?: WorkerHttpFetch;
   outboundDescriptorStore?: OutboundDescriptorStore;
+  providerCredentialResolver?: ProviderConnectionCredentialResolver;
+  providerAttachmentTransferStore?: ProviderAttachmentTransferStore;
   telegramBotTokenResolver?: TelegramBotTokenResolver;
   writeLog?: WorkerLogWriter;
 }
@@ -624,11 +633,17 @@ export function createExternalChannelOutboxHandlers({
 export function createHttpWorkerAdaptersFromEnv(
   env: Record<string, string | undefined> = process.env,
   fetcher: WorkerHttpFetch = defaultWorkerHttpFetch,
-  telegramBotTokenResolver?: TelegramBotTokenResolver
+  telegramBotTokenResolver?: TelegramBotTokenResolver,
+  providerCredentialResolver?: ProviderConnectionCredentialResolver,
+  providerAttachmentTransferStore?: ProviderAttachmentTransferStore
 ): HttpWorkerAdapters {
   const timeoutMs = positiveInteger(env.OUTBOX_HTTP_TIMEOUT_MS, 5_000);
   const channelConnectors = Object.fromEntries(parseEndpointMap(env.OUTBOX_CHANNEL_CONNECTORS)
     .map(([channel, endpoint]) => [channel, createHttpChannelConnector(endpoint, fetcher, timeoutMs)]));
+  channelConnectors.SDK ??= {
+    deliverMessage: async () => undefined,
+    startConversation: async () => undefined
+  };
   const telegramConfig = loadTelegramRuntimeConnectorConfig(env);
   if (telegramConfig.enabled) {
     const tokenResolver = telegramBotTokenResolver ?? createIntegrationTelegramTokenResolver(
@@ -645,19 +660,15 @@ export function createHttpWorkerAdaptersFromEnv(
   }
   const vkConfig = loadVkRuntimeConnectorConfig(env);
   if (vkConfig.enabled) {
-    channelConnectors[vkConfig.channel] = createVkChannelConnector({
-      endpoint: vkConfig.endpoint,
-      fetcher,
-      timeoutMs
-    });
+    channelConnectors[vkConfig.channel] = providerCredentialResolver
+      ? createTenantVkChannelConnector({ apiBaseUrl: vkConfig.endpoint, fetcher, providerAttachmentTransferStore, resolveCredential: providerCredentialResolver.resolve, timeoutMs })
+      : createVkChannelConnector({ endpoint: vkConfig.endpoint, fetcher, timeoutMs });
   }
   const maxConfig = loadMaxRuntimeConnectorConfig(env);
   if (maxConfig.enabled) {
-    channelConnectors[maxConfig.channel] = createMaxChannelConnector({
-      endpoint: maxConfig.endpoint,
-      fetcher,
-      timeoutMs
-    });
+    channelConnectors[maxConfig.channel] = providerCredentialResolver
+      ? createTenantMaxChannelConnector({ apiBaseUrl: maxConfig.endpoint, fetcher, providerAttachmentTransferStore, resolveCredential: providerCredentialResolver.resolve, timeoutMs })
+      : createMaxChannelConnector({ endpoint: maxConfig.endpoint, fetcher, timeoutMs });
   }
   const scannerConfig = loadAttachmentScannerRuntimeConfig(env);
   const fileScannerUrl = stringValue(env.OUTBOX_FILE_SCAN_URL);
@@ -726,10 +737,12 @@ export function createRuntimeOutboxHandlers({
   env = process.env,
   fetcher = defaultWorkerHttpFetch,
   outboundDescriptorStore,
+  providerAttachmentTransferStore,
+  providerCredentialResolver,
   telegramBotTokenResolver,
   writeLog = writeStructuredLog
 }: RuntimeOutboxHandlerOptions = {}): Record<string, OutboxEventHandler> {
-  const adapters = createHttpWorkerAdaptersFromEnv(env, fetcher, telegramBotTokenResolver);
+  const adapters = createHttpWorkerAdaptersFromEnv(env, fetcher, telegramBotTokenResolver, providerCredentialResolver, providerAttachmentTransferStore);
   if (!outboundDescriptorStore) {
     return createDefaultOutboxHandlers({ writeLog });
   }
@@ -988,7 +1001,18 @@ function createChannelConnectorHandler(
       : toOutboundConversationRequest(event, descriptor, channel);
 
     try {
-      await connector[method](request);
+      const result = await connector[method](request);
+      if (result?.providerMessageId && descriptorStore.recordProviderMessageBinding && descriptor.messageId) {
+        await descriptorStore.recordProviderMessageBinding({
+          channelConnectionId: requireString(request.channelConnectionId, "provider_channel_connection_id_required"),
+          conversationId: requireString(descriptor.conversationId, "provider_conversation_record_id_required"),
+          internalMessageId: descriptor.messageId,
+          provider: channel.toLowerCase(),
+          providerConversationId: requireString(request.conversationId, "provider_conversation_id_required"),
+          providerMessageId: result.providerMessageId,
+          tenantId: requireString(descriptor.tenantId, "provider_tenant_id_required")
+        });
+      }
     } catch (error) {
       await markOutboundDescriptorDelivery(descriptorStore, descriptor.id, "failed", writeLog, event);
       writeLog("error", "channel connector dispatch failed", {
@@ -1018,6 +1042,24 @@ function createChannelConnectorHandler(
       type: event.type
     });
   };
+}
+
+export interface ProviderConnectionCredential {
+  accessToken: string;
+  apiVersion?: string | null;
+  externalAccountId: string;
+}
+
+export interface ProviderConnectionCredentialResolver {
+  resolve(input: { channelConnectionId: string; provider: "max" | "vk"; tenantId: string }): Promise<ProviderConnectionCredential>;
+}
+
+export interface TenantProviderChannelConnectorOptions {
+  apiBaseUrl: string;
+  fetcher: WorkerHttpFetch;
+  providerAttachmentTransferStore?: ProviderAttachmentTransferStore;
+  resolveCredential: ProviderConnectionCredentialResolver["resolve"];
+  timeoutMs?: number;
 }
 
 async function markOutboundDescriptorDelivery(
@@ -1126,6 +1168,7 @@ export function createTelegramChannelConnector({
     endpoint: requireString(endpoint, "telegram_endpoint_required"),
     fetcher,
     idempotencyKey: requireString(request.idempotencyKey, "telegram_idempotency_key_required"),
+    replyMarkup: request.replyMarkup,
     text: message,
     timeoutMs,
     traceId: requireString(request.traceId, "telegram_trace_id_required")
@@ -1145,12 +1188,13 @@ export function createTenantTelegramChannelConnector({
 }: TenantTelegramChannelConnectorOptions): ChannelConnector {
   const sendMessage = async (request: ChannelConnectorRequest, message: string): Promise<void> => {
     const tenantId = requireString(request.tenantId, "telegram_tenant_id_required");
-    const botToken = requireString(await resolveBotToken(tenantId), "telegram_bot_token_not_configured");
+    const botToken = requireString(await resolveBotToken(tenantId, request.channelConnectionId), "telegram_bot_token_not_configured");
     return postTelegramSendMessage({
       chatId: requireString(request.conversationId ?? request.phone, "telegram_chat_id_required"),
       endpoint: telegramSendMessageEndpoint(apiBaseUrl, botToken),
       fetcher,
       idempotencyKey: requireString(request.idempotencyKey, "telegram_idempotency_key_required"),
+      replyMarkup: request.replyMarkup,
       text: message,
       timeoutMs,
       traceId: requireString(request.traceId, "telegram_trace_id_required")
@@ -1221,6 +1265,87 @@ export function createMaxChannelConnector({
       timeoutMs,
       traceId: requireString(request.traceId, "max_trace_id_required")
     })
+  };
+}
+
+export function createTenantVkChannelConnector({ apiBaseUrl, fetcher, providerAttachmentTransferStore, resolveCredential, timeoutMs = 5_000 }: TenantProviderChannelConnectorOptions): ChannelConnector {
+  return {
+    async deliverMessage(request) {
+      const credential = await resolveCredential({
+        channelConnectionId: requireString(request.channelConnectionId, "vk_channel_connection_id_required"),
+        provider: "vk",
+        tenantId: requireString(request.tenantId, "vk_tenant_id_required")
+      });
+      const providerAttachments = await resolveVkAttachments({
+        accessToken: credential.accessToken,
+        apiBaseUrl,
+        apiVersion: credential.apiVersion?.trim() || "5.199",
+        attachments: request.attachments,
+        channelConnectionId: requireString(request.channelConnectionId, "vk_channel_connection_id_required"),
+        fetcher,
+        peerId: requireString(request.conversationId, "vk_peer_id_required"),
+        tenantId: requireString(request.tenantId, "vk_tenant_id_required"),
+        transferStore: providerAttachmentTransferStore
+      });
+      const params = new URLSearchParams({
+        access_token: requireString(credential.accessToken, "vk_access_token_required"),
+        message: requireString(request.text, "vk_text_required"),
+        peer_id: requireString(request.conversationId, "vk_peer_id_required"),
+        random_id: stableProviderRandomId(request.idempotencyKey),
+        v: credential.apiVersion?.trim() || "5.199"
+      });
+      if (providerAttachments.length) params.set("attachment", providerAttachments.join(","));
+      const response = await postOfficialProviderRequest({
+        body: params.toString(),
+        contentType: "application/x-www-form-urlencoded",
+        endpoint: `${apiBaseUrl.replace(/\/+$/, "")}/method/messages.send`,
+        errorPrefix: "vk",
+        fetcher,
+        idempotencyKey: request.idempotencyKey,
+        timeoutMs,
+        traceId: request.traceId
+      });
+      return { providerMessageId: requireProviderMessageId(response.response, "vk_provider_message_id_required") };
+    },
+    async startConversation() { throw new Error("vk_proactive_delivery_unsupported"); }
+  };
+}
+
+export function createTenantMaxChannelConnector({ apiBaseUrl, fetcher, providerAttachmentTransferStore, resolveCredential, timeoutMs = 5_000 }: TenantProviderChannelConnectorOptions): ChannelConnector {
+  return {
+    async deliverMessage(request) {
+      const credential = await resolveCredential({
+        channelConnectionId: requireString(request.channelConnectionId, "max_channel_connection_id_required"),
+        provider: "max",
+        tenantId: requireString(request.tenantId, "max_tenant_id_required")
+      });
+      const attachments = await resolveMaxAttachments({
+        accessToken: credential.accessToken,
+        apiBaseUrl,
+        attachments: request.attachments,
+        channelConnectionId: requireString(request.channelConnectionId, "max_channel_connection_id_required"),
+        fetcher,
+        tenantId: requireString(request.tenantId, "max_tenant_id_required"),
+        timeoutMs,
+        transferStore: providerAttachmentTransferStore
+      });
+      const chatId = encodeURIComponent(requireString(request.conversationId, "max_chat_id_required"));
+      const response = await postOfficialProviderRequest({
+        authorization: requireString(credential.accessToken, "max_access_token_required"),
+        body: JSON.stringify({ text: requireString(request.text, "max_text_required"), ...(attachments.length ? { attachments } : {}) }),
+        contentType: "application/json",
+        endpoint: `${apiBaseUrl.replace(/\/+$/, "")}/messages?chat_id=${chatId}`,
+        errorPrefix: "max",
+        fetcher,
+        idempotencyKey: request.idempotencyKey,
+        timeoutMs,
+        traceId: request.traceId
+      });
+      const message = objectValue(response.message);
+      const body = objectValue(message?.body);
+      return { providerMessageId: requireProviderMessageId(body?.mid ?? message?.id, "max_provider_message_id_required") };
+    },
+    async startConversation() { throw new Error("max_proactive_delivery_unsupported"); }
   };
 }
 
@@ -1361,7 +1486,7 @@ async function postFileScanResultCallbackRequest(
         verdict: request.verdict
       }),
       headers: {
-        authorization: `Bearer ${bearerToken}`,
+        "x-file-scan-callback-token": bearerToken,
         "content-type": "application/json",
         "idempotency-key": request.idempotencyKey,
         "x-trace-id": request.traceId
@@ -1490,6 +1615,7 @@ async function postTelegramSendMessage({
   endpoint,
   fetcher,
   idempotencyKey,
+  replyMarkup,
   text,
   timeoutMs,
   traceId
@@ -1498,6 +1624,7 @@ async function postTelegramSendMessage({
   endpoint: string;
   fetcher: WorkerHttpFetch;
   idempotencyKey: string;
+  replyMarkup?: Record<string, unknown>;
   text: string;
   timeoutMs: number;
   traceId: string;
@@ -1513,6 +1640,7 @@ async function postTelegramSendMessage({
       body: JSON.stringify({
         chat_id: chatId,
         disable_web_page_preview: true,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         text
       }),
       headers: {
@@ -1613,6 +1741,206 @@ function rejectMaxAttachments(attachments: Array<Record<string, unknown>> | unde
   }
 }
 
+function providerAttachmentIds(attachments: Array<Record<string, unknown>> | undefined): string[] {
+  return (attachments ?? []).map((attachment) => requireString(attachment.providerAttachmentId, "provider_attachment_id_required"));
+}
+
+async function resolveVkAttachments(input: {
+  accessToken: string; apiBaseUrl: string; apiVersion: string; attachments?: Array<Record<string, unknown>>;
+  channelConnectionId: string; fetcher: WorkerHttpFetch; peerId: string; tenantId: string; transferStore?: ProviderAttachmentTransferStore;
+}): Promise<string[]> {
+  const ids: string[] = [];
+  for (const attachment of input.attachments ?? []) {
+    const fileId = requireString(attachment.fileId, "provider_attachment_file_required");
+    const contentVersion = stringValue(attachment.checksum) || fileId;
+    const key = { channelConnectionId: input.channelConnectionId, contentVersion, fileId, provider: "vk" as const, tenantId: input.tenantId };
+    const existing = input.transferStore ? await input.transferStore.find(key) : null;
+    if (existing?.status === "uploaded" && existing.providerAttachmentId) { ids.push(existing.providerAttachmentId); continue; }
+    if (input.transferStore) { await input.transferStore.upsert(key); await input.transferStore.markAttempt(key); }
+    try {
+      const isImage = stringValue(attachment.mimeType).toLowerCase().startsWith("image/");
+      const method = isImage ? "photos.getMessagesUploadServer" : "docs.getMessagesUploadServer";
+      const serverParams = new URLSearchParams({ access_token: input.accessToken, peer_id: input.peerId, v: input.apiVersion });
+      if (!isImage) serverParams.set("type", "doc");
+      const server = await providerJsonFetch(input.fetcher, `${input.apiBaseUrl.replace(/\/+$/, "")}/method/${method}`, {
+        body: serverParams.toString(), headers: { "content-type": "application/x-www-form-urlencoded" }, method: "POST"
+      }, "vk_upload_server_failed");
+      const serverResponse = objectValue(server.response);
+      const uploadUrl = requireString(serverResponse?.upload_url, "vk_upload_url_required");
+      const bytes = await downloadProviderAttachment(attachment, input.fetcher);
+      const boundary = `----support-${fileId.replace(/[^A-Za-z0-9]/g, "").slice(-24)}`;
+      const uploaded = await providerJsonFetch(input.fetcher, uploadUrl, {
+        body: multipartFileBody(boundary, bytes, requireString(attachment.fileName, "provider_attachment_file_name_required"), stringValue(attachment.mimeType) || "application/octet-stream", isImage ? "photo" : "file"),
+        headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, method: "POST"
+      }, "vk_attachment_upload_failed");
+      const saveMethod = isImage ? "photos.saveMessagesPhoto" : "docs.save";
+      const saveParams = new URLSearchParams({ access_token: input.accessToken, v: input.apiVersion });
+      if (isImage) {
+        saveParams.set("server", requireScalarString(uploaded.server, "vk_photo_server_required"));
+        saveParams.set("photo", requireString(uploaded.photo, "vk_photo_payload_required"));
+        saveParams.set("hash", requireString(uploaded.hash, "vk_photo_hash_required"));
+      } else {
+        saveParams.set("file", requireString(uploaded.file, "vk_file_payload_required"));
+        saveParams.set("title", requireString(attachment.fileName, "provider_attachment_file_name_required"));
+      }
+      const saved = await providerJsonFetch(input.fetcher, `${input.apiBaseUrl.replace(/\/+$/, "")}/method/${saveMethod}`, {
+        body: saveParams.toString(), headers: { "content-type": "application/x-www-form-urlencoded" }, method: "POST"
+      }, "vk_attachment_save_failed");
+      const raw = isImage ? (Array.isArray(saved.response) ? saved.response[0] : undefined) : (objectValue(saved.response)?.doc ?? saved.response);
+      const item = objectValue(raw);
+      const prefix = isImage ? "photo" : "doc";
+      const providerAttachmentId = `${prefix}${requireScalarString(item?.owner_id, "vk_attachment_owner_required")}_${requireScalarString(item?.id, "vk_attachment_id_required")}${stringValue(item?.access_key) ? `_${stringValue(item?.access_key)}` : ""}`;
+      if (input.transferStore) await input.transferStore.markUploaded({ ...key, providerAttachmentId });
+      ids.push(providerAttachmentId);
+    } catch (error) {
+      if (input.transferStore) await input.transferStore.markFailed({ ...key, error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }
+  return ids;
+}
+
+async function resolveMaxAttachments(input: {
+  accessToken: string;
+  apiBaseUrl: string;
+  attachments?: Array<Record<string, unknown>>;
+  channelConnectionId: string;
+  fetcher: WorkerHttpFetch;
+  tenantId: string;
+  timeoutMs: number;
+  transferStore?: ProviderAttachmentTransferStore;
+}): Promise<Array<{ payload: { token: string }; type: string }>> {
+  const resolved = [];
+  for (const attachment of input.attachments ?? []) {
+    const fileId = requireString(attachment.fileId, "provider_attachment_file_required");
+    const contentVersion = stringValue(attachment.checksum) || fileId;
+    const key = { channelConnectionId: input.channelConnectionId, contentVersion, fileId, provider: "max" as const, tenantId: input.tenantId };
+    const existing = input.transferStore ? await input.transferStore.find(key) : null;
+    if (existing?.status === "uploaded" && existing.providerAttachmentToken) {
+      resolved.push({ payload: { token: existing.providerAttachmentToken }, type: maxAttachmentType(attachment) });
+      continue;
+    }
+    if (input.transferStore) {
+      await input.transferStore.upsert(key);
+      await input.transferStore.markAttempt(key);
+    }
+    try {
+      const type = maxAttachmentType(attachment);
+      const bytes = await downloadProviderAttachment(attachment, input.fetcher);
+      const uploadDescriptor = await providerJsonFetch(input.fetcher, `${input.apiBaseUrl.replace(/\/+$/, "")}/uploads?type=${type}`, {
+        body: "",
+        headers: { authorization: input.accessToken },
+        method: "POST"
+      }, "max_upload_descriptor_failed");
+      const uploadUrl = requireString(uploadDescriptor.url, "max_upload_url_required");
+      const boundary = `----support-${fileId.replace(/[^A-Za-z0-9]/g, "").slice(-24)}`;
+      const body = multipartFileBody(boundary, bytes, requireString(attachment.fileName, "provider_attachment_file_name_required"), stringValue(attachment.mimeType) || "application/octet-stream");
+      const uploaded = await providerJsonFetch(input.fetcher, uploadUrl, {
+        body,
+        headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+        method: "POST"
+      }, "max_attachment_upload_failed");
+      const token = requireString(uploaded.token ?? uploadDescriptor.token, "max_attachment_token_required");
+      if (input.transferStore) await input.transferStore.markUploaded({ ...key, providerAttachmentToken: token });
+      resolved.push({ payload: { token }, type });
+    } catch (error) {
+      if (input.transferStore) await input.transferStore.markFailed({ ...key, error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }
+  return resolved;
+}
+
+function maxAttachmentType(attachment: Record<string, unknown>): "audio" | "file" | "image" | "video" {
+  const mime = stringValue(attachment.mimeType).toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "file";
+}
+
+async function downloadProviderAttachment(attachment: Record<string, unknown>, fetcher: WorkerHttpFetch): Promise<Uint8Array> {
+  const signedFile = signedAttachmentFileAccess(attachment.signedFile);
+  if (!signedFile) throw new Error("provider_attachment_file_access_required");
+  if (new Date(signedFile.expiresAt).getTime() <= Date.now()) throw new Error("provider_attachment_file_access_expired");
+  const response = await fetcher(signedFile.url, { headers: signedFile.headers ?? {}, method: "GET" });
+  if (!response.ok || !response.arrayBuffer) throw new Error(`provider_attachment_download_failed:${response.status}`);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+async function providerJsonFetch(fetcher: WorkerHttpFetch, url: string, init: WorkerHttpRequestInit, errorCode: string): Promise<Record<string, unknown>> {
+  const response = await fetcher(url, init);
+  if (!response.ok) throw new Error(`${errorCode}:${response.status}`);
+  const text = await response.text();
+  const value = text ? JSON.parse(text) : {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(errorCode);
+  return value as Record<string, unknown>;
+}
+
+function multipartFileBody(boundary: string, bytes: Uint8Array, fileName: string, mimeType: string, fieldName = "data"): Uint8Array {
+  const encoder = new TextEncoder();
+  const safeName = fileName.replace(/["\r\n]/g, "_");
+  const prefix = encoder.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${fieldName}"; filename="${safeName}"\r\nContent-Type: ${mimeType}\r\n\r\n`);
+  const suffix = encoder.encode(`\r\n--${boundary}--\r\n`);
+  const body = new Uint8Array(prefix.length + bytes.length + suffix.length);
+  body.set(prefix, 0);
+  body.set(bytes, prefix.length);
+  body.set(suffix, prefix.length + bytes.length);
+  return body;
+}
+
+function stableProviderRandomId(value: string): string {
+  let hash = 0;
+  for (const character of requireString(value, "provider_idempotency_key_required")) {
+    hash = ((hash * 31) + character.charCodeAt(0)) | 0;
+  }
+  return String(Math.abs(hash || 1));
+}
+
+async function postOfficialProviderRequest(input: {
+  authorization?: string;
+  body: string;
+  contentType: string;
+  endpoint: string;
+  errorPrefix: "max" | "vk";
+  fetcher: WorkerHttpFetch;
+  idempotencyKey?: string;
+  timeoutMs: number;
+  traceId?: string;
+}): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+  let response: WorkerHttpResponse;
+  try {
+    response = await input.fetcher(input.endpoint, {
+      body: input.body,
+      headers: {
+        ...(input.authorization ? { authorization: input.authorization } : {}),
+        "content-type": input.contentType,
+        "idempotency-key": requireString(input.idempotencyKey, `${input.errorPrefix}_idempotency_key_required`),
+        "x-trace-id": requireString(input.traceId, `${input.errorPrefix}_trace_id_required`)
+      },
+      method: "POST",
+      signal: controller.signal
+    });
+  } catch {
+    if (controller.signal.aborted) throw new Error(`${input.errorPrefix}_dispatch_timeout:${input.timeoutMs}`);
+    throw new Error(`${input.errorPrefix}_dispatch_failed`);
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.ok) throw new Error(`${input.errorPrefix}_dispatch_failed:${response.status}`);
+  const payload = await response.text();
+  try {
+    const parsed = JSON.parse(payload) as Record<string, unknown>;
+    if (parsed.error || parsed.success === false) throw new Error(`${input.errorPrefix}_provider_rejected`);
+    return parsed;
+  } catch (error) {
+    if (error instanceof Error && error.message === `${input.errorPrefix}_provider_rejected`) throw error;
+    throw new Error(`${input.errorPrefix}_provider_response_invalid`);
+  }
+}
+
 function telegramSendMessageEndpoint(apiBaseUrl: string, botToken: string): string {
   return `${apiBaseUrl.replace(/\/+$/, "")}/bot${botToken}/sendMessage`;
 }
@@ -1635,15 +1963,18 @@ function requireDescriptorKind(descriptor: WorkerOutboundDescriptor, expectedKin
 
 function toMessageDeliveryRequest(event: StoredOutboxEvent, descriptor: WorkerOutboundDescriptor, channel: string): ChannelConnectorRequest {
   const attachments = attachmentsFromPayload(descriptor.payload.attachments);
+  const replyMarkup = objectValue(descriptor.payload.replyMarkup);
   return {
     ...(attachments ? { attachments } : {}),
     channel,
+    ...(stringValue(descriptor.payload.channelConnectionId) ? { channelConnectionId: stringValue(descriptor.payload.channelConnectionId) } : {}),
     conversationId: requireString(descriptor.payload.providerConversationId ?? descriptor.conversationId, "conversation_id_required"),
     descriptorId: descriptor.id,
     idempotencyKey: descriptor.idempotencyKey || descriptor.id,
     messageId: requireString(descriptor.messageId, "message_id_required"),
     outboxEventId: event.id,
     tenantId: requireString(descriptor.tenantId, "tenant_id_required"),
+    ...(replyMarkup ? { replyMarkup } : {}),
     text: requireString(descriptor.payload.text, "message_text_required"),
     traceId: event.traceId
   };
@@ -1867,6 +2198,18 @@ function requireString(value: unknown, code: string): string {
     throw new Error(code);
   }
 
+  return normalized;
+}
+
+function requireScalarString(value: unknown, code: string): string {
+  const normalized = typeof value === "number" && Number.isFinite(value) ? String(value) : stringValue(value);
+  if (!normalized) throw new Error(code);
+  return normalized;
+}
+
+function requireProviderMessageId(value: unknown, code: string): string {
+  const normalized = value === null || value === undefined ? "" : String(value).trim();
+  if (!normalized) throw new Error(code);
   return normalized;
 }
 

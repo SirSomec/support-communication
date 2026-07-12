@@ -265,6 +265,7 @@ describe("backend API Gateway runtime contracts", () => {
 
       const closeWithTopic = await patchJson("http://127.0.0.1:4191/api/v1/dialogs/vladimir/status", {
         nextStatus: "closed",
+        resolutionOutcome: "resolved",
         roleMode: "admin",
         topic: "Product / Mismatch"
       });

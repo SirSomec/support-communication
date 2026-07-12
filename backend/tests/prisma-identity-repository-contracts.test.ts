@@ -409,7 +409,10 @@ describe("Prisma-backed identity repository contracts", () => {
     const session = await repository.createServiceAdminSession({
       actorId: "svc-admin-prod",
       actorName: "Production Admin",
+      adminEmail: "production-admin@example.com",
       allowedActions: ["tenants.manage"],
+      availableOrganizations: [{ id: "tenant-volga", name: "Volga Logistics", role: "service_admin" }],
+      currentTenantId: "tenant-volga",
       mfaVerified: true,
       ttlMinutes: 30
     });
@@ -800,7 +803,10 @@ describe("Prisma-backed identity repository contracts", () => {
     const session = await repository.createServiceAdminSession({
       actorId: "svc-prisma-admin",
       actorName: "Prisma Admin",
+      adminEmail: "prisma-admin@example.com",
       allowedActions: ["tenants.manage"],
+      availableOrganizations: [{ id: "tenant-volga", name: "Volga Logistics", role: "service_admin" }],
+      currentTenantId: "tenant-volga",
       mfaVerified: true,
       ttlMinutes: 30
     });
@@ -885,7 +891,10 @@ describe("Prisma-backed identity repository contracts", () => {
     const session = await repository.createServiceAdminSession({
       actorId: "svc-prisma-token-admin",
       actorName: "Prisma Token Admin",
+      adminEmail: "prisma-token-admin@example.com",
       allowedActions: ["tenants.manage"],
+      availableOrganizations: [{ id: "tenant-volga", name: "Volga Logistics", role: "service_admin" }],
+      currentTenantId: "tenant-volga",
       mfaVerified: true,
       ttlMinutes: 30
     });

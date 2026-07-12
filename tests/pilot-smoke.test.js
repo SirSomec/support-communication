@@ -20,6 +20,8 @@ const operatorReplyText = String(process.env.PILOT_OPERATOR_REPLY_TEXT ?? "Pilot
 const environment = String(process.env.PILOT_PUBLIC_API_ENVIRONMENT ?? "stage").trim() || "stage";
 const publicApiKey = `sk_test_${runId}_${randomBytes(16).toString("hex")}`;
 const publicApiKeyId = `key_${runId}`;
+const sdkQueueId = "queue-pilot-sdk-smoke";
+const sdkConnectionId = "conn-pilot-sdk-smoke";
 const expectedConversationId = `sdk_${createHash("sha256")
   .update(`${tenantId}:${widgetExternalId}`)
   .digest("hex")
@@ -31,7 +33,38 @@ before(async () => {
   assert.equal(environment, "stage", "The self-seeded Public SDK smoke uses the stage environment.");
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   assert.ok(tenant, `Seeded tenant ${tenantId} was not found.`);
+  const preparedAt = new Date();
   await prisma.$transaction([
+    prisma.team.upsert({
+      create: { channels: ["SDK"], id: "group-line-1", name: "Line 1", scope: "Pilot smoke", status: "active", tenantId, updatedAt: preparedAt },
+      update: { status: "active", updatedAt: preparedAt },
+      where: { tenantId_id: { id: "group-line-1", tenantId } }
+    }),
+    prisma.supportQueue.upsert({
+      create: { defaultTeamId: "group-line-1", id: sdkQueueId, name: "Pilot SDK smoke", status: "active", tenantId, updatedAt: preparedAt },
+      update: { defaultTeamId: "group-line-1", name: "Pilot SDK smoke", status: "active", updatedAt: preparedAt },
+      where: { tenantId_id: { id: sdkQueueId, tenantId } }
+    }),
+    prisma.channelConnection.upsert({
+      create: {
+        chatLimit: 20,
+        credentialsMasked: true,
+        environment,
+        health: 100,
+        id: sdkConnectionId,
+        lastSyncAt: new Date(),
+        name: "Pilot SDK smoke",
+        rawExternalId: "sdk:pilot-smoke",
+        routingQueueId: sdkQueueId,
+        status: "active",
+        tenantId,
+        traffic: "smoke",
+        type: "sdk",
+        webhookUrl: "https://pilot-smoke.local/sdk"
+      },
+      update: { environment, routingQueueId: sdkQueueId, status: "active" },
+      where: { id: sdkConnectionId }
+    }),
     prisma.tenantUser.create({
       data: {
         device: "release-gate",
@@ -39,7 +72,7 @@ before(async () => {
         id: operatorId,
         inviteStatus: "accepted",
         lastActiveAt: null,
-        metadata: { smoke: true },
+        metadata: { employeeSettings: { chatLimit: 20 }, smoke: true },
         mfa: "enabled",
         name: "Public SDK Smoke Operator",
         risk: "low",
@@ -48,6 +81,28 @@ before(async () => {
         status: "active",
         supportNotes: "Ephemeral operator for Public SDK release smoke.",
         tenantId
+      }
+    }),
+    prisma.teamMembership.create({
+      data: {
+        active: true,
+        id: `tm_${runId}`,
+        operatorId,
+        role: "member",
+        teamId: "group-line-1",
+        tenantId,
+        updatedAt: preparedAt
+      }
+    }),
+    prisma.queueMembership.create({
+      data: {
+        active: true,
+        id: `qm_${runId}`,
+        operatorId,
+        queueId: sdkQueueId,
+        role: "member",
+        tenantId,
+        updatedAt: preparedAt
       }
     }),
     prisma.passwordCredential.create({
@@ -62,6 +117,7 @@ before(async () => {
     }),
     prisma.publicApiKey.create({
       data: {
+        channelConnectionId: sdkConnectionId,
         environment,
         keyId: publicApiKeyId,
         keyPreview: `sk_test_****_${publicApiKey.slice(-4)}`,
@@ -78,7 +134,9 @@ before(async () => {
 
 after(async () => {
   try {
-    await cleanupSmokeEvidence();
+    if (process.env.PILOT_SMOKE_KEEP_EVIDENCE !== "true") {
+      await cleanupSmokeEvidence();
+    }
   } finally {
     await prisma.$disconnect?.();
   }
@@ -98,6 +156,18 @@ describe("pilot smoke flow", () => {
     const accessToken = String(loginEnvelope.data?.accessToken ?? "");
     assert.ok(accessToken, "Tenant operator login did not return accessToken.");
 
+    const queuesEnvelope = await getJson(`${baseUrl}/routing/queues?status=active`, {
+      authorization: `Bearer ${accessToken}`
+    });
+    assert.equal(queuesEnvelope.status, "ok");
+    assert.equal(
+      queuesEnvelope.data?.queues?.some(
+        (queue) => queue?.id === sdkQueueId && queue?.defaultTeamId === "group-line-1" && queue?.memberIds?.includes(operatorId)
+      ),
+      true,
+      "Canonical SDK queue, team or operator membership is unavailable through the live API."
+    );
+
     const identifyEnvelope = await publicPost("/public/sdk/identify", {
       externalId: widgetExternalId
     });
@@ -114,6 +184,8 @@ describe("pilot smoke flow", () => {
     });
     assert.equal(sendEnvelope.status, "ok");
     assert.equal(String(sendEnvelope.data?.conversationId ?? ""), conversationId);
+    assert.equal(sendEnvelope.data?.autoAssignment?.assignment?.action, "assign");
+    assert.equal(sendEnvelope.data?.autoAssignment?.assignment?.targetOperatorId, operatorId);
     const visitorSessionToken = String(sendEnvelope.data?.visitorSessionToken ?? "");
     assert.ok(visitorSessionToken, "send message did not return visitorSessionToken.");
 
@@ -132,19 +204,67 @@ describe("pilot smoke flow", () => {
     });
     assert.equal(assigneesEnvelope.status, "ok");
     assert.equal(assigneesEnvelope.data?.items?.some((item) => item?.id === operatorId), true);
-    const assignmentEnvelope = await patchJson(
-      `${baseUrl}/dialogs/${encodeURIComponent(conversationId)}/assignment`,
-      {
-        operatorId,
-        reason: "Pilot smoke queue assignment"
-      },
-      {
-        authorization: `Bearer ${accessToken}`
-      }
+    const assignedDialogsEnvelope = await getJson(`${baseUrl}/dialogs?page=1&pageSize=100`, {
+      authorization: `Bearer ${accessToken}`
+    });
+    const assignedDialog = assignedDialogsEnvelope.data?.items?.find((item) => item?.id === conversationId);
+    assert.equal(assignedDialog?.operatorId, operatorId);
+    assert.equal(assignedDialog?.queueId, sdkQueueId);
+    assert.equal(assignedDialog?.teamId, "group-line-1");
+
+    const returnEnvelope = await postJson(
+      `${baseUrl}/routing/assignments`,
+      { action: "return_queue", conversationId, reason: "Pilot smoke return to queue" },
+      { authorization: `Bearer ${accessToken}` }
     );
-    assert.equal(assignmentEnvelope.status, "ok");
-    assert.equal(assignmentEnvelope.data?.action, "assignment");
-    assert.equal(assignmentEnvelope.data?.conversation?.operatorId, operatorId);
+    assert.equal(returnEnvelope.status, "ok");
+    const redistributionKey = `pilot-redistribution-${widgetExternalId}`;
+    const redistributionPayload = {
+      idempotencyKey: redistributionKey,
+      reason: "Pilot smoke canonical redistribution",
+      selectedQueues: [sdkQueueId],
+      targetRule: "least_loaded"
+    };
+    const redistributionPreview = await postJson(
+      `${baseUrl}/routing/redistribution/preview`,
+      redistributionPayload,
+      { authorization: `Bearer ${accessToken}` }
+    );
+    assert.equal(redistributionPreview.status, "ok");
+    assert.equal(redistributionPreview.data?.plan?.some((item) => item.conversationId === conversationId), true);
+    const redistributionCommit = await postJson(
+      `${baseUrl}/routing/redistribution/commit`,
+      redistributionPayload,
+      { authorization: `Bearer ${accessToken}` }
+    );
+    assert.equal(redistributionCommit.status, "ok");
+    assert.equal(redistributionCommit.data?.appliedAssignments?.some((item) => item.conversationId === conversationId), true);
+    const redistributedDialogsEnvelope = await getJson(`${baseUrl}/dialogs?page=1&pageSize=100`, {
+      authorization: `Bearer ${accessToken}`
+    });
+    assert.equal(redistributedDialogsEnvelope.data?.items?.find((item) => item?.id === conversationId)?.operatorId, operatorId);
+
+    const workloadEnvelope = await getJson(`${baseUrl}/routing/workload`, {
+      authorization: `Bearer ${accessToken}`
+    });
+    assert.equal(workloadEnvelope.status, "ok");
+    assert.equal(workloadEnvelope.data?.dataQuality?.canonical, true);
+    assert.equal(workloadEnvelope.data?.queues?.some((queue) => queue.channel === sdkQueueId && queue.active >= 1), true);
+    assert.equal(workloadEnvelope.data?.operators?.some((operator) => operator.id === operatorId && operator.chats >= 1), true);
+
+    const rescueStartEnvelope = await postJson(
+      `${baseUrl}/routing/rescue/start`,
+      { conversationId, reason: "Pilot smoke rescue workflow", source: "pilot_smoke" },
+      { authorization: `Bearer ${accessToken}` }
+    );
+    assert.equal(rescueStartEnvelope.status, "ok");
+    assert.equal(rescueStartEnvelope.data?.rescue?.state, "active");
+
+    const rescueDialogsEnvelope = await getJson(`${baseUrl}/dialogs?page=1&pageSize=100`, {
+      authorization: `Bearer ${accessToken}`
+    });
+    const rescueDialog = rescueDialogsEnvelope.data?.items?.find((item) => item?.id === conversationId);
+    assert.equal(rescueDialog?.rescueState?.state, "active");
 
     await new Promise((resolve) => setTimeout(resolve, 1_100));
 
@@ -167,18 +287,33 @@ describe("pilot smoke flow", () => {
     });
     assert.equal(polledReply.text, operatorReplyText);
 
+    const rescueResolveEnvelope = await postJson(
+      `${baseUrl}/routing/rescue/resolve`,
+      { conversationId, outcome: "saved", reason: "Pilot smoke operator replied" },
+      { authorization: `Bearer ${accessToken}` }
+    );
+    assert.equal(rescueResolveEnvelope.status, "ok");
+    assert.equal(rescueResolveEnvelope.data?.rescue?.state, "saved");
+    const rescueReportEnvelope = await getJson(`${baseUrl}/routing/reports/rescue?period=today`, {
+      authorization: `Bearer ${accessToken}`
+    });
+    assert.equal(rescueReportEnvelope.status, "ok");
+    assert.equal(rescueReportEnvelope.data?.rows?.some((row) => row.conversationId === conversationId && row.outcome === "saved"), true);
+
     const reportEnvelope = await getJson(
       `${baseUrl}/reports/workspace?period=${encodeURIComponent("Сегодня")}&channel=SDK`,
       { authorization: `Bearer ${accessToken}` }
     );
     assert.equal(reportEnvelope.status, "ok");
-    assert.equal(reportEnvelope.data?.source, "tenant_conversations");
+    assert.equal(reportEnvelope.data?.source, "conversation_lifecycle_events");
     assert.equal(reportEnvelope.data?.hasActivity, true);
     assert.ok(
       Number(reportEnvelope.data?.rows?.find((row) => row.metric === "Новые диалоги")?.today) >= 1,
       "Reports did not count the real SDK conversation for the current tenant."
     );
     assert.deepEqual(reportEnvelope.data?.bars, [["SDK", 100]]);
+    assert.equal(reportEnvelope.data?.filterOptions?.queueId?.includes(sdkQueueId), true);
+    assert.equal(reportEnvelope.data?.filterOptions?.teamId?.includes("group-line-1"), true);
     assert.equal(
       reportEnvelope.data?.rows?.find((row) => row.metric === "Среднее время первого ответа")?.today === "00:00",
       false,
@@ -192,14 +327,11 @@ describe("pilot smoke flow", () => {
     assert.equal(routingActivityEnvelope.status, "ok");
     assert.equal(routingActivityEnvelope.data?.source, "routing_analytics_rows");
     assert.equal(routingActivityEnvelope.data?.empty, false);
-    assert.equal(routingActivityEnvelope.data?.rows?.some((row) => row.operatorId === operatorId && row.assignments === 1), true);
-    assert.deepEqual(routingActivityEnvelope.data?.totals, {
-      assignments: 1,
-      operators: 1,
-      totalEvents: 1,
-      transfers: 0,
-      unattributedEvents: 0
-    });
+    assert.equal(routingActivityEnvelope.data?.rows?.some((row) => row.operatorId === operatorId && row.assignments >= 1), true);
+    assert.equal(routingActivityEnvelope.data?.totals?.assignments >= 1, true);
+    assert.equal(routingActivityEnvelope.data?.totals?.operators, 1);
+    assert.equal(routingActivityEnvelope.data?.totals?.totalEvents >= 1, true);
+    assert.equal(routingActivityEnvelope.data?.totals?.transfers, 0);
 
     const recoveryRequest = await postJson(`${baseUrl}/auth/recovery/request`, { email: operatorEmail });
     assert.equal(recoveryRequest.status, "ok");
@@ -279,10 +411,12 @@ async function cleanupSmokeEvidence() {
 
   await prisma.$transaction([
     prisma.routingAnalyticsRow.deleteMany({ where: { conversationId: expectedConversationId } }),
+    prisma.queueMembership.deleteMany({ where: { operatorId, tenantId } }),
     prisma.channelDeliveryReceipt.deleteMany({ where: { conversationId: expectedConversationId } }),
     prisma.conversationOutboundDescriptor.deleteMany({ where: { conversationId: expectedConversationId } }),
     prisma.conversationRealtimeEvent.deleteMany({ where: { resourceId: { in: realtimeResourceIds } } }),
-    prisma.conversation.deleteMany({ where: { id: expectedConversationId } }),
+    // Conversation lifecycle events are an append-only audit trail. Each run uses
+    // a unique conversation id, so the evidence remains isolated and queryable.
     prisma.outboxEvent.deleteMany({ where: { id: { in: outboxEventIds } } }),
     prisma.publicApiKey.deleteMany({ where: { keyId: publicApiKeyId } }),
     prisma.serviceAdminSession.deleteMany({ where: { adminId: operatorId } }),

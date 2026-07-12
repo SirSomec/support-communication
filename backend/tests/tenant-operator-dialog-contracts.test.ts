@@ -223,31 +223,20 @@ function demoServiceAdminHeaders(requiredAction: string): Record<string, string>
 }
 
 async function seedPilotOperator(repository: IdentityRepository): Promise<void> {
-  await repository.applyServiceAdminUserAction({
-    action: "tenant_operator.seed",
-    userId: PILOT_OPERATOR_USER_ID,
-    changes: {
-      email: PILOT_OPERATOR_EMAIL,
-      name: "Pilot Operator",
-      role: "Admin",
-      status: "active",
-      tenantId: PILOT_TENANT_ID
-    },
-    auditEvent: {
-      action: "tenant_operator.seed",
-      actor: "test-suite",
-      actorName: "test-suite",
-      at: new Date().toISOString(),
-      id: "evt_tenant_operator_dialog_seed_contract",
-      immutable: true,
-      reason: "Seed pilot operator credential for dialog and realtime tenant route contracts.",
-      result: "ok",
-      severity: "info",
-      target: PILOT_OPERATOR_USER_ID,
-      tenantId: PILOT_TENANT_ID,
-      traceId: "trc_tenant_operator_dialog_seed_contract",
-      userId: PILOT_OPERATOR_USER_ID
-    }
+  await repository.saveTenantUser({
+    device: "Contract test",
+    email: PILOT_OPERATOR_EMAIL,
+    id: PILOT_OPERATOR_USER_ID,
+    inviteStatus: "accepted",
+    lastActiveAt: new Date().toISOString(),
+    mfa: "enabled",
+    name: "Pilot Operator",
+    risk: "low",
+    role: "Admin",
+    sessions: 0,
+    status: "active",
+    supportNotes: "Explicit tenant dialog contract fixture.",
+    tenantId: PILOT_TENANT_ID
   });
 
   await repository.savePasswordCredential({

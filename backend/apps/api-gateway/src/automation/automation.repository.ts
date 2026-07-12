@@ -4,14 +4,13 @@ import type {
   ConversationOutboundDescriptor,
   ConversationRepository
 } from "../conversation/conversation.repository.js";
-import { isLocalRuntime } from "../runtime/local-runtime.js";
-import { bootstrapAutomationState } from "./seed.js";
 import type { BotScenario, ProactiveRule } from "./automation.types.js";
 
 export interface AutomationPublishIdempotencyRecord {
   fingerprint: string;
   key: string;
   result: Record<string, unknown>;
+  tenantId: string;
 }
 
 export interface AutomationBotTestRun {
@@ -20,7 +19,7 @@ export interface AutomationBotTestRun {
   queue: string;
   scenarioId: string;
   status: string;
-  tenantId?: string;
+  tenantId: string;
   testRunId: string;
 }
 
@@ -30,7 +29,7 @@ export interface AutomationBotScenarioVersion {
   flowNodes: BotScenario["flowNodes"];
   scenarioId: string;
   status: string;
-  tenantId?: string;
+  tenantId: string;
   versionId: string;
 }
 
@@ -43,8 +42,72 @@ export interface AutomationBotPublishAuditEvent {
   immutable: true;
   runtimeVersion: string;
   scenarioId: string;
-  tenantId?: string;
+  tenantId: string;
   versionId: string;
+}
+
+export interface AutomationBotRuntimeInstance {
+  attempts: number;
+  context: Record<string, unknown>;
+  conversationId: string;
+  createdAt: string;
+  currentNodeId: string;
+  id: string;
+  lastError: string | null;
+  nextAttemptAt: string | null;
+  scenarioId: string;
+  status: "active" | "completed" | "dead_lettered" | "handoff" | "retry_scheduled";
+  tenantId: string;
+  updatedAt: string;
+  versionId: string;
+}
+
+export interface AutomationBotRuntimeStep {
+  conversationId: string;
+  createdAt: string;
+  error: string | null;
+  handoffSummary: Record<string, unknown> | null;
+  id: string;
+  inputEvent: Record<string, unknown>;
+  inputEventId: string;
+  lifecycleEvent: Record<string, unknown> | null;
+  nodeId: string;
+  nodeType: string;
+  outcome: string;
+  runtimeId: string;
+  sideEffects: Array<Record<string, unknown>>;
+  tenantId: string;
+  webhookResponse: Record<string, unknown> | null;
+}
+
+export interface AutomationBotRuntimeSideEffect {
+  attempts: number;
+  conversationId: string;
+  createdAt: string;
+  deadLetteredAt: string | null;
+  deliveredAt: string | null;
+  id: string;
+  kind: "bot_handoff" | "message_delivery";
+  lastError: string | null;
+  leaseUntil: string | null;
+  nextAttemptAt: string | null;
+  payload: Record<string, unknown>;
+  status: "dead_lettered" | "delivered" | "pending" | "processing" | "retry_scheduled";
+  stepId: string;
+  tenantId: string;
+  updatedAt: string;
+}
+
+export interface AutomationBotRuntimeCommitInput {
+  expectedCurrentNodeId?: string;
+  instance: AutomationBotRuntimeInstance;
+  step: AutomationBotRuntimeStep;
+}
+
+export interface AutomationBotRuntimeCommitResult {
+  instance: AutomationBotRuntimeInstance;
+  outcome: "committed" | "duplicate";
+  step: AutomationBotRuntimeStep;
 }
 
 export interface AutomationProactiveExecutionWindow {
@@ -187,6 +250,9 @@ export interface AutomationState {
   botScenarios: BotScenario[];
   botScenarioVersions: AutomationBotScenarioVersion[];
   botTestRuns: AutomationBotTestRun[];
+  botRuntimeInstances: AutomationBotRuntimeInstance[];
+  botRuntimeSteps: AutomationBotRuntimeStep[];
+  botRuntimeSideEffects: AutomationBotRuntimeSideEffect[];
   proactiveDeliveryAttributions: AutomationProactiveDeliveryAttribution[];
   proactiveDeliveryAttempts: AutomationProactiveDeliveryAttempt[];
   proactiveDeliveryIdempotencyKeys: AutomationProactiveDeliveryIdempotencyRecord[];
@@ -203,6 +269,7 @@ export interface AutomationState {
 
 interface AutomationRepositoryOptions {
   filePath: string;
+  seed?: AutomationState;
 }
 
 type MaybePromise<T> = T | Promise<T>;
@@ -224,7 +291,7 @@ export interface PrismaAutomationClient {
   automationPublishIdempotencyKey: {
     create(input: { data: PrismaAutomationPublishIdempotencyKeyRow }): Promise<PrismaAutomationPublishIdempotencyKeyRow>;
     findMany(input?: PrismaAutomationFindManyInput): Promise<PrismaAutomationPublishIdempotencyKeyRow[]>;
-    findUnique(input: { where: { key: string } }): Promise<PrismaAutomationPublishIdempotencyKeyRow | null>;
+    findUnique(input: { where: PrismaAutomationPublishIdempotencyKeyWhereUniqueInput }): Promise<PrismaAutomationPublishIdempotencyKeyRow | null>;
   };
   botPublishAuditEvent: {
     create(input: { data: PrismaBotPublishAuditEventCreateInput }): Promise<PrismaBotPublishAuditEventRow>;
@@ -241,6 +308,9 @@ export interface PrismaAutomationClient {
     findMany(input: PrismaBotScenarioVersionFindManyInput): Promise<PrismaBotScenarioVersionRow[]>;
     findUnique(input: PrismaBotScenarioVersionFindUniqueInput): Promise<PrismaBotScenarioVersionRow | null>;
   };
+  botRuntimeInstance?: PrismaBotRuntimeInstanceDelegate;
+  botRuntimeStepJournal?: PrismaBotRuntimeStepDelegate;
+  botRuntimeSideEffect?: PrismaBotRuntimeSideEffectDelegate;
   proactiveDeliveryAttempt: {
     create(input: { data: PrismaProactiveDeliveryAttemptRow }): Promise<PrismaProactiveDeliveryAttemptRow>;
     findMany(input?: PrismaAutomationFindManyInput): Promise<PrismaProactiveDeliveryAttemptRow[]>;
@@ -282,11 +352,17 @@ export interface PrismaAutomationClient {
 }
 
 interface AutomationRepositoryPort {
+  claimBotRuntimeSideEffect(id: string, now: string, leaseUntil: string): MaybePromise<AutomationBotRuntimeSideEffect | undefined>;
+  listDueBotRuntimeSideEffects(now: string, limit: number): MaybePromise<AutomationBotRuntimeSideEffect[]>;
+  updateBotRuntimeSideEffect(effect: AutomationBotRuntimeSideEffect): MaybePromise<AutomationBotRuntimeSideEffect>;
+  commitBotRuntimeTransition(input: AutomationBotRuntimeCommitInput): MaybePromise<AutomationBotRuntimeCommitResult>;
+  findBotRuntimeInstance(tenantId: string, conversationId: string): MaybePromise<AutomationBotRuntimeInstance | undefined>;
+  findBotRuntimeStep(tenantId: string, conversationId: string, inputEventId: string): MaybePromise<AutomationBotRuntimeStep | undefined>;
   findBotPublishAuditEvent(auditId: string): MaybePromise<AutomationBotPublishAuditEvent | undefined>;
   findBotScenario(scenarioId: string): MaybePromise<BotScenario | undefined>;
   findBotScenarioVersion(versionId: string): MaybePromise<AutomationBotScenarioVersion | undefined>;
   findProactiveDeliveryIdempotencyKey(key: string): AutomationProactiveDeliveryIdempotencyRecord | undefined;
-  findPublishIdempotencyKey(key: string): AutomationPublishIdempotencyRecord | undefined;
+  findPublishIdempotencyKey(tenantId: string, key: string): AutomationPublishIdempotencyRecord | undefined;
   listBotPublishAuditEvents(scenarioId: string): MaybePromise<AutomationBotPublishAuditEvent[]>;
   listBotScenarios(): MaybePromise<BotScenario[]>;
   listBotScenarioVersions(scenarioId: string): MaybePromise<AutomationBotScenarioVersion[]>;
@@ -316,11 +392,17 @@ interface AutomationRepositoryPort {
 }
 
 interface AutomationRepositoryAsyncPort {
+  claimBotRuntimeSideEffectAsync(id: string, now: string, leaseUntil: string): Promise<AutomationBotRuntimeSideEffect | undefined>;
+  listDueBotRuntimeSideEffectsAsync(now: string, limit: number): Promise<AutomationBotRuntimeSideEffect[]>;
+  updateBotRuntimeSideEffectAsync(effect: AutomationBotRuntimeSideEffect): Promise<AutomationBotRuntimeSideEffect>;
+  commitBotRuntimeTransitionAsync(input: AutomationBotRuntimeCommitInput): Promise<AutomationBotRuntimeCommitResult>;
+  findBotRuntimeInstanceAsync(tenantId: string, conversationId: string): Promise<AutomationBotRuntimeInstance | undefined>;
+  findBotRuntimeStepAsync(tenantId: string, conversationId: string, inputEventId: string): Promise<AutomationBotRuntimeStep | undefined>;
   commitProactiveDeliveryAsync(
     input: AutomationProactiveDeliveryCommitInput
   ): Promise<AutomationProactiveDeliveryCommitResult>;
   findProactiveDeliveryIdempotencyKeyAsync(key: string): Promise<AutomationProactiveDeliveryIdempotencyRecord | undefined>;
-  findPublishIdempotencyKeyAsync(key: string): Promise<AutomationPublishIdempotencyRecord | undefined>;
+  findPublishIdempotencyKeyAsync(tenantId: string, key: string): Promise<AutomationPublishIdempotencyRecord | undefined>;
   listProactiveDeliveryAttributionsAsync(filter?: AutomationProactiveDeliveryAttributionFilter): Promise<AutomationProactiveDeliveryAttribution[]>;
   listProactiveDeliveryAttemptsAsync(filter?: AutomationProactiveDeliveryAttemptFilter): Promise<AutomationProactiveDeliveryAttempt[]>;
   listProactiveExecutionWindowsAsync(filter?: AutomationProactiveExecutionWindowFilter): Promise<AutomationProactiveExecutionWindow[]>;
@@ -351,6 +433,9 @@ interface PrismaAutomationUpsertInput {
 }
 
 interface PrismaProactiveDeliveryTransactionClient {
+  botRuntimeSideEffect?: PrismaBotRuntimeSideEffectDelegate;
+  botRuntimeInstance?: PrismaBotRuntimeInstanceDelegate;
+  botRuntimeStepJournal?: PrismaBotRuntimeStepDelegate;
   conversationOutboundDescriptor: PrismaAtomicConversationOutboundDescriptorDelegate;
   outboxEvent: PrismaAtomicOutboxEventDelegate;
   proactiveDeliveryAttempt: PrismaAutomationClient["proactiveDeliveryAttempt"];
@@ -371,6 +456,25 @@ interface PrismaAtomicConversationOutboundDescriptorDelegate {
 
 interface PrismaAtomicOutboxEventDelegate {
   create(input: { data: PrismaAtomicOutboxEventRow }): Promise<PrismaAtomicOutboxEventRow>;
+}
+
+interface PrismaBotRuntimeInstanceDelegate {
+  create(input: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  findUnique(input: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
+  updateMany(input: { data: Record<string, unknown>; where: Record<string, unknown> }): Promise<{ count: number }>;
+}
+
+interface PrismaBotRuntimeStepDelegate {
+  create(input: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  findUnique(input: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
+}
+
+interface PrismaBotRuntimeSideEffectDelegate {
+  create(input: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  findMany(input: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+  findUnique(input: { where: { id: string } }): Promise<Record<string, unknown> | null>;
+  update(input: { data: Record<string, unknown>; where: { id: string } }): Promise<Record<string, unknown>>;
+  updateMany(input: { data: Record<string, unknown>; where: Record<string, unknown> }): Promise<{ count: number }>;
 }
 
 interface PrismaAtomicConversationOutboundDescriptorRow {
@@ -419,6 +523,7 @@ interface PrismaBotScenarioUpsertInput {
 }
 
 interface PrismaBotScenarioCreateInput {
+  activeVersionId?: string | null;
   channels: string[];
   createdAt: Date;
   flowEdges: unknown;
@@ -434,6 +539,7 @@ interface PrismaBotScenarioCreateInput {
 type PrismaBotScenarioUpdateInput = Omit<PrismaBotScenarioCreateInput, "createdAt" | "id" | "updatedAt">;
 
 interface PrismaBotScenarioRow {
+  activeVersionId?: string | null;
   channels: string[];
   createdAt: Date | string;
   flowEdges: unknown;
@@ -514,6 +620,14 @@ interface PrismaAutomationPublishIdempotencyKeyRow {
   fingerprint: string;
   key: string;
   result: unknown;
+  tenantId: string;
+}
+
+interface PrismaAutomationPublishIdempotencyKeyWhereUniqueInput {
+  tenantId_key: {
+    key: string;
+    tenantId: string;
+  };
 }
 
 interface PrismaAutomationBotTestRunRow {
@@ -619,10 +733,6 @@ export class AutomationRepository implements AutomationRepositoryPort {
       return defaultRepository;
     }
 
-    if (isLocalRuntime()) {
-      return AutomationRepository.inMemory(bootstrapAutomationState());
-    }
-
     return AutomationRepository.inMemory();
   }
 
@@ -634,24 +744,122 @@ export class AutomationRepository implements AutomationRepositoryPort {
     defaultRepository = null;
   }
 
-  static inMemory(seed: AutomationState = seedAutomationState()): AutomationRepository {
+  static inMemory(seed: AutomationState = createEmptyAutomationState()): AutomationRepository {
     return new AutomationRepository(new InMemoryStore(seed));
   }
 
-  static open({ filePath }: AutomationRepositoryOptions): AutomationRepository {
-    const seed = isLocalRuntime() ? bootstrapAutomationState() : seedAutomationState();
-    const repository = new AutomationRepository(new JsonFileStore({ filePath, seed }));
-    if (isLocalRuntime()) {
-      repository.store.update((state) => withLocalSeedDefaults(state));
-    }
-    return repository;
+  static open({ filePath, seed = createEmptyAutomationState() }: AutomationRepositoryOptions): AutomationRepository {
+    return new AutomationRepository(new JsonFileStore({ filePath, seed }));
   }
 
   static prisma({ client, fallback }: PrismaAutomationRepositoryOptions): AutomationRepository {
     return new AutomationRepository(
-      new InMemoryStore(seedAutomationState()),
+      new InMemoryStore(createEmptyAutomationState()),
       new PrismaAutomationRepository(client, fallback ?? AutomationRepository.inMemory())
     );
+  }
+
+  async listDueBotRuntimeSideEffectsAsync(now: string, limit: number): Promise<AutomationBotRuntimeSideEffect[]> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) return this.adapter.listDueBotRuntimeSideEffectsAsync(now, limit);
+    return this.listDueBotRuntimeSideEffects(now, limit);
+  }
+
+  listDueBotRuntimeSideEffects(now: string, limit: number): AutomationBotRuntimeSideEffect[] {
+    if (this.adapter) return this.adapter.listDueBotRuntimeSideEffects(now, limit) as AutomationBotRuntimeSideEffect[];
+    const at = new Date(now).getTime();
+    return clone(this.readState().botRuntimeSideEffects.filter((effect) =>
+      (effect.status === "pending" || effect.status === "retry_scheduled" || (effect.status === "processing" && effect.leaseUntil !== null && new Date(effect.leaseUntil).getTime() <= at))
+      && (!effect.nextAttemptAt || new Date(effect.nextAttemptAt).getTime() <= at)
+    ).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(0, Math.max(1, limit)));
+  }
+
+  async claimBotRuntimeSideEffectAsync(id: string, now: string, leaseUntil: string): Promise<AutomationBotRuntimeSideEffect | undefined> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) return this.adapter.claimBotRuntimeSideEffectAsync(id, now, leaseUntil);
+    return this.claimBotRuntimeSideEffect(id, now, leaseUntil);
+  }
+
+  claimBotRuntimeSideEffect(id: string, now: string, leaseUntil: string): AutomationBotRuntimeSideEffect | undefined {
+    if (this.adapter) return this.adapter.claimBotRuntimeSideEffect(id, now, leaseUntil) as AutomationBotRuntimeSideEffect | undefined;
+    let claimed: AutomationBotRuntimeSideEffect | undefined;
+    this.store.update((raw) => {
+      const state = normalizeState(raw);
+      const at = new Date(now).getTime();
+      const current = state.botRuntimeSideEffects.find((item) => item.id === id);
+      if (!current || !(["pending", "retry_scheduled"].includes(current.status) || (current.status === "processing" && current.leaseUntil !== null && new Date(current.leaseUntil).getTime() <= at)) || (current.nextAttemptAt && new Date(current.nextAttemptAt).getTime() > at)) return state;
+      claimed = { ...current, attempts: current.attempts + 1, leaseUntil, status: "processing", updatedAt: now };
+      return { ...state, botRuntimeSideEffects: state.botRuntimeSideEffects.map((item) => item.id === id ? claimed! : item) };
+    });
+    return clone(claimed);
+  }
+
+  async updateBotRuntimeSideEffectAsync(effect: AutomationBotRuntimeSideEffect): Promise<AutomationBotRuntimeSideEffect> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) return this.adapter.updateBotRuntimeSideEffectAsync(effect);
+    return this.updateBotRuntimeSideEffect(effect);
+  }
+
+  updateBotRuntimeSideEffect(effect: AutomationBotRuntimeSideEffect): AutomationBotRuntimeSideEffect {
+    if (this.adapter) return this.adapter.updateBotRuntimeSideEffect(effect) as AutomationBotRuntimeSideEffect;
+    this.store.update((raw) => {
+      const state = normalizeState(raw);
+      if (!state.botRuntimeSideEffects.some((item) => item.id === effect.id)) throw new Error("bot_runtime_side_effect_not_found");
+      return { ...state, botRuntimeSideEffects: state.botRuntimeSideEffects.map((item) => item.id === effect.id ? clone(effect) : item) };
+    });
+    return clone(effect);
+  }
+
+  async findBotRuntimeInstanceAsync(tenantId: string, conversationId: string): Promise<AutomationBotRuntimeInstance | undefined> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) {
+      return this.adapter.findBotRuntimeInstanceAsync(tenantId, conversationId);
+    }
+    return this.findBotRuntimeInstance(tenantId, conversationId);
+  }
+
+  findBotRuntimeInstance(tenantId: string, conversationId: string): AutomationBotRuntimeInstance | undefined {
+    if (this.adapter) return this.adapter.findBotRuntimeInstance(tenantId, conversationId) as AutomationBotRuntimeInstance | undefined;
+    return clone(this.readState().botRuntimeInstances.find((item) => item.tenantId === tenantId && item.conversationId === conversationId));
+  }
+
+  async findBotRuntimeStepAsync(tenantId: string, conversationId: string, inputEventId: string): Promise<AutomationBotRuntimeStep | undefined> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) {
+      return this.adapter.findBotRuntimeStepAsync(tenantId, conversationId, inputEventId);
+    }
+    return this.findBotRuntimeStep(tenantId, conversationId, inputEventId);
+  }
+
+  findBotRuntimeStep(tenantId: string, conversationId: string, inputEventId: string): AutomationBotRuntimeStep | undefined {
+    if (this.adapter) return this.adapter.findBotRuntimeStep(tenantId, conversationId, inputEventId) as AutomationBotRuntimeStep | undefined;
+    return clone(this.readState().botRuntimeSteps.find((item) => item.tenantId === tenantId && item.conversationId === conversationId && item.inputEventId === inputEventId));
+  }
+
+  async commitBotRuntimeTransitionAsync(input: AutomationBotRuntimeCommitInput): Promise<AutomationBotRuntimeCommitResult> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) {
+      return this.adapter.commitBotRuntimeTransitionAsync(input);
+    }
+    return this.commitBotRuntimeTransition(input);
+  }
+
+  commitBotRuntimeTransition(input: AutomationBotRuntimeCommitInput): AutomationBotRuntimeCommitResult {
+    if (this.adapter) return this.adapter.commitBotRuntimeTransition(input) as AutomationBotRuntimeCommitResult;
+    let result!: AutomationBotRuntimeCommitResult;
+    this.store.update((raw) => {
+      const state = normalizeState(raw);
+      const duplicate = state.botRuntimeSteps.find((item) => item.tenantId === input.step.tenantId && item.conversationId === input.step.conversationId && item.inputEventId === input.step.inputEventId);
+      if (duplicate) {
+        const existing = state.botRuntimeInstances.find((item) => item.id === duplicate.runtimeId);
+        if (!existing) throw new Error("bot_runtime_instance_not_found");
+        result = { instance: clone(existing), outcome: "duplicate", step: clone(duplicate) };
+        return state;
+      }
+      const current = state.botRuntimeInstances.find((item) => item.tenantId === input.instance.tenantId && item.conversationId === input.instance.conversationId);
+      if (current && current.versionId !== input.instance.versionId) throw new Error("bot_runtime_version_is_pinned");
+      if (current && input.expectedCurrentNodeId !== undefined && current.currentNodeId !== input.expectedCurrentNodeId) throw new Error("bot_runtime_transition_conflict");
+      const instance = clone(input.instance);
+      const instances = [...state.botRuntimeInstances.filter((item) => item.id !== instance.id), instance];
+      const step = clone(input.step);
+      result = { instance: clone(instance), outcome: "committed", step: clone(step) };
+      return { ...state, botRuntimeInstances: instances, botRuntimeSteps: [...state.botRuntimeSteps, step], botRuntimeSideEffects: [...state.botRuntimeSideEffects, ...runtimeSideEffectsFromStep(step)] };
+    });
+    return result;
   }
 
   async commitProactiveDeliveryAsync(
@@ -704,20 +912,20 @@ export class AutomationRepository implements AutomationRepositoryPort {
     return normalizeState(this.store.read());
   }
 
-  async findPublishIdempotencyKeyAsync(key: string): Promise<AutomationPublishIdempotencyRecord | undefined> {
+  async findPublishIdempotencyKeyAsync(tenantId: string, key: string): Promise<AutomationPublishIdempotencyRecord | undefined> {
     if (this.adapter && hasAsyncAutomationPort(this.adapter)) {
-      return this.adapter.findPublishIdempotencyKeyAsync(key);
+      return this.adapter.findPublishIdempotencyKeyAsync(tenantId, key);
     }
 
-    return this.findPublishIdempotencyKey(key);
+    return this.findPublishIdempotencyKey(tenantId, key);
   }
 
-  findPublishIdempotencyKey(key: string): AutomationPublishIdempotencyRecord | undefined {
+  findPublishIdempotencyKey(tenantId: string, key: string): AutomationPublishIdempotencyRecord | undefined {
     if (this.adapter) {
-      return this.adapter.findPublishIdempotencyKey(key);
+      return this.adapter.findPublishIdempotencyKey(tenantId, key);
     }
 
-    return clone(this.readState().publishIdempotencyKeys.find((item) => item.key === key));
+    return clone(this.readState().publishIdempotencyKeys.find((item) => item.tenantId === tenantId && item.key === key));
   }
 
   async findProactiveDeliveryIdempotencyKeyAsync(key: string): Promise<AutomationProactiveDeliveryIdempotencyRecord | undefined> {
@@ -749,11 +957,13 @@ export class AutomationRepository implements AutomationRepositoryPort {
       return this.adapter.savePublishIdempotencyKey(record);
     }
 
-    const persisted = clone(record);
+    const persisted = normalizePublishIdempotencyRecord(record);
     let saved: AutomationPublishIdempotencyRecord = persisted;
     this.store.update((state) => {
       const current = normalizeState(state);
-      const existing = current.publishIdempotencyKeys.find((item) => item.key === persisted.key);
+      const existing = current.publishIdempotencyKeys.find((item) =>
+        item.tenantId === persisted.tenantId && item.key === persisted.key
+      );
       if (existing) {
         saved = clone(existing);
         return current;
@@ -1289,6 +1499,106 @@ export class AutomationRepository implements AutomationRepositoryPort {
 class PrismaAutomationRepository implements AutomationRepositoryPort {
   constructor(private readonly client: PrismaAutomationClient, private readonly fallback: AutomationRepository) {}
 
+  listDueBotRuntimeSideEffects(_now: string, _limit: number): AutomationBotRuntimeSideEffect[] { throw new Error("prisma_automation_async_required"); }
+  async listDueBotRuntimeSideEffectsAsync(now: string, limit: number): Promise<AutomationBotRuntimeSideEffect[]> {
+    const delegate = this.client.botRuntimeSideEffect;
+    if (!delegate) return this.fallback.listDueBotRuntimeSideEffectsAsync(now, limit);
+    const rows = await delegate.findMany({
+      orderBy: { createdAt: "asc" }, take: Math.max(1, limit),
+      where: { nextAttemptAt: { lte: new Date(now) }, OR: [{ status: "pending" }, { status: "retry_scheduled" }, { status: "processing", leaseUntil: { lte: new Date(now) } }] }
+    });
+    return rows.map(toBotRuntimeSideEffect);
+  }
+
+  claimBotRuntimeSideEffect(_id: string, _now: string, _leaseUntil: string): AutomationBotRuntimeSideEffect | undefined { throw new Error("prisma_automation_async_required"); }
+  async claimBotRuntimeSideEffectAsync(id: string, now: string, leaseUntil: string): Promise<AutomationBotRuntimeSideEffect | undefined> {
+    const delegate = this.client.botRuntimeSideEffect;
+    if (!delegate) return this.fallback.claimBotRuntimeSideEffectAsync(id, now, leaseUntil);
+    const current = await delegate.findUnique({ where: { id } });
+    if (!current) return undefined;
+    const effect = toBotRuntimeSideEffect(current);
+    const at = new Date(now).getTime();
+    const due = (effect.status === "pending" || effect.status === "retry_scheduled" || (effect.status === "processing" && effect.leaseUntil !== null && new Date(effect.leaseUntil).getTime() <= at)) && (!effect.nextAttemptAt || new Date(effect.nextAttemptAt).getTime() <= at);
+    if (!due) return undefined;
+    const updated = await delegate.updateMany({ data: { attempts: effect.attempts + 1, leaseUntil: new Date(leaseUntil), status: "processing", updatedAt: new Date(now) }, where: { id, status: effect.status, attempts: effect.attempts } });
+    if (updated.count !== 1) return undefined;
+    return { ...effect, attempts: effect.attempts + 1, leaseUntil, status: "processing", updatedAt: now };
+  }
+
+  updateBotRuntimeSideEffect(_effect: AutomationBotRuntimeSideEffect): AutomationBotRuntimeSideEffect { throw new Error("prisma_automation_async_required"); }
+  async updateBotRuntimeSideEffectAsync(effect: AutomationBotRuntimeSideEffect): Promise<AutomationBotRuntimeSideEffect> {
+    const delegate = this.client.botRuntimeSideEffect;
+    if (!delegate) return this.fallback.updateBotRuntimeSideEffectAsync(effect);
+    const row = await delegate.update({ data: toBotRuntimeSideEffectData(effect, false), where: { id: effect.id } });
+    return toBotRuntimeSideEffect(row);
+  }
+
+  findBotRuntimeInstance(_tenantId: string, _conversationId: string): AutomationBotRuntimeInstance | undefined {
+    throw new Error("prisma_automation_async_required");
+  }
+
+  async findBotRuntimeInstanceAsync(tenantId: string, conversationId: string): Promise<AutomationBotRuntimeInstance | undefined> {
+    const delegate = this.client.botRuntimeInstance;
+    if (!delegate) return this.fallback.findBotRuntimeInstanceAsync(tenantId, conversationId);
+    const row = await delegate.findUnique({ where: { tenantId_conversationId: { tenantId, conversationId } } });
+    return row ? toBotRuntimeInstance(row) : undefined;
+  }
+
+  findBotRuntimeStep(_tenantId: string, _conversationId: string, _inputEventId: string): AutomationBotRuntimeStep | undefined {
+    throw new Error("prisma_automation_async_required");
+  }
+
+  async findBotRuntimeStepAsync(tenantId: string, conversationId: string, inputEventId: string): Promise<AutomationBotRuntimeStep | undefined> {
+    const delegate = this.client.botRuntimeStepJournal;
+    if (!delegate) return this.fallback.findBotRuntimeStepAsync(tenantId, conversationId, inputEventId);
+    const row = await delegate.findUnique({ where: { tenantId_conversationId_inputEventId: { tenantId, conversationId, inputEventId } } });
+    return row ? toBotRuntimeStep(row) : undefined;
+  }
+
+  commitBotRuntimeTransition(_input: AutomationBotRuntimeCommitInput): AutomationBotRuntimeCommitResult {
+    throw new Error("prisma_automation_async_required");
+  }
+
+  async commitBotRuntimeTransitionAsync(input: AutomationBotRuntimeCommitInput): Promise<AutomationBotRuntimeCommitResult> {
+    if (!this.client.$transaction || !this.client.botRuntimeInstance || !this.client.botRuntimeStepJournal) {
+      return this.fallback.commitBotRuntimeTransitionAsync(input);
+    }
+    const existing = await this.findBotRuntimeStepAsync(input.step.tenantId, input.step.conversationId, input.step.inputEventId);
+    if (existing) {
+      const instance = await this.findBotRuntimeInstanceAsync(input.instance.tenantId, input.instance.conversationId);
+      if (!instance) throw new Error("bot_runtime_instance_not_found");
+      return { instance, outcome: "duplicate", step: existing };
+    }
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const instances = transaction.botRuntimeInstance;
+        const steps = transaction.botRuntimeStepJournal;
+        if (!instances || !steps) throw new Error("bot_runtime_prisma_delegates_required");
+        const currentRow = await instances.findUnique({ where: { tenantId_conversationId: { tenantId: input.instance.tenantId, conversationId: input.instance.conversationId } } });
+        if (currentRow && String(currentRow.versionId) !== input.instance.versionId) throw new Error("bot_runtime_version_is_pinned");
+        if (currentRow) {
+          const where: Record<string, unknown> = { id: input.instance.id };
+          if (input.expectedCurrentNodeId !== undefined) where.currentNodeId = input.expectedCurrentNodeId;
+          const updated = await instances.updateMany({ data: toBotRuntimeInstanceData(input.instance, false), where });
+          if (updated.count !== 1) throw new Error("bot_runtime_transition_conflict");
+        } else {
+          await instances.create({ data: toBotRuntimeInstanceData(input.instance, true) });
+        }
+        await steps.create({ data: toBotRuntimeStepData(input.step) });
+        if (transaction.botRuntimeSideEffect) {
+          for (const effect of runtimeSideEffectsFromStep(input.step)) await transaction.botRuntimeSideEffect.create({ data: toBotRuntimeSideEffectData(effect, true) });
+        }
+        return { instance: clone(input.instance), outcome: "committed" as const, step: clone(input.step) };
+      }, { isolationLevel: "Serializable" });
+    } catch (error) {
+      if (!isPrismaUniqueConstraintError(error)) throw error;
+      const replay = await this.findBotRuntimeStepAsync(input.step.tenantId, input.step.conversationId, input.step.inputEventId);
+      const instance = await this.findBotRuntimeInstanceAsync(input.instance.tenantId, input.instance.conversationId);
+      if (!replay || !instance) throw error;
+      return { instance, outcome: "duplicate", step: replay };
+    }
+  }
+
   async commitProactiveDeliveryAsync(
     input: AutomationProactiveDeliveryCommitInput
   ): Promise<AutomationProactiveDeliveryCommitResult> {
@@ -1400,12 +1710,14 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
     return row ? toBotScenarioVersion(row) : undefined;
   }
 
-  findPublishIdempotencyKey(key: string): AutomationPublishIdempotencyRecord | undefined {
+  findPublishIdempotencyKey(_tenantId: string, _key: string): AutomationPublishIdempotencyRecord | undefined {
     throw new Error("prisma_automation_async_required");
   }
 
-  async findPublishIdempotencyKeyAsync(key: string): Promise<AutomationPublishIdempotencyRecord | undefined> {
-    const row = await this.client.automationPublishIdempotencyKey.findUnique({ where: { key } });
+  async findPublishIdempotencyKeyAsync(tenantId: string, key: string): Promise<AutomationPublishIdempotencyRecord | undefined> {
+    const row = await this.client.automationPublishIdempotencyKey.findUnique({
+      where: automationPublishIdempotencyWhere(tenantId, key)
+    });
     return row ? toAutomationPublishIdempotencyRecord(row) : undefined;
   }
 
@@ -1552,7 +1864,7 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
     ]);
 
     return {
-      ...seedAutomationState(),
+      ...createEmptyAutomationState(),
       botPublishAuditEvents: botPublishAuditEvents.map(toBotPublishAuditEvent),
       botScenarios: botScenarios.map(toBotScenario),
       botScenarioVersions: botScenarioVersions.map(toBotScenarioVersion),
@@ -1774,11 +2086,10 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
   }
 
   async savePublishIdempotencyKeyAsync(record: AutomationPublishIdempotencyRecord): Promise<AutomationPublishIdempotencyRecord> {
-    const persisted: AutomationPublishIdempotencyRecord = {
-      ...record,
-      result: clone(record.result)
-    };
-    const existing = await this.client.automationPublishIdempotencyKey.findUnique({ where: { key: persisted.key } });
+    const persisted = normalizePublishIdempotencyRecord(record);
+    const existing = await this.client.automationPublishIdempotencyKey.findUnique({
+      where: automationPublishIdempotencyWhere(persisted.tenantId, persisted.key)
+    });
     if (existing) {
       return toAutomationPublishIdempotencyRecord(existing);
     }
@@ -1789,9 +2100,12 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
   }
 }
 
-function seedAutomationState(): AutomationState {
+export function createEmptyAutomationState(): AutomationState {
   return {
     botPublishAuditEvents: [],
+    botRuntimeInstances: [],
+    botRuntimeSideEffects: [],
+    botRuntimeSteps: [],
     botScenarios: [],
     botScenarioVersions: [],
     botTestRuns: [],
@@ -1815,6 +2129,9 @@ function normalizeState(state: Partial<AutomationState>): AutomationState {
     botPublishAuditEvents: (state.botPublishAuditEvents ?? []).map((event) =>
       normalizeBotPublishAuditEventRecord(event)
     ),
+    botRuntimeInstances: (state.botRuntimeInstances ?? []).map(clone),
+    botRuntimeSideEffects: (state.botRuntimeSideEffects ?? []).map(clone),
+    botRuntimeSteps: (state.botRuntimeSteps ?? []).map(clone),
     botScenarios: (state.botScenarios ?? []).map((scenario) => normalizeBotScenarioRecord(scenario)),
     botScenarioVersions: (state.botScenarioVersions ?? []).map((version) => normalizeBotScenarioVersionRecord(version)),
     botTestRuns: (state.botTestRuns ?? []).map((run) => normalizeBotTestRunRecord(run)),
@@ -1831,10 +2148,10 @@ function normalizeState(state: Partial<AutomationState>): AutomationState {
     ),
     proactiveFrequencyCaps: (state.proactiveFrequencyCaps ?? []).map((cap) => normalizeProactiveFrequencyCap(cap)),
     proactiveRules: (state.proactiveRules ?? []).map(normalizeProactiveRuleRecord),
-    publishIdempotencyKeys: state.publishIdempotencyKeys ?? [],
+    publishIdempotencyKeys: (state.publishIdempotencyKeys ?? []).map(normalizePublishIdempotencyRecord),
     activeVisitors: state.activeVisitors ?? [],
     rescueChats: state.rescueChats ?? [],
-    workspaceAuditEvents: state.workspaceAuditEvents ?? [],
+    workspaceAuditEvents: (state.workspaceAuditEvents ?? []).map(normalizeWorkspaceAuditEvent),
     workspaceRuntimeMetrics: state.workspaceRuntimeMetrics ?? []
   };
 }
@@ -1843,66 +2160,8 @@ function normalizeProactiveRuleRecord(rule: ProactiveRule): ProactiveRule {
   return {
     ...clone(rule),
     channels: clone(rule.channels),
-    tenantId: String(rule.tenantId ?? "tenant-volga").trim() || "tenant-volga"
+    tenantId: requireAutomationTenantId(rule.tenantId)
   };
-}
-
-function withLocalSeedDefaults(state: Partial<AutomationState>): AutomationState {
-  const normalized = normalizeState(state);
-  const seed = bootstrapAutomationState();
-  return {
-    ...normalized,
-    botScenarios: withLocalDemoTenantScenarios(normalized.botScenarios, seed.botScenarios),
-    proactiveRules: withLocalDemoTenantRules(normalized.proactiveRules, seed.proactiveRules),
-    workspaceAuditEvents: normalized.workspaceAuditEvents.length ? normalized.workspaceAuditEvents : seed.workspaceAuditEvents,
-    workspaceRuntimeMetrics: normalized.workspaceRuntimeMetrics.length ? normalized.workspaceRuntimeMetrics : seed.workspaceRuntimeMetrics
-  };
-}
-
-function withLocalDemoTenantRules(existing: ProactiveRule[], seedRules: ProactiveRule[]): ProactiveRule[] {
-  const rules = existing.length ? [...existing] : seedRules.map(normalizeProactiveRuleRecord);
-  for (const tenantId of ["tenant-demo", "tenant-volga"]) {
-    if (rules.some((rule) => rule.tenantId === tenantId)) {
-      continue;
-    }
-    rules.push(...seedRules.map((rule) => normalizeProactiveRuleRecord({
-      ...rule,
-      id: `${rule.id}-${tenantId.replace(/^tenant-/, "")}`,
-      tenantId
-    })));
-  }
-  return rules;
-}
-
-function withLocalDemoTenantScenarios(existing: BotScenario[], seedScenarios: BotScenario[]): BotScenario[] {
-  const scenarios = existing.length ? [...existing] : seedScenarios.map((scenario) => normalizeBotScenarioRecord(scenario));
-  for (const tenantId of ["tenant-demo", "tenant-volga"]) {
-    if (scenarios.some((scenario) => scenario.tenantId === tenantId)) {
-      continue;
-    }
-
-    scenarios.push(...seedScenarios.map((scenario) => cloneScenarioForTenant(scenario, tenantId)));
-  }
-  return scenarios;
-}
-
-function cloneScenarioForTenant(scenario: BotScenario, tenantId: string): BotScenario {
-  const suffix = tenantId === "tenant-demo" ? "" : `-${tenantId.replace(/^tenant-/, "")}`;
-  const nodeIds = new Map(scenario.flowNodes.map((node) => [node.id, `${node.id}${suffix}`]));
-  return normalizeBotScenarioRecord({
-    ...scenario,
-    flowEdges: scenario.flowEdges.map((edge) => ({
-      ...edge,
-      from: nodeIds.get(edge.from) ?? `${edge.from}${suffix}`,
-      to: nodeIds.get(edge.to) ?? `${edge.to}${suffix}`
-    })),
-    flowNodes: scenario.flowNodes.map((node) => ({
-      ...node,
-      id: nodeIds.get(node.id) ?? `${node.id}${suffix}`
-    })),
-    id: `${scenario.id}${suffix}`,
-    tenantId
-  });
 }
 
 function normalizeBotScenarioRecord(scenario: BotScenario, existing?: BotScenario): BotScenario {
@@ -1912,7 +2171,9 @@ function normalizeBotScenarioRecord(scenario: BotScenario, existing?: BotScenari
   return {
     ...scenario,
     createdAt,
-    tenantId: existing?.tenantId ?? scenario.tenantId ?? "tenant-demo",
+    tenantId: existing
+      ? requireMatchingAutomationTenantId(existing.tenantId, scenario.tenantId)
+      : requireAutomationTenantId(scenario.tenantId),
     updatedAt: existing ? now : scenario.updatedAt ?? now
   };
 }
@@ -1920,7 +2181,7 @@ function normalizeBotScenarioRecord(scenario: BotScenario, existing?: BotScenari
 function normalizeBotScenarioVersionRecord(version: AutomationBotScenarioVersion): AutomationBotScenarioVersion {
   return {
     ...version,
-    tenantId: version.tenantId ?? "tenant-demo"
+    tenantId: requireAutomationTenantId(version.tenantId)
   };
 }
 
@@ -1928,14 +2189,14 @@ function normalizeBotPublishAuditEventRecord(event: AutomationBotPublishAuditEve
   return {
     ...event,
     immutable: true,
-    tenantId: event.tenantId ?? "tenant-demo"
+    tenantId: requireAutomationTenantId(event.tenantId)
   };
 }
 
 function normalizeBotTestRunRecord(run: AutomationBotTestRun): AutomationBotTestRun {
   return {
     ...run,
-    tenantId: run.tenantId ?? "tenant-demo"
+    tenantId: requireAutomationTenantId(run.tenantId)
   };
 }
 
@@ -1943,14 +2204,14 @@ function normalizeProactiveExecutionWindow(window: AutomationProactiveExecutionW
   return {
     ...window,
     daysOfWeek: [...window.daysOfWeek],
-    tenantId: window.tenantId || "tenant-demo"
+    tenantId: requireAutomationTenantId(window.tenantId)
   };
 }
 
 function normalizeProactiveFrequencyCap(cap: AutomationProactiveFrequencyCapInput): AutomationProactiveFrequencyCap {
   return {
     ...cap,
-    tenantId: cap.tenantId || "tenant-demo"
+    tenantId: requireAutomationTenantId(cap.tenantId)
   };
 }
 
@@ -1959,14 +2220,14 @@ function normalizeProactiveExperimentAssignment(
 ): AutomationProactiveExperimentAssignment {
   return {
     ...assignment,
-    tenantId: assignment.tenantId || "tenant-demo"
+    tenantId: requireAutomationTenantId(assignment.tenantId)
   };
 }
 
 function normalizeProactiveDeliveryAttempt(attempt: AutomationProactiveDeliveryAttemptInput): AutomationProactiveDeliveryAttempt {
   return {
     ...attempt,
-    tenantId: attempt.tenantId || "tenant-demo"
+    tenantId: requireAutomationTenantId(attempt.tenantId)
   };
 }
 
@@ -1976,7 +2237,7 @@ function normalizeProactiveDeliveryIdempotencyRecord(
   return {
     ...record,
     result: clone(record.result),
-    tenantId: record.tenantId || "tenant-demo"
+    tenantId: requireAutomationTenantId(record.tenantId)
   };
 }
 
@@ -1985,12 +2246,30 @@ function normalizeProactiveDeliveryAttribution(
 ): AutomationProactiveDeliveryAttribution {
   return {
     ...attribution,
-    tenantId: attribution.tenantId || "tenant-demo"
+    tenantId: requireAutomationTenantId(attribution.tenantId)
+  };
+}
+
+function normalizePublishIdempotencyRecord(
+  record: AutomationPublishIdempotencyRecord
+): AutomationPublishIdempotencyRecord {
+  return {
+    ...record,
+    result: clone(record.result),
+    tenantId: requireAutomationTenantId(record.tenantId)
+  };
+}
+
+function normalizeWorkspaceAuditEvent(event: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...clone(event),
+    tenantId: requireAutomationTenantId(event.tenantId)
   };
 }
 
 function toBotScenario(row: PrismaBotScenarioRow): BotScenario {
   return {
+    ...(row.activeVersionId ? { activeVersionId: row.activeVersionId } : {}),
     channels: clone(row.channels),
     createdAt: toIsoString(row.createdAt),
     flowEdges: clone(row.flowEdges) as BotScenario["flowEdges"],
@@ -1999,13 +2278,14 @@ function toBotScenario(row: PrismaBotScenarioRow): BotScenario {
     name: row.name,
     schemaVersion: row.schemaVersion as BotScenario["schemaVersion"],
     status: row.status,
-    tenantId: row.tenantId,
+    tenantId: requireAutomationTenantId(row.tenantId),
     updatedAt: toIsoString(row.updatedAt)
   };
 }
 
 function toPrismaBotScenarioCreateInput(scenario: BotScenario): PrismaBotScenarioCreateInput {
   return {
+    activeVersionId: scenario.activeVersionId ?? null,
     channels: clone(scenario.channels),
     createdAt: new Date(scenario.createdAt ?? new Date().toISOString()),
     flowEdges: clone(scenario.flowEdges),
@@ -2014,20 +2294,21 @@ function toPrismaBotScenarioCreateInput(scenario: BotScenario): PrismaBotScenari
     name: scenario.name,
     schemaVersion: scenario.schemaVersion,
     status: scenario.status,
-    tenantId: scenario.tenantId ?? "tenant-demo",
+    tenantId: requireAutomationTenantId(scenario.tenantId),
     updatedAt: new Date(scenario.updatedAt ?? new Date().toISOString())
   };
 }
 
 function toPrismaBotScenarioUpdateInput(scenario: BotScenario): PrismaBotScenarioUpdateInput {
   return {
+    activeVersionId: scenario.activeVersionId ?? null,
     channels: clone(scenario.channels),
     flowEdges: clone(scenario.flowEdges),
     flowNodes: clone(scenario.flowNodes),
     name: scenario.name,
     schemaVersion: scenario.schemaVersion,
     status: scenario.status,
-    tenantId: scenario.tenantId ?? "tenant-demo"
+    tenantId: requireAutomationTenantId(scenario.tenantId)
   };
 }
 
@@ -2038,7 +2319,7 @@ function toBotScenarioVersion(row: PrismaBotScenarioVersionRow): AutomationBotSc
     flowNodes: clone(row.flowNodes) as AutomationBotScenarioVersion["flowNodes"],
     scenarioId: row.scenarioId,
     status: row.status,
-    tenantId: row.tenantId,
+    tenantId: requireAutomationTenantId(row.tenantId),
     versionId: row.versionId
   };
 }
@@ -2052,7 +2333,7 @@ function toPrismaBotScenarioVersionCreateInput(
     flowNodes: clone(version.flowNodes),
     scenarioId: version.scenarioId,
     status: version.status,
-    tenantId: version.tenantId ?? "tenant-demo",
+    tenantId: requireAutomationTenantId(version.tenantId),
     versionId: version.versionId
   };
 }
@@ -2084,7 +2365,7 @@ function toPrismaBotPublishAuditEventCreateInput(
     immutable: true,
     runtimeVersion: event.runtimeVersion,
     scenarioId: event.scenarioId,
-    tenantId: event.tenantId ?? "tenant-demo",
+    tenantId: requireAutomationTenantId(event.tenantId),
     versionId: event.versionId
   };
 }
@@ -2092,20 +2373,39 @@ function toPrismaBotPublishAuditEventCreateInput(
 function toAutomationPublishIdempotencyRecord(
   row: PrismaAutomationPublishIdempotencyKeyRow
 ): AutomationPublishIdempotencyRecord {
+  const result = clone(row.result) as Record<string, unknown>;
   return {
     fingerprint: row.fingerprint,
     key: row.key,
-    result: clone(row.result) as Record<string, unknown>
+    result,
+    tenantId: requireAutomationTenantId(row.tenantId)
   };
 }
 
 function toPrismaAutomationPublishIdempotencyRecord(
   record: AutomationPublishIdempotencyRecord
 ): PrismaAutomationPublishIdempotencyKeyRow {
+  const persisted = normalizePublishIdempotencyRecord(record);
   return {
-    fingerprint: record.fingerprint,
-    key: record.key,
-    result: clone(record.result)
+    fingerprint: persisted.fingerprint,
+    key: persisted.key,
+    result: {
+      ...clone(persisted.result),
+      tenantId: persisted.tenantId
+    },
+    tenantId: persisted.tenantId
+  };
+}
+
+function automationPublishIdempotencyWhere(
+  tenantId: string,
+  key: string
+): PrismaAutomationPublishIdempotencyKeyWhereUniqueInput {
+  return {
+    tenantId_key: {
+      key,
+      tenantId: requireAutomationTenantId(tenantId)
+    }
   };
 }
 
@@ -2116,7 +2416,7 @@ function toAutomationBotTestRun(row: PrismaAutomationBotTestRunRow): AutomationB
     queue: row.queue,
     scenarioId: row.scenarioId,
     status: row.status,
-    tenantId: row.tenantId ?? undefined,
+    tenantId: requireAutomationTenantId(row.tenantId),
     testRunId: row.testRunId
   });
 }
@@ -2128,7 +2428,7 @@ function toPrismaAutomationBotTestRun(run: AutomationBotTestRun): PrismaAutomati
     queue: run.queue,
     scenarioId: run.scenarioId,
     status: run.status,
-    tenantId: run.tenantId ?? "tenant-demo",
+    tenantId: requireAutomationTenantId(run.tenantId),
     testRunId: run.testRunId
   };
 }
@@ -2141,7 +2441,7 @@ function toProactiveRule(row: PrismaProactiveRuleRow): ProactiveRule {
     id: row.id,
     segment: row.segment ?? undefined,
     status: row.status ?? undefined,
-    tenantId: row.tenantId
+    tenantId: requireAutomationTenantId(row.tenantId)
   };
 }
 
@@ -2153,7 +2453,7 @@ function toPrismaProactiveRule(rule: ProactiveRule): PrismaProactiveRuleRow {
     id: rule.id,
     segment: rule.segment ?? null,
     status: rule.status ?? null,
-    tenantId: String(rule.tenantId ?? "tenant-volga").trim() || "tenant-volga"
+    tenantId: requireAutomationTenantId(rule.tenantId)
   };
 }
 
@@ -2418,6 +2718,9 @@ function proactiveDeliveryCommitResult(
 }
 
 function validateProactiveDeliveryCommitInput(input: AutomationProactiveDeliveryCommitInput): void {
+  const tenantId = requireAutomationTenantId(input.tenantId);
+  requireAutomationTenantId(input.descriptor.tenantId);
+  requireAutomationTenantId(input.idempotencyRecord.tenantId);
   const descriptorKey = input.descriptor.idempotencyKey;
   if (!descriptorKey || descriptorKey !== input.idempotencyRecord.key) {
     throw new Error("proactive_delivery_idempotency_key_mismatch");
@@ -2425,7 +2728,7 @@ function validateProactiveDeliveryCommitInput(input: AutomationProactiveDelivery
   if (input.descriptor.requestFingerprint !== input.idempotencyRecord.fingerprint) {
     throw new Error("proactive_delivery_fingerprint_mismatch");
   }
-  if (input.descriptor.tenantId !== input.tenantId || input.idempotencyRecord.tenantId !== input.tenantId) {
+  if (input.descriptor.tenantId !== tenantId || input.idempotencyRecord.tenantId !== tenantId) {
     throw new Error("proactive_delivery_tenant_mismatch");
   }
   if (input.idempotencyRecord.ruleId !== input.ruleId) {
@@ -2470,6 +2773,113 @@ function toPrismaAtomicOutboxEvent(outbox: OutboxEvent): PrismaAtomicOutboxEvent
   };
 }
 
+function toBotRuntimeInstance(row: Record<string, unknown>): AutomationBotRuntimeInstance {
+  return {
+    attempts: Number(row.attempts ?? 0),
+    context: clone((row.context ?? {}) as Record<string, unknown>),
+    conversationId: String(row.conversationId),
+    createdAt: toIsoString(row.createdAt as Date | string),
+    currentNodeId: String(row.currentNodeId),
+    id: String(row.id),
+    lastError: row.lastError == null ? null : String(row.lastError),
+    nextAttemptAt: row.nextAttemptAt == null ? null : toIsoString(row.nextAttemptAt as Date | string),
+    scenarioId: String(row.scenarioId),
+    status: String(row.status) as AutomationBotRuntimeInstance["status"],
+    tenantId: String(row.tenantId),
+    updatedAt: toIsoString(row.updatedAt as Date | string),
+    versionId: String(row.versionId)
+  };
+}
+
+function toBotRuntimeStep(row: Record<string, unknown>): AutomationBotRuntimeStep {
+  return {
+    conversationId: String(row.conversationId),
+    createdAt: toIsoString(row.createdAt as Date | string),
+    error: row.error == null ? null : String(row.error),
+    handoffSummary: row.handoffSummary == null ? null : clone(row.handoffSummary as Record<string, unknown>),
+    id: String(row.id),
+    inputEvent: clone(row.inputEvent as Record<string, unknown>),
+    inputEventId: String(row.inputEventId),
+    lifecycleEvent: row.lifecycleEvent == null ? null : clone(row.lifecycleEvent as Record<string, unknown>),
+    nodeId: String(row.nodeId),
+    nodeType: String(row.nodeType),
+    outcome: String(row.outcome),
+    runtimeId: String(row.runtimeId),
+    sideEffects: clone((row.sideEffects ?? []) as Array<Record<string, unknown>>),
+    tenantId: String(row.tenantId),
+    webhookResponse: row.webhookResponse == null ? null : clone(row.webhookResponse as Record<string, unknown>)
+  };
+}
+
+function toBotRuntimeInstanceData(instance: AutomationBotRuntimeInstance, includeIdentity: boolean): Record<string, unknown> {
+  return {
+    ...(includeIdentity ? {
+      id: instance.id,
+      tenantId: instance.tenantId,
+      conversationId: instance.conversationId,
+      scenarioId: instance.scenarioId,
+      versionId: instance.versionId,
+      createdAt: new Date(instance.createdAt)
+    } : {}),
+    attempts: instance.attempts,
+    context: clone(instance.context),
+    currentNodeId: instance.currentNodeId,
+    lastError: instance.lastError,
+    nextAttemptAt: instance.nextAttemptAt ? new Date(instance.nextAttemptAt) : null,
+    status: instance.status,
+    updatedAt: new Date(instance.updatedAt)
+  };
+}
+
+function toBotRuntimeStepData(step: AutomationBotRuntimeStep): Record<string, unknown> {
+  return {
+    ...clone(step),
+    createdAt: new Date(step.createdAt)
+  };
+}
+
+function runtimeSideEffectsFromStep(step: AutomationBotRuntimeStep): AutomationBotRuntimeSideEffect[] {
+  return step.sideEffects.map((sideEffect, index) => ({
+    attempts: 0,
+    conversationId: step.conversationId,
+    createdAt: step.createdAt,
+    deadLetteredAt: null,
+    deliveredAt: null,
+    id: `bot_effect_${step.id}_${index}`,
+    kind: String(sideEffect.kind) as AutomationBotRuntimeSideEffect["kind"],
+    lastError: null,
+    leaseUntil: null,
+    nextAttemptAt: step.createdAt,
+    payload: clone(sideEffect),
+    status: "pending",
+    stepId: step.id,
+    tenantId: step.tenantId,
+    updatedAt: step.createdAt
+  }));
+}
+
+function toBotRuntimeSideEffect(row: Record<string, unknown>): AutomationBotRuntimeSideEffect {
+  return {
+    attempts: Number(row.attempts ?? 0), conversationId: String(row.conversationId), createdAt: toIsoString(row.createdAt as Date | string),
+    deadLetteredAt: row.deadLetteredAt == null ? null : toIsoString(row.deadLetteredAt as Date | string),
+    deliveredAt: row.deliveredAt == null ? null : toIsoString(row.deliveredAt as Date | string), id: String(row.id),
+    kind: String(row.kind) as AutomationBotRuntimeSideEffect["kind"], lastError: row.lastError == null ? null : String(row.lastError),
+    leaseUntil: row.leaseUntil == null ? null : toIsoString(row.leaseUntil as Date | string),
+    nextAttemptAt: row.nextAttemptAt == null ? null : toIsoString(row.nextAttemptAt as Date | string), payload: clone(row.payload as Record<string, unknown>),
+    status: String(row.status) as AutomationBotRuntimeSideEffect["status"], stepId: String(row.stepId), tenantId: String(row.tenantId), updatedAt: toIsoString(row.updatedAt as Date | string)
+  };
+}
+
+function toBotRuntimeSideEffectData(effect: AutomationBotRuntimeSideEffect, includeIdentity: boolean): Record<string, unknown> {
+  return {
+    ...(includeIdentity ? { id: effect.id, stepId: effect.stepId, tenantId: effect.tenantId, conversationId: effect.conversationId, kind: effect.kind, createdAt: new Date(effect.createdAt) } : {}),
+    attempts: effect.attempts, deadLetteredAt: effect.deadLetteredAt ? new Date(effect.deadLetteredAt) : null,
+    deliveredAt: effect.deliveredAt ? new Date(effect.deliveredAt) : null, lastError: effect.lastError,
+    leaseUntil: effect.leaseUntil ? new Date(effect.leaseUntil) : null, nextAttemptAt: effect.nextAttemptAt ? new Date(effect.nextAttemptAt) : null,
+    payload: clone(effect.payload), status: effect.status, updatedAt: new Date(effect.updatedAt)
+  };
+}
+
 function isPrismaUniqueConstraintError(error: unknown): error is Error & { code: "P2002" } {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
 }
@@ -2484,6 +2894,23 @@ function pruneUndefined<T extends object>(input: T): Record<string, unknown> {
 
 function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function requireAutomationTenantId(value: unknown): string {
+  const tenantId = String(value ?? "").trim();
+  if (!tenantId) {
+    throw new Error("automation_tenant_required");
+  }
+  return tenantId;
+}
+
+function requireMatchingAutomationTenantId(existing: unknown, incoming: unknown): string {
+  const existingTenantId = requireAutomationTenantId(existing);
+  const incomingTenantId = requireAutomationTenantId(incoming);
+  if (existingTenantId !== incomingTenantId) {
+    throw new Error("automation_tenant_mismatch");
+  }
+  return existingTenantId;
 }
 
 function clone<T>(value: T): T {

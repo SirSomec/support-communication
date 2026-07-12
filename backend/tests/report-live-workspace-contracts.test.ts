@@ -113,6 +113,40 @@ describe("live report workspace contracts", () => {
     assert.equal(workspace.rows.every((row) => row.current === "0" || row.current === "00:00" || row.current === "0%"), true);
     assert.equal(workspace.chartBlocks.every((chart) => chart.series.every((series) => series.points.every((point) => point === 0))), true);
   });
+
+  it("derives creation, closure, first response and SLA breach from immutable lifecycle events", () => {
+    const workspace = buildLiveReportWorkspace([conversation("journal", "2020-01-01T00:00:00.000Z", {
+      lifecycleEvents: [
+        { eventType: "conversation.created", occurredAt: "2026-07-10T08:00:00.000Z" },
+        { eventType: "message.received", occurredAt: "2026-07-10T08:00:10.000Z" },
+        { eventType: "message.sent", occurredAt: "2026-07-10T08:01:40.000Z" },
+        { eventType: "sla.overdue", occurredAt: "2026-07-10T08:01:00.000Z" },
+        { data: { toStatus: "closed" }, eventType: "status.changed", occurredAt: "2026-07-10T09:00:00.000Z" }
+      ],
+      messages: [],
+      slaTone: "ok",
+      status: "active",
+      updatedAt: "2030-01-01T00:00:00.000Z"
+    })], { now: NOW });
+
+    assert.equal(workspace.current.newConversations, 1);
+    assert.equal(workspace.current.closedConversations, 1);
+    assert.equal(workspace.current.firstResponseSeconds, 90);
+    assert.equal(workspace.current.slaViolations, 1);
+    assert.equal(workspace.current.slaPercent, 0);
+  });
+
+  it("uses the tenant timezone when building day boundaries", () => {
+    const workspace = buildLiveReportWorkspace([
+      conversation("moscow-midnight", "2026-07-09T21:30:00.000Z")
+    ], { now: NOW, period: "today", timezoneOffsetMinutes: 180 });
+
+    assert.deepEqual(workspace.windows.current, {
+      from: "2026-07-09T21:00:00.000Z",
+      to: "2026-07-10T21:00:00.000Z"
+    });
+    assert.equal(workspace.current.newConversations, 1);
+  });
 });
 
 function conversation(

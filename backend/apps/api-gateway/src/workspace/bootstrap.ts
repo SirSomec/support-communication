@@ -1,5 +1,5 @@
 import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryKind, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
-import { WorkspaceRepository, type PrismaWorkspaceClient } from "./workspace.repository.js";
+import { WorkspaceRepository, type PrismaWorkspaceClient, type WorkspaceState } from "./workspace.repository.js";
 
 export interface WorkspaceRepositoryBootstrapSource {
   DATABASE_URL?: string;
@@ -12,6 +12,7 @@ export interface WorkspaceRepositoryBootstrapSource {
 
 export interface WorkspaceRepositoryBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaWorkspaceClient;
+  seed?: WorkspaceState;
 }
 
 export function configureWorkspaceRepository(
@@ -19,8 +20,8 @@ export function configureWorkspaceRepository(
   options: WorkspaceRepositoryBootstrapOptions = {}
 ): WorkspaceRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => WorkspaceRepository.open({ filePath }),
-    createPrismaRepository: (client, createFallback) => WorkspaceRepository.prisma({ client, fallback: createFallback() }),
+    createJsonRepository: (filePath) => WorkspaceRepository.open({ filePath, seed: options.seed }),
+    createPrismaRepository: (client) => WorkspaceRepository.prisma({ client }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
     repositoryEnv: "WORKSPACE_REPOSITORY",
     source,

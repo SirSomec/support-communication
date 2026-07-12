@@ -98,6 +98,9 @@ export function buildAccessProfile(permissions = [], permissionModel = null) {
   const canManageDialogs = hasWildcard || normalized.includes("dialogs.manage");
   const canViewSensitive = hasWildcard || normalized.includes("clients.merge") || canManageDialogs;
   const canResetPasswords = hasWildcard || normalized.includes("employees.passwordReset");
+  const canReviewQuality = hasWildcard || normalized.includes("quality.manual-reviews.write");
+  const canScoreQuality = hasWildcard || normalized.includes("quality.scoring-audits.write");
+  const canManageKnowledge = hasWildcard || normalized.includes("knowledge.write");
 
   let reason = "Доступ ограничен политикой организации";
   if (hasWildcard) {
@@ -117,6 +120,9 @@ export function buildAccessProfile(permissions = [], permissionModel = null) {
     canViewSensitive,
     canManageSettings,
     canResetPasswords,
+    canReviewQuality,
+    canScoreQuality,
+    canManageKnowledge,
     canExportReports,
     canRedistribute,
     canServiceAdmin: false,
@@ -150,6 +156,10 @@ function fallbackActionsForRoleMode(roleMode) {
       "reports.read",
       "reports.export",
       "quality.read",
+      "quality.manual-reviews.write",
+      "quality.scoring-audits.write",
+      "knowledge.read",
+      "knowledge.write",
       "settings.read",
       "outbound.start",
       "employees.passwordReset",

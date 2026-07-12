@@ -17,7 +17,9 @@ const providerRuntimeEnvNames = [
   "OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID",
   "OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED",
   "OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_DIALOG_ID",
+  "OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_MAX_CONNECTION_ID",
   "OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_PEER_ID",
+  "OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_VK_CONNECTION_ID",
   "OUTBOX_SCANNER_BEARER_TOKEN",
   "OUTBOX_SCANNER_ENABLED",
   "OUTBOX_SCANNER_PROVIDER_MODE",
@@ -105,6 +107,7 @@ const releaseGateSteps = [
     scrubProviderEnv: true
   },
   "node scripts/compose-health-check.mjs",
+  "node scripts/backup-restore-gate.mjs",
   "curl.exe -fsS http://127.0.0.1:8080/",
   "curl.exe -fsS http://127.0.0.1:8080/api/v1/health",
   "curl.exe -fsS http://127.0.0.1:4101/api/v1/health",

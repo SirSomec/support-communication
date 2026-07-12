@@ -1,21 +1,24 @@
 import type { ConversationRepository } from "../conversation/conversation.repository.js";
 import type { ConversationService } from "../conversation/conversation.service.js";
-import type { TelegramConnectionStoredRecord } from "./integration.repository.js";
+import type { ChannelConnectionStoredRecord, TelegramConnectionStoredRecord } from "./integration.repository.js";
 import type { TelegramHttpFetch } from "./telegram-channel-connection.js";
-import { resolveOrCreateTelegramConversation, telegramTenantEventId } from "./telegram-webhook.route.js";
+import { resolveOrCreateTelegramConversation, telegramRoutingQueueId, telegramTenantEventId } from "./telegram-webhook.route.js";
 
 export interface TelegramPollingInput {
   apiBaseUrl?: string;
+  autoAssignConversation?: (conversationId: string, tenantId: string) => Promise<unknown>;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   fetcher?: TelegramHttpFetch;
   integrationRepository: TelegramConnectionReader;
   limit?: number;
+  runBotRuntime?: (event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string }) => Promise<{ instance?: { status?: string }; outcome?: string }>;
   offsets?: Map<string, number>;
   timeoutMs?: number;
 }
 
 export interface TelegramConnectionReader {
+  listChannelConnectionsAsync?(filters: { tenantId: string; type?: string }): Promise<ChannelConnectionStoredRecord[]>;
   listTelegramConnections(): TelegramConnectionStoredRecord[];
   listTelegramConnectionsAsync?(): Promise<TelegramConnectionStoredRecord[]>;
   saveTelegramConnectionAsync?(connection: TelegramConnectionStoredRecord): Promise<TelegramConnectionStoredRecord>;
@@ -146,6 +149,7 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
         chatId: parsed.chatId,
         conversationRepository: input.conversationRepository,
         displayName: parsed.displayName,
+        queueId: await telegramRoutingQueueId(input.integrationRepository, connection.tenantId, connection),
         tenantId: connection.tenantId,
         username: parsed.username
       });
@@ -168,6 +172,24 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
       } else {
         result.failed += 1;
         continue;
+      }
+
+      const runtimeEventId = telegramTenantEventId(connection.tenantId, connection.botId ?? undefined, parsed.eventId);
+      let botRuntime: { instance?: { status?: string }; outcome?: string } | null = null;
+      if (input.runBotRuntime) {
+        try {
+          botRuntime = await input.runBotRuntime({ channel: "Telegram", conversationId: conversation.id, eventId: runtimeEventId, payload: { text: parsed.text }, tenantId: connection.tenantId, traceId: normalized.traceId });
+        } catch {
+          botRuntime = null;
+        }
+      }
+      const needsOperator = !botRuntime || ["handoff", "dead_lettered"].includes(String(botRuntime.instance?.status ?? ""));
+      if (needsOperator && input.autoAssignConversation) {
+        try {
+          await input.autoAssignConversation(conversation.id, connection.tenantId);
+        } catch {
+          // Inbound delivery remains accepted; an unassigned dialog stays visible in its queue.
+        }
       }
 
       await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, parsed.updateId + 1);

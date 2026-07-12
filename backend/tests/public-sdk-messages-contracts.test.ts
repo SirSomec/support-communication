@@ -9,6 +9,7 @@ import { IdentityModule } from "../apps/api-gateway/dist/identity/identity.modul
 import { IdentityRepository } from "../apps/api-gateway/dist/identity/identity.repository.js";
 import { IntegrationModule } from "../apps/api-gateway/dist/integrations/integration.module.js";
 import { IntegrationRepository } from "../apps/api-gateway/dist/integrations/integration.repository.js";
+import { QualityRepository } from "../apps/api-gateway/dist/quality/quality.repository.js";
 
 const PUBLIC_API_KEY = "sk_test_public_sdk_contract_secret";
 const PUBLIC_KEY_ID = "pak_public_sdk_contract_stage";
@@ -31,6 +32,7 @@ describe("public sdk message ingress and widget poll contracts", () => {
     }
 
     IntegrationRepository.clearDefault();
+    QualityRepository.clearDefault();
   });
 
   it("accepts sdk message and returns conversationId", async () => {
@@ -47,6 +49,51 @@ describe("public sdk message ingress and widget poll contracts", () => {
     assert.equal(send.data.accepted, true);
     assert.equal(typeof send.data.visitorSessionToken, "string");
     assert.equal(send.data.visitorSessionToken.length > 20, true);
+
+    const conversationId = String(send.data.conversationId);
+    const repository = ConversationRepository.default();
+    const lifecycleEvents = await repository.listLifecycleEvents({ conversationId, tenantId: TENANT_ID });
+    assert.deepEqual(lifecycleEvents.map((event) => event.eventType), ["conversation.created", "message.received"]);
+    assert.equal(lifecycleEvents.every((event) => event.tenantId === TENANT_ID), true);
+
+    const realtimeEvents = (await repository.listRealtimeEvents({ tenantId: TENANT_ID }))
+      .filter((event) => event.resourceId === conversationId);
+    assert.deepEqual(realtimeEvents.map((event) => event.eventName), ["conversation.created", "message.created"]);
+    assert.equal(lifecycleEvents[0]?.sourceEventId, realtimeEvents[0]?.eventId);
+    assert.equal(lifecycleEvents[0]?.traceId, realtimeEvents[0]?.traceId);
+    assert.equal(lifecycleEvents[1]?.sourceEventId, realtimeEvents[1]?.eventId);
+    assert.equal(lifecycleEvents[1]?.traceId, realtimeEvents[1]?.traceId);
+  });
+
+  it("tracks anonymous SDK presence before a conversation exists", async () => {
+    const { baseUrl, integrationRepository } = await createTestApiApp(apps);
+    assert.equal((await ConversationRepository.default().listConversations()).length, 0);
+
+    const first = await publicPost(baseUrl, "/public/sdk/presence/heartbeat", {
+      externalId: "visitor-presence@example.test",
+      pageUrl: "https://shop.example/checkout?email=secret@example.test#payment",
+      referrer: "https://search.example/results?q=private",
+      sessionId: "browser-session-001"
+    });
+    const second = await publicPost(baseUrl, "/public/sdk/presence/heartbeat", {
+      externalId: "visitor-presence@example.test",
+      pagePath: "/checkout?token=secret",
+      sessionId: "browser-session-001"
+    });
+
+    assert.equal(first.status, "ok");
+    assert.equal(second.data.firstSeenAt, first.data.firstSeenAt);
+    assert.equal((await ConversationRepository.default().listConversations()).length, 0);
+    const sessions = await integrationRepository.listLiveSdkVisitorPresence({ at: new Date().toISOString() });
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0]?.pagePath, "/checkout");
+    assert.equal(sessions[0]?.pageUrl, null);
+    assert.equal(sessions[0]?.subjectId.includes("visitor-presence"), false);
+    assert.equal(sessions[0]?.sessionKeyHash.includes("browser-session"), false);
+
+    const disconnected = await publicPost(baseUrl, "/public/sdk/presence/disconnect", { sessionId: "browser-session-001" });
+    assert.equal(disconnected.data.connected, false);
+    assert.equal((await integrationRepository.listLiveSdkVisitorPresence({ at: new Date().toISOString() })).length, 0);
   });
 
   it("polls only operator replies after sdk message ingress", async () => {
@@ -110,9 +157,109 @@ describe("public sdk message ingress and widget poll contracts", () => {
     assert.equal(Array.isArray(pollSince.data.messages), true);
     assert.equal(pollSince.data.messages.length, 0);
   });
+
+  it("records an idempotent SDK rating from canonical conversation data", async () => {
+    const { baseUrl } = await createTestApiApp(apps);
+    const send = await publicPost(baseUrl, "/public/sdk/messages", {
+      externalId: "visitor-rating-001",
+      text: "Please help with my order"
+    });
+    const conversationId = String(send.data.conversationId);
+    const conversations = ConversationRepository.default();
+    const conversation = await conversations.findConversation(conversationId);
+    assert.ok(conversation);
+    await conversations.saveConversation({
+      ...conversation,
+      channel: "SDK",
+      operatorId: "operator-canonical",
+      operatorName: "Canonical Operator",
+      topic: "Canonical topic"
+    });
+
+    const payload = {
+      channel: "Telegram",
+      idempotencyKey: "widget-rating-001",
+      operator: "attacker-controlled",
+      scale: "CSAT",
+      score: 5,
+      topic: "Fake topic",
+      visitorSessionToken: String(send.data.visitorSessionToken)
+    };
+    const first = await publicPost(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/ratings`, payload);
+    const replay = await publicPost(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/ratings`, payload);
+
+    assert.equal(first.status, "ok");
+    assert.equal(first.data.accepted, true);
+    assert.equal(replay.data.ratingId, first.data.ratingId);
+    assert.equal("visitorSessionToken" in first.data, false);
+    const ratings = await QualityRepository.default().listQualityRatings({ tenantId: TENANT_ID });
+    assert.equal(ratings.length, 1);
+    assert.equal(ratings[0]?.channel, "SDK");
+    assert.equal(ratings[0]?.operator, "operator-canonical");
+    assert.equal(ratings[0]?.topic, "Canonical topic");
+    assert.equal(ratings[0]?.clientId, "visitor-rating-001");
+  });
+
+  it("rejects invalid rating input, visitor token and API key scope", async () => {
+    const { baseUrl, integrationRepository } = await createTestApiApp(apps);
+    const send = await publicPost(baseUrl, "/public/sdk/messages", {
+      externalId: "visitor-rating-security",
+      text: "Need an operator"
+    });
+    const conversationId = String(send.data.conversationId);
+    const conversations = ConversationRepository.default();
+    const conversation = await conversations.findConversation(conversationId);
+    assert.ok(conversation);
+    await conversations.saveConversation({ ...conversation, operatorId: "operator-security" });
+
+    const invalidScore = await publicPost(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/ratings`, {
+      idempotencyKey: "invalid-score",
+      scale: "CSAT",
+      score: 6,
+      visitorSessionToken: String(send.data.visitorSessionToken)
+    });
+    assert.equal(invalidScore.status, "invalid");
+    assert.equal(invalidScore.error?.code, "quality_rating_invalid");
+
+    const invalidToken = await publicPost(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/ratings`, {
+      idempotencyKey: "invalid-token",
+      scale: "CSI",
+      score: 4,
+      visitorSessionToken: `${send.data.visitorSessionToken}tampered`
+    });
+    assert.equal(invalidToken.status, "denied");
+    assert.equal(String(invalidToken.error?.code).startsWith("visitor_session_token_"), true);
+
+    const noScopeKey = "sk_test_public_sdk_no_rating_scope";
+    await integrationRepository.savePublicApiKey({
+      createdAt: new Date().toISOString(), environment: "stage", keyId: "pak-no-rating-scope",
+      name: "No rating scope", owner: "contract-tests", rawSecret: noScopeKey,
+      scopes: ["clients:identify"], status: "active", tenantId: TENANT_ID
+    });
+    const denied = await postWithKey(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/ratings`, noScopeKey, {
+      idempotencyKey: "no-scope", scale: "CSAT", score: 5,
+      visitorSessionToken: String(send.data.visitorSessionToken)
+    });
+    assert.equal(denied.status, "denied");
+    assert.equal(denied.error?.code, "public_api_scope_denied");
+
+    const otherTenantKey = "sk_test_public_sdk_other_tenant";
+    await integrationRepository.savePublicApiKey({
+      createdAt: new Date().toISOString(), environment: "stage", keyId: "pak-other-tenant",
+      name: "Other tenant SDK", owner: "contract-tests", rawSecret: otherTenantKey,
+      scopes: ["conversations:write"], status: "active", tenantId: "tenant-other"
+    });
+    const crossTenant = await postWithKey(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/ratings`, otherTenantKey, {
+      idempotencyKey: "cross-tenant", scale: "CSAT", score: 5,
+      visitorSessionToken: String(send.data.visitorSessionToken)
+    });
+    assert.equal(crossTenant.status, "not_found");
+    assert.equal(crossTenant.error?.code, "conversation_not_found");
+    assert.equal((await QualityRepository.default().listQualityRatings({ tenantId: TENANT_ID })).length, 0);
+  });
 });
 
-async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: string }> {
+async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: string; integrationRepository: IntegrationRepository }> {
   process.env.NODE_ENV = "test";
   process.env.ALLOW_DEMO_SERVICE_ADMIN_HEADERS = "true";
   process.env.API_VERSION = "v1";
@@ -132,7 +279,27 @@ async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: st
   ConversationRepository.useDefault(conversationRepository);
 
   const integrationRepository = IntegrationRepository.inMemory();
+  const sdkConnectionId = "conn-public-sdk-contract";
+  await integrationRepository.saveChannelConnectionAsync({
+    chatLimit: 10,
+    credentialsMasked: true,
+    createdAt: new Date().toISOString(),
+    environment: "stage",
+    health: 100,
+    id: sdkConnectionId,
+    lastSyncAt: new Date().toISOString(),
+    name: "Public SDK contract",
+    rawExternalId: "sdk:contract",
+    routingQueueId: "queue-public-sdk-contract",
+    status: "active",
+    tenantId: TENANT_ID,
+    traffic: "test",
+    type: "sdk",
+    updatedAt: new Date().toISOString(),
+    webhookUrl: ""
+  });
   await integrationRepository.savePublicApiKey({
+    channelConnectionId: sdkConnectionId,
     createdAt: new Date().toISOString(),
     environment: "stage",
     keyId: PUBLIC_KEY_ID,
@@ -144,6 +311,7 @@ async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: st
     tenantId: TENANT_ID
   });
   IntegrationRepository.useDefault(integrationRepository);
+  QualityRepository.useDefault(QualityRepository.inMemory({ aiScoringAudits: [], aiSuggestionDecisions: [], lifecycleEvents: [], manualQaReviews: [], qualityRatings: [] }));
 
   const app = await NestFactory.create(PublicSdkMessagesContractTestModule, {
     logger: false
@@ -158,20 +326,25 @@ async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: st
     throw new Error("Unable to resolve test HTTP port.");
   }
 
-  return { baseUrl: `http://127.0.0.1:${address.port}` };
+  return { baseUrl: `http://127.0.0.1:${address.port}`, integrationRepository };
 }
 
 async function publicPost(baseUrl: string, path: string, payload: Record<string, unknown>) {
+  return postWithKey(baseUrl, path, PUBLIC_API_KEY, payload);
+}
+
+async function postWithKey(baseUrl: string, path: string, apiKey: string, payload: Record<string, unknown>) {
   const response = await fetch(`${baseUrl}/api/v1${path}?environment=stage`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${PUBLIC_API_KEY}`,
+      authorization: `Bearer ${apiKey}`,
       "content-type": "application/json"
     },
     body: JSON.stringify(payload)
   });
-  assert.equal(response.status, 200);
-  return response.json() as Promise<{ data: Record<string, any>; status: string }>;
+  const body = await response.text();
+  assert.equal(response.status, 200, body);
+  return JSON.parse(body) as { data: Record<string, any>; error?: { code?: string }; status: string };
 }
 
 async function publicGet(

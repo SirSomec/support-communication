@@ -16,6 +16,7 @@ function clone<T>(value: T): T {
 
 export function bootstrapQualityState(base?: Partial<QualityState>): QualityState {
   return {
+    aiSuggestionDecisions: [],
     aiScoringAudits: base?.aiScoringAudits ?? [],
     manualQaReviews: base?.manualQaReviews ?? [],
     ratings: base?.ratings ?? [],

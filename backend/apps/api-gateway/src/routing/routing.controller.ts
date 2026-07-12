@@ -110,5 +110,20 @@ export class RoutingController {
 
 function routingContextFromRequest(request: TenantOperatorRequest & ServiceAdminRequest): RoutingRequestContext {
   const tenantId = request.tenantOperatorContext?.tenantId ?? request.serviceAdminContext?.currentTenantId;
-  return tenantId ? { tenantId } : {};
+  if (!tenantId) {
+    return {};
+  }
+  if (request.tenantOperatorContext) {
+    return {
+      actorId: request.tenantOperatorContext.userId,
+      actorType: "operator",
+      tenantId
+    };
+  }
+  return {
+    actorId: request.serviceAdminContext?.actor.id,
+    actorName: request.serviceAdminContext?.actor.name,
+    actorType: "service_admin",
+    tenantId
+  };
 }

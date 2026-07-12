@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { configureConversationRealtimeFanout } from "../apps/api-gateway/src/conversation/bootstrap.ts";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
+import { bootstrapConversationState } from "../apps/api-gateway/src/conversation/seed.ts";
 import {
   createDisabledRealtimeFanoutAdapter,
   createRealtimeFanoutAdapterFromEnv,
@@ -162,7 +163,7 @@ describe("Redis realtime fan-out adapter contracts", () => {
       redisFactory: () => redis
     });
     try {
-      const conversations = new ConversationService(ConversationRepository.inMemory());
+      const conversations = new ConversationService(ConversationRepository.inMemory(bootstrapConversationState()));
       const inbound = await conversations.normalizeInboundEvent("telegram", {
         conversationId: "dmitry",
         eventId: "tg-runtime-fanout-001",

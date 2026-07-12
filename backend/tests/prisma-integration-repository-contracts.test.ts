@@ -9,6 +9,7 @@ import {
   type PrismaIntegrationClient
 } from "../apps/api-gateway/src/integrations/integration.repository.ts";
 import { IntegrationService } from "../apps/api-gateway/src/integrations/integration.service.ts";
+import { bootstrapIntegrationState } from "../apps/api-gateway/src/integrations/seed.ts";
 import {
   hashPublicApiKeySecret,
   resolvePublicApiRequest
@@ -684,7 +685,7 @@ describe("Prisma-backed integration repository contracts", () => {
 
   it("rotates fixture API keys through Prisma after creating a safe public key reference for audit FK", async () => {
     const { calls, client } = createFakePrismaIntegrationClient();
-    const repository = IntegrationRepository.prisma({ client });
+    const repository = IntegrationRepository.prisma({ client, seed: bootstrapIntegrationState() });
     const integrations = new IntegrationService(repository);
 
     const rotated = await integrations.rotateApiKey("stage-key");
@@ -707,7 +708,7 @@ describe("Prisma-backed integration repository contracts", () => {
 
   it("keeps an existing Prisma public API key hash when preparing rotation audit references", async () => {
     const { calls, client } = createFakePrismaIntegrationClient();
-    const repository = IntegrationRepository.prisma({ client });
+    const repository = IntegrationRepository.prisma({ client, seed: bootstrapIntegrationState() });
     const integrations = new IntegrationService(repository);
     const rawSecret = "sk_test_existing_stage_secret_4400";
 

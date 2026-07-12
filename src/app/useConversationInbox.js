@@ -185,6 +185,9 @@ export function useConversationInbox({ sessionActive = false } = {}) {
 
         return {
           ...conversation,
+          resolutionOutcome: nextStatus === "closed"
+            ? eventPayload?.resolutionOutcome ?? conversation.resolutionOutcome
+            : nextStatus === "reopened" ? "" : conversation.resolutionOutcome,
           status: nextStatus,
           topic: nextTopic,
           sla: meta.sla,
@@ -208,6 +211,7 @@ export function useConversationInbox({ sessionActive = false } = {}) {
     const response = await dialogService.transitionConversationStatus({
       conversationId,
       nextStatus,
+      resolutionOutcome: typeof eventPayload === "object" ? eventPayload?.resolutionOutcome : undefined,
       topic: typeof eventPayload === "object" ? eventPayload?.toTopic : undefined
     });
 
@@ -271,39 +275,46 @@ export function useConversationInbox({ sessionActive = false } = {}) {
     return { ok: true, response };
   }, []);
 
+  const loadConversationDetail = useCallback(async (conversationId) => {
+    const normalizedId = String(conversationId ?? "").trim();
+    if (!sessionActive || !normalizedId) {
+      return { ok: false };
+    }
+
+    const response = await dialogService.fetchDialogDetail(normalizedId);
+    if (response.status !== "ok") {
+      return { ok: false, response };
+    }
+
+    const mapped = mapApiConversation({
+      ...(response.data?.conversation ?? {}),
+      lifecycleEvents: response.data?.lifecycleEvents ?? []
+    });
+    setConversationItems((current) =>
+      current.some((item) => item.id === mapped.id)
+        ? current.map((item) => (item.id === mapped.id ? mapped : item))
+        : [mapped, ...current]
+    );
+    setTopics((current) => ({ ...current, [mapped.id]: mapped.topic ?? "" }));
+    setClosedIds((current) => {
+      const next = new Set(current);
+      if (mapped.status === "closed") {
+        next.add(mapped.id);
+      } else {
+        next.delete(mapped.id);
+      }
+      return next;
+    });
+    return { ok: true, response };
+  }, [sessionActive]);
+
   const handleRealtimeEvent = useCallback((event) => {
     if (event.eventName !== "message.created" && event.eventName !== "conversation.updated") {
       return;
     }
 
-    const conversationId = String(event.resourceId ?? "").trim();
-    if (!conversationId) {
-      return;
-    }
-
-    void dialogService.fetchDialogDetail(conversationId).then((response) => {
-      if (response.status !== "ok") {
-        return;
-      }
-
-      const mapped = mapApiConversation(response.data?.conversation ?? {});
-      setConversationItems((current) =>
-        current.some((item) => item.id === mapped.id)
-          ? current.map((item) => (item.id === mapped.id ? mapped : item))
-          : [mapped, ...current]
-      );
-      setTopics((current) => ({ ...current, [mapped.id]: mapped.topic ?? "" }));
-      setClosedIds((current) => {
-        const next = new Set(current);
-        if (mapped.status === "closed") {
-          next.add(mapped.id);
-        } else {
-          next.delete(mapped.id);
-        }
-        return next;
-      });
-    });
-  }, []);
+    void loadConversationDetail(event.resourceId);
+  }, [loadConversationDetail]);
 
   useRealtimeInbox({
     enabled: sessionActive,
@@ -318,6 +329,7 @@ export function useConversationInbox({ sessionActive = false } = {}) {
     closedIds,
     conversationItems,
     error,
+    loadConversationDetail,
     loading,
     refreshInbox,
     refreshing,
@@ -333,6 +345,7 @@ export function useConversationInbox({ sessionActive = false } = {}) {
     closedIds,
     conversationItems,
     error,
+    loadConversationDetail,
     loading,
     refreshInbox,
     refreshing,

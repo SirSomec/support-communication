@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Check, Info, MoreHorizontal, UserRoundCheck, X } from "lucide-react";
-import { maskPhone, statusLabels } from "../../app/dialogModel.js";
+import { maskPhone, resolutionOutcomeLabels, statusLabels } from "../../app/dialogModel.js";
 import { Avatar } from "./Avatar.jsx";
 import { DialogActionMenu } from "./DialogActionMenu.jsx";
 
@@ -23,6 +23,8 @@ export function ChatHeader({
   const [assignmentReason, setAssignmentReason] = useState("");
   const [assignmentError, setAssignmentError] = useState("");
   const [assignmentPending, setAssignmentPending] = useState(false);
+  const [isClosurePanelOpen, setClosurePanelOpen] = useState(false);
+  const [resolutionOutcome, setResolutionOutcome] = useState("resolved");
   const [targetOperatorId, setTargetOperatorId] = useState("");
   const visiblePhone = access.canViewSensitive ? conversation.phone : maskPhone(conversation.phone);
   const availableTargets = assignees.filter((assignee) => assignee.id !== conversation.operatorId);
@@ -31,6 +33,8 @@ export function ChatHeader({
     setAssignmentPanelOpen(false);
     setAssignmentReason("");
     setAssignmentError("");
+    setClosurePanelOpen(false);
+    setResolutionOutcome("resolved");
     setTargetOperatorId("");
   }, [conversation.id]);
 
@@ -160,7 +164,13 @@ export function ChatHeader({
         <span>Статус:</span>
         <select
           disabled={!access.canManageDialogs || (isClosed && status !== "closed")}
-          onChange={(event) => onStatusChange(event.target.value)}
+          onChange={(event) => {
+            if (event.target.value === "closed") {
+              setClosurePanelOpen(true);
+              return;
+            }
+            onStatusChange(event.target.value);
+          }}
           value={status}
         >
           {Object.entries(statusLabels).map(([key, label]) => (
@@ -168,6 +178,35 @@ export function ChatHeader({
           ))}
         </select>
       </label>
+      {isClosurePanelOpen ? (
+        <div aria-label="Результат закрытия" className="closure-panel" role="dialog">
+          <label>
+            <span>Результат закрытия</span>
+            <select value={resolutionOutcome} onChange={(event) => setResolutionOutcome(event.target.value)}>
+              {Object.entries(resolutionOutcomeLabels).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="closure-panel-actions">
+            <button aria-label="Отменить закрытие" onClick={() => setClosurePanelOpen(false)} title="Отмена" type="button">
+              <X size={17} />
+            </button>
+            <button
+              aria-label="Подтвердить закрытие"
+              className="closure-submit"
+              onClick={() => {
+                onStatusChange("closed", { resolutionOutcome });
+                setClosurePanelOpen(false);
+              }}
+              title="Закрыть диалог"
+              type="button"
+            >
+              <Check size={17} />
+            </button>
+          </div>
+        </div>
+      ) : null}
       <label className="topic-select">
         <span>Тематика:</span>
         <select value={topic} onChange={(event) => onTopic(event.target.value)}>

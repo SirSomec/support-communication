@@ -1,10 +1,11 @@
-import { Controller, Get } from "@nestjs/common";
+import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { loadBackendConfig, type BackendConfig } from "@support-communication/config";
 import { type BackendEnvelope } from "@support-communication/envelope";
 import {
   buildHealthEnvelope,
   buildReadinessEnvelope,
+  checkRuntimeDependencies,
   type HealthResponse,
   type ReadinessResponse
 } from "./health.response.js";
@@ -22,7 +23,10 @@ export class HealthController {
 
   @Get("ready")
   @ApiOkResponse({ description: "API Gateway readiness envelope" })
-  ready(requestId?: string): BackendEnvelope<ReadinessResponse> {
-    return buildReadinessEnvelope(this.config, requestId);
+  async ready(requestId?: string): Promise<BackendEnvelope<ReadinessResponse>> {
+    const dependencies = await checkRuntimeDependencies(this.config);
+    const envelope = buildReadinessEnvelope(this.config, requestId, dependencies);
+    if (envelope.data.status === "unready") throw new ServiceUnavailableException(envelope);
+    return envelope;
   }
 }

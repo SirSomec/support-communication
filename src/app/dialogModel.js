@@ -1,5 +1,6 @@
 export const queueFilterDefaults = {
   channel: "all",
+  queueId: "all",
   topic: "all",
   status: "all",
   sort: "time",
@@ -22,6 +23,15 @@ export const conversationStatusMeta = {
 export const statusLabels = Object.fromEntries(
   Object.entries(conversationStatusMeta).map(([status, meta]) => [status, meta.label])
 );
+
+export const resolutionOutcomeLabels = {
+  resolved: "Вопрос решен",
+  resolved_with_followup: "Решено, нужен контроль",
+  duplicate: "Дубликат",
+  cancelled: "Отменено клиентом",
+  spam: "Спам",
+  unresolved: "Не решено"
+};
 
 export const slaSortRank = {
   danger: 0,

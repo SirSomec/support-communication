@@ -3,8 +3,10 @@ import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 
 import { BillingRepository } from "../apps/api-gateway/src/billing/billing.repository.ts";
+import { createSeededBillingRepository } from "../apps/api-gateway/src/billing/seed.ts";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { createSeededIdentityRepository } from "../apps/api-gateway/src/identity/seed.ts";
 import { QualityRepository } from "../apps/api-gateway/src/quality/quality.repository.ts";
 import { RoutingRepository } from "../apps/api-gateway/src/routing/routing.repository.ts";
 import { WorkspaceRepository } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
@@ -111,7 +113,7 @@ describe("tenant isolation verification gates", () => {
   });
 
   it("covers identity tenant-owned repository methods with concrete isolation checks", async () => {
-    const repository = IdentityRepository.inMemory();
+    const repository = createSeededIdentityRepository();
 
     await repository.recordRbacRoleGrant({
       action: "conversation.read",
@@ -689,7 +691,7 @@ describe("tenant isolation verification gates", () => {
   });
 
   it("covers billing tenant-owned repository reads with concrete isolation checks", async () => {
-    const repository = BillingRepository.inMemory();
+    const repository = createSeededBillingRepository();
     await repository.recordQuotaLedgerEntry({
       createdAt: "2026-06-29T12:00:00.000Z",
       decision: "allow",

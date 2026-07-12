@@ -5,6 +5,7 @@ import { loadBackendConfig } from "../packages/config/src/index.ts";
 import { createEnvelope } from "../packages/envelope/src/index.ts";
 import { buildHealthEnvelope, buildReadinessEnvelope } from "../apps/api-gateway/src/health.response.ts";
 import { createRequestTraceId } from "../packages/observability/src/index.ts";
+import { createLocalDevelopmentRepositorySeeds } from "../apps/api-gateway/src/runtime/local-development-seed.ts";
 
 describe("phase 0 shared backend foundation", () => {
   it("creates frontend-compatible response envelopes", () => {
@@ -55,6 +56,7 @@ describe("phase 0 shared backend foundation", () => {
 
     assert.equal(config.NODE_ENV, "test");
     assert.equal(config.RUNTIME_PROFILE, "local");
+    assert.equal(config.LOCAL_DEVELOPMENT_SEED_ENABLED, "false");
     assert.equal(config.PORT, 4201);
     assert.equal(config.SERVICE_NAME, "api-gateway");
     assert.equal(config.AUTOMATION_REPOSITORY, "json");
@@ -64,6 +66,7 @@ describe("phase 0 shared backend foundation", () => {
     assert.equal(config.NOTIFICATION_REPOSITORY, "json");
     assert.equal(config.OPERATIONS_REPOSITORY, "json");
     assert.equal(config.PLATFORM_REPOSITORY, "json");
+    assert.equal(config.QUALITY_REPOSITORY, "json");
     assert.equal(config.REPORT_REPOSITORY, "json");
     assert.equal(config.ROUTING_REPOSITORY, "json");
     assert.equal(config.S3_REGION, "us-east-1");
@@ -74,6 +77,7 @@ describe("phase 0 shared backend foundation", () => {
     assert.equal(loadBackendConfig(createTestEnv({ NOTIFICATION_REPOSITORY: "prisma" })).NOTIFICATION_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ OPERATIONS_REPOSITORY: "prisma" })).OPERATIONS_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ PLATFORM_REPOSITORY: "prisma" })).PLATFORM_REPOSITORY, "prisma");
+    assert.equal(loadBackendConfig(createTestEnv({ QUALITY_REPOSITORY: "prisma" })).QUALITY_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ REPORT_REPOSITORY: "prisma" })).REPORT_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ ROUTING_REPOSITORY: "prisma" })).ROUTING_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ BROWSER_PUSH_PUBLIC_KEY: "" })).BROWSER_PUSH_PUBLIC_KEY, undefined);
@@ -93,6 +97,7 @@ describe("phase 0 shared backend foundation", () => {
       NOTIFICATION_REPOSITORY: "prisma",
       OPERATIONS_REPOSITORY: "prisma",
       PLATFORM_REPOSITORY: "prisma",
+      QUALITY_REPOSITORY: "prisma",
       PUBLIC_API_KEY_SECRET: "prod-public-api-secret",
       REPORT_REPOSITORY: "prisma",
       ROUTING_REPOSITORY: "prisma",
@@ -103,6 +108,25 @@ describe("phase 0 shared backend foundation", () => {
       () => loadBackendConfig(productionEnv),
       /BILLING_REPOSITORY must be prisma outside local runtime/
     );
+    assert.throws(
+      () => loadBackendConfig({
+        ...productionEnv,
+        BILLING_REPOSITORY: "prisma",
+        LOCAL_DEVELOPMENT_SEED_ENABLED: "true"
+      }),
+      /Local development seed cannot be enabled outside/
+    );
+  });
+
+  it("loads local sample data only through the explicit development composition", () => {
+    const seeds = createLocalDevelopmentRepositorySeeds();
+
+    assert.ok(seeds.identity?.tenantUsers.length);
+    assert.ok(seeds.identity?.passwordCredentials.length);
+    assert.ok(seeds.conversation?.conversations.length);
+    assert.ok(seeds.billing?.tenants.length);
+    assert.ok(seeds.workspace?.templates.length);
+    assert.ok(seeds.reports?.workspace.reportColumnOptions.length);
   });
 
   it("allows legacy JSON store file envs in production-like profile when Prisma repositories are selected", () => {
@@ -122,6 +146,7 @@ describe("phase 0 shared backend foundation", () => {
       OPERATIONS_REPOSITORY: "prisma",
       OPERATIONS_STORE_FILE: ".runtime/operations-store.json",
       PLATFORM_REPOSITORY: "prisma",
+      QUALITY_REPOSITORY: "prisma",
       PLATFORM_STORE_FILE: ".runtime/platform-store.json",
       PUBLIC_API_KEY_SECRET: "production-like-public-api-secret",
       REPORT_REPOSITORY: "prisma",
@@ -164,6 +189,7 @@ describe("phase 0 shared backend foundation", () => {
       NOTIFICATION_REPOSITORY: "prisma",
       OPERATIONS_REPOSITORY: "prisma",
       PLATFORM_REPOSITORY: "prisma",
+      QUALITY_REPOSITORY: "prisma",
       PUBLIC_API_KEY_SECRET: "staging-public-api-secret",
       REPORT_REPOSITORY: "prisma",
       ROUTING_REPOSITORY: "prisma",

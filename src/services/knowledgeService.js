@@ -3,6 +3,10 @@ import { apiRequest, createApiErrorEnvelope } from "./apiClient.js";
 const SERVICE = "knowledgeService";
 
 export const knowledgeService = {
+  async createArticle(payload = {}) {
+    return apiRequest("/knowledge", { body: payload, method: "POST", operation: "createKnowledgeArticle", service: SERVICE });
+  },
+
   async fetchArticles(filters = {}) {
     return apiRequest("/knowledge", {
       operation: "fetchArticles",

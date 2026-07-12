@@ -1,17 +1,30 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { lastValueFrom, toArray } from "rxjs";
 import type { RealtimeFanoutAdapter, RealtimeFanoutEvent } from "../apps/api-gateway/src/conversation/realtime.fanout.ts";
-import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
+import { ConversationRepository as RuntimeConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
+import { bootstrapConversationState } from "../apps/api-gateway/src/conversation/seed.ts";
 import { createRealtimeSseStream } from "../apps/api-gateway/src/conversation/realtime.sse.ts";
 import { writeRealtimeWebSocketReplay } from "../apps/api-gateway/src/conversation/realtime.websocket.ts";
 import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
 import { createDeterministicObjectStorageSigner } from "../apps/api-gateway/src/workspace/object-storage.ts";
 import { WorkspaceRepository } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
-import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { IdentityRepository as RuntimeIdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { bootstrapIdentityState } from "../apps/api-gateway/src/identity/seed.ts";
+
+const ConversationRepository = {
+  default: () => RuntimeConversationRepository.default(),
+  inMemory: () => RuntimeConversationRepository.inMemory(bootstrapConversationState())
+};
+const IdentityRepository = {
+  inMemory: () => RuntimeIdentityRepository.inMemory(bootstrapIdentityState())
+};
 
 describe("phase 2 conversation, message, channel and realtime backend contracts", () => {
+  beforeEach(() => {
+    RuntimeConversationRepository.useDefault(RuntimeConversationRepository.inMemory(bootstrapConversationState()));
+  });
   it("assigns a live dialog to an active tenant user and records report activity atomically", async () => {
     const repository = ConversationRepository.inMemory();
     const identityRepository = IdentityRepository.inMemory();
@@ -46,6 +59,78 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     }, { tenantId: "tenant-volga" });
     assert.equal(unchanged.status, "conflict");
     assert.equal(unchanged.error?.code, "operator_unchanged");
+  });
+
+  it("persists an immutable tenant-scoped lifecycle timeline for dialog mutations", async () => {
+    const repository = RuntimeConversationRepository.inMemory(bootstrapConversationState());
+    const conversations = new ConversationService(repository, { identityRepository: IdentityRepository.inMemory() });
+    const scope = {
+      actorId: "usr-volga-admin",
+      actorName: "Sergey Markin",
+      actorType: "operator" as const,
+      tenantId: "tenant-volga"
+    };
+
+    const status = await conversations.transitionConversationStatus({
+      conversationId: "maria",
+      nextStatus: "waiting_client",
+      reason: "Waiting for customer confirmation"
+    }, scope);
+    const note = await conversations.appendMessage({
+      conversationId: "maria",
+      mode: "internal",
+      text: "Verify the courier response before replying."
+    }, scope);
+    const assignees = await conversations.fetchAssignees(scope);
+    const operator = (assignees.data.items as Array<{ id: string }>)[0];
+    const assignment = await conversations.assignConversation({
+      conversationId: "maria",
+      operatorId: operator.id,
+      reason: "Assign after lifecycle review"
+    }, scope);
+
+    assert.equal(status.status, "ok");
+    assert.equal(note.status, "ok");
+    assert.equal(assignment.status, "ok");
+    const events = await repository.listLifecycleEvents({ conversationId: "maria", tenantId: "tenant-volga" });
+    assert.deepEqual(events.map((event) => event.eventType), [
+      "status.changed",
+      "internal_comment.created",
+      "assignment.changed"
+    ]);
+    assert.ok(events.every((event) => event.actorId === "usr-volga-admin" && event.tenantId === "tenant-volga"));
+    assert.equal(events[0].reason, "Waiting for customer confirmation");
+
+    const firstPage = await conversations.fetchConversationTimeline("maria", { limit: 2 }, scope);
+    const secondPage = await conversations.fetchConversationTimeline("maria", {
+      cursor: String(firstPage.data.nextCursor),
+      limit: 2
+    }, scope);
+    assert.equal(firstPage.data.events.length, 2);
+    assert.equal(secondPage.data.events.length, 1);
+    assert.equal(secondPage.data.events[0].eventType, "assignment.changed");
+
+    const foreign = await repository.listLifecycleEvents({ conversationId: "maria", tenantId: "tenant-northstar" });
+    assert.deepEqual(foreign, []);
+  });
+
+  it("ships a database trigger that rejects lifecycle event updates and deletes", () => {
+    const migration = readFileSync(new URL("../prisma/migrations/202607110003_conversation_lifecycle_events/migration.sql", import.meta.url), "utf8");
+    assert.match(migration, /BEFORE UPDATE OR DELETE ON "conversation_lifecycle_events"/);
+    assert.match(migration, /conversation_lifecycle_events are append-only/);
+    assert.match(migration, /FOREIGN KEY \("tenant_id", "conversation_id"\)/);
+  });
+
+  it("maps legacy customer lifecycle actors to the canonical client actor", () => {
+    const repositorySource = readFileSync(new URL("../apps/api-gateway/src/conversation/conversation.repository.ts", import.meta.url), "utf8");
+    assert.match(repositorySource, /value === "customer"[\s\S]*return "client"/);
+  });
+
+  it("backfills legacy closed dialogs and enforces resolution outcomes", () => {
+    const migration = readFileSync(new URL("../prisma/migrations/202607110006_conversation_resolution_outcome/migration.sql", import.meta.url), "utf8");
+    assert.match(migration, /SET "resolution_outcome" = 'legacy_unknown'/);
+    assert.match(migration, /conversations_closed_resolution_outcome_check/);
+    assert.match(migration, /conversations_tenant_resolution_outcome_updated_idx/);
   });
 
   it("rejects assignment to an operator outside the active tenant roster", async () => {
@@ -92,17 +177,43 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     assert.equal(missingTopic.error?.code, "topic_required");
     assert.equal(missingTopic.data.guard, "role_channel_topic");
 
+    const missingOutcome = await conversations.transitionConversationStatus({
+      conversationId: "vladimir",
+      nextStatus: "closed",
+      topic: "Product / Mismatch"
+    });
+    assert.equal(missingOutcome.status, "invalid");
+    assert.equal(missingOutcome.error?.code, "resolution_outcome_required");
+
     const closed = await conversations.transitionConversationStatus({
       conversationId: "vladimir",
       nextStatus: "closed",
+      resolutionOutcome: "resolved",
       roleMode: "admin",
       topic: "Product / Mismatch"
     });
     assert.equal(closed.status, "ok");
     assert.equal(closed.data.conversation.status, "closed");
     assert.equal(closed.data.conversation.topic, "Product / Mismatch");
+    assert.equal(closed.data.conversation.resolutionOutcome, "resolved");
+    assert.equal(closed.data.lifecycleEvent.data.resolutionOutcome, "resolved");
     assert.equal(closed.data.auditEvent.immutable, true);
     assert.equal(closed.data.realtimeEvent.eventName, "conversation.updated");
+
+    const duplicateClose = await conversations.transitionConversationStatus({
+      conversationId: "vladimir",
+      nextStatus: "closed",
+      resolutionOutcome: "resolved"
+    });
+    assert.equal(duplicateClose.status, "conflict");
+    assert.equal(duplicateClose.error?.code, "conversation_already_closed");
+
+    const reopened = await conversations.transitionConversationStatus({
+      conversationId: "vladimir",
+      nextStatus: "reopened"
+    });
+    assert.equal(reopened.status, "ok");
+    assert.equal(reopened.data.conversation.resolutionOutcome, undefined);
   });
 
   it("keeps internal comments out of outbound delivery", async () => {
@@ -137,6 +248,79 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     });
     assert.equal(empty.status, "invalid");
     assert.equal(empty.error?.code, "message_content_required");
+  });
+
+  it("atomically queues one durable Telegram CSAT survey when a dialog is closed", async () => {
+    const repository = ConversationRepository.inMemory();
+    await repository.saveConversation({
+      channel: "Telegram",
+      clientSince: "2026-07-11",
+      device: "Telegram",
+      entry: "Telegram",
+      id: "telegram-csat-close",
+      initials: "TC",
+      language: "ru",
+      messages: [],
+      name: "Telegram client",
+      phone: "111222333",
+      preview: "Question resolved",
+      previous: [],
+      sla: "Active",
+      slaTone: "ok",
+      status: "active",
+      tags: ["telegram", "telegram-chat:987654321"],
+      tenantId: "tenant-mygig",
+      time: "now",
+      topic: "Support / Telegram"
+    });
+    const conversations = new ConversationService(repository);
+
+    const closed = await conversations.transitionConversationStatus({
+      conversationId: "telegram-csat-close",
+      nextStatus: "closed",
+      resolutionOutcome: "resolved"
+    }, { tenantId: "tenant-mygig" });
+    const replay = await conversations.transitionConversationStatus({
+      conversationId: "telegram-csat-close",
+      nextStatus: "closed",
+      resolutionOutcome: "resolved"
+    }, { tenantId: "tenant-mygig" });
+    const descriptors = await repository.listOutboundDescriptors({
+      conversationId: "telegram-csat-close",
+      kind: "message_delivery"
+    });
+    const outbox = await repository.listOutboxEvents();
+
+    assert.equal(closed.status, "ok");
+    assert.equal(closed.data.conversation.status, "closed");
+    assert.equal(closed.data.csatSurveyDelivery.deliveryState, "queued");
+    assert.equal(replay.status, "conflict");
+    assert.equal(descriptors.length, 1);
+    assert.equal(descriptors[0]?.idempotencyKey, "quality:csat:telegram-csat-close");
+    assert.equal(descriptors[0]?.payload.providerConversationId, "987654321");
+    assert.deepEqual(descriptors[0]?.payload.replyMarkup, {
+      inline_keyboard: [[1, 2, 3, 4, 5].map((score) => ({
+        callback_data: `quality:csat:${score}`,
+        text: String(score)
+      }))]
+    });
+    assert.equal(outbox.filter((event) => event.payload.descriptorId === descriptors[0]?.id).length, 1);
+  });
+
+  it("does not queue a CSAT delivery descriptor for non-Telegram closes", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+
+    const closed = await conversations.transitionConversationStatus({
+      conversationId: "maria",
+      nextStatus: "closed",
+      resolutionOutcome: "resolved",
+      topic: "Product / Mismatch"
+    });
+
+    assert.equal(closed.status, "ok");
+    assert.equal(closed.data.csatSurveyDelivery, undefined);
+    assert.equal((await repository.listOutboundDescriptors({ conversationId: "maria" })).length, 0);
   });
 
   it("dispatches Telegram operator replies through the outbound dispatcher", async () => {
@@ -419,8 +603,8 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     const uploadDescriptor = uploadDescriptors.find((descriptor) => descriptor.id === upload.data.descriptorId);
     assert.equal(uploadDescriptor?.payload.fileId, upload.data.fileId);
     const uploadOutbox = await repository.listOutboxEvents();
-    const uploadRequested = uploadOutbox.find((event) => event.id === upload.data.outboxEventId);
-    assert.equal(uploadRequested?.payload.fileId, upload.data.fileId);
+    assert.equal(upload.data.outboxEventId, null);
+    assert.equal(uploadOutbox.some((event) => event.payload.fileId === upload.data.fileId), false);
 
     const missingOutboundTopic = await conversations.createOutboundConversationRequest({
       channel: "Telegram",
@@ -487,6 +671,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       url: `https://storage.example.test/download/${upload.data.fileId}`
     });
     assert.equal(JSON.stringify(descriptor?.payload).includes("objectKey"), false);
+    assert.equal((await conversationRepository.listOutboxEvents()).some((event) => event.payload.fileId === upload.data.fileId), false);
 
     const finalized = await conversations.finalizeAttachmentUpload({
       checksum: "sha256-dialog-upload",
@@ -499,6 +684,9 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     assert.equal(finalized.data.antivirusState, "scan_pending");
     assert.equal(finalized.data.objectKeyExposed, false);
     assert.equal(JSON.stringify(finalized).includes(String(storedFile?.objectKey)), false);
+    const scanEvents = (await conversationRepository.listOutboxEvents()).filter((event) => event.payload.fileId === upload.data.fileId);
+    assert.equal(scanEvents.length, 1);
+    assert.equal(scanEvents[0]?.type, "attachment.upload.requested");
 
     const finalizedFile = await workspaceRepository.findFile(String(upload.data.fileId), { tenantId: "tenant-volga" });
     assert.equal(finalizedFile?.storageState, "uploaded");
@@ -561,6 +749,15 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     assert.equal(sameIdDifferentChannel.status, "ok");
     assert.equal(sameIdDifferentChannel.data.duplicate, false);
     assert.equal(sameIdDifferentChannel.data.message.side, "client");
+
+    const attachmentOnly = await conversations.normalizeInboundEvent("max", {
+      attachments: [{ providerAttachmentId: "max-image-001", type: "image" }],
+      eventId: "max-event-attachment-001",
+      conversationId: "alexey"
+    });
+    assert.equal(attachmentOnly.status, "ok");
+    assert.equal(attachmentOnly.data.message.text, "Attachment received");
+    assert.deepEqual(attachmentOnly.data.message.attachments, [{ providerAttachmentId: "max-image-001", type: "image" }]);
 
     const events = await conversations.fetchRealtimeEvents({ since: "now-5m" });
     assert.equal(events.status, "ok");
@@ -994,7 +1191,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       recordInboundEvent: baseRepository.recordInboundEvent.bind(baseRepository),
       recordOutboundDescriptor: baseRepository.recordOutboundDescriptor.bind(baseRepository),
       saveConversation: baseRepository.saveConversation.bind(baseRepository)
-    } as unknown as ConversationRepository;
+    } as unknown as RuntimeConversationRepository;
     const racingConversations = new ConversationService(racingRepository);
 
     const replay = await racingConversations.recordDeliveryReceipt("telegram", {

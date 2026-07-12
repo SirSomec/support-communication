@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { BookOpen, Bot } from "lucide-react";
+import { BookOpen } from "lucide-react";
 import { statusLabels } from "../../app/dialogModel.js";
 import { AttachmentPreview } from "./AttachmentPreview.jsx";
 import {
@@ -11,32 +11,6 @@ import {
 } from "./timelineModel.js";
 
 const MESSAGE_TIME_TICK_MS = 1000;
-
-export function BotHandoffSummary({ summary }) {
-  return (
-    <section className="bot-handoff-summary" aria-label="Резюме бота перед передачей оператору">
-      <header>
-        <Bot size={17} />
-        <strong>Handoff summary: {summary.scenario}</strong>
-        <span>{summary.reason}</span>
-      </header>
-      <div>
-        <span>
-          <b>Бот спросил</b>
-          {summary.asked.join(", ")}
-        </span>
-        <span>
-          <b>Получено</b>
-          {summary.received.join(" · ")}
-        </span>
-        <span>
-          <b>Дальше</b>
-          Ответить оператору без повторного сбора данных
-        </span>
-      </div>
-    </section>
-  );
-}
 
 export function AuditTimeline({ messages, onSaveTemplate, transcriptMode }) {
   const transcriptRef = useRef(null);

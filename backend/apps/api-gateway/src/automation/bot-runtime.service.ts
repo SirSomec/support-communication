@@ -1,0 +1,178 @@
+import { randomUUID } from "node:crypto";
+import { redactSensitiveText } from "@support-communication/redaction";
+import type { BotFlowNode, BotScenario } from "./automation.types.js";
+import {
+  AutomationRepository,
+  type AutomationBotRuntimeCommitResult,
+  type AutomationBotRuntimeInstance,
+  type AutomationBotRuntimeStep,
+  type AutomationBotScenarioVersion
+} from "./automation.repository.js";
+import { planBotRuntimeLabeledTransition, resolveBotRuntimeDeadLetterState, resolveBotRuntimeRetryState } from "./bot-runtime.worker.js";
+import type { BotRuntimeStateTransition } from "./bot-runtime.worker.js";
+
+export interface BotRuntimeInboundEvent {
+  channel: string;
+  conversationId: string;
+  eventId: string;
+  payload?: Record<string, unknown>;
+  scenarioId?: string;
+  tenantId: string;
+  traceId: string;
+}
+
+export interface BotRuntimeOptions {
+  fetch?: typeof fetch;
+  maxAttempts?: number;
+  now?: () => Date;
+  webhookAllowlist?: string[];
+  webhookTimeoutMs?: number;
+}
+
+export class BotRuntimeService {
+  constructor(private readonly repository: AutomationRepository, private readonly options: BotRuntimeOptions = {}) {}
+
+  async handleInboundEvent(event: BotRuntimeInboundEvent): Promise<AutomationBotRuntimeCommitResult> {
+    validateEvent(event);
+    const replay = await this.repository.findBotRuntimeStepAsync(event.tenantId, event.conversationId, event.eventId);
+    if (replay) {
+      const instance = await this.repository.findBotRuntimeInstanceAsync(event.tenantId, event.conversationId);
+      if (!instance) throw new Error("bot_runtime_instance_not_found");
+      return { instance, outcome: "duplicate", step: replay };
+    }
+
+    const existing = await this.repository.findBotRuntimeInstanceAsync(event.tenantId, event.conversationId);
+    const resolved = await this.resolveScenario(event, existing);
+    const now = (this.options.now?.() ?? new Date()).toISOString();
+    const initialNodeId = resolved.scenario.flowNodes.find((node) => node.id === "start")?.id ?? resolved.scenario.flowNodes[0]?.id;
+    if (!initialNodeId) throw new Error("bot_runtime_scenario_empty");
+    const currentNodeId = existing?.currentNodeId ?? initialNodeId;
+    const edgeLabel = selectEdgeLabel(resolved.scenario, currentNodeId, event.payload ?? {});
+    let transition: BotRuntimeStateTransition;
+    try {
+      transition = planBotRuntimeLabeledTransition({
+        channel: event.channel,
+        conversationId: event.conversationId,
+        currentNodeId,
+        edgeLabel,
+        eventId: event.eventId,
+        scenario: resolved.scenario,
+        tenantId: event.tenantId,
+        traceId: event.traceId
+      });
+      const node = resolved.scenario.flowNodes.find((item) => item.id === transition.nextNodeId)!;
+      const executed = await this.executeNode(node, event, existing?.context ?? {});
+      const instance = makeInstance(existing, event, resolved.version, transition.nextNodeId, executed.status, executed.context, now);
+      const step = makeStep(instance, event, node, executed, transition.sideEffects, now);
+      return this.repository.commitBotRuntimeTransitionAsync({ expectedCurrentNodeId: existing?.currentNodeId, instance, step });
+    } catch (error) {
+      return this.commitFailure(existing, event, resolved.version, currentNodeId, error, now);
+    }
+  }
+
+  async retryInboundEvent(event: BotRuntimeInboundEvent): Promise<AutomationBotRuntimeCommitResult> {
+    const instance = await this.repository.findBotRuntimeInstanceAsync(event.tenantId, event.conversationId);
+    if (!instance || instance.status !== "retry_scheduled") throw new Error("bot_runtime_retry_not_scheduled");
+    const now = this.options.now?.() ?? new Date();
+    if (instance.nextAttemptAt && new Date(instance.nextAttemptAt).getTime() > now.getTime()) throw new Error("bot_runtime_retry_not_due");
+    return this.handleInboundEvent({ ...event, eventId: `${event.eventId}:retry:${instance.attempts}` });
+  }
+
+  async rollbackToPublishedVersion(tenantId: string, scenarioId: string, versionId: string): Promise<BotScenario> {
+    const scenario = await this.repository.findBotScenario(scenarioId);
+    const version = await this.repository.findBotScenarioVersion(versionId);
+    if (!scenario || scenario.tenantId !== tenantId || !version || version.tenantId !== tenantId || version.scenarioId !== scenarioId || version.status !== "published") {
+      throw new Error("bot_runtime_rollback_version_not_found");
+    }
+    return this.repository.saveBotScenario({ ...scenario, activeVersionId: version.versionId, flowEdges: version.flowEdges, flowNodes: version.flowNodes, status: "published" });
+  }
+
+  private async resolveScenario(event: BotRuntimeInboundEvent, existing?: AutomationBotRuntimeInstance): Promise<{ scenario: BotScenario; version: AutomationBotScenarioVersion }> {
+    const state = await this.repository.readStateAsync();
+    const scenarioId = existing?.scenarioId ?? event.scenarioId;
+    const candidates = state.botScenarios.filter((item) => item.tenantId === event.tenantId && (!scenarioId || item.id === scenarioId) && item.channels.includes(event.channel));
+    const scenario = candidates.find((item) => ["published", "enabled"].includes(item.status));
+    if (!scenario) throw new Error("bot_runtime_published_scenario_not_found");
+    const versions = state.botScenarioVersions.filter((item) => item.tenantId === event.tenantId && item.scenarioId === scenario.id && item.status === "published");
+    const version = existing
+      ? versions.find((item) => item.versionId === existing.versionId)
+      : versions.find((item) => item.versionId === scenario.activeVersionId) ?? versions.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    if (!version) throw new Error(existing ? "bot_runtime_pinned_version_not_found" : "bot_runtime_published_version_not_found");
+    return { scenario: { ...scenario, flowEdges: version.flowEdges, flowNodes: version.flowNodes }, version };
+  }
+
+  private async executeNode(node: BotFlowNode, event: BotRuntimeInboundEvent, previous: Record<string, unknown>) {
+    const context = { ...previous, ...(event.payload?.context as Record<string, unknown> | undefined ?? {}) };
+    if (node.type === "contact_request") {
+      const field = String(node.config?.field ?? "contact");
+      const value = event.payload?.value;
+      if (value !== undefined) context[field] = value;
+      return { context, outcome: value === undefined ? "contact_requested" : "contact_collected", status: "active" as const };
+    }
+    if (node.type === "webhook") {
+      const webhookResponse = await this.callWebhook(node, event, context);
+      return { context: { ...context, webhook: webhookResponse }, outcome: "webhook_succeeded", status: "active" as const, webhookResponse };
+    }
+    if (node.type === "handoff") return { context, handoffSummary: { botId: event.scenarioId, collectedFields: redactObject(context), nodeId: node.id, queue: node.title ?? "default" }, outcome: "handed_off", status: "handoff" as const };
+    if (node.type === "fallback") return { context, outcome: "fallback", status: "active" as const };
+    if (node.type === "quick_replies") return { context, outcome: "quick_replies_sent", status: "active" as const };
+    if (node.type === "condition") return { context, outcome: "condition_evaluated", status: "active" as const };
+    return { context, outcome: "message_queued", status: "active" as const };
+  }
+
+  private async callWebhook(node: BotFlowNode, event: BotRuntimeInboundEvent, context: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const url = new URL(String(node.config?.url ?? ""));
+    if (url.protocol !== "https:") throw new Error("bot_runtime_webhook_https_required");
+    const allowlist = this.options.webhookAllowlist ?? splitAllowlist(process.env.BOT_RUNTIME_WEBHOOK_ALLOWLIST);
+    if (!allowlist.includes(url.hostname.toLowerCase())) throw new Error("bot_runtime_webhook_host_not_allowed");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.options.webhookTimeoutMs ?? 3000);
+    try {
+      const response = await (this.options.fetch ?? fetch)(url, {
+        body: JSON.stringify({ context, event: event.payload ?? {}, eventId: event.eventId }),
+        headers: { "content-type": "application/json" }, method: "POST", redirect: "error", signal: controller.signal
+      });
+      const text = (await response.text()).slice(0, 8192);
+      if (!response.ok) throw new Error(`bot_runtime_webhook_http_${response.status}: ${redactSensitiveText(text)}`);
+      return { body: scrubSensitiveText(text), status: response.status };
+    } finally { clearTimeout(timeout); }
+  }
+
+  private async commitFailure(existing: AutomationBotRuntimeInstance | undefined, event: BotRuntimeInboundEvent, version: AutomationBotScenarioVersion, currentNodeId: string, error: unknown, now: string) {
+    const attempts = (existing?.attempts ?? 0) + 1;
+    const max = this.options.maxAttempts ?? 3;
+    const state = attempts >= max
+      ? resolveBotRuntimeDeadLetterState({ currentAttempts: attempts - 1, error: error instanceof Error ? error : String(error), failedAt: now })
+      : resolveBotRuntimeRetryState({ currentAttempts: attempts - 1, error: error instanceof Error ? error : String(error), failedAt: now, retryBackoffMs: Math.min(60_000, 1000 * 2 ** (attempts - 1)) });
+    const instance = makeInstance(existing, event, version, currentNodeId, state.status, existing?.context ?? {}, now, state.attempts, state.lastError, state.nextAttemptAt);
+    const node = version.flowNodes.find((item) => item.id === currentNodeId) ?? { id: currentNodeId, type: "fallback" };
+    const step = makeStep(instance, event, node, { context: instance.context, error: state.lastError, outcome: state.status, status: state.status }, [], now);
+    return this.repository.commitBotRuntimeTransitionAsync({ expectedCurrentNodeId: existing?.currentNodeId, instance, step });
+  }
+}
+
+function selectEdgeLabel(scenario: BotScenario, nodeId: string, payload: Record<string, unknown>): string | undefined {
+  const edges = scenario.flowEdges.filter((edge) => edge.from === nodeId);
+  if (edges.length <= 1) return edges[0]?.label;
+  const requested = String(payload.quickReply ?? payload.condition ?? payload.value ?? "");
+  if (edges.some((edge) => edge.label === requested)) return requested;
+  if (edges.some((edge) => edge.label === "default")) return "default";
+  throw new Error("bot_runtime_transition_ambiguous");
+}
+
+function makeInstance(existing: AutomationBotRuntimeInstance | undefined, event: BotRuntimeInboundEvent, version: AutomationBotScenarioVersion, currentNodeId: string, status: AutomationBotRuntimeInstance["status"], context: Record<string, unknown>, now: string, attempts = 0, lastError: string | null = null, nextAttemptAt: string | null = null): AutomationBotRuntimeInstance {
+  return { attempts, context: redactObject(context), conversationId: event.conversationId, createdAt: existing?.createdAt ?? now, currentNodeId, id: existing?.id ?? `bot_runtime_${randomUUID()}`, lastError, nextAttemptAt, scenarioId: version.scenarioId, status, tenantId: event.tenantId, updatedAt: now, versionId: version.versionId };
+}
+
+function makeStep(instance: AutomationBotRuntimeInstance, event: BotRuntimeInboundEvent, node: BotFlowNode, result: Record<string, unknown>, sideEffects: unknown[], now: string): AutomationBotRuntimeStep {
+  return { conversationId: event.conversationId, createdAt: now, error: result.error ? redactSensitiveText(String(result.error)) : null, handoffSummary: (result.handoffSummary as Record<string, unknown>) ?? null, id: `bot_step_${randomUUID()}`, inputEvent: redactObject({ channel: event.channel, payload: event.payload ?? {}, scenarioId: event.scenarioId, traceId: event.traceId }), inputEventId: event.eventId, lifecycleEvent: { eventName: `bot.runtime.${String(result.outcome)}`, traceId: event.traceId }, nodeId: node.id, nodeType: node.type, outcome: String(result.outcome), runtimeId: instance.id, sideEffects: redactObject(sideEffects) as Array<Record<string, unknown>>, tenantId: event.tenantId, webhookResponse: (result.webhookResponse as Record<string, unknown>) ?? null };
+}
+
+function redactObject<T>(value: T): T { return JSON.parse(scrubSensitiveText(JSON.stringify(value))) as T; }
+function scrubSensitiveText(value: string): string {
+  return redactSensitiveText(value)
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[REDACTED_EMAIL]")
+    .replace(/(?:\+?\d[\s().-]*){10,15}/g, "[REDACTED_PHONE]");
+}
+function splitAllowlist(value?: string): string[] { return (value ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean); }
+function validateEvent(event: BotRuntimeInboundEvent): void { if (!event.tenantId || !event.conversationId || !event.eventId || !event.traceId || !event.channel) throw new Error("bot_runtime_event_context_required"); }

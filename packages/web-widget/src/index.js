@@ -1,18 +1,34 @@
 const POLL_INTERVAL_MS = 3000;
+const INVITATION_POLL_INTERVAL_MS = 5000;
+const PRESENCE_INTERVAL_MS = 15000;
 const DEFAULT_ENVIRONMENT = "stage";
+const SUBJECT_STORAGE_KEY = "support-widget:subject-id";
+const SESSION_STORAGE_KEY = "support-widget:session-id";
 
 const state = {
   apiBase: "",
   publicKey: "",
   externalId: "",
+  tenantId: "",
+  integrationId: "",
   environment: DEFAULT_ENVIRONMENT,
+  subjectId: null,
+  sessionId: null,
+  presencePath: "/public/sdk/presence/heartbeat",
+  disconnectPath: "/public/sdk/presence/disconnect",
+  presenceIntervalMs: PRESENCE_INTERVAL_MS,
+  presenceTimer: null,
+  presenceListenersAttached: false,
   conversationId: null,
   visitorSessionToken: null,
   lastOperatorMessageId: null,
   pollTimer: null,
+  invitationPollTimer: null,
+  currentInvitation: null,
   messages: [],
   panelOpen: false,
-  initialized: false
+  initialized: false,
+  ratingSubmitted: false
 };
 
 let rootEl = null;
@@ -20,32 +36,39 @@ let messagesEl = null;
 let inputEl = null;
 let sendBtn = null;
 let toggleBtn = null;
+let ratingEl = null;
+let invitationEl = null;
 
 export function init(options = {}) {
   const apiBase = String(options.apiBase ?? "").trim().replace(/\/+$/, "");
   const publicKey = String(options.publicKey ?? "").trim();
   const externalId = String(options.externalId ?? "").trim();
 
-  if (!apiBase || !publicKey || !externalId) {
-    throw new Error("SupportWidget.init requires apiBase, publicKey, and externalId.");
+  if (!apiBase || !publicKey) {
+    throw new Error("SupportWidget.init requires apiBase and publicKey.");
   }
 
   state.apiBase = apiBase;
   state.publicKey = publicKey;
-  state.externalId = externalId;
+  state.subjectId = externalId || getOrCreateIdentity(localStorage, SUBJECT_STORAGE_KEY, "visitor");
+  state.sessionId = getOrCreateIdentity(sessionStorage, SESSION_STORAGE_KEY, "session");
+  state.externalId = externalId || state.subjectId;
+  state.tenantId = String(options.tenantId ?? "").trim();
+  state.integrationId = String(options.integrationId ?? "").trim();
   state.environment = String(options.environment ?? DEFAULT_ENVIRONMENT).trim() || DEFAULT_ENVIRONMENT;
+  state.presencePath = String(options.presencePath ?? "/public/sdk/presence/heartbeat").trim();
+  state.disconnectPath = String(options.disconnectPath ?? "/public/sdk/presence/disconnect").trim();
+  state.presenceIntervalMs = normalizeInterval(options.presenceIntervalMs);
 
   injectStyles();
   renderShell();
+  startPresence();
+  startInvitationPolling();
 
-  identifyVisitor()
-    .then(() => {
-      state.initialized = true;
-      startPolling();
-    })
-    .catch((error) => {
-      appendSystemMessage(`Не удалось подключиться: ${error.message}`);
-    });
+  // Presence intentionally starts before a conversation exists. The first
+  // message or an accepted proactive invitation creates the conversation.
+  state.initialized = true;
+  startPolling();
 
   return { open, close, destroy };
 }
@@ -78,17 +101,6 @@ async function apiRequest(method, path, { body, query } = {}) {
   }
 
   return envelope.data ?? {};
-}
-
-async function identifyVisitor() {
-  const data = await apiRequest("POST", "/public/sdk/identify", {
-    body: { externalId: state.externalId }
-  });
-
-  state.conversationId = data.conversationId ?? null;
-  if (!state.conversationId) {
-    throw new Error("Identify response did not include conversationId.");
-  }
 }
 
 async function sendVisitorMessage(text) {
@@ -136,6 +148,174 @@ async function pollOperatorReplies() {
       state.lastOperatorMessageId = String(reply.id);
     }
   }
+  if (data.conversationStatus === "closed" && !state.ratingSubmitted && ratingEl) {
+    ratingEl.hidden = false;
+  }
+}
+
+function presencePayload(status = "active") {
+  const location = typeof window !== "undefined" ? window.location : null;
+  return {
+    subjectId: state.subjectId,
+    sessionId: state.sessionId,
+    externalId: state.externalId,
+    tenantId: state.tenantId || undefined,
+    integrationId: state.integrationId || undefined,
+    pageUrl: location?.href,
+    pagePath: location?.pathname,
+    pageTitle: typeof document !== "undefined" ? document.title : undefined,
+    visibility: typeof document !== "undefined" ? document.visibilityState : "visible",
+    status
+  };
+}
+
+async function pollInvitations() {
+  if (!state.sessionId || state.currentInvitation) return;
+  const data = await apiRequest("GET", "/public/sdk/invitations", {
+    query: { sessionId: state.sessionId }
+  });
+  const invitation = firstInvitation(data.invitations);
+  if (invitation) renderInvitation(invitation);
+}
+
+async function acknowledgeInvitation(exposureId, action) {
+  return apiRequest("POST", invitationAcknowledgePath(exposureId, action), {
+    body: { sessionId: state.sessionId }
+  });
+}
+
+function startInvitationPolling() {
+  stopInvitationPolling();
+  pollInvitations().catch(() => {});
+  state.invitationPollTimer = window.setInterval(() => {
+    pollInvitations().catch(() => {});
+  }, INVITATION_POLL_INTERVAL_MS);
+}
+
+function stopInvitationPolling() {
+  if (state.invitationPollTimer != null) {
+    window.clearInterval(state.invitationPollTimer);
+    state.invitationPollTimer = null;
+  }
+}
+
+function renderInvitation(invitation) {
+  if (!rootEl || state.currentInvitation || !invitation?.exposureId) return;
+  state.currentInvitation = invitation;
+  invitationEl = document.createElement("section");
+  invitationEl.className = "sw-invitation";
+  invitationEl.setAttribute("aria-live", "polite");
+
+  const message = document.createElement("p");
+  message.textContent = String(invitation.message ?? "").trim() || "Нужна помощь?";
+  const actions = document.createElement("div");
+  const dismissButton = document.createElement("button");
+  dismissButton.type = "button";
+  dismissButton.textContent = "Не сейчас";
+  const acceptButton = document.createElement("button");
+  acceptButton.type = "button";
+  acceptButton.className = "sw-invitation__accept";
+  acceptButton.textContent = "Открыть чат";
+  actions.append(dismissButton, acceptButton);
+  invitationEl.append(message, actions);
+  rootEl.appendChild(invitationEl);
+
+  acknowledgeInvitation(invitation.exposureId, "shown").catch(() => {});
+  dismissButton.addEventListener("click", () => handleInvitationAction("dismissed", dismissButton, acceptButton));
+  acceptButton.addEventListener("click", () => handleInvitationAction("accepted", dismissButton, acceptButton));
+}
+
+async function handleInvitationAction(action, ...buttons) {
+  const invitation = state.currentInvitation;
+  if (!invitation) return;
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const data = await acknowledgeInvitation(invitation.exposureId, action);
+    if (action === "accepted") {
+      const conversationId = String(data.conversationId ?? "").trim();
+      if (!conversationId) throw new Error("Invitation acceptance did not include a conversation.");
+      state.conversationId = conversationId;
+      state.visitorSessionToken = null;
+      state.lastOperatorMessageId = null;
+      state.ratingSubmitted = false;
+      if (ratingEl) ratingEl.hidden = true;
+      open();
+    }
+    clearInvitation();
+  } catch (error) {
+    appendSystemMessage(`Не удалось обработать приглашение: ${error.message}`);
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+function clearInvitation() {
+  state.currentInvitation = null;
+  if (invitationEl?.parentNode) invitationEl.parentNode.removeChild(invitationEl);
+  invitationEl = null;
+}
+
+async function sendPresenceHeartbeat() {
+  if (!state.presencePath) return;
+  await apiRequest("POST", state.presencePath, { body: presencePayload() });
+}
+
+function sendDisconnect() {
+  if (!state.disconnectPath || !state.subjectId || !state.sessionId) return;
+  const url = buildUrl(state.disconnectPath);
+  const body = JSON.stringify(presencePayload("disconnected"));
+  fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${state.publicKey}`,
+      "content-type": "application/json"
+    },
+    body,
+    keepalive: true
+  }).catch(() => {});
+}
+
+function startPresence() {
+  stopPresence();
+  sendPresenceHeartbeat().catch(() => {});
+  state.presenceTimer = window.setInterval(() => {
+    sendPresenceHeartbeat().catch(() => {});
+  }, state.presenceIntervalMs);
+  if (!state.presenceListenersAttached) {
+    document.addEventListener("visibilitychange", handlePageUpdate);
+    window.addEventListener("pageshow", handlePageUpdate);
+    window.addEventListener("pagehide", handlePageHide);
+    state.presenceListenersAttached = true;
+  }
+}
+
+function stopPresence() {
+  if (state.presenceTimer != null) {
+    window.clearInterval(state.presenceTimer);
+    state.presenceTimer = null;
+  }
+}
+
+function handlePageUpdate() {
+  sendPresenceHeartbeat().catch(() => {});
+}
+
+function handlePageHide() {
+  sendDisconnect();
+}
+
+async function sendQualityRating(score) {
+  const data = await apiRequest("POST", `/public/sdk/conversations/${encodeURIComponent(state.conversationId)}/ratings`, {
+    body: {
+      idempotencyKey: `widget:${state.externalId}`,
+      scale: "CSAT",
+      score,
+      visitorSessionToken: state.visitorSessionToken
+    }
+  });
+  if (!data.ratingId) throw new Error("Rating was not confirmed by the server.");
+  state.ratingSubmitted = true;
+  if (ratingEl) ratingEl.hidden = true;
+  appendSystemMessage("Спасибо, оценка сохранена.");
 }
 
 function startPolling() {
@@ -171,6 +351,15 @@ function close() {
 
 function destroy() {
   stopPolling();
+  stopInvitationPolling();
+  stopPresence();
+  sendDisconnect();
+  if (state.presenceListenersAttached) {
+    document.removeEventListener("visibilitychange", handlePageUpdate);
+    window.removeEventListener("pageshow", handlePageUpdate);
+    window.removeEventListener("pagehide", handlePageHide);
+    state.presenceListenersAttached = false;
+  }
   if (rootEl?.parentNode) {
     rootEl.parentNode.removeChild(rootEl);
   }
@@ -179,7 +368,44 @@ function destroy() {
   inputEl = null;
   sendBtn = null;
   toggleBtn = null;
+  ratingEl = null;
+  invitationEl = null;
+  state.currentInvitation = null;
 }
+
+function normalizeInterval(value) {
+  const interval = Number(value);
+  return Number.isFinite(interval) && interval >= 5000 ? interval : PRESENCE_INTERVAL_MS;
+}
+
+function getOrCreateIdentity(storage, key, prefix) {
+  try {
+    const existing = String(storage?.getItem(key) ?? "").trim();
+    if (existing) return existing;
+    const identity = createIdentity(prefix);
+    storage?.setItem(key, identity);
+    return identity;
+  } catch {
+    return createIdentity(prefix);
+  }
+}
+
+function createIdentity(prefix) {
+  const randomId = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${randomId}`;
+}
+
+function firstInvitation(value) {
+  if (!Array.isArray(value)) return null;
+  return value.find((invitation) => invitation && typeof invitation.exposureId === "string" && invitation.exposureId.trim()) ?? null;
+}
+
+function invitationAcknowledgePath(exposureId, action) {
+  return `/public/sdk/invitations/${encodeURIComponent(exposureId)}/${action}`;
+}
+
+export const __test__ = { firstInvitation, getOrCreateIdentity, invitationAcknowledgePath, normalizeInterval };
 
 function renderShell() {
   if (rootEl) {
@@ -196,6 +422,10 @@ function renderShell() {
         <button type="button" class="sw-close" aria-label="Закрыть">×</button>
       </header>
       <div class="sw-messages" role="log" aria-live="polite"></div>
+      <div class="sw-rating" hidden>
+        <span>Оцените помощь</span>
+        <div>${[1, 2, 3, 4, 5].map((score) => `<button type="button" data-score="${score}" aria-label="Оценка ${score} из 5">${score}</button>`).join("")}</div>
+      </div>
       <form class="sw-composer">
         <textarea class="sw-input" rows="2" placeholder="Напишите сообщение…" required></textarea>
         <button type="submit" class="sw-send">Отправить</button>
@@ -209,6 +439,7 @@ function renderShell() {
   messagesEl = rootEl.querySelector(".sw-messages");
   inputEl = rootEl.querySelector(".sw-input");
   sendBtn = rootEl.querySelector(".sw-send");
+  ratingEl = rootEl.querySelector(".sw-rating");
   const closeBtn = rootEl.querySelector(".sw-close");
   const form = rootEl.querySelector(".sw-composer");
 
@@ -220,6 +451,18 @@ function renderShell() {
     }
   });
   closeBtn.addEventListener("click", close);
+  ratingEl.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-score]");
+    if (!button || state.ratingSubmitted) return;
+    const buttons = [...ratingEl.querySelectorAll("button")];
+    buttons.forEach((item) => { item.disabled = true; });
+    try {
+      await sendQualityRating(Number(button.dataset.score));
+    } catch (error) {
+      appendSystemMessage(`Не удалось сохранить оценку: ${error.message}`);
+      buttons.forEach((item) => { item.disabled = false; });
+    }
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -345,6 +588,33 @@ function injectStyles() {
       flex-direction: column;
       gap: 8px;
     }
+
+    .support-widget .sw-rating {
+      padding: 10px 12px;
+      border-top: 1px solid #d9e0ea;
+      background: #f8fafc;
+      text-align: center;
+    }
+
+    .support-widget .sw-rating[hidden] { display: none; }
+    .support-widget .sw-rating span { display: block; margin-bottom: 8px; font-size: 13px; }
+    .support-widget .sw-rating div { display: flex; justify-content: center; gap: 6px; }
+    .support-widget .sw-rating button { width: 34px; height: 34px; border: 1px solid #b8c4d4; border-radius: 6px; background: #fff; cursor: pointer; }
+    .support-widget .sw-invitation {
+      position: absolute;
+      right: 0;
+      bottom: 68px;
+      width: min(320px, calc(100vw - 40px));
+      padding: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+    }
+    .support-widget .sw-invitation p { margin: 0 0 10px; line-height: 1.4; }
+    .support-widget .sw-invitation div { display: flex; justify-content: flex-end; gap: 8px; }
+    .support-widget .sw-invitation button { border: 1px solid #b8c4d4; border-radius: 6px; background: #fff; padding: 7px 10px; cursor: pointer; }
+    .support-widget .sw-invitation .sw-invitation__accept { border-color: #2563eb; background: #2563eb; color: #fff; }
     .support-widget .sw-message {
       max-width: 85%;
       padding: 8px 12px;

@@ -1,10 +1,37 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { configureAutomationRepository } from "../apps/api-gateway/src/automation/bootstrap.ts";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { planEligibleProactiveRuleDeliveryAsync } from "../apps/api-gateway/src/automation/proactive-delivery.worker.ts";
+import { bootstrapAutomationState } from "../apps/api-gateway/src/automation/seed.ts";
 
 describe("Prisma-backed automation repository contracts", () => {
+  it("applies local automation fixtures only through explicit JSON bootstrap seed", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "automation-bootstrap-"));
+    try {
+      const empty = configureAutomationRepository({
+        AUTOMATION_REPOSITORY: "json",
+        AUTOMATION_STORE_FILE: join(workspace, "empty.json")
+      });
+      const seeded = configureAutomationRepository({
+        AUTOMATION_REPOSITORY: "json",
+        AUTOMATION_STORE_FILE: join(workspace, "seeded.json")
+      }, {
+        seed: bootstrapAutomationState()
+      });
+
+      assert.equal(empty.readState().botScenarios.length, 0);
+      assert.ok(seeded.readState().botScenarios.length > 0);
+      assert.ok(seeded.readState().botScenarios.every((scenario) => scenario.tenantId === "tenant-demo"));
+    } finally {
+      AutomationRepository.clearDefault();
+      rmSync(workspace, { force: true, recursive: true });
+    }
+  });
+
   it("bootstraps the default automation repository from a Prisma client factory", async () => {
     const { client, calls } = createFakePrismaAutomationClient();
     let datasourceUrl: string | undefined;
@@ -51,7 +78,8 @@ describe("Prisma-backed automation repository contracts", () => {
       id: "bot-scenario-prisma",
       name: "Prisma scenario bot",
       schemaVersion: "bot-flow/v1",
-      status: "draft"
+      status: "draft",
+      tenantId: "tenant-demo"
     });
     saved.flowNodes[0].title = "Mutated after save";
 
@@ -64,7 +92,7 @@ describe("Prisma-backed automation repository contracts", () => {
       ...foundAgainBeforeUpdate!,
       channels: ["SDK", "Telegram"],
       status: "published",
-      tenantId: "tenant-spoofed"
+      tenantId: "tenant-demo"
     });
     const foundAgain = await repository.findBotScenario("bot-scenario-prisma");
     const listed = await repository.listBotScenarios();
@@ -105,6 +133,7 @@ describe("Prisma-backed automation repository contracts", () => {
       ],
       scenarioId: "bot-version-prisma",
       status: "draft",
+      tenantId: "tenant-demo",
       versionId: "bot-version-prisma-v1"
     };
 
@@ -112,8 +141,7 @@ describe("Prisma-backed automation repository contracts", () => {
     version.flowNodes[0].title = "Mutated after save";
     const duplicate = await repository.saveBotScenarioVersion({
       ...version,
-      status: "published",
-      tenantId: "tenant-spoofed"
+      status: "published"
     });
     const second = await repository.saveBotScenarioVersion({
       ...version,
@@ -164,6 +192,7 @@ describe("Prisma-backed automation repository contracts", () => {
       immutable: true as const,
       runtimeVersion: "runtime-bot-prisma-v1",
       scenarioId: "bot-publish-prisma",
+      tenantId: "tenant-demo",
       versionId: "bot-publish-prisma-v1"
     };
 
@@ -172,15 +201,13 @@ describe("Prisma-backed automation repository contracts", () => {
       ...auditEvent,
       actor: "changed-admin",
       idempotencyKey: "publish-audit-prisma-other-key",
-      runtimeVersion: "runtime-bot-prisma-v2",
-      tenantId: "tenant-spoofed"
+      runtimeVersion: "runtime-bot-prisma-v2"
     });
     const duplicateKey = await repository.saveBotPublishAuditEvent({
       ...auditEvent,
       auditId: "evt_bot_publish_prisma_002",
       actor: "changed-admin",
-      runtimeVersion: "runtime-bot-prisma-v2",
-      tenantId: "tenant-spoofed"
+      runtimeVersion: "runtime-bot-prisma-v2"
     });
     const otherScenario = await repository.saveBotPublishAuditEvent({
       ...auditEvent,
@@ -224,14 +251,22 @@ describe("Prisma-backed automation repository contracts", () => {
     const publishRecord = await repository.savePublishIdempotencyKeyAsync({
       fingerprint: "publish-fingerprint",
       key: "publish-key",
-      result: { runtimeVersion: "runtime-prisma-v1", scenarioId: "bot-prisma-runtime" }
+      result: { runtimeVersion: "runtime-prisma-v1", scenarioId: "bot-prisma-runtime", tenantId: "tenant-demo" },
+      tenantId: "tenant-demo"
     });
     const replayedPublish = await repository.savePublishIdempotencyKeyAsync({
       fingerprint: "changed-fingerprint",
       key: "publish-key",
-      result: { runtimeVersion: "changed" }
+      result: { runtimeVersion: "changed", tenantId: "tenant-demo" },
+      tenantId: "tenant-demo"
     });
-    const foundPublish = await repository.findPublishIdempotencyKeyAsync("publish-key");
+    const foundPublish = await repository.findPublishIdempotencyKeyAsync("tenant-demo", "publish-key");
+    const otherTenantPublish = await repository.savePublishIdempotencyKeyAsync({
+      fingerprint: "ladoga-publish-fingerprint",
+      key: "publish-key",
+      result: { runtimeVersion: "runtime-ladoga-v1", scenarioId: "bot-prisma-ladoga", tenantId: "tenant-ladoga" },
+      tenantId: "tenant-ladoga"
+    });
 
     const testRun = await repository.saveBotTestRunAsync({
       auditId: "evt_bot_test_prisma",
@@ -249,7 +284,8 @@ describe("Prisma-backed automation repository contracts", () => {
       cooldown: "24h",
       id: "rule-prisma",
       segment: "checkout",
-      status: "enabled"
+      status: "enabled",
+      tenantId: "tenant-demo"
     });
     const listedRules = await repository.listProactiveRulesAsync();
 
@@ -321,6 +357,7 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.equal(publishRecord.key, "publish-key");
     assert.equal(replayedPublish.fingerprint, "publish-fingerprint");
     assert.equal(foundPublish?.result.runtimeVersion, "runtime-prisma-v1");
+    assert.equal(otherTenantPublish.fingerprint, "ladoga-publish-fingerprint");
     assert.equal(testRun.tenantId, "tenant-demo");
     assert.equal(rule.status, "enabled");
     assert.deepEqual(listedRules.map((item) => item.id), ["rule-prisma"]);
@@ -330,7 +367,7 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.equal(attempt.traceId, "trc_proactive_prisma");
     assert.equal(deliveryRecord.result.descriptorId, "proactive_rule_prisma_tenant_demo_client_42");
     assert.equal(attribution.variant, "B");
-    assert.equal(state.publishIdempotencyKeys.length, 1);
+    assert.equal(state.publishIdempotencyKeys.length, 2);
     assert.equal(state.botTestRuns.length, 1);
     assert.equal(state.proactiveRules.length, 1);
     assert.equal(state.proactiveExecutionWindows.length, 1);
@@ -339,7 +376,7 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.equal(state.proactiveDeliveryAttempts.length, 1);
     assert.equal(state.proactiveDeliveryIdempotencyKeys.length, 1);
     assert.equal(state.proactiveDeliveryAttributions.length, 1);
-    assert.equal(calls.automationPublishIdempotencyKeyCreates.length, 1);
+    assert.equal(calls.automationPublishIdempotencyKeyCreates.length, 2);
     assert.equal(calls.automationBotTestRunUpserts.length, 1);
     assert.equal(calls.proactiveRuleUpserts.length, 1);
     assert.equal(calls.proactiveExecutionWindowUpserts.length, 1);
@@ -350,6 +387,63 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.equal(calls.proactiveDeliveryAttributionCreates.length, 1);
   });
 
+  it("rejects tenantless automation writes before calling Prisma", async () => {
+    const { client, calls } = createFakePrismaAutomationClient();
+    const repository = AutomationRepository.prisma({ client });
+    const required = /automation_tenant_required/;
+
+    await assert.rejects(Promise.resolve(repository.saveBotScenario({
+      channels: ["SDK"], flowEdges: [], flowNodes: [], id: "tenantless-scenario",
+      name: "Tenantless", schemaVersion: "bot-flow/v1", status: "draft"
+    } as never)), required);
+    await assert.rejects(Promise.resolve(repository.saveBotScenarioVersion({
+      createdAt: "2026-07-10T00:00:00.000Z", flowEdges: [], flowNodes: [],
+      scenarioId: "tenantless-scenario", status: "draft", versionId: "tenantless-version"
+    } as never)), required);
+    await assert.rejects(Promise.resolve(repository.saveBotPublishAuditEvent({
+      action: "bot.publish", actor: "tester", auditId: "tenantless-audit",
+      createdAt: "2026-07-10T00:00:00.000Z", idempotencyKey: "tenantless-audit-key",
+      immutable: true, runtimeVersion: "runtime-v1", scenarioId: "tenantless-scenario", versionId: "v1"
+    } as never)), required);
+    await assert.rejects(repository.saveBotTestRunAsync({
+      auditId: "tenantless-test-audit", cases: [], queue: "bot-runtime",
+      scenarioId: "tenantless-scenario", status: "running", testRunId: "tenantless-test"
+    } as never), required);
+    await assert.rejects(repository.saveProactiveRuleAsync({
+      channels: ["SDK"], id: "tenantless-rule", status: "enabled"
+    } as never), required);
+    await assert.rejects(repository.saveProactiveExecutionWindowAsync({
+      active: true, daysOfWeek: [1], endsAt: "18:00", ruleId: "rule", startsAt: "09:00",
+      timezone: "UTC", windowId: "tenantless-window"
+    }), required);
+    await assert.rejects(repository.saveProactiveFrequencyCapAsync({
+      active: true, capId: "tenantless-cap", limit: 1, period: "day",
+      resetAt: "2026-07-11T00:00:00.000Z", ruleId: "rule", used: 0
+    }), required);
+    await assert.rejects(repository.saveProactiveExperimentAssignmentAsync({
+      assignedAt: "2026-07-10T00:00:00.000Z", assignmentId: "tenantless-assignment",
+      experimentId: "experiment", ruleId: "rule", subjectId: "subject", variant: "A"
+    }), required);
+    await assert.rejects(repository.saveProactiveDeliveryAttemptAsync({
+      attemptedAt: "2026-07-10T00:00:00.000Z", attemptId: "tenantless-attempt", channel: "SDK",
+      descriptorId: "descriptor", ruleId: "rule", status: "queued", subjectId: "subject", traceId: "trace"
+    }), required);
+    await assert.rejects(repository.saveProactiveDeliveryIdempotencyKeyAsync({
+      fingerprint: "fingerprint", key: "tenantless-idempotency", result: {}, ruleId: "rule", subjectId: "subject"
+    }), required);
+    await assert.rejects(repository.saveProactiveDeliveryAttributionAsync({
+      assignedAt: "2026-07-10T00:00:00.000Z", attributionId: "tenantless-attribution",
+      descriptorId: "descriptor", experimentId: "experiment", ruleId: "rule", subjectId: "subject", variant: "A"
+    }), required);
+    await assert.rejects(repository.savePublishIdempotencyKeyAsync({
+      fingerprint: "fingerprint", key: "tenantless-publish", result: {}
+    } as never), required);
+
+    assert.equal(calls.botScenarioUpsert.length, 0);
+    assert.equal(calls.proactiveRuleUpserts.length, 0);
+    assert.equal(calls.proactiveDeliveryAttemptCreates.length, 0);
+  });
+
   it("plans proactive delivery through async Prisma-backed eligibility without sync fallback reads", async () => {
     const { client } = createFakePrismaAutomationClient();
     const repository = AutomationRepository.prisma({ client });
@@ -358,7 +452,8 @@ describe("Prisma-backed automation repository contracts", () => {
       channels: ["SDK"],
       id: "rule-prisma-eligible",
       segment: "checkout",
-      status: "enabled"
+      status: "enabled",
+      tenantId: "tenant-demo"
     });
     await repository.saveProactiveExecutionWindowAsync({
       active: true,
@@ -453,14 +548,15 @@ function createFakePrismaAutomationClient() {
     automationPublishIdempotencyKey: {
       async create(input: { data: FakeAutomationPublishIdempotencyKeyRow }): Promise<FakeAutomationPublishIdempotencyKeyRow> {
         calls.automationPublishIdempotencyKeyCreates.push(input);
-        automationPublishIdempotencyKeys.set(input.data.key, clone(input.data));
+        automationPublishIdempotencyKeys.set(fakeAutomationPublishMapKey(input.data.tenantId, input.data.key), clone(input.data));
         return clone(input.data);
       },
       async findMany(): Promise<FakeAutomationPublishIdempotencyKeyRow[]> {
         return Array.from(automationPublishIdempotencyKeys.values()).sort((left, right) => left.key.localeCompare(right.key)).map(clone);
       },
-      async findUnique(input: { where: { key: string } }): Promise<FakeAutomationPublishIdempotencyKeyRow | null> {
-        return clone(automationPublishIdempotencyKeys.get(input.where.key) ?? null);
+      async findUnique(input: { where: FakeAutomationPublishIdempotencyKeyWhereUniqueInput }): Promise<FakeAutomationPublishIdempotencyKeyRow | null> {
+        const { key, tenantId } = input.where.tenantId_key;
+        return clone(automationPublishIdempotencyKeys.get(fakeAutomationPublishMapKey(tenantId, key)) ?? null);
       }
     },
     automationBotTestRun: {
@@ -711,6 +807,18 @@ interface FakeAutomationPublishIdempotencyKeyRow {
   fingerprint: string;
   key: string;
   result: Record<string, unknown>;
+  tenantId: string;
+}
+
+interface FakeAutomationPublishIdempotencyKeyWhereUniqueInput {
+  tenantId_key: {
+    key: string;
+    tenantId: string;
+  };
+}
+
+function fakeAutomationPublishMapKey(tenantId: string, key: string): string {
+  return `${tenantId}\u0000${key}`;
 }
 
 interface FakeAutomationBotTestRunRow {

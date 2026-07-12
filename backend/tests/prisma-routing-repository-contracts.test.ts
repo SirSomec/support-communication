@@ -150,9 +150,12 @@ describe("Prisma-backed routing repository contracts", () => {
     assert.deepEqual(calls.routingJobUpserts, [{
       create: {
         action: "return_to_sla_queue",
+        claimedAt: new Date("2026-06-29T12:20:00.000Z"),
         conversationId: "dialog-prisma-rescue",
         id: "job_prisma_rescue_return",
         kind: "rescue.return_queue",
+        leaseExpiresAt: null,
+        leaseOwner: null,
         payload: job,
         queue: "rescue-return",
         redistributionId: null,
@@ -161,8 +164,11 @@ describe("Prisma-backed routing repository contracts", () => {
       },
       update: {
         action: "return_to_sla_queue",
+        claimedAt: new Date("2026-06-29T12:20:00.000Z"),
         conversationId: "dialog-prisma-rescue",
         kind: "rescue.return_queue",
+        leaseExpiresAt: null,
+        leaseOwner: null,
         payload: job,
         queue: "rescue-return",
         redistributionId: null,
@@ -207,7 +213,9 @@ describe("Prisma-backed routing repository contracts", () => {
       claimedAt: "2026-06-29T13:16:00.000Z",
       expectedStatus: "pending",
       jobId: "job_prisma_sla_claim",
-      queue: "sla-timers"
+      leaseDurationMs: 30_000,
+      queue: "sla-timers",
+      workerId: "sla-worker-a"
     });
     const duplicate = await repository.claimJob({
       claimedAt: "2026-06-29T13:16:01.000Z",
@@ -219,15 +227,22 @@ describe("Prisma-backed routing repository contracts", () => {
     assert.equal(claimed?.id, "job_prisma_sla_claim");
     assert.equal(claimed?.status, "claimed");
     assert.equal(claimed?.claimedAt, "2026-06-29T13:16:00.000Z");
+    assert.equal(claimed?.leaseExpiresAt, "2026-06-29T13:16:30.000Z");
+    assert.equal(claimed?.leaseOwner, "sla-worker-a");
     assert.equal(duplicate, undefined);
     assert.deepEqual(calls.routingJobUpdateMany, [{
       data: {
         action: "resume_sla",
+        claimedAt: new Date("2026-06-29T13:16:00.000Z"),
         conversationId: null,
         kind: null,
+        leaseExpiresAt: new Date("2026-06-29T13:16:30.000Z"),
+        leaseOwner: "sla-worker-a",
         payload: {
           ...job,
           claimedAt: "2026-06-29T13:16:00.000Z",
+          leaseExpiresAt: "2026-06-29T13:16:30.000Z",
+          leaseOwner: "sla-worker-a",
           status: "claimed"
         },
         queue: "sla-timers",
@@ -237,6 +252,8 @@ describe("Prisma-backed routing repository contracts", () => {
       },
       where: {
         id: "job_prisma_sla_claim",
+        leaseExpiresAt: null,
+        leaseOwner: null,
         queue: "sla-timers",
         status: "pending"
       }
@@ -481,6 +498,60 @@ describe("Prisma-backed routing repository contracts", () => {
     assert.equal((await first.listRoutingAnalyticsRows()).some((row) => row.id === "analytics_conflict_should_not_commit"), false);
   });
 
+  it("rolls back routing state when a lifecycle event identity is duplicated", async () => {
+    const { client, seedRoutingStateSnapshot } = createFakePrismaRoutingClient();
+    seedRoutingStateSnapshot(emptyRoutingState({
+      conversations: [{
+        channel: "VK",
+        client: "Atomic client",
+        id: "dialog-prisma-lifecycle-atomic",
+        slaTone: "ok",
+        status: "queued",
+        tenantId: "tenant-volga"
+      }],
+      queues: [{
+        active: 0,
+        channel: "VK",
+        health: 100,
+        limit: 10,
+        overdue: 0,
+        tenantId: "tenant-volga",
+        waiting: 1
+      }]
+    }));
+    const repository = RoutingRepository.prisma({ client });
+    const state = await repository.hydrateStateSnapshot();
+    const event = {
+      actorId: "operator-anna",
+      actorName: null,
+      actorType: "operator" as const,
+      conversationId: "dialog-prisma-lifecycle-atomic",
+      data: { toStatus: "assigned" },
+      eventType: "assignment.changed",
+      id: "lifecycle-routing-atomic",
+      ingestedAt: "2026-06-29T13:16:30.000Z",
+      occurredAt: "2026-06-29T13:16:30.000Z",
+      reason: "Atomic routing change",
+      schemaVersion: "conversation-lifecycle/v1" as const,
+      source: "routing-api",
+      sourceEventId: "routing-atomic-source",
+      tenantId: "tenant-volga",
+      traceId: "trace-routing-atomic"
+    };
+    await repository.saveStateWithLifecycleEvents(state, [event]);
+
+    await assert.rejects(
+      () => repository.saveStateWithLifecycleEvents({
+        ...repository.readState(),
+        queues: repository.readState().queues.map((queue) => ({ ...queue, waiting: 99 }))
+      }, [event]),
+      /conversation_lifecycle_events_source_key/
+    );
+
+    const persisted = await repository.hydrateStateSnapshot();
+    assert.equal(persisted.queues[0]?.waiting, 1);
+  });
+
   it("skips SLA apply when the Prisma-current job was completed after local state hydration", async () => {
     const worker = await import("../apps/api-gateway/src/routing/sla-timer.worker.ts");
     const { client, seedRoutingStateSnapshot } = createFakePrismaRoutingClient();
@@ -491,7 +562,8 @@ describe("Prisma-backed routing repository contracts", () => {
         id: "dialog-prisma-stale-apply",
         operatorId: "operator-anna",
         slaTone: "hold",
-        status: "paused"
+        status: "paused",
+        tenantId: "tenant-ladoga"
       }]
     }));
     const writer = RoutingRepository.prisma({ client });
@@ -501,7 +573,8 @@ describe("Prisma-backed routing repository contracts", () => {
       id: "job_prisma_stale_apply",
       queue: "sla-timers",
       runAt: "2026-06-29T13:15:00.000Z",
-      status: "claimed"
+      status: "claimed",
+      tenantId: "tenant-ladoga"
     });
     const staleWorkerRepository = RoutingRepository.prisma({ client });
     await staleWorkerRepository.hydrateStateSnapshot();
@@ -610,7 +683,8 @@ describe("Prisma-backed routing repository contracts", () => {
         id: "dialog-prisma-sla-direct",
         operatorId: "operator-anna",
         slaTone: "hold",
-        status: "paused"
+        status: "paused",
+        tenantId: "tenant-ladoga"
       }]
     }));
     const repository = RoutingRepository.prisma({ client });
@@ -620,7 +694,8 @@ describe("Prisma-backed routing repository contracts", () => {
       id: "job_prisma_sla_direct",
       queue: "sla-timers",
       runAt: "2026-06-29T13:15:00.000Z",
-      status: "claimed"
+      status: "claimed",
+      tenantId: "tenant-ladoga"
     });
 
     const applied = await repository.applySlaTimerTransition({
@@ -628,6 +703,7 @@ describe("Prisma-backed routing repository contracts", () => {
       completedAt: "2026-06-29T13:16:30.000Z",
       conversationId: "dialog-prisma-sla-direct",
       jobId: "job_prisma_sla_direct",
+      tenantId: "tenant-ladoga",
       toStatus: "active"
     });
 
@@ -638,6 +714,9 @@ describe("Prisma-backed routing repository contracts", () => {
     assert.equal(repository.readState().conversations[0]?.status, "active");
     assert.equal(repository.readState().conversations[0]?.slaTone, "ok");
     assert.equal(calls.routingTransactions, 1);
+    assert.equal(calls.conversationLifecycleEventCreates.length, 1);
+    assert.equal(calls.conversationLifecycleEventCreates[0]?.data.eventType, "sla.resumed");
+    assert.equal(calls.conversationLifecycleEventCreates[0]?.data.tenantId, "tenant-ladoga");
   });
 
   it("skips Prisma SLA apply when the current job is bound to a different conversation", async () => {
@@ -685,6 +764,48 @@ describe("Prisma-backed routing repository contracts", () => {
     assert.equal(job.completedAt, undefined);
     assert.equal(state.conversations.find((conversation) => conversation.id === "dialog-prisma-sla-current")?.status, "paused");
     assert.equal(state.conversations.find((conversation) => conversation.id === "dialog-prisma-sla-stale")?.status, "paused");
+  });
+
+  it("appends one tenant-scoped overdue lifecycle event for a claimed SLA job", async () => {
+    const { calls, client, seedRoutingStateSnapshot } = createFakePrismaRoutingClient();
+    seedRoutingStateSnapshot(emptyRoutingState({
+      conversations: [{
+        channel: "Telegram",
+        client: "Overdue client",
+        id: "dialog-prisma-sla-overdue",
+        operatorId: "operator-anna",
+        slaTone: "warn",
+        status: "assigned",
+        tenantId: "tenant-ladoga"
+      }]
+    }));
+    const repository = RoutingRepository.prisma({ client });
+    await repository.saveJob({
+      action: "mark_sla_overdue",
+      conversationId: "dialog-prisma-sla-overdue",
+      id: "job_prisma_sla_overdue",
+      queue: "sla-timers",
+      status: "claimed",
+      tenantId: "tenant-ladoga"
+    });
+
+    const input = {
+      action: "mark_sla_overdue" as const,
+      completedAt: "2026-06-29T13:16:30.000Z",
+      conversationId: "dialog-prisma-sla-overdue",
+      jobId: "job_prisma_sla_overdue",
+      tenantId: "tenant-ladoga",
+      toSlaTone: "danger" as const,
+      toStatus: "assigned" as const
+    };
+    const applied = await repository.applySlaTimerTransition(input);
+    const duplicate = await repository.applySlaTimerTransition(input);
+
+    assert.equal(applied.status, "applied");
+    assert.equal(duplicate.status, "skipped");
+    assert.equal(calls.conversationLifecycleEventCreates.length, 1);
+    assert.equal(calls.conversationLifecycleEventCreates[0]?.data.eventType, "sla.overdue");
+    assert.equal(calls.conversationLifecycleEventCreates[0]?.data.sourceEventId, "job_prisma_sla_overdue:mark_sla_overdue");
   });
 
   it("applies rescue-return transitions through the Prisma routing repository transaction boundary", async () => {
@@ -759,6 +880,16 @@ describe("Prisma-backed routing repository contracts", () => {
     assert.equal(analyticsRow.tenantId, "tenant-ladoga");
     assert.equal((await repository.listRoutingAnalyticsRows({ eventKind: "auto_return", tenantId: "tenant-volga" })).length, 0);
     assert.equal(calls.routingTransactions, 1);
+    assert.equal(calls.conversationLifecycleEventCreates.length, 1);
+    assert.equal(calls.conversationLifecycleEventCreates[0]?.data.eventType, "rescue.auto_returned");
+    const duplicate = await repository.applyRescueReturnTransition({
+      completedAt: "2026-06-29T13:17:30.000Z",
+      fallbackConversationId: "dialog-prisma-rescue-direct",
+      jobId: "job_prisma_rescue_direct",
+      tenantId: "tenant-ladoga"
+    });
+    assert.equal(duplicate.status, "skipped");
+    assert.equal(calls.conversationLifecycleEventCreates.length, 1);
   });
 
   it("rolls back Prisma rescue-return apply side effects when the snapshot version conflicts", async () => {
@@ -920,6 +1051,7 @@ describe("Prisma-backed routing repository contracts", () => {
 });
 
 function createFakePrismaRoutingClient() {
+  const conversationLifecycleEvents = new Map<string, Record<string, unknown>>();
   const routingRules = new Map<string, FakeRoutingRuleCreateInput>();
   const queueMemberships = new Map<string, FakeQueueMembershipCreateInput>();
   const operatorCapacities = new Map<string, FakeOperatorCapacityCreateInput>();
@@ -928,6 +1060,7 @@ function createFakePrismaRoutingClient() {
   const routingStateSnapshots = new Map<string, FakeRoutingStateSnapshotCreateInput>();
   let forceSnapshotConflict = false;
   const calls = {
+    conversationLifecycleEventCreates: [] as Array<{ data: Record<string, unknown> }>,
     operatorCapacityFindFirst: [] as Array<{ where: { channel?: string; operatorId?: string; tenantId?: string } }>,
     operatorCapacityFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }>,
     operatorCapacityFindUnique: [] as Array<{ where: { id: string } }>,
@@ -966,7 +1099,7 @@ function createFakePrismaRoutingClient() {
     }>,
     routingJobUpdateMany: [] as Array<{
       data: Omit<FakeRoutingJobCreateInput, "id">;
-      where: { id: string; queue: string; status: string | null };
+      where: { id: string; leaseExpiresAt?: Date | null; leaseOwner?: string | null; queue: string; status: string | null };
     }>,
     routingStateSnapshotCreate: [] as Array<{
       data: FakeRoutingStateSnapshotCreateInput;
@@ -983,6 +1116,7 @@ function createFakePrismaRoutingClient() {
     async $transaction<T>(callback: (client: typeof client) => Promise<T>): Promise<T> {
       calls.routingTransactions += 1;
       const routingRulesBefore = new Map(routingRules);
+      const conversationLifecycleEventsBefore = new Map(conversationLifecycleEvents);
       const queueMembershipsBefore = new Map(queueMemberships);
       const operatorCapacitiesBefore = new Map(operatorCapacities);
       const routingAnalyticsRowsBefore = new Map(routingAnalyticsRows);
@@ -991,6 +1125,8 @@ function createFakePrismaRoutingClient() {
       try {
         return await callback(client);
       } catch (error) {
+        conversationLifecycleEvents.clear();
+        for (const [key, value] of conversationLifecycleEventsBefore) conversationLifecycleEvents.set(key, value);
         routingRules.clear();
         for (const [key, value] of routingRulesBefore) routingRules.set(key, value);
         queueMemberships.clear();
@@ -1004,6 +1140,17 @@ function createFakePrismaRoutingClient() {
         routingStateSnapshots.clear();
         for (const [key, value] of routingStateSnapshotsBefore) routingStateSnapshots.set(key, value);
         throw error;
+      }
+    },
+    conversationLifecycleEvent: {
+      create(input: { data: Record<string, unknown> }) {
+        calls.conversationLifecycleEventCreates.push(input);
+        const key = `${input.data.tenantId}:${input.data.source}:${input.data.sourceEventId}`;
+        if (conversationLifecycleEvents.has(key)) {
+          return Promise.reject(new Error("conversation_lifecycle_events_source_key"));
+        }
+        conversationLifecycleEvents.set(key, input.data);
+        return Promise.resolve(input.data);
       }
     },
     operatorCapacity: {
@@ -1148,11 +1295,15 @@ function createFakePrismaRoutingClient() {
       },
       updateMany(input: {
         data: Omit<FakeRoutingJobCreateInput, "id">;
-        where: { id: string; queue: string; status: string | null };
+        where: { id: string; leaseExpiresAt?: Date | null; leaseOwner?: string | null; queue: string; status: string | null };
       }) {
         calls.routingJobUpdateMany.push(input);
         const current = routingJobs.get(input.where.id);
-        if (!current || current.queue !== input.where.queue || (current.status ?? null) !== input.where.status) {
+        if (!current
+          || current.queue !== input.where.queue
+          || (current.status ?? null) !== input.where.status
+          || (input.where.leaseOwner !== undefined && (current.leaseOwner ?? null) !== input.where.leaseOwner)
+          || (input.where.leaseExpiresAt !== undefined && !sameNullableDate(current.leaseExpiresAt, input.where.leaseExpiresAt))) {
           return Promise.resolve({ count: 0 });
         }
         routingJobs.set(input.where.id, {
@@ -1289,16 +1440,26 @@ interface FakeRoutingAnalyticsCreateInput {
 
 interface FakeRoutingJobCreateInput {
   action: string | null;
+  claimedAt: Date | null;
   conversationId: string | null;
   createdAt?: Date;
   id: string;
   kind: string | null;
+  leaseExpiresAt: Date | null;
+  leaseOwner: string | null;
   payload: RoutingJobDescriptor;
   queue: string;
   redistributionId: string | null;
   runAt: number | string | typeof Prisma.DbNull | null;
   status: string | null;
   updatedAt?: Date;
+}
+
+function sameNullableDate(left: Date | null | undefined, right: Date | null): boolean {
+  if (left == null || right == null) {
+    return left == null && right == null;
+  }
+  return left.getTime() === right.getTime();
 }
 
 interface FakeRoutingStateSnapshotCreateInput {

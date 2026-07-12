@@ -167,11 +167,12 @@ describe("UI mutation guards", () => {
     const panelSource = readFileSync(new URL("../src/features/panel/PanelScreen.jsx", import.meta.url), "utf8");
     const settingsSource = readFileSync(new URL("../src/features/settings/SettingsScreen.jsx", import.meta.url), "utf8");
     const channelsSource = readFileSync(new URL("../src/features/settings/ChannelConnectionsPanel.jsx", import.meta.url), "utf8");
-    const serviceAdminSource = readFileSync(new URL("../src/features/service-admin/ServiceAdminDashboard.jsx", import.meta.url), "utf8");
 
     assert.match(appSource, /resolveNotificationNavigationTarget/);
     assert.match(appSource, /notificationNavigationTarget/);
-    assert.match(appSource, /routeActions\.openServiceAdmin/);
+    assert.doesNotMatch(appSource, /routeActions\.openServiceAdmin/);
+    assert.doesNotMatch(appSource, /ServiceAdminDashboard/);
+    assert.doesNotMatch(appSource, /VITE_ENABLE_SERVICE_ADMIN/);
     assert.match(routerSource, /navigationTarget/);
     assert.match(panelSource, /navigationTarget/);
     assert.match(panelSource, /panelNotificationContext/);
@@ -179,8 +180,6 @@ describe("UI mutation guards", () => {
     assert.match(settingsSource, /navigationTarget/);
     assert.match(settingsSource, /focusChannelType/);
     assert.match(channelsSource, /focusChannelType/);
-    assert.match(serviceAdminSource, /navigationTarget/);
-    assert.match(serviceAdminSource, /setActiveWorkspace/);
   });
 
   it("guards service-admin notification actions before rendering tenant-shell buttons", async () => {
@@ -203,7 +202,7 @@ describe("UI mutation guards", () => {
       }
     }), {
       disabled: true,
-      reason: "Service-admin access is required for this notification target."
+      reason: "Откройте /service-admin — этот раздел недоступен из рабочего места организации."
     });
 
     assert.deepEqual(resolveNotificationActionAvailability(serviceAdminTarget, {
@@ -212,8 +211,8 @@ describe("UI mutation guards", () => {
         sections: []
       }
     }), {
-      disabled: false,
-      reason: ""
+      disabled: true,
+      reason: "Откройте /service-admin — этот раздел недоступен из рабочего места организации."
     });
 
     assert.deepEqual(resolveNotificationActionAvailability({
@@ -229,6 +228,7 @@ describe("UI mutation guards", () => {
     assert.match(source, /disabled=\{notificationActionState\.disabled\}/);
     assert.match(source, /notification-action-note/);
     assert.match(shellSource, /getNotificationActionAvailability/);
+    assert.doesNotMatch(shellSource, /service-admin-entry/);
     assert.match(appSource, /resolveNotificationActionAvailability/);
   });
 

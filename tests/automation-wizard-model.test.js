@@ -83,6 +83,21 @@ describe("scenario creation wizard model", () => {
     clearWizardDraft(storage);
     assert.equal(loadWizardDraft(storage), null);
   });
+
+  it("previews keyword matches and detects phrase conflicts without raw enum labels", async () => {
+    const { findTriggerPhraseConflicts, previewKeywordTrigger } = await import("../src/features/automation/automationModel.js");
+    const hit = previewKeywordTrigger("Подскажите где мой заказ пожалуйста", ["где мой заказ"], "contains");
+    const miss = previewKeywordTrigger("хочу вернуть товар", ["где мой заказ"], "exact");
+    assert.equal(hit.matches, true);
+    assert.equal(hit.modeLabel, "содержит текст");
+    assert.equal(miss.matches, false);
+
+    const conflicts = findTriggerPhraseConflicts(["где мой заказ"], [
+      { id: "other", name: "Старый статус", status: "published", triggerRules: [{ phrases: ["Где мой заказ"], type: "phrase" }] }
+    ]);
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0].scenarioName, "Старый статус");
+  });
 });
 
 function createMemoryStorage() {

@@ -61,8 +61,8 @@ export function createScenarioFromWizard(id, values = {}) {
     : [];
   const sourceBindings = normalizeSourceBindings(values.sourceBindings);
   const triggerRules = trigger.id === "keyword"
-    ? [{ id: "phrase-1", type: "phrase", phrases: triggerPhrases, matchMode: values.matchMode ?? "contains", priority: 0 }]
-    : [{ id: "new-conversation", type: trigger.id === "first_message" ? "new_conversation" : "manual", priority: 0 }];
+    ? [{ id: "phrase-1", type: "phrase", phrases: triggerPhrases, matchMode: values.matchMode ?? "contains", priority: Number(values.triggerPriority) || 0 }]
+    : [{ id: "new-conversation", type: trigger.id === "first_message" ? "new_conversation" : "manual", priority: Number(values.triggerPriority) || 0 }];
 
   return {
     id,
@@ -229,6 +229,57 @@ export function buildClientExperiencePreview(form = {}, context = {}) {
       : "Только заготовленные сообщения",
     teamSees: `В списке сценариев коллеги увидят название «${String(form.name ?? "").trim() || goal.suggestedName}». Клиенты название не видят.`
   };
+}
+
+export function normalizeTriggerPreviewText(value, locale = "ru") {
+  return String(value ?? "").normalize("NFC").toLocaleLowerCase(locale).replace(/\s+/gu, " ").trim();
+}
+
+export function matchesTriggerPreviewPhrase(message, phrase, mode = "contains", locale = "ru") {
+  const normalizedMessage = normalizeTriggerPreviewText(message, locale);
+  const normalizedPhrase = normalizeTriggerPreviewText(phrase, locale);
+  if (!normalizedMessage || !normalizedPhrase) return false;
+  const phraseTokens = normalizedPhrase.match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (!phraseTokens.length) return false;
+  if (mode === "exact") return normalizedMessage === normalizedPhrase;
+  if (mode === "contains") return normalizedMessage.includes(normalizedPhrase);
+  const messageTokens = new Set(normalizedMessage.match(/[\p{L}\p{N}]+/gu) ?? []);
+  return phraseTokens.every((token) => messageTokens.has(token));
+}
+
+export function previewKeywordTrigger(message, phrases = [], matchMode = "contains") {
+  const matched = phrases.filter((phrase) => matchesTriggerPreviewPhrase(message, phrase, matchMode));
+  return {
+    matchedPhrases: matched,
+    matches: matched.length > 0,
+    modeLabel: describeMatchMode(matchMode)
+  };
+}
+
+export function findTriggerPhraseConflicts(phrases = [], scenarios = [], currentScenarioId = "") {
+  const normalizedPhrases = phrases.map((phrase) => normalizeTriggerPreviewText(phrase)).filter(Boolean);
+  if (!normalizedPhrases.length) return [];
+
+  const conflicts = [];
+  for (const scenario of scenarios) {
+    if (!scenario || scenario.id === currentScenarioId || scenario.status === "archived") continue;
+    const rules = Array.isArray(scenario.triggerRules) ? scenario.triggerRules : [];
+    for (const rule of rules) {
+      if (rule?.type !== "phrase") continue;
+      const otherPhrases = Array.isArray(rule.phrases) ? rule.phrases : [];
+      for (const phrase of otherPhrases) {
+        const key = normalizeTriggerPreviewText(phrase);
+        if (normalizedPhrases.includes(key)) {
+          conflicts.push({
+            phrase: String(phrase),
+            scenarioId: scenario.id,
+            scenarioName: scenario.name || scenario.id
+          });
+        }
+      }
+    }
+  }
+  return conflicts;
 }
 
 const scenarioStatusLabels = {

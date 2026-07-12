@@ -772,3 +772,18 @@
   color: #33445c;
   line-height: 1.4;
 }
+
+.scenario-live-preview-ok {
+  color: #166534;
+  font-weight: 700;
+}
+
+.scenario-live-preview-miss {
+  color: #9a3412;
+  font-weight: 700;
+}
+
+.scenario-wizard-note--warn {
+  border-color: #f0d9a8;
+  background: #fff8eb;
+}

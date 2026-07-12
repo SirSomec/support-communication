@@ -1,0 +1,10 @@
+/* Service-admin MPA has no tenant sidebar — use full-width shell. */
+.app-shell.service-admin-app {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell.service-admin-app .workspace {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}

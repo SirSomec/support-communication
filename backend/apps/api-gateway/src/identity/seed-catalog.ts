@@ -29,6 +29,7 @@ export const serviceAdminSession = {
     "flags.read",
     "flags.test",
     "users.support",
+    "ai.connections.manage",
     "impersonation.stop",
     "incidents.read",
     "knowledge.read",

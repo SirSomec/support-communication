@@ -5,6 +5,7 @@ export const serviceAdminPrivilegedActions: string[] = [
   "billing.change", "break-glass.decide", "break-glass.request", "channels.ingest",
   "channels.read", "clients.merge", "clients.read", "dialogs.manage", "dialogs.read",
   "files.read", "files.write", "flags.read", "flags.test", "users.support",
+  "ai.connections.manage",
   "impersonation.stop", "incidents.read", "knowledge.read", "knowledge.write",
   "permissions.read", "permissions.validate", "platform.alert.acknowledge",
   "platform.alert-routing.write", "platform.health-rollups.write", "platform.read",

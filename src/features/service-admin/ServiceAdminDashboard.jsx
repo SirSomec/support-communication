@@ -33,6 +33,7 @@ import { IncidentMonitoringWorkspace } from "./IncidentMonitoringWorkspace.jsx";
 import { ServiceAdminAuditStream } from "./ServiceAdminAuditStream.jsx";
 import { ServiceUserSupportWorkspace } from "./ServiceUserSupportWorkspace.jsx";
 import { TenantManagementWorkspace } from "./TenantManagementWorkspace.jsx";
+import { AiConnectionsWorkspace } from "./AiConnectionsWorkspace.jsx";
 import {
   envelopeToAuditEntry,
   formatAction,
@@ -51,6 +52,7 @@ const workspaceOptions = [
   { label: "Биллинг", value: "billing" },
   { label: "Инциденты", value: "incidents" },
   { label: "Флаги", value: "flags" },
+  { label: "AI", value: "ai" },
   { label: "Аудит", value: "audit" }
 ];
 
@@ -58,7 +60,7 @@ function formatMeasuredValue(value, suffix) {
   return typeof value === "number" ? `${value} ${suffix}` : "Нет данных";
 }
 
-export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, onToast = noop }) {
+export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, backLabel = "Выйти", onToast = noop }) {
   const requestedWorkspace = resolveServiceAdminWorkspace(navigationTarget);
   const [activeWorkspace, setActiveWorkspace] = useState(requestedWorkspace || "tenants");
   const [auditEvents, setAuditEvents] = useState([]);
@@ -217,7 +219,8 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
   return (
     <ProductScreen
       title="Администрирование сервиса"
-      subtitle="Операции с организациями, поддержка учетных записей, биллинг, инциденты платформы, флаги и аудит привилегированных действий."
+      subtitle="Операции с организациями, поддержка учетных записей, биллинг, AI-подключения, инциденты платформы, флаги и аудит привилегированных действий."
+      backLabel={backLabel}
       onBack={onBack}
       stateItems={[
         { label: "организации", value: dashboard.tenantCount, tone: "ok" },
@@ -299,6 +302,7 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
         {activeWorkspace === "billing" ? <BillingTariffWorkspace onAudit={recordEnvelope} /> : null}
         {activeWorkspace === "incidents" ? <IncidentMonitoringWorkspace onAudit={recordEnvelope} /> : null}
         {activeWorkspace === "flags" ? <FeatureFlagWorkspace onAudit={recordEnvelope} /> : null}
+        {activeWorkspace === "ai" ? <AiConnectionsWorkspace onAudit={recordEnvelope} onToast={onToast} /> : null}
         {activeWorkspace === "audit" ? <ServiceAdminAuditStream events={auditEvents} /> : null}
       </section>
     </ProductScreen>

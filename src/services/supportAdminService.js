@@ -72,6 +72,30 @@ export const supportAdminService = {
     });
   },
 
+  async fetchAiConnections(tenantId) {
+    return aiConnectionRequest({ operation: "fetchAiConnections", tenantId });
+  },
+
+  async createAiConnection(tenantId, payload = {}) {
+    return aiConnectionRequest({ body: payload, method: "POST", operation: "createAiConnection", tenantId });
+  },
+
+  async updateAiConnection(tenantId, connectionId, payload = {}) {
+    return aiConnectionRequest({ body: payload, connectionId, method: "PATCH", operation: "updateAiConnection", tenantId });
+  },
+
+  async deleteAiConnection(tenantId, connectionId) {
+    return aiConnectionRequest({ connectionId, method: "DELETE", operation: "deleteAiConnection", tenantId });
+  },
+
+  async testAiConnection(tenantId, connectionId) {
+    return aiConnectionRequest({ connectionId, method: "POST", operation: "testAiConnection", suffix: "test", tenantId });
+  },
+
+  async disableAiConnection(tenantId, connectionId) {
+    return aiConnectionRequest({ connectionId, method: "POST", operation: "disableAiConnection", suffix: "disable", tenantId });
+  },
+
   getReadiness() {
     return {
       id: SERVICE,
@@ -83,7 +107,13 @@ export const supportAdminService = {
         "blockUser",
         "resendInvite",
         "startImpersonation",
-        "stopImpersonation"
+        "stopImpersonation",
+        "fetchAiConnections",
+        "createAiConnection",
+        "updateAiConnection",
+        "deleteAiConnection",
+        "testAiConnection",
+        "disableAiConnection"
       ],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "invalid"],
@@ -101,6 +131,19 @@ function userActionRequest({ operation, payload, route, userId }) {
     authMode: "service-admin",
     body: payload,
     method: "POST",
+    operation,
+    service: SERVICE
+  });
+}
+
+function aiConnectionRequest({ body, connectionId, method = "GET", operation, suffix, tenantId }) {
+  if (!hasRouteId(tenantId)) return missingIdEnvelope(operation, "Tenant id is required.");
+  const connectionPath = connectionId ? `/${encodeURIComponent(connectionId)}${suffix ? `/${suffix}` : ""}` : "";
+  if (connectionId && !hasRouteId(connectionId)) return missingIdEnvelope(operation, "AI connection id is required.");
+  return apiRequest(`/service-admin/tenants/${encodeURIComponent(tenantId)}/ai-connections${connectionPath}`, {
+    authMode: "service-admin",
+    ...(body ? { body } : {}),
+    method,
     operation,
     service: SERVICE
   });

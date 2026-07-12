@@ -708,6 +708,31 @@
   }
 }
 
+.ai-connections-workspace .service-admin-mini-list article {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line, #e5e7eb);
+}
+
+.ai-connections-workspace .service-admin-mini-list article:last-child {
+  border-bottom: 0;
+}
+
+.ai-connections-workspace .service-admin-mini-list footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-connection-note {
+  align-items: center;
+  color: var(--muted, #667085);
+  display: flex;
+  gap: 8px;
+  line-height: 1.45;
+}
+
 @media (max-width: 820px) {
   .service-admin-impersonation,
   .service-admin-feedback,

@@ -14,6 +14,7 @@ import { QualityModule } from "./quality/quality.module.js";
 import { ReportModule } from "./reports/report.module.js";
 import { RoutingModule } from "./routing/routing.module.js";
 import { ServiceAdminModule } from "./service-admin/service-admin.module.js";
+import { AiConnectionsModule } from "./ai-connections/ai-connections.module.js";
 import { requestTraceMiddleware } from "./trace-id.middleware.js";
 import { WorkspaceModule } from "./workspace/workspace.module.js";
 
@@ -33,6 +34,7 @@ import { WorkspaceModule } from "./workspace/workspace.module.js";
     ReportModule,
     RoutingModule,
     ServiceAdminModule,
+    AiConnectionsModule,
     WorkspaceModule
   ],
   controllers: [HealthController]

@@ -23,14 +23,14 @@ const visuallyHiddenStyle = {
   border: 0
 };
 
-export function ProductScreen({ title, subtitle, onBack, actions, stateItems = [], children }) {
+export function ProductScreen({ title, subtitle, onBack, backLabel = "Диалоги", actions, stateItems = [], children }) {
   return (
     <section className="product-screen">
       <header className="product-header">
         <div>
           <button className="back-link" onClick={onBack} type="button">
             <ChevronLeft size={18} />
-            Диалоги
+            {backLabel}
           </button>
           <h1>{title}</h1>
           <p>{subtitle}</p>

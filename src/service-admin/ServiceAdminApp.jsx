@@ -4,6 +4,8 @@ import { RouteLoading } from "../app/RouteLoading.jsx";
 import { Toast } from "../ui.jsx";
 import { parseServiceAdminPath, serviceAdminPathForView } from "./serviceAdminPath.js";
 import "../styles.css";
+import "../features/app-shell/app-shell.css";
+import "./service-admin-app.css";
 
 const ServiceAdminDashboard = lazy(() =>
   import("../features/service-admin/index.js").then((module) => ({
@@ -62,7 +64,11 @@ export function ServiceAdminApp() {
     <div data-testid="route-service-admin" className="app-shell service-admin-app">
       <main className="workspace">
         <Suspense fallback={<RouteLoading label="Загрузка администрирования сервиса" />}>
-          <ServiceAdminDashboard onBack={handleLogoutOrBack} onToast={setToast} />
+          <ServiceAdminDashboard
+            backLabel="Выйти"
+            onBack={handleLogoutOrBack}
+            onToast={setToast}
+          />
         </Suspense>
       </main>
       {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}

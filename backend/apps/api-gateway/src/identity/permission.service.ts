@@ -31,7 +31,8 @@ const ACTION_TO_SECTION: Record<string, string> = {
   "settings.manage": "settings",
   "settings.write": "settings",
   "settings.integrations.read": "settings",
-  "settings.integrations.write": "settings"
+  "settings.integrations.write": "settings",
+  "ai.connections.manage": "settings"
 };
 
 const ALL_SECTIONS = [

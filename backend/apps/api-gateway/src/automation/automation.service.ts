@@ -12,6 +12,7 @@ import { BotRuntimeService, type BotRuntimeInboundEvent, type BotRuntimeOptions 
 import { matchesBotTriggerPhrase, normalizeBotTriggerText } from "./bot-trigger-matcher.js";
 import { DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS, ProactiveExposureRepository } from "./proactive-exposure.repository.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
+import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
 import { isKnowledgeSourceRetrievalEligible } from "../knowledge-sources/knowledge-source.types.js";
 
 const AUTOMATION_SERVICE = "automationService";
@@ -1022,22 +1023,87 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
   if (phraseRule && !phraseMatched) {
     return {
       answerPreview: testMessage ? "Сценарий не запустится: сообщение не совпало ни с одной ключевой фразой." : "Введите сообщение клиента, чтобы проверить ключевую фразу.",
-      citations: [], input: testMessage || "Введите сообщение клиента для проверки.", outcome: "no_match",
+      citations: [],
+      input: testMessage || "Введите сообщение клиента для проверки.",
+      outcome: "no_match",
       reason: testMessage ? "phrase_not_matched" : "test_message_required",
-      steps: [], trigger: { matched: false, matchMode: phraseRule.matchMode ?? "contains", phrases: phraseRule.phrases ?? [], type: "phrase" }
+      steps: [],
+      trace: {
+        aiWouldCall: false,
+        dryRun: true,
+        isolation: "no_runtime_steps_no_outbound",
+        knowledgeSourceCount: sources.length,
+        readiness: aiReadinessForTenant(tenantId).status,
+        retrievalCache: "skipped",
+        retrievalTokenBudget: 0,
+        retrievalTokensUsed: 0
+      },
+      trigger: { matched: false, matchMode: phraseRule.matchMode ?? "contains", phrases: phraseRule.phrases ?? [], type: "phrase" }
     };
   }
+
   const aiNode = scenario.flowNodes.find((node) => node.type === "ai_reply");
   const readiness = aiReadinessForTenant(tenantId);
-  const needsHandoff = Boolean(aiNode) && (readiness.status !== "ready" || sources.length === 0);
+  let retrieval: { cache: "hit" | "miss"; passages: Array<{ citation: { sourceId: string; sourceVersion: number; title: string }; content: string; score: number }>; tokenBudget: number; tokensUsed: number } = {
+    cache: "miss",
+    passages: [],
+    tokenBudget: 0,
+    tokensUsed: 0
+  };
+  if (aiNode && sources.length && testMessage) {
+    retrieval = await new KnowledgeRetrievalService().retrieve({
+      query: testMessage,
+      sourceBindings,
+      tenantId,
+      tokenBudget: 800
+    });
+  }
+
+  const wouldCallAi = Boolean(aiNode) && readiness.status === "ready" && sources.length > 0 && retrieval.passages.length > 0;
+  const needsHandoff = Boolean(aiNode) && !wouldCallAi;
+  const citations = retrieval.passages.length
+    ? retrieval.passages.map((passage) => ({
+      sourceId: passage.citation.sourceId,
+      title: passage.citation.title,
+      version: passage.citation.sourceVersion
+    }))
+    : sources.map((source) => ({ sourceId: source.id, title: source.title, version: source.version }));
+
   return {
-    answerPreview: !aiNode ? "Сценарий отправит настроенное сообщение." : needsHandoff ? "AI не будет отвечать: клиенту будет предложена помощь оператора." : "AI сформирует ответ только по выбранным источникам; при недостатке сведений передаст вопрос оператору.",
-    citations: sources.map((source) => ({ sourceId: source.id, title: source.title, version: source.version })),
+    answerPreview: !aiNode
+      ? "Сценарий отправит настроенное сообщение."
+      : needsHandoff
+        ? (aiNode.config?.fallbackMessage
+          ? String(aiNode.config.fallbackMessage)
+          : "AI не будет отвечать: клиенту будет предложена помощь оператора.")
+        : "AI сформирует ответ только по выбранным источникам; при недостатке сведений передаст вопрос оператору.",
+    citations,
     input: testMessage || "Введите сообщение клиента для проверки.",
     outcome: needsHandoff ? "handoff" : aiNode ? "ai_response" : "message",
-    reason: needsHandoff ? "ai_or_knowledge_not_ready" : "matched",
+    reason: needsHandoff
+      ? (readiness.status !== "ready" ? "ai_not_ready" : sources.length === 0 ? "knowledge_not_ready" : "retrieval_empty")
+      : "matched",
+    retrievalPassages: retrieval.passages.slice(0, 3).map((passage) => ({
+      score: passage.score,
+      sourceId: passage.citation.sourceId,
+      title: passage.citation.title,
+      preview: passage.content.slice(0, 160)
+    })),
     steps: scenario.flowNodes.map((node) => ({ id: node.id, title: node.title ?? node.type, type: node.type })),
-    trigger: phraseRule ? { matched: phraseMatched, type: "phrase" } : { matched: true, type: (scenario.triggerRules ?? [])[0]?.type ?? "manual" }
+    trace: {
+      aiWouldCall: wouldCallAi,
+      dryRun: true,
+      isolation: "no_runtime_steps_no_outbound",
+      knowledgeSourceCount: sources.length,
+      readiness: readiness.status,
+      retrievalCache: retrieval.cache,
+      retrievalTokenBudget: retrieval.tokenBudget,
+      retrievalTokensUsed: retrieval.tokensUsed,
+      stepsCount: scenario.flowNodes.length
+    },
+    trigger: phraseRule
+      ? { matched: phraseMatched, matchMode: phraseRule.matchMode ?? "contains", phrases: phraseRule.phrases ?? [], type: "phrase" }
+      : { matched: true, type: (scenario.triggerRules ?? [])[0]?.type ?? "manual" }
   };
 }
 

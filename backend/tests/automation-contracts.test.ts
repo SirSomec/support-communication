@@ -136,7 +136,11 @@ describe("automation bot scenario contracts", () => {
     assert.equal(result.status, "ok");
     assert.equal(result.data.preview.outcome, "handoff");
     assert.equal(result.data.preview.trigger.matched, true);
+    assert.equal(result.data.preview.trace.dryRun, true);
+    assert.equal(result.data.preview.trace.isolation, "no_runtime_steps_no_outbound");
+    assert.equal(result.data.preview.trace.aiWouldCall, false);
     assert.equal(AutomationRepository.default().readState().botRuntimeSteps.length, 0);
+    assert.equal(AutomationRepository.default().readState().botRuntimeInstances.length, 0);
     const noMatch = await automation.testBotScenario({ id: "bot-sandbox", testMessage: "unrelated question" } as never, { tenantId: "tenant-volga" });
     assert.equal(noMatch.data.preview.outcome, "no_match");
     assert.equal(noMatch.data.preview.reason, "phrase_not_matched");

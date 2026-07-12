@@ -43,7 +43,31 @@ export function mapApiConversation(input) {
     messages,
     ...(nonEmptyString(input?.operatorId) ? { operatorId: nonEmptyString(input.operatorId) } : {}),
     ...(nonEmptyString(input?.operatorName) ? { operatorName: nonEmptyString(input.operatorName) } : {}),
-    ...(nonEmptyString(input?.teamId) ? { teamId: nonEmptyString(input.teamId) } : {})
+    ...(nonEmptyString(input?.teamId) ? { teamId: nonEmptyString(input.teamId) } : {}),
+    ...(isRecord(input?.botHandoff) ? { botHandoff: mapBotHandoff(input.botHandoff) } : {})
+  };
+}
+
+function mapBotHandoff(input) {
+  return {
+    aiOutcome: nonEmptyString(input.aiOutcome),
+    citations: Array.isArray(input.citations)
+      ? input.citations
+        .map((item) => ({
+          sourceId: nonEmptyString(item?.sourceId),
+          title: nonEmptyString(item?.title),
+          ...(Number.isFinite(Number(item?.version)) ? { version: Number(item.version) } : {})
+        }))
+        .filter((item) => item.sourceId && item.title)
+      : [],
+    collectedFields: isRecord(input.collectedFields) ? { ...input.collectedFields } : {},
+    goal: nonEmptyString(input.goal),
+    phone: nonEmptyString(input.phone),
+    queue: nonEmptyString(input.queue, "default"),
+    reason: nonEmptyString(input.reason, "handoff_requested"),
+    scenarioName: nonEmptyString(input.scenarioName, "Бот"),
+    sessionState: nonEmptyString(input.sessionState),
+    topic: nonEmptyString(input.topic)
   };
 }
 

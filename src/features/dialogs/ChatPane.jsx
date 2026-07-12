@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { getRescueRemainingSeconds } from "../../app/dialogModel.js";
 import { AuditTimeline } from "./AuditTimeline.jsx";
+import { BotHandoffSummary } from "./BotHandoffSummary.jsx";
 import { ChatHeader } from "./ChatHeader.jsx";
 import { Composer } from "./Composer.jsx";
 import { TranscriptToolbar } from "./TranscriptToolbar.jsx";
@@ -76,6 +77,12 @@ export function ChatPane({
         rescueRemainingSeconds={rescueRemainingSeconds}
         topic={topic}
         transcriptMode={transcriptMode}
+      />
+      <BotHandoffSummary
+        canViewSensitive={access?.canViewSensitive}
+        handoff={conversation.botHandoff}
+        phone={conversation.phone}
+        topic={topic || conversation.topic}
       />
       <AuditTimeline messages={conversation.messages} onSaveTemplate={onSaveTemplate} transcriptMode={transcriptMode} />
 

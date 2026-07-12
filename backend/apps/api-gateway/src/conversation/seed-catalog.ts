@@ -22,6 +22,18 @@ export const conversationFixtures: ConversationRecord[] = [
     clientSince: "2024-05-12",
     tags: ["delivery", "order status", "important"],
     previous: [["2024-05-05", "Return", "Closed"]],
+    botHandoff: {
+      aiOutcome: "Нужна проверка статуса у курьера",
+      citations: [{ sourceId: "src-delivery", title: "Правила доставки", version: 2 }],
+      collectedFields: { orderId: "A-1042", phone: "+7 999 204-18-44" },
+      goal: "Помочь со статусом заказа",
+      phone: "+7 999 204-18-44",
+      queue: "Очередь 1-я линия",
+      reason: "ai_unavailable",
+      scenarioName: "Delivery status",
+      sessionState: "Клиент спросил статус заказа A-1042",
+      topic: "Delivery / Status"
+    },
     messages: [
       { id: 1, side: "client", text: "Where is my order?", time: "11:24" },
       { id: 2, type: "event", text: "Assigned to Ivan P.", time: "11:24" },
@@ -144,6 +156,18 @@ export const conversationFixtures: ConversationRecord[] = [
     clientSince: "2024-04-29",
     tags: ["product", "complaint"],
     previous: [],
+    botHandoff: {
+      aiOutcome: "Клиент хочет возврат из-за несоответствия",
+      citations: [{ sourceId: "src-returns", title: "Возвраты", version: 1 }],
+      collectedFields: { intent: "return" },
+      goal: "Разобрать жалобу по товару",
+      phone: "+7 921 991-12-53",
+      queue: "Очередь качество",
+      reason: "handoff_requested",
+      scenarioName: "Product mismatch",
+      sessionState: "Клиент описал несоответствие описания",
+      topic: ""
+    },
     messages: [
       { id: 1, side: "client", text: "Product does not match the description. I want to return it.", time: "10:58" },
       { id: 2, type: "event", text: "Choose a topic before closing", time: "10:59" }

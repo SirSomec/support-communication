@@ -11,6 +11,18 @@ export interface ConversationMessage {
 
 export interface ConversationRecord {
   avatar?: string;
+  botHandoff?: {
+    aiOutcome?: string;
+    citations?: Array<{ sourceId: string; title: string; version?: number }>;
+    collectedFields?: Record<string, unknown>;
+    goal?: string;
+    phone?: string;
+    queue?: string;
+    reason?: string;
+    scenarioName?: string;
+    sessionState?: string;
+    topic?: string;
+  };
   channel: string;
   channelConnectionId?: string;
   clientSince: string;

@@ -21,6 +21,7 @@ import {
 } from "./scenario-operational-summary.js";
 import { recordBotPublishFailure, recordBotSourceError } from "./bot-observability.js";
 import { evaluateBotAlerts, summarizeBotMetricsForAlerts } from "./bot-alert-catalog.js";
+import { buildOperatorHandoffView } from "./operator-handoff-view.js";
 import { metricsRegistry } from "@support-communication/observability";
 
 const AUTOMATION_SERVICE = "automationService";
@@ -66,12 +67,18 @@ interface ScenarioDraftPayload extends Partial<BotScenario> {
 }
 
 interface CreateBotHandoffPayload {
+  aiOutcome?: string;
   botId?: string;
+  citations?: Array<{ sourceId?: string; title?: string; version?: number }>;
   collectedFields?: Record<string, unknown>;
   conversationId?: string;
+  goal?: string;
   queue?: string;
   reason?: string;
+  scenarioName?: string;
+  sessionState?: string;
   tenantId?: string;
+  topic?: string;
 }
 
 export interface AutomationRequestContext {
@@ -700,11 +707,28 @@ export class AutomationService {
 
     const eventId = makeEventId("bot_handoff");
     const traceId = automationTraceId("createBotHandoffSummary");
-    const summary = {
-      botId: request.botId,
+    const operatorView = buildOperatorHandoffView({
+      aiOutcome: request.aiOutcome,
+      citations: request.citations,
       collectedFields: maskCollectedFields(request.collectedFields ?? {}),
-      queue: request.queue ?? "default",
-      reason: request.reason ?? "handoff_requested"
+      goal: request.goal,
+      queue: request.queue,
+      reason: request.reason,
+      scenarioName: request.scenarioName ?? request.botId,
+      sessionState: request.sessionState,
+      topic: request.topic
+    });
+    const summary = {
+      aiOutcome: operatorView.aiOutcome,
+      botId: request.botId,
+      citations: operatorView.citations,
+      collectedFields: Object.fromEntries(operatorView.collectedFields.map((item) => [item.key, item.value])),
+      goal: operatorView.goal,
+      queue: operatorView.queue,
+      reason: operatorView.reason,
+      scenarioName: operatorView.scenarioName,
+      sessionState: operatorView.sessionState,
+      topic: operatorView.topic
     };
 
     return createEnvelope({
@@ -716,6 +740,7 @@ export class AutomationService {
         auditId: makeAuditId("bot"),
         eventId,
         eventName: "bot.handoff.created",
+        operatorView,
         resourceId: request.conversationId,
         resourceType: "conversation",
         realtimeEvent: realtimeEvent({

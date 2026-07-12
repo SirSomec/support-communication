@@ -11,8 +11,6 @@ import {
   PlayCircle,
   Plus,
   Sparkles,
-  Trash2,
-  Undo2,
   Workflow,
   Zap
 } from "lucide-react";
@@ -22,7 +20,8 @@ import { automationService } from "../../services/automationService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
 import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
-import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScenarioFromWizard } from "./automationModel.js";
+import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
+import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScenarioFromWizard, formatScenarioStatusLabel } from "./automationModel.js";
 
 export function AutomationScreen({ onBack, onToast, access }) {
   const [loading, setLoading] = useState(true);
@@ -41,51 +40,61 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [knowledgeSourcesError, setKnowledgeSourcesError] = useState("");
   const [knowledgeSourcesLoading, setKnowledgeSourcesLoading] = useState(true);
   const [aiReadiness, setAiReadiness] = useState({ status: "not_configured" });
+  const [scenarioVersions, setScenarioVersions] = useState([]);
+  const [workspacePartial, setWorkspacePartial] = useState(false);
   const [sandboxMessage, setSandboxMessage] = useState("");
   const [sandboxPreview, setSandboxPreview] = useState(null);
 
-  useEffect(() => {
-    let ignore = false;
-
-    async function loadWorkspace() {
-      setLoading(true);
-      setError("");
-      const [response, sourcesResponse] = await Promise.all([
-        automationService.fetchAutomationWorkspace(),
-        knowledgeService.fetchSources()
-      ]);
-      if (ignore) {
-        return;
-      }
-
-      if (response.status !== "ok") {
-        setError(response.error?.message ?? "Не удалось загрузить automation workspace.");
-        setLoading(false);
-        return;
-      }
-
-      const scenarios = normalizeScenarios(response.data?.botScenarios);
-      setAuditEvents(Array.isArray(response.data?.auditEvents) ? response.data.auditEvents : []);
-      setProactiveRules(Array.isArray(response.data?.proactiveRules) ? response.data.proactiveRules : []);
-      setRuntimeMetrics(normalizeRuntimeMetrics(response.data?.runtimeMetrics));
-      setAiReadiness(response.data?.aiReadiness ?? { status: "not_configured" });
-      setScenarioItems(scenarios);
-      setSelectedScenarioId(scenarios[0]?.id ?? "");
-      setSelectedNodeId(scenarios[0]?.flowNodes?.[0]?.id ?? "");
-      if (sourcesResponse.status === "ok") {
-        setKnowledgeSources(sourcesResponse.data?.sources ?? []);
-        setKnowledgeSourcesError("");
-      } else {
-        setKnowledgeSources([]);
-        setKnowledgeSourcesError(sourcesResponse.error?.message ?? "Не удалось загрузить источники знаний.");
-      }
-      setKnowledgeSourcesLoading(false);
-      setLoading(false);
+  async function loadWorkspace({ ignoreSignal } = {}) {
+    setLoading(true);
+    setError("");
+    const [response, sourcesResponse] = await Promise.all([
+      automationService.fetchAutomationWorkspace(),
+      knowledgeService.fetchSources()
+    ]);
+    if (ignoreSignal?.ignored) {
+      return;
     }
 
-    void loadWorkspace();
+    if (response.status !== "ok") {
+      setError(response.error?.message ?? "Не удалось загрузить automation workspace.");
+      setLoading(false);
+      return;
+    }
+
+    const scenarios = normalizeScenarios(response.data?.botScenarios);
+    const nextScenarioId = scenarios.some((scenario) => scenario.id === selectedScenarioId)
+      ? selectedScenarioId
+      : (scenarios[0]?.id ?? "");
+    const selected = scenarios.find((scenario) => scenario.id === nextScenarioId);
+    const nextNodeId = selected?.flowNodes?.some((node) => node.id === selectedNodeId)
+      ? selectedNodeId
+      : (selected?.flowNodes?.[0]?.id ?? "");
+    setAuditEvents(Array.isArray(response.data?.auditEvents) ? response.data.auditEvents : []);
+    setProactiveRules(Array.isArray(response.data?.proactiveRules) ? response.data.proactiveRules : []);
+    setRuntimeMetrics(normalizeRuntimeMetrics(response.data?.runtimeMetrics));
+    setAiReadiness(response.data?.aiReadiness ?? { status: "not_configured" });
+    setScenarioVersions(Array.isArray(response.data?.botScenarioVersions) ? response.data.botScenarioVersions : []);
+    setWorkspacePartial(Boolean(response.data?.partial));
+    setScenarioItems(scenarios);
+    setSelectedScenarioId(nextScenarioId);
+    setSelectedNodeId(nextNodeId);
+    if (sourcesResponse.status === "ok") {
+      setKnowledgeSources(sourcesResponse.data?.sources ?? []);
+      setKnowledgeSourcesError("");
+    } else {
+      setKnowledgeSources([]);
+      setKnowledgeSourcesError(sourcesResponse.error?.message ?? "Не удалось загрузить источники знаний.");
+    }
+    setKnowledgeSourcesLoading(false);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    const ignoreSignal = { ignored: false };
+    void loadWorkspace({ ignoreSignal });
     return () => {
-      ignore = true;
+      ignoreSignal.ignored = true;
     };
   }, []);
 
@@ -121,7 +130,27 @@ export function AutomationScreen({ onBack, onToast, access }) {
           { label: "Данные", tone: "empty", value: "недоступны" },
           { label: "Ошибки", tone: "error", value: error }
         ]}
-      />
+        actions={
+          <button onClick={() => void loadWorkspace()} type="button">
+            Повторить
+          </button>
+        }
+      >
+        <ScenarioListPanel
+          aiReadiness={aiReadiness}
+          canManage={canManageAutomation}
+          isSaving={isSaving}
+          knowledgeSources={knowledgeSources}
+          knowledgeSourcesError={knowledgeSourcesError}
+          knowledgeSourcesLoading={knowledgeSourcesLoading}
+          onRetry={() => void loadWorkspace()}
+          partial={workspacePartial}
+          scenarios={[]}
+          selectedScenarioId=""
+          versions={scenarioVersions}
+          workspaceError={error}
+        />
+      </ProductScreen>
     );
   }
 
@@ -134,7 +163,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
         stateItems={createScreenStateItems({
           total: 0,
           emptyWhenZero: "сценариев ботов пока нет",
-          errorLabel: "ошибок нет"
+          errorLabel: knowledgeSourcesError ? "частичные данные" : "ошибок нет"
         })}
         actions={
           <button disabled={!canManageAutomation || isSaving} onClick={openScenarioWizard} title={canManageAutomation ? "Открыть мастер создания первого сценария" : access.reason} type="button">
@@ -143,11 +172,23 @@ export function AutomationScreen({ onBack, onToast, access }) {
           </button>
         }
       >
-        <section className="work-panel bot-empty-state">
-          <Bot size={22} />
-          <strong>Сценариев пока нет</strong>
-          <span>Первый сценарий будет сохранен как черновик. Его можно отредактировать, проверить и опубликовать.</span>
-        </section>
+        <ScenarioListPanel
+          aiReadiness={aiReadiness}
+          canManage={canManageAutomation}
+          isSaving={isSaving}
+          knowledgeSources={knowledgeSources}
+          knowledgeSourcesError={knowledgeSourcesError}
+          knowledgeSourcesLoading={knowledgeSourcesLoading}
+          onArchive={archiveScenario}
+          onDisable={disableScenario}
+          onOpen={selectScenario}
+          onRestore={restoreScenario}
+          onRetry={() => void loadWorkspace()}
+          partial={workspacePartial}
+          scenarios={scenarioItems}
+          selectedScenarioId={selectedScenarioId}
+          versions={scenarioVersions}
+        />
         {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} /> : null}
       </ProductScreen>
     );
@@ -569,8 +610,8 @@ export function AutomationScreen({ onBack, onToast, access }) {
         total: scenarioItems.length,
         empty: `${scenarioItems.length} сценариев`,
         emptyWhenZero: "сценариев нет",
-        errors: importError ? 1 : 0,
-        errorLabel: "ошибок flow нет"
+        errors: importError || knowledgeSourcesError || workspacePartial ? 1 : 0,
+        errorLabel: knowledgeSourcesError || workspacePartial ? "частичные данные" : "ошибок flow нет"
       })}
       actions={
         <>
@@ -647,35 +688,23 @@ export function AutomationScreen({ onBack, onToast, access }) {
       </div>
 
       <div className="automation-layout">
-        <section className="work-panel">
-          <SectionTitle title="Конструктор сценариев" action="триггер -> шаги -> handoff" />
-          <div className="scenario-list">
-            {scenarioItems.map((scenario) => (
-              <article className={`scenario-card ${selectedScenario.id === scenario.id ? "selected" : ""}`} key={scenario.id}>
-                <header>
-                  <Bot size={18} />
-                  <strong>{scenario.name}</strong>
-                  <span>{formatScenarioStatus(scenario.status)}</span>
-                </header>
-                <p>{scenario.trigger}</p>
-                <ol>
-                  {scenario.steps.map((step) => <li key={step}>{step}</li>)}
-                </ol>
-                <footer>
-                  <ChannelList channels={scenario.channels} />
-                  <b>{formatSuccessRate(scenario.successRate)}</b>
-                  <button onClick={() => selectScenario(scenario)} type="button">Открыть</button>
-                  {canManageAutomation && scenario.status === "published" ? <button disabled={isSaving} onClick={() => disableScenario(scenario)} type="button">Остановить</button> : null}
-                  {canManageAutomation && (scenario.status === "archived" ? (
-                    <button disabled={isSaving} onClick={() => restoreScenario(scenario)} type="button"><Undo2 size={15} /> Восстановить</button>
-                  ) : (
-                    <button className="scenario-delete-button" disabled={isSaving} onClick={() => archiveScenario(scenario)} type="button"><Trash2 size={15} /> Удалить</button>
-                  ))}
-                </footer>
-              </article>
-            ))}
-          </div>
-        </section>
+        <ScenarioListPanel
+          aiReadiness={aiReadiness}
+          canManage={canManageAutomation}
+          isSaving={isSaving}
+          knowledgeSources={knowledgeSources}
+          knowledgeSourcesError={knowledgeSourcesError}
+          knowledgeSourcesLoading={knowledgeSourcesLoading}
+          onArchive={archiveScenario}
+          onDisable={disableScenario}
+          onOpen={selectScenario}
+          onRestore={restoreScenario}
+          onRetry={() => void loadWorkspace()}
+          partial={workspacePartial}
+          scenarios={scenarioItems}
+          selectedScenarioId={selectedScenario.id}
+          versions={scenarioVersions}
+        />
 
         <section className="work-panel">
           <SectionTitle title="Audit автоматизации" action="экспорт, лимиты, rescue" />
@@ -693,7 +722,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
       </div>
 
       <section className="work-panel bot-builder-panel">
-        <SectionTitle title="Canvas сценария" action={`${selectedScenario.name} · ${formatScenarioStatus(selectedScenario.status)}`} />
+        <SectionTitle title="Canvas сценария" action={`${selectedScenario.name} · ${formatScenarioStatusLabel(selectedScenario.status)}`} />
         <div className="bot-builder-grid">
           <div className="bot-canvas-panel">
             <div className="bot-canvas-toolbar">
@@ -917,27 +946,4 @@ function sameStringList(left = [], right = []) {
 function isEnabledAutomationStatus(status) {
   const value = String(status ?? "").toLowerCase();
   return value.includes("enabled") || value.includes("published") || value.includes("включ");
-}
-
-function formatScenarioStatus(status) {
-  const value = String(status ?? "").trim().toLowerCase();
-  const labels = {
-    archived: "\u0410\u0440\u0445\u0438\u0432",
-    draft: "\u0427\u0435\u0440\u043d\u043e\u0432\u0438\u043a",
-    published: "\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d"
-  };
-
-  return labels[value] ?? String(status ?? "");
-}
-
-function formatSuccessRate(value) {
-  if (typeof value === "number") {
-    return `${value}%`;
-  }
-
-  if (value === null || value === undefined || value === "") {
-    return "—";
-  }
-
-  return String(value).endsWith("%") ? String(value) : `${value}%`;
 }

@@ -155,3 +155,132 @@ function findOption(options, value, fallbackId) {
     ?? options.find((option) => option.id === fallbackId)
     ?? options[0];
 }
+
+const scenarioStatusLabels = {
+  archived: "Архив",
+  disabled: "Выключен",
+  draft: "Черновик",
+  published: "Опубликован",
+  test: "Тест"
+};
+
+export function formatScenarioStatusLabel(status) {
+  const value = String(status ?? "").trim().toLowerCase();
+  return scenarioStatusLabels[value] ?? (String(status ?? "").trim() || "Без статуса");
+}
+
+export function scenarioStatusTone(status) {
+  const value = String(status ?? "").trim().toLowerCase();
+  if (value === "published") return "ok";
+  if (value === "archived" || value === "disabled") return "warn";
+  if (value === "draft" || value === "test") return "info";
+  return "info";
+}
+
+export function describeScenarioTrigger(scenario = {}) {
+  const rules = Array.isArray(scenario.triggerRules) ? scenario.triggerRules : [];
+  if (!rules.length) {
+    return String(scenario.trigger ?? "").trim() || "Триггер не задан";
+  }
+
+  const phraseRule = rules.find((rule) => rule.type === "phrase");
+  if (phraseRule) {
+    const phrases = Array.isArray(phraseRule.phrases)
+      ? phraseRule.phrases.map((phrase) => String(phrase).trim()).filter(Boolean)
+      : [];
+    const mode = describeMatchMode(phraseRule.matchMode);
+    if (!phrases.length) return `Ключевая фраза (${mode})`;
+    const preview = phrases.slice(0, 3).join(", ");
+    return phrases.length > 3 ? `Фраза (${mode}): ${preview} +${phrases.length - 3}` : `Фраза (${mode}): ${preview}`;
+  }
+
+  if (rules.some((rule) => rule.type === "new_conversation")) {
+    return "Первое сообщение клиента";
+  }
+
+  if (rules.some((rule) => rule.type === "manual")) {
+    return "Ручной запуск";
+  }
+
+  return String(scenario.trigger ?? "").trim() || "Триггер не задан";
+}
+
+export function describeMatchMode(matchMode) {
+  switch (String(matchMode ?? "contains").toLowerCase()) {
+    case "exact":
+      return "точное совпадение";
+    case "tokens":
+      return "по словам";
+    default:
+      return "содержит текст";
+  }
+}
+
+export function buildScenarioListRow(scenario = {}, context = {}) {
+  const versions = Array.isArray(context.versions) ? context.versions : [];
+  const knowledgeSources = Array.isArray(context.knowledgeSources) ? context.knowledgeSources : [];
+  const aiReadiness = context.aiReadiness ?? { status: "not_configured" };
+  const sourceBindings = Array.isArray(scenario.sourceBindings) ? scenario.sourceBindings : [];
+  const flowNodes = Array.isArray(scenario.flowNodes) ? scenario.flowNodes : [];
+  const hasAi = flowNodes.some((node) => node.type === "ai_reply");
+  const sourceTitles = sourceBindings.map((binding) => {
+    const source = knowledgeSources.find((item) => item.id === binding.sourceId);
+    return source?.title ?? binding.sourceId;
+  }).filter(Boolean);
+
+  const activeVersion = versions.find((version) => version.versionId === scenario.activeVersionId);
+  const latestPublished = versions
+    .filter((version) => version.scenarioId === scenario.id && version.status === "published")
+    .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")))[0];
+  const lastPublishedAt = activeVersion?.createdAt ?? latestPublished?.createdAt ?? null;
+
+  const errors = [];
+  if (hasAi && aiReadiness.status !== "ready") {
+    errors.push(aiReadiness.status === "unavailable" ? "AI-подключение недоступно" : "AI-подключение не настроено");
+  }
+  if (hasAi && sourceBindings.length === 0) {
+    errors.push("Нет привязанных источников знаний");
+  }
+  if (scenario.status === "published" && scenario.enabled === false) {
+    errors.push("Опубликован, но остановлен");
+  }
+  if (Array.isArray(context.scenarioErrors)) {
+    for (const message of context.scenarioErrors) {
+      if (message) errors.push(String(message));
+    }
+  }
+
+  return {
+    aiSummary: hasAi
+      ? (sourceTitles.length
+        ? `AI · ${sourceTitles.slice(0, 2).join(", ")}${sourceTitles.length > 2 ? ` +${sourceTitles.length - 2}` : ""}`
+        : "AI · источники не выбраны")
+      : "Без AI",
+    channels: Array.isArray(scenario.channels) ? scenario.channels : [],
+    errors,
+    hasAi,
+    hasErrors: errors.length > 0,
+    id: scenario.id,
+    lastPublishedAt,
+    lastPublishedLabel: lastPublishedAt
+      ? formatListTimestamp(lastPublishedAt)
+      : (scenario.status === "published" ? "Опубликован" : "Ещё не публиковался"),
+    name: String(scenario.name ?? scenario.id ?? "Сценарий"),
+    sourceCount: sourceBindings.length,
+    status: String(scenario.status ?? "draft"),
+    statusLabel: formatScenarioStatusLabel(scenario.status),
+    statusTone: scenarioStatusTone(scenario.status),
+    triggerSummary: describeScenarioTrigger(scenario)
+  };
+}
+
+function formatListTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short"
+  }).format(date);
+}

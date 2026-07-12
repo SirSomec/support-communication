@@ -168,6 +168,36 @@ export const incidentPostmortems = [
 
 export const featureFlags: FeatureFlag[] = [
   {
+    id: "flag-ai-bots",
+    key: "ai_bots",
+    name: "AI consultation bots",
+    status: "off",
+    environment: "production",
+    scope: "tenant",
+    rollout: 0,
+    owner: "AI team",
+    segments: [],
+    enabledTenantIds: [],
+    variants: [{ id: "disabled", weight: 100 }],
+    killSwitch: true,
+    updatedAt: "2026-07-12T00:00:00.000Z"
+  },
+  {
+    id: "flag-ai-bot-mcp-sources",
+    key: "ai_bot_mcp_sources",
+    name: "AI bot MCP knowledge sources",
+    status: "off",
+    environment: "production",
+    scope: "tenant",
+    rollout: 0,
+    owner: "AI team",
+    segments: [],
+    enabledTenantIds: [],
+    variants: [{ id: "disabled", weight: 100 }],
+    killSwitch: true,
+    updatedAt: "2026-07-12T00:00:00.000Z"
+  },
+  {
     id: "flag-ai-replies",
     key: "ff-ai-replies",
     name: "AI reply assistant",

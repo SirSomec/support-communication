@@ -67,17 +67,46 @@ export const automationService = {
     });
   },
 
+  async listBotScenarios() {
+    return apiRequest("/automation/bot-scenarios", { operation: "listBotScenarios", service: SERVICE });
+  },
+
+  async fetchBotScenario(scenarioId) {
+    if (!hasRouteId(scenarioId)) return missingIdEnvelope("fetchBotScenario", "Bot scenario id is required.");
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}`, { operation: "fetchBotScenario", service: SERVICE });
+  },
+
+  async archiveBotScenario(scenarioId, options = {}) {
+    if (!hasRouteId(scenarioId)) return missingIdEnvelope("archiveBotScenario", "Bot scenario id is required.");
+    return lifecycleRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}`, "DELETE", "archiveBotScenario", options);
+  },
+
+  async restoreBotScenario(scenarioId, options = {}) {
+    if (!hasRouteId(scenarioId)) return missingIdEnvelope("restoreBotScenario", "Bot scenario id is required.");
+    return lifecycleRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/restore`, "POST", "restoreBotScenario", options);
+  },
+
+  async disableBotScenario(scenarioId, options = {}) {
+    if (!hasRouteId(scenarioId)) return missingIdEnvelope("disableBotScenario", "Bot scenario id is required.");
+    return lifecycleRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/disable`, "POST", "disableBotScenario", options);
+  },
+
   getReadiness() {
     return {
       id: SERVICE,
       status: "ready",
       operations: [
         "fetchAutomationWorkspace",
+        "listBotScenarios",
+        "fetchBotScenario",
         "validateBotFlowImport",
         "publishBotScenario",
         "testBotScenario",
         "createBotScenario",
-        "updateBotScenario"
+        "updateBotScenario",
+        "disableBotScenario",
+        "archiveBotScenario",
+        "restoreBotScenario"
       ],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
@@ -94,6 +123,18 @@ function missingIdEnvelope(operation, message) {
   return createApiErrorEnvelope({
     code: "missing_id",
     message,
+    operation,
+    service: SERVICE
+  });
+}
+
+function lifecycleRequest(path, method, operation, options = {}) {
+  const idempotencyKey = String(options.idempotencyKey ?? "").trim();
+  const reason = String(options.reason ?? "").trim();
+  return apiRequest(path, {
+    ...(reason ? { body: { reason } } : {}),
+    ...(idempotencyKey ? { headers: { "idempotency-key": idempotencyKey } } : {}),
+    method,
     operation,
     service: SERVICE
   });

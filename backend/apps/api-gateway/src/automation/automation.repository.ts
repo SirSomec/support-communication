@@ -4,7 +4,7 @@ import type {
   ConversationOutboundDescriptor,
   ConversationRepository
 } from "../conversation/conversation.repository.js";
-import type { BotScenario, ProactiveRule } from "./automation.types.js";
+import type { BotScenario, BotTriggerRule, KnowledgeSourceBinding, ProactiveRule } from "./automation.types.js";
 
 export interface AutomationPublishIdempotencyRecord {
   fingerprint: string;
@@ -27,9 +27,12 @@ export interface AutomationBotScenarioVersion {
   createdAt: string;
   flowEdges: BotScenario["flowEdges"];
   flowNodes: BotScenario["flowNodes"];
+  priority?: number;
   scenarioId: string;
+  sourceBindings?: BotScenario["sourceBindings"];
   status: string;
   tenantId: string;
+  triggerRules?: BotScenario["triggerRules"];
   versionId: string;
 }
 
@@ -244,6 +247,22 @@ export interface AutomationProactiveDeliveryCommitResult {
   outcome: "cap_exhausted" | "conflicted" | "duplicate" | "queued";
   outboxEventId: string;
 }
+export interface AutomationScenarioAuditEvent {
+  action: string; actor: string; actorType: "system" | "user"; auditId: string; createdAt: string;
+  fingerprint?: string; idempotencyKey?: string; immutable: true; payload: Record<string, unknown>; reason: string;
+  scenarioId: string; tenantId: string; traceId: string;
+}
+
+export const BOT_SCENARIO_RETENTION_DAYS = 30;
+
+/** Immutable publish audit records are never deleted to make a purge succeed. */
+export type BotScenarioPurgeOutcome = "audit_hold" | "legal_hold" | "not_eligible" | "purged";
+
+export interface BotScenarioPurgeResult {
+  outcome: BotScenarioPurgeOutcome;
+  scenarioId: string;
+  tenantId: string;
+}
 
 export interface AutomationState {
   botPublishAuditEvents: AutomationBotPublishAuditEvent[];
@@ -253,6 +272,7 @@ export interface AutomationState {
   botRuntimeInstances: AutomationBotRuntimeInstance[];
   botRuntimeSteps: AutomationBotRuntimeStep[];
   botRuntimeSideEffects: AutomationBotRuntimeSideEffect[];
+  scenarioAuditEvents: AutomationScenarioAuditEvent[];
   proactiveDeliveryAttributions: AutomationProactiveDeliveryAttribution[];
   proactiveDeliveryAttempts: AutomationProactiveDeliveryAttempt[];
   proactiveDeliveryIdempotencyKeys: AutomationProactiveDeliveryIdempotencyRecord[];
@@ -284,6 +304,11 @@ export interface PrismaAutomationClient {
     operation: (client: PrismaProactiveDeliveryTransactionClient) => Promise<TResult>,
     options?: { isolationLevel: "Serializable" }
   ): Promise<TResult>;
+  automationScenarioAuditEvent: {
+    create(input: { data: AutomationScenarioAuditEvent }): Promise<AutomationScenarioAuditEvent>;
+    findMany(input?: PrismaAutomationFindManyInput): Promise<AutomationScenarioAuditEvent[]>;
+    findUnique(input: { where: { auditId: string } | { tenantId_idempotencyKey: { tenantId: string; idempotencyKey: string } } }): Promise<AutomationScenarioAuditEvent | null>;
+  };
   automationBotTestRun: {
     findMany(input?: PrismaAutomationFindManyInput): Promise<PrismaAutomationBotTestRunRow[]>;
     upsert(input: PrismaAutomationUpsertInput): Promise<PrismaAutomationBotTestRunRow>;
@@ -299,6 +324,7 @@ export interface PrismaAutomationClient {
     findUnique(input: PrismaBotPublishAuditEventFindUniqueInput): Promise<PrismaBotPublishAuditEventRow | null>;
   };
   botScenario: {
+    deleteMany(input: { where: Record<string, unknown> }): Promise<{ count: number }>;
     findMany(input: PrismaBotScenarioFindManyInput): Promise<PrismaBotScenarioRow[]>;
     findUnique(input: PrismaBotScenarioFindUniqueInput): Promise<PrismaBotScenarioRow | null>;
     upsert(input: PrismaBotScenarioUpsertInput): Promise<PrismaBotScenarioRow>;
@@ -365,6 +391,8 @@ interface AutomationRepositoryPort {
   findPublishIdempotencyKey(tenantId: string, key: string): AutomationPublishIdempotencyRecord | undefined;
   listBotPublishAuditEvents(scenarioId: string): MaybePromise<AutomationBotPublishAuditEvent[]>;
   listBotScenarios(): MaybePromise<BotScenario[]>;
+  listScenarioAuditEvents(scenarioId: string, tenantId: string): MaybePromise<AutomationScenarioAuditEvent[]>;
+  listExpiredArchivedBotScenarios(now: string, limit: number): MaybePromise<BotScenario[]>;
   listBotScenarioVersions(scenarioId: string): MaybePromise<AutomationBotScenarioVersion[]>;
   listProactiveDeliveryAttributions(filter?: AutomationProactiveDeliveryAttributionFilter): AutomationProactiveDeliveryAttribution[];
   listProactiveDeliveryAttempts(filter?: AutomationProactiveDeliveryAttemptFilter): AutomationProactiveDeliveryAttempt[];
@@ -375,6 +403,8 @@ interface AutomationRepositoryPort {
   readState(): AutomationState;
   saveBotPublishAuditEvent(event: AutomationBotPublishAuditEvent): MaybePromise<AutomationBotPublishAuditEvent>;
   saveBotScenario(scenario: BotScenario): MaybePromise<BotScenario>;
+  saveScenarioAuditEvent(event: AutomationScenarioAuditEvent): MaybePromise<AutomationScenarioAuditEvent>;
+  purgeArchivedBotScenario(tenantId: string, scenarioId: string, now: string): MaybePromise<BotScenarioPurgeResult>;
   saveBotScenarioVersion(version: AutomationBotScenarioVersion): MaybePromise<AutomationBotScenarioVersion>;
   saveBotTestRun(run: AutomationBotTestRun): AutomationBotTestRun;
   saveProactiveDeliveryAttribution(
@@ -409,6 +439,8 @@ interface AutomationRepositoryAsyncPort {
   listProactiveExperimentAssignmentsAsync(filter?: AutomationProactiveExperimentAssignmentFilter): Promise<AutomationProactiveExperimentAssignment[]>;
   listProactiveFrequencyCapsAsync(filter?: AutomationProactiveFrequencyCapFilter): Promise<AutomationProactiveFrequencyCap[]>;
   listProactiveRulesAsync(): Promise<ProactiveRule[]>;
+  listExpiredArchivedBotScenariosAsync(now: string, limit: number): Promise<BotScenario[]>;
+  purgeArchivedBotScenarioAsync(tenantId: string, scenarioId: string, now: string): Promise<BotScenarioPurgeResult>;
   readStateAsync(): Promise<AutomationState>;
   saveBotTestRunAsync(run: AutomationBotTestRun): Promise<AutomationBotTestRun>;
   saveProactiveDeliveryAttributionAsync(attribution: AutomationProactiveDeliveryAttributionInput): Promise<AutomationProactiveDeliveryAttribution>;
@@ -510,6 +542,8 @@ interface PrismaAtomicOutboxEventRow {
 
 interface PrismaBotScenarioFindManyInput {
   orderBy: { updatedAt: "desc" };
+  take?: number;
+  where?: Record<string, unknown>;
 }
 
 interface PrismaBotScenarioFindUniqueInput {
@@ -524,15 +558,34 @@ interface PrismaBotScenarioUpsertInput {
 
 interface PrismaBotScenarioCreateInput {
   activeVersionId?: string | null;
+  auditHold: boolean;
+  auditHoldAt?: Date | null;
+  auditHoldBy?: string | null;
+  auditHoldReason?: string | null;
+  archiveReason?: string | null;
+  archivedAt?: Date | null;
+  archivedBy?: string | null;
   channels: string[];
   createdAt: Date;
+  disabledAt?: Date | null;
+  disabledBy?: string | null;
+  disableReason?: string | null;
+  enabled: boolean;
   flowEdges: unknown;
   flowNodes: unknown;
   id: string;
   name: string;
+  legalHold: boolean;
+  legalHoldAt?: Date | null;
+  legalHoldBy?: string | null;
+  legalHoldReason?: string | null;
+  priority: number;
+  retentionUntil?: Date | null;
+  sourceBindings: unknown;
   schemaVersion: string;
   status: string;
   tenantId: string;
+  triggerRules: unknown;
   updatedAt: Date;
 }
 
@@ -540,15 +593,34 @@ type PrismaBotScenarioUpdateInput = Omit<PrismaBotScenarioCreateInput, "createdA
 
 interface PrismaBotScenarioRow {
   activeVersionId?: string | null;
+  auditHold?: boolean;
+  auditHoldAt?: Date | string | null;
+  auditHoldBy?: string | null;
+  auditHoldReason?: string | null;
+  archiveReason?: string | null;
+  archivedAt?: Date | string | null;
+  archivedBy?: string | null;
   channels: string[];
   createdAt: Date | string;
+  disabledAt?: Date | string | null;
+  disabledBy?: string | null;
+  disableReason?: string | null;
+  enabled?: boolean;
   flowEdges: unknown;
   flowNodes: unknown;
   id: string;
+  legalHold?: boolean;
+  legalHoldAt?: Date | string | null;
+  legalHoldBy?: string | null;
+  legalHoldReason?: string | null;
   name: string;
+  priority?: number;
+  retentionUntil?: Date | string | null;
+  sourceBindings?: unknown;
   schemaVersion: string;
   status: string;
   tenantId: string;
+  triggerRules?: unknown;
   updatedAt: Date | string;
 }
 
@@ -565,9 +637,12 @@ interface PrismaBotScenarioVersionCreateInput {
   createdAt: Date;
   flowEdges: unknown;
   flowNodes: unknown;
+  priority: number;
   scenarioId: string;
+  sourceBindings: unknown;
   status: string;
   tenantId: string;
+  triggerRules: unknown;
   versionId: string;
 }
 
@@ -575,9 +650,12 @@ interface PrismaBotScenarioVersionRow {
   createdAt: Date | string;
   flowEdges: unknown;
   flowNodes: unknown;
+  priority?: number;
   scenarioId: string;
+  sourceBindings?: unknown;
   status: string;
   tenantId: string;
+  triggerRules?: unknown;
   versionId: string;
 }
 
@@ -1023,6 +1101,22 @@ export class AutomationRepository implements AutomationRepositoryPort {
     return clone(this.readState().botScenarios.map((scenario) => normalizeBotScenarioRecord(scenario)));
   }
 
+  listExpiredArchivedBotScenarios(now: string, limit: number): MaybePromise<BotScenario[]> {
+    if (this.adapter) return this.adapter.listExpiredArchivedBotScenarios(now, limit);
+    return clone(this.readState().botScenarios
+      .map((scenario) => normalizeBotScenarioRecord(scenario))
+      .filter((scenario) => isArchivedRetentionExpired(scenario, now))
+      .sort((left, right) => String(left.retentionUntil).localeCompare(String(right.retentionUntil)))
+      .slice(0, boundedPurgeLimit(limit)));
+  }
+
+  async listExpiredArchivedBotScenariosAsync(now: string, limit: number): Promise<BotScenario[]> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) {
+      return this.adapter.listExpiredArchivedBotScenariosAsync(now, limit);
+    }
+    return this.listExpiredArchivedBotScenarios(now, limit);
+  }
+
   findBotScenario(scenarioId: string): MaybePromise<BotScenario | undefined> {
     if (this.adapter) {
       return this.adapter.findBotScenario(scenarioId);
@@ -1142,6 +1236,71 @@ export class AutomationRepository implements AutomationRepositoryPort {
       };
     });
 
+    return clone(saved);
+  }
+
+  purgeArchivedBotScenario(tenantId: string, scenarioId: string, now: string): MaybePromise<BotScenarioPurgeResult> {
+    if (this.adapter) return this.adapter.purgeArchivedBotScenario(tenantId, scenarioId, now);
+    const scopedTenantId = requireAutomationTenantId(tenantId);
+    let result: BotScenarioPurgeResult = { outcome: "not_eligible", scenarioId, tenantId: scopedTenantId };
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const scenario = current.botScenarios.find((item) => item.id === scenarioId && item.tenantId === scopedTenantId);
+      if (!scenario || !isArchivedRetentionExpired(scenario, now)) return current;
+      if (scenario.legalHold) { result = { ...result, outcome: "legal_hold" }; return current; }
+      if (scenario.auditHold || current.botPublishAuditEvents.some((event) => event.tenantId === scopedTenantId && event.scenarioId === scenarioId)) {
+        result = { ...result, outcome: "audit_hold" };
+        return current;
+      }
+      result = { ...result, outcome: "purged" };
+      return {
+        ...current,
+        botScenarios: current.botScenarios.filter((item) => !(item.id === scenarioId && item.tenantId === scopedTenantId)),
+        botScenarioVersions: current.botScenarioVersions.filter((item) => !(item.scenarioId === scenarioId && item.tenantId === scopedTenantId)),
+        botTestRuns: current.botTestRuns.filter((item) => !(item.scenarioId === scenarioId && item.tenantId === scopedTenantId))
+      };
+    });
+    return result;
+  }
+
+  async purgeArchivedBotScenarioAsync(tenantId: string, scenarioId: string, now: string): Promise<BotScenarioPurgeResult> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) {
+      return this.adapter.purgeArchivedBotScenarioAsync(tenantId, scenarioId, now);
+    }
+    return this.purgeArchivedBotScenario(tenantId, scenarioId, now);
+  }
+
+  /** Append-only tenant-scoped projection for scenario lifecycle actions. */
+  async saveScenarioAuditEvent(event: AutomationScenarioAuditEvent): Promise<AutomationScenarioAuditEvent> {
+    if (this.adapter) return await this.adapter.saveScenarioAuditEvent(event);
+    const persisted = normalizeScenarioAuditEvent(event);
+    let saved = persisted;
+    this.store.update((raw) => {
+      const current = normalizeState(raw);
+      const existing = current.scenarioAuditEvents.find((item) => item.auditId === persisted.auditId || (
+        Boolean(persisted.idempotencyKey) && item.tenantId === persisted.tenantId && item.idempotencyKey === persisted.idempotencyKey
+      ));
+      if (existing) { saved = existing; return current; }
+      return { ...current, scenarioAuditEvents: [...current.scenarioAuditEvents, persisted] };
+    });
+    return clone(saved);
+  }
+
+  listScenarioAuditEvents(scenarioId: string, tenantId: string): AutomationScenarioAuditEvent[] {
+    if (this.adapter) return this.adapter.listScenarioAuditEvents(scenarioId, tenantId) as AutomationScenarioAuditEvent[];
+    const scopedTenantId = requireAutomationTenantId(tenantId);
+    return clone(this.readState().scenarioAuditEvents.filter((event) => event.scenarioId === scenarioId && event.tenantId === scopedTenantId));
+  }
+
+  saveWorkspaceAuditEvent(event: Record<string, unknown>): Record<string, unknown> {
+    const persisted = normalizeWorkspaceAuditEvent(event);
+    let saved = persisted;
+    this.store.update((raw) => {
+      const current = normalizeState(raw);
+      const existing = current.workspaceAuditEvents.find((item) => item.auditId === persisted.auditId || (persisted.idempotencyKey && item.idempotencyKey === persisted.idempotencyKey));
+      if (existing) { saved = normalizeWorkspaceAuditEvent(existing); return current; }
+      return { ...current, workspaceAuditEvents: [...current.workspaceAuditEvents, persisted] };
+    });
     return clone(saved);
   }
 
@@ -1743,6 +1902,24 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
     return rows.map(toBotScenario);
   }
 
+  async listScenarioAuditEvents(scenarioId: string, tenantId: string): Promise<AutomationScenarioAuditEvent[]> {
+    const rows = await this.client.automationScenarioAuditEvent.findMany({ orderBy: { createdAt: "asc" }, where: { scenarioId, tenantId } });
+    return rows.map(normalizeScenarioAuditEvent);
+  }
+
+  async listExpiredArchivedBotScenarios(now: string, limit: number): Promise<BotScenario[]> {
+    const rows = await this.client.botScenario.findMany({
+      orderBy: { updatedAt: "desc" },
+      take: boundedPurgeLimit(limit),
+      where: { retentionUntil: { lte: new Date(now) }, status: "archived" }
+    });
+    return rows.map(toBotScenario).filter((scenario) => isArchivedRetentionExpired(scenario, now));
+  }
+
+  async listExpiredArchivedBotScenariosAsync(now: string, limit: number): Promise<BotScenario[]> {
+    return this.listExpiredArchivedBotScenarios(now, limit);
+  }
+
   async listBotScenarioVersions(scenarioId: string): Promise<AutomationBotScenarioVersion[]> {
     const rows = await this.client.botScenarioVersion.findMany({
       orderBy: { createdAt: "asc" },
@@ -1917,6 +2094,36 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
     const saved = toBotScenario(row);
 
     return saved;
+  }
+
+  async saveScenarioAuditEvent(event: AutomationScenarioAuditEvent): Promise<AutomationScenarioAuditEvent> {
+    const persisted = normalizeScenarioAuditEvent(event);
+    const existing = persisted.idempotencyKey
+      ? await this.client.automationScenarioAuditEvent.findUnique({ where: { tenantId_idempotencyKey: { idempotencyKey: persisted.idempotencyKey, tenantId: persisted.tenantId } } })
+      : await this.client.automationScenarioAuditEvent.findUnique({ where: { auditId: persisted.auditId } });
+    if (existing) return normalizeScenarioAuditEvent(existing);
+    return normalizeScenarioAuditEvent(await this.client.automationScenarioAuditEvent.create({ data: persisted }));
+  }
+
+  async purgeArchivedBotScenario(tenantId: string, scenarioId: string, now: string): Promise<BotScenarioPurgeResult> {
+    const scopedTenantId = requireAutomationTenantId(tenantId);
+    const scenario = await this.findBotScenario(scenarioId);
+    const result: BotScenarioPurgeResult = { outcome: "not_eligible", scenarioId, tenantId: scopedTenantId };
+    if (!scenario || scenario.tenantId !== scopedTenantId || !isArchivedRetentionExpired(scenario, now)) return result;
+    if (scenario.legalHold) return { ...result, outcome: "legal_hold" };
+    // Do not delete immutable evidence. The foreign key is RESTRICT as a race-safe backstop.
+    const auditEvents = await this.listBotPublishAuditEvents(scenarioId);
+    if (scenario.auditHold || auditEvents.some((event) => event.tenantId === scopedTenantId && event.immutable)) {
+      return { ...result, outcome: "audit_hold" };
+    }
+    const deleted = await this.client.botScenario.deleteMany({
+      where: { auditHold: false, id: scenarioId, legalHold: false, retentionUntil: { lte: new Date(now) }, status: "archived", tenantId: scopedTenantId }
+    });
+    return { ...result, outcome: deleted.count === 1 ? "purged" : "not_eligible" };
+  }
+
+  async purgeArchivedBotScenarioAsync(tenantId: string, scenarioId: string, now: string): Promise<BotScenarioPurgeResult> {
+    return this.purgeArchivedBotScenario(tenantId, scenarioId, now);
   }
 
   async saveBotScenarioVersion(version: AutomationBotScenarioVersion): Promise<AutomationBotScenarioVersion> {
@@ -2119,6 +2326,7 @@ export function createEmptyAutomationState(): AutomationState {
     publishIdempotencyKeys: [],
     activeVisitors: [],
     rescueChats: [],
+    scenarioAuditEvents: [],
     workspaceAuditEvents: [],
     workspaceRuntimeMetrics: []
   };
@@ -2132,6 +2340,7 @@ function normalizeState(state: Partial<AutomationState>): AutomationState {
     botRuntimeInstances: (state.botRuntimeInstances ?? []).map(clone),
     botRuntimeSideEffects: (state.botRuntimeSideEffects ?? []).map(clone),
     botRuntimeSteps: (state.botRuntimeSteps ?? []).map(clone),
+    scenarioAuditEvents: (state.scenarioAuditEvents ?? []).map(normalizeScenarioAuditEvent),
     botScenarios: (state.botScenarios ?? []).map((scenario) => normalizeBotScenarioRecord(scenario)),
     botScenarioVersions: (state.botScenarioVersions ?? []).map((version) => normalizeBotScenarioVersionRecord(version)),
     botTestRuns: (state.botTestRuns ?? []).map((run) => normalizeBotTestRunRecord(run)),
@@ -2147,11 +2356,13 @@ function normalizeState(state: Partial<AutomationState>): AutomationState {
       normalizeProactiveExperimentAssignment(assignment)
     ),
     proactiveFrequencyCaps: (state.proactiveFrequencyCaps ?? []).map((cap) => normalizeProactiveFrequencyCap(cap)),
-    proactiveRules: (state.proactiveRules ?? []).map(normalizeProactiveRuleRecord),
+    // Old local JSON demos could contain proactive records created before tenant
+    // scoping. They must never enter a tenant-aware worker or block bot runtime.
+    proactiveRules: (state.proactiveRules ?? []).filter(hasAutomationTenantId).map(normalizeProactiveRuleRecord),
     publishIdempotencyKeys: (state.publishIdempotencyKeys ?? []).map(normalizePublishIdempotencyRecord),
     activeVisitors: state.activeVisitors ?? [],
     rescueChats: state.rescueChats ?? [],
-    workspaceAuditEvents: (state.workspaceAuditEvents ?? []).map(normalizeWorkspaceAuditEvent),
+    workspaceAuditEvents: (state.workspaceAuditEvents ?? []).filter(hasAutomationTenantId).map(normalizeWorkspaceAuditEvent),
     workspaceRuntimeMetrics: state.workspaceRuntimeMetrics ?? []
   };
 }
@@ -2167,21 +2378,118 @@ function normalizeProactiveRuleRecord(rule: ProactiveRule): ProactiveRule {
 function normalizeBotScenarioRecord(scenario: BotScenario, existing?: BotScenario): BotScenario {
   const now = new Date().toISOString();
   const createdAt = existing?.createdAt ?? scenario.createdAt ?? now;
+  const archived = scenario.status === "archived";
+  const enabled = archived ? false : scenario.enabled ?? existing?.enabled ?? true;
+  const disabled = !enabled;
 
   return {
     ...scenario,
+    ...(archived
+      ? {
+          archiveReason: scenario.archiveReason ?? existing?.archiveReason,
+          archivedAt: scenario.archivedAt ?? existing?.archivedAt ?? now,
+          archivedBy: scenario.archivedBy ?? existing?.archivedBy,
+          retentionUntil: normalizeRetentionUntil(scenario.retentionUntil ?? existing?.retentionUntil, now)
+        }
+      : { retentionUntil: undefined }),
+    auditHold: Boolean(scenario.auditHold ?? existing?.auditHold),
+    ...(scenario.auditHold ?? existing?.auditHold
+      ? {
+          auditHoldAt: scenario.auditHoldAt ?? existing?.auditHoldAt ?? now,
+          auditHoldBy: scenario.auditHoldBy ?? existing?.auditHoldBy,
+          auditHoldReason: scenario.auditHoldReason ?? existing?.auditHoldReason
+        }
+      : {}),
     createdAt,
+    ...(disabled
+      ? {
+          disabledAt: scenario.disabledAt ?? existing?.disabledAt ?? now,
+          disabledBy: scenario.disabledBy ?? existing?.disabledBy,
+          disableReason: scenario.disableReason ?? existing?.disableReason
+        }
+      : {}),
+    enabled,
+    legalHold: Boolean(scenario.legalHold ?? existing?.legalHold),
+    ...(scenario.legalHold ?? existing?.legalHold
+      ? {
+          legalHoldAt: scenario.legalHoldAt ?? existing?.legalHoldAt ?? now,
+          legalHoldBy: scenario.legalHoldBy ?? existing?.legalHoldBy,
+          legalHoldReason: scenario.legalHoldReason ?? existing?.legalHoldReason
+        }
+      : {}),
+    priority: normalizeBotScenarioPriority(scenario.priority ?? existing?.priority),
+    sourceBindings: normalizeSourceBindings(scenario.sourceBindings ?? existing?.sourceBindings ?? []),
     tenantId: existing
       ? requireMatchingAutomationTenantId(existing.tenantId, scenario.tenantId)
       : requireAutomationTenantId(scenario.tenantId),
+    triggerRules: normalizeBotTriggerRules(scenario.triggerRules ?? existing?.triggerRules ?? []),
     updatedAt: existing ? now : scenario.updatedAt ?? now
   };
+}
+
+function normalizeRetentionUntil(value: string | undefined, now: string): string {
+  if (value && !Number.isNaN(Date.parse(value))) return new Date(value).toISOString();
+  return new Date(new Date(now).getTime() + BOT_SCENARIO_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function isArchivedRetentionExpired(scenario: BotScenario, now: string): boolean {
+  return scenario.status === "archived"
+    && Boolean(scenario.retentionUntil)
+    && !Number.isNaN(Date.parse(String(scenario.retentionUntil)))
+    && Date.parse(String(scenario.retentionUntil)) <= Date.parse(now);
+}
+
+function boundedPurgeLimit(limit: number): number {
+  return Number.isInteger(limit) && limit > 0 ? Math.min(limit, 500) : 50;
+}
+
+function normalizeBotScenarioPriority(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isInteger(parsed) ? Math.max(-10_000, Math.min(10_000, parsed)) : 0;
+}
+
+function normalizeBotTriggerRules(value: unknown): BotTriggerRule[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const type = String(record.type ?? "");
+    if (type !== "manual" && type !== "new_conversation" && type !== "phrase") return [];
+    const phrases = Array.isArray(record.phrases)
+      ? record.phrases.map((phrase) => String(phrase).trim()).filter(Boolean).slice(0, 32)
+      : [];
+    const matchMode = ["exact", "contains", "tokens"].includes(String(record.matchMode))
+      ? String(record.matchMode) as BotTriggerRule["matchMode"]
+      : "contains";
+    return [{
+      id: String(record.id ?? `trigger-${index + 1}`).trim() || `trigger-${index + 1}`,
+      ...(record.locale ? { locale: String(record.locale).trim() } : {}),
+      ...(type === "phrase" ? { matchMode, phrases } : {}),
+      priority: normalizeBotScenarioPriority(record.priority),
+      type
+    }];
+  });
+}
+
+function normalizeSourceBindings(value: unknown): KnowledgeSourceBinding[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const sourceId = String((item as Record<string, unknown>).sourceId ?? "").trim();
+    if (!sourceId || seen.has(sourceId)) return [];
+    seen.add(sourceId);
+    const sourceVersion = String((item as Record<string, unknown>).sourceVersion ?? "").trim();
+    return [{ sourceId, ...(sourceVersion ? { sourceVersion } : {}) }];
+  });
 }
 
 function normalizeBotScenarioVersionRecord(version: AutomationBotScenarioVersion): AutomationBotScenarioVersion {
   return {
     ...version,
-    tenantId: requireAutomationTenantId(version.tenantId)
+    priority: normalizeBotScenarioPriority(version.priority),
+    tenantId: requireAutomationTenantId(version.tenantId),
+    triggerRules: normalizeBotTriggerRules(version.triggerRules ?? [])
   };
 }
 
@@ -2270,15 +2578,34 @@ function normalizeWorkspaceAuditEvent(event: Record<string, unknown>): Record<st
 function toBotScenario(row: PrismaBotScenarioRow): BotScenario {
   return {
     ...(row.activeVersionId ? { activeVersionId: row.activeVersionId } : {}),
+    auditHold: row.auditHold ?? false,
+    ...(row.auditHoldAt ? { auditHoldAt: toIsoString(row.auditHoldAt) } : {}),
+    ...(row.auditHoldBy ? { auditHoldBy: row.auditHoldBy } : {}),
+    ...(row.auditHoldReason ? { auditHoldReason: row.auditHoldReason } : {}),
+    ...(row.archiveReason ? { archiveReason: row.archiveReason } : {}),
+    ...(row.archivedAt ? { archivedAt: toIsoString(row.archivedAt) } : {}),
+    ...(row.archivedBy ? { archivedBy: row.archivedBy } : {}),
     channels: clone(row.channels),
     createdAt: toIsoString(row.createdAt),
+    ...(row.disabledAt ? { disabledAt: toIsoString(row.disabledAt) } : {}),
+    ...(row.disabledBy ? { disabledBy: row.disabledBy } : {}),
+    ...(row.disableReason ? { disableReason: row.disableReason } : {}),
+    enabled: row.enabled ?? true,
     flowEdges: clone(row.flowEdges) as BotScenario["flowEdges"],
     flowNodes: clone(row.flowNodes) as BotScenario["flowNodes"],
     id: row.id,
+    legalHold: row.legalHold ?? false,
+    ...(row.legalHoldAt ? { legalHoldAt: toIsoString(row.legalHoldAt) } : {}),
+    ...(row.legalHoldBy ? { legalHoldBy: row.legalHoldBy } : {}),
+    ...(row.legalHoldReason ? { legalHoldReason: row.legalHoldReason } : {}),
     name: row.name,
+    priority: normalizeBotScenarioPriority(row.priority),
+    ...(row.retentionUntil ? { retentionUntil: toIsoString(row.retentionUntil) } : {}),
     schemaVersion: row.schemaVersion as BotScenario["schemaVersion"],
     status: row.status,
     tenantId: requireAutomationTenantId(row.tenantId),
+    sourceBindings: normalizeSourceBindings(row.sourceBindings ?? []),
+    triggerRules: normalizeBotTriggerRules(row.triggerRules ?? []),
     updatedAt: toIsoString(row.updatedAt)
   };
 }
@@ -2286,15 +2613,34 @@ function toBotScenario(row: PrismaBotScenarioRow): BotScenario {
 function toPrismaBotScenarioCreateInput(scenario: BotScenario): PrismaBotScenarioCreateInput {
   return {
     activeVersionId: scenario.activeVersionId ?? null,
+    auditHold: Boolean(scenario.auditHold),
+    auditHoldAt: scenario.auditHoldAt ? new Date(scenario.auditHoldAt) : null,
+    auditHoldBy: scenario.auditHoldBy ?? null,
+    auditHoldReason: scenario.auditHoldReason ?? null,
+    archiveReason: scenario.archiveReason ?? null,
+    archivedAt: scenario.archivedAt ? new Date(scenario.archivedAt) : null,
+    archivedBy: scenario.archivedBy ?? null,
     channels: clone(scenario.channels),
     createdAt: new Date(scenario.createdAt ?? new Date().toISOString()),
+    disabledAt: scenario.disabledAt ? new Date(scenario.disabledAt) : null,
+    disabledBy: scenario.disabledBy ?? null,
+    disableReason: scenario.disableReason ?? null,
+    enabled: scenario.enabled ?? true,
     flowEdges: clone(scenario.flowEdges),
     flowNodes: clone(scenario.flowNodes),
     id: scenario.id,
+    legalHold: Boolean(scenario.legalHold),
+    legalHoldAt: scenario.legalHoldAt ? new Date(scenario.legalHoldAt) : null,
+    legalHoldBy: scenario.legalHoldBy ?? null,
+    legalHoldReason: scenario.legalHoldReason ?? null,
     name: scenario.name,
+    priority: normalizeBotScenarioPriority(scenario.priority),
+    retentionUntil: scenario.retentionUntil ? new Date(scenario.retentionUntil) : null,
     schemaVersion: scenario.schemaVersion,
     status: scenario.status,
     tenantId: requireAutomationTenantId(scenario.tenantId),
+    sourceBindings: normalizeSourceBindings(scenario.sourceBindings ?? []),
+    triggerRules: normalizeBotTriggerRules(scenario.triggerRules ?? []),
     updatedAt: new Date(scenario.updatedAt ?? new Date().toISOString())
   };
 }
@@ -2302,13 +2648,32 @@ function toPrismaBotScenarioCreateInput(scenario: BotScenario): PrismaBotScenari
 function toPrismaBotScenarioUpdateInput(scenario: BotScenario): PrismaBotScenarioUpdateInput {
   return {
     activeVersionId: scenario.activeVersionId ?? null,
+    auditHold: Boolean(scenario.auditHold),
+    auditHoldAt: scenario.auditHoldAt ? new Date(scenario.auditHoldAt) : null,
+    auditHoldBy: scenario.auditHoldBy ?? null,
+    auditHoldReason: scenario.auditHoldReason ?? null,
+    archiveReason: scenario.archiveReason ?? null,
+    archivedAt: scenario.archivedAt ? new Date(scenario.archivedAt) : null,
+    archivedBy: scenario.archivedBy ?? null,
     channels: clone(scenario.channels),
+    disabledAt: scenario.disabledAt ? new Date(scenario.disabledAt) : null,
+    disabledBy: scenario.disabledBy ?? null,
+    disableReason: scenario.disableReason ?? null,
+    enabled: scenario.enabled ?? true,
     flowEdges: clone(scenario.flowEdges),
     flowNodes: clone(scenario.flowNodes),
     name: scenario.name,
+    legalHold: Boolean(scenario.legalHold),
+    legalHoldAt: scenario.legalHoldAt ? new Date(scenario.legalHoldAt) : null,
+    legalHoldBy: scenario.legalHoldBy ?? null,
+    legalHoldReason: scenario.legalHoldReason ?? null,
+    priority: normalizeBotScenarioPriority(scenario.priority),
+    retentionUntil: scenario.retentionUntil ? new Date(scenario.retentionUntil) : null,
     schemaVersion: scenario.schemaVersion,
     status: scenario.status,
-    tenantId: requireAutomationTenantId(scenario.tenantId)
+    tenantId: requireAutomationTenantId(scenario.tenantId),
+    sourceBindings: normalizeSourceBindings(scenario.sourceBindings ?? []),
+    triggerRules: normalizeBotTriggerRules(scenario.triggerRules ?? [])
   };
 }
 
@@ -2317,9 +2682,12 @@ function toBotScenarioVersion(row: PrismaBotScenarioVersionRow): AutomationBotSc
     createdAt: toIsoString(row.createdAt),
     flowEdges: clone(row.flowEdges) as AutomationBotScenarioVersion["flowEdges"],
     flowNodes: clone(row.flowNodes) as AutomationBotScenarioVersion["flowNodes"],
+    priority: normalizeBotScenarioPriority(row.priority),
     scenarioId: row.scenarioId,
+    sourceBindings: normalizeSourceBindings(row.sourceBindings ?? []),
     status: row.status,
     tenantId: requireAutomationTenantId(row.tenantId),
+    triggerRules: normalizeBotTriggerRules(row.triggerRules ?? []),
     versionId: row.versionId
   };
 }
@@ -2331,9 +2699,12 @@ function toPrismaBotScenarioVersionCreateInput(
     createdAt: new Date(version.createdAt),
     flowEdges: clone(version.flowEdges),
     flowNodes: clone(version.flowNodes),
+    priority: normalizeBotScenarioPriority(version.priority),
     scenarioId: version.scenarioId,
+    sourceBindings: normalizeSourceBindings(version.sourceBindings ?? []),
     status: version.status,
     tenantId: requireAutomationTenantId(version.tenantId),
+    triggerRules: normalizeBotTriggerRules(version.triggerRules ?? []),
     versionId: version.versionId
   };
 }
@@ -2902,6 +3273,16 @@ function requireAutomationTenantId(value: unknown): string {
     throw new Error("automation_tenant_required");
   }
   return tenantId;
+}
+
+function normalizeScenarioAuditEvent(event: AutomationScenarioAuditEvent): AutomationScenarioAuditEvent {
+  return { ...clone(event), actor: String(event.actor).trim() || "automation-admin", actorType: event.actorType === "system" ? "system" : "user",
+    immutable: true, payload: clone(event.payload ?? {}), reason: String(event.reason).trim() || "unspecified",
+    scenarioId: String(event.scenarioId).trim(), tenantId: requireAutomationTenantId(event.tenantId), traceId: String(event.traceId).trim() || "automation-audit" };
+}
+
+function hasAutomationTenantId(value: { tenantId?: unknown }): boolean {
+  return Boolean(String(value.tenantId ?? "").trim());
 }
 
 function requireMatchingAutomationTenantId(existing: unknown, incoming: unknown): string {

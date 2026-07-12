@@ -15,6 +15,17 @@ export const knowledgeService = {
     });
   },
 
+  async fetchSources() {
+    return apiRequest("/knowledge-sources", {
+      operation: "fetchKnowledgeSources",
+      service: SERVICE
+    });
+  },
+
+  async createSource(payload = {}) { return apiRequest("/knowledge-sources", { body: payload, method: "POST", operation: "createKnowledgeSource", service: SERVICE }); },
+  async refreshSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/refresh`, { method: "POST", operation: "refreshKnowledgeSource", service: SERVICE }); },
+  async approveSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/approve`, { method: "POST", operation: "approveKnowledgeSource", service: SERVICE }); },
+
   async fetchArticle(articleId) {
     if (!hasRouteId(articleId)) {
       return missingIdEnvelope("fetchArticle", "Knowledge article id is required.");
@@ -95,6 +106,7 @@ export const knowledgeService = {
       status: "ready",
       operations: [
         "fetchArticles",
+        "fetchSources",
         "fetchArticle",
         "saveArticleDraft",
         "submitArticleForReview",

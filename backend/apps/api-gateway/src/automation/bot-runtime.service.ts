@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { redactSensitiveText } from "@support-communication/redaction";
-import type { BotFlowNode, BotScenario } from "./automation.types.js";
+import type { BotFlowNode, BotScenario, BotTriggerRule } from "./automation.types.js";
 import {
   AutomationRepository,
   type AutomationBotRuntimeCommitResult,
@@ -9,7 +9,9 @@ import {
   type AutomationBotScenarioVersion
 } from "./automation.repository.js";
 import { planBotRuntimeLabeledTransition, resolveBotRuntimeDeadLetterState, resolveBotRuntimeRetryState } from "./bot-runtime.worker.js";
-import type { BotRuntimeStateTransition } from "./bot-runtime.worker.js";
+import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runtime.worker.js";
+import { matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
+import { AiBotResponseService, type AiBotResponse } from "./ai-bot-response.service.js";
 
 export interface BotRuntimeInboundEvent {
   channel: string;
@@ -22,6 +24,7 @@ export interface BotRuntimeInboundEvent {
 }
 
 export interface BotRuntimeOptions {
+  aiResponder?: Pick<AiBotResponseService, "respond">;
   fetch?: typeof fetch;
   maxAttempts?: number;
   now?: () => Date;
@@ -61,7 +64,9 @@ export class BotRuntimeService {
         traceId: event.traceId
       });
       const node = resolved.scenario.flowNodes.find((item) => item.id === transition.nextNodeId)!;
-      const executed = await this.executeNode(node, event, existing?.context ?? {});
+      const executed = await this.executeNode(node, event, existing?.context ?? {}, resolved.scenario.sourceBindings ?? []);
+      applyGeneratedMessage(transition.sideEffects, executed.aiResponse);
+      if (executed.outcome === "ai_handoff_requested" && executed.handoffSummary) transition.sideEffects.push(createAiFailureHandoff(event, node, executed.handoffSummary));
       const instance = makeInstance(existing, event, resolved.version, transition.nextNodeId, executed.status, executed.context, now);
       const step = makeStep(instance, event, node, executed, transition.sideEffects, now);
       return this.repository.commitBotRuntimeTransitionAsync({ expectedCurrentNodeId: existing?.currentNodeId, instance, step });
@@ -84,24 +89,52 @@ export class BotRuntimeService {
     if (!scenario || scenario.tenantId !== tenantId || !version || version.tenantId !== tenantId || version.scenarioId !== scenarioId || version.status !== "published") {
       throw new Error("bot_runtime_rollback_version_not_found");
     }
-    return this.repository.saveBotScenario({ ...scenario, activeVersionId: version.versionId, flowEdges: version.flowEdges, flowNodes: version.flowNodes, status: "published" });
+    return this.repository.saveBotScenario({
+      ...scenario,
+      activeVersionId: version.versionId,
+      flowEdges: version.flowEdges,
+      flowNodes: version.flowNodes,
+      priority: version.priority ?? scenario.priority,
+      status: "published",
+      sourceBindings: version.sourceBindings ?? scenario.sourceBindings,
+      triggerRules: version.triggerRules ?? scenario.triggerRules
+    });
   }
 
   private async resolveScenario(event: BotRuntimeInboundEvent, existing?: AutomationBotRuntimeInstance): Promise<{ scenario: BotScenario; version: AutomationBotScenarioVersion }> {
     const state = await this.repository.readStateAsync();
     const scenarioId = existing?.scenarioId ?? event.scenarioId;
-    const candidates = state.botScenarios.filter((item) => item.tenantId === event.tenantId && (!scenarioId || item.id === scenarioId) && item.channels.includes(event.channel));
-    const scenario = candidates.find((item) => ["published", "enabled"].includes(item.status));
+    const candidates = state.botScenarios.filter((item) => item.tenantId === event.tenantId
+      && (!scenarioId || item.id === scenarioId)
+      && item.channels.includes(event.channel)
+      && (existing ? true : item.enabled !== false && item.status === "published"));
+    const scenario = scenarioId
+      ? candidates[0]
+      : candidates
+        .flatMap((item) => matchingTrigger(item, event.payload ?? {})?.map((rule) => ({ rule, scenario: item })) ?? [])
+        .sort((left, right) => scenarioTriggerPriority(right.scenario, right.rule) - scenarioTriggerPriority(left.scenario, left.rule)
+          || left.scenario.id.localeCompare(right.scenario.id)
+          || left.rule.id.localeCompare(right.rule.id))[0]?.scenario;
     if (!scenario) throw new Error("bot_runtime_published_scenario_not_found");
     const versions = state.botScenarioVersions.filter((item) => item.tenantId === event.tenantId && item.scenarioId === scenario.id && item.status === "published");
     const version = existing
       ? versions.find((item) => item.versionId === existing.versionId)
       : versions.find((item) => item.versionId === scenario.activeVersionId) ?? versions.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
     if (!version) throw new Error(existing ? "bot_runtime_pinned_version_not_found" : "bot_runtime_published_version_not_found");
-    return { scenario: { ...scenario, flowEdges: version.flowEdges, flowNodes: version.flowNodes }, version };
+    return {
+      scenario: {
+        ...scenario,
+        flowEdges: version.flowEdges,
+        flowNodes: version.flowNodes,
+        priority: version.priority ?? scenario.priority,
+        sourceBindings: version.sourceBindings ?? scenario.sourceBindings,
+        triggerRules: version.triggerRules ?? scenario.triggerRules
+      },
+      version
+    };
   }
 
-  private async executeNode(node: BotFlowNode, event: BotRuntimeInboundEvent, previous: Record<string, unknown>) {
+  private async executeNode(node: BotFlowNode, event: BotRuntimeInboundEvent, previous: Record<string, unknown>, sourceBindings: import("./automation.types.js").KnowledgeSourceBinding[]) {
     const context = { ...previous, ...(event.payload?.context as Record<string, unknown> | undefined ?? {}) };
     if (node.type === "contact_request") {
       const field = String(node.config?.field ?? "contact");
@@ -114,6 +147,18 @@ export class BotRuntimeService {
       return { context: { ...context, webhook: webhookResponse }, outcome: "webhook_succeeded", status: "active" as const, webhookResponse };
     }
     if (node.type === "handoff") return { context, handoffSummary: { botId: event.scenarioId, collectedFields: redactObject(context), nodeId: node.id, queue: node.title ?? "default" }, outcome: "handed_off", status: "handoff" as const };
+    if (node.type === "ai_reply") {
+      const message = inboundText(event.payload ?? {});
+      if (!message) throw new Error("bot_ai_message_required");
+      try {
+        const aiResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({ instructions: typeof node.config?.instructions === "string" ? node.config.instructions : node.title, message, sourceBindings, tenantId: event.tenantId });
+        return { aiResponse, context: { ...context, lastAiResponse: { citations: aiResponse.citations, model: aiResponse.model } }, outcome: "ai_reply_queued", status: "active" as const };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "bot_ai_unavailable";
+        const handoffSummary = { botId: event.scenarioId ?? "", collectedFields: redactObject(context), nodeId: node.id, queue: String(node.config?.handoffQueue ?? "default"), reason: "ai_unavailable" };
+        return { aiResponse: { citations: [], model: "unavailable", text: "Сейчас я не могу надёжно ответить по материалам. Передам вопрос специалисту." }, context: { ...context, lastAiFailure: reason }, handoffSummary, outcome: "ai_handoff_requested", status: "handoff" as const };
+      }
+    }
     if (node.type === "fallback") return { context, outcome: "fallback", status: "active" as const };
     if (node.type === "quick_replies") return { context, outcome: "quick_replies_sent", status: "active" as const };
     if (node.type === "condition") return { context, outcome: "condition_evaluated", status: "active" as const };
@@ -149,6 +194,54 @@ export class BotRuntimeService {
     const step = makeStep(instance, event, node, { context: instance.context, error: state.lastError, outcome: state.status, status: state.status }, [], now);
     return this.repository.commitBotRuntimeTransitionAsync({ expectedCurrentNodeId: existing?.currentNodeId, instance, step });
   }
+}
+
+function applyGeneratedMessage(sideEffects: unknown[], response: AiBotResponse | undefined): void {
+  if (!response) return;
+  for (const effect of sideEffects as Array<{ kind?: string; descriptor?: { payload?: Record<string, unknown> } }>) {
+    if (effect.kind !== "message_delivery" || !effect.descriptor?.payload) continue;
+    effect.descriptor.payload.text = response.text;
+    effect.descriptor.payload.citations = response.citations.map((citation) => ({ sourceId: citation.sourceId, title: citation.title, version: citation.version }));
+  }
+}
+
+function createAiFailureHandoff(event: BotRuntimeInboundEvent, node: BotFlowNode, summary: { botId?: string; collectedFields: Record<string, unknown>; nodeId: string; queue: string; reason?: string }): BotRuntimeSideEffect {
+  return {
+    descriptor: {
+      eventId: `evt_bot_handoff_${sanitizeIdentifierSegment(event.eventId)}_${sanitizeIdentifierSegment(node.id)}`,
+      eventName: "bot.handoff.created",
+      resourceId: event.conversationId,
+      resourceType: "conversation",
+      schemaVersion: "bot-handoff/v1",
+      summary: { botId: summary.botId ?? event.scenarioId ?? "", nodeId: summary.nodeId, queue: summary.queue, reason: "handoff_requested" },
+      tenantId: event.tenantId,
+      traceId: event.traceId
+    },
+    kind: "bot_handoff"
+  };
+}
+
+function sanitizeIdentifierSegment(value: string): string { return String(value).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100) || "event"; }
+
+function matchingTrigger(scenario: BotScenario, payload: Record<string, unknown>): BotTriggerRule[] | null {
+  const rules = scenario.triggerRules ?? [];
+  const text = inboundText(payload);
+  return rules.filter((rule) => {
+    if (rule.type === "manual") return false;
+    if (rule.type === "new_conversation") return payload.isNewConversation === true;
+    return Boolean(text) && (rule.phrases ?? []).some((phrase) => matchesBotTriggerPhrase(text!, phrase, rule.matchMode ?? "contains", rule.locale));
+  });
+}
+
+function inboundText(payload: Record<string, unknown>): string | null {
+  for (const value of [payload.text, payload.message, payload.content]) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+function scenarioTriggerPriority(scenario: BotScenario, rule: BotTriggerRule): number {
+  return Number(scenario.priority ?? 0) + Number(rule.priority ?? 0);
 }
 
 function selectEdgeLabel(scenario: BotScenario, nodeId: string, payload: Record<string, unknown>): string | undefined {

@@ -613,6 +613,12 @@ describe("frontend backend service contracts", () => {
         "POST",
         { reason: "QA exit reason" }
       ],
+      [() => supportAdminService.fetchAiConnections("tenant-volga"), "supportAdminService", "fetchAiConnections", "/api/v1/service-admin/tenants/tenant-volga/ai-connections", "GET", undefined],
+      [() => supportAdminService.createAiConnection("tenant-volga", { baseUrl: "https://ai.example.test/v1", chatModel: "small", secret: "secret" }), "supportAdminService", "createAiConnection", "/api/v1/service-admin/tenants/tenant-volga/ai-connections", "POST", { baseUrl: "https://ai.example.test/v1", chatModel: "small", secret: "secret" }],
+      [() => supportAdminService.updateAiConnection("tenant-volga", "aic-1", { chatModel: "medium" }), "supportAdminService", "updateAiConnection", "/api/v1/service-admin/tenants/tenant-volga/ai-connections/aic-1", "PATCH", { chatModel: "medium" }],
+      [() => supportAdminService.testAiConnection("tenant-volga", "aic-1"), "supportAdminService", "testAiConnection", "/api/v1/service-admin/tenants/tenant-volga/ai-connections/aic-1/test", "POST", undefined],
+      [() => supportAdminService.disableAiConnection("tenant-volga", "aic-1"), "supportAdminService", "disableAiConnection", "/api/v1/service-admin/tenants/tenant-volga/ai-connections/aic-1/disable", "POST", undefined],
+      [() => supportAdminService.deleteAiConnection("tenant-volga", "aic-1"), "supportAdminService", "deleteAiConnection", "/api/v1/service-admin/tenants/tenant-volga/ai-connections/aic-1", "DELETE", undefined],
       [() => incidentService.fetchIncidents({ status: "open" }), "incidentService", "fetchIncidents", "/api/v1/incidents?status=open", "GET", undefined],
       [() => incidentService.fetchIncidentDetail("inc/webhook"), "incidentService", "fetchIncidentDetail", "/api/v1/incidents/inc%2Fwebhook", "GET", undefined],
       [

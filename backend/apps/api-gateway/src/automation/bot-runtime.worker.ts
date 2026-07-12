@@ -7,7 +7,7 @@ import type {
   RealtimeEvent
 } from "../conversation/conversation.repository.js";
 
-const BOT_RUNTIME_ALLOWED_NODE_TYPES = new Set(["message", "quick_replies", "condition", "contact_request", "webhook", "handoff", "fallback"]);
+const BOT_RUNTIME_ALLOWED_NODE_TYPES = new Set(["message", "ai_reply", "quick_replies", "condition", "contact_request", "webhook", "handoff", "fallback"]);
 
 export interface BotRuntimeStateTransitionInput {
   channel?: string;
@@ -287,7 +287,7 @@ function createStateTransitionSideEffects(
   input: BotRuntimeStateTransitionInput,
   node: BotScenario["flowNodes"][number]
 ): BotRuntimeSideEffect[] {
-  if (!["message", "quick_replies", "contact_request", "fallback"].includes(node.type)) {
+  if (!["message", "ai_reply", "quick_replies", "contact_request", "fallback"].includes(node.type)) {
     if (node.type === "handoff") {
       return [createBotRuntimeHandoffSideEffect(input, node)];
     }

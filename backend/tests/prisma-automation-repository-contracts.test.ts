@@ -121,6 +121,64 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.equal(calls.botScenarioUpsert[1].update.createdAt, undefined);
   });
 
+  it("persists disabled and archived lifecycle metadata while keeping archived scenarios disabled", async () => {
+    const { client, calls } = createFakePrismaAutomationClient();
+    const repository = AutomationRepository.prisma({ client });
+
+    const disabled = await repository.saveBotScenario({
+      channels: ["SDK"],
+      disableReason: "Maintenance window",
+      disabledBy: "tenant-admin",
+      enabled: false,
+      flowEdges: [],
+      flowNodes: [{ id: "start", type: "message" }],
+      id: "bot-scenario-lifecycle",
+      name: "Lifecycle scenario",
+      schemaVersion: "bot-flow/v1",
+      status: "published",
+      tenantId: "tenant-demo"
+    });
+    const archived = await repository.saveBotScenario({
+      ...disabled,
+      archiveReason: "No longer needed",
+      archivedBy: "tenant-admin",
+      enabled: true,
+      status: "archived"
+    });
+    const found = await repository.findBotScenario("bot-scenario-lifecycle");
+
+    assert.equal(disabled.enabled, false);
+    assert.ok(disabled.disabledAt);
+    assert.equal(disabled.disableReason, "Maintenance window");
+    assert.equal(archived.enabled, false);
+    assert.ok(archived.archivedAt);
+    assert.equal(archived.archiveReason, "No longer needed");
+    assert.equal(found?.enabled, false);
+    assert.equal(found?.archivedBy, "tenant-admin");
+    assert.equal(calls.botScenarioUpsert[0].create.enabled, false);
+    assert.equal(calls.botScenarioUpsert[1].update.enabled, false);
+    assert.equal(calls.botScenarioUpsert[1].update.archivedAt instanceof Date, true);
+  });
+
+  it("purges an expired archived scenario through Prisma with a tenant-qualified predicate", async () => {
+    const { client, calls } = createFakePrismaAutomationClient();
+    const repository = AutomationRepository.prisma({ client });
+    await repository.saveBotScenario({
+      archivedAt: "2026-06-01T00:00:00.000Z", channels: ["SDK"], enabled: false, flowEdges: [],
+      flowNodes: [{ id: "start", type: "message" }], id: "bot-scenario-prisma-purge", name: "Prisma purge scenario",
+      retentionUntil: "2026-07-01T00:00:00.000Z", schemaVersion: "bot-flow/v1", status: "archived", tenantId: "tenant-demo"
+    });
+
+    const result = await repository.purgeArchivedBotScenarioAsync("tenant-demo", "bot-scenario-prisma-purge", "2026-07-12T00:00:00.000Z");
+
+    assert.equal(result.outcome, "purged");
+    assert.equal(await repository.findBotScenario("bot-scenario-prisma-purge"), undefined);
+    assert.equal(calls.botScenarioDeleteMany[0]?.where.tenantId, "tenant-demo");
+    assert.equal(calls.botScenarioDeleteMany[0]?.where.status, "archived");
+    assert.equal(calls.botScenarioDeleteMany[0]?.where.auditHold, false);
+    assert.equal(calls.botScenarioDeleteMany[0]?.where.legalHold, false);
+  });
+
   it("persists immutable bot scenario versions through Prisma with first-write-wins replay", async () => {
     const { client, calls } = createFakePrismaAutomationClient();
     const repository = AutomationRepository.prisma({ client });
@@ -519,6 +577,7 @@ function createFakePrismaAutomationClient() {
   const calls = {
     automationPublishIdempotencyKeyCreates: [] as Array<{ data: FakeAutomationPublishIdempotencyKeyRow }>,
     automationBotTestRunUpserts: [] as Array<FakeGenericUpsertInput>,
+    botScenarioDeleteMany: [] as Array<{ where: Record<string, unknown> }>,
     botScenarioFindMany: [] as Array<{ orderBy: { updatedAt: "desc" } }>,
     botScenarioFindUnique: [] as Array<{ where: { id: string } }>,
     botScenarioUpsert: [] as Array<FakeBotScenarioUpsertInput>,
@@ -573,6 +632,13 @@ function createFakePrismaAutomationClient() {
       }
     },
     botScenario: {
+      async deleteMany(input: { where: Record<string, unknown> }): Promise<{ count: number }> {
+        calls.botScenarioDeleteMany.push(input);
+        const existing = scenarios.get(String(input.where.id));
+        if (!existing || existing.tenantId !== input.where.tenantId || existing.status !== input.where.status) return { count: 0 };
+        scenarios.delete(existing.id);
+        return { count: 1 };
+      },
       async findMany(input: { orderBy: { updatedAt: "desc" } }): Promise<FakeBotScenarioRow[]> {
         calls.botScenarioFindMany.push(input);
         return Array.from(scenarios.values()).sort((left, right) =>

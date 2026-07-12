@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  changeBotScenarioLifecycle,
   publishBotScenario,
   runBotScenarioTest,
   submitBotScenarioUpdate
@@ -119,5 +120,29 @@ describe("automation workflow actions", () => {
     assert.equal(result.ok, true);
     assert.equal(result.testRunId, "bot_test_001");
     assert.equal(result.queue, "bot-runtime");
+  });
+
+  it("returns the server scenario after a lifecycle action", async () => {
+    let capturedId = "";
+    const result = await changeBotScenarioLifecycle("bot-checkout", "archive", {
+      archiveBotScenario: async (scenarioId) => {
+        capturedId = scenarioId;
+        return { data: { duplicate: false, scenario: { id: scenarioId, status: "archived" } }, status: "ok" };
+      }
+    });
+
+    assert.equal(capturedId, "bot-checkout");
+    assert.equal(result.ok, true);
+    assert.equal(result.scenario.status, "archived");
+  });
+
+  it("does not invent lifecycle success when the server rejects it", async () => {
+    const result = await changeBotScenarioLifecycle("bot-checkout", "restore", {
+      restoreBotScenario: async () => ({ error: { message: "Scenario is on legal hold." }, status: "conflict" })
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.scenario, undefined);
+    assert.match(result.message, /legal hold/);
   });
 });

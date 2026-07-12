@@ -60,6 +60,8 @@ export function bootstrapAutomationState(base?: Partial<AutomationState>): Autom
 
     rescueChats: base?.rescueChats ?? [],
 
+    scenarioAuditEvents: base?.scenarioAuditEvents ?? [],
+
     workspaceAuditEvents: base?.workspaceAuditEvents ?? clone(automationAuditEvents),
 
     workspaceRuntimeMetrics: base?.workspaceRuntimeMetrics ?? clone(runtimeMetrics)

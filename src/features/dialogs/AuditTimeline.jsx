@@ -91,6 +91,7 @@ function MessageBubble({ message, now, onSaveTemplate }) {
   return (
     <article className={`message-bubble ${message.side}`}>
       <p>{message.text}</p>
+      {message.citations?.length ? <div className="message-citations"><strong>Источники AI:</strong>{message.citations.map((citation) => <span key={`${citation.sourceId}-${citation.version ?? ""}`}>{citation.title ?? citation.sourceId}</span>)}</div> : null}
       {message.attachments?.length ? (
         <div className="message-attachments">
           {message.attachments.map((attachment) => (

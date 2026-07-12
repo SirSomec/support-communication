@@ -29,6 +29,7 @@
     "backend:notification:worker:once": "cd backend && npm run notification:worker:once",
     "backend:webhook:worker:once": "cd backend && npm run webhook:worker:once",
     "backend:proactive-delivery:worker:once": "cd backend && npm run proactive-delivery:worker:once",
+    "backend:bot-scenario-purge:worker:once": "cd backend && npm run bot-scenario-purge:worker:once",
     "backend:proactive-delivery:prisma-concurrency-smoke": "cd backend && npm run proactive-delivery:prisma-concurrency-smoke",
     "backend:billing:worker:once": "cd backend && npm run billing:worker:once",
     "backend:outbox:bullmq": "cd backend && npm run start:outbox-bullmq-worker",

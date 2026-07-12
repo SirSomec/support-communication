@@ -17,6 +17,7 @@ import { ServiceAdminModule } from "./service-admin/service-admin.module.js";
 import { AiConnectionsModule } from "./ai-connections/ai-connections.module.js";
 import { requestTraceMiddleware } from "./trace-id.middleware.js";
 import { WorkspaceModule } from "./workspace/workspace.module.js";
+import { KnowledgeSourcesModule } from "./knowledge-sources/knowledge-sources.module.js";
 
 @Module({
   imports: [
@@ -35,7 +36,8 @@ import { WorkspaceModule } from "./workspace/workspace.module.js";
     RoutingModule,
     ServiceAdminModule,
     AiConnectionsModule,
-    WorkspaceModule
+    WorkspaceModule,
+    KnowledgeSourcesModule
   ],
   controllers: [HealthController]
 })

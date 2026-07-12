@@ -67,7 +67,37 @@ export async function runBotScenarioTest(
     ok: true,
     auditId: response.data.auditId,
     queue: response.data.queue,
+    preview: response.data.preview ?? null,
     status: response.data.status,
     testRunId: response.data.testRunId
+  };
+}
+
+export async function changeBotScenarioLifecycle(
+  scenarioId,
+  action,
+  dependencies = {},
+  options = {}
+) {
+  const id = String(scenarioId ?? "").trim();
+  if (!id) return { ok: false, message: "Bot scenario id is required." };
+
+  const operations = {
+    archive: dependencies.archiveBotScenario ?? automationService.archiveBotScenario,
+    disable: dependencies.disableBotScenario ?? automationService.disableBotScenario,
+    restore: dependencies.restoreBotScenario ?? automationService.restoreBotScenario
+  };
+  const operation = operations[action];
+  if (!operation) return { ok: false, message: "Unsupported scenario lifecycle action." };
+
+  const response = await operation(id, options);
+  if (response.status !== "ok" || !response.data?.scenario) {
+    return { ok: false, message: response.error?.message ?? "Не удалось изменить состояние сценария." };
+  }
+
+  return {
+    duplicate: response.data.duplicate === true,
+    ok: true,
+    scenario: response.data.scenario
   };
 }

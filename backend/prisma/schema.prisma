@@ -2048,19 +2048,41 @@ model TelegramConnection {
 model BotScenario {
   id            String   @id
   activeVersionId String? @map("active_version_id")
+  auditHold     Boolean  @default(false) @map("audit_hold")
+  auditHoldAt   DateTime? @map("audit_hold_at") @db.Timestamptz(3)
+  auditHoldBy   String?  @map("audit_hold_by")
+  auditHoldReason String? @map("audit_hold_reason")
+  archiveReason String?  @map("archive_reason")
+  archivedAt    DateTime? @map("archived_at") @db.Timestamptz(3)
+  archivedBy    String?  @map("archived_by")
   tenantId      String   @map("tenant_id")
   name          String
   schemaVersion String   @map("schema_version")
   status        String
+  priority      Int      @default(0)
+  enabled       Boolean  @default(true)
+  disabledAt    DateTime? @map("disabled_at") @db.Timestamptz(3)
+  disabledBy    String?  @map("disabled_by")
+  disableReason String?  @map("disable_reason")
   channels      String[] @default([])
   flowNodes     Json     @map("flow_nodes")
   flowEdges     Json     @map("flow_edges")
+  legalHold     Boolean  @default(false) @map("legal_hold")
+  legalHoldAt   DateTime? @map("legal_hold_at") @db.Timestamptz(3)
+  legalHoldBy   String?  @map("legal_hold_by")
+  legalHoldReason String? @map("legal_hold_reason")
+  retentionUntil DateTime? @map("retention_until") @db.Timestamptz(3)
+  sourceBindings Json    @default("[]") @map("source_bindings")
+  triggerRules  Json     @default("[]") @map("trigger_rules")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   versions      BotScenarioVersion[]
 
   @@unique([tenantId, id], map: "bot_scenarios_tenant_id_key")
   @@index([tenantId, status], map: "bot_scenarios_tenant_status_idx")
+  @@index([tenantId, enabled, status], map: "bot_scenarios_tenant_enabled_status_idx")
+  @@index([tenantId, enabled, status, priority], map: "bot_scenarios_tenant_trigger_priority_idx")
+  @@index([tenantId, status, retentionUntil], map: "bot_scenarios_tenant_retention_idx")
   @@index([tenantId, updatedAt], map: "bot_scenarios_tenant_updated_at_idx")
   @@map("bot_scenarios")
 }
@@ -2071,8 +2093,11 @@ model BotScenarioVersion {
   scenarioId     String      @map("scenario_id")
   runtimeVersion String?     @map("runtime_version")
   status         String
+  priority       Int         @default(0)
   flowNodes      Json        @map("flow_nodes")
   flowEdges      Json        @map("flow_edges")
+  sourceBindings Json        @default("[]") @map("source_bindings")
+  triggerRules   Json        @default("[]") @map("trigger_rules")
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   scenario       BotScenario @relation(fields: [tenantId, scenarioId], references: [tenantId, id], onDelete: Cascade)
   publishAuditEvents BotPublishAuditEvent[]
@@ -2082,6 +2107,88 @@ model BotScenarioVersion {
   @@index([tenantId, scenarioId, status], map: "bot_scenario_versions_tenant_scenario_status_idx")
   @@index([tenantId, createdAt], map: "bot_scenario_versions_tenant_created_at_idx")
   @@map("bot_scenario_versions")
+}
+
+model AiConnection {
+  id               String    @id
+  tenantId         String    @map("tenant_id")
+  providerType     String    @map("provider_type")
+  baseUrl          String    @map("base_url")
+  chatModel        String    @map("chat_model")
+  embeddingModel   String?   @map("embedding_model")
+  secretCiphertext String?   @map("secret_ciphertext")
+  secretRef        String?   @map("secret_ref")
+  keyVersion       String?   @map("key_version")
+  capabilities     Json      @default("[]")
+  limits           Json      @default("{}")
+  status           String    @default("disabled")
+  lastTestedAt     DateTime? @map("last_tested_at") @db.Timestamptz(3)
+  lastTestStatus   String?   @map("last_test_status")
+  lastTestMessage  String?   @map("last_test_message")
+  disabledAt       DateTime? @map("disabled_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, id], map: "ai_connections_tenant_id_key")
+  @@index([tenantId, status], map: "ai_connections_tenant_status_idx")
+  @@map("ai_connections")
+}
+
+// Source catalog for the grounded AI bot.  This is deliberately separate from
+// KnowledgeArticle: articles remain the editorial workspace, while a source
+// may be a document, a fetched URL or a read-only MCP integration.
+//
+// Values for status/readiness/approvalStatus are kept as strings to make this
+// additive migration compatible with the existing database conventions.  The
+// application contract lives in knowledge-sources/knowledge-source.types.ts.
+model KnowledgeSource {
+  id             String    @id
+  tenantId       String    @map("tenant_id")
+  kind           String
+  title          String
+  status         String    @default("draft")
+  readiness      String    @default("not_ready")
+  approvalStatus String    @default("pending") @map("approval_status")
+  owner          String
+  sourceRef      String?   @map("source_ref")
+  sourceConfig   Json      @default("{}") @map("source_config")
+  metadata       Json      @default("{}")
+  version        Int       @default(1)
+  contentChecksum String?  @map("content_checksum")
+  approvedBy     String?   @map("approved_by")
+  approvedAt     DateTime? @map("approved_at") @db.Timestamptz(3)
+  lastIngestedAt DateTime? @map("last_ingested_at") @db.Timestamptz(3)
+  lastIndexedAt  DateTime? @map("last_indexed_at") @db.Timestamptz(3)
+  failedAt       DateTime? @map("failed_at") @db.Timestamptz(3)
+  failureCode    String?   @map("failure_code")
+  disabledAt     DateTime? @map("disabled_at") @db.Timestamptz(3)
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+  retentionUntil DateTime? @map("retention_until") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, id], map: "knowledge_sources_tenant_id_key")
+  @@index([tenantId, status, readiness, approvalStatus], map: "knowledge_sources_tenant_lifecycle_idx")
+  @@index([tenantId, kind, updatedAt], map: "knowledge_sources_tenant_kind_updated_idx")
+  @@index([tenantId, approvalStatus, readiness, version], map: "knowledge_sources_tenant_retrieval_idx")
+  @@map("knowledge_sources")
+}
+
+model McpConnector {
+  id String @id
+  tenantId String @map("tenant_id")
+  endpoint String
+  allowedHosts Json @map("allowed_hosts")
+  tools Json
+  rateLimitPerMinute Int @default(60) @map("rate_limit_per_minute")
+  status String @default("disabled")
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(3)
+  approvedBy String? @map("approved_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@unique([tenantId, id])
+  @@index([tenantId, status])
+  @@map("mcp_connectors")
 }
 
 model BotPublishAuditEvent {
@@ -2111,6 +2218,26 @@ model AutomationPublishIdempotencyKey {
 
   @@id([tenantId, key])
   @@map("automation_publish_idempotency_keys")
+}
+
+model AutomationScenarioAuditEvent {
+  auditId        String   @id @map("audit_id")
+  tenantId       String   @map("tenant_id")
+  scenarioId     String   @map("scenario_id")
+  action         String
+  actor          String
+  actorType      String   @map("actor_type")
+  reason         String
+  traceId        String   @map("trace_id")
+  idempotencyKey String?  @map("idempotency_key")
+  fingerprint    String?  @map("fingerprint")
+  payload        Json     @default("{}")
+  immutable      Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, idempotencyKey], map: "automation_scenario_audit_tenant_idempotency_key")
+  @@index([tenantId, scenarioId, createdAt], map: "automation_scenario_audit_tenant_scenario_created_idx")
+  @@map("automation_scenario_audit_events")
 }
 
 model ProviderConnectionCredential {

@@ -15,6 +15,20 @@ function event(eventId = "evt-1", payload: Record<string, unknown> = {}) {
   return { channel: "SDK", conversationId: "conv-1", eventId, payload, scenarioId: "bot-1", tenantId: "tenant-1", traceId: "trace-1" };
 }
 
+function triggerRepository() {
+  const state = createEmptyAutomationState();
+  for (const scenario of [
+    { id: "bot-contains", priority: 1, triggerRules: [{ id: "contains", matchMode: "contains" as const, phrases: ["оплата"], priority: 0, type: "phrase" as const }] },
+    { id: "bot-exact", priority: 3, triggerRules: [{ id: "exact", matchMode: "exact" as const, phrases: ["где оплата"], priority: 0, type: "phrase" as const }] },
+    { id: "bot-tokens", priority: 2, triggerRules: [{ id: "tokens", matchMode: "tokens" as const, phrases: ["статус заказа"], priority: 0, type: "phrase" as const }] }
+  ]) {
+    const nodes = [{ id: "start", type: "message", title: scenario.id }];
+    state.botScenarios.push({ activeVersionId: `${scenario.id}-v1`, channels: ["SDK"], flowEdges: [], flowNodes: nodes, id: scenario.id, name: scenario.id, priority: scenario.priority, schemaVersion: "bot-flow/v1", status: "published", tenantId: "tenant-1", triggerRules: scenario.triggerRules });
+    state.botScenarioVersions.push({ createdAt: "2026-07-12T10:00:00.000Z", flowEdges: [], flowNodes: nodes, scenarioId: scenario.id, status: "published", tenantId: "tenant-1", versionId: `${scenario.id}-v1` });
+  }
+  return AutomationRepository.inMemory(state);
+}
+
 describe("durable bot runtime core", () => {
   it("pins an immutable version and replays an input event without a second step", async () => {
     const repo = repository([{ id: "start", type: "condition" }, { id: "reply", type: "message", title: "Hello" }], [{ from: "start", to: "reply" }]);
@@ -74,6 +88,61 @@ describe("durable bot runtime core", () => {
     assert.equal(result.instance.status, "handoff");
     assert.equal(result.step.handoffSummary?.queue, "Priority");
     assert.equal(result.step.sideEffects[0]?.kind, "bot_handoff");
+  });
+
+  it("delivers a grounded AI reply through the normal outbound queue without exposing prompt content", async () => {
+    const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: { instructions: "Use approved knowledge." } }], [{ from: "start", to: "answer" }]);
+    const state = repo.readState();
+    state.botScenarios[0]!.sourceBindings = [{ sourceId: "source-1" }];
+    const runtime = new BotRuntimeService(AutomationRepository.inMemory(state), {
+      aiResponder: { respond: async (input) => {
+        assert.equal(input.tenantId, "tenant-1");
+        assert.deepEqual(input.sourceBindings, [{ sourceId: "source-1" }]);
+        return { citations: [{ sourceId: "source-1", title: "FAQ", version: 1 }], model: "test-model", text: "Grounded answer" };
+      } }
+    });
+    const result = await runtime.handleInboundEvent(event("evt-ai", { text: "What are your hours?" }));
+    assert.equal(result.step.outcome, "ai_reply_queued");
+    assert.equal((result.step.sideEffects[0] as { descriptor: { payload: { text: string } } }).descriptor.payload.text, "Grounded answer");
+    assert.deepEqual((result.step.sideEffects[0] as { descriptor: { payload: { citations: Array<{ sourceId: string }> } } }).descriptor.payload.citations, [{ sourceId: "source-1", title: "FAQ", version: 1 }]);
+    assert.equal(JSON.stringify(result.instance.context).includes("What are your hours?"), false);
+  });
+
+  it("safely hands off when AI is unavailable instead of retrying or inventing an answer", async () => {
+    const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: { handoffQueue: "Support" } }], [{ from: "start", to: "answer" }]);
+    const runtime = new BotRuntimeService(repo, { aiResponder: { respond: async () => { throw new Error("bot_ai_connection_not_ready"); } } });
+    const result = await runtime.handleInboundEvent(event("evt-ai-unavailable", { text: "Need help" }));
+    assert.equal(result.instance.status, "handoff");
+    assert.equal(result.step.outcome, "ai_handoff_requested");
+    assert.equal((result.step.sideEffects[0] as { descriptor: { payload: { text: string } } }).descriptor.payload.text.includes("специалисту"), true);
+    assert.equal(result.step.sideEffects[1]?.kind, "bot_handoff");
+  });
+
+  it("does not start disabled or archived scenarios", async () => {
+    const repo = repository([{ id: "start", type: "message" }], []);
+    const state = repo.readState();
+    state.botScenarios[0]!.enabled = false;
+    const disabled = AutomationRepository.inMemory(state);
+    await assert.rejects(() => new BotRuntimeService(disabled).handleInboundEvent(event("evt-disabled")), /bot_runtime_published_scenario_not_found/);
+  });
+
+  it("selects a published scenario from configured phrases and never falls back to the first scenario", async () => {
+    const runtime = new BotRuntimeService(triggerRepository());
+    const exact = await runtime.handleInboundEvent({ channel: "SDK", conversationId: "phrase-1", eventId: "phrase-1", payload: { text: "ГДЕ   ОПЛАТА" }, tenantId: "tenant-1", traceId: "phrase-1" });
+    const tokens = await runtime.handleInboundEvent({ channel: "SDK", conversationId: "phrase-2", eventId: "phrase-2", payload: { text: "Подскажите статус нового заказа" }, tenantId: "tenant-1", traceId: "phrase-2" });
+
+    assert.equal(exact.instance.scenarioId, "bot-exact");
+    assert.equal(tokens.instance.scenarioId, "bot-tokens");
+    await assert.rejects(() => runtime.handleInboundEvent({ channel: "SDK", conversationId: "phrase-3", eventId: "phrase-3", payload: { text: "совсем другой вопрос" }, tenantId: "tenant-1", traceId: "phrase-3" }), /bot_runtime_published_scenario_not_found/);
+    await assert.rejects(() => runtime.handleInboundEvent({ channel: "SDK", conversationId: "foreign", eventId: "foreign", payload: { text: "где оплата" }, tenantId: "tenant-2", traceId: "foreign" }), /bot_runtime_published_scenario_not_found/);
+    await assert.rejects(() => runtime.handleInboundEvent({ channel: "Email", conversationId: "wrong-channel", eventId: "wrong-channel", payload: { text: "где оплата" }, tenantId: "tenant-1", traceId: "wrong-channel" }), /bot_runtime_published_scenario_not_found/);
+  });
+
+  it("selects the same deterministic rule across every configured channel", async () => {
+    const initial = triggerRepository().readState();
+    initial.botScenarios.forEach((scenario) => { scenario.channels = ["SDK", "Telegram"]; });
+    const result = await new BotRuntimeService(AutomationRepository.inMemory(initial)).handleInboundEvent({ channel: "Telegram", conversationId: "telegram", eventId: "telegram", payload: { text: "ГДЕ ОПЛАТА" }, tenantId: "tenant-1", traceId: "telegram" });
+    assert.equal(result.instance.scenarioId, "bot-exact");
   });
 
   it("rolls new conversations back to a prior published version without moving pinned conversations", async () => {

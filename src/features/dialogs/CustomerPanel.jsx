@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Copy, FileText, Lock, Plus, ShieldCheck, Smartphone } from "lucide-react";
-import { maskPhone, resolutionOutcomeLabels } from "../../app/dialogModel.js";
+import { maskPhone, resolutionOutcomeLabels, isRepeatAppeal } from "../../app/dialogModel.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
+import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 
 export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic, setDraft, templates, onClose, access, isClosed }) {
   const [resolutionOutcome, setResolutionOutcome] = useState("resolved");
@@ -22,6 +23,12 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
   return (
     <aside className="customer-panel" aria-label="Карточка клиента">
       <PanelSection title="О клиенте" action={<button aria-label="Копировать"><Copy size={18} /></button>}>
+        {isRepeatAppeal(conversation) ? (
+          <div className="repeat-appeal-panel-note">
+            <RepeatAppealBadge conversation={conversation} />
+            <p>Клиент снова обратился по той же тематике в течение 24 часов после предыдущего закрытия.</p>
+          </div>
+        ) : null}
         <InfoRow label="Телефон" value={access.canViewSensitive ? conversation.phone : maskPhone(conversation.phone)} />
         <InfoRow label="Устройство" value={conversation.device} icon={<Smartphone size={15} />} />
         <InfoRow label="Точка входа" value={conversation.entry} />

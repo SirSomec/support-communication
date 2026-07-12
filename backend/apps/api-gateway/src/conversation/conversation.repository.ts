@@ -8,7 +8,7 @@ import {
 } from "@support-communication/database";
 import { type OutboxEvent } from "@support-communication/events";
 import { Prisma } from "@prisma/client";
-import { type ConversationMessage, type ConversationRecord } from "./conversation.types.js";
+import { type ConversationMessage, type ConversationAppealMetadata, type ConversationRecord } from "./conversation.types.js";
 
 export interface RealtimeEvent {
   eventId: string;
@@ -432,6 +432,7 @@ interface PrismaConversationUpsertData {
   id: string;
   initials: string;
   language: string;
+  metadata: unknown;
   name: string;
   operatorId: string | null;
   operatorName: string | null;
@@ -1492,6 +1493,7 @@ function toConversationRecord(row: PrismaConversationRow): ConversationRecord {
     ...(row.queueId ? { queueId: row.queueId } : {}),
     ...(recordFromJson(row.rescueState) ? { rescueState: recordFromJson(row.rescueState) } : {}),
     ...(row.resolutionOutcome ? { resolutionOutcome: row.resolutionOutcome } : {}),
+    ...(appealMetadataFromJson(row.metadata) ? { metadata: appealMetadataFromJson(row.metadata) } : {}),
     sla: row.sla,
     slaTone: row.slaTone,
     status: row.status,
@@ -1529,6 +1531,7 @@ function toPrismaConversationUpsertData(conversation: ConversationRecord): Prism
     id: conversation.id,
     initials: conversation.initials,
     language: conversation.language,
+    metadata: conversation.metadata ?? null,
     name: conversation.name,
     operatorId: conversation.operatorId ?? null,
     operatorName: conversation.operatorName ?? null,
@@ -1737,6 +1740,29 @@ function recordFromJson(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? { ...(value as Record<string, unknown>) }
     : undefined;
+}
+
+function appealMetadataFromJson(value: unknown): ConversationAppealMetadata | undefined {
+  const record = recordFromJson(value);
+  if (!record) {
+    return undefined;
+  }
+
+  const metadata: ConversationAppealMetadata = {};
+  if (typeof record.anchorId === "string" && record.anchorId.trim()) {
+    metadata.anchorId = record.anchorId.trim();
+  }
+  if (typeof record.closedAt === "string" && record.closedAt.trim()) {
+    metadata.closedAt = record.closedAt.trim();
+  }
+  if (typeof record.parentConversationId === "string" && record.parentConversationId.trim()) {
+    metadata.parentConversationId = record.parentConversationId.trim();
+  }
+  if (typeof record.isRepeatAppeal === "boolean") {
+    metadata.isRepeatAppeal = record.isRepeatAppeal;
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 
 function lifecycleEventIdentityMatches(left: ConversationLifecycleEvent, right: ConversationLifecycleEvent): boolean {

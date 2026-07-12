@@ -11,7 +11,7 @@ export interface ProviderWebhookRouteInput {
   body: Record<string, unknown>;
   channel: "MAX" | "VK";
   channelConnectionId: string;
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent" | "recordDeliveryReceipt">;
   headers?: Record<string, string | undefined>;
   integrationRepository: Pick<IntegrationRepository, "findChannelConnectionAsync" | "findProviderConnectionCredentialByConnectionIdAsync">;

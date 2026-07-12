@@ -1,4 +1,4 @@
-import { getStatusMeta } from "./dialogModel.js";
+import { getStatusMeta, isRepeatAppeal } from "./dialogModel.js";
 
 const NOW_LABEL = "сейчас";
 const DEFAULT_LANGUAGE = "Русский";
@@ -17,7 +17,7 @@ export function mapApiConversation(input) {
   const messages = mapConversationTimeline(input?.messages, input?.lifecycleEvents);
   const previewFallback = messages.at(-1)?.text ?? "";
 
-  return {
+  const mapped = {
     id: nonEmptyString(input?.id, `conversation-${Date.now()}`),
     name: nonEmptyString(input?.name, "Новый клиент"),
     initials: nonEmptyString(input?.initials, buildInitials(input?.name)),
@@ -37,6 +37,7 @@ export function mapApiConversation(input) {
     clientSince: nonEmptyString(input?.clientSince, DEFAULT_CLIENT_SINCE),
     tags: Array.isArray(input?.tags) ? input.tags.map((tag) => String(tag)) : [],
     previous: Array.isArray(input?.previous) ? input.previous : [],
+    ...(isRecord(input?.metadata) ? { metadata: { ...input.metadata } } : {}),
     ...(nonEmptyString(input?.queueId) ? { queueId: nonEmptyString(input.queueId) } : {}),
     ...(isRecord(input?.rescueState) ? { rescue: { ...input.rescueState } } : {}),
     ...(nonEmptyString(input?.resolutionOutcome) ? { resolutionOutcome: nonEmptyString(input.resolutionOutcome) } : {}),
@@ -69,6 +70,12 @@ function mapBotHandoff(input) {
     sessionState: nonEmptyString(input.sessionState),
     topic: nonEmptyString(input.topic)
   };
+
+  if (isRepeatAppeal(mapped)) {
+    mapped.isRepeatAppeal = true;
+  }
+
+  return mapped;
 }
 
 export function mapLifecycleEvent(input) {
@@ -168,6 +175,9 @@ function lifecycleEventDetail(eventType, data) {
     "topic.changed": "Изменена тема диалога"
   };
   const base = labels[eventType] ?? nonEmptyString(eventType, "Событие диалога");
+  if (data.reason === "repeat_appeal") {
+    return "Создано повторное обращение";
+  }
   return data.reason ? `${base}: ${data.reason}` : base;
 }
 

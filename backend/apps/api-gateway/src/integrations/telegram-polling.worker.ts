@@ -7,7 +7,7 @@ import { resolveOrCreateTelegramConversation, telegramRoutingQueueId, telegramTe
 export interface TelegramPollingInput {
   apiBaseUrl?: string;
   autoAssignConversation?: (conversationId: string, tenantId: string) => Promise<unknown>;
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversation">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   fetcher?: TelegramHttpFetch;
   integrationRepository: TelegramConnectionReader;

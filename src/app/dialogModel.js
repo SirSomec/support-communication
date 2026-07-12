@@ -232,6 +232,24 @@ export function maskPhone(phone) {
   return phone.replace(/(\+7)\s(\d{3})\s(\d{3})-(\d{2})-(\d{2})/, "$1 *** ***-**-$5");
 }
 
+export const REPEAT_APPEAL_TAG = "repeat-appeal";
+
+export function isRepeatAppeal(conversation) {
+  if (!conversation) {
+    return false;
+  }
+
+  if (conversation.isRepeatAppeal) {
+    return true;
+  }
+
+  if (conversation.metadata?.isRepeatAppeal) {
+    return true;
+  }
+
+  return Array.isArray(conversation.tags) && conversation.tags.includes(REPEAT_APPEAL_TAG);
+}
+
 export function getStatusMeta(status) {
   return conversationStatusMeta[status] ?? conversationStatusMeta.active;
 }

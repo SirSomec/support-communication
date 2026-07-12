@@ -9,6 +9,10 @@ import type {
   RealtimeEvent
 } from "../conversation/conversation.repository.js";
 import {
+  resolveOrForkAppealConversation,
+  type AppealConversationMutation
+} from "../conversation/appeal-lifecycle.js";
+import {
   resolvePublicApiRequest,
   type PublicApiEnvironment,
   type PublicApiKeyLookup
@@ -35,7 +39,7 @@ export interface PublicSdkMessageRouteInput {
     pageUrl?: string;
     text?: string;
   };
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   environment: PublicApiEnvironment;
   lookup: PublicApiKeyLookup;
@@ -71,7 +75,7 @@ export interface PublicSdkRatingRouteInput {
 
 export async function resolveOrCreatePublicSdkConversation(
   input: PublicSdkConversationIdentityInput & {
-    conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
+    conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   }
 ): Promise<ConversationRecord | null> {
   const externalId = String(input.externalId ?? "").trim();
@@ -80,59 +84,63 @@ export async function resolveOrCreatePublicSdkConversation(
   }
 
   const requestedConversationId = String(input.conversationId ?? "").trim();
-  const fallbackConversationId = `sdk_${createHash("sha256")
+  const anchorId = `sdk_${createHash("sha256")
     .update(`${input.tenantId}:${externalId}`)
     .digest("hex")
     .slice(0, 24)}`;
-  const conversationId = requestedConversationId || fallbackConversationId;
-  const existing = await input.conversationRepository.findConversation(conversationId);
-  if (existing) {
-    if (resolveConversationTenantId(existing) !== input.tenantId) {
-      return null;
-    }
-    return existing;
-  }
+  const conversationId = requestedConversationId || anchorId;
 
-  const conversation: ConversationRecord = {
-    channel: "SDK",
-    clientSince: new Date().toISOString().slice(0, 10),
-    device: "Web",
-    entry: "SDK",
-    id: conversationId,
-    initials: initialsFromExternalId(externalId),
-    language: "Unknown",
-    messages: [],
-    name: `Visitor ${externalId}`,
-    phone: externalId,
-    preview: "",
-    previous: [],
-    ...(input.queueId?.trim() ? { queueId: input.queueId.trim() } : {}),
-    sla: "Active",
-    slaTone: "ok",
-    status: "active",
-    tags: compactTags(["sdk", `external:${externalId}`, input.pageUrl ? `page:${input.pageUrl}` : ""]),
-    tenantId: input.tenantId,
-    time: "now",
-    topic: "SDK / Web widget",
-    updatedAt: new Date().toISOString()
-  };
+  const resolved = await resolveOrForkAppealConversation({
+    anchorId,
+    conversationRepository: input.conversationRepository,
+    createInitial: () => ({
+      channel: "SDK",
+      clientSince: new Date().toISOString().slice(0, 10),
+      device: "Web",
+      entry: "SDK",
+      id: conversationId,
+      initials: initialsFromExternalId(externalId),
+      language: "Unknown",
+      messages: [],
+      name: `Visitor ${externalId}`,
+      phone: externalId,
+      preview: "",
+      previous: [],
+      ...(input.queueId?.trim() ? { queueId: input.queueId.trim() } : {}),
+      sla: "Active",
+      slaTone: "ok",
+      status: "active",
+      tags: compactTags(["sdk", `external:${externalId}`, input.pageUrl ? `page:${input.pageUrl}` : ""]),
+      tenantId: input.tenantId,
+      time: "now",
+      topic: "SDK / Web widget",
+      updatedAt: new Date().toISOString()
+    }),
+    createMutation: (conversation, eventType = "conversation.created") =>
+      conversationCreatedMutation(conversation, "sdk", eventType),
+    tenantId: input.tenantId
+  });
 
-  const mutation = await input.conversationRepository.saveConversationMutation(
-    conversationCreatedMutation(conversation, "sdk")
-  );
-  return mutation.conversation;
+  return resolved?.conversation ?? null;
 }
 
 function conversationCreatedMutation(
   conversation: ConversationRecord,
-  channel: string
-): { conversation: ConversationRecord; lifecycleEvent: ConversationLifecycleEvent; realtimeEvent: RealtimeEvent } {
+  channel: string,
+  eventType: AppealConversationMutation["lifecycleEvent"]["eventType"] = "conversation.created"
+): AppealConversationMutation {
   const occurredAt = new Date().toISOString();
-  const traceId = getCurrentTraceId() ?? createRequestTraceId(INTEGRATION_SERVICE, "conversation.created");
+  const traceId = getCurrentTraceId() ?? createRequestTraceId(INTEGRATION_SERVICE, eventType);
   const realtimeEvent: RealtimeEvent = {
-    data: { channel, direction: "inbound", ...(conversation.queueId ? { queueId: conversation.queueId } : {}) },
+    data: {
+      channel,
+      direction: "inbound",
+      ...(conversation.metadata?.isRepeatAppeal ? { isRepeatAppeal: true } : {}),
+      ...(conversation.metadata?.parentConversationId ? { parentConversationId: conversation.metadata.parentConversationId } : {}),
+      ...(conversation.queueId ? { queueId: conversation.queueId } : {})
+    },
     eventId: `rt_${randomUUID()}`,
-    eventName: "conversation.created",
+    eventName: eventType === "conversation.updated" ? "conversation.updated" : "conversation.created",
     occurredAt,
     resourceId: conversation.id,
     resourceType: "conversation",
@@ -145,12 +153,12 @@ function conversationCreatedMutation(
     actorName: null,
     actorType: "client",
     conversationId: conversation.id,
-    data: { channel, direction: "inbound", ...(conversation.queueId ? { queueId: conversation.queueId } : {}) },
-    eventType: "conversation.created",
+    data: realtimeEvent.data,
+    eventType,
     id: `lifecycle_${randomUUID()}`,
     ingestedAt: occurredAt,
     occurredAt,
-    reason: null,
+    reason: eventType === "conversation.created" && conversation.metadata?.isRepeatAppeal ? "repeat_appeal" : null,
     schemaVersion: "conversation-lifecycle/v1",
     source: "integration-service",
     sourceEventId: realtimeEvent.eventId,

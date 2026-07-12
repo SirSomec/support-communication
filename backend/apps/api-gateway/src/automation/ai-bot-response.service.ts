@@ -8,11 +8,13 @@ import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 import { formatSessionForPrompt } from "./agent-session-state.js";
 import { AgentSessionStateRepository } from "./agent-session-state.repository.js";
 import type { KnowledgeSourceBinding } from "./automation.types.js";
+import { recordBotAiRequest } from "./bot-observability.js";
 
 export interface AiBotResponseInput {
   conversationId?: string;
   instructions?: string;
   message: string;
+  scenarioId?: string;
   scenarioRevisionId?: string;
   sourceBindings: KnowledgeSourceBinding[];
   tenantId: string;
@@ -31,11 +33,16 @@ export class AiBotResponseService {
   ) {}
 
   async respond(input: AiBotResponseInput): Promise<AiBotResponse> {
+    const startedAt = Date.now();
     const connection = this.connections.list(input.tenantId).filter((item) => item.status === "ready" && item.disabledAt === null && item.capabilities.includes("chat_completion")).sort((a, b) => a.id.localeCompare(b.id))[0];
-    if (!connection) throw new Error("bot_ai_connection_not_ready");
-    const release = this.usage.reserve({ connectionId: connection.id, maxConcurrentRuns: connection.limits.maxConcurrentRuns, monthlyTokenBudget: connection.limits.monthlyTokenBudget, requestsPerMinute: connection.limits.requestsPerMinute, tenantId: input.tenantId, worstCaseTokens: Math.min(500, connection.limits.monthlyTokenBudget ?? 500) });
+    if (!connection) {
+      recordBotAiRequest({ errorCode: "bot_ai_connection_not_ready", latencyMs: Date.now() - startedAt, scenarioId: input.scenarioId, status: "error", tenantId: input.tenantId });
+      throw new Error("bot_ai_connection_not_ready");
+    }
+    let release: (() => void) | null = null;
     try {
-      const materials = await this.materials(input.tenantId, input.sourceBindings, input.message);
+      release = this.usage.reserve({ connectionId: connection.id, maxConcurrentRuns: connection.limits.maxConcurrentRuns, monthlyTokenBudget: connection.limits.monthlyTokenBudget, requestsPerMinute: connection.limits.requestsPerMinute, tenantId: input.tenantId, worstCaseTokens: Math.min(500, connection.limits.monthlyTokenBudget ?? 500) });
+      const materials = await this.materials(input.tenantId, input.sourceBindings, input.message, input.scenarioId);
       if (!materials.length) throw new Error("bot_ai_knowledge_not_ready");
       const session = input.conversationId ? this.sessions.get(input.tenantId, input.conversationId) : null;
       const secret = new SecretStore({ keyVersion: this.environment.AI_CONNECTIONS_KEY_VERSION ?? "local-v1", masterKeyBase64: this.environment.AI_CONNECTIONS_MASTER_KEY ?? this.environment.PROVIDER_CREDENTIAL_MASTER_KEY ?? "" }).decrypt(connection.secret);
@@ -44,7 +51,16 @@ export class AiBotResponseService {
         { role: "system", content: systemPrompt(input.instructions, materials.map((item) => item.content).join("\n\n"), session ? formatSessionForPrompt(session) : undefined) },
         { role: "user", content: input.message.slice(0, 4_000) }
       ] });
-      this.usage.recordUsage(input.tenantId, connection.id, completion.usage.totalTokens ?? 500);
+      const tokens = completion.usage.totalTokens ?? 500;
+      this.usage.recordUsage(input.tenantId, connection.id, tokens);
+      recordBotAiRequest({
+        connectionId: connection.id,
+        latencyMs: Date.now() - startedAt,
+        scenarioId: input.scenarioId,
+        status: "ok",
+        tenantId: input.tenantId,
+        tokens
+      });
       const text = completion.content.slice(0, 8_000);
       if (input.conversationId) {
         this.sessions.updateAfterRun({
@@ -55,18 +71,35 @@ export class AiBotResponseService {
           scenarioRevisionId: input.scenarioRevisionId ?? session?.scenarioRevisionId ?? null,
           summary: session?.summary || input.message.slice(0, 200),
           tenantId: input.tenantId,
-          tokensUsed: completion.usage.totalTokens ?? estimatePromptTokens(input.message, text),
+          tokensUsed: tokens,
           userText: input.message
         });
       }
       return { citations: materials.map(({ content: _content, ...citation }) => citation), model: completion.model, text };
+    } catch (error) {
+      const errorCode = error instanceof Error ? error.message : "bot_ai_unavailable";
+      recordBotAiRequest({
+        connectionId: connection.id,
+        errorCode,
+        latencyMs: Date.now() - startedAt,
+        scenarioId: input.scenarioId,
+        status: "error",
+        tenantId: input.tenantId
+      });
+      throw error;
     } finally {
-      release();
+      release?.();
     }
   }
 
-  private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string) {
-    const result = await new KnowledgeRetrievalService(this.sources, this.workspace).retrieve({ query: question, sourceBindings: bindings, tenantId, tokenBudget: 1_500 });
+  private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string, scenarioId?: string) {
+    const result = await new KnowledgeRetrievalService(this.sources, this.workspace).retrieve({
+      query: question,
+      scenarioId,
+      sourceBindings: bindings,
+      tenantId,
+      tokenBudget: 1_500
+    });
     return result.passages.map((passage) => ({ content: passage.content, endOffset: passage.citation.endOffset, sourceId: passage.citation.sourceId, startOffset: passage.citation.startOffset, title: passage.citation.title, version: passage.citation.sourceVersion }));
   }
 }

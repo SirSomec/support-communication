@@ -12,6 +12,7 @@ import { planBotRuntimeLabeledTransition, resolveBotRuntimeDeadLetterState, reso
 import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runtime.worker.js";
 import { matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
 import { AiBotResponseService, type AiBotResponse } from "./ai-bot-response.service.js";
+import { recordBotHandoff, recordBotTriggerMatch } from "./bot-observability.js";
 
 export interface BotRuntimeInboundEvent {
   channel: string;
@@ -64,9 +65,16 @@ export class BotRuntimeService {
         traceId: event.traceId
       });
       const node = resolved.scenario.flowNodes.find((item) => item.id === transition.nextNodeId)!;
-      const executed = await this.executeNode(node, event, existing?.context ?? {}, resolved.scenario.sourceBindings ?? [], resolved.version.versionId);
+      const executed = await this.executeNode(node, event, existing?.context ?? {}, resolved.scenario.sourceBindings ?? [], resolved.version.versionId, resolved.scenario.id);
       applyGeneratedMessage(transition.sideEffects, executed.aiResponse);
       if (executed.outcome === "ai_handoff_requested" && executed.handoffSummary) transition.sideEffects.push(createAiFailureHandoff(event, node, executed.handoffSummary));
+      if (executed.outcome === "handed_off" || executed.outcome === "ai_handoff_requested") {
+        recordBotHandoff({
+          reason: String(executed.handoffSummary?.reason ?? executed.context?.lastAiFailure ?? executed.outcome),
+          scenarioId: resolved.scenario.id,
+          tenantId: event.tenantId
+        });
+      }
       const instance = makeInstance(existing, event, resolved.version, transition.nextNodeId, executed.status, executed.context, now);
       const step = makeStep(instance, event, node, executed, transition.sideEffects, now);
       return this.repository.commitBotRuntimeTransitionAsync({ expectedCurrentNodeId: existing?.currentNodeId, instance, step });
@@ -104,6 +112,7 @@ export class BotRuntimeService {
   private async resolveScenario(event: BotRuntimeInboundEvent, existing?: AutomationBotRuntimeInstance): Promise<{ scenario: BotScenario; version: AutomationBotScenarioVersion }> {
     const state = await this.repository.readStateAsync();
     const scenarioId = existing?.scenarioId ?? event.scenarioId;
+    const evaluatingTrigger = !scenarioId;
     const candidates = state.botScenarios.filter((item) => item.tenantId === event.tenantId
       && (!scenarioId || item.id === scenarioId)
       && item.channels.includes(event.channel)
@@ -115,6 +124,14 @@ export class BotRuntimeService {
         .sort((left, right) => scenarioTriggerPriority(right.scenario, right.rule) - scenarioTriggerPriority(left.scenario, left.rule)
           || left.scenario.id.localeCompare(right.scenario.id)
           || left.rule.id.localeCompare(right.rule.id))[0]?.scenario;
+    if (evaluatingTrigger) {
+      recordBotTriggerMatch({
+        channel: event.channel,
+        result: scenario ? "matched" : "no_match",
+        scenarioId: scenario?.id,
+        tenantId: event.tenantId
+      });
+    }
     if (!scenario) throw new Error("bot_runtime_published_scenario_not_found");
     const versions = state.botScenarioVersions.filter((item) => item.tenantId === event.tenantId && item.scenarioId === scenario.id && item.status === "published");
     const version = existing
@@ -134,7 +151,14 @@ export class BotRuntimeService {
     };
   }
 
-  private async executeNode(node: BotFlowNode, event: BotRuntimeInboundEvent, previous: Record<string, unknown>, sourceBindings: import("./automation.types.js").KnowledgeSourceBinding[], scenarioRevisionId?: string) {
+  private async executeNode(
+    node: BotFlowNode,
+    event: BotRuntimeInboundEvent,
+    previous: Record<string, unknown>,
+    sourceBindings: import("./automation.types.js").KnowledgeSourceBinding[],
+    scenarioRevisionId?: string,
+    scenarioId?: string
+  ) {
     const context = { ...previous, ...(event.payload?.context as Record<string, unknown> | undefined ?? {}) };
     if (node.type === "contact_request") {
       const field = String(node.config?.field ?? "contact");
@@ -146,7 +170,20 @@ export class BotRuntimeService {
       const webhookResponse = await this.callWebhook(node, event, context);
       return { context: { ...context, webhook: webhookResponse }, outcome: "webhook_succeeded", status: "active" as const, webhookResponse };
     }
-    if (node.type === "handoff") return { context, handoffSummary: { botId: event.scenarioId, collectedFields: redactObject(context), nodeId: node.id, queue: node.title ?? "default" }, outcome: "handed_off", status: "handoff" as const };
+    if (node.type === "handoff") {
+      return {
+        context,
+        handoffSummary: {
+          botId: scenarioId ?? event.scenarioId,
+          collectedFields: redactObject(context),
+          nodeId: node.id,
+          queue: node.title ?? "default",
+          reason: "handoff_requested"
+        },
+        outcome: "handed_off",
+        status: "handoff" as const
+      };
+    }
     if (node.type === "ai_reply") {
       const message = inboundText(event.payload ?? {});
       if (!message) throw new Error("bot_ai_message_required");
@@ -155,6 +192,7 @@ export class BotRuntimeService {
           conversationId: event.conversationId,
           instructions: typeof node.config?.instructions === "string" ? node.config.instructions : node.title,
           message,
+          scenarioId: scenarioId ?? event.scenarioId,
           scenarioRevisionId,
           sourceBindings,
           tenantId: event.tenantId
@@ -162,8 +200,24 @@ export class BotRuntimeService {
         return { aiResponse, context: { ...context, lastAiResponse: { citations: aiResponse.citations, model: aiResponse.model } }, outcome: "ai_reply_queued", status: "active" as const };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "bot_ai_unavailable";
-        const handoffSummary = { botId: event.scenarioId ?? "", collectedFields: redactObject(context), nodeId: node.id, queue: String(node.config?.handoffQueue ?? "default"), reason: "ai_unavailable" };
-        return { aiResponse: { citations: [], model: "unavailable", text: String(node.config?.fallbackMessage ?? "Сейчас я не могу надёжно ответить по материалам. Передам вопрос специалисту.") }, context: { ...context, lastAiFailure: reason }, handoffSummary, outcome: "ai_handoff_requested", status: "handoff" as const };
+        const handoffSummary = {
+          botId: scenarioId ?? event.scenarioId ?? "",
+          collectedFields: redactObject(context),
+          nodeId: node.id,
+          queue: String(node.config?.handoffQueue ?? "default"),
+          reason: reason.startsWith("bot_ai_") ? reason : "ai_unavailable"
+        };
+        return {
+          aiResponse: {
+            citations: [],
+            model: "unavailable",
+            text: String(node.config?.fallbackMessage ?? "Сейчас я не могу надёжно ответить по материалам. Передам вопрос специалисту.")
+          },
+          context: { ...context, lastAiFailure: reason },
+          handoffSummary,
+          outcome: "ai_handoff_requested",
+          status: "handoff" as const
+        };
       }
     }
     if (node.type === "fallback") return { context, outcome: "fallback", status: "active" as const };

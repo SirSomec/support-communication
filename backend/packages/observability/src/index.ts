@@ -2,6 +2,19 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { redactSensitiveValue } from "@support-communication/redaction";
 
+export {
+  METRIC_BUCKETS,
+  MetricsRegistry,
+  metricsRegistry,
+  resetMetricsRegistry,
+  sanitizeMetricLabel,
+  type MetricLabelValue,
+  type MetricLabels,
+  type MetricSnapshot,
+  type CounterSnapshot,
+  type HistogramSnapshot
+} from "./metrics.js";
+
 export interface LogContext {
   operation?: string;
   service: string;

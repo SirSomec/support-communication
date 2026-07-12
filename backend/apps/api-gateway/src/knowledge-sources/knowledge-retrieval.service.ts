@@ -2,9 +2,11 @@ import { KnowledgeSourceRepository } from "./knowledge-source.repository.js";
 import { isKnowledgeSourceRetrievalEligible } from "./knowledge-source.types.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 import { buildRetrievalCacheKey, KnowledgeRetrievalCache } from "./knowledge-retrieval-cache.js";
+import { recordBotRetrieval } from "../automation/bot-observability.js";
 
 export interface KnowledgeRetrievalInput {
   query: string;
+  scenarioId?: string;
   sourceBindings: Array<{ sourceId: string; sourceVersion?: string }>;
   tenantId: string;
   tokenBudget?: number;
@@ -47,7 +49,15 @@ export class KnowledgeRetrievalService {
     });
     const cached = this.cache.get(cacheKey);
     if (cached) {
-      return { cache: "hit", ...cached };
+      const hit = { cache: "hit" as const, ...cached };
+      recordBotRetrieval({
+        cache: "hit",
+        passageCount: hit.passages.length,
+        scenarioId: input.scenarioId,
+        tenantId: input.tenantId,
+        topScore: hit.passages[0]?.score
+      });
+      return hit;
     }
 
     const queryTerms = terms(input.query);
@@ -75,6 +85,13 @@ export class KnowledgeRetrievalService {
     this.cache.set(cacheKey, result, {
       sourceIds: input.sourceBindings.map((binding) => binding.sourceId),
       tenantId: input.tenantId
+    });
+    recordBotRetrieval({
+      cache: "miss",
+      passageCount: passages.length,
+      scenarioId: input.scenarioId,
+      tenantId: input.tenantId,
+      topScore: passages[0]?.score
     });
     return { cache: "miss", ...result };
   }

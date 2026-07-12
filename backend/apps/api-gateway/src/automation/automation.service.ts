@@ -19,6 +19,8 @@ import {
   buildScenarioOperationalSummariesFromState,
   buildTenantAiUsageSummary
 } from "./scenario-operational-summary.js";
+import { recordBotPublishFailure, recordBotSourceError } from "./bot-observability.js";
+import { metricsRegistry } from "@support-communication/observability";
 
 const AUTOMATION_SERVICE = "automationService";
 const VALID_NODE_TYPES = new Set(["message", "ai_reply", "quick_replies", "condition", "contact_request", "webhook", "handoff", "fallback"]);
@@ -123,6 +125,9 @@ export class AutomationService {
         proactiveRules: clone(state.proactiveRules.filter((rule) => proactiveRuleTenantId(rule) === tenantId)),
         runtimeMetrics: clone(state.workspaceRuntimeMetrics),
         scenarioOperations: clone(buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)),
+        telemetry: {
+          metrics: metricsRegistry().snapshot().filter((metric) => metric.name.startsWith("bot_"))
+        },
         tenantId
       }
     });
@@ -393,28 +398,28 @@ export class AutomationService {
     const validation = parseAndValidateBotFlow(request);
 
     if (!scenarioId) {
-      return invalidEnvelope("publishBotScenario", "bot_scenario_id_required", "Bot scenario id is required.", {});
+      return publishFailure(tenantId, undefined, "bot_scenario_id_required", invalidEnvelope("publishBotScenario", "bot_scenario_id_required", "Bot scenario id is required.", {}));
     }
 
     const existing = this.scenarios.find((item) => item.id === scenarioId) ?? await this.automationRepository.findBotScenario(scenarioId);
     if (!existing || scenarioTenantId(existing) !== tenantId) {
-      return invalidEnvelope("publishBotScenario", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId });
+      return publishFailure(tenantId, scenarioId, "bot_scenario_not_found", invalidEnvelope("publishBotScenario", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId }));
     }
     if (validation.errors.length) {
-      return invalidEnvelope("publishBotScenario", "bot_flow_invalid", validation.errors.join("; "), {
+      return publishFailure(tenantId, scenarioId, "bot_flow_invalid", invalidEnvelope("publishBotScenario", "bot_flow_invalid", validation.errors.join("; "), {
         scenarioId
-      });
+      }));
     }
 
     const triggerRules = resolveScenarioTriggerRules(request, existing.triggerRules ?? defaultScenarioTriggerRules());
     const triggerErrors = validateScenarioTriggerRules(triggerRules);
     if (triggerErrors.length) {
-      return invalidEnvelope("publishBotScenario", "bot_trigger_invalid", triggerErrors.join("; "), { scenarioId, violations: triggerErrors });
+      return publishFailure(tenantId, scenarioId, "bot_trigger_invalid", invalidEnvelope("publishBotScenario", "bot_trigger_invalid", triggerErrors.join("; "), { scenarioId, violations: triggerErrors }));
     }
     const state = await this.automationRepository.readStateAsync();
     const triggerConflict = findScenarioTriggerConflict(state.botScenarios, scenarioId, tenantId, triggerRules, normalizeScenarioPriority(request.priority ?? existing.priority));
     if (triggerConflict) {
-      return conflictEnvelope("publishBotScenario", "trigger_conflict", "Another published scenario already owns this keyword phrase and priority.", triggerConflict);
+      return publishFailure(tenantId, scenarioId, "trigger_conflict", conflictEnvelope("publishBotScenario", "trigger_conflict", "Another published scenario already owns this keyword phrase and priority.", triggerConflict));
     }
     const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? existing.sourceBindings ?? []);
     const unavailableSourceId = sourceBindings.find((binding) => {
@@ -422,7 +427,8 @@ export class AutomationService {
       return !source || !isKnowledgeSourceRetrievalEligible(source);
     })?.sourceId;
     if (unavailableSourceId) {
-      return invalidEnvelope("publishBotScenario", "knowledge_source_not_ready", "Every selected knowledge source must be ready and approved before publication.", { scenarioId, sourceId: unavailableSourceId });
+      recordBotSourceError({ failureCode: "knowledge_source_not_ready", tenantId });
+      return publishFailure(tenantId, scenarioId, "knowledge_source_not_ready", invalidEnvelope("publishBotScenario", "knowledge_source_not_ready", "Every selected knowledge source must be ready and approved before publication.", { scenarioId, sourceId: unavailableSourceId }));
     }
     const prerequisiteViolations: string[] = [];
     const nodes = validation.payload?.flowNodes ?? [];
@@ -432,7 +438,7 @@ export class AutomationService {
       if (!nodes.some((node) => node.type === "handoff" || node.type === "fallback")) prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");
     }
     if (prerequisiteViolations.length) {
-      return invalidEnvelope("publishBotScenario", "bot_publish_prerequisites_invalid", prerequisiteViolations.join(" "), { scenarioId, violations: prerequisiteViolations });
+      return publishFailure(tenantId, scenarioId, "bot_publish_prerequisites_invalid", invalidEnvelope("publishBotScenario", "bot_publish_prerequisites_invalid", prerequisiteViolations.join(" "), { scenarioId, violations: prerequisiteViolations }));
     }
 
     const idempotencyKey = request.idempotencyKey?.trim() || actionIdempotencyKey(context);
@@ -451,10 +457,10 @@ export class AutomationService {
 
     if (cached) {
       if (cached.fingerprint !== fingerprint) {
-        return conflictEnvelope("publishBotScenario", "idempotency_key_reused", "Idempotency key was already used for a different bot publish request.", {
+        return publishFailure(tenantId, scenarioId, "idempotency_key_reused", conflictEnvelope("publishBotScenario", "idempotency_key_reused", "Idempotency key was already used for a different bot publish request.", {
           idempotencyKey,
           scenarioId
-        });
+        }));
       }
 
       return createEnvelope({
@@ -470,7 +476,7 @@ export class AutomationService {
     }
 
     if (!canTransitionBotScenario(existing.status, "published")) {
-      return conflictEnvelope("publishBotScenario", "bot_scenario_transition_invalid", `Bot scenario cannot be published from ${existing.status}.`, { scenarioId, status: existing.status });
+      return publishFailure(tenantId, scenarioId, "bot_scenario_transition_invalid", conflictEnvelope("publishBotScenario", "bot_scenario_transition_invalid", `Bot scenario cannot be published from ${existing.status}.`, { scenarioId, status: existing.status }));
     }
 
     const result = {
@@ -1332,6 +1338,16 @@ function proactiveRuleTenantId(rule: ProactiveRule): string | null {
 
 function scopedBotScenarios(scenarios: BotScenario[], tenantId: string): BotScenario[] {
   return scenarios.filter((scenario) => scenarioTenantId(scenario) === tenantId);
+}
+
+function publishFailure<T extends BackendEnvelope<Record<string, unknown>>>(
+  tenantId: string,
+  scenarioId: string | undefined,
+  errorCode: string,
+  envelope: T
+): T {
+  recordBotPublishFailure({ errorCode, scenarioId, tenantId });
+  return envelope;
 }
 
 function tenantRequiredEnvelope(operation: string): BackendEnvelope<Record<string, unknown>> {

@@ -1,9 +1,8 @@
 services:
   frontend:
     profiles: ["prisma-postgres"]
-    build:
-      args:
-        VITE_ENABLE_SERVICE_ADMIN: "true"
+    build: {}
+
 
   api-gateway:
     profiles: ["prisma-postgres"]

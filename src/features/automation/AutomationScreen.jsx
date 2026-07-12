@@ -22,6 +22,7 @@ import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } fr
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
 import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
 import { ScenarioArchiveConfirmModal, ScenarioPauseConfirmModal, ScenarioPublishChecklistModal } from "./ScenarioLifecycleModals.jsx";
+import { ScenarioOperationalPanel } from "./ScenarioOperationalPanel.jsx";
 import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScenarioFromWizard, formatScenarioStatusLabel, loadAdvancedModePreference, saveAdvancedModePreference } from "./automationModel.js";
 
 export function AutomationScreen({ onBack, onToast, access }) {
@@ -50,6 +51,8 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [pauseTarget, setPauseTarget] = useState(null);
   const [publishChecklistOpen, setPublishChecklistOpen] = useState(false);
   const [advancedMode, setAdvancedMode] = useState(() => loadAdvancedModePreference());
+  const [scenarioOperations, setScenarioOperations] = useState([]);
+  const [aiUsage, setAiUsage] = useState(null);
 
   function toggleAdvancedMode(nextValue) {
     const enabled = Boolean(nextValue);
@@ -86,6 +89,8 @@ export function AutomationScreen({ onBack, onToast, access }) {
     setProactiveRules(Array.isArray(response.data?.proactiveRules) ? response.data.proactiveRules : []);
     setRuntimeMetrics(normalizeRuntimeMetrics(response.data?.runtimeMetrics));
     setAiReadiness(response.data?.aiReadiness ?? { status: "not_configured" });
+    setAiUsage(response.data?.aiUsage ?? null);
+    setScenarioOperations(Array.isArray(response.data?.scenarioOperations) ? response.data.scenarioOperations : []);
     setScenarioVersions(Array.isArray(response.data?.botScenarioVersions) ? response.data.botScenarioVersions : []);
     setWorkspacePartial(Boolean(response.data?.partial));
     setScenarioItems(scenarios);
@@ -112,6 +117,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
   const selectedScenario = scenarioItems.find((scenario) => scenario.id === selectedScenarioId) ?? scenarioItems[0] ?? null;
   const selectedNode = selectedScenario?.flowNodes?.find((node) => node.id === selectedNodeId) ?? selectedScenario?.flowNodes?.[0] ?? null;
+  const selectedOperations = scenarioOperations.find((item) => item.scenarioId === selectedScenario?.id) ?? null;
   const canManageAutomation = access.canManageSettings;
   const isSaving = Boolean(savingAction);
 
@@ -719,14 +725,11 @@ export function AutomationScreen({ onBack, onToast, access }) {
           </div>
         </section>
 
-        <section className="work-panel bot-handoff-card">
-          <SectionTitle title="Handoff summary" action={selectedScenario.handoff} />
-          <p>Оператор получает trigger, собранные поля, последний ответ бота и причину передачи до первого ручного сообщения.</p>
-          <div>
-            <span>Поля: {selectedScenario.validationRules.join(", ")}</span>
-            <span>Последний тест: {selectedScenario.testCases[0]?.expected ?? "handoff"}</span>
-          </div>
-        </section>
+        <ScenarioOperationalPanel
+          aiUsage={aiUsage}
+          operations={selectedOperations}
+          scenarioName={selectedScenario.name}
+        />
       </div>
 
       <div className="automation-layout">

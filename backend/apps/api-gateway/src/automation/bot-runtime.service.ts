@@ -220,7 +220,7 @@ function createAiFailureHandoff(event: BotRuntimeInboundEvent, node: BotFlowNode
       resourceId: event.conversationId,
       resourceType: "conversation",
       schemaVersion: "bot-handoff/v1",
-      summary: { botId: summary.botId ?? event.scenarioId ?? "", nodeId: summary.nodeId, queue: summary.queue, reason: "handoff_requested" },
+      summary: { botId: summary.botId ?? event.scenarioId ?? "", nodeId: summary.nodeId, queue: summary.queue, reason: summary.reason ?? "handoff_requested" },
       tenantId: event.tenantId,
       traceId: event.traceId
     },

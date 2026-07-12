@@ -258,5 +258,15 @@ function automationContextFromRequest(request: TenantOperatorRequest, extra: Par
   const serviceAdminContext = (request as TenantOperatorRequest & { serviceAdminContext?: { currentTenantId?: string } }).serviceAdminContext;
   const tenantId = request.tenantOperatorContext?.tenantId ?? serviceAdminContext?.currentTenantId;
   const actor = request.tenantOperatorContext?.userId ?? (request as TenantOperatorRequest & { serviceAdminContext?: { actor?: { id?: string } } }).serviceAdminContext?.actor?.id;
-  return tenantId ? { ...extra, ...(actor ? { actor } : {}), tenantId } : {};
+  const permissions = request.tenantOperatorContext?.permissions ?? [];
+  const isServiceAdmin = Boolean(serviceAdminContext);
+  return tenantId
+    ? {
+      ...extra,
+      ...(actor ? { actor } : {}),
+      isServiceAdmin,
+      permissions,
+      tenantId
+    }
+    : {};
 }

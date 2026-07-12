@@ -903,3 +903,117 @@
   color: #33445c;
   line-height: 1.45;
 }
+
+.scenario-ops-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.scenario-ops-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.scenario-ops-summary span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.scenario-ops-grid {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.scenario-ops-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fbff;
+}
+
+.scenario-ops-grid dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.scenario-ops-grid dd {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  color: #17233a;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.scenario-ops-lists {
+  display: grid;
+  gap: 10px;
+}
+
+.scenario-ops-list {
+  display: grid;
+  gap: 6px;
+}
+
+.scenario-ops-list strong {
+  font-size: 12px;
+}
+
+.scenario-ops-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.scenario-ops-list ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scenario-ops-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  align-items: start;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.scenario-ops-list li svg {
+  grid-row: 1 / span 2;
+  margin-top: 2px;
+  color: #b45309;
+}
+
+.scenario-ops-list time {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.scenario-ops-list span {
+  color: #17233a;
+  line-height: 1.35;
+}
+
+@media (min-width: 900px) {
+  .scenario-ops-lists {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

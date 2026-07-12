@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { AiConnectionRepository } from "../ai-connections/ai-connection.repository.js";
+import { AiUsageRepository } from "../ai-connections/ai-usage.repository.js";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import type { BotFlowEdge, BotFlowNode, BotScenario, BotTriggerRule, ProactiveRule } from "./automation.types.js";
 import {
@@ -14,6 +15,10 @@ import { DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS, ProactiveExposureRepository } 
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
 import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
 import { isKnowledgeSourceRetrievalEligible } from "../knowledge-sources/knowledge-source.types.js";
+import {
+  buildScenarioOperationalSummariesFromState,
+  buildTenantAiUsageSummary
+} from "./scenario-operational-summary.js";
 
 const AUTOMATION_SERVICE = "automationService";
 const VALID_NODE_TYPES = new Set(["message", "ai_reply", "quick_replies", "condition", "contact_request", "webhook", "handoff", "fallback"]);
@@ -69,6 +74,8 @@ interface CreateBotHandoffPayload {
 export interface AutomationRequestContext {
   actor?: string;
   idempotencyKey?: string;
+  isServiceAdmin?: boolean;
+  permissions?: string[];
   reason?: string;
   tenantId?: string;
   traceId?: string;
@@ -95,6 +102,8 @@ export class AutomationService {
     }
     const state = await this.automationRepository.readStateAsync();
     this.syncLocalCaches(state);
+    const scenarios = scopedBotScenarios(state.botScenarios, tenantId);
+    const aiUsage = resolveTenantAiUsage(tenantId, context);
 
     return createEnvelope({
       service: AUTOMATION_SERVICE,
@@ -104,14 +113,16 @@ export class AutomationService {
       meta: apiMeta({ tenantId }),
       data: {
         aiReadiness: aiReadinessForTenant(tenantId),
+        aiUsage,
         auditEvents: [
           ...clone(state.workspaceAuditEvents.filter((event) => scenarioTenantId(event) === tenantId)),
           ...clone(state.botPublishAuditEvents.filter((event) => scenarioTenantId(event) === tenantId))
         ],
-        botScenarios: clone(scopedBotScenarios(state.botScenarios, tenantId)),
+        botScenarios: clone(scenarios),
         botScenarioVersions: clone(state.botScenarioVersions.filter((version) => scenarioTenantId(version) === tenantId)),
         proactiveRules: clone(state.proactiveRules.filter((rule) => proactiveRuleTenantId(rule) === tenantId)),
         runtimeMetrics: clone(state.workspaceRuntimeMetrics),
+        scenarioOperations: clone(buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)),
         tenantId
       }
     });
@@ -275,12 +286,20 @@ export class AutomationService {
       return invalidEnvelope("fetchBotScenario", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId });
     }
     const versions = await this.automationRepository.listBotScenarioVersions(scenarioId);
+    const state = await this.automationRepository.readStateAsync();
+    const aiUsage = resolveTenantAiUsage(tenantId, context);
+    const operations = buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)
+      .find((item) => item.scenarioId === scenarioId) ?? null;
     return createEnvelope({
       service: AUTOMATION_SERVICE,
       operation: "fetchBotScenario",
       traceId: automationTraceId("fetchBotScenario"),
       meta: apiMeta({ tenantId }),
-      data: { scenario: clone(scenario), versions: clone(versions.filter((version) => version.tenantId === tenantId)) }
+      data: {
+        operations: clone(operations),
+        scenario: clone(scenario),
+        versions: clone(versions.filter((version) => version.tenantId === tenantId))
+      }
     });
   }
 
@@ -1056,6 +1075,22 @@ function aiReadinessForTenant(tenantId: string): { connectionCount: number; read
   const connections = AiConnectionRepository.default().list(tenantId);
   const readyConnectionCount = connections.filter((connection) => connection.status === "ready" && connection.disabledAt === null && connection.capabilities.includes("chat_completion")).length;
   return { connectionCount: connections.length, readyConnectionCount, status: readyConnectionCount ? "ready" : connections.length ? "unavailable" : "not_configured" };
+}
+
+function resolveTenantAiUsage(tenantId: string, context: AutomationRequestContext) {
+  const connections = AiConnectionRepository.default().list(tenantId);
+  const primary = connections.find((connection) => connection.status === "ready" && connection.disabledAt === null)
+    ?? connections[0];
+  if (!primary) {
+    return buildTenantAiUsageSummary({ usedTokens: 0, viewer: context });
+  }
+  const usage = AiUsageRepository.default().current(tenantId, primary.id);
+  return buildTenantAiUsageSummary({
+    month: usage.month,
+    monthlyTokenBudget: primary.limits.monthlyTokenBudget ?? null,
+    usedTokens: usage.usedTokens,
+    viewer: context
+  });
 }
 
 async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string, testMessage: string): Promise<Record<string, unknown>> {

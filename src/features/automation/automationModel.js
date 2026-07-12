@@ -424,6 +424,75 @@ export function formatScenarioStatusLabel(status) {
   return scenarioStatusLabels[value] ?? (String(status ?? "").trim() || "Без статуса");
 }
 
+export function formatFallbackReasonLabel(reason) {
+  const value = String(reason ?? "").trim();
+  if (!value) return "Причина не зафиксирована";
+  const labels = {
+    ai_unavailable: "AI недоступен",
+    bot_ai_concurrency_limit_reached: "Достигнут лимит параллельных AI-запросов",
+    bot_ai_quota_exhausted: "Исчерпан месячный бюджет токенов",
+    bot_ai_rate_limit_reached: "Превышен лимит запросов в минуту",
+    handoff: "Передача оператору",
+    handoff_requested: "Запрошена передача оператору",
+    webhook_timeout: "Таймаут webhook"
+  };
+  return labels[value] ?? value;
+}
+
+export function formatAiUsageCostBucket(bucket) {
+  const value = String(bucket ?? "").trim().toLowerCase();
+  if (value === "low") return "низкая";
+  if (value === "medium") return "средняя";
+  if (value === "high") return "высокая";
+  return "нет";
+}
+
+export function buildScenarioOperationalView(operations = null, aiUsage = null) {
+  const source = operations && typeof operations === "object" ? operations : {};
+  const usage = aiUsage ?? source.aiUsage ?? null;
+  const recentFailures = Array.isArray(source.recentFailures) ? source.recentFailures : [];
+  const recentHandoffs = Array.isArray(source.recentHandoffs) ? source.recentHandoffs : [];
+  const recentPublishes = Array.isArray(source.recentPublishes) ? source.recentPublishes : [];
+  const lastCitations = Array.isArray(source.lastCitations) ? source.lastCitations : [];
+
+  return {
+    citationsLabel: lastCitations.length
+      ? lastCitations.map((item) => `${item.title}${item.version != null ? ` v${item.version}` : ""}`).join(", ")
+      : "Пока нет citations",
+    failureCount: recentFailures.length,
+    failures: recentFailures.slice(0, 5).map((item) => ({
+      detail: item.error ? formatFallbackReasonLabel(item.error) : formatFallbackReasonLabel(item.outcome),
+      id: `${item.conversationId}-${item.at}-${item.outcome}`,
+      when: formatListTimestamp(item.at)
+    })),
+    fallbackReasonLabel: formatFallbackReasonLabel(source.lastFallbackReason),
+    handoffCount: recentHandoffs.length,
+    handoffs: recentHandoffs.slice(0, 5).map((item) => ({
+      detail: [item.queue, formatFallbackReasonLabel(item.reason)].filter(Boolean).join(" · "),
+      id: `${item.conversationId}-${item.at}`,
+      when: formatListTimestamp(item.at)
+    })),
+    publishCount: recentPublishes.length,
+    publishes: recentPublishes.slice(0, 5).map((item) => ({
+      detail: `${item.actor} · ${item.versionId}`,
+      id: `${item.versionId}-${item.at}`,
+      when: formatListTimestamp(item.at)
+    })),
+    statusLabel: formatScenarioStatusLabel(source.status),
+    statusTone: scenarioStatusTone(source.status),
+    usage: usage
+      ? {
+        budgetLabel: usage.monthlyTokenBudget != null
+          ? `${usage.usedTokens} / ${usage.monthlyTokenBudget} ток.`
+          : `${usage.usedTokens} ток.`,
+        costLabel: `оценка ${formatAiUsageCostBucket(usage.estimatedCostBucket)}${usage.estimatedCostUsd ? ` · ~$${Number(usage.estimatedCostUsd).toFixed(4)}` : ""}`,
+        month: usage.month
+      }
+      : null
+  };
+}
+
+
 export function scenarioStatusTone(status) {
   const value = String(status ?? "").trim().toLowerCase();
   if (value === "published") return "ok";

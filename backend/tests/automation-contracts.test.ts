@@ -269,6 +269,89 @@ describe("automation bot scenario contracts", () => {
     assert.equal(audit?.actor, "operator-8");
     assert.equal(audit?.traceId, "trc-trigger-8");
   });
+
+  it("exposes role-scoped scenario operational data in the workspace", async () => {
+    const repository = AutomationRepository.inMemory(createEmptyAutomationState());
+    await repository.saveBotScenario({
+      channels: ["SDK"],
+      flowEdges: [],
+      flowNodes: [{ id: "ai", type: "ai_reply", title: "AI" }],
+      id: "bot-ops-workspace",
+      name: "Ops workspace",
+      schemaVersion: "bot-flow/v1",
+      status: "published",
+      tenantId: "tenant-volga"
+    });
+    await repository.saveBotPublishAuditEvent({
+      action: "bot.publish",
+      actor: "admin-1",
+      auditId: "aud-ops-1",
+      createdAt: "2026-07-12T10:00:00.000Z",
+      idempotencyKey: "ops-1",
+      immutable: true,
+      runtimeVersion: "v1",
+      scenarioId: "bot-ops-workspace",
+      tenantId: "tenant-volga",
+      versionId: "v1"
+    });
+    await repository.commitBotRuntimeTransitionAsync({
+      instance: {
+        attempts: 1,
+        context: { lastAiFailure: "bot_ai_quota_exhausted" },
+        conversationId: "conv-ops",
+        createdAt: "2026-07-12T11:00:00.000Z",
+        currentNodeId: "ai",
+        id: "rt-ops",
+        lastError: null,
+        nextAttemptAt: null,
+        scenarioId: "bot-ops-workspace",
+        status: "handoff",
+        tenantId: "tenant-volga",
+        updatedAt: "2026-07-12T11:05:00.000Z",
+        versionId: "v1"
+      },
+      step: {
+        conversationId: "conv-ops",
+        createdAt: "2026-07-12T11:05:00.000Z",
+        error: null,
+        handoffSummary: { queue: "Л1", reason: "bot_ai_quota_exhausted" },
+        id: "step-ops",
+        inputEvent: { scenarioId: "bot-ops-workspace" },
+        inputEventId: "evt-ops",
+        lifecycleEvent: null,
+        nodeId: "ai",
+        nodeType: "ai_reply",
+        outcome: "ai_handoff_requested",
+        runtimeId: "rt-ops",
+        sideEffects: [{
+          descriptor: { payload: { citations: [{ sourceId: "src-1", title: "Оплата", version: 2 }] } },
+          kind: "message_delivery"
+        }],
+        tenantId: "tenant-volga",
+        webhookResponse: null
+      }
+    });
+
+    const automation = new AutomationService(repository);
+    const reader = await automation.fetchAutomationWorkspace({
+      permissions: ["automation.read"],
+      tenantId: "tenant-volga"
+    });
+    const manager = await automation.fetchAutomationWorkspace({
+      permissions: ["settings.manage"],
+      tenantId: "tenant-volga"
+    });
+    const ops = (reader.data.scenarioOperations as Array<Record<string, unknown>>).find((item) => item.scenarioId === "bot-ops-workspace");
+
+    assert.equal(reader.status, "ok");
+    assert.equal(ops?.status, "published");
+    assert.equal((ops?.recentPublishes as Array<Record<string, unknown>>)[0]?.versionId, "v1");
+    assert.equal((ops?.recentHandoffs as Array<Record<string, unknown>>)[0]?.reason, "bot_ai_quota_exhausted");
+    assert.equal(ops?.lastFallbackReason, "bot_ai_quota_exhausted");
+    assert.equal((ops?.lastCitations as Array<Record<string, unknown>>)[0]?.title, "Оплата");
+    assert.equal(reader.data.aiUsage, null);
+    assert.equal(typeof (manager.data.aiUsage as { usedTokens?: number })?.usedTokens, "number");
+  });
 });
 
 function sourceFixture(id, tenantId, status, approvalStatus) {

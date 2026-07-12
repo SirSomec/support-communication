@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildScenarioListRow,
+  buildScenarioOperationalView,
   createScenarioFromWizard,
   describeMatchMode,
   describeScenarioTrigger,
+  formatFallbackReasonLabel,
   formatScenarioStatusLabel,
   scenarioStatusTone
 } from "../src/features/automation/automationModel.js";
@@ -68,5 +70,34 @@ describe("BAI-600 scenario list model", () => {
     assert.equal(row.aiSummary, "Без AI");
     assert.equal(row.hasErrors, false);
     assert.equal(row.lastPublishedLabel, "Ещё не публиковался");
+  });
+
+  it("formats operational data for the selected scenario within role visibility", () => {
+    const view = buildScenarioOperationalView({
+      lastCitations: [{ sourceId: "src-1", title: "Оплата", version: 2 }],
+      lastFallbackReason: "bot_ai_quota_exhausted",
+      recentFailures: [{ at: "2026-07-12T11:00:00.000Z", conversationId: "c1", error: "webhook_timeout", outcome: "dead_lettered" }],
+      recentHandoffs: [{ at: "2026-07-12T11:05:00.000Z", conversationId: "c1", queue: "Л1", reason: "ai_unavailable" }],
+      recentPublishes: [{ action: "bot.publish", actor: "admin", at: "2026-07-12T10:00:00.000Z", versionId: "v1" }],
+      status: "published"
+    }, null);
+
+    assert.equal(view.statusLabel, formatScenarioStatusLabel("published"));
+    assert.equal(view.fallbackReasonLabel, formatFallbackReasonLabel("bot_ai_quota_exhausted"));
+    assert.match(view.citationsLabel, /Оплата/);
+    assert.equal(view.usage, null);
+    assert.equal(view.failureCount, 1);
+    assert.equal(view.publishCount, 1);
+    assert.equal(view.handoffCount, 1);
+
+    const withUsage = buildScenarioOperationalView({ status: "published" }, {
+      estimatedCostBucket: "low",
+      estimatedCostUsd: 0.004,
+      month: "2026-07",
+      monthlyTokenBudget: 50_000,
+      usedTokens: 2_000
+    });
+    assert.match(withUsage.usage.budgetLabel, /2000 \/ 50000/);
+    assert.match(withUsage.usage.costLabel, /низкая/);
   });
 });

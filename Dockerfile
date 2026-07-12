@@ -8,7 +8,8 @@ ENV VITE_ENABLE_SERVICE_ADMIN=$VITE_ENABLE_SERVICE_ADMIN
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY index.html vite.config.js ./
+COPY index.html vite.config.js vite.service-admin-fallback.js ./
+COPY service-admin ./service-admin
 COPY public ./public
 COPY src ./src
 RUN npm run build

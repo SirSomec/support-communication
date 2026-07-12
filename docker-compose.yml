@@ -3,8 +3,6 @@ services:
     build:
       context: .
       target: frontend
-      args:
-        VITE_ENABLE_SERVICE_ADMIN: "true"
     depends_on:
       api-gateway:
         condition: service_healthy

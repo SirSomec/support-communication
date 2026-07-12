@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { legacyServiceAdminHashToPath } from "../service-admin/serviceAdminPath.js";
 
 const routeByHash = {
   "#/app": { namespace: "app", view: "dialogs" },
@@ -78,6 +79,12 @@ export function useWorkspaceRoute({
 }
 
 function parseCurrentRoute() {
+  const legacyPath = legacyServiceAdminHashToPath(window.location.hash);
+  if (legacyPath) {
+    window.location.replace(legacyPath);
+    return defaultRoute;
+  }
+
   return routeByHash[window.location.hash] ?? defaultRoute;
 }
 

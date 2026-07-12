@@ -20,6 +20,7 @@ import {
   buildTenantAiUsageSummary
 } from "./scenario-operational-summary.js";
 import { recordBotPublishFailure, recordBotSourceError } from "./bot-observability.js";
+import { evaluateBotAlerts, summarizeBotMetricsForAlerts } from "./bot-alert-catalog.js";
 import { metricsRegistry } from "@support-communication/observability";
 
 const AUTOMATION_SERVICE = "automationService";
@@ -126,7 +127,9 @@ export class AutomationService {
         runtimeMetrics: clone(state.workspaceRuntimeMetrics),
         scenarioOperations: clone(buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)),
         telemetry: {
-          metrics: metricsRegistry().snapshot().filter((metric) => metric.name.startsWith("bot_"))
+          alerts: evaluateBotAlerts(summarizeBotMetricsForAlerts(metricsRegistry().snapshot())),
+          metrics: metricsRegistry().snapshot().filter((metric) => metric.name.startsWith("bot_")),
+          runbookPath: "docs/bots-ai-operations-runbook.md"
         },
         tenantId
       }

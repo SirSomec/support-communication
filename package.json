@@ -45,6 +45,7 @@
     "test:settings-runtime": "playwright test tests/settings-runtime.spec.js",
     "test:service-admin-runtime": "playwright test tests/service-admin-runtime.spec.js",
     "test:service-admin-utils": "node --test tests/service-admin-utils.test.js",
+    "test:service-admin-path": "node --test tests/service-admin-path.test.js",
     "test:tenant-provision-service": "node --test tests/tenant-provision-service.test.js",
     "test:e2e-runtime-config": "node --test tests/playwright-runtime-config.test.js",
     "test:no-demo-runtime": "node --test tests/no-demo-runtime-imports.test.js",

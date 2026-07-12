@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   Bot,
   CheckCircle2,
   CircleHelp,
+  Eye,
   MessageSquareText,
   Route,
   ShieldCheck,
@@ -12,13 +13,18 @@ import {
 } from "lucide-react";
 import { Modal } from "../../ui.jsx";
 import {
+  buildClientExperiencePreview,
+  clearWizardDraft,
+  createDefaultWizardForm,
+  loadWizardDraft,
+  saveWizardDraft,
   scenarioGoalOptions,
   scenarioHandoffOptions,
-  scenarioTriggerOptions
+  scenarioTriggerOptions,
+  scenarioWizardSteps
 } from "./automationModel.js";
 import { ScenarioKnowledgeSourceSelector } from "./ScenarioKnowledgeSourceSelector.jsx";
 
-const wizardSteps = ["Задача", "Запуск", "Знания", "Ответ", "Проверка"];
 const channelOptions = ["SDK", "Telegram", "MAX", "VK"];
 const MAX_TRIGGER_PHRASES = 12;
 const MAX_TRIGGER_PHRASE_LENGTH = 120;
@@ -39,34 +45,28 @@ export function ScenarioCreationWizard({
   onClose,
   onCreate
 }) {
-  const [step, setStep] = useState(0);
-  const [form, setForm] = useState(() => ({
-    channels: ["SDK"],
-    firstMessage: scenarioGoalOptions[0].defaultMessage,
-    goal: scenarioGoalOptions[0].id,
-    handoffQueue: "Очередь 1-я линия",
-    handoffRule: scenarioHandoffOptions[0].id,
-    name: scenarioGoalOptions[0].suggestedName,
-    selectedSourceIds: [],
-    trigger: scenarioTriggerOptions[0].id,
-    triggerPhrases: [],
-    matchMode: keywordMatchModes[0].id
-  }));
+  const restored = useMemo(() => loadWizardDraft(), []);
+  const [step, setStep] = useState(restored?.step ?? 0);
+  const [form, setForm] = useState(() => restored?.form ?? createDefaultWizardForm());
   const [phraseInput, setPhraseInput] = useState("");
   const [phraseError, setPhraseError] = useState("");
+  const [draftSavedAt, setDraftSavedAt] = useState(restored ? "восстановлен" : "");
 
   const selectedGoal = findOption(scenarioGoalOptions, form.goal);
   const selectedTrigger = findOption(scenarioTriggerOptions, form.trigger);
   const selectedHandoffRule = findOption(scenarioHandoffOptions, form.handoffRule);
   const selectedMatchMode = findOption(keywordMatchModes, form.matchMode);
   const keywordTriggerIsConfigured = form.trigger !== "keyword" || form.triggerPhrases.length > 0;
-  const canCreate = form.name.trim().length > 0 && form.channels.length > 0 && keywordTriggerIsConfigured;
+  const canCreate = form.name.trim().length > 0 && form.channels.length > 0 && keywordTriggerIsConfigured && form.firstMessage.trim().length > 0;
   const canAdvance = step === 0
     ? form.name.trim().length > 0
     : step === 1
       ? form.channels.length > 0 && keywordTriggerIsConfigured
-      : true;
-  const progress = ((step + 1) / wizardSteps.length) * 100;
+      : step === 2
+        ? form.firstMessage.trim().length > 0
+        : true;
+  const progress = ((step + 1) / scenarioWizardSteps.length) * 100;
+  const clientPreview = useMemo(() => buildClientExperiencePreview(form), [form]);
   const scenarioSummary = useMemo(() => ({
     channels: form.channels.join(", "),
     handoff: `${selectedHandoffRule.label} → ${form.handoffQueue.trim() || "Очередь 1-я линия"}`,
@@ -74,6 +74,11 @@ export function ScenarioCreationWizard({
     sources: buildSourceSummary(knowledgeSources, form.selectedSourceIds),
     trigger: buildTriggerSummary(selectedTrigger, selectedMatchMode, form.triggerPhrases)
   }), [form, knowledgeSources, selectedGoal, selectedHandoffRule, selectedMatchMode, selectedTrigger]);
+
+  useEffect(() => {
+    saveWizardDraft(form, step);
+    setDraftSavedAt("сохранён");
+  }, [form, step]);
 
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -144,14 +149,15 @@ export function ScenarioCreationWizard({
         name: form.name.trim(),
         sourceBindings: form.selectedSourceIds.map((sourceId) => ({ sourceId }))
       });
+      clearWizardDraft();
     }
   }
 
   return (
     <Modal
       closeLabel="Закрыть мастер создания сценария"
-      eyebrow="Без кода · черновик сценария"
-      footer={step === wizardSteps.length - 1 ? (
+      eyebrow={`Без кода · черновик ${draftSavedAt ? `(${draftSavedAt})` : ""}`}
+      footer={step === scenarioWizardSteps.length - 1 ? (
         <>
           <button disabled={isSaving} onClick={() => setStep(step - 1)} type="button"><ArrowLeft size={16} />Назад</button>
           <button className="primary-action" disabled={!canCreate || isSaving} onClick={() => void handleCreate()} type="button"><CheckCircle2 size={17} />{isSaving ? "Создаём..." : "Создать черновик"}</button>
@@ -168,24 +174,25 @@ export function ScenarioCreationWizard({
       title="Мастер создания сценария"
       titleId="scenario-wizard-title"
     >
-      <div className="scenario-wizard-progress" aria-label={`Шаг ${step + 1} из ${wizardSteps.length}`}>
-        <div aria-valuemax={wizardSteps.length} aria-valuemin="1" aria-valuenow={step + 1} className="scenario-wizard-progress-bar" role="progressbar"><span style={{ width: `${progress}%` }} /></div>
-        <ol>{wizardSteps.map((label, index) => <li aria-current={index === step ? "step" : undefined} className={index <= step ? "complete" : ""} key={label}><span>{index + 1}</span>{label}</li>)}</ol>
+      <div className="scenario-wizard-progress" aria-label={`Шаг ${step + 1} из ${scenarioWizardSteps.length}`}>
+        <div aria-valuemax={scenarioWizardSteps.length} aria-valuemin="1" aria-valuenow={step + 1} className="scenario-wizard-progress-bar" role="progressbar"><span style={{ width: `${progress}%` }} /></div>
+        <ol>{scenarioWizardSteps.map((label, index) => <li aria-current={index === step ? "step" : undefined} className={index <= step ? "complete" : ""} key={label}><span>{index + 1}</span>{label}</li>)}</ol>
       </div>
 
       {step === 0 ? (
         <section className="scenario-wizard-step" aria-labelledby="scenario-wizard-step-goal">
-          <WizardIntro icon={<Bot size={20} />} id="scenario-wizard-step-goal" title="Для чего нужен сценарий?">Выберите близкую задачу. Мы подготовим понятный стартовый поток, который можно отредактировать позже.</WizardIntro>
+          <WizardIntro icon={<Bot size={20} />} id="scenario-wizard-step-goal" title="Для чего нужен сценарий?">Выберите задачу. Мы подготовим стартовый поток: его можно править после сохранения черновика.</WizardIntro>
           <div className="scenario-goal-grid" role="radiogroup" aria-label="Задача сценария">
             {scenarioGoalOptions.map((goal) => <button aria-checked={form.goal === goal.id} className={form.goal === goal.id ? "selected" : ""} key={goal.id} onClick={() => chooseGoal(goal)} role="radio" type="button"><strong>{goal.label}</strong><span>{goal.description}</span></button>)}
           </div>
-          <label className="scenario-wizard-field"><span>Название сценария</span><input onChange={(event) => update("name", event.target.value)} placeholder="Например, Статус заказа" value={form.name} /><small>Его увидят коллеги в списке сценариев. Клиенты это название не увидят.</small></label>
+          <label className="scenario-wizard-field"><span>Название сценария</span><input onChange={(event) => update("name", event.target.value)} placeholder="Например, Статус заказа" value={form.name} /><small>{clientPreview.teamSees}</small></label>
+          <ClientPreview lines={[clientPreview.teamSees, "Клиент пока ничего не увидит — сценарий ещё черновик."]} />
         </section>
       ) : null}
 
       {step === 1 ? (
         <section className="scenario-wizard-step" aria-labelledby="scenario-wizard-step-trigger">
-          <WizardIntro icon={<Route size={20} />} id="scenario-wizard-step-trigger" title="Когда запускать сценарий?">Настройте условие старта и каналы. Один и тот же сценарий можно использовать в нескольких каналах.</WizardIntro>
+          <WizardIntro icon={<Route size={20} />} id="scenario-wizard-step-trigger" title="Когда запускать сценарий?">Настройте условие старта и каналы. Один сценарий можно использовать в нескольких каналах.</WizardIntro>
           <div className="scenario-option-list" role="radiogroup" aria-label="Условие запуска">
             {scenarioTriggerOptions.map((trigger) => <button aria-checked={form.trigger === trigger.id} className={form.trigger === trigger.id ? "selected" : ""} key={trigger.id} onClick={() => chooseTrigger(trigger)} role="radio" type="button"><strong>{trigger.label}</strong><span>{trigger.description}</span></button>)}
           </div>
@@ -226,12 +233,21 @@ export function ScenarioCreationWizard({
             </fieldset>
           ) : null}
           <fieldset className="scenario-channel-picker"><legend>Каналы запуска</legend><p>Клиент увидит один и тот же первый ответ в выбранных каналах.</p><div>{channelOptions.map((channel) => <button aria-pressed={form.channels.includes(channel)} className={form.channels.includes(channel) ? "selected" : ""} key={channel} onClick={() => toggleChannel(channel)} type="button">{channel}</button>)}</div>{form.channels.length === 0 ? <small className="scenario-field-error">Выберите хотя бы один канал.</small> : null}</fieldset>
+          <ClientPreview lines={clientPreview.clientSees.slice(0, 2)} />
         </section>
       ) : null}
 
       {step === 2 ? (
-        <section className="scenario-wizard-step" aria-labelledby="scenario-wizard-step-sources">
-          <WizardIntro icon={<Bot size={20} />} id="scenario-wizard-step-sources" title="На какие знания сможет опираться AI?">Выберите проверенные источники, которые относятся к этому сценарию. Это необязательный шаг: без источников сценарий сможет отправлять обычные заготовленные сообщения.</WizardIntro>
+        <section className="scenario-wizard-step" aria-labelledby="scenario-wizard-step-help">
+          <WizardIntro icon={<MessageSquareText size={20} />} id="scenario-wizard-step-help" title="Как бот поможет клиенту?">Напишите обычный текст первого ответа. Это то, что клиент увидит сразу после запуска сценария.</WizardIntro>
+          <label className="scenario-wizard-field"><span>Первый ответ бота</span><textarea onChange={(event) => update("firstMessage", event.target.value)} value={form.firstMessage} /><small>Без переменных и JSON — только понятный текст для клиента.</small></label>
+          <ClientPreview lines={[`Бот ответит: «${clientPreview.message}»`, `Каналы: ${clientPreview.channelsLabel}`]} />
+        </section>
+      ) : null}
+
+      {step === 3 ? (
+        <section className="scenario-wizard-step" aria-labelledby="scenario-wizard-step-knowledge">
+          <WizardIntro icon={<Bot size={20} />} id="scenario-wizard-step-knowledge" title="Знания и передача оператору">Выберите источники для AI и правило handoff. Без источников бот сможет отправлять только заготовленный ответ.</WizardIntro>
           <div className="scenario-wizard-note"><CircleHelp size={18} /><span>{aiReadinessMessage(aiReadiness)}</span></div>
           <ScenarioKnowledgeSourceSelector
             error={knowledgeSourcesError}
@@ -241,16 +257,9 @@ export function ScenarioCreationWizard({
             sources={knowledgeSources}
           />
           {onAddUrlSource ? <button className="scenario-wizard-secondary" disabled={isSaving} onClick={onAddUrlSource} type="button">Добавить URL-страницу</button> : null}
-          <div className="scenario-wizard-note"><CircleHelp size={18} /><span>Бот использует только выбранные готовые источники. Если сведений в них недостаточно, он должен предложить помощь оператора, а не придумывать ответ.</span></div>
-        </section>
-      ) : null}
-
-      {step === 3 ? (
-        <section className="scenario-wizard-step" aria-labelledby="scenario-wizard-step-message">
-          <WizardIntro icon={<MessageSquareText size={20} />} id="scenario-wizard-step-message" title="Что скажет бот и когда позовёт человека?">Введите обычный текст для клиента. Никаких переменных, JSON или логики программирования не нужно.</WizardIntro>
-          <label className="scenario-wizard-field"><span>Первый ответ бота</span><textarea onChange={(event) => update("firstMessage", event.target.value)} value={form.firstMessage} /><small>Этот текст отправится сразу после запуска сценария.</small></label>
           <div className="scenario-option-list compact" role="radiogroup" aria-label="Правило передачи оператору"><strong>Передать оператору, если</strong>{scenarioHandoffOptions.map((rule) => <button aria-checked={form.handoffRule === rule.id} className={form.handoffRule === rule.id ? "selected" : ""} key={rule.id} onClick={() => update("handoffRule", rule.id)} role="radio" type="button"><strong>{rule.label}</strong><span>{rule.description}</span></button>)}</div>
           <label className="scenario-wizard-field"><span>Очередь операторов</span><input onChange={(event) => update("handoffQueue", event.target.value)} value={form.handoffQueue} /><small>Оператор получит историю диалога и причину передачи до первого ручного сообщения.</small></label>
+          <ClientPreview lines={[clientPreview.clientSees[3], `Знания: ${clientPreview.sourcesLabel}`]} />
         </section>
       ) : null}
 
@@ -259,14 +268,24 @@ export function ScenarioCreationWizard({
           <WizardIntro icon={<ShieldCheck size={20} />} id="scenario-wizard-step-review" title="Проверьте, как всё будет работать">Сейчас создастся только черновик: клиенты не увидят сценарий, пока вы не прогоните тест и не опубликуете его.</WizardIntro>
           <div className="scenario-execution-preview" aria-live="polite">
             <ScenarioSummary index="1" title="Запуск" value={`${scenarioSummary.trigger} · ${scenarioSummary.channels}`} />
-            <ScenarioSummary index="2" title="Знания для AI" value={scenarioSummary.sources} />
-            <ScenarioSummary index="3" title="Ответ бота" value={scenarioSummary.message} />
+            <ScenarioSummary index="2" title="Как помогает" value={scenarioSummary.message} />
+            <ScenarioSummary index="3" title="Знания для AI" value={scenarioSummary.sources} />
             <ScenarioSummary index="4" title="Передача оператору" value={scenarioSummary.handoff} />
           </div>
-          <div className="scenario-wizard-note"><CircleHelp size={18} /><span>После создания откроется canvas сценария. Там можно поменять шаги, а кнопка «Прогнать тест» проверит цепочку до публикации.</span></div>
+          <ClientPreview lines={clientPreview.clientSees} title="Что увидит клиент" />
+          <div className="scenario-wizard-note"><CircleHelp size={18} /><span>Черновик шагов сохранён в этом браузере. После создания откроется canvas — там можно поменять шаги и нажать «Прогнать тест» до публикации.</span></div>
         </section>
       ) : null}
     </Modal>
+  );
+}
+
+function ClientPreview({ lines, title = "Что увидит клиент" }) {
+  return (
+    <aside className="scenario-client-preview" aria-label={title}>
+      <header><Eye size={16} /><strong>{title}</strong></header>
+      <ol>{lines.map((line) => <li key={line}>{line}</li>)}</ol>
+    </aside>
   );
 }
 

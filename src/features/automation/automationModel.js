@@ -156,6 +156,81 @@ function findOption(options, value, fallbackId) {
     ?? options[0];
 }
 
+export const scenarioWizardSteps = ["Задача", "Запуск", "Как помогает", "Знания и передача", "Проверка"];
+export const SCENARIO_WIZARD_DRAFT_KEY = "bot-scenario-wizard-draft-v1";
+
+export function createDefaultWizardForm() {
+  return {
+    channels: ["SDK"],
+    firstMessage: scenarioGoalOptions[0].defaultMessage,
+    goal: scenarioGoalOptions[0].id,
+    handoffQueue: "Очередь 1-я линия",
+    handoffRule: scenarioHandoffOptions[0].id,
+    matchMode: "contains",
+    name: scenarioGoalOptions[0].suggestedName,
+    selectedSourceIds: [],
+    trigger: scenarioTriggerOptions[0].id,
+    triggerPhrases: []
+  };
+}
+
+export function saveWizardDraft(form, step, storage = globalThis.sessionStorage) {
+  if (!storage?.setItem) return;
+  storage.setItem(SCENARIO_WIZARD_DRAFT_KEY, JSON.stringify({
+    form,
+    savedAt: new Date().toISOString(),
+    step: Math.max(0, Math.min(scenarioWizardSteps.length - 1, Number(step) || 0))
+  }));
+}
+
+export function loadWizardDraft(storage = globalThis.sessionStorage) {
+  if (!storage?.getItem) return null;
+  try {
+    const raw = storage.getItem(SCENARIO_WIZARD_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.form || typeof parsed.form !== "object") return null;
+    return {
+      form: { ...createDefaultWizardForm(), ...parsed.form },
+      step: Math.max(0, Math.min(scenarioWizardSteps.length - 1, Number(parsed.step) || 0))
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearWizardDraft(storage = globalThis.sessionStorage) {
+  if (!storage?.removeItem) return;
+  storage.removeItem(SCENARIO_WIZARD_DRAFT_KEY);
+}
+
+export function buildClientExperiencePreview(form = {}, context = {}) {
+  const goal = findOption(scenarioGoalOptions, form.goal, "answer");
+  const trigger = findOption(scenarioTriggerOptions, form.trigger, "first_message");
+  const handoff = findOption(scenarioHandoffOptions, form.handoffRule, "request");
+  const channels = Array.isArray(form.channels) && form.channels.length ? form.channels : ["SDK"];
+  const message = String(form.firstMessage ?? "").trim() || goal.defaultMessage;
+  const phrases = Array.isArray(form.triggerPhrases) ? form.triggerPhrases.filter(Boolean) : [];
+  const triggerLine = trigger.id === "keyword"
+    ? (phrases.length ? `Клиент напишет одну из фраз: ${phrases.slice(0, 3).map((phrase) => `«${phrase}»`).join(", ")}` : "Клиент напишет ключевую фразу (ещё не задана)")
+    : trigger.description;
+  return {
+    channelsLabel: channels.join(", "),
+    clientSees: [
+      `В канале ${channels[0]} клиент начнёт диалог.`,
+      triggerLine,
+      `Бот ответит: «${message}»`,
+      `Если потребуется человек — передадим в «${String(form.handoffQueue ?? "").trim() || "Очередь 1-я линия"}» (${handoff.label.toLowerCase()}).`
+    ],
+    handoffLabel: `${handoff.label} → ${String(form.handoffQueue ?? "").trim() || "Очередь 1-я линия"}`,
+    message,
+    sourcesLabel: Array.isArray(form.selectedSourceIds) && form.selectedSourceIds.length
+      ? `${form.selectedSourceIds.length} источник(ов)`
+      : "Только заготовленные сообщения",
+    teamSees: `В списке сценариев коллеги увидят название «${String(form.name ?? "").trim() || goal.suggestedName}». Клиенты название не видят.`
+  };
+}
+
 const scenarioStatusLabels = {
   archived: "Архив",
   disabled: "Выключен",

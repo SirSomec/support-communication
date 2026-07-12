@@ -147,6 +147,29 @@ describe("automation bot scenario contracts", () => {
     assert.deepEqual(noMatch.data.preview.steps, []);
   });
 
+  it("validates advanced JSON import with the same trigger and AI policy checks as publish", async () => {
+    const automation = new AutomationService();
+    const structural = await automation.validateBotFlowImport({
+      name: "Import ok",
+      flowNodes: [{ id: "start", type: "message" }],
+      flowEdges: []
+    }, { tenantId: "tenant-volga" });
+    assert.equal(structural.status, "ok");
+    assert.equal(structural.data.valid, true);
+    assert.ok(Array.isArray(structural.data.payload.triggerRules));
+    assert.ok(Array.isArray(structural.data.payload.sourceBindings));
+
+    const aiWithoutPolicy = await automation.validateBotFlowImport({
+      name: "AI import",
+      flowNodes: [{ id: "start", type: "message" }, { id: "answer", type: "ai_reply" }],
+      flowEdges: [{ from: "start", to: "answer" }],
+      sourceBindings: [],
+      triggerRules: [{ id: "phrase", type: "phrase", phrases: ["оплата"], matchMode: "contains" }]
+    }, { tenantId: "tenant-volga" });
+    assert.equal(aiWithoutPolicy.status, "invalid");
+    assert.match(String(aiWithoutPolicy.error?.message ?? ""), /источник|AI|оператору/i);
+  });
+
   it("blocks AI publication and returns actionable prerequisite violations", async () => {
     const automation = new AutomationService();
     const scenario = { id: "bot-ai-invalid", name: "AI invalid", channels: ["SDK"], flowNodes: [{ id: "start", type: "message" }, { id: "answer", type: "ai_reply" }], flowEdges: [{ from: "start", to: "answer" }] };

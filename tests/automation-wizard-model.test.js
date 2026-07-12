@@ -8,8 +8,10 @@ import {
   createScenarioFromWizard,
   describeAiReadiness,
   findTriggerPhraseConflicts,
+  loadAdvancedModePreference,
   loadWizardDraft,
   previewKeywordTrigger,
+  saveAdvancedModePreference,
   saveWizardDraft,
   SCENARIO_ARCHIVE_RETENTION_DAYS,
   scenarioWizardSteps
@@ -141,6 +143,15 @@ describe("scenario creation wizard model", () => {
       triggerRules: [{ type: "new_conversation" }]
     }, { aiReadiness: { status: "ready" }, sandboxVerified: true });
     assert.equal(ready.canPublish, true);
+  });
+
+  it("persists advanced mode preference separately from the no-code wizard draft", () => {
+    const storage = createMemoryStorage();
+    assert.equal(loadAdvancedModePreference(storage), false);
+    saveAdvancedModePreference(true, storage);
+    assert.equal(loadAdvancedModePreference(storage), true);
+    saveAdvancedModePreference(false, storage);
+    assert.equal(loadAdvancedModePreference(storage), false);
   });
 });
 

@@ -39,6 +39,8 @@ interface ValidatedBotFlow {
   flowNodes: BotFlowNode[];
   name: string;
   schemaVersion: "bot-flow/v1";
+  sourceBindings: NonNullable<BotScenario["sourceBindings"]>;
+  triggerRules: BotTriggerRule[];
 }
 
 interface PublishBotScenarioPayload extends BotFlowImportPayload {
@@ -294,24 +296,66 @@ export class AutomationService {
     return this.transitionBotScenario(scenarioId, "disabled", "restoreBotScenario", context);
   }
 
-  async validateBotFlowImport(input: BotFlowImportPayload | string | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async validateBotFlowImport(
+    input: BotFlowImportPayload | string | null | undefined,
+    context: AutomationRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
     const { errors, payload } = parseAndValidateBotFlow(input);
+    const policyErrors: string[] = [];
+    let enriched = payload;
+    if (payload) {
+      const raw = typeof input === "string" ? null : input;
+      const triggerRules = resolveScenarioTriggerRules(raw ?? {}, defaultScenarioTriggerRules());
+      policyErrors.push(...validateScenarioTriggerRules(triggerRules));
+      const sourceBindings = normalizeScenarioSourceBindings(raw?.sourceBindings ?? []);
+      const tenantId = resolveAutomationTenantId(context);
+      if (tenantId) {
+        for (const binding of sourceBindings) {
+          const source = this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
+          if (!source || !isKnowledgeSourceRetrievalEligible(source)) {
+            policyErrors.push(`Источник знаний «${binding.sourceId}» недоступен или не готов.`);
+          }
+        }
+        if (payload.flowNodes.some((node) => node.type === "ai_reply")) {
+          if (!sourceBindings.length) policyErrors.push("AI-ответу нужен хотя бы один готовый источник знаний.");
+          if (aiReadinessForTenant(tenantId).status !== "ready") {
+            policyErrors.push("AI-подключение организации не настроено или не прошло проверку.");
+          }
+          if (!payload.flowNodes.some((node) => node.type === "handoff" || node.type === "fallback")) {
+            policyErrors.push("Добавьте передачу оператору или запасной ответ.");
+          }
+        }
+        const state = await this.automationRepository.readStateAsync();
+        const conflict = findScenarioTriggerConflict(
+          state.botScenarios,
+          String((raw as { id?: string } | null)?.id ?? ""),
+          tenantId,
+          triggerRules,
+          normalizeScenarioPriority(raw?.priority)
+        );
+        if (conflict) {
+          policyErrors.push("Другой опубликованный сценарий уже использует эту ключевую фразу с тем же приоритетом.");
+        }
+      }
+      enriched = { ...payload, sourceBindings, triggerRules };
+    }
 
+    const allErrors = [...errors, ...policyErrors];
     return createEnvelope({
       service: AUTOMATION_SERVICE,
       operation: "validateBotFlowImport",
       traceId: automationTraceId("validateBotFlowImport"),
-      status: errors.length ? "invalid" : "ok",
-      meta: apiMeta(),
+      status: allErrors.length ? "invalid" : "ok",
+      meta: apiMeta({ tenantId: resolveAutomationTenantId(context) ?? undefined }),
       data: {
-        errors,
-        payload: errors.length ? null : payload,
-        valid: errors.length === 0
+        errors: allErrors,
+        payload: allErrors.length ? null : enriched,
+        valid: allErrors.length === 0
       },
-      error: errors.length
+      error: allErrors.length
         ? {
             code: "bot_flow_invalid",
-            message: errors.join("; ")
+            message: allErrors.join("; ")
           }
         : null
     });
@@ -914,7 +958,9 @@ function parseAndValidateBotFlow(input: BotFlowImportPayload | string | null | u
       })),
       flowNodes,
       name: name ?? "",
-      schemaVersion: "bot-flow/v1"
+      schemaVersion: "bot-flow/v1",
+      sourceBindings: normalizeScenarioSourceBindings(payload.sourceBindings ?? []),
+      triggerRules: resolveScenarioTriggerRules(payload, defaultScenarioTriggerRules())
     }
   };
 }

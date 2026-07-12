@@ -299,6 +299,18 @@ export function buildClientExperiencePreview(form = {}, context = {}) {
   };
 }
 
+export const SCENARIO_ADVANCED_MODE_KEY = "bot-scenario-advanced-mode";
+
+export function loadAdvancedModePreference(storage = globalThis.sessionStorage) {
+  if (!storage?.getItem) return false;
+  return storage.getItem(SCENARIO_ADVANCED_MODE_KEY) === "1";
+}
+
+export function saveAdvancedModePreference(enabled, storage = globalThis.sessionStorage) {
+  if (!storage?.setItem) return;
+  storage.setItem(SCENARIO_ADVANCED_MODE_KEY, enabled ? "1" : "0");
+}
+
 export const SCENARIO_ARCHIVE_RETENTION_DAYS = 30;
 
 export function buildPublishChecklist(scenario = {}, context = {}) {

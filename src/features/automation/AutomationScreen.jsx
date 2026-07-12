@@ -22,7 +22,7 @@ import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } fr
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
 import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
 import { ScenarioArchiveConfirmModal, ScenarioPauseConfirmModal, ScenarioPublishChecklistModal } from "./ScenarioLifecycleModals.jsx";
-import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScenarioFromWizard, formatScenarioStatusLabel } from "./automationModel.js";
+import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScenarioFromWizard, formatScenarioStatusLabel, loadAdvancedModePreference, saveAdvancedModePreference } from "./automationModel.js";
 
 export function AutomationScreen({ onBack, onToast, access }) {
   const [loading, setLoading] = useState(true);
@@ -49,6 +49,13 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [pauseTarget, setPauseTarget] = useState(null);
   const [publishChecklistOpen, setPublishChecklistOpen] = useState(false);
+  const [advancedMode, setAdvancedMode] = useState(() => loadAdvancedModePreference());
+
+  function toggleAdvancedMode(nextValue) {
+    const enabled = Boolean(nextValue);
+    setAdvancedMode(enabled);
+    saveAdvancedModePreference(enabled);
+  }
 
   async function loadWorkspace({ ignoreSignal } = {}) {
     setLoading(true);
@@ -596,6 +603,8 @@ export function AutomationScreen({ onBack, onToast, access }) {
         owner: payload.owner ?? selectedScenario.owner,
         updatedAt: "сейчас",
         trigger: payload.trigger ?? selectedScenario.trigger,
+        triggerRules: validatedPayload.triggerRules ?? payload.triggerRules ?? selectedScenario.triggerRules,
+        sourceBindings: validatedPayload.sourceBindings ?? payload.sourceBindings ?? selectedScenario.sourceBindings,
         channels: Array.isArray(payload.channels) ? payload.channels : selectedScenario.channels,
         handoff: payload.handoff ?? selectedScenario.handoff,
         flowNodes: validatedPayload.flowNodes,
@@ -754,6 +763,50 @@ export function AutomationScreen({ onBack, onToast, access }) {
         </section>
       </div>
 
+      <section className="work-panel bot-mode-panel">
+        <SectionTitle title="Режим работы" action={advancedMode ? "дополнительный" : "no-code"} />
+        <div className="bot-mode-toggle">
+          <label>
+            <input
+              checked={advancedMode}
+              onChange={(event) => toggleAdvancedMode(event.target.checked)}
+              type="checkbox"
+            />
+            <span>
+              <strong>Дополнительный режим</strong>
+              <small>Canvas, редактор нод и JSON import/export — только после базового no-code пути. Импорт проходит ту же серверную проверку policy/source/trigger.</small>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <section className="work-panel bot-sandbox-standalone" aria-live="polite">
+        <SectionTitle title="Тестовая песочница" action={selectedScenario.name} />
+        <p>Введите пример сообщения клиента. Проверка не отправляет сообщений в реальные каналы и не создаёт runtime-шаги.</p>
+        <textarea disabled={!canManageAutomation || isSaving} onChange={(event) => setSandboxMessage(event.target.value)} placeholder="Например: Где узнать статус заказа?" value={sandboxMessage} />
+        <button disabled={!canManageAutomation || isSaving} onClick={handleScenarioTest} type="button"><PlayCircle size={15} /> Проверить сценарий</button>
+        {sandboxPreview ? (
+          <div className="bot-validation-list bot-sandbox-result">
+            <strong>{sandboxPreview.outcome === "handoff" ? "Будет передача оператору" : sandboxPreview.outcome === "no_match" ? "Сценарий не запустится" : "Ожидаемый результат"}</strong>
+            <span>{sandboxPreview.answerPreview}</span>
+            <span>Триггер: {sandboxPreview.trigger?.matched === false ? "не сработает" : "сработает"}{sandboxPreview.trigger?.matchMode ? ` · ${sandboxPreview.trigger.matchMode}` : ""}</span>
+            {Array.isArray(sandboxPreview.steps) && sandboxPreview.steps.length ? (
+              <span>Путь: {sandboxPreview.steps.map((step) => step.title || step.type).join(" → ")}</span>
+            ) : null}
+            {sandboxPreview.citations?.length ? <span>Источники: {sandboxPreview.citations.map((item) => item.title).join(", ")}</span> : null}
+            {sandboxPreview.retrievalPassages?.length ? (
+              <span>Фрагменты: {sandboxPreview.retrievalPassages.map((item) => item.title).join(", ")}</span>
+            ) : null}
+            {sandboxPreview.trace ? (
+              <span>
+                Trace: dry-run · AI {sandboxPreview.trace.aiWouldCall ? "вызвали бы" : "не вызовут"} · retrieval {sandboxPreview.trace.retrievalTokensUsed ?? 0}/{sandboxPreview.trace.retrievalTokenBudget ?? 0} ток. · cache {sandboxPreview.trace.retrievalCache ?? "—"}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+
+      {advancedMode ? (
       <section className="work-panel bot-builder-panel">
         <SectionTitle title="Canvas сценария" action={`${selectedScenario.name} · ${formatScenarioStatusLabel(selectedScenario.status)}`} />
         <div className="bot-builder-grid">
@@ -841,36 +894,12 @@ export function AutomationScreen({ onBack, onToast, access }) {
                 </div>
               ))}
             </div>
-            <div className="bot-io-panel" aria-live="polite">
-              <header><PlayCircle size={17} /><strong>Тестовая песочница</strong></header>
-              <p>Введите пример сообщения клиента. Проверка не отправляет сообщений в реальные каналы.</p>
-              <textarea disabled={!canManageAutomation || isSaving} onChange={(event) => setSandboxMessage(event.target.value)} placeholder="Например: Где узнать статус заказа?" value={sandboxMessage} />
-              <button disabled={!canManageAutomation || isSaving} onClick={handleScenarioTest} type="button"><PlayCircle size={15} /> Проверить сценарий</button>
-              {sandboxPreview ? (
-                <div className="bot-validation-list bot-sandbox-result">
-                  <strong>{sandboxPreview.outcome === "handoff" ? "Будет передача оператору" : sandboxPreview.outcome === "no_match" ? "Сценарий не запустится" : "Ожидаемый результат"}</strong>
-                  <span>{sandboxPreview.answerPreview}</span>
-                  <span>Триггер: {sandboxPreview.trigger?.matched === false ? "не сработает" : "сработает"}{sandboxPreview.trigger?.matchMode ? ` · ${sandboxPreview.trigger.matchMode}` : ""}</span>
-                  {Array.isArray(sandboxPreview.steps) && sandboxPreview.steps.length ? (
-                    <span>Путь: {sandboxPreview.steps.map((step) => step.title || step.type).join(" → ")}</span>
-                  ) : null}
-                  {sandboxPreview.citations?.length ? <span>Источники: {sandboxPreview.citations.map((item) => item.title).join(", ")}</span> : null}
-                  {sandboxPreview.retrievalPassages?.length ? (
-                    <span>Фрагменты: {sandboxPreview.retrievalPassages.map((item) => item.title).join(", ")}</span>
-                  ) : null}
-                  {sandboxPreview.trace ? (
-                    <span>
-                      Trace: dry-run · AI {sandboxPreview.trace.aiWouldCall ? "вызвали бы" : "не вызовут"} · retrieval {sandboxPreview.trace.retrievalTokensUsed ?? 0}/{sandboxPreview.trace.retrievalTokenBudget ?? 0} ток. · cache {sandboxPreview.trace.retrievalCache ?? "—"}
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
             <div className="bot-io-panel">
               <header>
                 <FileText size={17} />
                 <strong>Import / Export</strong>
               </header>
+              <p className="bot-advanced-hint">JSON проходит ту же серверную проверку, что и публикация: узлы, trigger, источники и AI-policy.</p>
               <textarea readOnly value={exportPayload} aria-label="JSON export сценария" />
               <textarea disabled={!canManageAutomation || isSaving} value={importDraft} onChange={(event) => setImportDraft(event.target.value)} placeholder="Вставьте JSON flow для импорта" />
               {importError ? (
@@ -891,6 +920,12 @@ export function AutomationScreen({ onBack, onToast, access }) {
           </aside>
         </div>
       </section>
+      ) : (
+        <section className="work-panel bot-advanced-closed">
+          <SectionTitle title="Canvas и JSON скрыты" action="no-code путь" />
+          <p>Основной путь — мастер, список сценариев и песочница. Включите дополнительный режим выше, если нужен canvas или JSON import/export.</p>
+        </section>
+      )}
       {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} /> : null}
       {archiveTarget ? <ScenarioArchiveConfirmModal isSaving={isSaving} onClose={() => setArchiveTarget(null)} onConfirm={(scenario) => void confirmArchiveScenario(scenario)} scenario={archiveTarget} /> : null}
       {pauseTarget ? <ScenarioPauseConfirmModal isSaving={isSaving} onClose={() => setPauseTarget(null)} onConfirm={(scenario) => void confirmDisableScenario(scenario)} scenario={pauseTarget} /> : null}

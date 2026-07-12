@@ -869,3 +869,37 @@
 .scenario-publish-checklist li.fail {
   background: #fff8eb;
 }
+
+.bot-mode-toggle label {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 14px;
+}
+
+.bot-mode-toggle strong {
+  display: block;
+}
+
+.bot-mode-toggle small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.bot-sandbox-standalone {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 14px;
+}
+
+.bot-sandbox-standalone textarea {
+  min-height: 88px;
+}
+
+.bot-advanced-hint,
+.bot-advanced-closed p {
+  margin: 0;
+  color: #33445c;
+  line-height: 1.45;
+}

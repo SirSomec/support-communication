@@ -94,6 +94,18 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(validFlow.status, "ok");
     assert.equal(validFlow.data.valid, true);
     assert.equal(validFlow.data.payload.schemaVersion, "bot-flow/v1");
+    assert.ok(Array.isArray(validFlow.data.payload.triggerRules));
+    assert.ok(Array.isArray(validFlow.data.payload.sourceBindings));
+
+    const aiImport = await automation.validateBotFlowImport({
+      name: "AI import",
+      flowNodes: [{ id: "start", type: "message" }, { id: "answer", type: "ai_reply" }],
+      flowEdges: [{ from: "start", to: "answer" }],
+      sourceBindings: [],
+      triggerRules: [{ id: "phrase", type: "phrase", phrases: [], matchMode: "contains" }]
+    }, { tenantId: "tenant-demo" });
+    assert.equal(aiImport.status, "invalid");
+    assert.ok(String(aiImport.error?.message ?? "").length > 0);
 
     const publish = await automation.publishBotScenario({
       id: "bot-checkout",

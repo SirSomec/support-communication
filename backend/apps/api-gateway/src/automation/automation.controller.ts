@@ -53,8 +53,8 @@ export class AutomationController {
   @RequireServiceAdminAction("automation.read")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "Bot flow import validation envelope" })
-  validateBotFlowImport(@Body() payload: unknown) {
-    return this.automationService.validateBotFlowImport(payload as never);
+  validateBotFlowImport(@Body() payload: unknown, @Req() request: TenantOperatorRequest) {
+    return this.automationService.validateBotFlowImport(payload as never, automationContextFromRequest(request));
   }
 
   @Post("bot-flows/validate")
@@ -62,8 +62,8 @@ export class AutomationController {
   @RequireServiceAdminAction("automation.read")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "Bot flow import validation envelope" })
-  validateBotFlowImportAlias(@Body() payload: unknown) {
-    return this.automationService.validateBotFlowImport(payload as never);
+  validateBotFlowImportAlias(@Body() payload: unknown, @Req() request: TenantOperatorRequest) {
+    return this.automationService.validateBotFlowImport(payload as never, automationContextFromRequest(request));
   }
 
   @Post("bot-scenarios")

@@ -71,6 +71,20 @@ async function openAppShell(page, { serviceAdmin = false } = {}) {
   return { serviceAdminSession, tenantSession: session };
 }
 
+async function openServiceAdminShell(page) {
+  const session = await loginServiceAdmin(page);
+  await page.addInitScript((accessToken) => {
+    try {
+      window.sessionStorage.setItem("sc_service_admin_access_token", accessToken);
+    } catch {
+      // about:blank blocks sessionStorage in Chromium; the script runs again on the app origin.
+    }
+  }, session.accessToken);
+  await page.goto("/service-admin", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("route-service-admin")).toBeVisible();
+  return session;
+}
+
 async function seedTenantTemplate(page, template) {
   const loginResponse = await page.request.post("/api/v1/auth/tenant/login", {
     data: {
@@ -536,7 +550,7 @@ test("topbar notifications and live bot handoff summary are actionable", async (
 });
 
 test("notification navigation actions open concrete workspaces", async ({ page }) => {
-  await openAppShell(page, { serviceAdmin: true });
+  await openAppShell(page);
   await selectRole(page, "Администратор");
 
   await page.getByRole("button", { name: "Уведомления" }).click();
@@ -549,11 +563,9 @@ test("notification navigation actions open concrete workspaces", async ({ page }
 
   await page.getByRole("button", { name: "Уведомления" }).click();
   const serviceAdminNotification = page.locator(".notification-item").filter({ hasText: "Service-admin audit export" });
-  await expect(serviceAdminNotification.locator("button")).toBeEnabled();
-  await serviceAdminNotification.locator("button").click();
-  await expect(page.getByTestId("route-service-admin")).toBeVisible();
-  await expect(page.locator(".audit-workspace")).toBeVisible();
-  await expect(page.locator(".service-admin-tabs button[aria-pressed=\"true\"]")).toContainText("Аудит");
+  await expect(serviceAdminNotification.locator("button")).toBeDisabled();
+  await expect(page.getByTestId("route-service-admin")).toHaveCount(0);
+  await expect(page.locator(".channel-connections-panel")).toBeVisible();
   await expectHealthyPage(page);
 });
 
@@ -1198,19 +1210,13 @@ test("route namespaces keep public auth and service admin isolated", async ({ pa
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await expectHealthyPage(page);
 
-  await openAppShell(page, { serviceAdmin: true });
+  await openAppShell(page);
   await selectRole(page, "Администратор");
   await expect(page.locator(".role-switcher select")).not.toContainText("Администратор сервиса");
-  await expect(page.locator(".service-admin-entry")).toBeVisible();
+  await expect(page.locator(".service-admin-entry")).toHaveCount(0);
 
-  await page.goto("/#/service-admin");
-  await expect(page.getByTestId("route-service-admin")).toBeVisible();
-  await expect(page.locator(".role-switcher")).toHaveCount(0);
-  await expectHealthyPage(page);
-
-  await openAppShell(page, { serviceAdmin: true });
-  await page.locator(".service-admin-entry").click();
-  await expect(page.getByTestId("route-service-admin")).toBeVisible();
+  await page.goto("/service-admin/login");
+  await expect(page.getByTestId("route-service-admin-login")).toBeVisible();
   await expect(page.locator(".role-switcher")).toHaveCount(0);
   await expectHealthyPage(page);
 });
@@ -1299,9 +1305,7 @@ test("dialog assignment persists from the responsive operator workspace", async 
 });
 
 test("service admin critical actions require reason confirmation and audit", async ({ page }) => {
-  await openAppShell(page, { serviceAdmin: true });
-  await page.locator(".service-admin-entry").click();
-  await expect(page.getByTestId("route-service-admin")).toBeVisible();
+  await openServiceAdminShell(page);
 
   await page.locator(".service-admin-tabs button").filter({ hasText: "Пользователи" }).click();
   await expect(page.locator(".user-support-workspace")).toContainText("Личность клиента");
@@ -1364,9 +1368,7 @@ test("landing auth onboarding and service admin do not overflow responsive viewp
       await expectHealthyPage(page);
     }
 
-    await openAppShell(page, { serviceAdmin: true });
-    await page.locator(".service-admin-entry").click();
-    await expect(page.getByTestId("route-service-admin")).toBeVisible();
+    await openServiceAdminShell(page);
     await expectHealthyPage(page);
   }
 });

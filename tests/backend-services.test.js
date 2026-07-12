@@ -749,7 +749,7 @@ describe("frontend backend service contracts", () => {
     const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
     const smokeSource = readFileSync(new URL("./smoke.spec.js", import.meta.url), "utf8");
 
-    assert.match(appSource, /VITE_ENABLE_SERVICE_ADMIN/);
+    assert.doesNotMatch(appSource, /VITE_ENABLE_SERVICE_ADMIN|openServiceAdmin|service-admin-entry/);
     assert.doesNotMatch(appSource, /supportServiceAdminSession|sessionStorage|localStorage/);
     assert.doesNotMatch(smokeSource, /supportServiceAdminSession|grantServiceAdminSession/);
   });

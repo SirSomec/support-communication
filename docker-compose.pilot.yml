@@ -113,6 +113,7 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      AUTOMATION_REPOSITORY: prisma
       INTEGRATION_REPOSITORY: prisma
       CONVERSATION_REPOSITORY: prisma
       TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-true}
@@ -203,6 +204,7 @@ services:
       RUNTIME_PROFILE: production-like
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
       INTEGRATION_REPOSITORY: prisma
+      CONVERSATION_REPOSITORY: prisma
       OUTBOX_TELEGRAM_ENABLED: ${OUTBOX_TELEGRAM_ENABLED:-true}
       OUTBOX_TELEGRAM_CHANNEL: ${OUTBOX_TELEGRAM_CHANNEL:-Telegram}
       OUTBOX_TELEGRAM_API_BASE_URL: ${OUTBOX_TELEGRAM_API_BASE_URL:-https://api.telegram.org}

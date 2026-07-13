@@ -1,5 +1,6 @@
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
 import { REPORT_COLUMN_OPTIONS, REPORT_METRIC_DEFINITION_VERSION } from "./report-definition.js";
+import { listJsonConversationReportSourceRows } from "./report-json-conversation-source.js";
 import type { ReportExportJob } from "./report.types.js";
 
 export interface ReportIdempotencyRecord {
@@ -785,6 +786,11 @@ export class ReportRepository {
         grouped.set(event.conversationId, current);
       }
       return [...grouped.values()];
+    }
+
+    const jsonRows = listJsonConversationReportSourceRows(input);
+    if (jsonRows.length > 0) {
+      return jsonRows;
     }
 
     if (!this.prismaClient?.conversation) {

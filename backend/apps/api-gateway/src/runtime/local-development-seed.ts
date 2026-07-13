@@ -50,3 +50,16 @@ export function createLocalDevelopmentRepositorySeeds(): LocalDevelopmentReposit
     workspace: bootstrapWorkspaceState()
   };
 }
+
+export function createPrismaCatalogFallbackSeeds(config: {
+  AUTOMATION_REPOSITORY?: string;
+  QUALITY_REPOSITORY?: string;
+}): LocalDevelopmentRepositorySeeds {
+  const seeds: LocalDevelopmentRepositorySeeds = {};
+
+  if (config.QUALITY_REPOSITORY === "prisma") {
+    seeds.quality = bootstrapQualityState();
+  }
+
+  return seeds;
+}

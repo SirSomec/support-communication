@@ -32,6 +32,7 @@ try {
   await upsertPilotTenant(prisma, tenantSlug);
   await upsertPilotOperator(prisma, operatorEmail);
   await upsertPilotPasswordCredential(prisma, operatorEmail, operatorPassword);
+  await seedPilotDomainCatalog(prisma, ["tenant-volga", PILOT_TENANT_ID]);
 
   const prismaKeySaved = await upsertPilotPublicApiKeyPrisma(prisma, {
     createdAt,
@@ -79,6 +80,171 @@ function runNpmScript(script) {
   if (result.status !== 0) {
     process.stderr.write(`npm run ${script} failed with exit code ${result.status ?? 1}.\n`);
     process.exit(result.status ?? 1);
+  }
+}
+
+async function seedPilotDomainCatalog(client, tenantIds) {
+  const automationCatalog = loadSeedCatalog("../apps/api-gateway/dist/automation/seed-catalog.js");
+  const qualityCatalog = loadSeedCatalog("../apps/api-gateway/dist/quality/seed-catalog.js");
+  if (!automationCatalog && !qualityCatalog) {
+    process.stderr.write("[pilot:bootstrap] Domain catalog seed skipped: compiled seed catalogs are unavailable.\n");
+    return;
+  }
+
+  const now = new Date();
+  for (const tenantId of tenantIds) {
+    if (automationCatalog?.botScenarios) {
+      for (const [index, scenario] of automationCatalog.botScenarios.entries()) {
+        const scenarioId = `${scenario.id}-${tenantId.replace(/^tenant-/, "")}`;
+        const mapped = mapSeedBotScenarioStatus(scenario.status);
+        const triggerRules = Array.isArray(scenario.triggerRules) && scenario.triggerRules.length
+          ? scenario.triggerRules
+          : [{ id: "seed-new-conversation", priority: 0, type: "new_conversation" }];
+        const scenarioPayload = {
+          channels: scenario.channels ?? [],
+          enabled: mapped.enabled,
+          flowEdges: scenario.flowEdges ?? [],
+          flowNodes: scenario.flowNodes ?? [],
+          name: scenario.name,
+          priority: Number(scenario.priority ?? index),
+          schemaVersion: scenario.schemaVersion ?? "bot-flow/v1",
+          sourceBindings: scenario.sourceBindings ?? [],
+          status: mapped.status,
+          tenantId,
+          triggerRules,
+          updatedAt: now
+        };
+
+        await client.botScenario.upsert({
+          create: {
+            ...scenarioPayload,
+            id: scenarioId
+          },
+          update: scenarioPayload,
+          where: { id: scenarioId }
+        });
+
+        if (mapped.status === "published") {
+          const versionId = `${scenarioId}-v1`;
+          await client.botScenarioVersion.upsert({
+            create: {
+              flowEdges: scenario.flowEdges ?? [],
+              flowNodes: scenario.flowNodes ?? [],
+              priority: Number(scenario.priority ?? index),
+              scenarioId,
+              sourceBindings: scenario.sourceBindings ?? [],
+              status: "published",
+              tenantId,
+              triggerRules,
+              versionId
+            },
+            update: {
+              flowEdges: scenario.flowEdges ?? [],
+              flowNodes: scenario.flowNodes ?? [],
+              priority: Number(scenario.priority ?? index),
+              sourceBindings: scenario.sourceBindings ?? [],
+              status: "published",
+              tenantId,
+              triggerRules
+            },
+            where: { versionId }
+          });
+          await client.botScenario.update({
+            data: { activeVersionId: versionId },
+            where: { id: scenarioId }
+          });
+        }
+      }
+    }
+
+    if (automationCatalog?.proactiveRules) {
+      for (const rule of automationCatalog.proactiveRules) {
+        const ruleId = `${rule.id}-${tenantId.replace(/^tenant-/, "")}`;
+        await client.proactiveRule.upsert({
+          create: {
+            activeVariant: rule.activeVariant ?? "A",
+            channels: rule.channels ?? [],
+            cooldown: rule.cooldown ?? null,
+            id: ruleId,
+            segment: rule.segment ?? null,
+            status: rule.status ?? "enabled",
+            tenantId,
+            updatedAt: now
+          },
+          update: {
+            activeVariant: rule.activeVariant ?? "A",
+            channels: rule.channels ?? [],
+            cooldown: rule.cooldown ?? null,
+            segment: rule.segment ?? null,
+            status: rule.status ?? "enabled",
+            tenantId,
+            updatedAt: now
+          },
+          where: { id: ruleId }
+        });
+      }
+    }
+
+    if (qualityCatalog?.qualityMetrics) {
+      for (const metric of qualityCatalog.qualityMetrics) {
+        const ratingId = `${metric.id}-${tenantId.replace(/^tenant-/, "")}`;
+        const auditId = `audit-${ratingId}`;
+        const realtimeEventId = `rt-${ratingId}`;
+        await client.qualityRating.upsert({
+          create: {
+            auditId,
+            channel: metric.channel,
+            clientId: metric.client ?? null,
+            conversationId: metric.conversationId,
+            createdAt: now,
+            operator: metric.operator,
+            ratingId,
+            realtimeEventId,
+            scale: metric.scale,
+            score: Number(metric.score ?? 0),
+            tenantId,
+            topic: metric.topic ?? null
+          },
+          update: {
+            channel: metric.channel,
+            clientId: metric.client ?? null,
+            conversationId: metric.conversationId,
+            operator: metric.operator,
+            scale: metric.scale,
+            score: Number(metric.score ?? 0),
+            topic: metric.topic ?? null
+          },
+          where: { tenantId_ratingId: { ratingId, tenantId } }
+        });
+      }
+    }
+  }
+
+  process.stderr.write(`[pilot:bootstrap] Seeded automation and quality catalogs for ${tenantIds.join(", ")}.\n`);
+}
+
+function mapSeedBotScenarioStatus(seedStatus) {
+  const raw = String(seedStatus ?? "").trim().toLowerCase();
+  if (raw === "enabled" || raw === "published") {
+    return { enabled: true, status: "published" };
+  }
+  if (raw === "disabled") {
+    return { enabled: false, status: "disabled" };
+  }
+  if (raw === "archived") {
+    return { enabled: false, status: "archived" };
+  }
+  return { enabled: false, status: "draft" };
+}
+
+function loadSeedCatalog(relativePath) {
+  try {
+    return require(relativePath);
+  } catch (error) {
+    process.stderr.write(
+      `[pilot:bootstrap] Failed to load ${relativePath}: ${error instanceof Error ? error.message : String(error)}\n`
+    );
+    return null;
   }
 }
 

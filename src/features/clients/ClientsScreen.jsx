@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Download, Filter, ShieldCheck, Sparkles, Tag } from "lucide-react";
 import { submitClientExport, submitClientMerge, submitClientUnmerge } from "../../app/clientProfileActions.js";
+import { buildSourceProfileId, groupConversationsIntoClientProfiles, normalizeClientPhone } from "../../app/clientProfileModel.js";
 import { maskPhone } from "../../app/dialogModel.js";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { clientService } from "../../services/clientService.js";
@@ -8,8 +9,9 @@ import { ChannelBadge, EntityTable, ProductScreen, SectionTitle, ToolbarSearch }
 import "./clients.css";
 
 function getClientId(client) {
-  const phoneSuffix = (client?.phone ?? "").replace(/\D/g, "").slice(-4) || "0000";
-  return `gig-${client?.id ?? "unknown"}-${phoneSuffix}`;
+  const identityKey = String(client?.clientIdentityKey ?? "").replace(/[^a-z0-9]/gi, "").slice(0, 16) || "client";
+  const phoneSuffix = normalizeClientPhone(client?.phone).slice(-4) || "0000";
+  return `gig-${identityKey}-${phoneSuffix}`;
 }
 
 function getClientMutationProfileId(client) {
@@ -17,8 +19,9 @@ function getClientMutationProfileId(client) {
     return client.sourceProfileId;
   }
 
-  if (client?.channel && client?.id) {
-    return `src_${String(client.channel).toLowerCase()}_${client.id}`;
+  const stableProfileId = buildSourceProfileId(client);
+  if (stableProfileId) {
+    return stableProfileId;
   }
 
   return client?.id ?? "";
@@ -53,7 +56,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
   const [segmentsError, setSegmentsError] = useState("");
   const [selectedSegmentId, setSelectedSegmentId] = useState("");
   const [exportPending, setExportPending] = useState(false);
-  const [selectedId, setSelectedId] = useState(conversations[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState("");
   const [mergedIds, setMergedIds] = useState([]);
   useEffect(() => {
     let cancelled = false;
@@ -83,21 +86,33 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     };
   }, []);
   const clients = useMemo(() => {
-    return conversations
+    return groupConversationsIntoClientProfiles(conversations)
       .filter((client) => clientMatchesSegment(client, selectedSegmentId))
       .filter((client) => `${client.name} ${client.phone} ${client.channel} ${client.device} ${client.topic}`.toLowerCase().includes(query.toLowerCase()));
   }, [conversations, query, selectedSegmentId]);
-  const selected = clients.find((client) => client.id === selectedId) ?? clients[0] ?? conversations[0] ?? null;
+  useEffect(() => {
+    if (!clients.length) {
+      if (selectedId) {
+        setSelectedId("");
+      }
+      return;
+    }
+
+    if (!clients.some((client) => client.clientIdentityKey === selectedId)) {
+      setSelectedId(clients[0].clientIdentityKey);
+    }
+  }, [clients, selectedId]);
+  const selected = clients.find((client) => client.clientIdentityKey === selectedId) ?? clients[0] ?? null;
   const canMergeProfiles = Boolean(selected) && access.canViewSensitive;
   const canExportClients = !exportPending && !segmentsLoading && clients.length > 0;
   const visiblePhone = selected ? (access.canViewSensitive ? selected.phone : maskPhone(selected.phone)) : "";
   const visibleClientId = selected ? (access.canViewSensitive ? getClientId(selected) : `${getClientId(selected).slice(0, 8)}***`) : "";
   const duplicateCandidates = selected
-    ? conversations
-      .filter((client) => client.id !== selected.id)
+    ? clients
+      .filter((client) => client.clientIdentityKey !== selected.clientIdentityKey)
       .map((client) => ({
         ...client,
-        score: client.phone.slice(0, 6) === selected.phone.slice(0, 6) ? 94 : client.name.split(" ")[0] === selected.name.split(" ")[0] ? 82 : 64
+        score: normalizeClientPhone(client.phone) === normalizeClientPhone(selected.phone) ? 94 : client.name.split(" ")[0] === selected.name.split(" ")[0] ? 82 : 64
       }))
       .sort((left, right) => right.score - left.score)
       .slice(0, 3)
@@ -206,13 +221,13 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
           ) : null}
         >
           {clients.map((client) => (
-            <button className={`entity-row ${selected?.id === client.id ? "selected" : ""}`} key={client.id} onClick={() => setSelectedId(client.id)}>
+            <button className={`entity-row ${selected?.clientIdentityKey === client.clientIdentityKey ? "selected" : ""}`} key={client.clientIdentityKey} onClick={() => setSelectedId(client.clientIdentityKey)}>
               <strong>{client.name}</strong>
               <span>{access.canViewSensitive ? client.phone : maskPhone(client.phone)}</span>
               <ChannelBadge channel={client.channel} />
               <span>{client.device}</span>
               <span>{client.topic || "Не выбрана"}</span>
-              <span>{client.previous.length} закрытых</span>
+              <span>{client.appealCount} обращ. · {client.previous.length} закрытых</span>
             </button>
           ))}
         </EntityTable>
@@ -261,7 +276,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
                 const isMerged = mergedIds.includes(getClientMutationProfileId(candidate));
 
                 return (
-                  <article className={`duplicate-row ${isMerged ? "merged" : ""}`} key={candidate.id}>
+                  <article className={`duplicate-row ${isMerged ? "merged" : ""}`} key={candidate.clientIdentityKey}>
                     <header>
                       <strong>{candidate.name}</strong>
                       <b>{candidate.score}%</b>
@@ -280,7 +295,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
           </section>
 
           <section className="work-panel">
-            <SectionTitle title="История обращений" action={`${selected.previous.length + 1} всего`} />
+            <SectionTitle title="История обращений" action={`${selected.appealCount} обращений`} />
             <div className="client-history-list">
               <article>
                 <time>Сейчас</time>

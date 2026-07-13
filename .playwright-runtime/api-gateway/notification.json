@@ -1,256 +1,113 @@
 {
-  "browserPushSubscriptions": [
-    {
-      "createdAt": "2026-07-11T22:09:51.469Z",
-      "endpoint": "https://push.playwright.test/subscription/topbar-notifications",
-      "endpointHash": "sha256:056277a43e23c06e4b14da6b171e7137cef03369bab213aca61f3cadf7c57673",
-      "expirationTime": null,
-      "id": "push_sub_5011252a-7e50-47d6-94ef-c82574dd64fd",
-      "keys": {
-        "auth": "playwright-auth-secret",
-        "p256dh": "playwright-p256dh-key"
-      },
-      "revokedAt": null,
-      "status": "active",
-      "tenantId": "tenant-volga",
-      "updatedAt": "2026-07-11T22:09:51.469Z",
-      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.7827.55 Safari/537.36",
-      "userId": "usr-volga-admin"
-    }
-  ],
-  "deliveryDescriptors": [
-    {
-      "attempts": 0,
-      "createdAt": "2026-07-11T22:09:51.645Z",
-      "deliveredAt": null,
-      "endpointHash": "sha256:056277a43e23c06e4b14da6b171e7137cef03369bab213aca61f3cadf7c57673",
-      "failedAt": null,
-      "id": "notif_delivery_44d2caf5-4ff3-4b90-aec8-92e726321770",
-      "lastError": null,
-      "nextAttemptAt": null,
-      "notificationId": "notif-724a757e-57aa-4584-871d-a7b9777f9998",
-      "payload": {
-        "body": "Notification route smoke",
-        "title": "Critical alert test",
-        "url": "/#/app"
-      },
-      "providerMessageId": null,
-      "queue": "browser-push",
-      "status": "queued",
-      "subscriptionId": "push_sub_5011252a-7e50-47d6-94ef-c82574dd64fd",
-      "tenantId": "tenant-volga",
-      "traceId": "trc_api_gateway_http_13452366-8f36-4f7b-9568-5ccbd3746598",
-      "type": "browser-push.critical-alert.test",
-      "updatedAt": "2026-07-11T22:09:51.645Z",
-      "userId": "usr-volga-admin"
-    }
-  ],
+  "browserPushSubscriptions": [],
+  "deliveryDescriptors": [],
   "notifications": [
     {
-      "action": "Открыть диалог",
+      "id": "notif-sla-vladimir",
       "actionTarget": {
         "kind": "navigate",
         "resourceId": "vladimir",
         "section": "dialogs"
       },
-      "category": "sla_risk",
-      "createdAt": "2026-07-02T08:36:00.000Z",
-      "detail": "Закрытие заблокировано, SLA просрочен",
-      "history": "11:36 · SLA alert доставлен старшему сотруднику",
-      "id": "notif-sla-vladimir",
-      "meta": "Telegram · очередь спасения",
-      "readAt": "2026-07-11T22:09:51.828Z",
-      "recipientUserId": null,
       "tenantId": "tenant-volga",
-      "title": "Владимир Б. без тематики",
-      "tone": "danger",
+      "category": "sla_risk",
       "type": "SLA",
-      "typeKey": "sla"
+      "typeKey": "sla",
+      "title": "Владимир Б. без тематики",
+      "detail": "Закрытие заблокировано, SLA просрочен",
+      "meta": "Telegram · очередь спасения",
+      "action": "Открыть диалог",
+      "tone": "danger",
+      "history": "11:36 · SLA alert доставлен старшему сотруднику",
+      "readAt": null,
+      "recipientUserId": null,
+      "createdAt": "2026-07-02T08:36:00.000Z"
     },
     {
-      "action": "Посмотреть",
+      "id": "notif-mention-anna",
       "actionTarget": {
         "kind": "navigate",
         "resourceId": "irina",
         "section": "dialogs"
       },
-      "category": "invite_event",
-      "createdAt": "2026-07-02T08:34:00.000Z",
-      "detail": "Нужна проверка возврата до закрытия",
-      "history": "11:34 · mention из внутреннего комментария",
-      "id": "notif-mention-anna",
-      "meta": "MAX · старший сотрудник",
-      "readAt": "2026-07-11T22:09:51.828Z",
-      "recipientUserId": null,
       "tenantId": "tenant-volga",
-      "title": "Анна Р. упомянула вас",
-      "tone": "warn",
+      "category": "invite_event",
       "type": "Mention",
-      "typeKey": "mention"
+      "typeKey": "mention",
+      "title": "Анна Р. упомянула вас",
+      "detail": "Нужна проверка возврата до закрытия",
+      "meta": "MAX · старший сотрудник",
+      "action": "Посмотреть",
+      "tone": "warn",
+      "history": "11:34 · mention из внутреннего комментария",
+      "readAt": null,
+      "recipientUserId": null,
+      "createdAt": "2026-07-02T08:34:00.000Z"
     },
     {
-      "action": "Открыть канал",
+      "id": "notif-channel-vk",
       "actionTarget": {
         "kind": "navigate",
         "resourceId": "vk",
         "section": "settings"
       },
-      "category": "channel_failure",
-      "createdAt": "2026-07-02T08:31:00.000Z",
-      "detail": "3 ошибки доставки за последние 15 минут",
-      "history": "11:31 · webhook retry превысил порог",
-      "id": "notif-channel-vk",
-      "meta": "Интеграции · требует администратора",
-      "readAt": "2026-07-11T22:09:51.828Z",
-      "recipientUserId": null,
       "tenantId": "tenant-volga",
-      "title": "VK: рост ошибок webhook",
-      "tone": "info",
+      "category": "channel_failure",
       "type": "Channel",
-      "typeKey": "channel"
+      "typeKey": "channel",
+      "title": "VK: рост ошибок webhook",
+      "detail": "3 ошибки доставки за последние 15 минут",
+      "meta": "Интеграции · требует администратора",
+      "action": "Открыть канал",
+      "tone": "info",
+      "history": "11:31 · webhook retry превысил порог",
+      "readAt": null,
+      "recipientUserId": null,
+      "createdAt": "2026-07-02T08:31:00.000Z"
     },
     {
-      "action": "Открыть панель",
+      "id": "notif-ladoga-sla",
       "actionTarget": {
         "kind": "navigate",
         "resourceId": "tenant-ladoga",
         "section": "panel"
       },
+      "tenantId": "tenant-ladoga",
       "category": "sla_risk",
-      "createdAt": "2026-07-02T07:12:00.000Z",
+      "type": "SLA",
+      "typeKey": "sla",
+      "title": "Очередь Ladoga перегружена",
       "detail": "SLA risk на 4 диалогах",
-      "history": "10:12 · SLA risk escalated",
-      "id": "notif-ladoga-sla",
       "meta": "Telegram · rescue queue",
+      "action": "Открыть панель",
+      "tone": "danger",
+      "history": "10:12 · SLA risk escalated",
       "readAt": null,
       "recipientUserId": null,
-      "tenantId": "tenant-ladoga",
-      "title": "Очередь Ladoga перегружена",
-      "tone": "danger",
-      "type": "SLA",
-      "typeKey": "sla"
+      "createdAt": "2026-07-02T07:12:00.000Z"
     },
     {
-      "action": "Открыть audit",
+      "id": "notif-privileged-admin",
       "actionTarget": {
         "kind": "navigate",
         "resourceId": "service-admin-audit",
         "section": "audit"
       },
+      "tenantId": "tenant-volga",
       "category": "privileged_admin",
-      "createdAt": "2026-07-02T06:55:00.000Z",
+      "type": "Privileged",
+      "typeKey": "privileged",
+      "title": "Service-admin audit export готов",
       "detail": "CSV, 128 событий, redaction policy applied",
-      "history": "09:55 · privileged export completed",
-      "id": "notif-privileged-admin",
       "meta": "Service admin · privileged",
+      "action": "Открыть audit",
+      "tone": "info",
+      "history": "09:55 · privileged export completed",
       "readAt": "2026-07-02T09:56:00.000Z",
       "recipientUserId": null,
-      "tenantId": "tenant-volga",
-      "title": "Service-admin audit export готов",
-      "tone": "info",
-      "type": "Privileged",
-      "typeKey": "privileged"
-    },
-    {
-      "action": "РџСЂРѕРІРµСЂРёС‚СЊ critical route",
-      "actionTarget": null,
-      "category": "privileged_admin",
-      "createdAt": "2026-07-11T22:09:51.633Z",
-      "detail": "Notification route smoke",
-      "history": "01:09 В· critical alert route test",
-      "id": "notif-724a757e-57aa-4584-871d-a7b9777f9998",
-      "meta": "Notifications В· delivery test",
-      "readAt": "2026-07-11T22:09:51.828Z",
-      "recipientUserId": "usr-volga-admin",
-      "tenantId": "tenant-volga",
-      "title": "Critical alert test",
-      "tone": "warn",
-      "type": "Critical",
-      "typeKey": "critical"
+      "createdAt": "2026-07-02T06:55:00.000Z"
     }
   ],
-  "preferenceAuditEvents": [
-    {
-      "action": "notifications.preferences.update",
-      "at": "2026-07-11T22:09:49.996Z",
-      "id": "notif_pref_c6e04988-fac8-4f67-81c8-4b6ace44abe8",
-      "immutable": true,
-      "reason": "Notification delivery preferences updated.",
-      "result": "ok",
-      "tenantId": "tenant-volga",
-      "traceId": "trc_api_gateway_http_0a487eff-ae54-4837-b273-731a6bcc7575",
-      "userId": "usr-volga-admin"
-    },
-    {
-      "action": "notifications.preferences.update",
-      "at": "2026-07-11T22:09:51.089Z",
-      "id": "notif_pref_4e805f05-c044-44ad-800f-ed961e93dec6",
-      "immutable": true,
-      "reason": "Notification delivery preferences updated.",
-      "result": "ok",
-      "tenantId": "tenant-volga",
-      "traceId": "trc_api_gateway_http_2aede2be-f763-4b77-9a4f-b1afbf6a258b",
-      "userId": "usr-volga-admin"
-    },
-    {
-      "action": "notifications.preferences.update",
-      "at": "2026-07-11T22:09:51.291Z",
-      "id": "notif_pref_1209bd96-e28c-49ae-bcfd-9f249afbd2c4",
-      "immutable": true,
-      "reason": "Notification delivery preferences updated.",
-      "result": "ok",
-      "tenantId": "tenant-volga",
-      "traceId": "trc_api_gateway_http_3c5ce387-bb31-4548-beb1-f09ae7b52084",
-      "userId": "usr-volga-admin"
-    },
-    {
-      "action": "notifications.browser-push.subscribe",
-      "at": "2026-07-11T22:09:51.469Z",
-      "id": "notif_push_7436bba1-2de1-49f1-bfe6-3b931206dc4d",
-      "immutable": true,
-      "reason": "Browser push subscription stored.",
-      "result": "ok",
-      "tenantId": "tenant-volga",
-      "traceId": "trc_api_gateway_http_b4b2df7b-45e1-41f7-885f-ac98c5bca15b",
-      "userId": "usr-volga-admin"
-    },
-    {
-      "action": "notifications.critical-alert.test",
-      "at": "2026-07-11T22:09:51.645Z",
-      "id": "notif_test_b210905d-0662-4940-886a-3735a1a4d2c7",
-      "immutable": true,
-      "reason": "Critical alert test route executed.",
-      "result": "ok",
-      "tenantId": "tenant-volga",
-      "traceId": "trc_api_gateway_http_13452366-8f36-4f7b-9568-5ccbd3746598",
-      "userId": "usr-volga-admin"
-    },
-    {
-      "action": "notifications.preferences.update",
-      "at": "2026-07-11T22:09:51.963Z",
-      "id": "notif_pref_d5c301cc-2e92-49b2-b511-63b0914a2339",
-      "immutable": true,
-      "reason": "Notification delivery preferences updated.",
-      "result": "ok",
-      "tenantId": "tenant-volga",
-      "traceId": "trc_api_gateway_http_aca6e738-bd24-4de7-a58f-eff36edacda1",
-      "userId": "usr-volga-admin"
-    }
-  ],
-  "preferences": [
-    {
-      "browserPushEnabled": true,
-      "browserPushEndpoint": "https://push.playwright.test/subscription/topbar-notifications",
-      "browserPushPermission": "granted",
-      "browserPushSubscriptionId": "push_sub_5011252a-7e50-47d6-94ef-c82574dd64fd",
-      "enabledExternalChannelIds": [
-        "conn_email_digest"
-      ],
-      "mutedSoundRuleIds": [],
-      "mutedTypeKeys": [],
-      "tenantId": "tenant-volga",
-      "updatedAt": "2026-07-11T22:09:51.963Z",
-      "userId": "usr-volga-admin"
-    }
-  ]
+  "preferenceAuditEvents": [],
+  "preferences": []
 }

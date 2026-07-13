@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const DRAFT_SWITCH_DISCARD_TOAST = "Черновик и очередь вложений сброшены.";
 const EMPTY_CONVERSATION = {
@@ -31,10 +31,24 @@ export function useConversationSelection({
   clearAttachments,
   setDraft,
   setToast,
-  initialSelectedId = "maria"
+  initialSelectedId = ""
 }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId);
   const [pendingConversationId, setPendingConversationId] = useState(null);
+
+  useEffect(() => {
+    if (!conversationItems.length) {
+      if (selectedId) {
+        setSelectedId("");
+      }
+      return;
+    }
+
+    const hasSelectedConversation = conversationItems.some((conversation) => conversation.id === selectedId);
+    if (!hasSelectedConversation) {
+      setSelectedId(conversationItems[0].id);
+    }
+  }, [conversationItems, selectedId]);
 
   const selected = useMemo(
     () => conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0] ?? EMPTY_CONVERSATION,

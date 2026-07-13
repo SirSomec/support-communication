@@ -5,7 +5,7 @@ export function applyNotificationMarkReadResponse({ currentReadIds = [], fallbac
     return {
       ok: false,
       ids: currentReadIds,
-      message: response.error?.message ?? "Notification read state was not persisted."
+      message: response.error?.message ?? "Не удалось сохранить отметку о прочтении уведомлений."
     };
   }
 
@@ -21,7 +21,7 @@ export function applyNotificationMarkReadResponse({ currentReadIds = [], fallbac
     return {
       ok: false,
       ids: currentReadIds,
-      message: "Notification read state was not confirmed by the backend."
+      message: "Отметка о прочтении уведомлений не подтверждена бэкендом."
     };
   }
 
@@ -36,7 +36,7 @@ export function applyNotificationPreferencesResponse({ currentPreferences = {}, 
     return {
       ok: false,
       preferences: currentPreferences,
-      message: response.error?.message ?? "Notification preference update was not persisted."
+      message: response.error?.message ?? "Не удалось сохранить настройки уведомлений."
     };
   }
 
@@ -46,7 +46,7 @@ export function applyNotificationPreferencesResponse({ currentPreferences = {}, 
     return {
       ok: false,
       preferences: currentPreferences,
-      message: "Notification preference evidence was not confirmed by the backend."
+      message: "Изменение настроек уведомлений не подтверждено бэкендом."
     };
   }
 
@@ -62,7 +62,7 @@ export function applyCriticalAlertTestResponse({ response }) {
     return {
       ok: false,
       deliveredCount: 0,
-      message: response.error?.message ?? "Critical alert test was not delivered."
+      message: response.error?.message ?? "Тестовое критическое оповещение не доставлено."
     };
   }
 
@@ -73,7 +73,7 @@ export function applyCriticalAlertTestResponse({ response }) {
     return {
       ok: false,
       deliveredCount: 0,
-      message: "Critical alert delivery evidence was not confirmed by the backend."
+      message: "Доставка критического оповещения не подтверждена бэкендом."
     };
   }
 
@@ -91,7 +91,7 @@ export function applyBrowserPushSubscriptionResponse({ currentPreferences = {}, 
     return {
       ok: false,
       preferences: currentPreferences,
-      message: response.error?.message ?? "Browser push subscription was not persisted."
+      message: response.error?.message ?? "Не удалось сохранить подписку на push-уведомления браузера."
     };
   }
 
@@ -102,7 +102,7 @@ export function applyBrowserPushSubscriptionResponse({ currentPreferences = {}, 
     return {
       ok: false,
       preferences: currentPreferences,
-      message: "Browser push subscription evidence was not confirmed by the backend."
+      message: "Подписка на push-уведомления браузера не подтверждена бэкендом."
     };
   }
 
@@ -110,7 +110,7 @@ export function applyBrowserPushSubscriptionResponse({ currentPreferences = {}, 
     return {
       ok: false,
       preferences: currentPreferences,
-      message: "Browser push subscription evidence did not match backend preferences."
+      message: "Подписка на push-уведомления браузера не совпадает с настройками бэкенда."
     };
   }
 

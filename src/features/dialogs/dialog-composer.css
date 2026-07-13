@@ -6,7 +6,7 @@
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   box-shadow: var(--shadow);
 }
 
@@ -128,7 +128,7 @@
 
 .inline-ai-card p {
   margin: 0;
-  color: #263248;
+  color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -137,7 +137,7 @@
   min-height: 24px;
   padding: 4px 8px;
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--surface);
   color: #506078;
   font-size: 12px;
   font-weight: 800;
@@ -151,7 +151,7 @@
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--surface);
   color: #2d405f;
   font-weight: 800;
 }
@@ -166,7 +166,7 @@
   padding: 7px 8px;
   border: 1px solid #dce8f8;
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .ai-explainability summary {
@@ -298,8 +298,8 @@
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #ffffff;
-  color: #31415b;
+  background: var(--surface);
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 800;
 }
@@ -375,7 +375,7 @@
   padding: 7px 8px;
   border-left: 3px solid var(--green);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .pre-send-check-list span.warn {

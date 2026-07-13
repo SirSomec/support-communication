@@ -21,7 +21,7 @@ const EMPTY_WORKSPACE = {
   webhookEndpoints: []
 };
 
-export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) {
+export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode, view = "all" }) {
   const [workspace, setWorkspace] = useState(EMPTY_WORKSPACE);
   const [loading, setLoading] = useState(true);
   const [selectedWebhookId, setSelectedWebhookId] = useState("");
@@ -131,31 +131,40 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode }) 
   }
 
   if (loading) {
-    return <div className="admin-workspace-layout">Loading admin workspace...</div>;
+    return <div className="admin-workspace-layout">Загружаем данные администрирования…</div>;
   }
+
+  const showApi = view === "all" || view === "api";
+  const showSecurity = view === "all" || view === "security";
 
   return (
     <div className="admin-workspace-layout">
-      <ApiGovernancePanel
-        apiChangelog={apiChangelog}
-        apiEnvironmentKeys={apiEnvironmentKeys}
-        onReplayDelivery={handleReplayWebhook}
-        onRotateKey={handleRotateApiKey}
-        onSelectWebhook={setSelectedWebhookId}
-        replayedDeliveryIds={replayedDeliveryIds}
-        rotatedKeyIds={rotatedKeyIds}
-        selectedWebhook={selectedWebhook}
-        visibleWebhookDeliveries={visibleWebhookDeliveries}
-        webhookEndpoints={webhookEndpoints}
-      />
-      <SecurityControlsPanel
-        activeSecuritySessions={activeSecuritySessions}
-        onRevokeSession={handleRevokeSession}
-        revokedSessionIds={revokedSessionIds}
-        securityAlerts={securityAlerts}
-        securityControls={securityControls}
-      />
-      <BackendIntegrationPanel />
+      {showApi ? (
+        <ApiGovernancePanel
+          apiChangelog={apiChangelog}
+          apiEnvironmentKeys={apiEnvironmentKeys}
+          onReplayDelivery={handleReplayWebhook}
+          onRotateKey={handleRotateApiKey}
+          onSelectWebhook={setSelectedWebhookId}
+          replayedDeliveryIds={replayedDeliveryIds}
+          rotatedKeyIds={rotatedKeyIds}
+          selectedWebhook={selectedWebhook}
+          visibleWebhookDeliveries={visibleWebhookDeliveries}
+          webhookEndpoints={webhookEndpoints}
+        />
+      ) : null}
+      {showSecurity ? (
+        <>
+          <SecurityControlsPanel
+            activeSecuritySessions={activeSecuritySessions}
+            onRevokeSession={handleRevokeSession}
+            revokedSessionIds={revokedSessionIds}
+            securityAlerts={securityAlerts}
+            securityControls={securityControls}
+          />
+          <BackendIntegrationPanel />
+        </>
+      ) : null}
     </div>
   );
 }

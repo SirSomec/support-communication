@@ -187,7 +187,7 @@ export function NotificationCenter({
       if (typeof onNavigateNotificationAction !== "function") {
         return {
           ok: false,
-          message: "РќР°РІРёРіР°С†РёСЏ РёР· СѓРІРµРґРѕРјР»РµРЅРёСЏ РЅРµ РїРѕРґРєР»СЋС‡РµРЅР°."
+          message: "Навигация из уведомления недоступна."
         };
       }
 
@@ -195,7 +195,7 @@ export function NotificationCenter({
       if (!navigationResult?.ok) {
         return {
           ok: false,
-          message: navigationResult?.message ?? "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ С†РµР»СЊ СѓРІРµРґРѕРјР»РµРЅРёСЏ."
+          message: navigationResult?.message ?? "Не удалось открыть цель уведомления."
         };
       }
 
@@ -207,7 +207,7 @@ export function NotificationCenter({
 
     return {
       ok: false,
-      message: "РЈ СѓРІРµРґРѕРјР»РµРЅРёСЏ РЅРµС‚ РїРѕРґРґРµСЂР¶РёРІР°РµРјРѕРіРѕ РґРµР№СЃС‚РІРёСЏ."
+      message: "У уведомления нет поддерживаемого действия."
     };
   }
 

@@ -127,7 +127,7 @@ describe("quality and knowledge workflow actions", () => {
     );
 
     assert.equal(result.ok, false);
-    assert.match(result.message, /backend knowledge governance evidence/);
+    assert.match(result.message, /подтверждение действия со статьёй/);
   });
 
   it("wraps approve, publish, reject, archive and attachment delete knowledge actions", async () => {
@@ -290,7 +290,7 @@ describe("quality and knowledge workflow actions", () => {
     );
 
     assert.equal(result.ok, false);
-    assert.match(result.message, /backend manual QA evidence/);
+    assert.match(result.message, /Ручная QA-оценка не подтверждена/);
   });
 
   it("submits reviewer criteria and their calculated score instead of copying CSAT", async () => {

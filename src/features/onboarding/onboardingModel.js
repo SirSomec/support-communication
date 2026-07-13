@@ -37,6 +37,14 @@ export const planOptions = [
 
 export const employeeRoles = ["Оператор", "Старший оператор", "Администратор", "Аудитор"];
 
+export const stepRequirements = {
+  tenant: "Укажите название организации (от 2 символов) и slug (от 3 символов).",
+  plan: "Выберите тариф.",
+  admin: "Заполните имя, рабочий email и пароль от 8 символов.",
+  limits: "Лимиты операторов и диалогов — больше нуля, сообщений в день — от 100.",
+  employees: "Добавьте хотя бы одного сотрудника в список приглашений."
+};
+
 export function hasEmailShape(value) {
   return /\S+@\S+\.\S+/.test(value);
 }

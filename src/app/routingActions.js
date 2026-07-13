@@ -10,7 +10,7 @@ export async function submitRoutingRedistribution(
   if (response.status !== "ok") {
     return {
       ok: false,
-      message: response.error?.message ?? "Routing redistribution was rejected by backend."
+      message: response.error?.message ?? "Сервер не принял перераспределение диалогов."
     };
   }
 
@@ -19,7 +19,7 @@ export async function submitRoutingRedistribution(
   if (!data.redistributionId || !data.auditEvent?.immutable || assignments.length === 0) {
     return {
       ok: false,
-      message: "Routing redistribution response did not include backend redistribution evidence."
+      message: "Ответ сервера не содержит подтверждения перераспределения."
     };
   }
 

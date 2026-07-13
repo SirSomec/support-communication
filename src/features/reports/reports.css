@@ -104,7 +104,7 @@
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .report-chart-card header {
@@ -176,7 +176,7 @@
   padding: 11px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .rescue-outcome-card span,
@@ -233,7 +233,7 @@
 .rescue-report-row {
   padding: 12px 10px;
   border-bottom: 1px solid var(--line);
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .rescue-report-row.missed {
@@ -295,8 +295,8 @@
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
-  color: #223049;
+  background: var(--surface);
+  color: var(--text-secondary);
   text-align: left;
 }
 
@@ -343,8 +343,8 @@
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #31415b;
+  background: var(--surface);
+  color: var(--text-secondary);
   font-weight: 800;
 }
 

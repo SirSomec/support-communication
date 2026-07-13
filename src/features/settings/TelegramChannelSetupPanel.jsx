@@ -159,7 +159,7 @@ export function TelegramChannelSetupPanel({ canEditSettings, onToast }) {
                   <strong>URL</strong>
                   <span>{connection.webhookUrl}</span>
                 </div>
-                <button onClick={() => handleCopy(connection.webhookUrl, "Webhook URL")} type="button">
+                <button aria-label="Копировать Webhook URL" onClick={() => handleCopy(connection.webhookUrl, "Webhook URL")} title="Копировать Webhook URL" type="button">
                   <Copy size={14} />
                 </button>
               </div>
@@ -169,7 +169,7 @@ export function TelegramChannelSetupPanel({ canEditSettings, onToast }) {
                     <strong>secret_token</strong>
                     <span>{connection.webhookSecret}</span>
                   </div>
-                  <button onClick={() => handleCopy(connection.webhookSecret, "secret_token")} type="button">
+                  <button aria-label="Копировать secret_token" onClick={() => handleCopy(connection.webhookSecret, "secret_token")} title="Копировать secret_token" type="button">
                     <Copy size={14} />
                   </button>
                 </div>

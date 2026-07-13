@@ -18,6 +18,7 @@ import {
   getCompletion,
   hasEmailShape,
   planOptions,
+  stepRequirements,
   steps
 } from "./onboardingModel.js";
 import "./onboarding.css";
@@ -67,6 +68,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
   const progress = Math.round((completedCount / steps.length) * 100);
   const activeIndex = steps.findIndex((step) => step.id === activeStep);
   const allComplete = completedCount === steps.length;
+  const incompleteSteps = steps.filter((step) => !completion[step.id]);
   const selectedPlan = planOptions.find((option) => option.id === plan.id) ?? planOptions[1];
 
   function moveStep(direction) {
@@ -103,7 +105,12 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
 
   async function handleFinish() {
     if (!allComplete) {
-      setNotice({ tone: "error", text: "Завершите все пункты checklist перед открытием рабочего пространства." });
+      const firstIncomplete = incompleteSteps[0];
+      setActiveStep(firstIncomplete.id);
+      setNotice({
+        tone: "error",
+        text: `Осталось завершить: ${incompleteSteps.map((step) => step.label).join(", ")}. ${stepRequirements[firstIncomplete.id]}`
+      });
       return;
     }
 
@@ -198,6 +205,15 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
         <div className="onboarding-progress-track">
           <span style={{ width: `${progress}%` }} />
         </div>
+        {!allComplete ? (
+          <p className="onboarding-progress-hint">
+            Далее: <strong>{incompleteSteps[0].label}</strong> — {stepRequirements[incompleteSteps[0].id]}
+          </p>
+        ) : (
+          <p className="onboarding-progress-hint complete">
+            Все пункты завершены — нажмите «Завершить», чтобы создать организацию.
+          </p>
+        )}
       </section>
 
       {notice.text ? (
@@ -213,6 +229,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
             <StepButton
               active={step.id === activeStep}
               complete={completion[step.id]}
+              hint={completion[step.id] ? "" : stepRequirements[step.id]}
               icon={step.icon}
               key={step.id}
               label={step.label}

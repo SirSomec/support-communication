@@ -666,7 +666,7 @@ test("composer attachment queue blocks scan-pending backend descriptors", async 
   await expect(page.locator(".toast")).toContainText("Вложения добавлены в очередь: 1");
   await expect(page.locator(".attachment-queue")).toContainText("receipt.pdf");
   await expect(page.locator(".attachment-card").filter({ hasText: "receipt.pdf" })).toContainText(
-    "Waiting for backend scan",
+    "Ожидание антивирусной проверки",
     { timeout: 15_000 }
   );
   await expect(page.locator(".send-button")).toBeDisabled();
@@ -1008,12 +1008,8 @@ test("settings expose webhooks api keys and security controls", async ({ page })
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
 
+  await page.locator("#settings-tab-api").click();
   await expect(page.locator(".api-governance-panel")).toContainText("Webhooks / API keys");
-  await expect(page.locator(".security-controls-panel")).toContainText("Security controls");
-  await expect(page.locator(".backend-integration-panel")).toContainText("Backend integration");
-  await expect(page.locator("[data-service-id='reportService']")).toContainText("exportReport");
-  await expect(page.locator("[data-service-id='clientService']")).toContainText("updateClient");
-  await expect(page.locator("[data-service-id='auditService']")).toContainText("redactAuditEvent");
   const productionKey = page.locator(".api-key-card").filter({ hasText: "Production SDK key" });
   if (await productionKey.count()) {
     await productionKey.locator("button").click();
@@ -1029,21 +1025,30 @@ test("settings expose webhooks api keys and security controls", async ({ page })
     await expect(page.locator(".webhook-detail")).toContainText("HMAC SHA-256");
     await page.locator(".webhook-delivery-row").filter({ hasText: "signature_failed" }).locator("button").click();
     await expect(page.locator(".webhook-delivery-row").filter({ hasText: "message_new" })).toContainText("replay_queued");
-    await expect(page.locator(".toast")).toContainText("manual replay");
+    await expect(page.locator(".toast")).toContainText("повтор доставки поставлен в очередь");
   } else {
     await expect(page.locator(".webhook-detail")).toContainText("Webhook endpoints");
   }
+  await expectNoElementOverflow(page, ".admin-workspace-layout");
+  await expectNoElementOverflow(page, ".api-governance-panel");
+  await expectNoElementOverflow(page, ".webhook-workspace");
+
+  await page.locator("#settings-tab-security").click();
+  await expect(page.locator(".security-controls-panel")).toContainText("Security controls");
+  await expect(page.locator(".backend-integration-panel")).toContainText("Backend integration");
+  await expect(page.locator("[data-service-id='reportService']")).toContainText("exportReport");
+  await expect(page.locator("[data-service-id='clientService']")).toContainText("updateClient");
+  await expect(page.locator("[data-service-id='auditService']")).toContainText("redactAuditEvent");
 
   await page.locator(".security-session-row").filter({ hasText: "Сервисный ключ" }).locator("button").click();
   await expect(page.locator(".security-session-row").filter({ hasText: "Сервисный ключ" })).toContainText("Отозвана");
-  await expect(page.locator(".toast")).toContainText("security audit");
+  await expect(page.locator(".toast")).toContainText("Аудит безопасности");
   await expectNoElementOverflow(page, ".admin-workspace-layout");
-  await expectNoElementOverflow(page, ".api-governance-panel");
   await expectNoElementOverflow(page, ".backend-integration-panel");
-  await expectNoElementOverflow(page, ".webhook-workspace");
   await expectNoElementOverflow(page, ".security-controls-panel");
 
   await selectRole(page, "Старший сотрудник");
+  await page.locator("#settings-tab-security").click();
   await expect(page.locator(".admin-locked-panel")).toContainText("Админские настройки скрыты");
   await expect(page.locator(".api-governance-panel")).toHaveCount(0);
   await expect(page.locator(".backend-integration-panel")).toHaveCount(0);

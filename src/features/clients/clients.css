@@ -17,8 +17,8 @@
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #31415b;
+  background: var(--surface);
+  color: var(--text-secondary);
   font-size: 13px;
   font-weight: 800;
 }
@@ -118,7 +118,7 @@
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .duplicate-row.merged {
@@ -170,7 +170,7 @@
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #f8fafc;
-  color: #31415b;
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 800;
 }

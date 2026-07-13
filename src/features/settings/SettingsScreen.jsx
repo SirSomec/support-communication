@@ -87,30 +87,42 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, 
 
       <SettingsShell activeTab={activeTab} onTabChange={setActiveTab} summaries={summaries}>
         {activeTab === "connections" ? (
-          <>
-            <div className="integration-layout">
-              <ChannelConnectionsPanel
-                access={access}
-                canEditSettings={canEditSettings}
-                focusChannelType={navigationTarget?.tab === "connections" ? navigationTarget.channelType : ""}
-                focusConnectionId={navigationTarget?.tab === "connections" ? navigationTarget.connectionId : ""}
-                onSummaryChange={setConnectionSummary}
-                onToast={onToast}
-              />
+          <div className="integration-layout">
+            <ChannelConnectionsPanel
+              access={access}
+              canEditSettings={canEditSettings}
+              focusChannelType={navigationTarget?.tab === "connections" ? navigationTarget.channelType : ""}
+              focusConnectionId={navigationTarget?.tab === "connections" ? navigationTarget.connectionId : ""}
+              onSummaryChange={setConnectionSummary}
+              onToast={onToast}
+            />
 
-              <SdkConsolePanel
-                access={access}
-                canEditSettings={canEditSettings}
-                onToast={onToast}
-              />
-            </div>
-            <AdminWorkspaces
+            <SdkConsolePanel
               access={access}
               canEditSettings={canEditSettings}
               onToast={onToast}
-              roleMode={roleMode}
             />
-          </>
+          </div>
+        ) : null}
+
+        {activeTab === "api" ? (
+          <AdminWorkspaces
+            access={access}
+            canEditSettings={canEditSettings}
+            onToast={onToast}
+            roleMode={roleMode}
+            view="api"
+          />
+        ) : null}
+
+        {activeTab === "security" ? (
+          <AdminWorkspaces
+            access={access}
+            canEditSettings={canEditSettings}
+            onToast={onToast}
+            roleMode={roleMode}
+            view="security"
+          />
         ) : null}
 
         {activeTab === "employees" ? (
@@ -147,5 +159,5 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, 
 
 function resolveSettingsNavigationTab(navigationTarget) {
   const tab = typeof navigationTarget?.tab === "string" ? navigationTarget.tab : "";
-  return ["connections", "employees", "topics", "rules"].includes(tab) ? tab : "";
+  return ["connections", "employees", "topics", "rules", "api", "security"].includes(tab) ? tab : "";
 }

@@ -49,11 +49,11 @@ function isPublishedArticle(article) {
 }
 
 function isReviewableArticle(article) {
-  return article.status === "draft" || article.status === "Р§РµСЂРЅРѕРІРёРє";
+  return article.status === "draft" || article.status === "Черновик";
 }
 
 function isPublishableArticle(article) {
-  return article.status === "review" || article.status === "approved" || article.status === "РќР° РїСЂРѕРІРµСЂРєРµ";
+  return article.status === "review" || article.status === "approved" || article.status === "На проверке";
 }
 
 function createArticleDraft(article) {

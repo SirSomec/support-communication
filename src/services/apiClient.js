@@ -81,6 +81,11 @@ export async function apiRequest(path, { authMode = "auto", body, headers = {}, 
     const envelope = normalizeEnvelope(payload, { operation, service });
 
     if (!response.ok) {
+      const rawError = envelope.error ?? {
+        code: `http_${response.status}`,
+        message: response.statusText || "API request failed."
+      };
+
       return {
         ...envelope,
         status: "error",
@@ -90,22 +95,69 @@ export async function apiRequest(path, { authMode = "auto", body, headers = {}, 
           error: true,
           partial: Boolean(envelope.partial)
         },
-        error: envelope.error ?? {
-          code: `http_${response.status}`,
-          message: response.statusText || "API request failed."
+        error: {
+          ...rawError,
+          message: humanizeErrorMessage({
+            httpStatus: response.status,
+            message: rawError.message,
+            traceId: envelope.traceId
+          }),
+          detail: rawError.message
         }
       };
     }
 
     return envelope;
   } catch (error) {
-    return createApiErrorEnvelope({
+    const rawMessage = error instanceof Error ? error.message : "Network request failed.";
+    const failureEnvelope = createApiErrorEnvelope({
       code: "network_error",
-      message: error instanceof Error ? error.message : "Network request failed.",
+      message: "Нет соединения с сервером. Проверьте сеть и попробуйте ещё раз.",
       operation,
       service
     });
+    failureEnvelope.error.detail = rawMessage;
+    return failureEnvelope;
   }
+}
+
+const GENERIC_TECHNICAL_MESSAGES = new Set([
+  "",
+  "api request failed.",
+  "bad gateway",
+  "bad request",
+  "forbidden",
+  "gateway timeout",
+  "internal server error",
+  "not found",
+  "request timeout",
+  "service unavailable",
+  "too many requests",
+  "unauthorized"
+]);
+
+const HTTP_STATUS_MESSAGES = {
+  401: "Сессия не авторизована или данные для входа не подошли. Проверьте их и попробуйте снова.",
+  403: "Недостаточно прав для этого действия.",
+  404: "Запрошенные данные не найдены.",
+  408: "Сервер не ответил вовремя. Попробуйте ещё раз.",
+  429: "Слишком много запросов. Подождите немного и повторите."
+};
+
+function humanizeErrorMessage({ httpStatus, message, traceId }) {
+  const normalized = String(message ?? "").trim();
+  const isGenericTechnical = GENERIC_TECHNICAL_MESSAGES.has(normalized.toLowerCase());
+
+  if (!isGenericTechnical && !(httpStatus >= 500)) {
+    return normalized;
+  }
+
+  if (httpStatus >= 500) {
+    const traceSuffix = traceId ? ` Код обращения: ${traceId}.` : "";
+    return `Сервис временно недоступен. Попробуйте ещё раз через минуту.${traceSuffix}`;
+  }
+
+  return HTTP_STATUS_MESSAGES[httpStatus] ?? "Не удалось выполнить запрос. Попробуйте ещё раз.";
 }
 
 export function createApiErrorEnvelope({ code, data = null, message, operation = "request", service = "apiClient" }) {

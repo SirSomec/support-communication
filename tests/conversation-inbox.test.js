@@ -433,7 +433,7 @@ describe("composer attachment workflow", () => {
     assert.equal(result.backendState.antivirusState, "scan_pending");
     assert.equal(result.uploadPolicy.queue, "file-scan");
     assert.equal(result.uploadPolicy.scanState, "scan_pending");
-    assert.match(result.error, /scan/i);
+    assert.match(result.error, /проверк/i);
   });
 
   it("uploads attachment bytes, finalizes the backend file and polls until scan-ready", async () => {
@@ -605,7 +605,7 @@ describe("composer attachment workflow", () => {
 
     assert.equal(result.status, "error");
     assert.equal(result.retryable, false);
-    assert.match(result.error, /blocked/i);
+    assert.match(result.error, /заблокировано/i);
   });
 
   it("keeps backend upload failures as retryable attachment errors", async () => {

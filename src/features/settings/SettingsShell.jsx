@@ -1,11 +1,11 @@
 import React from "react";
-import { Cable, ListChecks, Tags, UsersRound } from "lucide-react";
+import { Cable, ListChecks, ShieldCheck, Tags, UsersRound, Webhook } from "lucide-react";
 
 const tabs = [
   {
     id: "connections",
     label: "Подключения",
-    description: "Каналы, webhook, API keys",
+    description: "Каналы и SDK",
     icon: Cable
   },
   {
@@ -25,6 +25,18 @@ const tabs = [
     label: "Правила",
     description: "Ограничения и контроль",
     icon: ListChecks
+  },
+  {
+    id: "api",
+    label: "API и webhooks",
+    description: "Ключи, доставки, changelog",
+    icon: Webhook
+  },
+  {
+    id: "security",
+    label: "Безопасность",
+    description: "Сессии, контроль, диагностика",
+    icon: ShieldCheck
   }
 ];
 

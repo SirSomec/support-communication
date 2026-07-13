@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { PauseCircle, PlayCircle, PlugZap, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { ChannelBadge, SectionTitle } from "../../ui.jsx";
+import { ChannelBadge, ConfirmDialog, SectionTitle } from "../../ui.jsx";
 import { integrationService } from "../../services/integrationService.js";
 import { routingService } from "../../services/routingService.js";
 import { settingsService } from "../../services/settingsService.js";
@@ -48,6 +48,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     recipient: "+7 999 000-00-00"
   });
   const [testResult, setTestResult] = useState(null);
+  const [connectionToDisable, setConnectionToDisable] = useState(null);
   const normalizedFocusChannelType = typeof focusChannelType === "string" ? focusChannelType.trim() : "";
   const normalizedFocusConnectionId = typeof focusConnectionId === "string" ? focusConnectionId.trim() : "";
 
@@ -258,13 +259,18 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     onToast?.(`${response.data.connection.name}: изменения сохранены. Аудит ${response.data.auditId}.`);
   }
 
-  async function disableConnection(connection) {
+  function disableConnection(connection) {
     if (!connection || !canMutateConnections) {
       return;
     }
 
-    const confirmed = window.confirm(`Отключить ${connection.name}? Входящие события перестанут приниматься этим инстансом.`);
-    if (!confirmed) {
+    setConnectionToDisable(connection);
+  }
+
+  async function confirmDisableConnection() {
+    const connection = connectionToDisable;
+    setConnectionToDisable(null);
+    if (!connection) {
       return;
     }
 
@@ -570,6 +576,18 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
             </div>
           </div>
         </div>
+      ) : null}
+
+      {connectionToDisable ? (
+        <ConfirmDialog
+          confirmLabel="Отключить"
+          danger
+          description={`Отключить ${connectionToDisable.name}? Входящие события перестанут приниматься этим инстансом.`}
+          eyebrow="Подключение канала"
+          onCancel={() => setConnectionToDisable(null)}
+          onConfirm={confirmDisableConnection}
+          title="Отключить подключение?"
+        />
       ) : null}
     </section>
   );

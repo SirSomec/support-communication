@@ -34,6 +34,7 @@ services:
       OPERATIONS_REPOSITORY: prisma
       PLATFORM_REPOSITORY: prisma
       QUALITY_REPOSITORY: prisma
+      PRESENCE_REPOSITORY: prisma
       REPORT_REPOSITORY: prisma
       REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
       ROUTING_REPOSITORY: prisma
@@ -123,6 +124,11 @@ services:
       AUTOMATION_REPOSITORY: prisma
       INTEGRATION_REPOSITORY: prisma
       CONVERSATION_REPOSITORY: prisma
+      # Auto-assignment inside the polling worker reads canonical operators and
+      # presence; without prisma here it falls back to empty JSON stores.
+      IDENTITY_REPOSITORY: prisma
+      PRESENCE_REPOSITORY: prisma
+      ROUTING_REPOSITORY: prisma
       QUALITY_REPOSITORY: prisma
       TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-true}
       TELEGRAM_INGRESS_MODE: polling

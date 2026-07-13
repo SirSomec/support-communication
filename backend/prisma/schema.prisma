@@ -2624,6 +2624,23 @@ model SdkVisitorPresenceSession {
   @@map("sdk_visitor_presence_sessions")
 }
 
+model OperatorPresenceInterval {
+  id         String    @id
+  tenantId   String    @map("tenant_id")
+  operatorId String    @map("operator_id")
+  status     String
+  changedBy  String?   @map("changed_by")
+  startedAt  DateTime  @map("started_at") @db.Timestamptz(3)
+  endedAt    DateTime? @map("ended_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, operatorId, startedAt], map: "operator_presence_tenant_operator_started_idx")
+  @@index([tenantId, endedAt], map: "operator_presence_tenant_open_idx")
+  @@index([tenantId, startedAt], map: "operator_presence_tenant_started_idx")
+  @@map("operator_presence_intervals")
+}
+
 model AiSuggestionDecision {
   decisionId       String   @map("decision_id")
   tenantId         String   @map("tenant_id")

@@ -159,6 +159,7 @@ Webhook ingress: `POST /api/v1/webhooks/telegram`
 
 - [ ] `GET /health` и `GET /ready` возвращают 200
 - [ ] Выполнен `npm run pilot:bootstrap`, сохранены `operator` credentials и `PILOT_PUBLIC_API_KEY`
+- [ ] После обновления со статусами операторов выполнен повторный `npm run prisma:seed` (добавляет действия ролей `presence.write`/`presence.read`), операторы перелогинились и `PUT /api/v1/presence/me` отвечает `ok`
 - [ ] Оператор успешно логинится через `POST /api/v1/auth/tenant/login`
 - [ ] Виджет на клиентской странице отправляет тестовое сообщение
 - [ ] Диалог появляется у оператора в inbox не позднее 3 секунд

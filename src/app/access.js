@@ -7,6 +7,7 @@ export const ACTION_TO_SECTION = {
   "dialogs.read": "dialogs",
   "dialogs.manage": "dialogs",
   "panel.read": "panel",
+  "presence.read": "panel",
   "routing.read": "panel",
   "clients.read": "clients",
   "clients.merge": "clients",
@@ -149,6 +150,8 @@ function fallbackActionsForRoleMode(roleMode) {
       "dialogs.read",
       "dialogs.manage",
       "panel.read",
+      "presence.read",
+      "presence.write",
       "clients.read",
       "templates.read",
       "templates.write",
@@ -167,7 +170,7 @@ function fallbackActionsForRoleMode(roleMode) {
     ];
   }
 
-  return ["dialogs.read", "clients.read", "templates.read", "templates.write"];
+  return ["dialogs.read", "clients.read", "templates.read", "templates.write", "presence.write"];
 }
 
 /** @deprecated Use buildAccessProfile / buildAccessProfileForRoleMode */

@@ -41,6 +41,7 @@
     "test:access": "node --test tests/access.test.js",
     "test:backend-api-smoke": "node --test tests/backend-api-smoke.test.js",
     "test:conversation-inbox": "node --test tests/conversation-inbox.test.js",
+    "test:presence-model": "node --test tests/presence-model.test.js",
     "test:pilot-smoke": "node --test tests/pilot-smoke.test.js",
     "test:pilot-flow": "playwright test tests/pilot-flow.spec.js",
     "test:settings-runtime": "playwright test tests/settings-runtime.spec.js",

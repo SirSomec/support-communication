@@ -2,10 +2,11 @@ import React from "react";
 import { ChevronDown, Globe2, Headphones, LogIn, Search, ShieldCheck, UsersRound, Zap } from "lucide-react";
 import { roleModes } from "../../app/access.js";
 import { navigationItems } from "../../app/navigationModel.js";
+import { PRESENCE_STATUSES, PRESENCE_STATUS_NOT_SET_LABEL, presenceStatusClass, presenceStatusLabel } from "../../app/presenceModel.js";
 import { NotificationCenter } from "../notifications/NotificationCenter.jsx";
 import "./app-shell.css";
 
-export function Sidebar({ active, access, onSelect, operator }) {
+export function Sidebar({ active, access, onSelect, operator, presenceStatus = "" }) {
   const operatorName = operator?.name || operator?.email || "Сотрудник";
   const operatorInitials = buildInitials(operatorName);
 
@@ -38,7 +39,10 @@ export function Sidebar({ active, access, onSelect, operator }) {
         <span className="operator-avatar" aria-hidden="true">{operatorInitials}</span>
         <div>
           <strong>{operatorName}</strong>
-          <span>Статус не задан</span>
+          <span className="operator-card-presence">
+            <i className={`presence-dot ${presenceStatusClass(presenceStatus)}`} aria-hidden="true" />
+            {presenceStatusLabel(presenceStatus)}
+          </span>
         </div>
       </div>
     </aside>
@@ -53,19 +57,33 @@ export function TopBar({
   onOpenLanding,
   onNavigateNotificationAction,
   onOutbound,
+  onPresenceChange,
   onRoleMode,
   onToast,
   notificationsEnabled = true,
   operatorConversationCount = 0,
+  presencePending = false,
+  presenceStatus = "",
   roleMode,
   showRoleSwitcher = true
 }) {
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <button className="status-select">
-          Статус не задан
-        </button>
+        <label className={`status-select presence-select ${presenceStatusClass(presenceStatus)}`} title="Статус влияет на распределение обращений">
+          <i className={`presence-dot ${presenceStatusClass(presenceStatus)}`} aria-hidden="true" />
+          <select
+            aria-label="Статус оператора"
+            disabled={presencePending}
+            onChange={(event) => onPresenceChange?.(event.target.value)}
+            value={presenceStatus || ""}
+          >
+            {!presenceStatus ? <option disabled value="">{PRESENCE_STATUS_NOT_SET_LABEL}</option> : null}
+            {PRESENCE_STATUSES.map((status) => (
+              <option key={status.key} value={status.key}>{status.label}</option>
+            ))}
+          </select>
+        </label>
         <button className="status-select">
           <UsersRound size={17} />
           {operatorConversationCount} {conversationWord(operatorConversationCount)}

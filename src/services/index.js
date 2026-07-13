@@ -13,6 +13,7 @@ export { knowledgeService } from "./knowledgeService.js";
 export { notificationService } from "./notificationService.js";
 export { operationsService } from "./operationsService.js";
 export { permissionService } from "./permissionService.js";
+export { presenceService } from "./presenceService.js";
 export { routingService } from "./routingService.js";
 export { platformMonitoringService } from "./platformMonitoringService.js";
 export { publicLeadService } from "./publicLeadService.js";

@@ -205,10 +205,58 @@
 }
 
 .presence-dot {
-  width: 14px;
-  height: 14px;
+  flex: none;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: #12c47f;
+  background: #aab3c1;
+}
+
+.presence-dot.online {
+  background: var(--green);
+}
+
+.presence-dot.busy {
+  background: var(--red);
+}
+
+.presence-dot.wrapping_up {
+  background: #7d6bff;
+}
+
+.presence-dot.break {
+  background: var(--amber);
+}
+
+.presence-dot.unavailable {
+  background: #d0d7e2;
+}
+
+.presence-dot.offline {
+  background: #aab3c1;
+}
+
+.presence-select {
+  padding-inline: 10px 6px;
+}
+
+.presence-select select {
+  max-width: 190px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-weight: 750;
+  outline: 0;
+}
+
+.presence-select select:disabled {
+  color: var(--subtle);
+}
+
+.operator-card-presence i.presence-dot {
+  width: 7px;
+  height: 7px;
 }
 
 .icon-button {

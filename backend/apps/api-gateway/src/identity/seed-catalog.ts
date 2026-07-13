@@ -50,6 +50,7 @@ export const serviceAdminSession = {
     "quality.manual-reviews.write",
     "quality.ratings.write",
     "quality.scoring-audits.write",
+    "presence.read",
     "quotas.check",
     "quotas.read",
     "realtime.events.read",
@@ -282,7 +283,7 @@ export const permissionRoles = [
   {
     key: "employee",
     description: "Line support operator",
-    actions: ["dialogs.read", "templates.read", "templates.write", "clients.read"],
+    actions: ["dialogs.read", "templates.read", "templates.write", "clients.read", "presence.write"],
     aliases: ["employee", "operator", "line_1", "line-1", "сотрудник"],
     groupIds: ["line-1"],
     metadata: {}
@@ -294,6 +295,8 @@ export const permissionRoles = [
       "dialogs.read",
       "dialogs.manage",
       "panel.read",
+      "presence.read",
+      "presence.write",
       "routing.read",
       "routing.redistribute",
       "templates.read",

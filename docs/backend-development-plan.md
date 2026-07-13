@@ -313,6 +313,7 @@ Status 2026-06-29: implemented first gateway contract slice for operator workloa
 - [x] Slice 4.6: persist routing job descriptors and runtime state snapshots through Prisma without JSON fallback reads/writes.
 - [x] Slice 4.7: claim SLA/rescue runtime jobs through repository-owned compare-and-set updates.
 - [x] Slice 4.8: move SLA/rescue apply transitions into repository-owned transactional methods.
+- [x] Slice 4.9 (2026-07-13): operator presence statuses (FR §9.4). Durable `operator_presence_intervals` store (json/prisma via `PRESENCE_REPOSITORY`), `/api/v1/presence/me` + `/api/v1/presence/team` with `presence.write`/`presence.read` actions, `operator.presence.updated` realtime events, presence overlay in workload reads (`presenceSince`, dataQuality `operatorPresence: operator_presence|partial|not_recorded`), auto-assignment/redistribution gated to `online`, manual assignment allowed for online/busy/wrapping_up, telegram-polling worker bootstraps the same presence repository. Operators without a recorded status keep the legacy not-recorded bypass for backward compatibility.
 
 ### Phase 5. Reports, exports and metric definitions
 

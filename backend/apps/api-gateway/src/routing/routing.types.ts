@@ -1,13 +1,19 @@
 export interface RoutingOperator {
+  /** Recorded when the presence source is known; canonical adapter marks "not_recorded". */
+  availability?: { online: boolean | null; source: string };
   avgFirstResponseSeconds: number;
   channels: string[];
   chats: number;
   id: string;
   limit: number;
   name: string;
+  /** Start of the current presence status, ISO timestamp (FR §12.3 "время в текущем статусе"). */
+  presenceSince?: string;
+  presenceSource?: "operator_presence";
   rescueActive: number;
   slaPercent: number;
-  status: "break" | "offline" | "online";
+  /** FR §9.4 operator statuses; legacy json stores may only carry online/break/offline. */
+  status: "break" | "busy" | "offline" | "online" | "unavailable" | "wrapping_up";
   tenantId?: string;
 }
 

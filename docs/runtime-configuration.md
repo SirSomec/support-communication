@@ -77,6 +77,7 @@ Repository defaults:
 | `OPERATIONS_REPOSITORY` | JSON store unless set to `prisma` |
 | `PLATFORM_REPOSITORY` | JSON store unless set to `prisma` |
 | `QUALITY_REPOSITORY` | JSON store unless set to `prisma` |
+| `PRESENCE_REPOSITORY` | JSON store unless set to `prisma`; operator presence statuses that gate routing (`PRESENCE_STORE_FILE` overrides the JSON path). Workers that auto-assign (telegram polling) must use the same repository mode as the api-gateway. |
 | `ROUTING_REPOSITORY` | JSON store unless set to `prisma` |
 | `REPORT_REPOSITORY` | JSON store unless set to `prisma` |
 

@@ -3,6 +3,9 @@ import { createEnvelope, type BackendEnvelope } from "@support-communication/env
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import type { RealtimeEvent } from "../conversation/conversation.repository.js";
 import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
+import { OperatorPresenceRepository } from "../presence/operator-presence.repository.js";
+import type { OperatorPresenceCurrentRecord } from "../presence/operator-presence.types.js";
+import { presenceAcceptsAutoAssignment, presenceAcceptsManualAssignment } from "../presence/operator-presence.types.js";
 import type { RescueReportRow, RoutingConversation, RoutingOperator, RoutingQueue, RoutingRescueState } from "./routing.types.js";
 import { CanonicalRoutingConversationRepository, type CanonicalRoutingConversation } from "./canonical-routing-conversation.repository.js";
 import { CanonicalRoutingWorkloadAdapter } from "./canonical-routing-workload.adapter.js";
@@ -108,7 +111,8 @@ export class RoutingService {
     private readonly routingRepository = RoutingRepository.default(),
     private readonly canonicalWorkload?: CanonicalRoutingWorkloadAdapter,
     private readonly canonicalConversations?: CanonicalRoutingConversationRepository,
-    private readonly canonicalTeams?: TeamDirectoryRepository
+    private readonly canonicalTeams?: TeamDirectoryRepository,
+    private readonly operatorPresence: Pick<OperatorPresenceRepository, "findCurrent" | "listCurrent"> = OperatorPresenceRepository.default()
   ) {
     const state = routingRepository.readState();
     this.conversations = clone(state.conversations);
@@ -133,11 +137,13 @@ export class RoutingService {
     const routingPolicy = await this.resolveRoutingPolicy(channel, tenantId);
     const routingAnalyticsRows = await this.routingRepository.listRoutingAnalyticsRows({ tenantId });
     const visibleQueueIds = new Set(queues.map((queue) => queue.channel));
-    const operatorSource = canonical
+    const presenceByOperator = await this.listOperatorPresence(tenantId);
+    const operatorSource = (canonical
       ? canonical.operators.filter((operator) => !channel || operator.queueIds.some((queueId) => visibleQueueIds.has(queueId)))
       : this.operators
         .filter((operator) => this.operatorBelongsToTenant(operator, tenantId))
-        .filter((operator) => this.operatorCanAccessChannel(operator, channel, memberships));
+        .filter((operator) => this.operatorCanAccessChannel(operator, channel, memberships)))
+      .map((operator) => withOperatorPresence(operator, presenceByOperator.get(operator.id)));
     const operators = operatorSource
       .map((operator) => operatorProjection(
         operator,
@@ -160,7 +166,7 @@ export class RoutingService {
         routingPolicy,
         dataQuality: canonical ? {
           canonical: true,
-          operatorPresence: "not_recorded",
+          operatorPresence: presenceQualityLabel(operatorSource),
           queueMetrics: "canonical_conversations"
         } : { canonical: false },
         totals: {
@@ -237,11 +243,12 @@ export class RoutingService {
       });
     }
 
-    if (operator.status !== "online" && !hasUnknownCanonicalPresence(operator)) {
-      return deniedEnvelope("createAssignment", "operator_unavailable", "Operator is not online.", {
+    const presenceAwareOperator = withOperatorPresence(operator, await this.findOperatorPresence(tenantId, operator.id));
+    if (!operatorAcceptsManualAssignment(presenceAwareOperator)) {
+      return deniedEnvelope("createAssignment", "operator_unavailable", "Operator status does not allow new dialog assignments.", {
         guard: "operator_channel_limit",
         operatorId: operator.id,
-        operatorStatus: operator.status
+        operatorStatus: presenceAwareOperator.status
       });
     }
 
@@ -1069,8 +1076,10 @@ export class RoutingService {
   ): Promise<Array<Record<string, unknown>>> {
     const memberships = await this.listActiveQueueMemberships(conversation.channel, tenantId);
     const capacities = await this.listOperatorCapacities(conversation.channel, tenantId);
+    const presenceByOperator = await this.listOperatorPresence(tenantId);
     return this.operators
       .filter((operator) => this.operatorBelongsToTenant(operator, tenantId))
+      .map((operator) => withOperatorPresence(operator, presenceByOperator.get(operator.id)))
       .map((operator) => {
         const capacity = findCapacityForOperator(capacities, operator.id, conversation.channel);
         const queueMembership = findMembershipForOperator(memberships, operator.id, conversation.channel);
@@ -1078,10 +1087,11 @@ export class RoutingService {
         const plannedChats = operator.chats + (plannedOperatorLoad.get(operator.id) ?? 0);
         const channelAccess = this.operatorCanAccessChannel(operator, conversation.channel, memberships);
         const availableCapacity = Math.max(0, chatLimit - plannedChats);
-        const online = operator.status === "online" || hasUnknownCanonicalPresence(operator);
+        const online = operatorAcceptsAutoAssignment(operator);
         const explain = [
           channelAccess ? "channel_access:granted" : "channel_access:denied",
           `status:${operator.status}`,
+          `presence:${operator.presenceSource ?? operator.availability?.source ?? "routing_store"}`,
           availableCapacity > 0 ? "capacity:available" : "capacity:full"
         ];
 
@@ -1282,6 +1292,15 @@ export class RoutingService {
       serverValidated: true,
       waitThresholdSeconds: rule?.waitThresholdSeconds ?? 180
     };
+  }
+
+  private async listOperatorPresence(tenantId: string): Promise<Map<string, OperatorPresenceCurrentRecord>> {
+    const records = await this.operatorPresence.listCurrent(tenantId);
+    return new Map(records.map((record) => [record.operatorId, record]));
+  }
+
+  private async findOperatorPresence(tenantId: string, operatorId: string): Promise<OperatorPresenceCurrentRecord | undefined> {
+    return await this.operatorPresence.findCurrent(tenantId, operatorId) ?? undefined;
   }
 
   private operatorBelongsToTenant(operator: RoutingOperator, tenantId: string): boolean {
@@ -1792,7 +1811,44 @@ function realtimeEvent(eventName: string, resourceId: string, tenantId: string, 
 }
 
 function hasUnknownCanonicalPresence(operator: RoutingOperator): boolean {
-  return (operator as RoutingOperator & { availability?: { source?: string } }).availability?.source === "not_recorded";
+  return operator.availability?.source === "not_recorded";
+}
+
+/** Overlays the operator-selected presence status (FR §9.4) on top of the routing/canonical operator record. */
+function withOperatorPresence(operator: RoutingOperator, presence?: OperatorPresenceCurrentRecord): RoutingOperator {
+  if (!presence) {
+    return operator;
+  }
+
+  return {
+    ...operator,
+    availability: { online: presence.status === "online", source: "operator_presence" },
+    presenceSince: presence.since,
+    presenceSource: "operator_presence",
+    status: presence.status
+  };
+}
+
+function operatorAcceptsAutoAssignment(operator: RoutingOperator): boolean {
+  if (operator.presenceSource === "operator_presence") {
+    return presenceAcceptsAutoAssignment(operator.status);
+  }
+  return operator.status === "online" || hasUnknownCanonicalPresence(operator);
+}
+
+function operatorAcceptsManualAssignment(operator: RoutingOperator): boolean {
+  if (operator.presenceSource === "operator_presence") {
+    return presenceAcceptsManualAssignment(operator.status);
+  }
+  return operator.status === "online" || hasUnknownCanonicalPresence(operator);
+}
+
+function presenceQualityLabel(operators: RoutingOperator[]): "not_recorded" | "operator_presence" | "partial" {
+  const recorded = operators.filter((operator) => operator.presenceSource === "operator_presence").length;
+  if (recorded === 0) {
+    return "not_recorded";
+  }
+  return recorded === operators.length ? "operator_presence" : "partial";
 }
 
 function replaceTenantRecords<T extends { tenantId?: string }>(current: T[], canonical: T[], tenantId: string): T[] {

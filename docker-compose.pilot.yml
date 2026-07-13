@@ -221,14 +221,26 @@ services:
       RUNTIME_PROFILE: production-like
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
       BILLING_REPOSITORY: prisma
+      # The outbox runtime opens the conversation delivery store on boot; without
+      # this the worker falls back to the JSON store and dies with
+      # conversation_store_file_required in the Prisma pilot stack.
+      CONVERSATION_REPOSITORY: prisma
       BILLING_SYNC_PROVIDER_MODE: ${BILLING_SYNC_PROVIDER_MODE:-disabled}
       BILLING_SYNC_PROVIDER_URL: ${BILLING_SYNC_PROVIDER_URL:-}
+
+  identity-events-worker:
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      CONVERSATION_REPOSITORY: prisma
 
   file-scan-scanner-worker:
     environment:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      CONVERSATION_REPOSITORY: prisma
       OUTBOX_SCANNER_ENABLED: ${OUTBOX_SCANNER_ENABLED:-true}
       OUTBOX_SCANNER_PROVIDER_MODE: ${OUTBOX_SCANNER_PROVIDER_MODE:-http}
       OUTBOX_SCANNER_LOCAL_VERDICT: ${OUTBOX_SCANNER_LOCAL_VERDICT:-clean}

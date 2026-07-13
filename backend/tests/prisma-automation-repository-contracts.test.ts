@@ -25,7 +25,7 @@ describe("Prisma-backed automation repository contracts", () => {
 
       assert.equal(empty.readState().botScenarios.length, 0);
       assert.ok(seeded.readState().botScenarios.length > 0);
-      assert.ok(seeded.readState().botScenarios.every((scenario) => scenario.tenantId === "tenant-demo"));
+      assert.ok(seeded.readState().botScenarios.every((scenario) => scenario.tenantId === "tenant-volga"));
     } finally {
       AutomationRepository.clearDefault();
       rmSync(workspace, { force: true, recursive: true });
@@ -79,7 +79,7 @@ describe("Prisma-backed automation repository contracts", () => {
       name: "Prisma scenario bot",
       schemaVersion: "bot-flow/v1",
       status: "draft",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     saved.flowNodes[0].title = "Mutated after save";
 
@@ -92,19 +92,19 @@ describe("Prisma-backed automation repository contracts", () => {
       ...foundAgainBeforeUpdate!,
       channels: ["SDK", "Telegram"],
       status: "published",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const foundAgain = await repository.findBotScenario("bot-scenario-prisma");
     const listed = await repository.listBotScenarios();
     const missing = await repository.findBotScenario("missing-bot");
     const state = await repository.readStateAsync();
 
-    assert.equal(saved.tenantId, "tenant-demo");
-    assert.equal(found?.tenantId, "tenant-demo");
+    assert.equal(saved.tenantId, "tenant-volga");
+    assert.equal(found?.tenantId, "tenant-volga");
     assert.equal(foundTitleBeforeMutation, "Start");
     assert.equal(foundAgainBeforeUpdate?.flowNodes[0].title, "Start");
     assert.equal(foundAgain?.flowNodes[0].title, "Start");
-    assert.equal(updated.tenantId, "tenant-demo");
+    assert.equal(updated.tenantId, "tenant-volga");
     assert.equal(updated.status, "published");
     assert.deepEqual(updated.channels, ["SDK", "Telegram"]);
     assert.equal(listed.filter((scenario) => scenario.id === "bot-scenario-prisma").length, 1);
@@ -115,8 +115,8 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.deepEqual(calls.botScenarioFindMany[0], {
       orderBy: { updatedAt: "desc" }
     });
-    assert.equal(calls.botScenarioUpsert[0].create.tenantId, "tenant-demo");
-    assert.equal(calls.botScenarioUpsert[1].update.tenantId, "tenant-demo");
+    assert.equal(calls.botScenarioUpsert[0].create.tenantId, "tenant-volga");
+    assert.equal(calls.botScenarioUpsert[1].update.tenantId, "tenant-volga");
     assert.equal(calls.botScenarioUpsert[0].create.createdAt instanceof Date, true);
     assert.equal(calls.botScenarioUpsert[1].update.createdAt, undefined);
   });
@@ -136,7 +136,7 @@ describe("Prisma-backed automation repository contracts", () => {
       name: "Lifecycle scenario",
       schemaVersion: "bot-flow/v1",
       status: "published",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const archived = await repository.saveBotScenario({
       ...disabled,
@@ -166,14 +166,14 @@ describe("Prisma-backed automation repository contracts", () => {
     await repository.saveBotScenario({
       archivedAt: "2026-06-01T00:00:00.000Z", channels: ["SDK"], enabled: false, flowEdges: [],
       flowNodes: [{ id: "start", type: "message" }], id: "bot-scenario-prisma-purge", name: "Prisma purge scenario",
-      retentionUntil: "2026-07-01T00:00:00.000Z", schemaVersion: "bot-flow/v1", status: "archived", tenantId: "tenant-demo"
+      retentionUntil: "2026-07-01T00:00:00.000Z", schemaVersion: "bot-flow/v1", status: "archived", tenantId: "tenant-volga"
     });
 
-    const result = await repository.purgeArchivedBotScenarioAsync("tenant-demo", "bot-scenario-prisma-purge", "2026-07-12T00:00:00.000Z");
+    const result = await repository.purgeArchivedBotScenarioAsync("tenant-volga", "bot-scenario-prisma-purge", "2026-07-12T00:00:00.000Z");
 
     assert.equal(result.outcome, "purged");
     assert.equal(await repository.findBotScenario("bot-scenario-prisma-purge"), undefined);
-    assert.equal(calls.botScenarioDeleteMany[0]?.where.tenantId, "tenant-demo");
+    assert.equal(calls.botScenarioDeleteMany[0]?.where.tenantId, "tenant-volga");
     assert.equal(calls.botScenarioDeleteMany[0]?.where.status, "archived");
     assert.equal(calls.botScenarioDeleteMany[0]?.where.auditHold, false);
     assert.equal(calls.botScenarioDeleteMany[0]?.where.legalHold, false);
@@ -191,7 +191,7 @@ describe("Prisma-backed automation repository contracts", () => {
       ],
       scenarioId: "bot-version-prisma",
       status: "draft",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       versionId: "bot-version-prisma-v1"
     };
 
@@ -215,10 +215,10 @@ describe("Prisma-backed automation repository contracts", () => {
     const missing = await repository.findBotScenarioVersion("missing-version");
     const state = await repository.readStateAsync();
 
-    assert.equal(saved.tenantId, "tenant-demo");
+    assert.equal(saved.tenantId, "tenant-volga");
     assert.equal(duplicate.versionId, "bot-version-prisma-v1");
     assert.equal(duplicate.status, "draft");
-    assert.equal(duplicate.tenantId, "tenant-demo");
+    assert.equal(duplicate.tenantId, "tenant-volga");
     assert.equal(second.versionId, "bot-version-prisma-v2");
     assert.equal(second.status, "published");
     assert.equal(found?.createdAt, "2026-06-30T17:20:00.000Z");
@@ -234,8 +234,8 @@ describe("Prisma-backed automation repository contracts", () => {
       where: { scenarioId: "bot-version-prisma" }
     });
     assert.equal(calls.botScenarioVersionCreates[0].data.createdAt instanceof Date, true);
-    assert.equal(calls.botScenarioVersionCreates[0].data.tenantId, "tenant-demo");
-    assert.equal(calls.botScenarioVersionCreates[1].data.tenantId, "tenant-demo");
+    assert.equal(calls.botScenarioVersionCreates[0].data.tenantId, "tenant-volga");
+    assert.equal(calls.botScenarioVersionCreates[1].data.tenantId, "tenant-volga");
   });
 
   it("persists immutable bot publish audit rows through Prisma with idempotency replay", async () => {
@@ -250,7 +250,7 @@ describe("Prisma-backed automation repository contracts", () => {
       immutable: true as const,
       runtimeVersion: "runtime-bot-prisma-v1",
       scenarioId: "bot-publish-prisma",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       versionId: "bot-publish-prisma-v1"
     };
 
@@ -278,12 +278,12 @@ describe("Prisma-backed automation repository contracts", () => {
     const missing = await repository.findBotPublishAuditEvent("missing-audit");
     const state = await repository.readStateAsync();
 
-    assert.equal(saved.tenantId, "tenant-demo");
+    assert.equal(saved.tenantId, "tenant-volga");
     assert.equal(saved.immutable, true);
     assert.equal(duplicateAuditId.auditId, "evt_bot_publish_prisma_001");
     assert.equal(duplicateAuditId.runtimeVersion, "runtime-bot-prisma-v1");
     assert.equal(duplicateKey.auditId, "evt_bot_publish_prisma_001");
-    assert.equal(duplicateKey.tenantId, "tenant-demo");
+    assert.equal(duplicateKey.tenantId, "tenant-volga");
     assert.equal(otherScenario.scenarioId, "bot-publish-prisma-other");
     assert.equal(found?.createdAt, "2026-06-30T17:30:00.000Z");
     assert.deepEqual(listed.map((event) => event.auditId), ["evt_bot_publish_prisma_001"]);
@@ -297,7 +297,7 @@ describe("Prisma-backed automation repository contracts", () => {
     });
     assert.equal(calls.botPublishAuditEventCreates[0].data.createdAt instanceof Date, true);
     assert.equal(calls.botPublishAuditEventCreates[0].data.immutable, true);
-    assert.equal(calls.botPublishAuditEventCreates[0].data.tenantId, "tenant-demo");
+    assert.equal(calls.botPublishAuditEventCreates[0].data.tenantId, "tenant-volga");
   });
 
   it("persists automation runtime state through Prisma delegates without JSON fallback", async () => {
@@ -309,16 +309,16 @@ describe("Prisma-backed automation repository contracts", () => {
     const publishRecord = await repository.savePublishIdempotencyKeyAsync({
       fingerprint: "publish-fingerprint",
       key: "publish-key",
-      result: { runtimeVersion: "runtime-prisma-v1", scenarioId: "bot-prisma-runtime", tenantId: "tenant-demo" },
-      tenantId: "tenant-demo"
+      result: { runtimeVersion: "runtime-prisma-v1", scenarioId: "bot-prisma-runtime", tenantId: "tenant-volga" },
+      tenantId: "tenant-volga"
     });
     const replayedPublish = await repository.savePublishIdempotencyKeyAsync({
       fingerprint: "changed-fingerprint",
       key: "publish-key",
-      result: { runtimeVersion: "changed", tenantId: "tenant-demo" },
-      tenantId: "tenant-demo"
+      result: { runtimeVersion: "changed", tenantId: "tenant-volga" },
+      tenantId: "tenant-volga"
     });
-    const foundPublish = await repository.findPublishIdempotencyKeyAsync("tenant-demo", "publish-key");
+    const foundPublish = await repository.findPublishIdempotencyKeyAsync("tenant-volga", "publish-key");
     const otherTenantPublish = await repository.savePublishIdempotencyKeyAsync({
       fingerprint: "ladoga-publish-fingerprint",
       key: "publish-key",
@@ -332,7 +332,7 @@ describe("Prisma-backed automation repository contracts", () => {
       queue: "bot-runtime",
       scenarioId: "bot-prisma-runtime",
       status: "running",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       testRunId: "bot-test-prisma"
     });
 
@@ -343,7 +343,7 @@ describe("Prisma-backed automation repository contracts", () => {
       id: "rule-prisma",
       segment: "checkout",
       status: "enabled",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const listedRules = await repository.listProactiveRulesAsync();
 
@@ -353,7 +353,7 @@ describe("Prisma-backed automation repository contracts", () => {
       endsAt: "18:00",
       ruleId: "rule-prisma",
       startsAt: "09:00",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       timezone: "Europe/Moscow",
       windowId: "window-prisma"
     });
@@ -364,7 +364,7 @@ describe("Prisma-backed automation repository contracts", () => {
       period: "day",
       resetAt: "2026-07-03T21:00:00.000Z",
       ruleId: "rule-prisma",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       used: 1
     });
     const assignment = await repository.saveProactiveExperimentAssignmentAsync({
@@ -373,7 +373,7 @@ describe("Prisma-backed automation repository contracts", () => {
       experimentId: "exp-rule-prisma",
       ruleId: "rule-prisma",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variant: "B"
     });
     const replayedAssignment = await repository.saveProactiveExperimentAssignmentAsync({
@@ -385,29 +385,29 @@ describe("Prisma-backed automation repository contracts", () => {
       attemptedAt: "2026-07-03T10:05:00.000Z",
       attemptId: "attempt-prisma",
       channel: "SDK",
-      descriptorId: "proactive_rule_prisma_tenant_demo_client_42",
+      descriptorId: "proactive_rule_prisma_tenant_volga_client_42",
       ruleId: "rule-prisma",
       status: "queued",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       traceId: "trc_proactive_prisma"
     });
     const deliveryRecord = await repository.saveProactiveDeliveryIdempotencyKeyAsync({
       fingerprint: "delivery-fingerprint",
-      key: "proactive-delivery:tenant-demo:rule-prisma:client-42",
-      result: { descriptorId: "proactive_rule_prisma_tenant_demo_client_42" },
+      key: "proactive-delivery:tenant-volga:rule-prisma:client-42",
+      result: { descriptorId: "proactive_rule_prisma_tenant_volga_client_42" },
       ruleId: "rule-prisma",
       subjectId: "client-42",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const attribution = await repository.saveProactiveDeliveryAttributionAsync({
       assignedAt: "2026-07-03T10:05:01.000Z",
       attributionId: "attribution-prisma",
-      descriptorId: "proactive_rule_prisma_tenant_demo_client_42",
+      descriptorId: "proactive_rule_prisma_tenant_volga_client_42",
       experimentId: "exp-rule-prisma",
       ruleId: "rule-prisma",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variant: "B"
     });
     const state = await repository.readStateAsync();
@@ -416,14 +416,14 @@ describe("Prisma-backed automation repository contracts", () => {
     assert.equal(replayedPublish.fingerprint, "publish-fingerprint");
     assert.equal(foundPublish?.result.runtimeVersion, "runtime-prisma-v1");
     assert.equal(otherTenantPublish.fingerprint, "ladoga-publish-fingerprint");
-    assert.equal(testRun.tenantId, "tenant-demo");
+    assert.equal(testRun.tenantId, "tenant-volga");
     assert.equal(rule.status, "enabled");
     assert.deepEqual(listedRules.map((item) => item.id), ["rule-prisma"]);
     assert.equal(window.windowId, "window-prisma");
     assert.equal(cap.capId, "cap-prisma");
     assert.equal(replayedAssignment.variant, "B");
     assert.equal(attempt.traceId, "trc_proactive_prisma");
-    assert.equal(deliveryRecord.result.descriptorId, "proactive_rule_prisma_tenant_demo_client_42");
+    assert.equal(deliveryRecord.result.descriptorId, "proactive_rule_prisma_tenant_volga_client_42");
     assert.equal(attribution.variant, "B");
     assert.equal(state.publishIdempotencyKeys.length, 2);
     assert.equal(state.botTestRuns.length, 1);
@@ -511,7 +511,7 @@ describe("Prisma-backed automation repository contracts", () => {
       id: "rule-prisma-eligible",
       segment: "checkout",
       status: "enabled",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     await repository.saveProactiveExecutionWindowAsync({
       active: true,
@@ -519,7 +519,7 @@ describe("Prisma-backed automation repository contracts", () => {
       endsAt: "23:59",
       ruleId: "rule-prisma-eligible",
       startsAt: "00:00",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       timezone: "UTC",
       windowId: "window-prisma-eligible"
     });
@@ -530,7 +530,7 @@ describe("Prisma-backed automation repository contracts", () => {
       period: "day",
       resetAt: "2026-07-04T00:00:00.000Z",
       ruleId: "rule-prisma-eligible",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       used: 0
     });
     const rules = await repository.listProactiveRulesAsync();
@@ -544,7 +544,7 @@ describe("Prisma-backed automation repository contracts", () => {
       repository,
       rules,
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       topic: "checkout",
       traceId: "trc_prisma_proactive_plan"
     });
@@ -552,10 +552,10 @@ describe("Prisma-backed automation repository contracts", () => {
     const assignments = await repository.listProactiveExperimentAssignmentsAsync({
       ruleId: "rule-prisma-eligible",
       subjectId: "client-42",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
 
-    assert.equal(plan?.descriptor.id, "proactive_rule_prisma_eligible_tenant_demo_client_42");
+    assert.equal(plan?.descriptor.id, "proactive_rule_prisma_eligible_tenant_volga_client_42");
     assert.equal(plan?.descriptor.payload.variant, assignments[0]?.variant);
     assert.equal(assignments.length, 1);
   });

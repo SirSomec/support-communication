@@ -170,6 +170,7 @@ function App() {
     suggestions: aiSuggestions,
     selectedId: selected.id,
     isClosed,
+    appendMessage,
     refreshInbox,
     setComposeMode,
     setDraft,

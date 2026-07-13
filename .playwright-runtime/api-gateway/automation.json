@@ -7,9 +7,9 @@
     {
       "id": "bot-delivery-status",
       "name": "Delivery status",
-      "status": "enabled",
+      "status": "draft",
       "schemaVersion": "bot-flow/v1",
-      "tenantId": "tenant-demo",
+      "tenantId": "tenant-volga",
       "channels": [
         "SDK",
         "Telegram"
@@ -42,6 +42,13 @@
           "to": "delivery-handoff",
           "label": "delay"
         }
+      ],
+      "triggerRules": [
+        {
+          "id": "delivery-new-conversation",
+          "priority": 0,
+          "type": "new_conversation"
+        }
       ]
     },
     {
@@ -49,7 +56,7 @@
       "name": "Auth code",
       "status": "test",
       "schemaVersion": "bot-flow/v1",
-      "tenantId": "tenant-demo",
+      "tenantId": "tenant-volga",
       "channels": [
         "VK",
         "MAX"
@@ -82,6 +89,13 @@
           "to": "auth-fallback",
           "label": "failed"
         }
+      ],
+      "triggerRules": [
+        {
+          "id": "auth-new-conversation",
+          "priority": 10,
+          "type": "new_conversation"
+        }
       ]
     }
   ],
@@ -100,7 +114,7 @@
         "SDK",
         "Telegram"
       ],
-      "tenantId": "tenant-demo",
+      "tenantId": "tenant-volga",
       "activeVariant": "A",
       "cooldown": "24h",
       "segment": "checkout",
@@ -111,7 +125,7 @@
       "channels": [
         "VK"
       ],
-      "tenantId": "tenant-demo",
+      "tenantId": "tenant-volga",
       "activeVariant": "B",
       "cooldown": "12h",
       "segment": "returning",
@@ -121,6 +135,7 @@
   "publishIdempotencyKeys": [],
   "activeVisitors": [],
   "rescueChats": [],
+  "scenarioAuditEvents": [],
   "workspaceAuditEvents": [
     {
       "id": "audit-bot-1001",
@@ -128,7 +143,7 @@
       "actor": "system",
       "target": "bot-delivery-status",
       "immutable": true,
-      "tenantId": "tenant-demo"
+      "tenantId": "tenant-volga"
     },
     {
       "id": "audit-proactive-1002",
@@ -136,7 +151,7 @@
       "actor": "senior-operator",
       "target": "rule-checkout",
       "immutable": true,
-      "tenantId": "tenant-demo"
+      "tenantId": "tenant-volga"
     }
   ],
   "workspaceRuntimeMetrics": [

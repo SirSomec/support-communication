@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { AlertTriangle, Clock3, Lock, ShieldCheck } from "lucide-react";
-import { formatRescueTimer, resolutionOutcomeLabels } from "../../app/dialogModel.js";
+import { formatRescueNextAction, formatRescueTimer, resolutionOutcomeLabels } from "../../app/dialogModel.js";
 
 const transcriptModes = [
   ["all", "Все"],
@@ -41,7 +41,7 @@ export function TranscriptToolbar({
               <Clock3 size={16} />
               <strong>{formatRescueTimer(rescueRemainingSeconds)}</strong>
               <span>{isRescueExpired ? "Время вышло" : activeRescue.reason}</span>
-              <b>{activeRescue.nextAction}</b>
+              <b>{formatRescueNextAction(activeRescue.nextAction)}</b>
             </div>
           ) : null}
         </div>

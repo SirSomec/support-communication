@@ -33,6 +33,14 @@ export const resolutionOutcomeLabels = {
   unresolved: "Не решено"
 };
 
+export const rescueNextActionLabels = {
+  reply_or_return_to_sla_queue: "Ответить клиенту или вернуть в SLA-очередь"
+};
+
+export function formatRescueNextAction(nextAction) {
+  return rescueNextActionLabels[nextAction] ?? nextAction ?? "";
+}
+
 export const slaSortRank = {
   danger: 0,
   warn: 1,

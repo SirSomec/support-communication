@@ -1,4 +1,4 @@
-import { statusLabels } from "./dialogModel.js";
+import { createAuditEvent, formatRescueNextAction, formatRescueTimer, statusLabels } from "./dialogModel.js";
 import { routingService } from "../services/routingService.js";
 
 export function useDialogActions({
@@ -111,9 +111,15 @@ export function useDialogActions({
     const serverConversation = response.data?.conversation;
     const serverRescue = response.data?.rescue ?? serverConversation?.rescue;
     if (serverConversation && serverRescue) {
+      const rescueAuditEvent = createAuditEvent({
+        eventKind: "rescue",
+        fromStatus: selectedStatus,
+        toStatus: serverConversation.status ?? "assigned",
+        detail: `Запущен rescue timer ${formatRescueTimer(serverRescue.durationSeconds)}: ${formatRescueNextAction(serverRescue.nextAction)}`
+      });
       setConversationItems((current) => current.map((conversation) => (
         conversation.id === selected.id
-          ? mergeRescueResponse(conversation, serverConversation, serverRescue)
+          ? mergeRescueResponse(conversation, serverConversation, serverRescue, rescueAuditEvent)
           : conversation
       )));
     } else if (refreshInbox) {
@@ -218,7 +224,7 @@ export function useDialogActions({
   };
 }
 
-function mergeRescueResponse(conversation, serverConversation, serverRescue) {
+function mergeRescueResponse(conversation, serverConversation, serverRescue, auditEvent = null) {
   return {
     ...conversation,
     ...(serverConversation.status ? { status: serverConversation.status } : {}),
@@ -226,6 +232,7 @@ function mergeRescueResponse(conversation, serverConversation, serverRescue) {
     ...(serverConversation.slaTone ? { slaTone: serverConversation.slaTone } : {}),
     ...(serverConversation.operatorId ? { operatorId: serverConversation.operatorId } : {}),
     ...(serverConversation.operatorName ? { operatorName: serverConversation.operatorName } : {}),
+    ...(auditEvent ? { messages: [...(conversation.messages ?? []), auditEvent] } : {}),
     rescue: serverRescue
   };
 }

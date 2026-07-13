@@ -272,29 +272,6 @@
         "storageGb": 18,
         "webhooks": 19000
       }
-    },
-    {
-      "arr": 0,
-      "healthScore": 100,
-      "id": "tenant-qa-retail",
-      "monthlyRevenue": 0,
-      "name": "QA Retail",
-      "owner": "QA Admin",
-      "planId": "trial",
-      "region": "ru-1",
-      "sla": "99.9",
-      "status": "trial",
-      "usage": {
-        "aiTokens": 0,
-        "botRuns": 0,
-        "channels": 1,
-        "operators": 1,
-        "reportExports": 0,
-        "storageGb": 0,
-        "webhooks": 0
-      },
-      "users": 1,
-      "workspaces": 2
     }
   ]
 }

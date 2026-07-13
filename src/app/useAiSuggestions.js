@@ -6,6 +6,7 @@ export function useAiSuggestions({
   suggestions,
   selectedId,
   isClosed,
+  appendMessage,
   refreshInbox,
   setComposeMode,
   setDraft,
@@ -62,9 +63,18 @@ export function useAiSuggestions({
       }
 
       await refreshInbox?.();
+      await appendMessage?.(selectedId, {
+        actor: "AI copilot",
+        detail: `AI-подсказка ${aiActionLabels[action]}: ${suggestion.title}`,
+        eventKind: "ai",
+        id: `ai-audit-${suggestion.id}-${action}-${Date.now()}`,
+        text: `AI-подсказка ${aiActionLabels[action]}: ${suggestion.title}`,
+        type: "event",
+        time: "сейчас"
+      }, { persist: false });
       setToast(`Решение по AI-подсказке сохранено: ${aiActionLabels[action]}.`);
     },
-    [isClosed, pendingSuggestionIds, refreshInbox, selectedId, setComposeMode, setDraft, setToast]
+    [appendMessage, isClosed, pendingSuggestionIds, refreshInbox, selectedId, setComposeMode, setDraft, setToast]
   );
 
   return {

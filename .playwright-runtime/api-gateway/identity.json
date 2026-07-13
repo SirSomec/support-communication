@@ -1,530 +1,73 @@
 {
-  "authInviteTokens": [
-    {
-      "codeHash": "sha256:b52b3ef2233858ce1156d85f235cf2c41eddfa8ca1eedc924398b9af1db303cb",
-      "consumedAt": null,
-      "createdAt": "2026-07-11T22:14:47.079Z",
-      "email": "nikolai@lumen.example",
-      "expiresAt": "2026-01-01T00:00:00.000Z",
-      "id": "inv_60fbfdc4-8c58-44a9-ac4a-6da4f72e967d",
-      "tenantId": "tenant-lumen"
-    }
-  ],
+  "authInviteTokens": [],
   "authRecoveryTokens": [],
   "breakGlassApprovals": [],
-  "credentialAuditEvents": [
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:15:49.811Z",
-      "id": "evt_credential_password_d1b34698-acb8-47b6-8758-9a5a076347fd",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_230c136a-5a04-4114-aad7-c751798be334"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:15:49.756Z",
-      "id": "evt_credential_password_cf128f78-ba08-4fe0-9c88-0a173beb6fea",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_fd7ee546-9ea8-4665-811b-c3fa726857bf"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:15:47.846Z",
-      "id": "evt_credential_password_f8da2258-2949-49a8-99d8-28164fb4881f",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_cafac33e-82ba-47bd-afab-e683e949e379"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:15:47.777Z",
-      "id": "evt_credential_password_1d00de44-ab9a-4f81-8275-0b1cd2f60784",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_5ae41d5c-9c2c-4ce0-af41-f1600482683e"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:15:45.870Z",
-      "id": "evt_credential_password_a4a4f35b-c9ba-4207-8c63-4ce5ecb77e09",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_d42cf995-d140-43d1-8d79-5c2e3d589376"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:15:45.819Z",
-      "id": "evt_credential_password_a2cd8ba9-fdc2-4cf2-8666-3b50160d8398",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_1932a7e2-255a-4a5d-bbdd-c6ece219eb1a"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:15:44.142Z",
-      "id": "evt_credential_password_033798e9-cff3-40d8-b133-cb5f7cc9e6db",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_44bbc841-cf8e-43ec-a32d-3f1e1633c25b"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:15:44.077Z",
-      "id": "evt_credential_password_8bd78199-f608-4126-86b6-f6256e737d2b",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_85c4e62c-7c35-41fc-93da-0128215781d2"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:14:53.257Z",
-      "id": "evt_credential_password_bc8a21d9-6e68-4444-917c-93c237acfed7",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_2c8c95b1-5dad-4ef0-9bd1-192cecdf767c"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:14:53.211Z",
-      "id": "evt_credential_password_6d313b96-9e8d-4e63-b2ef-ddb34980c6db",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_cc2d3acb-fbe6-45e1-aae6-5622b127ff2d"
-    },
-    {
-      "action": "auth.invite.accept",
-      "actor": "nikolai@lumen.example",
-      "at": "2026-07-11T22:14:47.109Z",
-      "id": "evt_auth_flow_d7cd3f39-eb9e-4a38-a49e-2099e19ff86b",
-      "immutable": true,
-      "reason": "Invite token has expired.",
-      "result": "denied",
-      "subjectId": "nikolai@lumen.example",
-      "traceId": "trc_api_gateway_http_1a41d2b5-b3e2-421c-8227-914993e9e0ad"
-    },
-    {
-      "action": "auth.tenant.select",
-      "actor": "multi@example.com",
-      "at": "2026-07-11T22:14:46.121Z",
-      "id": "evt_auth_flow_92042b18-7d90-4eae-947d-fd889f93dbcf",
-      "immutable": true,
-      "reason": "Selected tenant tenant-lumen.",
-      "result": "ok",
-      "subjectId": "multi@example.com",
-      "traceId": "trc_api_gateway_http_7e87b603-e260-41ec-9865-e070e1817090"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:14:43.602Z",
-      "id": "evt_credential_password_d6d1d80b-b902-472a-8bbc-89bedfa69730",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_bf7e3567-6c65-49eb-bf8e-979c5ebf8428"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:14:43.554Z",
-      "id": "evt_credential_password_2c41b673-adc3-4c66-9eb9-0f6f22127bc3",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_3b36e662-1cc1-46ea-845b-5b61bf32c488"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:14:41.861Z",
-      "id": "evt_credential_password_b1905e3e-36bd-4011-8af8-7838e2bf4e67",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_27746d62-6fdc-4bc3-9032-1ba9dc047d0b"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:14:41.816Z",
-      "id": "evt_credential_password_dee0135c-03c6-4c07-ae9d-589023edef3d",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_2cdab833-ae84-41c6-8dea-a81542bd86d9"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:12:16.529Z",
-      "id": "evt_credential_password_84a2ea67-ea50-46a8-a012-f6a2a93621b0",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_ae6a67aa-ebc7-42df-8821-64157face378"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:12:16.465Z",
-      "id": "evt_credential_password_f1c71757-33e4-4401-bc0e-95fd569e5ddf",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_46c8a9e5-ba46-4090-8c06-36c926192e2b"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:09:52.420Z",
-      "id": "evt_credential_password_564e9339-9ad2-4924-996b-6472cd040cec",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_40885c14-f9c5-46cc-9911-a52e0eac0b1b"
-    },
-    {
-      "action": "credential.password.verify",
-      "actor": "svc-admin-001",
-      "at": "2026-07-11T22:09:52.361Z",
-      "id": "evt_credential_password_4969c5aa-4e0e-4de8-bfb0-499fa25e8d0d",
-      "immutable": true,
-      "reason": "Password hash matched policy credential.",
-      "result": "ok",
-      "subjectId": "svc-admin-001",
-      "traceId": "trc_api_gateway_http_9afba9db-8f88-48fa-a5e9-421d12b9ee50"
-    }
-  ],
-  "mfaChallenges": [
-    {
-      "attempts": 0,
-      "id": "mfa_60e42d59-87c7-4628-9d6d-147475b56cd2",
-      "consumedAt": "2026-07-11T22:09:52.436Z",
-      "createdAt": "2026-07-11T22:09:52.378Z",
-      "email": "service-admin@example.com",
-      "expiresAt": "2026-07-11T22:19:52.378Z",
-      "maxAttempts": 5,
-      "otpHash": "hmac-sha256:a78dd83fa8e16c7e8eddc9181c7e08c885103a1790850315db12cf9e774f8ebc"
-    },
-    {
-      "attempts": 0,
-      "id": "mfa_d77f9524-53f6-4bc5-b2cb-b4d544d3842c",
-      "consumedAt": "2026-07-11T22:12:16.543Z",
-      "createdAt": "2026-07-11T22:12:16.481Z",
-      "email": "service-admin@example.com",
-      "expiresAt": "2026-07-11T22:22:16.481Z",
-      "maxAttempts": 5,
-      "otpHash": "hmac-sha256:a78dd83fa8e16c7e8eddc9181c7e08c885103a1790850315db12cf9e774f8ebc"
-    },
-    {
-      "attempts": 0,
-      "id": "mfa_69cb3524-649d-4b4b-af98-c39b172f1ef2",
-      "consumedAt": "2026-07-11T22:14:41.873Z",
-      "createdAt": "2026-07-11T22:14:41.826Z",
-      "email": "service-admin@example.com",
-      "expiresAt": "2026-07-11T22:24:41.826Z",
-      "maxAttempts": 5,
-      "otpHash": "hmac-sha256:a78dd83fa8e16c7e8eddc9181c7e08c885103a1790850315db12cf9e774f8ebc"
-    },
-    {
-      "attempts": 0,
-      "id": "mfa_c0eb8193-e094-44de-890a-37b37df85dd1",
-      "consumedAt": "2026-07-11T22:14:43.616Z",
-      "createdAt": "2026-07-11T22:14:43.568Z",
-      "email": "service-admin@example.com",
-      "expiresAt": "2026-07-11T22:24:43.568Z",
-      "maxAttempts": 5,
-      "otpHash": "hmac-sha256:a78dd83fa8e16c7e8eddc9181c7e08c885103a1790850315db12cf9e774f8ebc"
-    },
-    {
-      "attempts": 0,
-      "id": "mfa_f4bb9f05-336c-4d41-b725-4a73706dc174",
-      "consumedAt": "2026-07-11T22:14:53.272Z",
-      "createdAt": "2026-07-11T22:14:53.226Z",
-      "email": "service-admin@example.com",
-      "expiresAt": "2026-07-11T22:24:53.226Z",
-      "maxAttempts": 5,
-      "otpHash": "hmac-sha256:a78dd83fa8e16c7e8eddc9181c7e08c885103a1790850315db12cf9e774f8ebc"
-    },
-    {
-      "attempts": 0,
-      "id": "mfa_d1dc0a01-d39c-4978-997e-0a691b6194a6",
-      "consumedAt": "2026-07-11T22:15:44.159Z",
-      "createdAt": "2026-07-11T22:15:44.099Z",
-      "email": "service-admin@example.com",
-      "expiresAt": "2026-07-11T22:25:44.099Z",
-      "maxAttempts": 5,
-      "otpHash": "hmac-sha256:a78dd83fa8e16c7e8eddc9181c7e08c885103a1790850315db12cf9e774f8ebc"
-    },
-    {
-      "attempts": 0,
-      "id": "mfa_03a537aa-08b9-4f3f-884e-7113ffcb4512",
-      "consumedAt": "2026-07-11T22:15:45.886Z",
-      "createdAt": "2026-07-11T22:15:45.834Z",
-      "email": "service-admin@example.com",
-      "expiresAt": "2026-07-11T22:25:45.834Z",
-      "maxAttempts": 5,
-      "otpHash": "hmac-sha256:a78dd83fa8e16c7e8eddc9181c7e08c885103a1790850315db12cf9e774f8ebc"
-    },
-    {
-      "attempts": 0,
-      "id": "mfa_f882b566-de28-4de7-94a9-c4d2d4d172a1",
-      "consumedAt": "2026-07-11T22:15:47.863Z",
-      "createdAt": "2026-07-11T22:15:47.806Z",
-      "email": "service-admin@example.com",
-      "expiresAt": "2026-07-11T22:25:47.806Z",
-      "maxAttempts": 5,
-      "otpHash": "hmac-sha256:a78dd83fa8e16c7e8eddc9181c7e08c885103a1790850315db12cf9e774f8ebc"
-    },
-    {
-      "attempts": 0,
-      "id": "mfa_d81fb8a5-77e1-4d41-95fc-d6170904f8a0",
-      "consumedAt": "2026-07-11T22:15:49.828Z",
-      "createdAt": "2026-07-11T22:15:49.775Z",
-      "email": "service-admin@example.com",
-      "expiresAt": "2026-07-11T22:25:49.775Z",
-      "maxAttempts": 5,
-      "otpHash": "hmac-sha256:a78dd83fa8e16c7e8eddc9181c7e08c885103a1790850315db12cf9e774f8ebc"
-    }
-  ],
+  "credentialAuditEvents": [],
+  "mfaChallenges": [],
   "oidcCallbackDescriptors": [],
   "oidcProviderConfigs": [],
-  "outbox": [
-    {
-      "id": "outbox_6802c35b-baba-4557-b06f-97328a9834b2",
-      "aggregateId": "svc-session_652a0df8-c275-47ae-88a0-342af90b9fe7",
-      "aggregateType": "service-admin-session",
-      "occurredAt": "2026-07-11T22:09:52.480Z",
-      "payload": {
-        "adminId": "svc-admin-001",
-        "authState": "mfa_verified"
-      },
-      "queue": "identity-events",
-      "status": "pending",
-      "traceId": "trc_api_gateway_http_40885c14-f9c5-46cc-9911-a52e0eac0b1b",
-      "type": "service_admin.login"
-    },
-    {
-      "id": "outbox_d781db47-8441-49a2-887d-41243ea29776",
-      "aggregateId": "svc-session_963836a3-eb2d-4f2f-8c51-f74a97091e68",
-      "aggregateType": "service-admin-session",
-      "occurredAt": "2026-07-11T22:12:16.588Z",
-      "payload": {
-        "adminId": "svc-admin-001",
-        "authState": "mfa_verified"
-      },
-      "queue": "identity-events",
-      "status": "pending",
-      "traceId": "trc_api_gateway_http_ae6a67aa-ebc7-42df-8821-64157face378",
-      "type": "service_admin.login"
-    },
-    {
-      "id": "outbox_7585a22c-dc8f-497a-bf4f-9890c2869092",
-      "aggregateId": "svc-session_990c68a7-38fd-4e38-893d-49d2f684196b",
-      "aggregateType": "service-admin-session",
-      "occurredAt": "2026-07-11T22:14:41.909Z",
-      "payload": {
-        "adminId": "svc-admin-001",
-        "authState": "mfa_verified"
-      },
-      "queue": "identity-events",
-      "status": "pending",
-      "traceId": "trc_api_gateway_http_27746d62-6fdc-4bc3-9032-1ba9dc047d0b",
-      "type": "service_admin.login"
-    },
-    {
-      "id": "outbox_2aecc09f-ea96-4572-83c0-2b6f6ff0e3fb",
-      "aggregateId": "svc-session_97552511-b110-4d79-a916-0a0daedd6867",
-      "aggregateType": "service-admin-session",
-      "occurredAt": "2026-07-11T22:14:43.657Z",
-      "payload": {
-        "adminId": "svc-admin-001",
-        "authState": "mfa_verified"
-      },
-      "queue": "identity-events",
-      "status": "pending",
-      "traceId": "trc_api_gateway_http_bf7e3567-6c65-49eb-bf8e-979c5ebf8428",
-      "type": "service_admin.login"
-    },
-    {
-      "id": "outbox_8b1af978-9b07-4a67-9fe0-34a04d33045d",
-      "aggregateId": "svc-session_a97d3a6e-76e0-4d46-a79e-1b0888cf4d58",
-      "aggregateType": "service-admin-session",
-      "occurredAt": "2026-07-11T22:14:53.312Z",
-      "payload": {
-        "adminId": "svc-admin-001",
-        "authState": "mfa_verified"
-      },
-      "queue": "identity-events",
-      "status": "pending",
-      "traceId": "trc_api_gateway_http_2c8c95b1-5dad-4ef0-9bd1-192cecdf767c",
-      "type": "service_admin.login"
-    },
-    {
-      "id": "outbox_1d038bb0-86ba-4400-8ead-0ceb2b67a1da",
-      "aggregateId": "svc-session_f60c83f8-e298-46ee-87ac-178fb67d65f5",
-      "aggregateType": "service-admin-session",
-      "occurredAt": "2026-07-11T22:15:44.212Z",
-      "payload": {
-        "adminId": "svc-admin-001",
-        "authState": "mfa_verified"
-      },
-      "queue": "identity-events",
-      "status": "pending",
-      "traceId": "trc_api_gateway_http_44bbc841-cf8e-43ec-a32d-3f1e1633c25b",
-      "type": "service_admin.login"
-    },
-    {
-      "id": "outbox_caebd909-f18a-4174-bbca-9e29d8bce543",
-      "aggregateId": "svc-session_ddc19769-29d5-4b0f-b9ae-faebe01ec134",
-      "aggregateType": "service-admin-session",
-      "occurredAt": "2026-07-11T22:15:45.938Z",
-      "payload": {
-        "adminId": "svc-admin-001",
-        "authState": "mfa_verified"
-      },
-      "queue": "identity-events",
-      "status": "pending",
-      "traceId": "trc_api_gateway_http_d42cf995-d140-43d1-8d79-5c2e3d589376",
-      "type": "service_admin.login"
-    },
-    {
-      "id": "outbox_7979418f-b1ad-4aa6-a5c7-8e9d3e522375",
-      "aggregateId": "svc-session_2fa7e12b-e61e-4264-ba96-bf96b61d68fc",
-      "aggregateType": "service-admin-session",
-      "occurredAt": "2026-07-11T22:15:47.917Z",
-      "payload": {
-        "adminId": "svc-admin-001",
-        "authState": "mfa_verified"
-      },
-      "queue": "identity-events",
-      "status": "pending",
-      "traceId": "trc_api_gateway_http_cafac33e-82ba-47bd-afab-e683e949e379",
-      "type": "service_admin.login"
-    },
-    {
-      "id": "outbox_0b954ef7-88b1-49d4-ad68-f50dc159eaef",
-      "aggregateId": "svc-session_bf4c6dd9-4a3f-4bf9-bae2-8dd09d7da7a4",
-      "aggregateType": "service-admin-session",
-      "occurredAt": "2026-07-11T22:15:49.879Z",
-      "payload": {
-        "adminId": "svc-admin-001",
-        "authState": "mfa_verified"
-      },
-      "queue": "identity-events",
-      "status": "pending",
-      "traceId": "trc_api_gateway_http_230c136a-5a04-4114-aad7-c751798be334",
-      "type": "service_admin.login"
-    }
-  ],
+  "outbox": [],
   "passwordCredentials": [
     {
-      "algorithm": "sha256",
-      "email": "admin@qa.example",
-      "hash": "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
-      "subjectId": "usr-d0128abc-ff0c-49b8-b8a8-60c16740c5dc",
-      "updatedAt": "2026-07-11T22:14:50.286Z",
-      "version": 1
-    },
-    {
-      "algorithm": "sha256",
+      "algorithm": "scrypt",
       "email": "service-admin@example.com",
-      "hash": "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
+      "hash": "scrypt:16384:8:1:2551ea026fadae49bc0a44035e73acd4:0beabe57bda41ad596064dc9821abcdea5e32e66a349e8d3873e044f9e02f70e",
       "subjectId": "svc-admin-001",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
     },
     {
-      "algorithm": "sha256",
+      "algorithm": "scrypt",
       "email": "mira@northstar.example",
-      "hash": "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
+      "hash": "scrypt:16384:8:1:e0b492baec166753d7117eaf0bdc7615:aef53144a35d39fc335ca071603978e7e4216ba410e5558a5c933599fa27ee84",
       "subjectId": "usr-ns-owner",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
     },
     {
-      "algorithm": "sha256",
+      "algorithm": "scrypt",
       "email": "pavel@northstar.example",
-      "hash": "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
+      "hash": "scrypt:16384:8:1:1bcb453ab62097183122ae663717628d:549789370e020a126ca5c122b7bee997b2e1c6a7f98a1d09efba3c1e3d86d83e",
       "subjectId": "usr-ns-agent",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
     },
     {
-      "algorithm": "sha256",
+      "algorithm": "scrypt",
       "email": "multi@example.com",
-      "hash": "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
+      "hash": "scrypt:16384:8:1:93cc6adce1704f2bf76735dc5eef3a7e:15f10f8309e8f7101fa15a947bdc44d8590a9e32be695154dd1e2623f33debd0",
       "subjectId": "usr-ns-multi",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
     },
     {
-      "algorithm": "sha256",
+      "algorithm": "scrypt",
       "email": "sergey@volga.example",
-      "hash": "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
+      "hash": "scrypt:16384:8:1:37a928d27a01b1de58204805b3fdaf82:36fd09dbb68acbc019d01edfdac067f1d721ad9802cfad0c65cdf1b85ec1ae79",
       "subjectId": "usr-volga-admin",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
     },
     {
-      "algorithm": "sha256",
+      "algorithm": "scrypt",
       "email": "ops@aurora.example",
-      "hash": "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
+      "hash": "scrypt:16384:8:1:73fc384cb6acfa7171a33da4fcb4fed0:1c6a1a5a35300fc953e96c028a03d5df9b3455ab355ad3009fe03ad5658b8d55",
       "subjectId": "usr-aurora-risk",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
     },
     {
-      "algorithm": "sha256",
+      "algorithm": "scrypt",
       "email": "nikolai@lumen.example",
-      "hash": "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
+      "hash": "scrypt:16384:8:1:a2151db686785f742b61319af346feba:562ff04d86ad55df66eeed0dcb23d2464a78942bf35feeb19561de984e073b6e",
       "subjectId": "usr-lumen-invite",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
     },
     {
-      "algorithm": "sha256",
+      "algorithm": "scrypt",
       "email": "multi@example.com",
-      "hash": "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf",
+      "hash": "scrypt:16384:8:1:74c34ef7933e080eb88c169b53c9300e:ce9b5d531a198a657d27d3545d2586ee67945c2cc00f543693157eff8f73cf38",
       "subjectId": "usr-lumen-multi",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -639,6 +182,13 @@
         "flags.read",
         "flags.test",
         "users.support",
+        "automation.scenarios.read",
+        "automation.scenarios.write",
+        "automation.scenarios.archive",
+        "automation.scenarios.restore",
+        "knowledge.sources.read",
+        "knowledge.sources.write",
+        "ai.connections.manage",
         "impersonation.stop",
         "incidents.read",
         "knowledge.read",
@@ -707,6 +257,13 @@
     "flags.read",
     "flags.test",
     "users.support",
+    "automation.scenarios.read",
+    "automation.scenarios.write",
+    "automation.scenarios.archive",
+    "automation.scenarios.restore",
+    "knowledge.sources.read",
+    "knowledge.sources.write",
+    "ai.connections.manage",
     "impersonation.stop",
     "incidents.read",
     "knowledge.read",
@@ -753,18 +310,6 @@
     }
   ],
   "rbacRoleGrants": [
-    {
-      "action": "*",
-      "createdAt": "2026-07-11T22:14:50.328Z",
-      "createdBy": "service-admin",
-      "effect": "allow",
-      "id": "grant_2b0d9610-277d-4362-8f72-f2ddf191bce2",
-      "policyVersionId": "rbac-policy-default",
-      "resource": "tenant",
-      "roleKey": "owner",
-      "tenantId": "tenant-qa-retail",
-      "traceId": "trc_api_gateway_http_33f9c3af-aefb-4878-8249-ac05efa2643c"
-    },
     {
       "action": "dialogs.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
@@ -1342,7 +887,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "impersonation.stop",
+      "action": "automation.scenarios.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1354,7 +899,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "incidents.read",
+      "action": "automation.scenarios.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1366,7 +911,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "knowledge.read",
+      "action": "automation.scenarios.archive",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1378,7 +923,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "knowledge.write",
+      "action": "automation.scenarios.restore",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1390,7 +935,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "permissions.read",
+      "action": "knowledge.sources.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1402,7 +947,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "permissions.validate",
+      "action": "knowledge.sources.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1414,7 +959,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "platform.alert.acknowledge",
+      "action": "ai.connections.manage",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1426,7 +971,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "platform.alert-routing.write",
+      "action": "impersonation.stop",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1438,7 +983,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "platform.health-rollups.write",
+      "action": "incidents.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1450,7 +995,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "platform.read",
+      "action": "knowledge.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1462,7 +1007,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "platform.telemetry.ingest",
+      "action": "knowledge.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1474,7 +1019,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "quality.manual-reviews.write",
+      "action": "permissions.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1486,7 +1031,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "quality.ratings.write",
+      "action": "permissions.validate",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1498,7 +1043,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "quality.scoring-audits.write",
+      "action": "platform.alert.acknowledge",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1510,7 +1055,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "quotas.check",
+      "action": "platform.alert-routing.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1522,7 +1067,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "quotas.read",
+      "action": "platform.health-rollups.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1534,7 +1079,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "realtime.events.read",
+      "action": "platform.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1546,7 +1091,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "notifications.read",
+      "action": "platform.telemetry.ingest",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1558,7 +1103,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "operations.read",
+      "action": "quality.manual-reviews.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1570,7 +1115,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "operations.write",
+      "action": "quality.ratings.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1582,7 +1127,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "settings.read",
+      "action": "quality.scoring-audits.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1594,7 +1139,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "settings.manage",
+      "action": "quotas.check",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1606,7 +1151,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "service-admin.users.read",
+      "action": "quotas.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1618,7 +1163,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "service-admin.users.write",
+      "action": "realtime.events.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1630,7 +1175,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "service-admin.audit.read",
+      "action": "notifications.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1642,7 +1187,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "service-admin.audit.export",
+      "action": "operations.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1654,7 +1199,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "security.review",
+      "action": "operations.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1666,7 +1211,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "templates.read",
+      "action": "settings.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1678,7 +1223,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "templates.write",
+      "action": "settings.manage",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1690,7 +1235,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "incidents.manage",
+      "action": "service-admin.users.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1702,7 +1247,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "flags.manage",
+      "action": "service-admin.users.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1714,7 +1259,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "impersonation.start",
+      "action": "service-admin.audit.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1726,7 +1271,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "reports.read",
+      "action": "service-admin.audit.export",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1738,7 +1283,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "reports.export",
+      "action": "security.review",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1750,7 +1295,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "reports.write",
+      "action": "templates.read",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1762,7 +1307,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "audit.read",
+      "action": "templates.write",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1774,7 +1319,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "audit.export",
+      "action": "incidents.manage",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1786,7 +1331,7 @@
       "traceId": "trc_rbac_default"
     },
     {
-      "action": "audit.redact",
+      "action": "flags.manage",
       "createdAt": "2026-06-28T00:00:00.000Z",
       "createdBy": "system",
       "effect": "allow",
@@ -1796,9 +1341,155 @@
       "roleKey": "service_admin",
       "tenantId": null,
       "traceId": "trc_rbac_default"
+    },
+    {
+      "action": "impersonation.start",
+      "createdAt": "2026-06-28T00:00:00.000Z",
+      "createdBy": "system",
+      "effect": "allow",
+      "id": "rbac-grant-default-service_admin-57",
+      "policyVersionId": "rbac-policy-default",
+      "resource": "*",
+      "roleKey": "service_admin",
+      "tenantId": null,
+      "traceId": "trc_rbac_default"
+    },
+    {
+      "action": "reports.read",
+      "createdAt": "2026-06-28T00:00:00.000Z",
+      "createdBy": "system",
+      "effect": "allow",
+      "id": "rbac-grant-default-service_admin-58",
+      "policyVersionId": "rbac-policy-default",
+      "resource": "*",
+      "roleKey": "service_admin",
+      "tenantId": null,
+      "traceId": "trc_rbac_default"
+    },
+    {
+      "action": "reports.export",
+      "createdAt": "2026-06-28T00:00:00.000Z",
+      "createdBy": "system",
+      "effect": "allow",
+      "id": "rbac-grant-default-service_admin-59",
+      "policyVersionId": "rbac-policy-default",
+      "resource": "*",
+      "roleKey": "service_admin",
+      "tenantId": null,
+      "traceId": "trc_rbac_default"
+    },
+    {
+      "action": "reports.write",
+      "createdAt": "2026-06-28T00:00:00.000Z",
+      "createdBy": "system",
+      "effect": "allow",
+      "id": "rbac-grant-default-service_admin-60",
+      "policyVersionId": "rbac-policy-default",
+      "resource": "*",
+      "roleKey": "service_admin",
+      "tenantId": null,
+      "traceId": "trc_rbac_default"
+    },
+    {
+      "action": "audit.read",
+      "createdAt": "2026-06-28T00:00:00.000Z",
+      "createdBy": "system",
+      "effect": "allow",
+      "id": "rbac-grant-default-service_admin-61",
+      "policyVersionId": "rbac-policy-default",
+      "resource": "*",
+      "roleKey": "service_admin",
+      "tenantId": null,
+      "traceId": "trc_rbac_default"
+    },
+    {
+      "action": "audit.export",
+      "createdAt": "2026-06-28T00:00:00.000Z",
+      "createdBy": "system",
+      "effect": "allow",
+      "id": "rbac-grant-default-service_admin-62",
+      "policyVersionId": "rbac-policy-default",
+      "resource": "*",
+      "roleKey": "service_admin",
+      "tenantId": null,
+      "traceId": "trc_rbac_default"
+    },
+    {
+      "action": "audit.redact",
+      "createdAt": "2026-06-28T00:00:00.000Z",
+      "createdBy": "system",
+      "effect": "allow",
+      "id": "rbac-grant-default-service_admin-63",
+      "policyVersionId": "rbac-policy-default",
+      "resource": "*",
+      "roleKey": "service_admin",
+      "tenantId": null,
+      "traceId": "trc_rbac_default"
     }
   ],
   "serviceAdminFeatureFlags": [
+    {
+      "id": "flag-ai-agents-v1",
+      "key": "ai_agents_v1",
+      "name": "AI agents v1 (pilot)",
+      "status": "on",
+      "environment": "production",
+      "scope": "tenant",
+      "rollout": 0,
+      "owner": "AI team",
+      "segments": [],
+      "enabledTenantIds": [
+        "tenant-pilot-001"
+      ],
+      "variants": [
+        {
+          "id": "pilot",
+          "weight": 100
+        }
+      ],
+      "killSwitch": true,
+      "updatedAt": "2026-07-12T00:00:00.000Z"
+    },
+    {
+      "id": "flag-ai-bots",
+      "key": "ai_bots",
+      "name": "AI consultation bots",
+      "status": "off",
+      "environment": "production",
+      "scope": "tenant",
+      "rollout": 0,
+      "owner": "AI team",
+      "segments": [],
+      "enabledTenantIds": [],
+      "variants": [
+        {
+          "id": "disabled",
+          "weight": 100
+        }
+      ],
+      "killSwitch": true,
+      "updatedAt": "2026-07-12T00:00:00.000Z"
+    },
+    {
+      "id": "flag-ai-bot-mcp-sources",
+      "key": "ai_bot_mcp_sources",
+      "name": "AI bot MCP knowledge sources",
+      "status": "off",
+      "environment": "production",
+      "scope": "tenant",
+      "rollout": 0,
+      "owner": "AI team",
+      "segments": [],
+      "enabledTenantIds": [],
+      "variants": [
+        {
+          "id": "disabled",
+          "weight": 100
+        }
+      ],
+      "killSwitch": true,
+      "updatedAt": "2026-07-12T00:00:00.000Z"
+    },
     {
       "id": "flag-ai-replies",
       "key": "ff-ai-replies",
@@ -2066,2595 +1757,12 @@
   "samlAcsRequestDescriptors": [],
   "samlAssertionReplays": [],
   "samlProviderMetadata": [],
-  "serviceAdminAuditEvents": [
-    {
-      "action": "tenant.provision",
-      "actor": "service-admin",
-      "actorName": "Service Admin",
-      "at": "2026-07-11T22:14:50.373Z",
-      "id": "evt_tenant_provision_a3115c50-f17c-4842-8709-450d8200aaf8",
-      "immutable": true,
-      "reason": "Provisioned tenant tenant-qa-retail",
-      "result": "ok",
-      "severity": "info",
-      "target": "tenant-qa-retail",
-      "tenantId": "tenant-qa-retail",
-      "traceId": "trc_api_gateway_http_33f9c3af-aefb-4878-8249-ac05efa2643c",
-      "userId": "usr-d0128abc-ff0c-49b8-b8a8-60c16740c5dc"
-    },
-    {
-      "id": "evt_service_admin_a81b740f-376f-48e1-95c1-4a9dd7f69c90",
-      "action": "user.mfa.reset",
-      "actor": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "at": "2026-07-11T22:12:17.559Z",
-      "immutable": true,
-      "reason": "Smoke audit seed event for screen filters",
-      "result": "applied",
-      "severity": "warning",
-      "target": "usr-volga-admin",
-      "tenantId": "tenant-volga",
-      "traceId": "trc_api_gateway_http_c8fa1343-2d38-485a-a46a-864e9fed6f31",
-      "userId": "usr-volga-admin"
-    }
-  ],
-  "serviceAdminAuditExports": [
-    {
-      "id": "audit_export_5630ee3f-db02-4e63-92c4-10f7f0ccc5cd",
-      "createdAt": "2026-07-11T22:12:18.774Z",
-      "descriptor": {
-        "contentType": "application/json",
-        "downloadUrl": "https://service-admin.local/audit-exports/audit-export-718412865987c373/service-admin-audit-all.json",
-        "expiresIn": "24h",
-        "fileName": "service-admin-audit-all.json",
-        "format": "json",
-        "id": "audit-export-718412865987c373",
-        "objectKey": "[REDACTED:object_key]",
-        "objectKeyExposed": false,
-        "permissionRequired": "service-admin.audit.export",
-        "totalRows": 1
-      },
-      "descriptorId": "audit-export-718412865987c373",
-      "expiresAt": "2026-07-12T22:12:18.774Z",
-      "filters": {
-        "format": "json",
-        "period": "30d"
-      },
-      "objectKey": "service-admin/audit-exports/audit-export-718412865987c373/service-admin-audit-all.json",
-      "redactionPolicy": "canonical-secret-carriers/v1",
-      "requesterId": "svc-admin-001",
-      "requesterName": "service-admin@example.com",
-      "sourceEventIds": [
-        "evt_service_admin_a81b740f-376f-48e1-95c1-4a9dd7f69c90"
-      ]
-    }
-  ],
+  "serviceAdminAuditEvents": [],
+  "serviceAdminAuditExports": [],
   "serviceAdminAuditRedactions": [],
   "serviceAdminImpersonations": [],
-  "serviceAdminSessions": [
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_488331a2-0e32-47e6-92c8-ec289eaf37b1",
-      "expiresAt": "2026-07-11T23:07:23.886Z",
-      "mfaVerifiedAt": "2026-07-11T22:07:23.886Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_21415e01-d825-4845-91b2-2beaa3bf8dec",
-      "expiresAt": "2026-07-11T23:07:28.798Z",
-      "mfaVerifiedAt": "2026-07-11T22:07:28.798Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_4b48f36d-ad94-41fb-87b3-29b116e8aeee",
-      "expiresAt": "2026-07-11T23:07:31.608Z",
-      "mfaVerifiedAt": "2026-07-11T22:07:31.608Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_670cdf8e-1868-4e59-95e5-ab1412a71bd1",
-      "expiresAt": "2026-07-11T23:07:46.571Z",
-      "mfaVerifiedAt": "2026-07-11T22:07:46.571Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_54e4f24e-c1cd-4299-9b94-578dc2e677f3",
-      "expiresAt": "2026-07-11T23:08:34.433Z",
-      "mfaVerifiedAt": "2026-07-11T22:08:34.433Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_0c8f63cf-637d-4ecd-ae97-cf4d81e1e108",
-      "expiresAt": "2026-07-11T23:08:37.934Z",
-      "mfaVerifiedAt": "2026-07-11T22:08:37.934Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_3b974ebc-395b-4b9d-ac17-7663786636bf",
-      "expiresAt": "2026-07-11T23:08:40.947Z",
-      "mfaVerifiedAt": "2026-07-11T22:08:40.947Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_bbe9d3de-9ac2-412b-b801-222704536206",
-      "expiresAt": "2026-07-11T23:08:53.298Z",
-      "mfaVerifiedAt": "2026-07-11T22:08:53.298Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_afe9f1e2-a100-48d7-a525-8633972e1bff",
-      "expiresAt": "2026-07-11T23:09:40.448Z",
-      "mfaVerifiedAt": "2026-07-11T22:09:40.448Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_f9d09510-b0d5-46dc-b43d-08c1608ee459",
-      "expiresAt": "2026-07-11T23:09:40.561Z",
-      "mfaVerifiedAt": "2026-07-11T22:09:40.561Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_1125c491-6ba6-4755-94cf-116fb66e4281",
-      "expiresAt": "2026-07-11T23:09:44.650Z",
-      "mfaVerifiedAt": "2026-07-11T22:09:44.650Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_6461ff0d-8730-4de5-8b38-1fdc6fcf2296",
-      "expiresAt": "2026-07-11T23:09:46.679Z",
-      "mfaVerifiedAt": "2026-07-11T22:09:46.679Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_25614156-99be-4f07-a98b-8af69685ae31",
-      "expiresAt": "2026-07-11T23:09:49.010Z",
-      "mfaVerifiedAt": "2026-07-11T22:09:49.010Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_b2b4cc2f-02fe-4771-b2d2-48ad025ecc57",
-      "expiresAt": "2026-07-11T23:09:52.296Z",
-      "mfaVerifiedAt": "2026-07-11T22:09:52.296Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "adminEmail": "service-admin@example.com",
-      "adminId": "svc-admin-001",
-      "adminName": "service-admin@example.com",
-      "allowedActions": [
-        "auth.logout",
-        "auth.state",
-        "billing.read",
-        "tenants.read",
-        "tenants.manage",
-        "billing.change",
-        "break-glass.decide",
-        "break-glass.request",
-        "channels.ingest",
-        "channels.read",
-        "clients.merge",
-        "clients.read",
-        "dialogs.manage",
-        "dialogs.read",
-        "files.read",
-        "files.write",
-        "flags.read",
-        "flags.test",
-        "users.support",
-        "impersonation.stop",
-        "incidents.read",
-        "knowledge.read",
-        "knowledge.write",
-        "permissions.read",
-        "permissions.validate",
-        "platform.alert.acknowledge",
-        "platform.alert-routing.write",
-        "platform.health-rollups.write",
-        "platform.read",
-        "platform.telemetry.ingest",
-        "quality.manual-reviews.write",
-        "quality.ratings.write",
-        "quality.scoring-audits.write",
-        "quotas.check",
-        "quotas.read",
-        "realtime.events.read",
-        "notifications.read",
-        "operations.read",
-        "operations.write",
-        "settings.read",
-        "settings.manage",
-        "service-admin.users.read",
-        "service-admin.users.write",
-        "service-admin.audit.read",
-        "service-admin.audit.export",
-        "security.review",
-        "templates.read",
-        "templates.write",
-        "incidents.manage",
-        "flags.manage",
-        "impersonation.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-northstar",
-          "name": "Northstar Retail",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-volga",
-          "name": "Volga Logistics",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-aurora",
-          "name": "Aurora Fintech",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-lumen",
-          "name": "Lumen Health",
-          "role": "service_admin"
-        }
-      ],
-      "currentTenantId": "tenant-northstar",
-      "role": "service_admin",
-      "tenantScope": "platform",
-      "id": "svc-session_652a0df8-c275-47ae-88a0-342af90b9fe7",
-      "expiresAt": "2026-07-12T02:09:52.455Z",
-      "mfaVerifiedAt": "2026-07-11T22:09:52.455Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_461c0068-0ef4-4bc0-b590-ab529cd87b1b",
-      "expiresAt": "2026-07-11T23:10:04.795Z",
-      "mfaVerifiedAt": "2026-07-11T22:10:04.795Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_6f21de3f-54c1-4c55-9721-1f11fc5eb664",
-      "expiresAt": "2026-07-11T23:10:51.579Z",
-      "mfaVerifiedAt": "2026-07-11T22:10:51.579Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_9a7c56c2-f5d8-439a-aab4-5f25419f1c89",
-      "expiresAt": "2026-07-11T23:10:54.096Z",
-      "mfaVerifiedAt": "2026-07-11T22:10:54.096Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_61dbec92-0288-486a-b602-2056205d28b0",
-      "expiresAt": "2026-07-11T23:11:03.628Z",
-      "mfaVerifiedAt": "2026-07-11T22:11:03.628Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_0d3502e5-b225-4af6-9cb3-ebed54a6b03a",
-      "expiresAt": "2026-07-11T23:11:05.895Z",
-      "mfaVerifiedAt": "2026-07-11T22:11:05.895Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_11d837e9-cef8-4ca0-ba82-d23f99a807cb",
-      "expiresAt": "2026-07-11T23:11:52.848Z",
-      "mfaVerifiedAt": "2026-07-11T22:11:52.848Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_a0998065-4b5f-440f-a719-3849c4f6a2c4",
-      "expiresAt": "2026-07-11T23:12:04.916Z",
-      "mfaVerifiedAt": "2026-07-11T22:12:04.916Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_d6385379-e124-41ac-bb4e-7de81f449063",
-      "expiresAt": "2026-07-11T23:12:16.373Z",
-      "mfaVerifiedAt": "2026-07-11T22:12:16.373Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "adminEmail": "service-admin@example.com",
-      "adminId": "svc-admin-001",
-      "adminName": "service-admin@example.com",
-      "allowedActions": [
-        "auth.logout",
-        "auth.state",
-        "billing.read",
-        "tenants.read",
-        "tenants.manage",
-        "billing.change",
-        "break-glass.decide",
-        "break-glass.request",
-        "channels.ingest",
-        "channels.read",
-        "clients.merge",
-        "clients.read",
-        "dialogs.manage",
-        "dialogs.read",
-        "files.read",
-        "files.write",
-        "flags.read",
-        "flags.test",
-        "users.support",
-        "impersonation.stop",
-        "incidents.read",
-        "knowledge.read",
-        "knowledge.write",
-        "permissions.read",
-        "permissions.validate",
-        "platform.alert.acknowledge",
-        "platform.alert-routing.write",
-        "platform.health-rollups.write",
-        "platform.read",
-        "platform.telemetry.ingest",
-        "quality.manual-reviews.write",
-        "quality.ratings.write",
-        "quality.scoring-audits.write",
-        "quotas.check",
-        "quotas.read",
-        "realtime.events.read",
-        "notifications.read",
-        "operations.read",
-        "operations.write",
-        "settings.read",
-        "settings.manage",
-        "service-admin.users.read",
-        "service-admin.users.write",
-        "service-admin.audit.read",
-        "service-admin.audit.export",
-        "security.review",
-        "templates.read",
-        "templates.write",
-        "incidents.manage",
-        "flags.manage",
-        "impersonation.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-northstar",
-          "name": "Northstar Retail",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-volga",
-          "name": "Volga Logistics",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-aurora",
-          "name": "Aurora Fintech",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-lumen",
-          "name": "Lumen Health",
-          "role": "service_admin"
-        }
-      ],
-      "currentTenantId": "tenant-northstar",
-      "role": "service_admin",
-      "tenantScope": "platform",
-      "id": "svc-session_963836a3-eb2d-4f2f-8c51-f74a97091e68",
-      "expiresAt": "2026-07-12T02:12:16.565Z",
-      "mfaVerifiedAt": "2026-07-11T22:12:16.565Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_941e3ed5-b5b2-46df-af76-67017e37ee65",
-      "expiresAt": "2026-07-11T23:12:19.237Z",
-      "mfaVerifiedAt": "2026-07-11T22:12:19.237Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_859d45d7-0ed6-4296-8d58-9f418cf582c1",
-      "expiresAt": "2026-07-11T23:12:30.835Z",
-      "mfaVerifiedAt": "2026-07-11T22:12:30.835Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_7a926afd-b2bb-410e-860b-b9589676872e",
-      "expiresAt": "2026-07-11T23:12:43.514Z",
-      "mfaVerifiedAt": "2026-07-11T22:12:43.514Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_739a6d54-8e34-4291-8f0f-a495cf7721d2",
-      "expiresAt": "2026-07-11T23:12:55.504Z",
-      "mfaVerifiedAt": "2026-07-11T22:12:55.504Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_22a4379c-7f31-466a-96c4-1760d5dbfcd9",
-      "expiresAt": "2026-07-11T23:13:42.812Z",
-      "mfaVerifiedAt": "2026-07-11T22:13:42.812Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_2f494dfb-5c68-4c0e-a1cb-608a6b43f086",
-      "expiresAt": "2026-07-11T23:14:30.366Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:30.366Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_c81d50ff-e836-4894-b879-219a57fdea6f",
-      "expiresAt": "2026-07-11T23:14:33.324Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:33.324Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_0c0ac044-7678-4d8e-b296-0d5cf40abec5",
-      "expiresAt": "2026-07-11T23:14:35.607Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:35.607Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_898559b0-40ef-44ec-955c-332f6f558e15",
-      "expiresAt": "2026-07-11T23:14:38.084Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:38.084Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_e0153648-c7c3-4d87-886f-0ba2bb90f014",
-      "expiresAt": "2026-07-11T23:14:41.771Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:41.771Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "adminEmail": "service-admin@example.com",
-      "adminId": "svc-admin-001",
-      "adminName": "service-admin@example.com",
-      "allowedActions": [
-        "auth.logout",
-        "auth.state",
-        "billing.read",
-        "tenants.read",
-        "tenants.manage",
-        "billing.change",
-        "break-glass.decide",
-        "break-glass.request",
-        "channels.ingest",
-        "channels.read",
-        "clients.merge",
-        "clients.read",
-        "dialogs.manage",
-        "dialogs.read",
-        "files.read",
-        "files.write",
-        "flags.read",
-        "flags.test",
-        "users.support",
-        "impersonation.stop",
-        "incidents.read",
-        "knowledge.read",
-        "knowledge.write",
-        "permissions.read",
-        "permissions.validate",
-        "platform.alert.acknowledge",
-        "platform.alert-routing.write",
-        "platform.health-rollups.write",
-        "platform.read",
-        "platform.telemetry.ingest",
-        "quality.manual-reviews.write",
-        "quality.ratings.write",
-        "quality.scoring-audits.write",
-        "quotas.check",
-        "quotas.read",
-        "realtime.events.read",
-        "notifications.read",
-        "operations.read",
-        "operations.write",
-        "settings.read",
-        "settings.manage",
-        "service-admin.users.read",
-        "service-admin.users.write",
-        "service-admin.audit.read",
-        "service-admin.audit.export",
-        "security.review",
-        "templates.read",
-        "templates.write",
-        "incidents.manage",
-        "flags.manage",
-        "impersonation.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-northstar",
-          "name": "Northstar Retail",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-volga",
-          "name": "Volga Logistics",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-aurora",
-          "name": "Aurora Fintech",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-lumen",
-          "name": "Lumen Health",
-          "role": "service_admin"
-        }
-      ],
-      "currentTenantId": "tenant-northstar",
-      "role": "service_admin",
-      "tenantScope": "platform",
-      "id": "svc-session_990c68a7-38fd-4e38-893d-49d2f684196b",
-      "expiresAt": "2026-07-12T02:14:41.885Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:41.885Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_6f0d7eeb-d838-414f-b1f8-b2fa200e7268",
-      "expiresAt": "2026-07-11T23:14:43.440Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:43.440Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "adminEmail": "service-admin@example.com",
-      "adminId": "svc-admin-001",
-      "adminName": "service-admin@example.com",
-      "allowedActions": [
-        "auth.logout",
-        "auth.state",
-        "billing.read",
-        "tenants.read",
-        "tenants.manage",
-        "billing.change",
-        "break-glass.decide",
-        "break-glass.request",
-        "channels.ingest",
-        "channels.read",
-        "clients.merge",
-        "clients.read",
-        "dialogs.manage",
-        "dialogs.read",
-        "files.read",
-        "files.write",
-        "flags.read",
-        "flags.test",
-        "users.support",
-        "impersonation.stop",
-        "incidents.read",
-        "knowledge.read",
-        "knowledge.write",
-        "permissions.read",
-        "permissions.validate",
-        "platform.alert.acknowledge",
-        "platform.alert-routing.write",
-        "platform.health-rollups.write",
-        "platform.read",
-        "platform.telemetry.ingest",
-        "quality.manual-reviews.write",
-        "quality.ratings.write",
-        "quality.scoring-audits.write",
-        "quotas.check",
-        "quotas.read",
-        "realtime.events.read",
-        "notifications.read",
-        "operations.read",
-        "operations.write",
-        "settings.read",
-        "settings.manage",
-        "service-admin.users.read",
-        "service-admin.users.write",
-        "service-admin.audit.read",
-        "service-admin.audit.export",
-        "security.review",
-        "templates.read",
-        "templates.write",
-        "incidents.manage",
-        "flags.manage",
-        "impersonation.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-northstar",
-          "name": "Northstar Retail",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-volga",
-          "name": "Volga Logistics",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-aurora",
-          "name": "Aurora Fintech",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-lumen",
-          "name": "Lumen Health",
-          "role": "service_admin"
-        }
-      ],
-      "currentTenantId": "tenant-northstar",
-      "role": "service_admin",
-      "tenantScope": "platform",
-      "id": "svc-session_97552511-b110-4d79-a916-0a0daedd6867",
-      "expiresAt": "2026-07-12T02:14:43.632Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:43.632Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-lumen-multi",
-      "actorName": "Multi Tenant Operator",
-      "adminEmail": "multi@example.com",
-      "adminId": "usr-lumen-multi",
-      "adminName": "Multi Tenant Operator",
-      "allowedActions": [
-        "dialogs.read",
-        "dialogs.manage",
-        "panel.read",
-        "routing.read",
-        "routing.redistribute",
-        "templates.read",
-        "templates.write",
-        "clients.read",
-        "clients.merge",
-        "visitors.read",
-        "automation.proactive.read",
-        "reports.read",
-        "reports.export",
-        "quality.read",
-        "quality.scoring-audits.write",
-        "quality.ratings.write",
-        "quality.manual-reviews.write",
-        "knowledge.read",
-        "automation.read",
-        "permissions.read",
-        "notifications.read",
-        "settings.read",
-        "employees.passwordReset",
-        "outbound.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-lumen",
-          "name": "tenant-lumen",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-lumen",
-      "role": "Senior operator",
-      "tenantScope": "tenant-lumen",
-      "id": "top-session_250f16ba-90f5-4716-b9d5-935f99f66618",
-      "expiresAt": "2026-07-11T23:14:46.189Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:46.189Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_46ad1e1f-db5a-43de-a261-dba44c118b1f",
-      "expiresAt": "2026-07-11T23:14:47.489Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:47.489Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-d0128abc-ff0c-49b8-b8a8-60c16740c5dc",
-      "actorName": "QA Admin",
-      "adminEmail": "admin@qa.example",
-      "adminId": "usr-d0128abc-ff0c-49b8-b8a8-60c16740c5dc",
-      "adminName": "QA Admin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-qa-retail",
-          "name": "tenant-qa-retail",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-qa-retail",
-      "role": "Owner",
-      "tenantScope": "tenant-qa-retail",
-      "id": "top-session_b10e0f63-56f0-4767-a8be-bceb3e9e80d6",
-      "expiresAt": "2026-07-11T23:14:50.403Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:50.403Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_ebbf2fcb-2bd4-4e45-aa50-8959fa05f6dd",
-      "expiresAt": "2026-07-11T23:14:51.094Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:51.094Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_bca5e8c4-28e6-44af-9eb5-b0af9d821431",
-      "expiresAt": "2026-07-11T23:14:53.155Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:53.155Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "adminEmail": "service-admin@example.com",
-      "adminId": "svc-admin-001",
-      "adminName": "service-admin@example.com",
-      "allowedActions": [
-        "auth.logout",
-        "auth.state",
-        "billing.read",
-        "tenants.read",
-        "tenants.manage",
-        "billing.change",
-        "break-glass.decide",
-        "break-glass.request",
-        "channels.ingest",
-        "channels.read",
-        "clients.merge",
-        "clients.read",
-        "dialogs.manage",
-        "dialogs.read",
-        "files.read",
-        "files.write",
-        "flags.read",
-        "flags.test",
-        "users.support",
-        "impersonation.stop",
-        "incidents.read",
-        "knowledge.read",
-        "knowledge.write",
-        "permissions.read",
-        "permissions.validate",
-        "platform.alert.acknowledge",
-        "platform.alert-routing.write",
-        "platform.health-rollups.write",
-        "platform.read",
-        "platform.telemetry.ingest",
-        "quality.manual-reviews.write",
-        "quality.ratings.write",
-        "quality.scoring-audits.write",
-        "quotas.check",
-        "quotas.read",
-        "realtime.events.read",
-        "notifications.read",
-        "operations.read",
-        "operations.write",
-        "settings.read",
-        "settings.manage",
-        "service-admin.users.read",
-        "service-admin.users.write",
-        "service-admin.audit.read",
-        "service-admin.audit.export",
-        "security.review",
-        "templates.read",
-        "templates.write",
-        "incidents.manage",
-        "flags.manage",
-        "impersonation.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-northstar",
-          "name": "Northstar Retail",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-volga",
-          "name": "Volga Logistics",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-aurora",
-          "name": "Aurora Fintech",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-lumen",
-          "name": "Lumen Health",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-qa-retail",
-          "name": "QA Retail",
-          "role": "service_admin"
-        }
-      ],
-      "currentTenantId": "tenant-northstar",
-      "role": "service_admin",
-      "tenantScope": "platform",
-      "id": "svc-session_a97d3a6e-76e0-4d46-a79e-1b0888cf4d58",
-      "expiresAt": "2026-07-12T02:14:53.286Z",
-      "mfaVerifiedAt": "2026-07-11T22:14:53.286Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_280ef1b9-0d90-44ea-a1f8-da8d9488e88f",
-      "expiresAt": "2026-07-11T23:15:43.995Z",
-      "mfaVerifiedAt": "2026-07-11T22:15:43.995Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "adminEmail": "service-admin@example.com",
-      "adminId": "svc-admin-001",
-      "adminName": "service-admin@example.com",
-      "allowedActions": [
-        "auth.logout",
-        "auth.state",
-        "billing.read",
-        "tenants.read",
-        "tenants.manage",
-        "billing.change",
-        "break-glass.decide",
-        "break-glass.request",
-        "channels.ingest",
-        "channels.read",
-        "clients.merge",
-        "clients.read",
-        "dialogs.manage",
-        "dialogs.read",
-        "files.read",
-        "files.write",
-        "flags.read",
-        "flags.test",
-        "users.support",
-        "impersonation.stop",
-        "incidents.read",
-        "knowledge.read",
-        "knowledge.write",
-        "permissions.read",
-        "permissions.validate",
-        "platform.alert.acknowledge",
-        "platform.alert-routing.write",
-        "platform.health-rollups.write",
-        "platform.read",
-        "platform.telemetry.ingest",
-        "quality.manual-reviews.write",
-        "quality.ratings.write",
-        "quality.scoring-audits.write",
-        "quotas.check",
-        "quotas.read",
-        "realtime.events.read",
-        "notifications.read",
-        "operations.read",
-        "operations.write",
-        "settings.read",
-        "settings.manage",
-        "service-admin.users.read",
-        "service-admin.users.write",
-        "service-admin.audit.read",
-        "service-admin.audit.export",
-        "security.review",
-        "templates.read",
-        "templates.write",
-        "incidents.manage",
-        "flags.manage",
-        "impersonation.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-northstar",
-          "name": "Northstar Retail",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-volga",
-          "name": "Volga Logistics",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-aurora",
-          "name": "Aurora Fintech",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-lumen",
-          "name": "Lumen Health",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-qa-retail",
-          "name": "QA Retail",
-          "role": "service_admin"
-        }
-      ],
-      "currentTenantId": "tenant-northstar",
-      "role": "service_admin",
-      "tenantScope": "platform",
-      "id": "svc-session_f60c83f8-e298-46ee-87ac-178fb67d65f5",
-      "expiresAt": "2026-07-12T02:15:44.178Z",
-      "mfaVerifiedAt": "2026-07-11T22:15:44.178Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_ce2b5d0f-c801-46ef-9353-d03b93e530ec",
-      "expiresAt": "2026-07-11T23:15:45.771Z",
-      "mfaVerifiedAt": "2026-07-11T22:15:45.771Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "adminEmail": "service-admin@example.com",
-      "adminId": "svc-admin-001",
-      "adminName": "service-admin@example.com",
-      "allowedActions": [
-        "auth.logout",
-        "auth.state",
-        "billing.read",
-        "tenants.read",
-        "tenants.manage",
-        "billing.change",
-        "break-glass.decide",
-        "break-glass.request",
-        "channels.ingest",
-        "channels.read",
-        "clients.merge",
-        "clients.read",
-        "dialogs.manage",
-        "dialogs.read",
-        "files.read",
-        "files.write",
-        "flags.read",
-        "flags.test",
-        "users.support",
-        "impersonation.stop",
-        "incidents.read",
-        "knowledge.read",
-        "knowledge.write",
-        "permissions.read",
-        "permissions.validate",
-        "platform.alert.acknowledge",
-        "platform.alert-routing.write",
-        "platform.health-rollups.write",
-        "platform.read",
-        "platform.telemetry.ingest",
-        "quality.manual-reviews.write",
-        "quality.ratings.write",
-        "quality.scoring-audits.write",
-        "quotas.check",
-        "quotas.read",
-        "realtime.events.read",
-        "notifications.read",
-        "operations.read",
-        "operations.write",
-        "settings.read",
-        "settings.manage",
-        "service-admin.users.read",
-        "service-admin.users.write",
-        "service-admin.audit.read",
-        "service-admin.audit.export",
-        "security.review",
-        "templates.read",
-        "templates.write",
-        "incidents.manage",
-        "flags.manage",
-        "impersonation.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-northstar",
-          "name": "Northstar Retail",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-volga",
-          "name": "Volga Logistics",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-aurora",
-          "name": "Aurora Fintech",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-lumen",
-          "name": "Lumen Health",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-qa-retail",
-          "name": "QA Retail",
-          "role": "service_admin"
-        }
-      ],
-      "currentTenantId": "tenant-northstar",
-      "role": "service_admin",
-      "tenantScope": "platform",
-      "id": "svc-session_ddc19769-29d5-4b0f-b9ae-faebe01ec134",
-      "expiresAt": "2026-07-12T02:15:45.904Z",
-      "mfaVerifiedAt": "2026-07-11T22:15:45.904Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_09e488a8-7d46-4e54-942f-e7300dd557bb",
-      "expiresAt": "2026-07-11T23:15:47.666Z",
-      "mfaVerifiedAt": "2026-07-11T22:15:47.666Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "adminEmail": "service-admin@example.com",
-      "adminId": "svc-admin-001",
-      "adminName": "service-admin@example.com",
-      "allowedActions": [
-        "auth.logout",
-        "auth.state",
-        "billing.read",
-        "tenants.read",
-        "tenants.manage",
-        "billing.change",
-        "break-glass.decide",
-        "break-glass.request",
-        "channels.ingest",
-        "channels.read",
-        "clients.merge",
-        "clients.read",
-        "dialogs.manage",
-        "dialogs.read",
-        "files.read",
-        "files.write",
-        "flags.read",
-        "flags.test",
-        "users.support",
-        "impersonation.stop",
-        "incidents.read",
-        "knowledge.read",
-        "knowledge.write",
-        "permissions.read",
-        "permissions.validate",
-        "platform.alert.acknowledge",
-        "platform.alert-routing.write",
-        "platform.health-rollups.write",
-        "platform.read",
-        "platform.telemetry.ingest",
-        "quality.manual-reviews.write",
-        "quality.ratings.write",
-        "quality.scoring-audits.write",
-        "quotas.check",
-        "quotas.read",
-        "realtime.events.read",
-        "notifications.read",
-        "operations.read",
-        "operations.write",
-        "settings.read",
-        "settings.manage",
-        "service-admin.users.read",
-        "service-admin.users.write",
-        "service-admin.audit.read",
-        "service-admin.audit.export",
-        "security.review",
-        "templates.read",
-        "templates.write",
-        "incidents.manage",
-        "flags.manage",
-        "impersonation.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-northstar",
-          "name": "Northstar Retail",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-volga",
-          "name": "Volga Logistics",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-aurora",
-          "name": "Aurora Fintech",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-lumen",
-          "name": "Lumen Health",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-qa-retail",
-          "name": "QA Retail",
-          "role": "service_admin"
-        }
-      ],
-      "currentTenantId": "tenant-northstar",
-      "role": "service_admin",
-      "tenantScope": "platform",
-      "id": "svc-session_2fa7e12b-e61e-4264-ba96-bf96b61d68fc",
-      "expiresAt": "2026-07-12T02:15:47.884Z",
-      "mfaVerifiedAt": "2026-07-11T22:15:47.884Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_aa9fde2c-1bf0-4283-b56f-99583bf466c7",
-      "expiresAt": "2026-07-11T23:15:49.698Z",
-      "mfaVerifiedAt": "2026-07-11T22:15:49.698Z",
-      "revokedAt": null
-    },
-    {
-      "actorId": "svc-admin-001",
-      "actorName": "service-admin@example.com",
-      "adminEmail": "service-admin@example.com",
-      "adminId": "svc-admin-001",
-      "adminName": "service-admin@example.com",
-      "allowedActions": [
-        "auth.logout",
-        "auth.state",
-        "billing.read",
-        "tenants.read",
-        "tenants.manage",
-        "billing.change",
-        "break-glass.decide",
-        "break-glass.request",
-        "channels.ingest",
-        "channels.read",
-        "clients.merge",
-        "clients.read",
-        "dialogs.manage",
-        "dialogs.read",
-        "files.read",
-        "files.write",
-        "flags.read",
-        "flags.test",
-        "users.support",
-        "impersonation.stop",
-        "incidents.read",
-        "knowledge.read",
-        "knowledge.write",
-        "permissions.read",
-        "permissions.validate",
-        "platform.alert.acknowledge",
-        "platform.alert-routing.write",
-        "platform.health-rollups.write",
-        "platform.read",
-        "platform.telemetry.ingest",
-        "quality.manual-reviews.write",
-        "quality.ratings.write",
-        "quality.scoring-audits.write",
-        "quotas.check",
-        "quotas.read",
-        "realtime.events.read",
-        "notifications.read",
-        "operations.read",
-        "operations.write",
-        "settings.read",
-        "settings.manage",
-        "service-admin.users.read",
-        "service-admin.users.write",
-        "service-admin.audit.read",
-        "service-admin.audit.export",
-        "security.review",
-        "templates.read",
-        "templates.write",
-        "incidents.manage",
-        "flags.manage",
-        "impersonation.start"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-northstar",
-          "name": "Northstar Retail",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-volga",
-          "name": "Volga Logistics",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-aurora",
-          "name": "Aurora Fintech",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-lumen",
-          "name": "Lumen Health",
-          "role": "service_admin"
-        },
-        {
-          "id": "tenant-qa-retail",
-          "name": "QA Retail",
-          "role": "service_admin"
-        }
-      ],
-      "currentTenantId": "tenant-northstar",
-      "role": "service_admin",
-      "tenantScope": "platform",
-      "id": "svc-session_bf4c6dd9-4a3f-4bf9-bae2-8dd09d7da7a4",
-      "expiresAt": "2026-07-12T02:15:49.850Z",
-      "mfaVerifiedAt": "2026-07-11T22:15:49.850Z",
-      "revokedAt": null
-    }
-  ],
-  "serviceAdminTokenPairs": [
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:15:49.861Z",
-      "accessTokenHash": "sha256:1acdff1dd8e4e5cc430eb25588394e9e16414a1997cad9ae11708660a9475058",
-      "id": "top_pair_b8a353d5-0149-4adc-9ffc-331d701dbe92",
-      "issuedAt": "2026-07-11T22:15:49.861Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:15:49.861Z",
-      "refreshTokenHash": "sha256:04f7a438824eceae393f14d8a20e1d7530e63ab0ad9cf793df6b006e8a0e5584",
-      "sessionId": "svc-session_bf4c6dd9-4a3f-4bf9-bae2-8dd09d7da7a4",
-      "subjectId": "svc-admin-001",
-      "revokedAt": null,
-      "rotatedAt": null
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:15:49.709Z",
-      "accessTokenHash": "sha256:0799d22ad57c54fe5cbfb8f183e255f04d49d8a5518c1b8edb7bdf86f6051e02",
-      "id": "top_pair_a6a65fa2-702d-4a4b-8323-8d87af9ded1b",
-      "issuedAt": "2026-07-11T22:15:49.709Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:15:49.709Z",
-      "refreshTokenHash": "sha256:e2162cf772e4d70b5e5478930e881be485e490b565d6be4e90f6f634c8d4acd3",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_aa9fde2c-1bf0-4283-b56f-99583bf466c7",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:15:47.899Z",
-      "accessTokenHash": "sha256:05067cdf720f72ff2ac9df3e3fa5e7b28631c6cd04f43a31c12d9cba9c64c467",
-      "id": "top_pair_666129cd-424a-4b08-9637-d103a7361307",
-      "issuedAt": "2026-07-11T22:15:47.899Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:15:47.899Z",
-      "refreshTokenHash": "sha256:e7f3a5bc3d225bf70c00ee01e5120fdf3f8e7ef1a3e278238f5f2ef7d512d0cb",
-      "sessionId": "svc-session_2fa7e12b-e61e-4264-ba96-bf96b61d68fc",
-      "subjectId": "svc-admin-001",
-      "revokedAt": null,
-      "rotatedAt": null
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:15:47.700Z",
-      "accessTokenHash": "sha256:33d499b1ae070903f1d7ce948bbcd1088898ce630b68b094663a7fe8b2b2ce86",
-      "id": "top_pair_feb616f0-b0ae-4f97-acdd-55f47c132a93",
-      "issuedAt": "2026-07-11T22:15:47.700Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:15:47.700Z",
-      "refreshTokenHash": "sha256:17e103ccf100800464691a109bb45b50452040767eb475e27c3c79afac07cda9",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_09e488a8-7d46-4e54-942f-e7300dd557bb",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:15:45.918Z",
-      "accessTokenHash": "sha256:069a777d1119c350252e70325ea3869422d9b87857c08f6e1104a72694ea7158",
-      "id": "top_pair_d1e71e70-a87d-43f6-959a-fdb0f3f564d8",
-      "issuedAt": "2026-07-11T22:15:45.918Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:15:45.918Z",
-      "refreshTokenHash": "sha256:6986aa53653a5c82f3197efc7b3031107f3425c1178760b170c82640404486de",
-      "sessionId": "svc-session_ddc19769-29d5-4b0f-b9ae-faebe01ec134",
-      "subjectId": "svc-admin-001",
-      "revokedAt": null,
-      "rotatedAt": null
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:15:45.783Z",
-      "accessTokenHash": "sha256:8ec31827626eb77a4abd025daf10b430dd15ab1e154f10c5d8e3a05927041883",
-      "id": "top_pair_66723a67-18f5-4009-bb38-efc7c6fbf7a2",
-      "issuedAt": "2026-07-11T22:15:45.783Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:15:45.783Z",
-      "refreshTokenHash": "sha256:730170eacefedfbc9d1a1789e2d7c362f893465eb3176675078e176ffdd6f57c",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_ce2b5d0f-c801-46ef-9353-d03b93e530ec",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:15:44.191Z",
-      "accessTokenHash": "sha256:06eed16a154ee1936e5f4c1c8d0812bc082f9cc0edaf70c9c18d1b9a849bf8f6",
-      "id": "top_pair_c64f94ad-e302-490e-805c-9db0392201c9",
-      "issuedAt": "2026-07-11T22:15:44.191Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:15:44.191Z",
-      "refreshTokenHash": "sha256:618b872721d7d62bf2f88fa8c1697b005ffecfd2be4f117362982d9704c48957",
-      "sessionId": "svc-session_f60c83f8-e298-46ee-87ac-178fb67d65f5",
-      "subjectId": "svc-admin-001",
-      "revokedAt": null,
-      "rotatedAt": null
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:15:44.009Z",
-      "accessTokenHash": "sha256:dc9fa63a273f2277c8c39de371beaa81baf5d584cbde33bfeb465641fbfaab86",
-      "id": "top_pair_830d680e-cae1-4e90-9eb5-7b1eba054a73",
-      "issuedAt": "2026-07-11T22:15:44.009Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:15:44.009Z",
-      "refreshTokenHash": "sha256:3e2380766572bbcbcb59eef01ebd1c65b76af7e41a4443b04a6bd03734e25a04",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_280ef1b9-0d90-44ea-a1f8-da8d9488e88f",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:53.296Z",
-      "accessTokenHash": "sha256:e2fffa4b0c4cfc3ebe2e45fe0ef615b3096b4585e4a76218e2032ba82821475d",
-      "id": "top_pair_205a8643-7ff5-47b8-aa17-b769a9df87b3",
-      "issuedAt": "2026-07-11T22:14:53.296Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:53.296Z",
-      "refreshTokenHash": "sha256:dadf0fa82cde1d0c09586837438aa358b8291a99c641698d63c78e0ccc7943c3",
-      "sessionId": "svc-session_a97d3a6e-76e0-4d46-a79e-1b0888cf4d58",
-      "subjectId": "svc-admin-001",
-      "revokedAt": null,
-      "rotatedAt": null
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:53.170Z",
-      "accessTokenHash": "sha256:b42e7c9c487bbb1826d00634083025f8c5ec0361434cda2ed639a5811ba1a42c",
-      "id": "top_pair_b17bcd0d-60e8-4670-8053-25b6be864e58",
-      "issuedAt": "2026-07-11T22:14:53.170Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:53.170Z",
-      "refreshTokenHash": "sha256:dc71f0e2082223ebf780f68f5e07147d04e25b17740184e81879923cd686fc20",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_bca5e8c4-28e6-44af-9eb5-b0af9d821431",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:51.113Z",
-      "accessTokenHash": "sha256:a431b3dce0513f346c016eb87f41a219a6fa742bd43aca137b1ec0b4229d0a64",
-      "id": "top_pair_00144fb6-72d1-4760-904e-ffbc1a3d6486",
-      "issuedAt": "2026-07-11T22:14:51.113Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:51.113Z",
-      "refreshTokenHash": "sha256:6209af73e3a0cf0a4897300074bf32804ecda6b44d2ba13e563c7b3cae029b75",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_ebbf2fcb-2bd4-4e45-aa50-8959fa05f6dd",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:50.420Z",
-      "accessTokenHash": "sha256:c919f7a18ece5f313e21fd6605456208ee3a7b4fea18548da57e90f39611d295",
-      "id": "top_pair_002d8db4-af7d-4499-8661-c49b50b5e144",
-      "issuedAt": "2026-07-11T22:14:50.420Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:50.420Z",
-      "refreshTokenHash": "sha256:f3c56e633cbca1dfded64ef3bb36483209ec7d9b3586bd2d1dcb5b91f028d3ff",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_b10e0f63-56f0-4767-a8be-bceb3e9e80d6",
-      "subjectId": "usr-d0128abc-ff0c-49b8-b8a8-60c16740c5dc"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:47.495Z",
-      "accessTokenHash": "sha256:3047be93875c08e8c680b1d62ba826878ee5c8c1ed8ecf26f4b2a8406a122a35",
-      "id": "top_pair_90746a5f-4b82-45a8-9800-280b3d067696",
-      "issuedAt": "2026-07-11T22:14:47.495Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:47.495Z",
-      "refreshTokenHash": "sha256:373baaa7c349cb463c2d3b0acfe32320554ef188f07b22ba532d166bae09873e",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_46ad1e1f-db5a-43de-a261-dba44c118b1f",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:46.195Z",
-      "accessTokenHash": "sha256:8304f203b6cbbdc3d9f5cf65a135063f53f5ba97a9acbbcaaf04edc3f9afb684",
-      "id": "top_pair_19aab910-4e5e-42a5-85ea-81310d5d5141",
-      "issuedAt": "2026-07-11T22:14:46.195Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:46.195Z",
-      "refreshTokenHash": "sha256:2be28be59c681add2019e8316245f1aae8a43946da8fc18a74d2bef95c77d824",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_250f16ba-90f5-4716-b9d5-935f99f66618",
-      "subjectId": "usr-lumen-multi"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:43.643Z",
-      "accessTokenHash": "sha256:bbbc90522869482424fcd9f944aed20b0cbb7e1bc2da188eb07ce68d449e7781",
-      "id": "top_pair_32688686-3e10-4982-b83d-d224e8e94779",
-      "issuedAt": "2026-07-11T22:14:43.643Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:43.643Z",
-      "refreshTokenHash": "sha256:cc129f11c3b13d307e960b82b6b12521ad74bb2d008f0190f3cdaea3955ca9d2",
-      "sessionId": "svc-session_97552511-b110-4d79-a916-0a0daedd6867",
-      "subjectId": "svc-admin-001",
-      "revokedAt": null,
-      "rotatedAt": null
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:43.448Z",
-      "accessTokenHash": "sha256:62934c735f8f0141ea28aef809873ca530e527c04bc23085b6d628d4ef335836",
-      "id": "top_pair_cc00a675-ac27-4443-b80e-8703862a9d39",
-      "issuedAt": "2026-07-11T22:14:43.448Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:43.448Z",
-      "refreshTokenHash": "sha256:76625c26c19352a11861a2d32184a6a672c490cab5508022c60d9b007b0a5946",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_6f0d7eeb-d838-414f-b1f8-b2fa200e7268",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:41.894Z",
-      "accessTokenHash": "sha256:28fa4c57dcb1017a8c0575c4bca6d8f55b32087df7a2268add8293b364e0ecd0",
-      "id": "top_pair_28beaf4c-8b1f-47d1-9de0-fd762a189cf0",
-      "issuedAt": "2026-07-11T22:14:41.894Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:41.894Z",
-      "refreshTokenHash": "sha256:86e98336353ac88692dece5b94db71929a2cff0daa146f641877aa6363709def",
-      "sessionId": "svc-session_990c68a7-38fd-4e38-893d-49d2f684196b",
-      "subjectId": "svc-admin-001",
-      "revokedAt": null,
-      "rotatedAt": null
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:41.778Z",
-      "accessTokenHash": "sha256:5d6dc6ac67f65731801818fd30de88eb3ca5b6baf24fabe5c2460ce46ceb565b",
-      "id": "top_pair_7f7c7748-598b-4e4b-8f49-16934f8163dc",
-      "issuedAt": "2026-07-11T22:14:41.778Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:41.778Z",
-      "refreshTokenHash": "sha256:0f3a7b37c093821c19f90e7e65016f1df9c9a1dbc2aa3c83331d017c0619bc00",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_e0153648-c7c3-4d87-886f-0ba2bb90f014",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:38.093Z",
-      "accessTokenHash": "sha256:f5f715f2b784c9ed9213e89f4f8d734398e5813f529b206eb0612122618c2506",
-      "id": "top_pair_c2f5e201-e849-46e9-9ccd-38cb2f2732aa",
-      "issuedAt": "2026-07-11T22:14:38.093Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:38.093Z",
-      "refreshTokenHash": "sha256:2c9fbbd5c0903038dbf16bc45fd38ca3376552c17815ba25f7929d9d5b35e820",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_898559b0-40ef-44ec-955c-332f6f558e15",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:35.619Z",
-      "accessTokenHash": "sha256:476317e8f5c3c9646cefca2bdd0711e6f450a919ce78bf7edc21224c520d99d7",
-      "id": "top_pair_ba4e7c63-03a8-4ea1-b3e0-ce23f2449c66",
-      "issuedAt": "2026-07-11T22:14:35.619Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:35.619Z",
-      "refreshTokenHash": "sha256:f93acb6f1af8751af61a577316e06efb6feb852f14ed53873e1a1571880bf275",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_0c0ac044-7678-4d8e-b296-0d5cf40abec5",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:33.332Z",
-      "accessTokenHash": "sha256:191211ed16d9618b82413cd4b6aebdc821d2cac27d8f6f3a413a651ce8ac5fac",
-      "id": "top_pair_d3bd9a04-3de4-4389-a45a-af2e1c024715",
-      "issuedAt": "2026-07-11T22:14:33.332Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:33.332Z",
-      "refreshTokenHash": "sha256:cfb288bac7b38ae2aa1e16eed32bf753f8fd07056fe4dd4da63ceebcb3ca1a94",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_c81d50ff-e836-4894-b879-219a57fdea6f",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:14:30.378Z",
-      "accessTokenHash": "sha256:e2e9479b51cc8650fa7ae789752dd16780dd185addcb4a9b9d97f2da913a4825",
-      "id": "top_pair_fbe175ab-122b-49df-af83-25ad5899063c",
-      "issuedAt": "2026-07-11T22:14:30.378Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:14:30.378Z",
-      "refreshTokenHash": "sha256:7c04cf31f26be793ce79aa8bbf95624524e77e87c18e43c71e42a0dd8c58751d",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_2f494dfb-5c68-4c0e-a1cb-608a6b43f086",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:13:42.823Z",
-      "accessTokenHash": "sha256:c2fcc709dfd89a40d35f524a2743d487174372a7a00a408f04de33cb8f12c8f2",
-      "id": "top_pair_d37cef35-a4cf-4801-bb57-118050457289",
-      "issuedAt": "2026-07-11T22:13:42.823Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:13:42.823Z",
-      "refreshTokenHash": "sha256:fdac51306bce08ab888c1db811ede41dc4bec78f7adda4a4adaaea83482fede9",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_22a4379c-7f31-466a-96c4-1760d5dbfcd9",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:12:55.510Z",
-      "accessTokenHash": "sha256:079aa643c1b281a2fd0b78d1b592564804d1a4d979877e67be97642c58a38894",
-      "id": "top_pair_1914d53f-d60f-48ac-93b4-93a055b74e12",
-      "issuedAt": "2026-07-11T22:12:55.510Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:12:55.510Z",
-      "refreshTokenHash": "sha256:94ab786d027322f34f091da4f5ea8f12f8081050e39c3162a83d203be5777e22",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_739a6d54-8e34-4291-8f0f-a495cf7721d2",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:12:43.520Z",
-      "accessTokenHash": "sha256:366036c50d9b6bd67fce89bcbd104c70899445ac56c96edbe0c93b55e1524eb9",
-      "id": "top_pair_afade159-55ad-4b43-a450-4139b9c830fc",
-      "issuedAt": "2026-07-11T22:12:43.520Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:12:43.520Z",
-      "refreshTokenHash": "sha256:d06da4f8c36b4226712b49b7369b92b324bce76afb5f1a114ccde30a6b95a524",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_7a926afd-b2bb-410e-860b-b9589676872e",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:12:30.843Z",
-      "accessTokenHash": "sha256:8ddc25e8057a4c73656a14a403e069db0aeb93815dfc67be1080376982fb421d",
-      "id": "top_pair_6e267113-9109-4aa7-847b-9aa69f580188",
-      "issuedAt": "2026-07-11T22:12:30.843Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:12:30.843Z",
-      "refreshTokenHash": "sha256:ed719fe3956343c00be8fe3a86670e055016650be5cb412a1f4d10f250254fdc",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_859d45d7-0ed6-4296-8d58-9f418cf582c1",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:12:19.244Z",
-      "accessTokenHash": "sha256:05c5e1f0fe6c748534ed57933c46e53544957565e83046a6c011cf2107682e31",
-      "id": "top_pair_8476586e-19dd-4197-84fc-e1d8c49ce691",
-      "issuedAt": "2026-07-11T22:12:19.244Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:12:19.244Z",
-      "refreshTokenHash": "sha256:0336bf91d18e00d7b33e1d1f34649d164122586ca115c2935d0802d9729b110c",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_941e3ed5-b5b2-46df-af76-67017e37ee65",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:12:16.574Z",
-      "accessTokenHash": "sha256:229a9c8b79705d66e5f384a56307d870207f8a62f0d20a92cd4b6823e1c7aaf3",
-      "id": "top_pair_bb94299a-d60d-468f-86f3-1a27b9adc2ed",
-      "issuedAt": "2026-07-11T22:12:16.574Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:12:16.574Z",
-      "refreshTokenHash": "sha256:3a0f8079351ce04d8244d7fdb36b1dc6de8899730232944fab1e1c2bd3351437",
-      "sessionId": "svc-session_963836a3-eb2d-4f2f-8c51-f74a97091e68",
-      "subjectId": "svc-admin-001",
-      "revokedAt": null,
-      "rotatedAt": null
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:12:16.382Z",
-      "accessTokenHash": "sha256:8f887fb3b9ab473f2f4e89468c61b1d60ef1bdf836c1da50b214e5ad7b757100",
-      "id": "top_pair_0764a709-d20e-4d2e-88dc-d1d33ec1cecd",
-      "issuedAt": "2026-07-11T22:12:16.382Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:12:16.382Z",
-      "refreshTokenHash": "sha256:52a8b303ee00ce9c0b74fa639867edb8aa9b808e4de560be5ca41dca9f952476",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_d6385379-e124-41ac-bb4e-7de81f449063",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:12:04.924Z",
-      "accessTokenHash": "sha256:3b3500ff78aa5b41ce7cac2bb7d4c138a59de6393dfc55290eb22bdf5d027b7a",
-      "id": "top_pair_4d163e3e-92ad-4ead-a54c-28d4d002989a",
-      "issuedAt": "2026-07-11T22:12:04.924Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:12:04.924Z",
-      "refreshTokenHash": "sha256:18f11f6332e11b730c1960e7f06309f7939da00b8d19a651c0e9a5fc3df70d03",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_a0998065-4b5f-440f-a719-3849c4f6a2c4",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:11:52.857Z",
-      "accessTokenHash": "sha256:dc1d64d21005cb7e473b93facbafd6d101edfda6acb238b935a36de3d8577c7f",
-      "id": "top_pair_38041728-65ea-43b5-ba2c-f6ca99b6a655",
-      "issuedAt": "2026-07-11T22:11:52.857Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:11:52.857Z",
-      "refreshTokenHash": "sha256:c93712acde25edac3b166fa6ac3f891dc20f0ca8dd91d433d975859f39079c66",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_11d837e9-cef8-4ca0-ba82-d23f99a807cb",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:11:05.902Z",
-      "accessTokenHash": "sha256:9c1ed4767f089e64c127dd6e8392395a592279dd11921e6b84f7dd12043f4792",
-      "id": "top_pair_46a80064-0c18-4457-b02a-7b7ceaebe9fc",
-      "issuedAt": "2026-07-11T22:11:05.902Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:11:05.902Z",
-      "refreshTokenHash": "sha256:9b1414965082b6a5183630ed05641cce4423a5697b8e548b3c43c861e97740d7",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_0d3502e5-b225-4af6-9cb3-ebed54a6b03a",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:11:03.635Z",
-      "accessTokenHash": "sha256:8a084b7fafd1cbcc1cd848f7705b87e6955c5b48865e5fe042282211283e42c0",
-      "id": "top_pair_395c0005-e0fe-4ed9-8130-bc08a1876328",
-      "issuedAt": "2026-07-11T22:11:03.635Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:11:03.635Z",
-      "refreshTokenHash": "sha256:2146ef88f929d68f299c1984c31ddc8ce9515f8161201ebe41a95a141980f678",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_61dbec92-0288-486a-b602-2056205d28b0",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:10:54.102Z",
-      "accessTokenHash": "sha256:2d56d641b4c46f8d1029533007161d0ba7c6fa840052eb3768a0677ff2728fab",
-      "id": "top_pair_dd154f5e-fc08-463e-878a-6b7c92deb369",
-      "issuedAt": "2026-07-11T22:10:54.102Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:10:54.102Z",
-      "refreshTokenHash": "sha256:1753cf956ff18d2e448fcedc5b0b7063ce3be6355bbba4cf06861b871635a846",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_9a7c56c2-f5d8-439a-aab4-5f25419f1c89",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:10:51.586Z",
-      "accessTokenHash": "sha256:9d08ae722bd9dd3f41fda4ff569f324d09a9c1fd3f00fb0aa34634b6467d474e",
-      "id": "top_pair_e01901dd-e140-4e69-944e-eba00ad97de2",
-      "issuedAt": "2026-07-11T22:10:51.586Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:10:51.586Z",
-      "refreshTokenHash": "sha256:b2b1cf32e2a496717b692f8beeafe9cf993cfc5c0033bf186c04270782bacc5a",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_6f21de3f-54c1-4c55-9721-1f11fc5eb664",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:10:04.802Z",
-      "accessTokenHash": "sha256:c0fac5eb8d7524de971d6961ad95b85440308b358211ea4e4e901176013130ed",
-      "id": "top_pair_69b17039-dceb-41f0-a822-77f37f34d25a",
-      "issuedAt": "2026-07-11T22:10:04.802Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:10:04.802Z",
-      "refreshTokenHash": "sha256:15c7ab0a42f70cad0d7bbb52bcde2955dd6def539a59c7f88658ef4ceb5b5629",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_461c0068-0ef4-4bc0-b590-ab529cd87b1b",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:09:52.464Z",
-      "accessTokenHash": "sha256:e368a1a980a8512d4679657d6c2cff517b25452965d06ff8fa60353d0a23d8c4",
-      "id": "top_pair_49199e45-5971-41ee-91e4-cb18eb4a9de9",
-      "issuedAt": "2026-07-11T22:09:52.464Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:09:52.464Z",
-      "refreshTokenHash": "sha256:c1d04784d1d45443b116c4f7bee65ecd199affba77885766685ce34dcd3171b1",
-      "sessionId": "svc-session_652a0df8-c275-47ae-88a0-342af90b9fe7",
-      "subjectId": "svc-admin-001",
-      "revokedAt": null,
-      "rotatedAt": null
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:09:52.307Z",
-      "accessTokenHash": "sha256:3ed530ab72ba84cd348531d12560b7e93b393336abe34d850435102ac455c8eb",
-      "id": "top_pair_3fc7829b-0ffb-46c0-8187-3e428ee99a1e",
-      "issuedAt": "2026-07-11T22:09:52.307Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:09:52.307Z",
-      "refreshTokenHash": "sha256:b56b76f216ef344cbafaa76396aa0e93052d0b3df161138057ccd73cea55e170",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_b2b4cc2f-02fe-4771-b2d2-48ad025ecc57",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:09:49.017Z",
-      "accessTokenHash": "sha256:99ed9d49e6a6ee3c497a728459d0e1473709c2466dd5df02395540e7f55de4cc",
-      "id": "top_pair_8b005706-c70f-46dc-be0d-468caee808d3",
-      "issuedAt": "2026-07-11T22:09:49.017Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:09:49.017Z",
-      "refreshTokenHash": "sha256:e186ce42ef7db091320fb40a59d236f37d3ff3a663b1e8c5198e0b8576d9174a",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_25614156-99be-4f07-a98b-8af69685ae31",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:09:46.688Z",
-      "accessTokenHash": "sha256:62846db8ff233f2c6188f2475a934568aae86bd8aece7c907067a8d0ebce08a1",
-      "id": "top_pair_1a8bf972-0533-4d77-923b-e6408afa38a2",
-      "issuedAt": "2026-07-11T22:09:46.688Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:09:46.688Z",
-      "refreshTokenHash": "sha256:04553087a75eb1bb9686204a9ff60846dd673a278c57d5690b6914027a854417",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_6461ff0d-8730-4de5-8b38-1fdc6fcf2296",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:09:44.656Z",
-      "accessTokenHash": "sha256:70a1cccc4bda1afe4c33b6d86e069fe9821cd247e9a5c036f102d962e495237c",
-      "id": "top_pair_546e115a-3ed3-47d4-8ea4-265250476a47",
-      "issuedAt": "2026-07-11T22:09:44.656Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:09:44.656Z",
-      "refreshTokenHash": "sha256:1e6c8921fc25840f7bc0be172659ea0d8ee96514f8a385a1136b356665f13db8",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_1125c491-6ba6-4755-94cf-116fb66e4281",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:09:40.566Z",
-      "accessTokenHash": "sha256:6a07d2055124f3dacd4da61471f7ea7b47946a66871f413fbb7e35c2eebe5865",
-      "id": "top_pair_9a920c78-f16a-4719-a1c8-d8fbd371fa01",
-      "issuedAt": "2026-07-11T22:09:40.566Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:09:40.566Z",
-      "refreshTokenHash": "sha256:25c65245e8963ac96208d543c84196bbc29599256d80feef5b33b3e8ab1957c6",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_f9d09510-b0d5-46dc-b43d-08c1608ee459",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:09:40.454Z",
-      "accessTokenHash": "sha256:ddbb007e986dfe0cf51c1a363ee1fb3b34be3d420f0d4c1bca18189266e87745",
-      "id": "top_pair_3888f076-4794-4375-aad7-85a2eb12c611",
-      "issuedAt": "2026-07-11T22:09:40.454Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:09:40.454Z",
-      "refreshTokenHash": "sha256:a2308031460b071ac5a13d46a43d05d28f4038d52ac9e92868434575c154c13d",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_afe9f1e2-a100-48d7-a525-8633972e1bff",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:08:53.309Z",
-      "accessTokenHash": "sha256:78dd3acb4795c8df41882dac7ce826d9b109df379b87da0b12ff313bd619efd6",
-      "id": "top_pair_3a1ec555-dabe-4bd7-97c5-1330797096d4",
-      "issuedAt": "2026-07-11T22:08:53.309Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:08:53.309Z",
-      "refreshTokenHash": "sha256:dfc8bb6cc10921fb657f3385888e41a068af56a4e5021233cab5a198efae7c0c",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_bbe9d3de-9ac2-412b-b801-222704536206",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:08:40.954Z",
-      "accessTokenHash": "sha256:01697c1719a6c7addb7efc7891ff495025053276d4ccbebaf4869508851a2d32",
-      "id": "top_pair_510aaa85-17b9-4633-a276-521ea2dc9b80",
-      "issuedAt": "2026-07-11T22:08:40.954Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:08:40.954Z",
-      "refreshTokenHash": "sha256:e7f1f5692eb6846c30626a87c6745d2ba476a9f56ba75393ea7a3ce0a39b7328",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_3b974ebc-395b-4b9d-ac17-7663786636bf",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:08:37.945Z",
-      "accessTokenHash": "sha256:67e7fea82b518f2a4b04ec427f9255e40af2afa6b3b3ab8094d8ada063708c5d",
-      "id": "top_pair_f46a1f2b-0386-463b-9589-7afb484f2e2c",
-      "issuedAt": "2026-07-11T22:08:37.945Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:08:37.945Z",
-      "refreshTokenHash": "sha256:b684d1fe417e47f870f16f780beca7f1e460cca5b693a258b095d427a01cec38",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_0c8f63cf-637d-4ecd-ae97-cf4d81e1e108",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:08:34.442Z",
-      "accessTokenHash": "sha256:3efdbe3a7864aa3e36a122daf09c7ab2012b8f3c22923c1e5c8695423cdc27f4",
-      "id": "top_pair_b46973f1-fefc-4377-96be-ec16737c362a",
-      "issuedAt": "2026-07-11T22:08:34.442Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:08:34.442Z",
-      "refreshTokenHash": "sha256:3e422e9c7915a29a0477b565bac75df1fe6d69649a41c365f454f913cefc9d4d",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_54e4f24e-c1cd-4299-9b94-578dc2e677f3",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:07:46.588Z",
-      "accessTokenHash": "sha256:2f1c4bb67f23ca2cfecb5f0535b73ff54d6a605dbbe3fa1786461f4431acc213",
-      "id": "top_pair_97559c75-bbe4-4623-9409-2da8f05a4993",
-      "issuedAt": "2026-07-11T22:07:46.588Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:07:46.588Z",
-      "refreshTokenHash": "sha256:4f291b3ac266d7532402d375b86ce525de8eb9fae32f65613220a83006fe145f",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_670cdf8e-1868-4e59-95e5-ab1412a71bd1",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:07:31.614Z",
-      "accessTokenHash": "sha256:d008e6b64d0475f3e5efb99b6c0d427a1ef5f231a54a6ffd2191bd0ff6bb9ffc",
-      "id": "top_pair_237f0e9b-a1b1-4e7c-aa6f-9ae1465fb427",
-      "issuedAt": "2026-07-11T22:07:31.614Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:07:31.614Z",
-      "refreshTokenHash": "sha256:404e4bbf2cae8a1a2b78ec65591b8bd592380bfa8c74ac98c5908f7ae4ce8bfc",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_4b48f36d-ad94-41fb-87b3-29b116e8aeee",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:07:28.805Z",
-      "accessTokenHash": "sha256:1e2689815660db35e89cc4be06c9b25955beba575d225336f2db29a07a86ab5a",
-      "id": "top_pair_43dd4fe8-27a8-4f6b-9f7b-3a79e13bdc4d",
-      "issuedAt": "2026-07-11T22:07:28.805Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:07:28.805Z",
-      "refreshTokenHash": "sha256:0ace487c6e2d9d20d420d29e05b43c868dd979e2f7f62bd5f32dc90487a44d34",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_21415e01-d825-4845-91b2-2beaa3bf8dec",
-      "subjectId": "usr-volga-admin"
-    },
-    {
-      "accessTokenExpiresAt": "2026-07-11T23:07:23.895Z",
-      "accessTokenHash": "sha256:3f6991b929d66913e4d3e79b5852685ee74fc7ec99839fb5fcdd510ed5ef41b9",
-      "id": "top_pair_e416060a-d889-4685-abfe-fb2ef5191db9",
-      "issuedAt": "2026-07-11T22:07:23.895Z",
-      "refreshTokenExpiresAt": "2026-07-25T22:07:23.895Z",
-      "refreshTokenHash": "sha256:45f888640734ffb567d97c436ba58a0b9598aee7e65ba02398b21c63661adead",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_488331a2-0e32-47e6-92c8-ec289eaf37b1",
-      "subjectId": "usr-volga-admin"
-    }
-  ],
+  "serviceAdminSessions": [],
+  "serviceAdminTokenPairs": [],
   "serviceAdminTokenRevocations": [],
   "serviceAdminTokenRotations": [],
   "tenantAuditEvents": [
@@ -4709,36 +1817,6 @@
   ],
   "tenantUsers": [
     {
-      "device": "Invited during onboarding",
-      "email": "operator@qa.example",
-      "id": "usr-89c9fcc4-5b1a-4945-811f-ba6963ed88ef",
-      "inviteStatus": "pending",
-      "lastActiveAt": "2026-07-11T22:14:50.348Z",
-      "mfa": "disabled",
-      "name": "operator",
-      "risk": "low",
-      "role": "Оператор",
-      "sessions": 0,
-      "status": "active",
-      "supportNotes": "Invited during onboarding (Support).",
-      "tenantId": "tenant-qa-retail"
-    },
-    {
-      "device": "Provisioned during onboarding",
-      "email": "admin@qa.example",
-      "id": "usr-d0128abc-ff0c-49b8-b8a8-60c16740c5dc",
-      "inviteStatus": "accepted",
-      "lastActiveAt": "2026-07-11T22:14:50.273Z",
-      "mfa": "disabled",
-      "name": "QA Admin",
-      "risk": "low",
-      "role": "Owner",
-      "sessions": 0,
-      "status": "active",
-      "supportNotes": "Created by tenant onboarding.",
-      "tenantId": "tenant-qa-retail"
-    },
-    {
       "id": "usr-ns-owner",
       "tenantId": "tenant-northstar",
       "name": "Mira Volkova",
@@ -4790,7 +1868,7 @@
       "email": "sergey@volga.example",
       "role": "Admin",
       "status": "active",
-      "mfa": "reset_pending",
+      "mfa": "enabled",
       "inviteStatus": "accepted",
       "lastActiveAt": "2026-06-27T07:19:00.000Z",
       "sessions": 4,
@@ -4959,30 +2037,6 @@
       ],
       "incidentIds": [],
       "notes": "Trial ends in 9 days. Candidate for Business tariff."
-    },
-    {
-      "activeUsers": 1,
-      "arr": 0,
-      "domains": [
-        "qa-retail.example.test"
-      ],
-      "flags": [],
-      "healthScore": 100,
-      "id": "tenant-qa-retail",
-      "incidentIds": [],
-      "lastSeenAt": "2026-07-11T22:14:50.253Z",
-      "legalName": "QA Retail",
-      "monthlyRevenue": 0,
-      "name": "QA Retail",
-      "notes": "Provisioned through onboarding.",
-      "owner": "QA Admin",
-      "ownerEmail": "admin@qa.example",
-      "planId": "trial",
-      "region": "ru-1",
-      "sla": 100,
-      "status": "trial",
-      "users": 1,
-      "workspaces": 2
     }
   ]
 }

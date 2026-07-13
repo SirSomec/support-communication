@@ -4,9 +4,9 @@ export const botScenarios: BotScenario[] = [
   {
     id: "bot-delivery-status",
     name: "Delivery status",
-    status: "enabled",
+    status: "draft",
     schemaVersion: "bot-flow/v1",
-    tenantId: "tenant-demo",
+    tenantId: "tenant-volga",
     channels: ["SDK", "Telegram"],
     flowNodes: [
       { id: "delivery-message", type: "message", title: "Accept delivery question" },
@@ -16,14 +16,15 @@ export const botScenarios: BotScenario[] = [
     flowEdges: [
       { from: "delivery-message", to: "delivery-contact", label: "needs_contact" },
       { from: "delivery-contact", to: "delivery-handoff", label: "delay" }
-    ]
+    ],
+    triggerRules: [{ id: "delivery-new-conversation", priority: 0, type: "new_conversation" }]
   },
   {
     id: "bot-auth-code",
     name: "Auth code",
     status: "test",
     schemaVersion: "bot-flow/v1",
-    tenantId: "tenant-demo",
+    tenantId: "tenant-volga",
     channels: ["VK", "MAX"],
     flowNodes: [
       { id: "auth-message", type: "message", title: "Accept auth issue" },
@@ -33,7 +34,8 @@ export const botScenarios: BotScenario[] = [
     flowEdges: [
       { from: "auth-message", to: "auth-webhook", label: "cooldown_ok" },
       { from: "auth-webhook", to: "auth-fallback", label: "failed" }
-    ]
+    ],
+    triggerRules: [{ id: "auth-new-conversation", priority: 10, type: "new_conversation" }]
   }
 ];
 
@@ -41,7 +43,7 @@ export const proactiveRules: ProactiveRule[] = [
   {
     id: "rule-checkout",
     channels: ["SDK", "Telegram"],
-    tenantId: "tenant-demo",
+    tenantId: "tenant-volga",
     activeVariant: "A",
     cooldown: "24h",
     segment: "checkout",
@@ -50,7 +52,7 @@ export const proactiveRules: ProactiveRule[] = [
   {
     id: "rule-returning-vk",
     channels: ["VK"],
-    tenantId: "tenant-demo",
+    tenantId: "tenant-volga",
     activeVariant: "B",
     cooldown: "12h",
     segment: "returning",
@@ -65,7 +67,7 @@ export const automationAuditEvents = [
     actor: "system",
     target: "bot-delivery-status",
     immutable: true,
-    tenantId: "tenant-demo"
+    tenantId: "tenant-volga"
   },
   {
     id: "audit-proactive-1002",
@@ -73,7 +75,7 @@ export const automationAuditEvents = [
     actor: "senior-operator",
     target: "rule-checkout",
     immutable: true,
-    tenantId: "tenant-demo"
+    tenantId: "tenant-volga"
   }
 ];
 

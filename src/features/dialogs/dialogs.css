@@ -763,6 +763,9 @@
 
 .transcript-toolbar {
   display: flex;
+  /* The close-outcome select and close button must never cover the filter
+     buttons when the chat column is narrow: let the actions row wrap below. */
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -783,6 +786,9 @@
 .transcript-toolbar-left {
   flex: 1 1 auto;
   flex-wrap: wrap;
+  /* Never shrink below the widest chip/button group: overflowing content would
+     slide under the toolbar actions and swallow their clicks. */
+  min-width: fit-content;
 }
 
 .transcript-toolbar-actions {

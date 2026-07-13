@@ -354,8 +354,8 @@ test("conversation queue filters remain actionable", async ({ page }) => {
   await page.getByRole("button", { name: "Расширенные фильтры" }).click();
   await expect(page.locator(".queue-filter-panel")).toBeVisible();
 
-  await page.locator(".queue-filter-panel select").nth(0).selectOption("Telegram");
-  await page.locator(".queue-filter-panel select").nth(1).selectOption("none");
+  await page.locator('.queue-filter-panel label:has(span:text-is("Канал")) select').selectOption("Telegram");
+  await page.locator('.queue-filter-panel label:has(span:text-is("Тематика")) select').selectOption("none");
   await expect(page.locator(".active-filter-chips")).toContainText("Канал: Telegram");
   await expect(page.locator(".active-filter-chips")).toContainText("Без тематики");
   await expect(page.locator(".queue-row")).toHaveCount(1);
@@ -387,7 +387,7 @@ test("customer panel inserts templates and enforces close topic", async ({ page 
   await expect(page.locator(".customer-panel")).toContainText("Для закрытия укажите тематику");
   await expect(page.locator(".customer-panel .close-button")).toBeDisabled();
 
-  await page.locator(".customer-panel .close-topic select").selectOption({ label: "Товар / Несоответствие" });
+  await page.locator('.customer-panel .close-topic:has(span:text-is("Тематика")) select').selectOption({ label: "Товар / Несоответствие" });
   await expect(page.locator(".customer-panel .close-button")).toBeEnabled();
   await expect(page.locator(".bot-handoff-summary")).toContainText("Товар / Несоответствие");
 
@@ -660,7 +660,8 @@ test("composer attachment queue blocks scan-pending backend descriptors", async 
   const uploadPayload = await uploadResponse.json();
   expect(uploadPayload.status).toBe("ok");
   expect(uploadPayload.data.descriptorId).toBeTruthy();
-  expect(uploadPayload.data.outboxEventId).toBeTruthy();
+  expect(uploadPayload.data.storageState).toBe("upload_queued");
+  expect(uploadPayload.data.uploadPolicy.queue).toBe("file-scan");
   expect(uploadPayload.data.antivirusState).toBe("scan_pending");
 
   await expect(page.locator(".toast")).toContainText("Вложения добавлены в очередь: 1");
@@ -790,7 +791,7 @@ test("quality AI workspace exposes real-time scoring and coaching", async ({ pag
   await selectRole(page, "Администратор");
   await openSection(page, "Качество");
 
-  await expect(page.locator(".ai-quality-workspace")).toContainText("Real-time scoring");
+  await expect(page.locator(".ai-quality-workspace")).toContainText("Проверка текста");
   await expect(page.locator(".ai-quality-workspace")).toContainText("Risky wording");
   await expect(page.locator(".ai-effectiveness-grid")).toContainText("Accepted without edits");
 
@@ -809,32 +810,36 @@ test("quality AI workspace exposes real-time scoring and coaching", async ({ pag
   const scoredCard = page.locator(".ai-coaching-card").filter({ hasText: "missing_next_step" });
   await expect(scoredCard).toContainText(`${draftScorePayload.data.score}/100`);
   await expect(scoredCard).toContainText(draftScorePayload.data.telemetry.auditId);
-  await expect(page.locator(".toast")).toContainText("AI scoring: missing_next_step");
+  await expect(page.locator(".toast")).toContainText("Проверка по правилам: missing_next_step");
 
   const batchScorePromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/quality/draft-scores") && response.request().method() === "POST"
   );
-  await page.getByRole("button", { name: /AI-проверка/ }).click();
+  await page.getByRole("button", { name: "Проверить текст" }).click();
   const batchScoreResponse = await batchScorePromise;
   expect(batchScoreResponse.ok()).toBeTruthy();
   const batchScorePayload = await batchScoreResponse.json();
   expect(batchScorePayload.status).toBe("ok");
   expect(batchScorePayload.data.telemetry.auditId).toBeTruthy();
-  await expect(page.locator(".toast")).toContainText("AI batch scoring saved");
+  await expect(page.locator(".toast")).toContainText("Проверка по правилам сохранена");
 
   await page.getByRole("button", { name: "Низкие оценки" }).click();
   const lowScoreRow = page.locator(".quality-row").filter({ hasText: "client-vladimir" });
   await expect(lowScoreRow).toBeVisible();
+  await lowScoreRow.getByRole("button", { name: "Проверить", exact: true }).click();
+  const reviewForm = lowScoreRow.locator(".qa-review-form");
+  await expect(reviewForm).toBeVisible();
   const manualReviewPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/quality/manual-reviews") && response.request().method() === "POST"
   );
-  await lowScoreRow.getByRole("button", { name: "Проверить" }).click();
+  await reviewForm.getByRole("button", { name: "Сохранить проверку" }).click();
   const manualReviewResponse = await manualReviewPromise;
   expect(manualReviewResponse.ok()).toBeTruthy();
   const manualReviewPayload = await manualReviewResponse.json();
   expect(manualReviewPayload.status).toBe("ok");
   expect(manualReviewPayload.data.reviewId).toBeTruthy();
   expect(manualReviewPayload.data.auditId).toBeTruthy();
+  await expect(page.locator(".toast")).toContainText("Ручная проверка сохранена");
   await expect(lowScoreRow).toContainText("Проверено");
   await expectHealthyPage(page);
 });
@@ -861,15 +866,33 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   await expect(page.locator(".toast")).toContainText("сценарий сохранен на backend");
   await expect(page.locator(".bot-flow-node.selected")).toContainText("Backend saved node");
 
+  // Import runs before publish: published scenarios are edit-locked by lifecycle governance.
+  const exportValue = await page.locator(".bot-io-panel textarea").first().inputValue();
+  const payload = JSON.parse(exportValue);
+  expect(payload.schemaVersion).toBe("bot-flow/v1");
+  expect(payload.flowEdges.length).toBeGreaterThan(0);
+
+  await page.locator(".bot-io-panel textarea").nth(1).fill('{"name":"Broken","flowNodes":[{"id":"bad","type":"bad_type"}]}');
+  await page.locator(".bot-io-panel button").filter({ hasText: "Импорт" }).click();
+  await expect(page.locator(".bot-import-error")).toContainText("валидными type");
+
+  payload.name = "Импортированный сценарий";
+  payload.flowNodes[0].title = "Импортированная нода";
+  await page.locator(".bot-io-panel textarea").nth(1).fill(JSON.stringify(payload));
+  await page.locator(".bot-io-panel button").filter({ hasText: "Импорт" }).click();
+  await expect(page.locator(".toast")).toContainText("сохранен на backend");
+  await expect(page.locator(".bot-builder-panel .section-title")).toContainText("Импортированный сценарий");
+  await expect(page.locator(".bot-flow-node.selected")).toContainText("Импортированная нода");
+
   const publishPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/automation/bot-scenarios/")
     && response.url().includes("/publish")
     && response.request().method() === "POST"
   );
-  await page.getByRole("button", { name: "Опубликовать" }).click();
+  await page.getByRole("button", { name: "Опубликовать", exact: true }).click();
   const publishDialog = page.getByRole("dialog", { name: /Публикация/ });
   await expect(publishDialog).toBeVisible();
-  await publishDialog.getByRole("button", { name: "Опубликовать" }).click();
+  await publishDialog.getByRole("button", { name: "Опубликовать", exact: true }).click();
   const publishResponse = await publishPromise;
   expect(publishResponse.ok()).toBeTruthy();
   const publishPayload = await publishResponse.json();
@@ -892,24 +915,7 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   expect(testRunPayload.data.auditId).toBeTruthy();
   expect(testRunPayload.data.queue).toBe("bot-runtime");
   expect(testRunPayload.data.testRunId).toMatch(/^bot_test_/);
-  await expect(page.locator(".toast")).toContainText("bot_test_");
-
-  const exportValue = await page.locator(".bot-io-panel textarea").first().inputValue();
-  const payload = JSON.parse(exportValue);
-  expect(payload.schemaVersion).toBe("bot-flow/v1");
-  expect(payload.flowEdges.length).toBeGreaterThan(0);
-
-  await page.locator(".bot-io-panel textarea").nth(1).fill('{"name":"Broken","flowNodes":[{"id":"bad","type":"bad_type"}]}');
-  await page.locator(".bot-io-panel button").filter({ hasText: "Импорт" }).click();
-  await expect(page.locator(".bot-import-error")).toContainText("валидными type");
-
-  payload.name = "Импортированный сценарий";
-  payload.flowNodes[0].title = "Импортированная нода";
-  await page.locator(".bot-io-panel textarea").nth(1).fill(JSON.stringify(payload));
-  await page.locator(".bot-io-panel button").filter({ hasText: "Импорт" }).click();
-  await expect(page.locator(".toast")).toContainText("сохранен на backend");
-  await expect(page.locator(".bot-builder-panel .section-title")).toContainText("Импортированный сценарий");
-  await expect(page.locator(".bot-flow-node.selected")).toContainText("Импортированная нода");
+  await expect(page.locator(".toast")).toContainText("Песочница");
   await expectHealthyPage(page);
 });
 
@@ -930,6 +936,9 @@ test("scenario wizard keeps keyboard focus, aria steps and responsive layout", a
     await expectNoElementOverflow(page, ".automation-insight-grid");
     await expectNoElementOverflow(page, ".scenario-ops-panel");
 
+    // The wizard intentionally restores an unfinished draft (including the step),
+    // so reset the persisted draft to observe the first step on every viewport.
+    await page.evaluate(() => sessionStorage.removeItem("bot-scenario-wizard-draft-v1"));
     await page.getByRole("button", { name: "Создать в мастере" }).click();
     const wizard = page.getByRole("dialog", { name: "Мастер создания сценария" });
     await expect(wizard).toBeVisible();
@@ -1145,22 +1154,31 @@ test("settings channel connections create multiple Telegram and MAX instances", 
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: "MAX backup webhook" })).toHaveCount(0);
 
   const createForm = channelPanel.locator(".channel-create-form");
-  await createForm.locator("select").first().selectOption("telegram");
-  await createForm.locator("input").nth(0).fill(telegramName);
-  await createForm.locator("select").nth(1).selectOption("sandbox");
-  await createForm.locator("input").nth(1).fill("queue-telegram-qa");
-  await createForm.locator("input").nth(2).fill("9");
-  await createForm.locator("input").nth(3).fill("900001:qa-telegram-token-smoke");
-  await createForm.getByRole("button", { name: "Создать" }).click();
+  const createFormField = (label) => createForm.locator(`label:has(span:text-is("${label}"))`);
+  const routingQueueSelect = createFormField("Очередь").locator("select");
+  await expect.poll(async () => routingQueueSelect.locator("option").count()).toBeGreaterThan(0);
+  if (await routingQueueSelect.locator("option[value='']").count()) {
+    await channelPanel.getByLabel("Название новой очереди").fill(`QA queue ${runId}`);
+    await channelPanel.getByRole("button", { name: "Создать очередь" }).click();
+    await expect(page.locator(".toast")).toContainText("очередь создана");
+    await expect.poll(async () => routingQueueSelect.locator("option:not([value=''])").count()).toBeGreaterThan(0);
+  }
+
+  await createFormField("Тип").locator("select").selectOption("telegram");
+  await createFormField("Название").locator("input").fill(telegramName);
+  await createFormField("Среда").locator("select").selectOption("sandbox");
+  await routingQueueSelect.selectOption({ index: 0 });
+  await createFormField("Лимит чатов").locator("input").fill("9");
+  await createFormField("Секрет или token").locator("input").fill("900001:qa-telegram-token-smoke");
+  await createForm.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName })).toBeVisible();
   await expect(page.locator(".toast")).toContainText(`${telegramName}: подключение создано.`);
 
-  await createForm.locator("select").first().selectOption("max");
-  await createForm.locator("input").nth(0).fill(maxName);
-  await createForm.locator("input").nth(1).fill("queue-max-qa");
-  await createForm.locator("input").nth(2).fill("7");
-  await createForm.locator("input").nth(3).fill("qa-max-token");
-  await createForm.getByRole("button", { name: "Создать" }).click();
+  await createFormField("Тип").locator("select").selectOption("max");
+  await createFormField("Название").locator("input").fill(maxName);
+  await createFormField("Лимит чатов").locator("input").fill("7");
+  await createFormField("Секрет или token").locator("input").fill("qa-max-token");
+  await createForm.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: maxName })).toBeVisible();
   await expect(page.locator(".toast")).toContainText(`${maxName}: подключение создано.`);
 

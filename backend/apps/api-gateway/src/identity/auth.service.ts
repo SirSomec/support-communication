@@ -1699,4 +1699,56 @@ function buildOidcAuthorizationUrl(
   authorizationUrl.searchParams.set("redirect_uri", redirectUri);
   authorizationUrl.searchParams.set("response_type", "code");
   authorizationUrl.searchParams.set("scope", provider.scopes.join(" "));
-  authorizationUrl.searchParams.set("state"
+  authorizationUrl.searchParams.set("state", state);
+  authorizationUrl.searchParams.set("nonce", nonce);
+  if (provider.audience) {
+    authorizationUrl.searchParams.set("audience", provider.audience);
+  }
+  return authorizationUrl.toString();
+}
+
+function hashOidcValue(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function isSamlAssertionReplayConflict(error: unknown): boolean {
+  const prismaError = error as { code?: unknown } | null;
+  return (error instanceof Error && /SAML assertion replay already exists/.test(error.message))
+    || prismaError?.code === "P2002";
+}
+
+function resolveSessionStateDenial(session: StoredServiceAdminSession | undefined): { code: string; message: string } | null {
+  if (!session) {
+    return { code: "session_not_found", message: "Service-admin session was not found." };
+  }
+
+  if (session.revokedAt) {
+    return { code: "session_revoked", message: "Service-admin session was revoked." };
+  }
+
+  if (!session.mfaVerifiedAt) {
+    return { code: "mfa_required", message: "Service-admin session requires MFA verification." };
+  }
+
+  if (!Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
+    return { code: "session_expired", message: "Service-admin session has expired." };
+  }
+
+  return null;
+}
+
+function resolveTenantOperatorSessionDenial(session: StoredTenantOperatorSession | undefined): { code: string; message: string } | null {
+  if (!session) {
+    return { code: "session_not_found", message: "Tenant operator session was not found." };
+  }
+
+  if (session.revokedAt) {
+    return { code: "session_revoked", message: "Tenant operator session was revoked." };
+  }
+
+  if (!Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
+    return { code: "session_expired", message: "Tenant operator session has expired." };
+  }
+
+  return null;
+}

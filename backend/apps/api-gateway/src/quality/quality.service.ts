@@ -502,7 +502,14 @@ function buildAiEffectiveness(decisions: AiSuggestionDecisionRecord[]): Array<Re
   const counts = { accept: 0, edit: 0, reject: 0 };
   for (const decision of decisions) counts[decision.action] += 1;
   const total = decisions.length;
-  return [{ accepted: counts.accept, acceptanceRate: total ? counts.accept / total : null, edited: counts.edit, editRate: total ? counts.edit / total : null, rejected: counts.reject, rejectionRate: total ? counts.reject / total : null, total }];
+  const rate = (count: number) => (total ? count / total : 0);
+  const percent = (count: number) => `${Math.round(rate(count) * 100)}%`;
+  const detail = (count: number) => `${count} of ${total} AI suggestion decisions`;
+  return [
+    { id: "accepted-rate", label: "Accepted without edits", value: percent(counts.accept), detail: detail(counts.accept), accepted: counts.accept, acceptanceRate: rate(counts.accept), total },
+    { id: "edited-rate", label: "Edited before send", value: percent(counts.edit), detail: detail(counts.edit), edited: counts.edit, editRate: rate(counts.edit), total },
+    { id: "rejected-rate", label: "Rejected by operator", value: percent(counts.reject), detail: detail(counts.reject), rejected: counts.reject, rejectionRate: rate(counts.reject), total }
+  ];
 }
 
 function mergeQualityScores(

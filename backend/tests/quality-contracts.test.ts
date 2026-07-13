@@ -60,7 +60,22 @@ describe("quality workspace contracts", () => {
     assert.equal(state.lifecycleEvents?.[0].eventType, "quality.ai-suggestion.decided");
     assert.equal(workspace.data.aiSuggestionDecisions.length, 1);
     assert.deepEqual(workspace.data.aiEffectivenessMetrics[0], {
-      accepted: 0, acceptanceRate: 0, edited: 1, editRate: 1, rejected: 0, rejectionRate: 0, total: 1
+      accepted: 0,
+      acceptanceRate: 0,
+      detail: "0 of 1 AI suggestion decisions",
+      id: "accepted-rate",
+      label: "Accepted without edits",
+      total: 1,
+      value: "0%"
+    });
+    assert.deepEqual(workspace.data.aiEffectivenessMetrics[1], {
+      detail: "1 of 1 AI suggestion decisions",
+      editRate: 1,
+      edited: 1,
+      id: "edited-rate",
+      label: "Edited before send",
+      total: 1,
+      value: "100%"
     });
   });
 

@@ -1,44 +1,6 @@
 {
   "exportRetryAuditEvents": [],
-  "exportJobs": [
-    {
-      "id": "export-mrgx23hp-ac51cb0e",
-      "name": "Диалоги: Все каналы",
-      "format": "XLSX",
-      "period": "Сегодня",
-      "statusKey": "queued",
-      "status": "Queued",
-      "progress": 8,
-      "requestedBy": "current-operator",
-      "createdAt": "2026-07-11T22:08:37.165Z",
-      "rows": 0,
-      "columns": [
-        "metric",
-        "today",
-        "delta",
-        "status",
-        "previous"
-      ],
-      "backendQueueId": "report_96f179d1-2cfa-42aa-a8d0-e38ccc9ab30f",
-      "auditId": "evt_report_f4c2d5cf-42fa-457d-a397-de5c94fb7a9d",
-      "metricDefinitionVersion": "metrics/v1",
-      "queue": "report-export",
-      "tenantId": "tenant-volga",
-      "filters": {
-        "operatorId": "all",
-        "outcome": "all",
-        "queueId": "all",
-        "resolutionOutcome": "all",
-        "status": "all",
-        "teamId": "all",
-        "topic": "all",
-        "snapshotAt": "2026-07-11T22:08:36.258Z",
-        "timezoneOffsetMinutes": 180,
-        "channel": "Все каналы",
-        "tenantId": "tenant-volga"
-      }
-    }
-  ],
+  "exportJobs": [],
   "idempotencyKeys": [],
   "metricDefinitions": [],
   "metricTenantOverrides": [],

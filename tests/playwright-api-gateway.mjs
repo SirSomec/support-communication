@@ -18,6 +18,9 @@ const storeFiles = {
   NOTIFICATION_STORE_FILE: "notification.json",
   OPERATIONS_STORE_FILE: "operations.json",
   PLATFORM_STORE_FILE: "platform.json",
+  // Without this override the quality store falls back to backend/.env.example's
+  // .runtime/quality-store.json and leaks manual reviews between smoke runs.
+  QUALITY_STORE_FILE: "quality.json",
   REPORT_STORE_FILE: "report.json",
   ROUTING_STORE_FILE: "routing.json",
   WORKSPACE_STORE_FILE: "workspace.json"

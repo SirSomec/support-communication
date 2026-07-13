@@ -18,7 +18,10 @@ import { RoutingService } from "./routing.service.js";
       provide: RoutingService,
       useFactory: () => new RoutingService(
         RoutingRepository.default(),
-        new CanonicalRoutingWorkloadAdapter(),
+        // The canonical workload adapter reads the SupportQueue directory through Prisma.
+        // In json-store runtimes (local dev, Playwright stub) that would leak queues from
+        // an unrelated database, so it is only wired when routing itself runs on Prisma.
+        process.env.ROUTING_REPOSITORY === "prisma" ? new CanonicalRoutingWorkloadAdapter() : undefined,
         new CanonicalRoutingConversationRepository(),
         TeamDirectoryRepository.default()
       )

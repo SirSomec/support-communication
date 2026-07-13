@@ -47,14 +47,14 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(empty.proactiveRules.length, 0);
     assert.ok(seeded.botScenarios.length > 0);
     assert.ok(seeded.proactiveRules.length > 0);
-    assert.ok(seeded.botScenarios.every((scenario) => scenario.tenantId === "tenant-demo"));
-    assert.equal(seeded.botScenarios.some((scenario) => scenario.tenantId === "tenant-volga"), false);
+    assert.ok(seeded.botScenarios.every((scenario) => scenario.tenantId === "tenant-volga"));
+    assert.equal(seeded.botScenarios.some((scenario) => scenario.tenantId !== "tenant-volga"), false);
   });
 
   it("returns automation workspace with bot scenarios, proactive rules and audit events", async () => {
     const automation = new AutomationService(AutomationRepository.inMemory(bootstrapAutomationState()));
 
-    const workspace = await automation.fetchAutomationWorkspace({ tenantId: "tenant-demo" });
+    const workspace = await automation.fetchAutomationWorkspace({ tenantId: "tenant-volga" });
 
     assert.equal(workspace.service, "automationService");
     assert.equal(workspace.status, "ok");
@@ -67,7 +67,8 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
   });
 
   it("validates bot flow imports and publishes idempotent runtime versions", async () => {
-    const automation = new AutomationService();
+    const publishRepository = AutomationRepository.inMemory();
+    const automation = new AutomationService(publishRepository);
 
     const invalidJson = await automation.validateBotFlowImport("{not-json");
     assert.equal(invalidJson.status, "invalid");
@@ -103,9 +104,32 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       flowEdges: [{ from: "start", to: "answer" }],
       sourceBindings: [],
       triggerRules: [{ id: "phrase", type: "phrase", phrases: [], matchMode: "contains" }]
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(aiImport.status, "invalid");
     assert.ok(String(aiImport.error?.message ?? "").length > 0);
+
+    await publishRepository.saveBotScenario({
+      channels: ["SDK"],
+      flowEdges: [],
+      flowNodes: [{ id: "start", title: "Start", type: "message" }],
+      id: "bot-checkout",
+      name: "Checkout bot",
+      schemaVersion: "bot-flow/v1",
+      status: "draft",
+      triggerRules: [{ id: "new-conversation", priority: 0, type: "new_conversation" }],
+      tenantId: "tenant-volga"
+    });
+    await publishRepository.saveBotScenario({
+      channels: ["SDK"],
+      flowEdges: [],
+      flowNodes: [{ id: "start", title: "Start", type: "message" }],
+      id: "bot-checkout-ladoga",
+      name: "Checkout bot Ladoga",
+      schemaVersion: "bot-flow/v1",
+      status: "draft",
+      triggerRules: [{ id: "new-conversation", priority: 0, type: "new_conversation" }],
+      tenantId: "tenant-ladoga"
+    });
 
     const publish = await automation.publishBotScenario({
       id: "bot-checkout",
@@ -114,7 +138,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       flowNodes: [{ id: "start", type: "message" }],
       flowEdges: [],
       idempotencyKey: "publish-bot-checkout"
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(publish.status, "ok");
     assert.equal(publish.data.scenarioId, "bot-checkout");
     assert.equal(publish.data.versionState, "published");
@@ -130,7 +154,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       flowNodes: [{ id: "start", type: "message" }],
       flowEdges: [],
       idempotencyKey: "publish-bot-checkout"
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(duplicate.status, "ok");
     assert.equal(duplicate.data.duplicate, true);
     assert.equal(duplicate.data.runtimeVersion, publish.data.runtimeVersion);
@@ -142,7 +166,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       flowNodes: [{ id: "start", type: "message" }],
       flowEdges: [],
       idempotencyKey: "publish-bot-checkout"
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(reusedKey.status, "conflict");
     assert.equal(reusedKey.error?.code, "idempotency_key_reused");
 
@@ -162,14 +186,14 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       id: "bot-checkout",
       name: "Checkout bot",
       testCases: [{ id: "happy-path", expected: "handoff" }]
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(testRun.status, "ok");
     assert.equal(testRun.data.scenarioId, "bot-checkout");
     assert.match(testRun.data.testRunId, /^bot_test_/);
     assert.equal(testRun.data.status, "running");
     assert.equal(testRun.data.queue, "bot-runtime");
     assert.equal(testRun.data.cases.length, 1);
-    assert.equal(testRun.data.tenantId, "tenant-demo");
+    assert.equal(testRun.data.tenantId, "tenant-volga");
     assert.match(testRun.data.auditId, /^evt_bot_/);
   });
 
@@ -179,16 +203,16 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     const first = repository.savePublishIdempotencyKey({
       key: "publish-race",
       fingerprint: "first-fingerprint",
-      result: { runtimeVersion: "runtime-first", tenantId: "tenant-demo" },
-      tenantId: "tenant-demo"
+      result: { runtimeVersion: "runtime-first", tenantId: "tenant-volga" },
+      tenantId: "tenant-volga"
     });
     const second = repository.savePublishIdempotencyKey({
       key: "publish-race",
       fingerprint: "second-fingerprint",
-      result: { runtimeVersion: "runtime-second", tenantId: "tenant-demo" },
-      tenantId: "tenant-demo"
+      result: { runtimeVersion: "runtime-second", tenantId: "tenant-volga" },
+      tenantId: "tenant-volga"
     });
-    const stored = repository.findPublishIdempotencyKey("tenant-demo", "publish-race");
+    const stored = repository.findPublishIdempotencyKey("tenant-volga", "publish-race");
 
     assert.equal(first.fingerprint, "first-fingerprint");
     assert.equal(second.fingerprint, "first-fingerprint");
@@ -209,6 +233,18 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     const repository = AutomationRepository.inMemory();
     const automation = new AutomationService(repository);
 
+    await repository.saveBotScenario({
+      channels: ["SDK"],
+      flowEdges: [{ from: "start", to: "handoff" }],
+      flowNodes: [{ id: "start", title: "Start", type: "message" }],
+      id: "bot-publish-hardening",
+      name: "Publish hardening bot",
+      schemaVersion: "bot-flow/v1",
+      status: "draft",
+      triggerRules: [{ id: "new-conversation", priority: 0, type: "new_conversation" }],
+      tenantId: "tenant-volga"
+    });
+
     const publish = await automation.publishBotScenario({
       channels: ["SDK"],
       flowEdges: [{ from: "start", to: "handoff" }],
@@ -216,7 +252,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       id: "bot-publish-hardening",
       idempotencyKey: "publish-hardening-key",
       name: "Publish hardening bot"
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     const duplicate = await automation.publishBotScenario({
       channels: ["SDK"],
       flowEdges: [{ from: "start", to: "handoff" }],
@@ -224,7 +260,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       id: "bot-publish-hardening",
       idempotencyKey: "publish-hardening-key",
       name: "Publish hardening bot"
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     const version = await repository.findBotScenarioVersion(String(publish.data.runtimeVersion));
     const audit = await repository.findBotPublishAuditEvent(String(publish.data.auditId));
     const auditRows = await repository.listBotPublishAuditEvents("bot-publish-hardening");
@@ -236,16 +272,28 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(version?.status, "published");
     assert.equal(audit?.action, "bot.publish");
     assert.equal(audit?.auditId, publish.data.auditId);
-    assert.equal(audit?.idempotencyKey, "bot-publish:tenant-demo:publish-hardening-key");
+    assert.equal(audit?.idempotencyKey, "bot-publish:tenant-volga:publish-hardening-key");
     assert.equal(audit?.immutable, true);
     assert.equal(audit?.runtimeVersion, publish.data.runtimeVersion);
-    assert.equal(audit?.tenantId, "tenant-demo");
+    assert.equal(audit?.tenantId, "tenant-volga");
     assert.deepEqual(auditRows.map((row) => row.auditId), [publish.data.auditId]);
   });
 
   it("exposes durable bot scenario versions and publish audit rows in automation workspace", async () => {
     const repository = AutomationRepository.inMemory();
     const automation = new AutomationService(repository);
+
+    await repository.saveBotScenario({
+      channels: ["SDK"],
+      flowEdges: [{ from: "start", to: "handoff" }],
+      flowNodes: [{ id: "start", title: "Start", type: "message" }],
+      id: "bot-version-visible",
+      name: "Version visible bot",
+      schemaVersion: "bot-flow/v1",
+      status: "draft",
+      triggerRules: [{ id: "new-conversation", priority: 0, type: "new_conversation" }],
+      tenantId: "tenant-volga"
+    });
 
     const publish = await automation.publishBotScenario({
       channels: ["SDK"],
@@ -254,8 +302,8 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       id: "bot-version-visible",
       idempotencyKey: "version-visible-key",
       name: "Version visible bot"
-    }, { tenantId: "tenant-demo" });
-    const workspace = await automation.fetchAutomationWorkspace({ tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
+    const workspace = await automation.fetchAutomationWorkspace({ tenantId: "tenant-volga" });
     const versions = workspace.data.botScenarioVersions as Array<Record<string, unknown>>;
     const auditRows = workspace.data.auditEvents as Array<Record<string, unknown>>;
 
@@ -264,7 +312,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       version.scenarioId === "bot-version-visible"
         && version.versionId === publish.data.runtimeVersion
         && version.status === "published"
-        && version.tenantId === "tenant-demo"
+        && version.tenantId === "tenant-volga"
     ));
     assert.ok(auditRows.some((event) =>
       event.auditId === publish.data.auditId
@@ -286,7 +334,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       name: "Scenario contract bot",
       schemaVersion: "bot-flow/v1" as const,
       status: "draft",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     };
 
     const saved = repository.saveBotScenario(scenario);
@@ -325,7 +373,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       ],
       scenarioId: "bot-version-contract",
       status: "draft",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       versionId: "bot-version-contract-v1"
     };
 
@@ -371,7 +419,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       idempotencyKey: "publish-audit-contract",
       runtimeVersion: "runtime-bot-audit-v1",
       scenarioId: "bot-publish-audit-contract",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       versionId: "bot-publish-audit-contract-v1"
     };
 
@@ -436,7 +484,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       activeVariant: "B",
       cooldown: "24h",
       segment: "checkout"
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(rule.status, "ok");
     assert.match(rule.data.frequencyCap.id, /^cap_rule-checkout_/);
     assert.match(rule.data.experiment.id, /^exp_rule-checkout_/);
@@ -452,7 +500,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       reason: "customer_requested_operator",
       collectedFields: { cardNumber: "4111111111111111", orderId: "A-42", phone: "+7 999 204-18-44" },
       queue: "Delivery",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     assert.equal(handoff.status, "ok");
     assert.equal(handoff.data.eventName, "bot.handoff.created");
@@ -464,7 +512,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(JSON.stringify(handoff.data.realtimeEvent.data).includes("204-18-44"), false);
     assert.match(handoff.data.realtimeEvent.eventId, /^evt_bot_handoff_/);
     assert.equal(handoff.data.realtimeEvent.schemaVersion, "bot-handoff/v1");
-    assert.equal(handoff.data.realtimeEvent.tenantId, "tenant-demo");
+    assert.equal(handoff.data.realtimeEvent.tenantId, "tenant-volga");
     assert.match(handoff.data.realtimeEvent.occurredAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.match(handoff.data.realtimeEvent.traceId, /^trc_|^req_|^test-/);
     assert.match(handoff.data.auditId, /^evt_bot_/);
@@ -479,7 +527,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       endsAt: "18:00",
       ruleId: "rule-checkout",
       startsAt: "09:00",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       timezone: "Europe/Moscow",
       windowId: "win-rule-checkout-business-hours"
     });
@@ -491,11 +539,11 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     saved.daysOfWeek.push(6);
     updated.daysOfWeek.push(7);
 
-    const tenantWindows = repository.listProactiveExecutionWindows({ tenantId: "tenant-demo" });
+    const tenantWindows = repository.listProactiveExecutionWindows({ tenantId: "tenant-volga" });
     tenantWindows[0].daysOfWeek.push(0);
     const ruleWindows = repository.listProactiveExecutionWindows({
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const otherTenantWindows = repository.listProactiveExecutionWindows({ tenantId: "tenant-other" });
 
@@ -504,7 +552,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(otherTenantWindows.length, 0);
     assert.equal(ruleWindows[0].windowId, "win-rule-checkout-business-hours");
     assert.equal(ruleWindows[0].ruleId, "rule-checkout");
-    assert.equal(ruleWindows[0].tenantId, "tenant-demo");
+    assert.equal(ruleWindows[0].tenantId, "tenant-volga");
     assert.equal(ruleWindows[0].timezone, "Europe/Moscow");
     assert.equal(ruleWindows[0].startsAt, "10:00");
     assert.equal(ruleWindows[0].endsAt, "18:00");
@@ -532,7 +580,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       period: "day",
       resetAt: "2026-07-01T00:00:00.000Z",
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       used: 1
     });
     const updated = repository.saveProactiveFrequencyCap({
@@ -543,11 +591,11 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     saved.limit = 99;
     updated.used = 99;
 
-    const tenantCaps = repository.listProactiveFrequencyCaps({ tenantId: "tenant-demo" });
+    const tenantCaps = repository.listProactiveFrequencyCaps({ tenantId: "tenant-volga" });
     tenantCaps[0].used = 42;
     const ruleCaps = repository.listProactiveFrequencyCaps({
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const otherTenantCaps = repository.listProactiveFrequencyCaps({ tenantId: "tenant-other" });
     assert.throws(() => repository.saveProactiveFrequencyCap({
@@ -565,7 +613,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(otherTenantCaps.length, 0);
     assert.equal(ruleCaps[0].capId, "cap-rule-checkout-daily");
     assert.equal(ruleCaps[0].ruleId, "rule-checkout");
-    assert.equal(ruleCaps[0].tenantId, "tenant-demo");
+    assert.equal(ruleCaps[0].tenantId, "tenant-volga");
     assert.equal(ruleCaps[0].period, "day");
     assert.equal(ruleCaps[0].limit, 4);
     assert.equal(ruleCaps[0].used, 2);
@@ -582,7 +630,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       experimentId: "exp-rule-checkout",
       ruleId: "rule-checkout",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variant: "B"
     });
     const updated = repository.saveProactiveExperimentAssignment({
@@ -595,15 +643,15 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     saved.variant = "Z";
     updated.variant = "Z";
 
-    const tenantAssignments = repository.listProactiveExperimentAssignments({ tenantId: "tenant-demo" });
+    const tenantAssignments = repository.listProactiveExperimentAssignments({ tenantId: "tenant-volga" });
     tenantAssignments[0].variant = "Z";
     const ruleAssignments = repository.listProactiveExperimentAssignments({
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const subjectAssignments = repository.listProactiveExperimentAssignments({
       subjectId: "client-42",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const otherTenantAssignments = repository.listProactiveExperimentAssignments({ tenantId: "tenant-other" });
     assert.throws(() => repository.saveProactiveExperimentAssignment({
@@ -623,7 +671,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(ruleAssignments[0].experimentId, "exp-rule-checkout");
     assert.equal(ruleAssignments[0].ruleId, "rule-checkout");
     assert.equal(ruleAssignments[0].subjectId, "client-42");
-    assert.equal(ruleAssignments[0].tenantId, "tenant-demo");
+    assert.equal(ruleAssignments[0].tenantId, "tenant-volga");
     assert.equal(ruleAssignments[0].variant, "B");
     assert.equal(ruleAssignments[0].assignedAt, "2026-06-30T19:30:00.000Z");
   });
@@ -666,10 +714,13 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.throws(() => repository.savePublishIdempotencyKey({
       fingerprint: "fingerprint", key: "missing-tenant-publish", result: {}
     } as never), required);
-    assert.throws(() => AutomationRepository.inMemory({
+    // Legacy local JSON stores may still contain tenantless workspace audit rows:
+    // they are dropped on load instead of failing the whole state (see normalizeState).
+    const filteredState = AutomationRepository.inMemory({
       ...repository.readState(),
       workspaceAuditEvents: [{ id: "missing-tenant-workspace-audit" }]
-    }).readState(), required);
+    }).readState();
+    assert.equal(filteredState.workspaceAuditEvents.length, 0);
   });
 
   it("evaluates proactive execution windows from tenant-scoped active windows using replay time", () => {
@@ -680,7 +731,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       endsAt: "18:00",
       ruleId: "rule-checkout",
       startsAt: "09:00",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       timezone: "Europe/Moscow",
       windowId: "win-checkout-business"
     });
@@ -690,7 +741,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       endsAt: "23:59",
       ruleId: "rule-checkout",
       startsAt: "00:00",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       timezone: "Europe/Moscow",
       windowId: "win-checkout-inactive"
     });
@@ -709,25 +760,25 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       evaluatedAt: "2026-06-30T08:30:00.000Z",
       repository,
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const replay = evaluateProactiveExecutionWindowEligibility({
       evaluatedAt: "2026-06-30T08:30:00.000Z",
       repository,
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const outside = evaluateProactiveExecutionWindowEligibility({
       evaluatedAt: "2026-06-30T19:30:00.000Z",
       repository,
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const noWindows = evaluateProactiveExecutionWindowEligibility({
       evaluatedAt: "2026-06-30T08:30:00.000Z",
       repository,
       ruleId: "rule-without-window",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
 
     assert.equal(inside.eligible, true);
@@ -750,7 +801,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       endsAt: "06:00",
       ruleId: "rule-night",
       startsAt: "22:00",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       timezone: "Europe/Moscow",
       windowId: "win-night-monday"
     });
@@ -759,13 +810,13 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       evaluatedAt: "2026-06-29T22:00:00.000Z",
       repository,
       ruleId: "rule-night",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const lateTuesday = evaluateProactiveExecutionWindowEligibility({
       evaluatedAt: "2026-06-30T19:00:00.000Z",
       repository,
       ruleId: "rule-night",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
 
     assert.equal(earlyTuesday.eligible, true);
@@ -783,7 +834,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       period: "day",
       resetAt: "2026-07-01T00:00:00.000Z",
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       used: 2
     });
     repository.saveProactiveFrequencyCap({
@@ -793,7 +844,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       period: "day",
       resetAt: "2026-07-01T00:00:00.000Z",
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       used: 99
     });
     repository.saveProactiveFrequencyCap({
@@ -811,13 +862,13 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       evaluatedAt: "2026-06-30T12:00:00.000Z",
       repository,
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const replay = evaluateProactiveFrequencyCapEligibility({
       evaluatedAt: "2026-06-30T12:00:00.000Z",
       repository,
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     repository.saveProactiveFrequencyCap({
       active: true,
@@ -826,26 +877,26 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       period: "day",
       resetAt: "2026-07-01T00:00:00.000Z",
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       used: 3
     });
     const exhausted = evaluateProactiveFrequencyCapEligibility({
       evaluatedAt: "2026-06-30T12:00:00.000Z",
       repository,
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const resetReached = evaluateProactiveFrequencyCapEligibility({
       evaluatedAt: "2026-07-01T00:00:00.000Z",
       repository,
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const noCaps = evaluateProactiveFrequencyCapEligibility({
       evaluatedAt: "2026-06-30T12:00:00.000Z",
       repository,
       ruleId: "rule-without-cap",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
 
     assert.equal(available.eligible, true);
@@ -871,7 +922,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       repository,
       ruleId: "rule-checkout",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variants: ["A", "B"]
     });
     const replay = evaluateProactiveExperimentAssignmentEligibility({
@@ -880,7 +931,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       repository,
       ruleId: "rule-checkout",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variants: ["holdout", "changed"]
     });
     const otherTenant = evaluateProactiveExperimentAssignmentEligibility({
@@ -898,18 +949,18 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       repository,
       ruleId: "rule-checkout",
       subjectId: "client-99",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variants: ["A", "B"]
     });
     const stored = repository.listProactiveExperimentAssignments({
       ruleId: "rule-checkout",
       subjectId: "client-42",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
 
     assert.equal(first.eligible, true);
     assert.equal(first.reason, "experiment_assigned");
-    assert.equal(first.assignment.assignmentId, "exp-rule-checkout:tenant-demo:rule-checkout:client-42");
+    assert.equal(first.assignment.assignmentId, "exp-rule-checkout:tenant-volga:rule-checkout:client-42");
     assert.equal(first.assignment.assignedAt, "2026-06-30T12:00:00.000Z");
     assert.ok(["A", "B"].includes(first.assignment.variant));
     assert.equal(replay.reason, "experiment_assignment_replayed");
@@ -930,18 +981,18 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       endsAt: "18:00",
       ruleId: "rule-checkout",
       startsAt: "09:00",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       timezone: "Europe/Moscow",
-      windowId: "win-tenant-demo"
+      windowId: "win-tenant-volga"
     });
     repository.saveProactiveFrequencyCap({
       active: true,
-      capId: "cap-tenant-demo",
+      capId: "cap-tenant-volga",
       limit: 1,
       period: "day",
       resetAt: "2026-07-01T00:00:00.000Z",
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       used: 0
     });
 
@@ -1000,7 +1051,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       repository,
       ruleId: "rule-checkout",
       subjectId: "",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variants: ["A", "B"]
     });
     const firstClient = evaluateProactiveExperimentAssignmentEligibility({
@@ -1009,7 +1060,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       repository,
       ruleId: "rule-checkout",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variants: ["A", "B"]
     });
     const secondClient = evaluateProactiveExperimentAssignmentEligibility({
@@ -1018,7 +1069,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       repository,
       ruleId: "rule-checkout",
       subjectId: "client-43",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variants: ["A", "B"]
     });
 
@@ -1027,7 +1078,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(firstClient.eligible, true);
     assert.equal(secondClient.eligible, true);
     assert.notEqual(firstClient.assignment?.assignmentId, secondClient.assignment?.assignmentId);
-    assert.equal(repository.listProactiveExperimentAssignments({ ruleId: "rule-checkout", tenantId: "tenant-demo" }).length, 2);
+    assert.equal(repository.listProactiveExperimentAssignments({ ruleId: "rule-checkout", tenantId: "tenant-volga" }).length, 2);
   });
 
   it("fails proactive frequency cap eligibility closed when exhausted cap reset time is malformed", () => {
@@ -1039,7 +1090,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       period: "day",
       resetAt: "tomorrow",
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       used: 1
     });
 
@@ -1047,7 +1098,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       evaluatedAt: "2026-06-30T08:30:00.000Z",
       repository,
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
 
     assert.equal(result.eligible, false);
@@ -1069,7 +1120,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         status: "enabled"
       },
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       topic: "Delivery / Proactive",
       traceId: "trc_proactive_delivery_contract"
     });
@@ -1077,12 +1128,12 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
 
     assert.equal(planned.status, "planned");
     assert.equal(planned.ruleId, "rule-checkout");
-    assert.equal(descriptor.id, "proactive_rule_checkout_tenant_demo_client_42");
+    assert.equal(descriptor.id, "proactive_rule_checkout_tenant_volga_client_42");
     assert.equal(descriptor.kind, "outbound_conversation");
     assert.equal(descriptor.channel, "Telegram");
     assert.equal(descriptor.conversationId, null);
     assert.equal(descriptor.deliveryState, "queued");
-    assert.equal(descriptor.idempotencyKey, "proactive-delivery:tenant-demo:rule-checkout:client-42");
+    assert.equal(descriptor.idempotencyKey, "proactive-delivery:tenant-volga:rule-checkout:client-42");
     assert.equal(descriptor.messageId, null);
     assert.equal(descriptor.outboxEventId, planned.outbox.id);
     assert.equal(descriptor.payload.message, "Your order can be delivered today. Reply if you want us to reserve the slot.");
@@ -1094,7 +1145,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(descriptor.requestFingerprint, planned.requestFingerprint);
     assert.equal(descriptor.retryable, true);
     assert.equal(descriptor.status, "queued");
-    assert.equal(descriptor.tenantId, "tenant-demo");
+    assert.equal(descriptor.tenantId, "tenant-volga");
     assert.equal(descriptor.traceId, "trc_proactive_delivery_contract");
     assert.equal(planned.outbox.aggregateId, descriptor.id);
     assert.equal(planned.outbox.aggregateType, "conversation_outbound");
@@ -1114,7 +1165,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       endsAt: "18:00",
       ruleId: "rule-eligible",
       startsAt: "09:00",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       timezone: "Europe/Moscow",
       windowId: "win-rule-eligible"
     });
@@ -1125,7 +1176,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       period: "day",
       resetAt: "2026-07-01T00:00:00.000Z",
       ruleId: "rule-eligible",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       used: 0
     });
 
@@ -1143,14 +1194,14 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         { channels: ["Telegram"], id: "rule-later", segment: "checkout", status: "enabled" }
       ],
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       topic: "Delivery / Proactive",
       traceId: "trc_proactive_delivery_select"
     });
 
     assert.equal(planned?.status, "planned");
     assert.equal(planned?.ruleId, "rule-eligible");
-    assert.equal(planned?.descriptor.id, "proactive_rule_eligible_tenant_demo_client_42");
+    assert.equal(planned?.descriptor.id, "proactive_rule_eligible_tenant_volga_client_42");
     assert.equal(planned?.descriptor.payload.proactiveRuleId, "rule-eligible");
     assert.equal(planned?.descriptor.payload.variant, "B");
     assert.equal(planned?.outbox.payload.descriptorId, planned?.descriptor.id);
@@ -1171,7 +1222,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         { channels: ["Telegram"], id: "rule-enabled", segment: "checkout", status: "enabled" }
       ],
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       topic: "Delivery / Proactive",
       traceId: "trc_proactive_delivery_missing_status"
     });
@@ -1195,7 +1246,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         status: "enabled"
       },
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       topic: "Delivery / Proactive",
       traceId: "trc_proactive_delivery_persist"
     });
@@ -1205,9 +1256,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       plan
     });
     const descriptors = await conversationRepository.listOutboundDescriptors({
-      idempotencyKey: "proactive-delivery:tenant-demo:rule-checkout:client-42",
+      idempotencyKey: "proactive-delivery:tenant-volga:rule-checkout:client-42",
       kind: "outbound_conversation",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const outboxEvents = await conversationRepository.listOutboxEvents();
 
@@ -1226,13 +1277,13 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
 
     const saved = repository.saveProactiveDeliveryAttempt({
       attemptId: "attempt-rule-checkout-client-42",
-      descriptorId: "proactive_rule_checkout_tenant_demo_client_42",
+      descriptorId: "proactive_rule_checkout_tenant_volga_client_42",
       attemptedAt: "2026-06-30T08:30:00.000Z",
       channel: "Telegram",
       ruleId: "rule-checkout",
       status: "queued",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       traceId: "trc_proactive_attempt"
     });
     saved.status = "mutated";
@@ -1244,22 +1295,22 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       ruleId: "rule-checkout",
       status: "failed",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       traceId: "trc_changed"
     });
     const attempts = repository.listProactiveDeliveryAttempts({
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     attempts[0].status = "mutated";
     const subjectAttempts = repository.listProactiveDeliveryAttempts({
       subjectId: "client-42",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const otherTenantAttempts = repository.listProactiveDeliveryAttempts({ tenantId: "tenant-other" });
 
     assert.equal(replay.status, "queued");
-    assert.equal(replay.descriptorId, "proactive_rule_checkout_tenant_demo_client_42");
+    assert.equal(replay.descriptorId, "proactive_rule_checkout_tenant_volga_client_42");
     assert.equal(replay.attemptedAt, "2026-06-30T08:30:00.000Z");
     assert.equal(attempts.length, 1);
     assert.equal(subjectAttempts.length, 1);
@@ -1275,35 +1326,35 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
 
     const first = repository.saveProactiveDeliveryIdempotencyKey({
       fingerprint: "fingerprint-001",
-      key: "proactive-delivery:tenant-demo:rule-checkout:client-42",
+      key: "proactive-delivery:tenant-volga:rule-checkout:client-42",
       result: {
-        descriptorId: "proactive_rule_checkout_tenant_demo_client_42",
+        descriptorId: "proactive_rule_checkout_tenant_volga_client_42",
         outboxEventId: "outbox_proactive_001"
       },
       ruleId: "rule-checkout",
       subjectId: "client-42",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     first.result.descriptorId = "mutated";
     const replay = repository.saveProactiveDeliveryIdempotencyKey({
       fingerprint: "changed",
-      key: "proactive-delivery:tenant-demo:rule-checkout:client-42",
+      key: "proactive-delivery:tenant-volga:rule-checkout:client-42",
       result: { descriptorId: "changed" },
       ruleId: "rule-checkout",
       subjectId: "client-42",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
-    const found = repository.findProactiveDeliveryIdempotencyKey("proactive-delivery:tenant-demo:rule-checkout:client-42");
+    const found = repository.findProactiveDeliveryIdempotencyKey("proactive-delivery:tenant-volga:rule-checkout:client-42");
     found!.result.descriptorId = "mutated-again";
-    const foundAgain = repository.findProactiveDeliveryIdempotencyKey("proactive-delivery:tenant-demo:rule-checkout:client-42");
+    const foundAgain = repository.findProactiveDeliveryIdempotencyKey("proactive-delivery:tenant-volga:rule-checkout:client-42");
 
     assert.equal(replay.fingerprint, "fingerprint-001");
-    assert.equal(replay.result.descriptorId, "proactive_rule_checkout_tenant_demo_client_42");
+    assert.equal(replay.result.descriptorId, "proactive_rule_checkout_tenant_volga_client_42");
     assert.equal(replay.result.outboxEventId, "outbox_proactive_001");
     assert.equal(replay.ruleId, "rule-checkout");
     assert.equal(replay.subjectId, "client-42");
-    assert.equal(replay.tenantId, "tenant-demo");
-    assert.equal(foundAgain?.result.descriptorId, "proactive_rule_checkout_tenant_demo_client_42");
+    assert.equal(replay.tenantId, "tenant-volga");
+    assert.equal(foundAgain?.result.descriptorId, "proactive_rule_checkout_tenant_volga_client_42");
     assert.equal(repository.findProactiveDeliveryIdempotencyKey("missing"), undefined);
   });
 
@@ -1313,11 +1364,11 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     const saved = repository.saveProactiveDeliveryAttribution({
       assignedAt: "2026-06-30T08:29:00.000Z",
       attributionId: "attr-rule-checkout-client-42",
-      descriptorId: "proactive_rule_checkout_tenant_demo_client_42",
+      descriptorId: "proactive_rule_checkout_tenant_volga_client_42",
       experimentId: "exp-rule-checkout",
       ruleId: "rule-checkout",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variant: "B"
     });
     saved.variant = "mutated";
@@ -1328,22 +1379,22 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       experimentId: "changed",
       ruleId: "rule-checkout",
       subjectId: "client-42",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       variant: "A"
     });
     const ruleAttribution = repository.listProactiveDeliveryAttributions({
       ruleId: "rule-checkout",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     ruleAttribution[0].variant = "mutated-again";
     const subjectAttribution = repository.listProactiveDeliveryAttributions({
       subjectId: "client-42",
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const otherTenantAttribution = repository.listProactiveDeliveryAttributions({ tenantId: "tenant-other" });
 
     assert.equal(replay.variant, "B");
-    assert.equal(replay.descriptorId, "proactive_rule_checkout_tenant_demo_client_42");
+    assert.equal(replay.descriptorId, "proactive_rule_checkout_tenant_volga_client_42");
     assert.equal(replay.experimentId, "exp-rule-checkout");
     assert.equal(replay.assignedAt, "2026-06-30T08:29:00.000Z");
     assert.equal(subjectAttribution.length, 1);
@@ -1368,7 +1419,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       mode: "reply",
       portVersion: QUALITY_SCORING_PROVIDER_PORT_VERSION,
       requestedAt: "2026-06-30T09:00:00.000Z",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       traceId: "trc_quality_provider"
     };
     const provider: QualityScoringProvider = {
@@ -1480,7 +1531,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       mode: "reply",
       portVersion: QUALITY_SCORING_PROVIDER_PORT_VERSION,
       requestedAt: "2026-06-30T10:00:00.000Z",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       traceId: "trc_quality_deterministic"
     };
 
@@ -1518,8 +1569,8 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       "repair-risk:danger",
       "repair-attachment:danger"
     ]);
-    assert.equal(first.telemetry.requestFingerprint, "e458424cf60820b074c4b6ea61bcd7f6e4bcab85d980d9f12804f709b9acb6e9");
-    assert.equal(first.providerResultId, "quality_deterministic_e458424cf60820b074c4b6ea");
+    assert.equal(first.telemetry.requestFingerprint, "2febd54d262003aa756b3a9bc0cff583c95cae8d6cf2d0785c5e430896dbef53");
+    assert.equal(first.providerResultId, "quality_deterministic_2febd54d262003aa756b3a9b");
     assert.equal(first.telemetry.usage?.inputTokens, 8);
     assert.equal(first.telemetry.usage?.outputTokens, 2);
     assert.equal(first.providerResultId, replay.providerResultId);
@@ -1553,7 +1604,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         { id: "suggestion-1", label: "Use apology", secret: "drop-me" },
         "invalid"
       ],
-      tenantId: " tenant-demo ",
+      tenantId: " tenant-volga ",
       text: "  I am sorry. I will check the delivery status.  "
     };
 
@@ -1576,7 +1627,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     (payload.suggestions[0] as Record<string, unknown>).label = "mutated";
 
     assert.equal(request.portVersion, QUALITY_SCORING_PROVIDER_PORT_VERSION);
-    assert.equal(request.tenantId, "tenant-demo");
+    assert.equal(request.tenantId, "tenant-volga");
     assert.equal(request.channel, "Telegram");
     assert.equal(request.conversationId, "conv-request-adapter");
     assert.equal(request.mode, "reply");
@@ -1688,9 +1739,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
   it("redacts quality scoring request telemetry before provider execution", () => {
     const request = createQualityScoringProviderRequest({
       attachments: [
-        { id: "att-secret", status: "uploading", url: "https://files.local/support/tenant-demo/private/secret.pdf" },
+        { id: "att-secret", status: "uploading", url: "https://files.local/support/tenant-volga/private/secret.pdf" },
         { id: "att-ready", status: "ready" },
-        { id: "att-leaky", status: "https://files.local/support/tenant-demo/private/status-secret" }
+        { id: "att-leaky", status: "https://files.local/support/tenant-volga/private/status-secret" }
       ],
       channel: "Telegram",
       conversationId: "conv-request-redaction",
@@ -1701,7 +1752,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       suggestions: [
         { id: "suggestion-secret", label: "Mention card 4242 4242 4242 4242", secret: "drop-me" }
       ],
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       text: "Customer token Bearer sk-live-secret should never be stored in telemetry."
     }, {
       requestedAt: "2026-06-30T12:00:00.000Z",
@@ -1733,7 +1784,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
 
     assert.equal(telemetry.direction, "request");
     assert.equal(telemetry.providerPortVersion, QUALITY_SCORING_PROVIDER_PORT_VERSION);
-    assert.equal(telemetry.tenantId, "tenant-demo");
+    assert.equal(telemetry.tenantId, "tenant-volga");
     assert.equal(telemetry.channel, "Telegram");
     assert.equal(telemetry.mode, "reply");
     assert.equal(telemetry.conversationId, "conv-request-redaction");
@@ -1767,7 +1818,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
           tone: "danger"
         },
         {
-          detail: "Provider saw object tenant-demo/private/secret.pdf.",
+          detail: "Provider saw object tenant-volga/private/secret.pdf.",
           id: "attachment",
           label: "Attachment is not ready",
           tone: "danger"
@@ -1775,7 +1826,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       ],
       explainability: {
         modelVersion: "quality-model/v1",
-        reasons: ["risk:Bearer sk-live-secret", "attachment:tenant-demo/private/secret.pdf"]
+        reasons: ["risk:Bearer sk-live-secret", "attachment:tenant-volga/private/secret.pdf"]
       },
       portVersion: QUALITY_SCORING_PROVIDER_PORT_VERSION,
       providerId: "model-quality",
@@ -1902,7 +1953,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       mode: "reply",
       operatorId: "operator-secret",
       suggestions: [{ id: "suggestion-secret", label: "Secret label" }],
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       text: "Bearer sk-live-secret should not be persisted."
     }, {
       requestedAt: "2026-06-30T13:00:00.000Z",
@@ -1975,9 +2026,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       },
       telemetryId: "quality-request-telemetry-unsafe-tenant-shared"
     });
-    const rows = repository.listRequestTelemetry({ tenantId: "tenant-demo" });
+    const rows = repository.listRequestTelemetry({ tenantId: "tenant-volga" });
     rows[0].telemetry.channel = "mutated-again";
-    const rowsAgain = repository.listRequestTelemetry({ tenantId: "tenant-demo" });
+    const rowsAgain = repository.listRequestTelemetry({ tenantId: "tenant-volga" });
     const serialized = JSON.stringify(rowsAgain);
 
     assert.equal(replay.recordedAt, "2026-06-30T13:00:01.000Z");
@@ -1994,7 +2045,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(rowsAgain.length, 2);
     assert.equal(rowsAgain[0].telemetry.channel, "other");
     assert.equal(rowsAgain[0].telemetry.direction, "request");
-    assert.equal(rowsAgain[0].telemetry.tenantId, "tenant-demo");
+    assert.equal(rowsAgain[0].telemetry.tenantId, "tenant-volga");
     assert.equal(rowsAgain[0].telemetry.conversationId, "redacted");
     assert.equal(rowsAgain[0].telemetry.requestFingerprint, "redacted");
     assert.equal(rowsAgain[0].telemetry.traceId, "redacted");
@@ -2087,7 +2138,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
 
     const saved = repository.saveResponseTelemetry({
       recordedAt: "2026-06-30T13:05:01.000Z",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       telemetry: unsafeTelemetry,
       telemetryId: "quality-response-telemetry-Bearer-sk-id-secret"
     });
@@ -2095,7 +2146,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     saved.telemetry.status = "failed";
     const replay = repository.saveResponseTelemetry({
       recordedAt: "2026-06-30T13:05:02.000Z",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       telemetry: createQualityScoringResponseTelemetry({
         ...result,
         score: 80
@@ -2117,7 +2168,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     });
     const craftedSyntheticId = repository.saveResponseTelemetry({
       recordedAt: "2026-06-30T13:05:03.500Z",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       telemetry: createQualityScoringResponseTelemetry({
         ...result,
         score: 81
@@ -2128,7 +2179,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     });
     const craftedInternalId = repository.saveResponseTelemetry({
       recordedAt: "2026-06-30T13:05:03.750Z",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       telemetry: createQualityScoringResponseTelemetry({
         ...result,
         score: 82
@@ -2150,7 +2201,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     });
     const sameValidIdDemoTenant = repository.saveResponseTelemetry({
       recordedAt: "2026-06-30T13:05:05.000Z",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       telemetry: createQualityScoringResponseTelemetry({
         ...result,
         score: 91
@@ -2203,9 +2254,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       }),
       telemetryId: "quality-response-telemetry-unsafe-tenant-shared"
     });
-    const rows = repository.listResponseTelemetry({ status: "ok", tenantId: "tenant-demo" });
+    const rows = repository.listResponseTelemetry({ status: "ok", tenantId: "tenant-volga" });
     rows[0].telemetry.status = "failed";
-    const rowsAgain = repository.listResponseTelemetry({ status: "ok", tenantId: "tenant-demo" });
+    const rowsAgain = repository.listResponseTelemetry({ status: "ok", tenantId: "tenant-volga" });
     const serialized = JSON.stringify(rowsAgain);
 
     assert.equal(replay.recordedAt, "2026-06-30T13:05:01.000Z");
@@ -2215,7 +2266,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.notEqual(craftedInternalId.telemetryId, replay.telemetryId);
     assert.equal(distinctUnsafeId.tenantId, "tenant-other");
     assert.equal(sameValidIdOtherTenant.tenantId, "tenant-other");
-    assert.equal(sameValidIdDemoTenant.tenantId, "tenant-demo");
+    assert.equal(sameValidIdDemoTenant.tenantId, "tenant-volga");
     assert.equal(sameValidIdOtherTenant.telemetryId, sameValidIdDemoTenant.telemetryId);
     assert.notEqual(sameValidIdOtherTenant.recordedAt, sameValidIdDemoTenant.recordedAt);
     assert.match(unsafeTenantOne.tenantId, /^tenant-redacted:[a-f0-9]{16}$/);
@@ -2229,7 +2280,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(craftedInternalTenant.telemetryId, unsafeTenantOne.telemetryId);
     assert.equal(replay.telemetry.status, "ok");
     assert.equal(rowsAgain.length, 4);
-    assert.equal(rowsAgain[0].tenantId, "tenant-demo");
+    assert.equal(rowsAgain[0].tenantId, "tenant-volga");
     assert.equal(rowsAgain[0].telemetry.direction, "response");
     assert.equal(rowsAgain[0].telemetry.conversationId, "redacted");
     assert.equal(rowsAgain[0].telemetry.provider.model, "redacted");
@@ -2254,7 +2305,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(serialized.includes("raw secret"), false);
     assert.equal("prompt" in rowsAgain[0].telemetry, false);
     assert.equal("secret" in rowsAgain[0].telemetry, false);
-    assert.equal(repository.listResponseTelemetry({ status: "failed", tenantId: "tenant-demo" }).length, 0);
+    assert.equal(repository.listResponseTelemetry({ status: "failed", tenantId: "tenant-volga" }).length, 0);
     assert.equal(repository.listResponseTelemetry({ status: "ok", tenantId: "tenant-other" }).length, 2);
     assert.equal(repository.listResponseTelemetry({ status: "ok", tenantId: unsafeTenantOne.tenantId }).length, 1);
     assert.equal(repository.listResponseTelemetry({ status: "ok", tenantId: unsafeTenantTwo.tenantId }).length, 1);
@@ -2290,7 +2341,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     } as Parameters<typeof QualityScoringRepository.inMemory>[0]);
 
     assert.throws(
-      () => repository.listResponseTelemetry({ tenantId: "tenant-demo" }),
+      () => repository.listResponseTelemetry({ tenantId: "tenant-volga" }),
       /quality_scoring_tenant_required/
     );
   });
@@ -2453,7 +2504,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       realtimeEventId: "evt_quality_score_contract",
       scale: "CSAT" as const,
       score: 5,
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       topic: "Delivery"
     };
 
@@ -2465,7 +2516,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       channel: "VK",
       createdAt: "2026-06-30T13:21:00.000Z",
       score: 2,
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const otherTenant = repository.saveQualityRating({
       ...rating,
@@ -2473,9 +2524,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       score: 4,
       tenantId: "tenant-other"
     });
-    const tenantRows = repository.listQualityRatings({ tenantId: "tenant-demo" });
+    const tenantRows = repository.listQualityRatings({ tenantId: "tenant-volga" });
     tenantRows[0].score = 1;
-    const tenantRowsAgain = repository.listQualityRatings({ tenantId: "tenant-demo" });
+    const tenantRowsAgain = repository.listQualityRatings({ tenantId: "tenant-volga" });
 
     assert.equal(replay.createdAt, "2026-06-30T13:20:00.000Z");
     assert.equal(replay.score, 5);
@@ -2487,8 +2538,8 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(tenantRowsAgain[0].ratingId, "quality_rating_contract");
     assert.equal(tenantRowsAgain[0].conversationId, "conv-rating-contract");
     assert.equal(repository.listQualityRatings({ tenantId: "tenant-other" }).length, 1);
-    assert.equal(repository.listQualityRatings({ conversationId: "conv-rating-contract", tenantId: "tenant-demo" }).length, 1);
-    assert.equal(repository.listQualityRatings({ conversationId: "conv-missing", tenantId: "tenant-demo" }).length, 0);
+    assert.equal(repository.listQualityRatings({ conversationId: "conv-rating-contract", tenantId: "tenant-volga" }).length, 1);
+    assert.equal(repository.listQualityRatings({ conversationId: "conv-missing", tenantId: "tenant-volga" }).length, 0);
     assert.equal(repository.listQualityRatings().length, 0);
     assert.equal(repository.listQualityRatings({ tenantId: "" }).length, 0);
   });
@@ -2518,7 +2569,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         realtimeEventId: "evt_quality_score_json",
         scale: "CSI" as const,
         score: 4,
-        tenantId: "tenant-demo",
+        tenantId: "tenant-volga",
         topic: "Delivery"
       };
 
@@ -2532,7 +2583,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         channel: "Email",
         createdAt: "2026-06-30T14:01:00.000Z",
         score: 2,
-        tenantId: "tenant-demo"
+        tenantId: "tenant-volga"
       });
       const otherTenant = second.saveQualityRating({
         ...rating,
@@ -2540,7 +2591,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         score: 5,
         tenantId: "tenant-other"
       });
-      const reopenedRows = QualityRepository.open({ filePath }).listQualityRatings({ tenantId: "tenant-demo" });
+      const reopenedRows = QualityRepository.open({ filePath }).listQualityRatings({ tenantId: "tenant-volga" });
       const state = JSON.parse(readFileSync(filePath, "utf8")) as {
         ratings: Array<Record<string, unknown>>;
       };
@@ -2555,7 +2606,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       assert.equal(reopenedRows[0].score, 4);
       assert.equal(state.ratings.length, 2);
       assert.ok(state.ratings.some((row) =>
-        row.tenantId === "tenant-demo"
+        row.tenantId === "tenant-volga"
           && row.ratingId === "quality_rating_json"
           && row.score === 4
           && row.channel === "SDK"
@@ -2583,7 +2634,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       realtimeEventId: "rt-rating-original",
       scale: "CSAT",
       score: 5,
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       topic: "Delivery"
     });
     const replay = repository.saveQualityRating({
@@ -2597,10 +2648,10 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       realtimeEventId: "rt-rating-mutated",
       scale: "QA",
       score: 1,
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       topic: "Mutated"
     });
-    const rows = repository.listQualityRatings({ tenantId: "tenant-demo" });
+    const rows = repository.listQualityRatings({ tenantId: "tenant-volga" });
 
     assert.equal(first.auditId, "audit-rating-original");
     assert.equal(replay.auditId, "audit-rating-original");
@@ -2627,7 +2678,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       reviewId: "qa_review_contract",
       reviewer: "senior-1",
       score: 92,
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     };
 
     const saved = repository.saveManualQaReview(review);
@@ -2638,7 +2689,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       createdAt: "2026-06-30T13:26:00.000Z",
       reviewer: "senior-2",
       score: 70,
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const otherTenant = repository.saveManualQaReview({
       ...review,
@@ -2647,9 +2698,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       score: 88,
       tenantId: "tenant-other"
     });
-    const tenantRows = repository.listManualQaReviews({ tenantId: "tenant-demo" });
+    const tenantRows = repository.listManualQaReviews({ tenantId: "tenant-volga" });
     tenantRows[0].criteria.tone = 1;
-    const tenantRowsAgain = repository.listManualQaReviews({ tenantId: "tenant-demo" });
+    const tenantRowsAgain = repository.listManualQaReviews({ tenantId: "tenant-volga" });
 
     assert.equal(replay.createdAt, "2026-06-30T13:25:00.000Z");
     assert.equal(replay.reviewer, "senior-1");
@@ -2661,8 +2712,8 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(tenantRowsAgain[0].criteria.tone, 4);
     assert.equal(tenantRowsAgain[0].overrideReason, "senior_review");
     assert.equal(repository.listManualQaReviews({ tenantId: "tenant-other" }).length, 1);
-    assert.equal(repository.listManualQaReviews({ conversationId: "conv-review-contract", tenantId: "tenant-demo" }).length, 1);
-    assert.equal(repository.listManualQaReviews({ conversationId: "conv-missing", tenantId: "tenant-demo" }).length, 0);
+    assert.equal(repository.listManualQaReviews({ conversationId: "conv-review-contract", tenantId: "tenant-volga" }).length, 1);
+    assert.equal(repository.listManualQaReviews({ conversationId: "conv-missing", tenantId: "tenant-volga" }).length, 0);
     assert.equal(repository.listManualQaReviews().length, 0);
     assert.equal(repository.listManualQaReviews({ tenantId: "" }).length, 0);
   });
@@ -2695,7 +2746,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         reviewId: "qa_review_json",
         reviewer: "senior-json",
         score: 92,
-        tenantId: "tenant-demo"
+        tenantId: "tenant-volga"
       };
 
       const saved = first.saveManualQaReview(review);
@@ -2708,7 +2759,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         createdAt: "2026-06-30T14:06:00.000Z",
         reviewer: "senior-replay",
         score: 70,
-        tenantId: "tenant-demo"
+        tenantId: "tenant-volga"
       });
       const otherTenant = second.saveManualQaReview({
         ...review,
@@ -2717,7 +2768,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         score: 88,
         tenantId: "tenant-other"
       });
-      const reopenedRows = QualityRepository.open({ filePath }).listManualQaReviews({ tenantId: "tenant-demo" });
+      const reopenedRows = QualityRepository.open({ filePath }).listManualQaReviews({ tenantId: "tenant-volga" });
       const state = JSON.parse(readFileSync(filePath, "utf8")) as {
         manualQaReviews: Array<Record<string, unknown> & { criteria?: Record<string, unknown> }>;
       };
@@ -2733,7 +2784,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       assert.equal(reopenedRows[0].criteria.tone, 4);
       assert.equal(state.manualQaReviews.length, 2);
       assert.ok(state.manualQaReviews.some((row) =>
-        row.tenantId === "tenant-demo"
+        row.tenantId === "tenant-volga"
           && row.reviewId === "qa_review_json"
           && row.score === 92
           && row.criteria?.tone === 4
@@ -2759,7 +2810,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       reviewer: "reviewer-original",
       reviewId: "review-audit-immutable",
       score: 4.5,
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const replay = repository.saveManualQaReview({
       auditId: "audit-review-mutated",
@@ -2770,9 +2821,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       reviewer: "reviewer-mutated",
       reviewId: "review-audit-immutable",
       score: 1,
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
-    const rows = repository.listManualQaReviews({ tenantId: "tenant-demo" });
+    const rows = repository.listManualQaReviews({ tenantId: "tenant-volga" });
 
     assert.equal(first.auditId, "audit-review-original");
     assert.equal(replay.auditId, "audit-review-original");
@@ -2795,7 +2846,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       queue: "quality-ai-scoring",
       score: 96,
       status: "ok" as const,
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       traceId: "trc_quality_scoring_audit"
     };
 
@@ -2807,7 +2858,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       createdAt: "2026-06-30T13:31:00.000Z",
       providerResultId: "quality_deterministic_changed",
       score: 20,
-      tenantId: "tenant-demo"
+      tenantId: "tenant-volga"
     });
     const otherTenant = repository.saveAiScoringAudit({
       ...audit,
@@ -2815,9 +2866,9 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       score: 88,
       tenantId: "tenant-other"
     });
-    const tenantRows = repository.listAiScoringAudits({ tenantId: "tenant-demo" });
+    const tenantRows = repository.listAiScoringAudits({ tenantId: "tenant-volga" });
     tenantRows[0].score = 10;
-    const tenantRowsAgain = repository.listAiScoringAudits({ tenantId: "tenant-demo" });
+    const tenantRowsAgain = repository.listAiScoringAudits({ tenantId: "tenant-volga" });
 
     assert.equal(replay.createdAt, "2026-06-30T13:30:00.000Z");
     assert.equal(replay.providerResultId, "quality_deterministic_contract");
@@ -2829,8 +2880,8 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(tenantRowsAgain[0].queue, "quality-ai-scoring");
     assert.equal(tenantRowsAgain[0].status, "ok");
     assert.equal(repository.listAiScoringAudits({ tenantId: "tenant-other" }).length, 1);
-    assert.equal(repository.listAiScoringAudits({ conversationId: "conv-scoring-audit-contract", tenantId: "tenant-demo" }).length, 1);
-    assert.equal(repository.listAiScoringAudits({ conversationId: "conv-missing", tenantId: "tenant-demo" }).length, 0);
+    assert.equal(repository.listAiScoringAudits({ conversationId: "conv-scoring-audit-contract", tenantId: "tenant-volga" }).length, 1);
+    assert.equal(repository.listAiScoringAudits({ conversationId: "conv-missing", tenantId: "tenant-volga" }).length, 0);
     assert.equal(repository.listAiScoringAudits().length, 0);
     assert.equal(repository.listAiScoringAudits({ tenantId: "" }).length, 0);
   });
@@ -2859,7 +2910,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         queue: "quality-ai-scoring",
         score: 96,
         status: "ok" as const,
-        tenantId: "tenant-demo",
+        tenantId: "tenant-volga",
         traceId: "trc_quality_scoring_json"
       };
 
@@ -2874,7 +2925,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         providerResultId: "quality_deterministic_changed",
         score: 20,
         status: "failed",
-        tenantId: "tenant-demo"
+        tenantId: "tenant-volga"
       });
       const otherTenant = second.saveAiScoringAudit({
         ...audit,
@@ -2884,7 +2935,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         status: "failed",
         tenantId: "tenant-other"
       });
-      const reopenedRows = QualityRepository.open({ filePath }).listAiScoringAudits({ tenantId: "tenant-demo" });
+      const reopenedRows = QualityRepository.open({ filePath }).listAiScoringAudits({ tenantId: "tenant-volga" });
       const state = JSON.parse(readFileSync(filePath, "utf8")) as {
         aiScoringAudits: Array<Record<string, unknown>>;
       };
@@ -2903,7 +2954,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       assert.equal(reopenedRows[0].traceId, "trc_quality_scoring_json");
       assert.equal(state.aiScoringAudits.length, 2);
       assert.ok(state.aiScoringAudits.some((row) =>
-        row.tenantId === "tenant-demo"
+        row.tenantId === "tenant-volga"
           && row.auditId === "evt_ai_scoring_json"
           && row.providerResultId === "quality_deterministic_json"
           && row.score === 96
@@ -2931,7 +2982,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       queue: "quality-ai-scoring",
       score: 91,
       status: "ok",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       traceId: "trace-scoring-original"
     });
     const replay = repository.saveAiScoringAudit({
@@ -2943,10 +2994,10 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       queue: "quality-ai-scoring-mutated",
       score: 1,
       status: "failed",
-      tenantId: "tenant-demo",
+      tenantId: "tenant-volga",
       traceId: "trace-scoring-mutated"
     });
-    const rows = repository.listAiScoringAudits({ tenantId: "tenant-demo" });
+    const rows = repository.listAiScoringAudits({ tenantId: "tenant-volga" });
 
     assert.equal(first.providerResultId, "quality-result-original");
     assert.equal(replay.providerId, "deterministic-quality-scoring");
@@ -2962,7 +3013,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
   it("returns quality workspace and scores draft responses with explainable telemetry", async () => {
     const quality = new QualityService(QualityRepository.inMemory(bootstrapQualityState()));
 
-    const workspace = await quality.fetchQualityWorkspace({ tenantId: "tenant-demo" });
+    const workspace = await quality.fetchQualityWorkspace({ tenantId: "tenant-volga" });
     assert.equal(workspace.service, "qualityService");
     assert.equal(workspace.status, "ok");
     assert.equal(workspace.partial, true);
@@ -2974,7 +3025,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       conversationId: "conv-empty",
       mode: "reply",
       text: ""
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(empty.status, "ok");
     assert.equal(empty.data.checks[0].id, "empty");
     assert.equal(empty.data.checks[0].tone, "danger");
@@ -2987,14 +3038,14 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       mode: "reply",
       suggestions: [{ id: "ai-reply" }],
       text: "This is not our problem"
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(risky.status, "ok");
     assert.ok(risky.data.checks.some((check) => check.id === "attachment" && check.tone === "danger"));
     assert.ok(risky.data.repairActions.length > 0);
     assert.equal(risky.data.telemetry.effectivenessKey, "quality_conv-risk");
     assert.ok(risky.data.explainability.reasons.length > 0);
 
-    const malformed = await quality.scoreDraftResponse(null, { tenantId: "tenant-demo" });
+    const malformed = await quality.scoreDraftResponse(null, { tenantId: "tenant-volga" });
     assert.equal(malformed.status, "invalid");
     assert.equal(malformed.error?.code, "quality_draft_payload_required");
   });
@@ -3017,7 +3068,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
       score: 5,
       scale: "CSAT",
       topic: "Delivery"
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(rating.status, "ok");
     assert.match(rating.data.ratingId, /^quality_/);
     assert.equal(rating.data.links.conversationId, "conv-42");
@@ -3025,7 +3076,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.equal(rating.data.links.operator, "operator-7");
     assert.match(rating.data.realtimeEvent.eventId, /^evt_quality_score_/);
     assert.equal(rating.data.realtimeEvent.eventName, "quality.score.updated");
-    assert.equal(rating.data.realtimeEvent.tenantId, "tenant-demo");
+    assert.equal(rating.data.realtimeEvent.tenantId, "tenant-volga");
     assert.match(rating.data.realtimeEvent.occurredAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.match(rating.data.realtimeEvent.traceId, /^trc_|^req_|^test-/);
     assert.match(rating.data.auditId, /^evt_quality_/);
@@ -3042,7 +3093,7 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
         speed: 5
       },
       overrideReason: "senior_review"
-    }, { tenantId: "tenant-demo" });
+    }, { tenantId: "tenant-volga" });
     assert.equal(review.status, "ok");
     assert.equal(review.data.reviewId.startsWith("qa_"), true);
     assert.equal(review.data.override.auditRequired, true);

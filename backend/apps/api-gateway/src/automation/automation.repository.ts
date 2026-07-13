@@ -2466,7 +2466,7 @@ function normalizeBotTriggerRules(value: unknown): BotTriggerRule[] {
     if (!item || typeof item !== "object") return [];
     const record = item as Record<string, unknown>;
     const type = String(record.type ?? "");
-    if (type !== "manual" && type !== "new_conversation" && type !== "phrase") return [];
+    if (type !== "manual" && type !== "new_conversation" && type !== "phrase" && type !== "always_except") return [];
     const phrases = Array.isArray(record.phrases)
       ? record.phrases.map((phrase) => String(phrase).trim()).filter(Boolean).slice(0, 32)
       : [];
@@ -2476,9 +2476,9 @@ function normalizeBotTriggerRules(value: unknown): BotTriggerRule[] {
     return [{
       id: String(record.id ?? `trigger-${index + 1}`).trim() || `trigger-${index + 1}`,
       ...(record.locale ? { locale: String(record.locale).trim() } : {}),
-      ...(type === "phrase" ? { matchMode, phrases } : {}),
+      ...((type === "phrase" || type === "always_except") ? { matchMode, phrases } : {}),
       priority: normalizeBotScenarioPriority(record.priority),
-      type
+      type: type as BotTriggerRule["type"]
     }];
   });
 }

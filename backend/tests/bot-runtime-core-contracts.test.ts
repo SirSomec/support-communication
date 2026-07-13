@@ -126,6 +126,24 @@ describe("durable bot runtime core", () => {
     await assert.rejects(() => new BotRuntimeService(disabled).handleInboundEvent(event("evt-disabled")), /bot_runtime_published_scenario_not_found/);
   });
 
+  it("recovers always_except from the wizard trigger node when triggerRules were emptied", async () => {
+    const repo = repository([{ id: "start", type: "message", title: "Всегда, кроме" }, { id: "reply", type: "message", title: "Ответ" }], [{ from: "start", to: "reply" }]);
+    const state = repo.readState();
+    state.botScenarios[0]!.channels = ["SDK", "Telegram"];
+    state.botScenarios[0]!.triggerRules = [];
+    state.botScenarioVersions[0]!.triggerRules = [];
+    const runtime = new BotRuntimeService(AutomationRepository.inMemory(state));
+    const result = await runtime.handleInboundEvent({
+      channel: "Telegram",
+      conversationId: "recover-1",
+      eventId: "recover-1",
+      payload: { text: "любой вопрос" },
+      tenantId: "tenant-1",
+      traceId: "recover-1"
+    });
+    assert.equal(result.instance.scenarioId, "bot-1");
+  });
+
   it("selects a published scenario from configured phrases and never falls back to the first scenario", async () => {
     const runtime = new BotRuntimeService(triggerRepository());
     const exact = await runtime.handleInboundEvent({ channel: "SDK", conversationId: "phrase-1", eventId: "phrase-1", payload: { text: "ГДЕ   ОПЛАТА" }, tenantId: "tenant-1", traceId: "phrase-1" });

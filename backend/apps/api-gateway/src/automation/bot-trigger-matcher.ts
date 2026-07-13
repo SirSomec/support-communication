@@ -68,3 +68,19 @@ export function matchesBotTriggerPhrase(
   const messageTokens = new Set(tokenizeBotTriggerText(normalizedMessage, locale));
   return phraseTokens.every((token) => messageTokens.has(token));
 }
+
+/**
+ * Catch-all trigger: matches every inbound message unless an exclusion phrase hits.
+ * An empty exclusion list means the scenario always matches.
+ */
+export function matchesBotAlwaysExceptTrigger(
+  message: string | null | undefined,
+  exclusions: string[] | undefined,
+  mode: BotTriggerMatchMode = "contains",
+  locale = "ru-RU"
+): boolean {
+  const phrases = Array.isArray(exclusions) ? exclusions : [];
+  if (!phrases.length) return true;
+  if (!message?.trim()) return true;
+  return !phrases.some((phrase) => matchesBotTriggerPhrase(message, phrase, mode, locale));
+}

@@ -47,6 +47,12 @@ export function mapApiConversation(input) {
     ...(nonEmptyString(input?.teamId) ? { teamId: nonEmptyString(input.teamId) } : {}),
     ...(isRecord(input?.botHandoff) ? { botHandoff: mapBotHandoff(input.botHandoff) } : {})
   };
+
+  if (isRepeatAppeal(mapped)) {
+    mapped.isRepeatAppeal = true;
+  }
+
+  return mapped;
 }
 
 function mapBotHandoff(input) {
@@ -70,12 +76,6 @@ function mapBotHandoff(input) {
     sessionState: nonEmptyString(input.sessionState),
     topic: nonEmptyString(input.topic)
   };
-
-  if (isRepeatAppeal(mapped)) {
-    mapped.isRepeatAppeal = true;
-  }
-
-  return mapped;
 }
 
 export function mapLifecycleEvent(input) {
@@ -158,7 +158,7 @@ function lifecycleEventDetail(eventType, data) {
     "conversation.created": "Создан диалог",
     "internal_comment.created": "Добавлен внутренний комментарий",
     "message.received": "Получено сообщение клиента",
-    "message.sent": "Отправлен ответ оператором",
+    "message.sent": "Отправлен ответ",
     "queue.entered": "Диалог возвращен в очередь",
     "quality.assessment.appealed": "Оценка качества обжалована",
     "quality.assessment.changed": "Оценка качества изменена",

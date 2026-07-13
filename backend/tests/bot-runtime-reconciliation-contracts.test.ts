@@ -37,9 +37,13 @@ describe("bot runtime side-effect reconciliation", () => {
       findOutboundDescriptorByIdempotencyKey: conversationRepository.findOutboundDescriptorByIdempotencyKey.bind(conversationRepository),
       listLifecycleEvents: conversationRepository.listLifecycleEvents.bind(conversationRepository),
       saveConversationMutation: conversationRepository.saveConversationMutation.bind(conversationRepository),
-      async recordOutboundDescriptor(input: Parameters<ConversationRepository["recordOutboundDescriptor"]>[0]) {
-        const saved = await conversationRepository.recordOutboundDescriptor(input);
-        if (crash) { crash = false; throw new Error("simulated_crash_after_conversation_commit"); }
+      recordOutboundDescriptor: conversationRepository.recordOutboundDescriptor.bind(conversationRepository),
+      async queueOutboundMessageReply(input: Parameters<ConversationRepository["queueOutboundMessageReply"]>[0]) {
+        const saved = await conversationRepository.queueOutboundMessageReply(input);
+        if (crash) {
+          crash = false;
+          throw new Error("simulated_crash_after_conversation_commit");
+        }
         return saved;
       }
     };
@@ -54,6 +58,34 @@ describe("bot runtime side-effect reconciliation", () => {
     assert.equal((await conversationRepository.listOutboundDescriptors()).length, 1);
     assert.equal((await conversationRepository.listOutboxEvents()).length, 1);
     assert.equal(automationRepository.readState().botRuntimeSideEffects[0]?.status, "delivered");
+  });
+
+  it("persists the bot reply into conversation messages for the operator UI", async () => {
+    const automationRepository = automation("message");
+    const conversationRepository = conversations();
+    await createStep(automationRepository);
+    const published: string[] = [];
+    const result = await runBotRuntimeReconciliationOnce({
+      automationRepository,
+      conversationRepository,
+      now: "2026-07-11T11:00:01.000Z",
+      realtimeFanout: {
+        async publish(event) {
+          published.push(event.eventName);
+          return { channel: "test", status: "published", subscribers: 1 };
+        }
+      }
+    });
+    assert.equal(result.delivered, 1);
+    const conversation = await conversationRepository.findConversation("conv-1");
+    assert.equal(conversation?.messages.length, 1);
+    assert.equal(conversation?.messages[0]?.side, "agent");
+    assert.equal(conversation?.messages[0]?.text, "Hello");
+    assert.equal(conversation?.messages[0]?.author, "Бот");
+    assert.equal(conversation?.preview, "Hello");
+    const events = await conversationRepository.listLifecycleEvents({ conversationId: "conv-1", tenantId: "tenant-1" });
+    assert.equal(events.filter((event) => event.eventType === "message.sent").length, 1);
+    assert.deepEqual(published, ["message.created"]);
   });
 
   it("passes the reconciled outbox event through the real handler registry", async () => {

@@ -10,6 +10,7 @@ import {
   findTriggerPhraseConflicts,
   loadAdvancedModePreference,
   loadWizardDraft,
+  previewAlwaysExceptTrigger,
   previewKeywordTrigger,
   saveAdvancedModePreference,
   saveWizardDraft,
@@ -121,6 +122,23 @@ describe("scenario creation wizard model", () => {
     ]);
     assert.equal(conflicts.length, 1);
     assert.equal(conflicts[0].scenarioName, "Старый статус");
+  });
+
+  it("creates always_except trigger rules and inverts live preview for exclusions", () => {
+    const scenario = createScenarioFromWizard("bot-always-except", {
+      trigger: "always_except",
+      triggerPhrases: ["оператор", "человек"],
+      matchMode: "contains"
+    });
+    assert.equal(scenario.triggerRules[0].type, "always_except");
+    assert.deepEqual(scenario.triggerRules[0].phrases, ["оператор", "человек"]);
+    assert.equal(scenario.flowNodes[0].title, "Всегда, кроме");
+
+    const allowed = previewAlwaysExceptTrigger("Где мой заказ?", ["оператор"], "contains");
+    const blocked = previewAlwaysExceptTrigger("Нужен оператор", ["оператор"], "contains");
+    assert.equal(allowed.matches, true);
+    assert.equal(blocked.matches, false);
+    assert.deepEqual(blocked.matchedPhrases, ["оператор"]);
   });
 
   it("builds a publish checklist with retention guidance and blocks incomplete AI scenarios", () => {

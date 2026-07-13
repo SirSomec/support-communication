@@ -10,7 +10,7 @@ import {
   type AutomationPublishIdempotencyRecord
 } from "./automation.repository.js";
 import { BotRuntimeService, type BotRuntimeInboundEvent, type BotRuntimeOptions } from "./bot-runtime.service.js";
-import { matchesBotTriggerPhrase, normalizeBotTriggerText } from "./bot-trigger-matcher.js";
+import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase, normalizeBotTriggerText } from "./bot-trigger-matcher.js";
 import { DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS, ProactiveExposureRepository } from "./proactive-exposure.repository.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
 import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
@@ -1232,6 +1232,7 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
     return source && isKnowledgeSourceRetrievalEligible(source) ? [source] : [];
   });
   const phraseRule = (scenario.triggerRules ?? []).find((rule) => rule.type === "phrase");
+  const alwaysExceptRule = (scenario.triggerRules ?? []).find((rule) => rule.type === "always_except");
   const phraseMatched = phraseRule ? Boolean(testMessage) && (phraseRule.phrases ?? []).some((phrase) => matchesBotTriggerPhrase(testMessage, phrase, phraseRule.matchMode ?? "contains", phraseRule.locale)) : null;
   if (phraseRule && !phraseMatched) {
     return {
@@ -1253,6 +1254,36 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
       },
       trigger: { matched: false, matchMode: phraseRule.matchMode ?? "contains", phrases: phraseRule.phrases ?? [], type: "phrase" }
     };
+  }
+
+  if (alwaysExceptRule) {
+    const matched = matchesBotAlwaysExceptTrigger(testMessage, alwaysExceptRule.phrases, alwaysExceptRule.matchMode ?? "contains", alwaysExceptRule.locale);
+    if (!matched) {
+      return {
+        answerPreview: "Сценарий не запустится: сообщение попало под исключение «Всегда, кроме».",
+        citations: [],
+        input: testMessage || "Введите сообщение клиента для проверки.",
+        outcome: "no_match",
+        reason: "always_except_excluded",
+        steps: [],
+        trace: {
+          aiWouldCall: false,
+          dryRun: true,
+          isolation: "no_runtime_steps_no_outbound",
+          knowledgeSourceCount: sources.length,
+          readiness: aiReadinessForTenant(tenantId).status,
+          retrievalCache: "skipped",
+          retrievalTokenBudget: 0,
+          retrievalTokensUsed: 0
+        },
+        trigger: {
+          matched: false,
+          matchMode: alwaysExceptRule.matchMode ?? "contains",
+          phrases: alwaysExceptRule.phrases ?? [],
+          type: "always_except"
+        }
+      };
+    }
   }
 
   const aiNode = scenario.flowNodes.find((node) => node.type === "ai_reply");
@@ -1316,6 +1347,13 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
     },
     trigger: phraseRule
       ? { matched: phraseMatched, matchMode: phraseRule.matchMode ?? "contains", phrases: phraseRule.phrases ?? [], type: "phrase" }
+      : alwaysExceptRule
+        ? {
+          matched: true,
+          matchMode: alwaysExceptRule.matchMode ?? "contains",
+          phrases: alwaysExceptRule.phrases ?? [],
+          type: "always_except"
+        }
       : { matched: true, type: (scenario.triggerRules ?? [])[0]?.type ?? "manual" }
   };
 }
@@ -1339,7 +1377,11 @@ function resolveScenarioTriggerRules(
   input: Pick<ScenarioDraftPayload, "matchMode" | "triggerPhrases" | "triggerRules">,
   fallback: BotTriggerRule[]
 ): BotTriggerRule[] {
-  if (Array.isArray(input.triggerRules)) return normalizeScenarioTriggerRules(input.triggerRules);
+  // Empty arrays must not wipe an existing fallback: clients often omit or
+  // accidentally send triggerRules: [] while the flow node still encodes the trigger.
+  if (Array.isArray(input.triggerRules) && input.triggerRules.length > 0) {
+    return normalizeScenarioTriggerRules(input.triggerRules);
+  }
   if (Array.isArray(input.triggerPhrases)) {
     return normalizeScenarioTriggerRules([{
       id: "phrase-1",
@@ -1354,14 +1396,14 @@ function resolveScenarioTriggerRules(
 
 function normalizeScenarioTriggerRules(value: BotTriggerRule[]): BotTriggerRule[] {
   return value.flatMap((rule, index) => {
-    if (!rule || !["manual", "new_conversation", "phrase"].includes(rule.type)) return [];
+    if (!rule || !["manual", "new_conversation", "phrase", "always_except"].includes(rule.type)) return [];
     const phrases = Array.isArray(rule.phrases)
       ? rule.phrases.map((phrase) => String(phrase).trim()).filter(Boolean).slice(0, 32)
       : [];
     return [{
       id: String(rule.id ?? `trigger-${index + 1}`).trim() || `trigger-${index + 1}`,
       ...(rule.locale ? { locale: String(rule.locale).trim() } : {}),
-      ...(rule.type === "phrase" ? { matchMode: normalizeMatchMode(rule.matchMode), phrases } : {}),
+      ...((rule.type === "phrase" || rule.type === "always_except") ? { matchMode: normalizeMatchMode(rule.matchMode), phrases } : {}),
       priority: normalizeScenarioPriority(rule.priority),
       type: rule.type
     }];
@@ -1390,15 +1432,15 @@ function validateScenarioTriggerRules(rules: BotTriggerRule[]): string[] {
   const seen = new Set<string>();
   const errors: string[] = [];
   for (const rule of rules) {
-    if (rule.type !== "phrase") continue;
-    if (!rule.phrases?.length) {
+    if (rule.type !== "phrase" && rule.type !== "always_except") continue;
+    if (rule.type === "phrase" && !rule.phrases?.length) {
       errors.push(`Trigger ${rule.id} requires at least one phrase.`);
       continue;
     }
-    for (const phrase of rule.phrases) {
+    for (const phrase of rule.phrases ?? []) {
       const normalized = normalizeBotTriggerText(phrase, rule.locale);
       if (!normalized || !/[\p{L}\p{N}]/u.test(normalized)) errors.push(`Trigger ${rule.id} contains an empty phrase.`);
-      const key = `${rule.locale ?? "ru-RU"}\u0000${rule.matchMode ?? "contains"}\u0000${normalized}`;
+      const key = `${rule.type}\u0000${rule.locale ?? "ru-RU"}\u0000${rule.matchMode ?? "contains"}\u0000${normalized}`;
       if (seen.has(key)) errors.push(`Trigger ${rule.id} contains a duplicate phrase.`);
       seen.add(key);
     }
@@ -1416,9 +1458,20 @@ function findScenarioTriggerConflict(
   const phrases = rules.flatMap((rule) => rule.type === "phrase"
     ? (rule.phrases ?? []).map((phrase) => ({ locale: rule.locale ?? "ru-RU", matchMode: rule.matchMode ?? "contains", phrase: normalizeBotTriggerText(phrase, rule.locale), priority: priority + (rule.priority ?? 0) }))
     : []);
-  if (!phrases.length) return null;
+  const alwaysExcept = rules.find((rule) => rule.type === "always_except");
+  if (!phrases.length && !alwaysExcept) return null;
   for (const candidate of scenarios) {
     if (candidate.id === scenarioId || candidate.tenantId !== tenantId || candidate.status !== "published" || candidate.enabled === false) continue;
+    if (alwaysExcept) {
+      const other = (candidate.triggerRules ?? []).find((rule) => rule.type === "always_except");
+      if (other) {
+        const otherPriority = priority + (alwaysExcept.priority ?? 0);
+        const candidatePriority = normalizeScenarioPriority(candidate.priority) + normalizeScenarioPriority(other.priority);
+        if (otherPriority === candidatePriority) {
+          return { conflictingScenarioId: candidate.id, phrase: "*", priority: otherPriority, type: "always_except" };
+        }
+      }
+    }
     for (const rule of candidate.triggerRules ?? []) {
       if (rule.type !== "phrase") continue;
       for (const phrase of rule.phrases ?? []) {

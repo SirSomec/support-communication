@@ -208,6 +208,29 @@ describe("automation bot scenario contracts", () => {
     assert.equal(second.error?.code, "trigger_conflict");
   });
 
+  it("keeps existing trigger rules when a publish body sends an empty triggerRules array", async () => {
+    const automation = new AutomationService();
+    const triggerRules = [{ id: "always-except-1", matchMode: "contains" as const, phrases: [], priority: 0, type: "always_except" as const }];
+    const base = {
+      channels: ["Telegram"],
+      flowEdges: [],
+      flowNodes: [{ id: "start", type: "message", title: "Всегда, кроме" }],
+      triggerRules
+    };
+    await automation.createBotScenario({ ...base, id: "bot-keep-triggers", name: "Keep" }, { tenantId: "tenant-volga" });
+    const published = await automation.publishBotScenario({
+      ...base,
+      id: "bot-keep-triggers",
+      name: "Keep",
+      triggerRules: []
+    }, { tenantId: "tenant-volga" });
+
+    assert.equal(published.status, "ok");
+    const detail = await automation.fetchBotScenario("bot-keep-triggers", { tenantId: "tenant-volga" });
+    assert.equal(detail.status, "ok");
+    assert.deepEqual(detail.data?.scenario?.triggerRules, triggerRules);
+  });
+
   it("publishes only sources that are ready and approved in the same tenant", async () => {
     const sources = KnowledgeSourceRepository.inMemory({
       sources: [

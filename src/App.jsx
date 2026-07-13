@@ -129,13 +129,19 @@ function App() {
     clearAttachments,
     setDraft,
     setToast,
-    initialSelectedId: "maria"
   });
   useEffect(() => {
-    if (tenantSession.authenticated && selectedId) {
-      void loadConversationDetail(selectedId);
+    if (!tenantSession.authenticated || !selectedId || selectedId === "empty") {
+      return;
     }
-  }, [loadConversationDetail, selectedId, tenantSession.authenticated]);
+
+    const hasConversation = conversationItems.some((conversation) => conversation.id === selectedId);
+    if (!hasConversation && inboxLoading) {
+      return;
+    }
+
+    void loadConversationDetail(selectedId, { force: true });
+  }, [conversationItems, inboxLoading, loadConversationDetail, selectedId, tenantSession.authenticated]);
   const selectedTopic = topics[selected.id] ?? "";
   const {
     closeSaveTemplateDialog,

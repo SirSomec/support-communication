@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  matchesBotAlwaysExceptTrigger,
   matchesBotTriggerPhrase,
   normalizeBotTriggerText,
   tokenizeBotTriggerText
@@ -31,5 +32,12 @@ describe("bot trigger matcher", () => {
   it("never lets empty or punctuation-only phrases trigger a scenario", () => {
     assert.equal(matchesBotTriggerPhrase("Любое сообщение", "   ", "contains"), false);
     assert.equal(matchesBotTriggerPhrase("Любое сообщение", "---", "tokens"), false);
+  });
+
+  it("matches always_except unless an exclusion phrase hits", () => {
+    assert.equal(matchesBotAlwaysExceptTrigger("Где мой заказ?", [], "contains"), true);
+    assert.equal(matchesBotAlwaysExceptTrigger("Где мой заказ?", ["оператор"], "contains"), true);
+    assert.equal(matchesBotAlwaysExceptTrigger("Нужен оператор", ["оператор"], "contains"), false);
+    assert.equal(matchesBotAlwaysExceptTrigger("", ["оператор"], "contains"), true);
   });
 });

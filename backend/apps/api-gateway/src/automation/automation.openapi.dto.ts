@@ -2,9 +2,9 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 /** Schema-only DTOs: runtime validation remains in AutomationService so old clients keep working. */
 export class BotScenarioTriggerRuleDto {
-  @ApiProperty({ enum: ["manual", "new_conversation", "phrase"] }) type!: "manual" | "new_conversation" | "phrase";
+  @ApiProperty({ enum: ["manual", "new_conversation", "phrase", "always_except"] }) type!: "manual" | "new_conversation" | "phrase" | "always_except";
   @ApiPropertyOptional({ enum: ["exact", "contains", "tokens"] }) matchMode?: "exact" | "contains" | "tokens";
-  @ApiPropertyOptional({ type: [String] }) phrases?: string[];
+  @ApiPropertyOptional({ type: [String], description: "Include phrases for phrase triggers; exclusion phrases for always_except." }) phrases?: string[];
   @ApiPropertyOptional() priority?: number;
 }
 

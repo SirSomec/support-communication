@@ -1,3 +1,4 @@
+import { writeStructuredLog } from "@support-communication/observability";
 import type { ConversationRepository } from "../conversation/conversation.repository.js";
 import type { ConversationService } from "../conversation/conversation.service.js";
 import type { ChannelConnectionStoredRecord, TelegramConnectionStoredRecord } from "./integration.repository.js";
@@ -179,7 +180,14 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
       if (input.runBotRuntime) {
         try {
           botRuntime = await input.runBotRuntime({ channel: "Telegram", conversationId: conversation.id, eventId: runtimeEventId, payload: { text: parsed.text }, tenantId: connection.tenantId, traceId: normalized.traceId });
-        } catch {
+        } catch (error) {
+          writeStructuredLog("warn", "Telegram inbound bot runtime failed", {
+            conversationId: conversation.id,
+            error: error instanceof Error ? error.message : String(error),
+            operation: "telegram.polling.bot_runtime",
+            service: "telegram-polling-worker",
+            tenantId: connection.tenantId
+          });
           botRuntime = null;
         }
       }

@@ -19,6 +19,7 @@ import {
   describeAiReadiness,
   findTriggerPhraseConflicts,
   loadWizardDraft,
+  previewAlwaysExceptTrigger,
   previewKeywordTrigger,
   saveWizardDraft,
   scenarioGoalOptions,
@@ -76,6 +77,7 @@ export function ScenarioCreationWizard({
     return source?.title || source?.name || sourceId;
   });
   const keywordTriggerIsConfigured = form.trigger !== "keyword" || form.triggerPhrases.length > 0;
+  const showsPhraseConfig = form.trigger === "keyword" || form.trigger === "always_except";
   const canCreate = form.name.trim().length > 0 && form.channels.length > 0 && keywordTriggerIsConfigured && form.firstMessage.trim().length > 0;
   const canAdvance = step === 0
     ? form.name.trim().length > 0
@@ -87,8 +89,10 @@ export function ScenarioCreationWizard({
   const progress = ((step + 1) / scenarioWizardSteps.length) * 100;
   const clientPreview = useMemo(() => buildClientExperiencePreview(form), [form]);
   const livePreview = useMemo(
-    () => previewKeywordTrigger(livePreviewMessage, form.triggerPhrases, form.matchMode),
-    [form.matchMode, form.triggerPhrases, livePreviewMessage]
+    () => form.trigger === "always_except"
+      ? previewAlwaysExceptTrigger(livePreviewMessage, form.triggerPhrases, form.matchMode)
+      : previewKeywordTrigger(livePreviewMessage, form.triggerPhrases, form.matchMode),
+    [form.matchMode, form.trigger, form.triggerPhrases, livePreviewMessage]
   );
   const phraseConflicts = useMemo(
     () => findTriggerPhraseConflicts(form.triggerPhrases, existingScenarios),
@@ -155,7 +159,9 @@ export function ScenarioCreationWizard({
   function addTriggerPhrase(rawPhrase = phraseInput) {
     const phrasesToAdd = String(rawPhrase).split(",").map(normalizePhrase).filter(Boolean);
     if (phrasesToAdd.length === 0) {
-      setPhraseError("Введите фразу, по которой бот должен запускаться.");
+      setPhraseError(form.trigger === "always_except"
+        ? "Введите фразу-исключение, при которой сценарий не должен запускаться."
+        : "Введите фразу, по которой бот должен запускаться.");
       return;
     }
     const tooLongPhrase = phrasesToAdd.find((phrase) => phrase.length > MAX_TRIGGER_PHRASE_LENGTH);
@@ -294,15 +300,19 @@ export function ScenarioCreationWizard({
               </button>
             ))}
           </div>
-          {form.trigger === "keyword" ? (
+          {showsPhraseConfig ? (
             <fieldset className="scenario-keyword-config">
-              <legend>Какие фразы должен распознать бот?</legend>
-              <p>Добавьте слова или короткие предложения так, как их обычно пишут клиенты. Регистр букв и лишние пробелы не учитываются.</p>
+              <legend>{form.trigger === "always_except" ? "Какие сообщения исключить?" : "Какие фразы должен распознать бот?"}</legend>
+              <p>
+                {form.trigger === "always_except"
+                  ? "Сценарий сработает на любое сообщение. Добавьте фразы, при которых его запускать не нужно — например, запросы к оператору или команды другого сценария. Без исключений бот отвечает всегда."
+                  : "Добавьте слова или короткие предложения так, как их обычно пишут клиенты. Регистр букв и лишние пробелы не учитываются."}
+              </p>
               <div className="scenario-keyword-input-row">
-                <label className="sr-only" htmlFor="scenario-trigger-phrase">Ключевая фраза</label>
+                <label className="sr-only" htmlFor="scenario-trigger-phrase">{form.trigger === "always_except" ? "Фраза-исключение" : "Ключевая фраза"}</label>
                 <input
                   aria-describedby="scenario-trigger-phrase-help"
-                  aria-invalid={Boolean(phraseError) || !keywordTriggerIsConfigured}
+                  aria-invalid={Boolean(phraseError) || (form.trigger === "keyword" && !keywordTriggerIsConfigured)}
                   id="scenario-trigger-phrase"
                   maxLength={MAX_TRIGGER_PHRASE_LENGTH}
                   onChange={(event) => setPhraseInput(event.target.value)}
@@ -312,37 +322,45 @@ export function ScenarioCreationWizard({
                       addTriggerPhrase();
                     }
                   }}
-                  placeholder="Например, где мой заказ"
+                  placeholder={form.trigger === "always_except" ? "Например, оператор" : "Например, где мой заказ"}
                   value={phraseInput}
                 />
                 <button onClick={() => addTriggerPhrase()} type="button">Добавить</button>
               </div>
               <small id="scenario-trigger-phrase-help">Нажмите Enter или «Добавить». Несколько фраз можно вставить через запятую.</small>
               {form.triggerPhrases.length > 0 ? (
-                <ul aria-label="Добавленные ключевые фразы" className="scenario-keyword-chips">
+                <ul aria-label={form.trigger === "always_except" ? "Фразы-исключения" : "Добавленные ключевые фразы"} className="scenario-keyword-chips">
                   {form.triggerPhrases.map((phrase) => <li key={phrase}><span>{phrase}</span><button aria-label={`Удалить фразу «${phrase}»`} onClick={() => removeTriggerPhrase(phrase)} type="button"><X size={14} /></button></li>)}
                 </ul>
               ) : null}
-              <div className="scenario-keyword-examples"><span>Примеры:</span>{keywordPhraseExamples.map((phrase) => <button key={phrase} onClick={() => addTriggerPhrase(phrase)} type="button">+ {phrase}</button>)}</div>
+              <div className="scenario-keyword-examples"><span>Примеры:</span>{(form.trigger === "always_except" ? ["оператор", "человек", "менеджер"] : keywordPhraseExamples).map((phrase) => <button key={phrase} onClick={() => addTriggerPhrase(phrase)} type="button">+ {phrase}</button>)}</div>
               <div className="scenario-match-mode" role="radiogroup" aria-label="Как сравнивать фразы">
-                <strong>Как искать фразу</strong>
+                <strong>{form.trigger === "always_except" ? "Как искать исключение" : "Как искать фразу"}</strong>
                 {keywordMatchModes.map((mode) => <label className={form.matchMode === mode.id ? "selected" : ""} key={mode.id}><input checked={form.matchMode === mode.id} name="scenario-match-mode" onChange={() => update("matchMode", mode.id)} type="radio" value={mode.id} /><span><b>{mode.label}</b><small>{mode.description}</small></span></label>)}
               </div>
               <label className="scenario-wizard-field">
                 <span>Приоритет запуска</span>
                 <input max={100} min={0} onChange={(event) => setTriggerPriority(Number(event.target.value) || 0)} type="number" value={triggerPriority} />
-                <small>Чем выше число, тем раньше этот сценарий выбирается при совпадении нескольких фраз. Обычно достаточно 0.</small>
+                <small>
+                  {form.trigger === "always_except"
+                    ? "Для «Всегда, кроме» обычно ставьте меньший приоритет, чем у сценариев с ключевыми фразами, чтобы точные правила срабатывали первыми."
+                    : "Чем выше число, тем раньше этот сценарий выбирается при совпадении нескольких фраз. Обычно достаточно 0."}
+                </small>
               </label>
               <label className="scenario-wizard-field">
                 <span>Проверка на примере сообщения клиента</span>
                 <textarea aria-label="Пример сообщения для проверки фразы" onChange={(event) => setLivePreviewMessage(event.target.value)} value={livePreviewMessage} />
                 <small className={livePreview.matches ? "scenario-live-preview-ok" : "scenario-live-preview-miss"}>
-                  {livePreview.matches
-                    ? `Сработает (${livePreview.modeLabel}): ${livePreview.matchedPhrases.map((phrase) => `«${phrase}»`).join(", ")}`
-                    : `Не сработает для режима «${livePreview.modeLabel}». Измените фразу или пример сообщения.`}
+                  {form.trigger === "always_except"
+                    ? (livePreview.matches
+                      ? `Сработает (${livePreview.modeLabel})${form.triggerPhrases.length ? ": сообщение не попало под исключения" : ": исключения не заданы"}`
+                      : `Не сработает — исключение (${livePreview.modeLabel}): ${livePreview.matchedPhrases.map((phrase) => `«${phrase}»`).join(", ")}`)
+                    : (livePreview.matches
+                      ? `Сработает (${livePreview.modeLabel}): ${livePreview.matchedPhrases.map((phrase) => `«${phrase}»`).join(", ")}`
+                      : `Не сработает для режима «${livePreview.modeLabel}». Измените фразу или пример сообщения.`)}
                 </small>
               </label>
-              {phraseConflicts.length ? (
+              {phraseConflicts.length && form.trigger === "keyword" ? (
                 <div className="scenario-wizard-note scenario-wizard-note--warn" role="status">
                   <CircleHelp size={18} />
                   <span>
@@ -351,7 +369,8 @@ export function ScenarioCreationWizard({
                   </span>
                 </div>
               ) : null}
-              {!keywordTriggerIsConfigured || phraseError ? <small className="scenario-field-error" role="alert">{phraseError || "Добавьте хотя бы одну ключевую фразу."}</small> : null}
+              {form.trigger === "keyword" && (!keywordTriggerIsConfigured || phraseError) ? <small className="scenario-field-error" role="alert">{phraseError || "Добавьте хотя бы одну ключевую фразу."}</small> : null}
+              {form.trigger === "always_except" && phraseError ? <small className="scenario-field-error" role="alert">{phraseError}</small> : null}
             </fieldset>
           ) : null}
           <fieldset className="scenario-channel-picker"><legend>Каналы запуска</legend><p>Клиент увидит один и тот же первый ответ в выбранных каналах.</p><div>{channelOptions.map((channel) => <button aria-pressed={form.channels.includes(channel)} className={form.channels.includes(channel) ? "selected" : ""} key={channel} onClick={() => toggleChannel(channel)} type="button">{channel}</button>)}</div>{form.channels.length === 0 ? <small className="scenario-field-error" role="alert">Выберите хотя бы один канал.</small> : null}</fieldset>
@@ -505,6 +524,10 @@ function toPhraseKey(phrase) {
 }
 
 function buildTriggerSummary(trigger, matchMode, phrases) {
+  if (trigger.id === "always_except") {
+    if (!phrases.length) return `${trigger.label} — без исключений`;
+    return `${trigger.label} — кроме: ${phrases.map((phrase) => `«${phrase}»`).join(", ")}`;
+  }
   if (trigger.id !== "keyword") return trigger.label;
   const phraseSummary = phrases.length ? `: ${phrases.map((phrase) => `«${phrase}»`).join(", ")}` : ": фраза ещё не добавлена";
   return `${trigger.label} — ${matchMode.label}${phraseSummary}`;

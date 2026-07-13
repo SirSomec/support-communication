@@ -1062,6 +1062,7 @@ function normalizeScenario(scenario = {}) {
     testCases: Array.isArray(scenario.testCases) && scenario.testCases.length
       ? scenario.testCases
       : [{ id: `${scenarioId}-backend-test`, name: "Backend smoke", expected: "ok" }],
+    triggerRules: Array.isArray(scenario.triggerRules) ? scenario.triggerRules : [],
     trigger: scenario.trigger ?? flowNodes[0]?.title ?? name,
     updatedAt: scenario.updatedAt ?? "",
     validationRules: normalizeStringList(scenario.validationRules, [])

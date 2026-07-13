@@ -37,6 +37,7 @@ export const scenarioGoalOptions = [
 export const scenarioTriggerOptions = [
   { id: "first_message", label: "Первое сообщение клиента", description: "Сценарий начнётся, когда клиент напишет в выбранный канал." },
   { id: "keyword", label: "Ключевая фраза в сообщении", description: "Сценарий отработает, когда в сообщении встретится нужная фраза." },
+  { id: "always_except", label: "Всегда, кроме", description: "Сценарий отвечает на любое сообщение, кроме указанных исключений." },
   { id: "after_hours", label: "В нерабочее время", description: "Сценарий возьмёт диалог, пока операторы недоступны." }
 ];
 
@@ -66,6 +67,8 @@ export function createScenarioFromWizard(id, values = {}) {
   const fallbackMessage = String(values.fallbackMessage ?? "").trim() || DEFAULT_AI_FALLBACK_MESSAGE;
   const triggerRules = trigger.id === "keyword"
     ? [{ id: "phrase-1", type: "phrase", phrases: triggerPhrases, matchMode: values.matchMode ?? "contains", priority: Number(values.triggerPriority) || 0 }]
+    : trigger.id === "always_except"
+      ? [{ id: "always-except-1", type: "always_except", phrases: triggerPhrases, matchMode: values.matchMode ?? "contains", priority: Number(values.triggerPriority) || 0 }]
     : [{ id: "new-conversation", type: trigger.id === "first_message" ? "new_conversation" : "manual", priority: Number(values.triggerPriority) || 0 }];
 
   return {
@@ -284,6 +287,10 @@ export function buildClientExperiencePreview(form = {}, context = {}) {
   const phrases = Array.isArray(form.triggerPhrases) ? form.triggerPhrases.filter(Boolean) : [];
   const triggerLine = trigger.id === "keyword"
     ? (phrases.length ? `Клиент напишет одну из фраз: ${phrases.slice(0, 3).map((phrase) => `«${phrase}»`).join(", ")}` : "Клиент напишет ключевую фразу (ещё не задана)")
+    : trigger.id === "always_except"
+      ? (phrases.length
+        ? `Бот ответит на любое сообщение, кроме: ${phrases.slice(0, 3).map((phrase) => `«${phrase}»`).join(", ")}`
+        : "Бот ответит на любое сообщение в выбранных каналах")
     : trigger.description;
   return {
     channelsLabel: channels.join(", "),
@@ -324,6 +331,7 @@ export function buildPublishChecklist(scenario = {}, context = {}) {
   const rules = Array.isArray(scenario.triggerRules) ? scenario.triggerRules : [];
   const hasAi = nodes.some((node) => node.type === "ai_reply");
   const phraseRule = rules.find((rule) => rule.type === "phrase");
+  const alwaysExceptRule = rules.find((rule) => rule.type === "always_except");
   const items = [
     { blocking: true, id: "name", label: "Указано название сценария", ok: Boolean(String(scenario.name ?? "").trim()) },
     { blocking: true, id: "channels", label: "Выбран хотя бы один канал", ok: channels.length > 0 },
@@ -331,9 +339,15 @@ export function buildPublishChecklist(scenario = {}, context = {}) {
     {
       blocking: true,
       id: "trigger",
-      label: phraseRule ? "Добавлена хотя бы одна ключевая фраза" : "Задан триггер запуска",
+      label: phraseRule
+        ? "Добавлена хотя бы одна ключевая фраза"
+        : alwaysExceptRule
+          ? "Задан режим «Всегда, кроме»"
+          : "Задан триггер запуска",
       ok: phraseRule
         ? Boolean(phraseRule.phrases?.length)
+        : alwaysExceptRule
+          ? true
         : rules.length > 0 || Boolean(String(scenario.trigger ?? "").trim()) || nodes.length > 0
     }
   ];
@@ -386,6 +400,16 @@ export function previewKeywordTrigger(message, phrases = [], matchMode = "contai
   return {
     matchedPhrases: matched,
     matches: matched.length > 0,
+    modeLabel: describeMatchMode(matchMode)
+  };
+}
+
+/** Preview for «Всегда, кроме»: matches unless an exclusion phrase hits. */
+export function previewAlwaysExceptTrigger(message, exclusions = [], matchMode = "contains") {
+  const matchedExclusions = exclusions.filter((phrase) => matchesTriggerPreviewPhrase(message, phrase, matchMode));
+  return {
+    matchedPhrases: matchedExclusions,
+    matches: matchedExclusions.length === 0,
     modeLabel: describeMatchMode(matchMode)
   };
 }
@@ -521,6 +545,18 @@ export function describeScenarioTrigger(scenario = {}) {
     if (!phrases.length) return `Ключевая фраза (${mode})`;
     const preview = phrases.slice(0, 3).join(", ");
     return phrases.length > 3 ? `Фраза (${mode}): ${preview} +${phrases.length - 3}` : `Фраза (${mode}): ${preview}`;
+  }
+
+  const alwaysExceptRule = rules.find((rule) => rule.type === "always_except");
+  if (alwaysExceptRule) {
+    const phrases = Array.isArray(alwaysExceptRule.phrases)
+      ? alwaysExceptRule.phrases.map((phrase) => String(phrase).trim()).filter(Boolean)
+      : [];
+    if (!phrases.length) return "Всегда, кроме — без исключений";
+    const preview = phrases.slice(0, 3).join(", ");
+    return phrases.length > 3
+      ? `Всегда, кроме: ${preview} +${phrases.length - 3}`
+      : `Всегда, кроме: ${preview}`;
   }
 
   if (rules.some((rule) => rule.type === "new_conversation")) {

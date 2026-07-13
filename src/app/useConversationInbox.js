@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAuditEvent, getStatusMeta } from "./dialogModel.js";
 import { clearTenantSession } from "./sessionStore.js";
 import { mapApiConversation, mapApiConversationCollection } from "./conversationApiMapper.js";
@@ -16,6 +16,9 @@ export function useConversationInbox({ sessionActive = false } = {}) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [assignees, setAssignees] = useState([]);
+  const detailInFlightRef = useRef(new Set());
+  const detailDebounceRef = useRef(new Map());
+  const processedRealtimeEventIdsRef = useRef(new Set());
 
   const syncMetaFromItems = useCallback((items) => {
     setTopics(Object.fromEntries(items.map((conversation) => [conversation.id, conversation.topic ?? ""])));
@@ -275,14 +278,20 @@ export function useConversationInbox({ sessionActive = false } = {}) {
     return { ok: true, response };
   }, []);
 
-  const loadConversationDetail = useCallback(async (conversationId) => {
+  const loadConversationDetail = useCallback(async (conversationId, options = {}) => {
     const normalizedId = String(conversationId ?? "").trim();
-    if (!sessionActive || !normalizedId) {
+    if (!sessionActive || !normalizedId || normalizedId === "empty") {
       return { ok: false };
     }
 
+    if (!options.force && detailInFlightRef.current.has(normalizedId)) {
+      return { ok: false, skipped: true };
+    }
+
+    detailInFlightRef.current.add(normalizedId);
     const response = await dialogService.fetchDialogDetail(normalizedId);
     if (response.status !== "ok") {
+      detailInFlightRef.current.delete(normalizedId);
       return { ok: false, response };
     }
 
@@ -305,16 +314,60 @@ export function useConversationInbox({ sessionActive = false } = {}) {
       }
       return next;
     });
+    detailInFlightRef.current.delete(normalizedId);
     return { ok: true, response };
   }, [sessionActive]);
+
+  const scheduleConversationDetailRefresh = useCallback((conversationId) => {
+    const normalizedId = String(conversationId ?? "").trim();
+    if (!normalizedId || normalizedId === "empty") {
+      return;
+    }
+
+    const timers = detailDebounceRef.current;
+    const existingTimer = timers.get(normalizedId);
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+    }
+
+    timers.set(
+      normalizedId,
+      window.setTimeout(() => {
+        timers.delete(normalizedId);
+        void loadConversationDetail(normalizedId);
+      }, 400)
+    );
+  }, [loadConversationDetail]);
+
+  useEffect(() => () => {
+    for (const timer of detailDebounceRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    detailDebounceRef.current.clear();
+    detailInFlightRef.current.clear();
+    processedRealtimeEventIdsRef.current.clear();
+  }, []);
 
   const handleRealtimeEvent = useCallback((event) => {
     if (event.eventName !== "message.created" && event.eventName !== "conversation.updated") {
       return;
     }
 
-    void loadConversationDetail(event.resourceId);
-  }, [loadConversationDetail]);
+    const eventId = String(event?.eventId ?? "").trim();
+    if (eventId) {
+      const processed = processedRealtimeEventIdsRef.current;
+      if (processed.has(eventId)) {
+        return;
+      }
+      processed.add(eventId);
+      if (processed.size > 500) {
+        const staleIds = [...processed].slice(0, processed.size - 250);
+        staleIds.forEach((id) => processed.delete(id));
+      }
+    }
+
+    scheduleConversationDetailRefresh(event.resourceId);
+  }, [scheduleConversationDetailRefresh]);
 
   useRealtimeInbox({
     enabled: sessionActive,

@@ -12,12 +12,13 @@ export interface BotFlowEdge {
 }
 
 export type BotTriggerMatchMode = "contains" | "exact" | "tokens";
-export type BotTriggerType = "manual" | "new_conversation" | "phrase";
+export type BotTriggerType = "manual" | "new_conversation" | "phrase" | "always_except";
 
 export interface BotTriggerRule {
   id: string;
   locale?: string;
   matchMode?: BotTriggerMatchMode;
+  /** For `phrase`: include phrases. For `always_except`: exclusion phrases. */
   phrases?: string[];
   priority?: number;
   type: BotTriggerType;

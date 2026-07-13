@@ -10,7 +10,7 @@ import {
 } from "./automation.repository.js";
 import { planBotRuntimeLabeledTransition, resolveBotRuntimeDeadLetterState, resolveBotRuntimeRetryState } from "./bot-runtime.worker.js";
 import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runtime.worker.js";
-import { matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
+import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
 import { AiBotResponseService, type AiBotResponse } from "./ai-bot-response.service.js";
 import { evaluateAiAgentsPilot } from "./ai-agents-pilot.js";
 import { recordBotHandoff, recordBotTriggerMatch } from "./bot-observability.js";
@@ -129,7 +129,8 @@ export class BotRuntimeService {
     const candidates = state.botScenarios.filter((item) => item.tenantId === event.tenantId
       && (!scenarioId || item.id === scenarioId)
       && item.channels.includes(event.channel)
-      && (existing ? true : item.enabled !== false && item.status === "published"));
+      && (existing ? true : item.enabled !== false && item.status === "published"))
+      .map((item) => withEffectiveTriggerRules(item, state.botScenarioVersions));
     const scenario = scenarioId
       ? candidates[0]
       : candidates
@@ -159,7 +160,11 @@ export class BotRuntimeService {
         flowNodes: version.flowNodes,
         priority: version.priority ?? scenario.priority,
         sourceBindings: version.sourceBindings ?? scenario.sourceBindings,
-        triggerRules: version.triggerRules ?? scenario.triggerRules
+        triggerRules: effectiveTriggerRules({
+          ...scenario,
+          triggerRules: version.triggerRules ?? scenario.triggerRules,
+          flowNodes: version.flowNodes?.length ? version.flowNodes : scenario.flowNodes
+        })
       },
       version
     };
@@ -323,12 +328,49 @@ function createAiFailureHandoff(event: BotRuntimeInboundEvent, node: BotFlowNode
 
 function sanitizeIdentifierSegment(value: string): string { return String(value).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100) || "event"; }
 
+function withEffectiveTriggerRules(scenario: BotScenario, versions: AutomationBotScenarioVersion[]): BotScenario {
+  const published = versions
+    .filter((item) => item.tenantId === scenario.tenantId && item.scenarioId === scenario.id && item.status === "published")
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const version = published.find((item) => item.versionId === scenario.activeVersionId) ?? published[0];
+  return {
+    ...scenario,
+    flowNodes: version?.flowNodes?.length ? version.flowNodes : scenario.flowNodes,
+    triggerRules: effectiveTriggerRules({
+      ...scenario,
+      flowNodes: version?.flowNodes?.length ? version.flowNodes : scenario.flowNodes,
+      triggerRules: version?.triggerRules ?? scenario.triggerRules
+    })
+  };
+}
+
+/**
+ * Wizard stores the selected trigger as the first flow-node title. Older publishes
+ * sometimes persisted an empty triggerRules array; recover the intended rule so
+ * runtime still matches instead of failing with bot_runtime_published_scenario_not_found.
+ */
+export function effectiveTriggerRules(scenario: Pick<BotScenario, "flowNodes" | "triggerRules">): BotTriggerRule[] {
+  const rules = Array.isArray(scenario.triggerRules) ? scenario.triggerRules : [];
+  if (rules.length) return rules;
+  const title = String(scenario.flowNodes?.[0]?.title ?? "").trim();
+  if (title === "Всегда, кроме") {
+    return [{ id: "always-except-recovered", matchMode: "contains", phrases: [], priority: 0, type: "always_except" }];
+  }
+  if (title === "Первое сообщение клиента") {
+    return [{ id: "new-conversation-recovered", priority: 0, type: "new_conversation" }];
+  }
+  return rules;
+}
+
 function matchingTrigger(scenario: BotScenario, payload: Record<string, unknown>): BotTriggerRule[] | null {
-  const rules = scenario.triggerRules ?? [];
+  const rules = effectiveTriggerRules(scenario);
   const text = inboundText(payload);
   return rules.filter((rule) => {
     if (rule.type === "manual") return false;
     if (rule.type === "new_conversation") return payload.isNewConversation === true;
+    if (rule.type === "always_except") {
+      return matchesBotAlwaysExceptTrigger(text, rule.phrases, rule.matchMode ?? "contains", rule.locale);
+    }
     return Boolean(text) && (rule.phrases ?? []).some((phrase) => matchesBotTriggerPhrase(text!, phrase, rule.matchMode ?? "contains", rule.locale));
   });
 }

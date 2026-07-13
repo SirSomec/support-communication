@@ -31,6 +31,8 @@ services:
       API_VERSION: v1
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
       REDIS_URL: redis://redis:6379
+      REALTIME_REDIS_FANOUT_ENABLED: ${REALTIME_REDIS_FANOUT_ENABLED:-true}
+      REALTIME_REDIS_CHANNEL: ${REALTIME_REDIS_CHANNEL:-support:realtime}
       S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
       S3_BUCKET: support-communication-local
       S3_REGION: us-east-1
@@ -175,6 +177,18 @@ services:
       INTEGRATION_STORE_FILE: .runtime/docker/integration-store.json
       CONVERSATION_REPOSITORY: json
       CONVERSATION_STORE_FILE: .runtime/docker/conversation-store.json
+      # Must share the same automation/AI/knowledge stores as api-gateway, otherwise
+      # published scenarios are invisible to inbound Telegram bot runtime.
+      AUTOMATION_REPOSITORY: json
+      AUTOMATION_STORE_FILE: .runtime/docker/automation-store.json
+      AI_CONNECTIONS_MASTER_KEY: ${AI_CONNECTIONS_MASTER_KEY:-ERERERERERERERERERERERERERERERERERERERERERE=}
+      AI_CONNECTIONS_KEY_VERSION: ${AI_CONNECTIONS_KEY_VERSION:-local-v1}
+      AI_CONNECTIONS_STORE_FILE: .runtime/docker/ai-connections-store.json
+      AI_USAGE_STORE_FILE: .runtime/docker/ai-usage-store.json
+      AGENT_SESSION_STORE_FILE: .runtime/docker/agent-session-state.json
+      KNOWLEDGE_SOURCES_STORE_FILE: .runtime/docker/knowledge-sources-store.json
+      WORKSPACE_REPOSITORY: json
+      WORKSPACE_STORE_FILE: .runtime/docker/workspace-store.json
       TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-true}
       TELEGRAM_INGRESS_MODE: ${TELEGRAM_INGRESS_MODE:-polling}
       TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
@@ -223,6 +237,9 @@ services:
       AUTOMATION_STORE_FILE: .runtime/docker/automation-store.json
       CONVERSATION_REPOSITORY: json
       CONVERSATION_STORE_FILE: .runtime/docker/conversation-store.json
+      REDIS_URL: redis://redis:6379
+      REALTIME_REDIS_FANOUT_ENABLED: ${REALTIME_REDIS_FANOUT_ENABLED:-true}
+      REALTIME_REDIS_CHANNEL: ${REALTIME_REDIS_CHANNEL:-support:realtime}
       BOT_RUNTIME_RECONCILIATION_INTERVAL_MS: 5000
       BOT_RUNTIME_RECONCILIATION_LEASE_MS: 30000
       BOT_RUNTIME_RECONCILIATION_LIMIT: 50
@@ -384,6 +401,10 @@ services:
       NODE_ENV: development
       SERVICE_NAME: outbox-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # Local compose uses JSON conversation/integration stores (same volume as api-gateway).
+      CONVERSATION_REPOSITORY: json
+      CONVERSATION_STORE_FILE: .runtime/docker/conversation-store.json
+      INTEGRATION_REPOSITORY: json
       INTEGRATION_STORE_FILE: .runtime/docker/integration-store.json
       OUTBOX_QUEUE: message-delivery
       OUTBOX_POLL_INTERVAL_MS: 10000
@@ -392,7 +413,7 @@ services:
       OUTBOX_RETRY_BACKOFF_MS: 60000
       OUTBOX_HTTP_TIMEOUT_MS: 5000
       OUTBOX_CHANNEL_CONNECTORS: ${OUTBOX_CHANNEL_CONNECTORS:-}
-      OUTBOX_TELEGRAM_ENABLED: ${OUTBOX_TELEGRAM_ENABLED:-false}
+      OUTBOX_TELEGRAM_ENABLED: ${OUTBOX_TELEGRAM_ENABLED:-true}
       OUTBOX_TELEGRAM_CHANNEL: ${OUTBOX_TELEGRAM_CHANNEL:-Telegram}
       OUTBOX_TELEGRAM_API_BASE_URL: ${OUTBOX_TELEGRAM_API_BASE_URL:-https://api.telegram.org}
       OUTBOX_TELEGRAM_BOT_TOKEN: ${OUTBOX_TELEGRAM_BOT_TOKEN:-}

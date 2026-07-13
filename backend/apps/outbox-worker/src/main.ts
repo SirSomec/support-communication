@@ -1,6 +1,8 @@
-import { createPrismaBillingSyncJobStore, createPrismaClient, createPrismaConversationOutboundDescriptorStore, createPrismaOutboxStore, type PrismaBillingSyncJobClient, type PrismaConversationOutboundDescriptorClient, type PrismaOutboxClient } from "@support-communication/database";
+import { createPrismaBillingSyncJobStore, createPrismaClient, createPrismaConversationOutboundDescriptorStore, createPrismaOutboxStore, type ConversationOutboundDescriptorStore, type PrismaBillingSyncJobClient, type PrismaConversationOutboundDescriptorClient, type PrismaOutboxClient } from "@support-communication/database";
+import { type OutboxEventStore } from "@support-communication/events";
 import { createBullMqWorkerBridge, createRuntimeBillingSyncHandlers, createRuntimeOutboxHandlers, loadBullMqWorkerConfig, loadOutboxWorkerConfig, runBillingSyncWorker, runOutboxWorker, runRuntimeFileScanScannerWorker } from "./index.js";
 import { createIntegrationTelegramTokenResolver, createPrismaIntegrationTelegramTokenResolver, type PrismaTelegramConnectionTokenClient } from "./integration-telegram-store.js";
+import { createJsonConversationOutboundDescriptorStore, createJsonConversationOutboxStore } from "./json-conversation-delivery-store.js";
 import { resolveProviderConnectionCredential, type PrismaProviderConnectionCredentialClient } from "./provider-connection-store.js";
 import { createPrismaProviderAttachmentTransferStore, type PrismaProviderAttachmentTransferClient } from "./provider-attachment-transfer-store.js";
 
@@ -8,10 +10,17 @@ interface DisconnectableWorkerPrismaClient extends PrismaOutboxClient, PrismaBil
   $disconnect?: () => Promise<void>;
 }
 
+const conversationRepository = String(process.env.CONVERSATION_REPOSITORY ?? "json").trim().toLowerCase();
+const useJsonConversationDelivery = conversationRepository !== "prisma";
 const client = createPrismaClient({
   datasourceUrl: process.env.DATABASE_URL
 }) as DisconnectableWorkerPrismaClient;
-const outboundDescriptorStore = createPrismaConversationOutboundDescriptorStore(client);
+const outboxStore: OutboxEventStore = useJsonConversationDelivery
+  ? createJsonConversationOutboxStore(process.env.CONVERSATION_STORE_FILE)
+  : createPrismaOutboxStore(client);
+const outboundDescriptorStore: ConversationOutboundDescriptorStore = useJsonConversationDelivery
+  ? createJsonConversationOutboundDescriptorStore(process.env.CONVERSATION_STORE_FILE)
+  : createPrismaConversationOutboundDescriptorStore(client);
 const providerAttachmentTransferStore = createPrismaProviderAttachmentTransferStore(client);
 const telegramBotTokenResolver = process.env.INTEGRATION_REPOSITORY === "prisma"
   ? createPrismaIntegrationTelegramTokenResolver(client, process.env.OUTBOX_TELEGRAM_BOT_TOKEN)
@@ -39,7 +48,7 @@ try {
           once: true,
           queue: config.queue ?? "file-scan",
           outboundDescriptorStore,
-          store: createPrismaOutboxStore(client)
+          store: outboxStore
         })
         : runBillingSync
         ? runBillingSyncWorker({
@@ -53,7 +62,7 @@ try {
           ...config,
           once: true,
           handlers: createRuntimeOutboxHandlers({ outboundDescriptorStore, providerAttachmentTransferStore, providerCredentialResolver, telegramBotTokenResolver }),
-          store: createPrismaOutboxStore(client)
+          store: outboxStore
         }),
       service
     });
@@ -81,7 +90,7 @@ try {
       ...config,
       queue: config.queue ?? "file-scan",
       outboundDescriptorStore,
-      store: createPrismaOutboxStore(client)
+      store: outboxStore
     })
     : runBillingSync
     ? await runBillingSyncWorker({
@@ -93,11 +102,12 @@ try {
     : await runOutboxWorker({
       ...config,
       handlers: createRuntimeOutboxHandlers({ outboundDescriptorStore, providerAttachmentTransferStore, providerCredentialResolver, telegramBotTokenResolver }),
-      store: createPrismaOutboxStore(client)
+      store: outboxStore
     });
 
   console.log(JSON.stringify({
     service: runFileScanScanner ? "file-scan-scanner-worker" : runBillingSync ? "billing-sync-worker" : "outbox-worker",
+    conversationDeliveryStore: useJsonConversationDelivery ? "json" : "prisma",
     result
   }));
   }

@@ -73,6 +73,30 @@ export class KnowledgeRetrievalService {
         candidates.push({ citation: { endOffset: chunk.endOffset, sourceId: source.id, sourceVersion: source.version, startOffset: chunk.startOffset, title: source.title }, content: chunk.content, score });
       }
     }
+    // Short/typoed queries can score 0 against ready sources; still surface a lead chunk
+    // so AI bots can answer instead of hard-failing with bot_ai_knowledge_not_ready.
+    if (candidates.length === 0) {
+      for (const binding of input.sourceBindings) {
+        const source = this.sources.find(input.tenantId, binding.sourceId);
+        if (!source || !isKnowledgeSourceRetrievalEligible(source)) continue;
+        if (binding.sourceVersion && String(source.version) !== binding.sourceVersion) continue;
+        const text = await sourceText(source, this.workspace, input.tenantId);
+        const [chunk] = chunks(text);
+        if (!chunk?.content) continue;
+        candidates.push({
+          citation: {
+            endOffset: chunk.endOffset,
+            sourceId: source.id,
+            sourceVersion: source.version,
+            startOffset: chunk.startOffset,
+            title: source.title
+          },
+          content: chunk.content,
+          score: 0.01
+        });
+        break;
+      }
+    }
     candidates.sort((a, b) => b.score - a.score || a.citation.sourceId.localeCompare(b.citation.sourceId) || a.citation.startOffset - b.citation.startOffset);
     const passages: KnowledgeRetrievalPassage[] = []; let tokensUsed = 0;
     for (const candidate of candidates) {

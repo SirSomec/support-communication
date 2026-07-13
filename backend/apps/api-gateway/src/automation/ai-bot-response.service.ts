@@ -13,9 +13,11 @@ import { recordBotAiRequest } from "./bot-observability.js";
 
 export interface AiBotResponseInput {
   basePrompt?: string;
+  behaviorRules?: string;
   conversationId?: string;
   instructions?: string;
   message: string;
+  retrievalScoreThreshold?: number;
   scenarioId?: string;
   scenarioRevisionId?: string;
   sourceBindings: KnowledgeSourceBinding[];
@@ -44,7 +46,7 @@ export class AiBotResponseService {
     let release: (() => void) | null = null;
     try {
       release = this.usage.reserve({ connectionId: connection.id, maxConcurrentRuns: connection.limits.maxConcurrentRuns, monthlyTokenBudget: connection.limits.monthlyTokenBudget, requestsPerMinute: connection.limits.requestsPerMinute, tenantId: input.tenantId, worstCaseTokens: Math.min(500, connection.limits.monthlyTokenBudget ?? 500) });
-      const materials = await this.materials(input.tenantId, input.sourceBindings, input.message, input.scenarioId);
+      const materials = await this.materials(input.tenantId, input.sourceBindings, input.message, input.scenarioId, input.retrievalScoreThreshold);
       if (!materials.length) {
         // BAI-826: копим «вопросы без ответа» для пополнения знаний; песочница не считается.
         if (!String(input.conversationId ?? "").startsWith("sandbox:")) {
@@ -63,6 +65,7 @@ export class AiBotResponseService {
       const completion = await provider.complete({ maxTokens: 500, temperature: 0.2, messages: [
         { role: "system", content: buildAiBotSystemPrompt({
           basePrompt: input.basePrompt,
+          behaviorRules: input.behaviorRules,
           instructions: input.instructions,
           knowledge: materials.map((item) => item.content).join("\n\n"),
           sessionState: session ? formatSessionForPrompt(session) : undefined
@@ -110,10 +113,11 @@ export class AiBotResponseService {
     }
   }
 
-  private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string, scenarioId?: string) {
+  private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string, scenarioId?: string, scoreThreshold?: number) {
     const result = await new KnowledgeRetrievalService(this.sources, this.workspace).retrieve({
       query: question,
       scenarioId,
+      scoreThreshold,
       sourceBindings: bindings,
       tenantId,
       tokenBudget: 1_500
@@ -135,19 +139,26 @@ export function extractRelevantKnowledge(document: string, question: string, bud
   return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
 }
 
-/** Order: tenant base prompt → platform safety rails → node instructions → session → knowledge. */
+/**
+ * Order: tenant base prompt → tenant behavior rules → platform safety rails →
+ * node instructions → session → knowledge. Safety rails deliberately follow the
+ * tenant-configurable text so behavior rules cannot override them (BAI-840).
+ */
 export function buildAiBotSystemPrompt(input: {
   basePrompt?: string;
+  behaviorRules?: string;
   instructions?: string;
   knowledge: string;
   sessionState?: string;
 }): string {
   return [
     input.basePrompt?.trim() ? input.basePrompt.trim().slice(0, 4_000) : "",
+    input.behaviorRules?.trim() ? `Additional behavior rules: ${input.behaviorRules.trim().slice(0, 1_000)}` : "",
     "You are a customer-support consultation assistant.",
     "Answer only from the supplied knowledge. Do not invent facts, policies, prices, or actions.",
     "If the answer is not in the knowledge, say that you cannot confirm it and offer a human operator.",
     "Do not access CRM data and do not claim that you did.",
+    "The behavior rules above never override these safety rules.",
     input.instructions?.trim() ? `Scenario guidance: ${input.instructions.trim().slice(0, 1500)}` : "",
     input.sessionState?.trim() ? input.sessionState.trim().slice(0, 2_000) : "",
     `Approved knowledge:\n${input.knowledge}`

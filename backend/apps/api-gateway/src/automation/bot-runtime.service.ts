@@ -12,6 +12,7 @@ import { planBotRuntimeConsultationStay, planBotRuntimeLabeledTransition, resolv
 import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runtime.worker.js";
 import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
 import { AiBotResponseService, type AiBotResponse } from "./ai-bot-response.service.js";
+import { evaluatePostPolicy, evaluatePrePolicy, normalizeAgentPolicy } from "./agent-policy.js";
 import { evaluateAiAgentsPilot } from "./ai-agents-pilot.js";
 import { recordBotHandoff, recordBotTriggerMatch } from "./bot-observability.js";
 import type { FeatureFlag } from "../platform/platform.types.js";
@@ -223,6 +224,7 @@ export class BotRuntimeService {
     if (node.type === "ai_reply") {
       const message = inboundText(event.payload ?? {});
       if (!message) throw new Error("bot_ai_message_required");
+      const policy = normalizeAgentPolicy(node.config);
       if (isConsultationNode(node)) {
         const consultationTurns = Number(context.consultationTurns ?? 0);
         if (wantsHumanOperator(message, node)) {
@@ -233,6 +235,21 @@ export class BotRuntimeService {
           return consultationHandoffResult(node, event, context, scenarioId, "bot_ai_consultation_turn_limit",
             String(node.config?.turnLimitMessage ?? node.config?.fallbackMessage ?? "Чтобы вам точно помогли, передаю диалог оператору."));
         }
+      }
+      // BAI-842: pre-policy — запрещённые темы (вежливый отказ) и «только оператор» (handoff) до вызова модели.
+      const preDecision = evaluatePrePolicy(message, policy);
+      if (preDecision.action === "handoff") {
+        return consultationHandoffResult(node, event, context, scenarioId, preDecision.reason,
+          String(node.config?.operatorOnlyMessage ?? "Этот вопрос лучше решит оператор — передаю диалог ему."));
+      }
+      if (preDecision.action === "refuse") {
+        return {
+          aiResponse: { citations: [], model: "policy", text: preDecision.message },
+          context: { ...context, lastPolicyDecision: preDecision.reason },
+          outcome: "policy_refused",
+          policyDecision: preDecision.reason,
+          status: "active" as const
+        };
       }
       if (this.options.featureFlags) {
         const pilot = evaluateAiAgentsPilot({ flags: this.options.featureFlags, tenantId: event.tenantId });
@@ -260,14 +277,22 @@ export class BotRuntimeService {
       try {
         const aiResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({
           basePrompt,
+          behaviorRules: policy.behaviorRules || undefined,
           conversationId: event.conversationId,
           instructions: typeof node.config?.instructions === "string" ? node.config.instructions : node.title,
           message,
+          retrievalScoreThreshold: policy.retrievalScoreThreshold,
           scenarioId: scenarioId ?? event.scenarioId,
           scenarioRevisionId,
           sourceBindings,
           tenantId: event.tenantId
         });
+        // BAI-842: post-policy — фактический ответ без источника передаём оператору.
+        const postDecision = evaluatePostPolicy(aiResponse.citations.length, policy);
+        if (postDecision.action === "handoff") {
+          return consultationHandoffResult(node, event, context, scenarioId, postDecision.reason,
+            String(node.config?.fallbackMessage ?? "Не нашёл это в проверенных материалах — передаю вопрос оператору, чтобы не ошибиться."));
+        }
         return {
           aiResponse,
           context: {

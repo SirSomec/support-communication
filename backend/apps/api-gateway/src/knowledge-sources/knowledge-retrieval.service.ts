@@ -7,6 +7,8 @@ import { recordBotRetrieval } from "../automation/bot-observability.js";
 export interface KnowledgeRetrievalInput {
   query: string;
   scenarioId?: string;
+  /** BAI-843: минимальный lexical score фрагмента; ниже него доказательства недостаточны. */
+  scoreThreshold?: number;
   sourceBindings: Array<{ sourceId: string; sourceVersion?: string }>;
   tenantId: string;
   tokenBudget?: number;
@@ -61,6 +63,7 @@ export class KnowledgeRetrievalService {
     }
 
     const queryTerms = terms(input.query);
+    const scoreThreshold = Math.max(0.05, Number.isFinite(input.scoreThreshold) ? Number(input.scoreThreshold) : 0);
     const candidates: KnowledgeRetrievalPassage[] = [];
     for (const binding of input.sourceBindings) {
       const source = this.sources.find(input.tenantId, binding.sourceId);
@@ -69,7 +72,7 @@ export class KnowledgeRetrievalService {
       const text = await sourceText(source, this.workspace, input.tenantId);
       for (const chunk of chunks(text)) {
         const score = relevance(queryTerms, chunk.content);
-        if (score < 0.05) continue;
+        if (score < scoreThreshold) continue;
         candidates.push({ citation: { endOffset: chunk.endOffset, sourceId: source.id, sourceVersion: source.version, startOffset: chunk.startOffset, title: source.title }, content: chunk.content, score });
       }
     }
@@ -77,8 +80,10 @@ export class KnowledgeRetrievalService {
     // so AI bots can answer instead of hard-failing with bot_ai_knowledge_not_ready.
     // Guarded by word-prefix overlap: без единого морфологически близкого слова
     // («доставка»/«доставку») это был бы ответ не по теме, а не ответ по знаниям.
+    // Lead-chunk fallback уважает явный порог: при строгом policy-threshold мы не
+    // подсовываем слабое совпадение — лучше честный handoff, чем ответ невпопад.
     const queryPrefixes = queryTerms.map((term) => term.slice(0, 4)).filter((prefix) => prefix.length >= 4);
-    if (candidates.length === 0 && queryPrefixes.length > 0) {
+    if (candidates.length === 0 && queryPrefixes.length > 0 && scoreThreshold <= 0.05) {
       for (const binding of input.sourceBindings) {
         const source = this.sources.find(input.tenantId, binding.sourceId);
         if (!source || !isKnowledgeSourceRetrievalEligible(source)) continue;

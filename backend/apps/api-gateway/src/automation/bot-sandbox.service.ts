@@ -195,6 +195,9 @@ export class BotSandboxService {
     if (result && !failureCode && executedNode?.type === "contact_request" && result.step.outcome === "contact_requested") {
       events.push({ kind: "contact_request", note: `Бот запросил поле «${String(executedNode.config?.field ?? "contact")}».` });
     }
+    if (result && !failureCode && result.step.outcome === "policy_refused") {
+      events.push({ kind: "policy", note: "Ответ ограничен правилом «Рамки ответов»: тема в списке запрещённых.", reason: "policy_blocked_topic" });
+    }
 
     const aiCalled = Boolean(result && !failureCode && executedNode?.type === "ai_reply" && result.step.outcome === "ai_reply_queued");
     const retrieval = aiCalled || (executedNode?.type === "ai_reply" && result?.step.outcome === "ai_handoff_requested" && text)
@@ -511,7 +514,9 @@ function sandboxHandoffNote(reason: string): string {
     bot_ai_quota_exhausted: "Исчерпан месячный бюджет токенов — диалог передан оператору.",
     bot_ai_rate_limit_reached: "Превышен лимит запросов в минуту — диалог передан оператору.",
     client_requested_operator: "Клиент попросил живого оператора — диалог передан.",
-    handoff_requested: "Сценарий передал диалог оператору по настроенному шагу."
+    handoff_requested: "Сценарий передал диалог оператору по настроенному шагу.",
+    policy_operator_only: "Тема из списка «только оператор» — диалог сразу передан человеку.",
+    policy_source_required: "Ответ не подтверждён источником — по правилу «Рамки ответов» диалог передан оператору."
   };
   return notes[reason] ?? `Диалог передан оператору (${reason}).`;
 }

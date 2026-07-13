@@ -11,6 +11,7 @@ import {
 } from "./automation.repository.js";
 import { BotRuntimeService, type BotRuntimeInboundEvent, type BotRuntimeOptions } from "./bot-runtime.service.js";
 import { BotSandboxService } from "./bot-sandbox.service.js";
+import { normalizeAgentPolicy } from "./agent-policy.js";
 import type { FeatureFlag } from "../platform/platform.types.js";
 import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase, normalizeBotTriggerText } from "./bot-trigger-matcher.js";
 import { DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS, ProactiveExposureRepository } from "./proactive-exposure.repository.js";
@@ -475,10 +476,19 @@ export class AutomationService {
     }
     const prerequisiteViolations: string[] = [];
     const nodes = validation.payload?.flowNodes ?? [];
-    if (nodes.some((node) => node.type === "ai_reply")) {
+    const aiNodes = nodes.filter((node) => node.type === "ai_reply");
+    if (aiNodes.length) {
       if (!sourceBindings.length) prerequisiteViolations.push("AI-ответу нужен хотя бы один готовый источник знаний.");
       if (aiReadinessForTenant(tenantId).status !== "ready") prerequisiteViolations.push("AI-подключение организации не настроено или не прошло проверку.");
-      if (!nodes.some((node) => node.type === "handoff" || node.type === "fallback")) prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");
+      const hasHandoffPath = nodes.some((node) => node.type === "handoff" || node.type === "fallback");
+      if (!hasHandoffPath) prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");
+      // BAI-844: рамки ответов должны безопасно закрывать red-team-категории.
+      // Если источник ответа не обязателен, бот может ответить без доказательств —
+      // тогда обязательна передача оператору как страховка.
+      const ungroundedNode = aiNodes.find((node) => normalizeAgentPolicy(node.config).requireSource === false);
+      if (ungroundedNode && !hasHandoffPath) {
+        prerequisiteViolations.push("AI-ответ без обязательного источника разрешён только вместе с передачей оператору.");
+      }
     }
     if (prerequisiteViolations.length) {
       return publishFailure(tenantId, scenarioId, "bot_publish_prerequisites_invalid", invalidEnvelope("publishBotScenario", "bot_publish_prerequisites_invalid", prerequisiteViolations.join(" "), { scenarioId, violations: prerequisiteViolations }));

@@ -95,12 +95,18 @@ export function createScenarioFromWizard(id, values = {}) {
         title: "Ответ AI по базе знаний",
         detail: firstMessage,
         config: {
+          behaviorRules: String(values.behaviorRules ?? "").trim().slice(0, 1000),
+          blockedTopics: normalizeTopicList(values.blockedTopics),
           consultationMode: true,
           fallbackMessage,
           handoffQueue,
           instructions: firstMessage,
           language,
           maxTurns: 10,
+          operatorOnlyTopics: normalizeTopicList(values.operatorOnlyTopics),
+          refusalMessage: String(values.refusalMessage ?? "").trim() || DEFAULT_REFUSAL_MESSAGE,
+          requireSource: values.requireSource !== false,
+          retrievalScoreThreshold: clampScore(values.retrievalScoreThreshold),
           tone
         },
         channel: primaryChannel,
@@ -196,6 +202,28 @@ export const scenarioToneOptions = [
 ];
 
 export const DEFAULT_AI_FALLBACK_MESSAGE = "Сейчас я не могу надёжно ответить по материалам. Передам вопрос специалисту.";
+export const DEFAULT_REFUSAL_MESSAGE = "Извините, по этому вопросу я не могу помочь. Если нужно, могу передать диалог оператору.";
+
+export function normalizeTopicList(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const topics = [];
+  for (const item of value) {
+    const topic = String(item ?? "").trim().slice(0, 120);
+    if (!topic) continue;
+    const key = topic.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    topics.push(topic);
+    if (topics.length >= 40) break;
+  }
+  return topics;
+}
+
+export function clampScore(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 0;
+}
 
 export function describeAiReadiness(readiness = {}) {
   const status = String(readiness.status ?? "not_configured");
@@ -461,10 +489,14 @@ export function formatFallbackReasonLabel(reason) {
   const labels = {
     ai_unavailable: "AI недоступен",
     bot_ai_concurrency_limit_reached: "Достигнут лимит параллельных AI-запросов",
+    bot_ai_consultation_turn_limit: "Достигнут лимит реплик консультации",
     bot_ai_quota_exhausted: "Исчерпан месячный бюджет токенов",
     bot_ai_rate_limit_reached: "Превышен лимит запросов в минуту",
+    client_requested_operator: "Клиент попросил оператора",
     handoff: "Передача оператору",
     handoff_requested: "Запрошена передача оператору",
+    policy_operator_only: "Тема «только оператор» по рамкам ответов",
+    policy_source_required: "Ответ не подтверждён источником",
     webhook_timeout: "Таймаут webhook"
   };
   return labels[value] ?? value;

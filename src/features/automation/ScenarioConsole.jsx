@@ -6,10 +6,12 @@ import { ScenarioOperationalPanel } from "./ScenarioOperationalPanel.jsx";
 import { ScenarioSandboxChat } from "./ScenarioSandboxChat.jsx";
 import {
   DEFAULT_AI_FALLBACK_MESSAGE,
+  DEFAULT_REFUSAL_MESSAGE,
   buildScenarioListRow,
   describeMatchMode,
   describeScenarioTrigger,
   formatScenarioStatusLabel,
+  normalizeTopicList,
   scenarioLanguageOptions,
   scenarioStatusTone,
   scenarioToneOptions
@@ -149,6 +151,12 @@ export function ScenarioConsole({
               <dt>Передача оператору</dt>
               <dd>{aiNode ? `очередь «${aiNode.config?.handoffQueue ?? "default"}»` : (effective.handoff ?? "по шагу Handoff")}</dd>
             </div>
+            {aiNode ? (
+              <div>
+                <dt>Рамки ответов</dt>
+                <dd>{describePolicy(aiNode.config)}</dd>
+              </div>
+            ) : null}
             <div>
               <dt>Последняя публикация</dt>
               <dd>{row.lastPublishedAt ? formatDateTime(row.lastPublishedAt) : "ещё не публиковался"}</dd>
@@ -319,6 +327,41 @@ export function ScenarioConsole({
             </fieldset>
           ) : null}
 
+          {aiNode ? (
+            <fieldset className="scenario-settings-ai scenario-settings-policy">
+              <legend>Рамки ответов</legend>
+              <p className="scenario-settings-note">Задайте, о чём бот отвечает, о чём молчит и когда сразу зовёт человека. Правила безопасности платформы эти рамки не отменяют.</p>
+              <label>
+                <span>О чём бот не отвечает (темы через запятую)</span>
+                <textarea disabled={!canManage} onChange={(event) => updateForm({ blockedTopics: event.target.value })} placeholder="политика, здоровье, юридические консультации" rows={2} value={form.blockedTopics} />
+              </label>
+              <label>
+                <span>Вежливый отказ на запрещённую тему</span>
+                <textarea disabled={!canManage} onChange={(event) => updateForm({ refusalMessage: event.target.value })} rows={2} value={form.refusalMessage} />
+              </label>
+              <label>
+                <span>Когда сразу зовёт человека (темы через запятую)</span>
+                <textarea disabled={!canManage} onChange={(event) => updateForm({ operatorOnlyTopics: event.target.value })} placeholder="возврат денег, жалоба, расторжение договора" rows={2} value={form.operatorOnlyTopics} />
+              </label>
+              <label className="scenario-settings-checkbox">
+                <input checked={form.requireSource} disabled={!canManage} onChange={(event) => updateForm({ requireSource: event.target.checked })} type="checkbox" />
+                <span>Отвечать только при наличии подтверждающего источника (иначе — передать оператору)</span>
+              </label>
+              <label>
+                <span>Строгость поиска: минимальное совпадение, % ({form.retrievalScoreThreshold || 0}%)</span>
+                <input disabled={!canManage} max="100" min="0" onChange={(event) => updateForm({ retrievalScoreThreshold: event.target.value })} step="5" type="range" value={form.retrievalScoreThreshold || 0} />
+              </label>
+              <label>
+                <span>Дополнительные правила поведения (необязательно)</span>
+                <textarea disabled={!canManage} maxLength={1000} onChange={(event) => updateForm({ behaviorRules: event.target.value })} placeholder="Например: отвечай кратко, не более трёх предложений; всегда предлагай оформить заявку." rows={3} value={form.behaviorRules} />
+              </label>
+              <div className="scenario-policy-preview">
+                <strong>Как бот откажет:</strong>
+                <span>{form.refusalMessage || DEFAULT_REFUSAL_MESSAGE}</span>
+              </div>
+            </fieldset>
+          ) : null}
+
           <div className="scenario-console-actions">
             <button className="primary-action" disabled={!canManage || isSaving || !formDirty} title={canManage ? "Сохранить настройки" : access.reason} type="submit">
               <Save size={15} /> {scenario.status === "published" ? "Сохранить черновик изменений" : "Сохранить"}
@@ -442,6 +485,8 @@ function buildForm(effective) {
     ?? null;
   return {
     basePrompt: String(effective?.basePrompt ?? ""),
+    behaviorRules: String(aiNode?.config?.behaviorRules ?? ""),
+    blockedTopics: (aiNode?.config?.blockedTopics ?? []).join(", "),
     channels: [...(effective?.channels ?? [])],
     fallbackMessage: String(aiNode?.config?.fallbackMessage ?? DEFAULT_AI_FALLBACK_MESSAGE),
     handoffQueue: String(aiNode?.config?.handoffQueue ?? "1-я линия"),
@@ -449,8 +494,12 @@ function buildForm(effective) {
     matchMode: rule?.matchMode ?? "contains",
     maxTurns: String(aiNode?.config?.maxTurns ?? 10),
     name: String(effective?.name ?? ""),
+    operatorOnlyTopics: (aiNode?.config?.operatorOnlyTopics ?? []).join(", "),
     phrases: [...(rule?.phrases ?? [])],
     priority: String(effective?.priority ?? 0),
+    refusalMessage: String(aiNode?.config?.refusalMessage ?? DEFAULT_REFUSAL_MESSAGE),
+    requireSource: aiNode?.config?.requireSource !== false,
+    retrievalScoreThreshold: String(Math.round(Number(aiNode?.config?.retrievalScoreThreshold ?? 0) * 100)),
     tone: String(aiNode?.config?.tone ?? "neutral"),
     triggerType: rule?.type ?? "new_conversation"
   };
@@ -462,11 +511,17 @@ function collectUpdatePayload(effective, form) {
       ...node,
       config: {
         ...(node.config ?? {}),
+        behaviorRules: form.behaviorRules.trim().slice(0, 1000),
+        blockedTopics: normalizeTopicList(splitTopics(form.blockedTopics)),
         consultationMode: node.config?.consultationMode ?? true,
         fallbackMessage: form.fallbackMessage.trim() || DEFAULT_AI_FALLBACK_MESSAGE,
         handoffQueue: form.handoffQueue.trim() || "1-я линия",
         language: form.language,
         maxTurns: clampNumber(form.maxTurns, 1, 30, 10),
+        operatorOnlyTopics: normalizeTopicList(splitTopics(form.operatorOnlyTopics)),
+        refusalMessage: form.refusalMessage.trim() || DEFAULT_REFUSAL_MESSAGE,
+        requireSource: form.requireSource !== false,
+        retrievalScoreThreshold: clampNumber(form.retrievalScoreThreshold, 0, 100, 0) / 100,
         tone: form.tone
       }
     }
@@ -490,6 +545,20 @@ function clampNumber(value, min, max, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(parsed)));
+}
+
+function splitTopics(value) {
+  return String(value ?? "").split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function describePolicy(config) {
+  const blocked = normalizeTopicList(config?.blockedTopics ?? []);
+  const operatorOnly = normalizeTopicList(config?.operatorOnlyTopics ?? []);
+  const parts = [];
+  parts.push(config?.requireSource === false ? "может отвечать без источника" : "только по проверенным источникам");
+  if (blocked.length) parts.push(`не отвечает: ${blocked.slice(0, 3).join(", ")}${blocked.length > 3 ? "…" : ""}`);
+  if (operatorOnly.length) parts.push(`сразу оператор: ${operatorOnly.slice(0, 3).join(", ")}${operatorOnly.length > 3 ? "…" : ""}`);
+  return parts.join(" · ");
 }
 
 function labelFor(options, id) {

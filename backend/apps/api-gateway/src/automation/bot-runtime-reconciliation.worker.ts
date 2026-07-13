@@ -120,8 +120,9 @@ async function reconcileEffect(
       }
     };
     const outbox = botRuntimeOutbox(effect, enriched, now);
+    const botName = String(descriptor.payload?.botName ?? "").trim();
     const message = createBotOutboundMessage({
-      author: "Бот",
+      author: botName ? `Бот «${botName}»` : "Бот",
       createdAt: now,
       id: messageId,
       text

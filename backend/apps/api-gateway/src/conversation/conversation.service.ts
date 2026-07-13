@@ -718,6 +718,7 @@ export class ConversationService {
     }
 
     const messageCreatedAt = new Date().toISOString();
+    const authorName = await this.resolveMessageAuthorName(scope, tenantId);
     const message: ConversationMessage = internal
       ? {
           createdAt: messageCreatedAt,
@@ -725,7 +726,7 @@ export class ConversationService {
           type: "internal",
           text: messageText,
           attachments,
-          author: scope.actorName ?? scope.actorId ?? "Operator",
+          author: authorName,
           time: NOW_LABEL
         }
       : {
@@ -734,6 +735,7 @@ export class ConversationService {
           side: "agent",
           text: messageText,
           attachments,
+          author: authorName,
           time: NOW_LABEL
         };
     conversation.messages.push(message);
@@ -774,6 +776,7 @@ export class ConversationService {
           attachmentCount: attachments.length,
           ...(deliveryAttachments.length ? { attachments: deliveryAttachments } : {}),
           ...(conversation.channelConnectionId ? { channelConnectionId: conversation.channelConnectionId } : {}),
+          ...(message.author ? { author: message.author } : {}),
           conversationId: conversation.id,
           createdAt: message.createdAt,
           messageId: String(message.id),
@@ -1088,6 +1091,18 @@ export class ConversationService {
     });
   }
 
+  private async resolveMessageAuthorName(scope: TenantScope, tenantId: string): Promise<string> {
+    const actorId = scope.actorId?.trim() ?? "";
+    if (actorId && scope.actorType === "operator") {
+      const users = await this.identityRepository.findTenantUsers(tenantId);
+      const operatorName = users.find((user) => user.id === actorId)?.name?.trim();
+      if (operatorName) {
+        return operatorName;
+      }
+    }
+    return scope.actorName?.trim() || actorId || "Operator";
+  }
+
   async fetchAttachmentUploadStatus(fileId: string, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const normalizedFileId = String(fileId ?? "").trim();
     if (!normalizedFileId) {
@@ -1162,7 +1177,7 @@ export class ConversationService {
 
       let queuedConversation = await this.conversationRepository.findConversation(existing.conversationId ?? existing.id);
       if (!queuedConversation) {
-        const recovered = createQueuedOutboundConversationRecord(existing, message, clientName);
+        const recovered = createQueuedOutboundConversationRecord(existing, message, clientName, await this.resolveMessageAuthorName(scope, tenantId));
         const recoveredRealtime = this.createRealtimeEvent("conversation.created", "conversation", recovered.id, {
           channel,
           direction: "outbound"
@@ -1222,7 +1237,7 @@ export class ConversationService {
       traceId,
       type: "conversation.outbound.requested"
     });
-    const queuedConversationRecord = createQueuedOutboundConversationRecord(descriptor, message, clientName);
+    const queuedConversationRecord = createQueuedOutboundConversationRecord(descriptor, message, clientName, await this.resolveMessageAuthorName(scope, tenantId));
     const realtimeEvent = this.createRealtimeEvent("conversation.created", "conversation", queuedConversationRecord.id, {
       channel,
       direction: "outbound"
@@ -1787,8 +1802,10 @@ function outboundMessageFromDescriptor(descriptor: ConversationOutboundDescripto
         return publicAttachment;
       })
     : fallbackAttachments;
+  const author = stringValue(descriptor.payload.author, "");
   return {
     ...(createdAt ? { createdAt } : {}),
+    ...(author ? { author } : {}),
     id: descriptor.messageId ?? stringValue(descriptor.payload.messageId, descriptor.id),
     side: "agent",
     text: stringValue(descriptor.payload.text, fallbackText),
@@ -1938,7 +1955,8 @@ function outboundConversationDataFromDescriptor(descriptor: ConversationOutbound
 function createQueuedOutboundConversationRecord(
   descriptor: ConversationOutboundDescriptor,
   fallbackMessage: string,
-  fallbackClientName: string
+  fallbackClientName: string,
+  authorName?: string
 ): ConversationRecord {
   const id = descriptor.conversationId ?? descriptor.id;
   const channel = stringValue(descriptor.payload.channel, descriptor.channel);
@@ -1969,6 +1987,7 @@ function createQueuedOutboundConversationRecord(
         id: `${id}-agent`,
         side: "agent",
         text: message,
+        ...(authorName ? { author: authorName } : {}),
         time: NOW_LABEL
       }
     ],

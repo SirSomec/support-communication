@@ -123,8 +123,11 @@ export function mapApiMessage(input) {
     mapped.type = input.type;
   }
 
-  if (mapped.type === "internal") {
-    mapped.author = nonEmptyString(input?.author, "Оператор");
+  const author = nonEmptyString(input?.author);
+  if (author) {
+    mapped.author = author;
+  } else if (mapped.type === "internal") {
+    mapped.author = "Оператор";
   }
 
   if (Array.isArray(input?.attachments)) {

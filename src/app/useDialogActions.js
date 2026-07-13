@@ -196,7 +196,7 @@ export function useDialogActions({
       side: composeMode === "internal" ? undefined : "agent",
       text: draft.trim() || "Отправлено вложение",
       attachments: readyAttachments,
-      author: composeMode === "internal" ? operatorName : undefined,
+      author: operatorName,
       time: "сейчас"
     }, {
       optimistic: false,

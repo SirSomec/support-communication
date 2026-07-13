@@ -81,7 +81,7 @@ describe("bot runtime side-effect reconciliation", () => {
     assert.equal(conversation?.messages.length, 1);
     assert.equal(conversation?.messages[0]?.side, "agent");
     assert.equal(conversation?.messages[0]?.text, "Hello");
-    assert.equal(conversation?.messages[0]?.author, "Бот");
+    assert.equal(conversation?.messages[0]?.author, "Бот «Bot»");
     assert.equal(conversation?.preview, "Hello");
     const events = await conversationRepository.listLifecycleEvents({ conversationId: "conv-1", tenantId: "tenant-1" });
     assert.equal(events.filter((event) => event.eventType === "message.sent").length, 1);

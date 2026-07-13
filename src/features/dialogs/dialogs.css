@@ -1097,6 +1097,12 @@
   font-size: 14px;
 }
 
+.message-bubble .message-author {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .message-bubble time {
   justify-self: end;
   color: var(--subtle);

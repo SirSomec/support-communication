@@ -311,6 +311,7 @@ function createStateTransitionSideEffects(
       messageId,
       outboxEventId: null,
       payload: {
+        botName: input.scenario.name,
         messageId,
         nodeId: node.id,
         ...(node.type === "quick_replies" ? { quickReplies: node.config?.quickReplies ?? [] } : {}),

@@ -73,6 +73,36 @@ export async function runBotScenarioTest(
   };
 }
 
+export async function rollbackBotScenario(
+  scenarioId,
+  versionId,
+  { rollbackBotScenario: rollback = automationService.rollbackBotScenario } = {}
+) {
+  const id = String(scenarioId ?? "").trim();
+  const version = String(versionId ?? "").trim();
+  if (!id || !version) return { ok: false, message: "Нужны идентификаторы сценария и версии." };
+
+  const response = await rollback(id, version);
+  if (response.status !== "ok" || !response.data?.scenario) {
+    return { ok: false, message: response.error?.message ?? "Не удалось выполнить откат версии." };
+  }
+  return { ok: true, scenario: response.data.scenario, versionId: response.data.versionId };
+}
+
+export async function discardBotScenarioDraft(
+  scenarioId,
+  { discardBotScenarioDraft: discard = automationService.discardBotScenarioDraft } = {}
+) {
+  const id = String(scenarioId ?? "").trim();
+  if (!id) return { ok: false, message: "Bot scenario id is required." };
+
+  const response = await discard(id);
+  if (response.status !== "ok" || !response.data?.scenario) {
+    return { ok: false, message: response.error?.message ?? "Не удалось отменить черновик." };
+  }
+  return { discarded: response.data.discarded === true, ok: true, scenario: response.data.scenario };
+}
+
 export async function changeBotScenarioLifecycle(
   scenarioId,
   action,

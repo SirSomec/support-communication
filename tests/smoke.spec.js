@@ -849,10 +849,12 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   await selectRole(page, "Администратор");
   await openSection(page, "Боты");
 
-  await expect(page.locator(".automation-insight-grid")).toContainText("Боты по каналам");
-  await page.locator(".bot-assignment-list select").first().selectOption({ label: "Auth code" });
-  await expect(page.locator(".toast")).toContainText('SDK: назначен бот "Auth code" и сохранен на backend.');
+  // BAI-810: консоль сценария с вкладками — паспорт, результаты, версии.
+  await expect(page.locator(".scenario-console")).toBeVisible();
+  await expect(page.locator(".scenario-passport-grid")).toContainText("Когда запускается");
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Результаты" }).click();
   await expect(page.locator(".scenario-ops-panel")).toContainText("Эксплуатация сценария");
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Обзор" }).click();
 
   await page.locator(".bot-mode-toggle input[type='checkbox']").check();
   await expect(page.locator(".bot-builder-panel")).toBeVisible();
@@ -902,6 +904,22 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   expect(publishPayload.data.versionState).toBe("published");
   await expect(page.locator(".toast")).toContainText("опубликован: runtime-");
 
+  // BAI-812: правки опубликованного сценария копятся в черновике следующей версии.
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Настройка" }).click();
+  await expect(page.locator(".scenario-settings-note").first()).toContainText("черновик");
+  await page.locator(".scenario-settings-form input[type='text']").first().fill("Импортированный сценарий v2");
+  await page.getByRole("button", { name: "Сохранить черновик изменений" }).click();
+  await expect(page.locator(".toast")).toContainText("черновик");
+  await expect(page.locator(".scenario-console-badges")).toContainText("неопубликованные изменения");
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Обзор" }).click();
+  await page.getByRole("button", { name: "Отменить изменения" }).click();
+  await expect(page.locator(".toast")).toContainText("отменён");
+  await expect(page.locator(".scenario-console-badges")).not.toContainText("неопубликованные изменения");
+
+  // BAI-813: вкладка версий показывает активную версию публикации.
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Версии" }).click();
+  await expect(page.locator(".scenario-version-list")).toContainText("активная");
+
   // BAI-804: живой тест-чат — сообщение проходит настоящий runtime в изолированной sandbox-сессии.
   await page.getByRole("button", { name: "Тест-чат" }).click();
   const sandboxTurnPromise = page.waitForResponse((response) =>
@@ -942,9 +960,9 @@ test("scenario wizard keeps keyboard focus, aria steps and responsive layout", a
     await openSection(page, "Боты");
 
     await expect(page.locator(".scenario-list-panel")).toBeVisible();
-    await expect(page.locator(".scenario-ops-panel")).toBeVisible();
-    await expectNoElementOverflow(page, ".automation-insight-grid");
-    await expectNoElementOverflow(page, ".scenario-ops-panel");
+    await expect(page.locator(".scenario-console")).toBeVisible();
+    await expectNoElementOverflow(page, ".automation-layout--console");
+    await expectNoElementOverflow(page, ".scenario-console");
 
     // The wizard intentionally restores an unfinished draft (including the step),
     // so reset the persisted draft to observe the first step on every viewport.

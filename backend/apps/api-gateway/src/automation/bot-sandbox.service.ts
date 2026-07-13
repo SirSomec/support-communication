@@ -391,8 +391,23 @@ export class BotSandboxService {
         versionId: version.versionId
       };
     }
+    // Draft-режим тестирует черновик следующей версии, если он есть (BAI-812).
+    const overlay = scenario.draft;
+    const effective: BotScenario = overlay
+      ? {
+        ...scenario,
+        ...(overlay.basePrompt !== undefined ? { basePrompt: overlay.basePrompt } : {}),
+        ...(overlay.channels ? { channels: overlay.channels } : {}),
+        ...(overlay.flowEdges ? { flowEdges: overlay.flowEdges } : {}),
+        ...(overlay.flowNodes ? { flowNodes: overlay.flowNodes } : {}),
+        ...(overlay.name ? { name: overlay.name } : {}),
+        ...(overlay.priority !== undefined ? { priority: overlay.priority } : {}),
+        ...(overlay.sourceBindings ? { sourceBindings: overlay.sourceBindings } : {}),
+        ...(overlay.triggerRules ? { triggerRules: overlay.triggerRules } : {})
+      }
+      : scenario;
     return {
-      config: withEffectiveRules(scenario),
+      config: withEffectiveRules(effective),
       mode: resolvedMode,
       versionId: pinnedVersionId ?? `sandbox-draft-${scenarioId}`
     };

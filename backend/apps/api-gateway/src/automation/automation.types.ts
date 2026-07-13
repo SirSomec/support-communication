@@ -29,7 +29,27 @@ export interface KnowledgeSourceBinding {
   sourceVersion?: string;
 }
 
+/**
+ * Unpublished edits of a published scenario (ADR BAI-001 §1.3: editing a
+ * published configuration happens through a next-revision draft). Runtime and
+ * channels keep executing the pinned published version; the overlay is used by
+ * the sandbox draft mode and becomes the next version on publish.
+ */
+export interface BotScenarioDraftOverlay {
+  basePrompt?: string;
+  channels?: string[];
+  flowEdges?: BotFlowEdge[];
+  flowNodes?: BotFlowNode[];
+  name?: string;
+  priority?: number;
+  sourceBindings?: KnowledgeSourceBinding[];
+  triggerRules?: BotTriggerRule[];
+  updatedAt: string;
+  updatedBy?: string;
+}
+
 export interface BotScenario {
+  draft?: BotScenarioDraftOverlay;
   activeVersionId?: string;
   auditHold?: boolean;
   auditHoldAt?: string;

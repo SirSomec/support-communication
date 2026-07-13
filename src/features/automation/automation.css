@@ -1356,3 +1356,370 @@
     gap: 2px;
   }
 }
+
+/* ===== BAI-810: консоль сценария ===== */
+
+.automation-view-switch {
+  align-self: flex-start;
+}
+
+.automation-layout--console {
+  grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.6fr);
+  align-items: start;
+}
+
+.scenario-console {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.scenario-console-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.scenario-console-head h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.scenario-console-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.scenario-draft-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #f2d197;
+  border-radius: var(--radius-sm);
+  background: #fdf6e7;
+  color: #8a5b0b;
+  font-size: 12.5px;
+}
+
+.scenario-draft-banner-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.scenario-draft-banner-actions button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.scenario-passport {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.scenario-passport-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.scenario-passport-grid dt {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.scenario-passport-grid dd {
+  margin: 2px 0 0;
+  color: #17233a;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.scenario-passport-warnings {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scenario-passport-warnings li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 10px;
+  border: 1px solid #f4c7c3;
+  border-radius: var(--radius-sm);
+  background: #fdf1f0;
+  color: #9a3b31;
+  font-size: 12.5px;
+}
+
+.scenario-passport-warnings li button {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.scenario-console-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.scenario-console-actions button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.scenario-settings-form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.scenario-settings-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.scenario-settings-dirty {
+  color: #8a5b0b;
+  font-size: 12px;
+}
+
+.scenario-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.scenario-settings-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+}
+
+.scenario-settings-form label > span {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.scenario-settings-form input[type="text"],
+.scenario-settings-form input[type="number"],
+.scenario-settings-form select,
+.scenario-settings-form textarea {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13px;
+}
+
+.scenario-settings-form fieldset {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.scenario-settings-form legend {
+  padding: 0 6px;
+  color: #17233a;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.scenario-settings-channels div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scenario-settings-channels button {
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.scenario-settings-channels button.active {
+  border-color: var(--blue);
+  background: #eaf1ff;
+  color: #1c4fd6;
+  font-weight: 600;
+}
+
+.scenario-trigger-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.scenario-trigger-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: #f2f6ff;
+  font-size: 12.5px;
+}
+
+.scenario-trigger-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #dbe4f8;
+  color: #35508f;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scenario-trigger-empty {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.scenario-trigger-add {
+  display: flex;
+  gap: 8px;
+}
+
+.scenario-trigger-add input {
+  flex: 1;
+}
+
+.scenario-trigger-add button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.scenario-trigger-mode {
+  display: grid;
+  gap: 6px;
+}
+
+.scenario-trigger-mode label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12.5px;
+}
+
+.scenario-console-knowledge {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
+.scenario-console-knowledge > button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.scenario-console-test {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.scenario-console-test .sandbox-chat-panel {
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.scenario-version-list ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scenario-version-list li {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.scenario-version-list li.active {
+  border-color: #9dc19d;
+  background: #f2f9f1;
+}
+
+.scenario-version-list li > div {
+  display: grid;
+  gap: 2px;
+}
+
+.scenario-version-list strong {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.scenario-version-list span {
+  color: #35508f;
+  font-size: 12.5px;
+}
+
+.scenario-version-list small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.scenario-version-list li > button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.scenario-console-head .segmented-control {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 980px) {
+  .automation-layout--console {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .scenario-draft-banner-actions {
+    margin-left: 0;
+  }
+
+  .scenario-console-head {
+    flex-direction: column;
+  }
+}

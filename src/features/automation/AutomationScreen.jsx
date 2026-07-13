@@ -15,16 +15,15 @@ import {
   Zap
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
-import { changeBotScenarioLifecycle, publishBotScenario, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
+import { changeBotScenarioLifecycle, discardBotScenarioDraft, publishBotScenario, rollbackBotScenario, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { automationService } from "../../services/automationService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
-import { ChannelBadge, ChannelList, ConfirmDialog, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
+import { ConfirmDialog, MetricTile, ProductScreen, SectionTitle, SegmentedControl } from "../../ui.jsx";
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
 import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
 import { ScenarioArchiveConfirmModal, ScenarioPauseConfirmModal, ScenarioPublishChecklistModal } from "./ScenarioLifecycleModals.jsx";
-import { ScenarioOperationalPanel } from "./ScenarioOperationalPanel.jsx";
 import { ScenarioKnowledgeSourceSelector } from "./ScenarioKnowledgeSourceSelector.jsx";
-import { ScenarioSandboxChat } from "./ScenarioSandboxChat.jsx";
+import { ScenarioConsole } from "./ScenarioConsole.jsx";
 import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScenarioFromWizard, formatScenarioStatusLabel, loadAdvancedModePreference, saveAdvancedModePreference } from "./automationModel.js";
 
 export function AutomationScreen({ onBack, onToast, access }) {
@@ -47,6 +46,8 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [scenarioVersions, setScenarioVersions] = useState([]);
   const [workspacePartial, setWorkspacePartial] = useState(false);
   const [sandboxVerifiedScenarioId, setSandboxVerifiedScenarioId] = useState("");
+  const [consoleTab, setConsoleTab] = useState("overview");
+  const [workView, setWorkView] = useState("scenarios");
   const sandboxChatRef = useRef(null);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [pauseTarget, setPauseTarget] = useState(null);
@@ -216,21 +217,9 @@ export function AutomationScreen({ onBack, onToast, access }) {
   }
   const enabledScenarios = scenarioItems.filter((scenario) => isEnabledAutomationStatus(scenario.status)).length;
   const enabledProactive = proactiveRules.filter((rule) => isEnabledAutomationStatus(rule.status)).length;
-  const automationChannels = ["SDK", "Telegram", "MAX", "VK"];
-  const channelAssignments = automationChannels.map((channel) => ({
-    channel,
-    scenario: scenarioItems.find((scenario) => scenario.channels.includes(channel))
-  }));
   const botMetricRows = runtimeMetrics.length
     ? runtimeMetrics
     : [{ label: "Bot runtime", value: "нет данных", detail: "runtimeMetrics не вернулись из backend" }];
-  const afterHoursPolicy = {
-    name: "Нерабочее время",
-    window: "21:00-09:00",
-    channels: selectedScenario.channels,
-    behavior: "Собрать телефон, тему, номер заказа и создать обращение без ожидания оператора",
-    fallback: "Если клиент просит человека, показать срок ответа и поставить SLA-таймер"
-  };
   const exportPayload = JSON.stringify({
     schemaVersion: selectedScenario.schemaVersion,
     exportVersion: selectedScenario.exportVersion,
@@ -498,56 +487,56 @@ export function AutomationScreen({ onBack, onToast, access }) {
     }
   }
 
-  async function handleAssignChannel(channel, scenarioId) {
+  async function handleConsoleUpdate(fields) {
+    if (!canManageAutomation || !selectedScenario) {
+      onToast(access.reason);
+      return null;
+    }
+    return persistScenarioDraft({ ...selectedScenario, ...fields }, {
+      successMessage: selectedScenario.status === "published"
+        ? "Изменения сохранены в черновик. Клиенты увидят их после публикации."
+        : "Настройки сценария сохранены."
+    });
+  }
+
+  async function handleDiscardDraft(scenario) {
     if (!canManageAutomation) {
       onToast(access.reason);
       return;
     }
+    setSavingAction(`discard:${scenario.id}`);
+    try {
+      const result = await discardBotScenarioDraft(scenario.id);
+      if (!result.ok) return onToast(result.message);
+      const persisted = normalizeScenario(result.scenario);
+      setScenarioItems((current) => replaceScenario(current, persisted));
+      onToast("Черновик изменений отменён: сценарий соответствует опубликованной версии.");
+    } finally {
+      setSavingAction("");
+    }
+  }
 
-    const targetScenario = scenarioItems.find((scenario) => scenario.id === scenarioId);
-    if (!targetScenario) {
-      onToast("Выберите сценарий для канала.");
+  async function handleRollbackVersion(scenario, versionId) {
+    if (!canManageAutomation) {
+      onToast(access.reason);
       return;
     }
-
-    const nextScenarios = scenarioItems.map((scenario) => {
-      const nextChannels = scenario.id === scenarioId
-        ? Array.from(new Set([...scenario.channels, channel]))
-        : scenario.channels.filter((item) => item !== channel);
-
-      return { ...scenario, channels: nextChannels };
-    });
-    const changedScenarios = nextScenarios.filter((scenario) => {
-      const previous = scenarioItems.find((item) => item.id === scenario.id);
-      return previous && !sameStringList(previous.channels, scenario.channels);
-    });
-
-    setSavingAction(`channel:${channel}`);
+    setSavingAction(`rollback:${scenario.id}`);
     try {
-      const persistedScenarios = [];
-      for (const scenario of changedScenarios) {
-        const result = await submitBotScenarioUpdate(scenario);
-        if (!result.ok) {
-          onToast(result.message);
-          return;
-        }
-        persistedScenarios.push(normalizeScenario({ ...scenario, ...result.scenario }));
-      }
-
-      setScenarioItems((current) => {
-        const persistedById = new Map(persistedScenarios.map((scenario) => [scenario.id, scenario]));
-        return current.map((scenario) => persistedById.get(scenario.id) ?? scenario);
-      });
-      onToast(`${channel}: назначен бот "${targetScenario.name}" и сохранен на backend.`);
+      const result = await rollbackBotScenario(scenario.id, versionId);
+      if (!result.ok) return onToast(result.message);
+      const persisted = normalizeScenario(result.scenario);
+      setScenarioItems((current) => replaceScenario(current, persisted));
+      onToast("Откат выполнен: новые диалоги пойдут по выбранной версии.");
     } finally {
       setSavingAction("");
     }
   }
 
   function focusSandboxChat() {
+    setWorkView("scenarios");
+    setConsoleTab("test");
     sandboxChatRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    const input = sandboxChatRef.current?.querySelector("input");
-    input?.focus?.({ preventScroll: true });
   }
 
   async function handleScenarioPublish() {
@@ -575,6 +564,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
       const publishedScenario = normalizeScenario({
         ...selectedScenario,
         activeVersionId: result.runtimeVersion,
+        draft: undefined,
         enabled: true,
         exportVersion: result.runtimeVersion,
         status: result.versionState || "published",
@@ -584,9 +574,24 @@ export function AutomationScreen({ onBack, onToast, access }) {
       selectScenario(publishedScenario);
       setPublishChecklistOpen(false);
       onToast(`Сценарий «${selectedScenario.name}» опубликован: ${result.runtimeVersion}.`);
+      await refreshScenarioDetail(publishedScenario.id);
     } finally {
       setSavingAction("");
     }
+  }
+
+  async function refreshScenarioDetail(scenarioId) {
+    const detail = await automationService.fetchBotScenario(scenarioId);
+    if (detail.status !== "ok") return;
+    const scenario = detail.data?.scenario;
+    const versions = Array.isArray(detail.data?.versions) ? detail.data.versions : [];
+    if (scenario) {
+      setScenarioItems((current) => replaceScenario(current, normalizeScenario(scenario)));
+    }
+    setScenarioVersions((current) => [
+      ...current.filter((item) => item.scenarioId !== scenarioId),
+      ...versions
+    ]);
   }
 
   async function handleSaveSelectedScenario() {
@@ -711,87 +716,96 @@ export function AutomationScreen({ onBack, onToast, access }) {
         <MetricTile icon={<ListChecks size={21} />} label="Audit" value={auditEvents.length} detail="последние события" />
       </div>
 
-      <div className="automation-insight-grid">
-        <section className="work-panel bot-assignment-panel">
-          <SectionTitle title="Боты по каналам" action="один активный сценарий на канал" />
-          <div className="bot-assignment-list">
-            {channelAssignments.map(({ channel, scenario }) => (
-              <label key={channel}>
-                <span><ChannelBadge channel={channel} /> {scenario?.status ?? "Не назначен"}</span>
-                <select
-                  disabled={!canManageAutomation || isSaving}
-                  onChange={(event) => handleAssignChannel(channel, event.target.value)}
-                  value={scenario?.id ?? ""}
-                >
-                  <option value="" disabled>Выберите сценарий</option>
-                  {scenarioItems.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </select>
-              </label>
-            ))}
+      <SegmentedControl
+        ariaLabel="Режим раздела ботов"
+        className="automation-view-switch"
+        onChange={setWorkView}
+        options={[{ label: "Сценарии", value: "scenarios" }, { label: "Работа ботов", value: "operations" }]}
+        value={workView}
+      />
+
+      {workView === "scenarios" ? (
+        <div className="automation-layout automation-layout--console">
+          <ScenarioListPanel
+            aiReadiness={aiReadiness}
+            canManage={canManageAutomation}
+            isSaving={isSaving}
+            knowledgeSources={knowledgeSources}
+            knowledgeSourcesError={knowledgeSourcesError}
+            knowledgeSourcesLoading={knowledgeSourcesLoading}
+            onArchive={archiveScenario}
+            onDisable={disableScenario}
+            onOpen={(scenario) => {
+              selectScenario(scenario);
+              setConsoleTab("overview");
+            }}
+            onPublish={requestScenarioPublish}
+            onRestore={restoreScenario}
+            onRetry={() => void loadWorkspace()}
+            partial={workspacePartial}
+            scenarios={scenarioItems}
+            selectedScenarioId={selectedScenario.id}
+            versions={scenarioVersions}
+          />
+
+          <div ref={sandboxChatRef}>
+            <ScenarioConsole
+              access={access}
+              activeTab={consoleTab}
+              aiReadiness={aiReadiness}
+              aiUsage={aiUsage}
+              canManage={canManageAutomation}
+              isSaving={isSaving}
+              knowledgeSources={knowledgeSources}
+              knowledgeSourcesError={knowledgeSourcesError}
+              knowledgeSourcesLoading={knowledgeSourcesLoading}
+              onAddUrlSource={addUrlKnowledgeSource}
+              onArchive={archiveScenario}
+              onDisable={disableScenario}
+              onDiscardDraft={handleDiscardDraft}
+              onPublish={requestScenarioPublish}
+              onRestore={restoreScenario}
+              onRollback={handleRollbackVersion}
+              onTabChange={setConsoleTab}
+              onToast={onToast}
+              onUpdateScenario={handleConsoleUpdate}
+              onVerified={setSandboxVerifiedScenarioId}
+              operations={selectedOperations}
+              scenario={selectedScenario}
+              versions={scenarioVersions}
+            />
           </div>
-        </section>
+        </div>
+      ) : (
+        <div className="automation-layout">
+          <section className="work-panel bot-metrics-card">
+            <SectionTitle title="Метрики ботов" action="backend runtime" />
+            <div className="bot-metric-list">
+              {botMetricRows.map((metric) => (
+                <span key={metric.label}>
+                  <b>{metric.value}</b>
+                  <strong>{metric.label}</strong>
+                  <small>{metric.detail}</small>
+                </span>
+              ))}
+            </div>
+          </section>
 
-        <section className="work-panel after-hours-card">
-          <SectionTitle title="Нерабочее время" action={afterHoursPolicy.window} />
-          <p>{afterHoursPolicy.behavior}</p>
-          <small>{afterHoursPolicy.fallback}</small>
-          <ChannelList channels={afterHoursPolicy.channels} />
-        </section>
-
-        <section className="work-panel bot-metrics-card">
-          <SectionTitle title="Метрики ботов" action="backend runtime" />
-          <div className="bot-metric-list">
-            {botMetricRows.map((metric) => (
-              <span key={metric.label}>
-                <b>{metric.value}</b>
-                <strong>{metric.label}</strong>
-                <small>{metric.detail}</small>
-              </span>
-            ))}
-          </div>
-        </section>
-
-        <ScenarioOperationalPanel
-          aiUsage={aiUsage}
-          operations={selectedOperations}
-          scenarioName={selectedScenario.name}
-        />
-      </div>
-
-      <div className="automation-layout">
-        <ScenarioListPanel
-          aiReadiness={aiReadiness}
-          canManage={canManageAutomation}
-          isSaving={isSaving}
-          knowledgeSources={knowledgeSources}
-          knowledgeSourcesError={knowledgeSourcesError}
-          knowledgeSourcesLoading={knowledgeSourcesLoading}
-          onArchive={archiveScenario}
-          onDisable={disableScenario}
-          onOpen={selectScenario}
-          onPublish={requestScenarioPublish}
-          onRestore={restoreScenario}
-          onRetry={() => void loadWorkspace()}
-          partial={workspacePartial}
-          scenarios={scenarioItems}
-          selectedScenarioId={selectedScenario.id}
-          versions={scenarioVersions}
-        />
-
-        <section className="work-panel">
-          <SectionTitle title="Audit автоматизации" action="экспорт, лимиты, rescue" />
-          <div className="audit-list">
-            {auditEvents.map((event) => (
-              <article className="audit-row" key={event.id}>
-                <time>{event.time}</time>
-                <strong>{event.action}</strong>
-                <span>{event.actor} · {event.role}</span>
-                <p>{event.target}: {event.detail}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-      </div>
+          <section className="work-panel">
+            <SectionTitle title="Audit автоматизации" action="экспорт, лимиты, rescue" />
+            <div className="audit-list">
+              {auditEvents.map((event) => (
+                <article className="audit-row" key={event.id}>
+                  <time>{event.time}</time>
+                  <strong>{event.action}</strong>
+                  <span>{event.actor} · {event.role}</span>
+                  <p>{event.target}: {event.detail}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
 
       <section className="work-panel bot-mode-panel">
         <SectionTitle title="Режим работы" action={advancedMode ? "дополнительный" : "no-code"} />
@@ -809,17 +823,6 @@ export function AutomationScreen({ onBack, onToast, access }) {
           </label>
         </div>
       </section>
-
-      <div ref={sandboxChatRef}>
-        <ScenarioSandboxChat
-          accessReason={access.reason}
-          aiReadiness={aiReadiness}
-          canManage={canManageAutomation}
-          onToast={onToast}
-          onVerified={setSandboxVerifiedScenarioId}
-          scenario={selectedScenario}
-        />
-      </div>
 
       {advancedMode ? (
       <section className="work-panel bot-builder-panel">
@@ -911,8 +914,12 @@ export function AutomationScreen({ onBack, onToast, access }) {
               <input disabled={!canManageAutomation || isSaving} value={selectedNode.title} onChange={(event) => updateSelectedNode("title", event.target.value)} />
             </label>
             <label>
-              <span>Каналы</span>
-              <input disabled={!canManageAutomation || isSaving} value={selectedNode.channel} onChange={(event) => updateSelectedNode("channel", event.target.value)} />
+              <span>Канал шага</span>
+              <select disabled={!canManageAutomation || isSaving} value={selectedNode.channel} onChange={(event) => updateSelectedNode("channel", event.target.value)}>
+                {(selectedScenario.channels?.length ? selectedScenario.channels : ["SDK"]).map((channel) => (
+                  <option key={channel} value={channel}>{channel}</option>
+                ))}
+              </select>
             </label>
             <label>
               <span>Логика</span>
@@ -1121,16 +1128,6 @@ function replaceScenario(current, persisted) {
 
 function normalizeStringList(value, fallback) {
   return Array.isArray(value) ? value.map((item) => String(item)) : fallback;
-}
-
-function sameStringList(left = [], right = []) {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  const sortedLeft = [...left].sort();
-  const sortedRight = [...right].sort();
-  return sortedLeft.every((item, index) => item === sortedRight[index]);
 }
 
 function isEnabledAutomationStatus(status) {

@@ -91,6 +91,27 @@ export const automationService = {
     return lifecycleRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/disable`, "POST", "disableBotScenario", options);
   },
 
+  async rollbackBotScenario(scenarioId, versionId) {
+    if (!hasRouteId(scenarioId) || !hasRouteId(versionId)) {
+      return missingIdEnvelope("rollbackBotScenario", "Scenario and version ids are required.");
+    }
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/rollback`, {
+      body: { versionId },
+      method: "POST",
+      operation: "rollbackBotScenario",
+      service: SERVICE
+    });
+  },
+
+  async discardBotScenarioDraft(scenarioId) {
+    if (!hasRouteId(scenarioId)) return missingIdEnvelope("discardBotScenarioDraft", "Bot scenario id is required.");
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/discard-draft`, {
+      method: "POST",
+      operation: "discardBotScenarioDraft",
+      service: SERVICE
+    });
+  },
+
   async createBotSandboxSession(scenarioId, payload = {}) {
     if (!hasRouteId(scenarioId)) return missingIdEnvelope("createBotSandboxSession", "Bot scenario id is required.");
     return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/sandbox-sessions`, {
@@ -174,6 +195,8 @@ export const automationService = {
         "archiveBotScenario",
         "restoreBotScenario",
         "recordBotAiFeedback",
+        "rollbackBotScenario",
+        "discardBotScenarioDraft",
         "createBotSandboxSession",
         "postBotSandboxMessage",
         "deleteBotSandboxSession",

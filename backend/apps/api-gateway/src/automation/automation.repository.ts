@@ -572,6 +572,7 @@ interface PrismaBotScenarioCreateInput {
   disabledAt?: Date | null;
   disabledBy?: string | null;
   disableReason?: string | null;
+  draft?: unknown;
   enabled: boolean;
   flowEdges: unknown;
   flowNodes: unknown;
@@ -608,6 +609,7 @@ interface PrismaBotScenarioRow {
   disabledAt?: Date | string | null;
   disabledBy?: string | null;
   disableReason?: string | null;
+  draft?: unknown;
   enabled?: boolean;
   flowEdges: unknown;
   flowNodes: unknown;
@@ -2424,6 +2426,7 @@ function normalizeBotScenarioRecord(scenario: BotScenario, existing?: BotScenari
       : {}),
     priority: normalizeBotScenarioPriority(scenario.priority ?? existing?.priority),
     basePrompt: normalizeBasePrompt(scenario.basePrompt ?? existing?.basePrompt),
+    draft: normalizeScenarioDraftOverlay(scenario.draft),
     sourceBindings: normalizeSourceBindings(scenario.sourceBindings ?? existing?.sourceBindings ?? []),
     tenantId: existing
       ? requireMatchingAutomationTenantId(existing.tenantId, scenario.tenantId)
@@ -2481,6 +2484,31 @@ function normalizeBotTriggerRules(value: unknown): BotTriggerRule[] {
       type: type as BotTriggerRule["type"]
     }];
   });
+}
+
+/** Draft overlay of a published scenario. Absent/invalid values stay undefined so no phantom draft appears. */
+function normalizeScenarioDraftOverlay(value: unknown): BotScenario["draft"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const overlay: NonNullable<BotScenario["draft"]> = {
+    updatedAt: typeof record.updatedAt === "string" && !Number.isNaN(Date.parse(record.updatedAt))
+      ? new Date(record.updatedAt).toISOString()
+      : new Date().toISOString()
+  };
+  if (typeof record.updatedBy === "string" && record.updatedBy.trim()) overlay.updatedBy = record.updatedBy.trim();
+  if (typeof record.name === "string" && record.name.trim()) overlay.name = record.name.trim();
+  if (Array.isArray(record.channels)) overlay.channels = record.channels.map((item) => String(item)).filter(Boolean);
+  if (record.basePrompt !== undefined) {
+    const basePrompt = normalizeBasePrompt(record.basePrompt);
+    if (basePrompt) overlay.basePrompt = basePrompt;
+  }
+  if (record.priority !== undefined) overlay.priority = normalizeBotScenarioPriority(record.priority);
+  if (Array.isArray(record.flowNodes)) overlay.flowNodes = clone(record.flowNodes) as NonNullable<BotScenario["draft"]>["flowNodes"];
+  if (Array.isArray(record.flowEdges)) overlay.flowEdges = clone(record.flowEdges) as NonNullable<BotScenario["draft"]>["flowEdges"];
+  if (record.sourceBindings !== undefined) overlay.sourceBindings = normalizeSourceBindings(record.sourceBindings);
+  if (record.triggerRules !== undefined) overlay.triggerRules = normalizeBotTriggerRules(record.triggerRules);
+  const meaningful = Object.keys(overlay).some((key) => key !== "updatedAt" && key !== "updatedBy");
+  return meaningful ? overlay : undefined;
 }
 
 function normalizeSourceBindings(value: unknown): KnowledgeSourceBinding[] {
@@ -2617,6 +2645,7 @@ function toBotScenario(row: PrismaBotScenarioRow): BotScenario {
     ...(row.disabledAt ? { disabledAt: toIsoString(row.disabledAt) } : {}),
     ...(row.disabledBy ? { disabledBy: row.disabledBy } : {}),
     ...(row.disableReason ? { disableReason: row.disableReason } : {}),
+    ...(normalizeScenarioDraftOverlay(row.draft) ? { draft: normalizeScenarioDraftOverlay(row.draft) } : {}),
     enabled: row.enabled ?? true,
     flowEdges: clone(row.flowEdges) as BotScenario["flowEdges"],
     flowNodes: clone(row.flowNodes) as BotScenario["flowNodes"],
@@ -2653,6 +2682,7 @@ function toPrismaBotScenarioCreateInput(scenario: BotScenario): PrismaBotScenari
     disabledAt: scenario.disabledAt ? new Date(scenario.disabledAt) : null,
     disabledBy: scenario.disabledBy ?? null,
     disableReason: scenario.disableReason ?? null,
+    draft: normalizeScenarioDraftOverlay(scenario.draft) ?? null,
     enabled: scenario.enabled ?? true,
     flowEdges: clone(scenario.flowEdges),
     flowNodes: clone(scenario.flowNodes),
@@ -2688,6 +2718,7 @@ function toPrismaBotScenarioUpdateInput(scenario: BotScenario): PrismaBotScenari
     disabledAt: scenario.disabledAt ? new Date(scenario.disabledAt) : null,
     disabledBy: scenario.disabledBy ?? null,
     disableReason: scenario.disableReason ?? null,
+    draft: normalizeScenarioDraftOverlay(scenario.draft) ?? null,
     enabled: scenario.enabled ?? true,
     flowEdges: clone(scenario.flowEdges),
     flowNodes: clone(scenario.flowNodes),

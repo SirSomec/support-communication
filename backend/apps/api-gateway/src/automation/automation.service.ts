@@ -215,7 +215,7 @@ export class AutomationService {
       flowEdges: clone(request.flowEdges ?? []),
       flowNodes: clone(request.flowNodes ?? [{ id: "start", type: "message", title: "Start" }]),
       id: scenarioId,
-      name: String(request.name ?? "РќРѕРІС‹Р№ СЃС†РµРЅР°СЂРёР№"),
+      name: String(request.name ?? "Новый сценарий"),
       priority: normalizeScenarioPriority(request.priority),
       schemaVersion: "bot-flow/v1",
       status: "draft",
@@ -252,7 +252,9 @@ export class AutomationService {
       return conflictEnvelope("updateBotScenario", "bot_scenario_archived", "Restore the archived bot scenario before editing it.", { scenarioId });
     }
     if (existing.status === "published") {
-      return conflictEnvelope("updateBotScenario", "bot_scenario_published", "Disable the published scenario before editing it.", { scenarioId });
+      // BAI-812: правки опубликованного сценария копятся в черновике следующей
+      // версии; runtime продолжает исполнять закреплённую опубликованную версию.
+      return this.saveScenarioDraftOverlay(existing, request, context);
     }
 
     const requestedStatus = normalizeBotScenarioStatus(request.status, existing.status);
@@ -375,16 +377,16 @@ export class AutomationService {
         for (const binding of sourceBindings) {
           const source = this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
           if (!source || !isKnowledgeSourceRetrievalEligible(source)) {
-            policyErrors.push(`РСЃС‚РѕС‡РЅРёРє Р·РЅР°РЅРёР№ В«${binding.sourceId}В» РЅРµРґРѕСЃС‚СѓРїРµРЅ РёР»Рё РЅРµ РіРѕС‚РѕРІ.`);
+            policyErrors.push(`Источник знаний «${binding.sourceId}» недоступен или не готов.`);
           }
         }
         if (payload.flowNodes.some((node) => node.type === "ai_reply")) {
-          if (!sourceBindings.length) policyErrors.push("AI-РѕС‚РІРµС‚Сѓ РЅСѓР¶РµРЅ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РіРѕС‚РѕРІС‹Р№ РёСЃС‚РѕС‡РЅРёРє Р·РЅР°РЅРёР№.");
+          if (!sourceBindings.length) policyErrors.push("AI-ответу нужен хотя бы один готовый источник знаний.");
           if (aiReadinessForTenant(tenantId).status !== "ready") {
-            policyErrors.push("AI-РїРѕРґРєР»СЋС‡РµРЅРёРµ РѕСЂРіР°РЅРёР·Р°С†РёРё РЅРµ РЅР°СЃС‚СЂРѕРµРЅРѕ РёР»Рё РЅРµ РїСЂРѕС€Р»Рѕ РїСЂРѕРІРµСЂРєСѓ.");
+            policyErrors.push("AI-подключение организации не настроено или не прошло проверку.");
           }
           if (!payload.flowNodes.some((node) => node.type === "handoff" || node.type === "fallback")) {
-            policyErrors.push("Р”РѕР±Р°РІСЊС‚Рµ РїРµСЂРµРґР°С‡Сѓ РѕРїРµСЂР°С‚РѕСЂСѓ РёР»Рё Р·Р°РїР°СЃРЅРѕР№ РѕС‚РІРµС‚.");
+            policyErrors.push("Добавьте передачу оператору или запасной ответ.");
           }
         }
         const state = await this.automationRepository.readStateAsync();
@@ -396,7 +398,7 @@ export class AutomationService {
           normalizeScenarioPriority(raw?.priority)
         );
         if (conflict) {
-          policyErrors.push("Р”СЂСѓРіРѕР№ РѕРїСѓР±Р»РёРєРѕРІР°РЅРЅС‹Р№ СЃС†РµРЅР°СЂРёР№ СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚ СЌС‚Сѓ РєР»СЋС‡РµРІСѓСЋ С„СЂР°Р·Сѓ СЃ С‚РµРј Р¶Рµ РїСЂРёРѕСЂРёС‚РµС‚РѕРј.");
+          policyErrors.push("Другой опубликованный сценарий уже использует эту ключевую фразу с тем же приоритетом.");
         }
       }
       enriched = { ...payload, sourceBindings, triggerRules };
@@ -449,7 +451,10 @@ export class AutomationService {
       }));
     }
 
-    const triggerRules = resolveScenarioTriggerRules(request, existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules());
+    const draftOverlay = existing.draft;
+    const triggerRules = resolveScenarioTriggerRules(request, draftOverlay?.triggerRules?.length
+      ? draftOverlay.triggerRules
+      : existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules());
     const triggerErrors = validateScenarioTriggerRules(triggerRules);
     if (triggerErrors.length) {
       return publishFailure(tenantId, scenarioId, "bot_trigger_invalid", invalidEnvelope("publishBotScenario", "bot_trigger_invalid", triggerErrors.join("; "), { scenarioId, violations: triggerErrors }));
@@ -459,7 +464,7 @@ export class AutomationService {
     if (triggerConflict) {
       return publishFailure(tenantId, scenarioId, "trigger_conflict", conflictEnvelope("publishBotScenario", "trigger_conflict", "Another published scenario already owns this keyword phrase and priority.", triggerConflict));
     }
-    const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? existing.sourceBindings ?? []);
+    const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? draftOverlay?.sourceBindings ?? existing.sourceBindings ?? []);
     const unavailableSourceId = sourceBindings.find((binding) => {
       const source = this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
       return !source || !isKnowledgeSourceRetrievalEligible(source);
@@ -471,9 +476,9 @@ export class AutomationService {
     const prerequisiteViolations: string[] = [];
     const nodes = validation.payload?.flowNodes ?? [];
     if (nodes.some((node) => node.type === "ai_reply")) {
-      if (!sourceBindings.length) prerequisiteViolations.push("AI-РѕС‚РІРµС‚Сѓ РЅСѓР¶РµРЅ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РіРѕС‚РѕРІС‹Р№ РёСЃС‚РѕС‡РЅРёРє Р·РЅР°РЅРёР№.");
-      if (aiReadinessForTenant(tenantId).status !== "ready") prerequisiteViolations.push("AI-РїРѕРґРєР»СЋС‡РµРЅРёРµ РѕСЂРіР°РЅРёР·Р°С†РёРё РЅРµ РЅР°СЃС‚СЂРѕРµРЅРѕ РёР»Рё РЅРµ РїСЂРѕС€Р»Рѕ РїСЂРѕРІРµСЂРєСѓ.");
-      if (!nodes.some((node) => node.type === "handoff" || node.type === "fallback")) prerequisiteViolations.push("Р”РѕР±Р°РІСЊС‚Рµ РїРµСЂРµРґР°С‡Сѓ РѕРїРµСЂР°С‚РѕСЂСѓ РёР»Рё Р·Р°РїР°СЃРЅРѕР№ РѕС‚РІРµС‚.");
+      if (!sourceBindings.length) prerequisiteViolations.push("AI-ответу нужен хотя бы один готовый источник знаний.");
+      if (aiReadinessForTenant(tenantId).status !== "ready") prerequisiteViolations.push("AI-подключение организации не настроено или не прошло проверку.");
+      if (!nodes.some((node) => node.type === "handoff" || node.type === "fallback")) prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");
     }
     if (prerequisiteViolations.length) {
       return publishFailure(tenantId, scenarioId, "bot_publish_prerequisites_invalid", invalidEnvelope("publishBotScenario", "bot_publish_prerequisites_invalid", prerequisiteViolations.join(" "), { scenarioId, violations: prerequisiteViolations }));
@@ -534,16 +539,17 @@ export class AutomationService {
       versionState: "published"
     };
 
+    // Публикация материализует черновик следующей версии (если он был) и всегда очищает его.
     const scenario: BotScenario = {
       activeVersionId: String(result.runtimeVersion),
-      basePrompt: normalizeScenarioBasePrompt(request.basePrompt ?? existing.basePrompt),
-      channels: clone(request.channels ?? existing.channels),
+      basePrompt: normalizeScenarioBasePrompt(request.basePrompt ?? draftOverlay?.basePrompt ?? existing.basePrompt),
+      channels: clone(request.channels ?? draftOverlay?.channels ?? existing.channels),
       enabled: true,
-      flowEdges: clone(validation.payload?.flowEdges ?? existing.flowEdges),
-      flowNodes: clone(validation.payload?.flowNodes ?? existing.flowNodes),
+      flowEdges: clone(validation.payload?.flowEdges ?? draftOverlay?.flowEdges ?? existing.flowEdges),
+      flowNodes: clone(validation.payload?.flowNodes ?? draftOverlay?.flowNodes ?? existing.flowNodes),
       id: scenarioId,
-      name: String(validation.payload?.name ?? existing.name),
-      priority: normalizeScenarioPriority(request.priority ?? existing.priority),
+      name: String(validation.payload?.name ?? draftOverlay?.name ?? existing.name),
+      priority: normalizeScenarioPriority(request.priority ?? draftOverlay?.priority ?? existing.priority),
       schemaVersion: "bot-flow/v1",
       status: "published",
       tenantId,
@@ -841,6 +847,136 @@ export class AutomationService {
       });
     } catch (error) {
       return sandboxErrorEnvelope("saveBotSandboxRegression", error);
+    }
+  }
+
+  /** BAI-812: правки published-сценария сохраняются как черновик следующей версии, не трогая runtime. */
+  private async saveScenarioDraftOverlay(
+    existing: BotScenario,
+    request: ScenarioDraftPayload,
+    context: AutomationRequestContext
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const requestedStatus = normalizeBotScenarioStatus(request.status, existing.status);
+    if (requestedStatus !== existing.status) {
+      return conflictEnvelope("updateBotScenario", "bot_scenario_status_transition_required", "Use the dedicated scenario status action.", { scenarioId: existing.id, status: requestedStatus });
+    }
+    const previous = existing.draft ?? { updatedAt: new Date().toISOString() };
+    const draft: NonNullable<BotScenario["draft"]> = {
+      ...previous,
+      ...(request.name !== undefined ? { name: String(request.name) } : {}),
+      ...(request.channels !== undefined ? { channels: clone(request.channels) } : {}),
+      ...(request.basePrompt !== undefined ? { basePrompt: normalizeScenarioBasePrompt(request.basePrompt) } : {}),
+      ...(request.priority !== undefined ? { priority: normalizeScenarioPriority(request.priority) } : {}),
+      ...(request.flowNodes !== undefined ? { flowNodes: clone(request.flowNodes) } : {}),
+      ...(request.flowEdges !== undefined ? { flowEdges: clone(request.flowEdges) } : {}),
+      ...(request.sourceBindings !== undefined ? { sourceBindings: normalizeScenarioSourceBindings(request.sourceBindings) } : {}),
+      ...(request.triggerRules !== undefined || request.triggerPhrases !== undefined
+        ? { triggerRules: resolveScenarioTriggerRules(request, existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules()) }
+        : {}),
+      updatedAt: new Date().toISOString(),
+      updatedBy: actionActor(context)
+    };
+    const scenario: BotScenario = { ...existing, draft, updatedAt: new Date().toISOString() };
+    this.upsertScenario(scenario);
+    await this.automationRepository.saveBotScenario(scenario);
+    const auditId = makeAuditId("bot_draft");
+    await this.recordScenarioActionAudit({
+      action: "bot.draft.update",
+      afterStatus: existing.status,
+      auditId,
+      beforeStatus: existing.status,
+      context,
+      idempotencyKey: actionIdempotencyKey(context),
+      reason: actionReason(context, "draft_updated"),
+      scenarioId: existing.id,
+      tenantId: existing.tenantId
+    });
+    const saved = this.scenarios.find((item) => item.id === existing.id) ?? scenario;
+    return createEnvelope({
+      service: AUTOMATION_SERVICE,
+      operation: "updateBotScenario",
+      traceId: actionTraceId(context, "updateBotScenario"),
+      meta: apiMeta({ tenantId: existing.tenantId }),
+      data: { auditId, draftPending: true, scenario: clone(saved) }
+    });
+  }
+
+  async discardBotScenarioDraft(scenarioId: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("discardBotScenarioDraft");
+    const existing = this.scenarios.find((item) => item.id === scenarioId) ?? await this.automationRepository.findBotScenario(scenarioId);
+    if (!existing || scenarioTenantId(existing) !== tenantId) {
+      return invalidEnvelope("discardBotScenarioDraft", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId });
+    }
+    if (!existing.draft) {
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "discardBotScenarioDraft",
+        traceId: actionTraceId(context, "discardBotScenarioDraft"),
+        meta: apiMeta({ tenantId }),
+        data: { discarded: false, scenario: clone(existing) }
+      });
+    }
+    const { draft: _draft, ...withoutDraft } = existing;
+    const scenario: BotScenario = { ...withoutDraft, updatedAt: new Date().toISOString() };
+    this.upsertScenario(scenario);
+    await this.automationRepository.saveBotScenario(scenario);
+    const auditId = makeAuditId("bot_draft");
+    await this.recordScenarioActionAudit({
+      action: "bot.draft.discard",
+      afterStatus: scenario.status,
+      auditId,
+      beforeStatus: existing.status,
+      context,
+      reason: actionReason(context, "draft_discarded"),
+      scenarioId,
+      tenantId
+    });
+    return createEnvelope({
+      service: AUTOMATION_SERVICE,
+      operation: "discardBotScenarioDraft",
+      traceId: actionTraceId(context, "discardBotScenarioDraft"),
+      meta: apiMeta({ tenantId }),
+      data: { auditId, discarded: true, scenario: clone(scenario) }
+    });
+  }
+
+  /** BAI-813: откат опубликованного сценария к более ранней опубликованной версии. */
+  async rollbackBotScenarioToVersion(scenarioId: string, versionId: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("rollbackBotScenario");
+    if (!String(versionId ?? "").trim()) {
+      return invalidEnvelope("rollbackBotScenario", "bot_version_id_required", "Version id is required.", { scenarioId });
+    }
+    try {
+      const scenario = await this.rollbackBotRuntimeVersion(tenantId, scenarioId, versionId);
+      this.upsertScenario(scenario);
+      const auditId = makeAuditId("bot_rollback");
+      await this.recordScenarioActionAudit({
+        action: "bot.rollback",
+        afterStatus: scenario.status,
+        auditId,
+        beforeStatus: "published",
+        context,
+        idempotencyKey: actionIdempotencyKey(context),
+        reason: actionReason(context, `rollback_to_${versionId}`),
+        scenarioId,
+        tenantId
+      });
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "rollbackBotScenario",
+        traceId: actionTraceId(context, "rollbackBotScenario"),
+        meta: apiMeta({ tenantId, versionId }),
+        data: { auditId, scenario: clone(scenario), versionId }
+      });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "bot_rollback_failed";
+      return invalidEnvelope("rollbackBotScenario", code === "bot_runtime_rollback_version_not_found" ? code : "bot_rollback_failed",
+        code === "bot_runtime_rollback_version_not_found"
+          ? "Версия для отката не найдена или не опубликована."
+          : "Не удалось выполнить откат версии.",
+        { scenarioId, versionId });
     }
   }
 
@@ -1173,19 +1309,19 @@ function conflictEnvelope(operation: string, code: string, message: string, data
 }
 
 const SANDBOX_ERROR_MESSAGES: Record<string, string> = {
-  bot_sandbox_budget_exhausted: "РСЃС‡РµСЂРїР°РЅ Р»РёРјРёС‚ С‚РѕРєРµРЅРѕРІ РЅР° С‚РµСЃС‚РёСЂРѕРІР°РЅРёРµ РІ СЌС‚РѕРј РјРµСЃСЏС†Рµ. РћР±СЂР°С‚РёС‚РµСЃСЊ Рє Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ СЃРµСЂРІРёСЃР°, С‡С‚РѕР±С‹ РїРѕРґРЅСЏС‚СЊ Р»РёРјРёС‚.",
-  bot_sandbox_channel_unsupported: "Р’С‹Р±СЂР°РЅРЅС‹Р№ РєР°РЅР°Р» РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ Рє СЃС†РµРЅР°СЂРёСЋ.",
-  bot_sandbox_message_required: "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ, С‡С‚РѕР±С‹ РѕС‚РїСЂР°РІРёС‚СЊ РµРіРѕ Р±РѕС‚Сѓ.",
-  bot_sandbox_published_version_not_found: "РЈ СЃС†РµРЅР°СЂРёСЏ РЅРµС‚ РѕРїСѓР±Р»РёРєРѕРІР°РЅРЅРѕР№ РІРµСЂСЃРёРё вЂ” РїСЂРѕС‚РµСЃС‚РёСЂСѓР№С‚Рµ С‡РµСЂРЅРѕРІРёРє.",
-  bot_sandbox_scenario_not_found: "РЎС†РµРЅР°СЂРёР№ РЅРµ РЅР°Р№РґРµРЅ.",
-  bot_sandbox_session_empty: "Р’ С‚РµСЃС‚РѕРІРѕРј РґРёР°Р»РѕРіРµ РµС‰С‘ РЅРµС‚ СЂРµРїР»РёРє вЂ” СЃРЅР°С‡Р°Р»Р° РѕС‚РїСЂР°РІСЊС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ Р±РѕС‚Сѓ.",
-  bot_sandbox_session_not_found: "РўРµСЃС‚РѕРІР°СЏ СЃРµСЃСЃРёСЏ РЅРµ РЅР°Р№РґРµРЅР° РёР»Рё РёСЃС‚РµРєР»Р°. РќР°С‡РЅРёС‚Рµ С‚РµСЃС‚ Р·Р°РЅРѕРІРѕ."
+  bot_sandbox_budget_exhausted: "Исчерпан лимит токенов на тестирование в этом месяце. Обратитесь к администратору сервиса, чтобы поднять лимит.",
+  bot_sandbox_channel_unsupported: "Выбранный канал не подключён к сценарию.",
+  bot_sandbox_message_required: "Введите сообщение, чтобы отправить его боту.",
+  bot_sandbox_published_version_not_found: "У сценария нет опубликованной версии — протестируйте черновик.",
+  bot_sandbox_scenario_not_found: "Сценарий не найден.",
+  bot_sandbox_session_empty: "В тестовом диалоге ещё нет реплик — сначала отправьте сообщение боту.",
+  bot_sandbox_session_not_found: "Тестовая сессия не найдена или истекла. Начните тест заново."
 };
 
 function sandboxErrorEnvelope(operation: string, error: unknown): BackendEnvelope<Record<string, unknown>> {
   const code = error instanceof Error ? error.message : "bot_sandbox_failed";
   const known = SANDBOX_ERROR_MESSAGES[code];
-  return invalidEnvelope(operation, known ? code : "bot_sandbox_failed", known ?? "РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ РѕРїРµСЂР°С†РёСЋ С‚РµСЃС‚-С‡Р°С‚Р°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.", {});
+  return invalidEnvelope(operation, known ? code : "bot_sandbox_failed", known ?? "Не удалось выполнить операцию тест-чата. Попробуйте ещё раз.", {});
 }
 
 function invalidEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
@@ -1390,9 +1526,9 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
   const phraseMatched = phraseRule ? Boolean(testMessage) && (phraseRule.phrases ?? []).some((phrase) => matchesBotTriggerPhrase(testMessage, phrase, phraseRule.matchMode ?? "contains", phraseRule.locale)) : null;
   if (phraseRule && !phraseMatched) {
     return {
-      answerPreview: testMessage ? "РЎС†РµРЅР°СЂРёР№ РЅРµ Р·Р°РїСѓСЃС‚РёС‚СЃСЏ: СЃРѕРѕР±С‰РµРЅРёРµ РЅРµ СЃРѕРІРїР°Р»Рѕ РЅРё СЃ РѕРґРЅРѕР№ РєР»СЋС‡РµРІРѕР№ С„СЂР°Р·РѕР№." : "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ РєР»РёРµРЅС‚Р°, С‡С‚РѕР±С‹ РїСЂРѕРІРµСЂРёС‚СЊ РєР»СЋС‡РµРІСѓСЋ С„СЂР°Р·Сѓ.",
+      answerPreview: testMessage ? "Сценарий не запустится: сообщение не совпало ни с одной ключевой фразой." : "Введите сообщение клиента, чтобы проверить ключевую фразу.",
       citations: [],
-      input: testMessage || "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ РєР»РёРµРЅС‚Р° РґР»СЏ РїСЂРѕРІРµСЂРєРё.",
+      input: testMessage || "Введите сообщение клиента для проверки.",
       outcome: "no_match",
       reason: testMessage ? "phrase_not_matched" : "test_message_required",
       steps: [],
@@ -1414,9 +1550,9 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
     const matched = matchesBotAlwaysExceptTrigger(testMessage, alwaysExceptRule.phrases, alwaysExceptRule.matchMode ?? "contains", alwaysExceptRule.locale);
     if (!matched) {
       return {
-        answerPreview: "РЎС†РµРЅР°СЂРёР№ РЅРµ Р·Р°РїСѓСЃС‚РёС‚СЃСЏ: СЃРѕРѕР±С‰РµРЅРёРµ РїРѕРїР°Р»Рѕ РїРѕРґ РёСЃРєР»СЋС‡РµРЅРёРµ В«Р’СЃРµРіРґР°, РєСЂРѕРјРµВ».",
+        answerPreview: "Сценарий не запустится: сообщение попало под исключение «Всегда, кроме».",
         citations: [],
-        input: testMessage || "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ РєР»РёРµРЅС‚Р° РґР»СЏ РїСЂРѕРІРµСЂРєРё.",
+        input: testMessage || "Введите сообщение клиента для проверки.",
         outcome: "no_match",
         reason: "always_except_excluded",
         steps: [],
@@ -1469,14 +1605,14 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
 
   return {
     answerPreview: !aiNode
-      ? "РЎС†РµРЅР°СЂРёР№ РѕС‚РїСЂР°РІРёС‚ РЅР°СЃС‚СЂРѕРµРЅРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ."
+      ? "Сценарий отправит настроенное сообщение."
       : needsHandoff
         ? (aiNode.config?.fallbackMessage
           ? String(aiNode.config.fallbackMessage)
-          : "AI РЅРµ Р±СѓРґРµС‚ РѕС‚РІРµС‡Р°С‚СЊ: РєР»РёРµРЅС‚Сѓ Р±СѓРґРµС‚ РїСЂРµРґР»РѕР¶РµРЅР° РїРѕРјРѕС‰СЊ РѕРїРµСЂР°С‚РѕСЂР°.")
-        : "AI СЃС„РѕСЂРјРёСЂСѓРµС‚ РѕС‚РІРµС‚ С‚РѕР»СЊРєРѕ РїРѕ РІС‹Р±СЂР°РЅРЅС‹Рј РёСЃС‚РѕС‡РЅРёРєР°Рј; РїСЂРё РЅРµРґРѕСЃС‚Р°С‚РєРµ СЃРІРµРґРµРЅРёР№ РїРµСЂРµРґР°СЃС‚ РІРѕРїСЂРѕСЃ РѕРїРµСЂР°С‚РѕСЂСѓ.",
+          : "AI не будет отвечать: клиенту будет предложена помощь оператора.")
+        : "AI сформирует ответ только по выбранным источникам; при недостатке сведений передаст вопрос оператору.",
     citations,
-    input: testMessage || "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ РєР»РёРµРЅС‚Р° РґР»СЏ РїСЂРѕРІРµСЂРєРё.",
+    input: testMessage || "Введите сообщение клиента для проверки.",
     outcome: needsHandoff ? "handoff" : aiNode ? "ai_response" : "message",
     reason: needsHandoff
       ? (readiness.status !== "ready" ? "ai_not_ready" : sources.length === 0 ? "knowledge_not_ready" : "retrieval_empty")

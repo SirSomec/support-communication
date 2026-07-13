@@ -209,6 +209,32 @@ export class AutomationController {
     return this.automationService.testBotScenario({ ...(payload ?? {}), id: scenarioId }, automationContextFromRequest(request));
   }
 
+  @Post("bot-scenarios/:scenarioId/rollback")
+  @RequireTenantOperatorPermission("automation.write")
+  @RequireServiceAdminAction("automation.write")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "rollbackBotScenario", summary: "Roll a published scenario back to an earlier published version" })
+  @ApiParam({ name: "scenarioId", description: "Bot scenario identifier" })
+  @ApiOkResponse({ description: "Scenario rollback envelope", type: AutomationEnvelopeDto })
+  rollbackBotScenario(
+    @Param("scenarioId") scenarioId: string,
+    @Body() payload: { versionId?: string } | null,
+    @Req() request: TenantOperatorRequest
+  ) {
+    return this.automationService.rollbackBotScenarioToVersion(scenarioId, String(payload?.versionId ?? ""), automationContextFromRequest(request));
+  }
+
+  @Post("bot-scenarios/:scenarioId/discard-draft")
+  @RequireTenantOperatorPermission("automation.write")
+  @RequireServiceAdminAction("automation.write")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "discardBotScenarioDraft", summary: "Discard unpublished draft changes of a published scenario" })
+  @ApiParam({ name: "scenarioId", description: "Bot scenario identifier" })
+  @ApiOkResponse({ description: "Draft discard envelope", type: AutomationEnvelopeDto })
+  discardBotScenarioDraft(@Param("scenarioId") scenarioId: string, @Req() request: TenantOperatorRequest) {
+    return this.automationService.discardBotScenarioDraft(scenarioId, automationContextFromRequest(request));
+  }
+
   @Post("bot-scenarios/:scenarioId/sandbox-sessions")
   @RequireTenantOperatorPermission("automation.read")
   @RequireServiceAdminAction("automation.read")

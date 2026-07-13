@@ -18,6 +18,7 @@ export function ScenarioSandboxChat({
   accessReason,
   aiReadiness,
   canManage,
+  mode,
   onToast,
   onVerified,
   scenario
@@ -43,7 +44,7 @@ export function ScenarioSandboxChat({
     setChatError("");
     setExpandedTraces(new Set());
     setRegressionSaved(false);
-  }, [scenarioId]);
+  }, [scenarioId, mode]);
 
   useEffect(() => {
     if (logRef.current) {
@@ -67,7 +68,7 @@ export function ScenarioSandboxChat({
     if (session) {
       return session;
     }
-    const response = await automationService.createBotSandboxSession(scenarioId, {});
+    const response = await automationService.createBotSandboxSession(scenarioId, mode ? { mode } : {});
     if (response.status !== "ok") {
       throw new Error(response.error?.message ?? "Не удалось начать тестовую сессию.");
     }

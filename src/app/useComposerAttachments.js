@@ -6,7 +6,9 @@ const readyStorageStates = new Set(["ready", "upload_complete", "upload_ready", 
 const readyScanStates = new Set(["clean", "scan_clean"]);
 const blockedScanStates = new Set(["blocked", "infected", "scan_blocked"]);
 const failedScanStates = new Set(["error", "failed", "scan_failed"]);
-const defaultStatusPollAttempts = 6;
+// Бюджет опроса должен перекрывать интервал file-scan воркера (10 секунд)
+// плюс время самой проверки, иначе вложение зависает в "uploading".
+const defaultStatusPollAttempts = 20;
 const defaultStatusPollDelayMs = 1500;
 
 export function buildAttachmentUploadPayload(attachment) {
@@ -52,6 +54,12 @@ export async function uploadComposerAttachment(
     let descriptor = response.data;
     let shouldPollScanStatus = false;
     const signedUpload = signedUploadPolicy(response.data?.signedUpload);
+    if (signedUpload && !attachment.file) {
+      return createAttachmentUploadError(
+        attachment,
+        "Файл вложения недоступен в памяти браузера. Удалите вложение и приложите файл заново."
+      );
+    }
     if (signedUpload && attachment.file) {
       await uploadAttachmentFile(attachment.file, signedUpload);
       const fileId = String(response.data.fileId ?? "").trim();
@@ -282,7 +290,7 @@ export function useComposerAttachments({ setToast } = {}) {
       setAttachments((current) =>
         current.map((currentAttachment) =>
           currentAttachment.id === attachment.id
-            ? { ...nextAttachment, previewUrl: currentAttachment.previewUrl }
+            ? preserveAttachmentFile({ ...nextAttachment, previewUrl: currentAttachment.previewUrl }, nextAttachment)
             : currentAttachment
         )
       );
@@ -334,12 +342,12 @@ export function useComposerAttachments({ setToast } = {}) {
       return;
     }
 
-    const retryingAttachment = {
+    const retryingAttachment = preserveAttachmentFile({
       ...attachment,
       error: "",
       progress: 64,
       status: "uploading"
-    };
+    }, attachment);
 
     setAttachments((current) =>
       current.map((attachment) =>

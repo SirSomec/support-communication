@@ -1660,7 +1660,13 @@ function conversationTraceId(service: string, operation: string): string {
 
 function normalizeIdempotencyKey(value: unknown, fallback: string): string {
   const key = String(value ?? "").trim();
-  return key || fallback;
+  if (!key) {
+    return fallback;
+  }
+
+  // Workers forward the key as an idempotency-key HTTP header, and fetch
+  // rejects non-ASCII header values (e.g. Cyrillic file names in client keys).
+  return /^[\x21-\x7e]+$/.test(key) ? key : encodeURIComponent(key);
 }
 
 function requiredTenantId(value: unknown): string | null {

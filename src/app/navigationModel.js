@@ -20,6 +20,6 @@ export const navigationItems = [
   { key: "reports", label: "Отчеты", icon: BarChart3 },
   { key: "quality", label: "Качество", icon: ShieldCheck },
   { key: "automation", label: "Боты", icon: Bot },
-  { key: "audit", label: "Audit", icon: FileClock },
+  { key: "audit", label: "Аудит", icon: FileClock },
   { key: "settings", label: "Настройки", icon: Settings }
 ];

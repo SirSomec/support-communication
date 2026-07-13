@@ -906,3 +906,18 @@ textarea:focus-visible {
 .export-queue-panel {
   margin-bottom: 14px;
 }
+
+.audit-pagination {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.audit-pagination span {
+  color: var(--muted);
+  font-size: 12px;
+}

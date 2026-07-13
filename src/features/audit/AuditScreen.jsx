@@ -1,24 +1,46 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Archive, Download, FileClock, Filter, KeyRound, Link2, ShieldAlert } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
+import { lifecycleEventDetail } from "../../app/conversationApiMapper.js";
 import { auditService } from "../../services/auditService.js";
 import { copyTextToClipboard } from "../../services/clipboardService.js";
 import { MetricTile, ProductScreen, SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
 
-const auditSourceOptions = ["Все источники", "Диалоги", "Отчеты", "Настройки", "Каналы", "Качество", "Боты"];
+const auditSourceOptions = ["Все источники", "Диалоги", "Качество", "Боты", "Каналы"];
 const auditSeverityOptions = ["Все уровни", "critical", "warning", "info"];
-const auditObjectTypeOptions = ["Все объекты", "Диалог", "Экспорт", "Права", "Webhook", "AI", "Бот"];
-const auditPeriodOptions = ["Сегодня", "7 дней", "30 дней", "Retention"];
-const auditRetentionPolicies = [
-  { name: "Privileged actions", coverage: "Service-admin mutations", period: "365 дней" },
-  { name: "Channel failures", coverage: "Webhook and delivery errors", period: "180 дней" },
-  { name: "Exports", coverage: "Report and audit descriptors", period: "90 дней" }
+const auditObjectTypeOptions = ["Все объекты", "Диалог", "Канал"];
+const auditPeriodOptions = ["Сегодня", "7 дней", "30 дней", "Год"];
+const auditUsageGuide = [
+  { name: "Разбор инцидентов", coverage: "Кто и когда изменил статус, назначение или тему обращения", period: "фильтр «Диалоги»" },
+  { name: "Контроль качества", coverage: "Оценки клиентов и ручные проверки с указанием исполнителя", period: "фильтр «Качество»" },
+  { name: "Доказательная база", coverage: "У каждого события неизменяемый ID и trace — на них можно ссылаться в спорных ситуациях", period: "кнопка JSON" }
 ];
+const actorTypeLabels = {
+  client: "Клиент",
+  operator: "Оператор",
+  service_admin: "Сервис-админ",
+  system: "Система",
+  worker: "Бот"
+};
 const severityTone = {
   critical: "warn",
   warning: "hold",
   info: "info"
 };
+const AUDIT_PAGE_SIZE = 20;
+
+function auditPeriodValue(periodFilter) {
+  if (periodFilter === "Сегодня") {
+    return "24h";
+  }
+  if (periodFilter === "7 дней") {
+    return "7d";
+  }
+  if (periodFilter === "Год") {
+    return "365d";
+  }
+  return "30d";
+}
 
 function formatAuditEventCount(count) {
   if (count % 10 === 1 && count % 100 !== 11) {
@@ -34,23 +56,25 @@ function formatAuditEventCount(count) {
 
 function mapAuditEvent(event) {
   const at = new Date(event.at ?? Date.now());
+  const roleLabel = actorTypeLabels[event.actorType] ?? "Система";
+  const data = event.data && typeof event.data === "object" ? event.data : {};
+  const detail = event.objectType === "Диалог"
+    ? lifecycleEventDetail(event.action, { ...data, reason: event.reason })
+    : event.reason || event.action;
   return {
     id: event.id,
     time: at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }),
     date: at.toISOString().slice(0, 10),
-    actor: event.actorName ?? event.actor ?? "system",
-    role: event.actor ?? "system",
+    actor: event.actorName || event.actorId || roleLabel,
+    role: roleLabel,
     action: event.action,
     object: event.target,
-    objectType: event.action?.includes("export") ? "Экспорт" : "Событие",
-    source: event.tenantId ? "Настройки" : "Система",
-    channel: "Система",
+    objectType: event.objectType ?? "Диалог",
+    source: event.source ?? "Диалоги",
     severity: event.severity ?? "info",
     result: event.result ?? "applied",
-    retention: "365 дней",
-    ip: "—",
     eventId: event.id,
-    detail: event.reason ?? event.action,
+    detail,
     related: event.target,
     rawAt: event.at ?? at.toISOString(),
     tenantId: event.tenantId ?? null,
@@ -58,6 +82,11 @@ function mapAuditEvent(event) {
     traceId: event.traceId ?? "",
     immutable: Boolean(event.immutable)
   };
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[";\n]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
 }
 
 export function AuditScreen({ onBack, onToast, access }) {
@@ -71,7 +100,12 @@ export function AuditScreen({ onBack, onToast, access }) {
   const [periodFilter, setPeriodFilter] = useState("Сегодня");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [relatedEvent, setRelatedEvent] = useState(null);
+  const [page, setPage] = useState(1);
   const normalizedQuery = query.trim().toLowerCase();
+
+  useEffect(() => {
+    setPage(1);
+  }, [normalizedQuery, sourceFilter, severityFilter, objectTypeFilter, periodFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,8 +113,8 @@ export function AuditScreen({ onBack, onToast, access }) {
     async function loadEvents() {
       setLoading(true);
       setError("");
-      const response = await auditService.fetchAuditEvents({
-        period: periodFilter === "Retention" ? "365d" : periodFilter === "Сегодня" ? "24h" : periodFilter === "7 дней" ? "7d" : "30d"
+      const response = await auditService.fetchWorkspaceAuditEvents({
+        period: auditPeriodValue(periodFilter)
       });
 
       if (cancelled) {
@@ -88,7 +122,7 @@ export function AuditScreen({ onBack, onToast, access }) {
       }
 
       if (response.status !== "ok") {
-        setError(response.error?.message ?? "Не удалось загрузить audit.");
+        setError(response.error?.message ?? "Не удалось загрузить журнал аудита.");
         setEvents([]);
         setLoading(false);
         return;
@@ -134,28 +168,44 @@ export function AuditScreen({ onBack, onToast, access }) {
     });
   }, [events, normalizedQuery, objectTypeFilter, severityFilter, sourceFilter]);
 
-  const selectedEvent = visibleEvents.find((event) => event.id === selectedEventId) ?? visibleEvents[0] ?? null;
+  const totalPages = Math.max(1, Math.ceil(visibleEvents.length / AUDIT_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedEvents = visibleEvents.slice((currentPage - 1) * AUDIT_PAGE_SIZE, currentPage * AUDIT_PAGE_SIZE);
+  const pageRangeStart = visibleEvents.length ? (currentPage - 1) * AUDIT_PAGE_SIZE + 1 : 0;
+  const pageRangeEnd = Math.min(currentPage * AUDIT_PAGE_SIZE, visibleEvents.length);
+  const selectedEvent = pagedEvents.find((event) => event.id === selectedEventId) ?? pagedEvents[0] ?? null;
   const relatedObjectEvent = relatedEvent && visibleEvents.some((event) => event.id === relatedEvent.id) ? relatedEvent : null;
   const criticalCount = events.filter((event) => event.severity === "critical").length;
   const warningCount = events.filter((event) => event.severity === "warning").length;
   const visibleCriticalCount = visibleEvents.filter((event) => event.severity === "critical").length;
 
-  async function handleExport() {
-    if (!access.canManageSettings || error) {
+  function handleExport() {
+    if (!visibleEvents.length || error) {
       return;
     }
 
-    const response = await auditService.exportAuditEvents({
-      format: "json",
-      period: periodFilter === "Retention" ? "365d" : periodFilter === "Сегодня" ? "24h" : periodFilter === "7 дней" ? "7d" : "30d"
-    });
-
-    if (response.status === "ok") {
-      onToast(`Audit export: ${formatAuditEventCount(visibleEvents.length)} за период "${periodFilter}" поставлены в очередь.`);
-      return;
-    }
-
-    onToast(response.error?.message ?? "Не удалось экспортировать audit.");
+    const header = ["Дата", "Действие", "Кто", "Роль", "Объект", "Источник", "Уровень", "Результат", "Trace", "Event ID"];
+    const rows = visibleEvents.map((event) => [
+      event.rawAt,
+      event.detail,
+      event.actor,
+      event.role,
+      event.object,
+      event.source,
+      event.severity,
+      event.result,
+      event.traceId,
+      event.eventId
+    ]);
+    const csv = [header, ...rows].map((row) => row.map(csvCell).join(";")).join("\r\n");
+    const blob = new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    onToast(`Экспортировано: ${formatAuditEventCount(visibleEvents.length)} за период "${periodFilter}".`);
   }
 
   function handleOpenRelated() {
@@ -177,8 +227,8 @@ export function AuditScreen({ onBack, onToast, access }) {
 
   return (
     <ProductScreen
-      title="Audit"
-      subtitle="Единый журнал действий по диалогам, экспортам, правам, webhooks, AI и ботам."
+      title="Аудит действий"
+      subtitle="Неизменяемый журнал: кто и когда менял диалоги, ставил оценки, запускал ботов и подключал каналы. Для разбора инцидентов и спорных ситуаций."
       onBack={onBack}
       stateItems={createScreenStateItems({
         total: visibleEvents.length,
@@ -189,10 +239,10 @@ export function AuditScreen({ onBack, onToast, access }) {
       })}
       actions={
         <>
-          <select className="inline-select" value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value)} aria-label="Период audit">
+          <select className="inline-select" value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value)} aria-label="Период журнала">
             {auditPeriodOptions.map((option) => <option key={option}>{option}</option>)}
           </select>
-          <button className="primary-action" disabled={!access.canManageSettings || Boolean(error)} onClick={handleExport} title={access.canManageSettings ? "Экспорт audit CSV" : access.reason} type="button">
+          <button className="primary-action" disabled={!visibleEvents.length || Boolean(error)} onClick={handleExport} title={visibleEvents.length ? "Скачать CSV с событиями по текущим фильтрам." : "Нет событий для экспорта."} type="button">
             <Download size={17} />
             Экспорт CSV
           </button>
@@ -201,21 +251,21 @@ export function AuditScreen({ onBack, onToast, access }) {
     >
       {error ? <div className="entity-empty"><strong>{error}</strong></div> : null}
       <div className="metric-strip">
-        <MetricTile icon={<FileClock size={21} />} label="Событий" value={events.length} detail="из всех источников" />
-        <MetricTile icon={<ShieldAlert size={21} />} label="Critical" value={criticalCount} detail="требуют внимания" tone="danger" />
-        <MetricTile icon={<Filter size={21} />} label="Warnings" value={warningCount} detail="проверка старшим" />
-        <MetricTile icon={<KeyRound size={21} />} label="Immutable ID" value="100%" detail="event id у каждого события" />
+        <MetricTile icon={<FileClock size={21} />} label="Событий" value={events.length} detail="за выбранный период" />
+        <MetricTile icon={<ShieldAlert size={21} />} label="Критичные" value={criticalCount} detail="требуют внимания" tone="danger" />
+        <MetricTile icon={<Filter size={21} />} label="Предупреждения" value={warningCount} detail="низкие оценки, повторы, SLA" />
+        <MetricTile icon={<KeyRound size={21} />} label="Неизменяемость" value="100%" detail="event id у каждого события" />
       </div>
 
       <div className="screen-toolbar audit-toolbar">
-        <ToolbarSearch ariaLabel="Поиск audit" placeholder="Поиск по actor, action, object, event id" value={query} onChange={setQuery} />
-        <select className="inline-select" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} aria-label="Источник audit">
+        <ToolbarSearch ariaLabel="Поиск по журналу" placeholder="Поиск: кто, действие, объект, event id" value={query} onChange={setQuery} />
+        <select className="inline-select" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} aria-label="Источник событий">
           {auditSourceOptions.map((option) => <option key={option}>{option}</option>)}
         </select>
-        <select className="inline-select" value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value)} aria-label="Уровень audit">
+        <select className="inline-select" value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value)} aria-label="Уровень события">
           {auditSeverityOptions.map((option) => <option key={option}>{option}</option>)}
         </select>
-        <select className="inline-select" value={objectTypeFilter} onChange={(event) => setObjectTypeFilter(event.target.value)} aria-label="Тип объекта audit">
+        <select className="inline-select" value={objectTypeFilter} onChange={(event) => setObjectTypeFilter(event.target.value)} aria-label="Тип объекта">
           {auditObjectTypeOptions.map((option) => <option key={option}>{option}</option>)}
         </select>
       </div>
@@ -224,8 +274,8 @@ export function AuditScreen({ onBack, onToast, access }) {
         <section className="work-panel">
           <SectionTitle title="Журнал событий" action={`${formatAuditEventCount(visibleEvents.length)} найдено`} />
           <div className="audit-log-list">
-            {loading ? <div className="entity-empty"><strong>Загружаем audit...</strong></div> : null}
-            {!loading ? visibleEvents.map((event) => (
+            {loading ? <div className="entity-empty"><strong>Загружаем журнал...</strong></div> : null}
+            {!loading ? pagedEvents.map((event) => (
               <button
                 className={`audit-log-row ${event.id === selectedEvent?.id ? "selected" : ""}`}
                 key={event.id}
@@ -237,12 +287,12 @@ export function AuditScreen({ onBack, onToast, access }) {
               >
                 <time>{event.time}</time>
                 <span>
-                  <strong>{event.action}</strong>
+                  <strong>{event.detail}</strong>
                   <small>{event.actor} · {event.role}</small>
                 </span>
                 <span>
                   <b>{event.object}</b>
-                  <small>{event.source} · {event.channel}</small>
+                  <small>{event.source} · {event.objectType}</small>
                 </span>
                 <StatusBadge tone={severityTone[event.severity]}>{event.severity}</StatusBadge>
               </button>
@@ -250,10 +300,23 @@ export function AuditScreen({ onBack, onToast, access }) {
             {!loading && !visibleEvents.length ? (
               <div className="entity-empty">
                 <strong>Событий не найдено</strong>
-                <span>Измените фильтры audit или период.</span>
+                <span>Измените фильтры или период.</span>
               </div>
             ) : null}
           </div>
+          {!loading && visibleEvents.length > AUDIT_PAGE_SIZE ? (
+            <footer className="audit-pagination">
+              <button disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)} type="button">
+                Назад
+              </button>
+              <span>
+                Страница {currentPage} из {totalPages} · записи {pageRangeStart}–{pageRangeEnd} из {visibleEvents.length}
+              </span>
+              <button disabled={currentPage >= totalPages} onClick={() => setPage(currentPage + 1)} type="button">
+                Вперед
+              </button>
+            </footer>
+          ) : null}
         </section>
 
         <aside className="audit-detail-panel">
@@ -263,18 +326,18 @@ export function AuditScreen({ onBack, onToast, access }) {
               <header>
                 <div>
                   <span>{selectedEvent.date} · {selectedEvent.time}</span>
-                  <h2>{selectedEvent.action}</h2>
-                  <p>{selectedEvent.detail}</p>
+                  <h2>{selectedEvent.detail}</h2>
+                  <p>{selectedEvent.action}</p>
                 </div>
                 <StatusBadge tone={severityTone[selectedEvent.severity]}>{selectedEvent.result}</StatusBadge>
               </header>
               <dl>
-                <div><dt>Actor</dt><dd>{selectedEvent.actor}</dd></div>
-                <div><dt>Object</dt><dd>{selectedEvent.object}</dd></div>
-                <div><dt>Source</dt><dd>{selectedEvent.source}</dd></div>
-                <div><dt>Channel</dt><dd>{selectedEvent.channel}</dd></div>
-                <div><dt>IP</dt><dd>{selectedEvent.ip}</dd></div>
-                <div><dt>Retention</dt><dd>{selectedEvent.retention}</dd></div>
+                <div><dt>Кто</dt><dd>{selectedEvent.actor} ({selectedEvent.role})</dd></div>
+                <div><dt>Объект</dt><dd>{selectedEvent.object}</dd></div>
+                <div><dt>Источник</dt><dd>{selectedEvent.source}</dd></div>
+                <div><dt>Тип объекта</dt><dd>{selectedEvent.objectType}</dd></div>
+                <div><dt>Trace</dt><dd>{selectedEvent.traceId || "—"}</dd></div>
+                <div><dt>Event ID</dt><dd>{selectedEvent.eventId}</dd></div>
               </dl>
               <footer>
                 <button onClick={handleOpenRelated} type="button"><Link2 size={16} /> Открыть объект</button>
@@ -284,7 +347,7 @@ export function AuditScreen({ onBack, onToast, access }) {
           ) : (
             <section className="work-panel audit-empty-detail">
               <SectionTitle title="Деталка события" action="нет события" />
-              <p>Выборка пуста. Измените фильтры, чтобы увидеть immutable event id и детали события.</p>
+              <p>Выборка пуста. Измените фильтры, чтобы увидеть детали события и его неизменяемый event id.</p>
             </section>
           )}
 
@@ -292,35 +355,35 @@ export function AuditScreen({ onBack, onToast, access }) {
             <section className="work-panel audit-related-object-panel" data-testid="audit-related-object-panel">
               <SectionTitle title="Связанный объект" action={relatedObjectEvent.objectType} />
               <dl>
-                <div><dt>Object</dt><dd>{relatedObjectEvent.related}</dd></div>
+                <div><dt>Объект</dt><dd>{relatedObjectEvent.related}</dd></div>
                 <div><dt>Event ID</dt><dd>{relatedObjectEvent.eventId}</dd></div>
-                <div><dt>Action</dt><dd>{relatedObjectEvent.action}</dd></div>
-                <div><dt>Actor</dt><dd>{relatedObjectEvent.actor}</dd></div>
+                <div><dt>Действие</dt><dd>{relatedObjectEvent.detail}</dd></div>
+                <div><dt>Кто</dt><dd>{relatedObjectEvent.actor}</dd></div>
                 <div><dt>Tenant</dt><dd>{relatedObjectEvent.tenantId ?? "-"}</dd></div>
-                <div><dt>User</dt><dd>{relatedObjectEvent.userId ?? "-"}</dd></div>
+                <div><dt>Пользователь</dt><dd>{relatedObjectEvent.userId ?? "-"}</dd></div>
                 <div><dt>Trace</dt><dd>{relatedObjectEvent.traceId || "-"}</dd></div>
-                <div><dt>Source</dt><dd>{relatedObjectEvent.source}</dd></div>
-                <div><dt>Result</dt><dd>{relatedObjectEvent.result}</dd></div>
-                <div><dt>Immutable</dt><dd>{relatedObjectEvent.immutable ? "immutable" : "mutable"}</dd></div>
+                <div><dt>Источник</dt><dd>{relatedObjectEvent.source}</dd></div>
+                <div><dt>Результат</dt><dd>{relatedObjectEvent.result}</dd></div>
+                <div><dt>Журнал</dt><dd>{relatedObjectEvent.immutable ? "неизменяемый" : "изменяемый"}</dd></div>
               </dl>
               <footer>
-                <span>Источник открыт из immutable audit-события без потери контекста фильтра.</span>
+                <span>Объект открыт из события журнала — фильтры не сбрасываются.</span>
                 <button onClick={() => setRelatedEvent(null)} type="button">Закрыть</button>
               </footer>
             </section>
           ) : null}
 
           <section className="work-panel audit-retention-panel">
-            <SectionTitle title="Retention policy" action="redaction-ready" />
+            <SectionTitle title="Зачем нужен аудит" action="журнал неизменяем" />
             <div>
-              {auditRetentionPolicies.map((policy) => (
-                <article key={policy.name}>
+              {auditUsageGuide.map((usage) => (
+                <article key={usage.name}>
                   <Archive size={17} />
                   <span>
-                    <strong>{policy.name}</strong>
-                    <small>{policy.coverage}</small>
+                    <strong>{usage.name}</strong>
+                    <small>{usage.coverage}</small>
                   </span>
-                  <b>{policy.period}</b>
+                  <b>{usage.period}</b>
                 </article>
               ))}
             </div>

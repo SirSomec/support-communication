@@ -1,4 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
+import { WorkspaceAuditModule } from "./audit/workspace-audit.module.js";
 import { AutomationModule } from "./automation/automation.module.js";
 import { BillingModule } from "./billing/billing.module.js";
 import { ConversationModule } from "./conversation/conversation.module.js";
@@ -21,6 +22,7 @@ import { KnowledgeSourcesModule } from "./knowledge-sources/knowledge-sources.mo
 
 @Module({
   imports: [
+    WorkspaceAuditModule,
     AutomationModule,
     BillingModule,
     ConversationModule,

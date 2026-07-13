@@ -167,7 +167,7 @@ function mapConversationTimeline(messages, lifecycleEvents) {
   });
 }
 
-function lifecycleEventDetail(eventType, data) {
+export function lifecycleEventDetail(eventType, data) {
   const labels = {
     "assignment.changed": "Изменен ответственный оператор",
     "conversation.created": "Создан диалог",

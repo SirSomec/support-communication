@@ -3,6 +3,14 @@ import { apiRequest, createApiErrorEnvelope } from "./apiClient.js";
 const SERVICE = "auditService";
 
 export const auditService = {
+  async fetchWorkspaceAuditEvents(filters = {}) {
+    return apiRequest("/audit/events", {
+      operation: "fetchWorkspaceAuditEvents",
+      query: filters,
+      service: SERVICE
+    });
+  },
+
   async fetchAuditEvents(filters = {}) {
     return apiRequest("/service-admin/audit-events", {
       authMode: "service-admin",
@@ -40,7 +48,7 @@ export const auditService = {
     return {
       id: SERVICE,
       status: "ready",
-      operations: ["fetchAuditEvents", "exportAuditEvents", "redactAuditEvent"],
+      operations: ["fetchWorkspaceAuditEvents", "fetchAuditEvents", "exportAuditEvents", "redactAuditEvent"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
       note: "Connected to API Gateway routes."

@@ -118,7 +118,7 @@ export class BotRuntimeService {
       priority: version.priority ?? scenario.priority,
       status: "published",
       sourceBindings: version.sourceBindings ?? scenario.sourceBindings,
-      triggerRules: version.triggerRules ?? scenario.triggerRules
+      triggerRules: version.triggerRules?.length ? version.triggerRules : scenario.triggerRules
     });
   }
 
@@ -162,7 +162,7 @@ export class BotRuntimeService {
         sourceBindings: version.sourceBindings ?? scenario.sourceBindings,
         triggerRules: effectiveTriggerRules({
           ...scenario,
-          triggerRules: version.triggerRules ?? scenario.triggerRules,
+          triggerRules: version.triggerRules?.length ? version.triggerRules : scenario.triggerRules,
           flowNodes: version.flowNodes?.length ? version.flowNodes : scenario.flowNodes
         })
       },
@@ -333,13 +333,16 @@ function withEffectiveTriggerRules(scenario: BotScenario, versions: AutomationBo
     .filter((item) => item.tenantId === scenario.tenantId && item.scenarioId === scenario.id && item.status === "published")
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const version = published.find((item) => item.versionId === scenario.activeVersionId) ?? published[0];
+  // Repository normalization stores "no version-level rules" as an empty array
+  // (a null Prisma column also reads back as []), so an empty array must fall
+  // back to the scenario rules instead of shadowing them.
   return {
     ...scenario,
     flowNodes: version?.flowNodes?.length ? version.flowNodes : scenario.flowNodes,
     triggerRules: effectiveTriggerRules({
       ...scenario,
       flowNodes: version?.flowNodes?.length ? version.flowNodes : scenario.flowNodes,
-      triggerRules: version?.triggerRules ?? scenario.triggerRules
+      triggerRules: version?.triggerRules?.length ? version.triggerRules : scenario.triggerRules
     })
   };
 }

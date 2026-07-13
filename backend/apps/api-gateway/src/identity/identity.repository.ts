@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { type ServiceAdminSessionRecord } from "@support-communication/auth-context";
 import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
 import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
@@ -204,7 +204,7 @@ export interface IdentityAuthRecoveryTokenRecord {
 }
 
 export interface IdentityPasswordCredential {
-  algorithm: "sha256";
+  algorithm: "sha256" | "scrypt";
   email: string;
   hash: string;
   subjectId: string;
@@ -4628,8 +4628,68 @@ function clone<T>(value: T): T {
   return value === undefined ? value : JSON.parse(JSON.stringify(value)) as T;
 }
 
+const SCRYPT_COST = 16384;
+const SCRYPT_BLOCK_SIZE = 8;
+const SCRYPT_PARALLELIZATION = 1;
+const SCRYPT_KEY_LENGTH = 32;
+const SCRYPT_SALT_LENGTH = 16;
+const SCRYPT_MAX_MEMORY = 64 * 1024 * 1024;
+
+export const PASSWORD_CREDENTIAL_ALGORITHM = "scrypt" as const;
+
 export function hashPasswordCredential(password: string): string {
-  return `sha256:${createHash("sha256").update(password).digest("hex")}`;
+  const salt = randomBytes(SCRYPT_SALT_LENGTH);
+  const key = scryptSync(password, salt, SCRYPT_KEY_LENGTH, {
+    N: SCRYPT_COST,
+    maxmem: SCRYPT_MAX_MEMORY,
+    p: SCRYPT_PARALLELIZATION,
+    r: SCRYPT_BLOCK_SIZE
+  });
+  return `scrypt:${SCRYPT_COST}:${SCRYPT_BLOCK_SIZE}:${SCRYPT_PARALLELIZATION}:${salt.toString("hex")}:${key.toString("hex")}`;
+}
+
+export function isLegacyPasswordCredential(credential: IdentityPasswordCredential | undefined): boolean {
+  if (!credential) {
+    return false;
+  }
+  return credential.algorithm === "sha256" || String(credential.hash ?? "").startsWith("sha256:");
+}
+
+function verifyScryptPasswordHash(password: string, storedHash: string): boolean {
+  const parts = storedHash.split(":");
+  if (parts.length !== 6 || parts[0] !== "scrypt") {
+    return false;
+  }
+
+  const cost = Number(parts[1]);
+  const blockSize = Number(parts[2]);
+  const parallelization = Number(parts[3]);
+  const saltHex = parts[4];
+  const keyHex = parts[5];
+  if (
+    !Number.isInteger(cost) || cost < 2
+    || !Number.isInteger(blockSize) || blockSize < 1
+    || !Number.isInteger(parallelization) || parallelization < 1
+    || !saltHex || !keyHex || keyHex.length % 2 !== 0
+  ) {
+    return false;
+  }
+
+  try {
+    const expected = Buffer.from(keyHex, "hex");
+    if (expected.length === 0) {
+      return false;
+    }
+    const actual = scryptSync(password, Buffer.from(saltHex, "hex"), expected.length, {
+      N: cost,
+      maxmem: SCRYPT_MAX_MEMORY,
+      p: parallelization,
+      r: blockSize
+    });
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
 }
 
 export function hashServiceAdminToken(token: string): string {
@@ -4736,12 +4796,17 @@ function hasActiveServiceAdminTokenHashConflict(
 }
 
 export function verifyPasswordCredential(password: string, credential: IdentityPasswordCredential | undefined): boolean {
-  if (!credential || credential.algorithm !== "sha256") {
+  if (!credential || (credential.algorithm !== "sha256" && credential.algorithm !== "scrypt")) {
     return false;
   }
 
-  const expected = Buffer.from(credential.hash);
-  const actual = Buffer.from(hashPasswordCredential(password));
+  const storedHash = String(credential.hash ?? "");
+  if (storedHash.startsWith("scrypt:")) {
+    return verifyScryptPasswordHash(password, storedHash);
+  }
+
+  const expected = Buffer.from(storedHash);
+  const actual = Buffer.from(`sha256:${createHash("sha256").update(password).digest("hex")}`);
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
@@ -5144,12 +5209,12 @@ function toPrismaAuthRecoveryTokenInput(token: IdentityAuthRecoveryTokenRecord):
 }
 
 function toPasswordCredential(row: PrismaPasswordCredentialRow): IdentityPasswordCredential | undefined {
-  if (row.algorithm !== "sha256") {
+  if (row.algorithm !== "sha256" && row.algorithm !== "scrypt") {
     return undefined;
   }
 
   return {
-    algorithm: "sha256",
+    algorithm: row.algorithm,
     email: normalizeEmail(row.email),
     hash: row.hash,
     subjectId: row.subjectId,

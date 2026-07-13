@@ -33,7 +33,7 @@ export function createSeededIdentityRepository(base?: Partial<IdentityState>): I
 function seedIdentityPasswordCredentials(): IdentityPasswordCredential[] {
   return [
     {
-      algorithm: "sha256",
+      algorithm: "scrypt",
       email: serviceAdminSession.adminEmail,
       hash: hashPasswordCredential("correct-password"),
       subjectId: serviceAdminSession.adminId,
@@ -41,7 +41,7 @@ function seedIdentityPasswordCredentials(): IdentityPasswordCredential[] {
       version: 1
     },
     ...tenantUsers.map((user) => ({
-      algorithm: "sha256" as const,
+      algorithm: "scrypt" as const,
       email: user.email,
       hash: hashPasswordCredential("correct-password"),
       subjectId: user.id,

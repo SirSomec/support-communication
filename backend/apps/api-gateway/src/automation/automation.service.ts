@@ -28,7 +28,7 @@ import {
   type BotAiFeedbackRecord,
   type BotFeedbackRepositoryPort
 } from "./bot-feedback.repository.js";
-import { featureFlags as platformFeatureFlags } from "../platform/seed-catalog.js";
+import { PlatformRepository } from "../platform/platform.repository.js";
 import { metricsRegistry } from "@support-communication/observability";
 
 const AUTOMATION_SERVICE = "automationService";
@@ -119,7 +119,8 @@ export class AutomationService {
     private readonly automationRepository: AutomationRepository = AutomationRepository.default(),
     private readonly exposureRepository: ProactiveExposureRepository = ProactiveExposureRepository.default(),
     private readonly knowledgeSourceRepository: KnowledgeSourceRepository = KnowledgeSourceRepository.default(),
-    private readonly botFeedbackRepository: BotFeedbackRepositoryPort = BotFeedbackRepository.default()
+    private readonly botFeedbackRepository: BotFeedbackRepositoryPort = BotFeedbackRepository.default(),
+    private readonly platformRepository: PlatformRepository = PlatformRepository.default()
   ) {
     this.scenarios = [];
     this.rules = [];
@@ -951,7 +952,9 @@ export class AutomationService {
 
   async handleBotRuntimeInboundEvent(event: BotRuntimeInboundEvent, options: BotRuntimeOptions = {}) {
     const featureFlags = options.featureFlags
-      ?? (String(process.env.BOT_AI_AGENTS_PILOT_ENFORCE ?? "").trim() === "1" ? platformFeatureFlags : undefined);
+      ?? (String(process.env.BOT_AI_AGENTS_PILOT_ENFORCE ?? "").trim() === "1"
+        ? await this.platformRepository.listFeatureFlagsAsync()
+        : undefined);
     return new BotRuntimeService(this.automationRepository, { ...options, featureFlags }).handleInboundEvent(event);
   }
 

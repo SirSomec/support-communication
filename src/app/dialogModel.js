@@ -94,7 +94,7 @@ const allowedAttachmentExtensions = ["pdf", "png", "jpg", "jpeg", "webp"];
 const imageAttachmentExtensions = ["png", "jpg", "jpeg", "webp"];
 
 export function createAuditEvent({
-  actor = "Иван П.",
+  actor = "Оператор",
   detail,
   eventKind = "status",
   fromStatus,

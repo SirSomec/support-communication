@@ -11,6 +11,7 @@ export function useDialogActions({
   composeMode,
   draft,
   isClosed,
+  operator = null,
   refreshInbox,
   selected,
   selectedStatus,
@@ -24,6 +25,8 @@ export function useDialogActions({
   topics,
   startRescueRequest = routingService.startRescue
 }) {
+  const operatorName = String(operator?.name ?? "").trim() || "Оператор";
+
   function handleTopicChange(value) {
     const previousTopic = topics[selected.id] ?? "";
     setTopics((current) => ({ ...current, [selected.id]: value }));
@@ -139,11 +142,11 @@ export function useDialogActions({
       });
     } else {
       appendMessage(selected.id, {
-        actor: "Иван П.",
-        detail: `${actionConfig.title}: Иван П.`,
+        actor: operatorName,
+        detail: `${actionConfig.title}: ${operatorName}`,
         eventKind: "action",
         type: "event",
-        text: `${actionConfig.title}: Иван П.`,
+        text: `${actionConfig.title}: ${operatorName}`,
         time: "сейчас"
       });
     }
@@ -187,7 +190,7 @@ export function useDialogActions({
       side: composeMode === "internal" ? undefined : "agent",
       text: draft.trim() || "Отправлено вложение",
       attachments: readyAttachments,
-      author: composeMode === "internal" ? "Иван П." : undefined,
+      author: composeMode === "internal" ? operatorName : undefined,
       time: "сейчас"
     }, {
       optimistic: false,

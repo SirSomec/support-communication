@@ -11,7 +11,7 @@
     {
       "algorithm": "scrypt",
       "email": "service-admin@example.com",
-      "hash": "scrypt:16384:8:1:2551ea026fadae49bc0a44035e73acd4:0beabe57bda41ad596064dc9821abcdea5e32e66a349e8d3873e044f9e02f70e",
+      "hash": "scrypt:16384:8:1:a09595dac710c742ea635c4e7ac6b77d:12fba3b5f6fade102a12a8430b5d1be18bab28d54e3335b28a8e89eff04329c8",
       "subjectId": "svc-admin-001",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -19,7 +19,7 @@
     {
       "algorithm": "scrypt",
       "email": "mira@northstar.example",
-      "hash": "scrypt:16384:8:1:e0b492baec166753d7117eaf0bdc7615:aef53144a35d39fc335ca071603978e7e4216ba410e5558a5c933599fa27ee84",
+      "hash": "scrypt:16384:8:1:b256f8339127370cf6109750696edb6d:a1ff75f6d4099795f1a0f1ee0fb48236cc7495a1c35e3c031b86f43f4d41810f",
       "subjectId": "usr-ns-owner",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -27,7 +27,7 @@
     {
       "algorithm": "scrypt",
       "email": "pavel@northstar.example",
-      "hash": "scrypt:16384:8:1:1bcb453ab62097183122ae663717628d:549789370e020a126ca5c122b7bee997b2e1c6a7f98a1d09efba3c1e3d86d83e",
+      "hash": "scrypt:16384:8:1:29a8020ea68add8325417d9583129504:d187b5835d4357e04402940297a27754cd52454a349ebea8eead727396fbfec1",
       "subjectId": "usr-ns-agent",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -35,7 +35,7 @@
     {
       "algorithm": "scrypt",
       "email": "multi@example.com",
-      "hash": "scrypt:16384:8:1:93cc6adce1704f2bf76735dc5eef3a7e:15f10f8309e8f7101fa15a947bdc44d8590a9e32be695154dd1e2623f33debd0",
+      "hash": "scrypt:16384:8:1:9e7386a0fb5457e013cc4a5b1b6ffdcd:c9728b66ae009e5fd9d77ba98020ff3ece250399b8e341bf55966e2f5dda07df",
       "subjectId": "usr-ns-multi",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -43,7 +43,7 @@
     {
       "algorithm": "scrypt",
       "email": "sergey@volga.example",
-      "hash": "scrypt:16384:8:1:37a928d27a01b1de58204805b3fdaf82:36fd09dbb68acbc019d01edfdac067f1d721ad9802cfad0c65cdf1b85ec1ae79",
+      "hash": "scrypt:16384:8:1:e8501123dbbe202d975b44b3c9cf65d1:00c490f59d8fe3704faa833d20cf40b84f414f908a61eeef0ca154eade83b189",
       "subjectId": "usr-volga-admin",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -51,7 +51,7 @@
     {
       "algorithm": "scrypt",
       "email": "ops@aurora.example",
-      "hash": "scrypt:16384:8:1:73fc384cb6acfa7171a33da4fcb4fed0:1c6a1a5a35300fc953e96c028a03d5df9b3455ab355ad3009fe03ad5658b8d55",
+      "hash": "scrypt:16384:8:1:e063055e739179a83953972e5fa02b7c:edaba70e26e2008c073c754a47dd949aa8a2e5ad4afca47f2f8f15b911711d36",
       "subjectId": "usr-aurora-risk",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -59,7 +59,7 @@
     {
       "algorithm": "scrypt",
       "email": "nikolai@lumen.example",
-      "hash": "scrypt:16384:8:1:a2151db686785f742b61319af346feba:562ff04d86ad55df66eeed0dcb23d2464a78942bf35feeb19561de984e073b6e",
+      "hash": "scrypt:16384:8:1:ac5a597c4e21b416063688412aef17cc:8518328745ec9f25fa806f24e8daa21d8eb2ed843380f4eea9d824e7d902ef64",
       "subjectId": "usr-lumen-invite",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -67,7 +67,7 @@
     {
       "algorithm": "scrypt",
       "email": "multi@example.com",
-      "hash": "scrypt:16384:8:1:74c34ef7933e080eb88c169b53c9300e:ce9b5d531a198a657d27d3545d2586ee67945c2cc00f543693157eff8f73cf38",
+      "hash": "scrypt:16384:8:1:9ad8dff67d0e2bd6557e398d60377267:138dac62209ae444854aa5bcf24449082d9400c5cd5c81a4c20c53eeb8304b83",
       "subjectId": "usr-lumen-multi",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1

@@ -10,9 +10,14 @@ rmSync(runtimeDir, { force: true, recursive: true });
 mkdirSync(runtimeDir, { recursive: true });
 
 const storeFiles = {
+  AGENT_SESSION_STORE_FILE: "agent-session-state.json",
+  AI_CONNECTIONS_STORE_FILE: "ai-connections.json",
+  AI_USAGE_STORE_FILE: "ai-usage.json",
   AUTOMATION_STORE_FILE: "automation.json",
   BILLING_STORE_FILE: "billing.json",
   BOT_SANDBOX_STORE_FILE: "bot-sandbox.json",
+  KNOWLEDGE_SOURCES_STORE_FILE: "knowledge-sources.json",
+  UNANSWERED_QUESTIONS_STORE_FILE: "unanswered-questions.json",
   CONVERSATION_STORE_FILE: "conversation.json",
   IDENTITY_STORE_FILE: "identity.json",
   INTEGRATION_STORE_FILE: "integration.json",

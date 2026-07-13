@@ -10,6 +10,7 @@ import { deriveKnowledgeSourceReadiness, type KnowledgeSourceKind, type Knowledg
 import { validateUrlKnowledgeSourceConfig } from "./url-source-config.js";
 import { ingestKnowledgeDocument } from "./document-ingestion.js";
 import { UrlSourcePolicyRepository, type UrlSourcePolicy } from "./url-source-policy.repository.js";
+import { AutomationRepository } from "../automation/automation.repository.js";
 
 const SERVICE = "knowledgeSourcesService";
 const URL_SOURCE_MAX_BYTES = 1_000_000;
@@ -32,11 +33,98 @@ export class KnowledgeSourcesService {
     private readonly workspaceRepository = WorkspaceRepository.default(),
     private readonly options: { fetch?: UrlSourceTransport; resolveHostname?: (hostname: string) => Promise<Array<{ address: string }>> } = {},
     private readonly policyRepository = UrlSourcePolicyRepository.default(),
-    private readonly identityRepository = IdentityRepository.default()
+    private readonly identityRepository = IdentityRepository.default(),
+    private readonly automationRepository = AutomationRepository.default()
   ) {}
 
-  list(tenantId: string): BackendEnvelope<Record<string, unknown>> {
-    return envelope("listKnowledgeSources", tenantId, { sources: this.repository.list(tenantId) });
+  async list(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return envelope("listKnowledgeSources", tenantId, {
+      sources: this.repository.list(tenantId),
+      usage: await this.scenarioUsage(tenantId)
+    });
+  }
+
+  /** BAI-822: где используется каждый источник — по обычным привязкам и черновикам сценариев. */
+  private async scenarioUsage(tenantId: string): Promise<Record<string, Array<{ name: string; scenarioId: string; status: string }>>> {
+    const state = await this.automationRepository.readStateAsync();
+    const usage: Record<string, Array<{ name: string; scenarioId: string; status: string }>> = {};
+    for (const scenario of state.botScenarios) {
+      if (scenario.tenantId !== tenantId || scenario.status === "archived") continue;
+      const bindings = [...(scenario.sourceBindings ?? []), ...(scenario.draft?.sourceBindings ?? [])];
+      for (const sourceId of new Set(bindings.map((binding) => binding.sourceId).filter(Boolean))) {
+        usage[sourceId] = [...(usage[sourceId] ?? []), { name: scenario.name, scenarioId: scenario.id, status: scenario.status }];
+      }
+    }
+    return usage;
+  }
+
+  private async boundScenarios(tenantId: string, sourceId: string): Promise<Array<{ name: string; scenarioId: string; status: string }>> {
+    return (await this.scenarioUsage(tenantId))[sourceId] ?? [];
+  }
+
+  async update(tenantId: string, sourceId: string, input: { title?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const current = this.repository.find(tenantId, sourceId);
+    if (!current) return invalid("updateKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
+    const title = String(input.title ?? "").trim();
+    if (!title) return invalid("updateKnowledgeSource", tenantId, "knowledge_source_title_required", "Укажите название источника.");
+    const source = this.repository.save({ ...current, title, updatedAt: new Date().toISOString(), version: current.version + 1 });
+    return envelope("updateKnowledgeSource", tenantId, { source });
+  }
+
+  async enable(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const current = this.repository.find(tenantId, sourceId);
+    if (!current) return invalid("enableKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
+    if (current.status !== "disabled") return invalid("enableKnowledgeSource", tenantId, "knowledge_source_not_disabled", "Включить можно только отключённый источник.");
+    const hasIndexedContent = Array.isArray(current.metadata.chunks) && current.metadata.chunks.length > 0;
+    const now = new Date().toISOString();
+    const source = this.repository.save({
+      ...current,
+      disabledAt: null,
+      status: hasIndexedContent ? "ready" : "draft",
+      updatedAt: now,
+      version: current.version + 1
+    });
+    return envelope("enableKnowledgeSource", tenantId, { source });
+  }
+
+  async archive(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const current = this.repository.find(tenantId, sourceId);
+    if (!current) return invalid("archiveKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
+    const bound = await this.boundScenarios(tenantId, sourceId);
+    if (bound.length) {
+      return invalid("archiveKnowledgeSource", tenantId, "knowledge_source_in_use", `Источник привязан к сценариям: ${bound.map((item) => item.name).join(", ")}. Сначала отвяжите его.`, { scenarios: bound });
+    }
+    const now = new Date().toISOString();
+    const source = this.repository.save({ ...current, archivedAt: now, status: "archived", updatedAt: now, version: current.version + 1 });
+    return envelope("archiveKnowledgeSource", tenantId, { source });
+  }
+
+  async remove(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const current = this.repository.find(tenantId, sourceId);
+    if (!current) return invalid("removeKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
+    if (current.status !== "archived") return invalid("removeKnowledgeSource", tenantId, "knowledge_source_not_archived", "Сначала переместите источник в архив.");
+    const bound = await this.boundScenarios(tenantId, sourceId);
+    if (bound.length) {
+      return invalid("removeKnowledgeSource", tenantId, "knowledge_source_in_use", `Источник привязан к сценариям: ${bound.map((item) => item.name).join(", ")}.`, { scenarios: bound });
+    }
+    this.repository.delete(tenantId, sourceId);
+    return envelope("removeKnowledgeSource", tenantId, { deleted: true, sourceId });
+  }
+
+  /** BAI-825: «что именно знает бот» — проиндексированные фрагменты без выдачи целого документа. */
+  preview(tenantId: string, sourceId: string): BackendEnvelope<Record<string, unknown>> {
+    const current = this.repository.find(tenantId, sourceId);
+    if (!current) return invalid("previewKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
+    const chunks = Array.isArray(current.metadata.chunks) ? current.metadata.chunks as Array<{ content?: string; id?: string }> : [];
+    const extractedText = typeof current.metadata.extractedText === "string" ? current.metadata.extractedText : "";
+    return envelope("previewKnowledgeSource", tenantId, {
+      chunkCount: chunks.length,
+      chunks: chunks.slice(0, 8).map((chunk, index) => ({ content: String(chunk.content ?? "").slice(0, 400), id: String(chunk.id ?? `chunk_${index + 1}`) })),
+      contentChecksum: current.contentChecksum,
+      extractedTextPreview: extractedText.slice(0, 1_200),
+      language: typeof current.metadata.language === "string" ? current.metadata.language : null,
+      sourceId: current.id
+    });
   }
 
   async create(tenantId: string, input: KnowledgeSourceCreateInput): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -50,7 +138,11 @@ export class KnowledgeSourcesService {
     let approvalStatus: KnowledgeSourceRecord["approvalStatus"] = "pending";
     let metadata: Record<string, unknown> = {};
 
-    if (kind === "document") {
+    if (kind === "document" && !sourceRef && sourceConfig.upload === true) {
+      // BAI-823: документ-файл без статьи — черновик, который наполняется через
+      // существующий scan-clean attachment-пайплайн (enqueueAttachmentIngestion).
+      sourceConfig = { upload: true };
+    } else if (kind === "document") {
       if (!sourceRef) return invalid("createKnowledgeSource", tenantId, "knowledge_article_required", "Choose a published knowledge article.");
       const article = await this.workspaceRepository.findKnowledgeArticle(sourceRef, { tenantId });
       if (!article || article.status !== "published") return invalid("createKnowledgeSource", tenantId, "knowledge_article_not_ready", "The selected article must be published before it can answer clients.");

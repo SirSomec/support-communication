@@ -73,9 +73,12 @@ export class KnowledgeRetrievalService {
         candidates.push({ citation: { endOffset: chunk.endOffset, sourceId: source.id, sourceVersion: source.version, startOffset: chunk.startOffset, title: source.title }, content: chunk.content, score });
       }
     }
-    // Short/typoed queries can score 0 against ready sources; still surface a lead chunk
+    // Short/typoed queries can score 0 against ready sources; surface a lead chunk
     // so AI bots can answer instead of hard-failing with bot_ai_knowledge_not_ready.
-    if (candidates.length === 0) {
+    // Guarded by word-prefix overlap: без единого морфологически близкого слова
+    // («доставка»/«доставку») это был бы ответ не по теме, а не ответ по знаниям.
+    const queryPrefixes = queryTerms.map((term) => term.slice(0, 4)).filter((prefix) => prefix.length >= 4);
+    if (candidates.length === 0 && queryPrefixes.length > 0) {
       for (const binding of input.sourceBindings) {
         const source = this.sources.find(input.tenantId, binding.sourceId);
         if (!source || !isKnowledgeSourceRetrievalEligible(source)) continue;
@@ -83,6 +86,8 @@ export class KnowledgeRetrievalService {
         const text = await sourceText(source, this.workspace, input.tenantId);
         const [chunk] = chunks(text);
         if (!chunk?.content) continue;
+        const chunkTerms = terms(chunk.content);
+        if (!chunkTerms.some((term) => queryPrefixes.some((prefix) => term.startsWith(prefix)))) continue;
         candidates.push({
           citation: {
             endOffset: chunk.endOffset,
@@ -122,7 +127,14 @@ export class KnowledgeRetrievalService {
 }
 
 async function sourceText(source: ReturnType<KnowledgeSourceRepository["find"]> & {}, workspace: WorkspaceRepository, tenantId: string): Promise<string> {
-  if (Array.isArray(source.metadata.chunks)) return source.metadata.chunks.map((item) => typeof item === "string" ? item : "").filter(Boolean).join("\n\n");
+  // Чанки исторически хранились строками; ingestion (BAI-402+) пишет объекты
+  // {content, offsets}. Поддерживаем оба вида — иначе document-источники немы.
+  if (Array.isArray(source.metadata.chunks)) {
+    return source.metadata.chunks
+      .map((item) => typeof item === "string" ? item : String((item as { content?: unknown })?.content ?? ""))
+      .filter(Boolean)
+      .join("\n\n");
+  }
   if (source.kind === "url") return String(source.metadata.extractedText ?? "");
   if (!source.sourceRef) return "";
   const article = await workspace.findKnowledgeArticle(source.sourceRef, { tenantId });

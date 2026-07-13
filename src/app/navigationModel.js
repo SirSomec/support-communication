@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  BookOpen,
   Bot,
   ClipboardList,
   FileClock,
@@ -19,6 +20,7 @@ export const navigationItems = [
   { key: "visitors", label: "Визиты", icon: Zap },
   { key: "reports", label: "Отчеты", icon: BarChart3 },
   { key: "quality", label: "Качество", icon: ShieldCheck },
+  { key: "knowledge", label: "Знания", icon: BookOpen },
   { key: "automation", label: "Боты", icon: Bot },
   { key: "audit", label: "Аудит", icon: FileClock },
   { key: "settings", label: "Настройки", icon: Settings }

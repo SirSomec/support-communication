@@ -711,12 +711,14 @@ test("draft switch warning preserves or discards unsent draft", async ({ page })
 test("knowledge editor supports article draft status and preview", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
-  await openSection(page, "Качество");
+  await openSection(page, "Знания");
 
-  await page.locator(".knowledge-row").filter({ hasText: "Delivery tracking" }).click();
-  await expect(page.locator(".knowledge-preview")).toContainText("Delivery tracking");
+  // BAI-820/821: статьи переехали в раздел «Знания», вкладка «Статьи».
+  await expect(page.locator(".knowledge-tabs")).toContainText("Вопросы без ответа");
+  await page.locator(".knowledge-row").filter({ hasText: "Order tracking" }).click();
+  await expect(page.locator(".knowledge-preview")).toContainText("Order tracking");
 
-  await page.locator(".knowledge-editor-form input").fill("Delivery tracking v5");
+  await page.locator(".knowledge-editor-form input").fill("Order tracking v5");
   const knowledgeDraftPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/knowledge/")
     && response.url().includes("/drafts")
@@ -747,7 +749,7 @@ test("knowledge editor supports article draft status and preview", async ({ page
   expect(submitReviewPayload.data.approvalDecision.immutable).toBeTruthy();
   await expect(page.locator(".toast")).toContainText("отправлена на проверку");
 
-  await expect(page.locator(".knowledge-preview")).toContainText("Delivery tracking v5");
+  await expect(page.locator(".knowledge-preview")).toContainText("Order tracking v5");
   await expect(page.locator(".knowledge-preview")).toContainText("review");
 
   await expect(page.locator(".knowledge-governance-panel").filter({ hasText: "Вложения" }).getByRole("button", { name: /Добавить/ })).toBeEnabled();
@@ -780,9 +782,48 @@ test("knowledge editor supports article draft status and preview", async ({ page
 
   await page.locator(".knowledge-preview-toolbar button").filter({ hasText: "Self-service" }).click();
   await page.locator(".knowledge-self-service-preview input").fill("delivery");
-  await expect(page.locator(".knowledge-widget-results")).toContainText("Delivery tracking v5");
+  await expect(page.locator(".knowledge-widget-results")).toContainText("Order tracking v5");
   await expect(page.locator(".knowledge-self-service-preview")).toContainText("Текущая статья доступна клиенту");
   await expect(page.locator(".knowledge-self-service-preview")).toContainText("Написать оператору");
+  await expectHealthyPage(page);
+});
+
+test("knowledge hub manages URL sources with preview and lifecycle", async ({ page }) => {
+  await openAppShell(page);
+  await selectRole(page, "Администратор");
+  await openSection(page, "Знания");
+
+  // BAI-824: страницы (URL) — менеджер источников с добавлением, предпросмотром и жизненным циклом.
+  await page.locator(".knowledge-tabs button", { hasText: "Страницы" }).click();
+  await expect(page.locator(".work-panel")).toContainText("Страниц пока нет");
+
+  const createPromise = page.waitForResponse((response) =>
+    response.url().endsWith("/api/v1/knowledge-sources") && response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Добавить URL-страницу" }).click();
+  const urlDialog = page.getByRole("dialog", { name: "Добавить URL-страницу" });
+  await urlDialog.locator("input[type='url']").fill("https://docs.example.test/faq");
+  await urlDialog.locator("input[type='text']").fill("FAQ по доставке");
+  await urlDialog.getByRole("button", { name: "Добавить" }).click();
+  const createResponse = await createPromise;
+  expect(createResponse.ok()).toBeTruthy();
+  expect((await createResponse.json()).status).toBe("ok");
+
+  const sourceRow = page.locator(".knowledge-source-row").filter({ hasText: "FAQ по доставке" });
+  await expect(sourceRow).toBeVisible();
+  await expect(sourceRow).toContainText("Не привязан к сценариям");
+
+  // BAI-822: переименование через PATCH.
+  const renamePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/knowledge-sources/") && response.request().method() === "PATCH"
+  );
+  await sourceRow.getByTitle("Переименовать").click();
+  const renameDialog = page.getByRole("dialog", { name: "Переименовать источник" });
+  await renameDialog.locator("input").fill("FAQ доставки v2");
+  await renameDialog.getByRole("button", { name: "Сохранить" }).click();
+  const renameResponse = await renamePromise;
+  expect(renameResponse.ok()).toBeTruthy();
+  await expect(page.locator(".knowledge-source-row").filter({ hasText: "FAQ доставки v2" })).toBeVisible();
   await expectHealthyPage(page);
 });
 

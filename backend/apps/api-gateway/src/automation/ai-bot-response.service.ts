@@ -4,6 +4,7 @@ import { SecretStore } from "../ai-connections/secret-store.js";
 import { createOpenAiCompatibleChatProvider } from "../ai-connections/openai-compatible-chat.provider.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
 import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
+import { UnansweredQuestionRepository } from "../knowledge-sources/unanswered-question.repository.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 import { formatSessionForPrompt } from "./agent-session-state.js";
 import { AgentSessionStateRepository } from "./agent-session-state.repository.js";
@@ -44,7 +45,18 @@ export class AiBotResponseService {
     try {
       release = this.usage.reserve({ connectionId: connection.id, maxConcurrentRuns: connection.limits.maxConcurrentRuns, monthlyTokenBudget: connection.limits.monthlyTokenBudget, requestsPerMinute: connection.limits.requestsPerMinute, tenantId: input.tenantId, worstCaseTokens: Math.min(500, connection.limits.monthlyTokenBudget ?? 500) });
       const materials = await this.materials(input.tenantId, input.sourceBindings, input.message, input.scenarioId);
-      if (!materials.length) throw new Error("bot_ai_knowledge_not_ready");
+      if (!materials.length) {
+        // BAI-826: копим «вопросы без ответа» для пополнения знаний; песочница не считается.
+        if (!String(input.conversationId ?? "").startsWith("sandbox:")) {
+          UnansweredQuestionRepository.default().record({
+            question: input.message,
+            reason: "knowledge_not_ready",
+            scenarioId: input.scenarioId,
+            tenantId: input.tenantId
+          });
+        }
+        throw new Error("bot_ai_knowledge_not_ready");
+      }
       const session = input.conversationId ? this.sessions.get(input.tenantId, input.conversationId) : null;
       const secret = new SecretStore({ keyVersion: this.environment.AI_CONNECTIONS_KEY_VERSION ?? "local-v1", masterKeyBase64: this.environment.AI_CONNECTIONS_MASTER_KEY ?? this.environment.PROVIDER_CREDENTIAL_MASTER_KEY ?? "" }).decrypt(connection.secret);
       const provider = createOpenAiCompatibleChatProvider({ apiKey: secret, baseUrl: connection.baseUrl, maxRetries: 1, model: connection.chatModel, timeoutMs: 12_000 });

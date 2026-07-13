@@ -405,7 +405,7 @@ export function ScenarioConsole({
         <ConfirmDialog
           confirmLabel="Откатиться"
           danger
-          message={`Активной станет версия от ${formatDateTime(rollbackTarget.createdAt)}. Новые диалоги пойдут по ней; уже начатые останутся на своих версиях. Текущая версия сохранится в истории.`}
+          description={`Активной станет версия от ${formatDateTime(rollbackTarget.createdAt)}. Новые диалоги пойдут по ней; уже начатые останутся на своих версиях. Текущая версия сохранится в истории.`}
           onCancel={() => setRollbackTarget(null)}
           onConfirm={() => {
             const target = rollbackTarget;

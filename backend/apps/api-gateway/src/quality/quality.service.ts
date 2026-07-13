@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
-import type { ConversationLifecycleEvent } from "../conversation/conversation.repository.js";
+import { ConversationRepository, type ConversationLifecycleEvent } from "../conversation/conversation.repository.js";
+import { IdentityRepository } from "../identity/identity.repository.js";
 import { createQualityScoringProviderRequest } from "./quality-scoring.adapter.js";
 import { createDeterministicQualityScoringProvider } from "./quality-scoring.deterministic-provider.js";
 import {
@@ -76,15 +77,23 @@ interface AiSuggestionDecisionPayload {
   suggestionId?: string;
 }
 
+export interface QualityDirectorySources {
+  conversationRepository?: Pick<ConversationRepository, "listConversations">;
+  identityRepository?: Pick<IdentityRepository, "findTenantUsers">;
+}
+
 export class QualityService {
   private readonly rulesProvider = createDeterministicQualityScoringProvider();
   private readonly aiProvider: QualityAiProviderConfiguration;
+  private readonly directorySources: QualityDirectorySources;
 
   constructor(
     private readonly qualityRepository: QualityRepositoryPort = QualityRepository.default(),
-    aiProvider: QualityAiProviderConfiguration = configureOpenAiCompatibleQualityProvider()
+    aiProvider: QualityAiProviderConfiguration = configureOpenAiCompatibleQualityProvider(),
+    directorySources: QualityDirectorySources = {}
   ) {
     this.aiProvider = aiProvider;
+    this.directorySources = directorySources;
   }
 
   async fetchQualityWorkspace(context: QualityRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -93,14 +102,15 @@ export class QualityService {
       return tenantRequiredEnvelope("fetchQualityWorkspace");
     }
 
-    const [workspace, ratings, manualQaReviews, aiScoringAudits, aiSuggestionDecisions] = await Promise.all([
+    const [workspace, ratings, manualQaReviews, aiScoringAudits, aiSuggestionDecisions, directory] = await Promise.all([
       Promise.resolve(this.qualityRepository.readWorkspace()),
       Promise.resolve(this.qualityRepository.listQualityRatings({ tenantId })),
       Promise.resolve(this.qualityRepository.listManualQaReviews({ tenantId })),
       Promise.resolve(this.qualityRepository.listAiScoringAudits({ tenantId })),
-      Promise.resolve(this.qualityRepository.listAiSuggestionDecisions({ tenantId }))
+      Promise.resolve(this.qualityRepository.listAiSuggestionDecisions({ tenantId })),
+      this.loadQualityDirectory(tenantId)
     ]);
-    const qualityScores = mergeQualityScores(workspace.qualityMetrics, ratings, manualQaReviews);
+    const qualityScores = mergeQualityScores(workspace.qualityMetrics, ratings, manualQaReviews, directory);
 
     return createEnvelope({
       service: QUALITY_SERVICE,
@@ -132,6 +142,26 @@ export class QualityService {
         tenantId
       }
     });
+  }
+
+  private async loadQualityDirectory(tenantId: string): Promise<QualityDirectory> {
+    const conversationRepository = this.directorySources.conversationRepository ?? ConversationRepository.default();
+    const identityRepository = this.directorySources.identityRepository ?? IdentityRepository.default();
+    const [conversations, users] = await Promise.all([
+      Promise.resolve(conversationRepository.listConversations()).catch(() => []),
+      Promise.resolve(identityRepository.findTenantUsers(tenantId)).catch(() => [])
+    ]);
+
+    return {
+      conversationNameById: new Map(
+        conversations
+          .filter((conversation) => String(conversation.tenantId ?? "").trim() === tenantId)
+          .map((conversation) => [conversation.id, String(conversation.name ?? "").trim()])
+      ),
+      operatorNameById: new Map(
+        users.map((user) => [String(user.id ?? ""), String(user.name ?? "").trim()])
+      )
+    };
   }
 
   async scoreDraftResponse(payload: ScoreDraftPayload | null | undefined, context: QualityRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -512,10 +542,16 @@ function buildAiEffectiveness(decisions: AiSuggestionDecisionRecord[]): Array<Re
   ];
 }
 
+interface QualityDirectory {
+  conversationNameById: Map<string, string>;
+  operatorNameById: Map<string, string>;
+}
+
 function mergeQualityScores(
   base: Array<Record<string, unknown>>,
   ratings: QualityRatingRecord[],
-  reviews: ManualQaReviewRecord[]
+  reviews: ManualQaReviewRecord[],
+  directory?: QualityDirectory
 ): Array<Record<string, unknown>> {
   const latestReviewByConversation = new Map<string, ManualQaReviewRecord>();
   for (const review of [...reviews].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))) {
@@ -525,9 +561,10 @@ function mergeQualityScores(
   }
   const persisted = ratings.map((rating) => ({
     ...clone(rating),
-    client: rating.clientId ?? rating.conversationId,
+    client: directory?.conversationNameById.get(rating.conversationId) || rating.clientId || rating.conversationId,
     id: rating.ratingId,
     manualReviewId: latestReviewByConversation.get(rating.conversationId)?.reviewId ?? null,
+    operatorName: directory?.operatorNameById.get(rating.operator) || null,
     status: rating.score !== null && rating.score < 4 ? "Low score" : "Rated"
   }));
   const persistedIds = new Set(persisted.map((item) => item.id));

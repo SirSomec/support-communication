@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { AlertTriangle, BookOpen, CheckCircle2, Filter, ShieldCheck, Sparkles, Star } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
+import { mapApiConversation } from "../../app/conversationApiMapper.js";
 import { scoreAiSuggestionBatch, submitManualQaReview } from "../../app/qualityAiActions.js";
+import { dialogService } from "../../services/dialogService.js";
 import { qualityService } from "../../services/qualityService.js";
-import { ChannelBadge, MetricTile, ProductScreen, ScreenStateStrip, SectionTitle } from "../../ui.jsx";
+import { ChannelBadge, MetricTile, Modal, ProductScreen, ScreenStateStrip, SectionTitle } from "../../ui.jsx";
 import { AiQualityWorkspace } from "./AiQualityWorkspace.jsx";
 import { KnowledgeBaseWorkspace } from "./KnowledgeBaseWorkspace.jsx";
 
@@ -19,6 +21,7 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
   const [showLowScoresOnly, setShowLowScoresOnly] = useState(false);
   const [reviewingScoreId, setReviewingScoreId] = useState("");
   const [reviewDraft, setReviewDraft] = useState(null);
+  const [audit, setAudit] = useState(null);
   const [manualReviewIds, setManualReviewIds] = useState({});
   const [batchScoring, setBatchScoring] = useState(false);
   const [scoredSuggestions, setScoredSuggestions] = useState({});
@@ -89,6 +92,33 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
     )
     : 0;
 
+  async function openAudit(score) {
+    setReviewDraft(manualReviewIds[score.id] ? null : createQaReviewDraft(score));
+    setAudit({ conversation: null, error: "", loading: true, score });
+    const response = await dialogService.fetchDialogDetail(score.conversationId);
+    setAudit((current) => {
+      if (!current || current.score.id !== score.id) {
+        return current;
+      }
+      if (response.status !== "ok") {
+        return { ...current, error: response.error?.message ?? "Не удалось загрузить переписку диалога.", loading: false };
+      }
+      return {
+        ...current,
+        conversation: mapApiConversation({
+          ...(response.data?.conversation ?? {}),
+          lifecycleEvents: response.data?.lifecycleEvents ?? []
+        }),
+        loading: false
+      };
+    });
+  }
+
+  function closeAudit() {
+    setAudit(null);
+    setReviewDraft(null);
+  }
+
   async function handleManualQaReview(score) {
     if (reviewingScoreId) {
       return;
@@ -109,6 +139,7 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
 
     await refreshWorkspace();
     setReviewDraft(null);
+    setAudit(null);
     onToast(`Ручная проверка сохранена: ${result.reviewId}.`);
   }
 
@@ -240,42 +271,16 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
                 </header>
                 <p>{score.comment}</p>
                 <footer>
-                  <span>{score.operator} · {score.topic}</span>
+                  <span>{score.operatorName || score.operator} · {score.topic}</span>
                   <button
-                    disabled={!access.canReviewQuality || reviewingScoreId === score.id || Boolean(manualReviewIds[score.id])}
-                    onClick={() => setReviewDraft(createQaReviewDraft(score))}
-                    title={!access.canReviewQuality ? access.reason : manualReviewIds[score.id] ? `Backend review: ${manualReviewIds[score.id]}` : "Создать ручную проверку."}
+                    disabled={reviewingScoreId === score.id}
+                    onClick={() => void openAudit(score)}
+                    title={manualReviewIds[score.id] ? `Открыть диалог. Backend review: ${manualReviewIds[score.id]}` : "Открыть диалог и провести ручную проверку."}
                     type="button"
                   >
-                    {reviewingScoreId === score.id ? "Проверка..." : manualReviewIds[score.id] ? "Проверено" : "Проверить"}
+                    {reviewingScoreId === score.id ? "Проверка..." : manualReviewIds[score.id] ? "Диалог · проверено" : "Аудит диалога"}
                   </button>
                 </footer>
-                {reviewDraft?.qualityScoreId === score.id ? (
-                  <form className="qa-review-form" onSubmit={(event) => { event.preventDefault(); void handleManualQaReview(score); }}>
-                    <strong>Ручная проверка</strong>
-                    {QA_CRITERIA.map((criterion) => (
-                      <label key={criterion.id}>
-                        <span>{criterion.label}</span>
-                        <select
-                          value={reviewDraft.criteria[criterion.id]}
-                          onChange={(event) => setReviewDraft((current) => ({
-                            ...current,
-                            criteria: { ...current.criteria, [criterion.id]: Number(event.target.value) }
-                          }))}
-                        >
-                          {[0, 1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value} из 5</option>)}
-                        </select>
-                      </label>
-                    ))}
-                    <div className="qa-review-actions">
-                      <b>Итог: {calculateQaScore(reviewDraft.criteria)} / 100</b>
-                      <button type="button" onClick={() => setReviewDraft(null)}>Отмена</button>
-                      <button className="primary-action" disabled={Boolean(reviewingScoreId)} type="submit">
-                        {reviewingScoreId ? "Сохранение..." : "Сохранить проверку"}
-                      </button>
-                    </div>
-                  </form>
-                ) : null}
               </article>
             ))}
           </div>
@@ -318,6 +323,77 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
         <SectionTitle title="База знаний" action="редактор и публикация статей" />
         <KnowledgeBaseWorkspace articles={knowledgeArticles} canWrite={access.canManageKnowledge} onToast={onToast} operator={operator} />
       </section>
+
+      {audit ? (
+        <Modal
+          eyebrow={`${audit.score.scale}: ${audit.score.score} · ${audit.score.operatorName || audit.score.operator}`}
+          onClose={closeAudit}
+          overlayClassName="confirm-overlay quality-audit-overlay"
+          panelClassName="confirm-panel quality-audit-panel"
+          title={`${audit.score.client} — аудит диалога`}
+          titleId="quality-audit-title"
+        >
+          <div className="quality-audit-body">
+            <section aria-label="Переписка диалога" className="quality-transcript">
+              {audit.loading ? <p className="quality-audit-note">Загрузка переписки...</p> : null}
+              {audit.error ? <p className="quality-audit-note danger">{audit.error}</p> : null}
+              {!audit.loading && !audit.error && !(audit.conversation?.messages ?? []).length ? (
+                <p className="quality-audit-note">Сообщений в диалоге нет.</p>
+              ) : null}
+              {(audit.conversation?.messages ?? []).map((message) => message.type === "event" ? (
+                <div className="quality-transcript-event" key={message.id}>
+                  <span>{message.text}</span>
+                  <small>{message.time}</small>
+                </div>
+              ) : (
+                <div
+                  className={`quality-transcript-message ${message.side === "agent" || message.type === "internal" ? "agent" : "client"} ${message.type === "internal" ? "internal" : ""}`}
+                  key={message.id}
+                >
+                  {message.author ? <small>{message.author}</small> : null}
+                  <p>{message.text}</p>
+                  <span>{message.time}</span>
+                </div>
+              ))}
+            </section>
+            <section aria-label="Ручная проверка" className="quality-audit-review">
+              {manualReviewIds[audit.score.id] ? (
+                <p className="quality-audit-note">Диалог уже проверен: {manualReviewIds[audit.score.id]}</p>
+              ) : reviewDraft?.qualityScoreId === audit.score.id ? (
+                <form className="qa-review-form" onSubmit={(event) => { event.preventDefault(); void handleManualQaReview(audit.score); }}>
+                  <strong>Ручная проверка</strong>
+                  {QA_CRITERIA.map((criterion) => (
+                    <label key={criterion.id}>
+                      <span>{criterion.label}</span>
+                      <select
+                        value={reviewDraft.criteria[criterion.id]}
+                        onChange={(event) => setReviewDraft((current) => ({
+                          ...current,
+                          criteria: { ...current.criteria, [criterion.id]: Number(event.target.value) }
+                        }))}
+                      >
+                        {[0, 1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value} из 5</option>)}
+                      </select>
+                    </label>
+                  ))}
+                  <div className="qa-review-actions">
+                    <b>Итог: {calculateQaScore(reviewDraft.criteria)} / 100</b>
+                    <button onClick={closeAudit} type="button">Отмена</button>
+                    <button
+                      className="primary-action"
+                      disabled={!access.canReviewQuality || Boolean(reviewingScoreId)}
+                      title={!access.canReviewQuality ? access.reason : "Сохранить ручную проверку."}
+                      type="submit"
+                    >
+                      {reviewingScoreId ? "Сохранение..." : "Сохранить проверку"}
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+            </section>
+          </div>
+        </Modal>
+      ) : null}
     </ProductScreen>
   );
 }

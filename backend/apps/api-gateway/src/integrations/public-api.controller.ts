@@ -195,7 +195,7 @@ export class PublicApiController {
   @ApiQuery({ name: "visitorSessionToken", required: true, description: "Short-lived signed visitor session token" })
   @ApiQuery({ name: "since", required: false, description: "Optional last seen operator message id" })
   @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
-  @ApiOkResponse({ description: "Public SDK poll envelope with operator reply messages only" })
+  @ApiOkResponse({ description: "Public SDK poll envelope with operator reply messages only; ready attachments include short-lived signed download links" })
   pollPublicSdkConversationMessages(
     @Headers("authorization") authorization: string | undefined,
     @Param("conversationId") conversationId: string,
@@ -209,6 +209,8 @@ export class PublicApiController {
       conversationRepository: this.conversationRepository,
       environment,
       lookup: this.lookup,
+      resolveDeliveryAttachments: (attachments, tenantId) =>
+        this.conversationService.resolvePublicDeliveryAttachments(attachments, tenantId),
       since,
       visitorSessionToken
     });

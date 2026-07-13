@@ -620,6 +620,37 @@ export class ConversationService {
     });
   }
 
+  async resolvePublicDeliveryAttachments(
+    attachments: Array<Record<string, unknown>>,
+    tenantId: string
+  ): Promise<Array<Record<string, unknown>>> {
+    const resolved: Array<Record<string, unknown>> = [];
+    for (const attachment of attachments) {
+      const fileId = String(attachment?.fileId ?? "").trim();
+      if (!fileId) {
+        continue;
+      }
+      const file = await this.attachmentStorage.workspaceRepository.findFile(fileId, { tenantId });
+      if (!file || !attachmentFileIsReady(file)) {
+        continue;
+      }
+      const signedFile = await this.attachmentStorage.objectStorage.signDownload({
+        fileId: file.fileId,
+        fileName: file.fileName,
+        objectKey: file.objectKey,
+        tenantId
+      });
+      resolved.push({
+        fileId,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        signedFile: signedObjectStorageUrlData(signedFile)
+      });
+    }
+    return resolved;
+  }
+
   async appendMessage(payload: AppendMessagePayload, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const conversation = await this.conversationRepository.findConversation(payload.conversationId);
 

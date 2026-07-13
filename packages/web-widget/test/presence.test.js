@@ -50,3 +50,30 @@ test("invitation acknowledgement path encodes the exposure identifier", () => {
     "/public/sdk/invitations/exposure%2F42/accepted"
   );
 });
+
+test("only attachments with an http(s) signed download link are rendered", () => {
+  const valid = {
+    download: { expiresAt: "2026-07-13T12:15:00.000Z", url: "http://kubernetes.docker.internal:19000/pilot/objects/obj-1?X-Amz-Signature=abc" },
+    fileId: "file-1",
+    fileName: "invoice.pdf",
+    mimeType: "application/pdf",
+    sizeBytes: 2048
+  };
+
+  assert.deepEqual(__test__.downloadableAttachments([
+    valid,
+    null,
+    { fileName: "no-download.bin" },
+    { download: { url: "javascript:alert(1)" }, fileName: "evil.bin" },
+    { download: { url: "" }, fileName: "empty.bin" }
+  ]), [valid]);
+  assert.deepEqual(__test__.downloadableAttachments("not-an-array"), []);
+});
+
+test("attachment size labels are humanized", () => {
+  assert.equal(__test__.formatAttachmentSize(512), "512 Б");
+  assert.equal(__test__.formatAttachmentSize(2048), "2.0 КБ");
+  assert.equal(__test__.formatAttachmentSize(5 * 1024 * 1024), "5.0 МБ");
+  assert.equal(__test__.formatAttachmentSize("unknown"), "");
+  assert.equal(__test__.formatAttachmentSize(0), "");
+});

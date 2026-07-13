@@ -56,6 +56,10 @@ export interface PublicSdkPollRouteInput {
   conversationRepository: Pick<ConversationRepository, "findConversation">;
   environment: PublicApiEnvironment;
   lookup: PublicApiKeyLookup;
+  resolveDeliveryAttachments?: (
+    attachments: Array<Record<string, unknown>>,
+    tenantId: string
+  ) => Promise<Array<Record<string, unknown>>>;
   since?: string;
   visitorSessionToken?: string;
 }
@@ -315,7 +319,12 @@ export async function handlePublicSdkMessagesPollFromRoute(
   }
 
   const since = String(input.since ?? "").trim();
-  const replies = operatorRepliesFromConversation(conversation, since);
+  const replies = await operatorRepliesFromConversation(
+    conversation,
+    since,
+    input.resolveDeliveryAttachments,
+    auth.context.tenantId
+  );
 
   return createEnvelope({
     service: INTEGRATION_SERVICE,
@@ -417,22 +426,47 @@ async function tryBotRuntime(run: BotRuntimeRunner, event: Parameters<BotRuntime
   try { return await run(event); } catch { return null; }
 }
 
-function operatorRepliesFromConversation(conversation: ConversationRecord, since: string): Array<Record<string, unknown>> {
+async function operatorRepliesFromConversation(
+  conversation: ConversationRecord,
+  since: string,
+  resolveDeliveryAttachments: PublicSdkPollRouteInput["resolveDeliveryAttachments"],
+  tenantId: string
+): Promise<Array<Record<string, unknown>>> {
   const agentReplies = conversation.messages.filter((message) => message.side === "agent" && message.type !== "internal");
-  if (!since) {
-    return agentReplies.map(toPublicReplyRecord);
-  }
-
-  const startIndex = agentReplies.findIndex((message) => String(message.id) === since);
+  const startIndex = since ? agentReplies.findIndex((message) => String(message.id) === since) : -1;
   const slice = startIndex >= 0 ? agentReplies.slice(startIndex + 1) : agentReplies;
-  return slice.map(toPublicReplyRecord);
+  return Promise.all(slice.map((message) => toPublicReplyRecord(message, resolveDeliveryAttachments, tenantId)));
 }
 
-function toPublicReplyRecord(message: ConversationMessage): Record<string, unknown> {
+async function toPublicReplyRecord(
+  message: ConversationMessage,
+  resolveDeliveryAttachments: PublicSdkPollRouteInput["resolveDeliveryAttachments"],
+  tenantId: string
+): Promise<Record<string, unknown>> {
+  const attachments = Array.isArray(message.attachments) && message.attachments.length && resolveDeliveryAttachments
+    ? await resolveDeliveryAttachments(message.attachments, tenantId)
+    : [];
   return {
     id: String(message.id),
     text: message.text,
-    time: message.time
+    time: message.time,
+    ...(attachments.length ? { attachments: attachments.map(toPublicAttachmentRecord) } : {})
+  };
+}
+
+function toPublicAttachmentRecord(attachment: Record<string, unknown>): Record<string, unknown> {
+  const signedFile = attachment.signedFile && typeof attachment.signedFile === "object" && !Array.isArray(attachment.signedFile)
+    ? attachment.signedFile as Record<string, unknown>
+    : {};
+  return {
+    download: {
+      expiresAt: String(signedFile.expiresAt ?? ""),
+      url: String(signedFile.url ?? "")
+    },
+    fileId: String(attachment.fileId ?? ""),
+    fileName: String(attachment.fileName ?? ""),
+    mimeType: String(attachment.mimeType ?? ""),
+    sizeBytes: Number(attachment.sizeBytes ?? 0)
   };
 }
 

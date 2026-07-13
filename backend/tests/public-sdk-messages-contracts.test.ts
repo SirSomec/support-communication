@@ -10,6 +10,7 @@ import { IdentityRepository } from "../apps/api-gateway/dist/identity/identity.r
 import { IntegrationModule } from "../apps/api-gateway/dist/integrations/integration.module.js";
 import { IntegrationRepository } from "../apps/api-gateway/dist/integrations/integration.repository.js";
 import { QualityRepository } from "../apps/api-gateway/dist/quality/quality.repository.js";
+import { WorkspaceRepository } from "../apps/api-gateway/dist/workspace/workspace.repository.js";
 
 const PUBLIC_API_KEY = "sk_test_public_sdk_contract_secret";
 const PUBLIC_KEY_ID = "pak_public_sdk_contract_stage";
@@ -158,6 +159,78 @@ describe("public sdk message ingress and widget poll contracts", () => {
     assert.equal(pollSince.data.messages.length, 0);
   });
 
+  it("returns operator attachments with signed download links in widget poll", async () => {
+    const { baseUrl } = await createTestApiApp(apps);
+
+    const send = await publicPost(baseUrl, "/public/sdk/messages", {
+      externalId: "visitor-attachment-001",
+      text: "Пришлите, пожалуйста, счёт"
+    });
+    const conversationId = String(send.data.conversationId);
+
+    await WorkspaceRepository.default().saveFile({
+      auditId: "audit-sdk-attachment-001",
+      channel: "SDK",
+      fileId: "file-sdk-attachment-001",
+      fileName: "invoice.pdf",
+      mimeType: "application/pdf",
+      objectKey: "objects/obj_sdk_attachment_001",
+      scanState: "clean",
+      scanVerdict: "clean",
+      sizeBytes: 2048,
+      storageState: "uploaded",
+      tenantId: TENANT_ID
+    });
+    await WorkspaceRepository.default().saveFile({
+      auditId: "audit-sdk-attachment-002",
+      channel: "SDK",
+      fileId: "file-sdk-attachment-pending",
+      fileName: "pending.pdf",
+      mimeType: "application/pdf",
+      objectKey: "objects/obj_sdk_attachment_pending",
+      scanState: "pending",
+      sizeBytes: 1024,
+      storageState: "uploaded",
+      tenantId: TENANT_ID
+    });
+
+    const appendReply = await fetch(`${baseUrl}/api/v1/dialogs/${encodeURIComponent(conversationId)}/messages`, {
+      method: "POST",
+      headers: {
+        ...demoServiceAdminHeaders("dialogs.manage"),
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        mode: "reply",
+        text: "Отправляю счёт во вложении.",
+        attachments: [{ fileId: "file-sdk-attachment-001" }]
+      })
+    });
+    assert.equal(appendReply.status, 200);
+    const appendReplyEnvelope = await appendReply.json() as { status: string };
+    assert.equal(appendReplyEnvelope.status, "ok");
+
+    const poll = await publicGet(
+      baseUrl,
+      `/public/sdk/conversations/${encodeURIComponent(conversationId)}/messages`,
+      { visitorSessionToken: String(send.data.visitorSessionToken) }
+    );
+    const messages = poll.data.messages as Array<{ attachments?: Array<Record<string, any>>; text: string }>;
+    const withAttachment = messages.find((message) => Array.isArray(message.attachments) && message.attachments.length > 0);
+    assert.ok(withAttachment, "operator reply with attachment must be present in the poll response");
+
+    const attachment = withAttachment.attachments![0];
+    assert.equal(attachment.fileId, "file-sdk-attachment-001");
+    assert.equal(attachment.fileName, "invoice.pdf");
+    assert.equal(attachment.mimeType, "application/pdf");
+    assert.equal(attachment.sizeBytes, 2048);
+    assert.equal("signedFile" in attachment, false);
+    assert.equal(typeof attachment.download?.url, "string");
+    assert.equal(attachment.download.url.startsWith("http"), true);
+    assert.equal(attachment.download.url.includes("X-Amz-Signature="), true);
+    assert.equal(new Date(String(attachment.download.expiresAt)).getTime() > Date.now(), true);
+  });
+
   it("records an idempotent SDK rating from canonical conversation data", async () => {
     const { baseUrl } = await createTestApiApp(apps);
     const send = await publicPost(baseUrl, "/public/sdk/messages", {
@@ -277,6 +350,8 @@ async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: st
 
   const conversationRepository = ConversationRepository.inMemory();
   ConversationRepository.useDefault(conversationRepository);
+
+  WorkspaceRepository.useDefault(WorkspaceRepository.inMemory());
 
   const integrationRepository = IntegrationRepository.inMemory();
   const sdkConnectionId = "conn-public-sdk-contract";

@@ -143,7 +143,7 @@ async function pollOperatorReplies() {
 
   const replies = Array.isArray(data.messages) ? data.messages : [];
   for (const reply of replies) {
-    appendMessage("operator", reply.text, reply.id);
+    appendMessage("operator", reply.text, reply.id, reply.attachments);
     if (reply.id) {
       state.lastOperatorMessageId = String(reply.id);
     }
@@ -405,7 +405,7 @@ function invitationAcknowledgePath(exposureId, action) {
   return `/public/sdk/invitations/${encodeURIComponent(exposureId)}/${action}`;
 }
 
-export const __test__ = { firstInvitation, getOrCreateIdentity, invitationAcknowledgePath, normalizeInterval };
+export const __test__ = { downloadableAttachments, firstInvitation, formatAttachmentSize, getOrCreateIdentity, invitationAcknowledgePath, normalizeInterval };
 
 function renderShell() {
   if (rootEl) {
@@ -487,8 +487,9 @@ function renderShell() {
   });
 }
 
-function appendMessage(role, text, id) {
-  if (!messagesEl || !text) {
+function appendMessage(role, text, id, attachments) {
+  const files = downloadableAttachments(attachments);
+  if (!messagesEl || (!text && !files.length)) {
     return;
   }
 
@@ -501,9 +502,61 @@ function appendMessage(role, text, id) {
 
   const bubble = document.createElement("div");
   bubble.className = `sw-message sw-message--${role}`;
-  bubble.textContent = text;
+  if (text) {
+    const textEl = document.createElement("div");
+    textEl.className = "sw-message__text";
+    textEl.textContent = text;
+    bubble.appendChild(textEl);
+  }
+  if (files.length) {
+    bubble.appendChild(renderAttachmentList(files));
+  }
   messagesEl.appendChild(bubble);
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function downloadableAttachments(attachments) {
+  if (!Array.isArray(attachments)) {
+    return [];
+  }
+  return attachments.filter((attachment) => {
+    const url = String(attachment?.download?.url ?? "").trim();
+    return /^https?:\/\//i.test(url);
+  });
+}
+
+function renderAttachmentList(files) {
+  const list = document.createElement("div");
+  list.className = "sw-attachments";
+  for (const file of files) {
+    const link = document.createElement("a");
+    link.className = "sw-attachment";
+    link.href = String(file.download.url);
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    const name = String(file.fileName ?? "").trim() || "Файл";
+    const size = formatAttachmentSize(file.sizeBytes);
+    link.textContent = size ? `${name} (${size})` : name;
+    if (file.mimeType) {
+      link.title = String(file.mimeType);
+    }
+    list.appendChild(link);
+  }
+  return list;
+}
+
+function formatAttachmentSize(sizeBytes) {
+  const size = Number(sizeBytes);
+  if (!Number.isFinite(size) || size <= 0) {
+    return "";
+  }
+  if (size < 1024) {
+    return `${size} Б`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} КБ`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
 function appendSystemMessage(text) {
@@ -633,6 +686,29 @@ function injectStyles() {
       background: #fff;
       border: 1px solid #e2e8f0;
       border-bottom-left-radius: 4px;
+    }
+    .support-widget .sw-attachments {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .support-widget .sw-message__text + .sw-attachments {
+      border-top: 1px solid rgba(148, 163, 184, 0.35);
+      padding-top: 6px;
+    }
+    .support-widget .sw-attachment {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #2563eb;
+      font-size: 13px;
+      text-decoration: underline;
+      word-break: break-all;
+    }
+    .support-widget .sw-attachment::before {
+      content: "📎";
+      text-decoration: none;
     }
     .support-widget .sw-message--system {
       align-self: center;

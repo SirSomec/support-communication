@@ -28,7 +28,7 @@ export interface TelegramWebhookConfig {
 export interface TelegramWebhookRouteInput {
   autoAssignConversation?: (conversationId: string, tenantId: string) => Promise<BackendEnvelope<Record<string, unknown>>>;
   body: Record<string, unknown>;
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "listLifecycleEvents" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   headers: Record<string, string | undefined>;
   integrationRepository: TelegramConnectionReader;
@@ -85,30 +85,30 @@ export async function handleTelegramWebhookFromRoute(
     if (!input.recordQualityRating) {
       return deniedEnvelope("telegram_quality_not_configured", "Telegram quality rating ingestion is not configured.");
     }
-    const conversation = await resolveTelegramRatedConversation(input.conversationRepository, {
+    const target = await resolveTelegramRatedTarget(input.conversationRepository, {
       botId: tenantConnection?.botId ?? undefined,
       chatId: rating.chatId,
       tenantId
     });
-    if (!conversation || resolveConversationTenantId(conversation) !== tenantId || !conversation.operatorId) {
+    if (!target?.operator) {
       return deniedEnvelope("telegram_quality_conversation_unresolved", "Rated conversation or its operator could not be resolved.");
     }
     const recorded = await input.recordQualityRating({
       channel: "Telegram",
       clientId: rating.chatId,
-      conversationId: conversation.id,
+      conversationId: target.conversation.id,
       idempotencyKey: `telegram:${tenantConnection?.botId ?? "default"}:${rating.callbackQueryId}`,
-      operator: conversation.operatorId,
+      operator: target.operator,
       scale: rating.scale,
       score: rating.score,
-      topic: conversation.topic
+      topic: target.conversation.topic
     }, { actorId: rating.chatId, actorType: "client", tenantId });
     return createEnvelope({
       service: INTEGRATION_SERVICE,
       operation: "receiveTelegramQualityRating",
       status: recorded.status,
       meta: { channel: "telegram", source: "telegram-bot-api", tenantId },
-      data: { accepted: recorded.status === "ok", callbackQueryId: rating.callbackQueryId, conversationId: conversation.id, ratingId: recorded.data?.ratingId ?? null },
+      data: { accepted: recorded.status === "ok", callbackQueryId: rating.callbackQueryId, conversationId: target.conversation.id, ratingId: recorded.data?.ratingId ?? null },
       error: recorded.error ?? null
     });
   }
@@ -389,20 +389,50 @@ function parseTelegramUpdate(body: Record<string, unknown>) {
   };
 }
 
-export async function resolveTelegramRatedConversation(
-  repository: Pick<ConversationRepository, "findConversation" | "listConversations">,
+export interface TelegramRatedTarget {
+  conversation: ConversationRecord;
+  operator: string | null;
+}
+
+export async function resolveTelegramRatedTarget(
+  repository: Pick<ConversationRepository, "findConversation" | "listConversations" | "listLifecycleEvents">,
   input: { botId?: string; chatId: string; tenantId: string }
-): Promise<ConversationRecord | null> {
+): Promise<TelegramRatedTarget | null> {
   const anchorId = telegramConversationId(input.tenantId, input.botId, input.chatId);
   const anchorTag = appealAnchorTag(anchorId);
   const appeals = (await repository.listConversations())
     .filter((conversation) => resolveConversationTenantId(conversation) === input.tenantId)
     .filter((conversation) => conversation.id === anchorId || conversation.tags.includes(anchorTag))
     .sort((left, right) => conversationSortTimestamp(right) - conversationSortTimestamp(left));
-  const resolved = appeals.find((conversation) => conversation.operatorId)
+  // The survey goes out when an appeal is closed, so the rating belongs to the
+  // most recently closed appeal — a follow-up appeal may already be open on top.
+  const conversation = appeals.find((candidate) => candidate.status === "closed")
     ?? appeals[0]
     ?? await repository.findConversation(input.chatId);
-  return resolved && resolveConversationTenantId(resolved) === input.tenantId ? resolved : null;
+  if (!conversation || resolveConversationTenantId(conversation) !== input.tenantId) {
+    return null;
+  }
+  return { conversation, operator: await resolveRatedOperator(repository, conversation) };
+}
+
+async function resolveRatedOperator(
+  repository: Pick<ConversationRepository, "listLifecycleEvents">,
+  conversation: ConversationRecord
+): Promise<string | null> {
+  if (conversation.operatorId) {
+    return conversation.operatorId;
+  }
+
+  // Operators can reply and close a dialog without formally taking it, leaving
+  // operatorId empty — fall back to the latest operator actor in its history.
+  const events = await repository.listLifecycleEvents({
+    conversationId: conversation.id,
+    tenantId: resolveConversationTenantId(conversation)
+  });
+  const latestOperatorEvent = [...events]
+    .sort((left, right) => Date.parse(String(right.occurredAt ?? "")) - Date.parse(String(left.occurredAt ?? "")))
+    .find((event) => event.actorType === "operator" && event.actorId?.trim());
+  return latestOperatorEvent?.actorId?.trim() ?? null;
 }
 
 function conversationSortTimestamp(conversation: ConversationRecord): number {

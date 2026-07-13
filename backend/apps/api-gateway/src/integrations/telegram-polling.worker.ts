@@ -7,7 +7,7 @@ import type { TelegramHttpFetch } from "./telegram-channel-connection.js";
 import {
   parseTelegramQualityRating,
   resolveOrCreateTelegramConversation,
-  resolveTelegramRatedConversation,
+  resolveTelegramRatedTarget,
   telegramRoutingQueueId,
   telegramTenantEventId
 } from "./telegram-webhook.route.js";
@@ -15,7 +15,7 @@ import {
 export interface TelegramPollingInput {
   apiBaseUrl?: string;
   autoAssignConversation?: (conversationId: string, tenantId: string) => Promise<unknown>;
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "listLifecycleEvents" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   fetcher?: TelegramHttpFetch;
   integrationRepository: TelegramConnectionReader;
@@ -250,7 +250,7 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
 async function recordPolledQualityRating(input: {
   apiBaseUrl?: string;
   connection: TelegramConnectionStoredRecord;
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "listLifecycleEvents">;
   fetcher: TelegramHttpFetch;
   rating: NonNullable<ReturnType<typeof parseTelegramQualityRating>>;
   recordQualityRating?: TelegramPollingInput["recordQualityRating"];
@@ -261,23 +261,23 @@ async function recordPolledQualityRating(input: {
     if (!input.recordQualityRating) {
       throw new Error("telegram_quality_not_configured");
     }
-    const conversation = await resolveTelegramRatedConversation(input.conversationRepository, {
+    const target = await resolveTelegramRatedTarget(input.conversationRepository, {
       botId: connection.botId ?? undefined,
       chatId: rating.chatId,
       tenantId: connection.tenantId
     });
-    if (!conversation?.operatorId) {
+    if (!target?.operator) {
       throw new Error("telegram_quality_conversation_unresolved");
     }
     const response = await input.recordQualityRating({
       channel: "Telegram",
       clientId: rating.chatId,
-      conversationId: conversation.id,
+      conversationId: target.conversation.id,
       idempotencyKey: `telegram:${connection.botId ?? "default"}:${rating.callbackQueryId}`,
-      operator: conversation.operatorId,
+      operator: target.operator,
       scale: rating.scale,
       score: rating.score,
-      topic: conversation.topic
+      topic: target.conversation.topic
     }, { actorId: rating.chatId, actorType: "client", tenantId: connection.tenantId });
     recorded = response.status === "ok";
     if (!recorded) {

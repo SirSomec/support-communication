@@ -401,6 +401,106 @@ describe("telegram polling ingress contracts", () => {
     assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-rating"))?.pollingOffset, 121);
   });
 
+  it("attaches a rating to the latest closed appeal and its closing operator when the dialog was never assigned", async () => {
+    const now = new Date();
+    const integrationRepository = IntegrationRepository.inMemory({
+      ...emptyIntegrationState(),
+      telegramConnections: [{
+        botId: "123456",
+        botToken: "123456:support_bot_token",
+        botUsername: "support_bot",
+        createdAt: now.toISOString(),
+        pollingOffset: 300,
+        status: "active" as const,
+        tenantId: "tenant-rating-unassigned",
+        tokenPreview: "123456:****",
+        updatedAt: now.toISOString(),
+        webhookSecret: "tg_wh_rating_unassigned"
+      }]
+    });
+    const conversationRepository = ConversationRepository.inMemory();
+    const created = await resolveOrCreateTelegramConversation({
+      botId: "123456",
+      chatId: "665544",
+      conversationRepository,
+      displayName: "Unassigned Client",
+      tenantId: "tenant-rating-unassigned"
+    });
+    assert.ok(created);
+    const closedAt = new Date(now.getTime() - 60_000).toISOString();
+    await conversationRepository.saveConversationMutation({
+      conversation: { ...created!, status: "closed", updatedAt: closedAt },
+      lifecycleEvent: {
+        actorId: "usr-closer",
+        actorName: "Operator Closer",
+        actorType: "operator",
+        conversationId: created!.id,
+        data: { fromStatus: "active", toStatus: "closed" },
+        eventType: "status.changed",
+        id: "lifecycle-close-1",
+        ingestedAt: closedAt,
+        occurredAt: closedAt,
+        reason: null,
+        schemaVersion: "conversation-lifecycle/v1",
+        source: "dialog-service",
+        sourceEventId: "rt-close-1",
+        tenantId: "tenant-rating-unassigned",
+        traceId: "trace-close-1"
+      },
+      realtimeEvent: {
+        data: { toStatus: "closed" },
+        eventId: "rt-close-1",
+        eventName: "conversation.updated",
+        occurredAt: closedAt,
+        resourceId: created!.id,
+        resourceType: "conversation",
+        schemaVersion: "v1",
+        tenantId: "tenant-rating-unassigned",
+        traceId: "trace-close-1"
+      }
+    });
+    const followUp = await resolveOrCreateTelegramConversation({
+      botId: "123456",
+      chatId: "665544",
+      conversationRepository,
+      displayName: "Unassigned Client",
+      tenantId: "tenant-rating-unassigned"
+    });
+    assert.ok(followUp);
+    assert.notEqual(followUp!.id, created!.id, "a follow-up appeal must fork from the closed anchor");
+
+    const ratings: Array<Record<string, unknown>> = [];
+    const result = await pollTelegramUpdatesOnce({
+      conversationRepository,
+      conversationService: new ConversationService(conversationRepository),
+      fetcher: async (input: string) => ({
+        json: async () => input.includes("/getUpdates")
+          ? {
+              ok: true,
+              result: [{
+                callback_query: { data: "quality:csat:5", id: "cbq-99", message: { chat: { id: 665544 } } },
+                update_id: 305
+              }]
+            }
+          : { ok: true, result: true },
+        ok: true,
+        status: 200
+      }),
+      integrationRepository,
+      offsets: new Map(),
+      recordQualityRating: async (payload) => {
+        ratings.push(payload);
+        return { data: { ratingId: "rating-99" }, error: null, meta: {}, operation: "recordClientQualityRating", service: "qualityService", status: "ok", traceId: "trace-rating" } as any;
+      }
+    });
+
+    assert.equal(result.accepted, 1);
+    assert.equal(result.failed, 0);
+    assert.equal(ratings[0]?.conversationId, created!.id, "the rating belongs to the closed appeal, not the open follow-up");
+    assert.equal(ratings[0]?.operator, "usr-closer", "the closing operator from lifecycle history is credited");
+    assert.equal((await conversationRepository.listConversations()).length, 2, "a rating callback must not create another appeal");
+  });
+
   it("skips a rating callback without jamming the cursor when quality ingestion is not configured", async () => {
     const now = new Date().toISOString();
     const integrationRepository = IntegrationRepository.inMemory({

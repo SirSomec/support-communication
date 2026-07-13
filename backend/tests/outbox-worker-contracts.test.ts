@@ -899,6 +899,119 @@ describe("outbox worker runtime contracts", () => {
     assert.equal(calls, 1);
   });
 
+  it("delivers Telegram attachments as sendDocument uploads with the text as caption", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const calls: Array<{ url: string; init: { body?: string | Uint8Array; headers?: Record<string, string>; method?: string } }> = [];
+    const connector = worker.createTenantTelegramChannelConnector({
+      apiBaseUrl: "https://telegram.example.test",
+      channel: "Telegram",
+      fetcher: async (url: string, init: { body?: string | Uint8Array; headers?: Record<string, string>; method?: string }) => {
+        calls.push({ url, init });
+        if (url.includes("storage.example.test")) {
+          return {
+            arrayBuffer: async () => new TextEncoder().encode("PDFBYTES").buffer,
+            ok: true,
+            status: 200,
+            text: async () => ""
+          };
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }) };
+      },
+      resolveBotToken: async () => "123:BOT-TOKEN",
+      timeoutMs: 25
+    });
+
+    await connector.deliverMessage({
+      attachments: [{
+        fileId: "file_tg_attachment",
+        fileName: "квитанция.pdf",
+        mimeType: "application/pdf",
+        signedFile: {
+          expiresAt: "2999-01-01T00:00:00.000Z",
+          method: "GET",
+          url: "https://storage.example.test/signed/file_tg_attachment"
+        },
+        sizeBytes: 8
+      }],
+      channel: "Telegram",
+      conversationId: "tg-chat-200",
+      descriptorId: "telegram_delivery_attachment",
+      idempotencyKey: "telegram-attachment-key",
+      messageId: "msg_telegram_attachment",
+      outboxEventId: "outbox_telegram_attachment",
+      tenantId: "tenant-volga",
+      text: "Отправлено вложение",
+      traceId: "trc_telegram_attachment"
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, "https://storage.example.test/signed/file_tg_attachment");
+    assert.equal(calls[1].url, "https://telegram.example.test/bot123:BOT-TOKEN/sendDocument");
+    assert.match(calls[1].init.headers?.["content-type"] ?? "", /^multipart\/form-data; boundary=/);
+    assert.equal(calls[1].init.headers?.["idempotency-key"], "telegram-attachment-key:document:0");
+    const multipart = new TextDecoder().decode(calls[1].init.body as Uint8Array);
+    assert.match(multipart, /name="chat_id"\r\n\r\ntg-chat-200/);
+    assert.match(multipart, /name="caption"\r\n\r\nОтправлено вложение/);
+    assert.match(multipart, /name="document"; filename="квитанция\.pdf"/);
+    assert.match(multipart, /Content-Type: application\/pdf/);
+    assert.match(multipart, /PDFBYTES/);
+  });
+
+  it("keeps plain Telegram text delivery on sendMessage and rejects expired attachment access", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const calls: Array<{ url: string }> = [];
+    const connector = worker.createTenantTelegramChannelConnector({
+      apiBaseUrl: "https://telegram.example.test",
+      channel: "Telegram",
+      fetcher: async (url: string) => {
+        calls.push({ url });
+        return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }) };
+      },
+      resolveBotToken: async () => "123:BOT-TOKEN",
+      timeoutMs: 25
+    });
+
+    await connector.deliverMessage({
+      channel: "Telegram",
+      conversationId: "tg-chat-300",
+      descriptorId: "telegram_delivery_text_only",
+      idempotencyKey: "telegram-text-key",
+      messageId: "msg_telegram_text_only",
+      outboxEventId: "outbox_telegram_text_only",
+      tenantId: "tenant-volga",
+      text: "Только текст",
+      traceId: "trc_telegram_text_only"
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://telegram.example.test/bot123:BOT-TOKEN/sendMessage");
+
+    await assert.rejects(
+      connector.deliverMessage({
+        attachments: [{
+          fileId: "file_tg_expired",
+          fileName: "expired.pdf",
+          mimeType: "application/pdf",
+          signedFile: {
+            expiresAt: "2000-01-01T00:00:00.000Z",
+            method: "GET",
+            url: "https://storage.example.test/signed/file_tg_expired"
+          },
+          sizeBytes: 8
+        }],
+        channel: "Telegram",
+        conversationId: "tg-chat-300",
+        descriptorId: "telegram_delivery_expired",
+        idempotencyKey: "telegram-expired-key",
+        messageId: "msg_telegram_expired",
+        outboxEventId: "outbox_telegram_expired",
+        tenantId: "tenant-volga",
+        text: "Отправлено вложение",
+        traceId: "trc_telegram_expired"
+      }),
+      /provider_attachment_file_access_expired/
+    );
+  });
+
   it("loads Telegram runtime adapter from explicit environment config only", async () => {
     const worker = await import("../apps/outbox-worker/src/index.ts");
     const disabled = worker.createHttpWorkerAdaptersFromEnv({

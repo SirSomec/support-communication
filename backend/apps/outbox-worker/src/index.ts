@@ -1186,9 +1186,12 @@ export function createTenantTelegramChannelConnector({
   resolveBotToken,
   timeoutMs = 5_000
 }: TenantTelegramChannelConnectorOptions): ChannelConnector {
-  const sendMessage = async (request: ChannelConnectorRequest, message: string): Promise<void> => {
+  const resolveToken = async (request: ChannelConnectorRequest): Promise<string> => {
     const tenantId = requireString(request.tenantId, "telegram_tenant_id_required");
-    const botToken = requireString(await resolveBotToken(tenantId, request.channelConnectionId), "telegram_bot_token_not_configured");
+    return requireString(await resolveBotToken(tenantId, request.channelConnectionId), "telegram_bot_token_not_configured");
+  };
+  const sendMessage = async (request: ChannelConnectorRequest, message: string): Promise<void> => {
+    const botToken = await resolveToken(request);
     return postTelegramSendMessage({
       chatId: requireString(request.conversationId ?? request.phone, "telegram_chat_id_required"),
       endpoint: telegramSendMessageEndpoint(apiBaseUrl, botToken),
@@ -1202,7 +1205,27 @@ export function createTenantTelegramChannelConnector({
   };
 
   return {
-    deliverMessage: async (request) => sendMessage(request, requireString(request.text, "telegram_text_required")),
+    deliverMessage: async (request) => {
+      if (!request.attachments?.length) {
+        return sendMessage(request, requireString(request.text, "telegram_text_required"));
+      }
+
+      const botToken = await resolveToken(request);
+      return sendTelegramAttachments({
+        apiBaseUrl,
+        attachments: request.attachments,
+        botToken,
+        chatId: requireString(request.conversationId ?? request.phone, "telegram_chat_id_required"),
+        fetcher,
+        idempotencyKey: requireString(request.idempotencyKey, "telegram_idempotency_key_required"),
+        replyMarkup: request.replyMarkup,
+        text: stringValue(request.text),
+        // Attachment uploads carry the file bytes to the provider, so allow
+        // them more time than a plain sendMessage call.
+        timeoutMs: Math.max(timeoutMs, 30_000),
+        traceId: requireString(request.traceId, "telegram_trace_id_required")
+      });
+    },
     startConversation: async (request) => sendMessage(request, requireString(request.message, "telegram_text_required"))
   };
 }
@@ -1943,6 +1966,129 @@ async function postOfficialProviderRequest(input: {
 
 function telegramSendMessageEndpoint(apiBaseUrl: string, botToken: string): string {
   return `${apiBaseUrl.replace(/\/+$/, "")}/bot${botToken}/sendMessage`;
+}
+
+const telegramCaptionLimit = 1024;
+
+async function sendTelegramAttachments(input: {
+  apiBaseUrl: string;
+  attachments: Array<Record<string, unknown>>;
+  botToken: string;
+  chatId: string;
+  fetcher: WorkerHttpFetch;
+  idempotencyKey: string;
+  replyMarkup?: Record<string, unknown>;
+  text: string;
+  timeoutMs: number;
+  traceId: string;
+}): Promise<void> {
+  // A caption cannot exceed the Telegram limit and cannot carry reply_markup
+  // together with the document reliably, so fall back to a separate text
+  // message in those cases.
+  const separateText = Boolean(input.text) && (input.text.length > telegramCaptionLimit || Boolean(input.replyMarkup));
+  if (separateText) {
+    await postTelegramSendMessage({
+      chatId: input.chatId,
+      endpoint: telegramApiEndpoint(input.apiBaseUrl, input.botToken, "sendMessage"),
+      fetcher: input.fetcher,
+      idempotencyKey: `${input.idempotencyKey}:text`,
+      replyMarkup: input.replyMarkup,
+      text: input.text,
+      timeoutMs: input.timeoutMs,
+      traceId: input.traceId
+    });
+  }
+
+  for (const [index, attachment] of input.attachments.entries()) {
+    const fileId = requireString(attachment.fileId, "provider_attachment_file_required");
+    const fileName = requireString(attachment.fileName, "provider_attachment_file_name_required");
+    const mimeType = stringValue(attachment.mimeType) || "application/octet-stream";
+    const bytes = await downloadProviderAttachment(attachment, input.fetcher);
+    const caption = !separateText && index === 0 ? input.text : "";
+    const isLast = index === input.attachments.length - 1;
+    const boundary = `----support-${fileId.replace(/[^A-Za-z0-9]/g, "").slice(-24)}`;
+    const body = multipartFormBody(boundary, {
+      chat_id: input.chatId,
+      ...(caption ? { caption } : {}),
+      ...(isLast && !separateText && input.replyMarkup ? { reply_markup: JSON.stringify(input.replyMarkup) } : {})
+    }, { bytes, fieldName: "document", fileName, mimeType });
+    await postTelegramMultipart({
+      body,
+      boundary,
+      endpoint: telegramApiEndpoint(input.apiBaseUrl, input.botToken, "sendDocument"),
+      fetcher: input.fetcher,
+      idempotencyKey: `${input.idempotencyKey}:document:${index}`,
+      timeoutMs: input.timeoutMs,
+      traceId: input.traceId
+    });
+  }
+}
+
+function telegramApiEndpoint(apiBaseUrl: string, botToken: string, method: string): string {
+  return `${apiBaseUrl.replace(/\/+$/, "")}/bot${botToken}/${method}`;
+}
+
+async function postTelegramMultipart(input: {
+  body: Uint8Array;
+  boundary: string;
+  endpoint: string;
+  fetcher: WorkerHttpFetch;
+  idempotencyKey: string;
+  timeoutMs: number;
+  traceId: string;
+}): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, input.timeoutMs);
+  let response: WorkerHttpResponse;
+
+  try {
+    response = await input.fetcher(input.endpoint, {
+      body: input.body,
+      headers: {
+        "content-type": `multipart/form-data; boundary=${input.boundary}`,
+        "idempotency-key": input.idempotencyKey,
+        "x-trace-id": input.traceId
+      },
+      method: "POST",
+      signal: controller.signal
+    });
+  } catch {
+    if (controller.signal.aborted) {
+      throw new Error(`telegram_dispatch_timeout:${input.timeoutMs}`);
+    }
+
+    throw new Error("telegram_dispatch_failed");
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    throw new Error(`telegram_dispatch_failed:${response.status}`);
+  }
+}
+
+function multipartFormBody(
+  boundary: string,
+  fields: Record<string, string>,
+  file: { bytes: Uint8Array; fieldName: string; fileName: string; mimeType: string }
+): Uint8Array {
+  const encoder = new TextEncoder();
+  const parts: Uint8Array[] = Object.entries(fields).map(([name, value]) =>
+    encoder.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+  const safeName = file.fileName.replace(/["\r\n]/g, "_");
+  parts.push(encoder.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${file.fieldName}"; filename="${safeName}"\r\nContent-Type: ${file.mimeType}\r\n\r\n`));
+  parts.push(file.bytes);
+  parts.push(encoder.encode(`\r\n--${boundary}--\r\n`));
+
+  const body = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    body.set(part, offset);
+    offset += part.length;
+  }
+  return body;
 }
 
 async function loadOutboundDescriptor(event: StoredOutboxEvent, descriptorStore: OutboundDescriptorStore): Promise<WorkerOutboundDescriptor> {

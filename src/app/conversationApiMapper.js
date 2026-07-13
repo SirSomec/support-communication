@@ -118,7 +118,7 @@ export function mapApiMessage(input) {
   }
 
   if (mapped.type === "internal") {
-    mapped.author = nonEmptyString(input?.author, "Иван П.");
+    mapped.author = nonEmptyString(input?.author, "Оператор");
   }
 
   if (Array.isArray(input?.attachments)) {
@@ -147,8 +147,14 @@ function mapConversationTimeline(messages, lifecycleEvents) {
   ].sort((left, right) => {
     const leftTime = Date.parse(left.createdAt ?? "");
     const rightTime = Date.parse(right.createdAt ?? "");
-    if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return 0;
-    return leftTime - rightTime;
+    const leftKnown = Number.isFinite(leftTime);
+    const rightKnown = Number.isFinite(rightTime);
+    if (leftKnown && rightKnown) return leftTime - rightTime;
+    // Элементы без метки времени (например, оптимистичные локальные сообщения)
+    // считаются самыми новыми и сохраняют исходный порядок (sort стабилен).
+    if (leftKnown) return -1;
+    if (rightKnown) return 1;
+    return 0;
   });
 }
 

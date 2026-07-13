@@ -223,6 +223,7 @@ export function useConversationInbox({ sessionActive = false } = {}) {
         setConversationItems((current) =>
           current.map((conversation) => (conversation.id === conversationId ? previousConversation : conversation))
         );
+        setTopics((current) => ({ ...current, [conversationId]: previousConversation.topic ?? "" }));
         setClosedIds((current) => {
           const next = new Set(current);
           if (previousConversation.status === "closed") {

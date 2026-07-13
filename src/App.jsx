@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useAiSuggestions } from "./app/useAiSuggestions.js";
 import { useAppTransientState } from "./app/useAppTransientState.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
@@ -130,8 +130,10 @@ function App() {
     setDraft,
     setToast,
   });
+  const loadedDetailIdRef = useRef("");
   useEffect(() => {
     if (!tenantSession.authenticated || !selectedId || selectedId === "empty") {
+      loadedDetailIdRef.current = "";
       return;
     }
 
@@ -140,6 +142,11 @@ function App() {
       return;
     }
 
+    if (loadedDetailIdRef.current === selectedId) {
+      return;
+    }
+
+    loadedDetailIdRef.current = selectedId;
     void loadConversationDetail(selectedId, { force: true });
   }, [conversationItems, inboxLoading, loadConversationDetail, selectedId, tenantSession.authenticated]);
   const selectedTopic = topics[selected.id] ?? "";
@@ -184,6 +191,7 @@ function App() {
     composeMode,
     draft,
     isClosed,
+    operator: tenantSession.operator,
     refreshInbox,
     selected,
     selectedStatus,

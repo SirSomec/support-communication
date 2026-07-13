@@ -4,8 +4,11 @@ import { createOutboxEvent, type OutboxEvent } from "@support-communication/even
 import { addMinutes, makeAuditId } from "./backend-ids.js";
 import {
   IdentityRepository,
+  hashPasswordCredential,
   hashServiceAdminToken,
   type IdentityCredentialAuditEvent,
+  type IdentityPasswordCredential,
+  isLegacyPasswordCredential,
   type StoredServiceAdminSession,
   type StoredTenantOperatorSession,
   verifyPasswordCredential
@@ -341,6 +344,8 @@ export class AuthService {
       });
     }
 
+    await this.upgradeLegacyPasswordCredential(password, credential);
+
     const tenantUser = await this.identityRepository.findTenantUserByEmail(loginEmail);
     if (tenantUser || !credential?.subjectId.startsWith("svc-admin")) {
       return createEnvelope({
@@ -470,6 +475,27 @@ export class AuthService {
     redirectUri
   }: StartOidcLoginPayload = {}): Promise<BackendEnvelope<OidcLoginStartData>> {
     const traceId = identityTraceId(SERVICE, "startOidcLogin");
+    if (!isPartialSsoRuntimeAllowed()) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "startOidcLogin",
+        traceId,
+        status: "denied",
+        meta: apiMeta(),
+        data: {
+          authorizationUrl: "",
+          callbackDescriptorId: "",
+          expiresAt: "",
+          providerId,
+          redirectUri: redirectUri ?? "",
+          state: ""
+        },
+        error: {
+          code: "sso_flow_unavailable",
+          message: PARTIAL_SSO_UNAVAILABLE_MESSAGE
+        }
+      });
+    }
     if (!redirectUri) {
       return createEnvelope({
         service: SERVICE,
@@ -578,6 +604,25 @@ export class AuthService {
     state
   }: CompleteOidcCallbackPayload = {}): Promise<BackendEnvelope<OidcCallbackData>> {
     const traceId = identityTraceId(SERVICE, "completeOidcCallback");
+    if (!isPartialSsoRuntimeAllowed()) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "completeOidcCallback",
+        traceId,
+        status: "denied",
+        meta: apiMeta(),
+        data: {
+          authenticated: false,
+          authState: "anonymous",
+          nextStep: "authorization",
+          state
+        },
+        error: {
+          code: "sso_flow_unavailable",
+          message: PARTIAL_SSO_UNAVAILABLE_MESSAGE
+        }
+      });
+    }
     const consumed = await this.identityRepository.consumeOidcCallbackDescriptor({ state });
     if (consumed.status !== "consumed") {
       return createEnvelope({
@@ -685,6 +730,21 @@ export class AuthService {
       requestId,
       subjectId
     };
+
+    if (!isPartialSsoRuntimeAllowed()) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "completeSamlAcs",
+        traceId,
+        status: "denied",
+        meta: apiMeta(),
+        data: baseData,
+        error: {
+          code: "sso_flow_unavailable",
+          message: PARTIAL_SSO_UNAVAILABLE_MESSAGE
+        }
+      });
+    }
 
     if (!assertionId || !audience || !requestId || !subjectId) {
       return createEnvelope({
@@ -940,6 +1000,10 @@ export class AuthService {
       });
     }
 
+    if (password) {
+      await this.upgradeLegacyPasswordCredential(password, credential);
+    }
+
     const tenantUser = await this.identityRepository.findTenantUserByEmail(normalizedEmail);
     if (!tenantUser || tenantUser.status !== "active") {
       return createEnvelope({
@@ -1149,6 +1213,28 @@ export class AuthService {
     });
   }
 
+  private async upgradeLegacyPasswordCredential(
+    password: string,
+    credential: IdentityPasswordCredential | undefined
+  ): Promise<void> {
+    if (!credential || !isLegacyPasswordCredential(credential)) {
+      return;
+    }
+
+    try {
+      await this.identityRepository.savePasswordCredential({
+        ...credential,
+        algorithm: "scrypt",
+        hash: hashPasswordCredential(password),
+        updatedAt: new Date().toISOString(),
+        version: credential.version + 1
+      });
+    } catch {
+      // Upgrade is opportunistic: the verified legacy credential keeps working
+      // and will be upgraded on a subsequent successful login.
+    }
+  }
+
   private async createAndDeliverMfaChallenge(email: string) {
     const issued = this.mfaOtp.issue(email);
     const challenge = await this.identityRepository.createMfaChallenge({
@@ -1309,9 +1395,9 @@ export class AuthService {
     });
 
     await this.identityRepository.savePasswordCredential({
-      algorithm: "sha256",
+      algorithm: "scrypt",
       email: normalizedEmail,
-      hash: `sha256:${createHash("sha256").update(password).digest("hex")}`,
+      hash: hashPasswordCredential(password),
       subjectId: activatedUser.id,
       updatedAt: new Date().toISOString(),
       version: 1
@@ -1429,9 +1515,9 @@ export class AuthService {
 
     const completedRecovery = await this.identityRepository.completePasswordRecovery({
       credential: {
-        algorithm: "sha256",
+        algorithm: "scrypt",
         email: normalizedEmail,
-        hash: `sha256:${createHash("sha256").update(password).digest("hex")}`,
+        hash: hashPasswordCredential(password),
         subjectId: user.id,
         updatedAt: new Date().toISOString(),
         version: 1
@@ -1575,6 +1661,16 @@ function currentNodeEnv(): string {
   return process.env.NODE_ENV || "test";
 }
 
+const PARTIAL_SSO_UNAVAILABLE_MESSAGE =
+  "OIDC/SAML sign-in is not fully implemented yet (token exchange and assertion signature validation are pending) and is disabled in this runtime. Set AUTH_ALLOW_PARTIAL_SSO_FLOWS=true only for contract testing.";
+
+function isPartialSsoRuntimeAllowed(): boolean {
+  if (["development", "test"].includes(currentNodeEnv())) {
+    return true;
+  }
+  return String(process.env.AUTH_ALLOW_PARTIAL_SSO_FLOWS ?? "").trim().toLowerCase() === "true";
+}
+
 function shouldSkipTenantOperatorMfa(): boolean {
   const localRuntime = ["development", "test"].includes(currentNodeEnv());
   const requireMfaInLocal = String(process.env.AUTH_REQUIRE_TENANT_MFA ?? "").trim().toLowerCase() === "true";
@@ -1603,56 +1699,4 @@ function buildOidcAuthorizationUrl(
   authorizationUrl.searchParams.set("redirect_uri", redirectUri);
   authorizationUrl.searchParams.set("response_type", "code");
   authorizationUrl.searchParams.set("scope", provider.scopes.join(" "));
-  authorizationUrl.searchParams.set("state", state);
-  authorizationUrl.searchParams.set("nonce", nonce);
-  if (provider.audience) {
-    authorizationUrl.searchParams.set("audience", provider.audience);
-  }
-  return authorizationUrl.toString();
-}
-
-function hashOidcValue(value: string): string {
-  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
-}
-
-function isSamlAssertionReplayConflict(error: unknown): boolean {
-  const prismaError = error as { code?: unknown } | null;
-  return (error instanceof Error && /SAML assertion replay already exists/.test(error.message))
-    || prismaError?.code === "P2002";
-}
-
-function resolveSessionStateDenial(session: StoredServiceAdminSession | undefined): { code: string; message: string } | null {
-  if (!session) {
-    return { code: "session_not_found", message: "Service-admin session was not found." };
-  }
-
-  if (session.revokedAt) {
-    return { code: "session_revoked", message: "Service-admin session was revoked." };
-  }
-
-  if (!session.mfaVerifiedAt) {
-    return { code: "mfa_required", message: "Service-admin session requires MFA verification." };
-  }
-
-  if (!Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
-    return { code: "session_expired", message: "Service-admin session has expired." };
-  }
-
-  return null;
-}
-
-function resolveTenantOperatorSessionDenial(session: StoredTenantOperatorSession | undefined): { code: string; message: string } | null {
-  if (!session) {
-    return { code: "session_not_found", message: "Tenant operator session was not found." };
-  }
-
-  if (session.revokedAt) {
-    return { code: "session_revoked", message: "Tenant operator session was revoked." };
-  }
-
-  if (!Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
-    return { code: "session_expired", message: "Tenant operator session has expired." };
-  }
-
-  return null;
-}
+  authorizationUrl.searchParams.set("state"

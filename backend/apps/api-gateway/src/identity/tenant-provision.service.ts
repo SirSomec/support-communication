@@ -4,6 +4,7 @@ import { makeAuditId } from "./backend-ids.js";
 import { BillingRepository } from "../billing/billing.repository.js";
 import {
   IdentityRepository,
+  hashPasswordCredential,
   type IdentityRbacRoleGrant,
   type IdentityTenantUser
 } from "./identity.repository.js";
@@ -186,9 +187,9 @@ export class TenantProvisionService {
       await this.identityRepository.saveTenantUser(user);
 
       await this.identityRepository.savePasswordCredential({
-        algorithm: "sha256",
+        algorithm: "scrypt",
         email: adminEmail,
-        hash: `sha256:${createHash("sha256").update(adminPassword).digest("hex")}`,
+        hash: hashPasswordCredential(adminPassword),
         subjectId: user.id,
         updatedAt: new Date().toISOString(),
         version: 1

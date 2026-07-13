@@ -12,6 +12,7 @@ mkdirSync(runtimeDir, { recursive: true });
 const storeFiles = {
   AUTOMATION_STORE_FILE: "automation.json",
   BILLING_STORE_FILE: "billing.json",
+  BOT_SANDBOX_STORE_FILE: "bot-sandbox.json",
   CONVERSATION_STORE_FILE: "conversation.json",
   IDENTITY_STORE_FILE: "identity.json",
   INTEGRATION_STORE_FILE: "integration.json",

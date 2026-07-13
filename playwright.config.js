@@ -19,6 +19,9 @@ export default defineConfig({
     },
     {
       command: "npm run dev -- --port 5173",
+      // Local .env.development.local may point the dev proxy at the docker pilot
+      // (4101, MFA enforced); smokes must always talk to their own gateway on 4100.
+      env: { DEV_API_PROXY_TARGET: "http://127.0.0.1:4100" },
       reuseExistingServer: true,
       timeout: 120_000,
       url: "http://127.0.0.1:5173"

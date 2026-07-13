@@ -2502,8 +2502,21 @@ function normalizeBotScenarioVersionRecord(version: AutomationBotScenarioVersion
     basePrompt: normalizeBasePrompt(version.basePrompt),
     priority: normalizeBotScenarioPriority(version.priority),
     tenantId: requireAutomationTenantId(version.tenantId),
-    triggerRules: normalizeBotTriggerRules(version.triggerRules ?? [])
+    triggerRules: normalizeVersionTriggerRules(version.triggerRules)
   };
+}
+
+/**
+ * A version without snapshotted rules must stay `undefined` so the runtime
+ * falls back to the scenario's rules (`version.triggerRules ?? scenario.…`).
+ * Publish validation never produces an intentionally empty snapshot, so an
+ * empty array is treated as "not snapshotted" too; coercing it to [] silently
+ * erased phrase triggers of versions published before rules were snapshotted.
+ */
+function normalizeVersionTriggerRules(value: unknown): BotTriggerRule[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  const rules = normalizeBotTriggerRules(value);
+  return rules.length ? rules : undefined;
 }
 
 function normalizeBotPublishAuditEventRecord(event: AutomationBotPublishAuditEvent): AutomationBotPublishAuditEvent {
@@ -2704,7 +2717,7 @@ function toBotScenarioVersion(row: PrismaBotScenarioVersionRow): AutomationBotSc
     sourceBindings: normalizeSourceBindings(row.sourceBindings ?? []),
     status: row.status,
     tenantId: requireAutomationTenantId(row.tenantId),
-    triggerRules: normalizeBotTriggerRules(row.triggerRules ?? []),
+    ...(normalizeVersionTriggerRules(row.triggerRules) ? { triggerRules: normalizeVersionTriggerRules(row.triggerRules) } : {}),
     versionId: row.versionId
   };
 }

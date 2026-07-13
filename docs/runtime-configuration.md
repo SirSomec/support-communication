@@ -62,6 +62,8 @@ VITE_API_BASE_URL=http://127.0.0.1:4100 npm run dev
 | `REALTIME_REDIS_FANOUT_ENABLED=true` | Enable Redis-backed realtime fanout |
 | `REDIS_URL` | Redis connection for realtime fanout |
 | `AUTH_ALLOW_PARTIAL_SSO_FLOWS=true` | Разрешить частичные OIDC/SAML flows вне dev/test. По умолчанию вне dev/test эндпоинты `/auth/oidc/*` и `/auth/saml/acs` отвечают `denied sso_flow_unavailable`, потому что token exchange (OIDC) и проверка подписи assertion (SAML) ещё не реализованы и сессия не выдается. Флаг предназначен только для контрактного тестирования. |
+| `BOT_SANDBOX_STORE_FILE` | Путь к JSON-хранилищу sandbox-сессий тест-чата ботов (по умолчанию `.runtime/bot-sandbox-sessions.json`). Сессии эфемерны (TTL 2 часа) и не являются продакшен-диалогами. |
+| `BOT_SANDBOX_MONTHLY_TOKEN_BUDGET` | Месячный лимит токенов на живой тест-чат для tenant, если у AI-подключения не задан `limits.sandboxMonthlyTokenBudget` (по умолчанию 100000). Расход песочницы дополнительно учитывается в общем месячном бюджете подключения. |
 
 Repository defaults:
 

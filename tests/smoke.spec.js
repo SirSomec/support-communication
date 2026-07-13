@@ -902,20 +902,30 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   expect(publishPayload.data.versionState).toBe("published");
   await expect(page.locator(".toast")).toContainText("опубликован: runtime-");
 
-  const testRunPromise = page.waitForResponse((response) =>
+  // BAI-804: живой тест-чат — сообщение проходит настоящий runtime в изолированной sandbox-сессии.
+  await page.getByRole("button", { name: "Тест-чат" }).click();
+  const sandboxTurnPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/automation/bot-scenarios/")
-    && response.url().includes("/test-runs")
+    && response.url().includes("/sandbox-sessions/")
+    && response.url().includes("/messages")
     && response.request().method() === "POST"
   );
-  await page.getByRole("button", { name: "Прогнать тест" }).click();
-  const testRunResponse = await testRunPromise;
-  expect(testRunResponse.ok()).toBeTruthy();
-  const testRunPayload = await testRunResponse.json();
-  expect(testRunPayload.status).toBe("ok");
-  expect(testRunPayload.data.auditId).toBeTruthy();
-  expect(testRunPayload.data.queue).toBe("bot-runtime");
-  expect(testRunPayload.data.testRunId).toMatch(/^bot_test_/);
-  await expect(page.locator(".toast")).toContainText("Песочница");
+  await page.locator(".sandbox-composer input").fill("Здравствуйте, подскажите статус заказа");
+  await page.locator(".sandbox-composer button[type='submit']").click();
+  const sandboxTurnResponse = await sandboxTurnPromise;
+  expect(sandboxTurnResponse.ok()).toBeTruthy();
+  const sandboxTurnPayload = await sandboxTurnResponse.json();
+  expect(sandboxTurnPayload.status).toBe("ok");
+  expect(sandboxTurnPayload.data.session.id).toMatch(/^sbx_/);
+  expect(sandboxTurnPayload.data.turn.trace).toBeTruthy();
+  await expect(page.locator(".sandbox-bubble--client")).toContainText("статус заказа");
+  await expect(page.locator(".sandbox-bubble--bot, .sandbox-event").first()).toBeVisible();
+  await page.locator(".sandbox-trace > button").first().click();
+  await expect(page.locator(".sandbox-trace-details")).toContainText("Шаг");
+  await page.getByRole("button", { name: "Сохранить как проверку" }).click();
+  await expect(page.locator(".toast")).toContainText("проверочный набор");
+  await page.getByRole("button", { name: "Начать заново" }).click();
+  await expect(page.locator(".sandbox-chat-empty")).toBeVisible();
   await expectHealthyPage(page);
 });
 

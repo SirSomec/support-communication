@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "./automation.css";
 import {
   AlertTriangle,
@@ -15,7 +15,7 @@ import {
   Zap
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
-import { changeBotScenarioLifecycle, publishBotScenario, runBotScenarioTest, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
+import { changeBotScenarioLifecycle, publishBotScenario, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { automationService } from "../../services/automationService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
 import { ChannelBadge, ChannelList, ConfirmDialog, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
@@ -24,6 +24,7 @@ import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
 import { ScenarioArchiveConfirmModal, ScenarioPauseConfirmModal, ScenarioPublishChecklistModal } from "./ScenarioLifecycleModals.jsx";
 import { ScenarioOperationalPanel } from "./ScenarioOperationalPanel.jsx";
 import { ScenarioKnowledgeSourceSelector } from "./ScenarioKnowledgeSourceSelector.jsx";
+import { ScenarioSandboxChat } from "./ScenarioSandboxChat.jsx";
 import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScenarioFromWizard, formatScenarioStatusLabel, loadAdvancedModePreference, saveAdvancedModePreference } from "./automationModel.js";
 
 export function AutomationScreen({ onBack, onToast, access }) {
@@ -45,9 +46,8 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [aiReadiness, setAiReadiness] = useState({ status: "not_configured" });
   const [scenarioVersions, setScenarioVersions] = useState([]);
   const [workspacePartial, setWorkspacePartial] = useState(false);
-  const [sandboxMessage, setSandboxMessage] = useState("");
-  const [sandboxPreview, setSandboxPreview] = useState(null);
   const [sandboxVerifiedScenarioId, setSandboxVerifiedScenarioId] = useState("");
+  const sandboxChatRef = useRef(null);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [pauseTarget, setPauseTarget] = useState(null);
   const [urlSourceForm, setUrlSourceForm] = useState(null);
@@ -544,26 +544,10 @@ export function AutomationScreen({ onBack, onToast, access }) {
     }
   }
 
-  async function handleScenarioTest() {
-    if (!canManageAutomation) {
-      onToast(access.reason);
-      return;
-    }
-
-    setSavingAction(`test:${selectedScenario.id}`);
-    try {
-      const result = await runBotScenarioTest({ ...selectedScenario, testMessage: sandboxMessage });
-      if (!result.ok) {
-        onToast(result.message);
-        return;
-      }
-
-      setSandboxPreview(result.preview);
-      setSandboxVerifiedScenarioId(selectedScenario.id);
-      onToast(`Песочница «${selectedScenario.name}» выполнена: реальные диалоги не затронуты.`);
-    } finally {
-      setSavingAction("");
-    }
+  function focusSandboxChat() {
+    sandboxChatRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const input = sandboxChatRef.current?.querySelector("input");
+    input?.focus?.({ preventScroll: true });
   }
 
   async function handleScenarioPublish() {
@@ -713,9 +697,9 @@ export function AutomationScreen({ onBack, onToast, access }) {
             <CheckCircle2 size={17} />
             Опубликовать
           </button>
-          <button className="primary-action" disabled={!canManageAutomation || isSaving} onClick={handleScenarioTest} title={canManageAutomation ? "Прогнать тест" : access.reason} type="button">
+          <button className="primary-action" disabled={!canManageAutomation || isSaving} onClick={focusSandboxChat} title={canManageAutomation ? "Открыть живой тест-чат" : access.reason} type="button">
             <PlayCircle size={17} />
-            Прогнать тест
+            Тест-чат
           </button>
         </>
       }
@@ -826,31 +810,16 @@ export function AutomationScreen({ onBack, onToast, access }) {
         </div>
       </section>
 
-      <section className="work-panel bot-sandbox-standalone" aria-live="polite">
-        <SectionTitle title="Тестовая песочница" action={selectedScenario.name} />
-        <p>Введите пример сообщения клиента. Проверка не отправляет сообщений в реальные каналы и не создаёт runtime-шаги.</p>
-        <textarea disabled={!canManageAutomation || isSaving} onChange={(event) => setSandboxMessage(event.target.value)} placeholder="Например: Где узнать статус заказа?" value={sandboxMessage} />
-        <button disabled={!canManageAutomation || isSaving} onClick={handleScenarioTest} type="button"><PlayCircle size={15} /> Проверить сценарий</button>
-        {sandboxPreview ? (
-          <div className="bot-validation-list bot-sandbox-result">
-            <strong>{sandboxPreview.outcome === "handoff" ? "Будет передача оператору" : sandboxPreview.outcome === "no_match" ? "Сценарий не запустится" : "Ожидаемый результат"}</strong>
-            <span>{sandboxPreview.answerPreview}</span>
-            <span>Триггер: {sandboxPreview.trigger?.matched === false ? "не сработает" : "сработает"}{sandboxPreview.trigger?.matchMode ? ` · ${sandboxPreview.trigger.matchMode}` : ""}</span>
-            {Array.isArray(sandboxPreview.steps) && sandboxPreview.steps.length ? (
-              <span>Путь: {sandboxPreview.steps.map((step) => step.title || step.type).join(" → ")}</span>
-            ) : null}
-            {sandboxPreview.citations?.length ? <span>Источники: {sandboxPreview.citations.map((item) => item.title).join(", ")}</span> : null}
-            {sandboxPreview.retrievalPassages?.length ? (
-              <span>Фрагменты: {sandboxPreview.retrievalPassages.map((item) => item.title).join(", ")}</span>
-            ) : null}
-            {sandboxPreview.trace ? (
-              <span>
-                Trace: dry-run · AI {sandboxPreview.trace.aiWouldCall ? "вызвали бы" : "не вызовут"} · retrieval {sandboxPreview.trace.retrievalTokensUsed ?? 0}/{sandboxPreview.trace.retrievalTokenBudget ?? 0} ток. · cache {sandboxPreview.trace.retrievalCache ?? "—"}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
+      <div ref={sandboxChatRef}>
+        <ScenarioSandboxChat
+          accessReason={access.reason}
+          aiReadiness={aiReadiness}
+          canManage={canManageAutomation}
+          onToast={onToast}
+          onVerified={setSandboxVerifiedScenarioId}
+          scenario={selectedScenario}
+        />
+      </div>
 
       {advancedMode ? (
       <section className="work-panel bot-builder-panel">

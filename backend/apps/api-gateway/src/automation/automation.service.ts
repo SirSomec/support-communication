@@ -10,6 +10,8 @@ import {
   type AutomationPublishIdempotencyRecord
 } from "./automation.repository.js";
 import { BotRuntimeService, type BotRuntimeInboundEvent, type BotRuntimeOptions } from "./bot-runtime.service.js";
+import { BotSandboxService } from "./bot-sandbox.service.js";
+import type { FeatureFlag } from "../platform/platform.types.js";
 import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase, normalizeBotTriggerText } from "./bot-trigger-matcher.js";
 import { DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS, ProactiveExposureRepository } from "./proactive-exposure.repository.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
@@ -213,7 +215,7 @@ export class AutomationService {
       flowEdges: clone(request.flowEdges ?? []),
       flowNodes: clone(request.flowNodes ?? [{ id: "start", type: "message", title: "Start" }]),
       id: scenarioId,
-      name: String(request.name ?? "Новый сценарий"),
+      name: String(request.name ?? "РќРѕРІС‹Р№ СЃС†РµРЅР°СЂРёР№"),
       priority: normalizeScenarioPriority(request.priority),
       schemaVersion: "bot-flow/v1",
       status: "draft",
@@ -282,7 +284,7 @@ export class AutomationService {
       status: normalizeBotScenarioStatus(request.status, existing.status),
       tenantId,
       sourceBindings: normalizeScenarioSourceBindings(request.sourceBindings ?? existing.sourceBindings ?? []),
-      triggerRules: resolveScenarioTriggerRules(request, existing.triggerRules ?? defaultScenarioTriggerRules()),
+      triggerRules: resolveScenarioTriggerRules(request, existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules()),
       updatedAt: new Date().toISOString()
     };
     this.upsertScenario(scenario);
@@ -373,16 +375,16 @@ export class AutomationService {
         for (const binding of sourceBindings) {
           const source = this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
           if (!source || !isKnowledgeSourceRetrievalEligible(source)) {
-            policyErrors.push(`Источник знаний «${binding.sourceId}» недоступен или не готов.`);
+            policyErrors.push(`РСЃС‚РѕС‡РЅРёРє Р·РЅР°РЅРёР№ В«${binding.sourceId}В» РЅРµРґРѕСЃС‚СѓРїРµРЅ РёР»Рё РЅРµ РіРѕС‚РѕРІ.`);
           }
         }
         if (payload.flowNodes.some((node) => node.type === "ai_reply")) {
-          if (!sourceBindings.length) policyErrors.push("AI-ответу нужен хотя бы один готовый источник знаний.");
+          if (!sourceBindings.length) policyErrors.push("AI-РѕС‚РІРµС‚Сѓ РЅСѓР¶РµРЅ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РіРѕС‚РѕРІС‹Р№ РёСЃС‚РѕС‡РЅРёРє Р·РЅР°РЅРёР№.");
           if (aiReadinessForTenant(tenantId).status !== "ready") {
-            policyErrors.push("AI-подключение организации не настроено или не прошло проверку.");
+            policyErrors.push("AI-РїРѕРґРєР»СЋС‡РµРЅРёРµ РѕСЂРіР°РЅРёР·Р°С†РёРё РЅРµ РЅР°СЃС‚СЂРѕРµРЅРѕ РёР»Рё РЅРµ РїСЂРѕС€Р»Рѕ РїСЂРѕРІРµСЂРєСѓ.");
           }
           if (!payload.flowNodes.some((node) => node.type === "handoff" || node.type === "fallback")) {
-            policyErrors.push("Добавьте передачу оператору или запасной ответ.");
+            policyErrors.push("Р”РѕР±Р°РІСЊС‚Рµ РїРµСЂРµРґР°С‡Сѓ РѕРїРµСЂР°С‚РѕСЂСѓ РёР»Рё Р·Р°РїР°СЃРЅРѕР№ РѕС‚РІРµС‚.");
           }
         }
         const state = await this.automationRepository.readStateAsync();
@@ -394,7 +396,7 @@ export class AutomationService {
           normalizeScenarioPriority(raw?.priority)
         );
         if (conflict) {
-          policyErrors.push("Другой опубликованный сценарий уже использует эту ключевую фразу с тем же приоритетом.");
+          policyErrors.push("Р”СЂСѓРіРѕР№ РѕРїСѓР±Р»РёРєРѕРІР°РЅРЅС‹Р№ СЃС†РµРЅР°СЂРёР№ СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚ СЌС‚Сѓ РєР»СЋС‡РµРІСѓСЋ С„СЂР°Р·Сѓ СЃ С‚РµРј Р¶Рµ РїСЂРёРѕСЂРёС‚РµС‚РѕРј.");
         }
       }
       enriched = { ...payload, sourceBindings, triggerRules };
@@ -447,7 +449,7 @@ export class AutomationService {
       }));
     }
 
-    const triggerRules = resolveScenarioTriggerRules(request, existing.triggerRules ?? defaultScenarioTriggerRules());
+    const triggerRules = resolveScenarioTriggerRules(request, existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules());
     const triggerErrors = validateScenarioTriggerRules(triggerRules);
     if (triggerErrors.length) {
       return publishFailure(tenantId, scenarioId, "bot_trigger_invalid", invalidEnvelope("publishBotScenario", "bot_trigger_invalid", triggerErrors.join("; "), { scenarioId, violations: triggerErrors }));
@@ -469,9 +471,9 @@ export class AutomationService {
     const prerequisiteViolations: string[] = [];
     const nodes = validation.payload?.flowNodes ?? [];
     if (nodes.some((node) => node.type === "ai_reply")) {
-      if (!sourceBindings.length) prerequisiteViolations.push("AI-ответу нужен хотя бы один готовый источник знаний.");
-      if (aiReadinessForTenant(tenantId).status !== "ready") prerequisiteViolations.push("AI-подключение организации не настроено или не прошло проверку.");
-      if (!nodes.some((node) => node.type === "handoff" || node.type === "fallback")) prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");
+      if (!sourceBindings.length) prerequisiteViolations.push("AI-РѕС‚РІРµС‚Сѓ РЅСѓР¶РµРЅ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РіРѕС‚РѕРІС‹Р№ РёСЃС‚РѕС‡РЅРёРє Р·РЅР°РЅРёР№.");
+      if (aiReadinessForTenant(tenantId).status !== "ready") prerequisiteViolations.push("AI-РїРѕРґРєР»СЋС‡РµРЅРёРµ РѕСЂРіР°РЅРёР·Р°С†РёРё РЅРµ РЅР°СЃС‚СЂРѕРµРЅРѕ РёР»Рё РЅРµ РїСЂРѕС€Р»Рѕ РїСЂРѕРІРµСЂРєСѓ.");
+      if (!nodes.some((node) => node.type === "handoff" || node.type === "fallback")) prerequisiteViolations.push("Р”РѕР±Р°РІСЊС‚Рµ РїРµСЂРµРґР°С‡Сѓ РѕРїРµСЂР°С‚РѕСЂСѓ РёР»Рё Р·Р°РїР°СЃРЅРѕР№ РѕС‚РІРµС‚.");
     }
     if (prerequisiteViolations.length) {
       return publishFailure(tenantId, scenarioId, "bot_publish_prerequisites_invalid", invalidEnvelope("publishBotScenario", "bot_publish_prerequisites_invalid", prerequisiteViolations.join(" "), { scenarioId, violations: prerequisiteViolations }));
@@ -717,6 +719,139 @@ export class AutomationService {
       meta: apiMeta({ scenarioId, tenantId }),
       data: { ...testRun, preview }
     });
+  }
+
+  async createBotSandboxSession(
+    scenarioId: string,
+    payload: { channel?: string; locale?: string; mode?: string } | null | undefined,
+    context: AutomationRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("createBotSandboxSession");
+    try {
+      const session = await this.sandboxService().createSession({
+        actor: actionActor(context),
+        channel: payload?.channel,
+        locale: payload?.locale,
+        mode: payload?.mode,
+        scenarioId,
+        tenantId
+      });
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "createBotSandboxSession",
+        traceId: actionTraceId(context, "createBotSandboxSession"),
+        meta: apiMeta({ scenarioId, tenantId }),
+        data: { session }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("createBotSandboxSession", error);
+    }
+  }
+
+  async fetchBotSandboxSession(scenarioId: string, sessionId: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("fetchBotSandboxSession");
+    try {
+      const session = await this.sandboxService().getSession(tenantId, scenarioId, sessionId);
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "fetchBotSandboxSession",
+        traceId: actionTraceId(context, "fetchBotSandboxSession"),
+        meta: apiMeta({ scenarioId, tenantId }),
+        data: { session }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("fetchBotSandboxSession", error);
+    }
+  }
+
+  async deleteBotSandboxSession(scenarioId: string, sessionId: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("deleteBotSandboxSession");
+    try {
+      await this.sandboxService().deleteSession(tenantId, scenarioId, sessionId);
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "deleteBotSandboxSession",
+        traceId: actionTraceId(context, "deleteBotSandboxSession"),
+        meta: apiMeta({ scenarioId, tenantId }),
+        data: { deleted: true, sessionId }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("deleteBotSandboxSession", error);
+    }
+  }
+
+  async postBotSandboxMessage(
+    scenarioId: string,
+    sessionId: string,
+    payload: { messageId?: string; quickReply?: string; text?: string; value?: unknown; webhooksEnabled?: boolean } | null | undefined,
+    context: AutomationRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("postBotSandboxMessage");
+    try {
+      const { session, turn } = await this.sandboxService().postMessage({
+        featureFlags: await this.botRuntimeFeatureFlags(),
+        messageId: payload?.messageId,
+        quickReply: payload?.quickReply,
+        scenarioId,
+        sessionId,
+        tenantId,
+        text: String(payload?.text ?? ""),
+        traceId: actionTraceId(context, "postBotSandboxMessage"),
+        value: payload?.value,
+        webhooksEnabled: payload?.webhooksEnabled
+      });
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "postBotSandboxMessage",
+        traceId: actionTraceId(context, "postBotSandboxMessage"),
+        meta: apiMeta({ scenarioId, sessionId, tenantId }),
+        data: { session, turn }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("postBotSandboxMessage", error);
+    }
+  }
+
+  async saveBotSandboxRegression(
+    scenarioId: string,
+    sessionId: string,
+    payload: { name?: string } | null | undefined,
+    context: AutomationRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("saveBotSandboxRegression");
+    try {
+      const testRun = await this.sandboxService().saveRegression({
+        actor: actionActor(context),
+        name: payload?.name,
+        scenarioId,
+        sessionId,
+        tenantId
+      });
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "saveBotSandboxRegression",
+        traceId: actionTraceId(context, "saveBotSandboxRegression"),
+        meta: apiMeta({ scenarioId, tenantId }),
+        data: { testRun }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("saveBotSandboxRegression", error);
+    }
+  }
+
+  private sandboxService(): BotSandboxService {
+    return new BotSandboxService(this.automationRepository);
+  }
+
+  private async botRuntimeFeatureFlags(): Promise<FeatureFlag[] | undefined> {
+    return String(process.env.BOT_AI_AGENTS_PILOT_ENFORCE ?? "").trim() === "1"
+      ? this.platformRepository.listFeatureFlagsAsync()
+      : undefined;
   }
 
   async recordBotAiFeedback(
@@ -1037,6 +1172,22 @@ function conflictEnvelope(operation: string, code: string, message: string, data
   });
 }
 
+const SANDBOX_ERROR_MESSAGES: Record<string, string> = {
+  bot_sandbox_budget_exhausted: "РСЃС‡РµСЂРїР°РЅ Р»РёРјРёС‚ С‚РѕРєРµРЅРѕРІ РЅР° С‚РµСЃС‚РёСЂРѕРІР°РЅРёРµ РІ СЌС‚РѕРј РјРµСЃСЏС†Рµ. РћР±СЂР°С‚РёС‚РµСЃСЊ Рє Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ СЃРµСЂРІРёСЃР°, С‡С‚РѕР±С‹ РїРѕРґРЅСЏС‚СЊ Р»РёРјРёС‚.",
+  bot_sandbox_channel_unsupported: "Р’С‹Р±СЂР°РЅРЅС‹Р№ РєР°РЅР°Р» РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ Рє СЃС†РµРЅР°СЂРёСЋ.",
+  bot_sandbox_message_required: "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ, С‡С‚РѕР±С‹ РѕС‚РїСЂР°РІРёС‚СЊ РµРіРѕ Р±РѕС‚Сѓ.",
+  bot_sandbox_published_version_not_found: "РЈ СЃС†РµРЅР°СЂРёСЏ РЅРµС‚ РѕРїСѓР±Р»РёРєРѕРІР°РЅРЅРѕР№ РІРµСЂСЃРёРё вЂ” РїСЂРѕС‚РµСЃС‚РёСЂСѓР№С‚Рµ С‡РµСЂРЅРѕРІРёРє.",
+  bot_sandbox_scenario_not_found: "РЎС†РµРЅР°СЂРёР№ РЅРµ РЅР°Р№РґРµРЅ.",
+  bot_sandbox_session_empty: "Р’ С‚РµСЃС‚РѕРІРѕРј РґРёР°Р»РѕРіРµ РµС‰С‘ РЅРµС‚ СЂРµРїР»РёРє вЂ” СЃРЅР°С‡Р°Р»Р° РѕС‚РїСЂР°РІСЊС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ Р±РѕС‚Сѓ.",
+  bot_sandbox_session_not_found: "РўРµСЃС‚РѕРІР°СЏ СЃРµСЃСЃРёСЏ РЅРµ РЅР°Р№РґРµРЅР° РёР»Рё РёСЃС‚РµРєР»Р°. РќР°С‡РЅРёС‚Рµ С‚РµСЃС‚ Р·Р°РЅРѕРІРѕ."
+};
+
+function sandboxErrorEnvelope(operation: string, error: unknown): BackendEnvelope<Record<string, unknown>> {
+  const code = error instanceof Error ? error.message : "bot_sandbox_failed";
+  const known = SANDBOX_ERROR_MESSAGES[code];
+  return invalidEnvelope(operation, known ? code : "bot_sandbox_failed", known ?? "РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ РѕРїРµСЂР°С†РёСЋ С‚РµСЃС‚-С‡Р°С‚Р°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.", {});
+}
+
 function invalidEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
   return createEnvelope({
     service: AUTOMATION_SERVICE,
@@ -1239,9 +1390,9 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
   const phraseMatched = phraseRule ? Boolean(testMessage) && (phraseRule.phrases ?? []).some((phrase) => matchesBotTriggerPhrase(testMessage, phrase, phraseRule.matchMode ?? "contains", phraseRule.locale)) : null;
   if (phraseRule && !phraseMatched) {
     return {
-      answerPreview: testMessage ? "Сценарий не запустится: сообщение не совпало ни с одной ключевой фразой." : "Введите сообщение клиента, чтобы проверить ключевую фразу.",
+      answerPreview: testMessage ? "РЎС†РµРЅР°СЂРёР№ РЅРµ Р·Р°РїСѓСЃС‚РёС‚СЃСЏ: СЃРѕРѕР±С‰РµРЅРёРµ РЅРµ СЃРѕРІРїР°Р»Рѕ РЅРё СЃ РѕРґРЅРѕР№ РєР»СЋС‡РµРІРѕР№ С„СЂР°Р·РѕР№." : "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ РєР»РёРµРЅС‚Р°, С‡С‚РѕР±С‹ РїСЂРѕРІРµСЂРёС‚СЊ РєР»СЋС‡РµРІСѓСЋ С„СЂР°Р·Сѓ.",
       citations: [],
-      input: testMessage || "Введите сообщение клиента для проверки.",
+      input: testMessage || "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ РєР»РёРµРЅС‚Р° РґР»СЏ РїСЂРѕРІРµСЂРєРё.",
       outcome: "no_match",
       reason: testMessage ? "phrase_not_matched" : "test_message_required",
       steps: [],
@@ -1263,9 +1414,9 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
     const matched = matchesBotAlwaysExceptTrigger(testMessage, alwaysExceptRule.phrases, alwaysExceptRule.matchMode ?? "contains", alwaysExceptRule.locale);
     if (!matched) {
       return {
-        answerPreview: "Сценарий не запустится: сообщение попало под исключение «Всегда, кроме».",
+        answerPreview: "РЎС†РµРЅР°СЂРёР№ РЅРµ Р·Р°РїСѓСЃС‚РёС‚СЃСЏ: СЃРѕРѕР±С‰РµРЅРёРµ РїРѕРїР°Р»Рѕ РїРѕРґ РёСЃРєР»СЋС‡РµРЅРёРµ В«Р’СЃРµРіРґР°, РєСЂРѕРјРµВ».",
         citations: [],
-        input: testMessage || "Введите сообщение клиента для проверки.",
+        input: testMessage || "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ РєР»РёРµРЅС‚Р° РґР»СЏ РїСЂРѕРІРµСЂРєРё.",
         outcome: "no_match",
         reason: "always_except_excluded",
         steps: [],
@@ -1318,14 +1469,14 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
 
   return {
     answerPreview: !aiNode
-      ? "Сценарий отправит настроенное сообщение."
+      ? "РЎС†РµРЅР°СЂРёР№ РѕС‚РїСЂР°РІРёС‚ РЅР°СЃС‚СЂРѕРµРЅРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ."
       : needsHandoff
         ? (aiNode.config?.fallbackMessage
           ? String(aiNode.config.fallbackMessage)
-          : "AI не будет отвечать: клиенту будет предложена помощь оператора.")
-        : "AI сформирует ответ только по выбранным источникам; при недостатке сведений передаст вопрос оператору.",
+          : "AI РЅРµ Р±СѓРґРµС‚ РѕС‚РІРµС‡Р°С‚СЊ: РєР»РёРµРЅС‚Сѓ Р±СѓРґРµС‚ РїСЂРµРґР»РѕР¶РµРЅР° РїРѕРјРѕС‰СЊ РѕРїРµСЂР°С‚РѕСЂР°.")
+        : "AI СЃС„РѕСЂРјРёСЂСѓРµС‚ РѕС‚РІРµС‚ С‚РѕР»СЊРєРѕ РїРѕ РІС‹Р±СЂР°РЅРЅС‹Рј РёСЃС‚РѕС‡РЅРёРєР°Рј; РїСЂРё РЅРµРґРѕСЃС‚Р°С‚РєРµ СЃРІРµРґРµРЅРёР№ РїРµСЂРµРґР°СЃС‚ РІРѕРїСЂРѕСЃ РѕРїРµСЂР°С‚РѕСЂСѓ.",
     citations,
-    input: testMessage || "Введите сообщение клиента для проверки.",
+    input: testMessage || "Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ РєР»РёРµРЅС‚Р° РґР»СЏ РїСЂРѕРІРµСЂРєРё.",
     outcome: needsHandoff ? "handoff" : aiNode ? "ai_response" : "message",
     reason: needsHandoff
       ? (readiness.status !== "ready" ? "ai_not_ready" : sources.length === 0 ? "knowledge_not_ready" : "retrieval_empty")
@@ -1541,3 +1692,4 @@ function publishFailure<T extends BackendEnvelope<Record<string, unknown>>>(
 function tenantRequiredEnvelope(operation: string): BackendEnvelope<Record<string, unknown>> {
   return invalidEnvelope(operation, "tenant_context_required", "Tenant context is required for automation runtime operations.", {});
 }
+

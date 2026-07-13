@@ -95,10 +95,12 @@ export function createScenarioFromWizard(id, values = {}) {
         title: "Ответ AI по базе знаний",
         detail: firstMessage,
         config: {
+          consultationMode: true,
           fallbackMessage,
           handoffQueue,
           instructions: firstMessage,
           language,
+          maxTurns: 10,
           tone
         },
         channel: primaryChannel,

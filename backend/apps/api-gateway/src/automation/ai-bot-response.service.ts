@@ -20,7 +20,7 @@ export interface AiBotResponseInput {
   sourceBindings: KnowledgeSourceBinding[];
   tenantId: string;
 }
-export interface AiBotResponse { citations: Array<{ endOffset: number; sourceId: string; startOffset: number; title: string; version: number }>; model: string; text: string; }
+export interface AiBotResponse { citations: Array<{ endOffset: number; sourceId: string; startOffset: number; title: string; version: number }>; model: string; text: string; usage?: { totalTokens: number | null }; }
 
 /** Builds a bounded, tenant-scoped grounded prompt; it never sends keys or unrelated tenant data. */
 export class AiBotResponseService {
@@ -81,7 +81,7 @@ export class AiBotResponseService {
           userText: input.message
         });
       }
-      return { citations: materials.map(({ content: _content, ...citation }) => citation), model: completion.model, text };
+      return { citations: materials.map(({ content: _content, ...citation }) => citation), model: completion.model, text, usage: { totalTokens: completion.usage.totalTokens ?? null } };
     } catch (error) {
       const errorCode = error instanceof Error ? error.message : "bot_ai_unavailable";
       recordBotAiRequest({

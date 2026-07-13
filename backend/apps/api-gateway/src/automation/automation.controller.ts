@@ -4,10 +4,10 @@ import { TenantOperatorOrServiceAdminGuard } from "../conversation/tenant-operat
 import { RequireServiceAdminAction } from "../identity/service-admin-auth.js";
 import { RequireTenantOperatorPermission, type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
 import { AutomationService, type AutomationRequestContext } from "./automation.service.js";
-import { AutomationEnvelopeDto, BotScenarioActionDto, BotScenarioDto, BotScenarioMutationDto, BotScenarioPublishDto, BotScenarioTestRunDto } from "./automation.openapi.dto.js";
+import { AutomationEnvelopeDto, BotSandboxMessageDto, BotSandboxSessionCreateDto, BotScenarioActionDto, BotScenarioDto, BotScenarioMutationDto, BotScenarioPublishDto, BotScenarioTestRunDto } from "./automation.openapi.dto.js";
 
 @ApiTags("automation")
-@ApiExtraModels(AutomationEnvelopeDto, BotScenarioDto, BotScenarioMutationDto, BotScenarioPublishDto, BotScenarioActionDto, BotScenarioTestRunDto)
+@ApiExtraModels(AutomationEnvelopeDto, BotScenarioDto, BotScenarioMutationDto, BotScenarioPublishDto, BotScenarioActionDto, BotScenarioTestRunDto, BotSandboxSessionCreateDto, BotSandboxMessageDto)
 @UseGuards(TenantOperatorOrServiceAdminGuard)
 @Controller("automation")
 export class AutomationController {
@@ -207,6 +207,88 @@ export class AutomationController {
     @Req() request: TenantOperatorRequest
   ) {
     return this.automationService.testBotScenario({ ...(payload ?? {}), id: scenarioId }, automationContextFromRequest(request));
+  }
+
+  @Post("bot-scenarios/:scenarioId/sandbox-sessions")
+  @RequireTenantOperatorPermission("automation.read")
+  @RequireServiceAdminAction("automation.read")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "createBotSandboxSession", summary: "Start a live sandbox chat with a scenario" })
+  @ApiParam({ name: "scenarioId", description: "Bot scenario identifier" })
+  @ApiBody({ type: BotSandboxSessionCreateDto })
+  @ApiOkResponse({ description: "Sandbox chat session envelope", type: AutomationEnvelopeDto })
+  createBotSandboxSession(
+    @Param("scenarioId") scenarioId: string,
+    @Body() payload: { channel?: string; locale?: string; mode?: string } | null,
+    @Req() request: TenantOperatorRequest
+  ) {
+    return this.automationService.createBotSandboxSession(scenarioId, payload ?? {}, automationContextFromRequest(request));
+  }
+
+  @Get("bot-scenarios/:scenarioId/sandbox-sessions/:sessionId")
+  @RequireTenantOperatorPermission("automation.read")
+  @RequireServiceAdminAction("automation.read")
+  @ApiOperation({ operationId: "fetchBotSandboxSession", summary: "Get a sandbox chat session with its transcript" })
+  @ApiParam({ name: "scenarioId", description: "Bot scenario identifier" })
+  @ApiParam({ name: "sessionId", description: "Sandbox session identifier" })
+  @ApiOkResponse({ description: "Sandbox chat session envelope", type: AutomationEnvelopeDto })
+  fetchBotSandboxSession(
+    @Param("scenarioId") scenarioId: string,
+    @Param("sessionId") sessionId: string,
+    @Req() request: TenantOperatorRequest
+  ) {
+    return this.automationService.fetchBotSandboxSession(scenarioId, sessionId, automationContextFromRequest(request));
+  }
+
+  @Post("bot-scenarios/:scenarioId/sandbox-sessions/:sessionId/messages")
+  @RequireTenantOperatorPermission("automation.read")
+  @RequireServiceAdminAction("automation.read")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "postBotSandboxMessage", summary: "Send a client message to the sandbox chat (live AI run)" })
+  @ApiParam({ name: "scenarioId", description: "Bot scenario identifier" })
+  @ApiParam({ name: "sessionId", description: "Sandbox session identifier" })
+  @ApiBody({ type: BotSandboxMessageDto })
+  @ApiOkResponse({ description: "Sandbox turn envelope with bot replies and trace", type: AutomationEnvelopeDto })
+  postBotSandboxMessage(
+    @Param("scenarioId") scenarioId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() payload: { messageId?: string; quickReply?: string; text?: string; value?: unknown; webhooksEnabled?: boolean } | null,
+    @Req() request: TenantOperatorRequest
+  ) {
+    return this.automationService.postBotSandboxMessage(scenarioId, sessionId, payload ?? {}, automationContextFromRequest(request));
+  }
+
+  @Delete("bot-scenarios/:scenarioId/sandbox-sessions/:sessionId")
+  @RequireTenantOperatorPermission("automation.read")
+  @RequireServiceAdminAction("automation.read")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "deleteBotSandboxSession", summary: "Reset (delete) a sandbox chat session" })
+  @ApiParam({ name: "scenarioId", description: "Bot scenario identifier" })
+  @ApiParam({ name: "sessionId", description: "Sandbox session identifier" })
+  @ApiOkResponse({ description: "Sandbox session deletion envelope", type: AutomationEnvelopeDto })
+  deleteBotSandboxSession(
+    @Param("scenarioId") scenarioId: string,
+    @Param("sessionId") sessionId: string,
+    @Req() request: TenantOperatorRequest
+  ) {
+    return this.automationService.deleteBotSandboxSession(scenarioId, sessionId, automationContextFromRequest(request));
+  }
+
+  @Post("bot-scenarios/:scenarioId/sandbox-sessions/:sessionId/regression-cases")
+  @RequireTenantOperatorPermission("automation.write")
+  @RequireServiceAdminAction("automation.write")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "saveBotSandboxRegression", summary: "Save the sandbox dialog as a regression test set" })
+  @ApiParam({ name: "scenarioId", description: "Bot scenario identifier" })
+  @ApiParam({ name: "sessionId", description: "Sandbox session identifier" })
+  @ApiOkResponse({ description: "Saved regression test run envelope", type: AutomationEnvelopeDto })
+  saveBotSandboxRegression(
+    @Param("scenarioId") scenarioId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() payload: { name?: string } | null,
+    @Req() request: TenantOperatorRequest
+  ) {
+    return this.automationService.saveBotSandboxRegression(scenarioId, sessionId, payload ?? {}, automationContextFromRequest(request));
   }
 
   @Post("proactive-rules")

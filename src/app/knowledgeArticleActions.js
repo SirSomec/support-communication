@@ -8,7 +8,7 @@ export async function submitKnowledgeArticleDraft(
   if (!articleId) {
     return {
       ok: false,
-      message: "Knowledge article id is required."
+      message: "Не указан идентификатор статьи базы знаний."
     };
   }
 
@@ -25,7 +25,7 @@ export async function submitKnowledgeArticleDraft(
   if (response?.status !== "ok" || !response.data?.article) {
     return {
       ok: false,
-      message: response?.error?.message ?? "Knowledge draft was not saved by the backend."
+      message: response?.error?.message ?? "Черновик статьи не сохранён бэкендом."
     };
   }
 
@@ -110,7 +110,7 @@ export async function addKnowledgeArticleAttachment(
   if (!articleId) {
     return {
       ok: false,
-      message: "Knowledge article id is required."
+      message: "Не указан идентификатор статьи базы знаний."
     };
   }
 
@@ -120,7 +120,7 @@ export async function addKnowledgeArticleAttachment(
     reason: reason ?? `Added attachment ${attachmentTitle(attachment)} to knowledge article ${articleTitle(article)}.`
   });
 
-  return knowledgeAttachmentActionResult(response, "Knowledge attachment was not added by the backend.");
+  return knowledgeAttachmentActionResult(response, "Вложение статьи не добавлено бэкендом.");
 }
 
 export async function deleteKnowledgeArticleAttachment(
@@ -133,14 +133,14 @@ export async function deleteKnowledgeArticleAttachment(
   if (!articleId) {
     return {
       ok: false,
-      message: "Knowledge article id is required."
+      message: "Не указан идентификатор статьи базы знаний."
     };
   }
 
   if (!attachmentId) {
     return {
       ok: false,
-      message: "Knowledge attachment id is required."
+      message: "Не указан идентификатор вложения статьи."
     };
   }
 
@@ -151,7 +151,7 @@ export async function deleteKnowledgeArticleAttachment(
     reason: reason ?? `Deleted attachment ${attachmentTitle(attachment)} from knowledge article ${articleTitle(article)}.`
   });
 
-  return knowledgeAttachmentActionResult(response, "Knowledge attachment was not deleted by the backend.");
+  return knowledgeAttachmentActionResult(response, "Вложение статьи не удалено бэкендом.");
 }
 
 async function submitKnowledgeGovernanceAction(
@@ -162,7 +162,7 @@ async function submitKnowledgeGovernanceAction(
   if (!articleId) {
     return {
       ok: false,
-      message: "Knowledge article id is required."
+      message: "Не указан идентификатор статьи базы знаний."
     };
   }
 
@@ -175,7 +175,7 @@ async function submitKnowledgeGovernanceAction(
   if (!hasKnowledgeGovernanceEvidence(response)) {
     return {
       ok: false,
-      message: response?.error?.message ?? "Knowledge action did not return backend knowledge governance evidence."
+      message: response?.error?.message ?? "Сервер не вернул подтверждение действия со статьёй базы знаний."
     };
   }
 

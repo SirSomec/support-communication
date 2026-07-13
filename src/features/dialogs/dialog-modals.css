@@ -14,7 +14,7 @@
   height: 100vh;
   overflow: auto;
   border-left: 1px solid var(--line);
-  background: #ffffff;
+  background: var(--surface);
   box-shadow: -20px 0 60px rgb(10 28 54 / 18%);
 }
 
@@ -30,7 +30,7 @@
 
 .outbound-panel > header h2 {
   margin: 4px 0 0;
-  color: #142037;
+  color: var(--text);
   font-size: 20px;
 }
 
@@ -56,8 +56,8 @@
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #31415b;
+  background: var(--surface);
+  color: var(--text-secondary);
   font-weight: 800;
 }
 
@@ -89,7 +89,7 @@
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 0 10px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--text);
   outline: 0;
 }
@@ -168,7 +168,7 @@
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   box-shadow: var(--shadow);
 }
 
@@ -193,7 +193,7 @@
 .template-save-panel > header h2,
 .draft-switch-panel > header h2 {
   margin: 4px 0 0;
-  color: #142037;
+  color: var(--text);
   font-size: 20px;
 }
 
@@ -217,7 +217,7 @@
 
 .draft-switch-body p {
   margin: 0;
-  color: #38465c;
+  color: var(--text-secondary);
   line-height: 1.45;
 }
 
@@ -295,8 +295,8 @@
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #31415b;
+  background: var(--surface);
+  color: var(--text-secondary);
   font-weight: 800;
 }
 
@@ -320,8 +320,8 @@
 }
 
 .draft-switch-panel > footer button.danger-action {
-  border-color: #cf3d4a;
-  background: #cf3d4a;
+  border-color: var(--red);
+  background: var(--red);
   color: #ffffff;
 }
 

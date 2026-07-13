@@ -71,7 +71,7 @@ export async function scoreCoachingDraft(
   if (response?.status !== "ok") {
     return {
       ok: false,
-      message: response?.error?.message ?? "Draft score was not accepted by the backend."
+      message: response?.error?.message ?? "Сервер не принял оценку черновика."
     };
   }
 
@@ -97,7 +97,7 @@ export async function submitManualQaReview(
   if (response?.status !== "ok") {
     return {
       ok: false,
-      message: response?.error?.message ?? "Manual QA review was not accepted by the backend."
+      message: response?.error?.message ?? "Сервер не принял ручную QA-оценку."
     };
   }
 
@@ -107,7 +107,7 @@ export async function submitManualQaReview(
   if (!reviewId || !auditId) {
     return {
       ok: false,
-      message: "Manual QA review was not confirmed by backend manual QA evidence."
+      message: "Ручная QA-оценка не подтверждена бэкендом."
     };
   }
 

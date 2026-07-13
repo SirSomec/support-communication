@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ClipboardCheck, KeyRound, Loader2, Route, ShieldCheck } from "lucide-react";
-import { SectionTitle } from "../../ui.jsx";
+import { ConfirmDialog, SectionTitle } from "../../ui.jsx";
 import { settingsService } from "../../services/settingsService.js";
 
 const iconByRule = {
@@ -22,6 +22,7 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
   const [error, setError] = useState("");
   const [busyRuleId, setBusyRuleId] = useState("");
   const [testResults, setTestResults] = useState({});
+  const [ruleToDisable, setRuleToDisable] = useState(null);
   const canMutateRules = canEditSettings && !error;
 
   useEffect(() => {
@@ -73,19 +74,30 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
 
   async function toggleRule(rule) {
     const nextEnabled = !rule.enabled;
-    let confirmed = false;
 
     if (!nextEnabled && rule.severity === "critical") {
-      confirmed = window.confirm("Критичное правило влияет на реальные ограничения обработки. Отключить его?");
-      if (!confirmed) {
-        return;
-      }
+      setRuleToDisable(rule);
+      return;
     }
 
     await updateRule(rule, {
-      confirmed,
+      confirmed: false,
       enabled: nextEnabled,
       reason: nextEnabled ? "Rule enabled from settings" : "Rule disabled from settings"
+    });
+  }
+
+  async function confirmDisableRule() {
+    const rule = ruleToDisable;
+    setRuleToDisable(null);
+    if (!rule) {
+      return;
+    }
+
+    await updateRule(rule, {
+      confirmed: true,
+      enabled: false,
+      reason: "Rule disabled from settings"
     });
   }
 
@@ -225,6 +237,18 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
           );
         })}
       </div>
+
+      {ruleToDisable ? (
+        <ConfirmDialog
+          confirmLabel="Отключить"
+          danger
+          description={`Правило «${ruleToDisable.title}» критичное и влияет на реальные ограничения обработки. Отключить его?`}
+          eyebrow="Критичное правило"
+          onCancel={() => setRuleToDisable(null)}
+          onConfirm={confirmDisableRule}
+          title="Отключить правило?"
+        />
+      ) : null}
     </section>
   );
 }

@@ -80,8 +80,8 @@
   min-height: 38px;
   padding: 0 10px;
   border: 1px solid var(--onboarding-line);
-  background: #ffffff;
-  color: #31415b;
+  background: var(--surface);
+  color: var(--text-secondary);
 }
 
 .onboarding-finish,
@@ -135,6 +135,23 @@
   transition: width 180ms ease;
 }
 
+.onboarding-progress-hint {
+  margin: 0;
+  color: var(--onboarding-muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.onboarding-progress-hint strong {
+  color: var(--text);
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.onboarding-progress-hint.complete {
+  color: #0c734c;
+}
+
 .onboarding-notice {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
@@ -176,7 +193,7 @@
   min-width: 0;
   border: 1px solid var(--onboarding-line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   box-shadow: 0 14px 34px rgb(22 35 58 / 6%);
 }
 
@@ -190,15 +207,28 @@
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) 20px;
   gap: 8px;
+  align-items: center;
   justify-content: stretch;
   width: 100%;
   min-height: 54px;
-  padding: 0 12px;
+  padding: 8px 12px;
   border-radius: 0;
   border-bottom: 1px solid var(--onboarding-line);
-  background: #ffffff;
-  color: #31415b;
+  background: var(--surface);
+  color: var(--text-secondary);
   text-align: left;
+}
+
+.onboarding-checklist button > span small {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--onboarding-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: normal;
 }
 
 .onboarding-checklist button:last-child {
@@ -308,7 +338,7 @@
   border: 1px solid var(--onboarding-line);
   border-radius: 7px;
   padding: 0 11px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--onboarding-text);
   outline: 0;
 }
@@ -338,7 +368,7 @@
   padding: 0 10px;
   border: 1px solid var(--onboarding-line);
   background: #f8fbff;
-  color: #31415b;
+  color: var(--text-secondary);
 }
 
 .onboarding-preview-row,
@@ -385,7 +415,7 @@
   min-height: 178px;
   padding: 14px;
   border: 1px solid var(--onboarding-line);
-  background: #ffffff;
+  background: var(--surface);
   color: #25344d;
   text-align: left;
 }
@@ -427,7 +457,7 @@
   border: 1px solid var(--onboarding-line);
   border-radius: 7px;
   background: #fbfcfe;
-  color: #31415b;
+  color: var(--text-secondary);
   font-weight: 820;
 }
 
@@ -465,7 +495,7 @@
   padding: 12px;
   border: 1px solid var(--onboarding-line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .onboarding-range strong {
@@ -557,8 +587,8 @@
   min-height: 36px;
   padding: 0 11px;
   border: 1px solid var(--onboarding-line);
-  background: #ffffff;
-  color: #31415b;
+  background: var(--surface);
+  color: var(--text-secondary);
 }
 
 .onboarding-summary {

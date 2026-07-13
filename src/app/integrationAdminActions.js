@@ -3,13 +3,13 @@ import { integrationService } from "../services/integrationService.js";
 export async function submitApiKeyRotation(keyId, service = integrationService) {
   const normalizedKeyId = stringValue(keyId);
   if (!normalizedKeyId) {
-    return failure("API key id is required.");
+    return failure("Не указан идентификатор API-ключа.");
   }
 
   try {
     const response = await service.rotateApiKey(normalizedKeyId);
     if (response.status !== "ok") {
-      return failure(response.error?.message ?? "API key rotation was rejected by the backend.");
+      return failure(response.error?.message ?? "Сервер не принял ротацию API-ключа.");
     }
 
     const data = response.data ?? {};
@@ -20,31 +20,31 @@ export async function submitApiKeyRotation(keyId, service = integrationService) 
       || data.status !== "rotation_queued"
       || data.rawKeyShownOnce !== false
     ) {
-      return failure("API key rotation evidence is incomplete.");
+      return failure("Ротация API-ключа не подтверждена бэкендом.");
     }
 
     return {
       auditId: data.auditId,
       keyId: normalizedKeyId,
-      message: `${normalizedKeyId}: API key rotation queued, audit ${data.auditId}.`,
+      message: `${normalizedKeyId}: ротация ключа поставлена в очередь. Аудит ${data.auditId}.`,
       ok: true,
       rotationId: data.rotationId
     };
   } catch (error) {
-    return failure(errorMessage(error, "API key rotation request failed."));
+    return failure(errorMessage(error, "Не удалось выполнить запрос ротации API-ключа."));
   }
 }
 
 export async function submitWebhookReplay(delivery, service = integrationService) {
   const deliveryId = stringValue(delivery?.id ?? delivery?.deliveryId);
   if (!deliveryId) {
-    return failure("Webhook delivery id is required.");
+    return failure("Не указан идентификатор доставки вебхука.");
   }
 
   try {
     const response = await service.replayWebhookDelivery(delivery);
     if (response.status !== "ok") {
-      return failure(response.error?.message ?? "Webhook replay was rejected by the backend.");
+      return failure(response.error?.message ?? "Сервер не принял повтор доставки вебхука.");
     }
 
     const data = response.data ?? {};
@@ -54,31 +54,31 @@ export async function submitWebhookReplay(delivery, service = integrationService
       || stringValue(data.auditId) === ""
       || data.status !== "replay_queued"
     ) {
-      return failure("Webhook replay evidence is incomplete.");
+      return failure("Повтор доставки вебхука не подтверждён бэкендом.");
     }
 
     return {
       auditId: data.auditId,
       deliveryId,
-      message: `${stringValue(delivery?.traceId) || deliveryId}: manual replay queued, audit ${data.auditId}.`,
+      message: `${stringValue(delivery?.traceId) || deliveryId}: повтор доставки поставлен в очередь. Аудит ${data.auditId}.`,
       ok: true,
       replayId: data.replayId
     };
   } catch (error) {
-    return failure(errorMessage(error, "Webhook replay request failed."));
+    return failure(errorMessage(error, "Не удалось выполнить запрос повтора доставки вебхука."));
   }
 }
 
 export async function submitSecuritySessionRevoke(sessionId, service = integrationService) {
   const normalizedSessionId = stringValue(sessionId);
   if (!normalizedSessionId) {
-    return failure("Security session id is required.");
+    return failure("Не указан идентификатор сессии.");
   }
 
   try {
     const response = await service.revokeSecuritySession(normalizedSessionId);
     if (response.status !== "ok") {
-      return failure(response.error?.message ?? "Security session revoke was rejected by the backend.");
+      return failure(response.error?.message ?? "Сервер не принял отзыв сессии.");
     }
 
     const data = response.data ?? {};
@@ -88,17 +88,17 @@ export async function submitSecuritySessionRevoke(sessionId, service = integrati
       || stringValue(data.revokedAt) === ""
       || data.status !== "revoked"
     ) {
-      return failure("Security session revoke evidence is incomplete.");
+      return failure("Отзыв сессии не подтверждён бэкендом.");
     }
 
     return {
       auditId: data.auditId,
-      message: `${normalizedSessionId}: security session revoked, security audit ${data.auditId}.`,
+      message: `${normalizedSessionId}: сессия отозвана. Аудит безопасности ${data.auditId}.`,
       ok: true,
       sessionId: normalizedSessionId
     };
   } catch (error) {
-    return failure(errorMessage(error, "Security session revoke request failed."));
+    return failure(errorMessage(error, "Не удалось выполнить запрос отзыва сессии."));
   }
 }
 

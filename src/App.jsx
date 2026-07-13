@@ -22,7 +22,7 @@ import { permissionService } from "./services/permissionService.js";
 import { publicLeadService } from "./services/publicLeadService.js";
 import { qualityService } from "./services/qualityService.js";
 import { settingsService } from "./services/settingsService.js";
-import { ScreenStateStrip, Toast } from "./ui.jsx";
+import { ScreenStateStrip, Skeleton, Toast, WorkspaceState } from "./ui.jsx";
 
 const ROLE_SWITCHER_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROLE_SWITCHER === "true";
 const SERVICE_ADMIN_UNAVAILABLE_MESSAGE = "Откройте /service-admin — этот раздел недоступен из рабочего места организации.";
@@ -239,7 +239,7 @@ function App() {
     if (!resolvedTarget) {
       return {
         ok: false,
-        message: access.reason ?? "Notification target is unavailable."
+        message: access.reason ?? "Раздел из уведомления недоступен."
       };
     }
 
@@ -257,7 +257,7 @@ function App() {
     if (!targetSection || !access.sections.includes(targetSection)) {
       return {
         ok: false,
-        message: access.reason ?? "Notification target is unavailable."
+        message: access.reason ?? "Раздел из уведомления недоступен."
       };
     }
 
@@ -266,7 +266,7 @@ function App() {
       if (!targetConversation) {
         return {
           ok: false,
-          message: "Notification dialog target was not found."
+          message: "Диалог из уведомления не найден."
         };
       }
 
@@ -279,7 +279,7 @@ function App() {
 
     return {
       ok: true,
-      message: `${item?.type ?? "Notification"}: ${item?.action ?? "opened"}`
+      message: `${item?.type ?? "Уведомление"}: ${item?.action ?? "открыто"}`
     };
   }
 
@@ -433,16 +433,56 @@ function App() {
           roleMode={roleMode}
           showRoleSwitcher={ROLE_SWITCHER_ENABLED}
         />
-        {section === "dialogs" ? (
+        {section === "dialogs" && !conversationItems.length ? (
+          inboxLoading ? (
+            <div aria-label="Загружаем диалоги" className="cockpit cockpit-skeleton" role="status">
+              <div className="cockpit-skeleton-column">
+                {[0, 1, 2, 3, 4, 5].map((row) => (
+                  <div className="cockpit-skeleton-row" key={row}>
+                    <Skeleton className="cockpit-skeleton-avatar" height={36} width={36} />
+                    <div className="cockpit-skeleton-lines">
+                      <Skeleton height={12} width="70%" />
+                      <Skeleton height={10} width="90%" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="cockpit-skeleton-main">
+                <Skeleton height={16} width="40%" />
+                <Skeleton height={64} width="72%" />
+                <Skeleton height={64} width="58%" />
+                <Skeleton height={40} width="100%" />
+              </div>
+              <div className="cockpit-skeleton-column">
+                <Skeleton height={14} width="55%" />
+                <Skeleton height={90} width="100%" />
+                <Skeleton height={90} width="100%" />
+              </div>
+            </div>
+          ) : inboxError ? (
+            <WorkspaceState
+              tone="error"
+              title="Не удалось загрузить диалоги"
+              description={inboxError}
+              actionLabel="Повторить"
+              onAction={() => refreshInbox()}
+            />
+          ) : (
+            <WorkspaceState
+              tone="empty"
+              title="Очередь пуста"
+              description="Новые обращения появятся здесь после поступления из подключенных каналов. Исходящий диалог можно создать кнопкой «Новый диалог»."
+              actionLabel="Обновить"
+              onAction={() => refreshInbox()}
+            />
+          )
+        ) : section === "dialogs" ? (
           <>
             {inboxLoading ? (
               <ScreenStateStrip items={[{ label: "Inbox", tone: "loading", value: "Загружается..." }]} />
             ) : null}
             {inboxError ? (
               <ScreenStateStrip items={[{ label: "Inbox", tone: "error", value: inboxError }]} />
-            ) : null}
-            {!inboxLoading && !inboxError && !conversationItems.length ? (
-              <ScreenStateStrip items={[{ label: "Inbox", tone: "empty", value: "Нет активных диалогов" }]} />
             ) : null}
             <DialogWorkspace
               access={access}

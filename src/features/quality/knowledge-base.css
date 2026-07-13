@@ -28,7 +28,7 @@
   min-height: 64px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
-  background: #ffffff;
+  background: var(--surface);
   color: var(--text);
   text-align: left;
 }
@@ -115,7 +115,7 @@
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
   color: #2e3d56;
   font-weight: 800;
 }
@@ -202,7 +202,7 @@
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--text);
   text-align: left;
 }
@@ -253,7 +253,7 @@
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .knowledge-governance-panel > header {
@@ -277,7 +277,7 @@
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 0 9px;
-  background: #ffffff;
+  background: var(--surface);
   color: #2e3d56;
   font-weight: 800;
 }
@@ -304,7 +304,7 @@
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--text);
   text-align: left;
 }
@@ -368,7 +368,7 @@
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
   color: #526078;
 }
 

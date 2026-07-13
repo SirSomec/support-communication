@@ -16,7 +16,7 @@
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .ai-live-score-card > header,
@@ -52,7 +52,7 @@
   position: absolute;
   inset: 12px;
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--surface);
   content: "";
 }
 
@@ -146,7 +146,7 @@
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .ai-coaching-card.warn {
@@ -194,7 +194,7 @@
   border-left: 3px solid var(--blue);
   border-radius: 6px;
   background: #f8fbff;
-  color: #263248;
+  color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -238,7 +238,7 @@
   gap: 9px;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  background: #ffffff;
+  background: var(--surface);
   color: #344054;
   font-size: 13px;
 }
@@ -260,7 +260,7 @@
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 0 10px;
-  background: #ffffff;
+  background: var(--surface);
   color: #2d405f;
   font-weight: 800;
 }

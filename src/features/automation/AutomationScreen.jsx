@@ -18,7 +18,7 @@ import { createScreenStateItems } from "../../app/screenState.js";
 import { changeBotScenarioLifecycle, publishBotScenario, runBotScenarioTest, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { automationService } from "../../services/automationService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
-import { ChannelBadge, ChannelList, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
+import { ChannelBadge, ChannelList, ConfirmDialog, MetricTile, ProductScreen, SectionTitle } from "../../ui.jsx";
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
 import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
 import { ScenarioArchiveConfirmModal, ScenarioPauseConfirmModal, ScenarioPublishChecklistModal } from "./ScenarioLifecycleModals.jsx";
@@ -50,6 +50,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [sandboxVerifiedScenarioId, setSandboxVerifiedScenarioId] = useState("");
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [pauseTarget, setPauseTarget] = useState(null);
+  const [urlSourceForm, setUrlSourceForm] = useState(null);
   const [publishChecklistOpen, setPublishChecklistOpen] = useState(false);
   const [advancedMode, setAdvancedMode] = useState(() => loadAdvancedModePreference());
   const [scenarioOperations, setScenarioOperations] = useState([]);
@@ -315,10 +316,15 @@ export function AutomationScreen({ onBack, onToast, access }) {
     } finally { setSavingAction(""); }
   }
 
-  async function addUrlKnowledgeSource() {
-    const url = window.prompt("Вставьте HTTPS-адрес страницы с ответами для клиентов.");
+  function addUrlKnowledgeSource() {
+    setUrlSourceForm({ title: "Страница знаний", url: "" });
+  }
+
+  async function submitUrlKnowledgeSource() {
+    const url = urlSourceForm?.url?.trim();
+    const title = urlSourceForm?.title?.trim() || "Страница знаний";
+    setUrlSourceForm(null);
     if (!url) return;
-    const title = window.prompt("Как назвать этот источник?", "Страница знаний") || "Страница знаний";
     setSavingAction("url-source");
     try {
       const created = await knowledgeService.createSource({ kind: "url", sourceConfig: { url }, title });
@@ -1009,6 +1015,35 @@ export function AutomationScreen({ onBack, onToast, access }) {
       {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} /> : null}
       {archiveTarget ? <ScenarioArchiveConfirmModal isSaving={isSaving} onClose={() => setArchiveTarget(null)} onConfirm={(scenario) => void confirmArchiveScenario(scenario)} scenario={archiveTarget} /> : null}
       {pauseTarget ? <ScenarioPauseConfirmModal isSaving={isSaving} onClose={() => setPauseTarget(null)} onConfirm={(scenario) => void confirmDisableScenario(scenario)} scenario={pauseTarget} /> : null}
+      {urlSourceForm ? (
+        <ConfirmDialog
+          confirmDisabled={!/^https:\/\/.+/i.test(urlSourceForm.url.trim())}
+          confirmLabel="Добавить"
+          description="Страница будет загружена, подготовлена и подтверждена как источник знаний для AI-ответов."
+          eyebrow="Источник знаний"
+          onCancel={() => setUrlSourceForm(null)}
+          onConfirm={() => void submitUrlKnowledgeSource()}
+          title="Добавить URL-страницу"
+        >
+          <label>
+            <span>HTTPS-адрес страницы с ответами для клиентов</span>
+            <input
+              onChange={(event) => setUrlSourceForm((current) => ({ ...current, url: event.target.value }))}
+              placeholder="https://example.com/faq"
+              type="url"
+              value={urlSourceForm.url}
+            />
+          </label>
+          <label>
+            <span>Название источника</span>
+            <input
+              onChange={(event) => setUrlSourceForm((current) => ({ ...current, title: event.target.value }))}
+              placeholder="Страница знаний"
+              value={urlSourceForm.title}
+            />
+          </label>
+        </ConfirmDialog>
+      ) : null}
       {publishChecklistOpen && selectedScenario ? (
         <ScenarioPublishChecklistModal
           aiReadiness={aiReadiness}

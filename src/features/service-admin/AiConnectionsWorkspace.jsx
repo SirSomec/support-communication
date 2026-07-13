@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { CheckCircle2, KeyRound, LoaderCircle, Pencil, PlugZap, Power, ShieldCheck, Trash2, X } from "lucide-react";
-import { SectionTitle, StatusBadge } from "../../ui.jsx";
+import { ConfirmDialog, SectionTitle, StatusBadge } from "../../ui.jsx";
 import { supportAdminService } from "../../services/supportAdminService.js";
 import { tenantService } from "../../services/tenantService.js";
 import { formatDateTime, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
@@ -15,6 +15,7 @@ export function AiConnectionsWorkspace({ onAudit, onToast }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState("");
+  const [connectionToDelete, setConnectionToDelete] = useState(null);
 
   async function loadConnections(nextTenantId = tenantId) {
     if (!nextTenantId) return;
@@ -73,7 +74,6 @@ export function AiConnectionsWorkspace({ onAudit, onToast }) {
   function cancelEditing() { setEditingId(""); setForm(initialForm); setError(""); }
 
   async function deleteConnection(connection) {
-    if (!window.confirm(`Удалить AI-подключение «${connection.chatModel}»? Сценарии, использующие его, перестанут отвечать через AI.`)) return;
     setBusy(`delete:${connection.id}`); setError("");
     const envelope = await supportAdminService.deleteAiConnection(tenantId, connection.id);
     setBusy("");
@@ -104,7 +104,7 @@ export function AiConnectionsWorkspace({ onAudit, onToast }) {
       <header className="service-admin-panel-toolbar"><PlugZap size={18} /><strong>AI-подключения клиента</strong></header>
       <label className="service-admin-reason-field"><span>Организация</span><select onChange={(event) => setTenantId(event.target.value)} value={tenantId}>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>
       <div className="service-admin-mini-list">
-        {connections.length ? connections.map((connection) => <article key={connection.id}><span className={connection.status === "ready" ? "ok" : connection.status === "error" ? "danger" : "warn"}><b>{connection.chatModel}</b><small>{connection.baseUrl}</small></span><StatusBadge tone={getStatusTone(connection.status)}>{formatLabel(connection.status)}</StatusBadge><small>{connection.secretConfigured ? "Ключ сохранён: ••••••••" : "Ключ не настроен"}</small><small>{connection.lastTestedAt ? `Проверено: ${formatDateTime(connection.lastTestedAt)}` : "Ещё не проверено"}</small><small>Использовано в этом месяце: {connection.usage?.usedTokens ?? 0}{connection.limits?.monthlyTokenBudget ? ` / ${connection.limits.monthlyTokenBudget} токенов` : " токенов"}</small><footer><button disabled={Boolean(busy)} onClick={() => editConnection(connection)} type="button"><Pencil size={14} />Изменить</button><button disabled={Boolean(busy)} onClick={() => void testConnection(connection)} type="button">{busy === `test:${connection.id}` ? "Проверяем…" : "Проверить"}</button><button disabled={Boolean(busy) || connection.status === "disabled"} onClick={() => void disableConnection(connection)} type="button"><Power size={14} />Отключить</button><button className="danger" disabled={Boolean(busy)} onClick={() => void deleteConnection(connection)} type="button"><Trash2 size={14} />Удалить</button></footer></article>) : <p>Для этой организации AI ещё не настроен.</p>}
+        {connections.length ? connections.map((connection) => <article key={connection.id}><span className={connection.status === "ready" ? "ok" : connection.status === "error" ? "danger" : "warn"}><b>{connection.chatModel}</b><small>{connection.baseUrl}</small></span><StatusBadge tone={getStatusTone(connection.status)}>{formatLabel(connection.status)}</StatusBadge><small>{connection.secretConfigured ? "Ключ сохранён: ••••••••" : "Ключ не настроен"}</small><small>{connection.lastTestedAt ? `Проверено: ${formatDateTime(connection.lastTestedAt)}` : "Ещё не проверено"}</small><small>Использовано в этом месяце: {connection.usage?.usedTokens ?? 0}{connection.limits?.monthlyTokenBudget ? ` / ${connection.limits.monthlyTokenBudget} токенов` : " токенов"}</small><footer><button disabled={Boolean(busy)} onClick={() => editConnection(connection)} type="button"><Pencil size={14} />Изменить</button><button disabled={Boolean(busy)} onClick={() => void testConnection(connection)} type="button">{busy === `test:${connection.id}` ? "Проверяем…" : "Проверить"}</button><button disabled={Boolean(busy) || connection.status === "disabled"} onClick={() => void disableConnection(connection)} type="button"><Power size={14} />Отключить</button><button className="danger" disabled={Boolean(busy)} onClick={() => setConnectionToDelete(connection)} type="button"><Trash2 size={14} />Удалить</button></footer></article>) : <p>Для этой организации AI ещё не настроен.</p>}
       </div>
     </section>
     <section className="service-admin-detail-panel">
@@ -124,5 +124,20 @@ export function AiConnectionsWorkspace({ onAudit, onToast }) {
       </form>
       <p className="ai-connection-note"><CheckCircle2 size={17} />После сохранения используйте «Проверить»: тест не передаёт документы или переписки клиента.</p>
     </section>
+    {connectionToDelete ? (
+      <ConfirmDialog
+        confirmLabel="Удалить"
+        danger
+        description={`Удалить AI-подключение «${connectionToDelete.chatModel}»? Сценарии, использующие его, перестанут отвечать через AI. Сохранённый ключ будет удалён.`}
+        eyebrow="AI-подключение"
+        onCancel={() => setConnectionToDelete(null)}
+        onConfirm={() => {
+          const connection = connectionToDelete;
+          setConnectionToDelete(null);
+          void deleteConnection(connection);
+        }}
+        title="Удалить подключение?"
+      />
+    ) : null}
   </div>;
 }

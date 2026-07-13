@@ -1,10 +1,13 @@
 import { CheckCircle2, Circle } from "lucide-react";
 
-export function StepButton({ active, complete, icon: Icon, label, onClick }) {
+export function StepButton({ active, complete, hint = "", icon: Icon, label, onClick }) {
   return (
     <button className={`${active ? "active" : ""} ${complete ? "complete" : ""}`} onClick={onClick} type="button">
       <Icon size={18} />
-      <span>{label}</span>
+      <span>
+        {label}
+        {hint ? <small>{hint}</small> : null}
+      </span>
       {complete ? <CheckCircle2 size={17} /> : <Circle size={17} />}
     </button>
   );

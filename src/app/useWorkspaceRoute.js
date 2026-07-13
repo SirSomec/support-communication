@@ -11,6 +11,26 @@ const routeByHash = {
 
 const defaultRoute = { namespace: "public", view: "landing" };
 
+const hashByPathPattern = [
+  [/^\/(auth|login)(\/|$)/, "#/login"],
+  [/^\/app(\/|$)/, "#/app"],
+  [/^\/onboarding(\/|$)/, "#/onboarding"],
+  [/^\/landing(\/|$)/, "#/landing"]
+];
+
+// Прямые URL вида /auth/login приводим к hash-роуту до первого рендера,
+// иначе роутер (он читает только hash) покажет лендинг вместо нужного экрана.
+export function normalizeDeepLinkPath() {
+  if (routeByHash[window.location.hash]) {
+    return;
+  }
+
+  const matched = hashByPathPattern.find(([pattern]) => pattern.test(window.location.pathname));
+  if (matched) {
+    window.history.replaceState(null, "", `/${matched[1]}`);
+  }
+}
+
 export function useWorkspaceRoute({
   onDenied,
   onAuthenticated,

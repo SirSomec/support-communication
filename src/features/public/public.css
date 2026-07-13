@@ -119,14 +119,14 @@
 
 .public-btn.secondary {
   border-color: var(--public-line);
-  background: #ffffff;
-  color: #20304a;
+  background: var(--surface);
+  color: var(--text-secondary);
 }
 
 .public-btn.ghost,
 .public-btn.text {
   background: transparent;
-  color: #20304a;
+  color: var(--text-secondary);
 }
 
 .public-btn.text {
@@ -201,7 +201,7 @@
   overflow: hidden;
   border: 1px solid #cbd8e8;
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   box-shadow: 0 24px 60px rgb(28 45 74 / 14%);
 }
 
@@ -327,7 +327,7 @@
 }
 
 .public-chat-panel header {
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .public-chat-panel button {
@@ -347,7 +347,7 @@
   padding: 12px 13px;
   border: 1px solid var(--public-line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   color: #27364e;
   line-height: 1.45;
 }
@@ -433,7 +433,7 @@
   min-width: 0;
   border: 1px solid var(--public-line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .public-capability-card {
@@ -595,7 +595,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #31415b;
+  color: var(--text-secondary);
 }
 
 .public-tariff-card li svg {
@@ -667,7 +667,7 @@
   overflow: auto;
   border: 1px solid #cbd8e8;
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   box-shadow: 0 24px 70px rgb(14 30 50 / 24%);
 }
 
@@ -699,7 +699,7 @@
   border: 1px solid var(--public-line);
   border-radius: 7px;
   background: #f8fbff;
-  color: #20304a;
+  color: var(--text-secondary);
   font-weight: 850;
 }
 
@@ -731,7 +731,7 @@
   min-height: 40px;
   border: 1px solid #cbd8e8;
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
   color: #17233a;
   font: inherit;
   font-weight: 650;

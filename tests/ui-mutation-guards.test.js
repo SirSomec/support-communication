@@ -292,7 +292,7 @@ describe("UI mutation guards", () => {
     );
 
     assert.equal(result.ok, false);
-    assert.match(result.message, /backend merge evidence/);
+    assert.match(result.message, /подтверждения объединения/);
   });
 
   it("does not report client unmerge success when backend rejects the mutation", async () => {
@@ -382,7 +382,7 @@ describe("UI mutation guards", () => {
     );
 
     assert.equal(result.ok, false);
-    assert.match(result.message, /export descriptor evidence/);
+    assert.match(result.message, /дескриптора экспорта/);
   });
 
   it("uses backend redistribution evidence before reporting routing success", async () => {
@@ -430,7 +430,7 @@ describe("UI mutation guards", () => {
     );
 
     assert.equal(result.ok, false);
-    assert.match(result.message, /redistribution evidence/);
+    assert.match(result.message, /подтверждения перераспределения/);
   });
 
   it("keeps notification read state unchanged when mark-read fails", async () => {
@@ -481,7 +481,7 @@ describe("UI mutation guards", () => {
 
     assert.equal(result.ok, false);
     assert.deepEqual(result.ids, ["already-read"]);
-    assert.match(result.message, /confirmed by the backend/);
+    assert.match(result.message, /не подтверждена бэкендом/);
   });
 
   it("treats zero-read mark-read success as an idempotent already-read confirmation", async () => {
@@ -546,7 +546,7 @@ describe("UI mutation guards", () => {
 
     assert.equal(result.ok, false);
     assert.deepEqual(result.preferences, { mutedTypeKeys: [] });
-    assert.match(result.message, /preference evidence/);
+    assert.match(result.message, /настроек уведомлений не подтверждено/);
   });
 
   it("requires backend delivery evidence before reporting critical alert test success", async () => {
@@ -621,7 +621,7 @@ describe("UI mutation guards", () => {
 
     assert.equal(result.ok, false);
     assert.deepEqual(result.preferences, { browserPushEnabled: false });
-    assert.match(result.message, /push subscription evidence/);
+    assert.match(result.message, /push-уведомления браузера не подтверждена/);
   });
 
   it("normalizes notification delivery channels from active tenant channel connections", async () => {
@@ -753,7 +753,7 @@ describe("UI mutation guards", () => {
     });
 
     assert.equal(rejected.ok, false);
-    assert.match(rejected.message, /rotation evidence/);
+    assert.match(rejected.message, /Ротация API-ключа не подтверждена/);
 
     const accepted = await submitApiKeyRotation("stage-key", {
       rotateApiKey: async () => ({
@@ -818,7 +818,7 @@ describe("UI mutation guards", () => {
     });
 
     assert.equal(rejected.ok, false);
-    assert.match(rejected.message, /session revoke evidence/);
+    assert.match(rejected.message, /Отзыв сессии не подтверждён/);
 
     const accepted = await submitSecuritySessionRevoke("sess-risk", {
       revokeSecuritySession: async () => ({

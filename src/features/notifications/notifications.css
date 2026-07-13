@@ -34,7 +34,7 @@
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   box-shadow: 0 18px 48px rgba(21, 32, 54, 0.18);
 }
 
@@ -223,7 +223,7 @@
 .notification-empty {
   border: 1px dashed #d7e2f1;
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
   color: var(--muted);
 }
 
@@ -274,7 +274,7 @@
 }
 
 .notification-delivery-settings {
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .browser-push-card {
@@ -294,8 +294,8 @@
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #31415b;
+  background: var(--surface);
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 850;
 }

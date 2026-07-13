@@ -138,7 +138,7 @@ export function LandingPage({
         <div className="public-nav-actions">
           <button className="public-btn ghost" onClick={onNavigateAuth} type="button">Войти</button>
           <button className="public-btn primary" onClick={() => onStartTrial({ plan: "business", source: "landing-nav" })} type="button">
-            Trial
+            Запустить trial
             <ArrowRight size={16} />
           </button>
         </div>
@@ -157,15 +157,12 @@ export function LandingPage({
               <ArrowRight size={18} />
             </button>
             <button
-              className="public-btn secondary large"
+              className="public-btn text large"
               disabled={!demoRequestEnabled}
               onClick={() => handleDemoRequest?.({ planInterest: "business", source: "landing-hero", title: "Демо по запросу" })}
               type="button"
             >
               Демо по запросу
-            </button>
-            <button className="public-btn text" onClick={onNavigateAuth} type="button">
-              Уже есть аккаунт
             </button>
           </div>
         </div>

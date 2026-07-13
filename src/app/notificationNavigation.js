@@ -55,12 +55,12 @@ export function resolveNotificationActionAvailability(actionTarget = {}, { acces
   }
 
   if (actionTarget?.kind !== "navigate") {
-    return unavailableNotificationAction("Notification action is unavailable.");
+    return unavailableNotificationAction("Действие уведомления недоступно.");
   }
 
   const resolvedTarget = resolveNotificationNavigationTarget(actionTarget);
   if (!resolvedTarget) {
-    return unavailableNotificationAction(accessProfile.reason || "Notification target is unavailable.");
+    return unavailableNotificationAction(accessProfile.reason || "Раздел из уведомления недоступен.");
   }
 
   if (resolvedTarget.namespace === "service-admin") {
@@ -71,7 +71,7 @@ export function resolveNotificationActionAvailability(actionTarget = {}, { acces
 
   const sections = Array.isArray(accessProfile.sections) ? accessProfile.sections : [];
   if (!sections.includes(resolvedTarget.section)) {
-    return unavailableNotificationAction(accessProfile.reason || "Notification target is unavailable.");
+    return unavailableNotificationAction(accessProfile.reason || "Раздел из уведомления недоступен.");
   }
 
   const resourceId = typeof resolvedTarget.detail?.resourceId === "string" ? resolvedTarget.detail.resourceId : "";
@@ -79,7 +79,7 @@ export function resolveNotificationActionAvailability(actionTarget = {}, { acces
     const hasConversation = Array.isArray(conversationItems)
       && conversationItems.some((conversation) => conversation?.id === resourceId);
     if (!hasConversation) {
-      return unavailableNotificationAction("Notification dialog target was not found.");
+      return unavailableNotificationAction("Диалог из уведомления не найден.");
     }
   }
 

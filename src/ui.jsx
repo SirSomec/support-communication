@@ -51,13 +51,33 @@ export function ScreenStateStrip({ items }) {
 
         return (
           <article className={`screen-state-item ${item.tone ?? "ok"}`} key={item.label}>
-            <Icon size={16} />
+            <Icon className={item.tone === "loading" ? "spin" : undefined} size={16} />
             <span>{item.label}</span>
             <strong>{item.value}</strong>
           </article>
         );
       })}
     </div>
+  );
+}
+
+export function WorkspaceState({ tone = "empty", title, description, actionLabel, onAction, children }) {
+  const Icon = stateIcons[tone] ?? Inbox;
+
+  return (
+    <section className={`workspace-state ${tone}`} role={tone === "error" ? "alert" : "status"}>
+      <span className="workspace-state-icon" aria-hidden="true">
+        <Icon className={tone === "loading" ? "spin" : undefined} size={28} />
+      </span>
+      <strong>{title}</strong>
+      {description ? <p>{description}</p> : null}
+      {actionLabel && onAction ? (
+        <button className="primary-action" onClick={onAction} type="button">
+          {actionLabel}
+        </button>
+      ) : null}
+      {children}
+    </section>
   );
 }
 
@@ -147,12 +167,43 @@ export function StatusBadge({ children, tone = "info" }) {
   return <span className={`status-chip ${tone}`}>{children}</span>;
 }
 
+const TOAST_AUTO_DISMISS_MS = 8000;
+
 export function Toast({ message, onClose }) {
+  const [paused, setPaused] = React.useState(false);
+
+  React.useEffect(() => {
+    if (paused) {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => onClose?.(), TOAST_AUTO_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [message, onClose, paused]);
+
   return (
-    <button aria-live="polite" className="toast" onClick={onClose} role="status" type="button">
+    <button
+      aria-live="polite"
+      className="toast"
+      onClick={onClose}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      role="status"
+      type="button"
+    >
       <CircleGauge size={18} />
       {message}
     </button>
+  );
+}
+
+export function Skeleton({ className = "", height, width }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={["skeleton", className].filter(Boolean).join(" ")}
+      style={{ display: "block", height, width }}
+    />
   );
 }
 
@@ -190,6 +241,48 @@ export function SegmentedControl({ ariaLabel, className = "", onChange, options,
         );
       })}
     </div>
+  );
+}
+
+export function ConfirmDialog({
+  cancelLabel = "Отмена",
+  children,
+  confirmDisabled = false,
+  confirmLabel = "Подтвердить",
+  danger = false,
+  description,
+  eyebrow = "Подтверждение",
+  onCancel,
+  onConfirm,
+  title
+}) {
+  return (
+    <Modal
+      eyebrow={eyebrow}
+      footer={
+        <>
+          <button onClick={onCancel} type="button">{cancelLabel}</button>
+          <button
+            className={danger ? "danger-action" : "primary-action"}
+            disabled={confirmDisabled}
+            onClick={onConfirm}
+            type="button"
+          >
+            {confirmLabel}
+          </button>
+        </>
+      }
+      onClose={onCancel}
+      overlayClassName="confirm-overlay"
+      panelClassName="confirm-panel"
+      title={title}
+      titleId="confirm-dialog-title"
+    >
+      <div className="confirm-body">
+        {description ? <p>{description}</p> : null}
+        {children}
+      </div>
+    </Modal>
   );
 }
 

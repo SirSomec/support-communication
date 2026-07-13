@@ -21,7 +21,7 @@
   min-height: 64px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
-  background: #ffffff;
+  background: var(--surface);
   color: var(--text);
   text-align: left;
 }
@@ -68,7 +68,7 @@
 }
 
 .info-pill strong {
-  color: #20304a;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -93,7 +93,7 @@
   gap: 10px;
   padding: 14px;
   border-bottom: 1px solid var(--line);
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .rescue-row header,
@@ -223,7 +223,7 @@
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
   color: #2e3d56;
   font-weight: 800;
 }
@@ -297,7 +297,7 @@
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .proactive-ab-list article.active {

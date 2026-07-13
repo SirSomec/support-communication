@@ -97,7 +97,7 @@ export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToa
         <label>
           <span>Тематика</span>
           <select value={topic} onChange={(event) => setTopic(event.target.value)}>
-            <option value="">РќРµ РІС‹Р±СЂР°РЅР°</option>
+            <option value="">Не выбрана</option>
             {topicOptions.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>

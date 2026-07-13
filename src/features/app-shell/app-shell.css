@@ -22,7 +22,7 @@
   margin: 0 8px 22px;
   place-items: center;
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   color: #061b34;
 }
 
@@ -121,6 +121,10 @@
   background: var(--surface);
 }
 
+.workspace > .workspace-state {
+  margin: 14px;
+}
+
 .route-loading {
   display: grid;
   width: 100%;
@@ -138,7 +142,7 @@
   min-width: 0;
   padding: 0 16px 0 14px;
   border-bottom: 1px solid var(--line);
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .topbar-left,
@@ -176,7 +180,7 @@
 .ghost-action {
   min-height: 34px;
   padding-inline: 10px;
-  background: #fff;
+  background: var(--surface);
   font-size: 13px;
 }
 
@@ -214,7 +218,7 @@
   height: 38px;
   place-items: center;
   border-radius: 7px;
-  background: #ffffff;
+  background: var(--surface);
   color: #152036;
 }
 

@@ -41,12 +41,12 @@ export async function uploadComposerAttachment(
     if (response.status !== "ok") {
       return createAttachmentUploadError(
         attachment,
-        response.error?.message ?? "Attachment upload descriptor was rejected by the backend."
+        response.error?.message ?? "Сервер не принял дескриптор загрузки вложения."
       );
     }
 
     if (!response.data?.descriptorId && !response.data?.fileId) {
-      return createAttachmentUploadError(attachment, "Attachment upload descriptor is missing backend identifiers.");
+      return createAttachmentUploadError(attachment, "В дескрипторе загрузки вложения нет идентификаторов бэкенда.");
     }
 
     let descriptor = response.data;
@@ -56,14 +56,14 @@ export async function uploadComposerAttachment(
       await uploadAttachmentFile(attachment.file, signedUpload);
       const fileId = String(response.data.fileId ?? "").trim();
       if (!fileId) {
-        return createAttachmentUploadError(attachment, "Attachment upload descriptor is missing fileId for finalize.");
+        return createAttachmentUploadError(attachment, "В дескрипторе загрузки вложения нет fileId для завершения загрузки.");
       }
 
       const finalizeResponse = await finalizeAttachmentUpload({ fileId });
       if (finalizeResponse.status !== "ok") {
         return createAttachmentUploadError(
           mergeAttachmentUploadDescriptor(attachment, descriptor),
-          finalizeResponse.error?.message ?? "Attachment upload finalize was rejected by the backend."
+          finalizeResponse.error?.message ?? "Сервер не принял завершение загрузки вложения."
         );
       }
 
@@ -88,7 +88,7 @@ export async function uploadComposerAttachment(
   } catch (error) {
     return createAttachmentUploadError(
       attachment,
-      error instanceof Error ? error.message : "Attachment upload request failed."
+      error instanceof Error ? error.message : "Не удалось выполнить запрос загрузки вложения."
     );
   }
 }
@@ -122,7 +122,7 @@ export function mergeAttachmentUploadDescriptor(attachment, descriptor) {
   if (blockedScanStates.has(antivirusState)) {
     return preserveAttachmentFile({
       ...base,
-      error: "Attachment blocked by antivirus scan.",
+      error: "Вложение заблокировано антивирусной проверкой.",
       progress: 100,
       retryable: false,
       status: "error"
@@ -132,7 +132,7 @@ export function mergeAttachmentUploadDescriptor(attachment, descriptor) {
   if (failedScanStates.has(antivirusState)) {
     return preserveAttachmentFile({
       ...base,
-      error: "Attachment scan failed. Retry upload.",
+      error: "Антивирусная проверка вложения не удалась. Повторите загрузку.",
       progress: 100,
       retryable: true,
       status: "error"
@@ -150,7 +150,7 @@ export function mergeAttachmentUploadDescriptor(attachment, descriptor) {
 
   return preserveAttachmentFile({
     ...base,
-    error: "Waiting for backend scan before send.",
+    error: "Ожидание антивирусной проверки перед отправкой.",
     progress: Math.max(Number(attachment.progress) || 0, 80),
     status: "uploading"
   }, attachment);
@@ -216,7 +216,7 @@ async function uploadSignedAttachmentFile(file, signedUpload) {
   });
 
   if (!response.ok) {
-    throw new Error(`Attachment file upload failed with status ${response.status}.`);
+    throw new Error(`Не удалось загрузить файл вложения: статус ${response.status}.`);
   }
 }
 
@@ -237,7 +237,7 @@ async function pollAttachmentScanStatus(attachment, {
     if (response.status !== "ok") {
       return createAttachmentUploadError(
         nextAttachment,
-        response.error?.message ?? "Attachment scan status request failed."
+        response.error?.message ?? "Не удалось получить статус антивирусной проверки вложения."
       );
     }
 
@@ -325,7 +325,7 @@ export function useComposerAttachments({ setToast } = {}) {
   );
 
   const completeAttachment = useCallback(() => {
-    setToast?.("Attachment readiness is controlled by backend scan status.");
+    setToast?.("Готовность вложения определяется статусом антивирусной проверки на сервере.");
   }, [setToast]);
 
   const retryAttachment = useCallback((attachmentId) => {

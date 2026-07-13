@@ -9,7 +9,7 @@ import { IntegrationService } from "../apps/api-gateway/src/integrations/integra
 import { createTelegramOutboundMessageDispatcher } from "../apps/api-gateway/src/integrations/telegram-outbound.dispatcher.ts";
 import { loadTelegramPollingRuntimeConfig } from "../apps/api-gateway/src/integrations/telegram-polling.main.ts";
 import { pollTelegramUpdatesOnce, startTelegramPollingWorker } from "../apps/api-gateway/src/integrations/telegram-polling.worker.ts";
-import { telegramConversationId } from "../apps/api-gateway/src/integrations/telegram-webhook.route.ts";
+import { resolveOrCreateTelegramConversation, telegramConversationId } from "../apps/api-gateway/src/integrations/telegram-webhook.route.ts";
 
 describe("telegram polling ingress contracts", () => {
   it("ships a production runtime entrypoint and compose service for polling", () => {
@@ -322,6 +322,128 @@ describe("telegram polling ingress contracts", () => {
     assert.equal(result.accepted, 0);
     assert.equal(result.failed, 0);
     assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-unsupported-update"))?.pollingOffset, 16);
+  });
+
+  it("records a CSAT survey callback without opening a follow-up appeal", async () => {
+    const now = new Date().toISOString();
+    const integrationRepository = IntegrationRepository.inMemory({
+      ...emptyIntegrationState(),
+      telegramConnections: [{
+        botId: "123456",
+        botToken: "123456:support_bot_token",
+        botUsername: "support_bot",
+        createdAt: now,
+        pollingOffset: 100,
+        status: "active" as const,
+        tenantId: "tenant-rating",
+        tokenPreview: "123456:****",
+        updatedAt: now,
+        webhookSecret: "tg_wh_rating"
+      }]
+    });
+    const conversationRepository = ConversationRepository.inMemory();
+    const conversation = await resolveOrCreateTelegramConversation({
+      botId: "123456",
+      chatId: "445566",
+      conversationRepository,
+      displayName: "Rated Client",
+      tenantId: "tenant-rating"
+    });
+    assert.ok(conversation);
+    await conversationRepository.saveConversation({ ...conversation!, operatorId: "operator-1", status: "closed" });
+
+    const requestedUrls: string[] = [];
+    const ratings: Array<Record<string, unknown>> = [];
+    const fetcher = async (input: string) => {
+      requestedUrls.push(input);
+      if (input.includes("/getUpdates")) {
+        return {
+          json: async () => ({
+            ok: true,
+            result: [{
+              callback_query: { data: "quality:csat:4", id: "cbq-77", message: { chat: { id: 445566 } } },
+              update_id: 120
+            }]
+          }),
+          ok: true,
+          status: 200
+        };
+      }
+      if (input.includes("/answerCallbackQuery")) {
+        return { json: async () => ({ ok: true, result: true }), ok: true, status: 200 };
+      }
+      throw new Error(`Unexpected Telegram API URL ${input}`);
+    };
+
+    const result = await pollTelegramUpdatesOnce({
+      conversationRepository,
+      conversationService: new ConversationService(conversationRepository),
+      fetcher,
+      integrationRepository,
+      offsets: new Map(),
+      recordQualityRating: async (payload) => {
+        ratings.push(payload);
+        return { data: { ratingId: "rating-77" }, error: null, meta: {}, operation: "recordClientQualityRating", service: "qualityService", status: "ok", traceId: "trace-rating" } as any;
+      }
+    });
+
+    assert.equal(result.accepted, 1);
+    assert.equal(result.failed, 0);
+    assert.equal(ratings.length, 1);
+    assert.equal(ratings[0]?.conversationId, conversation!.id);
+    assert.equal(ratings[0]?.operator, "operator-1");
+    assert.equal(ratings[0]?.score, 4);
+    assert.equal(ratings[0]?.scale, "CSAT");
+    assert.equal(ratings[0]?.idempotencyKey, "telegram:123456:cbq-77");
+    assert.ok(requestedUrls.some((url) => url.includes("/getUpdates") && url.includes("callback_query")));
+    assert.ok(requestedUrls.some((url) => url.includes("/answerCallbackQuery") && url.includes("callback_query_id=cbq-77")));
+    assert.equal((await conversationRepository.listConversations()).length, 1, "a rating callback must not fork a follow-up appeal");
+    assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-rating"))?.pollingOffset, 121);
+  });
+
+  it("skips a rating callback without jamming the cursor when quality ingestion is not configured", async () => {
+    const now = new Date().toISOString();
+    const integrationRepository = IntegrationRepository.inMemory({
+      ...emptyIntegrationState(),
+      telegramConnections: [{
+        botId: "123456",
+        botToken: "123456:support_bot_token",
+        botUsername: "support_bot",
+        createdAt: now,
+        pollingOffset: 200,
+        status: "active" as const,
+        tenantId: "tenant-rating-unconfigured",
+        tokenPreview: "123456:****",
+        updatedAt: now,
+        webhookSecret: "tg_wh_rating_unconfigured"
+      }]
+    });
+    const conversationRepository = ConversationRepository.inMemory();
+
+    const result = await pollTelegramUpdatesOnce({
+      conversationRepository,
+      conversationService: new ConversationService(conversationRepository),
+      fetcher: async (input: string) => ({
+        json: async () => input.includes("/getUpdates")
+          ? {
+              ok: true,
+              result: [{
+                callback_query: { data: "quality:csat:5", id: "cbq-88", message: { chat: { id: 998877 } } },
+                update_id: 205
+              }]
+            }
+          : { ok: true, result: true },
+        ok: true,
+        status: 200
+      }),
+      integrationRepository,
+      offsets: new Map()
+    });
+
+    assert.equal(result.accepted, 0);
+    assert.equal(result.failed, 1);
+    assert.equal((await conversationRepository.listConversations()).length, 0);
+    assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-rating-unconfigured"))?.pollingOffset, 206);
   });
 
   it("sends operator replies through the tenant telegram bot token", async () => {

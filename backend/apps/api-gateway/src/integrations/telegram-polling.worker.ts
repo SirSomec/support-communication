@@ -1,9 +1,16 @@
 import { writeStructuredLog } from "@support-communication/observability";
+import type { BackendEnvelope } from "@support-communication/envelope";
 import type { ConversationRepository } from "../conversation/conversation.repository.js";
 import type { ConversationService } from "../conversation/conversation.service.js";
 import type { ChannelConnectionStoredRecord, TelegramConnectionStoredRecord } from "./integration.repository.js";
 import type { TelegramHttpFetch } from "./telegram-channel-connection.js";
-import { resolveOrCreateTelegramConversation, telegramRoutingQueueId, telegramTenantEventId } from "./telegram-webhook.route.js";
+import {
+  parseTelegramQualityRating,
+  resolveOrCreateTelegramConversation,
+  resolveTelegramRatedConversation,
+  telegramRoutingQueueId,
+  telegramTenantEventId
+} from "./telegram-webhook.route.js";
 
 export interface TelegramPollingInput {
   apiBaseUrl?: string;
@@ -13,6 +20,10 @@ export interface TelegramPollingInput {
   fetcher?: TelegramHttpFetch;
   integrationRepository: TelegramConnectionReader;
   limit?: number;
+  recordQualityRating?: (payload: {
+    channel?: string; clientId?: string; conversationId?: string; idempotencyKey?: string;
+    operator?: string; scale?: "CSAT" | "CSI" | "QA"; score?: number; topic?: string;
+  }, context: { actorId?: string; actorType?: "client"; tenantId?: string }) => Promise<BackendEnvelope<Record<string, unknown>>>;
   runBotRuntime?: (event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string }) => Promise<{ instance?: { status?: string }; outcome?: string }>;
   offsets?: Map<string, number>;
   timeoutMs?: number;
@@ -48,6 +59,11 @@ interface TelegramGetUpdatesResponse {
 }
 
 interface TelegramUpdatePayload {
+  callback_query?: {
+    data?: string;
+    id?: number | string;
+    message?: TelegramMessagePayload;
+  };
   edited_message?: TelegramMessagePayload;
   message?: TelegramMessagePayload;
   update_id?: number;
@@ -136,6 +152,30 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
     });
 
     for (const update of updates) {
+      const rating = parseTelegramQualityRating(update as unknown as Record<string, unknown>);
+      if (rating) {
+        // Survey button taps must never fork a follow-up appeal: record the rating
+        // and advance the cursor without touching conversation creation.
+        const recorded = await recordPolledQualityRating({
+          apiBaseUrl: input.apiBaseUrl,
+          connection,
+          conversationRepository: input.conversationRepository,
+          fetcher,
+          rating,
+          recordQualityRating: input.recordQualityRating
+        });
+        if (recorded) {
+          result.accepted += 1;
+        } else {
+          result.failed += 1;
+        }
+        const ratingUpdateId = Number(update.update_id);
+        if (Number.isFinite(ratingUpdateId)) {
+          await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, ratingUpdateId + 1);
+        }
+        continue;
+      }
+
       const parsed = parseTelegramPollingUpdate(update);
       if (!parsed) {
         const ignoredUpdateId = Number(update.update_id);
@@ -207,6 +247,88 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
   return result;
 }
 
+async function recordPolledQualityRating(input: {
+  apiBaseUrl?: string;
+  connection: TelegramConnectionStoredRecord;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations">;
+  fetcher: TelegramHttpFetch;
+  rating: NonNullable<ReturnType<typeof parseTelegramQualityRating>>;
+  recordQualityRating?: TelegramPollingInput["recordQualityRating"];
+}): Promise<boolean> {
+  const { connection, rating } = input;
+  let recorded = false;
+  try {
+    if (!input.recordQualityRating) {
+      throw new Error("telegram_quality_not_configured");
+    }
+    const conversation = await resolveTelegramRatedConversation(input.conversationRepository, {
+      botId: connection.botId ?? undefined,
+      chatId: rating.chatId,
+      tenantId: connection.tenantId
+    });
+    if (!conversation?.operatorId) {
+      throw new Error("telegram_quality_conversation_unresolved");
+    }
+    const response = await input.recordQualityRating({
+      channel: "Telegram",
+      clientId: rating.chatId,
+      conversationId: conversation.id,
+      idempotencyKey: `telegram:${connection.botId ?? "default"}:${rating.callbackQueryId}`,
+      operator: conversation.operatorId,
+      scale: rating.scale,
+      score: rating.score,
+      topic: conversation.topic
+    }, { actorId: rating.chatId, actorType: "client", tenantId: connection.tenantId });
+    recorded = response.status === "ok";
+    if (!recorded) {
+      throw new Error(String(response.error?.code ?? "telegram_quality_rating_rejected"));
+    }
+  } catch (error) {
+    writeStructuredLog("warn", "Telegram quality rating ingestion failed", {
+      callbackQueryId: rating.callbackQueryId,
+      error: error instanceof Error ? error.message : String(error),
+      operation: "telegram.polling.quality_rating",
+      service: "telegram-polling-worker",
+      tenantId: connection.tenantId
+    });
+  }
+
+  await answerTelegramCallbackQuery({
+    apiBaseUrl: input.apiBaseUrl,
+    connection,
+    fetcher: input.fetcher,
+    callbackQueryId: rating.callbackQueryId,
+    text: recorded ? "Спасибо за оценку!" : undefined
+  });
+
+  return recorded;
+}
+
+async function answerTelegramCallbackQuery(input: {
+  apiBaseUrl?: string;
+  callbackQueryId: string;
+  connection: TelegramConnectionStoredRecord;
+  fetcher: TelegramHttpFetch;
+  text?: string;
+}): Promise<void> {
+  const token = String(input.connection.botToken ?? "").trim();
+  if (!token) {
+    return;
+  }
+
+  const endpoint = new URL(`${String(input.apiBaseUrl ?? DEFAULT_TELEGRAM_API_BASE_URL).replace(/\/+$/, "")}/bot${token}/answerCallbackQuery`);
+  endpoint.searchParams.set("callback_query_id", input.callbackQueryId);
+  if (input.text) {
+    endpoint.searchParams.set("text", input.text);
+  }
+
+  try {
+    await input.fetcher(endpoint.toString(), {});
+  } catch {
+    // Answering only stops the client-side spinner; a failure must not block ingestion.
+  }
+}
+
 function telegramCursorKey(connection: TelegramConnectionStoredRecord): string {
   return `${connection.tenantId}:${connection.botId ?? "default"}`;
 }
@@ -241,7 +363,7 @@ async function fetchTelegramUpdates(input: {
   const endpoint = new URL(`${String(input.apiBaseUrl ?? DEFAULT_TELEGRAM_API_BASE_URL).replace(/\/+$/, "")}/bot${token}/getUpdates`);
   endpoint.searchParams.set("timeout", "0");
   endpoint.searchParams.set("limit", String(input.limit));
-  endpoint.searchParams.set("allowed_updates", JSON.stringify(["message", "edited_message"]));
+  endpoint.searchParams.set("allowed_updates", JSON.stringify(["message", "edited_message", "callback_query"]));
   if (Number.isFinite(input.offset)) {
     endpoint.searchParams.set("offset", String(input.offset));
   }

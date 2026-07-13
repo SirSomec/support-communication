@@ -9,6 +9,7 @@ import type {
   RealtimeEvent
 } from "../conversation/conversation.repository.js";
 import {
+  appealAnchorTag,
   resolveOrForkAppealConversation,
   type AppealConversationMutation
 } from "../conversation/appeal-lifecycle.js";
@@ -84,9 +85,11 @@ export async function handleTelegramWebhookFromRoute(
     if (!input.recordQualityRating) {
       return deniedEnvelope("telegram_quality_not_configured", "Telegram quality rating ingestion is not configured.");
     }
-    const conversationId = telegramConversationId(tenantId, tenantConnection?.botId ?? undefined, rating.chatId);
-    const conversation = await input.conversationRepository.findConversation(conversationId)
-      ?? await input.conversationRepository.findConversation(rating.chatId);
+    const conversation = await resolveTelegramRatedConversation(input.conversationRepository, {
+      botId: tenantConnection?.botId ?? undefined,
+      chatId: rating.chatId,
+      tenantId
+    });
     if (!conversation || resolveConversationTenantId(conversation) !== tenantId || !conversation.operatorId) {
       return deniedEnvelope("telegram_quality_conversation_unresolved", "Rated conversation or its operator could not be resolved.");
     }
@@ -386,7 +389,28 @@ function parseTelegramUpdate(body: Record<string, unknown>) {
   };
 }
 
-function parseTelegramQualityRating(body: Record<string, unknown>): {
+export async function resolveTelegramRatedConversation(
+  repository: Pick<ConversationRepository, "findConversation" | "listConversations">,
+  input: { botId?: string; chatId: string; tenantId: string }
+): Promise<ConversationRecord | null> {
+  const anchorId = telegramConversationId(input.tenantId, input.botId, input.chatId);
+  const anchorTag = appealAnchorTag(anchorId);
+  const appeals = (await repository.listConversations())
+    .filter((conversation) => resolveConversationTenantId(conversation) === input.tenantId)
+    .filter((conversation) => conversation.id === anchorId || conversation.tags.includes(anchorTag))
+    .sort((left, right) => conversationSortTimestamp(right) - conversationSortTimestamp(left));
+  const resolved = appeals.find((conversation) => conversation.operatorId)
+    ?? appeals[0]
+    ?? await repository.findConversation(input.chatId);
+  return resolved && resolveConversationTenantId(resolved) === input.tenantId ? resolved : null;
+}
+
+function conversationSortTimestamp(conversation: ConversationRecord): number {
+  const updatedAt = Date.parse(String(conversation.updatedAt ?? ""));
+  return Number.isFinite(updatedAt) ? updatedAt : 0;
+}
+
+export function parseTelegramQualityRating(body: Record<string, unknown>): {
   callbackQueryId: string; chatId: string; scale: "CSAT" | "CSI"; score: number;
 } | null {
   const callback = body.callback_query as Record<string, unknown> | undefined;

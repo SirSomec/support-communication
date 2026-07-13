@@ -7,6 +7,8 @@ import { configureConversationRepository } from "../conversation/bootstrap.js";
 import { ConversationService } from "../conversation/conversation.service.js";
 import { configureIdentityRepository } from "../identity/bootstrap.js";
 import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
+import { configureQualityRepository } from "../quality/bootstrap.js";
+import { QualityService } from "../quality/quality.service.js";
 import { configureRoutingRepository } from "../routing/bootstrap.js";
 import { CanonicalRoutingConversationRepository } from "../routing/canonical-routing-conversation.repository.js";
 import { CanonicalRoutingWorkloadAdapter } from "../routing/canonical-routing-workload.adapter.js";
@@ -36,6 +38,7 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
     TeamDirectoryRepository.default()
   );
   const conversationService = new ConversationService(conversationRepository);
+  const qualityService = new QualityService(configureQualityRepository(source));
   const offsets = new Map<string, number>();
 
   startTelegramPollingWorker({
@@ -57,6 +60,7 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
             autoAssignConversation: (conversationId, tenantId) => routingService.autoAssignConversation(conversationId, { tenantId }),
             limit: config.limit,
             offsets,
+            recordQualityRating: (payload, context) => qualityService.recordClientQualityRating(payload, context),
             runBotRuntime: (event) => automationService.handleBotRuntimeInboundEvent(event),
             timeoutMs: config.timeoutMs
           })

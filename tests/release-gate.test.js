@@ -63,6 +63,7 @@ describe("product release gate", () => {
       "npm run build",
       "docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build",
       "node scripts/compose-health-check.mjs",
+      "node scripts/backup-restore-gate.mjs",
       "curl.exe -fsS http://127.0.0.1:8080/",
       "curl.exe -fsS http://127.0.0.1:8080/api/v1/health",
       "curl.exe -fsS http://127.0.0.1:4101/api/v1/health",
@@ -189,7 +190,10 @@ describe("product release gate", () => {
     assert.equal(leadWorkerEnv.RUNTIME_PROFILE, "production-like");
     assert.equal(leadWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
     assert.equal(leadWorkerEnv.INTEGRATION_REPOSITORY, "prisma");
-    assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE, "disabled");
+    assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE, "smtp");
+    assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_SMTP_FROM, "noreply@support-communication.local");
+    assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_SMTP_HOST, "mailpit");
+    assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_SMTP_PORT, "1025");
 
     const smtpLeadWorkerResult = spawnSync(
       "docker",
@@ -447,7 +451,7 @@ describe("product release gate", () => {
         cwd: root,
         env: {
           ...process.env,
-          OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN: "release-gate-scan-token",
+          FILE_SCAN_CALLBACK_TOKEN: "release-gate-scan-token",
           OUTBOX_SCANNER_BEARER_TOKEN: "release-gate-scanner-token",
           OUTBOX_SCANNER_ENABLED: "true",
           OUTBOX_SCANNER_PROVIDER_MODE: "http",
@@ -477,6 +481,7 @@ describe("product release gate", () => {
     assert.equal(worker.environment.OUTBOX_SCANNER_URL, "https://scanner.example.test/runtime");
     assert.equal(worker.environment.OUTBOX_FILE_SCAN_RESULT_BASE_URL, "http://api-gateway:4100/api/v1");
     assert.equal(worker.environment.OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN, "release-gate-scan-token");
+    assert.equal(config.services["api-gateway"].environment.FILE_SCAN_CALLBACK_TOKEN, "release-gate-scan-token");
     assert.equal(worker.environment.OUTBOX_QUEUE, "file-scan");
 
     const localResult = spawnSync(
@@ -499,7 +504,7 @@ describe("product release gate", () => {
         cwd: root,
         env: {
           ...process.env,
-          OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN: "release-gate-scan-token",
+          FILE_SCAN_CALLBACK_TOKEN: "release-gate-scan-token",
           OUTBOX_SCANNER_ENABLED: "true"
         },
         encoding: "utf8"
@@ -510,9 +515,9 @@ describe("product release gate", () => {
     const localConfig = JSON.parse(localResult.stdout);
     const localWorkerEnv = localConfig.services["file-scan-scanner-worker"].environment;
 
-    assert.equal(localWorkerEnv.OUTBOX_SCANNER_PROVIDER_MODE, "local");
+    assert.equal(localWorkerEnv.OUTBOX_SCANNER_PROVIDER_MODE, "http");
     assert.equal(localWorkerEnv.OUTBOX_SCANNER_LOCAL_VERDICT, "clean");
-    assert.notEqual(localWorkerEnv.OUTBOX_SCANNER_URL, "http://scanner:8080/scan");
+    assert.equal(localWorkerEnv.OUTBOX_SCANNER_URL, "http://clamav-scanner:4120/scan");
   });
 
   it("wires a live API callback smoke for the file scan scanner into the release gate", () => {

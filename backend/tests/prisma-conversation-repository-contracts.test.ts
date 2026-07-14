@@ -324,6 +324,36 @@ describe("Prisma-backed conversation repository contracts", () => {
     ]);
   });
 
+  it("persists the conversation mutation when the outbound reply idempotency key already exists", async () => {
+    const { client } = createFakePrismaConversationClient();
+    const repository = ConversationRepository.prisma({ client });
+    const conversation = await repository.findConversation("maria");
+    assert.ok(conversation);
+
+    await repository.recordOutboundDescriptor({ descriptor: csatSurveyDescriptor("delivery_csat_first") });
+
+    const queued = await repository.queueOutboundMessageReply({
+      conversation: { ...conversation, resolutionOutcome: "resolved", status: "closed" },
+      descriptor: csatSurveyDescriptor("delivery_csat_second"),
+      lifecycleEvent: {
+        ...assignmentLifecycleEvent("lifecycle_reclose_prisma", "rt_reclose_prisma"),
+        data: { toStatus: "closed" },
+        eventType: "status.changed"
+      },
+      realtimeEvent: assignmentRealtimeEvent("rt_reclose_prisma")
+    });
+
+    assert.equal(queued.descriptor.id, "delivery_csat_first");
+    assert.equal(queued.conversation.status, "closed");
+    assert.equal((await repository.findConversation("maria"))?.status, "closed");
+    assert.equal((await repository.listOutboundDescriptors({ conversationId: "maria" })).length, 1);
+    assert.equal(client.calls.transactions, 3);
+    assert.equal(
+      (await repository.listRealtimeEvents({ tenantId: "tenant-volga" })).some((event) => event.eventId === "rt_reclose_prisma"),
+      true
+    );
+  });
+
   it("persists delivery receipts through the Prisma conversation repository with provider replay", async () => {
     const { client } = createFakePrismaConversationClient();
     const repository = ConversationRepository.prisma({ client });
@@ -628,6 +658,14 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
     conversationOutboundDescriptor: {
       create: async (input: { data: FakeConversationOutboundDescriptorCreateInput }) => {
         calls.conversationOutboundDescriptorCreates.push(input);
+        const duplicate = input.data.idempotencyKey
+          ? Array.from(outboundDescriptors.values()).find((descriptor) => descriptor.idempotencyKey === input.data.idempotencyKey)
+          : undefined;
+        if (duplicate) {
+          const error = new Error("Unique constraint failed on the fields: (`idempotency_key`)") as Error & { code?: string };
+          error.code = "P2002";
+          throw error;
+        }
         outboundDescriptors.set(input.data.id, input.data);
         return input.data;
       },
@@ -687,12 +725,31 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
     }
   };
 
+  const mutableStores: Array<Map<string, any>> = [
+    conversations,
+    deliveryReceipts,
+    inboundEvents,
+    lifecycleEvents,
+    outboundDescriptors,
+    realtimeEvents
+  ];
   const client = {
     ...delegates,
     calls,
     $transaction: async <T>(operation: (transactionClient: typeof delegates) => Promise<T>) => {
       calls.transactions += 1;
-      return operation(delegates);
+      const snapshots = mutableStores.map((store) => structuredClone(store));
+      try {
+        return await operation(delegates);
+      } catch (error) {
+        mutableStores.forEach((store, index) => {
+          store.clear();
+          for (const [key, value] of snapshots[index]) {
+            store.set(key, value);
+          }
+        });
+        throw error;
+      }
     }
   };
 
@@ -876,6 +933,27 @@ interface FakeConversationLifecycleEventCreateInput {
 }
 
 type FakeConversationLifecycleEventRow = FakeConversationLifecycleEventCreateInput;
+
+function csatSurveyDescriptor(id: string) {
+  return {
+    auditId: null,
+    channel: "SDK",
+    conversationId: "maria",
+    createdAt: "2026-07-14T10:00:00.000Z",
+    deliveryState: "queued",
+    id,
+    idempotencyKey: "quality:csat:maria",
+    kind: "message_delivery" as const,
+    messageId: `csat-survey:${id}`,
+    outboxEventId: null,
+    payload: { conversationId: "maria", queue: "message-delivery", text: "survey" },
+    requestFingerprint: `fingerprint_${id}`,
+    retryable: true,
+    status: "queued",
+    tenantId: "tenant-volga",
+    traceId: `trc_${id}`
+  };
+}
 
 function assignmentLifecycleEvent(id: string, sourceEventId: string) {
   return {

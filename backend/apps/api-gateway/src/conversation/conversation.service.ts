@@ -584,9 +584,14 @@ export class ConversationService {
       payload.reason
     );
     const telegramSurvey = nextStatus === "closed" ? createTelegramCsatSurvey(conversation, event.traceId, tenantId) : null;
+    // A reopened dialog keeps its CSAT descriptor from the first close; queueing the survey
+    // again would collide on the idempotency key and roll the whole close back.
+    const surveyAlreadySent = telegramSurvey
+      ? Boolean(await this.conversationRepository.findOutboundDescriptorByIdempotencyKey(telegramSurvey.descriptor.idempotencyKey ?? ""))
+      : false;
     let csatSurveyDelivery: Record<string, unknown> | undefined;
     let persisted: ConversationMutationRecord;
-    if (telegramSurvey) {
+    if (telegramSurvey && !surveyAlreadySent) {
       const queued = await this.conversationRepository.queueOutboundMessageReply({
           conversation,
           descriptor: telegramSurvey.descriptor,

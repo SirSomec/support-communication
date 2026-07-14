@@ -307,6 +307,144 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     assert.equal(outbox.filter((event) => event.payload.descriptorId === descriptors[0]?.id).length, 1);
   });
 
+  it("persists a repeat close after reopen without re-sending the CSAT survey", async () => {
+    const repository = ConversationRepository.inMemory();
+    await repository.saveConversation({
+      channel: "Telegram",
+      clientSince: "2026-07-11",
+      device: "Telegram",
+      entry: "Telegram",
+      id: "telegram-csat-reclose",
+      initials: "TC",
+      language: "ru",
+      messages: [],
+      name: "Telegram client",
+      phone: "111222333",
+      preview: "Question resolved",
+      previous: [],
+      sla: "Active",
+      slaTone: "ok",
+      status: "active",
+      tags: ["telegram", "telegram-chat:987654321"],
+      tenantId: "tenant-mygig",
+      time: "now",
+      topic: "Support / Telegram"
+    });
+    const conversations = new ConversationService(repository);
+
+    const closed = await conversations.transitionConversationStatus({
+      conversationId: "telegram-csat-reclose",
+      nextStatus: "closed",
+      resolutionOutcome: "resolved"
+    }, { tenantId: "tenant-mygig" });
+    const reopened = await conversations.transitionConversationStatus({
+      conversationId: "telegram-csat-reclose",
+      nextStatus: "reopened"
+    }, { tenantId: "tenant-mygig" });
+    const reclosed = await conversations.transitionConversationStatus({
+      conversationId: "telegram-csat-reclose",
+      nextStatus: "closed",
+      resolutionOutcome: "resolved"
+    }, { tenantId: "tenant-mygig" });
+
+    assert.equal(closed.status, "ok");
+    assert.equal(reopened.status, "ok");
+    assert.equal(reclosed.status, "ok");
+    assert.equal(reclosed.data.conversation.status, "closed");
+    assert.equal(reclosed.data.csatSurveyDelivery, undefined);
+
+    const stored = await repository.findConversation("telegram-csat-reclose");
+    assert.equal(stored?.status, "closed");
+    assert.equal(stored?.resolutionOutcome, "resolved");
+
+    const descriptors = await repository.listOutboundDescriptors({
+      conversationId: "telegram-csat-reclose",
+      kind: "message_delivery"
+    });
+    assert.equal(descriptors.length, 1);
+    assert.equal(descriptors[0]?.idempotencyKey, "quality:csat:telegram-csat-reclose");
+
+    const lifecycle = await repository.listLifecycleEvents({
+      conversationId: "telegram-csat-reclose",
+      eventTypes: ["status.changed"],
+      tenantId: "tenant-mygig"
+    });
+    const closes = lifecycle.filter((event) => event.data?.toStatus === "closed");
+    assert.equal(closes.length, 2);
+  });
+
+  it("keeps the conversation mutation when an outbound reply deduplicates by idempotency key", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversation = await repository.findConversation("maria");
+    assert.ok(conversation);
+
+    const outboundInput = (suffix: string, status: string) => ({
+      conversation: { ...conversation, status, messages: [...conversation.messages] },
+      descriptor: {
+        auditId: null,
+        channel: conversation.channel,
+        conversationId: conversation.id,
+        createdAt: "2026-07-14T10:00:00.000Z",
+        deliveryState: "queued",
+        id: `delivery_reclose_${suffix}`,
+        idempotencyKey: "quality:csat:maria",
+        kind: "message_delivery" as const,
+        messageId: `csat-survey:maria-${suffix}`,
+        outboxEventId: null,
+        payload: { conversationId: conversation.id, queue: "message-delivery", text: "survey" },
+        requestFingerprint: `fingerprint_${suffix}`,
+        retryable: true,
+        status: "queued",
+        tenantId: "tenant-volga",
+        traceId: `trc_reclose_${suffix}`
+      },
+      lifecycleEvent: {
+        actorId: null,
+        actorName: null,
+        actorType: "operator" as const,
+        conversationId: conversation.id,
+        data: { toStatus: status },
+        eventType: "status.changed",
+        id: `lifecycle_reclose_${suffix}`,
+        ingestedAt: "2026-07-14T10:00:00.000Z",
+        occurredAt: "2026-07-14T10:00:00.000Z",
+        reason: null,
+        schemaVersion: "conversation-lifecycle/v1" as const,
+        source: "conversation-service",
+        sourceEventId: `rt_reclose_${suffix}`,
+        tenantId: "tenant-volga",
+        traceId: `trc_reclose_${suffix}`
+      },
+      realtimeEvent: {
+        data: { toStatus: status },
+        eventId: `rt_reclose_${suffix}`,
+        eventName: "conversation.updated",
+        occurredAt: "2026-07-14T10:00:00.000Z",
+        resourceId: conversation.id,
+        resourceType: "conversation",
+        schemaVersion: "v1",
+        tenantId: "tenant-volga",
+        traceId: `trc_reclose_${suffix}`
+      }
+    });
+
+    const first = await repository.queueOutboundMessageReply(outboundInput("first", "closed"));
+    const second = await repository.queueOutboundMessageReply(outboundInput("second", "closed"));
+
+    assert.equal(first.descriptor.id, "delivery_reclose_first");
+    assert.equal(second.descriptor.id, "delivery_reclose_first");
+    assert.equal((await repository.listOutboundDescriptors({ conversationId: "maria" })).length, 1);
+    assert.equal((await repository.findConversation("maria"))?.status, "closed");
+
+    const lifecycle = await repository.listLifecycleEvents({ conversationId: "maria", tenantId: "tenant-volga" });
+    assert.equal(lifecycle.filter((event) => event.id.startsWith("lifecycle_reclose_")).length, 2);
+
+    const replay = await repository.queueOutboundMessageReply(outboundInput("second", "closed"));
+    assert.equal(replay.descriptor.id, "delivery_reclose_first");
+    assert.equal((await repository.listLifecycleEvents({ conversationId: "maria", tenantId: "tenant-volga" }))
+      .filter((event) => event.id.startsWith("lifecycle_reclose_")).length, 2);
+  });
+
   it("does not queue a CSAT delivery descriptor for non-Telegram closes", async () => {
     const repository = ConversationRepository.inMemory();
     const conversations = new ConversationService(repository);

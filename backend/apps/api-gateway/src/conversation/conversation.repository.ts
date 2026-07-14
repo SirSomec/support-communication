@@ -924,12 +924,29 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
         throw error;
       }
 
-      return {
-        conversation: clone(input.conversation),
-        lifecycleEvent: clone(input.lifecycleEvent),
-        realtimeEvent: clone(input.realtimeEvent),
-        descriptor: existing
-      };
+      // The descriptor collision rolled the whole transaction back. Deduplicate the
+      // delivery, but persist the conversation mutation — otherwise the state change
+      // (e.g. a repeat close after reopen) is silently lost.
+      try {
+        return await this.client.$transaction(async (transaction) => {
+          const conversation = await savePrismaConversation(transaction, input.conversation);
+          const lifecycleEvent = await appendPrismaLifecycleEvent(transaction, input.lifecycleEvent);
+          const realtimeEvent = await appendPrismaRealtimeEvent(transaction, input.realtimeEvent);
+          return { conversation, lifecycleEvent, realtimeEvent, descriptor: existing };
+        });
+      } catch (mutationError) {
+        if (!isUniqueConstraintError(mutationError)) {
+          throw mutationError;
+        }
+
+        // True replay: the original attempt already recorded these exact events.
+        return {
+          conversation: clone(input.conversation),
+          lifecycleEvent: clone(input.lifecycleEvent),
+          realtimeEvent: clone(input.realtimeEvent),
+          descriptor: existing
+        };
+      }
     }
   }
 
@@ -1171,14 +1188,37 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
         const existing = findExistingOutboundDescriptor(state, input.descriptor);
         if (existing) {
           const existingOutbox = findOutboundDescriptorOutbox(state, existing);
+          const replayedLifecycleEvent = (state.lifecycleEvents ?? [])
+            .find((event) => lifecycleEventIdentityMatches(event, input.lifecycleEvent));
+          if (replayedLifecycleEvent) {
+            persisted = {
+              conversation: clone(input.conversation),
+              lifecycleEvent: clone(replayedLifecycleEvent),
+              realtimeEvent: clone(input.realtimeEvent),
+              descriptor: clone(existing),
+              ...(existingOutbox ? { outbox: clone(existingOutbox) } : {})
+            };
+            return state;
+          }
+
+          // Deduplicate the delivery, but persist the conversation mutation —
+          // otherwise the state change behind it (e.g. a repeat close) is lost.
+          const nextConversation = clone(input.conversation);
+          const nextLifecycleEvent = clone(input.lifecycleEvent);
+          const nextRealtimeEvent = clone(input.realtimeEvent);
           persisted = {
-            conversation: clone(input.conversation),
-            lifecycleEvent: clone(input.lifecycleEvent),
-            realtimeEvent: clone(input.realtimeEvent),
+            conversation: nextConversation,
+            lifecycleEvent: nextLifecycleEvent,
+            realtimeEvent: nextRealtimeEvent,
             descriptor: clone(existing),
             ...(existingOutbox ? { outbox: clone(existingOutbox) } : {})
           };
-          return state;
+          return {
+            ...state,
+            conversations: upsertConversationRows(state.conversations, nextConversation),
+            lifecycleEvents: [...(state.lifecycleEvents ?? []), nextLifecycleEvent],
+            realtimeEvents: lifecycleRealtimeEventsWithEvent(state.realtimeEvents ?? [], nextRealtimeEvent)
+          };
         }
 
         const nextConversation = clone(input.conversation);

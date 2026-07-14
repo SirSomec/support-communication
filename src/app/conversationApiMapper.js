@@ -77,12 +77,6 @@ function mapBotHandoff(input) {
     sessionState: nonEmptyString(input.sessionState),
     topic: nonEmptyString(input.topic)
   };
-
-  if (isRepeatAppeal(mapped)) {
-    mapped.isRepeatAppeal = true;
-  }
-
-  return mapped;
 }
 
 export function mapLifecycleEvent(input) {

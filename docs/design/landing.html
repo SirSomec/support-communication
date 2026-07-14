@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support Communication — поддержка клиентов в одном контуре</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Golos+Text:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:#f4f7fb;color:#142033}
+  a{color:#0b74ff;text-decoration:none}
+  a:hover{color:#0959c4}
+  img{max-width:100%}
+</style>
+</head>
+<body>
+<div style="background:#f4f7fb;color:#142033;font-family:Inter,system-ui,sans-serif">
+
+  <!-- nav -->
+  <header style="display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 40px;border-bottom:1px solid rgba(217,226,238,.72);background:rgba(244,247,251,.94)">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="display:grid;width:36px;height:36px;place-items:center;border-radius:8px;background:#10243c;color:#fff;font-weight:900">SC</span>
+      <strong style="font-size:15px">Support Communication</strong>
+    </div>
+    <nav style="display:flex;gap:22px;font-size:13px;font-weight:700;color:#43516a">
+      <span>Возможности</span><span>ИИ-бот</span><span>Каналы</span><span>Тарифы</span><span>FAQ</span>
+    </nav>
+    <div style="display:flex;gap:8px">
+      <button style="min-height:38px;padding:0 13px;border:0;border-radius:7px;background:transparent;color:#31415b;font-weight:800;font-size:13px">Войти</button>
+      <button style="display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:0 16px;border:0;border-radius:7px;background:#0b74ff;color:#fff;font-weight:800;font-size:13px;box-shadow:0 12px 24px rgb(11 116 255 / 18%)">Запустить trial <i data-lucide="arrow-right" style="width:15px;height:15px"></i></button>
+    </div>
+  </header>
+
+  <!-- hero -->
+  <div style="max-width:1180px;margin:0 auto;padding:56px 40px 20px;display:grid;gap:24px">
+    <div style="display:grid;gap:18px;max-width:840px">
+      <span style="width:max-content;display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border:1px solid #cfe0f6;border-radius:999px;background:#eaf4ff;color:#19599f;font-size:12.5px;font-weight:800"><i data-lucide="zap" style="width:14px;height:14px"></i> Запуск пилота за один день</span>
+      <h1 style="margin:0;font-size:62px;line-height:1.0;letter-spacing:-0.02em;color:#121d2f">Вся поддержка клиентов —<br>в одном операционном контуре</h1>
+      <p style="margin:0;max-width:680px;color:#627086;font-size:17px;line-height:1.55">SDK на сайте, Telegram, лимиты операторов, SLA, отчёты и аудит — не набор витрин, а рабочее место смены, готовое к продакшену.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button style="display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:0 22px;border:0;border-radius:8px;background:#0b74ff;color:#fff;font-weight:800;font-size:15px;box-shadow:0 12px 24px rgb(11 116 255 / 22%)">Запустить trial бесплатно <i data-lucide="arrow-right" style="width:17px;height:17px"></i></button>
+        <button style="display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:0 18px;border:1px solid #d9e2ee;border-radius:8px;background:#fff;color:#31415b;font-weight:800;font-size:15px">Демо по запросу</button>
+      </div>
+      <div style="display:flex;gap:26px;flex-wrap:wrap;padding-top:6px">
+        <div style="display:grid;gap:2px"><strong style="font-size:22px;color:#121d2f">−38%</strong><span style="font-size:12.5px;color:#627086;font-weight:600">время первого ответа за месяц</span></div>
+        <div style="width:1px;background:#d9e2ee"></div>
+        <div style="display:grid;gap:2px"><strong style="font-size:22px;color:#121d2f">100%</strong><span style="font-size:12.5px;color:#627086;font-weight:600">действий — в журнале аудита</span></div>
+        <div style="width:1px;background:#d9e2ee"></div>
+        <div style="display:grid;gap:2px"><strong style="font-size:22px;color:#121d2f">1 день</strong><span style="font-size:12.5px;color:#627086;font-weight:600">от регистрации до первого диалога</span></div>
+      </div>
+    </div>
+
+    <!-- product preview (реальный интерфейс оператора) -->
+    <div style="overflow:hidden;border:1px solid #cbd8e8;border-radius:10px;background:#fff;box-shadow:0 24px 60px rgb(28 45 74 / 14%)">
+      <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;min-height:44px;padding:0 14px;border-bottom:1px solid #d9e2ee;background:#fbfcfe;color:#40506a;font-size:13px;font-weight:700">
+        <span style="display:inline-flex;align-items:center;gap:7px"><i data-lucide="activity" style="width:15px;height:15px"></i> Рабочее место оператора</span>
+        <span>Демонстрационный пример · без клиентских данных</span>
+      </div>
+      <img src="uploads/operator-cockpit-concept.png" alt="Рабочее место оператора: диалоги, чат с клиентом и карточка клиента" style="display:block;width:100%;height:auto">
+    </div>
+  </div>
+
+  <!-- AI bot -->
+  <div style="background:#0b1830;color:#eaf1fb">
+    <div style="max-width:1180px;margin:0 auto;padding:52px 40px;display:grid;grid-template-columns:minmax(0,1fr) minmax(400px,.9fr);gap:40px;align-items:center">
+      <div style="display:grid;gap:18px">
+        <span style="width:max-content;display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border:1px solid rgba(109,93,252,.5);border-radius:999px;background:rgba(109,93,252,.14);color:#b9aefe;font-size:12.5px;font-weight:800"><i data-lucide="bot" style="width:14px;height:14px"></i> Встроенный ИИ-агент</span>
+        <h2 style="margin:0;font-size:36px;line-height:1.08;color:#fff">Бот отвечает первым, оператор — когда правда нужен</h2>
+        <p style="margin:0;color:#a8b7cd;font-size:16px;line-height:1.6;max-width:540px">Консультационный бот собирается без кода: подключите источники знаний, задайте ключевые фразы и рамки ответов. Сложный вопрос он передаёт оператору вместе с историей и причиной.</p>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+          <div style="display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:start"><i data-lucide="book-open" style="width:18px;height:18px;color:#8ad6bd"></i><div style="display:grid;gap:2px"><strong style="font-size:14px;color:#fff">Знания под контролем</strong><span style="font-size:13px;color:#9fb0c8;line-height:1.45">Статьи, документы, страницы и MCP-источники с предпросмотром «что знает бот».</span></div></div>
+          <div style="display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:start"><i data-lucide="shield-check" style="width:18px;height:18px;color:#8ad6bd"></i><div style="display:grid;gap:2px"><strong style="font-size:14px;color:#fff">Рамки ответов</strong><span style="font-size:13px;color:#9fb0c8;line-height:1.45">О чём молчать, когда сразу звать человека, обязателен ли источник.</span></div></div>
+          <div style="display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:start"><i data-lucide="message-circle" style="width:18px;height:18px;color:#8ad6bd"></i><div style="display:grid;gap:2px"><strong style="font-size:14px;color:#fff">Живой тест-чат</strong><span style="font-size:13px;color:#9fb0c8;line-height:1.45">Проверьте бота как клиент и увидьте, «как он думал»: триггер, источники, токены.</span></div></div>
+          <div style="display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:start"><i data-lucide="git-branch" style="width:18px;height:18px;color:#8ad6bd"></i><div style="display:grid;gap:2px"><strong style="font-size:14px;color:#fff">Handoff с контекстом</strong><span style="font-size:13px;color:#9fb0c8;line-height:1.45">Оператор получает цель, AI-исход, цитаты и причину передачи.</span></div></div>
+        </div>
+      </div>
+      <!-- bot chat mock -->
+      <div style="border:1px solid rgba(255,255,255,.12);border-radius:12px;overflow:hidden;background:#0f2038;box-shadow:0 30px 70px rgb(0 0 0 / 45%)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.08);font-size:12.5px;color:#9fb0c8"><span style="display:inline-flex;align-items:center;gap:7px;font-weight:800;color:#dfe8f4"><span style="display:grid;width:22px;height:22px;place-items:center;border-radius:6px;background:#6d5dfc"><i data-lucide="bot" style="width:13px;height:13px;color:#fff"></i></span> Сценарий «Оплата и возвраты»</span><span>активен</span></div>
+        <div style="display:grid;gap:12px;padding:16px">
+          <div style="justify-self:start;max-width:300px;padding:11px 14px;border-radius:14px 14px 14px 4px;background:#1a2c48;color:#dbe6f5;font-size:13.5px;line-height:1.5">Как вернуть деньги за отменённый заказ?</div>
+          <div style="justify-self:end;max-width:320px;padding:11px 14px;border-radius:14px 14px 4px 14px;background:#6d5dfc;color:#fff;font-size:13.5px;line-height:1.5">Возврат приходит на карту за 3–5 рабочих дней. Могу оформить заявку прямо сейчас — подскажите номер заказа.</div>
+          <div style="display:grid;grid-template-columns:16px 1fr;gap:8px;padding:10px 12px;border:1px solid rgba(138,214,189,.25);border-radius:9px;background:rgba(138,214,189,.08);color:#a8c9c0;font-size:12px">
+            <i data-lucide="search" style="width:14px;height:14px;color:#8ad6bd;margin-top:1px"></i>
+            <span><b style="color:#cfe9df;font-weight:700">Как бот думал:</b> триггер «возврат» · источник «Политика возвратов v3» · 412 токенов · 0.9 с</span>
+          </div>
+          <div style="display:grid;grid-template-columns:16px 1fr;gap:8px;padding:10px 12px;border:1px solid rgba(255,155,34,.28);border-radius:9px;background:rgba(255,155,34,.08);color:#e6c290;font-size:12px">
+            <i data-lucide="user-round" style="width:14px;height:14px;color:#ff9b22;margin-top:1px"></i>
+            <span><b style="color:#ffcf97;font-weight:700">Передача оператору:</b> клиент просит частичный возврат — тема вне рамок бота</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- proof strip -->
+  
+
+  <!-- how it works -->
+  <div style="max-width:1180px;margin:0 auto;padding:42px 40px;display:grid;gap:18px">
+    <h2 style="margin:0;font-size:34px;line-height:1.08;color:#121d2f">Как это работает</h2>
+    <p style="margin:0;max-width:720px;color:#627086;font-size:16px;line-height:1.55">Три шага от регистрации до работающей поддержки — без внедренцев и месяцев настройки.</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      <article style="display:grid;gap:10px;padding:18px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <span style="display:grid;width:32px;height:32px;place-items:center;border-radius:8px;background:#eaf4ff;color:#0b74ff;font-weight:900;font-size:15px">1</span>
+        <strong style="color:#17233a;font-size:15px">Подключите каналы</strong>
+        <p style="margin:0;color:#627086;line-height:1.5;font-size:13.5px">Web SDK вставляется одной строкой, Telegram-бот подключается по токену. Первое сообщение — через минуты.</p>
+      </article>
+      <article style="display:grid;gap:10px;padding:18px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <span style="display:grid;width:32px;height:32px;place-items:center;border-radius:8px;background:#eaf4ff;color:#0b74ff;font-weight:900;font-size:15px">2</span>
+        <strong style="color:#17233a;font-size:15px">Настройте смену</strong>
+        <p style="margin:0;color:#627086;line-height:1.5;font-size:13.5px">Роли, лимиты операторов, тематики и SLA — очередь сама распределяет и спасает просроченные диалоги.</p>
+      </article>
+      <article style="display:grid;gap:10px;padding:18px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <span style="display:grid;width:32px;height:32px;place-items:center;border-radius:8px;background:#eaf4ff;color:#0b74ff;font-weight:900;font-size:15px">3</span>
+        <strong style="color:#17233a;font-size:15px">Контролируйте качество</strong>
+        <p style="margin:0;color:#627086;line-height:1.5;font-size:13.5px">Оценки клиентов, проверки текста, отчёты с XLSX-выгрузкой и журнал аудита каждого действия.</p>
+      </article>
+    </div>
+  </div>
+
+  <!-- channels -->
+  <div style="max-width:1180px;margin:0 auto;padding:44px 40px;display:grid;gap:18px" id="channels-1a">
+    <div style="display:grid;gap:8px">
+      <h2 style="margin:0;font-size:34px;line-height:1.08;color:#121d2f">Каналы, где живут ваши клиенты</h2>
+      <p style="margin:0;max-width:760px;color:#627086;font-size:16px;line-height:1.55">Одна очередь для всех каналов. SDK на сайте, Telegram, ВКонтакте и MAX уже в продакшене; популярные мессенджеры индустрии — на подключении.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+      <article style="display:grid;gap:8px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="display:grid;width:36px;height:36px;place-items:center;border-radius:8px;background:#eaf4ff"><i data-lucide="code-2" style="width:19px;height:19px;color:#0b74ff"></i></span><span style="padding:3px 9px;border-radius:999px;background:#e7f7f0;color:#0c7a5f;font-size:11px;font-weight:800">работает</span></div>
+        <strong style="color:#17233a;font-size:15px">Web SDK</strong>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">Виджет на сайт одной строкой: идентификация посетителя, диалоги, вложения.</p>
+      </article>
+      <article style="display:grid;gap:8px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="display:grid;width:36px;height:36px;place-items:center;border-radius:8px;background:#e8f3fd"><i data-lucide="send" style="width:19px;height:19px;color:#2ca5e0"></i></span><span style="padding:3px 9px;border-radius:999px;background:#e7f7f0;color:#0c7a5f;font-size:11px;font-weight:800">работает</span></div>
+        <strong style="color:#17233a;font-size:15px">Telegram</strong>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">Входящие диалоги и ответы операторов через бота, подключение по токену.</p>
+      </article>
+      <article style="display:grid;gap:8px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="display:grid;width:36px;height:36px;place-items:center;border-radius:8px;background:#eaf1fb"><span style="font-weight:900;color:#2787f5;font-size:14px">VK</span></span><span style="padding:3px 9px;border-radius:999px;background:#e7f7f0;color:#0c7a5f;font-size:11px;font-weight:800">работает</span></div>
+        <strong style="color:#17233a;font-size:15px">ВКонтакте</strong>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">Приём и отправка сообщений сообщества в общей ленте со всеми каналами.</p>
+      </article>
+      <article style="display:grid;gap:8px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="display:grid;width:36px;height:36px;place-items:center;border-radius:8px;background:#eef0fb"><span style="font-weight:900;color:#5b6bd6;font-size:12px">MAX</span></span><span style="padding:3px 9px;border-radius:999px;background:#e7f7f0;color:#0c7a5f;font-size:11px;font-weight:800">работает</span></div>
+        <strong style="color:#17233a;font-size:15px">MAX</strong>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">Полный приём и отправка сообщений в национальном мессенджере MAX.</p>
+      </article>
+      <article style="display:grid;gap:8px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="display:grid;width:36px;height:36px;place-items:center;border-radius:8px;background:#eef5ff"><i data-lucide="webhook" style="width:19px;height:19px;color:#0b74ff"></i></span><span style="padding:3px 9px;border-radius:999px;background:#e7f7f0;color:#0c7a5f;font-size:11px;font-weight:800">работает</span></div>
+        <strong style="color:#17233a;font-size:15px">REST API</strong>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">Клиенты, диалоги, отчёты, webhooks и audit export для любых интеграций.</p>
+      </article>
+      <article style="display:grid;gap:8px;padding:16px;border:1px dashed #cdd7e5;border-radius:8px;background:#fbfcfe">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="display:grid;width:36px;height:36px;place-items:center;border-radius:8px;background:#eaf6ef"><i data-lucide="message-square" style="width:19px;height:19px;color:#25a35a"></i></span><span style="padding:3px 9px;border-radius:999px;background:#f1f4f9;color:#7a889c;font-size:11px;font-weight:800">на подключении</span></div>
+        <strong style="color:#17233a;font-size:15px">WhatsApp</strong>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">Бизнес-переписка и шаблоны сообщений — в той же операционной ленте.</p>
+      </article>
+      <article style="display:grid;gap:8px;padding:16px;border:1px dashed #cdd7e5;border-radius:8px;background:#fbfcfe">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="display:grid;width:36px;height:36px;place-items:center;border-radius:8px;background:#f3eefc"><i data-lucide="mail" style="width:19px;height:19px;color:#6d5dfc"></i></span><span style="padding:3px 9px;border-radius:999px;background:#f1f4f9;color:#7a889c;font-size:11px;font-weight:800">на подключении</span></div>
+        <strong style="color:#17233a;font-size:15px">Email</strong>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">Обращения на почту превращаются в диалоги с тематиками и SLA.</p>
+      </article>
+      <article style="display:grid;gap:8px;padding:16px;border:1px dashed #cdd7e5;border-radius:8px;background:#fbfcfe">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="display:grid;width:36px;height:36px;place-items:center;border-radius:8px;background:#f0edfb"><i data-lucide="phone" style="width:19px;height:19px;color:#7a52d1"></i></span><span style="padding:3px 9px;border-radius:999px;background:#f1f4f9;color:#7a889c;font-size:11px;font-weight:800">на подключении</span></div>
+        <strong style="color:#17233a;font-size:15px">Viber</strong>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">Ещё один канал мессенджеров — подключается как управляемый источник событий.</p>
+      </article>
+    </div>
+  </div>
+
+  <!-- capabilities -->
+  <div style="max-width:1180px;margin:0 auto;padding:10px 40px 42px;display:grid;gap:18px">
+    <h2 style="margin:0;font-size:34px;line-height:1.08;color:#121d2f">Возможности для смены и руководителя</h2>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+      <article style="display:grid;gap:10px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff"><i data-lucide="message-square" style="width:22px;height:22px;color:#0b74ff"></i><strong style="color:#17233a">Омниканальная очередь</strong><p style="margin:0;color:#627086;line-height:1.45;font-size:13.5px">SDK и Telegram в одной ленте с SLA, тематиками и передачей между сотрудниками.</p></article>
+      <article style="display:grid;gap:10px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff"><i data-lucide="shield-check" style="width:22px;height:22px;color:#0b74ff"></i><strong style="color:#17233a">Проверка качества</strong><p style="margin:0;color:#627086;line-height:1.45;font-size:13.5px">Оценки клиентов, ручные проверки и правила проверки текста с журналом действий.</p></article>
+      <article style="display:grid;gap:10px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff"><i data-lucide="gauge" style="width:22px;height:22px;color:#0b74ff"></i><strong style="color:#17233a">Контроль смены</strong><p style="margin:0;color:#627086;line-height:1.45;font-size:13.5px">Лимиты по операторам, загрузка очередей, спасение просроченных диалогов.</p></article>
+      <article style="display:grid;gap:10px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff"><i data-lucide="bar-chart-3" style="width:22px;height:22px;color:#0b74ff"></i><strong style="color:#17233a">Отчёты и качество</strong><p style="margin:0;color:#627086;line-height:1.45;font-size:13.5px">Отчёты по диалогам, первому ответу, SLA и назначениям с XLSX-выгрузкой.</p></article>
+    </div>
+  </div>
+
+  <!-- testimonials -->
+  <div style="max-width:1180px;margin:0 auto;padding:0 40px 42px;display:grid;gap:18px">
+    <h2 style="margin:0;font-size:34px;line-height:1.08;color:#121d2f">Что говорят команды</h2>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      <figure style="margin:0;display:grid;gap:12px;padding:18px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <blockquote style="margin:0;color:#27364e;line-height:1.55;font-size:14px">«Перевели поддержку из трёх чатов в одну очередь. Первый ответ ускорился почти вдвое, и наконец видно, кто чем занят.»</blockquote>
+        <figcaption style="display:flex;align-items:center;gap:10px"><span style="display:grid;width:34px;height:34px;place-items:center;border-radius:50%;background:#eaf4ff;color:#0b74ff;font-weight:900">М</span><div style="display:grid"><strong style="font-size:13px;color:#17233a">Марина, руководитель поддержки</strong><span style="font-size:12px;color:#8a97ab">интернет-ритейл · пример отзыва</span></div></figcaption>
+      </figure>
+      <figure style="margin:0;display:grid;gap:12px;padding:18px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <blockquote style="margin:0;color:#27364e;line-height:1.55;font-size:14px">«SDK подключили за вечер. Больше не теряем обращения с сайта — всё падает в ту же очередь, что и Telegram.»</blockquote>
+        <figcaption style="display:flex;align-items:center;gap:10px"><span style="display:grid;width:34px;height:34px;place-items:center;border-radius:50%;background:#eaf4ff;color:#0b74ff;font-weight:900">А</span><div style="display:grid"><strong style="font-size:13px;color:#17233a">Алексей, владелец бизнеса</strong><span style="font-size:12px;color:#8a97ab">онлайн-сервис · пример отзыва</span></div></figcaption>
+      </figure>
+      <figure style="margin:0;display:grid;gap:12px;padding:18px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <blockquote style="margin:0;color:#27364e;line-height:1.55;font-size:14px">«Для нас критичен аудит: каждое действие оператора в журнале, PII маскируется. Security-ревью прошли без замечаний.»</blockquote>
+        <figcaption style="display:flex;align-items:center;gap:10px"><span style="display:grid;width:34px;height:34px;place-items:center;border-radius:50%;background:#eaf4ff;color:#0b74ff;font-weight:900">Д</span><div style="display:grid"><strong style="font-size:13px;color:#17233a">Дмитрий, ИБ-директор</strong><span style="font-size:12px;color:#8a97ab">финтех · пример отзыва</span></div></figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- tariffs -->
+  <div style="max-width:1180px;margin:0 auto;padding:0 40px 42px;display:grid;gap:18px">
+    <h2 style="margin:0;font-size:34px;line-height:1.08;color:#121d2f">Тарифы без скрытых контуров</h2>
+    <p style="margin:0;max-width:720px;color:#627086;font-size:16px;line-height:1.55">Trial начинается с рабочей организации: первый администратор, лимиты и тестовое сообщение уже внутри.</p>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:start">
+      <article style="display:grid;gap:12px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center"><strong style="color:#17233a">Start</strong><span style="color:#627086;font-size:12px;font-weight:800">в месяц</span></div>
+        <div style="color:#111c2e;font-size:28px;font-weight:900">39 000 ₽</div>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">25 пользователей · 3 рабочих пространства</p>
+        <ul style="display:grid;gap:8px;margin:0;padding:0;list-style:none;font-size:13.5px;color:#31415b">
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Общая очередь</li>
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Базовые отчёты</li>
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Поддержка по email</li>
+        </ul>
+        <button style="min-height:40px;border:1px solid #d9e2ee;border-radius:7px;background:#fff;color:#31415b;font-weight:800;font-size:13px">Выбрать тариф</button>
+      </article>
+      <article style="display:grid;gap:12px;padding:16px;border:1px solid #9cc8ff;border-radius:8px;background:#fff;box-shadow:inset 0 4px 0 #0b74ff, 0 18px 40px rgb(11 116 255 / 12%)">
+        <div style="display:flex;justify-content:space-between;align-items:center"><strong style="color:#17233a">Business</strong><span style="padding:4px 8px;border-radius:999px;background:#0b74ff;color:#fff;font-size:11px;font-weight:800">популярный</span></div>
+        <div style="color:#111c2e;font-size:28px;font-weight:900">129 000 ₽</div>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">150 пользователей · 10 рабочих пространств</p>
+        <ul style="display:grid;gap:8px;margin:0;padding:0;list-style:none;font-size:13.5px;color:#31415b">
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> SLA-маршрутизация</li>
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> ИИ-подсказки</li>
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Экспорт аудита</li>
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Приоритетная поддержка</li>
+        </ul>
+        <button style="min-height:40px;border:0;border-radius:7px;background:#0b74ff;color:#fff;font-weight:800;font-size:13px">Запустить trial</button>
+      </article>
+      <article style="display:grid;gap:12px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center"><strong style="color:#17233a">Scale</strong><span style="color:#627086;font-size:12px;font-weight:800">в месяц</span></div>
+        <div style="color:#111c2e;font-size:28px;font-weight:900">380 000 ₽</div>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">350 пользователей · 20 рабочих пространств</p>
+        <ul style="display:grid;gap:8px;margin:0;padding:0;list-style:none;font-size:13.5px;color:#31415b">
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Webhook replay</li>
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Гибкая маршрутизация</li>
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Выделенный CSM</li>
+        </ul>
+        <button style="min-height:40px;border:1px solid #d9e2ee;border-radius:7px;background:#fff;color:#31415b;font-weight:800;font-size:13px">Выбрать тариф</button>
+      </article>
+      <article style="display:grid;gap:12px;padding:16px;border:1px solid #d9e2ee;border-radius:8px;background:#fff;box-shadow:inset 0 4px 0 #0eaa84">
+        <div style="display:flex;justify-content:space-between;align-items:center"><strong style="color:#17233a">Enterprise</strong><span style="color:#627086;font-size:12px;font-weight:800">в месяц</span></div>
+        <div style="color:#111c2e;font-size:28px;font-weight:900">Индивидуально</div>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.45">700+ пользователей · до 40 рабочих пространств</p>
+        <ul style="display:grid;gap:8px;margin:0;padding:0;list-style:none;font-size:13.5px;color:#31415b">
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> SAML и SSO</li>
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Региональное хранение</li>
+          <li style="display:flex;gap:7px;align-items:center"><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#0eaa84;flex:none"></i> Incident bridge 24/7</li>
+        </ul>
+        <button style="min-height:40px;border:1px solid #d9e2ee;border-radius:7px;background:#fff;color:#31415b;font-weight:800;font-size:13px">Контакт по запросу</button>
+      </article>
+    </div>
+  </div>
+
+  <!-- FAQ -->
+  <div style="max-width:1180px;margin:0 auto;padding:0 40px 42px;display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:26px;align-items:start">
+    <div style="display:grid;gap:10px">
+      <h2 style="margin:0;font-size:34px;line-height:1.08;color:#121d2f">Частые вопросы</h2>
+      <p style="margin:0;color:#627086;font-size:15px;line-height:1.55">Не нашли ответа — напишите нам, отвечаем в рабочие часы в тот же день.</p>
+    </div>
+    <div style="display:grid;gap:8px">
+      <details style="border:1px solid #d9e2ee;border-radius:8px;background:#fff;padding:14px 16px" open=""><summary style="cursor:pointer;font-weight:800;color:#17233a;font-size:14.5px">Сколько занимает запуск?</summary><p style="margin:10px 0 0;color:#627086;line-height:1.55;font-size:14px">Обычно один день: регистрация создаёт рабочую организацию, SDK ставится одной строкой, Telegram подключается по токену бота.</p></details>
+      <details style="border:1px solid #d9e2ee;border-radius:8px;background:#fff;padding:14px 16px"><summary style="cursor:pointer;font-weight:800;color:#17233a;font-size:14.5px">Какие каналы поддерживаются?</summary><p style="margin:10px 0 0;color:#627086;line-height:1.55;font-size:14px">Web SDK, Telegram, ВКонтакте, MAX и REST API уже работают в продакшене. WhatsApp, Email и Viber — на подключении.</p></details>
+      <details style="border:1px solid #d9e2ee;border-radius:8px;background:#fff;padding:14px 16px"><summary style="cursor:pointer;font-weight:800;color:#17233a;font-size:14.5px">Как устроен trial?</summary><p style="margin:10px 0 0;color:#627086;line-height:1.55;font-size:14px">Trial стартует с полноценной организацией: первый администратор, лимиты операторов и тестовое сообщение. Карта не нужна.</p></details>
+      <details style="border:1px solid #d9e2ee;border-radius:8px;background:#fff;padding:14px 16px"><summary style="cursor:pointer;font-weight:800;color:#17233a;font-size:14.5px">Как защищены данные?</summary><p style="margin:10px 0 0;color:#627086;line-height:1.55;font-size:14px">Email OTP, роли и блокировки, изоляция организаций, маскирование PII и полный журнал аудита с экспортом.</p></details>
+      <details style="border:1px solid #d9e2ee;border-radius:8px;background:#fff;padding:14px 16px"><summary style="cursor:pointer;font-weight:800;color:#17233a;font-size:14.5px">Можно ли выгружать отчёты?</summary><p style="margin:10px 0 0;color:#627086;line-height:1.55;font-size:14px">Да — отчёты по диалогам, первому ответу, SLA и назначениям выгружаются в XLSX; аудит доступен через API.</p></details>
+    </div>
+  </div>
+
+  <!-- CTA band -->
+  <div style="max-width:1180px;margin:0 auto;padding:0 40px 48px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;padding:32px 36px;border-radius:10px;background:#10243c;color:#fff">
+      <div style="display:grid;gap:6px"><strong style="font-size:24px">Запустите поддержку уже сегодня</strong><span style="color:#9fb2cc;font-size:14.5px">Рабочая организация, SDK и Telegram — за один день. Без карты.</span></div>
+      <button style="display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:0 22px;border:0;border-radius:8px;background:#0b74ff;color:#fff;font-weight:800;font-size:15px">Запустить trial <i data-lucide="arrow-right" style="width:17px;height:17px"></i></button>
+    </div>
+  </div>
+
+  <!-- footer -->
+  <footer style="border-top:1px solid #d9e2ee;background:#fbfcfe">
+    <div style="max-width:1180px;margin:0 auto;padding:34px 40px;display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:24px">
+      <div style="display:grid;gap:10px;align-content:start">
+        <div style="display:flex;align-items:center;gap:10px"><span style="display:grid;width:32px;height:32px;place-items:center;border-radius:8px;background:#10243c;color:#fff;font-weight:900;font-size:13px">SC</span><strong>Support Communication</strong></div>
+        <p style="margin:0;color:#627086;font-size:13px;line-height:1.5;max-width:280px">Операционный контур поддержки: каналы, очередь, качество и аудит в одном продукте.</p>
+      </div>
+      <div style="display:grid;gap:8px;align-content:start;font-size:13.5px"><strong style="font-size:12px;color:#8a97ab;letter-spacing:.06em;text-transform:uppercase">Продукт</strong><span style="color:#31415b">Возможности</span><span style="color:#31415b">Тарифы</span><span style="color:#31415b">Интеграции и SDK</span><span style="color:#31415b">Статус API</span></div>
+      <div style="display:grid;gap:8px;align-content:start;font-size:13.5px"><strong style="font-size:12px;color:#8a97ab;letter-spacing:.06em;text-transform:uppercase">Ресурсы</strong><span style="color:#31415b">Документация</span><span style="color:#31415b">Руководство по ИИ</span><span style="color:#31415b">Безопасность</span></div>
+      <div style="display:grid;gap:8px;align-content:start;font-size:13.5px"><strong style="font-size:12px;color:#8a97ab;letter-spacing:.06em;text-transform:uppercase">Контакты</strong><span style="color:#31415b"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="7102101d140231020401011e0305121e1c1c5f0304">[email&#160;protected]</a></span><span style="color:#31415b">Telegram: @supportcomm</span><span style="color:#31415b">Демо по запросу</span></div>
+    </div>
+    <div style="border-top:1px solid #e6ecf4"><div style="max-width:1180px;margin:0 auto;padding:14px 40px;display:flex;justify-content:space-between;color:#8a97ab;font-size:12px"><span>© 2026 Support Communication</span><span>Политика обработки данных · Условия сервиса</span></div></div>
+  </footer>
+
+</div>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+  function drawIcons(){ if(window.lucide){ try{ window.lucide.createIcons(); }catch(e){} } }
+  if(document.readyState!=='loading') drawIcons(); else document.addEventListener('DOMContentLoaded',drawIcons);
+  window.addEventListener('load',drawIcons);
+</script>
+</body>
+</html>

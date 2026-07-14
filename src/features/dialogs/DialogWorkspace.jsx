@@ -23,6 +23,7 @@ export function DialogWorkspace({
   onAttachmentComplete,
   onAttachmentRemove,
   onAttachmentRetry,
+  onClientPhoneSave,
   onCloseDialog,
   onConversationSelect,
   onDialogAction,
@@ -37,6 +38,7 @@ export function DialogWorkspace({
   onSaveTemplate,
   onSend,
   onStatusChange,
+  onTagsApply,
   onTopic,
   query,
   queueFilters,
@@ -126,6 +128,8 @@ export function DialogWorkspace({
         allConversations={allConversations}
         onEnsureConversationLoaded={onEnsureConversationLoaded}
         onNavigateToAppeal={onNavigateToAppeal}
+        onClientPhoneSave={onClientPhoneSave}
+        onTagsApply={onTagsApply}
       /> : <aside className="customer-panel customer-panel-empty" aria-label="Карточка клиента не выбрана" />}
     </div>
   );

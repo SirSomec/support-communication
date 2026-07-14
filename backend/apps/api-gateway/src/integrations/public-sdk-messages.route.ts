@@ -107,9 +107,12 @@ export async function resolveOrCreatePublicSdkConversation(
       language: "Unknown",
       messages: [],
       name: `Visitor ${externalId}`,
-      phone: externalId,
+      // Виджет не знает телефона посетителя: поле остается пустым для ручного
+      // заполнения оператором, а externalId живет в providerConversationId и теге external:*.
+      phone: "",
       preview: "",
       previous: [],
+      providerConversationId: externalId,
       ...(input.queueId?.trim() ? { queueId: input.queueId.trim() } : {}),
       sla: "Active",
       slaTone: "ok",
@@ -581,7 +584,11 @@ function resolveConversationTenantId(conversation: ConversationRecord): string {
 
 function publicSdkClientId(conversation: ConversationRecord): string {
   const externalTag = conversation.tags.find((tag) => tag.startsWith("external:"));
-  return externalTag?.slice("external:".length).trim() || conversation.phone.trim() || conversation.id;
+  return externalTag?.slice("external:".length).trim()
+    || conversation.providerConversationId?.trim()
+    // phone — legacy-фолбэк: раньше externalId посетителя хранился в нем.
+    || conversation.phone.trim()
+    || conversation.id;
 }
 
 async function tryAutoAssignment(

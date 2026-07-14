@@ -69,7 +69,9 @@ function App() {
   const {
     appendMessage,
     applyConversationAssignment,
+    applyConversationClientPhone,
     applyConversationStatus,
+    applyConversationTags,
     assignees,
     closedIds,
     conversationItems,
@@ -233,15 +235,19 @@ function App() {
     setToast
   });
   const {
+    handleClientPhoneSave,
     handleClose,
     handleDialogAction,
     handleSend,
     handleStatusChange,
+    handleTagsApply,
     handleTopicChange
   } = useDialogActions({
     access,
     appendMessage,
+    applyConversationClientPhone,
     applyConversationStatus,
+    applyConversationTags,
     attachments,
     clearAttachments,
     closedIds,
@@ -579,6 +585,8 @@ function App() {
               onSaveTemplate={handleOpenTemplateSave}
               onSend={handleSend}
               onStatusChange={handleStatusChange}
+              onClientPhoneSave={handleClientPhoneSave}
+              onTagsApply={handleTagsApply}
               onTopic={handleTopicChange}
               query={query}
               queueFilters={queueFilters}

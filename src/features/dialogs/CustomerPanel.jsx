@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Copy, FileText, Lock, Plus, ShieldCheck, Smartphone } from "lucide-react";
+import { AlertTriangle, Copy, FileText, Lock, Pencil, Plus, ShieldCheck, Smartphone } from "lucide-react";
 import { maskPhone, resolutionOutcomeLabels, isRepeatAppeal } from "../../app/dialogModel.js";
 import { mapApiConversationCollection } from "../../app/conversationApiMapper.js";
 import { dialogService } from "../../services/dialogService.js";
@@ -11,6 +11,8 @@ import {
 } from "./clientDialogHistoryModel.js";
 import { ClientArchiveDetailModal, ClientDialogsListModal } from "./ClientHistoryModals.jsx";
 import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
+import { TagManagerModal } from "./TagManagerModal.jsx";
+import { getVisibleTags } from "./tagSuggestionModel.js";
 
 export function CustomerPanel({
   conversation,
@@ -24,7 +26,9 @@ export function CustomerPanel({
   isClosed,
   allConversations = [],
   onEnsureConversationLoaded,
-  onNavigateToAppeal
+  onNavigateToAppeal,
+  onClientPhoneSave,
+  onTagsApply
 }) {
   const [resolutionOutcome, setResolutionOutcome] = useState("resolved");
   const [previewArticle, setPreviewArticle] = useState(null);
@@ -39,6 +43,61 @@ export function CustomerPanel({
   const [historyNavigating, setHistoryNavigating] = useState(false);
   const [historyNavigateError, setHistoryNavigateError] = useState("");
   const historyFetchedForRef = useRef("");
+  const [isTagManagerOpen, setTagManagerOpen] = useState(false);
+  const [removingTag, setRemovingTag] = useState("");
+  const visibleTags = useMemo(() => getVisibleTags(conversation), [conversation]);
+  const canManageTags = Boolean(onTagsApply) && Boolean(access.canManageDialogs);
+  const [phoneEditing, setPhoneEditing] = useState(false);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [phoneError, setPhoneError] = useState("");
+  const [phoneSaving, setPhoneSaving] = useState(false);
+  const phoneValue = String(conversation.phone ?? "").trim();
+  // Пустой телефон (источник его не передал) может заполнить любой оператор
+  // с правом ведения диалогов; исправлять уже сохраненный номер — только
+  // роль, которой контакты видны без маски.
+  const canEditPhone = Boolean(onClientPhoneSave)
+    && Boolean(access.canManageDialogs)
+    && (!phoneValue || Boolean(access.canViewSensitive));
+
+  function startPhoneEdit() {
+    setPhoneDraft(phoneValue);
+    setPhoneError("");
+    setPhoneEditing(true);
+  }
+
+  function cancelPhoneEdit() {
+    setPhoneEditing(false);
+    setPhoneError("");
+  }
+
+  async function handlePhoneSubmit(event) {
+    event.preventDefault();
+    if (phoneSaving) {
+      return;
+    }
+    setPhoneSaving(true);
+    const result = await onClientPhoneSave(phoneDraft);
+    setPhoneSaving(false);
+    if (result?.ok) {
+      setPhoneEditing(false);
+      setPhoneError("");
+      return;
+    }
+    if (result?.error) {
+      setPhoneError(result.error);
+    }
+  }
+
+  // Крестик на чипе убирает тег сразу, без модалки; на время запроса
+  // чип блокируется, чтобы повторный клик не отправил второй PATCH.
+  async function handleQuickRemoveTag(tag) {
+    if (!canManageTags || removingTag) {
+      return;
+    }
+    setRemovingTag(tag);
+    await onTagsApply(visibleTags.filter((item) => item !== tag));
+    setRemovingTag("");
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -56,6 +115,12 @@ export function CustomerPanel({
     setHistoryNavigating(false);
     setHistoryNavigateError("");
     historyFetchedForRef.current = "";
+    setTagManagerOpen(false);
+    setRemovingTag("");
+    setPhoneEditing(false);
+    setPhoneDraft("");
+    setPhoneError("");
+    setPhoneSaving(false);
   }, [conversation.id]);
 
   // Зависимость — булев флаг, а не объект historyView: переключение
@@ -156,7 +221,44 @@ export function CustomerPanel({
             <p>Клиент снова обратился по той же тематике в течение 24 часов после предыдущего закрытия.</p>
           </div>
         ) : null}
-        <InfoRow label="Телефон" value={access.canViewSensitive ? conversation.phone : maskPhone(conversation.phone)} />
+        {phoneEditing ? (
+          <form className="info-row info-row-phone-edit" onSubmit={handlePhoneSubmit}>
+            <span id={`client-phone-label-${conversation.id}`}>Телефон</span>
+            <div className="phone-edit-controls">
+              <input
+                aria-labelledby={`client-phone-label-${conversation.id}`}
+                autoFocus
+                disabled={phoneSaving}
+                inputMode="tel"
+                onChange={(event) => setPhoneDraft(event.target.value)}
+                placeholder="+7 999 123-45-67"
+                type="tel"
+                value={phoneDraft}
+              />
+              <button className="phone-edit-save" disabled={phoneSaving} type="submit">Сохранить</button>
+              <button disabled={phoneSaving} onClick={cancelPhoneEdit} type="button">Отмена</button>
+            </div>
+            {phoneError ? <p className="phone-edit-error" role="alert">{phoneError}</p> : null}
+          </form>
+        ) : (
+          <div className="info-row">
+            <span>Телефон</span>
+            <strong className={phoneValue ? "" : "info-row-empty"}>
+              {phoneValue ? (access.canViewSensitive ? phoneValue : maskPhone(phoneValue)) : "Не указан"}
+            </strong>
+            {canEditPhone ? (
+              <button
+                aria-label={phoneValue ? "Изменить телефон клиента" : "Указать телефон клиента"}
+                className="phone-edit-toggle"
+                onClick={startPhoneEdit}
+                title={phoneValue ? "Изменить телефон клиента" : "Источник не передал телефон — укажите его вручную"}
+                type="button"
+              >
+                <Pencil size={14} />
+              </button>
+            ) : null}
+          </div>
+        )}
         <InfoRow label="Устройство" value={conversation.device} icon={<Smartphone size={15} />} />
         <InfoRow label="Точка входа" value={conversation.entry} />
         <InfoRow label="Клиент с" value={conversation.clientSince} />
@@ -206,11 +308,37 @@ export function CustomerPanel({
         </div>
       </PanelSection>
 
-      <PanelSection title="Теги" action={<button><Plus size={16} /> Добавить тег</button>}>
+      <PanelSection
+        title="Теги"
+        action={
+          <button
+            disabled={!canManageTags}
+            onClick={() => setTagManagerOpen(true)}
+            title={canManageTags ? "Открыть подбор тегов" : access.reason}
+            type="button"
+          >
+            <Plus size={16} /> Добавить тег
+          </button>
+        }
+      >
         <div className="tag-list">
-          {conversation.tags.map((tag) => (
-            <span key={tag}>{tag}<button aria-label={`Удалить тег ${tag}`}>×</button></span>
+          {visibleTags.map((tag) => (
+            <span className={removingTag === tag ? "tag-removing" : ""} key={tag}>
+              {tag}
+              {canManageTags ? (
+                <button
+                  aria-label={`Удалить тег ${tag}`}
+                  disabled={Boolean(removingTag)}
+                  onClick={() => handleQuickRemoveTag(tag)}
+                  title={`Удалить тег ${tag}`}
+                  type="button"
+                >
+                  ×
+                </button>
+              ) : null}
+            </span>
           ))}
+          {!visibleTags.length ? <p className="tag-list-empty">Тегов пока нет.</p> : null}
         </div>
       </PanelSection>
 
@@ -293,6 +421,15 @@ export function CustomerPanel({
           clientName={conversation.name}
           entry={archiveEntry}
           onClose={closeArchiveDetail}
+        />
+      ) : null}
+      {isTagManagerOpen ? (
+        <TagManagerModal
+          allConversations={allConversations}
+          conversation={conversation}
+          onApply={onTagsApply}
+          onClose={() => setTagManagerOpen(false)}
+          topic={topic}
         />
       ) : null}
       {previewArticle ? (

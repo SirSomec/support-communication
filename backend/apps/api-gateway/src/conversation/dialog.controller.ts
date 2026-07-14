@@ -112,6 +112,32 @@ export class DialogController {
     return this.conversationService.assignConversation({ ...payload, conversationId }, dialogContextFromRequest(request));
   }
 
+  @Patch(":conversationId/tags")
+  @RequireTenantOperatorPermission("dialogs.manage")
+  @RequireServiceAdminAction("dialogs.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Dialog tags replacement envelope (service tags are preserved)" })
+  updateConversationTags(
+    @Param("conversationId") conversationId: string,
+    @Body() payload: { tags?: string[] },
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
+  ) {
+    return this.conversationService.updateConversationTags({ ...payload, conversationId }, dialogContextFromRequest(request));
+  }
+
+  @Patch(":conversationId/client-phone")
+  @RequireTenantOperatorPermission("dialogs.manage")
+  @RequireServiceAdminAction("dialogs.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Manual client phone update for dialogs whose source channel did not provide one" })
+  updateConversationClientPhone(
+    @Param("conversationId") conversationId: string,
+    @Body() payload: { phone?: string },
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest
+  ) {
+    return this.conversationService.updateConversationClientPhone({ ...payload, conversationId }, dialogContextFromRequest(request));
+  }
+
   @Patch(":conversationId/status")
   @RequireTenantOperatorPermission("dialogs.manage")
   @RequireServiceAdminAction("dialogs.manage")

@@ -1,4 +1,4 @@
-import { getStatusMeta, isRepeatAppeal } from "./dialogModel.js";
+import { getStatusMeta, isRepeatAppeal, sanitizeClientPhone } from "./dialogModel.js";
 
 const NOW_LABEL = "сейчас";
 const DEFAULT_LANGUAGE = "Русский";
@@ -23,7 +23,7 @@ export function mapApiConversation(input) {
     initials: nonEmptyString(input?.initials, buildInitials(input?.name)),
     avatar: nonEmptyString(input?.avatar),
     channel,
-    phone: nonEmptyString(input?.phone, ""),
+    phone: sanitizeClientPhone(input?.phone),
     time: mapTime(input?.time),
     preview: nonEmptyString(input?.preview, previewFallback),
     status,
@@ -165,6 +165,7 @@ function mapConversationTimeline(messages, lifecycleEvents) {
 export function lifecycleEventDetail(eventType, data) {
   const labels = {
     "assignment.changed": "Изменен ответственный оператор",
+    "client.phone.changed": "Изменен телефон клиента",
     "conversation.created": "Создан диалог",
     "internal_comment.created": "Добавлен внутренний комментарий",
     "message.received": "Получено сообщение клиента",
@@ -182,6 +183,7 @@ export function lifecycleEventDetail(eventType, data) {
     "sla.paused": "Срок ответа приостановлен",
     "sla.resumed": "Отсчет срока ответа возобновлен",
     "status.changed": "Изменен статус диалога",
+    "tags.changed": "Изменены теги диалога",
     "topic.changed": "Изменена тема диалога"
   };
   const base = labels[eventType] ?? nonEmptyString(eventType, "Событие диалога");

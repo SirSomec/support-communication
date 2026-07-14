@@ -234,9 +234,12 @@ export async function resolveOrCreateTelegramConversation(input: {
       language: "Unknown",
       messages: [],
       name: displayName,
-      phone: chatId,
+      // Телефон клиента Telegram не сообщает: поле остается пустым, пока его
+      // не заполнит оператор. Адрес доставки живет в providerConversationId и теге chat:*.
+      phone: "",
       preview: "",
       previous: [],
+      providerConversationId: chatId,
       ...(input.queueId?.trim() ? { queueId: input.queueId.trim() } : {}),
       sla: "Active",
       slaTone: "ok",

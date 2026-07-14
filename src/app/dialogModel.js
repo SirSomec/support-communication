@@ -240,6 +240,18 @@ export function maskPhone(phone) {
   return phone.replace(/(\+7)\s(\d{3})\s(\d{3})-(\d{2})-(\d{2})/, "$1 *** ***-**-$5");
 }
 
+// Совпадает с серверной валидацией PATCH client-phone: телефон в свободном
+// формате, но без букв и служебных идентификаторов (visitor_*, chatId и т.п.).
+export const CLIENT_PHONE_PATTERN = /^\+?[\d\s().-]{5,20}$/;
+
+// До разделения телефона и адреса доставки каналы писали в phone технические
+// идентификаторы; такие значения не показываются — поле остается пустым,
+// чтобы оператор мог заполнить его вручную.
+export function sanitizeClientPhone(phone) {
+  const value = String(phone ?? "").trim();
+  return CLIENT_PHONE_PATTERN.test(value) ? value : "";
+}
+
 export const REPEAT_APPEAL_TAG = "repeat-appeal";
 
 export function isRepeatAppeal(conversation) {

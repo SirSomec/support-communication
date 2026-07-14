@@ -29,6 +29,7 @@ export type ConversationLifecycleEventType =
   | "message.received"
   | "message.sent"
   | "status.changed"
+  | "tags.changed"
   | "topic.changed";
 
 export interface ConversationLifecycleEvent {

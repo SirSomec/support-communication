@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAuditEvent, getStatusMeta } from "./dialogModel.js";
+import { isServiceTag } from "../features/dialogs/tagSuggestionModel.js";
 import { clearTenantSession } from "./sessionStore.js";
 import { mapApiConversation, mapApiConversationCollection } from "./conversationApiMapper.js";
 import { useRealtimeInbox } from "./useRealtimeInbox.js";
@@ -264,6 +265,79 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
     return { ok: true, response };
   }, []);
 
+  // Теги обновляются на уровне обращения; сервер сохраняет служебные метки
+  // (repeat-appeal, appeal-anchor:*) сам, поэтому наружу уходят только видимые.
+  const applyConversationTags = useCallback(async (conversationId, tags) => {
+    let previousConversation = null;
+    setConversationItems((current) =>
+      current.map((conversation) => {
+        if (conversation.id !== conversationId) {
+          return conversation;
+        }
+
+        previousConversation = conversation;
+        const serviceTags = (conversation.tags ?? []).filter((tag) => isServiceTag(tag));
+        return { ...conversation, tags: [...tags, ...serviceTags] };
+      })
+    );
+
+    const response = await dialogService.updateConversationTags({ conversationId, tags });
+
+    if (response.status !== "ok") {
+      if (previousConversation) {
+        setConversationItems((current) =>
+          current.map((conversation) => (conversation.id === conversationId ? previousConversation : conversation))
+        );
+      }
+      setError(response.error?.message ?? "Не удалось обновить теги.");
+      return { ok: false, response };
+    }
+
+    const serverTags = Array.isArray(response.data?.tags) ? response.data.tags.map((tag) => String(tag)) : null;
+    if (serverTags) {
+      setConversationItems((current) =>
+        current.map((conversation) => (conversation.id === conversationId ? { ...conversation, tags: serverTags } : conversation))
+      );
+    }
+
+    return { ok: true, response };
+  }, []);
+
+  // Телефон, введенный оператором, применяется оптимистично и откатывается,
+  // если сервер отклонил значение (формат проверяется и на бэкенде).
+  const applyConversationClientPhone = useCallback(async (conversationId, phone) => {
+    let previousConversation = null;
+    setConversationItems((current) =>
+      current.map((conversation) => {
+        if (conversation.id !== conversationId) {
+          return conversation;
+        }
+
+        previousConversation = conversation;
+        return { ...conversation, phone };
+      })
+    );
+
+    const response = await dialogService.updateConversationClientPhone({ conversationId, phone });
+
+    if (response.status !== "ok") {
+      if (previousConversation) {
+        setConversationItems((current) =>
+          current.map((conversation) => (conversation.id === conversationId ? previousConversation : conversation))
+        );
+      }
+      setError(response.error?.message ?? "Не удалось обновить телефон клиента.");
+      return { ok: false, response };
+    }
+
+    const serverPhone = typeof response.data?.phone === "string" ? response.data.phone : phone;
+    setConversationItems((current) =>
+      current.map((conversation) => (conversation.id === conversationId ? { ...conversation, phone: serverPhone } : conversation))
+    );
+
+    return { ok: true, response };
+  }, []);
+
   const applyConversationAssignment = useCallback(async (conversationId, payload) => {
     const response = await dialogService.assignConversation({ conversationId, ...payload });
     if (response.status !== "ok") {
@@ -389,7 +463,9 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
   return useMemo(() => ({
     appendMessage,
     applyConversationAssignment,
+    applyConversationClientPhone,
     applyConversationStatus,
+    applyConversationTags,
     assignees,
     closedIds,
     conversationItems,
@@ -405,7 +481,9 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
   }), [
     appendMessage,
     applyConversationAssignment,
+    applyConversationClientPhone,
     applyConversationStatus,
+    applyConversationTags,
     assignees,
     closedIds,
     conversationItems,

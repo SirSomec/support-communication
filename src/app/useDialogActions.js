@@ -1,10 +1,14 @@
-import { createAuditEvent, formatRescueNextAction, formatRescueTimer, statusLabels } from "./dialogModel.js";
+import { CLIENT_PHONE_PATTERN, createAuditEvent, formatRescueNextAction, formatRescueTimer, statusLabels } from "./dialogModel.js";
+import { threadAppeals } from "../features/dialogs/clientThreadModel.js";
+import { getVisibleTags, normalizeTagInput } from "../features/dialogs/tagSuggestionModel.js";
 import { routingService } from "../services/routingService.js";
 
 export function useDialogActions({
   access,
   appendMessage,
+  applyConversationClientPhone,
   applyConversationStatus,
+  applyConversationTags,
   attachments,
   clearAttachments,
   closedIds,
@@ -41,6 +45,98 @@ export function useDialogActions({
       });
       setToast("Тематика сохранена в audit trail.");
     }
+  }
+
+  // Панель показывает объединенные теги треда, поэтому новый набор
+  // применяется к актуальному обращению, а снятые теги дополнительно
+  // убираются из остальных обращений треда — иначе они вернутся при слиянии.
+  async function handleTagsApply(nextTags) {
+    if (!access.canManageDialogs) {
+      setToast(access.reason);
+      return { ok: false };
+    }
+    if (!applyConversationTags) {
+      return { ok: false };
+    }
+
+    const normalizedNext = [];
+    const nextKeys = new Set();
+    for (const tag of Array.isArray(nextTags) ? nextTags : []) {
+      const normalized = normalizeTagInput(tag);
+      if (normalized && !nextKeys.has(normalized)) {
+        nextKeys.add(normalized);
+        normalizedNext.push(normalized);
+      }
+    }
+
+    const primaryResult = await applyConversationTags(selected.id, normalizedNext);
+    if (!primaryResult?.ok) {
+      setToast(primaryResult?.response?.error?.message ?? "Не удалось обновить теги. Попробуйте еще раз.");
+      return { ok: false };
+    }
+
+    let secondaryFailed = false;
+    for (const appeal of threadAppeals(selected)) {
+      if (appeal.id === selected.id) {
+        continue;
+      }
+      const visible = getVisibleTags(appeal);
+      const kept = visible.filter((tag) => nextKeys.has(normalizeTagInput(tag)));
+      if (kept.length === visible.length) {
+        continue;
+      }
+      const result = await applyConversationTags(appeal.id, kept);
+      if (!result?.ok) {
+        secondaryFailed = true;
+      }
+    }
+
+    setToast(secondaryFailed
+      ? "Теги актуального обращения обновлены, но часть прошлых обращений обновить не удалось."
+      : "Теги диалога обновлены.");
+    return { ok: true };
+  }
+
+  // Тред группируется по телефону, поэтому введенный оператором номер
+  // применяется ко всем обращениям треда — иначе обращения без номера
+  // отвалятся в отдельный тред при следующей группировке.
+  async function handleClientPhoneSave(nextPhone) {
+    if (!access.canManageDialogs) {
+      setToast(access.reason);
+      return { ok: false };
+    }
+    if (!applyConversationClientPhone) {
+      return { ok: false };
+    }
+
+    const phone = String(nextPhone ?? "").trim().replace(/\s+/g, " ");
+    if (phone && !CLIENT_PHONE_PATTERN.test(phone)) {
+      return { error: "Укажите телефон в формате +7 999 123-45-67 (от 5 до 20 цифр).", ok: false };
+    }
+
+    const primaryResult = await applyConversationClientPhone(selected.id, phone);
+    if (!primaryResult?.ok) {
+      return {
+        error: primaryResult?.response?.error?.message ?? "Не удалось сохранить телефон. Попробуйте еще раз.",
+        ok: false
+      };
+    }
+
+    let secondaryFailed = false;
+    for (const appeal of threadAppeals(selected)) {
+      if (appeal.id === selected.id || String(appeal.phone ?? "").trim() === phone) {
+        continue;
+      }
+      const result = await applyConversationClientPhone(appeal.id, phone);
+      if (!result?.ok) {
+        secondaryFailed = true;
+      }
+    }
+
+    setToast(secondaryFailed
+      ? "Телефон актуального обращения сохранен, но часть прошлых обращений обновить не удалось."
+      : "Телефон клиента сохранен.");
+    return { ok: true };
   }
 
   function handleStatusChange(nextStatus, options = {}) {
@@ -221,11 +317,13 @@ export function useDialogActions({
 
 
   return {
+    handleClientPhoneSave,
     handleClose,
     handleDialogAction,
     handleRescueStart,
     handleSend,
     handleStatusChange,
+    handleTagsApply,
     handleTopicChange
   };
 }

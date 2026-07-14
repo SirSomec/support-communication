@@ -36,6 +36,24 @@ export const dialogService = {
     });
   },
 
+  async updateConversationTags({ conversationId, ...payload }) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/tags`, {
+      body: payload,
+      method: "PATCH",
+      operation: "updateConversationTags",
+      service: SERVICE
+    });
+  },
+
+  async updateConversationClientPhone({ conversationId, ...payload }) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/client-phone`, {
+      body: payload,
+      method: "PATCH",
+      operation: "updateConversationClientPhone",
+      service: SERVICE
+    });
+  },
+
   async uploadAttachment(payload) {
     return apiRequest("/dialogs/attachments", {
       body: payload,
@@ -114,6 +132,8 @@ export const dialogService = {
         "assignConversation",
         "appendMessage",
         "transitionConversationStatus",
+        "updateConversationTags",
+        "updateConversationClientPhone",
         "fetchAiReplySuggestions",
         "uploadAttachment",
         "finalizeAttachmentUpload",

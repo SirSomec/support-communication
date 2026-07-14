@@ -3,7 +3,7 @@ import { createEnvelope, type BackendEnvelope } from "@support-communication/env
 import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import type { ConversationMessage, ConversationRecord } from "./conversation.types.js";
-import { recordClosedAppealHistory } from "./appeal-lifecycle.js";
+import { APPEAL_ANCHOR_TAG_PREFIX, REPEAT_APPEAL_TAG, recordClosedAppealHistory } from "./appeal-lifecycle.js";
 import {
   ConversationAssignmentConflictError,
   ConversationRepository,
@@ -72,6 +72,35 @@ interface AssignmentPayload {
   conversationId: string;
   operatorId?: string;
   reason?: string;
+}
+
+interface TagsPayload {
+  conversationId: string;
+  tags?: unknown;
+}
+
+interface ClientPhonePayload {
+  conversationId: string;
+  phone?: unknown;
+}
+
+// Совпадает с looksLikePhone открытого канала: телефон в свободном формате,
+// но без букв и служебных идентификаторов (visitor_*, openchat_* и т.п.).
+const CLIENT_PHONE_PATTERN = /^\+?[\d\s().-]{5,20}$/;
+
+function normalizeClientPhoneInput(value: unknown): string {
+  return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
+const CONVERSATION_TAG_MAX_LENGTH = 32;
+const CONVERSATION_TAG_LIMIT = 20;
+
+function normalizeConversationTag(value: unknown): string {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function isServiceConversationTag(tag: string): boolean {
+  return tag === REPEAT_APPEAL_TAG || tag.startsWith(APPEAL_ANCHOR_TAG_PREFIX);
 }
 
 interface AppendMessagePayload {
@@ -625,6 +654,187 @@ export class ConversationService {
     });
   }
 
+  // Оператор управляет только видимыми тегами. Служебные метки
+  // (repeat-appeal, appeal-anchor:*) сохраняются как есть: на них держится
+  // группировка обращений в клиентские треды и признак повторного обращения.
+  async updateConversationTags(payload: TagsPayload, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const conversation = await this.conversationRepository.findConversation(payload.conversationId);
+    if (!conversation || !matchesTenantScope(conversation, scope.tenantId)) {
+      return notFoundEnvelope(DIALOG_SERVICE, "updateConversationTags", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
+        conversationId: payload.conversationId
+      });
+    }
+
+    const tenantId = resolveConversationTenantId(conversation);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "updateConversationTags", { conversationId: conversation.id });
+    }
+
+    if (!Array.isArray(payload.tags)) {
+      return invalidEnvelope(DIALOG_SERVICE, "updateConversationTags", "tags_array_required", "tags must be an array of strings.", {
+        conversationId: conversation.id
+      });
+    }
+
+    const normalized: string[] = [];
+    const seen = new Set<string>();
+    for (const item of payload.tags) {
+      const tag = normalizeConversationTag(item);
+      if (!tag || isServiceConversationTag(tag) || seen.has(tag)) {
+        continue;
+      }
+      if (tag.length > CONVERSATION_TAG_MAX_LENGTH) {
+        return invalidEnvelope(DIALOG_SERVICE, "updateConversationTags", "tag_too_long", `Each tag must contain at most ${CONVERSATION_TAG_MAX_LENGTH} characters.`, {
+          conversationId: conversation.id,
+          maxLength: CONVERSATION_TAG_MAX_LENGTH,
+          tag
+        });
+      }
+      seen.add(tag);
+      normalized.push(tag);
+    }
+
+    if (normalized.length > CONVERSATION_TAG_LIMIT) {
+      return invalidEnvelope(DIALOG_SERVICE, "updateConversationTags", "tags_limit_exceeded", `A dialog can hold at most ${CONVERSATION_TAG_LIMIT} tags.`, {
+        conversationId: conversation.id,
+        limit: CONVERSATION_TAG_LIMIT
+      });
+    }
+
+    const serviceTags = conversation.tags.filter((tag) => isServiceConversationTag(normalizeConversationTag(tag)));
+    const previousVisible = conversation.tags.filter((tag) => !isServiceConversationTag(normalizeConversationTag(tag)));
+    const previousVisibleKeys = new Set(previousVisible.map((tag) => normalizeConversationTag(tag)));
+    const added = normalized.filter((tag) => !previousVisibleKeys.has(tag));
+    const removed = previousVisible.filter((tag) => !seen.has(normalizeConversationTag(tag)));
+
+    if (!added.length && !removed.length) {
+      return createEnvelope({
+        service: DIALOG_SERVICE,
+        operation: "updateConversationTags",
+        traceId: conversationTraceId(DIALOG_SERVICE, "updateConversationTags"),
+        meta: apiMeta({ conversationId: conversation.id }),
+        data: {
+          added: [],
+          changed: false,
+          conversation: clone(conversation),
+          removed: [],
+          tags: clone(conversation.tags)
+        }
+      });
+    }
+
+    conversation.tags = [...normalized, ...serviceTags];
+    conversation.updatedAt = new Date().toISOString();
+    const event = this.createRealtimeEvent("conversation.updated", "conversation", conversation.id, {
+      action: "tags",
+      added,
+      removed
+    }, tenantId);
+    const lifecycleEvent = this.createLifecycleEvent("tags.changed", conversation, event, scope, {
+      added,
+      removed,
+      tags: clone(normalized)
+    });
+    const persisted = await this.conversationRepository.saveConversationMutation({ conversation, lifecycleEvent, realtimeEvent: event });
+    await this.publishRealtimeEvent(persisted.realtimeEvent);
+
+    return createEnvelope({
+      service: DIALOG_SERVICE,
+      operation: "updateConversationTags",
+      traceId: conversationTraceId(DIALOG_SERVICE, "updateConversationTags"),
+      meta: apiMeta({ conversationId: conversation.id }),
+      data: {
+        added,
+        changed: true,
+        conversation: clone(persisted.conversation),
+        lifecycleEvent: persisted.lifecycleEvent,
+        realtimeEvent: persisted.realtimeEvent,
+        removed,
+        tags: clone(persisted.conversation.tags)
+      }
+    });
+  }
+
+  // Каналы без телефона в профиле (Telegram, виджет, Chat API) оставляют поле
+  // пустым — оператор заполняет его вручную из карточки клиента.
+  async updateConversationClientPhone(payload: ClientPhonePayload, scope: TenantScope = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const conversation = await this.conversationRepository.findConversation(payload.conversationId);
+    if (!conversation || !matchesTenantScope(conversation, scope.tenantId)) {
+      return notFoundEnvelope(DIALOG_SERVICE, "updateConversationClientPhone", "conversation_not_found", `Conversation ${payload.conversationId} was not found.`, {
+        conversationId: payload.conversationId
+      });
+    }
+
+    const tenantId = resolveConversationTenantId(conversation);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "updateConversationClientPhone", { conversationId: conversation.id });
+    }
+
+    if (typeof payload.phone !== "string") {
+      return invalidEnvelope(DIALOG_SERVICE, "updateConversationClientPhone", "phone_string_required", "phone must be a string.", {
+        conversationId: conversation.id
+      });
+    }
+
+    const phone = normalizeClientPhoneInput(payload.phone);
+    if (phone && !CLIENT_PHONE_PATTERN.test(phone)) {
+      return invalidEnvelope(DIALOG_SERVICE, "updateConversationClientPhone", "phone_invalid", "phone must contain 5-20 digits with optional +, spaces, parentheses and dashes.", {
+        conversationId: conversation.id
+      });
+    }
+
+    const previousPhone = conversation.phone.trim();
+    if (previousPhone === phone) {
+      return createEnvelope({
+        service: DIALOG_SERVICE,
+        operation: "updateConversationClientPhone",
+        traceId: conversationTraceId(DIALOG_SERVICE, "updateConversationClientPhone"),
+        meta: apiMeta({ conversationId: conversation.id }),
+        data: {
+          changed: false,
+          conversation: clone(conversation),
+          phone
+        }
+      });
+    }
+
+    // У записей, созданных до разделения телефона и адреса доставки, в phone
+    // мог лежать chatId/externalId. Перед перезаписью идентификатор переезжает
+    // в providerConversationId, иначе ответы клиенту перестанут доставляться.
+    if (previousPhone && !CLIENT_PHONE_PATTERN.test(previousPhone) && !conversation.providerConversationId) {
+      conversation.providerConversationId = previousPhone;
+    }
+
+    conversation.phone = phone;
+    conversation.updatedAt = new Date().toISOString();
+    const event = this.createRealtimeEvent("conversation.updated", "conversation", conversation.id, {
+      action: "client_phone",
+      hasPhone: Boolean(phone)
+    }, tenantId);
+    // Сам номер в событиях не хранится: timeline доступен и ролям без права
+    // просмотра контактов, поэтому фиксируется только факт изменения.
+    const lifecycleEvent = this.createLifecycleEvent("client.phone.changed", conversation, event, scope, {
+      hadPhone: Boolean(previousPhone),
+      hasPhone: Boolean(phone)
+    });
+    const persisted = await this.conversationRepository.saveConversationMutation({ conversation, lifecycleEvent, realtimeEvent: event });
+    await this.publishRealtimeEvent(persisted.realtimeEvent);
+
+    return createEnvelope({
+      service: DIALOG_SERVICE,
+      operation: "updateConversationClientPhone",
+      traceId: conversationTraceId(DIALOG_SERVICE, "updateConversationClientPhone"),
+      meta: apiMeta({ conversationId: conversation.id }),
+      data: {
+        changed: true,
+        conversation: clone(persisted.conversation),
+        lifecycleEvent: persisted.lifecycleEvent,
+        phone,
+        realtimeEvent: persisted.realtimeEvent
+      }
+    });
+  }
+
   async resolvePublicDeliveryAttachments(
     attachments: Array<Record<string, unknown>>,
     tenantId: string
@@ -864,7 +1074,9 @@ export class ConversationService {
         retryable: true
       };
       const dispatchResult = await this.dispatchOutboundMessageReply({
-        chatId: conversation.phone || conversation.id,
+        // phone — только legacy-фолбэк для записей, созданных до разделения
+        // телефона и адреса доставки; телефон оператора его не перезапишет.
+        chatId: conversation.providerConversationId ?? (conversation.phone || conversation.id),
         conversation,
         descriptor: queued.descriptor,
         event,
@@ -1819,8 +2031,11 @@ function createTelegramCsatSurvey(
 function telegramChatIdFromConversation(conversation: ConversationRecord): string {
   const taggedChatId = conversation.tags
     .map((tag) => tag.trim())
-    .find((tag) => /^(telegram-chat|telegram_chat_id):/i.test(tag));
-  return taggedChatId?.slice(taggedChatId.indexOf(":") + 1).trim() || conversation.phone.trim();
+    .find((tag) => /^(telegram-chat|telegram_chat_id|chat):/i.test(tag));
+  return taggedChatId?.slice(taggedChatId.indexOf(":") + 1).trim()
+    || conversation.providerConversationId?.trim()
+    // phone — legacy-фолбэк: до разделения телефона и адреса доставки chatId хранился в нем.
+    || conversation.phone.trim();
 }
 
 function outboundDeliveryFromDescriptor(descriptor: ConversationOutboundDescriptor): Record<string, unknown> {

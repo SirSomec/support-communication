@@ -47,7 +47,9 @@ export async function resolveOrCreateProviderConversation(input: ProviderConvers
       language: "Unknown",
       messages: [],
       name: displayName,
-      phone: providerConversationId,
+      // MAX/VK не передают телефон: поле остается пустым для ручного заполнения
+      // оператором, маршрутизация ответов идет по providerConversationId.
+      phone: "",
       preview: "",
       previous: [],
       providerConversationId,

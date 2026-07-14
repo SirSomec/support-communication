@@ -830,7 +830,7 @@ test("knowledge hub manages URL sources with preview and lifecycle", async ({ pa
   // BAI-831: заявка на MCP-подключение уходит на одобрение сервис-админом.
   await page.locator(".knowledge-tabs button", { hasText: "MCP-подключения" }).click();
   const mcpRequestPromise = page.waitForResponse((response) =>
-    response.url().includes("/api/v1/knowledge/mcp-connectors/requests") && response.request().method() === "POST"
+    response.url().includes("/api/v1/knowledge-mcp-connectors/requests") && response.request().method() === "POST"
   );
   await page.getByRole("button", { name: "Подать заявку" }).click();
   const mcpDialog = page.getByRole("dialog", { name: "Заявка на MCP-подключение" });

@@ -9,9 +9,11 @@ import { UnansweredQuestionRepository } from "./unanswered-question.repository.j
 const SERVICE = "knowledgeUnansweredService";
 
 /** BAI-826: вопросы, на которые бот не нашёл знаний, — сырьё для новых статей. */
+// Namespace deliberately outside "knowledge/…": the workspace article controller
+// owns the greedy "knowledge/:articleId" route and would otherwise shadow these.
 @ApiTags("knowledge-unanswered")
 @UseGuards(TenantOperatorOrServiceAdminGuard)
-@Controller("knowledge/unanswered-questions")
+@Controller("knowledge-unanswered-questions")
 export class UnansweredQuestionsController {
   private get repository(): UnansweredQuestionRepository {
     return UnansweredQuestionRepository.default();

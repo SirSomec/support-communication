@@ -12,9 +12,11 @@ import { McpConnectorsService, type McpConnectorWriteInput } from "./mcp-connect
  * Одобрение и включение остаются за Service Admin (mcp-connectors.controller).
  * Секреты/заголовки не возвращаются — только метаданные.
  */
+// Namespace deliberately outside "knowledge/…": the workspace article controller
+// owns the greedy "knowledge/:articleId" route and would otherwise shadow these.
 @ApiTags("knowledge-mcp-connectors")
 @UseGuards(TenantOperatorOrServiceAdminGuard)
-@Controller("knowledge/mcp-connectors")
+@Controller("knowledge-mcp-connectors")
 export class TenantMcpConnectorsController {
   constructor(private readonly service: McpConnectorsService) {}
 

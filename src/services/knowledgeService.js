@@ -34,11 +34,11 @@ export const knowledgeService = {
   async previewSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/preview`, { operation: "previewKnowledgeSource", service: SERVICE }); },
   async enqueueSourceAttachment(sourceId, payload = {}) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/attachments`, { body: payload, method: "POST", operation: "enqueueKnowledgeAttachmentIngestion", service: SERVICE }); },
   async searchSources(payload = {}) { return apiRequest("/knowledge-retrieval/query", { body: payload, method: "POST", operation: "retrieveKnowledgePreview", service: SERVICE }); },
-  async fetchMcpConnectors() { return apiRequest("/knowledge/mcp-connectors", { operation: "fetchMcpConnectors", service: SERVICE }); },
-  async requestMcpConnector(payload = {}) { return apiRequest("/knowledge/mcp-connectors/requests", { body: payload, method: "POST", operation: "requestMcpConnector", service: SERVICE }); },
-  async fetchUnansweredQuestions() { return apiRequest("/knowledge/unanswered-questions", { operation: "fetchUnansweredQuestions", service: SERVICE }); },
-  async dismissUnansweredQuestion(questionId) { return apiRequest(`/knowledge/unanswered-questions/${encodeURIComponent(questionId)}/dismiss`, { method: "POST", operation: "dismissUnansweredQuestion", service: SERVICE }); },
-  async resolveUnansweredQuestion(questionId, payload = {}) { return apiRequest(`/knowledge/unanswered-questions/${encodeURIComponent(questionId)}/resolve`, { body: payload, method: "POST", operation: "resolveUnansweredQuestion", service: SERVICE }); },
+  async fetchMcpConnectors() { return apiRequest("/knowledge-mcp-connectors", { operation: "fetchMcpConnectors", service: SERVICE }); },
+  async requestMcpConnector(payload = {}) { return apiRequest("/knowledge-mcp-connectors/requests", { body: payload, method: "POST", operation: "requestMcpConnector", service: SERVICE }); },
+  async fetchUnansweredQuestions() { return apiRequest("/knowledge-unanswered-questions", { operation: "fetchUnansweredQuestions", service: SERVICE }); },
+  async dismissUnansweredQuestion(questionId) { return apiRequest(`/knowledge-unanswered-questions/${encodeURIComponent(questionId)}/dismiss`, { method: "POST", operation: "dismissUnansweredQuestion", service: SERVICE }); },
+  async resolveUnansweredQuestion(questionId, payload = {}) { return apiRequest(`/knowledge-unanswered-questions/${encodeURIComponent(questionId)}/resolve`, { body: payload, method: "POST", operation: "resolveUnansweredQuestion", service: SERVICE }); },
 
   async fetchArticle(articleId) {
     if (!hasRouteId(articleId)) {

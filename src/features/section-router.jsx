@@ -3,6 +3,7 @@ import { ChevronLeft } from "lucide-react";
 import { AuditScreen } from "./audit/AuditScreen.jsx";
 import { AutomationScreen } from "./automation/AutomationScreen.jsx";
 import { ClientsScreen } from "./clients/ClientsScreen.jsx";
+import { KnowledgeScreen } from "./knowledge/KnowledgeScreen.jsx";
 import { PanelScreen } from "./panel/PanelScreen.jsx";
 import { QualityScreen } from "./quality/QualityScreen.jsx";
 import { ReportsScreen } from "./reports/ReportsScreen.jsx";
@@ -63,6 +64,10 @@ export function SectionRouter({
 
   if (section === "quality") {
     return <QualityScreen {...screenProps} />;
+  }
+
+  if (section === "knowledge") {
+    return <KnowledgeScreen {...screenProps} />;
   }
 
   if (section === "automation") {

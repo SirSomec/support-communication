@@ -91,6 +91,42 @@ export class KnowledgeSourceRepository {
     return clone(normalized);
   }
 
+  /** Hard delete of an archived source; ingestion jobs of the source are dropped with it. */
+  delete(tenantId: string, id: string): void {
+    const tenant = requiredIdentifier(tenantId, "knowledge_source_tenant_required");
+    const sourceId = requiredIdentifier(id, "knowledge_source_identity_required");
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      return {
+        ingestionJobs: current.ingestionJobs.filter((item) => !(item.tenantId === tenant && item.sourceId === sourceId)),
+        sources: current.sources.filter((item) => !(item.tenantId === tenant && item.id === sourceId))
+      };
+    });
+    KnowledgeRetrievalCache.default().purgeSource(tenant, sourceId);
+  }
+
+  /** BAI-827: пометить document-источники статьи, что вышла новая версия статьи. */
+  markArticleUpdated(tenantId: string, articleId: string, articleVersion: string): number {
+    const tenant = requiredIdentifier(tenantId, "knowledge_source_tenant_required");
+    const article = requiredIdentifier(articleId, "knowledge_source_identity_required");
+    let marked = 0;
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      return {
+        ...current,
+        sources: current.sources.map((item) => {
+          if (item.tenantId !== tenant || item.kind !== "document") return item;
+          const boundArticle = String(item.sourceConfig.articleId ?? item.sourceRef ?? "");
+          if (boundArticle !== article) return item;
+          if (String(item.metadata.articleVersion ?? "") === articleVersion) return item;
+          marked += 1;
+          return { ...item, metadata: { ...item.metadata, articleUpdatedAt: new Date().toISOString(), pendingArticleVersion: articleVersion } };
+        })
+      };
+    });
+    return marked;
+  }
+
   findIngestionJob(tenantId: string, idempotencyKey: string): KnowledgeDocumentIngestionJob | undefined {
     const job = this.store.read().ingestionJobs.find((item) => item.tenantId === requiredIdentifier(tenantId, "knowledge_source_tenant_required") && item.idempotencyKey === requiredIdentifier(idempotencyKey, "knowledge_ingestion_key_required"));
     return job ? clone(job) : undefined;

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import { createObjectStorageSigner } from "./object-storage.js";
+import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
 import {
   WorkspaceRepository,
   type ClientExportJobRecord,
@@ -877,13 +878,23 @@ export class WorkspaceService {
       });
     }
 
-    return this.persistKnowledgeTransition(base.article, payload, context, {
+    const result = await this.persistKnowledgeTransition(base.article, payload, context, {
       action: "published",
       nextStatus: "published",
       nextVisibility: "public",
       operation: "publishKnowledgeArticle",
       tone: "ok"
     });
+    if (result.status === "ok") {
+      // BAI-827: у document-источников этой статьи появляется отметка «вышла новая
+      // версия статьи» — раздел «Знания» подскажет обновить и переутвердить источник.
+      const published = (result.data as { article?: { id?: string; version?: string } } | undefined)?.article;
+      const tenantId = String(context.tenantId ?? "").trim();
+      if (tenantId && published?.id) {
+        KnowledgeSourceRepository.default().markArticleUpdated(tenantId, published.id, String(published.version ?? ""));
+      }
+    }
+    return result;
   }
 
   async rejectKnowledgeArticle(

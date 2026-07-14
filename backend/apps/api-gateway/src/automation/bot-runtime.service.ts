@@ -8,10 +8,11 @@ import {
   type AutomationBotRuntimeStep,
   type AutomationBotScenarioVersion
 } from "./automation.repository.js";
-import { planBotRuntimeLabeledTransition, resolveBotRuntimeDeadLetterState, resolveBotRuntimeRetryState } from "./bot-runtime.worker.js";
+import { planBotRuntimeConsultationStay, planBotRuntimeLabeledTransition, resolveBotRuntimeDeadLetterState, resolveBotRuntimeRetryState } from "./bot-runtime.worker.js";
 import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runtime.worker.js";
 import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
 import { AiBotResponseService, type AiBotResponse } from "./ai-bot-response.service.js";
+import { evaluatePostPolicy, evaluatePrePolicy, normalizeAgentPolicy } from "./agent-policy.js";
 import { evaluateAiAgentsPilot } from "./ai-agents-pilot.js";
 import { recordBotHandoff, recordBotTriggerMatch } from "./bot-observability.js";
 import type { FeatureFlag } from "../platform/platform.types.js";
@@ -49,24 +50,40 @@ export class BotRuntimeService {
     }
 
     const existing = await this.repository.findBotRuntimeInstanceAsync(event.tenantId, event.conversationId);
+    if (existing && (existing.status === "handoff" || existing.status === "completed")) throw new Error("bot_runtime_conversation_inactive");
     const resolved = await this.resolveScenario(event, existing);
     const now = (this.options.now?.() ?? new Date()).toISOString();
     const initialNodeId = resolved.scenario.flowNodes.find((node) => node.id === "start")?.id ?? resolved.scenario.flowNodes[0]?.id;
     if (!initialNodeId) throw new Error("bot_runtime_scenario_empty");
     const currentNodeId = existing?.currentNodeId ?? initialNodeId;
-    const edgeLabel = selectEdgeLabel(resolved.scenario, currentNodeId, event.payload ?? {});
+    const currentNode = resolved.scenario.flowNodes.find((item) => item.id === currentNodeId);
+    const consultationStay = Boolean(existing)
+      && currentNode?.type === "ai_reply"
+      && isConsultationNode(currentNode)
+      && isPlainTextEvent(event.payload ?? {});
+    const edgeLabel = consultationStay ? undefined : selectEdgeLabel(resolved.scenario, currentNodeId, event.payload ?? {});
     let transition: BotRuntimeStateTransition;
     try {
-      transition = planBotRuntimeLabeledTransition({
-        channel: event.channel,
-        conversationId: event.conversationId,
-        currentNodeId,
-        edgeLabel,
-        eventId: event.eventId,
-        scenario: resolved.scenario,
-        tenantId: event.tenantId,
-        traceId: event.traceId
-      });
+      transition = consultationStay
+        ? planBotRuntimeConsultationStay({
+          channel: event.channel,
+          conversationId: event.conversationId,
+          currentNodeId,
+          eventId: event.eventId,
+          scenario: resolved.scenario,
+          tenantId: event.tenantId,
+          traceId: event.traceId
+        })
+        : planBotRuntimeLabeledTransition({
+          channel: event.channel,
+          conversationId: event.conversationId,
+          currentNodeId,
+          edgeLabel,
+          eventId: event.eventId,
+          scenario: resolved.scenario,
+          tenantId: event.tenantId,
+          traceId: event.traceId
+        });
       const node = resolved.scenario.flowNodes.find((item) => item.id === transition.nextNodeId)!;
       const executed = await this.executeNode(
         node,
@@ -207,6 +224,33 @@ export class BotRuntimeService {
     if (node.type === "ai_reply") {
       const message = inboundText(event.payload ?? {});
       if (!message) throw new Error("bot_ai_message_required");
+      const policy = normalizeAgentPolicy(node.config);
+      if (isConsultationNode(node)) {
+        const consultationTurns = Number(context.consultationTurns ?? 0);
+        if (wantsHumanOperator(message, node)) {
+          return consultationHandoffResult(node, event, context, scenarioId, "client_requested_operator",
+            String(node.config?.handoffAcknowledgement ?? "Хорошо, передаю диалог оператору — он продолжит с этого места."));
+        }
+        if (consultationTurns >= consultationMaxTurns(node)) {
+          return consultationHandoffResult(node, event, context, scenarioId, "bot_ai_consultation_turn_limit",
+            String(node.config?.turnLimitMessage ?? node.config?.fallbackMessage ?? "Чтобы вам точно помогли, передаю диалог оператору."));
+        }
+      }
+      // BAI-842: pre-policy — запрещённые темы (вежливый отказ) и «только оператор» (handoff) до вызова модели.
+      const preDecision = evaluatePrePolicy(message, policy);
+      if (preDecision.action === "handoff") {
+        return consultationHandoffResult(node, event, context, scenarioId, preDecision.reason,
+          String(node.config?.operatorOnlyMessage ?? "Этот вопрос лучше решит оператор — передаю диалог ему."));
+      }
+      if (preDecision.action === "refuse") {
+        return {
+          aiResponse: { citations: [], model: "policy", text: preDecision.message },
+          context: { ...context, lastPolicyDecision: preDecision.reason },
+          outcome: "policy_refused",
+          policyDecision: preDecision.reason,
+          status: "active" as const
+        };
+      }
       if (this.options.featureFlags) {
         const pilot = evaluateAiAgentsPilot({ flags: this.options.featureFlags, tenantId: event.tenantId });
         if (!pilot.eligible) {
@@ -233,15 +277,32 @@ export class BotRuntimeService {
       try {
         const aiResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({
           basePrompt,
+          behaviorRules: policy.behaviorRules || undefined,
           conversationId: event.conversationId,
           instructions: typeof node.config?.instructions === "string" ? node.config.instructions : node.title,
           message,
+          retrievalScoreThreshold: policy.retrievalScoreThreshold,
           scenarioId: scenarioId ?? event.scenarioId,
           scenarioRevisionId,
           sourceBindings,
           tenantId: event.tenantId
         });
-        return { aiResponse, context: { ...context, lastAiResponse: { citations: aiResponse.citations, model: aiResponse.model } }, outcome: "ai_reply_queued", status: "active" as const };
+        // BAI-842: post-policy — фактический ответ без источника (при наличии знаний) передаём оператору.
+        const postDecision = evaluatePostPolicy(aiResponse.citations.length, aiResponse.materialsAvailable ?? 0, policy);
+        if (postDecision.action === "handoff") {
+          return consultationHandoffResult(node, event, context, scenarioId, postDecision.reason,
+            String(node.config?.fallbackMessage ?? "Не нашёл это в проверенных материалах — передаю вопрос оператору, чтобы не ошибиться."));
+        }
+        return {
+          aiResponse,
+          context: {
+            ...context,
+            ...(isConsultationNode(node) ? { consultationTurns: Number(context.consultationTurns ?? 0) + 1 } : {}),
+            lastAiResponse: { citations: aiResponse.citations, model: aiResponse.model }
+          },
+          outcome: "ai_reply_queued",
+          status: "active" as const
+        };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "bot_ai_unavailable";
         const handoffSummary = {
@@ -307,7 +368,63 @@ function applyGeneratedMessage(sideEffects: unknown[], response: AiBotResponse |
     if (effect.kind !== "message_delivery" || !effect.descriptor?.payload) continue;
     effect.descriptor.payload.text = response.text;
     effect.descriptor.payload.citations = response.citations.map((citation) => ({ sourceId: citation.sourceId, title: citation.title, version: citation.version }));
+    if (response.usage) effect.descriptor.payload.usageTokens = response.usage.totalTokens;
+    effect.descriptor.payload.model = response.model;
   }
+}
+
+const DEFAULT_CONSULTATION_MAX_TURNS = 10;
+const CONSULTATION_MAX_TURNS_LIMIT = 30;
+/** Token-mode phrases; each multi-word phrase requires all of its words. Node config `handoffPhrases` replaces the defaults. */
+const DEFAULT_HUMAN_HANDOFF_PHRASES = [
+  "оператор", "оператора", "оператору", "оператором", "операторы",
+  "живой человек", "живым человеком", "реальный человек",
+  "operator", "live agent", "real person", "human agent", "talk to a human"
+];
+
+/** Consultation mode keeps the dialog on the ai_reply node across client messages. Opt-in per node. */
+export function isConsultationNode(node: Pick<BotFlowNode, "config" | "type">): boolean {
+  return node.type === "ai_reply" && node.config?.consultationMode === true;
+}
+
+export function consultationMaxTurns(node: Pick<BotFlowNode, "config">): number {
+  const value = Number(node.config?.maxTurns);
+  return Number.isInteger(value) && value >= 1 && value <= CONSULTATION_MAX_TURNS_LIMIT ? value : DEFAULT_CONSULTATION_MAX_TURNS;
+}
+
+export function wantsHumanOperator(message: string, node?: Pick<BotFlowNode, "config">): boolean {
+  const configured = Array.isArray(node?.config?.handoffPhrases)
+    ? (node.config.handoffPhrases as unknown[]).filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+  const phrases = configured.length ? configured : DEFAULT_HUMAN_HANDOFF_PHRASES;
+  return phrases.some((phrase) => matchesBotTriggerPhrase(message, phrase, "tokens"));
+}
+
+function isPlainTextEvent(payload: Record<string, unknown>): boolean {
+  return Boolean(inboundText(payload)) && payload.quickReply === undefined && payload.condition === undefined && payload.value === undefined;
+}
+
+function consultationHandoffResult(
+  node: BotFlowNode,
+  event: BotRuntimeInboundEvent,
+  context: Record<string, unknown>,
+  scenarioId: string | undefined,
+  reason: string,
+  text: string
+) {
+  return {
+    aiResponse: { citations: [], model: "none", text },
+    context: { ...context, lastAiFailure: reason },
+    handoffSummary: {
+      botId: scenarioId ?? event.scenarioId ?? "",
+      collectedFields: redactObject(context),
+      nodeId: node.id,
+      queue: String(node.config?.handoffQueue ?? "default"),
+      reason
+    },
+    outcome: "ai_handoff_requested",
+    status: "handoff" as const
+  };
 }
 
 function createAiFailureHandoff(event: BotRuntimeInboundEvent, node: BotFlowNode, summary: { botId?: string; collectedFields: Record<string, unknown>; nodeId: string; queue: string; reason?: string }): BotRuntimeSideEffect {

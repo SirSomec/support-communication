@@ -572,6 +572,7 @@ interface PrismaBotScenarioCreateInput {
   disabledAt?: Date | null;
   disabledBy?: string | null;
   disableReason?: string | null;
+  draft?: unknown;
   enabled: boolean;
   flowEdges: unknown;
   flowNodes: unknown;
@@ -608,6 +609,7 @@ interface PrismaBotScenarioRow {
   disabledAt?: Date | string | null;
   disabledBy?: string | null;
   disableReason?: string | null;
+  draft?: unknown;
   enabled?: boolean;
   flowEdges: unknown;
   flowNodes: unknown;
@@ -2424,6 +2426,7 @@ function normalizeBotScenarioRecord(scenario: BotScenario, existing?: BotScenari
       : {}),
     priority: normalizeBotScenarioPriority(scenario.priority ?? existing?.priority),
     basePrompt: normalizeBasePrompt(scenario.basePrompt ?? existing?.basePrompt),
+    draft: normalizeScenarioDraftOverlay(scenario.draft),
     sourceBindings: normalizeSourceBindings(scenario.sourceBindings ?? existing?.sourceBindings ?? []),
     tenantId: existing
       ? requireMatchingAutomationTenantId(existing.tenantId, scenario.tenantId)
@@ -2483,6 +2486,31 @@ function normalizeBotTriggerRules(value: unknown): BotTriggerRule[] {
   });
 }
 
+/** Draft overlay of a published scenario. Absent/invalid values stay undefined so no phantom draft appears. */
+function normalizeScenarioDraftOverlay(value: unknown): BotScenario["draft"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const overlay: NonNullable<BotScenario["draft"]> = {
+    updatedAt: typeof record.updatedAt === "string" && !Number.isNaN(Date.parse(record.updatedAt))
+      ? new Date(record.updatedAt).toISOString()
+      : new Date().toISOString()
+  };
+  if (typeof record.updatedBy === "string" && record.updatedBy.trim()) overlay.updatedBy = record.updatedBy.trim();
+  if (typeof record.name === "string" && record.name.trim()) overlay.name = record.name.trim();
+  if (Array.isArray(record.channels)) overlay.channels = record.channels.map((item) => String(item)).filter(Boolean);
+  if (record.basePrompt !== undefined) {
+    const basePrompt = normalizeBasePrompt(record.basePrompt);
+    if (basePrompt) overlay.basePrompt = basePrompt;
+  }
+  if (record.priority !== undefined) overlay.priority = normalizeBotScenarioPriority(record.priority);
+  if (Array.isArray(record.flowNodes)) overlay.flowNodes = clone(record.flowNodes) as NonNullable<BotScenario["draft"]>["flowNodes"];
+  if (Array.isArray(record.flowEdges)) overlay.flowEdges = clone(record.flowEdges) as NonNullable<BotScenario["draft"]>["flowEdges"];
+  if (record.sourceBindings !== undefined) overlay.sourceBindings = normalizeSourceBindings(record.sourceBindings);
+  if (record.triggerRules !== undefined) overlay.triggerRules = normalizeBotTriggerRules(record.triggerRules);
+  const meaningful = Object.keys(overlay).some((key) => key !== "updatedAt" && key !== "updatedBy");
+  return meaningful ? overlay : undefined;
+}
+
 function normalizeSourceBindings(value: unknown): KnowledgeSourceBinding[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
@@ -2502,8 +2530,21 @@ function normalizeBotScenarioVersionRecord(version: AutomationBotScenarioVersion
     basePrompt: normalizeBasePrompt(version.basePrompt),
     priority: normalizeBotScenarioPriority(version.priority),
     tenantId: requireAutomationTenantId(version.tenantId),
-    triggerRules: normalizeBotTriggerRules(version.triggerRules ?? [])
+    triggerRules: normalizeVersionTriggerRules(version.triggerRules)
   };
+}
+
+/**
+ * A version without snapshotted rules must stay `undefined` so the runtime
+ * falls back to the scenario's rules (`version.triggerRules ?? scenario.…`).
+ * Publish validation never produces an intentionally empty snapshot, so an
+ * empty array is treated as "not snapshotted" too; coercing it to [] silently
+ * erased phrase triggers of versions published before rules were snapshotted.
+ */
+function normalizeVersionTriggerRules(value: unknown): BotTriggerRule[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  const rules = normalizeBotTriggerRules(value);
+  return rules.length ? rules : undefined;
 }
 
 function normalizeBotPublishAuditEventRecord(event: AutomationBotPublishAuditEvent): AutomationBotPublishAuditEvent {
@@ -2604,6 +2645,7 @@ function toBotScenario(row: PrismaBotScenarioRow): BotScenario {
     ...(row.disabledAt ? { disabledAt: toIsoString(row.disabledAt) } : {}),
     ...(row.disabledBy ? { disabledBy: row.disabledBy } : {}),
     ...(row.disableReason ? { disableReason: row.disableReason } : {}),
+    ...(normalizeScenarioDraftOverlay(row.draft) ? { draft: normalizeScenarioDraftOverlay(row.draft) } : {}),
     enabled: row.enabled ?? true,
     flowEdges: clone(row.flowEdges) as BotScenario["flowEdges"],
     flowNodes: clone(row.flowNodes) as BotScenario["flowNodes"],
@@ -2640,6 +2682,7 @@ function toPrismaBotScenarioCreateInput(scenario: BotScenario): PrismaBotScenari
     disabledAt: scenario.disabledAt ? new Date(scenario.disabledAt) : null,
     disabledBy: scenario.disabledBy ?? null,
     disableReason: scenario.disableReason ?? null,
+    draft: normalizeScenarioDraftOverlay(scenario.draft) ?? null,
     enabled: scenario.enabled ?? true,
     flowEdges: clone(scenario.flowEdges),
     flowNodes: clone(scenario.flowNodes),
@@ -2675,6 +2718,7 @@ function toPrismaBotScenarioUpdateInput(scenario: BotScenario): PrismaBotScenari
     disabledAt: scenario.disabledAt ? new Date(scenario.disabledAt) : null,
     disabledBy: scenario.disabledBy ?? null,
     disableReason: scenario.disableReason ?? null,
+    draft: normalizeScenarioDraftOverlay(scenario.draft) ?? null,
     enabled: scenario.enabled ?? true,
     flowEdges: clone(scenario.flowEdges),
     flowNodes: clone(scenario.flowNodes),
@@ -2704,7 +2748,7 @@ function toBotScenarioVersion(row: PrismaBotScenarioVersionRow): AutomationBotSc
     sourceBindings: normalizeSourceBindings(row.sourceBindings ?? []),
     status: row.status,
     tenantId: requireAutomationTenantId(row.tenantId),
-    triggerRules: normalizeBotTriggerRules(row.triggerRules ?? []),
+    ...(normalizeVersionTriggerRules(row.triggerRules) ? { triggerRules: normalizeVersionTriggerRules(row.triggerRules) } : {}),
     versionId: row.versionId
   };
 }

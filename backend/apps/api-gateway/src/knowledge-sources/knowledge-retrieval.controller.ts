@@ -9,5 +9,5 @@ export class KnowledgeRetrievalController {
   constructor(private readonly service: KnowledgeRetrievalApiService) {}
   @Post("query") @HttpCode(HttpStatus.OK) @RequireTenantOperatorPermission("knowledge.read") @RequireServiceAdminAction("knowledge.read")
   @ApiOkResponse({ description: "Tenant- and scenario-bound passages with versioned offset citations and token budget" })
-  retrieve(@Body() body: { query?: string; scenarioId?: string; tokenBudget?: number }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.retrieveScenario({ ...(body ?? {}), tenantId: request.tenantOperatorContext?.tenantId ?? request.serviceAdminContext?.currentTenantId ?? "" }); }
+  retrieve(@Body() body: { query?: string; scenarioId?: string; sourceIds?: string[]; tokenBudget?: number }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.retrieveScenario({ ...(body ?? {}), tenantId: request.tenantOperatorContext?.tenantId ?? request.serviceAdminContext?.currentTenantId ?? "" }); }
 }

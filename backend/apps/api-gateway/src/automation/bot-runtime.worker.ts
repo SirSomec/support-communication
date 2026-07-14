@@ -42,6 +42,30 @@ export interface BotRuntimeStateTransition {
   traceId: string;
 }
 
+/**
+ * Consultation mode: the dialog stays on the same `ai_reply` node for the next
+ * client message instead of moving along an edge. Exit conditions (client asks
+ * for a human, turn limit, AI failure) are decided by node execution, not here.
+ */
+export function planBotRuntimeConsultationStay(input: BotRuntimeStateTransitionInput): BotRuntimeStateTransition {
+  validateBotRuntimeScenario(input);
+  const node = input.scenario.flowNodes.find((item) => item.id === input.currentNodeId);
+  if (!node) throw new Error("bot_runtime_transition_node_not_found");
+  if (node.type !== "ai_reply") throw new Error("bot_runtime_consultation_node_not_ai");
+  return {
+    conversationId: input.conversationId,
+    eventId: input.eventId,
+    nextNodeId: node.id,
+    nodeType: node.type,
+    previousNodeId: input.currentNodeId,
+    scenarioId: input.scenario.id,
+    sideEffects: createStateTransitionSideEffects(input, node),
+    status: "transitioned",
+    tenantId: input.tenantId,
+    traceId: input.traceId
+  };
+}
+
 export interface BotRuntimeConversationState {
   conversationId: string;
   currentNodeId: string;

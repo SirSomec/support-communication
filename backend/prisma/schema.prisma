@@ -2075,6 +2075,7 @@ model BotScenario {
   sourceBindings Json    @default("[]") @map("source_bindings")
   triggerRules  Json     @default("[]") @map("trigger_rules")
   basePrompt    String?  @map("base_prompt") @db.Text
+  draft         Json?    @map("draft")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   versions      BotScenarioVersion[]

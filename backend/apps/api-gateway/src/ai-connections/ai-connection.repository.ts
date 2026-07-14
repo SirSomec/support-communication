@@ -16,7 +16,7 @@ export interface AiConnectionRecord {
   lastTestMessage: string | null;
   lastTestStatus: "failed" | "passed" | null;
   lastTestedAt: string | null;
-  limits: { maxConcurrentRuns?: number; monthlyTokenBudget?: number; requestsPerMinute?: number };
+  limits: { maxConcurrentRuns?: number; monthlyTokenBudget?: number; requestsPerMinute?: number; sandboxMonthlyTokenBudget?: number };
   providerType: "openai_compatible";
   secret: SecretEnvelope;
   status: AiConnectionStatus;

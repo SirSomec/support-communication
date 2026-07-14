@@ -37,6 +37,9 @@ describe("BAI-502 compact agent session state", () => {
       conversationId: "conv-a",
       facts: { orderId: "A-42" },
       intent: "delivery_status",
+      // Детерминированное «сейчас» внутри окна фикстуры: без него тест зависит от
+      // реальной даты и «протухает», когда календарь уходит за expiresAt фикстуры.
+      now: new Date("2026-07-12T11:00:00.000Z"),
       openQuestion: "Нужен ли трек-номер?",
       summary: "Клиент ждёт обновление статуса заказа A-42.",
       tenantId: "tenant-volga",

@@ -25,7 +25,7 @@ describe("knowledge source catalog service", () => {
     const id = String((created.data.source as { id: string }).id);
     const disabled = await service.disable("tenant-volga", id);
 
-    assert.equal(service.list("tenant-ladoga").data.sources.length, 0);
+    assert.equal(((await service.list("tenant-ladoga")).data.sources as unknown[]).length, 0);
     assert.equal((disabled.data.source as { status: string }).status, "disabled");
   });
 

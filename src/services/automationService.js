@@ -91,6 +91,86 @@ export const automationService = {
     return lifecycleRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/disable`, "POST", "disableBotScenario", options);
   },
 
+  async rollbackBotScenario(scenarioId, versionId) {
+    if (!hasRouteId(scenarioId) || !hasRouteId(versionId)) {
+      return missingIdEnvelope("rollbackBotScenario", "Scenario and version ids are required.");
+    }
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/rollback`, {
+      body: { versionId },
+      method: "POST",
+      operation: "rollbackBotScenario",
+      service: SERVICE
+    });
+  },
+
+  async discardBotScenarioDraft(scenarioId) {
+    if (!hasRouteId(scenarioId)) return missingIdEnvelope("discardBotScenarioDraft", "Bot scenario id is required.");
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/discard-draft`, {
+      method: "POST",
+      operation: "discardBotScenarioDraft",
+      service: SERVICE
+    });
+  },
+
+  async createBotSandboxSession(scenarioId, payload = {}) {
+    if (!hasRouteId(scenarioId)) return missingIdEnvelope("createBotSandboxSession", "Bot scenario id is required.");
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/sandbox-sessions`, {
+      body: payload,
+      method: "POST",
+      operation: "createBotSandboxSession",
+      service: SERVICE
+    });
+  },
+
+  async postBotSandboxMessage(scenarioId, sessionId, payload = {}) {
+    if (!hasRouteId(scenarioId) || !hasRouteId(sessionId)) {
+      return missingIdEnvelope("postBotSandboxMessage", "Scenario and session ids are required.");
+    }
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/sandbox-sessions/${encodeURIComponent(sessionId)}/messages`, {
+      body: payload,
+      method: "POST",
+      operation: "postBotSandboxMessage",
+      service: SERVICE
+    });
+  },
+
+  async deleteBotSandboxSession(scenarioId, sessionId) {
+    if (!hasRouteId(scenarioId) || !hasRouteId(sessionId)) {
+      return missingIdEnvelope("deleteBotSandboxSession", "Scenario and session ids are required.");
+    }
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/sandbox-sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+      operation: "deleteBotSandboxSession",
+      service: SERVICE
+    });
+  },
+
+  async saveBotSandboxRegression(scenarioId, sessionId, payload = {}) {
+    if (!hasRouteId(scenarioId) || !hasRouteId(sessionId)) {
+      return missingIdEnvelope("saveBotSandboxRegression", "Scenario and session ids are required.");
+    }
+    return apiRequest(`/automation/bot-scenarios/${encodeURIComponent(scenarioId)}/sandbox-sessions/${encodeURIComponent(sessionId)}/regression-cases`, {
+      body: payload,
+      method: "POST",
+      operation: "saveBotSandboxRegression",
+      service: SERVICE
+    });
+  },
+
+  async listBotAiFeedback() {
+    return apiRequest("/automation/bot-feedback", { operation: "listBotAiFeedback", service: SERVICE });
+  },
+
+  async resolveBotAiFeedback(feedbackId, action = "reviewed") {
+    if (!hasRouteId(feedbackId)) return missingIdEnvelope("resolveBotAiFeedback", "Feedback id is required.");
+    return apiRequest(`/automation/bot-feedback/${encodeURIComponent(feedbackId)}/resolve`, {
+      body: { action },
+      method: "POST",
+      operation: "resolveBotAiFeedback",
+      service: SERVICE
+    });
+  },
+
   async recordBotAiFeedback(payload = {}) {
     const conversationId = String(payload.conversationId ?? "").trim();
     if (!conversationId) {
@@ -128,7 +208,15 @@ export const automationService = {
         "disableBotScenario",
         "archiveBotScenario",
         "restoreBotScenario",
-        "recordBotAiFeedback"
+        "recordBotAiFeedback",
+        "listBotAiFeedback",
+        "resolveBotAiFeedback",
+        "rollbackBotScenario",
+        "discardBotScenarioDraft",
+        "createBotSandboxSession",
+        "postBotSandboxMessage",
+        "deleteBotSandboxSession",
+        "saveBotSandboxRegression"
       ],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],

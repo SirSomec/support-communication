@@ -6,13 +6,26 @@ import type { ServiceAdminActor } from "../identity/service-admin-auth.js";
 import { McpConnectorRepository, type McpConnectorRecord } from "./mcp-connector.repository.js";
 import { validateMcpConnector } from "./mcp-readonly-connector.service.js";
 
-export interface McpConnectorWriteInput { endpoint?: string; rateLimitPerMinute?: number; tools?: Array<{ name?: string; mode?: string }>; }
+export interface McpConnectorWriteInput { description?: string; endpoint?: string; name?: string; rateLimitPerMinute?: number; requestedBy?: string; tools?: Array<{ name?: string; mode?: string }>; }
 const SERVICE = "mcpConnectorsService";
 
 export class McpConnectorsService {
   constructor(private readonly repository = McpConnectorRepository.default(), private readonly identity = IdentityRepository.default(), private readonly environment: NodeJS.ProcessEnv = process.env) {}
 
   list(tenantId: string): BackendEnvelope<Record<string, unknown>> { return ok("listMcpConnectors", tenantId, { connectors: this.repository.list(tenantId) }); }
+
+  /**
+   * BAI-831: заявка тенант-администратора. Коннектор создаётся неодобренным и
+   * выключенным; включить его сможет только Service Admin после одобрения.
+   * Хост всё равно должен быть в глобальном allowlist — это защита от SSRF.
+   */
+  async request(tenantId: string, input: McpConnectorWriteInput, requestedBy: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const now = new Date().toISOString(); const id = `mcp_${randomUUID()}`;
+    const candidate = this.build({ approvedAt: null, approvedBy: null, createdAt: now, id, requestedBy, status: "disabled", tenantId, updatedAt: now }, input);
+    if (typeof candidate === "string") return invalid("requestMcpConnector", tenantId, candidate);
+    const record = this.repository.save({ ...candidate, name: input.name, description: input.description });
+    return ok("requestMcpConnector", tenantId, { auditEvent: await this.audit("mcp.connector.request", record, { id: requestedBy, name: requestedBy }, "requested"), connector: record });
+  }
 
   async create(tenantId: string, input: McpConnectorWriteInput, actor: ServiceAdminActor): Promise<BackendEnvelope<Record<string, unknown>>> {
     const now = new Date().toISOString(); const id = `mcp_${randomUUID()}`;
@@ -45,7 +58,7 @@ export class McpConnectorsService {
   }
 
   private build(base: Omit<McpConnectorRecord, "allowedHosts" | "endpoint" | "rateLimitPerMinute" | "tools"> & Partial<Pick<McpConnectorRecord, "allowedHosts" | "endpoint" | "rateLimitPerMinute" | "tools">>, input: McpConnectorWriteInput): McpConnectorRecord | string {
-    if (Object.keys(input as object).some((key) => !["endpoint", "rateLimitPerMinute", "tools"].includes(key))) return "Only endpoint, read-only tools and rate limit may be configured.";
+    if (Object.keys(input as object).some((key) => !["description", "endpoint", "name", "rateLimitPerMinute", "requestedBy", "tools"].includes(key))) return "Only name, endpoint, read-only tools and rate limit may be configured.";
     const endpoint = String(input.endpoint ?? base.endpoint ?? "").trim(); let host = "";
     try { host = new URL(endpoint).hostname.toLowerCase(); } catch { return "A valid HTTPS MCP endpoint is required."; }
     const policy = allowedHosts(this.environment); if (!policy.includes(host)) return "MCP endpoint is not in the service allowlist.";

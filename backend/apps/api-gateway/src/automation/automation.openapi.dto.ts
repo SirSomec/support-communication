@@ -43,6 +43,20 @@ export class BotScenarioTestRunDto {
   @ApiPropertyOptional({ type: [Object] }) testCases?: Array<Record<string, unknown>>;
 }
 
+export class BotSandboxSessionCreateDto {
+  @ApiPropertyOptional({ example: "SDK", description: "Channel to simulate; defaults to the scenario's first channel." }) channel?: string;
+  @ApiPropertyOptional({ example: "ru-RU" }) locale?: string;
+  @ApiPropertyOptional({ enum: ["draft", "published"], description: "Which configuration to test; defaults to draft for draft scenarios, otherwise the published version." }) mode?: string;
+}
+
+export class BotSandboxMessageDto {
+  @ApiPropertyOptional({ example: "msg-1", description: "Client-generated id; repeating it replays the stored turn instead of running the bot again." }) messageId?: string;
+  @ApiPropertyOptional({ example: "Где мой заказ №123?" }) text?: string;
+  @ApiPropertyOptional({ description: "Quick-reply label when answering a quick_replies step." }) quickReply?: string;
+  @ApiPropertyOptional({ description: "Value for contact_request or condition steps." }) value?: unknown;
+  @ApiPropertyOptional({ description: "Execute webhook nodes for real instead of the sandbox stub." }) webhooksEnabled?: boolean;
+}
+
 export class AutomationEnvelopeDto {
   @ApiProperty({ example: "automationService" }) service!: string;
   @ApiProperty() operation!: string;

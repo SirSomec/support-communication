@@ -711,12 +711,16 @@ test("draft switch warning preserves or discards unsent draft", async ({ page })
 test("knowledge editor supports article draft status and preview", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
-  await openSection(page, "Качество");
+  await openSection(page, "Знания");
 
-  await page.locator(".knowledge-row").filter({ hasText: "Delivery tracking" }).click();
-  await expect(page.locator(".knowledge-preview")).toContainText("Delivery tracking");
+  // BAI-820/821: статьи переехали в раздел «Знания», вкладка «Статьи».
+  await expect(page.locator(".knowledge-tabs")).toContainText("Вопросы без ответа");
+  // BAI-852: вкладка ревью обратной связи присутствует.
+  await expect(page.locator(".knowledge-tabs")).toContainText("Обратная связь");
+  await page.locator(".knowledge-row").filter({ hasText: "Order tracking" }).click();
+  await expect(page.locator(".knowledge-preview")).toContainText("Order tracking");
 
-  await page.locator(".knowledge-editor-form input").fill("Delivery tracking v5");
+  await page.locator(".knowledge-editor-form input").fill("Order tracking v5");
   const knowledgeDraftPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/knowledge/")
     && response.url().includes("/drafts")
@@ -747,7 +751,7 @@ test("knowledge editor supports article draft status and preview", async ({ page
   expect(submitReviewPayload.data.approvalDecision.immutable).toBeTruthy();
   await expect(page.locator(".toast")).toContainText("отправлена на проверку");
 
-  await expect(page.locator(".knowledge-preview")).toContainText("Delivery tracking v5");
+  await expect(page.locator(".knowledge-preview")).toContainText("Order tracking v5");
   await expect(page.locator(".knowledge-preview")).toContainText("review");
 
   await expect(page.locator(".knowledge-governance-panel").filter({ hasText: "Вложения" }).getByRole("button", { name: /Добавить/ })).toBeEnabled();
@@ -780,9 +784,64 @@ test("knowledge editor supports article draft status and preview", async ({ page
 
   await page.locator(".knowledge-preview-toolbar button").filter({ hasText: "Self-service" }).click();
   await page.locator(".knowledge-self-service-preview input").fill("delivery");
-  await expect(page.locator(".knowledge-widget-results")).toContainText("Delivery tracking v5");
+  await expect(page.locator(".knowledge-widget-results")).toContainText("Order tracking v5");
   await expect(page.locator(".knowledge-self-service-preview")).toContainText("Текущая статья доступна клиенту");
   await expect(page.locator(".knowledge-self-service-preview")).toContainText("Написать оператору");
+  await expectHealthyPage(page);
+});
+
+test("knowledge hub manages URL sources with preview and lifecycle", async ({ page }) => {
+  await openAppShell(page);
+  await selectRole(page, "Администратор");
+  await openSection(page, "Знания");
+
+  // BAI-824: страницы (URL) — менеджер источников с добавлением, предпросмотром и жизненным циклом.
+  await page.locator(".knowledge-tabs button", { hasText: "Страницы" }).click();
+  await expect(page.locator(".work-panel")).toContainText("Страниц пока нет");
+
+  const createPromise = page.waitForResponse((response) =>
+    response.url().endsWith("/api/v1/knowledge-sources") && response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Добавить URL-страницу" }).click();
+  const urlDialog = page.getByRole("dialog", { name: "Добавить URL-страницу" });
+  await urlDialog.locator("input[type='url']").fill("https://docs.example.test/faq");
+  await urlDialog.locator("input[type='text']").fill("FAQ по доставке");
+  await urlDialog.getByRole("button", { name: "Добавить" }).click();
+  const createResponse = await createPromise;
+  expect(createResponse.ok()).toBeTruthy();
+  expect((await createResponse.json()).status).toBe("ok");
+
+  const sourceRow = page.locator(".knowledge-source-row").filter({ hasText: "FAQ по доставке" });
+  await expect(sourceRow).toBeVisible();
+  await expect(sourceRow).toContainText("Не привязан к сценариям");
+
+  // BAI-822: переименование через PATCH.
+  const renamePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/knowledge-sources/") && response.request().method() === "PATCH"
+  );
+  await sourceRow.getByTitle("Переименовать").click();
+  const renameDialog = page.getByRole("dialog", { name: "Переименовать источник" });
+  await renameDialog.locator("input").fill("FAQ доставки v2");
+  await renameDialog.getByRole("button", { name: "Сохранить" }).click();
+  const renameResponse = await renamePromise;
+  expect(renameResponse.ok()).toBeTruthy();
+  await expect(page.locator(".knowledge-source-row").filter({ hasText: "FAQ доставки v2" })).toBeVisible();
+
+  // BAI-831: заявка на MCP-подключение уходит на одобрение сервис-админом.
+  await page.locator(".knowledge-tabs button", { hasText: "MCP-подключения" }).click();
+  const mcpRequestPromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/knowledge-mcp-connectors/requests") && response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Подать заявку" }).click();
+  const mcpDialog = page.getByRole("dialog", { name: "Заявка на MCP-подключение" });
+  await mcpDialog.locator("input[type='text']").first().fill("Каталог заказов");
+  await mcpDialog.locator("input[type='url']").fill("https://mcp.allowed.test/rpc");
+  await mcpDialog.locator("input[type='text']").last().fill("order_status");
+  await mcpDialog.getByRole("button", { name: "Отправить заявку" }).click();
+  const mcpRequestResponse = await mcpRequestPromise;
+  const mcpRequestPayload = await mcpRequestResponse.json();
+  // Хост может быть вне allowlist смока — заявка либо создаётся, либо явно отклоняется, но не падает.
+  expect(["ok", "invalid"]).toContain(mcpRequestPayload.status);
   await expectHealthyPage(page);
 });
 
@@ -849,10 +908,12 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   await selectRole(page, "Администратор");
   await openSection(page, "Боты");
 
-  await expect(page.locator(".automation-insight-grid")).toContainText("Боты по каналам");
-  await page.locator(".bot-assignment-list select").first().selectOption({ label: "Auth code" });
-  await expect(page.locator(".toast")).toContainText('SDK: назначен бот "Auth code" и сохранен на backend.');
+  // BAI-810: консоль сценария с вкладками — паспорт, результаты, версии.
+  await expect(page.locator(".scenario-console")).toBeVisible();
+  await expect(page.locator(".scenario-passport-grid")).toContainText("Когда запускается");
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Результаты" }).click();
   await expect(page.locator(".scenario-ops-panel")).toContainText("Эксплуатация сценария");
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Обзор" }).click();
 
   await page.locator(".bot-mode-toggle input[type='checkbox']").check();
   await expect(page.locator(".bot-builder-panel")).toBeVisible();
@@ -902,20 +963,46 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   expect(publishPayload.data.versionState).toBe("published");
   await expect(page.locator(".toast")).toContainText("опубликован: runtime-");
 
-  const testRunPromise = page.waitForResponse((response) =>
+  // BAI-812: правки опубликованного сценария копятся в черновике следующей версии.
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Настройка" }).click();
+  await expect(page.locator(".scenario-settings-note").first()).toContainText("черновик");
+  await page.locator(".scenario-settings-form input[type='text']").first().fill("Импортированный сценарий v2");
+  await page.getByRole("button", { name: "Сохранить черновик изменений" }).click();
+  await expect(page.locator(".toast")).toContainText("черновик");
+  await expect(page.locator(".scenario-console-badges")).toContainText("неопубликованные изменения");
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Обзор" }).click();
+  await page.getByRole("button", { name: "Отменить изменения" }).click();
+  await expect(page.locator(".toast")).toContainText("отменён");
+  await expect(page.locator(".scenario-console-badges")).not.toContainText("неопубликованные изменения");
+
+  // BAI-813: вкладка версий показывает активную версию публикации.
+  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Версии" }).click();
+  await expect(page.locator(".scenario-version-list")).toContainText("активная");
+
+  // BAI-804: живой тест-чат — сообщение проходит настоящий runtime в изолированной sandbox-сессии.
+  await page.getByRole("button", { name: "Тест-чат" }).click();
+  const sandboxTurnPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/automation/bot-scenarios/")
-    && response.url().includes("/test-runs")
+    && response.url().includes("/sandbox-sessions/")
+    && response.url().includes("/messages")
     && response.request().method() === "POST"
   );
-  await page.getByRole("button", { name: "Прогнать тест" }).click();
-  const testRunResponse = await testRunPromise;
-  expect(testRunResponse.ok()).toBeTruthy();
-  const testRunPayload = await testRunResponse.json();
-  expect(testRunPayload.status).toBe("ok");
-  expect(testRunPayload.data.auditId).toBeTruthy();
-  expect(testRunPayload.data.queue).toBe("bot-runtime");
-  expect(testRunPayload.data.testRunId).toMatch(/^bot_test_/);
-  await expect(page.locator(".toast")).toContainText("Песочница");
+  await page.locator(".sandbox-composer input").fill("Здравствуйте, подскажите статус заказа");
+  await page.locator(".sandbox-composer button[type='submit']").click();
+  const sandboxTurnResponse = await sandboxTurnPromise;
+  expect(sandboxTurnResponse.ok()).toBeTruthy();
+  const sandboxTurnPayload = await sandboxTurnResponse.json();
+  expect(sandboxTurnPayload.status).toBe("ok");
+  expect(sandboxTurnPayload.data.session.id).toMatch(/^sbx_/);
+  expect(sandboxTurnPayload.data.turn.trace).toBeTruthy();
+  await expect(page.locator(".sandbox-bubble--client")).toContainText("статус заказа");
+  await expect(page.locator(".sandbox-bubble--bot, .sandbox-event").first()).toBeVisible();
+  await page.locator(".sandbox-trace > button").first().click();
+  await expect(page.locator(".sandbox-trace-details")).toContainText("Шаг");
+  await page.getByRole("button", { name: "Сохранить как проверку" }).click();
+  await expect(page.locator(".toast")).toContainText("проверочный набор");
+  await page.getByRole("button", { name: "Начать заново" }).click();
+  await expect(page.locator(".sandbox-chat-empty")).toBeVisible();
   await expectHealthyPage(page);
 });
 
@@ -932,9 +1019,9 @@ test("scenario wizard keeps keyboard focus, aria steps and responsive layout", a
     await openSection(page, "Боты");
 
     await expect(page.locator(".scenario-list-panel")).toBeVisible();
-    await expect(page.locator(".scenario-ops-panel")).toBeVisible();
-    await expectNoElementOverflow(page, ".automation-insight-grid");
-    await expectNoElementOverflow(page, ".scenario-ops-panel");
+    await expect(page.locator(".scenario-console")).toBeVisible();
+    await expectNoElementOverflow(page, ".automation-layout--console");
+    await expectNoElementOverflow(page, ".scenario-console");
 
     // The wizard intentionally restores an unfinished draft (including the step),
     // so reset the persisted draft to observe the first step on every viewport.

@@ -14,7 +14,7 @@ export interface AiConnectionWriteInput {
   capabilities?: AiConnectionCapability[];
   chatModel?: string;
   embeddingModel?: string | null;
-  limits?: { maxConcurrentRuns?: number; monthlyTokenBudget?: number; requestsPerMinute?: number };
+  limits?: { maxConcurrentRuns?: number; monthlyTokenBudget?: number; requestsPerMinute?: number; sandboxMonthlyTokenBudget?: number };
   secret?: string;
 }
 
@@ -171,7 +171,7 @@ function publicConnection(connection: AiConnectionRecord): Omit<AiConnectionReco
 function normalizeBaseUrl(value: string): string { const url = new URL(value.trim()); if (url.protocol !== "https:" || url.username || url.password) throw new Error("AI provider URL must use HTTPS."); return url.toString().replace(/\/$/, ""); }
 function normalizedOptional(value: unknown): string | null { const normalized = String(value ?? "").trim(); return normalized || null; }
 function normalizeCapabilities(value: AiConnectionCapability[] | undefined): AiConnectionCapability[] { const capabilities = Array.from(new Set(value ?? [])); if (!capabilities.includes("chat_completion")) capabilities.unshift("chat_completion"); return capabilities.filter((item): item is AiConnectionCapability => item === "chat_completion" || item === "embeddings" || item === "retrieval"); }
-function normalizeLimits(value: AiConnectionWriteInput["limits"]): AiConnectionRecord["limits"] { const source = value ?? {}; const limits: AiConnectionRecord["limits"] = {}; for (const key of ["maxConcurrentRuns", "monthlyTokenBudget", "requestsPerMinute"] as const) { const parsed = Number(source[key]); if (Number.isInteger(parsed) && parsed > 0) limits[key] = parsed; } return limits; }
+function normalizeLimits(value: AiConnectionWriteInput["limits"]): AiConnectionRecord["limits"] { const source = value ?? {}; const limits: AiConnectionRecord["limits"] = {}; for (const key of ["maxConcurrentRuns", "monthlyTokenBudget", "requestsPerMinute", "sandboxMonthlyTokenBudget"] as const) { const parsed = Number(source[key]); if (Number.isInteger(parsed) && parsed > 0) limits[key] = parsed; } return limits; }
 function validateWrite(input: AiConnectionWriteInput, creating: boolean): string | null { if (creating && !input.secret?.trim()) return "API key is required."; if (input.secret !== undefined && !input.secret.trim()) return "API key must not be empty."; if (creating && (!input.baseUrl || !input.chatModel)) return "Provider URL and chat model are required."; try { if (input.baseUrl) normalizeBaseUrl(input.baseUrl); } catch { return "Provider URL must be a valid HTTPS URL."; } return null; }
 function safeMessage(error: unknown): string { if (error instanceof AiProviderError) return error.message; if (error instanceof SecretStoreError) return "Secret storage is unavailable."; return "AI connection could not be completed safely."; }
 function testDiagnostic(error: unknown): string { return error instanceof AiProviderError ? error.code : error instanceof SecretStoreError ? "secret_storage_unavailable" : "provider_unavailable"; }

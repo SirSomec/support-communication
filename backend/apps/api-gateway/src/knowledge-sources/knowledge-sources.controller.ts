@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { TenantOperatorOrServiceAdminGuard } from "../conversation/tenant-operator-or-service-admin.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
@@ -45,6 +45,30 @@ export class KnowledgeSourcesController {
   @RequireServiceAdminAction("knowledge.write")
   @HttpCode(HttpStatus.OK)
   approve(@Param("sourceId") sourceId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.approve(tenantId(request), sourceId); }
+  @Patch(":sourceId")
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  update(@Param("sourceId") sourceId: string, @Body() body: { title?: string }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.update(tenantId(request), sourceId, body ?? {}); }
+  @Post(":sourceId/enable")
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  enable(@Param("sourceId") sourceId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.enable(tenantId(request), sourceId); }
+  @Post(":sourceId/archive")
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  archive(@Param("sourceId") sourceId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.archive(tenantId(request), sourceId); }
+  @Delete(":sourceId")
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  remove(@Param("sourceId") sourceId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.remove(tenantId(request), sourceId); }
+  @Get(":sourceId/preview")
+  @RequireTenantOperatorPermission("knowledge.read")
+  @RequireServiceAdminAction("knowledge.read")
+  preview(@Param("sourceId") sourceId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.preview(tenantId(request), sourceId); }
 }
 
 function tenantId(request: TenantOperatorRequest & ServiceAdminRequest): string {

@@ -10,6 +10,9 @@ import {
   type AutomationPublishIdempotencyRecord
 } from "./automation.repository.js";
 import { BotRuntimeService, type BotRuntimeInboundEvent, type BotRuntimeOptions } from "./bot-runtime.service.js";
+import { BotSandboxService } from "./bot-sandbox.service.js";
+import { normalizeAgentPolicy } from "./agent-policy.js";
+import type { FeatureFlag } from "../platform/platform.types.js";
 import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase, normalizeBotTriggerText } from "./bot-trigger-matcher.js";
 import { DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS, ProactiveExposureRepository } from "./proactive-exposure.repository.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
@@ -250,7 +253,9 @@ export class AutomationService {
       return conflictEnvelope("updateBotScenario", "bot_scenario_archived", "Restore the archived bot scenario before editing it.", { scenarioId });
     }
     if (existing.status === "published") {
-      return conflictEnvelope("updateBotScenario", "bot_scenario_published", "Disable the published scenario before editing it.", { scenarioId });
+      // BAI-812: правки опубликованного сценария копятся в черновике следующей
+      // версии; runtime продолжает исполнять закреплённую опубликованную версию.
+      return this.saveScenarioDraftOverlay(existing, request, context);
     }
 
     const requestedStatus = normalizeBotScenarioStatus(request.status, existing.status);
@@ -282,7 +287,7 @@ export class AutomationService {
       status: normalizeBotScenarioStatus(request.status, existing.status),
       tenantId,
       sourceBindings: normalizeScenarioSourceBindings(request.sourceBindings ?? existing.sourceBindings ?? []),
-      triggerRules: resolveScenarioTriggerRules(request, existing.triggerRules ?? defaultScenarioTriggerRules()),
+      triggerRules: resolveScenarioTriggerRules(request, existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules()),
       updatedAt: new Date().toISOString()
     };
     this.upsertScenario(scenario);
@@ -447,7 +452,10 @@ export class AutomationService {
       }));
     }
 
-    const triggerRules = resolveScenarioTriggerRules(request, existing.triggerRules ?? defaultScenarioTriggerRules());
+    const draftOverlay = existing.draft;
+    const triggerRules = resolveScenarioTriggerRules(request, draftOverlay?.triggerRules?.length
+      ? draftOverlay.triggerRules
+      : existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules());
     const triggerErrors = validateScenarioTriggerRules(triggerRules);
     if (triggerErrors.length) {
       return publishFailure(tenantId, scenarioId, "bot_trigger_invalid", invalidEnvelope("publishBotScenario", "bot_trigger_invalid", triggerErrors.join("; "), { scenarioId, violations: triggerErrors }));
@@ -457,7 +465,7 @@ export class AutomationService {
     if (triggerConflict) {
       return publishFailure(tenantId, scenarioId, "trigger_conflict", conflictEnvelope("publishBotScenario", "trigger_conflict", "Another published scenario already owns this keyword phrase and priority.", triggerConflict));
     }
-    const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? existing.sourceBindings ?? []);
+    const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? draftOverlay?.sourceBindings ?? existing.sourceBindings ?? []);
     const unavailableSourceId = sourceBindings.find((binding) => {
       const source = this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
       return !source || !isKnowledgeSourceRetrievalEligible(source);
@@ -468,10 +476,19 @@ export class AutomationService {
     }
     const prerequisiteViolations: string[] = [];
     const nodes = validation.payload?.flowNodes ?? [];
-    if (nodes.some((node) => node.type === "ai_reply")) {
+    const aiNodes = nodes.filter((node) => node.type === "ai_reply");
+    if (aiNodes.length) {
       if (!sourceBindings.length) prerequisiteViolations.push("AI-ответу нужен хотя бы один готовый источник знаний.");
       if (aiReadinessForTenant(tenantId).status !== "ready") prerequisiteViolations.push("AI-подключение организации не настроено или не прошло проверку.");
-      if (!nodes.some((node) => node.type === "handoff" || node.type === "fallback")) prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");
+      const hasHandoffPath = nodes.some((node) => node.type === "handoff" || node.type === "fallback");
+      if (!hasHandoffPath) prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");
+      // BAI-844: рамки ответов должны безопасно закрывать red-team-категории.
+      // Если источник ответа не обязателен, бот может ответить без доказательств —
+      // тогда обязательна передача оператору как страховка.
+      const ungroundedNode = aiNodes.find((node) => normalizeAgentPolicy(node.config).requireSource === false);
+      if (ungroundedNode && !hasHandoffPath) {
+        prerequisiteViolations.push("AI-ответ без обязательного источника разрешён только вместе с передачей оператору.");
+      }
     }
     if (prerequisiteViolations.length) {
       return publishFailure(tenantId, scenarioId, "bot_publish_prerequisites_invalid", invalidEnvelope("publishBotScenario", "bot_publish_prerequisites_invalid", prerequisiteViolations.join(" "), { scenarioId, violations: prerequisiteViolations }));
@@ -532,16 +549,17 @@ export class AutomationService {
       versionState: "published"
     };
 
+    // Публикация материализует черновик следующей версии (если он был) и всегда очищает его.
     const scenario: BotScenario = {
       activeVersionId: String(result.runtimeVersion),
-      basePrompt: normalizeScenarioBasePrompt(request.basePrompt ?? existing.basePrompt),
-      channels: clone(request.channels ?? existing.channels),
+      basePrompt: normalizeScenarioBasePrompt(request.basePrompt ?? draftOverlay?.basePrompt ?? existing.basePrompt),
+      channels: clone(request.channels ?? draftOverlay?.channels ?? existing.channels),
       enabled: true,
-      flowEdges: clone(validation.payload?.flowEdges ?? existing.flowEdges),
-      flowNodes: clone(validation.payload?.flowNodes ?? existing.flowNodes),
+      flowEdges: clone(validation.payload?.flowEdges ?? draftOverlay?.flowEdges ?? existing.flowEdges),
+      flowNodes: clone(validation.payload?.flowNodes ?? draftOverlay?.flowNodes ?? existing.flowNodes),
       id: scenarioId,
-      name: String(validation.payload?.name ?? existing.name),
-      priority: normalizeScenarioPriority(request.priority ?? existing.priority),
+      name: String(validation.payload?.name ?? draftOverlay?.name ?? existing.name),
+      priority: normalizeScenarioPriority(request.priority ?? draftOverlay?.priority ?? existing.priority),
       schemaVersion: "bot-flow/v1",
       status: "published",
       tenantId,
@@ -719,6 +737,269 @@ export class AutomationService {
     });
   }
 
+  async createBotSandboxSession(
+    scenarioId: string,
+    payload: { channel?: string; locale?: string; mode?: string } | null | undefined,
+    context: AutomationRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("createBotSandboxSession");
+    try {
+      const session = await this.sandboxService().createSession({
+        actor: actionActor(context),
+        channel: payload?.channel,
+        locale: payload?.locale,
+        mode: payload?.mode,
+        scenarioId,
+        tenantId
+      });
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "createBotSandboxSession",
+        traceId: actionTraceId(context, "createBotSandboxSession"),
+        meta: apiMeta({ scenarioId, tenantId }),
+        data: { session }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("createBotSandboxSession", error);
+    }
+  }
+
+  async fetchBotSandboxSession(scenarioId: string, sessionId: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("fetchBotSandboxSession");
+    try {
+      const session = await this.sandboxService().getSession(tenantId, scenarioId, sessionId);
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "fetchBotSandboxSession",
+        traceId: actionTraceId(context, "fetchBotSandboxSession"),
+        meta: apiMeta({ scenarioId, tenantId }),
+        data: { session }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("fetchBotSandboxSession", error);
+    }
+  }
+
+  async deleteBotSandboxSession(scenarioId: string, sessionId: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("deleteBotSandboxSession");
+    try {
+      await this.sandboxService().deleteSession(tenantId, scenarioId, sessionId);
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "deleteBotSandboxSession",
+        traceId: actionTraceId(context, "deleteBotSandboxSession"),
+        meta: apiMeta({ scenarioId, tenantId }),
+        data: { deleted: true, sessionId }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("deleteBotSandboxSession", error);
+    }
+  }
+
+  async postBotSandboxMessage(
+    scenarioId: string,
+    sessionId: string,
+    payload: { messageId?: string; quickReply?: string; text?: string; value?: unknown; webhooksEnabled?: boolean } | null | undefined,
+    context: AutomationRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("postBotSandboxMessage");
+    try {
+      const { session, turn } = await this.sandboxService().postMessage({
+        featureFlags: await this.botRuntimeFeatureFlags(),
+        messageId: payload?.messageId,
+        quickReply: payload?.quickReply,
+        scenarioId,
+        sessionId,
+        tenantId,
+        text: String(payload?.text ?? ""),
+        traceId: actionTraceId(context, "postBotSandboxMessage"),
+        value: payload?.value,
+        webhooksEnabled: payload?.webhooksEnabled
+      });
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "postBotSandboxMessage",
+        traceId: actionTraceId(context, "postBotSandboxMessage"),
+        meta: apiMeta({ scenarioId, sessionId, tenantId }),
+        data: { session, turn }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("postBotSandboxMessage", error);
+    }
+  }
+
+  async saveBotSandboxRegression(
+    scenarioId: string,
+    sessionId: string,
+    payload: { name?: string } | null | undefined,
+    context: AutomationRequestContext = {}
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("saveBotSandboxRegression");
+    try {
+      const testRun = await this.sandboxService().saveRegression({
+        actor: actionActor(context),
+        name: payload?.name,
+        scenarioId,
+        sessionId,
+        tenantId
+      });
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "saveBotSandboxRegression",
+        traceId: actionTraceId(context, "saveBotSandboxRegression"),
+        meta: apiMeta({ scenarioId, tenantId }),
+        data: { testRun }
+      });
+    } catch (error) {
+      return sandboxErrorEnvelope("saveBotSandboxRegression", error);
+    }
+  }
+
+  /** BAI-812: правки published-сценария сохраняются как черновик следующей версии, не трогая runtime. */
+  private async saveScenarioDraftOverlay(
+    existing: BotScenario,
+    request: ScenarioDraftPayload,
+    context: AutomationRequestContext
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const requestedStatus = normalizeBotScenarioStatus(request.status, existing.status);
+    if (requestedStatus !== existing.status) {
+      return conflictEnvelope("updateBotScenario", "bot_scenario_status_transition_required", "Use the dedicated scenario status action.", { scenarioId: existing.id, status: requestedStatus });
+    }
+    const previous = existing.draft ?? { updatedAt: new Date().toISOString() };
+    const draft: NonNullable<BotScenario["draft"]> = {
+      ...previous,
+      ...(request.name !== undefined ? { name: String(request.name) } : {}),
+      ...(request.channels !== undefined ? { channels: clone(request.channels) } : {}),
+      ...(request.basePrompt !== undefined ? { basePrompt: normalizeScenarioBasePrompt(request.basePrompt) } : {}),
+      ...(request.priority !== undefined ? { priority: normalizeScenarioPriority(request.priority) } : {}),
+      ...(request.flowNodes !== undefined ? { flowNodes: clone(request.flowNodes) } : {}),
+      ...(request.flowEdges !== undefined ? { flowEdges: clone(request.flowEdges) } : {}),
+      ...(request.sourceBindings !== undefined ? { sourceBindings: normalizeScenarioSourceBindings(request.sourceBindings) } : {}),
+      ...(request.triggerRules !== undefined || request.triggerPhrases !== undefined
+        ? { triggerRules: resolveScenarioTriggerRules(request, existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules()) }
+        : {}),
+      updatedAt: new Date().toISOString(),
+      updatedBy: actionActor(context)
+    };
+    const scenario: BotScenario = { ...existing, draft, updatedAt: new Date().toISOString() };
+    this.upsertScenario(scenario);
+    await this.automationRepository.saveBotScenario(scenario);
+    const auditId = makeAuditId("bot_draft");
+    await this.recordScenarioActionAudit({
+      action: "bot.draft.update",
+      afterStatus: existing.status,
+      auditId,
+      beforeStatus: existing.status,
+      context,
+      idempotencyKey: actionIdempotencyKey(context),
+      reason: actionReason(context, "draft_updated"),
+      scenarioId: existing.id,
+      tenantId: existing.tenantId
+    });
+    const saved = this.scenarios.find((item) => item.id === existing.id) ?? scenario;
+    return createEnvelope({
+      service: AUTOMATION_SERVICE,
+      operation: "updateBotScenario",
+      traceId: actionTraceId(context, "updateBotScenario"),
+      meta: apiMeta({ tenantId: existing.tenantId }),
+      data: { auditId, draftPending: true, scenario: clone(saved) }
+    });
+  }
+
+  async discardBotScenarioDraft(scenarioId: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("discardBotScenarioDraft");
+    const existing = this.scenarios.find((item) => item.id === scenarioId) ?? await this.automationRepository.findBotScenario(scenarioId);
+    if (!existing || scenarioTenantId(existing) !== tenantId) {
+      return invalidEnvelope("discardBotScenarioDraft", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId });
+    }
+    if (!existing.draft) {
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "discardBotScenarioDraft",
+        traceId: actionTraceId(context, "discardBotScenarioDraft"),
+        meta: apiMeta({ tenantId }),
+        data: { discarded: false, scenario: clone(existing) }
+      });
+    }
+    const { draft: _draft, ...withoutDraft } = existing;
+    const scenario: BotScenario = { ...withoutDraft, updatedAt: new Date().toISOString() };
+    this.upsertScenario(scenario);
+    await this.automationRepository.saveBotScenario(scenario);
+    const auditId = makeAuditId("bot_draft");
+    await this.recordScenarioActionAudit({
+      action: "bot.draft.discard",
+      afterStatus: scenario.status,
+      auditId,
+      beforeStatus: existing.status,
+      context,
+      reason: actionReason(context, "draft_discarded"),
+      scenarioId,
+      tenantId
+    });
+    return createEnvelope({
+      service: AUTOMATION_SERVICE,
+      operation: "discardBotScenarioDraft",
+      traceId: actionTraceId(context, "discardBotScenarioDraft"),
+      meta: apiMeta({ tenantId }),
+      data: { auditId, discarded: true, scenario: clone(scenario) }
+    });
+  }
+
+  /** BAI-813: откат опубликованного сценария к более ранней опубликованной версии. */
+  async rollbackBotScenarioToVersion(scenarioId: string, versionId: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("rollbackBotScenario");
+    if (!String(versionId ?? "").trim()) {
+      return invalidEnvelope("rollbackBotScenario", "bot_version_id_required", "Version id is required.", { scenarioId });
+    }
+    try {
+      const scenario = await this.rollbackBotRuntimeVersion(tenantId, scenarioId, versionId);
+      this.upsertScenario(scenario);
+      const auditId = makeAuditId("bot_rollback");
+      await this.recordScenarioActionAudit({
+        action: "bot.rollback",
+        afterStatus: scenario.status,
+        auditId,
+        beforeStatus: "published",
+        context,
+        idempotencyKey: actionIdempotencyKey(context),
+        reason: actionReason(context, `rollback_to_${versionId}`),
+        scenarioId,
+        tenantId
+      });
+      return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation: "rollbackBotScenario",
+        traceId: actionTraceId(context, "rollbackBotScenario"),
+        meta: apiMeta({ tenantId, versionId }),
+        data: { auditId, scenario: clone(scenario), versionId }
+      });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "bot_rollback_failed";
+      return invalidEnvelope("rollbackBotScenario", code === "bot_runtime_rollback_version_not_found" ? code : "bot_rollback_failed",
+        code === "bot_runtime_rollback_version_not_found"
+          ? "Версия для отката не найдена или не опубликована."
+          : "Не удалось выполнить откат версии.",
+        { scenarioId, versionId });
+    }
+  }
+
+  private sandboxService(): BotSandboxService {
+    return new BotSandboxService(this.automationRepository);
+  }
+
+  private async botRuntimeFeatureFlags(): Promise<FeatureFlag[] | undefined> {
+    return String(process.env.BOT_AI_AGENTS_PILOT_ENFORCE ?? "").trim() === "1"
+      ? this.platformRepository.listFeatureFlagsAsync()
+      : undefined;
+  }
+
   async recordBotAiFeedback(
     payload: RecordBotAiFeedbackPayload | null | undefined,
     context: AutomationRequestContext = {}
@@ -777,6 +1058,39 @@ export class AutomationService {
         knowledgeMutated: false,
         reviewRequired: persisted.reviewRequired
       }
+    });
+  }
+
+  /** BAI-852: очередь ревью — что оператор отметил «не помогло»/«неверный источник». */
+  async listBotAiFeedback(context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("listBotAiFeedback");
+    const feedback = await Promise.resolve(this.botFeedbackRepository.listFeedback({ tenantId }));
+    return createEnvelope({
+      service: AUTOMATION_SERVICE,
+      operation: "listBotAiFeedback",
+      traceId: automationTraceId("listBotAiFeedback"),
+      meta: apiMeta({ tenantId }),
+      data: { feedback: clone(feedback) }
+    });
+  }
+
+  async resolveBotAiFeedback(feedbackId: string, action: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("resolveBotAiFeedback");
+    if (!this.botFeedbackRepository.resolveFeedback) {
+      return invalidEnvelope("resolveBotAiFeedback", "bot_feedback_resolve_unsupported", "Feedback review is not available in this runtime.", {});
+    }
+    const resolved = await Promise.resolve(this.botFeedbackRepository.resolveFeedback(tenantId, String(feedbackId ?? "").trim(), String(action ?? "reviewed")));
+    if (!resolved) {
+      return invalidEnvelope("resolveBotAiFeedback", "bot_feedback_not_found", "Feedback item was not found.", { feedbackId });
+    }
+    return createEnvelope({
+      service: AUTOMATION_SERVICE,
+      operation: "resolveBotAiFeedback",
+      traceId: automationTraceId("resolveBotAiFeedback"),
+      meta: apiMeta({ tenantId }),
+      data: { feedback: clone(resolved) }
     });
   }
 
@@ -1035,6 +1349,22 @@ function conflictEnvelope(operation: string, code: string, message: string, data
     data,
     error: { code, message }
   });
+}
+
+const SANDBOX_ERROR_MESSAGES: Record<string, string> = {
+  bot_sandbox_budget_exhausted: "Исчерпан лимит токенов на тестирование в этом месяце. Обратитесь к администратору сервиса, чтобы поднять лимит.",
+  bot_sandbox_channel_unsupported: "Выбранный канал не подключён к сценарию.",
+  bot_sandbox_message_required: "Введите сообщение, чтобы отправить его боту.",
+  bot_sandbox_published_version_not_found: "У сценария нет опубликованной версии — протестируйте черновик.",
+  bot_sandbox_scenario_not_found: "Сценарий не найден.",
+  bot_sandbox_session_empty: "В тестовом диалоге ещё нет реплик — сначала отправьте сообщение боту.",
+  bot_sandbox_session_not_found: "Тестовая сессия не найдена или истекла. Начните тест заново."
+};
+
+function sandboxErrorEnvelope(operation: string, error: unknown): BackendEnvelope<Record<string, unknown>> {
+  const code = error instanceof Error ? error.message : "bot_sandbox_failed";
+  const known = SANDBOX_ERROR_MESSAGES[code];
+  return invalidEnvelope(operation, known ? code : "bot_sandbox_failed", known ?? "Не удалось выполнить операцию тест-чата. Попробуйте ещё раз.", {});
 }
 
 function invalidEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
@@ -1541,3 +1871,4 @@ function publishFailure<T extends BackendEnvelope<Record<string, unknown>>>(
 function tenantRequiredEnvelope(operation: string): BackendEnvelope<Record<string, unknown>> {
   return invalidEnvelope(operation, "tenant_context_required", "Tenant context is required for automation runtime operations.", {});
 }
+

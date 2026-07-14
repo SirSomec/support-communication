@@ -4,11 +4,28 @@ import { KnowledgeRetrievalService } from "./knowledge-retrieval.service.js";
 
 export class KnowledgeRetrievalApiService {
   constructor(private readonly retrieval = new KnowledgeRetrievalService(), private readonly automation = AutomationRepository.default()) {}
-  async retrieveScenario(input: { query?: string; scenarioId?: string; tenantId: string; tokenBudget?: number }): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const scenario = input.scenarioId ? await this.automation.findBotScenario(input.scenarioId) : undefined;
-    if (!scenario || scenario.tenantId !== input.tenantId || scenario.status === "archived") return result("invalid", input.tenantId, { passages: [], tokenBudget: 0, tokensUsed: 0 }, "knowledge_retrieval_scenario_not_found");
+  async retrieveScenario(input: { query?: string; scenarioId?: string; sourceIds?: string[]; tenantId: string; tokenBudget?: number }): Promise<BackendEnvelope<Record<string, unknown>>> {
     const query = String(input.query ?? "").trim();
     if (!query) return result("invalid", input.tenantId, { passages: [], tokenBudget: 0, tokensUsed: 0 }, "knowledge_retrieval_query_required");
+    // BAI-825: раздел «Знания» проверяет поиск по явным источникам без сценария;
+    // eligibility (ready + approved + tenant) всё равно применяет retrieval-сервис.
+    const explicitSourceIds = Array.isArray(input.sourceIds)
+      ? input.sourceIds.map((id) => String(id ?? "").trim()).filter(Boolean)
+      : [];
+    if (explicitSourceIds.length) {
+      return result(
+        "ok",
+        input.tenantId,
+        (await this.retrieval.retrieve({
+          query,
+          sourceBindings: explicitSourceIds.map((sourceId) => ({ sourceId })),
+          tenantId: input.tenantId,
+          tokenBudget: input.tokenBudget
+        })) as unknown as Record<string, unknown>
+      );
+    }
+    const scenario = input.scenarioId ? await this.automation.findBotScenario(input.scenarioId) : undefined;
+    if (!scenario || scenario.tenantId !== input.tenantId || scenario.status === "archived") return result("invalid", input.tenantId, { passages: [], tokenBudget: 0, tokensUsed: 0 }, "knowledge_retrieval_scenario_not_found");
     return result(
       "ok",
       input.tenantId,

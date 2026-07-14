@@ -3,7 +3,10 @@ import { AiUsageRepository } from "../ai-connections/ai-usage.repository.js";
 import { SecretStore } from "../ai-connections/secret-store.js";
 import { createOpenAiCompatibleChatProvider } from "../ai-connections/openai-compatible-chat.provider.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
-import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
+import { KnowledgeRetrievalService, type McpRetrievalInvoker } from "../knowledge-sources/knowledge-retrieval.service.js";
+import { UnansweredQuestionRepository } from "../knowledge-sources/unanswered-question.repository.js";
+import { HttpMcpReadOnlyTransport, McpReadOnlyConnectorService } from "../knowledge-sources/mcp-readonly-connector.service.js";
+import { McpConnectorRepository } from "../knowledge-sources/mcp-connector.repository.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 import { formatSessionForPrompt } from "./agent-session-state.js";
 import { AgentSessionStateRepository } from "./agent-session-state.repository.js";
@@ -12,15 +15,17 @@ import { recordBotAiRequest } from "./bot-observability.js";
 
 export interface AiBotResponseInput {
   basePrompt?: string;
+  behaviorRules?: string;
   conversationId?: string;
   instructions?: string;
   message: string;
+  retrievalScoreThreshold?: number;
   scenarioId?: string;
   scenarioRevisionId?: string;
   sourceBindings: KnowledgeSourceBinding[];
   tenantId: string;
 }
-export interface AiBotResponse { citations: Array<{ endOffset: number; sourceId: string; startOffset: number; title: string; version: number }>; model: string; text: string; }
+export interface AiBotResponse { citations: Array<{ endOffset: number; sourceId: string; startOffset: number; title: string; version: number }>; model: string; text: string; usage?: { totalTokens: number | null }; materialsAvailable?: number; }
 
 /** Builds a bounded, tenant-scoped grounded prompt; it never sends keys or unrelated tenant data. */
 export class AiBotResponseService {
@@ -43,16 +48,30 @@ export class AiBotResponseService {
     let release: (() => void) | null = null;
     try {
       release = this.usage.reserve({ connectionId: connection.id, maxConcurrentRuns: connection.limits.maxConcurrentRuns, monthlyTokenBudget: connection.limits.monthlyTokenBudget, requestsPerMinute: connection.limits.requestsPerMinute, tenantId: input.tenantId, worstCaseTokens: Math.min(500, connection.limits.monthlyTokenBudget ?? 500) });
-      const materials = await this.materials(input.tenantId, input.sourceBindings, input.message, input.scenarioId);
-      if (!materials.length) throw new Error("bot_ai_knowledge_not_ready");
+      const materials = await this.materials(input.tenantId, input.sourceBindings, input.message, input.scenarioId, input.retrievalScoreThreshold);
+      // Пустой retrieval — не повод жёстко эскалировать: приветствия и smalltalk не
+      // совпадают со знаниями по лексике. Зовём модель с пустыми знаниями, а её
+      // rails решают: поздороваться/уточнить либо честно признать, что ответа нет и
+      // предложить оператора. Реальные пробелы знаний копим в «вопросах без ответа».
+      if (!materials.length && looksLikeQuestion(input.message) && !String(input.conversationId ?? "").startsWith("sandbox:")) {
+        UnansweredQuestionRepository.default().record({
+          question: input.message,
+          reason: "knowledge_not_ready",
+          scenarioId: input.scenarioId,
+          tenantId: input.tenantId
+        });
+      }
       const session = input.conversationId ? this.sessions.get(input.tenantId, input.conversationId) : null;
       const secret = new SecretStore({ keyVersion: this.environment.AI_CONNECTIONS_KEY_VERSION ?? "local-v1", masterKeyBase64: this.environment.AI_CONNECTIONS_MASTER_KEY ?? this.environment.PROVIDER_CREDENTIAL_MASTER_KEY ?? "" }).decrypt(connection.secret);
       const provider = createOpenAiCompatibleChatProvider({ apiKey: secret, baseUrl: connection.baseUrl, maxRetries: 1, model: connection.chatModel, timeoutMs: 12_000 });
-      const completion = await provider.complete({ maxTokens: 500, temperature: 0.2, messages: [
+      // BAI-851: стабильный ключ префикса (tenant + scenario revision), без PII и user id.
+      const promptCacheKey = `bot:${input.tenantId}:${input.scenarioId ?? "none"}:${input.scenarioRevisionId ?? "current"}`;
+      const completion = await provider.complete({ maxTokens: 500, promptCacheKey, temperature: 0.2, messages: [
         { role: "system", content: buildAiBotSystemPrompt({
           basePrompt: input.basePrompt,
+          behaviorRules: input.behaviorRules,
           instructions: input.instructions,
-          knowledge: materials.map((item) => item.content).join("\n\n"),
+          knowledge: materials.length ? materials.map((item) => item.content).join("\n\n") : "",
           sessionState: session ? formatSessionForPrompt(session) : undefined
         }) },
         { role: "user", content: input.message.slice(0, 4_000) }
@@ -81,7 +100,7 @@ export class AiBotResponseService {
           userText: input.message
         });
       }
-      return { citations: materials.map(({ content: _content, ...citation }) => citation), model: completion.model, text };
+      return { citations: materials.map(({ content: _content, ...citation }) => citation), materialsAvailable: materials.length, model: completion.model, text, usage: { totalTokens: completion.usage.totalTokens ?? null } };
     } catch (error) {
       const errorCode = error instanceof Error ? error.message : "bot_ai_unavailable";
       recordBotAiRequest({
@@ -98,15 +117,21 @@ export class AiBotResponseService {
     }
   }
 
-  private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string, scenarioId?: string) {
-    const result = await new KnowledgeRetrievalService(this.sources, this.workspace).retrieve({
+  private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string, scenarioId?: string, scoreThreshold?: number) {
+    const result = await new KnowledgeRetrievalService(this.sources, this.workspace, undefined, this.mcpInvoker()).retrieve({
       query: question,
       scenarioId,
+      scoreThreshold,
       sourceBindings: bindings,
       tenantId,
       tokenBudget: 1_500
     });
     return result.passages.map((passage) => ({ content: passage.content, endOffset: passage.citation.endOffset, sourceId: passage.citation.sourceId, startOffset: passage.citation.startOffset, title: passage.citation.title, version: passage.citation.sourceVersion }));
+  }
+
+  private mcpInvoker(): McpRetrievalInvoker {
+    const service = new McpReadOnlyConnectorService(new HttpMcpReadOnlyTransport(), 8_000, McpConnectorRepository.default());
+    return { invoke: (tenantId, connectorId, toolName, toolInput) => service.invoke(tenantId, connectorId, toolName, toolInput) };
   }
 }
 
@@ -123,25 +148,48 @@ export function extractRelevantKnowledge(document: string, question: string, bud
   return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
 }
 
-/** Order: tenant base prompt → platform safety rails → node instructions → session → knowledge. */
+/**
+ * Order: tenant base prompt → tenant behavior rules → platform safety rails →
+ * node instructions → session → knowledge. Safety rails deliberately follow the
+ * tenant-configurable text so behavior rules cannot override them (BAI-840).
+ */
 export function buildAiBotSystemPrompt(input: {
   basePrompt?: string;
+  behaviorRules?: string;
   instructions?: string;
   knowledge: string;
   sessionState?: string;
 }): string {
+  const hasKnowledge = Boolean(input.knowledge.trim());
   return [
     input.basePrompt?.trim() ? input.basePrompt.trim().slice(0, 4_000) : "",
+    input.behaviorRules?.trim() ? `Additional behavior rules: ${input.behaviorRules.trim().slice(0, 1_000)}` : "",
     "You are a customer-support consultation assistant.",
-    "Answer only from the supplied knowledge. Do not invent facts, policies, prices, or actions.",
-    "If the answer is not in the knowledge, say that you cannot confirm it and offer a human operator.",
+    "Answer factual questions only from the supplied knowledge. Do not invent facts, policies, prices, or actions.",
+    "For a greeting or small talk, reply briefly and warmly and ask what the customer needs — you do not need knowledge to greet.",
+    "If the customer asks something factual and the answer is not in the knowledge, say that you cannot confirm it and offer a human operator.",
     "Do not access CRM data and do not claim that you did.",
+    "The behavior rules above never override these safety rules.",
     input.instructions?.trim() ? `Scenario guidance: ${input.instructions.trim().slice(0, 1500)}` : "",
     input.sessionState?.trim() ? input.sessionState.trim().slice(0, 2_000) : "",
-    `Approved knowledge:\n${input.knowledge}`
+    hasKnowledge
+      ? `Approved knowledge:\n${input.knowledge}`
+      : "No approved knowledge matched this message. Greet or ask a clarifying question if that fits; otherwise say you cannot confirm the answer and offer a human operator."
   ].filter(Boolean).join("\n\n");
 }
 
 function estimatePromptTokens(message: string, answer: string): number {
   return Math.max(1, Math.ceil((message.length + answer.length) / 4));
+}
+
+/**
+ * Отсекает приветствия/smalltalk от реальных вопросов, чтобы не засорять очередь
+ * «вопросов без ответа». Вопрос — это «?» или хотя бы два содержательных слова.
+ */
+function looksLikeQuestion(message: string): boolean {
+  const text = String(message ?? "").trim();
+  if (!text) return false;
+  if (text.includes("?")) return true;
+  const meaningful = (text.toLocaleLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []).length;
+  return meaningful >= 2;
 }

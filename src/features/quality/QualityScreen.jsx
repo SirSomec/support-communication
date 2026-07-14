@@ -7,7 +7,6 @@ import { dialogService } from "../../services/dialogService.js";
 import { qualityService } from "../../services/qualityService.js";
 import { ChannelBadge, MetricTile, Modal, ProductScreen, ScreenStateStrip, SectionTitle } from "../../ui.jsx";
 import { AiQualityWorkspace } from "./AiQualityWorkspace.jsx";
-import { KnowledgeBaseWorkspace } from "./KnowledgeBaseWorkspace.jsx";
 
 export function QualityScreen({ access, onBack, onToast, operator }) {
   const [loading, setLoading] = useState(true);
@@ -319,9 +318,9 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
         />
       </section>
 
-      <section className="work-panel">
-        <SectionTitle title="База знаний" action="редактор и публикация статей" />
-        <KnowledgeBaseWorkspace articles={knowledgeArticles} canWrite={access.canManageKnowledge} onToast={onToast} operator={operator} />
+      <section className="work-panel quality-knowledge-pointer">
+        <SectionTitle title="База знаний" action="переехала в раздел «Знания»" />
+        <p>Статьи, документы, страницы и MCP-подключения теперь живут в отдельном разделе «Знания» вместе с источниками для ботов и вопросами без ответа.</p>
       </section>
 
       {audit ? (

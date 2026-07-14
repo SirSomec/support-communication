@@ -15,6 +15,9 @@ export interface BotAiFeedbackRecord {
   /** Always false — feedback never mutates knowledge without a separate review. */
   knowledgeMutated: false;
   outcome: BotAiFeedbackOutcome;
+  /** BAI-852: how a reviewer resolved the item; null until reviewed. */
+  resolvedAction?: string | null;
+  resolvedAt?: string | null;
   reviewRequired: boolean;
   scenarioId: string | null;
   tenantId: string;
@@ -30,6 +33,7 @@ type MaybePromise<T> = T | Promise<T>;
 export interface BotFeedbackRepositoryPort {
   listFeedback(filter?: BotAiFeedbackFilter): MaybePromise<BotAiFeedbackRecord[]>;
   saveFeedback(record: BotAiFeedbackRecord): MaybePromise<BotAiFeedbackRecord>;
+  resolveFeedback?(tenantId: string, feedbackId: string, action: string): MaybePromise<BotAiFeedbackRecord | undefined>;
 }
 
 const OUTCOMES = new Set<BotAiFeedbackOutcome>(["helped", "not_helped", "wrong_source"]);
@@ -91,6 +95,19 @@ export class BotFeedbackRepository implements BotFeedbackRepositoryPort {
     return clone(persisted);
   }
 
+  resolveFeedback(tenantId: string, feedbackId: string, action: string): BotAiFeedbackRecord | undefined {
+    const tenant = String(tenantId ?? "").trim();
+    const id = String(feedbackId ?? "").trim();
+    let resolved: BotAiFeedbackRecord | undefined;
+    this.records = this.records.map((item) => {
+      if (item.tenantId !== tenant || item.feedbackId !== id) return item;
+      resolved = { ...item, resolvedAction: String(action ?? "reviewed").trim().slice(0, 80) || "reviewed", resolvedAt: new Date().toISOString(), reviewRequired: false };
+      return resolved;
+    });
+    if (resolved) this.persist();
+    return resolved ? clone(resolved) : undefined;
+  }
+
   private persist(): void {
     if (this.mode !== "file") return;
     mkdirSync(dirname(this.filePath), { recursive: true });
@@ -126,7 +143,9 @@ function normalizeFeedback(record: BotAiFeedbackRecord): BotAiFeedbackRecord {
     idempotencyKey: String(record.idempotencyKey ?? "").trim(),
     knowledgeMutated: false,
     outcome: isBotAiFeedbackOutcome(record.outcome) ? record.outcome : "not_helped",
-    reviewRequired: Boolean(record.reviewRequired) || record.outcome === "wrong_source" || record.outcome === "not_helped",
+    resolvedAction: record.resolvedAction == null ? null : String(record.resolvedAction).trim() || null,
+    resolvedAt: record.resolvedAt == null ? null : String(record.resolvedAt).trim() || null,
+    reviewRequired: record.resolvedAt ? false : (Boolean(record.reviewRequired) || record.outcome === "wrong_source" || record.outcome === "not_helped"),
     scenarioId: record.scenarioId == null ? null : String(record.scenarioId).trim() || null,
     tenantId: String(record.tenantId ?? "").trim()
   };

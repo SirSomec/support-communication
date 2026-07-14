@@ -66,6 +66,7 @@ describe("phase 0 shared backend foundation", () => {
     assert.equal(config.NOTIFICATION_REPOSITORY, "json");
     assert.equal(config.OPERATIONS_REPOSITORY, "json");
     assert.equal(config.PLATFORM_REPOSITORY, "json");
+    assert.equal(config.PRESENCE_REPOSITORY, "json");
     assert.equal(config.QUALITY_REPOSITORY, "json");
     assert.equal(config.REPORT_REPOSITORY, "json");
     assert.equal(config.ROUTING_REPOSITORY, "json");
@@ -77,6 +78,7 @@ describe("phase 0 shared backend foundation", () => {
     assert.equal(loadBackendConfig(createTestEnv({ NOTIFICATION_REPOSITORY: "prisma" })).NOTIFICATION_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ OPERATIONS_REPOSITORY: "prisma" })).OPERATIONS_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ PLATFORM_REPOSITORY: "prisma" })).PLATFORM_REPOSITORY, "prisma");
+    assert.equal(loadBackendConfig(createTestEnv({ PRESENCE_REPOSITORY: "prisma" })).PRESENCE_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ QUALITY_REPOSITORY: "prisma" })).QUALITY_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ REPORT_REPOSITORY: "prisma" })).REPORT_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ ROUTING_REPOSITORY: "prisma" })).ROUTING_REPOSITORY, "prisma");
@@ -97,6 +99,7 @@ describe("phase 0 shared backend foundation", () => {
       NOTIFICATION_REPOSITORY: "prisma",
       OPERATIONS_REPOSITORY: "prisma",
       PLATFORM_REPOSITORY: "prisma",
+      PRESENCE_REPOSITORY: "prisma",
       QUALITY_REPOSITORY: "prisma",
       PUBLIC_API_KEY_SECRET: "prod-public-api-secret",
       REPORT_REPOSITORY: "prisma",
@@ -146,6 +149,7 @@ describe("phase 0 shared backend foundation", () => {
       OPERATIONS_REPOSITORY: "prisma",
       OPERATIONS_STORE_FILE: ".runtime/operations-store.json",
       PLATFORM_REPOSITORY: "prisma",
+      PRESENCE_REPOSITORY: "prisma",
       QUALITY_REPOSITORY: "prisma",
       PLATFORM_STORE_FILE: ".runtime/platform-store.json",
       PUBLIC_API_KEY_SECRET: "production-like-public-api-secret",
@@ -189,6 +193,7 @@ describe("phase 0 shared backend foundation", () => {
       NOTIFICATION_REPOSITORY: "prisma",
       OPERATIONS_REPOSITORY: "prisma",
       PLATFORM_REPOSITORY: "prisma",
+      PRESENCE_REPOSITORY: "prisma",
       QUALITY_REPOSITORY: "prisma",
       PUBLIC_API_KEY_SECRET: "staging-public-api-secret",
       REPORT_REPOSITORY: "prisma",

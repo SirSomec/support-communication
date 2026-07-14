@@ -1,16 +1,44 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Copy, FileText, Lock, Plus, ShieldCheck, Smartphone } from "lucide-react";
 import { maskPhone, resolutionOutcomeLabels, isRepeatAppeal } from "../../app/dialogModel.js";
+import { mapApiConversationCollection } from "../../app/conversationApiMapper.js";
+import { dialogService } from "../../services/dialogService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
+import {
+  buildClientDialogHistory,
+  clientHistoryDefaultFilters,
+  mergeClientConversations
+} from "./clientDialogHistoryModel.js";
+import { ClientDialogsListModal, ClientDialogTranscriptModal } from "./ClientHistoryModals.jsx";
 import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 
-export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic, setDraft, templates, onClose, access, isClosed }) {
+export function CustomerPanel({
+  conversation,
+  topic,
+  topicOptions = [],
+  onTopic,
+  setDraft,
+  templates,
+  onClose,
+  access,
+  isClosed,
+  allConversations = [],
+  onConversationSelect,
+  onEnsureConversationLoaded
+}) {
   const [resolutionOutcome, setResolutionOutcome] = useState("resolved");
   const [previewArticle, setPreviewArticle] = useState(null);
   const channelTemplates = templates.filter((template) => sameValue(template.channel, conversation.channel));
   const recommendedTemplates = channelTemplates.length ? channelTemplates : templates;
   const [knowledgeArticles, setKnowledgeArticles] = useState([]);
   const recommendedArticles = useMemo(() => rankArticles(knowledgeArticles, conversation, topic), [conversation, knowledgeArticles, topic]);
+  const [historyView, setHistoryView] = useState(null);
+  const [historyFilters, setHistoryFilters] = useState(clientHistoryDefaultFilters);
+  const [historyExtras, setHistoryExtras] = useState([]);
+  const [historyFetchState, setHistoryFetchState] = useState({ error: "", loading: false });
+  const [historyNavigating, setHistoryNavigating] = useState(false);
+  const [historyNavigateError, setHistoryNavigateError] = useState("");
+  const historyFetchedForRef = useRef("");
 
   useEffect(() => {
     let ignore = false;
@@ -19,6 +47,105 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
     });
     return () => { ignore = true; };
   }, [conversation.id, conversation.channel, topic]);
+
+  useEffect(() => {
+    setHistoryView(null);
+    setHistoryFilters(clientHistoryDefaultFilters);
+    setHistoryExtras([]);
+    setHistoryFetchState({ error: "", loading: false });
+    setHistoryNavigating(false);
+    setHistoryNavigateError("");
+    historyFetchedForRef.current = "";
+  }, [conversation.id]);
+
+  // Зависимость — булев флаг, а не объект historyView: переключение
+  // список <-> переписка не должно прерывать запрос полного списка.
+  const historyViewOpen = Boolean(historyView);
+
+  useEffect(() => {
+    if (!historyViewOpen) {
+      return undefined;
+    }
+
+    const phone = String(conversation.phone ?? "").trim();
+    if (!phone || historyFetchedForRef.current === conversation.id) {
+      return undefined;
+    }
+
+    historyFetchedForRef.current = conversation.id;
+    let ignore = false;
+    setHistoryFetchState({ error: "", loading: true });
+    void dialogService.fetchDialogs({ page: 1, pageSize: 100, query: phone }).then((response) => {
+      if (ignore) {
+        return;
+      }
+
+      if (response.status === "ok") {
+        setHistoryExtras(mapApiConversationCollection(response.data));
+        setHistoryFetchState({ error: "", loading: false });
+      } else {
+        setHistoryFetchState({
+          error: response.error?.message ?? "Не удалось обновить полный список — показаны уже загруженные диалоги.",
+          loading: false
+        });
+      }
+    });
+
+    return () => {
+      ignore = true;
+      setHistoryFetchState((current) => (current.loading ? { error: "", loading: false } : current));
+    };
+  }, [conversation.id, conversation.phone, historyViewOpen]);
+
+  const historyEntries = useMemo(
+    () => buildClientDialogHistory({ conversation, conversations: mergeClientConversations(allConversations, historyExtras) }),
+    [allConversations, conversation, historyExtras]
+  );
+  const previousHistoryEntries = useMemo(
+    () => historyEntries.filter((entry) => !entry.isCurrent),
+    [historyEntries]
+  );
+  const transcriptEntry = historyView?.type === "transcript"
+    ? historyEntries.find((entry) => entry.key === historyView.entry.key) ?? historyView.entry
+    : null;
+
+  function openHistoryTranscript(entry, from) {
+    setHistoryNavigateError("");
+    setHistoryView({ entry, from, type: "transcript" });
+  }
+
+  // Обработчики закрытия мемоизированы: Modal перевешивает фокус-ловушку по ссылке
+  // onClose, и новая ссылка на каждый рендер сбрасывала бы фокус из поля поиска.
+  const closeHistoryView = useCallback(() => {
+    setHistoryNavigateError("");
+    setHistoryView(null);
+  }, []);
+
+  const closeHistoryTranscript = useCallback(() => {
+    setHistoryNavigateError("");
+    setHistoryView((current) => (current?.from === "list" ? { type: "list" } : null));
+  }, []);
+
+  async function handleHistoryNavigate(entry) {
+    if (!onConversationSelect || !entry.conversationId || historyNavigating) {
+      return;
+    }
+
+    const isLoaded = allConversations.some((item) => item.id === entry.conversationId);
+    if (!isLoaded && onEnsureConversationLoaded) {
+      setHistoryNavigating(true);
+      setHistoryNavigateError("");
+      const result = await onEnsureConversationLoaded(entry.conversationId);
+      setHistoryNavigating(false);
+      if (!result?.ok) {
+        setHistoryNavigateError("Не удалось открыть диалог — обновите список и попробуйте еще раз.");
+        return;
+      }
+    }
+
+    setHistoryView(null);
+    onConversationSelect(entry.conversationId);
+  }
 
   return (
     <aside className="customer-panel" aria-label="Карточка клиента">
@@ -44,15 +171,34 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
         </div>
       </PanelSection>
 
-      <PanelSection title="Предыдущие диалоги" action={<button>Смотреть все</button>}>
+      <PanelSection
+        title="Предыдущие диалоги"
+        action={
+          <button onClick={() => { setHistoryNavigateError(""); setHistoryView({ type: "list" }); }} type="button">
+            Смотреть все
+          </button>
+        }
+      >
         <div className="history-list">
-          {(conversation.previous.length ? conversation.previous : [["-", "Истории пока нет", "Новый"]]).map(([date, title, status]) => (
-            <div className="history-row" key={`${date}${title}`}>
-              <time>{date}</time>
-              <span>{title}</span>
-              <b>{status}</b>
+          {previousHistoryEntries.length ? previousHistoryEntries.slice(0, 3).map((entry) => (
+            <button
+              className="history-row history-row-button"
+              key={entry.key}
+              onClick={() => openHistoryTranscript(entry, "panel")}
+              title={entry.kind === "conversation" ? "Открыть переписку" : "Открыть детали архивной записи"}
+              type="button"
+            >
+              <time>{entry.dateLabel}</time>
+              <span>{entry.title}</span>
+              <b className={entry.isClosed ? "" : "open"}>{entry.statusLabel}</b>
+            </button>
+          )) : (
+            <div className="history-row">
+              <time>-</time>
+              <span>Истории пока нет</span>
+              <b>Новый</b>
             </div>
-          ))}
+          )}
         </div>
       </PanelSection>
 
@@ -122,6 +268,32 @@ export function CustomerPanel({ conversation, topic, topicOptions = [], onTopic,
           </p>
         ) : null}
       </PanelSection>
+      {historyView?.type === "list" ? (
+        <ClientDialogsListModal
+          canViewSensitive={access.canViewSensitive}
+          clientName={conversation.name}
+          clientPhone={conversation.phone}
+          entries={historyEntries}
+          fetchState={historyFetchState}
+          filters={historyFilters}
+          navigating={historyNavigating}
+          navigateError={historyNavigateError}
+          onClose={closeHistoryView}
+          onFiltersChange={(patch) => setHistoryFilters((current) => ({ ...current, ...patch }))}
+          onNavigate={handleHistoryNavigate}
+          onOpenTranscript={(entry) => openHistoryTranscript(entry, "list")}
+        />
+      ) : null}
+      {transcriptEntry ? (
+        <ClientDialogTranscriptModal
+          clientName={conversation.name}
+          entry={transcriptEntry}
+          navigating={historyNavigating}
+          navigateError={historyNavigateError}
+          onClose={closeHistoryTranscript}
+          onNavigate={handleHistoryNavigate}
+        />
+      ) : null}
       {previewArticle ? (
         <div className="article-preview-overlay" role="presentation" onMouseDown={() => setPreviewArticle(null)}>
           <section aria-modal="true" className="article-preview-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-label={`Статья: ${previewArticle.title}`}>

@@ -517,6 +517,7 @@ function App() {
               onCloseDialog={handleClose}
               onConversationSelect={handleConversationSelect}
               onDialogAction={handleDialogAction}
+              onEnsureConversationLoaded={loadConversationDetail}
               onAssignment={(payload) => applyConversationAssignment(selected.id, payload)}
               onFilter={setFilter}
               onQuery={setQuery}

@@ -37,6 +37,7 @@ export function mapApiConversation(input) {
     clientSince: nonEmptyString(input?.clientSince, DEFAULT_CLIENT_SINCE),
     tags: Array.isArray(input?.tags) ? input.tags.map((tag) => String(tag)) : [],
     previous: Array.isArray(input?.previous) ? input.previous : [],
+    ...(nonEmptyString(input?.updatedAt) ? { updatedAt: nonEmptyString(input.updatedAt) } : {}),
     ...(isRecord(input?.metadata) ? { metadata: { ...input.metadata } } : {}),
     ...(nonEmptyString(input?.queueId) ? { queueId: nonEmptyString(input.queueId) } : {}),
     ...(isRecord(input?.rescueState) ? { rescue: { ...input.rescueState } } : {}),

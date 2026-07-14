@@ -24,6 +24,7 @@ export function DialogWorkspace({
   onCloseDialog,
   onConversationSelect,
   onDialogAction,
+  onEnsureConversationLoaded,
   onAssignment,
   onFilter,
   onQuery,
@@ -111,6 +112,9 @@ export function DialogWorkspace({
         access={access}
         isClosed={isClosed}
         topicOptions={topicOptions}
+        allConversations={allConversations}
+        onConversationSelect={onConversationSelect}
+        onEnsureConversationLoaded={onEnsureConversationLoaded}
       /> : <aside className="customer-panel customer-panel-empty" aria-label="Карточка клиента не выбрана" />}
     </div>
   );

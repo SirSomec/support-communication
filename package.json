@@ -40,6 +40,7 @@
     "test:session-store": "node --test tests/session-store.test.js",
     "test:access": "node --test tests/access.test.js",
     "test:backend-api-smoke": "node --test tests/backend-api-smoke.test.js",
+    "test:client-dialog-history": "node --test tests/client-dialog-history-model.test.js",
     "test:conversation-inbox": "node --test tests/conversation-inbox.test.js",
     "test:presence-model": "node --test tests/presence-model.test.js",
     "test:pilot-smoke": "node --test tests/pilot-smoke.test.js",

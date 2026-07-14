@@ -44,14 +44,14 @@ export function useConversationSelection({
       return;
     }
 
-    const hasSelectedConversation = conversationItems.some((conversation) => conversation.id === selectedId);
+    const hasSelectedConversation = conversationItems.some((conversation) => matchesSelection(conversation, selectedId));
     if (!hasSelectedConversation) {
       setSelectedId(conversationItems[0].id);
     }
   }, [conversationItems, selectedId]);
 
   const selected = useMemo(
-    () => conversationItems.find((conversation) => conversation.id === selectedId) ?? conversationItems[0] ?? EMPTY_CONVERSATION,
+    () => conversationItems.find((conversation) => matchesSelection(conversation, selectedId)) ?? conversationItems[0] ?? EMPTY_CONVERSATION,
     [conversationItems, selectedId]
   );
   const pendingConversation = useMemo(
@@ -69,6 +69,13 @@ export function useConversationSelection({
         return;
       }
 
+      // Переключение внутри того же клиентского треда (например, на другое
+      // обращение клиента) не меняет окно чата — черновик терять не из-за чего.
+      if (matchesSelection(selected, nextConversationId)) {
+        setSelectedId(nextConversationId);
+        return;
+      }
+
       if (hasUnsentComposerContent) {
         setPendingConversationId(nextConversationId);
         return;
@@ -76,7 +83,7 @@ export function useConversationSelection({
 
       setSelectedId(nextConversationId);
     },
-    [hasUnsentComposerContent, selectedId]
+    [hasUnsentComposerContent, selected, selectedId]
   );
 
   const handleStayOnConversation = useCallback(() => {
@@ -104,4 +111,18 @@ export function useConversationSelection({
     selectedId,
     setSelectedId
   };
+}
+
+// Элемент списка может быть клиентским тредом: он представляет и себя (id
+// актуального обращения), и все связанные обращения из conversationIds.
+function matchesSelection(conversation, conversationId) {
+  if (!conversation || !conversationId) {
+    return false;
+  }
+
+  if (conversation.id === conversationId) {
+    return true;
+  }
+
+  return Array.isArray(conversation.conversationIds) && conversation.conversationIds.includes(conversationId);
 }

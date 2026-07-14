@@ -16,6 +16,7 @@ export function useDialogActions({
   selected,
   selectedStatus,
   selectedTopic,
+  sendTargetConversationId = "",
   setClosedIds,
   setConversationItems,
   setDraft,
@@ -191,7 +192,12 @@ export function useDialogActions({
       return;
     }
 
-    const result = await appendMessage(selected.id, {
+    // Ответ клиенту уходит в обращение выбранного канала; внутренний
+    // комментарий остается в актуальном обращении треда.
+    const targetConversationId = composeMode === "internal"
+      ? selected.id
+      : sendTargetConversationId || selected.id;
+    const result = await appendMessage(targetConversationId, {
       type: composeMode === "internal" ? "internal" : undefined,
       side: composeMode === "internal" ? undefined : "agent",
       text: draft.trim() || "Отправлено вложение",

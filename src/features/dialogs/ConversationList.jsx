@@ -28,7 +28,7 @@ export function ConversationList({
 }) {
   const [isFilterPanelOpen, setFilterPanelOpen] = useState(false);
   const channelOptions = useMemo(
-    () => Array.from(new Set(allConversations.map((conversation) => conversation.channel))),
+    () => Array.from(new Set(allConversations.flatMap((conversation) => conversation.channels ?? [conversation.channel]))),
     [allConversations]
   );
   const queueOptions = useMemo(
@@ -153,7 +153,16 @@ export function ConversationList({
                 <RepeatAppealBadge compact conversation={conversation} />
                 <time>{conversation.time}</time>
               </span>
-              <span className={`channel-chip ${conversation.channel.toLowerCase()}`}>{conversation.channel}</span>
+              <span className="queue-chip-row">
+                {(conversation.channels ?? [conversation.channel]).map((channel) => (
+                  <span className={`channel-chip ${String(channel).toLowerCase()}`} key={channel}>{channel}</span>
+                ))}
+                {(conversation.appealCount ?? 1) > 1 ? (
+                  <span className="appeal-count-chip" title={`Обращений клиента: ${conversation.appealCount}`}>
+                    {conversation.appealCount} обращ.
+                  </span>
+                ) : null}
+              </span>
               <StatusBadge tone={getStatusMeta(conversation.status).tone}>{statusLabels[conversation.status] ?? conversation.status}</StatusBadge>
               <span className="queue-preview">{conversation.preview}</span>
               <span className={`queue-meta ${conversation.slaTone}`}>

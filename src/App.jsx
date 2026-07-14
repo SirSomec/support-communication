@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAiSuggestions } from "./app/useAiSuggestions.js";
 import { useAppTransientState } from "./app/useAppTransientState.js";
 import { useComposerAttachments } from "./app/useComposerAttachments.js";
@@ -15,6 +15,13 @@ import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
 import { useWorkspaceRoute } from "./app/useWorkspaceRoute.js";
 import { useTenantSessionState } from "./app/useTenantSessionState.js";
 import { resolveNotificationActionAvailability, resolveNotificationNavigationTarget } from "./app/notificationNavigation.js";
+import {
+  findThreadByConversationId,
+  groupConversationsIntoClientThreads,
+  resolveDefaultReplyChannel,
+  resolveThreadChannelOptions,
+  resolveThreadSendTarget
+} from "./features/dialogs/clientThreadModel.js";
 import { DialogWorkspace } from "./features/dialogs/DialogWorkspace.jsx";
 import { DraftSwitchDialog, OutboundDialogLauncher, SaveTemplateDialog } from "./features/dialogs/DialogModals.jsx";
 import { Sidebar, TopBar } from "./features/app-shell/AppShell.jsx";
@@ -113,6 +120,12 @@ function App() {
     removeAttachment: handleRemoveAttachment,
     retryAttachment: handleRetryAttachment
   } = useComposerAttachments({ setToast });
+  // Диалог с клиентом один: обращения группируются в клиентские треды,
+  // список и окно чата работают с тредами, а не с отдельными обращениями.
+  const clientThreads = useMemo(
+    () => groupConversationsIntoClientThreads(conversationItems),
+    [conversationItems]
+  );
   const {
     filter,
     filtered,
@@ -122,7 +135,7 @@ function App() {
     setFilter,
     setQuery,
     updateQueueFilter
-  } = useDialogQueueFilters({ conversationItems, topics });
+  } = useDialogQueueFilters({ conversationItems: clientThreads, topics });
   const {
     handleConversationSelect,
     handleDiscardDraftAndSwitch,
@@ -132,33 +145,67 @@ function App() {
     selectedId,
     setSelectedId
   } = useConversationSelection({
-    conversationItems,
+    conversationItems: clientThreads,
     draft,
     hasAttachments,
     clearAttachments,
     setDraft,
     setToast,
   });
+  const activeConversationId = selected.id;
   const loadedDetailIdRef = useRef("");
   useEffect(() => {
-    if (!tenantSession.authenticated || !selectedId || selectedId === "empty") {
+    if (!tenantSession.authenticated || !activeConversationId || activeConversationId === "empty") {
       loadedDetailIdRef.current = "";
       return;
     }
 
-    const hasConversation = conversationItems.some((conversation) => conversation.id === selectedId);
+    const hasConversation = conversationItems.some((conversation) => conversation.id === activeConversationId);
     if (!hasConversation && inboxLoading) {
       return;
     }
 
-    if (loadedDetailIdRef.current === selectedId) {
+    if (loadedDetailIdRef.current === activeConversationId) {
       return;
     }
 
-    loadedDetailIdRef.current = selectedId;
-    void loadConversationDetail(selectedId, { force: true });
-  }, [conversationItems, inboxLoading, loadConversationDetail, selectedId, tenantSession.authenticated]);
+    loadedDetailIdRef.current = activeConversationId;
+    void loadConversationDetail(activeConversationId, { force: true });
+  }, [activeConversationId, conversationItems, inboxLoading, loadConversationDetail, tenantSession.authenticated]);
   const selectedTopic = topics[selected.id] ?? "";
+  // Канал ответа: оператор выбирает, куда писать клиенту; по умолчанию —
+  // канал последнего сообщения клиента в треде.
+  const replyChannelOptions = useMemo(() => resolveThreadChannelOptions(selected), [selected]);
+  const [replyChannel, setReplyChannel] = useState("");
+  const selectedThreadKey = selected.threadKey ?? selected.id;
+  useEffect(() => {
+    setReplyChannel(resolveDefaultReplyChannel(selected));
+    // Сброс только при смене клиента: обновления сообщений внутри треда
+    // не должны затирать выбранный оператором канал.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedThreadKey]);
+  useEffect(() => {
+    if (!replyChannelOptions.length) {
+      return;
+    }
+    const known = replyChannelOptions.some((option) => option.channel === replyChannel);
+    if (!known) {
+      setReplyChannel(resolveDefaultReplyChannel(selected));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replyChannel, replyChannelOptions]);
+  const [appealScrollTarget, setAppealScrollTarget] = useState(null);
+  const handleNavigateToAppeal = useCallback((conversationId) => {
+    if (!conversationId) {
+      return;
+    }
+
+    const targetThread = findThreadByConversationId(clientThreads, conversationId);
+    if (targetThread && targetThread.id !== activeConversationId) {
+      setSelectedId(conversationId);
+    }
+    setAppealScrollTarget({ conversationId, token: Date.now() });
+  }, [activeConversationId, clientThreads, setSelectedId]);
   const {
     closeSaveTemplateDialog,
     handleOpenTemplateSave,
@@ -206,6 +253,7 @@ function App() {
     selected,
     selectedStatus,
     selectedTopic,
+    sendTargetConversationId: resolveThreadSendTarget(selected, replyChannel),
     setClosedIds,
     setConversationItems,
     setDraft,
@@ -498,9 +546,11 @@ function App() {
             ) : null}
             <DialogWorkspace
               access={access}
+              appealScrollTarget={appealScrollTarget}
               assignees={assignees}
               aiSuggestions={visibleAiSuggestions}
               allConversations={conversationItems}
+              allThreads={clientThreads}
               attachments={attachments}
               closedIds={closedIds}
               composeMode={composeMode}
@@ -518,19 +568,23 @@ function App() {
               onConversationSelect={handleConversationSelect}
               onDialogAction={handleDialogAction}
               onEnsureConversationLoaded={loadConversationDetail}
+              onNavigateToAppeal={handleNavigateToAppeal}
               onAssignment={(payload) => applyConversationAssignment(selected.id, payload)}
               onFilter={setFilter}
               onQuery={setQuery}
               onQueueFilterChange={updateQueueFilter}
               onQueueFiltersReset={resetQueueFilters}
               onRefreshInbox={refreshInbox}
+              onReplyChannelChange={setReplyChannel}
               onSaveTemplate={handleOpenTemplateSave}
               onSend={handleSend}
               onStatusChange={handleStatusChange}
               onTopic={handleTopicChange}
               query={query}
               queueFilters={queueFilters}
-              selectedId={selectedId}
+              replyChannel={replyChannel}
+              replyChannelOptions={replyChannelOptions}
+              selectedId={selected.id}
               setComposeMode={setComposeMode}
               setDraft={setDraft}
               setTranscriptMode={setTranscriptMode}

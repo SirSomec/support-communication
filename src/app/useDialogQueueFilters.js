@@ -16,8 +16,17 @@ export function useDialogQueueFilters({ conversationItems, topics }) {
     return conversationItems
       .filter((conversation) => {
         const topic = topics[conversation.id] ?? "";
-        const hasInternalComment = conversation.messages.some((message) => message.type === "internal");
-        const matchesQuery = `${conversation.name} ${conversation.phone} ${conversation.preview} ${conversation.channel} ${conversation.queueId ?? ""} ${topic} ${conversation.status}`
+        // Тред клиента фильтруется по всем своим обращениям: каналы и внутренние
+        // комментарии ищутся во всей связке, а не только в актуальном обращении.
+        const channels = Array.isArray(conversation.channels) && conversation.channels.length
+          ? conversation.channels
+          : [conversation.channel];
+        const appeals = Array.isArray(conversation.appeals) && conversation.appeals.length
+          ? conversation.appeals
+          : [conversation];
+        const hasInternalComment = appeals.some((appeal) =>
+          (appeal.messages ?? []).some((message) => message.type === "internal"));
+        const matchesQuery = `${conversation.name} ${conversation.phone} ${conversation.preview} ${channels.join(" ")} ${conversation.queueId ?? ""} ${topic} ${conversation.status}`
           .toLowerCase()
           .includes(query.toLowerCase());
         const matchesFilter =
@@ -27,7 +36,7 @@ export function useDialogQueueFilters({ conversationItems, topics }) {
           (filter === "rescue" && (!topic || conversation.slaTone === "danger")) ||
           (filter === "quality" && conversation.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))) ||
           filter === "all";
-        const matchesChannel = queueFilters.channel === "all" || conversation.channel === queueFilters.channel;
+        const matchesChannel = queueFilters.channel === "all" || channels.includes(queueFilters.channel);
         const matchesQueue = queueFilters.queueId === "all" || conversation.queueId === queueFilters.queueId;
         const matchesTopic =
           queueFilters.topic === "all" ||

@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { getRescueRemainingSeconds } from "../../app/dialogModel.js";
 import { AuditTimeline } from "./AuditTimeline.jsx";
 import { BotHandoffSummary } from "./BotHandoffSummary.jsx";
 import { ChatHeader } from "./ChatHeader.jsx";
+import { buildClientThreadTimeline } from "./clientThreadModel.js";
 import { Composer } from "./Composer.jsx";
 import { TranscriptToolbar } from "./TranscriptToolbar.jsx";
 
 export function ChatPane({
+  appealScrollTarget,
   assignees,
   conversation,
   topic,
@@ -24,7 +26,10 @@ export function ChatPane({
   onAttachmentComplete,
   onAttachmentRetry,
   onAttachmentRemove,
+  onReplyChannelChange,
   onSend,
+  replyChannel,
+  replyChannelOptions,
   templates,
   onSaveTemplate,
   onDialogAction,
@@ -34,12 +39,18 @@ export function ChatPane({
   access,
   isClosed,
   status,
-  topicOptions
+  topicOptions,
+  topics
 }) {
   const [rescueNow, setRescueNow] = useState(Date.now());
   const activeRescue = conversation.rescue?.state === "active" && !isClosed ? conversation.rescue : null;
   const rescueRemainingSeconds = activeRescue ? getRescueRemainingSeconds(activeRescue, rescueNow) : 0;
   const isRescueExpired = Boolean(activeRescue && rescueRemainingSeconds === 0);
+  // Единая лента клиента: все обращения треда с разделителями между ними.
+  const timeline = useMemo(
+    () => buildClientThreadTimeline(conversation, { topics: topics ?? {}, transcriptMode }),
+    [conversation, topics, transcriptMode]
+  );
 
   useEffect(() => {
     if (!activeRescue) {
@@ -86,7 +97,11 @@ export function ChatPane({
         scenarioId={conversation.botHandoff?.botId}
         topic={topic || conversation.topic}
       />
-      <AuditTimeline messages={conversation.messages} onSaveTemplate={onSaveTemplate} transcriptMode={transcriptMode} />
+      <AuditTimeline
+        appealScrollTarget={appealScrollTarget}
+        onSaveTemplate={onSaveTemplate}
+        timeline={timeline}
+      />
 
       <Composer
         mode={composeMode}
@@ -96,11 +111,14 @@ export function ChatPane({
         aiSuggestions={inlineAiSuggestions}
         onAiSuggestionAction={onAiSuggestionAction}
         attachments={attachments}
-        onAttachFiles={(fileList) => onAttachFiles(fileList, conversation.channel)}
+        onAttachFiles={(fileList) => onAttachFiles(fileList, replyChannel || conversation.channel)}
         onAttachmentComplete={onAttachmentComplete}
         onAttachmentRetry={onAttachmentRetry}
         onAttachmentRemove={onAttachmentRemove}
+        onReplyChannelChange={onReplyChannelChange}
         onSend={onSend}
+        replyChannel={replyChannel}
+        replyChannelOptions={replyChannelOptions}
         templates={templates}
         onSaveTemplate={onSaveTemplate}
         disabled={isClosed}

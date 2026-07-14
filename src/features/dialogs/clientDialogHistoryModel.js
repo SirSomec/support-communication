@@ -1,4 +1,4 @@
-import { resolveClientIdentityKey } from "../../app/clientProfileModel.js";
+import { resolveClientThreadKey } from "../../app/clientProfileModel.js";
 import { statusLabels } from "../../app/dialogModel.js";
 
 export const CLIENT_HISTORY_PAGE_SIZE = 8;
@@ -25,9 +25,11 @@ export function buildClientDialogHistory({ conversation, conversations = [] }) {
     return [];
   }
 
-  const identityKey = resolveClientIdentityKey(conversation);
+  // Клиент один во всех каналах: история собирает обращения по телефону
+  // клиента независимо от канала обращения.
+  const identityKey = resolveClientThreadKey(conversation);
   const pool = [conversation, ...conversations.filter((item) => item && item.id !== conversation.id)];
-  const siblings = pool.filter((item) => resolveClientIdentityKey(item) === identityKey);
+  const siblings = pool.filter((item) => resolveClientThreadKey(item) === identityKey);
   const conversationEntries = siblings.map((item) => toConversationEntry(item, conversation.id));
 
   const closedSignatures = new Set(

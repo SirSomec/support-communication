@@ -34,6 +34,22 @@ export function resolveClientIdentityKey(conversation) {
   return `conversation:${String(conversation?.id ?? "unknown").trim()}`;
 }
 
+// Клиент один и тот же во всех каналах: единый диалог клиента собирается
+// по телефону без учета канала, в отличие от resolveClientIdentityKey.
+export function resolveClientThreadKey(conversation) {
+  const phone = normalizeClientPhone(conversation?.phone);
+  if (phone) {
+    return `phone:${phone}`;
+  }
+
+  const anchorId = extractAppealAnchorId(conversation);
+  if (anchorId) {
+    return `anchor:${anchorId}`;
+  }
+
+  return `conversation:${String(conversation?.id ?? "unknown").trim()}`;
+}
+
 export function buildSourceProfileId(conversation) {
   const channel = String(conversation?.channel ?? "").trim().toLowerCase();
   const phone = normalizeClientPhone(conversation?.phone);

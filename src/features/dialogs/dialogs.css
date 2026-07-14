@@ -331,6 +331,25 @@
   font-size: 12px;
 }
 
+.queue-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+}
+
+.appeal-count-chip {
+  width: max-content;
+  padding: 1px 8px;
+  border: 1px solid #cfdcee;
+  border-radius: 999px;
+  background: #f2f7fd;
+  color: #46587a;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 .queue-preview {
   display: -webkit-box;
   overflow: hidden;
@@ -1070,14 +1089,105 @@
   background: #f8fafc;
 }
 
-.day-divider {
-  align-self: center;
-  padding: 4px 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
+.appeal-divider {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border: 1px dashed #c3d2e8;
+  border-radius: 8px;
+  background: #f6f9fd;
   color: var(--muted);
   font-size: 12px;
+  scroll-margin-top: 8px;
+}
+
+.appeal-divider:first-child {
+  margin-top: 0;
+}
+
+.appeal-divider.current {
+  border-color: #9cc4ff;
+  background: #eef6ff;
+}
+
+.appeal-divider.highlighted {
+  animation: appeal-divider-flash 2.2s ease-out;
+}
+
+@keyframes appeal-divider-flash {
+  0% {
+    border-color: var(--blue);
+    background: #d9ebff;
+    box-shadow: 0 0 0 3px rgba(11, 116, 255, 0.22);
+  }
+
+  100% {
+    border-color: #c3d2e8;
+    background: #f6f9fd;
+    box-shadow: none;
+  }
+}
+
+.appeal-divider-title {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-secondary);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.appeal-divider-current {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--blue);
+  color: #ffffff;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.appeal-divider-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.appeal-divider-meta time {
+  color: var(--subtle);
+  white-space: nowrap;
+}
+
+.appeal-divider-topic {
+  overflow: hidden;
+  max-width: 220px;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appeal-divider-status {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.appeal-divider-status.open {
+  background: #e1f4e6;
+  color: #177a3b;
+}
+
+.appeal-divider-status.closed {
+  background: #e8edf5;
+  color: #5d6b82;
 }
 
 .message-bubble {
@@ -1124,6 +1234,23 @@
   border-radius: 5px;
   background: transparent;
   color: var(--blue);
+}
+
+.message-bubble .message-channel {
+  margin-right: auto;
+  padding: 1px 8px;
+  border: 1px solid #cfdcee;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 70%);
+  color: #5d6b82;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.message-bubble.agent .message-channel {
+  border-color: #b7d5fb;
+  color: #2f6cbf;
 }
 
 .message-attachments {

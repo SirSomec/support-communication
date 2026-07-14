@@ -9,7 +9,7 @@ import {
   clientHistoryDefaultFilters,
   mergeClientConversations
 } from "./clientDialogHistoryModel.js";
-import { ClientDialogsListModal, ClientDialogTranscriptModal } from "./ClientHistoryModals.jsx";
+import { ClientArchiveDetailModal, ClientDialogsListModal } from "./ClientHistoryModals.jsx";
 import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 
 export function CustomerPanel({
@@ -23,8 +23,8 @@ export function CustomerPanel({
   access,
   isClosed,
   allConversations = [],
-  onConversationSelect,
-  onEnsureConversationLoaded
+  onEnsureConversationLoaded,
+  onNavigateToAppeal
 }) {
   const [resolutionOutcome, setResolutionOutcome] = useState("resolved");
   const [previewArticle, setPreviewArticle] = useState(null);
@@ -105,13 +105,11 @@ export function CustomerPanel({
     () => historyEntries.filter((entry) => !entry.isCurrent),
     [historyEntries]
   );
-  const transcriptEntry = historyView?.type === "transcript"
-    ? historyEntries.find((entry) => entry.key === historyView.entry.key) ?? historyView.entry
-    : null;
+  const archiveEntry = historyView?.type === "archive" ? historyView.entry : null;
 
-  function openHistoryTranscript(entry, from) {
+  function openArchiveDetail(entry, from) {
     setHistoryNavigateError("");
-    setHistoryView({ entry, from, type: "transcript" });
+    setHistoryView({ entry, from, type: "archive" });
   }
 
   // Обработчики закрытия мемоизированы: Modal перевешивает фокус-ловушку по ссылке
@@ -121,13 +119,15 @@ export function CustomerPanel({
     setHistoryView(null);
   }, []);
 
-  const closeHistoryTranscript = useCallback(() => {
+  const closeArchiveDetail = useCallback(() => {
     setHistoryNavigateError("");
     setHistoryView((current) => (current?.from === "list" ? { type: "list" } : null));
   }, []);
 
+  // Клик по обращению из истории перемещает окно чата к этому обращению:
+  // все обращения клиента показываются в единой ленте диалога.
   async function handleHistoryNavigate(entry) {
-    if (!onConversationSelect || !entry.conversationId || historyNavigating) {
+    if (!onNavigateToAppeal || !entry.conversationId || historyNavigating) {
       return;
     }
 
@@ -138,13 +138,13 @@ export function CustomerPanel({
       const result = await onEnsureConversationLoaded(entry.conversationId);
       setHistoryNavigating(false);
       if (!result?.ok) {
-        setHistoryNavigateError("Не удалось открыть диалог — обновите список и попробуйте еще раз.");
+        setHistoryNavigateError("Не удалось открыть обращение — обновите список и попробуйте еще раз.");
         return;
       }
     }
 
     setHistoryView(null);
-    onConversationSelect(entry.conversationId);
+    onNavigateToAppeal(entry.conversationId);
   }
 
   return (
@@ -164,8 +164,8 @@ export function CustomerPanel({
         <div className="channel-list">
           <span>Канал(ы)</span>
           <div>
-            {["SDK", "Telegram", "MAX", "VK"].map((channel) => (
-              <span className={`channel-chip ${channel.toLowerCase()}`} key={channel}>{channel}</span>
+            {(conversation.channels ?? [conversation.channel]).filter(Boolean).map((channel) => (
+              <span className={`channel-chip ${String(channel).toLowerCase()}`} key={channel}>{channel}</span>
             ))}
           </div>
         </div>
@@ -180,12 +180,16 @@ export function CustomerPanel({
         }
       >
         <div className="history-list">
+          {historyNavigateError && !historyView ? (
+            <p className="client-history-note error inline" role="alert">{historyNavigateError}</p>
+          ) : null}
           {previousHistoryEntries.length ? previousHistoryEntries.slice(0, 3).map((entry) => (
             <button
               className="history-row history-row-button"
+              disabled={entry.kind === "conversation" && historyNavigating}
               key={entry.key}
-              onClick={() => openHistoryTranscript(entry, "panel")}
-              title={entry.kind === "conversation" ? "Открыть переписку" : "Открыть детали архивной записи"}
+              onClick={() => (entry.kind === "conversation" ? handleHistoryNavigate(entry) : openArchiveDetail(entry, "panel"))}
+              title={entry.kind === "conversation" ? "Переместить окно чата к обращению" : "Открыть детали архивной записи"}
               type="button"
             >
               <time>{entry.dateLabel}</time>
@@ -281,17 +285,14 @@ export function CustomerPanel({
           onClose={closeHistoryView}
           onFiltersChange={(patch) => setHistoryFilters((current) => ({ ...current, ...patch }))}
           onNavigate={handleHistoryNavigate}
-          onOpenTranscript={(entry) => openHistoryTranscript(entry, "list")}
+          onOpenArchiveEntry={(entry) => openArchiveDetail(entry, "list")}
         />
       ) : null}
-      {transcriptEntry ? (
-        <ClientDialogTranscriptModal
+      {archiveEntry ? (
+        <ClientArchiveDetailModal
           clientName={conversation.name}
-          entry={transcriptEntry}
-          navigating={historyNavigating}
-          navigateError={historyNavigateError}
-          onClose={closeHistoryTranscript}
-          onNavigate={handleHistoryNavigate}
+          entry={archiveEntry}
+          onClose={closeArchiveDetail}
         />
       ) : null}
       {previewArticle ? (

@@ -5,9 +5,11 @@ import "./dialogs.css";
 
 export function DialogWorkspace({
   access,
+  appealScrollTarget,
   assignees,
   aiSuggestions,
   allConversations,
+  allThreads,
   attachments,
   closedIds,
   composeMode,
@@ -25,17 +27,21 @@ export function DialogWorkspace({
   onConversationSelect,
   onDialogAction,
   onEnsureConversationLoaded,
+  onNavigateToAppeal,
   onAssignment,
   onFilter,
   onQuery,
   onQueueFilterChange,
   onQueueFiltersReset,
+  onReplyChannelChange,
   onSaveTemplate,
   onSend,
   onStatusChange,
   onTopic,
   query,
   queueFilters,
+  replyChannel,
+  replyChannelOptions,
   selectedId,
   setComposeMode,
   setDraft,
@@ -53,7 +59,7 @@ export function DialogWorkspace({
     <div className="cockpit">
       <ConversationList
         conversations={conversations}
-        allConversations={allConversations}
+        allConversations={allThreads ?? allConversations}
         selectedId={selectedId}
         onSelect={onConversationSelect}
         filter={filter}
@@ -68,6 +74,7 @@ export function DialogWorkspace({
         closedIds={closedIds}
       />
       {hasConversation ? <ChatPane
+        appealScrollTarget={appealScrollTarget}
         assignees={assignees}
         conversation={conversation}
         topic={topic}
@@ -85,7 +92,10 @@ export function DialogWorkspace({
         onAttachmentComplete={onAttachmentComplete}
         onAttachmentRetry={onAttachmentRetry}
         onAttachmentRemove={onAttachmentRemove}
+        onReplyChannelChange={onReplyChannelChange}
         onSend={onSend}
+        replyChannel={replyChannel}
+        replyChannelOptions={replyChannelOptions}
         templates={templates}
         onSaveTemplate={onSaveTemplate}
         onDialogAction={onDialogAction}
@@ -96,6 +106,7 @@ export function DialogWorkspace({
         isClosed={isClosed}
         status={status}
         topicOptions={topicOptions}
+        topics={topics}
       /> : (
         <section className="dialog-empty-workspace" aria-label="Диалог не выбран">
           <strong>Нет выбранного диалога</strong>
@@ -113,8 +124,8 @@ export function DialogWorkspace({
         isClosed={isClosed}
         topicOptions={topicOptions}
         allConversations={allConversations}
-        onConversationSelect={onConversationSelect}
         onEnsureConversationLoaded={onEnsureConversationLoaded}
+        onNavigateToAppeal={onNavigateToAppeal}
       /> : <aside className="customer-panel customer-panel-empty" aria-label="Карточка клиента не выбрана" />}
     </div>
   );

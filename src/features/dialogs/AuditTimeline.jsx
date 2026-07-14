@@ -4,21 +4,23 @@ import { statusLabels } from "../../app/dialogModel.js";
 import { AttachmentPreview } from "./AttachmentPreview.jsx";
 import {
   formatMessageTime,
-  getVisibleMessages,
   isTranscriptPinnedToBottom,
   scrollTranscriptToBottom,
   shouldUpdatePinnedStateFromScroll
 } from "./timelineModel.js";
 
 const MESSAGE_TIME_TICK_MS = 1000;
+const APPEAL_HIGHLIGHT_MS = 2200;
 
-export function AuditTimeline({ messages, onSaveTemplate, transcriptMode }) {
+export function AuditTimeline({ appealScrollTarget, onSaveTemplate, timeline = [] }) {
   const transcriptRef = useRef(null);
   const pinnedToBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
+  const highlightTimerRef = useRef(0);
   const [timeNow, setTimeNow] = useState(() => new Date());
-  const visibleMessages = getVisibleMessages(messages, transcriptMode);
-  const lastVisibleMessageId = visibleMessages.at(-1)?.id ?? "";
+  const [highlightedAppealId, setHighlightedAppealId] = useState("");
+  const messageItems = timeline.filter((item) => item.kind === "message");
+  const lastVisibleMessageKey = messageItems.at(-1)?.key ?? "";
 
   useEffect(() => {
     const timer = window.setInterval(() => setTimeNow(new Date()), MESSAGE_TIME_TICK_MS);
@@ -29,7 +31,30 @@ export function AuditTimeline({ messages, onSaveTemplate, transcriptMode }) {
     if (pinnedToBottomRef.current) {
       scrollTranscriptToBottom(transcriptRef.current);
     }
-  }, [lastVisibleMessageId, transcriptMode, visibleMessages.length]);
+  }, [lastVisibleMessageKey, messageItems.length]);
+
+  // Переход из «Предыдущих диалогов»: окно чата перемещается к выбранному
+  // обращению и подсвечивает его разделитель.
+  useEffect(() => {
+    if (!appealScrollTarget?.conversationId) {
+      return undefined;
+    }
+
+    const container = transcriptRef.current;
+    const anchor = container?.querySelector(`[data-appeal-id="${cssEscape(appealScrollTarget.conversationId)}"]`);
+    if (!anchor) {
+      return undefined;
+    }
+
+    pinnedToBottomRef.current = isAnchorNearBottom(container, anchor);
+    container.scrollTop = anchor.offsetTop - container.offsetTop - 8;
+    setHighlightedAppealId(appealScrollTarget.conversationId);
+    window.clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = window.setTimeout(() => setHighlightedAppealId(""), APPEAL_HIGHLIGHT_MS);
+    return undefined;
+  }, [appealScrollTarget?.conversationId, appealScrollTarget?.token]);
+
+  useEffect(() => () => window.clearTimeout(highlightTimerRef.current), []);
 
   function markUserScrollIntent() {
     userScrollIntentRef.current = true;
@@ -52,11 +77,33 @@ export function AuditTimeline({ messages, onSaveTemplate, transcriptMode }) {
       onWheel={markUserScrollIntent}
       ref={transcriptRef}
     >
-      <div className="day-divider">Сегодня</div>
-      {visibleMessages.map((message) => (
-        <MessageBubble key={message.id} message={message} now={timeNow} onSaveTemplate={onSaveTemplate} />
+      {timeline.map((item) => item.kind === "appeal" ? (
+        <AppealDivider highlighted={item.conversationId === highlightedAppealId} item={item} key={item.key} />
+      ) : (
+        <MessageBubble key={item.key} message={item.message} now={timeNow} onSaveTemplate={onSaveTemplate} />
       ))}
-      {!visibleMessages.length ? <div className="empty-transcript">Нет записей для выбранного фильтра</div> : null}
+      {!messageItems.length ? <div className="empty-transcript">Нет записей для выбранного фильтра</div> : null}
+    </div>
+  );
+}
+
+function AppealDivider({ highlighted, item }) {
+  return (
+    <div
+      aria-label={`Обращение ${item.index} из ${item.total}`}
+      className={`appeal-divider${highlighted ? " highlighted" : ""}${item.isCurrent ? " current" : ""}`}
+      data-appeal-id={item.conversationId}
+    >
+      <span className="appeal-divider-title">
+        Обращение {item.index}/{item.total}
+        {item.isCurrent ? <i className="appeal-divider-current">текущее</i> : null}
+      </span>
+      <span className="appeal-divider-meta">
+        <time>{item.dateLabel}</time>
+        {item.channel ? <span className={`channel-chip ${item.channel.toLowerCase()}`}>{item.channel}</span> : null}
+        {item.topic ? <span className="appeal-divider-topic">{item.topic}</span> : null}
+        <b className={`appeal-divider-status ${item.isClosed ? "closed" : "open"}`}>{item.statusLabel}</b>
+      </span>
     </div>
   );
 }
@@ -111,6 +158,9 @@ function MessageBubble({ message, now, onSaveTemplate }) {
             <BookOpen size={14} />
           </button>
         ) : null}
+        {message.channel ? (
+          <span className="message-channel" title={`Канал сообщения: ${message.channel}`}>{message.channel}</span>
+        ) : null}
         <time>{displayTime}</time>
       </footer>
     </article>
@@ -147,4 +197,20 @@ function AuditEventCard({ displayTime, message }) {
       </footer>
     </article>
   );
+}
+
+function isAnchorNearBottom(container, anchor) {
+  if (!container || !anchor) {
+    return false;
+  }
+
+  const anchorOffset = anchor.offsetTop - container.offsetTop;
+  return container.scrollHeight - anchorOffset <= container.clientHeight;
+}
+
+function cssEscape(value) {
+  if (typeof window !== "undefined" && window.CSS?.escape) {
+    return window.CSS.escape(String(value));
+  }
+  return String(value).replace(/["\\\]]/g, "\\$&");
 }

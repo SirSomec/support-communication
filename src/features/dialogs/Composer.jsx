@@ -31,7 +31,10 @@ export function Composer({
   onAttachmentComplete,
   onAttachmentRetry,
   onAttachmentRemove,
+  onReplyChannelChange,
   onSend,
+  replyChannel = "",
+  replyChannelOptions = [],
   templates,
   onSaveTemplate,
   disabled
@@ -179,6 +182,23 @@ export function Composer({
       </section>
       <footer className="composer-footer">
         <div className="composer-tools">
+          {mode !== "internal" && replyChannelOptions.length ? (
+            <label className="composer-channel-select" title="Канал, в который уйдет ответ клиенту">
+              <span>Канал:</span>
+              <select
+                aria-label="Канал отправки ответа"
+                disabled={disabled}
+                onChange={(event) => onReplyChannelChange?.(event.target.value)}
+                value={replyChannelOptions.some((option) => option.channel === replyChannel) ? replyChannel : replyChannelOptions[0]?.channel ?? ""}
+              >
+                {replyChannelOptions.map((option) => (
+                  <option key={option.channel} value={option.channel}>
+                    {option.channel}{option.isClosed ? " · обращение закрыто" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <button aria-label="Прикрепить файл" disabled={disabled} onClick={() => fileInputRef.current?.click()} title="Прикрепить файл" type="button"><Paperclip size={18} /></button>
           <button aria-label="Добавить реакцию" disabled={disabled} onClick={() => setDraft(`${draft} Спасибо.`.trim())} type="button"><Smile size={18} /></button>
           <button aria-label="Сохранить как шаблон" disabled={disabled} onClick={onSaveTemplate} title="Сохранить как шаблон" type="button"><BookOpen size={18} /></button>

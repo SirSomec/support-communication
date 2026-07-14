@@ -11,7 +11,7 @@
     {
       "algorithm": "scrypt",
       "email": "service-admin@example.com",
-      "hash": "scrypt:16384:8:1:85948973842592d74778ee905f14b201:c1a68a0d91d32e4eef57414b81a91eb9a548407befd40f2d03de65012defd42c",
+      "hash": "scrypt:16384:8:1:8cf73769087da6f26c2f5f077a17b02f:ef224dc3bd12936411bbc779fc0553811771e661e33f8db0699e8fe4678fd7ee",
       "subjectId": "svc-admin-001",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -19,7 +19,7 @@
     {
       "algorithm": "scrypt",
       "email": "mira@northstar.example",
-      "hash": "scrypt:16384:8:1:70252290f9f1364182f127d6d5dce3ee:d68b5bc909a81d78acbdcf30e10b38fc79d0ab74b81d0b5ed0eb59f7548e6213",
+      "hash": "scrypt:16384:8:1:738823e96b4e15d75472dcc6474e9be9:3958e09e8b5af349f91c05424cc30f14c90de7563326568992825c4598f5391c",
       "subjectId": "usr-ns-owner",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -27,7 +27,7 @@
     {
       "algorithm": "scrypt",
       "email": "pavel@northstar.example",
-      "hash": "scrypt:16384:8:1:58045bf0624315f067d155bbbff46c5c:c55ada081b243e80c1a8011be09c1b027897f7c8bcaeb6d310ecf914790b59cd",
+      "hash": "scrypt:16384:8:1:f531648a6dcc1e62fb77a51899bd18e1:5a933576f9817f1455d359a6d170ff0c588ae8ee8281f0ddfbbd3653523ffe3e",
       "subjectId": "usr-ns-agent",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -35,7 +35,7 @@
     {
       "algorithm": "scrypt",
       "email": "multi@example.com",
-      "hash": "scrypt:16384:8:1:576469b43376f18dc19d059416c6bf06:3c469eaca272e6bd923d720bd3afc1ee286dc4f7b1a8268895e48341effb861c",
+      "hash": "scrypt:16384:8:1:25a014235a1608b1ed5c25c1d29c383b:29194e91c0ee9ddb993b22f383e1af03200b2ebd2e26dfab49c0a8e5f7a7fe0d",
       "subjectId": "usr-ns-multi",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -43,7 +43,7 @@
     {
       "algorithm": "scrypt",
       "email": "sergey@volga.example",
-      "hash": "scrypt:16384:8:1:32570a53daef36e806a7816f0d40d5e5:2baa88e27874084b2fd10d2dd1792d2cb26908ccdb8607ed24c5f2d56c60a568",
+      "hash": "scrypt:16384:8:1:a96cf9a7642c6d9bc5529366afe22b0e:f0bd434f4e1708f3a6d28b556460ce1f5b4b38bb28314523909a6dac6ea7008c",
       "subjectId": "usr-volga-admin",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -51,7 +51,7 @@
     {
       "algorithm": "scrypt",
       "email": "ops@aurora.example",
-      "hash": "scrypt:16384:8:1:57851746d085285558cd864307dbe8ab:734fe1c8858562fa8d64a192c33d86d9f3e550aa2930bec672ec209c3f1b5241",
+      "hash": "scrypt:16384:8:1:2f8e528fbfb688a6289c43710eff1182:3155fbe1d80655c4e6135de301f1f7fa600c69a3e67f80227c1401fd3ae04db9",
       "subjectId": "usr-aurora-risk",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -59,7 +59,7 @@
     {
       "algorithm": "scrypt",
       "email": "nikolai@lumen.example",
-      "hash": "scrypt:16384:8:1:cb751492f72544256322c6522470d9d5:1bc5946a414f8960f07157357458083d01b6d109effb459b2a0b767db8f01ef4",
+      "hash": "scrypt:16384:8:1:98627e2cfbb4283e4c3334a3b22c4836:970c082082fc06b639164575a5a32f8bc8c84f07d0f7ccab2432da2d31a2357c",
       "subjectId": "usr-lumen-invite",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -67,7 +67,7 @@
     {
       "algorithm": "scrypt",
       "email": "multi@example.com",
-      "hash": "scrypt:16384:8:1:9d32784dd5692422025dcb4dad299f20:4f54cb7a68003cda97948ae31bfc865c7bb21c672ff28b91b3389e8430fe5456",
+      "hash": "scrypt:16384:8:1:368eebe5d445e129706d26659a4bc292:11356530819f16730a1d66bdf0e820cc10cd0cac4b3bd7e270aec94086a1e60a",
       "subjectId": "usr-lumen-multi",
       "updatedAt": "2026-06-28T00:00:00.000Z",
       "version": 1
@@ -1761,47 +1761,8 @@
   "serviceAdminAuditExports": [],
   "serviceAdminAuditRedactions": [],
   "serviceAdminImpersonations": [],
-  "serviceAdminSessions": [
-    {
-      "actorId": "usr-volga-admin",
-      "actorName": "Sergey Markin",
-      "adminEmail": "sergey@volga.example",
-      "adminId": "usr-volga-admin",
-      "adminName": "Sergey Markin",
-      "allowedActions": [
-        "*"
-      ],
-      "authState": "mfa_verified",
-      "availableOrganizations": [
-        {
-          "id": "tenant-volga",
-          "name": "tenant-volga",
-          "role": "operator"
-        }
-      ],
-      "currentTenantId": "tenant-volga",
-      "role": "Admin",
-      "tenantScope": "tenant-volga",
-      "id": "top-session_673a990f-b64f-4a19-9bc4-a015a75ed508",
-      "expiresAt": "2026-07-13T20:30:30.264Z",
-      "mfaVerifiedAt": "2026-07-13T19:30:30.264Z",
-      "revokedAt": null
-    }
-  ],
-  "serviceAdminTokenPairs": [
-    {
-      "accessTokenExpiresAt": "2026-07-13T20:30:30.283Z",
-      "accessTokenHash": "sha256:427f3ae0374978e9aabf8c000ce95452109df7e2a319d7aec04074400dc19736",
-      "id": "top_pair_91573b21-54d7-40eb-b6e6-4270d6d24e84",
-      "issuedAt": "2026-07-13T19:30:30.283Z",
-      "refreshTokenExpiresAt": "2026-07-27T19:30:30.283Z",
-      "refreshTokenHash": "sha256:fcf799f83eb211ce28776d6024b35d5141cbb8d46606f8ebe5957495f4f11bac",
-      "revokedAt": null,
-      "rotatedAt": null,
-      "sessionId": "top-session_673a990f-b64f-4a19-9bc4-a015a75ed508",
-      "subjectId": "usr-volga-admin"
-    }
-  ],
+  "serviceAdminSessions": [],
+  "serviceAdminTokenPairs": [],
   "serviceAdminTokenRevocations": [],
   "serviceAdminTokenRotations": [],
   "tenantAuditEvents": [

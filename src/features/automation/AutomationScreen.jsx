@@ -716,6 +716,14 @@ export function AutomationScreen({ onBack, onToast, access }) {
         <MetricTile icon={<ListChecks size={21} />} label="Audit" value={auditEvents.length} detail="последние события" />
       </div>
 
+      <BotSetupChecklist
+        aiReady={aiReadiness?.status === "ready"}
+        hasEnabledScenario={enabledScenarios > 0}
+        hasScenario={scenarioItems.length > 0}
+        hasSources={knowledgeSources.some((source) => source.readiness === "ready")}
+        tested={Boolean(sandboxVerifiedScenarioId)}
+      />
+
       <SegmentedControl
         ariaLabel="Режим раздела ботов"
         className="automation-view-switch"
@@ -1037,6 +1045,35 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
 function normalizeScenarios(value) {
   return Array.isArray(value) ? value.map((scenario) => normalizeScenario(scenario)) : [];
+}
+
+/** BAI-861: короткий чек-лист «с чего начать», исчезает, когда бот запущен. */
+function BotSetupChecklist({ aiReady, hasEnabledScenario, hasScenario, hasSources, tested }) {
+  const steps = [
+    { done: hasSources, label: "Подключите знания", hint: "Раздел «Знания»: статья, документ или страница" },
+    { done: hasScenario, label: "Создайте сценарий", hint: "Мастер задаёт запуск, ответ и передачу оператору" },
+    { done: aiReady, label: "Подключите AI", hint: "Настраивает администратор сервиса в разделе «AI»" },
+    { done: tested, label: "Протестируйте в чате", hint: "Живой тест-чат показывает ответ и путь бота" },
+    { done: hasEnabledScenario, label: "Опубликуйте", hint: "После проверки сценарий начнёт отвечать клиентам" }
+  ];
+  const completed = steps.filter((step) => step.done).length;
+  if (completed === steps.length) return null;
+  return (
+    <section aria-label="С чего начать" className="work-panel bot-setup-checklist">
+      <SectionTitle action={`${completed} из ${steps.length}`} title="С чего начать" />
+      <ol>
+        {steps.map((step) => (
+          <li className={step.done ? "done" : ""} key={step.label}>
+            {step.done ? <CheckCircle2 size={16} /> : <span className="bot-setup-dot" aria-hidden="true" />}
+            <span>
+              <strong>{step.label}</strong>
+              <small>{step.hint}</small>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
 
 function normalizeScenario(scenario = {}) {

@@ -1363,6 +1363,57 @@
   align-self: flex-start;
 }
 
+.bot-setup-checklist ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: none;
+}
+
+.bot-setup-checklist li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.bot-setup-checklist li svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #2f9e63;
+}
+
+.bot-setup-dot {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+}
+
+.bot-setup-checklist li span {
+  display: grid;
+  gap: 1px;
+}
+
+.bot-setup-checklist strong {
+  font-size: 13px;
+}
+
+.bot-setup-checklist li.done strong {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.bot-setup-checklist small {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
 .automation-layout--console {
   grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.6fr);
   align-items: start;

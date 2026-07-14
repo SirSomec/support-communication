@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ClipboardCheck, KeyRound, Loader2, Route, ShieldCheck } from "lucide-react";
-import { ConfirmDialog, SectionTitle } from "../../ui.jsx";
+import { ClipboardCheck, KeyRound, Loader2, Route, ShieldCheck } from "lucide-react";
+import { ConfirmDialog } from "../../ui.jsx";
+import { SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import { settingsService } from "../../services/settingsService.js";
 
 const iconByRule = {
@@ -129,16 +130,14 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
   }
 
   return (
-    <section className="work-panel settings-rules-workspace">
-      <SectionTitle title="Правила" action={actionLabel} />
-      <div className="settings-rules-intro">
-        <AlertTriangle size={18} />
-        <div>
-          <strong>Правила управляют реальными ограничениями обработки обращений</strong>
-          <span>Каждое правило связано с диалогами, маршрутизацией, экспортами или аудитом и меняется через backend-контракт с trace и audit id.</span>
-        </div>
-      </div>
+    <section className="settings-section settings-rules-workspace">
+      <SettingsSectionHeader
+        title="Правила"
+        meta={actionLabel}
+        hint="Правила задают реальные ограничения обработки обращений: закрытие, маршрутизацию, экспорт и аудит. Каждое изменение фиксируется с trace и audit id."
+      />
 
+      <div className="settings-card settings-rules-card">
       {error ? <div className="settings-rule-error">{error}</div> : null}
       {loading ? (
         <div className="settings-rule-state"><Loader2 size={16} /> Загружаем правила</div>
@@ -147,7 +146,7 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
         <div className="settings-rule-state">Правила не настроены.</div>
       ) : null}
 
-      <div className="settings-rule-list">
+      <div className="settings-rule-list settings-scroll">
         {rules.map((rule) => {
           const Icon = iconByRule[rule.id] ?? ShieldCheck;
           const busy = busyRuleId === rule.id;
@@ -236,6 +235,7 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
             </article>
           );
         })}
+      </div>
       </div>
 
       {ruleToDisable ? (

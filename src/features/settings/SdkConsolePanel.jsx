@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { PlayCircle, Zap } from "lucide-react";
-import { SectionTitle } from "../../ui.jsx";
+import { SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import { copyTextToClipboard } from "../../services/clipboardService.js";
 import { dialogService } from "../../services/dialogService.js";
 import { integrationService } from "../../services/integrationService.js";
@@ -264,9 +264,14 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
   }
 
   return (
-    <section className="work-panel sdk-console">
-      <SectionTitle title="SDK-консоль" action={loadError ? "backend error" : "Ключи, события, точки входа"} />
+    <section className="settings-section sdk-console">
+      <SettingsSectionHeader
+        title="SDK-консоль"
+        meta={loadError ? "backend error" : "тестовый стенд"}
+        hint="Инструмент разработчика: сниппет для установки SDK, playground для проверки событий и справочник точек входа."
+      />
       {loadError ? <div className="entity-empty"><strong>{loadError}</strong></div> : null}
+      <div className="settings-card sdk-console-body settings-scroll">
       <div className="sdk-code">
         <code>{sdkSnippet}</code>
         <button disabled={!canEditSettings} onClick={() => void handleCopySdkSnippet()} title={canEditSettings ? "Копировать SDK snippet" : access.reason} type="button">Копировать</button>
@@ -339,6 +344,7 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
             <span>{description}</span>
           </div>
         ))}
+      </div>
       </div>
     </section>
   );

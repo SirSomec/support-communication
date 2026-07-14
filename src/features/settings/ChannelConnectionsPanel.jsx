@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { PauseCircle, PlayCircle, PlugZap, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { ChannelBadge, ConfirmDialog, SectionTitle } from "../../ui.jsx";
+import { Inbox, ListTree, PauseCircle, PlayCircle, PlugZap, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
+import { ChannelBadge, ConfirmDialog } from "../../ui.jsx";
+import { FieldHint, InlineHint, SettingsModal, SettingsSectionHeader } from "./SettingsPrimitives.jsx";
+import { submitSettingsChannelStatusToggle } from "../../app/settingsChannelActions.js";
 import { integrationService } from "../../services/integrationService.js";
 import { routingService } from "../../services/routingService.js";
 import { settingsService } from "../../services/settingsService.js";
@@ -24,6 +26,12 @@ const initialForm = {
 
 const tokenManagedTypes = new Set(["telegram", "max"]);
 
+const detailTabs = [
+  { id: "overview", label: "Параметры" },
+  { id: "test", label: "Тест" },
+  { id: "log", label: "Журнал" }
+];
+
 export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelType = "", focusConnectionId = "", onSummaryChange, onToast }) {
   const [connections, setConnections] = useState([]);
   const [queues, setQueues] = useState([]);
@@ -40,6 +48,9 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [detailTab, setDetailTab] = useState("overview");
+  const [isCreateOpen, setCreateOpen] = useState(false);
+  const [isQueueManagerOpen, setQueueManagerOpen] = useState(false);
   const canMutateConnections = canEditSettings && !error;
   const isTokenManagedType = tokenManagedTypes.has(form.type);
   const [testPayload, setTestPayload] = useState({
@@ -116,11 +127,28 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
   const totals = useMemo(() => {
     return {
       active: connections.filter((connection) => connection.status === "active").length,
-      disabled: connections.filter((connection) => connection.status === "disabled").length,
-      errors: events.filter((event) => event.severity === "error").length,
       total: connections.length
     };
-  }, [connections, events]);
+  }, [connections]);
+
+  // Агрегатный статус по типу канала: быстрый выключатель всего канала
+  // без удаления отдельных подключений.
+  const channelAggregates = useMemo(() => {
+    return availableTypes.map((type) => {
+      const typeConnections = connections.filter((connection) => connection.type === type);
+      const activeConnections = typeConnections.filter((connection) => connection.status === "active");
+
+      return {
+        enabled: activeConnections.length > 0,
+        hasConnections: typeConnections.length > 0,
+        limit: typeConnections[0]?.chatLimit ?? 5,
+        name: typeLabels[type] ?? type,
+        staff: activeConnections.length,
+        total: typeConnections.length,
+        type
+      };
+    });
+  }, [availableTypes, connections]);
 
   async function loadConnections() {
     setLoading(true);
@@ -157,6 +185,31 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     } else {
       setEvents([]);
     }
+  }
+
+  async function toggleChannelAggregate(channel) {
+    if (!canMutateConnections || busy || !channel.hasConnections) {
+      return;
+    }
+
+    const nextEnabled = !channel.enabled;
+    setBusy(`aggregate:${channel.type}`);
+    setError("");
+    const result = await submitSettingsChannelStatusToggle({
+      enabled: nextEnabled,
+      reason: `Settings aggregate channel ${nextEnabled ? "enabled" : "disabled"}`,
+      type: channel.type
+    }, integrationService);
+    setBusy("");
+
+    if (!result.ok) {
+      setError(result.message);
+      onToast?.(result.message);
+      return;
+    }
+
+    await loadConnections();
+    onToast?.(`${channel.name}: ${nextEnabled ? "включен" : "отключен"} через backend, audit ${result.auditId}.`);
   }
 
   async function createQueue() {
@@ -231,6 +284,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     }
 
     setForm({ ...initialForm, type: form.type });
+    setCreateOpen(false);
     await loadConnections();
     setSelectedConnectionId(response.data.connection.id);
     onToast?.(`${response.data.connection.name}: подключение создано. Аудит ${response.data.auditId}.`);
@@ -314,268 +368,414 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     }
 
     setTestResult(response.data.delivery);
+    setDetailTab("test");
     await loadEvents(connection.id);
     onToast?.(`${connection.name}: тест выполнен. Аудит ${response.data.auditId}.`);
   }
 
+  function openCreateModal() {
+    if (!canMutateConnections) {
+      onToast?.(access.reason);
+      return;
+    }
+
+    setCreateOpen(true);
+  }
+
   return (
-    <section className="work-panel channel-connections-panel">
-      <SectionTitle title="Подключения" action={`${totals.total} подключений, ${totals.active} активных`} />
+    <section className="settings-section channel-connections-panel">
+      <SettingsSectionHeader
+        title="Подключения"
+        meta={loading ? "загрузка" : `${totals.active} из ${totals.total} активны`}
+        hint="Каналы, по которым клиенты пишут в поддержку. Новые обращения попадают в выбранную очередь."
+        actions={
+          <>
+            <button className="settings-ghost-action" onClick={() => setQueueManagerOpen(true)} title="Очереди приема и команды, которые их разбирают" type="button">
+              <ListTree size={16} />
+              Очереди
+            </button>
+            <button
+              className="primary-action settings-create-connection"
+              disabled={!canMutateConnections}
+              onClick={openCreateModal}
+              title={canMutateConnections ? "Подключить новый канал" : access.reason}
+              type="button"
+            >
+              <Plus size={16} />
+              Новое подключение
+            </button>
+          </>
+        }
+      />
 
       {error ? <div className="settings-rule-error">{error}</div> : null}
 
-      <div className="channel-type-toolbar">
-        <button className={selectedType === "all" ? "selected" : ""} onClick={() => setSelectedType("all")} type="button">
-          Все
-        </button>
-        {availableTypes.map((type) => (
-          <button className={selectedType === type ? "selected" : ""} key={type} onClick={() => setSelectedType(type)} type="button">
-            {typeLabels[type] ?? type}
-          </button>
+      <div className="channel-settings" aria-label="Статус каналов">
+        {channelAggregates.map((channel) => (
+          <article key={channel.type}>
+            <button
+              aria-label={`Переключить ${channel.name}`}
+              aria-pressed={channel.enabled}
+              className="toggle-button"
+              disabled={!canMutateConnections || Boolean(busy) || !channel.hasConnections}
+              onClick={() => void toggleChannelAggregate(channel)}
+              title={channel.hasConnections ? `Включить или выключить все подключения ${channel.name}` : "Канал появится здесь после первого подключения."}
+              type="button"
+            >
+              {channel.enabled ? <ToggleRight size={30} /> : <ToggleLeft size={30} />}
+            </button>
+            <div>
+              <ChannelBadge channel={channel.name} />
+              <span>{channel.hasConnections ? `${channel.staff} из ${channel.total} активны · лимит ${channel.limit}` : "нет подключений"}</span>
+            </div>
+          </article>
         ))}
       </div>
 
-      <div className="channel-type-toolbar" aria-label="Управление очередями">
-        <input
-          aria-label="Название новой очереди"
-          disabled={!canMutateConnections || busy === "create-queue"}
-          onChange={(event) => setNewQueueName(event.target.value)}
-          placeholder="Новая очередь"
-          value={newQueueName}
-        />
-        <select aria-label="Команда новой очереди" disabled={!canMutateConnections || busy === "create-queue"} onChange={(event) => setNewQueueTeamId(event.target.value)} value={newQueueTeamId}>
-          <option value="">Без команды</option>
-          {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
-        </select>
-        <button disabled={!newQueueName.trim() || !canMutateConnections || busy === "create-queue"} onClick={createQueue} type="button">
-          <Plus size={16} /> Создать очередь
-        </button>
+      <div className="channel-workspace">
+        <aside className="channel-list-pane">
+          <div className="channel-type-toolbar" aria-label="Фильтр по типу канала">
+            <button className={selectedType === "all" ? "selected" : ""} onClick={() => setSelectedType("all")} type="button">
+              Все
+            </button>
+            {availableTypes.map((type) => (
+              <button className={selectedType === type ? "selected" : ""} key={type} onClick={() => setSelectedType(type)} type="button">
+                {typeLabels[type] ?? type}
+              </button>
+            ))}
+          </div>
+          <div className="channel-instance-list settings-scroll">
+            {loading ? <div className="channel-log-empty">Загружаем подключения.</div> : null}
+            {!loading && !filteredConnections.length ? (
+              <div className="channel-log-empty">
+                Подключений по фильтру нет. Нажмите «Новое подключение», чтобы добавить канал.
+              </div>
+            ) : null}
+            {filteredConnections.map((connection) => (
+              <button
+                aria-pressed={selectedConnection?.id === connection.id}
+                className={`connection-row connection-picker ${connection.status} ${selectedConnection?.id === connection.id ? "selected" : ""}`}
+                key={connection.id}
+                onClick={() => setSelectedConnectionId(connection.id)}
+                type="button"
+              >
+                <div>
+                  <strong>{connection.name}</strong>
+                  <span>{connection.environment} · {connection.routingQueueId}</span>
+                </div>
+                <ChannelBadge channel={typeLabels[connection.type] ?? connection.type} />
+                <b>{connection.status}</b>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <div className="channel-detail-pane">
+          {selectedConnection ? (
+            <div className="channel-detail-surface">
+              <header className="channel-detail-head">
+                <div>
+                  <ChannelBadge channel={typeLabels[selectedConnection.type] ?? selectedConnection.type} />
+                  <strong>{selectedConnection.name}</strong>
+                  <span>{selectedConnection.status} · синхронизация {formatDate(selectedConnection.lastSyncAt)}</span>
+                </div>
+                <button
+                  disabled={!canMutateConnections || busy === `test:${selectedConnection.id}`}
+                  onClick={() => runConnectionTest(selectedConnection)}
+                  title={canMutateConnections ? "Отправить тестовое сообщение и проверить связь" : access.reason}
+                  type="button"
+                >
+                  <PlayCircle size={16} />
+                  Проверить
+                </button>
+              </header>
+
+              <div className="channel-detail-tabs" role="tablist" aria-label="Разделы подключения">
+                {detailTabs.map((tab) => (
+                  <button
+                    aria-selected={detailTab === tab.id}
+                    className={detailTab === tab.id ? "active" : ""}
+                    key={tab.id}
+                    onClick={() => setDetailTab(tab.id)}
+                    role="tab"
+                    type="button"
+                  >
+                    {tab.label}
+                    {tab.id === "log" ? <em>{visibleEvents.length}</em> : null}
+                  </button>
+                ))}
+              </div>
+
+              {detailTab === "overview" ? (
+                <div className="channel-detail-body settings-scroll">
+                  <div className="channel-detail-grid">
+                    <label>
+                      <span>Название</span>
+                      <input
+                        disabled={!canMutateConnections || busy === selectedConnection.id}
+                        defaultValue={selectedConnection.name}
+                        key={`name-${selectedConnection.id}`}
+                        onBlur={(event) => event.target.value !== selectedConnection.name && updateConnection(selectedConnection, { name: event.target.value, reason: "Connection name changed" })}
+                      />
+                      <FieldHint>Сохраняется при выходе из поля.</FieldHint>
+                    </label>
+                    <label>
+                      <span>Очередь приема</span>
+                      <select
+                        disabled={!canMutateConnections || busy === selectedConnection.id}
+                        value={selectedConnection.routingQueueId}
+                        onChange={(event) => updateConnection(selectedConnection, { routingQueueId: event.target.value, reason: "Routing queue changed" })}
+                      >
+                        {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
+                      </select>
+                      <FieldHint>Куда попадают новые обращения канала.</FieldHint>
+                    </label>
+                    <label>
+                      <span>Лимит чатов</span>
+                      <input
+                        disabled={!canMutateConnections || busy === selectedConnection.id}
+                        defaultValue={selectedConnection.chatLimit}
+                        key={`limit-${selectedConnection.id}`}
+                        min="1"
+                        onBlur={(event) => Number(event.target.value) !== Number(selectedConnection.chatLimit) && updateConnection(selectedConnection, { chatLimit: Number(event.target.value), reason: "Chat limit changed" })}
+                        type="number"
+                      />
+                      <FieldHint>Одновременных диалогов на оператора.</FieldHint>
+                    </label>
+                    <div>
+                      <span>Секреты</span>
+                      <strong>{selectedConnection.credentialsMasked ? "замаскированы" : "не заданы"}</strong>
+                      <FieldHint>Токены хранятся в backend и не показываются.</FieldHint>
+                    </div>
+                  </div>
+
+                  <div className="channel-action-row">
+                    <button disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => updateConnection(selectedConnection, { status: "active", reason: "Connection resumed" })} title="Возобновить прием сообщений" type="button">
+                      <RefreshCw size={16} />
+                      Возобновить
+                    </button>
+                    <button disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => updateConnection(selectedConnection, { status: "paused", reason: "Connection paused" })} title="Приостановить прием без удаления" type="button">
+                      <PauseCircle size={16} />
+                      Пауза
+                    </button>
+                    <button className="danger" disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => disableConnection(selectedConnection)} title="Полностью отключить прием по этому подключению" type="button">
+                      <Trash2 size={16} />
+                      Отключить
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {detailTab === "test" ? (
+                <div className="channel-test-panel settings-scroll">
+                  <InlineHint>Проверка не затрагивает клиентов: сообщение проходит через тестовый стенд и попадает в журнал.</InlineHint>
+                  <div className="channel-test-grid">
+                    <label>
+                      <span>Направление</span>
+                      <select disabled={!canMutateConnections} value={testPayload.mode} onChange={(event) => setTestPayload({ ...testPayload, mode: event.target.value })}>
+                        <option value="receive">Прием</option>
+                        <option value="send">Отправка</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Адресат</span>
+                      <input disabled={!canMutateConnections} value={testPayload.recipient} onChange={(event) => setTestPayload({ ...testPayload, recipient: event.target.value })} />
+                    </label>
+                    <label className="channel-test-message">
+                      <span>Сообщение</span>
+                      <textarea disabled={!canMutateConnections} value={testPayload.message} onChange={(event) => setTestPayload({ ...testPayload, message: event.target.value })} />
+                    </label>
+                    <button disabled={!canMutateConnections || busy === `test:${selectedConnection.id}`} onClick={() => runConnectionTest(selectedConnection)} title={canMutateConnections ? "Запустить тест подключения" : access.reason} type="button">
+                      <PlugZap size={16} />
+                      Запустить
+                    </button>
+                  </div>
+                  {testResult ? (
+                    <div className="channel-test-result success">
+                      <strong>{testResult.status}</strong>
+                      <code>{JSON.stringify(testResult, null, 2)}</code>
+                    </div>
+                  ) : (
+                    <div className="channel-test-empty">Результат теста появится после запуска.</div>
+                  )}
+                </div>
+              ) : null}
+
+              {detailTab === "log" ? (
+                <div className="channel-log-panel">
+                  <div className="channel-log-toolbar">
+                    <select aria-label="Фильтр по уровню" value={eventSeverity} onChange={(event) => setEventSeverity(event.target.value)}>
+                      <option value="all">Все уровни</option>
+                      <option value="info">Info</option>
+                      <option value="warn">Warn</option>
+                      <option value="error">Error</option>
+                    </select>
+                    <select aria-label="Фильтр по времени" value={eventWindow} onChange={(event) => setEventWindow(event.target.value)}>
+                      <option value="all">Все время</option>
+                      <option value="24h">24 часа</option>
+                      <option value="1h">1 час</option>
+                    </select>
+                  </div>
+                  <div className="channel-log-list settings-scroll">
+                    {visibleEvents.map((event) => (
+                      <div className={`channel-log-row ${event.severity}`} key={event.id}>
+                        <time>{formatDate(event.time ?? event.createdAt)}</time>
+                        <b>{event.severity}</b>
+                        <span>{event.type ?? event.action}</span>
+                        <strong>{event.message}</strong>
+                        <code>{event.traceId}</code>
+                      </div>
+                    ))}
+                    {!visibleEvents.length ? <div className="channel-log-empty">По выбранным фильтрам событий нет.</div> : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="settings-empty-state">
+              <Inbox size={22} />
+              <strong>{loading ? "Загружаем подключения" : "Каналы еще не подключены"}</strong>
+              <span>{loading ? "Получаем список подключений из backend." : "Подключите Telegram, MAX, VK или SDK — и обращения клиентов появятся в диалогах."}</span>
+              {!loading ? (
+                <button className="primary-action" disabled={!canMutateConnections} onClick={openCreateModal} type="button">
+                  <Plus size={16} />
+                  Новое подключение
+                </button>
+              ) : null}
+            </div>
+          )}
+        </div>
       </div>
 
-      {queues.length ? (
-        <div className="channel-instance-list" aria-label="Список очередей">
-          {queues.map((queue) => (
-            <div className="connection-row" key={queue.id}>
-              <div><strong>{queue.name}</strong><span>{queue.memberCounts?.queue ?? 0} участников</span></div>
-              <select disabled={!canMutateConnections || busy === `queue:${queue.id}`} onChange={(event) => updateQueueTeam(queue, event.target.value)} value={queue.defaultTeamId ?? ""}>
-                <option value="">Без команды</option>
-                {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
-              </select>
+      {isCreateOpen ? (
+        <SettingsModal
+          eyebrow="Подключения"
+          footer={
+            <>
+              <button onClick={() => setCreateOpen(false)} type="button">Отмена</button>
+              <button
+                className="primary-action"
+                disabled={!canMutateConnections || busy === "create" || !form.routingQueueId}
+                form="channel-create-form"
+                title={canMutateConnections ? "Создать подключение" : access.reason}
+                type="submit"
+              >
+                <Plus size={16} />
+                Создать
+              </button>
+            </>
+          }
+          onClose={() => setCreateOpen(false)}
+          title="Новое подключение"
+          titleId="channel-create-title"
+        >
+          <form className="channel-create-form settings-form" id="channel-create-form" onSubmit={createConnection}>
+            <InlineHint>Один канал может иметь несколько подключений — например, отдельные боты для VIP и общей линии.</InlineHint>
+            <div className="settings-form-grid">
+              <label>
+                <span>Тип</span>
+                <select disabled={busy === "create"} value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}>
+                  {availableTypes.map((type) => <option key={type} value={type}>{typeLabels[type] ?? type}</option>)}
+                </select>
+                <FieldHint>Мессенджер или SDK виджет в приложении.</FieldHint>
+              </label>
+              <label>
+                <span>Название</span>
+                <input disabled={busy === "create"} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Telegram VIP" />
+                <FieldHint>Видно операторам в списке и отчетах.</FieldHint>
+              </label>
+              <label>
+                <span>Среда</span>
+                <select disabled={busy === "create"} value={form.environment} onChange={(event) => setForm({ ...form, environment: event.target.value })}>
+                  <option value="production">production</option>
+                  <option value="sandbox">sandbox</option>
+                </select>
+                <FieldHint>Sandbox — для проверки без клиентов.</FieldHint>
+              </label>
+              <label>
+                <span>Очередь</span>
+                <select disabled={busy === "create" || !queues.length} value={form.routingQueueId} onChange={(event) => setForm({ ...form, routingQueueId: event.target.value })}>
+                  {!queues.length ? <option value="">Нет доступных очередей</option> : null}
+                  {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
+                </select>
+                <FieldHint>Куда направлять новые обращения.</FieldHint>
+              </label>
+              <label>
+                <span>Лимит чатов</span>
+                <input disabled={busy === "create"} min="1" type="number" value={form.chatLimit} onChange={(event) => setForm({ ...form, chatLimit: event.target.value })} />
+                <FieldHint>Одновременных диалогов на оператора.</FieldHint>
+              </label>
+              {!isTokenManagedType ? (
+                <label>
+                  <span>Webhook URL</span>
+                  <input disabled={busy === "create"} value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} placeholder="https://example.com/webhook" />
+                  <FieldHint>Адрес, куда канал доставляет события.</FieldHint>
+                </label>
+              ) : null}
+              <label>
+                <span>Секрет или token</span>
+                <input disabled={busy === "create"} value={form.credentials} onChange={(event) => setForm({ ...form, credentials: event.target.value })} type="password" />
+                <FieldHint>{form.type === "telegram" ? "Токен бота из @BotFather." : "Ключ доступа канала. Хранится только в backend."}</FieldHint>
+              </label>
             </div>
-          ))}
-        </div>
+          </form>
+        </SettingsModal>
       ) : null}
 
-      <div className="channel-instance-layout">
-        <div className="channel-instance-list">
-          {loading ? <div className="channel-log-empty">Загружаем подключения.</div> : null}
-          {!loading && !filteredConnections.length ? <div className="channel-log-empty">Подключений по фильтру нет.</div> : null}
-          {filteredConnections.map((connection) => (
-            <button
-              aria-pressed={selectedConnection?.id === connection.id}
-              className={`connection-row connection-picker ${connection.status} ${selectedConnection?.id === connection.id ? "selected" : ""}`}
-              key={connection.id}
-              onClick={() => setSelectedConnectionId(connection.id)}
-              type="button"
-            >
-              <div>
-                <strong>{connection.name}</strong>
-                <span>{connection.environment} · {connection.routingQueueId}</span>
-              </div>
-              <ChannelBadge channel={typeLabels[connection.type] ?? connection.type} />
-              <b>{connection.status}</b>
-              <span>{connection.health ?? 0}% · {connection.traffic}</span>
-            </button>
-          ))}
-        </div>
-
-        <form className="channel-create-form" onSubmit={createConnection}>
-          <div className="section-title compact-title">
-            <h3>Новое подключение</h3>
-            <span>несколько инстансов одного канала</span>
-          </div>
-          <label>
-            <span>Тип</span>
-            <select disabled={!canMutateConnections || busy === "create"} value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}>
-              {availableTypes.map((type) => <option key={type} value={type}>{typeLabels[type] ?? type}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>Название</span>
-            <input disabled={!canMutateConnections || busy === "create"} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Telegram VIP" />
-          </label>
-          <label>
-            <span>Среда</span>
-            <select disabled={!canMutateConnections || busy === "create"} value={form.environment} onChange={(event) => setForm({ ...form, environment: event.target.value })}>
-              <option value="production">production</option>
-              <option value="sandbox">sandbox</option>
-            </select>
-          </label>
-          <label>
-            <span>Очередь</span>
-            <select disabled={!canMutateConnections || busy === "create" || !queues.length} value={form.routingQueueId} onChange={(event) => setForm({ ...form, routingQueueId: event.target.value })}>
-              {!queues.length ? <option value="">Нет доступных очередей</option> : null}
-              {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>Лимит чатов</span>
-            <input disabled={!canMutateConnections || busy === "create"} min="1" type="number" value={form.chatLimit} onChange={(event) => setForm({ ...form, chatLimit: event.target.value })} />
-          </label>
-          {!isTokenManagedType ? (
-            <label>
-              <span>Webhook URL</span>
-              <input disabled={!canMutateConnections || busy === "create"} value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} />
-            </label>
-          ) : null}
-          <label>
-            <span>Секрет или token</span>
-            <input disabled={!canMutateConnections || busy === "create"} value={form.credentials} onChange={(event) => setForm({ ...form, credentials: event.target.value })} type="password" />
-          </label>
-          <button disabled={!canMutateConnections || busy === "create" || !form.routingQueueId} title={canMutateConnections ? "Создать подключение" : access.reason} type="submit">
-            <Plus size={16} />
-            Создать
-          </button>
-        </form>
-      </div>
-
-      {selectedConnection ? (
-        <div className="channel-detail-surface">
-          <header className="channel-detail-head">
-            <div>
-              <ChannelBadge channel={typeLabels[selectedConnection.type] ?? selectedConnection.type} />
-              <strong>{selectedConnection.name}</strong>
-              <span>{selectedConnection.status} · синхронизация {formatDate(selectedConnection.lastSyncAt)}</span>
-            </div>
-            <button
-              disabled={!canMutateConnections || busy === `test:${selectedConnection.id}`}
-              onClick={() => runConnectionTest(selectedConnection)}
-              title={canMutateConnections ? "Проверить подключение" : access.reason}
-              type="button"
-            >
-              <PlayCircle size={16} />
-              Проверить
-            </button>
-          </header>
-
-          <div className="channel-detail-grid">
-            <label>
-              <span>Название</span>
-              <input
-                disabled={!canMutateConnections || busy === selectedConnection.id}
-                defaultValue={selectedConnection.name}
-                onBlur={(event) => updateConnection(selectedConnection, { name: event.target.value, reason: "Connection name changed" })}
-              />
-            </label>
-            <label>
-              <span>Маршрутизация</span>
-              <select
-                disabled={!canMutateConnections || busy === selectedConnection.id}
-                value={selectedConnection.routingQueueId}
-                onChange={(event) => updateConnection(selectedConnection, { routingQueueId: event.target.value, reason: "Routing queue changed" })}
-              >
-                {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Лимит</span>
-              <input
-                disabled={!canMutateConnections || busy === selectedConnection.id}
-                defaultValue={selectedConnection.chatLimit}
-                min="1"
-                onBlur={(event) => updateConnection(selectedConnection, { chatLimit: Number(event.target.value), reason: "Chat limit changed" })}
-                type="number"
-              />
-            </label>
-            <div>
-              <span>Секреты</span>
-              <strong>{selectedConnection.credentialsMasked ? "замаскированы" : "не заданы"}</strong>
-            </div>
-          </div>
-
-          <div className="channel-action-row">
-            <button disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => updateConnection(selectedConnection, { status: "active", reason: "Connection resumed" })} type="button">
-              <RefreshCw size={16} />
-              Возобновить
-            </button>
-            <button disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => updateConnection(selectedConnection, { status: "paused", reason: "Connection paused" })} type="button">
-              <PauseCircle size={16} />
-              Пауза
-            </button>
-            <button className="danger" disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => disableConnection(selectedConnection)} type="button">
-              <Trash2 size={16} />
-              Отключить
-            </button>
-          </div>
-
-          <div className="channel-test-panel">
-            <div className="section-title compact-title">
-              <h3>Тест приема/отправки</h3>
-              <span>{canMutateConnections ? selectedConnection.id : "только администратор"}</span>
-            </div>
-            <div className="channel-test-grid">
-              <label>
-                <span>Направление</span>
-                <select disabled={!canMutateConnections} value={testPayload.mode} onChange={(event) => setTestPayload({ ...testPayload, mode: event.target.value })}>
-                  <option value="receive">Прием</option>
-                  <option value="send">Отправка</option>
-                </select>
-              </label>
-              <label>
-                <span>Адресат</span>
-                <input disabled={!canMutateConnections} value={testPayload.recipient} onChange={(event) => setTestPayload({ ...testPayload, recipient: event.target.value })} />
-              </label>
-              <label className="channel-test-message">
-                <span>Сообщение</span>
-                <textarea disabled={!canMutateConnections} value={testPayload.message} onChange={(event) => setTestPayload({ ...testPayload, message: event.target.value })} />
-              </label>
-              <button disabled={!canMutateConnections || busy === `test:${selectedConnection.id}`} onClick={() => runConnectionTest(selectedConnection)} type="button">
-                <PlugZap size={16} />
-                Запустить
-              </button>
-            </div>
-            {testResult ? (
-              <div className="channel-test-result success">
-                <strong>{testResult.status}</strong>
-                <code>{JSON.stringify(testResult, null, 2)}</code>
-              </div>
-            ) : (
-              <div className="channel-test-empty">Результат теста появится после запуска.</div>
-            )}
-          </div>
-
-          <div className="channel-detail-section">
-            <div className="channel-log-toolbar">
-              <div className="section-title compact-title">
-                <h3>Журнал событий</h3>
-                <span>{visibleEvents.length} событий</span>
-              </div>
-              <select value={eventSeverity} onChange={(event) => setEventSeverity(event.target.value)}>
-                <option value="all">Все уровни</option>
-                <option value="info">Info</option>
-                <option value="warn">Warn</option>
-                <option value="error">Error</option>
-              </select>
-              <select value={eventWindow} onChange={(event) => setEventWindow(event.target.value)}>
-                <option value="all">Все время</option>
-                <option value="24h">24 часа</option>
-                <option value="1h">1 час</option>
-              </select>
-            </div>
-            <div className="channel-log-list">
-              {visibleEvents.map((event) => (
-                <div className={`channel-log-row ${event.severity}`} key={event.id}>
-                  <time>{formatDate(event.time ?? event.createdAt)}</time>
-                  <b>{event.severity}</b>
-                  <span>{event.type ?? event.action}</span>
-                  <strong>{event.message}</strong>
-                  <code>{event.traceId}</code>
+      {isQueueManagerOpen ? (
+        <SettingsModal
+          eyebrow="Подключения"
+          onClose={() => setQueueManagerOpen(false)}
+          size="wide"
+          title="Очереди приема"
+          titleId="queue-manager-title"
+        >
+          <div className="queue-manager">
+            <InlineHint>Очередь определяет, какая команда разбирает обращения. Подключение всегда направляет сообщения в одну очередь.</InlineHint>
+            <div className="queue-manager-list settings-scroll" aria-label="Список очередей">
+              {queues.map((queue) => (
+                <div className="connection-row queue-row" key={queue.id}>
+                  <div>
+                    <strong>{queue.name}</strong>
+                    <span>{queue.memberCounts?.queue ?? 0} участников</span>
+                  </div>
+                  <select
+                    aria-label={`Команда очереди ${queue.name}`}
+                    disabled={!canMutateConnections || busy === `queue:${queue.id}`}
+                    onChange={(event) => updateQueueTeam(queue, event.target.value)}
+                    value={queue.defaultTeamId ?? ""}
+                  >
+                    <option value="">Без команды</option>
+                    {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                  </select>
                 </div>
               ))}
-              {!visibleEvents.length ? <div className="channel-log-empty">По выбранным фильтрам событий нет.</div> : null}
+              {!queues.length ? <div className="channel-log-empty">Очередей пока нет — создайте первую ниже.</div> : null}
+            </div>
+            <div className="queue-manager-create" aria-label="Создание очереди">
+              <label>
+                <span>Новая очередь</span>
+                <input
+                  aria-label="Название новой очереди"
+                  disabled={!canMutateConnections || busy === "create-queue"}
+                  onChange={(event) => setNewQueueName(event.target.value)}
+                  placeholder="Например, VIP поддержка"
+                  value={newQueueName}
+                />
+              </label>
+              <label>
+                <span>Команда</span>
+                <select aria-label="Команда новой очереди" disabled={!canMutateConnections || busy === "create-queue"} onChange={(event) => setNewQueueTeamId(event.target.value)} value={newQueueTeamId}>
+                  <option value="">Без команды</option>
+                  {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                </select>
+              </label>
+              <button disabled={!newQueueName.trim() || !canMutateConnections || busy === "create-queue"} onClick={createQueue} type="button">
+                <Plus size={16} /> Создать очередь
+              </button>
             </div>
           </div>
-        </div>
+        </SettingsModal>
       ) : null}
 
       {connectionToDisable ? (

@@ -3,6 +3,7 @@ import { AdminLockedPanel } from "./AdminLockedPanel.jsx";
 import { ApiGovernancePanel } from "./ApiGovernancePanel.jsx";
 import { BackendIntegrationPanel } from "./BackendIntegrationPanel.jsx";
 import { SecurityControlsPanel } from "./SecurityControlsPanel.jsx";
+import { SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import {
   submitApiKeyRotation,
   submitSecuritySessionRevoke,
@@ -130,41 +131,60 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode, vi
     return <AdminLockedPanel access={access} roleMode={roleMode} />;
   }
 
-  if (loading) {
-    return <div className="admin-workspace-layout">Загружаем данные администрирования…</div>;
-  }
-
   const showApi = view === "all" || view === "api";
   const showSecurity = view === "all" || view === "security";
+  const header = showApi && !showSecurity ? (
+    <SettingsSectionHeader
+      title="API и webhooks"
+      hint="Ключи окружений, подписанные доставки webhook и changelog API. Ротация ключей и повтор доставок фиксируются в аудите."
+    />
+  ) : (
+    <SettingsSectionHeader
+      title="Безопасность"
+      hint="Активные сессии, контроль доступа и диагностика backend-интеграции. Отзыв сессии действует немедленно."
+    />
+  );
+
+  if (loading) {
+    return (
+      <div className="settings-section admin-workspace-section">
+        {header}
+        <div className="admin-workspace-layout">Загружаем данные администрирования…</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="admin-workspace-layout">
-      {showApi ? (
-        <ApiGovernancePanel
-          apiChangelog={apiChangelog}
-          apiEnvironmentKeys={apiEnvironmentKeys}
-          onReplayDelivery={handleReplayWebhook}
-          onRotateKey={handleRotateApiKey}
-          onSelectWebhook={setSelectedWebhookId}
-          replayedDeliveryIds={replayedDeliveryIds}
-          rotatedKeyIds={rotatedKeyIds}
-          selectedWebhook={selectedWebhook}
-          visibleWebhookDeliveries={visibleWebhookDeliveries}
-          webhookEndpoints={webhookEndpoints}
-        />
-      ) : null}
-      {showSecurity ? (
-        <>
-          <SecurityControlsPanel
-            activeSecuritySessions={activeSecuritySessions}
-            onRevokeSession={handleRevokeSession}
-            revokedSessionIds={revokedSessionIds}
-            securityAlerts={securityAlerts}
-            securityControls={securityControls}
+    <div className="settings-section admin-workspace-section">
+      {header}
+      <div className={`admin-workspace-layout ${view} settings-scroll`}>
+        {showApi ? (
+          <ApiGovernancePanel
+            apiChangelog={apiChangelog}
+            apiEnvironmentKeys={apiEnvironmentKeys}
+            onReplayDelivery={handleReplayWebhook}
+            onRotateKey={handleRotateApiKey}
+            onSelectWebhook={setSelectedWebhookId}
+            replayedDeliveryIds={replayedDeliveryIds}
+            rotatedKeyIds={rotatedKeyIds}
+            selectedWebhook={selectedWebhook}
+            visibleWebhookDeliveries={visibleWebhookDeliveries}
+            webhookEndpoints={webhookEndpoints}
           />
-          <BackendIntegrationPanel />
-        </>
-      ) : null}
+        ) : null}
+        {showSecurity ? (
+          <>
+            <SecurityControlsPanel
+              activeSecuritySessions={activeSecuritySessions}
+              onRevokeSession={handleRevokeSession}
+              revokedSessionIds={revokedSessionIds}
+              securityAlerts={securityAlerts}
+              securityControls={securityControls}
+            />
+            <BackendIntegrationPanel />
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }

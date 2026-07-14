@@ -1,17 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { ProductScreen } from "../../ui.jsx";
-import { createScreenStateItems } from "../../app/screenState.js";
+import { AlertTriangle, ChevronLeft } from "lucide-react";
 import { AdminWorkspaces } from "./AdminWorkspaces.jsx";
 import { ChannelConnectionsPanel } from "./ChannelConnectionsPanel.jsx";
 import { EmployeeManagementPanel } from "./EmployeeManagementPanel.jsx";
 import { RulesPanel } from "./RulesPanel.jsx";
-import { SettingsAccessPanel } from "./SettingsAccessPanel.jsx";
-import { SettingsShell } from "./SettingsShell.jsx";
+import { SettingsShell, settingsTabIds } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
 import { TopicDirectoryPanel } from "./TopicDirectoryPanel.jsx";
 import { settingsService } from "../../services/settingsService.js";
 
-export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, onTopicOptionsChange, navigationTarget = null }) {
+export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptionsChange, navigationTarget = null }) {
   const requestedTab = resolveSettingsNavigationTab(navigationTarget);
   const [activeTab, setActiveTab] = useState(requestedTab || "connections");
   const [connectionSummary, setConnectionSummary] = useState({ active: 0, total: 0 });
@@ -58,51 +56,54 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, 
   }, []);
 
   const summaries = {
-    connections: `${connectionSummary.total} подключений, ${connectionSummary.active} активных`,
-    employees: `${employeeSummary.total} сотрудников, роли и лимиты`,
+    connections: `${connectionSummary.active} из ${connectionSummary.total} активны`,
+    employees: `${employeeSummary.total} сотрудников`,
     topics: `${topicTotals.active} активных / ${topicTotals.archived} архив`,
     rules: `${rulesSummary.active} активных правил`
   };
 
   return (
-    <ProductScreen
-      title="Настройки"
-      subtitle="Подключения, сотрудники, справочник тематик и правила обработки обращений."
-      onBack={onBack}
-      stateItems={createScreenStateItems({
-        total: connectionSummary.total,
-        empty: `${connectionSummary.total} каналов`,
-        emptyWhenZero: "каналы не настроены",
-        errors: loadError ? 1 : 0,
-        errorLabel: loadError || "критичных ошибок нет"
-      })}
-    >
-      {loadError ? <div className="entity-empty"><strong>{loadError}</strong><span>Изменения заблокированы до восстановления backend.</span></div> : null}
-      <SettingsAccessPanel
-        canEditSettings={canEditSettings}
-        onRoleMode={onRoleMode}
-        onToast={onToast}
-        roleMode={roleMode}
-      />
+    <section className="product-screen settings-screen">
+      <header className="settings-header">
+        <div className="settings-header-main">
+          <button className="back-link" onClick={onBack} type="button">
+            <ChevronLeft size={18} />
+            Диалоги
+          </button>
+          <div>
+            <h1>Настройки</h1>
+            <p>Управление рабочим пространством: каналы, команда и правила обработки обращений.</p>
+          </div>
+        </div>
+        {loadError ? (
+          <div className="settings-load-error" role="alert">
+            <AlertTriangle size={16} />
+            <div>
+              <strong>{loadError}</strong>
+              <span>Изменения заблокированы до восстановления backend.</span>
+            </div>
+          </div>
+        ) : null}
+      </header>
 
       <SettingsShell activeTab={activeTab} onTabChange={setActiveTab} summaries={summaries}>
         {activeTab === "connections" ? (
-          <div className="integration-layout">
-            <ChannelConnectionsPanel
-              access={access}
-              canEditSettings={canEditSettings}
-              focusChannelType={navigationTarget?.tab === "connections" ? navigationTarget.channelType : ""}
-              focusConnectionId={navigationTarget?.tab === "connections" ? navigationTarget.connectionId : ""}
-              onSummaryChange={setConnectionSummary}
-              onToast={onToast}
-            />
+          <ChannelConnectionsPanel
+            access={access}
+            canEditSettings={canEditSettings}
+            focusChannelType={navigationTarget?.tab === "connections" ? navigationTarget.channelType : ""}
+            focusConnectionId={navigationTarget?.tab === "connections" ? navigationTarget.connectionId : ""}
+            onSummaryChange={setConnectionSummary}
+            onToast={onToast}
+          />
+        ) : null}
 
-            <SdkConsolePanel
-              access={access}
-              canEditSettings={canEditSettings}
-              onToast={onToast}
-            />
-          </div>
+        {activeTab === "sdk" ? (
+          <SdkConsolePanel
+            access={access}
+            canEditSettings={canEditSettings}
+            onToast={onToast}
+          />
         ) : null}
 
         {activeTab === "api" ? (
@@ -153,11 +154,11 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onRoleMode, 
           />
         ) : null}
       </SettingsShell>
-    </ProductScreen>
+    </section>
   );
 }
 
 function resolveSettingsNavigationTab(navigationTarget) {
   const tab = typeof navigationTarget?.tab === "string" ? navigationTarget.tab : "";
-  return ["connections", "employees", "topics", "rules", "api", "security"].includes(tab) ? tab : "";
+  return settingsTabIds.includes(tab) ? tab : "";
 }

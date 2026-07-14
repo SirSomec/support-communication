@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Search, ShieldCheck, Tag, ToggleLeft, ToggleRight } from "lucide-react";
-import { ChannelList, SectionTitle, SegmentedControl, ToolbarSearch } from "../../ui.jsx";
+import { ChannelList, SegmentedControl, ToolbarSearch } from "../../ui.jsx";
+import { FieldHint, InlineHint, SettingsModal, SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import { settingsService } from "../../services/settingsService.js";
 
 const topicStatusFilters = ["Все", "Активные", "Архив"];
@@ -8,19 +9,18 @@ const channelOptions = ["SDK", "Telegram", "MAX", "VK"];
 
 export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicOptionsChange, roleMode }) {
   const [topicDirectory, setTopicDirectory] = useState([]);
-  const [topics, setTopics] = useState([]);
   const [topicTotals, setTopicTotals] = useState({ active: 0, archived: 0, total: 0 });
   const [topicQuery, setTopicQuery] = useState("");
   const [topicStatusFilter, setTopicStatusFilter] = useState("Все");
   const [selectedTopicId, setSelectedTopicId] = useState("");
   const [draft, setDraft] = useState(emptyDraft());
+  const [isEditorOpen, setEditorOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const canMutateTopics = canEditSettings && !error;
 
   const normalizedTopicQuery = topicQuery.trim().toLowerCase();
-  const selectedTopic = topics.find((topic) => topic.id === selectedTopicId) ?? null;
 
   useEffect(() => {
     let ignore = false;
@@ -37,7 +37,6 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
       if (response.status !== "ok") {
         setError(response.error?.message ?? "Не удалось загрузить справочник тематик.");
         setTopicDirectory([]);
-        setTopics([]);
         setTopicTotals({ active: 0, archived: 0, total: 0 });
         setLoading(false);
         return;
@@ -91,14 +90,11 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
     const nextDirectory = Array.isArray(data.directory) ? data.directory : [];
     const nextTopics = Array.isArray(data.topics) ? data.topics.map(normalizeTopic) : flattenDirectory(nextDirectory);
     setTopicDirectory(nextDirectory);
-    setTopics(nextTopics);
     setTopicTotals(data.totals ?? countTopics(nextTopics));
     if (Array.isArray(data.activeOptions)) {
       onTopicOptionsChange?.(data.activeOptions);
     }
-    setSelectedTopicId((current) => current && nextTopics.some((topic) => topic.id === current)
-      ? current
-      : nextTopics[0]?.id ?? "");
+    setSelectedTopicId((current) => current && nextTopics.some((topic) => topic.id === current) ? current : "");
   }
 
   function handleNewTopic() {
@@ -109,6 +105,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
 
     setSelectedTopicId("");
     setDraft(emptyDraft());
+    setEditorOpen(true);
   }
 
   function handleTopicEdit(topic) {
@@ -127,6 +124,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
       required: Boolean(topic.required),
       routingTarget: topic.routingTarget ?? topic.routing ?? "Line 1"
     });
+    setEditorOpen(true);
   }
 
   async function handleTopicArchive(topic) {
@@ -169,6 +167,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
       return;
     }
 
+    setEditorOpen(false);
     await refreshTopics(response.data?.topic?.id);
     onToast(`${response.data?.topic?.groupName} / ${response.data?.topic?.name}: сохранено. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
   }
@@ -193,8 +192,26 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
   }
 
   return (
-    <section className="work-panel topic-directory-panel">
-      <SectionTitle title="Справочник тематик" action={loading ? "загрузка" : `${topicTotals.active} активных / ${topicTotals.archived} архив`} />
+    <section className="settings-section topic-directory-panel">
+      <SettingsSectionHeader
+        title="Справочник тематик"
+        meta={loading ? "загрузка" : `${topicTotals.active} активных / ${topicTotals.archived} архив`}
+        hint="Тематики классифицируют обращения, управляют маршрутизацией и обязательны при закрытии диалога."
+        actions={
+          <button
+            className="primary-action topic-add-button"
+            disabled={!canMutateTopics}
+            onClick={handleNewTopic}
+            title={canMutateTopics ? "Создать тематику" : access.reason}
+            type="button"
+          >
+            <Plus size={16} />
+            Добавить тематику
+          </button>
+        }
+      />
+
+      <div className="settings-card topic-directory-card">
       <div className="topic-directory-toolbar">
         <ToolbarSearch
           ariaLabel="Поиск по справочнику тематик"
@@ -211,72 +228,17 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
           value={topicStatusFilter}
           onChange={setTopicStatusFilter}
         />
-        <button
-          className="topic-add-button"
-          disabled={!canMutateTopics}
-          onClick={handleNewTopic}
-          title={canMutateTopics ? "Добавить тематику" : access.reason}
-          type="button"
-        >
-          <Plus size={16} />
-          Добавить
-        </button>
-      </div>
-      <div className="topic-rights-note">
-        <ShieldCheck size={17} />
-        <span>{canMutateTopics ? "Администратор может создавать, редактировать, архивировать и восстанавливать тематики." : `${roleMode}: просмотр справочника без изменения общих настроек.`}</span>
       </div>
 
-      <form className="topic-editor-form" onSubmit={handleSaveTopic}>
-        <strong>{selectedTopicId ? "Редактирование тематики" : "Новая тематика"}</strong>
-        <div className="topic-editor-grid">
-          <label>
-            <span>Группа</span>
-            <input disabled={!canMutateTopics} value={draft.groupName} onChange={(event) => setDraft((current) => ({ ...current, groupName: event.target.value }))} />
-          </label>
-          <label>
-            <span>Ветка</span>
-            <input disabled={!canMutateTopics} value={draft.branchName} onChange={(event) => setDraft((current) => ({ ...current, branchName: event.target.value }))} />
-          </label>
-          <label>
-            <span>Тема</span>
-            <input disabled={!canMutateTopics} value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
-          </label>
-          <label>
-            <span>Маршрутизация</span>
-            <input disabled={!canMutateTopics} value={draft.routingTarget} onChange={(event) => setDraft((current) => ({ ...current, routingTarget: event.target.value }))} />
-          </label>
-          <label>
-            <span>Доступ</span>
-            <select disabled={!canMutateTopics} value={draft.accessScope} onChange={(event) => setDraft((current) => ({ ...current, accessScope: event.target.value }))}>
-              <option value="admins">Администраторы</option>
-              <option value="senior">Старшие сотрудники</option>
-              <option value="all">Все сотрудники</option>
-            </select>
-          </label>
-          <label className="topic-required-toggle">
-            <input disabled={!canMutateTopics} checked={draft.required} type="checkbox" onChange={(event) => setDraft((current) => ({ ...current, required: event.target.checked }))} />
-            <span>Обязательная для закрытия</span>
-          </label>
+      {!canMutateTopics && !loading ? (
+        <div className="topic-rights-note">
+          <ShieldCheck size={17} />
+          <span>{error ? "Справочник доступен только на чтение до восстановления backend." : `${roleMode}: просмотр справочника без изменения общих настроек.`}</span>
         </div>
-        <div className="topic-channel-picker" aria-label="Каналы тематики">
-          {channelOptions.map((channel) => (
-            <label key={channel}>
-              <input disabled={!canMutateTopics} checked={draft.channels.includes(channel)} type="checkbox" onChange={() => toggleDraftChannel(channel)} />
-              <span>{channel}</span>
-            </label>
-          ))}
-        </div>
-        {error ? <div className="topic-error">{error}</div> : null}
-        <footer>
-          <span>Сохранение обновляет backend-справочник, который используется закрытием диалогов, отчетами и маршрутизацией.</span>
-          <button disabled={!canMutateTopics || saving} type="submit">
-            Сохранить тематику
-          </button>
-        </footer>
-      </form>
+      ) : null}
+      {error ? <div className="settings-rule-error">{error}</div> : null}
 
-      <div className="topic-tree-list">
+      <div className="topic-tree-list settings-scroll">
         {loading ? (
           <div className="topic-empty">
             <Search size={18} />
@@ -339,7 +301,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
                           data-topic-action="archive"
                           disabled={!canMutateTopics}
                           onClick={() => handleTopicArchive(normalizeTopic(topic))}
-                          title={canMutateTopics ? (topic.archived ? "Вернуть тематику из архива" : "Переместить тематику в архив") : access.reason}
+                          title={canMutateTopics ? (topic.archived ? "Вернуть тематику из архива" : "Скрыть тематику из выбора, история сохранится") : access.reason}
                           type="button"
                         >
                           {topic.archived ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
@@ -357,10 +319,76 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
           <div className="topic-empty">
             <Search size={18} />
             <strong>Тематики не найдены</strong>
-            <span>Измените запрос или фильтр статуса.</span>
+            <span>Измените запрос или фильтр статуса — либо добавьте новую тематику.</span>
           </div>
         )}
       </div>
+      </div>
+
+      {isEditorOpen ? (
+        <SettingsModal
+          eyebrow="Справочник тематик"
+          footer={
+            <>
+              <button onClick={() => setEditorOpen(false)} type="button">Отмена</button>
+              <button className="primary-action" disabled={!canMutateTopics || saving} form="topic-editor-form" type="submit">
+                Сохранить тематику
+              </button>
+            </>
+          }
+          onClose={() => setEditorOpen(false)}
+          title={selectedTopicId ? "Редактирование тематики" : "Новая тематика"}
+          titleId="topic-editor-title"
+        >
+          <form className="topic-editor-form settings-form" id="topic-editor-form" onSubmit={handleSaveTopic}>
+            <InlineHint>Справочник используется при закрытии диалогов, в отчетах и маршрутизации — изменения применяются сразу.</InlineHint>
+            <div className="settings-form-grid">
+              <label>
+                <span>Группа</span>
+                <input disabled={!canMutateTopics} placeholder="Оплата" value={draft.groupName} onChange={(event) => setDraft((current) => ({ ...current, groupName: event.target.value }))} />
+                <FieldHint>Верхний уровень дерева тематик.</FieldHint>
+              </label>
+              <label>
+                <span>Ветка</span>
+                <input disabled={!canMutateTopics} placeholder="Возвраты" value={draft.branchName} onChange={(event) => setDraft((current) => ({ ...current, branchName: event.target.value }))} />
+                <FieldHint>Подраздел внутри группы.</FieldHint>
+              </label>
+              <label>
+                <span>Тема</span>
+                <input disabled={!canMutateTopics} placeholder="Возврат за отмененный заказ" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+              </label>
+              <label>
+                <span>Маршрутизация</span>
+                <input disabled={!canMutateTopics} placeholder="Line 1" value={draft.routingTarget} onChange={(event) => setDraft((current) => ({ ...current, routingTarget: event.target.value }))} />
+                <FieldHint>Очередь или линия, куда попадает обращение.</FieldHint>
+              </label>
+              <label>
+                <span>Доступ</span>
+                <select disabled={!canMutateTopics} value={draft.accessScope} onChange={(event) => setDraft((current) => ({ ...current, accessScope: event.target.value }))}>
+                  <option value="admins">Администраторы</option>
+                  <option value="senior">Старшие сотрудники</option>
+                  <option value="all">Все сотрудники</option>
+                </select>
+                <FieldHint>Кто может выбирать тематику в диалоге.</FieldHint>
+              </label>
+            </div>
+            <label className="topic-required-toggle">
+              <input disabled={!canMutateTopics} checked={draft.required} type="checkbox" onChange={(event) => setDraft((current) => ({ ...current, required: event.target.checked }))} />
+              <span>Обязательная для закрытия диалога</span>
+            </label>
+            <div className="topic-channel-picker" aria-label="Каналы тематики">
+              <span>Каналы</span>
+              {channelOptions.map((channel) => (
+                <label key={channel}>
+                  <input disabled={!canMutateTopics} checked={draft.channels.includes(channel)} type="checkbox" onChange={() => toggleDraftChannel(channel)} />
+                  <span>{channel}</span>
+                </label>
+              ))}
+            </div>
+            {error ? <div className="topic-error">{error}</div> : null}
+          </form>
+        </SettingsModal>
+      ) : null}
     </section>
   );
 }

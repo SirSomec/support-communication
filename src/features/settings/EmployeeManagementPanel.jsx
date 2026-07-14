@@ -1,6 +1,8 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
-import { KeyRound, RefreshCcw, ShieldCheck, Smartphone, UserPlus } from "lucide-react";
-import { ChannelBadge, ChannelList, SectionTitle, ToolbarSearch } from "../../ui.jsx";
+import React, { useEffect, useMemo, useState } from "react";
+import { KeyRound, RefreshCcw, ShieldCheck, Smartphone, UserPlus, UsersRound } from "lucide-react";
+import { ChannelBadge, ChannelList, ToolbarSearch } from "../../ui.jsx";
+import { FieldHint, InlineHint, SettingsModal, SettingsSectionHeader } from "./SettingsPrimitives.jsx";
+import { RoleMatrixModal } from "./RoleMatrixModal.jsx";
 import { settingsService } from "../../services/settingsService.js";
 
 export function EmployeeManagementPanel({ access, canEditSettings, canResetEmployeePassword, onToast, roleMode }) {
@@ -19,6 +21,9 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
   const [error, setError] = useState("");
   const [inviteDraft, setInviteDraft] = useState({ email: "", name: "", roleKey: "employee", groupId: "group-line-1" });
   const [groupDraft, setGroupDraft] = useState({ channels: ["SDK"], groupId: "", name: "", scope: "" });
+  const [isInviteOpen, setInviteOpen] = useState(false);
+  const [isGroupsOpen, setGroupsOpen] = useState(false);
+  const [isRoleMatrixOpen, setRoleMatrixOpen] = useState(false);
 
   const canEditEmployeeDirectory = canEditSettings && !error;
   const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId) ?? employees[0] ?? null;
@@ -187,6 +192,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
     setEmployees((current) => [invited, ...current]);
     setSelectedEmployeeId(invited.id);
     setInviteDraft({ email: "", name: "", roleKey: "employee", groupId: "group-line-1" });
+    setInviteOpen(false);
     onToast(`${invited.employee}: приглашение отправлено. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
   }
 
@@ -226,6 +232,15 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
     onToast(`${savedGroup.name}: группа сохранена. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
   }
 
+  function openInviteModal() {
+    if (!canEditEmployeeDirectory) {
+      onToast(access.reason);
+      return;
+    }
+
+    setInviteOpen(true);
+  }
+
   function editGroup(group) {
     setGroupDraft({
       channels: group.channels?.length ? group.channels : ["SDK"],
@@ -245,40 +260,69 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
   }
 
   return (
-    <section className="work-panel employee-rules-panel">
-      <SectionTitle title="Сотрудники и роли" action={loading ? "загрузка" : `${employees.length} сотрудников`} />
+    <section className="settings-section employee-rules-panel">
+      <SettingsSectionHeader
+        title="Сотрудники и роли"
+        meta={loading ? "загрузка" : `${employees.length} сотрудников`}
+        hint="Роль определяет доступы, группа — зону ответственности, лимит — нагрузку оператора."
+        actions={
+          <>
+            <button className="settings-ghost-action" onClick={() => setRoleMatrixOpen(true)} title="Справочник: какие права дает каждая роль" type="button">
+              <ShieldCheck size={16} />
+              Права ролей
+            </button>
+            <button className="settings-ghost-action" onClick={() => setGroupsOpen(true)} title="Группы сотрудников и их каналы" type="button">
+              <UsersRound size={16} />
+              Группы
+            </button>
+            <button
+              className="primary-action settings-invite-employee"
+              disabled={!canEditEmployeeDirectory}
+              onClick={openInviteModal}
+              title={canEditEmployeeDirectory ? "Отправить приглашение по email" : access.reason}
+              type="button"
+            >
+              <UserPlus size={16} />
+              Пригласить
+            </button>
+          </>
+        }
+      />
+
       <div className="employee-management">
         <div className="employee-directory">
-          <ToolbarSearch
-            ariaLabel="Поиск сотрудника"
-            className="employee-search"
-            iconSize={17}
-            placeholder="Сотрудник, email, роль, группа, канал"
-            value={employeeQuery}
-            onChange={setEmployeeQuery}
-          />
-          <div className="employee-filter-row" aria-label="Фильтры сотрудников">
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="all">Все статусы</option>
-              <option value="active">Активные</option>
-              <option value="invited">Приглашены</option>
-              <option value="blocked">Заблокированы</option>
-              <option value="deactivated">Отключены</option>
-            </select>
-            <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
-              <option value="all">Все роли</option>
-              {roles.map((role) => <option value={role.key} key={role.key}>{role.name}</option>)}
-            </select>
-            <select value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
-              <option value="all">Все группы</option>
-              {groups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
-            </select>
-            <select value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)}>
-              <option value="all">Все каналы</option>
-              {supportedChannels.map((channelName) => <option value={channelName} key={channelName}>{channelName}</option>)}
-            </select>
+          <div className="employee-directory-toolbar">
+            <ToolbarSearch
+              ariaLabel="Поиск сотрудника"
+              className="employee-search"
+              iconSize={17}
+              placeholder="Имя, email, роль, группа, канал"
+              value={employeeQuery}
+              onChange={setEmployeeQuery}
+            />
+            <div className="employee-filter-row" aria-label="Фильтры сотрудников">
+              <select aria-label="Фильтр по статусу" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                <option value="all">Все статусы</option>
+                <option value="active">Активные</option>
+                <option value="invited">Приглашены</option>
+                <option value="blocked">Заблокированы</option>
+                <option value="deactivated">Отключены</option>
+              </select>
+              <select aria-label="Фильтр по роли" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+                <option value="all">Все роли</option>
+                {roles.map((role) => <option value={role.key} key={role.key}>{role.name}</option>)}
+              </select>
+              <select aria-label="Фильтр по группе" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
+                <option value="all">Все группы</option>
+                {groups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
+              </select>
+              <select aria-label="Фильтр по каналу" value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)}>
+                <option value="all">Все каналы</option>
+                {supportedChannels.map((channelName) => <option value={channelName} key={channelName}>{channelName}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="employee-selector-list">
+          <div className="employee-selector-list settings-scroll">
             {loading ? <div className="employee-empty">Загрузка сотрудников...</div> : null}
             {!loading && visibleEmployees.map((employee) => (
               <button
@@ -295,46 +339,9 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
               </button>
             ))}
             {!loading && !visibleEmployees.length ? (
-              <div className="employee-empty">Сотрудники не найдены.</div>
+              <div className="employee-empty">Сотрудники не найдены. Измените фильтры или пригласите нового сотрудника.</div>
             ) : null}
           </div>
-
-          <form className="employee-invite-form" onSubmit={handleInviteEmployee}>
-            <strong>Пригласить сотрудника</strong>
-            <input
-              disabled={!canEditEmployeeDirectory}
-              placeholder="Имя"
-              value={inviteDraft.name}
-              onChange={(event) => setInviteDraft((current) => ({ ...current, name: event.target.value }))}
-            />
-            <input
-              disabled={!canEditEmployeeDirectory}
-              placeholder="email@company.ru"
-              type="email"
-              value={inviteDraft.email}
-              onChange={(event) => setInviteDraft((current) => ({ ...current, email: event.target.value }))}
-            />
-            <div>
-              <select
-                disabled={!canEditEmployeeDirectory}
-                value={inviteDraft.roleKey}
-                onChange={(event) => setInviteDraft((current) => ({ ...current, roleKey: event.target.value }))}
-              >
-                {roles.map((role) => <option value={role.key} key={role.key}>{role.name}</option>)}
-              </select>
-              <select
-                disabled={!canEditEmployeeDirectory}
-                value={inviteDraft.groupId}
-                onChange={(event) => setInviteDraft((current) => ({ ...current, groupId: event.target.value }))}
-              >
-                {groups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
-              </select>
-            </div>
-            <button disabled={!canEditEmployeeDirectory || saving} type="submit" title={canEditEmployeeDirectory ? "Отправить приглашение" : access.reason}>
-              <UserPlus size={16} />
-              Пригласить
-            </button>
-          </form>
         </div>
 
         <div className="employee-editor">
@@ -348,7 +355,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                 <button
                   disabled={!canResetEmployeePassword}
                   onClick={handlePasswordReset}
-                  title={canResetEmployeePassword ? "Сбросить пароль сотруднику" : access.reason}
+                  title={canResetEmployeePassword ? "Отправить сотруднику ссылку для смены пароля" : access.reason}
                   type="button"
                 >
                   <KeyRound size={16} />
@@ -357,76 +364,81 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                 <button
                   disabled={!canResetEmployeePassword}
                   onClick={handleMfaReset}
-                  title={canResetEmployeePassword ? "Сбросить MFA сотруднику" : access.reason}
+                  title={canResetEmployeePassword ? "Сбросить второй фактор — сотрудник настроит его заново" : access.reason}
                   type="button"
                 >
                   <Smartphone size={16} />
                   Сбросить MFA
                 </button>
               </header>
-              <div className="employee-editor-grid">
-                <label>
-                  <span>Роль</span>
-                  <select disabled={!canEditEmployeeDirectory} value={selectedEmployee.roleKey} onChange={(event) => patchSelectedEmployee({ roleKey: event.target.value, role: roleName(roles, event.target.value) })} title={canEditEmployeeDirectory ? "Изменить роль" : access.reason}>
-                    {roles.map((role) => <option value={role.key} key={role.key}>{role.name}</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>Группа</span>
-                  <select disabled={!canEditEmployeeDirectory} value={selectedEmployee.groupId} onChange={(event) => patchSelectedEmployee({ groupId: event.target.value, group: groupName(groups, event.target.value) })} title={canEditEmployeeDirectory ? "Назначить группу" : access.reason}>
-                    {groups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>Лимит чатов</span>
-                  <input disabled={!canEditEmployeeDirectory} min="1" max="30" type="number" value={selectedEmployee.chatLimit} onChange={(event) => patchSelectedEmployee({ chatLimit: Number(event.target.value) })} title={canEditEmployeeDirectory ? "Изменить лимит сотрудника" : access.reason} />
-                </label>
-                <div>
-                  <span>Пароль</span>
-                  <strong>{selectedEmployee.passwordStatus}</strong>
+              <div className="employee-editor-body settings-scroll">
+                <div className="employee-editor-grid">
+                  <label>
+                    <span>Роль</span>
+                    <select disabled={!canEditEmployeeDirectory} value={selectedEmployee.roleKey} onChange={(event) => patchSelectedEmployee({ roleKey: event.target.value, role: roleName(roles, event.target.value) })} title={canEditEmployeeDirectory ? "Изменить роль" : access.reason}>
+                      {roles.map((role) => <option value={role.key} key={role.key}>{role.name}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Группа</span>
+                    <select disabled={!canEditEmployeeDirectory} value={selectedEmployee.groupId} onChange={(event) => patchSelectedEmployee({ groupId: event.target.value, group: groupName(groups, event.target.value) })} title={canEditEmployeeDirectory ? "Назначить группу" : access.reason}>
+                      {groups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Лимит чатов</span>
+                    <input disabled={!canEditEmployeeDirectory} min="1" max="30" type="number" value={selectedEmployee.chatLimit} onChange={(event) => patchSelectedEmployee({ chatLimit: Number(event.target.value) })} title={canEditEmployeeDirectory ? "Одновременных диалогов на сотрудника" : access.reason} />
+                  </label>
+                  <div>
+                    <span>Пароль</span>
+                    <strong>{selectedEmployee.passwordStatus}</strong>
+                  </div>
+                  <div>
+                    <span>MFA</span>
+                    <strong>{selectedEmployee.mfaStatus}</strong>
+                  </div>
                 </div>
-                <div>
-                  <span>MFA</span>
-                  <strong>{selectedEmployee.mfaStatus}</strong>
+                <div className="employee-channel-editor" aria-label="Каналы сотрудника">
+                  <span className="employee-editor-caption">Каналы, в которых сотрудник принимает обращения</span>
+                  <div>
+                    {supportedChannels.map((channelName) => (
+                      <label key={channelName}>
+                        <input
+                          checked={selectedEmployee.channels.includes(channelName)}
+                          disabled={!canEditEmployeeDirectory}
+                          onChange={() => toggleSelectedEmployeeChannel(channelName)}
+                          title={canEditEmployeeDirectory ? `Переключить канал ${channelName}` : access.reason}
+                          type="checkbox"
+                        />
+                        <ChannelBadge channel={channelName} />
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="employee-channel-editor" aria-label="Каналы сотрудника">
-                {supportedChannels.map((channelName) => (
-                  <label key={channelName}>
+                <div className="employee-permission-toggles">
+                  <label>
                     <input
-                      checked={selectedEmployee.channels.includes(channelName)}
+                      checked={selectedEmployee.canOverride}
                       disabled={!canEditEmployeeDirectory}
-                      onChange={() => toggleSelectedEmployeeChannel(channelName)}
-                      title={canEditEmployeeDirectory ? `Переключить канал ${channelName}` : access.reason}
+                      onChange={(event) => patchSelectedEmployee({ canOverride: event.target.checked })}
+                      title={canEditEmployeeDirectory ? "Может брать диалоги вне очереди" : access.reason}
                       type="checkbox"
                     />
-                    <ChannelBadge channel={channelName} />
+                    <span>Override очереди</span>
                   </label>
-                ))}
+                  <label>
+                    <input
+                      checked={selectedEmployee.sensitiveData}
+                      disabled={!canEditEmployeeDirectory}
+                      onChange={(event) => patchSelectedEmployee({ sensitiveData: event.target.checked })}
+                      title={canEditEmployeeDirectory ? "Видит телефоны и персональные данные клиентов" : access.reason}
+                      type="checkbox"
+                    />
+                    <span>Чувствительные данные</span>
+                  </label>
+                </div>
+                {error ? <div className="employee-error">{error}</div> : null}
               </div>
-              <div className="employee-permission-toggles">
-                <label>
-                  <input
-                    checked={selectedEmployee.canOverride}
-                    disabled={!canEditEmployeeDirectory}
-                    onChange={(event) => patchSelectedEmployee({ canOverride: event.target.checked })}
-                    title={canEditEmployeeDirectory ? "Разрешить override" : access.reason}
-                    type="checkbox"
-                  />
-                  <span>Override очереди</span>
-                </label>
-                <label>
-                  <input
-                    checked={selectedEmployee.sensitiveData}
-                    disabled={!canEditEmployeeDirectory}
-                    onChange={(event) => patchSelectedEmployee({ sensitiveData: event.target.checked })}
-                    title={canEditEmployeeDirectory ? "Показывать чувствительные данные" : access.reason}
-                    type="checkbox"
-                  />
-                  <span>Чувствительные данные</span>
-                </label>
-              </div>
-              {error ? <div className="employee-error">{error}</div> : null}
               <footer>
                 <span>{canEditEmployeeDirectory ? "Изменения сохраняются в backend и попадают в audit." : `${roleMode}: можно смотреть карточку сотрудника${canResetEmployeePassword ? " и сбрасывать пароль/MFA." : "."}`}</span>
                 <button
@@ -441,57 +453,137 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
               </footer>
             </>
           ) : (
-            <div className="employee-empty">Выберите сотрудника.</div>
+            <div className="employee-empty">{loading ? "Загрузка сотрудников..." : "Выберите сотрудника из списка слева."}</div>
           )}
         </div>
       </div>
-      <div className="employee-group-strip" aria-label="Группы сотрудников">
-        {groups.map((group) => (
-          <button key={group.id} onClick={() => editGroup(group)} type="button">
-            <strong>{group.name}</strong>
-            <span>{group.memberIds?.length ?? 0} сотрудников · {group.scope}</span>
-          </button>
-        ))}
-      </div>
-      <form className="employee-group-editor" onSubmit={handleSaveGroup}>
-        <label>
-          <span>Группа</span>
-          <input disabled={!canEditEmployeeDirectory || saving} value={groupDraft.name} onChange={(event) => setGroupDraft((current) => ({ ...current, name: event.target.value }))} />
-        </label>
-        <label>
-          <span>Область ответственности</span>
-          <input disabled={!canEditEmployeeDirectory || saving} value={groupDraft.scope} onChange={(event) => setGroupDraft((current) => ({ ...current, scope: event.target.value }))} />
-        </label>
-        <div className="employee-group-channel-picker">
-          {supportedChannels.map((channelName) => (
-            <label key={channelName}>
-              <input checked={groupDraft.channels.includes(channelName)} disabled={!canEditEmployeeDirectory || saving} onChange={() => toggleGroupChannel(channelName)} type="checkbox" />
-              <ChannelBadge channel={channelName} />
-            </label>
-          ))}
-        </div>
-        <button disabled={!canEditEmployeeDirectory || saving} type="submit">
-          {groupDraft.groupId ? "Сохранить группу" : "Создать группу"}
-        </button>
-      </form>
-      <div className="employee-rule-list">
-        {employees.map((employee) => (
-          <article className="employee-rule" key={employee.id}>
-            <header>
-              <strong>{employee.employee}</strong>
-              <span>{employee.role} · {employee.group}</span>
-              <b>{employee.chatLimit} чатов</b>
-            </header>
-            <ChannelList channels={employee.channels} />
-            <p>{employee.exceptions.join("; ") || "Без исключений"}</p>
-            <footer>
-              <span>{employee.canOverride ? "может override" : "без override"}</span>
-              <span>{employee.sensitiveData ? "видит чувствительные данные" : "данные маскированы"}</span>
-              <span>{employee.passwordStatus}</span>
-            </footer>
-          </article>
-        ))}
-      </div>
+
+      {isInviteOpen ? (
+        <SettingsModal
+          eyebrow="Сотрудники и роли"
+          footer={
+            <>
+              <button onClick={() => setInviteOpen(false)} type="button">Отмена</button>
+              <button
+                className="primary-action"
+                disabled={!canEditEmployeeDirectory || saving}
+                form="employee-invite-form"
+                title={canEditEmployeeDirectory ? "Отправить приглашение" : access.reason}
+                type="submit"
+              >
+                <UserPlus size={16} />
+                Пригласить
+              </button>
+            </>
+          }
+          onClose={() => setInviteOpen(false)}
+          title="Пригласить сотрудника"
+          titleId="employee-invite-title"
+        >
+          <form className="employee-invite-form settings-form" id="employee-invite-form" onSubmit={handleInviteEmployee}>
+            <InlineHint>Сотрудник получит письмо со ссылкой: задаст пароль и сразу попадет в рабочее пространство.</InlineHint>
+            <div className="settings-form-grid">
+              <label>
+                <span>Имя</span>
+                <input
+                  disabled={!canEditEmployeeDirectory}
+                  placeholder="Анна Смирнова"
+                  value={inviteDraft.name}
+                  onChange={(event) => setInviteDraft((current) => ({ ...current, name: event.target.value }))}
+                />
+              </label>
+              <label>
+                <span>Email</span>
+                <input
+                  disabled={!canEditEmployeeDirectory}
+                  placeholder="email@company.ru"
+                  type="email"
+                  value={inviteDraft.email}
+                  onChange={(event) => setInviteDraft((current) => ({ ...current, email: event.target.value }))}
+                />
+                <FieldHint>На этот адрес придет приглашение.</FieldHint>
+              </label>
+              <label>
+                <span>Роль</span>
+                <select
+                  disabled={!canEditEmployeeDirectory}
+                  value={inviteDraft.roleKey}
+                  onChange={(event) => setInviteDraft((current) => ({ ...current, roleKey: event.target.value }))}
+                >
+                  {roles.map((role) => <option value={role.key} key={role.key}>{role.name}</option>)}
+                </select>
+                <FieldHint>Определяет доступы. Можно изменить позже.</FieldHint>
+              </label>
+              <label>
+                <span>Группа</span>
+                <select
+                  disabled={!canEditEmployeeDirectory}
+                  value={inviteDraft.groupId}
+                  onChange={(event) => setInviteDraft((current) => ({ ...current, groupId: event.target.value }))}
+                >
+                  {groups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
+                </select>
+                <FieldHint>Зона ответственности сотрудника.</FieldHint>
+              </label>
+            </div>
+          </form>
+        </SettingsModal>
+      ) : null}
+
+      {isGroupsOpen ? (
+        <SettingsModal
+          eyebrow="Сотрудники и роли"
+          onClose={() => setGroupsOpen(false)}
+          size="wide"
+          title="Группы сотрудников"
+          titleId="employee-groups-title"
+        >
+          <InlineHint>Группа объединяет сотрудников по зоне ответственности и набору каналов. Выберите группу, чтобы отредактировать ее.</InlineHint>
+          <div className="employee-group-strip" aria-label="Группы сотрудников">
+            {groups.map((group) => (
+              <button className={groupDraft.groupId === group.id ? "selected" : ""} key={group.id} onClick={() => editGroup(group)} type="button">
+                <strong>{group.name}</strong>
+                <span>{group.memberIds?.length ?? 0} сотрудников · {group.scope}</span>
+              </button>
+            ))}
+            {!groups.length ? <div className="employee-empty">Групп пока нет — создайте первую ниже.</div> : null}
+          </div>
+          <form className="employee-group-editor settings-form" onSubmit={handleSaveGroup}>
+            <strong>{groupDraft.groupId ? "Редактирование группы" : "Новая группа"}</strong>
+            <div className="settings-form-grid">
+              <label>
+                <span>Группа</span>
+                <input disabled={!canEditEmployeeDirectory || saving} placeholder="VIP support" value={groupDraft.name} onChange={(event) => setGroupDraft((current) => ({ ...current, name: event.target.value }))} />
+              </label>
+              <label>
+                <span>Область ответственности</span>
+                <input disabled={!canEditEmployeeDirectory || saving} placeholder="Ключевые клиенты и эскалации" value={groupDraft.scope} onChange={(event) => setGroupDraft((current) => ({ ...current, scope: event.target.value }))} />
+              </label>
+            </div>
+            <div className="employee-group-channel-picker" aria-label="Каналы группы">
+              {supportedChannels.map((channelName) => (
+                <label key={channelName}>
+                  <input checked={groupDraft.channels.includes(channelName)} disabled={!canEditEmployeeDirectory || saving} onChange={() => toggleGroupChannel(channelName)} type="checkbox" />
+                  <ChannelBadge channel={channelName} />
+                </label>
+              ))}
+            </div>
+            {error ? <div className="employee-error">{error}</div> : null}
+            <div className="settings-form-actions">
+              {groupDraft.groupId ? (
+                <button onClick={() => setGroupDraft({ channels: ["SDK"], groupId: "", name: "", scope: "" })} type="button">
+                  Новая группа
+                </button>
+              ) : null}
+              <button className="primary-action" disabled={!canEditEmployeeDirectory || saving} type="submit">
+                {groupDraft.groupId ? "Сохранить группу" : "Создать группу"}
+              </button>
+            </div>
+          </form>
+        </SettingsModal>
+      ) : null}
+
+      {isRoleMatrixOpen ? <RoleMatrixModal onClose={() => setRoleMatrixOpen(false)} /> : null}
     </section>
   );
 }
@@ -532,4 +624,3 @@ function roleName(roles, roleKey) {
 function groupName(groups, groupId) {
   return groups.find((group) => group.id === groupId)?.name ?? groupId;
 }
-

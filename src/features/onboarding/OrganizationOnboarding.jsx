@@ -189,7 +189,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
         </button>
         <div>
           <h1>Onboarding организации</h1>
-          <p>Tenant, trial, первый администратор, лимиты и сотрудники перед входом в app namespace.</p>
+          <p>Организация, trial, первый администратор, лимиты и сотрудники перед входом в app namespace.</p>
         </div>
         <button className="onboarding-finish" disabled={isProvisioning} onClick={handleFinish} type="button">
           {isProvisioning ? "Создание..." : "Завершить"}

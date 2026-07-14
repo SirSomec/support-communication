@@ -359,7 +359,7 @@ export function AuditScreen({ onBack, onToast, access }) {
                 <div><dt>Event ID</dt><dd>{relatedObjectEvent.eventId}</dd></div>
                 <div><dt>Действие</dt><dd>{relatedObjectEvent.detail}</dd></div>
                 <div><dt>Кто</dt><dd>{relatedObjectEvent.actor}</dd></div>
-                <div><dt>Tenant</dt><dd>{relatedObjectEvent.tenantId ?? "-"}</dd></div>
+                <div><dt>Организация</dt><dd>{relatedObjectEvent.tenantId ?? "-"}</dd></div>
                 <div><dt>Пользователь</dt><dd>{relatedObjectEvent.userId ?? "-"}</dd></div>
                 <div><dt>Trace</dt><dd>{relatedObjectEvent.traceId || "-"}</dd></div>
                 <div><dt>Источник</dt><dd>{relatedObjectEvent.source}</dd></div>

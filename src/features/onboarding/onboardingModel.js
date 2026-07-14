@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 
 export const steps = [
-  { id: "tenant", label: "Tenant", icon: Building2 },
+  { id: "tenant", label: "Организация", icon: Building2 },
   { id: "plan", label: "Тариф / trial", icon: CreditCard },
   { id: "admin", label: "Первый администратор", icon: UserPlus },
   { id: "limits", label: "Лимиты", icon: Gauge },

@@ -35,7 +35,7 @@ export function OnboardingStepContent({
             <div className="onboarding-step">
               <StepHeading
                 icon={<Building2 size={20} />}
-                title="Tenant"
+                title="Организация"
                 text="Создайте рабочее пространство и публичный slug, который будет использоваться в маршрутах и audit."
               />
               <div className="onboarding-form-grid">
@@ -48,7 +48,7 @@ export function OnboardingStepContent({
                   />
                 </label>
                 <label className="onboarding-field slug-field">
-                  <span>Slug tenant</span>
+                  <span>Slug организации</span>
                   <div>
                     <input
                       onChange={(event) => setTenant((current) => ({ ...current, slug: event.target.value.toLowerCase() }))}
@@ -85,7 +85,7 @@ export function OnboardingStepContent({
               <div className="onboarding-preview-row">
                 <KeyRound size={17} />
                 <span>Workspace URL</span>
-                <strong>https://app.support.local/{tenant.slug || "tenant-slug"}</strong>
+                <strong>https://app.support.local/{tenant.slug || "org-slug"}</strong>
               </div>
             </div>
           ) : null}
@@ -248,7 +248,7 @@ export function OnboardingStepContent({
               <StepHeading
                 icon={<Users size={20} />}
                 title="Сотрудники"
-                text="Добавьте хотя бы одного сотрудника, чтобы проверить invite flow и будущие роли в tenant."
+                text="Добавьте хотя бы одного сотрудника, чтобы проверить invite flow и будущие роли в организации."
               />
               <form className="onboarding-employee-form" onSubmit={handleAddEmployee}>
                 <label className="onboarding-field">

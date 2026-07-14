@@ -206,16 +206,13 @@ describe("BAI-826 unanswered questions", () => {
       AgentSessionStateRepository.inMemory()
     );
 
-    await assert.rejects(
-      () => responder.respond({ conversationId: "conv-1", message: "Где мой заказ №5?", sourceBindings: [{ sourceId: "missing" }], tenantId: TENANT }),
-      /bot_ai_knowledge_not_ready/
-    );
+    // Пустой retrieval для реального вопроса больше не бросает knowledge_not_ready:
+    // вопрос копится в очереди, затем AI-вызов падает на фейковом секрете/URL.
+    await assert.rejects(() => responder.respond({ conversationId: "conv-1", message: "Где мой заказ №5?", sourceBindings: [{ sourceId: "missing" }], tenantId: TENANT }));
     assert.equal(unanswered.list(TENANT).length, 1);
 
-    await assert.rejects(
-      () => responder.respond({ conversationId: "sandbox:sbx-1", message: "Где мой заказ №5?", sourceBindings: [{ sourceId: "missing" }], tenantId: TENANT }),
-      /bot_ai_knowledge_not_ready/
-    );
+    // Песочница не копит «вопросы без ответа».
+    await assert.rejects(() => responder.respond({ conversationId: "sandbox:sbx-1", message: "Где мой заказ №5?", sourceBindings: [{ sourceId: "missing" }], tenantId: TENANT }));
     assert.equal(unanswered.list(TENANT).length, 1);
   });
 });

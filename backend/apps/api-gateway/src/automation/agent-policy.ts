@@ -77,11 +77,13 @@ export function evaluatePrePolicy(message: string, policy: AgentPolicy, locale =
 }
 
 /**
- * Проверка ответа модели: фактический ответ без citations при requireSource —
- * это выдумка, безопаснее передать оператору.
+ * Проверка ответа модели. requireSource передаёт оператору, только когда знания
+ * БЫЛИ найдены, но модель их не процитировала (фактический ответ мимо
+ * доказательств). Пустой retrieval (приветствие/smalltalk) не эскалируем — там
+ * модель по своим rails здоровается или честно предлагает оператора сама.
  */
-export function evaluatePostPolicy(citationCount: number, policy: AgentPolicy): AgentPolicyDecision {
-  if (policy.requireSource && citationCount === 0) {
+export function evaluatePostPolicy(citationCount: number, materialsAvailable: number, policy: AgentPolicy): AgentPolicyDecision {
+  if (policy.requireSource && materialsAvailable > 0 && citationCount === 0) {
     return { action: "handoff", reason: "policy_source_required" };
   }
   return { action: "allow" };

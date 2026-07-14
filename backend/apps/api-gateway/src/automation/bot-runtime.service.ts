@@ -287,8 +287,8 @@ export class BotRuntimeService {
           sourceBindings,
           tenantId: event.tenantId
         });
-        // BAI-842: post-policy — фактический ответ без источника передаём оператору.
-        const postDecision = evaluatePostPolicy(aiResponse.citations.length, policy);
+        // BAI-842: post-policy — фактический ответ без источника (при наличии знаний) передаём оператору.
+        const postDecision = evaluatePostPolicy(aiResponse.citations.length, aiResponse.materialsAvailable ?? 0, policy);
         if (postDecision.action === "handoff") {
           return consultationHandoffResult(node, event, context, scenarioId, postDecision.reason,
             String(node.config?.fallbackMessage ?? "Не нашёл это в проверенных материалах — передаю вопрос оператору, чтобы не ошибиться."));

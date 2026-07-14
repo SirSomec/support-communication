@@ -46,6 +46,8 @@ const backendConfigSchema = z.object({
   PLATFORM_REPOSITORY: z.enum(["json", "prisma"]).default("json"),
   PLATFORM_STORE_FILE: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().default(4100),
+  PRESENCE_REPOSITORY: z.enum(["json", "prisma"]).default("json"),
+  PRESENCE_STORE_FILE: z.string().min(1).optional(),
   PUBLIC_API_KEY_SECRET: z.string().min(16).optional(),
   QUALITY_REPOSITORY: z.enum(["json", "prisma"]).default("json"),
   QUALITY_STORE_FILE: z.string().min(1).optional(),
@@ -140,6 +142,7 @@ const productCriticalRepositoryEnvs = [
   "NOTIFICATION_REPOSITORY",
   "OPERATIONS_REPOSITORY",
   "PLATFORM_REPOSITORY",
+  "PRESENCE_REPOSITORY",
   "QUALITY_REPOSITORY",
   "REPORT_REPOSITORY",
   "ROUTING_REPOSITORY"

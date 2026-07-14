@@ -1,11 +1,23 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Clock3, Inbox, UsersRound, Workflow } from "lucide-react";
+import {
+  PRESENCE_STATUSES,
+  PRESENCE_STATUS_NOT_SET_LABEL,
+  formatPresenceDuration,
+  formatPresenceSeconds,
+  presenceRangeStartOfToday,
+  presenceStatusClass,
+  presenceStatusLabel
+} from "../../app/presenceModel.js";
 import { submitRoutingRedistribution } from "../../app/routingActions.js";
 import { createScreenStateItems } from "../../app/screenState.js";
+import { presenceService } from "../../services/presenceService.js";
 import { routingService } from "../../services/routingService.js";
 import { ChannelBadge, ChannelList, MetricTile, Modal, ProductScreen, ScreenStateStrip, SectionTitle } from "../../ui.jsx";
 
-export function PanelScreen({ onBack, onToast, access, navigationTarget = null }) {
+const PRESENCE_TICK_INTERVAL_MS = 30000;
+
+export function PanelScreen({ onBack, onToast, access, navigationTarget = null, presenceVersion = 0 }) {
   const [channel, setChannel] = useState("Все каналы");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -17,12 +29,18 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
   const [redistributionBusy, setRedistributionBusy] = useState(false);
   const [redistributionPayload, setRedistributionPayload] = useState(null);
   const [redistributionPreview, setRedistributionPreview] = useState(null);
+  const [teamPresence, setTeamPresence] = useState(null);
+  const [teamPresenceAvailable, setTeamPresenceAvailable] = useState(true);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const workloadLoadedRef = useRef(false);
 
   useEffect(() => {
     let ignore = false;
 
     async function loadWorkload() {
-      setLoading(true);
+      if (!workloadLoadedRef.current) {
+        setLoading(true);
+      }
       setError("");
       const response = await routingService.fetchWorkload();
 
@@ -37,6 +55,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
         setTotals(null);
         setDataQuality(null);
         setLoading(false);
+        workloadLoadedRef.current = false;
         return;
       }
 
@@ -45,13 +64,45 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
       setTotals(response.data?.totals ?? null);
       setDataQuality(response.data?.dataQuality ?? null);
       setLoading(false);
+      workloadLoadedRef.current = true;
     }
 
     void loadWorkload();
     return () => {
       ignore = true;
     };
-  }, [reloadVersion]);
+  }, [reloadVersion, presenceVersion]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadTeamPresence() {
+      const response = await presenceService.fetchTeamPresence({ from: presenceRangeStartOfToday() });
+
+      if (ignore) {
+        return;
+      }
+
+      if (response.status !== "ok") {
+        setTeamPresence(null);
+        setTeamPresenceAvailable(false);
+        return;
+      }
+
+      setTeamPresence(response.data ?? null);
+      setTeamPresenceAvailable(true);
+    }
+
+    void loadTeamPresence();
+    return () => {
+      ignore = true;
+    };
+  }, [reloadVersion, presenceVersion]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), PRESENCE_TICK_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const visibleQueues = channel === "Все каналы" ? queues : queues.filter((queue) => queue.channel === channel);
   const activeChats = totals?.activeChats ?? visibleQueues.reduce((sum, queue) => sum + (queue.active ?? 0), 0);
@@ -64,6 +115,7 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
     ...queues.map((queue) => ({ label: queue.name ?? queue.channel, value: queue.channel }))
   ];
   const selectedQueuesForRedistribution = resolveRedistributionQueues(visibleQueues, channel);
+  const teamPresenceOperators = Array.isArray(teamPresence?.operators) ? teamPresence.operators : [];
   const panelNotificationContext = resolvePanelNotificationContext(navigationTarget, overdueChats);
   const canRedistribute = access.canRedistribute && selectedQueuesForRedistribution.length > 0 && !redistributionBusy;
   const redistributeUnavailableReason = !access.canRedistribute
@@ -249,20 +301,25 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
         <section className="work-panel">
           <SectionTitle title="Нагрузка операторов" action="из API routing" />
           <div className="operator-table">
-            {operators.map((operator) => (
-              <div className="operator-row" key={operator.id ?? operator.name}>
-                <span className={`operator-presence ${presenceRecorded ? operator.status : "unknown"}`} />
-                <strong className="operator-name">{operator.name}</strong>
-                <span className="operator-status">{presenceRecorded ? operator.status === "break" ? "Перерыв" : operator.status === "offline" ? "Офлайн" : "Онлайн" : "Нет данных"}</span>
-                <div className="load-meter">
-                  <i style={{ width: `${Math.min(100, ((operator.chats ?? 0) / (operator.limit || 1)) * 100)}%` }} />
+            {operators.map((operator) => {
+              const presence = resolveOperatorPresenceView(operator, dataQuality, nowMs);
+
+              return (
+                <div className="operator-row" key={operator.id ?? operator.name}>
+                  <span className={`operator-presence ${presence.cssClass}`} />
+                  <strong className="operator-name">{operator.name}</strong>
+                  <span className="operator-status">{presence.label}</span>
+                  <span className="operator-status-duration" title="Время в текущем статусе">{presence.duration}</span>
+                  <div className="load-meter">
+                    <i style={{ width: `${Math.min(100, ((operator.chats ?? 0) / (operator.limit || 1)) * 100)}%` }} />
+                  </div>
+                  <b className="operator-load">{operator.chats} / {operator.limit}</b>
+                  <span className="operator-time">{operator.avg ?? "—"}</span>
+                  <span className="operator-sla">{operator.sla ?? operator.slaPercent ?? 0}% SLA</span>
+                  <ChannelList channels={operator.channels ?? []} />
                 </div>
-                <b className="operator-load">{operator.chats} / {operator.limit}</b>
-                <span className="operator-time">{operator.avg ?? "—"}</span>
-                <span className="operator-sla">{operator.sla ?? operator.slaPercent ?? 0}% SLA</span>
-                <ChannelList channels={operator.channels ?? []} />
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
@@ -288,8 +345,61 @@ export function PanelScreen({ onBack, onToast, access, navigationTarget = null }
           </div>
         </section>
       </div>
+
+      {teamPresenceAvailable ? (
+        <section className="work-panel presence-summary-panel" data-testid="presence-summary-panel">
+          <SectionTitle
+            title="Время в статусах (сегодня)"
+            action="для мониторинга нагрузки"
+          />
+          {teamPresenceOperators.length === 0 ? (
+            <ScreenStateStrip items={[{ label: "Статусы", tone: "empty", value: "Операторы еще не выбирали статус сегодня" }]} />
+          ) : (
+            <div className="presence-summary-table" role="table" aria-label="Время операторов в статусах за сегодня">
+              <div className="presence-summary-row presence-summary-head" role="row">
+                <span role="columnheader">Оператор</span>
+                <span role="columnheader">Статус</span>
+                {PRESENCE_STATUSES.map((status) => (
+                  <span key={status.key} role="columnheader" title={status.label}>{status.shortLabel}</span>
+                ))}
+              </div>
+              {teamPresenceOperators.map((row) => (
+                <div className="presence-summary-row" key={row.operatorId} role="row">
+                  <strong role="cell">{row.name}</strong>
+                  <span className="presence-summary-status" role="cell">
+                    <i className={`operator-presence ${presenceStatusClass(row.status)}`} aria-hidden="true" />
+                    {row.status ? presenceStatusLabel(row.status) : PRESENCE_STATUS_NOT_SET_LABEL}
+                  </span>
+                  {PRESENCE_STATUSES.map((status) => {
+                    const seconds = row.seconds?.[status.key] ?? 0;
+                    const isCurrent = row.status === status.key;
+                    return (
+                      <span className={isCurrent ? "presence-summary-current" : ""} key={status.key} role="cell">
+                        {seconds > 0 ? formatPresenceSeconds(seconds) : "—"}
+                      </span>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
     </ProductScreen>
   );
+}
+
+function resolveOperatorPresenceView(operator, dataQuality, nowMs) {
+  const recorded = operator.presenceSource === "operator_presence";
+  if (dataQuality?.canonical && !recorded) {
+    return { cssClass: "unknown", duration: "—", label: PRESENCE_STATUS_NOT_SET_LABEL };
+  }
+
+  return {
+    cssClass: presenceStatusClass(operator.status),
+    duration: operator.presenceSince ? formatPresenceDuration(operator.presenceSince, nowMs) : "—",
+    label: presenceStatusLabel(operator.status)
+  };
 }
 
 function resolveRedistributionQueues(queues, channel) {

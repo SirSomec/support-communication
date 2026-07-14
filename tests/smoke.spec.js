@@ -1438,3 +1438,37 @@ test("landing auth onboarding and service admin do not overflow responsive viewp
     await expectHealthyPage(page);
   }
 });
+
+test("operator presence selector updates distribution status and the shift panel tracks time in status", async ({ page }) => {
+  await openAppShell(page);
+  await selectRole(page, "Администратор");
+
+  const presenceSelect = page.locator(".presence-select select");
+  await expect(presenceSelect).toBeVisible();
+
+  const presenceUpdate = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/presence/me") && response.request().method() === "PUT");
+  await presenceSelect.selectOption("busy");
+  const putResponse = await presenceUpdate;
+  expect(putResponse.ok()).toBeTruthy();
+  const putPayload = await putResponse.json();
+  expect(putPayload.status).toBe("ok");
+  expect(putPayload.data.presence.status).toBe("busy");
+  expect(putPayload.data.realtimeEvent?.eventName).toBe("operator.presence.updated");
+
+  await expect(page.locator(".operator-card")).toContainText("Занят");
+
+  const teamPresence = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/presence/team") && response.ok());
+  await openSection(page, "Панель");
+  const teamPayload = await (await teamPresence).json();
+  expect(teamPayload.status).toBe("ok");
+  const sergey = teamPayload.data.operators.find((operator) => operator.name === "Sergey Markin");
+  expect(sergey?.status).toBe("busy");
+
+  const summaryPanel = page.getByTestId("presence-summary-panel");
+  await expect(summaryPanel).toBeVisible();
+  await expect(summaryPanel).toContainText("Sergey Markin");
+  await expect(summaryPanel).toContainText("Занят");
+  await expectHealthyPage(page);
+});

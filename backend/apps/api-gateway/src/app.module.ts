@@ -11,6 +11,7 @@ import { IntegrationModule } from "./integrations/integration.module.js";
 import { NotificationModule } from "./notifications/notification.module.js";
 import { OperationsModule } from "./operations/operations.module.js";
 import { PlatformModule } from "./platform/platform.module.js";
+import { PresenceModule } from "./presence/presence.module.js";
 import { QualityModule } from "./quality/quality.module.js";
 import { ReportModule } from "./reports/report.module.js";
 import { RoutingModule } from "./routing/routing.module.js";
@@ -33,6 +34,7 @@ import { KnowledgeSourcesModule } from "./knowledge-sources/knowledge-sources.mo
     NotificationModule,
     OperationsModule,
     PlatformModule,
+    PresenceModule,
     QualityModule,
     ReportModule,
     RoutingModule,

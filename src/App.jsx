@@ -8,6 +8,7 @@ import { useConversationSelection } from "./app/useConversationSelection.js";
 import { useAppNavigation } from "./app/useAppNavigation.js";
 import { useDialogActions } from "./app/useDialogActions.js";
 import { useDialogQueueFilters } from "./app/useDialogQueueFilters.js";
+import { useOperatorPresence } from "./app/useOperatorPresence.js";
 import { useOutboundConversation } from "./app/useOutboundConversation.js";
 import { RouteLoading } from "./app/RouteLoading.jsx";
 import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
@@ -53,6 +54,11 @@ function App() {
   const tenantSession = useTenantSessionState({
     enabled: typeof window !== "undefined" && (window.location.hash === "#/app" || window.location.hash.startsWith("#/app"))
   });
+  const operatorPresence = useOperatorPresence({
+    enabled: tenantSession.authenticated,
+    operatorId: tenantSession.operator?.id ?? "",
+    onToast: setToast
+  });
   const {
     appendMessage,
     applyConversationAssignment,
@@ -68,7 +74,10 @@ function App() {
     setConversationItems,
     setTopics,
     topics
-  } = useConversationInbox({ sessionActive: tenantSession.authenticated });
+  } = useConversationInbox({
+    onPresenceEvent: operatorPresence.handleRealtimeEvent,
+    sessionActive: tenantSession.authenticated
+  });
   const {
     access,
     section,
@@ -417,7 +426,7 @@ function App() {
 
   return (
     <div className="app-shell" data-testid="route-app-shell">
-      <Sidebar active={section} access={access} onSelect={handleSectionSelect} operator={tenantSession.operator} />
+      <Sidebar active={section} access={access} onSelect={handleSectionSelect} operator={tenantSession.operator} presenceStatus={operatorPresence.presence?.status ?? ""} />
       <main className="workspace">
         <TopBar
           access={access}
@@ -427,9 +436,12 @@ function App() {
           getNotificationActionAvailability={getNotificationActionAvailability}
           onNavigateNotificationAction={handleNotificationNavigation}
           onOutbound={handleOutboundRequest}
+          onPresenceChange={(status) => void operatorPresence.changeStatus(status)}
           onRoleMode={handleRoleModeChange}
           onToast={setToast}
           operatorConversationCount={conversationItems.filter((item) => item.operatorId === tenantSession.operator?.id).length}
+          presencePending={operatorPresence.pending}
+          presenceStatus={operatorPresence.presence?.status ?? ""}
           roleMode={roleMode}
           showRoleSwitcher={ROLE_SWITCHER_ENABLED}
         />
@@ -538,6 +550,7 @@ function App() {
             onTemplatesChange={setTemplateLibrary}
             onToast={setToast}
             access={access}
+            presenceVersion={operatorPresence.presenceVersion}
             roleMode={roleMode}
             onRoleMode={handleRoleModeChange}
             onTopicOptionsChange={setTopicOptions}

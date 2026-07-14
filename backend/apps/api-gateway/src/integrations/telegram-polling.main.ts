@@ -7,6 +7,7 @@ import { configureConversationRepository } from "../conversation/bootstrap.js";
 import { ConversationService } from "../conversation/conversation.service.js";
 import { configureIdentityRepository } from "../identity/bootstrap.js";
 import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
+import { configureOperatorPresenceRepository } from "../presence/bootstrap.js";
 import { configureQualityRepository } from "../quality/bootstrap.js";
 import { QualityService } from "../quality/quality.service.js";
 import { configureRoutingRepository } from "../routing/bootstrap.js";
@@ -35,7 +36,8 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
     configureRoutingRepository(source),
     new CanonicalRoutingWorkloadAdapter(),
     new CanonicalRoutingConversationRepository(conversationRepository),
-    TeamDirectoryRepository.default()
+    TeamDirectoryRepository.default(),
+    configureOperatorPresenceRepository(source)
   );
   const conversationService = new ConversationService(conversationRepository);
   const qualityService = new QualityService(configureQualityRepository(source));

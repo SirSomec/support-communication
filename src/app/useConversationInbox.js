@@ -8,7 +8,7 @@ import { dialogService } from "../services/dialogService.js";
 const ATTACHMENT_PREVIEW_LABEL = "Вложение";
 const NOW_LABEL = "сейчас";
 
-export function useConversationInbox({ sessionActive = false } = {}) {
+export function useConversationInbox({ sessionActive = false, onPresenceEvent } = {}) {
   const [conversationItems, setConversationItems] = useState([]);
   const [topics, setTopics] = useState({});
   const [closedIds, setClosedIds] = useState(() => new Set());
@@ -19,6 +19,11 @@ export function useConversationInbox({ sessionActive = false } = {}) {
   const detailInFlightRef = useRef(new Set());
   const detailDebounceRef = useRef(new Map());
   const processedRealtimeEventIdsRef = useRef(new Set());
+  const onPresenceEventRef = useRef(onPresenceEvent);
+
+  useEffect(() => {
+    onPresenceEventRef.current = onPresenceEvent;
+  }, [onPresenceEvent]);
 
   const syncMetaFromItems = useCallback((items) => {
     setTopics(Object.fromEntries(items.map((conversation) => [conversation.id, conversation.topic ?? ""])));
@@ -350,7 +355,8 @@ export function useConversationInbox({ sessionActive = false } = {}) {
   }, []);
 
   const handleRealtimeEvent = useCallback((event) => {
-    if (event.eventName !== "message.created" && event.eventName !== "conversation.updated") {
+    const isPresenceEvent = event.eventName === "operator.presence.updated";
+    if (!isPresenceEvent && event.eventName !== "message.created" && event.eventName !== "conversation.updated") {
       return;
     }
 
@@ -365,6 +371,11 @@ export function useConversationInbox({ sessionActive = false } = {}) {
         const staleIds = [...processed].slice(0, processed.size - 250);
         staleIds.forEach((id) => processed.delete(id));
       }
+    }
+
+    if (isPresenceEvent) {
+      onPresenceEventRef.current?.(event);
+      return;
     }
 
     scheduleConversationDetailRefresh(event.resourceId);

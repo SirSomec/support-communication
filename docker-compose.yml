@@ -64,6 +64,8 @@ services:
       WORKSPACE_STORE_FILE: .runtime/docker/workspace-store.json
       ROUTING_REPOSITORY: json
       ROUTING_STORE_FILE: .runtime/docker/routing-store.json
+      PRESENCE_REPOSITORY: json
+      PRESENCE_STORE_FILE: .runtime/docker/presence-store.json
       INTEGRATION_REPOSITORY: json
       OPERATIONS_REPOSITORY: json
       PLATFORM_REPOSITORY: json
@@ -189,6 +191,10 @@ services:
       KNOWLEDGE_SOURCES_STORE_FILE: .runtime/docker/knowledge-sources-store.json
       WORKSPACE_REPOSITORY: json
       WORKSPACE_STORE_FILE: .runtime/docker/workspace-store.json
+      # Presence must come from the same store the operators write through the
+      # api-gateway, otherwise polling auto-assignment ignores their statuses.
+      PRESENCE_REPOSITORY: json
+      PRESENCE_STORE_FILE: .runtime/docker/presence-store.json
       TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-true}
       TELEGRAM_INGRESS_MODE: ${TELEGRAM_INGRESS_MODE:-polling}
       TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}

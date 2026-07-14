@@ -81,6 +81,7 @@ export function useRealtimeInbox({ enabled, onEvent }) {
 
       source.addEventListener("message.created", handleEvent);
       source.addEventListener("conversation.updated", handleEvent);
+      source.addEventListener("operator.presence.updated", handleEvent);
       source.onopen = () => {
         sseConnected = true;
       };

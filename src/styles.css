@@ -204,6 +204,7 @@ select:disabled {
   .operator-row {
     grid-template-areas:
       "presence name status"
+      ". duration duration"
       ". meter load"
       ". time sla"
       ". channels channels";
@@ -225,6 +226,11 @@ select:disabled {
   .operator-row .operator-status {
     grid-area: status;
     justify-self: end;
+  }
+
+  .operator-row .operator-status-duration {
+    grid-area: duration;
+    font-size: 12px;
   }
 
   .operator-row .load-meter {

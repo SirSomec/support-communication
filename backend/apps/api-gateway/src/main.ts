@@ -17,6 +17,8 @@ import { configureNotificationRepository } from "./notifications/bootstrap.js";
 import { setupOpenApi } from "./openapi.js";
 import { configureOperationsRepository } from "./operations/bootstrap.js";
 import { configurePlatformRepository } from "./platform/bootstrap.js";
+import { configureOperatorPresenceRepository } from "./presence/bootstrap.js";
+import { OperatorPresenceService } from "./presence/presence.service.js";
 import { configureQualityRepository } from "./quality/bootstrap.js";
 import { configureReportRepository } from "./reports/bootstrap.js";
 import { configureRoutingRepository } from "./routing/bootstrap.js";
@@ -45,6 +47,8 @@ export async function bootstrap(): Promise<void> {
   configureIntegrationRepository(config, { seed: localSeeds.integrations });
   configureNotificationRepository(config);
   configurePlatformRepository(config, { seed: localSeeds.platform });
+  configureOperatorPresenceRepository(config);
+  OperatorPresenceService.configureRealtimeFanoutFromEnv(process.env);
   configureQualityRepository(config, { seed: localSeeds.quality });
   configureOperationsRepository(config, { seed: localSeeds.operations });
   const app = await NestFactory.create(AppModule, {

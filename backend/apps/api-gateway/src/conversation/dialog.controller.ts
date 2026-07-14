@@ -3,13 +3,17 @@ import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
 import { RequireTenantOperatorPermission, type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
 import { ConversationService } from "./conversation.service.js";
+import { OperatorAiSuggestionService } from "./operator-ai-suggestion.service.js";
 import { TenantOperatorOrServiceAdminGuard } from "./tenant-operator-or-service-admin.guard.js";
 
 @ApiTags("dialogs")
 @UseGuards(TenantOperatorOrServiceAdminGuard)
 @Controller("dialogs")
 export class DialogController {
-  constructor(private readonly conversationService: ConversationService) {}
+  constructor(
+    private readonly conversationService: ConversationService,
+    private readonly operatorAiSuggestionService: OperatorAiSuggestionService
+  ) {}
 
   @Get()
   @RequireTenantOperatorPermission("dialogs.read")
@@ -119,6 +123,15 @@ export class DialogController {
     @Req() request: TenantOperatorRequest & ServiceAdminRequest
   ) {
     return this.conversationService.transitionConversationStatus({ ...payload, conversationId }, dialogContextFromRequest(request));
+  }
+
+  @Post(":conversationId/ai-suggestions")
+  @RequireTenantOperatorPermission("dialogs.manage")
+  @RequireServiceAdminAction("dialogs.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "AI reply suggestions grounded in tenant knowledge sources" })
+  fetchAiReplySuggestions(@Param("conversationId") conversationId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) {
+    return this.operatorAiSuggestionService.suggest({ conversationId, tenantId: dialogContextFromRequest(request).tenantId });
   }
 
   @Post(":conversationId/messages")

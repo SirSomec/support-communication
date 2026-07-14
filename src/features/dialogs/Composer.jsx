@@ -26,6 +26,7 @@ export function Composer({
   setDraft,
   aiSuggestions: inlineAiSuggestions,
   onAiSuggestionAction,
+  onAiAssist,
   attachments,
   onAttachFiles,
   onAttachmentComplete,
@@ -50,10 +51,6 @@ export function Composer({
       ? "Дождитесь завершения загрузки вложений."
       : "Удалите вложение с ошибкой или повторите загрузку."
     : "";
-  const aiDraft =
-    mode === "internal"
-      ? "Клиент эмоционален, перед закрытием проверьте статус доставки и добавьте ссылку на заказ во внутренний комментарий."
-      : "Понимаю ожидание. Я проверю статус заказа и вернусь с точным временем доставки в этом диалоге.";
   const preSendChecks = getPreSendQualityChecks({ draft, mode, attachments, suggestions: inlineAiSuggestions });
   const preSendTone = preSendChecks.some((check) => check.tone === "danger")
     ? "danger"
@@ -205,14 +202,7 @@ export function Composer({
           <button
             aria-label="ИИ-подсказка"
             disabled={disabled}
-            onClick={() => {
-              if (inlineAiSuggestions.length) {
-                onAiSuggestionAction(inlineAiSuggestions[0], "edit");
-                return;
-              }
-
-              setDraft((current) => [current.trim(), aiDraft].filter(Boolean).join("\n\n"));
-            }}
+            onClick={onAiAssist}
             title="ИИ-подсказка"
             type="button"
           >

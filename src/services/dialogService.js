@@ -94,6 +94,14 @@ export const dialogService = {
     });
   },
 
+  async fetchAiReplySuggestions(conversationId) {
+    return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/ai-suggestions`, {
+      method: "POST",
+      operation: "fetchAiReplySuggestions",
+      service: SERVICE
+    });
+  },
+
   getReadiness() {
     return {
       id: SERVICE,
@@ -106,6 +114,7 @@ export const dialogService = {
         "assignConversation",
         "appendMessage",
         "transitionConversationStatus",
+        "fetchAiReplySuggestions",
         "uploadAttachment",
         "finalizeAttachmentUpload",
         "fetchAttachmentUploadStatus",

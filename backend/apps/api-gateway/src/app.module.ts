@@ -8,6 +8,7 @@ import { HealthController } from "./health.controller.js";
 import { IdentityModule } from "./identity/identity.module.js";
 import { IncidentModule } from "./incidents/incident.module.js";
 import { IntegrationModule } from "./integrations/integration.module.js";
+import { OpenChannelModule } from "./integrations/open-channel/open-channel.module.js";
 import { NotificationModule } from "./notifications/notification.module.js";
 import { OperationsModule } from "./operations/operations.module.js";
 import { PlatformModule } from "./platform/platform.module.js";
@@ -31,6 +32,7 @@ import { KnowledgeSourcesModule } from "./knowledge-sources/knowledge-sources.mo
     IdentityModule,
     IncidentModule,
     IntegrationModule,
+    OpenChannelModule,
     NotificationModule,
     OperationsModule,
     PlatformModule,

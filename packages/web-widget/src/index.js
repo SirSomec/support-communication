@@ -4,6 +4,8 @@ const PRESENCE_INTERVAL_MS = 15000;
 const DEFAULT_ENVIRONMENT = "stage";
 const SUBJECT_STORAGE_KEY = "support-widget:subject-id";
 const SESSION_STORAGE_KEY = "support-widget:session-id";
+const UTM_STORAGE_KEY = "support-widget:utm";
+const USER_TOKEN_STORAGE_KEY = "support-widget:user-token";
 
 const state = {
   apiBase: "",
@@ -28,7 +30,19 @@ const state = {
   messages: [],
   panelOpen: false,
   initialized: false,
-  ratingSubmitted: false
+  ratingSubmitted: false,
+  // Page API (sw_api) state.
+  agentsOnline: null,
+  contactInfo: {},
+  firstMessageSent: false,
+  lastInitOptions: null,
+  operatorAccepted: false,
+  pageTitleOverride: null,
+  pageUrlOverride: null,
+  unreadCount: 0,
+  userToken: "",
+  utm: null,
+  visitorNumber: null
 };
 
 let rootEl = null;
@@ -70,6 +84,14 @@ export function init(options = {}) {
   state.initialized = true;
   startPolling();
 
+  state.lastInitOptions = { ...options };
+  state.userToken = readStoredValue(localStorage, USER_TOKEN_STORAGE_KEY);
+  captureUtm();
+  refreshAgentsStatus();
+  if (options.pageApi !== false) {
+    installPageApi();
+  }
+
   return { open, close, destroy };
 }
 
@@ -108,7 +130,7 @@ async function sendVisitorMessage(text) {
     body: {
       conversationId: state.conversationId,
       externalId: state.externalId,
-      pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
+      pageUrl: state.pageUrlOverride ?? (typeof window !== "undefined" ? window.location.href : undefined),
       text
     }
   });
@@ -118,6 +140,12 @@ async function sendVisitorMessage(text) {
   }
   if (data.visitorSessionToken) {
     state.visitorSessionToken = data.visitorSessionToken;
+  }
+
+  if (!state.firstMessageSent) {
+    state.firstMessageSent = true;
+    callPageCallback("onMessageSent");
+    callPageCallback("onClientStartChat");
   }
 
   return data;
@@ -143,10 +171,21 @@ async function pollOperatorReplies() {
 
   const replies = Array.isArray(data.messages) ? data.messages : [];
   for (const reply of replies) {
+    const isNew = !reply.id || !state.messages.some((message) => message.id === String(reply.id));
     appendMessage("operator", reply.text, reply.id, reply.attachments);
     if (reply.id) {
       state.lastOperatorMessageId = String(reply.id);
     }
+    if (isNew) {
+      if (!state.panelOpen) {
+        state.unreadCount += 1;
+      }
+      callPageCallback("onMessageReceived");
+    }
+  }
+  if (["assigned", "transferred"].includes(String(data.conversationStatus)) && !state.operatorAccepted) {
+    state.operatorAccepted = true;
+    callPageCallback("onAccept");
   }
   if (data.conversationStatus === "closed" && !state.ratingSubmitted && ratingEl) {
     ratingEl.hidden = false;
@@ -161,9 +200,9 @@ function presencePayload(status = "active") {
     externalId: state.externalId,
     tenantId: state.tenantId || undefined,
     integrationId: state.integrationId || undefined,
-    pageUrl: location?.href,
+    pageUrl: state.pageUrlOverride ?? location?.href,
     pagePath: location?.pathname,
-    pageTitle: typeof document !== "undefined" ? document.title : undefined,
+    pageTitle: state.pageTitleOverride ?? (typeof document !== "undefined" ? document.title : undefined),
     visibility: typeof document !== "undefined" ? document.visibilityState : "visible",
     status
   };
@@ -220,7 +259,9 @@ function renderInvitation(invitation) {
   invitationEl.append(message, actions);
   rootEl.appendChild(invitationEl);
 
-  acknowledgeInvitation(invitation.exposureId, "shown").catch(() => {});
+  if (!isLocalInvitation(invitation)) {
+    acknowledgeInvitation(invitation.exposureId, "shown").catch(() => {});
+  }
   dismissButton.addEventListener("click", () => handleInvitationAction("dismissed", dismissButton, acceptButton));
   acceptButton.addEventListener("click", () => handleInvitationAction("accepted", dismissButton, acceptButton));
 }
@@ -229,6 +270,14 @@ async function handleInvitationAction(action, ...buttons) {
   const invitation = state.currentInvitation;
   if (!invitation) return;
   buttons.forEach((button) => { button.disabled = true; });
+  if (isLocalInvitation(invitation)) {
+    // Invitations raised from the page API live only in the browser.
+    if (action === "accepted") {
+      open();
+    }
+    clearInvitation();
+    return;
+  }
   try {
     const data = await acknowledgeInvitation(invitation.exposureId, action);
     if (action === "accepted") {
@@ -334,12 +383,16 @@ function stopPolling() {
 
 function open() {
   state.panelOpen = true;
+  state.unreadCount = 0;
   if (rootEl) {
     rootEl.classList.add("sw-open");
   }
   if (inputEl) {
     inputEl.focus();
   }
+  callPageCallback("onOpen");
+  callPageCallback("onChangeState", "chat");
+  callPageCallback("onResizeCallback");
 }
 
 function close() {
@@ -347,6 +400,9 @@ function close() {
   if (rootEl) {
     rootEl.classList.remove("sw-open");
   }
+  callPageCallback("onClose");
+  callPageCallback("onChangeState", "label");
+  callPageCallback("onResizeCallback");
 }
 
 function destroy() {
@@ -371,6 +427,8 @@ function destroy() {
   ratingEl = null;
   invitationEl = null;
   state.currentInvitation = null;
+  state.initialized = false;
+  callPageCallback("onWidgetDestroy");
 }
 
 function normalizeInterval(value) {
@@ -405,7 +463,291 @@ function invitationAcknowledgePath(exposureId, action) {
   return `/public/sdk/invitations/${encodeURIComponent(exposureId)}/${action}`;
 }
 
-export const __test__ = { downloadableAttachments, firstInvitation, formatAttachmentSize, getOrCreateIdentity, invitationAcknowledgePath, normalizeInterval };
+// --- Page API (window.sw_api) ---------------------------------------------
+// Site code controls the widget through a global object and page-level
+// callbacks. Alias prefixes keep drop-in compatibility for sites migrating
+// from third-party chat widgets: every callback and global is exposed under
+// each prefix, so existing integrations only swap keys and endpoints.
+
+const PAGE_API_PREFIXES = ["sw", "jivo"];
+
+function callPageCallback(name, ...args) {
+  if (typeof window === "undefined") return;
+  for (const prefix of PAGE_API_PREFIXES) {
+    const handler = window[`${prefix}_${name}`];
+    if (typeof handler === "function") {
+      try {
+        handler(...args);
+      } catch {
+        // Page callbacks must never break the widget loop.
+      }
+    }
+  }
+}
+
+function isLocalInvitation(invitation) {
+  return typeof invitation?.exposureId === "string" && invitation.exposureId.startsWith("local-");
+}
+
+function readStoredValue(storage, key) {
+  try {
+    return String(storage?.getItem(key) ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function writeStoredValue(storage, key, value) {
+  try {
+    if (value) {
+      storage?.setItem(key, value);
+    } else {
+      storage?.removeItem(key);
+    }
+  } catch {
+    // Storage may be unavailable (private mode); the widget keeps working.
+  }
+}
+
+function parseUtmParams(search) {
+  const params = new URLSearchParams(String(search ?? ""));
+  const utm = {};
+  for (const key of ["campaign", "content", "medium", "source", "term"]) {
+    const value = String(params.get(`utm_${key}`) ?? "").trim();
+    if (value) {
+      utm[key] = value;
+    }
+  }
+  return Object.keys(utm).length ? utm : null;
+}
+
+function captureUtm() {
+  const stored = readStoredValue(localStorage, UTM_STORAGE_KEY);
+  if (stored) {
+    try {
+      state.utm = JSON.parse(stored);
+      return;
+    } catch {
+      // Ignore a corrupted value and re-capture below.
+    }
+  }
+  const parsed = typeof window !== "undefined" ? parseUtmParams(window.location?.search) : null;
+  if (parsed) {
+    state.utm = parsed;
+    writeStoredValue(localStorage, UTM_STORAGE_KEY, JSON.stringify(parsed));
+  }
+}
+
+async function refreshAgentsStatus() {
+  try {
+    const data = await apiRequest("GET", "/public/sdk/agents/status");
+    state.agentsOnline = data.agentsOnline === true;
+  } catch {
+    state.agentsOnline = null;
+  }
+}
+
+async function sendClientInfo(partial = {}) {
+  const data = await apiRequest("POST", "/public/sdk/client-info", {
+    body: {
+      conversationId: state.conversationId || undefined,
+      externalId: state.externalId,
+      pageTitle: state.pageTitleOverride ?? (typeof document !== "undefined" ? document.title : undefined),
+      pageUrl: state.pageUrlOverride ?? (typeof window !== "undefined" ? window.location.href : undefined),
+      ...partial
+    }
+  });
+  if (data.conversationId) {
+    state.conversationId = data.conversationId;
+  }
+  if (data.visitorNumber !== undefined && data.visitorNumber !== null) {
+    state.visitorNumber = Number(data.visitorNumber);
+  }
+  return data;
+}
+
+function createPageApi() {
+  return {
+    chatMode() {
+      return state.agentsOnline === false ? "offline" : "online";
+    },
+    clearHistory() {
+      writeStoredValue(localStorage, SUBJECT_STORAGE_KEY, "");
+      writeStoredValue(sessionStorage, SESSION_STORAGE_KEY, "");
+      writeStoredValue(localStorage, USER_TOKEN_STORAGE_KEY, "");
+      state.conversationId = null;
+      state.visitorSessionToken = null;
+      state.lastOperatorMessageId = null;
+      state.messages = [];
+      state.unreadCount = 0;
+      state.firstMessageSent = false;
+      state.operatorAccepted = false;
+      state.ratingSubmitted = false;
+      state.contactInfo = {};
+      state.userToken = "";
+      if (messagesEl) {
+        messagesEl.innerHTML = "";
+      }
+      return { result: "ok" };
+    },
+    close() {
+      close();
+      return { result: "ok" };
+    },
+    getContactInfo() {
+      return {
+        client_name: state.contactInfo.name ?? null,
+        description: state.contactInfo.description ?? null,
+        email: state.contactInfo.email ?? null,
+        phone: state.contactInfo.phone ?? null
+      };
+    },
+    getUnreadMessagesCount() {
+      return state.unreadCount;
+    },
+    getUtm() {
+      return {
+        campaign: state.utm?.campaign ?? null,
+        content: state.utm?.content ?? null,
+        medium: state.utm?.medium ?? null,
+        source: state.utm?.source ?? null,
+        term: state.utm?.term ?? null
+      };
+    },
+    getVisitorNumber(callback) {
+      const done = typeof callback === "function" ? callback : () => {};
+      if (state.visitorNumber !== null) {
+        done(null, state.visitorNumber);
+        return;
+      }
+      sendClientInfo({})
+        .then(() => done(null, state.visitorNumber))
+        .catch((error) => done(error?.message ?? String(error)));
+    },
+    isCallbackEnabled(callback) {
+      if (typeof callback === "function") {
+        callback({ result: "fail", reason: "calls_not_available" });
+      }
+    },
+    open(params = {}) {
+      void params;
+      open();
+      return { result: "ok" };
+    },
+    sendOfflineMessage(payload = {}) {
+      const message = String(payload.message ?? "").trim();
+      if (!message) {
+        return { result: "fail", error: "message_required" };
+      }
+      this.setContactInfo(payload);
+      appendMessage("visitor", message);
+      sendVisitorMessage(message).catch((error) => {
+        appendSystemMessage(`Ошибка отправки: ${error.message}`);
+      });
+      return { result: "ok" };
+    },
+    sendPageTitle(title, fromApi, url) {
+      void fromApi;
+      state.pageTitleOverride = String(title ?? "").trim() || null;
+      state.pageUrlOverride = String(url ?? "").trim() || null;
+      sendPresenceHeartbeat().catch(() => {});
+      return { result: "ok" };
+    },
+    setClientAttributes(attributes = {}) {
+      sendClientInfo({ attributes }).catch(() => {});
+      return { result: "ok" };
+    },
+    setContactInfo(info = {}) {
+      const contact = {
+        description: String(info.description ?? "").trim() || undefined,
+        email: String(info.email ?? "").trim() || undefined,
+        name: String(info.name ?? "").trim() || undefined,
+        phone: String(info.phone ?? "").trim() || undefined
+      };
+      state.contactInfo = { ...state.contactInfo, ...contact };
+      sendClientInfo({ contactInfo: contact }).catch(() => {});
+      return { result: "ok" };
+    },
+    setCustomData(fields = []) {
+      const customData = Array.isArray(fields) ? fields.slice(0, 10) : [];
+      sendClientInfo({ customData }).catch(() => {});
+      return { result: "ok" };
+    },
+    setRules() {
+      return { result: "ok" };
+    },
+    setUserToken(token) {
+      state.userToken = String(token ?? "").trim();
+      writeStoredValue(localStorage, USER_TOKEN_STORAGE_KEY, state.userToken);
+      sendClientInfo({ userToken: state.userToken }).catch(() => {});
+      return { result: "ok" };
+    },
+    setWidgetColor(color, color2) {
+      applyWidgetColor(color, color2);
+      return { result: "ok" };
+    },
+    showProactiveInvitation(text, departmentId) {
+      void departmentId;
+      const message = String(text ?? "").trim();
+      if (!message || state.currentInvitation) {
+        return { result: "fail" };
+      }
+      renderInvitation({ exposureId: `local-${Date.now().toString(36)}`, message });
+      return { result: "ok" };
+    },
+    startCall() {
+      return { result: "fail", reason: "calls_not_available" };
+    }
+  };
+}
+
+function applyWidgetColor(color, color2) {
+  const primary = String(color ?? "").trim();
+  if (!primary || typeof document === "undefined") return;
+  const background = String(color2 ?? "").trim()
+    ? `linear-gradient(135deg, ${primary}, ${String(color2).trim()})`
+    : primary;
+  let style = document.getElementById("support-widget-color-override");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "support-widget-color-override";
+    document.head.appendChild(style);
+  }
+  style.textContent = `
+    .support-widget .sw-toggle,
+    .support-widget .sw-send,
+    .support-widget .sw-message--visitor,
+    .support-widget .sw-invitation .sw-invitation__accept {
+      background: ${background};
+      border-color: transparent;
+    }
+  `;
+}
+
+function installPageApi() {
+  if (typeof window === "undefined") return;
+  const api = createPageApi();
+  for (const prefix of PAGE_API_PREFIXES) {
+    if (!window[`${prefix}_api`]) {
+      window[`${prefix}_api`] = api;
+    }
+    if (typeof window[`${prefix}_init`] !== "function") {
+      window[`${prefix}_init`] = () => {
+        if (!state.initialized && state.lastInitOptions) {
+          init(state.lastInitOptions);
+        }
+      };
+    }
+    if (typeof window[`${prefix}_destroy`] !== "function") {
+      window[`${prefix}_destroy`] = () => {
+        destroy();
+      };
+    }
+  }
+  setTimeout(() => callPageCallback("onLoadCallback"), 0);
+}
+
+export const __test__ = { callPageCallback, createPageApi, downloadableAttachments, firstInvitation, formatAttachmentSize, getOrCreateIdentity, invitationAcknowledgePath, isLocalInvitation, normalizeInterval, parseUtmParams };
 
 function renderShell() {
   if (rootEl) {

@@ -15,6 +15,7 @@ import { configureIdentityRepository } from "./identity/bootstrap.js";
 import { configureIntegrationRepository } from "./integrations/bootstrap.js";
 import { configureNotificationRepository } from "./notifications/bootstrap.js";
 import { setupOpenApi } from "./openapi.js";
+import { startOpenChannelRuntime } from "./integrations/open-channel/open-channel-runtime.js";
 import { configureOperationsRepository } from "./operations/bootstrap.js";
 import { configurePlatformRepository } from "./platform/bootstrap.js";
 import { configureOperatorPresenceRepository } from "./presence/bootstrap.js";
@@ -66,6 +67,7 @@ export async function bootstrap(): Promise<void> {
     conversationService: app.get(ConversationService)
   });
   await app.listen(config.PORT);
+  startOpenChannelRuntime();
 
   writeStructuredLog("info", "API Gateway started", {
     operation: "bootstrap",

@@ -81,3 +81,7 @@ VITE_API_BASE_URL=http://127.0.0.1:4100 npm run dev
 ```
 
 Local privileged demo actions are no longer injected automatically by the frontend. Service-admin screens require a bearer session from `POST /api/v1/auth/login`. See `docs/runtime-configuration.md` for environment-specific auth and seed requirements.
+
+## External integrations (Open Channel API, External Bot API, Event Webhooks, Widget API)
+
+The external integration surface — a custom chat channel protocol (`/api/v1/open-channel/:token`), external bot-provider exchange (`/api/v1/external-bot/webhooks/:connectionId/:token`), dialog event webhooks and the widget page API (`window.sw_api`) — is documented in [`../docs/open-channel-api.md`](../docs/open-channel-api.md). Management endpoints live under `/api/v1/integrations/external/*`; contract coverage lives in `tests/open-channel-contracts.test.ts`.

@@ -20,6 +20,10 @@ import {
 } from "./public-sdk-messages.route.js";
 import { handlePublicSdkPresenceDisconnect, handlePublicSdkPresenceHeartbeat, type PublicSdkPresenceBody } from "./public-sdk-presence.route.js";
 import { handlePublicSdkInvitationAcknowledge, handlePublicSdkInvitationPoll } from "./public-sdk-invitations.route.js";
+import { OpenChannelRepository } from "./open-channel/open-channel.repository.js";
+import { ExternalBotBridge } from "./open-channel/external-bot.route.js";
+import { handleAgentsOnlineStatus, handleWidgetClientInfoFromRoute, type WidgetClientInfoBody } from "./open-channel/client-info.route.js";
+import { openChannelDeliveryService, resolveAgentsOnline } from "./open-channel/open-channel-public.controller.js";
 
 @ApiTags("public")
 @ApiBearerAuth()
@@ -150,8 +154,84 @@ export class PublicApiController {
       environment,
       lookup: this.lookup,
       recordProactiveConversion: this.proactiveExposureRepository,
-      runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event),
+      runBotRuntime: (event) => this.runBotRuntimeWithExternalBridge(event, payload),
       resolveQueueId: (tenantId, channelConnectionId) => this.resolveSdkQueueId(tenantId, channelConnectionId)
+    });
+  }
+
+  /**
+   * An external bot connected through the External Bot API takes priority over
+   * the built-in scenario runtime; when it owns the dialog the message is
+   * forwarded to the provider and operator auto-assignment is suppressed.
+   */
+  private async runBotRuntimeWithExternalBridge(
+    event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string },
+    payload: { externalId?: string; pageUrl?: string; text?: string }
+  ): Promise<{ instance?: { status?: string }; outcome?: string }> {
+    const externalRepository = OpenChannelRepository.default();
+    if (externalRepository.findActiveBotConnectionForChannel(event.tenantId, event.channel)) {
+      const conversation = await this.conversationRepository.findConversation(event.conversationId);
+      if (conversation && conversation.tenantId === event.tenantId) {
+        const bridge = new ExternalBotBridge({
+          agentsOnline: (tenantId) => resolveAgentsOnline(tenantId),
+          delivery: openChannelDeliveryService(),
+          repository: externalRepository
+        });
+        const handled = await bridge.forwardClientMessage({
+          channel: event.channel,
+          clientId: String(payload.externalId ?? "").trim() || conversation.providerConversationId || conversation.phone || conversation.id,
+          conversation,
+          pageUrl: payload.pageUrl,
+          tenantId: event.tenantId,
+          text: String(payload.text ?? "")
+        });
+        if (handled) {
+          return { instance: { status: "active" }, outcome: "external_bot" };
+        }
+      }
+    }
+    return this.automationService.handleBotRuntimeInboundEvent(event);
+  }
+
+  @Post("sdk/client-info")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    description: "Widget client card update (sw_api.setContactInfo / setCustomData / setUserToken / setClientAttributes).",
+    operationId: "updatePublicSdkClientInfo",
+    summary: "Update public SDK visitor client info"
+  })
+  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
+  updatePublicSdkClientInfo(
+    @Headers("authorization") authorization: string | undefined,
+    @Query("environment") environment: PublicApiEnvironment = "production",
+    @Body() payload: WidgetClientInfoBody = {}
+  ) {
+    return handleWidgetClientInfoFromRoute({
+      authorization,
+      body: payload,
+      conversationRepository: this.conversationRepository,
+      delivery: openChannelDeliveryService(),
+      environment,
+      lookup: this.lookup
+    });
+  }
+
+  @Get("sdk/agents/status")
+  @ApiOperation({
+    description: "Whether at least one agent can take chats (sw_api.chatMode).",
+    operationId: "fetchPublicSdkAgentsStatus",
+    summary: "Fetch public SDK agents online status"
+  })
+  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
+  fetchPublicSdkAgentsStatus(
+    @Headers("authorization") authorization: string | undefined,
+    @Query("environment") environment: PublicApiEnvironment = "production"
+  ) {
+    return handleAgentsOnlineStatus({
+      authorization,
+      environment,
+      lookup: this.lookup,
+      resolveAgentsOnline: (tenantId) => resolveAgentsOnline(tenantId)
     });
   }
 

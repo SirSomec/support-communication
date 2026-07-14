@@ -644,6 +644,12 @@ export function createHttpWorkerAdaptersFromEnv(
     deliverMessage: async () => undefined,
     startConversation: async () => undefined
   };
+  // Open Channel chat dialogs are delivered by the api-gateway event pump;
+  // the outbox entry only tracks the message, so the connector is a no-op.
+  channelConnectors.CHATAPI ??= {
+    deliverMessage: async () => undefined,
+    startConversation: async () => undefined
+  };
   const telegramConfig = loadTelegramRuntimeConnectorConfig(env);
   if (telegramConfig.enabled) {
     const tokenResolver = telegramBotTokenResolver ?? createIntegrationTelegramTokenResolver(

@@ -3,8 +3,10 @@ import { AiUsageRepository } from "../ai-connections/ai-usage.repository.js";
 import { SecretStore } from "../ai-connections/secret-store.js";
 import { createOpenAiCompatibleChatProvider } from "../ai-connections/openai-compatible-chat.provider.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
-import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
+import { KnowledgeRetrievalService, type McpRetrievalInvoker } from "../knowledge-sources/knowledge-retrieval.service.js";
 import { UnansweredQuestionRepository } from "../knowledge-sources/unanswered-question.repository.js";
+import { HttpMcpReadOnlyTransport, McpReadOnlyConnectorService } from "../knowledge-sources/mcp-readonly-connector.service.js";
+import { McpConnectorRepository } from "../knowledge-sources/mcp-connector.repository.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 import { formatSessionForPrompt } from "./agent-session-state.js";
 import { AgentSessionStateRepository } from "./agent-session-state.repository.js";
@@ -114,7 +116,7 @@ export class AiBotResponseService {
   }
 
   private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string, scenarioId?: string, scoreThreshold?: number) {
-    const result = await new KnowledgeRetrievalService(this.sources, this.workspace).retrieve({
+    const result = await new KnowledgeRetrievalService(this.sources, this.workspace, undefined, this.mcpInvoker()).retrieve({
       query: question,
       scenarioId,
       scoreThreshold,
@@ -123,6 +125,11 @@ export class AiBotResponseService {
       tokenBudget: 1_500
     });
     return result.passages.map((passage) => ({ content: passage.content, endOffset: passage.citation.endOffset, sourceId: passage.citation.sourceId, startOffset: passage.citation.startOffset, title: passage.citation.title, version: passage.citation.sourceVersion }));
+  }
+
+  private mcpInvoker(): McpRetrievalInvoker {
+    const service = new McpReadOnlyConnectorService(new HttpMcpReadOnlyTransport(), 8_000, McpConnectorRepository.default());
+    return { invoke: (tenantId, connectorId, toolName, toolInput) => service.invoke(tenantId, connectorId, toolName, toolInput) };
   }
 }
 

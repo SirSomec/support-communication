@@ -5,9 +5,14 @@ export interface McpConnectorRecord {
   approvedAt: string | null;
   approvedBy: string | null;
   createdAt: string;
+  description?: string;
   endpoint: string;
   id: string;
+  name?: string;
   rateLimitPerMinute: number;
+  rejectedReason?: string | null;
+  /** Set when a tenant admin requested the connector; the service admin approves it. */
+  requestedBy?: string | null;
   status: "disabled" | "enabled";
   tenantId: string;
   tools: Array<{ mode: "read"; name: string }>;
@@ -47,7 +52,19 @@ export class McpConnectorRepository {
 function normalizeState(state: Partial<McpConnectorState>): McpConnectorState { return { connectors: (state.connectors ?? []).map(normalize) }; }
 function normalize(record: McpConnectorRecord): McpConnectorRecord {
   const endpoint = new URL(record.endpoint); if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) throw new Error("mcp_connector_endpoint_invalid");
-  return { ...clone(record), allowedHosts: [...new Set(record.allowedHosts.map((value) => value.trim().toLowerCase()).filter(Boolean))], endpoint: endpoint.toString(), id: required(record.id), rateLimitPerMinute: Math.min(300, Math.max(1, Math.floor(record.rateLimitPerMinute || 60))), tenantId: required(record.tenantId), tools: record.tools.map((tool) => ({ mode: "read", name: required(tool.name) })) };
+  return {
+    ...clone(record),
+    allowedHosts: [...new Set(record.allowedHosts.map((value) => value.trim().toLowerCase()).filter(Boolean))],
+    ...(record.description ? { description: String(record.description).trim().slice(0, 300) } : {}),
+    endpoint: endpoint.toString(),
+    id: required(record.id),
+    ...(record.name ? { name: String(record.name).trim().slice(0, 120) } : {}),
+    rateLimitPerMinute: Math.min(300, Math.max(1, Math.floor(record.rateLimitPerMinute || 60))),
+    ...(record.rejectedReason ? { rejectedReason: String(record.rejectedReason).trim().slice(0, 300) } : {}),
+    ...(record.requestedBy ? { requestedBy: String(record.requestedBy).trim() } : {}),
+    tenantId: required(record.tenantId),
+    tools: record.tools.map((tool) => ({ mode: "read", name: required(tool.name) }))
+  };
 }
 function required(value: unknown): string { const result = String(value ?? "").trim(); if (!result) throw new Error("mcp_connector_identity_required"); return result; }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }

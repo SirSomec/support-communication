@@ -11,6 +11,7 @@ import { validateUrlKnowledgeSourceConfig } from "./url-source-config.js";
 import { ingestKnowledgeDocument } from "./document-ingestion.js";
 import { UrlSourcePolicyRepository, type UrlSourcePolicy } from "./url-source-policy.repository.js";
 import { AutomationRepository } from "../automation/automation.repository.js";
+import { McpConnectorRepository } from "./mcp-connector.repository.js";
 
 const SERVICE = "knowledgeSourcesService";
 const URL_SOURCE_MAX_BYTES = 1_000_000;
@@ -159,7 +160,24 @@ export class KnowledgeSourcesService {
       sourceConfig = { ...validated.config };
       sourceRef = validated.config.url;
     }
-    if (kind === "mcp" && !String(sourceConfig.connectorId ?? "").trim()) return invalid("createKnowledgeSource", tenantId, "mcp_connector_required", "Choose an approved read-only MCP connector.");
+    if (kind === "mcp") {
+      const connectorId = String(sourceConfig.connectorId ?? "").trim();
+      const tool = String(sourceConfig.tool ?? sourceConfig.toolName ?? "").trim();
+      if (!connectorId || !tool) return invalid("createKnowledgeSource", tenantId, "mcp_connector_required", "Выберите одобренный read-only MCP-коннектор и его инструмент.");
+      const connector = McpConnectorRepository.default().find(tenantId, connectorId);
+      if (!connector || !connector.approvedAt || connector.status !== "enabled") {
+        return invalid("createKnowledgeSource", tenantId, "mcp_connector_not_ready", "MCP-коннектор должен быть одобрен и включён.");
+      }
+      if (!connector.tools.some((item) => item.name === tool)) {
+        return invalid("createKnowledgeSource", tenantId, "mcp_tool_not_allowed", "Инструмент не входит в разрешённый read-only список коннектора.");
+      }
+      // MCP отдаёт данные в реальном времени: индексации нет, источник сразу
+      // готов к retrieval и одобрен (сам коннектор уже прошёл одобрение).
+      sourceConfig = { connectorId, tool };
+      status = "ready";
+      approvalStatus = "approved";
+      metadata = { connectorEndpoint: connector.endpoint, connectorName: connector.name ?? connectorId };
+    }
 
     const source = this.repository.save({
       approvalStatus,

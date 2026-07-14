@@ -1,8 +1,14 @@
 import { KnowledgeSourceRepository } from "./knowledge-source.repository.js";
-import { isKnowledgeSourceRetrievalEligible } from "./knowledge-source.types.js";
+import { isKnowledgeSourceRetrievalEligible, type KnowledgeSourceRecord } from "./knowledge-source.types.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 import { buildRetrievalCacheKey, KnowledgeRetrievalCache } from "./knowledge-retrieval-cache.js";
 import { recordBotRetrieval } from "../automation/bot-observability.js";
+import type { McpReadOnlyResult } from "./mcp-readonly-connector.service.js";
+
+/** BAI-833: live read-only MCP call used as a knowledge source. Injected so tests never hit the network. */
+export interface McpRetrievalInvoker {
+  invoke(tenantId: string, connectorId: string, toolName: string, toolInput: Record<string, unknown>): Promise<McpReadOnlyResult>;
+}
 
 export interface KnowledgeRetrievalInput {
   query: string;
@@ -35,7 +41,8 @@ export class KnowledgeRetrievalService {
   constructor(
     private readonly sources = KnowledgeSourceRepository.default(),
     workspace?: WorkspaceRepository,
-    cache?: KnowledgeRetrievalCache
+    cache?: KnowledgeRetrievalCache,
+    private readonly mcpInvoker?: McpRetrievalInvoker
   ) {
     this.workspace = workspace ?? WorkspaceRepository.default();
     this.cache = cache ?? KnowledgeRetrievalCache.default();
@@ -69,6 +76,11 @@ export class KnowledgeRetrievalService {
       const source = this.sources.find(input.tenantId, binding.sourceId);
       if (!source || !isKnowledgeSourceRetrievalEligible(source)) continue;
       if (binding.sourceVersion && String(source.version) !== binding.sourceVersion) continue;
+      if (source.kind === "mcp") {
+        const passage = await this.mcpPassage(source, input.query, input.tenantId);
+        if (passage) candidates.push(passage);
+        continue;
+      }
       const text = await sourceText(source, this.workspace, input.tenantId);
       for (const chunk of chunks(text)) {
         const score = relevance(queryTerms, chunk.content);
@@ -128,6 +140,29 @@ export class KnowledgeRetrievalService {
       topScore: passages[0]?.score
     });
     return { cache: "miss", ...result };
+  }
+
+  /**
+   * BAI-833: MCP-источник — живой read-only вызов. Ошибка/таймаут даёт пустой
+   * результат (отсутствие доказательств → handoff), а не выдуманный ответ.
+   */
+  private async mcpPassage(source: KnowledgeSourceRecord, query: string, tenantId: string): Promise<KnowledgeRetrievalPassage | null> {
+    if (!this.mcpInvoker) return null;
+    const connectorId = String(source.sourceConfig.connectorId ?? "").trim();
+    const toolName = String(source.sourceConfig.tool ?? source.sourceConfig.toolName ?? "").trim();
+    if (!connectorId || !toolName) return null;
+    try {
+      const result = await this.mcpInvoker.invoke(tenantId, connectorId, toolName, { query });
+      if (!result.ok || !result.result.content.trim()) return null;
+      const content = result.result.content.trim().slice(0, 4_000);
+      return {
+        citation: { endOffset: content.length, sourceId: source.id, sourceVersion: source.version, startOffset: 0, title: `MCP: ${source.title}` },
+        content,
+        score: 0.9
+      };
+    } catch {
+      return null;
+    }
   }
 }
 

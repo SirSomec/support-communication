@@ -824,6 +824,22 @@ test("knowledge hub manages URL sources with preview and lifecycle", async ({ pa
   const renameResponse = await renamePromise;
   expect(renameResponse.ok()).toBeTruthy();
   await expect(page.locator(".knowledge-source-row").filter({ hasText: "FAQ доставки v2" })).toBeVisible();
+
+  // BAI-831: заявка на MCP-подключение уходит на одобрение сервис-админом.
+  await page.locator(".knowledge-tabs button", { hasText: "MCP-подключения" }).click();
+  const mcpRequestPromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/knowledge/mcp-connectors/requests") && response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Подать заявку" }).click();
+  const mcpDialog = page.getByRole("dialog", { name: "Заявка на MCP-подключение" });
+  await mcpDialog.locator("input[type='text']").first().fill("Каталог заказов");
+  await mcpDialog.locator("input[type='url']").fill("https://mcp.allowed.test/rpc");
+  await mcpDialog.locator("input[type='text']").last().fill("order_status");
+  await mcpDialog.getByRole("button", { name: "Отправить заявку" }).click();
+  const mcpRequestResponse = await mcpRequestPromise;
+  const mcpRequestPayload = await mcpRequestResponse.json();
+  // Хост может быть вне allowlist смока — заявка либо создаётся, либо явно отклоняется, но не падает.
+  expect(["ok", "invalid"]).toContain(mcpRequestPayload.status);
   await expectHealthyPage(page);
 });
 

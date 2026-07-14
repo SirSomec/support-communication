@@ -51,6 +51,8 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   const [sources, setSources] = useState([]);
   const [usage, setUsage] = useState({});
   const [questions, setQuestions] = useState([]);
+  const [mcpConnectors, setMcpConnectors] = useState([]);
+  const [mcpForm, setMcpForm] = useState(null);
   const [busyAction, setBusyAction] = useState("");
   const [previewTarget, setPreviewTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -63,10 +65,11 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   async function loadAll({ silent } = {}) {
     if (!silent) setLoading(true);
     setError("");
-    const [articlesResponse, sourcesResponse, unansweredResponse] = await Promise.all([
+    const [articlesResponse, sourcesResponse, unansweredResponse, mcpResponse] = await Promise.all([
       knowledgeService.fetchArticles(),
       knowledgeService.fetchSources(),
-      knowledgeService.fetchUnansweredQuestions()
+      knowledgeService.fetchUnansweredQuestions(),
+      knowledgeService.fetchMcpConnectors()
     ]);
     if (articlesResponse.status === "ok") {
       setArticles(normalizeList(articlesResponse.data?.articles ?? articlesResponse.data?.items));
@@ -82,6 +85,9 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
     if (unansweredResponse.status === "ok") {
       setQuestions(normalizeList(unansweredResponse.data?.questions));
     }
+    if (mcpResponse.status === "ok") {
+      setMcpConnectors(normalizeList(mcpResponse.data?.connectors));
+    }
     setLoading(false);
   }
 
@@ -92,6 +98,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   const documents = useMemo(() => sources.filter((source) => source.kind === "document"), [sources]);
   const pages = useMemo(() => sources.filter((source) => source.kind === "url" || source.kind === "link"), [sources]);
   const mcpSources = useMemo(() => sources.filter((source) => source.kind === "mcp"), [sources]);
+  const approvedMcp = useMemo(() => mcpConnectors.filter((connector) => connector.approvedAt && connector.status === "enabled"), [mcpConnectors]);
   const openQuestions = useMemo(() => questions.filter((question) => question.status === "open"), [questions]);
   const readySources = sources.filter((source) => source.readiness === "ready").length;
   const publishedArticles = articles.filter((article) => String(article.status).toLowerCase().includes("publish") || article.status === "Опубликована").length;
@@ -232,6 +239,31 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
     }
   }
 
+  async function handleRequestMcp() {
+    const endpoint = mcpForm?.endpoint?.trim();
+    const name = mcpForm?.name?.trim() || "MCP-подключение";
+    const tools = splitTopicsInput(mcpForm?.tools);
+    setMcpForm(null);
+    if (!endpoint || !tools.length) return onToast("Укажите HTTPS-адрес и хотя бы один read-only инструмент.");
+    setBusyAction("request-mcp");
+    try {
+      const response = await knowledgeService.requestMcpConnector({
+        description: mcpForm?.description?.trim() || undefined,
+        endpoint,
+        name,
+        tools: tools.map((tool) => ({ name: tool }))
+      });
+      if (response.status !== "ok") {
+        onToast(response.error?.message ?? "Не удалось подать заявку на MCP-подключение.");
+        return;
+      }
+      onToast("Заявка отправлена. Администратор сервиса одобрит подключение.");
+      await loadAll({ silent: true });
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function handleDismissQuestion(question) {
     if (!canWrite) return onToast(access.reason);
     const response = await knowledgeService.dismissUnansweredQuestion(question.id);
@@ -267,7 +299,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
         <MetricTile detail={`${readySources} готовы к ответам`} icon={<FileText size={21} />} label="Источники" value={sources.length} />
         <MetricTile detail={`${publishedArticles} опубликованы`} icon={<BookOpen size={21} />} label="Статьи" value={articles.length} />
         <MetricTile detail="ждут статью или ответ" icon={<HelpCircle size={21} />} label="Вопросы без ответа" value={openQuestions.length} />
-        <MetricTile detail="read-only подключения" icon={<Plug size={21} />} label="MCP" value={mcpSources.length} />
+        <MetricTile detail={`${approvedMcp.length} одобрено`} icon={<Plug size={21} />} label="MCP" value={mcpConnectors.length} />
       </div>
 
       <SegmentedControl ariaLabel="Разделы знаний" className="knowledge-tabs" onChange={setTab} options={TABS} value={tab} />
@@ -331,15 +363,61 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
       ) : null}
 
       {tab === "mcp" ? (
-        <section className="work-panel knowledge-mcp-placeholder">
-          <SectionTitle action="read-only подключения" title="MCP-подключения" />
-          <div className="knowledge-empty">
-            <Globe size={19} />
-            <div>
-              <p>Подключение внешних read-only источников (MCP) появится здесь: вы регистрируете сервер, администратор сервиса одобряет его, и бот сможет отвечать по данным подключения.</p>
-              <p>Пока подключений {mcpSources.length ? `создано: ${mcpSources.length}` : "нет"}.</p>
+        <section className="work-panel">
+          <SectionTitle
+            action={
+              <button disabled={!canWrite || busy} onClick={() => setMcpForm({ description: "", endpoint: "", name: "", tools: "" })} type="button">
+                <Plug size={15} /> Подать заявку
+              </button>
+            }
+            title="MCP-подключения"
+          />
+          <p className="scenario-settings-note">Вы регистрируете read-only MCP-сервер, администратор сервиса одобряет его, и бот сможет отвечать по данным подключения. Запись во внешние системы недоступна.</p>
+          {!mcpConnectors.length ? (
+            <div className="knowledge-empty">
+              <Globe size={19} />
+              <span>Подключений пока нет. Подайте заявку — после одобрения администратором сервиса подключение можно будет выбрать как источник знаний.</span>
             </div>
-          </div>
+          ) : (
+            <ul className="knowledge-source-list">
+              {mcpConnectors.map((connector) => {
+                const state = connector.approvedAt
+                  ? (connector.status === "enabled" ? { label: "Одобрено и включено", tone: "ok" } : { label: "Одобрено, выключено", tone: "hold" })
+                  : (connector.rejectedReason ? { label: "Отклонено", tone: "warn" } : { label: "На одобрении", tone: "info" });
+                const boundSource = mcpSources.find((source) => source.sourceConfig?.connectorId === connector.id);
+                return (
+                  <li className="knowledge-source-row" key={connector.id}>
+                    <div className="knowledge-source-main">
+                      <strong>{connector.name ?? connector.endpoint}</strong>
+                      <span className="knowledge-source-badges">
+                        <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
+                        {boundSource ? <StatusBadge tone="ok">источник создан</StatusBadge> : null}
+                      </span>
+                      <small>
+                        {connector.endpoint} · инструменты: {(connector.tools ?? []).map((tool) => tool.name).join(", ") || "—"}
+                        {connector.rejectedReason ? ` · причина: ${connector.rejectedReason}` : ""}
+                      </small>
+                    </div>
+                    {connector.approvedAt && connector.status === "enabled" && !boundSource ? (
+                      <span className="knowledge-source-actions">
+                        <button
+                          disabled={!canWrite || busy}
+                          onClick={() => runSourceAction(`mcp-source-${connector.id}`, () => knowledgeService.createSource({
+                            kind: "mcp",
+                            sourceConfig: { connectorId: connector.id, tool: (connector.tools ?? [])[0]?.name },
+                            title: connector.name ?? "MCP-источник"
+                          }), { successMessage: "Источник из MCP создан и готов к выбору в сценариях." })}
+                          type="button"
+                        >
+                          <Plus size={14} /> Сделать источником
+                        </button>
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
       ) : null}
 
@@ -492,6 +570,34 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
         </ConfirmDialog>
       ) : null}
 
+      {mcpForm ? (
+        <ConfirmDialog
+          confirmLabel="Отправить заявку"
+          onCancel={() => setMcpForm(null)}
+          onConfirm={() => void handleRequestMcp()}
+          title="Заявка на MCP-подключение"
+        >
+          <span className="knowledge-url-form">
+            <label>
+              <span>Название</span>
+              <input autoFocus onChange={(event) => setMcpForm((current) => ({ ...current, name: event.target.value }))} placeholder="Каталог заказов" type="text" value={mcpForm.name} />
+            </label>
+            <label>
+              <span>HTTPS-адрес MCP-сервера</span>
+              <input onChange={(event) => setMcpForm((current) => ({ ...current, endpoint: event.target.value }))} placeholder="https://mcp.example.com/rpc" type="url" value={mcpForm.endpoint} />
+            </label>
+            <label>
+              <span>Read-only инструменты (через запятую)</span>
+              <input onChange={(event) => setMcpForm((current) => ({ ...current, tools: event.target.value }))} placeholder="order_status, catalog_lookup" type="text" value={mcpForm.tools} />
+            </label>
+            <label>
+              <span>Зачем нужно подключение (необязательно)</span>
+              <textarea onChange={(event) => setMcpForm((current) => ({ ...current, description: event.target.value }))} rows={2} value={mcpForm.description} />
+            </label>
+          </span>
+        </ConfirmDialog>
+      ) : null}
+
       {renameTarget ? (
         <ConfirmDialog
           confirmLabel="Сохранить"
@@ -628,6 +734,10 @@ function buildKnowledgeUpload(file) {
   };
   Object.defineProperty(attachment, "file", { enumerable: false, value: file, writable: false });
   return attachment;
+}
+
+function splitTopicsInput(value) {
+  return String(value ?? "").split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
 }
 
 function normalizeList(value) {

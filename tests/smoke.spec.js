@@ -715,6 +715,8 @@ test("knowledge editor supports article draft status and preview", async ({ page
 
   // BAI-820/821: статьи переехали в раздел «Знания», вкладка «Статьи».
   await expect(page.locator(".knowledge-tabs")).toContainText("Вопросы без ответа");
+  // BAI-852: вкладка ревью обратной связи присутствует.
+  await expect(page.locator(".knowledge-tabs")).toContainText("Обратная связь");
   await page.locator(".knowledge-row").filter({ hasText: "Order tracking" }).click();
   await expect(page.locator(".knowledge-preview")).toContainText("Order tracking");
 

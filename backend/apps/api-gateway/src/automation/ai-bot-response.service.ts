@@ -64,7 +64,9 @@ export class AiBotResponseService {
       const session = input.conversationId ? this.sessions.get(input.tenantId, input.conversationId) : null;
       const secret = new SecretStore({ keyVersion: this.environment.AI_CONNECTIONS_KEY_VERSION ?? "local-v1", masterKeyBase64: this.environment.AI_CONNECTIONS_MASTER_KEY ?? this.environment.PROVIDER_CREDENTIAL_MASTER_KEY ?? "" }).decrypt(connection.secret);
       const provider = createOpenAiCompatibleChatProvider({ apiKey: secret, baseUrl: connection.baseUrl, maxRetries: 1, model: connection.chatModel, timeoutMs: 12_000 });
-      const completion = await provider.complete({ maxTokens: 500, temperature: 0.2, messages: [
+      // BAI-851: стабильный ключ префикса (tenant + scenario revision), без PII и user id.
+      const promptCacheKey = `bot:${input.tenantId}:${input.scenarioId ?? "none"}:${input.scenarioRevisionId ?? "current"}`;
+      const completion = await provider.complete({ maxTokens: 500, promptCacheKey, temperature: 0.2, messages: [
         { role: "system", content: buildAiBotSystemPrompt({
           basePrompt: input.basePrompt,
           behaviorRules: input.behaviorRules,

@@ -157,6 +157,20 @@ export const automationService = {
     });
   },
 
+  async listBotAiFeedback() {
+    return apiRequest("/automation/bot-feedback", { operation: "listBotAiFeedback", service: SERVICE });
+  },
+
+  async resolveBotAiFeedback(feedbackId, action = "reviewed") {
+    if (!hasRouteId(feedbackId)) return missingIdEnvelope("resolveBotAiFeedback", "Feedback id is required.");
+    return apiRequest(`/automation/bot-feedback/${encodeURIComponent(feedbackId)}/resolve`, {
+      body: { action },
+      method: "POST",
+      operation: "resolveBotAiFeedback",
+      service: SERVICE
+    });
+  },
+
   async recordBotAiFeedback(payload = {}) {
     const conversationId = String(payload.conversationId ?? "").trim();
     if (!conversationId) {
@@ -195,6 +209,8 @@ export const automationService = {
         "archiveBotScenario",
         "restoreBotScenario",
         "recordBotAiFeedback",
+        "listBotAiFeedback",
+        "resolveBotAiFeedback",
         "rollbackBotScenario",
         "discardBotScenarioDraft",
         "createBotSandboxSession",

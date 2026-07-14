@@ -361,6 +361,24 @@ export class AutomationController {
     return this.automationService.createBotHandoffSummary({ ...payload, ...automationContextFromRequest(request) });
   }
 
+  @Get("bot-feedback")
+  @RequireTenantOperatorPermission("automation.read")
+  @RequireServiceAdminAction("automation.read")
+  @ApiOkResponse({ description: "Tenant bot AI feedback review queue" })
+  listBotAiFeedback(@Req() request: TenantOperatorRequest) {
+    return this.automationService.listBotAiFeedback(automationContextFromRequest(request));
+  }
+
+  @Post("bot-feedback/:feedbackId/resolve")
+  @RequireTenantOperatorPermission("automation.write")
+  @RequireServiceAdminAction("automation.write")
+  @HttpCode(HttpStatus.OK)
+  @ApiParam({ name: "feedbackId", description: "Feedback item identifier" })
+  @ApiOkResponse({ description: "Mark a feedback item as reviewed" })
+  resolveBotAiFeedback(@Param("feedbackId") feedbackId: string, @Body() body: { action?: string } | null, @Req() request: TenantOperatorRequest) {
+    return this.automationService.resolveBotAiFeedback(feedbackId, String(body?.action ?? "reviewed"), automationContextFromRequest(request));
+  }
+
   @Post("bot-feedback")
   @RequireTenantOperatorPermission("automation.read")
   @RequireServiceAdminAction("automation.read")

@@ -29,11 +29,14 @@ export interface OpenAiCompatibleChatConnection {
 export interface ChatCompletionRequest {
   maxTokens?: number;
   messages: ChatCompletionMessage[];
+  /** BAI-851: cache hint sent to providers that support prefix caching; never contains PII. */
+  promptCacheKey?: string;
   responseFormat?: "json_object" | "text";
   temperature?: number;
 }
 
 export interface ChatCompletionUsage {
+  cachedTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
@@ -130,6 +133,11 @@ export function createOpenAiCompatibleChatProvider(
   };
 }
 
+/** Exported for contract tests; builds the raw provider request body. */
+export function buildRequestBody(request: ChatCompletionRequest, model: string): Record<string, unknown> {
+  return requestBody(request, model);
+}
+
 function requestBody(request: ChatCompletionRequest, model: string): Record<string, unknown> {
   if (!Array.isArray(request.messages) || request.messages.length === 0) throw new Error("ai_chat_messages_required");
   const messages = request.messages.map((message) => {
@@ -140,6 +148,7 @@ function requestBody(request: ChatCompletionRequest, model: string): Record<stri
   if (request.temperature !== undefined) body.temperature = boundedNumber(request.temperature, 0, 2, "ai_chat_temperature_invalid");
   if (request.maxTokens !== undefined) body.max_tokens = clampInteger(request.maxTokens, 1, 32_768);
   if (request.responseFormat === "json_object") body.response_format = { type: "json_object" };
+  if (request.promptCacheKey?.trim()) body.prompt_cache_key = request.promptCacheKey.trim().slice(0, 128);
   return body;
 }
 
@@ -155,6 +164,7 @@ function parseCompletion(value: unknown, configuredModel: string): ChatCompletio
     providerId: OPENAI_COMPATIBLE_CHAT_PROVIDER_ID,
     providerRequestId: text(payload.id),
     usage: {
+      cachedTokens: nonNegativeInteger(record(usage.prompt_tokens_details).cached_tokens),
       inputTokens: nonNegativeInteger(usage.prompt_tokens),
       outputTokens: nonNegativeInteger(usage.completion_tokens),
       totalTokens: nonNegativeInteger(usage.total_tokens)

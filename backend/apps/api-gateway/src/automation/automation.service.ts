@@ -1061,6 +1061,39 @@ export class AutomationService {
     });
   }
 
+  /** BAI-852: очередь ревью — что оператор отметил «не помогло»/«неверный источник». */
+  async listBotAiFeedback(context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("listBotAiFeedback");
+    const feedback = await Promise.resolve(this.botFeedbackRepository.listFeedback({ tenantId }));
+    return createEnvelope({
+      service: AUTOMATION_SERVICE,
+      operation: "listBotAiFeedback",
+      traceId: automationTraceId("listBotAiFeedback"),
+      meta: apiMeta({ tenantId }),
+      data: { feedback: clone(feedback) }
+    });
+  }
+
+  async resolveBotAiFeedback(feedbackId: string, action: string, context: AutomationRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = resolveAutomationTenantId(context);
+    if (!tenantId) return tenantRequiredEnvelope("resolveBotAiFeedback");
+    if (!this.botFeedbackRepository.resolveFeedback) {
+      return invalidEnvelope("resolveBotAiFeedback", "bot_feedback_resolve_unsupported", "Feedback review is not available in this runtime.", {});
+    }
+    const resolved = await Promise.resolve(this.botFeedbackRepository.resolveFeedback(tenantId, String(feedbackId ?? "").trim(), String(action ?? "reviewed")));
+    if (!resolved) {
+      return invalidEnvelope("resolveBotAiFeedback", "bot_feedback_not_found", "Feedback item was not found.", { feedbackId });
+    }
+    return createEnvelope({
+      service: AUTOMATION_SERVICE,
+      operation: "resolveBotAiFeedback",
+      traceId: automationTraceId("resolveBotAiFeedback"),
+      meta: apiMeta({ tenantId }),
+      data: { feedback: clone(resolved) }
+    });
+  }
+
   async createBotHandoffSummary(payload: CreateBotHandoffPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const request = payload ?? {};
     const tenantId = String(request.tenantId ?? "").trim();

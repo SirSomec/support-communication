@@ -20,6 +20,7 @@ import {
 import { createScreenStateItems } from "../../app/screenState.js";
 import { uploadComposerAttachment } from "../../app/useComposerAttachments.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
+import { automationService } from "../../services/automationService.js";
 import { ConfirmDialog, MetricTile, Modal, ProductScreen, SectionTitle, SegmentedControl, StatusBadge } from "../../ui.jsx";
 import { KnowledgeBaseWorkspace } from "../quality/KnowledgeBaseWorkspace.jsx";
 
@@ -28,8 +29,14 @@ const TABS = [
   { label: "Документы", value: "documents" },
   { label: "Страницы", value: "pages" },
   { label: "MCP-подключения", value: "mcp" },
-  { label: "Вопросы без ответа", value: "unanswered" }
+  { label: "Вопросы без ответа", value: "unanswered" },
+  { label: "Обратная связь", value: "feedback" }
 ];
+
+const FEEDBACK_LABELS = {
+  not_helped: { label: "Не помогло", tone: "warn" },
+  wrong_source: { label: "Неверный источник", tone: "warn" }
+};
 
 const SOURCE_STATUS_LABELS = {
   archived: { label: "Архив", tone: "closed" },
@@ -53,6 +60,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   const [questions, setQuestions] = useState([]);
   const [mcpConnectors, setMcpConnectors] = useState([]);
   const [mcpForm, setMcpForm] = useState(null);
+  const [feedback, setFeedback] = useState([]);
   const [busyAction, setBusyAction] = useState("");
   const [previewTarget, setPreviewTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -65,11 +73,12 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   async function loadAll({ silent } = {}) {
     if (!silent) setLoading(true);
     setError("");
-    const [articlesResponse, sourcesResponse, unansweredResponse, mcpResponse] = await Promise.all([
+    const [articlesResponse, sourcesResponse, unansweredResponse, mcpResponse, feedbackResponse] = await Promise.all([
       knowledgeService.fetchArticles(),
       knowledgeService.fetchSources(),
       knowledgeService.fetchUnansweredQuestions(),
-      knowledgeService.fetchMcpConnectors()
+      knowledgeService.fetchMcpConnectors(),
+      automationService.listBotAiFeedback()
     ]);
     if (articlesResponse.status === "ok") {
       setArticles(normalizeList(articlesResponse.data?.articles ?? articlesResponse.data?.items));
@@ -88,6 +97,9 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
     if (mcpResponse.status === "ok") {
       setMcpConnectors(normalizeList(mcpResponse.data?.connectors));
     }
+    if (feedbackResponse.status === "ok") {
+      setFeedback(normalizeList(feedbackResponse.data?.feedback));
+    }
     setLoading(false);
   }
 
@@ -100,6 +112,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   const mcpSources = useMemo(() => sources.filter((source) => source.kind === "mcp"), [sources]);
   const approvedMcp = useMemo(() => mcpConnectors.filter((connector) => connector.approvedAt && connector.status === "enabled"), [mcpConnectors]);
   const openQuestions = useMemo(() => questions.filter((question) => question.status === "open"), [questions]);
+  const pendingFeedback = useMemo(() => feedback.filter((item) => item.reviewRequired), [feedback]);
   const readySources = sources.filter((source) => source.readiness === "ready").length;
   const publishedArticles = articles.filter((article) => String(article.status).toLowerCase().includes("publish") || article.status === "Опубликована").length;
 
@@ -271,6 +284,36 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
     setQuestions((current) => current.map((item) => item.id === question.id ? { ...item, status: "dismissed" } : item));
   }
 
+  async function handleResolveFeedback(item, action) {
+    if (!canWrite) return onToast(access.reason);
+    const response = await automationService.resolveBotAiFeedback(item.feedbackId, action);
+    if (response.status !== "ok") return onToast(response.error?.message ?? "Не удалось отметить обратную связь.");
+    setFeedback((current) => current.map((entry) => entry.feedbackId === item.feedbackId ? { ...entry, resolvedAction: action, reviewRequired: false } : entry));
+    onToast("Обратная связь отмечена как разобранная. Знания не меняются автоматически.");
+  }
+
+  async function handleArticleFromFeedback(item) {
+    if (!canWrite) return onToast(access.reason);
+    setBusyAction(`feedback-${item.feedbackId}`);
+    try {
+      const created = await knowledgeService.createArticle({
+        body: `Обратная связь оператора по диалогу ${item.conversationId}: «${item.outcome === "wrong_source" ? "неверный источник" : "не помогло"}».${item.comment ? `\nКомментарий: ${item.comment}` : ""}\n\nОпишите корректный ответ и опубликуйте статью, затем создайте из неё источник для бота.`,
+        category: "Боты",
+        title: `Исправление ответа бота (${item.conversationId})`.slice(0, 120)
+      });
+      if (created.status !== "ok" || !created.data?.article) {
+        onToast(created.error?.message ?? "Не удалось создать статью.");
+        return;
+      }
+      await automationService.resolveBotAiFeedback(item.feedbackId, "article_created");
+      onToast("Черновик статьи создан из обратной связи. Отредактируйте и опубликуйте его.");
+      await loadAll({ silent: true });
+      setTab("articles");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   if (loading) {
     return (
       <ProductScreen
@@ -298,7 +341,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
       <div className="metric-strip">
         <MetricTile detail={`${readySources} готовы к ответам`} icon={<FileText size={21} />} label="Источники" value={sources.length} />
         <MetricTile detail={`${publishedArticles} опубликованы`} icon={<BookOpen size={21} />} label="Статьи" value={articles.length} />
-        <MetricTile detail="ждут статью или ответ" icon={<HelpCircle size={21} />} label="Вопросы без ответа" value={openQuestions.length} />
+        <MetricTile detail={`${pendingFeedback.length} на разбор`} icon={<HelpCircle size={21} />} label="Вопросы без ответа" value={openQuestions.length} />
         <MetricTile detail={`${approvedMcp.length} одобрено`} icon={<Plug size={21} />} label="MCP" value={mcpConnectors.length} />
       </div>
 
@@ -450,6 +493,48 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
                   </span>
                 </li>
               ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      {tab === "feedback" ? (
+        <section className="work-panel">
+          <SectionTitle action="оценки операторов из диалогов" title="Обратная связь по ответам бота" />
+          <p className="scenario-settings-note">Знания не меняются автоматически: разберите оценку и, при необходимости, создайте или исправьте статью.</p>
+          {!pendingFeedback.length ? (
+            <div className="knowledge-empty">
+              <CheckCircle2 size={19} />
+              <span>Неразобранной обратной связи нет.</span>
+            </div>
+          ) : (
+            <ul className="knowledge-question-list">
+              {pendingFeedback.map((item) => {
+                const meta = FEEDBACK_LABELS[item.outcome] ?? { label: item.outcome, tone: "info" };
+                return (
+                  <li key={item.feedbackId}>
+                    <div>
+                      <p>
+                        <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge> диалог {item.conversationId}
+                        {item.scenarioId ? ` · сценарий ${item.scenarioId}` : ""}
+                      </p>
+                      <small>
+                        {item.comment ? `«${item.comment}» · ` : ""}
+                        {item.citationSourceIds?.length ? `источники: ${item.citationSourceIds.join(", ")} · ` : ""}
+                        {formatDateTime(item.createdAt)}
+                      </small>
+                    </div>
+                    <span className="knowledge-question-actions">
+                      <button disabled={!canWrite || busy} onClick={() => void handleArticleFromFeedback(item)} type="button">
+                        <Plus size={14} /> Создать статью
+                      </button>
+                      <button disabled={!canWrite || busy} onClick={() => void handleResolveFeedback(item, "reviewed")} type="button">
+                        Разобрано
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

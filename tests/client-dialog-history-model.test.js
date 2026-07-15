@@ -53,6 +53,23 @@ describe("client dialog history model", () => {
     assert.equal(entries[1].dateLabel, "01.07.2026");
   });
 
+  it("labels open dialogs with the updated date, not the time-of-day", () => {
+    const current = conversationFixture();
+    const openSibling = conversationFixture({
+      id: "conv-open",
+      status: "active",
+      topic: "Оплата",
+      time: "12:40",
+      updatedAt: "2026-07-10T08:15:00.000Z"
+    });
+
+    const entries = buildClientDialogHistory({ conversation: current, conversations: [openSibling] });
+    const openEntry = entries.find((entry) => entry.conversationId === "conv-open");
+
+    assert.equal(openEntry.isClosed, false);
+    assert.equal(openEntry.dateLabel, "10.07.2026");
+  });
+
   it("keeps archive tuples, dedupes them across siblings and skips rows covered by real closed dialogs", () => {
     const closedSibling = conversationFixture({
       id: "conv-closed",

@@ -128,9 +128,13 @@ function toConversationEntry(conversation, currentConversationId) {
   const preview = String(conversation.preview ?? "").trim();
   const title = topic || preview || NO_TOPIC_LABEL;
   const statusLabel = statusLabels[status] ?? (status || "—");
-  const dateLabel = isClosed && closedDateKey
-    ? formatHistoryDate(closedDateKey)
-    : String(conversation.time ?? "").trim() || (sortSource ? formatHistoryDate(sortSource.slice(0, 10)) : "—");
+  // Всегда показываем дату обращения (дд.мм.гггг): для закрытых — дату закрытия,
+  // для открытых — дату последнего обновления. conversation.time — это метка
+  // времени суток («12:40»/«сейчас»), она годится только как крайний фолбэк.
+  const dateKey = (isClosed && closedDateKey ? closedDateKey : sortSource.slice(0, 10)).trim();
+  const dateLabel = dateKey
+    ? formatHistoryDate(dateKey)
+    : String(conversation.time ?? "").trim() || "—";
   const messageTexts = (Array.isArray(conversation.messages) ? conversation.messages : [])
     .filter((message) => message && message.type !== "event")
     .map((message) => String(message.text ?? ""));

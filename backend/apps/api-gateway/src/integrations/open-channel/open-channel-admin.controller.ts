@@ -33,10 +33,10 @@ export class OpenChannelAdminController {
   @Get("chat-channels")
   @RequireTenantOperatorPermission("settings.read")
   @ApiOperation({ operationId: "listOpenChatChannels", summary: "List Open Channel chat channels" })
-  listChatChannels(@Req() request: TenantOperatorRequest) {
+  async listChatChannels(@Req() request: TenantOperatorRequest) {
     const tenantId = requestTenantId(request);
     return ok("listOpenChatChannels", {
-      items: this.repository.listChatChannels(tenantId).map((channel) => publicChatChannel(channel))
+      items: (await this.repository.listChatChannels(tenantId)).map((channel) => publicChatChannel(channel))
     });
   }
 
@@ -44,7 +44,7 @@ export class OpenChannelAdminController {
   @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "createOpenChatChannel", summary: "Create an Open Channel chat channel" })
-  createChatChannel(
+  async createChatChannel(
     @Req() request: TenantOperatorRequest,
     @Body() payload: { name?: string; outboundUrl?: string; routingQueueId?: string } = {}
   ) {
@@ -65,7 +65,7 @@ export class OpenChannelAdminController {
       token: createOpenChannelToken("oc"),
       updatedAt: now
     };
-    this.repository.saveChatChannel(channel);
+    await this.repository.saveChatChannel(channel);
     return ok("createOpenChatChannel", { channel: publicChatChannel(channel, true) });
   }
 
@@ -73,13 +73,13 @@ export class OpenChannelAdminController {
   @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "updateOpenChatChannel", summary: "Update an Open Channel chat channel" })
-  updateChatChannel(
+  async updateChatChannel(
     @Req() request: TenantOperatorRequest,
     @Param("id") id: string,
     @Body() payload: { name?: string; outboundUrl?: string; routingQueueId?: string; rotateToken?: boolean; status?: string } = {}
   ) {
     const tenantId = requestTenantId(request);
-    const existing = this.repository.findChatChannel(tenantId, id);
+    const existing = await this.repository.findChatChannel(tenantId, id);
     if (!existing) {
       return notFound("updateOpenChatChannel", "open_chat_channel_not_found");
     }
@@ -97,7 +97,7 @@ export class OpenChannelAdminController {
       token: payload.rotateToken === true ? createOpenChannelToken("oc") : existing.token,
       updatedAt: new Date().toISOString()
     };
-    this.repository.saveChatChannel(updated);
+    await this.repository.saveChatChannel(updated);
     return ok("updateOpenChatChannel", { channel: publicChatChannel(updated, payload.rotateToken === true) });
   }
 
@@ -105,8 +105,8 @@ export class OpenChannelAdminController {
   @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "deleteOpenChatChannel", summary: "Delete an Open Channel chat channel" })
-  deleteChatChannel(@Req() request: TenantOperatorRequest, @Param("id") id: string) {
-    const removed = this.repository.removeChatChannel(requestTenantId(request), id);
+  async deleteChatChannel(@Req() request: TenantOperatorRequest, @Param("id") id: string) {
+    const removed = await this.repository.removeChatChannel(requestTenantId(request), id);
     return removed ? ok("deleteOpenChatChannel", { removed: true }) : notFound("deleteOpenChatChannel", "open_chat_channel_not_found");
   }
 
@@ -115,9 +115,9 @@ export class OpenChannelAdminController {
   @Get("bot-connections")
   @RequireTenantOperatorPermission("settings.read")
   @ApiOperation({ operationId: "listExternalBotConnections", summary: "List external bot connections" })
-  listBotConnections(@Req() request: TenantOperatorRequest) {
+  async listBotConnections(@Req() request: TenantOperatorRequest) {
     return ok("listExternalBotConnections", {
-      items: this.repository.listBotConnections(requestTenantId(request)).map((connection) => publicBotConnection(connection))
+      items: (await this.repository.listBotConnections(requestTenantId(request))).map((connection) => publicBotConnection(connection))
     });
   }
 
@@ -125,7 +125,7 @@ export class OpenChannelAdminController {
   @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "createExternalBotConnection", summary: "Connect an external bot provider" })
-  createBotConnection(
+  async createBotConnection(
     @Req() request: TenantOperatorRequest,
     @Body() payload: { channels?: string[]; name?: string; providerUrl?: string; token?: string } = {}
   ) {
@@ -135,7 +135,7 @@ export class OpenChannelAdminController {
       return invalid("createExternalBotConnection", "provider_url_required", "providerUrl must be an http(s) URL.");
     }
     const token = String(payload.token ?? "").trim() || createOpenChannelToken("xb");
-    if (this.repository.listBotConnections().some((item) => item.token === token)) {
+    if ((await this.repository.listBotConnections()).some((item) => item.token === token)) {
       // Provider tokens must stay unique across bot connections.
       return invalid("createExternalBotConnection", "bot_token_not_unique", "The bot provider token is already used by another connection.");
     }
@@ -151,7 +151,7 @@ export class OpenChannelAdminController {
       token,
       updatedAt: now
     };
-    this.repository.saveBotConnection(connection);
+    await this.repository.saveBotConnection(connection);
     return ok("createExternalBotConnection", { connection: publicBotConnection(connection, true) });
   }
 
@@ -159,13 +159,13 @@ export class OpenChannelAdminController {
   @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "updateExternalBotConnection", summary: "Update an external bot provider connection" })
-  updateBotConnection(
+  async updateBotConnection(
     @Req() request: TenantOperatorRequest,
     @Param("id") id: string,
     @Body() payload: { channels?: string[]; name?: string; providerUrl?: string; status?: string; token?: string } = {}
   ) {
     const tenantId = requestTenantId(request);
-    const existing = this.repository.findBotConnection(tenantId, id);
+    const existing = await this.repository.findBotConnection(tenantId, id);
     if (!existing) {
       return notFound("updateExternalBotConnection", "external_bot_connection_not_found");
     }
@@ -174,7 +174,7 @@ export class OpenChannelAdminController {
       return invalid("updateExternalBotConnection", "provider_url_required", "providerUrl must be an http(s) URL.");
     }
     const token = String(payload.token ?? "").trim() || existing.token;
-    if (token !== existing.token && this.repository.listBotConnections().some((item) => item.token === token)) {
+    if (token !== existing.token && (await this.repository.listBotConnections()).some((item) => item.token === token)) {
       return invalid("updateExternalBotConnection", "bot_token_not_unique", "The bot provider token is already used by another connection.");
     }
     const updated: ExternalBotConnectionRecord = {
@@ -186,7 +186,7 @@ export class OpenChannelAdminController {
       token,
       updatedAt: new Date().toISOString()
     };
-    this.repository.saveBotConnection(updated);
+    await this.repository.saveBotConnection(updated);
     return ok("updateExternalBotConnection", { connection: publicBotConnection(updated) });
   }
 
@@ -194,8 +194,8 @@ export class OpenChannelAdminController {
   @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "deleteExternalBotConnection", summary: "Delete an external bot provider connection" })
-  deleteBotConnection(@Req() request: TenantOperatorRequest, @Param("id") id: string) {
-    const removed = this.repository.removeBotConnection(requestTenantId(request), id);
+  async deleteBotConnection(@Req() request: TenantOperatorRequest, @Param("id") id: string) {
+    const removed = await this.repository.removeBotConnection(requestTenantId(request), id);
     return removed ? ok("deleteExternalBotConnection", { removed: true }) : notFound("deleteExternalBotConnection", "external_bot_connection_not_found");
   }
 
@@ -204,9 +204,9 @@ export class OpenChannelAdminController {
   @Get("webhooks")
   @RequireTenantOperatorPermission("settings.read")
   @ApiOperation({ operationId: "listEventWebhookSubscriptions", summary: "List event webhook subscriptions" })
-  listWebhookSubscriptions(@Req() request: TenantOperatorRequest) {
+  async listWebhookSubscriptions(@Req() request: TenantOperatorRequest) {
     return ok("listEventWebhookSubscriptions", {
-      items: this.repository.listWebhookSubscriptions(requestTenantId(request)),
+      items: await this.repository.listWebhookSubscriptions(requestTenantId(request)),
       supportedEvents: SUPPORTED_WEBHOOK_EVENTS
     });
   }
@@ -215,7 +215,7 @@ export class OpenChannelAdminController {
   @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "createEventWebhookSubscription", summary: "Subscribe an URL to event webhooks" })
-  createWebhookSubscription(
+  async createWebhookSubscription(
     @Req() request: TenantOperatorRequest,
     @Body() payload: { events?: string[]; url?: string } = {}
   ) {
@@ -238,7 +238,7 @@ export class OpenChannelAdminController {
       updatedAt: now,
       url
     };
-    this.repository.saveWebhookSubscription(subscription);
+    await this.repository.saveWebhookSubscription(subscription);
     return ok("createEventWebhookSubscription", { subscription });
   }
 
@@ -246,13 +246,13 @@ export class OpenChannelAdminController {
   @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "updateEventWebhookSubscription", summary: "Update an event webhook subscription" })
-  updateWebhookSubscription(
+  async updateWebhookSubscription(
     @Req() request: TenantOperatorRequest,
     @Param("id") id: string,
     @Body() payload: { events?: string[]; status?: string; url?: string } = {}
   ) {
     const tenantId = requestTenantId(request);
-    const existing = this.repository.findWebhookSubscription(tenantId, id);
+    const existing = await this.repository.findWebhookSubscription(tenantId, id);
     if (!existing) {
       return notFound("updateEventWebhookSubscription", "event_webhook_subscription_not_found");
     }
@@ -271,7 +271,7 @@ export class OpenChannelAdminController {
       updatedAt: new Date().toISOString(),
       url
     };
-    this.repository.saveWebhookSubscription(subscription);
+    await this.repository.saveWebhookSubscription(subscription);
     return ok("updateEventWebhookSubscription", { subscription });
   }
 
@@ -279,8 +279,8 @@ export class OpenChannelAdminController {
   @RequireTenantOperatorPermission("settings.manage")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "deleteEventWebhookSubscription", summary: "Delete an event webhook subscription" })
-  deleteWebhookSubscription(@Req() request: TenantOperatorRequest, @Param("id") id: string) {
-    const removed = this.repository.removeWebhookSubscription(requestTenantId(request), id);
+  async deleteWebhookSubscription(@Req() request: TenantOperatorRequest, @Param("id") id: string) {
+    const removed = await this.repository.removeWebhookSubscription(requestTenantId(request), id);
     return removed ? ok("deleteEventWebhookSubscription", { removed: true }) : notFound("deleteEventWebhookSubscription", "event_webhook_subscription_not_found");
   }
 
@@ -289,8 +289,8 @@ export class OpenChannelAdminController {
   @Get("deliveries")
   @RequireTenantOperatorPermission("settings.read")
   @ApiOperation({ operationId: "listExternalDeliveries", summary: "List external integration delivery journal" })
-  listDeliveries(@Req() request: TenantOperatorRequest, @Query() query: { kind?: string; status?: string } = {}) {
-    const items = this.repository.listDeliveries({
+  async listDeliveries(@Req() request: TenantOperatorRequest, @Query() query: { kind?: string; status?: string } = {}) {
+    const items = await this.repository.listDeliveries({
       ...(isDeliveryKind(query.kind) ? { kind: query.kind } : {}),
       ...(isDeliveryStatus(query.status) ? { status: query.status } : {}),
       tenantId: requestTenantId(request)

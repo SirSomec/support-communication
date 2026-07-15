@@ -15,6 +15,7 @@ import { configureIdentityRepository } from "./identity/bootstrap.js";
 import { configureIntegrationRepository } from "./integrations/bootstrap.js";
 import { configureNotificationRepository } from "./notifications/bootstrap.js";
 import { setupOpenApi } from "./openapi.js";
+import { configureOpenChannelRepository } from "./integrations/open-channel/bootstrap.js";
 import { startOpenChannelRuntime } from "./integrations/open-channel/open-channel-runtime.js";
 import { configureOperationsRepository } from "./operations/bootstrap.js";
 import { configurePlatformRepository } from "./platform/bootstrap.js";
@@ -47,6 +48,7 @@ export async function bootstrap(): Promise<void> {
   await routingRepository.hydrateStateSnapshot();
   configureReportRepository(config, { seed: localSeeds.reports });
   configureIntegrationRepository(config, { seed: localSeeds.integrations });
+  configureOpenChannelRepository(config);
   configureNotificationRepository(config);
   configurePlatformRepository(config, { seed: localSeeds.platform });
   configureOperatorPresenceRepository(config);

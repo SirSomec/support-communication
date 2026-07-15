@@ -90,7 +90,7 @@ const ACK_MESSAGE_TYPES = new Set(["seen", "typein"]);
 
 export async function handleOpenChatInbound(input: OpenChatInboundInput): Promise<OpenChatRouteResult> {
   const repository = input.repository ?? OpenChannelRepository.default();
-  const channel = repository.findChatChannelByToken(input.channelToken);
+  const channel = await repository.findChatChannelByToken(input.channelToken);
   if (!channel || channel.status !== "active") {
     return plain(404, "channel_not_found");
   }
@@ -116,7 +116,7 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
     return plain(400, "conversation_create_failed");
   }
 
-  repository.mergeConversationState({
+  await repository.mergeConversationState({
     chatChannelId: channel.id,
     clientId,
     conversationId: conversation.id,
@@ -196,7 +196,7 @@ export async function handleOpenChatStatus(input: {
   repository?: OpenChannelRepository;
 }): Promise<OpenChatRouteResult> {
   const repository = input.repository ?? OpenChannelRepository.default();
-  const channel = repository.findChatChannelByToken(input.channelToken);
+  const channel = await repository.findChatChannelByToken(input.channelToken);
   if (!channel || channel.status !== "active") {
     return plain(404, "channel_not_found");
   }

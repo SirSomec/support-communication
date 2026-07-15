@@ -73,7 +73,7 @@ export class OpenChannelEventPump {
   }
 
   async runOnce(): Promise<OpenChannelEventPumpRunResult> {
-    const cursor = this.repository.readPumpCursor();
+    const cursor = await this.repository.readPumpCursor();
     const events = (await this.conversationRepository.listRealtimeEvents({}))
       .filter((event) => !cursor.lastOccurredAt || event.occurredAt >= cursor.lastOccurredAt)
       .filter((event) => !cursor.seenEventIds.includes(event.eventId))
@@ -97,7 +97,7 @@ export class OpenChannelEventPump {
     }
 
     const lastOccurredAt = events[events.length - 1]!.occurredAt;
-    this.repository.savePumpCursor({
+    await this.repository.savePumpCursor({
       lastOccurredAt,
       seenEventIds: [
         ...cursor.seenEventIds,
@@ -115,10 +115,10 @@ export class OpenChannelEventPump {
       const toStatus = String(event.data.toStatus ?? "");
       if (action === "assignment" || action === "transfer") {
         await this.emitWebhook("chat_accepted", event, result);
-        this.notifyBotClosed(event, result);
+        await this.notifyBotClosed(event, result);
       } else if (toStatus === "closed") {
         await this.emitWebhook("chat_finished", event, result);
-        this.notifyBotClosed(event, result);
+        await this.notifyBotClosed(event, result);
       }
       return;
     }
@@ -128,27 +128,27 @@ export class OpenChannelEventPump {
     }
   }
 
-  private notifyBotClosed(event: RealtimeEvent, result: OpenChannelEventPumpRunResult): void {
+  private async notifyBotClosed(event: RealtimeEvent, result: OpenChannelEventPumpRunResult): Promise<void> {
     if (!this.botBridge) return;
-    const state = this.repository.findConversationState(event.resourceId);
+    const state = await this.repository.findConversationState(event.resourceId);
     if (state?.botState === "active") {
-      this.botBridge.notifyChatClosed({ conversationId: event.resourceId, tenantId: event.tenantId });
+      await this.botBridge.notifyChatClosed({ conversationId: event.resourceId, tenantId: event.tenantId });
       result.botClosures += 1;
     }
   }
 
   private async emitWebhook(eventName: "chat_accepted" | "chat_finished", event: RealtimeEvent, result: OpenChannelEventPumpRunResult): Promise<void> {
-    const subscriptions = this.repository.listActiveWebhookSubscriptionsForEvent(event.tenantId, eventName);
+    const subscriptions = await this.repository.listActiveWebhookSubscriptionsForEvent(event.tenantId, eventName);
     if (!subscriptions.length) return;
 
     const conversation = await this.conversationRepository.findConversation(event.resourceId);
     if (!conversation || conversation.tenantId !== event.tenantId) return;
 
     const body = eventName === "chat_accepted"
-      ? this.buildChatAcceptedPayload(conversation)
-      : this.buildChatFinishedPayload(conversation);
+      ? await this.buildChatAcceptedPayload(conversation)
+      : await this.buildChatFinishedPayload(conversation);
     for (const subscription of subscriptions) {
-      this.delivery.enqueue({
+      await this.delivery.enqueue({
         body,
         conversationId: conversation.id,
         eventName,
@@ -160,16 +160,16 @@ export class OpenChannelEventPump {
     }
   }
 
-  private buildChatAcceptedPayload(conversation: ConversationRecord): Record<string, unknown> {
-    const state = this.repository.findConversationState(conversation.id);
+  private async buildChatAcceptedPayload(conversation: ConversationRecord): Promise<Record<string, unknown>> {
+    const state = await this.repository.findConversationState(conversation.id);
     return {
       ...compatWebhookEventBase("chat_accepted", conversation, state, compatWidgetId(conversation, state?.chatChannelId)),
       analytics: {}
     };
   }
 
-  private buildChatFinishedPayload(conversation: ConversationRecord): Record<string, unknown> {
-    const state = this.repository.findConversationState(conversation.id);
+  private async buildChatFinishedPayload(conversation: ConversationRecord): Promise<Record<string, unknown>> {
+    const state = await this.repository.findConversationState(conversation.id);
     const base = compatWebhookEventBase("chat_finished", conversation, state, compatWidgetId(conversation, state?.chatChannelId));
     const agent = base.agent;
     return {
@@ -191,17 +191,17 @@ export class OpenChannelEventPump {
     const conversation = await this.conversationRepository.findConversation(event.resourceId);
     if (!conversation || conversation.channel !== OPEN_CHAT_CHANNEL) return;
 
-    const state = this.repository.findConversationState(conversation.id);
+    const state = await this.repository.findConversationState(conversation.id);
     const channelId = state?.chatChannelId ?? taggedConnectionId(conversation);
     if (!channelId) return;
-    const channel = this.repository.findChatChannel(conversation.tenantId, channelId);
+    const channel = await this.repository.findChatChannel(conversation.tenantId, channelId);
     if (!channel || channel.status !== "active" || !channel.outboundUrl) return;
 
     const messageId = String(event.data.messageId ?? "");
     const message = conversation.messages.find((item) => String(item.id) === messageId);
     if (!message || message.side !== "agent" || message.type === "internal") return;
 
-    this.delivery.enqueue({
+    await this.delivery.enqueue({
       body: buildOpenChatOutboundEvent({
         clientId: externalClientId(conversation, state),
         messageId,

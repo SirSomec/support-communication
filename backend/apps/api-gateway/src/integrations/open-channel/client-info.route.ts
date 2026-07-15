@@ -94,7 +94,7 @@ export async function handleWidgetClientInfoFromRoute(input: WidgetClientInfoRou
     appendCustomDataEvent(conversation, customData);
   }
 
-  const state = repository.mergeConversationState({
+  const state = await repository.mergeConversationState({
     ...(attributes ? { attributes } : {}),
     conversationId: conversation.id,
     ...(customData.length ? { customData } : {}),
@@ -109,8 +109,8 @@ export async function handleWidgetClientInfoFromRoute(input: WidgetClientInfoRou
   if (input.delivery) {
     const widgetId = conversation.channelConnectionId ?? conversation.channel.toLowerCase();
     if (changedContact || customData.length) {
-      for (const subscription of repository.listActiveWebhookSubscriptionsForEvent(auth.context.tenantId, "chat_updated")) {
-        input.delivery.enqueue({
+      for (const subscription of await repository.listActiveWebhookSubscriptionsForEvent(auth.context.tenantId, "chat_updated")) {
+        await input.delivery.enqueue({
           body: {
             ...compatWebhookEventBase("chat_updated", conversation, state, widgetId),
             analytics: {}
@@ -124,8 +124,8 @@ export async function handleWidgetClientInfoFromRoute(input: WidgetClientInfoRou
       }
     }
     if (attributes) {
-      for (const subscription of repository.listActiveWebhookSubscriptionsForEvent(auth.context.tenantId, "client_attribute_updated")) {
-        input.delivery.enqueue({
+      for (const subscription of await repository.listActiveWebhookSubscriptionsForEvent(auth.context.tenantId, "client_attribute_updated")) {
+        await input.delivery.enqueue({
           body: {
             attributes,
             client_id: stableNumericId(String(input.body.externalId ?? conversation.id)),

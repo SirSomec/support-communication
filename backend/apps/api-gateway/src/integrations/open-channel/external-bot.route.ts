@@ -58,18 +58,18 @@ export class ExternalBotBridge {
     text: string;
   }): Promise<boolean> {
     if (input.conversation.operatorId || input.conversation.status === "closed") return false;
-    const connection = this.repository.findActiveBotConnectionForChannel(input.tenantId, input.channel);
+    const connection = await this.repository.findActiveBotConnectionForChannel(input.tenantId, input.channel);
     if (!connection) return false;
-    const state = this.repository.findConversationState(input.conversation.id);
+    const state = await this.repository.findConversationState(input.conversation.id);
     if (state?.botState === "closed") return false;
 
-    this.repository.mergeConversationState({
+    await this.repository.mergeConversationState({
       botState: "active",
       clientId: input.clientId,
       conversationId: input.conversation.id,
       tenantId: input.tenantId
     });
-    this.delivery.enqueue({
+    await this.delivery.enqueue({
       body: {
         agents_online: await this.resolveAgentsOnline(input.tenantId),
         channel: { id: connection.id, type: input.channel.toLowerCase() },
@@ -100,17 +100,17 @@ export class ExternalBotBridge {
   }
 
   /** CHAT_CLOSED — the dialog was accepted by an agent or closed; the bot must stop. */
-  notifyChatClosed(input: { conversationId: string; tenantId: string }): void {
-    const state = this.repository.findConversationState(input.conversationId);
+  async notifyChatClosed(input: { conversationId: string; tenantId: string }): Promise<void> {
+    const state = await this.repository.findConversationState(input.conversationId);
     if (!state || state.botState !== "active") return;
-    const connection = this.repository.listBotConnections(input.tenantId).find((item) => item.status === "active");
+    const connection = (await this.repository.listBotConnections(input.tenantId)).find((item) => item.status === "active");
     if (!connection) return;
-    this.repository.mergeConversationState({
+    await this.repository.mergeConversationState({
       botState: "closed",
       conversationId: input.conversationId,
       tenantId: input.tenantId
     });
-    this.delivery.enqueue({
+    await this.delivery.enqueue({
       body: {
         chat_id: String(stableNumericId(input.conversationId)),
         client_id: state.clientId ?? "",
@@ -125,8 +125,8 @@ export class ExternalBotBridge {
     });
   }
 
-  notifyAgentUnavailable(input: { clientId: string; connection: ExternalBotConnectionRecord; conversationId: string; tenantId: string }): void {
-    this.delivery.enqueue({
+  async notifyAgentUnavailable(input: { clientId: string; connection: ExternalBotConnectionRecord; conversationId: string; tenantId: string }): Promise<void> {
+    await this.delivery.enqueue({
       body: {
         chat_id: String(stableNumericId(input.conversationId)),
         client_id: input.clientId,
@@ -169,7 +169,7 @@ const BOT_MESSAGE_MEDIA_TYPES = new Set(["audio", "document", "photo", "video", 
 
 export async function handleExternalBotProviderEvent(input: ExternalBotProviderEventInput): Promise<ExternalBotRouteResult> {
   const repository = input.repository ?? OpenChannelRepository.default();
-  const connection = repository.findBotConnectionByIdAndToken(String(input.connectionId ?? "").trim(), String(input.token ?? "").trim());
+  const connection = await repository.findBotConnectionByIdAndToken(String(input.connectionId ?? "").trim(), String(input.token ?? "").trim());
   if (!connection || connection.status !== "active") {
     return externalBotError(401, "invalid_client", "Bot connection token is invalid.");
   }
@@ -179,7 +179,7 @@ export async function handleExternalBotProviderEvent(input: ExternalBotProviderE
     return externalBotError(400, "invalid_request", "The event field is required.");
   }
 
-  const resolved = resolveExternalBotConversationId(repository, connection.tenantId, input.body);
+  const resolved = await resolveExternalBotConversationId(repository, connection.tenantId, input.body);
   if (!resolved) {
     return externalBotError(400, "invalid_request", "chat_id or client_id does not match an active dialog.");
   }
@@ -190,7 +190,7 @@ export async function handleExternalBotProviderEvent(input: ExternalBotProviderE
   }
 
   if (event === "BOT_MESSAGE") {
-    const state = repository.findConversationState(conversation.id);
+    const state = await repository.findConversationState(conversation.id);
     if (state?.botState === "closed" || conversation.status === "closed") {
       return externalBotError(400, "invalid_request", "The chat is closed for bot messages.");
     }
@@ -209,7 +209,7 @@ export async function handleExternalBotProviderEvent(input: ExternalBotProviderE
   }
 
   if (event === "INVITE_AGENT") {
-    repository.mergeConversationState({
+    await repository.mergeConversationState({
       botState: "closed",
       conversationId: conversation.id,
       tenantId: connection.tenantId
@@ -219,12 +219,12 @@ export async function handleExternalBotProviderEvent(input: ExternalBotProviderE
       : { status: "skipped" };
     if (assigned.status !== "ok") {
       // No agent is available: the bot is told so and may continue the dialog.
-      repository.mergeConversationState({
+      await repository.mergeConversationState({
         botState: "active",
         conversationId: conversation.id,
         tenantId: connection.tenantId
       });
-      input.bridge?.notifyAgentUnavailable({
+      await input.bridge?.notifyAgentUnavailable({
         clientId: resolved.clientId,
         connection,
         conversationId: conversation.id,
@@ -235,7 +235,7 @@ export async function handleExternalBotProviderEvent(input: ExternalBotProviderE
   }
 
   if (event === "INIT_RATE") {
-    repository.mergeConversationState({
+    await repository.mergeConversationState({
       conversationId: conversation.id,
       rateRequested: true,
       tenantId: connection.tenantId
@@ -246,16 +246,16 @@ export async function handleExternalBotProviderEvent(input: ExternalBotProviderE
   return externalBotError(405, "invalid_request", `Event ${event} is not supported.`);
 }
 
-export function resolveExternalBotConversationId(
+export async function resolveExternalBotConversationId(
   repository: OpenChannelRepository,
   tenantId: string,
   body: Record<string, unknown>
-): { clientId: string; conversationId: string } | null {
+): Promise<{ clientId: string; conversationId: string } | null> {
   const chatId = String(body?.chat_id ?? "").trim();
   const clientId = String(body?.client_id ?? "").trim();
   // CLIENT_MESSAGE carries chat_id/client_id derived from the conversation;
   // the provider echoes them back, so match against the stored state.
-  const state = repository.listConversationStatesForTenant(tenantId)
+  const state = (await repository.listConversationStatesForTenant(tenantId))
     .find((record) => (chatId && String(stableNumericId(record.conversationId)) === chatId)
       || (clientId && record.clientId === clientId));
   return state ? { clientId: state.clientId ?? clientId, conversationId: state.conversationId } : null;

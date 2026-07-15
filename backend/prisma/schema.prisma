@@ -3069,3 +3069,116 @@ model OutboxEvent {
   @@index([status, queue, publishedAt], map: "outbox_events_status_queue_published_at_idx")
   @@map("outbox_events")
 }
+
+// --- Open Channel compatibility layer (External Bot API / Event Webhooks) ---
+// Storage for the neutral external-integration surface (Open Channel Chat API,
+// External Bot API, Event Webhooks). These tables are additive and standalone
+// (no tenant FK), matching the ai_connections / knowledge_sources /
+// mcp_connectors convention. The application contract lives in
+// integrations/open-channel/open-channel.repository.ts. channels/events keep a
+// JSON shape so `null` (all channels / all events) stays distinct from `[]`.
+
+model OpenChatChannel {
+  id             String   @id
+  tenantId       String   @map("tenant_id")
+  name           String
+  outboundUrl    String   @map("outbound_url")
+  routingQueueId String?  @map("routing_queue_id")
+  status         String
+  token          String   @unique(map: "open_channel_chat_channels_token_key")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, id], map: "open_channel_chat_channels_tenant_id_key")
+  @@index([tenantId, status], map: "open_channel_chat_channels_tenant_status_idx")
+  @@map("open_channel_chat_channels")
+}
+
+model ExternalBotConnection {
+  id          String   @id
+  tenantId    String   @map("tenant_id")
+  name        String
+  // channelsAll = true encodes the "all channels" case (record channels: null);
+  // otherwise `channels` lists the served channel types.
+  channelsAll Boolean  @default(false) @map("channels_all")
+  channels    String[] @default([])
+  providerUrl String   @map("provider_url")
+  status      String
+  token       String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, id], map: "open_channel_external_bot_connections_tenant_id_key")
+  @@index([tenantId, status], map: "open_channel_external_bot_connections_tenant_status_idx")
+  @@index([token], map: "open_channel_external_bot_connections_token_idx")
+  @@map("open_channel_external_bot_connections")
+}
+
+model EventWebhookSubscription {
+  id        String   @id
+  tenantId  String   @map("tenant_id")
+  // eventsAll = true encodes the "all events" case (record events: null);
+  // otherwise `events` lists the subscribed event names.
+  eventsAll Boolean  @default(false) @map("events_all")
+  events    String[] @default([])
+  status    String
+  url       String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, id], map: "open_channel_event_webhook_subscriptions_tenant_id_key")
+  @@index([tenantId, status], map: "open_channel_event_webhook_subscriptions_tenant_status_idx")
+  @@map("open_channel_event_webhook_subscriptions")
+}
+
+model OpenChannelConversationState {
+  conversationId              String   @id @map("conversation_id")
+  tenantId                    String   @map("tenant_id")
+  attributes                  Json?
+  botState                    String?  @map("bot_state")
+  chatChannelId               String?  @map("chat_channel_id")
+  clientId                    String?  @map("client_id")
+  customData                  Json?    @map("custom_data")
+  lastDeliveredAgentMessageId String?  @map("last_delivered_agent_message_id")
+  rateRequested               Boolean? @map("rate_requested")
+  userToken                   String?  @map("user_token")
+  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                   DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId], map: "open_channel_conversation_states_tenant_idx")
+  @@map("open_channel_conversation_states")
+}
+
+model OpenChannelDelivery {
+  id               String   @id
+  tenantId         String   @map("tenant_id")
+  kind             String
+  eventName        String   @map("event_name")
+  conversationId   String?  @map("conversation_id")
+  url              String
+  body             Json
+  status           String
+  attempts         Int      @default(0)
+  maxAttempts      Int      @map("max_attempts")
+  retryBackoffMs   Int      @map("retry_backoff_ms")
+  nextAttemptAt    DateTime @map("next_attempt_at") @db.Timestamptz(3)
+  lastError        String?  @map("last_error")
+  lastResponseBody String?  @map("last_response_body")
+  lastStatusCode   Int?     @map("last_status_code")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@index([tenantId, kind, status], map: "open_channel_deliveries_tenant_kind_status_idx")
+  @@index([status, nextAttemptAt], map: "open_channel_deliveries_status_next_attempt_idx")
+  @@index([createdAt], map: "open_channel_deliveries_created_at_idx")
+  @@map("open_channel_deliveries")
+}
+
+model OpenChannelPumpCursor {
+  id             String   @id
+  lastOccurredAt String   @map("last_occurred_at")
+  seenEventIds   Json     @default("[]") @map("seen_event_ids")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("open_channel_pump_cursors")
+}

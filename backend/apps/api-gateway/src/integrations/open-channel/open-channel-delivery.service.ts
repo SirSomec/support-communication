@@ -14,6 +14,8 @@ import {
  * 3 s timeout with 2 retries, webhooks — best effort with retries.
  */
 
+type MaybePromise<T> = T | Promise<T>;
+
 export interface OpenChannelDeliveryFetch {
   (url: string, init: {
     body: string;
@@ -64,7 +66,7 @@ export class OpenChannelDeliveryService {
     kind: OpenChannelDeliveryKind;
     tenantId: string;
     url: string;
-  }): OpenChannelDeliveryRecord {
+  }): MaybePromise<OpenChannelDeliveryRecord> {
     const defaults = OPEN_CHANNEL_DELIVERY_DEFAULTS[input.kind];
     return this.repository.enqueueDelivery({
       body: input.body,
@@ -100,13 +102,13 @@ export class OpenChannelDeliveryService {
   }
 
   async runOnce(now = new Date().toISOString()): Promise<OpenChannelDeliveryRunResult> {
-    const claimed = this.repository.claimDueDeliveries(now);
+    const claimed = await this.repository.claimDueDeliveries(now);
     const result: OpenChannelDeliveryRunResult = { claimed: claimed.length, deadLettered: 0, delivered: 0, retryScheduled: 0 };
 
     for (const delivery of claimed) {
       const outcome = await this.attempt(delivery);
       if (outcome.delivered) {
-        this.repository.resolveDelivery(delivery.id, {
+        await this.repository.resolveDelivery(delivery.id, {
           responseBody: outcome.responseBody,
           status: "delivered",
           statusCode: outcome.statusCode
@@ -120,7 +122,7 @@ export class OpenChannelDeliveryService {
 
       const permanent = outcome.statusCode !== undefined && outcome.statusCode >= 400 && outcome.statusCode < 500;
       const exhausted = permanent || delivery.attempts >= delivery.maxAttempts;
-      this.repository.resolveDelivery(delivery.id, {
+      await this.repository.resolveDelivery(delivery.id, {
         error: outcome.error,
         responseBody: outcome.responseBody,
         status: exhausted ? "dead_lettered" : "pending",
@@ -200,7 +202,7 @@ export class OpenChannelDeliveryService {
     if (!conversation || conversation.tenantId !== delivery.tenantId) return;
 
     applyWebhookEnrichment(conversation, { contactInfo, crmLink, customData });
-    this.repository.mergeConversationState({
+    await this.repository.mergeConversationState({
       conversationId: conversation.id,
       ...(customData.length ? { customData } : {}),
       tenantId: delivery.tenantId

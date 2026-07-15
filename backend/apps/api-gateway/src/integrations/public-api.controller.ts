@@ -169,7 +169,7 @@ export class PublicApiController {
     payload: { externalId?: string; pageUrl?: string; text?: string }
   ): Promise<{ instance?: { status?: string }; outcome?: string }> {
     const externalRepository = OpenChannelRepository.default();
-    if (externalRepository.findActiveBotConnectionForChannel(event.tenantId, event.channel)) {
+    if (await externalRepository.findActiveBotConnectionForChannel(event.tenantId, event.channel)) {
       const conversation = await this.conversationRepository.findConversation(event.conversationId);
       if (conversation && conversation.tenantId === event.tenantId) {
         const bridge = new ExternalBotBridge({

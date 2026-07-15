@@ -197,8 +197,19 @@ async function seedConversation(repo, state) {
 
   // 1. Conversations (parent rows). saveConversation upserts the conversation AND
   //    replaces its nested messages[] in the same transaction — no separate message writer.
+  //    The demo fixture reuses per-conversation local message ids (1,2,3...), which is
+  //    fine nested in JSON but violates the global conversation_message.id PK in Postgres.
+  //    Nothing references these ids (outbound/receipts are empty in the fixture), so
+  //    globalise them by prefixing with the conversation id before persisting.
   for (const conversation of state.conversations ?? []) {
-    await repo.saveConversation(conversation);
+    const messages = (conversation.messages ?? []).map((message: { id: unknown }) => ({ ...message, id: `${conversation.id}:${message.id}` }));
+    // Postgres requires closed conversations to carry a resolution_outcome
+    // (conversations_closed_resolution_outcome_check); the demo fixture leaves some
+    // closed conversations without one, so default them to the legacy_unknown value.
+    const resolutionOutcome = conversation.status === "closed" && !conversation.resolutionOutcome
+      ? "legacy_unknown"
+      : conversation.resolutionOutcome;
+    await repo.saveConversation({ ...conversation, messages, resolutionOutcome });
   }
 
   // 2. Outbox events — must exist before any outbound descriptor that references outboxEventId.
@@ -240,8 +251,13 @@ async function seedAutomation(repo, state) {
   // "prisma_automation_async_required" in the adapter.
 
   // 1. Bot scenarios (parents) before versions / audit / test-runs.
+  //    The demo fixture uses a "test" status that Postgres rejects
+  //    (bot_scenarios_status_check allows only draft/published/disabled/archived);
+  //    map any out-of-enum status to draft.
+  const validScenarioStatuses = new Set(["draft", "published", "disabled", "archived"]);
   for (const scenario of state.botScenarios ?? []) {
-    await repo.saveBotScenario(scenario);
+    const status = validScenarioStatuses.has(scenario.status) ? scenario.status : "draft";
+    await repo.saveBotScenario({ ...scenario, status });
   }
 
   // 2. Scenario versions (FK: scenarioId).
@@ -674,7 +690,12 @@ async function main(): Promise<void> {
   const client = createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as never;
   const seeds = createLocalDevelopmentRepositorySeeds();
   const failures: string[] = [];
-  const describe = (error: unknown): string => { const e = error as { code?: string; meta?: unknown; message?: string }; const base = e.code ? e.code + " " + JSON.stringify(e.meta ?? {}) : String(e.message ?? error); return base.replace(/s+/g, " ").slice(0, 200); };
+  const describe = (error: unknown): string => {
+    const e = error as { code?: string; meta?: unknown; message?: string; stack?: string };
+    const base = e.code ? `${e.code} ${JSON.stringify(e.meta ?? {})}` : String(e.message ?? error);
+    const raw = base && base.trim() ? base : String(e.stack ?? error);
+    return raw.replace(/\s+/g, " ").slice(0, 320);
+  };
   try { await seedWorkspace(WorkspaceRepository.prisma({ client }) as never, seeds.workspace as never); console.log("  ok workspace"); }
   catch (error) { failures.push("workspace: " + describe(error)); console.log("  FAIL workspace"); }
   try { await seedRouting(RoutingRepository.prisma({ client }) as never, seeds.routing as never); console.log("  ok routing"); }

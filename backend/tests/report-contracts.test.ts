@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { configureReportRepository, resolveReportStoreFile } from "../apps/api-gateway/src/reports/bootstrap.ts";
 import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
+import type { ReportExportJob } from "../apps/api-gateway/src/reports/report.types.ts";
 import { bootstrapReportState, exportJobFixtures } from "../apps/api-gateway/src/reports/seed.ts";
 
 describe("phase 5 reports, exports and metric definition backend contracts", () => {
@@ -51,62 +50,24 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.equal(repository.findMetricDefinition("metric_first_response", { tenantId: "tenant-ladoga" }), undefined);
   });
 
-  it("persists metric definitions through the JSON report repository", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "report-metric-definitions-"));
+  it("keeps freshly bootstrapped Prisma report repositories empty until records are written", () => {
+    const { client } = createFakePrismaReportClient();
     try {
-      const filePath = join(workspace, "reports.json");
-      const first = ReportRepository.open({ filePath });
-
-      first.saveMetricDefinition({
-        createdAt: "2026-06-30T09:00:00.000Z",
-        description: "Median time until the first operator response.",
-        id: "metric_json_first_response",
-        key: "first_response_seconds",
-        name: "First response time",
-        source: "conversation",
-        tenantId: "tenant-volga",
-        unit: "seconds",
-        updatedAt: "2026-06-30T09:00:00.000Z"
+      const repository = configureReportRepository({
+        DATABASE_URL: "postgresql://reports:secret@127.0.0.1:5432/support",
+        NODE_ENV: "test",
+        REPORT_REPOSITORY: "prisma"
+      }, {
+        prismaClientFactory() {
+          return client;
+        }
       });
 
-      const second = ReportRepository.open({ filePath });
-
-      assert.deepEqual(second.listMetricDefinitions({
-        key: "first_response_seconds",
-        tenantId: "tenant-volga"
-      }).map((metric) => metric.id), ["metric_json_first_response"]);
-      assert.equal(second.findMetricDefinition("metric_json_first_response", { tenantId: "tenant-volga" })?.unit, "seconds");
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
-  });
-
-  it("keeps default and JSON report repositories empty unless fixtures are explicitly injected", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "report-empty-bootstrap-"));
-    try {
-      ReportRepository.clearDefault();
-      const inMemory = ReportRepository.inMemory();
-      assert.deepEqual(inMemory.readState().exportJobs, []);
-      assert.deepEqual(inMemory.readWorkspaceCatalog().reportRows, []);
-      assert.ok(inMemory.readWorkspaceCatalog().reportColumnOptions.length > 0);
-
-      const empty = configureReportRepository({
-        NODE_ENV: "development",
-        REPORT_REPOSITORY: "json",
-        REPORT_STORE_FILE: join(workspace, "empty.json")
-      });
-      assert.deepEqual(empty.readState().exportJobs, []);
-      assert.deepEqual(empty.readWorkspaceCatalog().reportRows, []);
-
-      const seeded = configureReportRepository({
-        NODE_ENV: "development",
-        REPORT_REPOSITORY: "json",
-        REPORT_STORE_FILE: join(workspace, "seeded.json")
-      }, { seed: bootstrapReportState() });
-      assert.ok(seeded.readWorkspaceCatalog().reportRows.length > 0);
+      assert.deepEqual(repository.readState().exportJobs, []);
+      assert.deepEqual(repository.readWorkspaceCatalog().reportRows, []);
+      assert.ok(repository.readWorkspaceCatalog().reportColumnOptions.length > 0);
     } finally {
       ReportRepository.clearDefault();
-      rmSync(workspace, { force: true, recursive: true });
     }
   });
 
@@ -304,35 +265,6 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     );
   });
 
-  it("persists metric versions through the JSON report repository", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "report-metric-versions-"));
-    try {
-      const filePath = join(workspace, "reports.json");
-      const first = ReportRepository.open({ filePath });
-
-      first.saveMetricVersion({
-        createdAt: "2026-06-30T09:10:00.000Z",
-        definitionId: "metric_first_response",
-        id: "metric_json_first_response_v1",
-        queryKey: "conversation.first_response_seconds",
-        status: "active",
-        tenantId: "tenant-volga",
-        updatedAt: "2026-06-30T09:10:00.000Z",
-        version: "v1"
-      });
-
-      const second = ReportRepository.open({ filePath });
-
-      assert.deepEqual(second.listMetricVersions({
-        definitionId: "metric_first_response",
-        tenantId: "tenant-volga"
-      }).map((version) => version.id), ["metric_json_first_response_v1"]);
-      assert.equal(second.findMetricVersion("metric_json_first_response_v1", { tenantId: "tenant-volga" })?.queryKey, "conversation.first_response_seconds");
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
-  });
-
   it("persists tenant-scoped metric version overrides through the report repository", () => {
     const repository = ReportRepository.inMemory();
 
@@ -369,34 +301,6 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     }).map((override) => override.id), ["metric_first_response_tenant_override"]);
     assert.equal(repository.findMetricTenantOverride("metric_first_response_tenant_override", { tenantId: "tenant-volga" })?.reason, "Tenant-specific reporting cutoff");
     assert.equal(repository.findMetricTenantOverride("metric_first_response_tenant_override", { tenantId: "tenant-ladoga" }), undefined);
-  });
-
-  it("persists metric tenant overrides through the JSON report repository", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "report-metric-overrides-"));
-    try {
-      const filePath = join(workspace, "reports.json");
-      const first = ReportRepository.open({ filePath });
-
-      first.saveMetricTenantOverride({
-        createdAt: "2026-06-30T09:20:00.000Z",
-        definitionId: "metric_first_response",
-        id: "metric_json_first_response_override",
-        metricVersionId: "metric_json_first_response_v2",
-        reason: "Tenant-specific reporting cutoff",
-        tenantId: "tenant-volga",
-        updatedAt: "2026-06-30T09:20:00.000Z"
-      });
-
-      const second = ReportRepository.open({ filePath });
-
-      assert.deepEqual(second.listMetricTenantOverrides({
-        definitionId: "metric_first_response",
-        tenantId: "tenant-volga"
-      }).map((override) => override.id), ["metric_json_first_response_override"]);
-      assert.equal(second.findMetricTenantOverride("metric_json_first_response_override", { tenantId: "tenant-volga" })?.metricVersionId, "metric_json_first_response_v2");
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
   });
 
   it("returns an honest empty live workspace when no persisted tenant conversations exist", async () => {
@@ -521,82 +425,73 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     ]);
   });
 
-  it("persists report query execution status in the JSON report repository", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "report-query-status-"));
-    try {
-      const filePath = join(workspace, "reports.json");
-      const repository = ReportRepository.open({ filePath });
-      const reports = new ReportService(repository);
+  it("persists report query execution status through Prisma delegates", async () => {
+    const { calls, client } = createFakePrismaReportClient();
+    const repository = ReportRepository.prisma({ client });
+    const reports = new ReportService(repository);
 
-      const execution = await reports.executeReportQuery({
-        metricKey: "rescue.current",
-        parameters: {
-          channel: "all",
-          period: "today"
-        },
+    const execution = await reports.executeReportQuery({
+      metricKey: "rescue.current",
+      parameters: {
+        channel: "all",
+        period: "today"
+      },
+      tenantId: "tenant-volga"
+    });
+    const persisted = await repository.listReportQueryExecutionsAsync();
+
+    assert.equal(execution.data.execution.status, "completed");
+    assert.equal(calls.reportQueryExecutionUpserts.length, 1);
+    assert.deepEqual(persisted.map((item) => ({
+      id: item.id,
+      metricKey: item.metricKey,
+      parameters: item.parameters,
+      status: item.status
+    })), [{
+      id: execution.data.execution.id,
+      metricKey: "rescue.current",
+      parameters: {
+        channel: "all",
+        period: "today",
+        timezoneOffsetMinutes: 0,
         tenantId: "tenant-volga"
-      });
-      const second = ReportRepository.open({ filePath });
-
-      assert.equal(execution.data.execution.status, "completed");
-      assert.deepEqual(second.listReportQueryExecutions().map((item) => ({
-        id: item.id,
-        metricKey: item.metricKey,
-        parameters: item.parameters,
-        status: item.status
-      })), [{
-        id: execution.data.execution.id,
-        metricKey: "rescue.current",
-        parameters: {
-          channel: "all",
-          period: "today",
-          timezoneOffsetMinutes: 0,
-          tenantId: "tenant-volga"
-        },
-        status: "completed"
-      }]);
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
+      },
+      status: "completed"
+    }]);
   });
 
-  it("fails closed for unsupported report metric queries", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "report-query-failures-"));
-    try {
-      const filePath = join(workspace, "reports.json");
-      const repository = ReportRepository.open({ filePath });
-      const reports = new ReportService(repository);
+  it("fails closed for unsupported report metric queries through Prisma delegates", async () => {
+    const { client } = createFakePrismaReportClient();
+    const repository = ReportRepository.prisma({ client });
+    const reports = new ReportService(repository);
 
-      const execution = await reports.executeReportQuery({
-        metricKey: "unknown.current",
-        parameters: {
-          channel: "all",
-          period: "today"
-        },
-        tenantId: "tenant-volga"
-      });
-      const second = ReportRepository.open({ filePath });
+    const execution = await reports.executeReportQuery({
+      metricKey: "unknown.current",
+      parameters: {
+        channel: "all",
+        period: "today"
+      },
+      tenantId: "tenant-volga"
+    });
+    const persisted = await repository.listReportQueryExecutionsAsync();
 
-      assert.equal(execution.status, "invalid");
-      assert.equal(execution.error?.code, "report_metric_query_unsupported");
-      assert.deepEqual(execution.data, {
-        metricKey: "unknown.current"
-      });
-      assert.deepEqual(second.listReportQueryExecutions().map((item) => ({
-        failureEnvelope: item.failureEnvelope,
-        metricKey: item.metricKey,
-        status: item.status
-      })), [{
-        failureEnvelope: {
-          code: "report_metric_query_unsupported",
-          message: "Report metric query is not supported."
-        },
-        metricKey: "unknown.current",
-        status: "failed"
-      }]);
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
+    assert.equal(execution.status, "invalid");
+    assert.equal(execution.error?.code, "report_metric_query_unsupported");
+    assert.deepEqual(execution.data, {
+      metricKey: "unknown.current"
+    });
+    assert.deepEqual(persisted.map((item) => ({
+      failureEnvelope: item.failureEnvelope,
+      metricKey: item.metricKey,
+      status: item.status
+    })), [{
+      failureEnvelope: {
+        code: "report_metric_query_unsupported",
+        message: "Report metric query is not supported."
+      },
+      metricKey: "unknown.current",
+      status: "failed"
+    }]);
   });
 
   it("queues report exports with audit, metric version and idempotency metadata", async () => {
@@ -830,42 +725,6 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.equal(JSON.stringify(auditEvents).includes("objectKey"), false);
     assert.equal(JSON.stringify(auditEvents).includes("reports.local"), false);
     assert.equal(JSON.stringify(auditEvents).includes("Manual retry after transport issue"), false);
-  });
-
-  it("persists report file descriptors after successful object writes", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "report-file-descriptors-"));
-    try {
-      const filePath = join(workspace, "reports.json");
-      const first = ReportRepository.open({ filePath });
-
-      first.saveReportFileDescriptor({
-        checksum: "sha256-json-export",
-        contentType: "application/json",
-        createdAt: "2026-06-30T11:30:00.000Z",
-      fileName: "conversation-report.json",
-      format: "json",
-      id: "filedesc-export-json-005",
-      jobId: "export-json-005",
-      metricDefinitionVersion: "metrics/v1",
-      objectKey: "reports/tenant-volga/export-json-005/report.json",
-      sizeBytes: 128,
-      tenantId: "tenant-volga",
-      writtenAt: "2026-06-30T11:30:00.000Z"
-    });
-
-      const second = ReportRepository.open({ filePath });
-      const stored = second.findReportFileDescriptor("export-json-005");
-      if (stored) {
-        stored.fileName = "mutated.json";
-      }
-
-      assert.equal(second.findReportFileDescriptor("export-json-005")?.fileName, "conversation-report.json");
-      assert.equal(second.findReportFileDescriptor("export-json-005")?.objectKey, "reports/tenant-volga/export-json-005/report.json");
-      assert.equal(second.findReportFileDescriptor("missing-export"), undefined);
-      assert.equal(JSON.stringify(second.findReportFileDescriptor("export-json-005")).includes("downloadUrl"), false);
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
   });
 
   it("attaches signed download policy to persisted report file descriptors", async () => {
@@ -1351,6 +1210,73 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     }), undefined);
   });
 
+  it("keeps saved report template idempotency keys isolated from report export keys through Prisma delegates", async () => {
+    const { client } = createFakePrismaReportClient();
+    const reports = new ReportService(ReportRepository.prisma({ client }));
+
+    const template = await reports.saveSavedReportTemplate({
+      columns: ["metric", "today"],
+      idempotencyKey: "shared-idempotency-key",
+      name: "Shared key template",
+      reportType: "SLA"
+    }, { tenantId: "tenant-volga" });
+    const exportRequest = await reports.requestReportExport({
+      channel: "VK",
+      columns: ["metric", "today", "status"],
+      idempotencyKey: "shared-idempotency-key",
+      period: "today",
+      reportType: "SLA"
+    }, { tenantId: "tenant-volga" });
+
+    assert.equal(template.status, "ok");
+    assert.equal(template.data.duplicate, false);
+    assert.equal(exportRequest.status, "ok");
+    assert.equal(exportRequest.data.duplicate, false);
+    assert.notEqual(template.data.template.id, exportRequest.data.job.id);
+
+    const persistedExports = await ReportRepository.prisma({ client }).listExportJobsAsync({ tenantId: "tenant-volga" });
+    assert.deepEqual(persistedExports.map((row) => row.id), [exportRequest.data.job.id]);
+  });
+
+  it("rejects conflicting saved report template replays by idempotency key through Prisma delegates", async () => {
+    const { client } = createFakePrismaReportClient();
+    const reports = new ReportService(ReportRepository.prisma({ client }));
+
+    const first = await reports.saveSavedReportTemplate({
+      columns: ["metric", "today"],
+      idempotencyKey: "template-idempotency-key",
+      name: "Original template",
+      reportType: "SLA"
+    }, { tenantId: "tenant-volga" });
+    const replay = await reports.saveSavedReportTemplate({
+      columns: ["metric", "today"],
+      idempotencyKey: "template-idempotency-key",
+      name: "Original template",
+      reportType: "SLA"
+    }, { tenantId: "tenant-volga" });
+    const conflict = await reports.saveSavedReportTemplate({
+      columns: ["metric", "previous"],
+      idempotencyKey: "template-idempotency-key",
+      name: "Different template",
+      reportType: "SLA"
+    }, { tenantId: "tenant-volga" });
+
+    assert.equal(first.status, "ok");
+    assert.equal(first.data.duplicate, false);
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.data.duplicate, true);
+    assert.equal(replay.data.template.id, first.data.template.id);
+    assert.equal(conflict.status, "conflict");
+    assert.equal(conflict.error?.code, "idempotency_key_reused");
+
+    const stored = await reports.getSavedReportTemplate(first.data.template.id, {
+      requesterUserId: "current-operator",
+      tenantId: "tenant-volga"
+    });
+    assert.equal(stored.status, "ok");
+    assert.equal(stored.data.template.name, "Original template");
+  });
+
   it("persists scheduled digest descriptors and selects due tenant periods", () => {
     const repository = ReportRepository.inMemory();
 
@@ -1504,4 +1430,621 @@ function reportRepositoryWithExportFixtures(): ReportRepository {
       tenantId: "tenant-volga"
     }))
   }));
+}
+
+function createFakePrismaReportClient() {
+  const conversationLifecycleEvents: FakeConversationLifecycleEvent[] = [];
+  const metricDefinitions = new Map<string, FakeMetricDefinitionCreateInput>();
+  const metricTenantOverrides = new Map<string, FakeMetricTenantOverrideCreateInput>();
+  const metricVersions = new Map<string, FakeMetricVersionCreateInput>();
+  const reportExportJobs = new Map<string, FakeReportExportJobCreateInput>();
+  const reportIdempotencyKeys = new Map<string, FakeReportIdempotencyKeyCreateInput>();
+  const savedReportTemplates = new Map<string, FakeSavedReportTemplateCreateInput>();
+  const reportQueryExecutions = new Map<string, FakeReportQueryExecutionCreateInput>();
+  const reportFileDescriptors = new Map<string, FakeReportFileDescriptorCreateInput>();
+  const reportNotificationDescriptors = new Map<string, FakeReportNotificationDescriptorCreateInput>();
+  const scheduledDigestDescriptors = new Map<string, FakeScheduledDigestDescriptorCreateInput>();
+  const reportExportRetryAuditEvents = new Map<string, FakeReportExportRetryAuditEventCreateInput>();
+  const calls = {
+    conversationLifecycleEventFindMany: [] as Array<Record<string, any>>,
+    metricDefinitionFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }>,
+    metricDefinitionFindUnique: [] as Array<{ where: { id: string } }>,
+    metricDefinitionUpserts: [] as Array<{
+      create: FakeMetricDefinitionCreateInput;
+      update: FakeMetricDefinitionUpdateInput;
+      where: { id: string };
+    }>,
+    metricVersionFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }>,
+    metricVersionFindUnique: [] as Array<{ where: { id: string } }>,
+    metricVersionUpserts: [] as Array<{
+      create: FakeMetricVersionCreateInput;
+      update: FakeMetricVersionUpdateInput;
+      where: { id: string };
+    }>,
+    metricTenantOverrideFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }>,
+    metricTenantOverrideFindUnique: [] as Array<{ where: { id: string } }>,
+    metricTenantOverrideUpserts: [] as Array<{
+      create: FakeMetricTenantOverrideCreateInput;
+      update: FakeMetricTenantOverrideUpdateInput;
+      where: { id: string };
+    }>,
+    reportIdempotencyKeyFindUnique: [] as Array<{ where: FakeReportIdempotencyKeyWhereUniqueInput }>,
+    reportIdempotencyKeyCreates: [] as Array<{ data: FakeReportIdempotencyKeyCreateInput }>,
+    reportIdempotencyKeyUpserts: [] as Array<{
+      create: FakeReportIdempotencyKeyCreateInput;
+      update: FakeReportIdempotencyKeyUpdateInput;
+      where: FakeReportIdempotencyKeyWhereUniqueInput;
+    }>,
+    reportExportJobFindMany: [] as Array<{ orderBy: { createdAt: "desc" } }>,
+    reportExportJobFindUnique: [] as Array<{ where: { id: string } }>,
+    reportExportJobUpserts: [] as Array<{
+      create: FakeReportExportJobCreateInput;
+      update: FakeReportExportJobUpdateInput;
+      where: { id: string };
+    }>,
+    savedReportTemplateFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }>,
+    savedReportTemplateFindUnique: [] as Array<{ where: { id: string } }>,
+    savedReportTemplateUpserts: [] as Array<{
+      create: FakeSavedReportTemplateCreateInput;
+      update: FakeSavedReportTemplateUpdateInput;
+      where: { id: string };
+    }>,
+    reportQueryExecutionUpserts: [] as Array<{
+      create: FakeReportQueryExecutionCreateInput;
+      update: FakeReportQueryExecutionUpdateInput;
+      where: { id: string };
+    }>,
+    reportFileDescriptorUpserts: [] as Array<{
+      create: FakeReportFileDescriptorCreateInput;
+      update: FakeReportFileDescriptorUpdateInput;
+      where: { jobId: string };
+    }>,
+    reportNotificationDescriptorUpserts: [] as Array<{
+      create: FakeReportNotificationDescriptorCreateInput;
+      update: FakeReportNotificationDescriptorUpdateInput;
+      where: { idempotencyKey: string };
+    }>,
+    scheduledDigestDescriptorUpserts: [] as Array<{
+      create: FakeScheduledDigestDescriptorCreateInput;
+      update: FakeScheduledDigestDescriptorUpdateInput;
+      where: { id: string };
+    }>,
+    reportExportRetryAuditEventUpserts: [] as Array<{
+      create: FakeReportExportRetryAuditEventCreateInput;
+      update: FakeReportExportRetryAuditEventUpdateInput;
+      where: { auditId: string };
+    }>,
+    transactions: [] as Array<{ isolationLevel?: "Serializable" }>
+  };
+
+  return {
+    calls,
+    seedConversationLifecycleEvent(row: FakeConversationLifecycleEvent) {
+      conversationLifecycleEvents.push(row);
+    },
+    seedMetricVersion(row: FakeMetricVersionCreateInput) {
+      metricVersions.set(row.id, row);
+    },
+    client: {
+      conversationLifecycleEvent: {
+        findMany(input: Record<string, any>) {
+          calls.conversationLifecycleEventFindMany.push(input);
+          const { gte, lt } = input.where.occurredAt as { gte: Date; lt: Date };
+          return Promise.resolve(conversationLifecycleEvents
+            .filter((row) => row.tenantId === input.where.tenantId && row.occurredAt >= gte && row.occurredAt < lt)
+            .sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime()));
+        }
+      },
+      metricDefinition: {
+        findMany(input: { orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }) {
+          calls.metricDefinitionFindMany.push(input);
+          return Promise.resolve(Array.from(metricDefinitions.values())
+            .filter((row) => matchesWhere(row, input.where))
+            .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime()));
+        },
+        findUnique(input: { where: { id: string } }) {
+          calls.metricDefinitionFindUnique.push(input);
+          return Promise.resolve(metricDefinitions.get(input.where.id) ?? null);
+        },
+        upsert(input: {
+          create: FakeMetricDefinitionCreateInput;
+          update: FakeMetricDefinitionUpdateInput;
+          where: { id: string };
+        }) {
+          calls.metricDefinitionUpserts.push(input);
+          const current = metricDefinitions.get(input.where.id);
+          const next: FakeMetricDefinitionCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          metricDefinitions.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      metricVersion: {
+        findMany(input: { orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }) {
+          calls.metricVersionFindMany.push(input);
+          return Promise.resolve(Array.from(metricVersions.values())
+            .filter((row) => matchesWhere(row, input.where))
+            .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime()));
+        },
+        findUnique(input: { where: { id: string } }) {
+          calls.metricVersionFindUnique.push(input);
+          return Promise.resolve(metricVersions.get(input.where.id) ?? null);
+        },
+        upsert(input: {
+          create: FakeMetricVersionCreateInput;
+          update: FakeMetricVersionUpdateInput;
+          where: { id: string };
+        }) {
+          calls.metricVersionUpserts.push(input);
+          const current = metricVersions.get(input.where.id);
+          const next: FakeMetricVersionCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          metricVersions.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      metricTenantOverride: {
+        findMany(input: { orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }) {
+          calls.metricTenantOverrideFindMany.push(input);
+          return Promise.resolve(Array.from(metricTenantOverrides.values())
+            .filter((row) => matchesWhere(row, input.where))
+            .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime()));
+        },
+        findUnique(input: { where: { id: string } }) {
+          calls.metricTenantOverrideFindUnique.push(input);
+          return Promise.resolve(metricTenantOverrides.get(input.where.id) ?? null);
+        },
+        upsert(input: {
+          create: FakeMetricTenantOverrideCreateInput;
+          update: FakeMetricTenantOverrideUpdateInput;
+          where: { id: string };
+        }) {
+          calls.metricTenantOverrideUpserts.push(input);
+          const current = metricTenantOverrides.get(input.where.id);
+          const next: FakeMetricTenantOverrideCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          metricTenantOverrides.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportIdempotencyKey: {
+        create(input: { data: FakeReportIdempotencyKeyCreateInput }) {
+          calls.reportIdempotencyKeyCreates.push(input);
+          const mapKey = fakeReportIdempotencyMapKey(input.data.tenantId, input.data.key);
+          if (reportIdempotencyKeys.has(mapKey)) {
+            const error = new Error("Unique constraint failed on the fields: (`tenant_id`,`key`)") as Error & { code?: string };
+            error.code = "P2002";
+            return Promise.reject(error);
+          }
+
+          reportIdempotencyKeys.set(mapKey, input.data);
+          return Promise.resolve(input.data);
+        },
+        findUnique(input: { where: FakeReportIdempotencyKeyWhereUniqueInput }) {
+          calls.reportIdempotencyKeyFindUnique.push(input);
+          const { key, tenantId } = input.where.tenantId_key;
+          return Promise.resolve(reportIdempotencyKeys.get(fakeReportIdempotencyMapKey(tenantId, key)) ?? null);
+        },
+        upsert(input: {
+          create: FakeReportIdempotencyKeyCreateInput;
+          update: FakeReportIdempotencyKeyUpdateInput;
+          where: FakeReportIdempotencyKeyWhereUniqueInput;
+        }) {
+          calls.reportIdempotencyKeyUpserts.push(input);
+          const { key, tenantId } = input.where.tenantId_key;
+          const mapKey = fakeReportIdempotencyMapKey(tenantId, key);
+          const current = reportIdempotencyKeys.get(mapKey);
+          const next: FakeReportIdempotencyKeyCreateInput = current
+            ? { ...current, ...input.update, key: current.key, tenantId: current.tenantId }
+            : input.create;
+          reportIdempotencyKeys.set(mapKey, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportExportJob: {
+        findMany(input: { orderBy: { createdAt: "desc" } }) {
+          calls.reportExportJobFindMany.push(input);
+          return Promise.resolve(Array.from(reportExportJobs.values())
+            .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()));
+        },
+        findUnique(input: { where: { id: string } }) {
+          calls.reportExportJobFindUnique.push(input);
+          return Promise.resolve(reportExportJobs.get(input.where.id) ?? null);
+        },
+        upsert(input: {
+          create: FakeReportExportJobCreateInput;
+          update: FakeReportExportJobUpdateInput;
+          where: { id: string };
+        }) {
+          calls.reportExportJobUpserts.push(input);
+          const current = reportExportJobs.get(input.where.id);
+          const next: FakeReportExportJobCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          reportExportJobs.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      savedReportTemplate: {
+        findMany(input: { orderBy: { updatedAt: "desc" }; where?: Record<string, unknown> }) {
+          calls.savedReportTemplateFindMany.push(input);
+          return Promise.resolve(Array.from(savedReportTemplates.values())
+            .filter((row) => matchesWhere(row, input.where))
+            .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime()));
+        },
+        findUnique(input: { where: { id: string } }) {
+          calls.savedReportTemplateFindUnique.push(input);
+          return Promise.resolve(savedReportTemplates.get(input.where.id) ?? null);
+        },
+        upsert(input: {
+          create: FakeSavedReportTemplateCreateInput;
+          update: FakeSavedReportTemplateUpdateInput;
+          where: { id: string };
+        }) {
+          calls.savedReportTemplateUpserts.push(input);
+          const current = savedReportTemplates.get(input.where.id);
+          const next: FakeSavedReportTemplateCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          savedReportTemplates.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportQueryExecution: {
+        findMany(_input: { orderBy: { createdAt: "desc" } }) {
+          return Promise.resolve(Array.from(reportQueryExecutions.values())
+            .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()));
+        },
+        upsert(input: {
+          create: FakeReportQueryExecutionCreateInput;
+          update: FakeReportQueryExecutionUpdateInput;
+          where: { id: string };
+        }) {
+          calls.reportQueryExecutionUpserts.push(input);
+          const current = reportQueryExecutions.get(input.where.id);
+          const next: FakeReportQueryExecutionCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          reportQueryExecutions.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportFileDescriptor: {
+        deleteMany(input: { where: { jobId: string } }) {
+          const deleted = reportFileDescriptors.delete(input.where.jobId);
+          return Promise.resolve({ count: deleted ? 1 : 0 });
+        },
+        findMany(_input: { orderBy: { createdAt: "desc" } }) {
+          return Promise.resolve(Array.from(reportFileDescriptors.values())
+            .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()));
+        },
+        findUnique(input: { where: { jobId: string } }) {
+          return Promise.resolve(reportFileDescriptors.get(input.where.jobId) ?? null);
+        },
+        upsert(input: {
+          create: FakeReportFileDescriptorCreateInput;
+          update: FakeReportFileDescriptorUpdateInput;
+          where: { jobId: string };
+        }) {
+          calls.reportFileDescriptorUpserts.push(input);
+          const current = reportFileDescriptors.get(input.where.jobId);
+          const next: FakeReportFileDescriptorCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          reportFileDescriptors.set(input.where.jobId, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportNotificationDescriptor: {
+        findMany(_input: { orderBy: { createdAt: "desc" } }) {
+          return Promise.resolve(Array.from(reportNotificationDescriptors.values())
+            .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()));
+        },
+        findUnique(input: { where: { idempotencyKey: string } }) {
+          return Promise.resolve(reportNotificationDescriptors.get(input.where.idempotencyKey) ?? null);
+        },
+        upsert(input: {
+          create: FakeReportNotificationDescriptorCreateInput;
+          update: FakeReportNotificationDescriptorUpdateInput;
+          where: { idempotencyKey: string };
+        }) {
+          calls.reportNotificationDescriptorUpserts.push(input);
+          const current = reportNotificationDescriptors.get(input.where.idempotencyKey);
+          const next: FakeReportNotificationDescriptorCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          reportNotificationDescriptors.set(input.where.idempotencyKey, next);
+          return Promise.resolve(next);
+        }
+      },
+      scheduledDigestDescriptor: {
+        findMany(input: { orderBy: { dueAt: "asc" }; where?: Record<string, unknown> }) {
+          return Promise.resolve(Array.from(scheduledDigestDescriptors.values())
+            .filter((row) => matchesWhere(row, input.where))
+            .sort((left, right) => left.dueAt.getTime() - right.dueAt.getTime()));
+        },
+        findUnique(input: { where: { id: string } }) {
+          return Promise.resolve(scheduledDigestDescriptors.get(input.where.id) ?? null);
+        },
+        upsert(input: {
+          create: FakeScheduledDigestDescriptorCreateInput;
+          update: FakeScheduledDigestDescriptorUpdateInput;
+          where: { id: string };
+        }) {
+          calls.scheduledDigestDescriptorUpserts.push(input);
+          const current = scheduledDigestDescriptors.get(input.where.id);
+          const next: FakeScheduledDigestDescriptorCreateInput = current
+            ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
+            : input.create;
+          scheduledDigestDescriptors.set(input.where.id, next);
+          return Promise.resolve(next);
+        }
+      },
+      reportExportRetryAuditEvent: {
+        findMany(_input: { orderBy: { at: "desc" } }) {
+          return Promise.resolve(Array.from(reportExportRetryAuditEvents.values())
+            .sort((left, right) => right.at.getTime() - left.at.getTime()));
+        },
+        upsert(input: {
+          create: FakeReportExportRetryAuditEventCreateInput;
+          update: FakeReportExportRetryAuditEventUpdateInput;
+          where: { auditId: string };
+        }) {
+          calls.reportExportRetryAuditEventUpserts.push(input);
+          const current = reportExportRetryAuditEvents.get(input.where.auditId);
+          const next: FakeReportExportRetryAuditEventCreateInput = current
+            ? { ...current, ...input.update, auditId: current.auditId, createdAt: current.createdAt }
+            : input.create;
+          reportExportRetryAuditEvents.set(input.where.auditId, next);
+          return Promise.resolve(next);
+        }
+      },
+      $transaction<T>(callback: (transaction: unknown) => Promise<T>, options?: { isolationLevel?: "Serializable" }) {
+        calls.transactions.push({ isolationLevel: options?.isolationLevel });
+        return callback(this);
+      }
+    }
+  };
+}
+
+interface FakeMetricDefinitionCreateInput {
+  createdAt: Date;
+  description: string;
+  id: string;
+  key: string;
+  name: string;
+  source: string;
+  tenantId: string;
+  unit: string;
+  updatedAt: Date;
+}
+
+type FakeMetricDefinitionUpdateInput = Omit<FakeMetricDefinitionCreateInput, "createdAt" | "id">;
+
+interface FakeMetricVersionCreateInput {
+  createdAt: Date;
+  definitionId: string;
+  id: string;
+  queryKey: string;
+  status: string;
+  tenantId: string;
+  updatedAt: Date;
+  version: string;
+}
+
+type FakeMetricVersionUpdateInput = Omit<FakeMetricVersionCreateInput, "createdAt" | "id">;
+
+interface FakeMetricTenantOverrideCreateInput {
+  createdAt: Date;
+  definitionId: string;
+  id: string;
+  metricVersionId: string;
+  reason: string;
+  tenantId: string;
+  updatedAt: Date;
+}
+
+type FakeMetricTenantOverrideUpdateInput = Omit<FakeMetricTenantOverrideCreateInput, "createdAt" | "id">;
+
+interface FakeReportIdempotencyKeyCreateInput {
+  fingerprint: string;
+  jobId: string;
+  key: string;
+  tenantId: string;
+}
+
+type FakeReportIdempotencyKeyUpdateInput = Omit<FakeReportIdempotencyKeyCreateInput, "key" | "tenantId">;
+
+interface FakeReportIdempotencyKeyWhereUniqueInput {
+  tenantId_key: {
+    key: string;
+    tenantId: string;
+  };
+}
+
+function fakeReportIdempotencyMapKey(tenantId: string, key: string): string {
+  return `${tenantId}\u0000${key}`;
+}
+
+interface FakeReportExportJobCreateInput {
+  auditId: string;
+  backendQueueId: string | null;
+  columns: string[];
+  createdAt: Date;
+  deadLetteredAt: Date | null;
+  failureCode: string | null;
+  failureMessage: string | null;
+  fileName: string | null;
+  filters: Record<string, unknown>;
+  format: string;
+  id: string;
+  metricDefinitionVersion: string | null;
+  name: string;
+  period: string;
+  progress: number;
+  queue: string | null;
+  requestedBy: string;
+  rows: number;
+  status: string;
+  statusKey: string;
+}
+
+type FakeReportExportJobUpdateInput = Omit<FakeReportExportJobCreateInput, "createdAt" | "id">;
+
+interface FakeSavedReportTemplateCreateInput {
+  columns: string[];
+  createdAt: Date;
+  filters: Record<string, unknown>;
+  id: string;
+  name: string;
+  ownerUserId: string;
+  reportType: string;
+  tenantId: string;
+  updatedAt: Date;
+  visibilityPermissions: string[];
+  visibilityRoles: string[];
+  visibilityScope: string;
+}
+
+type FakeSavedReportTemplateUpdateInput = Omit<FakeSavedReportTemplateCreateInput, "createdAt" | "id">;
+
+interface FakeReportQueryExecutionCreateInput {
+  createdAt: Date;
+  failureCode: string | null;
+  failureMessage: string | null;
+  id: string;
+  metricKey: string;
+  parameters: Record<string, unknown> | null;
+  status: string;
+  updatedAt: Date;
+}
+
+type FakeReportQueryExecutionUpdateInput = Omit<FakeReportQueryExecutionCreateInput, "createdAt" | "id">;
+
+interface FakeReportFileDescriptorCreateInput {
+  checksum: string;
+  contentType: string;
+  createdAt: Date;
+  fileName: string;
+  format: string;
+  id: string;
+  jobId: string;
+  metricDefinitionVersion: string;
+  objectKey: string;
+  sizeBytes: number;
+  tenantId: string;
+  updatedAt: Date;
+  writtenAt: Date;
+}
+
+type FakeReportFileDescriptorUpdateInput = Omit<FakeReportFileDescriptorCreateInput, "createdAt" | "id">;
+
+interface FakeReportNotificationDescriptorCreateInput {
+  createdAt: Date;
+  eventType: string;
+  exportJobId: string;
+  id: string;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  status: string;
+  tenantId: string;
+  updatedAt: Date;
+}
+
+type FakeReportNotificationDescriptorUpdateInput = Omit<FakeReportNotificationDescriptorCreateInput, "createdAt" | "id">;
+
+interface FakeScheduledDigestDescriptorCreateInput {
+  createdAt: Date;
+  dueAt: Date;
+  id: string;
+  periodKey: string;
+  reportType: string;
+  scheduleId: string;
+  status: string;
+  tenantId: string;
+  updatedAt: Date;
+}
+
+type FakeScheduledDigestDescriptorUpdateInput = Omit<FakeScheduledDigestDescriptorCreateInput, "createdAt" | "id">;
+
+interface FakeReportExportRetryAuditEventCreateInput {
+  action: string;
+  at: Date;
+  auditId: string;
+  backendQueueId: string;
+  createdAt: Date;
+  format: string;
+  immutable: boolean;
+  jobId: string;
+  metricDefinitionVersion: string;
+  nextStatusKey: string;
+  previousStatusKey: string;
+  queue: string;
+  reasonCode: string;
+}
+
+type FakeReportExportRetryAuditEventUpdateInput = Omit<FakeReportExportRetryAuditEventCreateInput, "auditId" | "createdAt">;
+
+interface FakeConversationLifecycleEvent {
+  conversation: {
+    channel: string;
+    operatorId: string | null;
+    operatorName: string | null;
+    status: string;
+    topic: string;
+  };
+  conversationId: string;
+  data: Record<string, unknown>;
+  eventType: string;
+  id: string;
+  ingestedAt: Date;
+  occurredAt: Date;
+  source: string;
+  tenantId: string;
+}
+
+function reportExportJob(overrides: Partial<ReportExportJob> = {}): ReportExportJob {
+  return {
+    auditId: "evt_report_prisma_export",
+    backendQueueId: "report_prisma_export",
+    columns: ["metric", "today"],
+    createdAt: "2026-06-30T15:00:00.000Z",
+    filters: {
+      periodKey: "2026-07-01",
+      scheduleId: "digest-volga-daily",
+      tenantId: "tenant-volga"
+    },
+    format: "XLSX",
+    id: "export-prisma-first",
+    metricDefinitionVersion: "metrics/v1",
+    name: "daily_support_digest: all",
+    period: "2026-07-01",
+    progress: 8,
+    queue: "report-export",
+    requestedBy: "current-operator",
+    rows: 0,
+    status: "Queued",
+    statusKey: "queued",
+    tenantId: "tenant-volga",
+    ...overrides
+  };
+}
+
+function matchesWhere(row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean {
+  if (!where) {
+    return true;
+  }
+
+  return Object.entries(where).every(([key, value]) => {
+    const rowValue = row[key];
+    if (value && typeof value === "object" && "lte" in value) {
+      const limit = (value as { lte: unknown }).lte;
+      return rowValue instanceof Date && limit instanceof Date && rowValue.getTime() <= limit.getTime();
+    }
+
+    return rowValue === value;
+  });
 }

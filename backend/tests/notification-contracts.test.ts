@@ -282,38 +282,6 @@ describe("notification contracts", () => {
     assert.deepEqual(active.data.preferences.enabledExternalChannelIds, ["conn_telegram_active"]);
   });
 
-  it("configures durable notification preferences and audit evidence from runtime store file", async () => {
-    const { configureNotificationRepository } = await import("../apps/api-gateway/src/notifications/bootstrap.ts");
-    const filePath = join(makeTempWorkspace(), "notifications.json");
-
-    configureNotificationRepository({ NOTIFICATION_STORE_FILE: filePath });
-    saveChannelConnection({ id: "conn_runtime_alert" });
-    const first = createService();
-    const updated = await first.updateNotificationPreferences({
-      enabledExternalChannelIds: ["conn_runtime_alert"],
-      mutedSoundRuleIds: ["sound-critical"],
-      mutedTypeKeys: ["sla"]
-    }, {
-      tenantId: "tenant-volga",
-      userId: "usr-volga-admin"
-    });
-
-    configureNotificationRepository({ NOTIFICATION_STORE_FILE: filePath });
-    const second = createService();
-    const fetched = await second.fetchNotificationPreferences({
-      tenantId: "tenant-volga",
-      userId: "usr-volga-admin"
-    });
-    const state = NotificationRepository.default().readState();
-
-    assert.equal(updated.status, "ok");
-    assert.deepEqual(fetched.data.preferences, updated.data.preferences);
-    assert.equal(
-      state.preferenceAuditEvents.some((event) => event.id === updated.data.auditEvent.id && event.immutable === true),
-      true
-    );
-  });
-
   it("creates a critical alert test notification and delivery evidence", async () => {
     const notifications = createService() as unknown as {
       sendCriticalAlertTest?: (payload: Record<string, unknown>, context: { tenantId: string; userId: string }) => Promise<Record<string, any>>;

@@ -220,43 +220,6 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(missing.error?.code, "channel_type_connections_not_found");
   });
 
-  it("adds missing seeded notification channel connections when reopening an existing JSON store", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "integration-seed-backfill-"));
-    const filePath = join(workspace, "integration-store.json");
-    const existingAdminTelegram = {
-      ...bootstrapIntegrationState().channelConnections.find((connection) => connection.id === "conn_admin_telegram")!,
-      name: "Existing Admin Telegram",
-      status: "disabled"
-    };
-
-    try {
-      IntegrationRepository.open({
-        filePath,
-        seed: bootstrapIntegrationState({ channelConnections: [existingAdminTelegram] })
-      });
-
-      const repository = configureIntegrationRepository(
-        {
-          INTEGRATION_STORE_FILE: filePath,
-          NODE_ENV: "test",
-          PORT: 4101,
-          SERVICE_NAME: "api-gateway-test"
-        },
-        { seed: bootstrapIntegrationState() }
-      );
-      const state = repository.readState();
-
-      assert.equal(repository.findChannelConnection("tenant-volga", "conn_admin_telegram")?.name, "Existing Admin Telegram");
-      assert.equal(repository.findChannelConnection("tenant-volga", "conn_admin_telegram")?.status, "disabled");
-      assert.ok(state.channelConnections.some((connection) => connection.id === "conn_email_digest" && connection.status === "active"));
-      assert.ok(state.channelConnections.some((connection) => connection.id === "conn_incident_webhook" && connection.status === "active"));
-      assert.equal(state.channelConnections.filter((connection) => connection.id === "conn_admin_telegram").length, 1);
-    } finally {
-      IntegrationRepository.clearDefault();
-      rmSync(workspace, { force: true, recursive: true });
-    }
-  });
-
   it("provisions Telegram and MAX channel connections from token without manual webhook URL", async () => {
     const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const providerCredentialCrypto = new ProviderConnectionCrypto({

@@ -235,22 +235,6 @@ describe("Prisma-backed quality scoring telemetry contracts", () => {
     QualityScoringRepository.clearDefault();
   });
 
-  it("bootstraps a JSON-backed quality scoring repository when the repository env is not prisma", () => {
-    const storeDir = mkdtempSync(join(tmpdir(), "quality-scoring-store-"));
-    try {
-      QualityScoringRepository.clearDefault();
-      const repository = configureQualityScoringRepository({
-        QUALITY_SCORING_REPOSITORY: "json",
-        QUALITY_SCORING_STORE_FILE: join(storeDir, "quality-scoring.json")
-      });
-      assert.equal(repository.constructor.name, "QualityScoringRepository");
-      assert.equal(QualityScoringRepository.default(), repository);
-    } finally {
-      QualityScoringRepository.clearDefault();
-      rmSync(storeDir, { force: true, recursive: true });
-    }
-  });
-
   it("resolves a local store path even when no store-file env is configured", () => {
     const resolved = resolveQualityScoringStoreFile({});
     assert.match(resolved, /quality-scoring/);

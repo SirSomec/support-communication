@@ -9,17 +9,14 @@ import { planEligibleProactiveRuleDeliveryAsync } from "../apps/api-gateway/src/
 import { bootstrapAutomationState } from "../apps/api-gateway/src/automation/seed.ts";
 
 describe("Prisma-backed automation repository contracts", () => {
-  it("applies local automation fixtures only through explicit JSON bootstrap seed", () => {
+  it("applies local automation fixtures only through an explicit seed, never inferred", () => {
+    // The JSON file store stays a test-only utility (the JSON runtime is removed in
+    // phase D); it must still seed only when a seed is passed explicitly, not inferred.
     const workspace = mkdtempSync(join(tmpdir(), "automation-bootstrap-"));
     try {
-      const empty = configureAutomationRepository({
-        AUTOMATION_REPOSITORY: "json",
-        AUTOMATION_STORE_FILE: join(workspace, "empty.json")
-      });
-      const seeded = configureAutomationRepository({
-        AUTOMATION_REPOSITORY: "json",
-        AUTOMATION_STORE_FILE: join(workspace, "seeded.json")
-      }, {
+      const empty = AutomationRepository.open({ filePath: join(workspace, "empty.json") });
+      const seeded = AutomationRepository.open({
+        filePath: join(workspace, "seeded.json"),
         seed: bootstrapAutomationState()
       });
 

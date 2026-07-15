@@ -377,8 +377,11 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
     });
 
     it("keeps presence stores out of shared runtime defaults in the playwright gateway", () => {
+      // The smoke gateway now runs prisma-only against a dedicated, per-run Postgres
+      // database (phase C/D); presence isolation is enforced by PRESENCE_REPOSITORY=prisma
+      // there instead of a per-run JSON store file.
       const playwrightGateway = readFileSync(new URL("../../tests/playwright-api-gateway.mjs", import.meta.url), "utf8");
-      assert.match(playwrightGateway, /PRESENCE_STORE_FILE/);
+      assert.match(playwrightGateway, /PRESENCE_REPOSITORY/);
       assert.equal(existsSync(new URL("../apps/api-gateway/src/presence/bootstrap.ts", import.meta.url)), true);
     });
   });

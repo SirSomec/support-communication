@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
-import { configureBillingRepository } from "../apps/api-gateway/src/billing/bootstrap.ts";
 import { BillingRepository } from "../apps/api-gateway/src/billing/billing.repository.ts";
-import { bootstrapBillingState } from "../apps/api-gateway/src/billing/seed.ts";
-import { configureIdentityRepository } from "../apps/api-gateway/src/identity/bootstrap.ts";
+import type { PrismaBillingClient } from "../apps/api-gateway/src/billing/billing.repository.ts";
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
-import { bootstrapIdentityState } from "../apps/api-gateway/src/identity/seed.ts";
+import type { PrismaIdentityClient } from "../apps/api-gateway/src/identity/identity.repository.ts";
 
 describe("billing and identity seed separation", () => {
   it("keeps repository defaults free from demo tenants, users, invoices and passwords", async () => {
@@ -24,46 +19,56 @@ describe("billing and identity seed separation", () => {
     assert.ok((await identity.listPermissionRoles()).length > 0);
   });
 
-  it("injects local fixture state only when the composition caller passes it", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "explicit-seed-bootstrap-"));
+  it("does not infer fixture state from NODE_ENV under the Prisma runtime", async () => {
+    // The Prisma-backed repositories read tenant/user/password state exclusively
+    // from the injected client. Under NODE_ENV=development the composition must
+    // not synthesize demo fixtures (tenant-volga, its users or passwords):
+    // the empty fake clients below never return one, so any leak would come
+    // from env-driven inference in the repository, which this guards against.
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
     try {
-      const billing = configureBillingRepository({
-        BILLING_REPOSITORY: "json",
-        BILLING_STORE_FILE: join(directory, "billing.json"),
-        NODE_ENV: "test"
-      }, { seed: bootstrapBillingState() });
-      const identity = configureIdentityRepository({
-        IDENTITY_REPOSITORY: "json",
-        IDENTITY_STORE_FILE: join(directory, "identity.json"),
-        NODE_ENV: "test"
-      }, { seed: bootstrapIdentityState() });
-
-      assert.equal((await billing.findTenant("tenant-volga"))?.planId, "scale");
-      assert.equal((await identity.findTenant("tenant-volga"))?.status, "watch");
-      assert.ok(await identity.findPasswordCredentialByEmail("service-admin@example.com"));
-    } finally {
-      rmSync(directory, { force: true, recursive: true });
-    }
-  });
-
-  it("does not infer fixture state from NODE_ENV", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "empty-bootstrap-"));
-    try {
-      const billing = configureBillingRepository({
-        BILLING_REPOSITORY: "json",
-        BILLING_STORE_FILE: join(directory, "billing.json"),
-        NODE_ENV: "development"
-      });
-      const identity = configureIdentityRepository({
-        IDENTITY_REPOSITORY: "json",
-        IDENTITY_STORE_FILE: join(directory, "identity.json"),
-        NODE_ENV: "development"
-      });
+      const billing = BillingRepository.prisma({ client: createEmptyBillingClient() });
+      const identity = IdentityRepository.prisma({ client: createEmptyIdentityClient() });
 
       assert.equal(await billing.findTenant("tenant-volga"), undefined);
+      assert.deepEqual(await billing.listTenantInvoices("tenant-volga"), []);
       assert.equal(await identity.findTenant("tenant-volga"), undefined);
+      assert.equal(await identity.findTenantUserByEmail("sergey@volga.example"), undefined);
+      assert.equal(await identity.findPasswordCredentialByEmail("service-admin@example.com"), undefined);
     } finally {
-      rmSync(directory, { force: true, recursive: true });
+      if (previousNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
     }
   });
 });
+
+function createEmptyIdentityClient(): PrismaIdentityClient {
+  const client = {
+    passwordCredential: {
+      findUnique: async () => null
+    },
+    tenant: {
+      findUnique: async () => null
+    },
+    tenantUser: {
+      findFirst: async () => null
+    }
+  };
+  return client as unknown as PrismaIdentityClient;
+}
+
+function createEmptyBillingClient(): PrismaBillingClient {
+  const client = {
+    billingInvoice: {
+      findMany: async () => []
+    },
+    billingTenantState: {
+      findUnique: async () => null
+    }
+  };
+  return client as unknown as PrismaBillingClient;
+}

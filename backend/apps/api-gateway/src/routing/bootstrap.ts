@@ -1,4 +1,4 @@
-import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryKind, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
+import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
 import { RoutingRepository, type PrismaRoutingClient, type RoutingState } from "./routing.repository.js";
 
 export interface RoutingRepositoryBootstrapSource {

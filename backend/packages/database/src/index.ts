@@ -69,7 +69,6 @@ export interface PrismaClientFactoryOptions {
   log?: unknown[];
 }
 
-export type RepositoryKind = "json" | "prisma";
 export type RepositoryBootstrapSource = object;
 
 export interface RepositoryStoreFileInput {
@@ -88,10 +87,6 @@ export interface RepositoryBootstrapInput<TRepository, TPrismaClient> extends Re
   useDefault(repository: TRepository): void;
 }
 
-export function resolveRepositoryKind(source: RepositoryBootstrapSource, repositoryEnv: string): RepositoryKind {
-  return String(sourceValue(source, repositoryEnv) ?? "").trim().toLowerCase() === "prisma" ? "prisma" : "json";
-}
-
 export function resolveRepositoryStoreFile(input: RepositoryStoreFileInput): string {
   const configuredPath = String(sourceValue(input.source, input.storeFileEnv) ?? "").trim();
   if (configuredPath) {
@@ -108,11 +103,16 @@ export function resolveRepositoryStoreFile(input: RepositoryStoreFileInput): str
 export function configureRepositoryBootstrap<TRepository, TPrismaClient>(
   input: RepositoryBootstrapInput<TRepository, TPrismaClient>
 ): TRepository {
+  // Prisma-only runtime (plan 2026-07-15, phase D): the JSON runtime store is removed —
+  // repositories always run on Prisma regardless of the (now inert) *_REPOSITORY env.
+  // The json factory remains only as the in-memory fallback some Prisma adapters accept
+  // for read models that are not persisted to Postgres; InMemoryStore stays for unit tests.
   const filePath = resolveRepositoryStoreFile(input);
   const createJsonRepository = () => input.createJsonRepository(filePath);
-  const repository = resolveRepositoryKind(input.source, input.repositoryEnv) === "prisma"
-    ? input.createPrismaRepository(input.prismaClientFactory({ datasourceUrl: stringOrUndefined(sourceValue(input.source, "DATABASE_URL")) }), createJsonRepository)
-    : createJsonRepository();
+  const repository = input.createPrismaRepository(
+    input.prismaClientFactory({ datasourceUrl: stringOrUndefined(sourceValue(input.source, "DATABASE_URL")) }),
+    createJsonRepository
+  );
   input.useDefault(repository);
   return repository;
 }

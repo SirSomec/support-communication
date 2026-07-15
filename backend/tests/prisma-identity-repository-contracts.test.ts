@@ -1367,6 +1367,87 @@ describe("Prisma-backed identity repository contracts", () => {
     assert.deepEqual(replayExport.data.export.sourceEventIds, firstExport.data.export.sourceEventIds);
     assert.deepEqual(replayExport.data.export.payload.rows, firstExport.data.export.payload.rows);
   });
+
+  it("rejects deciding a terminal break-glass approval through Prisma delegates", async () => {
+    const { client } = createFakePrismaIdentityClient();
+    const repository = IdentityRepository.prisma({ client });
+    const requestAudit = fakeServiceAdminAuditEvent({
+      action: "break_glass.request",
+      at: "2026-06-28T10:00:00.000Z",
+      id: "evt_bg_terminal_request",
+      result: "pending",
+      target: "usr-volga-admin"
+    });
+    await repository.createBreakGlassApproval({
+      approval: {
+        action: "impersonation.write",
+        auditEventId: requestAudit.id,
+        durationMinutes: 15,
+        expiresAt: "2026-06-28T10:15:00.000Z",
+        id: "bg_prisma_terminal",
+        requestedAt: "2026-06-28T10:00:00.000Z",
+        status: "pending",
+        target: "usr-volga-admin",
+        tenantId: "tenant-volga",
+        userId: "usr-volga-admin"
+      },
+      auditEvent: requestAudit
+    });
+    await repository.decideBreakGlassApproval({
+      approvalId: "bg_prisma_terminal",
+      auditEvent: fakeServiceAdminAuditEvent({
+        action: "break_glass.approve",
+        at: "2026-06-28T10:01:00.000Z",
+        id: "evt_bg_terminal_approve",
+        result: "approved",
+        target: "bg_prisma_terminal"
+      }),
+      status: "approved"
+    });
+    await assert.rejects(() => repository.decideBreakGlassApproval({
+      approvalId: "bg_prisma_terminal",
+      auditEvent: fakeServiceAdminAuditEvent({
+        action: "break_glass.reject",
+        at: "2026-06-28T10:02:00.000Z",
+        id: "evt_bg_terminal_reject",
+        result: "rejected",
+        target: "bg_prisma_terminal"
+      }),
+      status: "rejected"
+    }), /was not pending|not pending/);
+    const persisted = await repository.findBreakGlassApproval("bg_prisma_terminal");
+    assert.equal(persisted?.status, "approved");
+  });
+
+  it("rejects reusing a service-admin token revoke idempotency key for a different active token through Prisma delegates", async () => {
+    const { client } = createFakePrismaIdentityClient();
+    const repository = IdentityRepository.prisma({ client });
+    const firstSession = await repository.createServiceAdminSession({ actorId: "svc-admin-first-token", actorName: "First Token Admin", allowedActions: ["tenants.manage"], mfaVerified: true, ttlMinutes: 30 });
+    const secondSession = await repository.createServiceAdminSession({ actorId: "svc-admin-second-token", actorName: "Second Token Admin", allowedActions: ["tenants.manage"], mfaVerified: true, ttlMinutes: 30 });
+    await repository.createServiceAdminTokenPair({ accessTokenExpiresAt: "2099-06-29T11:00:00.000Z", accessTokenHash: hashServiceAdminTokenForPrismaTest("revoke-access-1"), id: "sat_pair_revoke_1", issuedAt: "2026-06-29T10:00:00.000Z", refreshTokenExpiresAt: "2099-07-29T10:00:00.000Z", refreshTokenHash: hashServiceAdminTokenForPrismaTest("revoke-refresh-1"), sessionId: firstSession.id, subjectId: "svc-admin-first-token" });
+    await repository.createServiceAdminTokenPair({ accessTokenExpiresAt: "2099-06-29T11:00:00.000Z", accessTokenHash: hashServiceAdminTokenForPrismaTest("revoke-access-2"), id: "sat_pair_revoke_2", issuedAt: "2026-06-29T10:00:00.000Z", refreshTokenExpiresAt: "2099-07-29T10:00:00.000Z", refreshTokenHash: hashServiceAdminTokenForPrismaTest("revoke-refresh-2"), sessionId: secondSession.id, subjectId: "svc-admin-second-token" });
+    const revoked = await repository.revokeServiceAdminToken({ idempotencyKey: "revoke-reused-key", revokedAt: "2026-06-29T10:06:00.000Z", tokenHash: hashServiceAdminTokenForPrismaTest("revoke-access-1") });
+    const conflict = await repository.revokeServiceAdminToken({ idempotencyKey: "revoke-reused-key", revokedAt: "2026-06-29T10:07:00.000Z", tokenHash: hashServiceAdminTokenForPrismaTest("revoke-access-2") });
+    assert.equal(revoked?.status, "revoked");
+    assert.equal(conflict, undefined);
+    assert.equal(await repository.findServiceAdminSessionByAccessToken("revoke-access-1"), undefined);
+    assert.equal(Boolean(await repository.findServiceAdminSessionByAccessToken("revoke-access-2")), true);
+  });
+
+  it("rejects service-admin token hash reuse during rotate and keeps revoked/rotated hashes reserved through Prisma delegates", async () => {
+    const { client } = createFakePrismaIdentityClient();
+    const repository = IdentityRepository.prisma({ client });
+    const firstSession = await repository.createServiceAdminSession({ actorId: "svc-admin-hash-first", actorName: "Hash First Admin", allowedActions: ["tenants.manage"], mfaVerified: true, ttlMinutes: 30 });
+    const secondSession = await repository.createServiceAdminSession({ actorId: "svc-admin-hash-second", actorName: "Hash Second Admin", allowedActions: ["tenants.manage"], mfaVerified: true, ttlMinutes: 30 });
+    await repository.createServiceAdminTokenPair({ accessTokenExpiresAt: "2099-06-29T11:00:00.000Z", accessTokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-access-1"), id: "sat_pair_hash_1", issuedAt: "2026-06-29T10:00:00.000Z", refreshTokenExpiresAt: "2099-07-29T10:00:00.000Z", refreshTokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-refresh-1"), sessionId: firstSession.id, subjectId: "svc-admin-hash-first" });
+    await repository.createServiceAdminTokenPair({ accessTokenExpiresAt: "2099-06-29T11:00:00.000Z", accessTokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-access-2"), id: "sat_pair_hash_2", issuedAt: "2026-06-29T10:00:00.000Z", refreshTokenExpiresAt: "2099-07-29T10:00:00.000Z", refreshTokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-refresh-2"), sessionId: secondSession.id, subjectId: "svc-admin-hash-second" });
+    const rotateConflict = await repository.rotateServiceAdminRefreshToken({ idempotencyKey: "rotate-hash-conflict", nextAccessTokenExpiresAt: "2099-06-29T11:05:00.000Z", nextAccessTokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-access-2"), nextRefreshTokenExpiresAt: "2099-07-29T10:05:00.000Z", nextRefreshTokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-refresh-3"), refreshTokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-refresh-1"), rotatedAt: "2026-06-29T10:05:00.000Z" });
+    assert.equal(rotateConflict, undefined);
+    assert.equal(Boolean(await repository.findServiceAdminSessionByAccessToken("hash-conflict-access-1")), true);
+    assert.equal(Boolean(await repository.findServiceAdminSessionByAccessToken("hash-conflict-access-2")), true);
+    await repository.revokeServiceAdminToken({ idempotencyKey: "revoke-hash-conflict-2", revokedAt: "2026-06-29T10:06:00.000Z", tokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-access-2") });
+    await assert.rejects(() => repository.createServiceAdminTokenPair({ accessTokenExpiresAt: "2099-06-29T11:10:00.000Z", accessTokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-access-2"), id: "sat_pair_hash_revoked_reuse", issuedAt: "2026-06-29T10:10:00.000Z", refreshTokenExpiresAt: "2099-07-29T10:10:00.000Z", refreshTokenHash: hashServiceAdminTokenForPrismaTest("hash-conflict-refresh-5"), sessionId: firstSession.id, subjectId: "svc-admin-hash-first" }), /token hash conflict/);
+  });
 });
 
 function createFakePrismaIdentityClient(options: { omitTransactionRawSql?: boolean; passwordCredentials?: FakePasswordCredentialRow[]; permissionRoles?: FakePermissionRoleRow[]; rbacRoleGrants?: FakeRbacRoleGrantRow[]; tenants?: FakeTenantRow[]; tenantUsers?: FakeTenantUserRow[] } = {}) {

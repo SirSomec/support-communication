@@ -1,4 +1,4 @@
-import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryKind, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
+import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
 import { WorkspaceRepository, type PrismaWorkspaceClient, type WorkspaceState } from "./workspace.repository.js";
 
 export interface WorkspaceRepositoryBootstrapSource {
@@ -33,10 +33,6 @@ export function configureWorkspaceRepository(
 
 function defaultPrismaClientFactory(options: PrismaClientFactoryOptions): PrismaWorkspaceClient {
   return createPrismaClient(options) as PrismaWorkspaceClient;
-}
-
-function resolveWorkspaceRepositoryKind(source: WorkspaceRepositoryBootstrapSource): "json" | "prisma" {
-  return resolveRepositoryKind(source, "WORKSPACE_REPOSITORY");
 }
 
 export function resolveWorkspaceStoreFile(source: WorkspaceRepositoryBootstrapSource = process.env): string {

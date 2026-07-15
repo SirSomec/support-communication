@@ -25,6 +25,7 @@
     "prisma:seed": "node --env-file=.env.example --import tsx scripts/seed-identity.ts",
     "identity:bootstrap:postgres": "npm run prisma:migrate:deploy && npm run prisma:seed",
     "bootstrap:local": "node --env-file=.env.example scripts/bootstrap-local.mjs",
+    "smoke:db-reset": "node --env-file=.env.example scripts/smoke-db-reset.mjs",
     "smoke:postgres": "node --env-file=.env.example scripts/smoke-postgres.mjs",
     "release:database:preflight": "node --env-file=.env.example scripts/release-database-preflight.mjs",
     "release:checklist": "node --env-file=.env.example scripts/release-checklist.mjs",

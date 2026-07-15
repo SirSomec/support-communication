@@ -155,7 +155,7 @@ test("app shell enforces role access and closes notifications on section change"
   await expect(page.locator(".quick-action")).toBeDisabled();
   await expect(page.locator(".topbar-access-note")).toContainText("Доступно старшему сотруднику или администратору");
   await expect(page.locator("nav button").filter({ hasText: "Панель" })).toBeDisabled();
-  await expect(page.locator("nav button").filter({ hasText: "Audit" })).toBeDisabled();
+  await expect(page.locator("nav button").filter({ hasText: "Аудит" })).toBeDisabled();
   await expect(page.locator("nav button").filter({ hasText: "Клиенты" })).toBeEnabled();
 
   await selectRole(page, "Администратор");
@@ -1049,7 +1049,7 @@ test("scenario wizard keeps keyboard focus, aria steps and responsive layout", a
 
 test("audit screen filters events and exposes event detail", async ({ page }) => {
   const { serviceAdminSession } = await openAppShell(page, { serviceAdmin: true });
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:5173" });
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
   const auditReason = "Smoke audit seed event for screen filters";
   const auditSeedResponse = await page.request.post("/api/v1/service-admin/users/usr-volga-admin/mfa/reset", {
     data: {
@@ -1071,12 +1071,12 @@ test("audit screen filters events and exposes event detail", async ({ page }) =>
   expect(seededAuditEvent.traceId).toBeTruthy();
 
   await selectRole(page, "Администратор");
-  await openSection(page, "Audit");
+  await openSection(page, "Аудит");
 
-  await expect(page.getByRole("heading", { name: "Audit" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Аудит действий" })).toBeVisible();
   await page.locator(".product-actions select").selectOption("30 дней");
   await expect.poll(async () => page.locator(".audit-log-row").count()).toBeGreaterThan(0);
-  await page.getByLabel("Поиск audit").fill(seededAuditId);
+  await page.getByLabel("Поиск по журналу").fill(seededAuditId);
   await expect(page.locator(".audit-log-row")).toHaveCount(1);
   await expect(page.locator(".audit-event-detail")).toContainText(seededAuditId);
   await expect(page.locator(".audit-event-detail")).toContainText(auditReason);
@@ -1094,7 +1094,7 @@ test("audit screen filters events and exposes event detail", async ({ page }) =>
   await expect(page.locator(".toast")).toContainText("Audit export:");
   await selectRole(page, "Сотрудник");
   await expect(page.locator(".audit-log-row")).toHaveCount(0);
-  await expect(page.locator("nav button").filter({ hasText: "Audit" })).toBeDisabled();
+  await expect(page.locator("nav button").filter({ hasText: "Аудит" })).toBeDisabled();
   await expect(page.locator(".conversation-list")).toBeVisible();
   await expectHealthyPage(page);
 });
@@ -1155,17 +1155,21 @@ test("settings expose webhooks api keys and security controls", async ({ page })
   await expectHealthyPage(page);
 });
 
-test("settings access panel keeps role matrix and channel limit permissions", async ({ page }) => {
+test("settings keep role matrix reference and aggregate channel toggles", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
 
-  await expect(page.locator(".role-mode-panel")).toContainText("Полный доступ к общим настройкам");
+  await page.locator("#settings-tab-employees").click();
+  await page.getByRole("button", { name: "Права ролей" }).click();
   await expect(page.locator(".role-table")).toContainText("Администратор");
   await expect(page.locator(".role-table")).toContainText("Все");
+  await page.locator(".settings-modal-panel").getByRole("button", { name: "Закрыть" }).click();
+  await expect(page.locator(".role-table")).toHaveCount(0);
 
+  await page.locator("#settings-tab-connections").click();
   const telegramChannel = page.locator(".channel-settings article").filter({ hasText: "Telegram" });
-  await expect(telegramChannel.locator("input")).toBeDisabled();
+  await expect(telegramChannel).toContainText("лимит");
 
   const telegramToggle = telegramChannel.locator(".toggle-button");
   await expect(telegramToggle).toHaveAttribute("aria-pressed", "true");
@@ -1177,11 +1181,10 @@ test("settings access panel keeps role matrix and channel limit permissions", as
   await telegramToggle.click();
   await expect(telegramToggle).toHaveAttribute("aria-pressed", "true");
 
-  await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
-  await expect(page.locator(".role-mode-panel")).toContainText("Общие настройки доступны только на чтение");
-  await expect(telegramChannel.locator("input")).toBeDisabled();
+  await selectRole(page, "Старший сотрудник");
   await expect(telegramToggle).toBeDisabled();
-  await expectNoElementOverflow(page, ".settings-layout");
+  await expect(page.locator(".settings-create-connection")).toBeDisabled();
+  await expectNoElementOverflow(page, ".channel-settings");
   await expectHealthyPage(page);
 });
 
@@ -1200,16 +1203,15 @@ test("settings employee management preserves edit and role permissions", async (
   await employeePanel.locator("[data-employee-id='usr-volga-admin']").click();
 
   await employeePanel.locator(".employee-editor-grid select").first().selectOption({ label: "Старший сотрудник" });
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Sergey Markin" })).toContainText("Старший сотрудник");
+  await expect(employeePanel.locator("[data-employee-id='usr-volga-admin']")).toContainText("Старший сотрудник");
   await employeePanel.locator(".employee-editor-grid select").nth(1).selectOption({ label: "VIP support" });
+  await expect(employeePanel.locator("[data-employee-id='usr-volga-admin']")).toContainText("VIP support");
   await employeePanel.locator(".employee-editor-grid input").fill("14");
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Sergey Markin" })).toContainText("14 чатов");
+  await expect(employeePanel.locator(".employee-editor-grid input")).toHaveValue("14");
   await employeePanel.locator(".employee-channel-editor label").filter({ hasText: "SDK" }).locator("input").check();
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Sergey Markin" })).toContainText("SDK");
+  await expect(employeePanel.locator("[data-employee-id='usr-volga-admin']").locator(".channel-chip").filter({ hasText: "SDK" })).toBeVisible();
   await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Override" }).locator("input").uncheck();
   await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Чувствительные" }).locator("input").uncheck();
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Sergey Markin" })).toContainText("без override");
-  await expect(employeePanel.locator(".employee-rule").filter({ hasText: "Sergey Markin" })).toContainText("данные маскированы");
   await employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" }).click();
   await expect(page.locator(".toast")).toContainText("Sergey Markin: настройки сохранены.");
 
@@ -1221,11 +1223,12 @@ test("settings employee management preserves edit and role permissions", async (
   await employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" }).click();
   await expect(page.locator(".toast")).toContainText("Sergey Markin: настройки сохранены.");
 
-  await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
+  await selectRole(page, "Старший сотрудник");
   await expect(employeePanel.locator(".employee-editor-grid select").first()).toBeDisabled();
   await expect(employeePanel.locator(".employee-editor-grid input")).toBeDisabled();
   await expect(employeePanel.locator(".employee-channel-editor label").filter({ hasText: "VK" }).locator("input")).toBeDisabled();
   await expect(employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" })).toBeDisabled();
+  await expect(employeePanel.locator(".settings-invite-employee")).toBeDisabled();
   await expect(employeePanel.locator(".employee-editor header button").filter({ hasText: "Сбросить пароль" })).toBeEnabled();
   await expectNoElementOverflow(page, ".employee-rules-panel");
   await expectHealthyPage(page);
@@ -1245,43 +1248,54 @@ test("settings channel connections create multiple Telegram and MAX instances", 
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: "MAX Business beta" })).toHaveCount(0);
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: "MAX backup webhook" })).toHaveCount(0);
 
-  const createForm = channelPanel.locator(".channel-create-form");
+  const createModal = page.locator(".settings-modal-panel");
+  const createForm = page.locator(".channel-create-form");
   const createFormField = (label) => createForm.locator(`label:has(span:text-is("${label}"))`);
-  const routingQueueSelect = createFormField("Очередь").locator("select");
-  await expect.poll(async () => routingQueueSelect.locator("option").count()).toBeGreaterThan(0);
-  if (await routingQueueSelect.locator("option[value='']").count()) {
-    await channelPanel.getByLabel("Название новой очереди").fill(`QA queue ${runId}`);
-    await channelPanel.getByRole("button", { name: "Создать очередь" }).click();
+  const routingQueueSelect = () => createFormField("Очередь").locator("select");
+
+  await channelPanel.locator(".settings-create-connection").click();
+  await expect(createForm).toBeVisible();
+  await expect.poll(async () => routingQueueSelect().locator("option").count()).toBeGreaterThan(0);
+  if (await routingQueueSelect().locator("option[value='']").count()) {
+    await createModal.getByRole("button", { name: "Закрыть" }).click();
+    await channelPanel.getByRole("button", { name: "Очереди" }).click();
+    await page.getByLabel("Название новой очереди").fill(`QA queue ${runId}`);
+    await page.getByRole("button", { name: "Создать очередь" }).click();
     await expect(page.locator(".toast")).toContainText("очередь создана");
-    await expect.poll(async () => routingQueueSelect.locator("option:not([value=''])").count()).toBeGreaterThan(0);
+    await createModal.getByRole("button", { name: "Закрыть" }).click();
+    await channelPanel.locator(".settings-create-connection").click();
+    await expect.poll(async () => routingQueueSelect().locator("option:not([value=''])").count()).toBeGreaterThan(0);
   }
 
   await createFormField("Тип").locator("select").selectOption("telegram");
   await createFormField("Название").locator("input").fill(telegramName);
   await createFormField("Среда").locator("select").selectOption("sandbox");
-  await routingQueueSelect.selectOption({ index: 0 });
+  await routingQueueSelect().selectOption({ index: 0 });
   await createFormField("Лимит чатов").locator("input").fill("9");
   await createFormField("Секрет или token").locator("input").fill("900001:qa-telegram-token-smoke");
-  await createForm.getByRole("button", { name: "Создать", exact: true }).click();
+  await createModal.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName })).toBeVisible();
   await expect(page.locator(".toast")).toContainText(`${telegramName}: подключение создано.`);
 
+  await channelPanel.locator(".settings-create-connection").click();
+  await expect(createForm).toBeVisible();
   await createFormField("Тип").locator("select").selectOption("max");
   await createFormField("Название").locator("input").fill(maxName);
   await createFormField("Лимит чатов").locator("input").fill("7");
   await createFormField("Секрет или token").locator("input").fill("qa-max-token");
-  await createForm.getByRole("button", { name: "Создать", exact: true }).click();
+  await createModal.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: maxName })).toBeVisible();
   await expect(page.locator(".toast")).toContainText(`${maxName}: подключение создано.`);
 
   await channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName }).click();
+  await channelPanel.locator(".channel-detail-tabs button").filter({ hasText: "Тест" }).click();
   await channelPanel.locator(".channel-test-grid label").filter({ hasText: "Адресат" }).locator("input").fill("+7 900 123-45-67");
   await channelPanel.locator(".channel-test-message textarea").fill("Проверка Telegram QA bot");
   await channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить" }).click();
   await expect(channelPanel.locator(".channel-test-result")).toContainText("accepted_to_queue");
   await expect(page.locator(".toast")).toContainText(`${telegramName}: тест выполнен.`);
 
-  await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
+  await selectRole(page, "Старший сотрудник");
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName })).toBeEnabled();
   await expect(channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить" })).toBeDisabled();
   await expect(channelPanel.locator(".channel-detail-head button").filter({ hasText: "Проверить" })).toBeDisabled();
@@ -1291,9 +1305,10 @@ test("settings channel connections create multiple Telegram and MAX instances", 
 
 test("settings sdk console keeps payload preview run states and permissions", async ({ page }) => {
   await openAppShell(page);
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:5173" });
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
+  await page.locator("#settings-tab-sdk").click();
 
   const sdkPanel = page.locator(".sdk-console");
   await sdkPanel.locator(".sdk-code button").filter({ hasText: "Копировать" }).click();
@@ -1318,7 +1333,7 @@ test("settings sdk console keeps payload preview run states and permissions", as
   await expect(sdkPanel.locator(".sdk-payload-preview")).toContainText('"entryPoint": "VK"');
   await expect(page.locator(".toast")).toContainText("SDK playground: identifyUser выполнен в stage.");
 
-  await page.locator(".role-mode-panel .segmented-control button").filter({ hasText: "Старший сотрудник" }).click();
+  await selectRole(page, "Старший сотрудник");
   await expect(sdkPanel.locator(".sdk-code button").filter({ hasText: "Копировать" })).toBeDisabled();
   await expect(sdkPanel.locator(".sdk-playground-actions button").filter({ hasText: "Запустить событие" })).toBeDisabled();
   await expect(sdkPanel.getByLabel("Событие")).toBeDisabled();
@@ -1338,7 +1353,7 @@ test("critical sections do not overflow responsive viewports", async ({ page }) 
     await openAppShell(page);
     await selectRole(page, "Администратор");
 
-    for (const section of ["Отчеты", "Боты", "Визиты", "Качество", "Audit", "Настройки"]) {
+    for (const section of ["Отчеты", "Боты", "Визиты", "Качество", "Аудит", "Настройки"]) {
       await openSection(page, section);
       await expectHealthyPage(page);
     }

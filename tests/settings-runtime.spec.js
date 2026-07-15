@@ -89,18 +89,21 @@ test("settings runtime creates telegram and max channels independently", async (
   const runId = Date.now().toString(36);
   const telegramName = `Runtime Telegram ${runId}`;
   const maxName = `Runtime MAX ${runId}`;
-  const createForm = channelPanel.locator(".channel-create-form");
+  const createModal = page.locator(".settings-modal-panel");
+  const createForm = page.locator(".channel-create-form");
 
+  await channelPanel.locator(".settings-create-connection").click();
   await createForm.locator("select").first().selectOption("telegram");
   await createForm.locator("input").nth(0).fill(telegramName);
   await createForm.locator("input[type='password']").fill("123:qa-telegram-token");
-  await createForm.getByRole("button", { name: "Создать" }).click();
+  await createModal.getByRole("button", { name: "Создать" }).click();
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName })).toBeVisible();
 
+  await channelPanel.locator(".settings-create-connection").click();
   await createForm.locator("select").first().selectOption("max");
   await createForm.locator("input").nth(0).fill(maxName);
   await createForm.locator("input[type='password']").fill("runtime-max-token");
-  await createForm.getByRole("button", { name: "Создать" }).click();
+  await createModal.getByRole("button", { name: "Создать" }).click();
   await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: maxName })).toBeVisible();
 
   const channelsResponse = await request.get("/api/v1/integrations/channels", {
@@ -111,6 +114,7 @@ test("settings runtime creates telegram and max channels independently", async (
   expect(names).toEqual(expect.arrayContaining([telegramName, maxName]));
 
   await channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName }).click();
+  await channelPanel.locator(".channel-detail-tabs button").filter({ hasText: "Тест" }).click();
   await channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить" }).click();
   await expect(channelPanel.locator(".channel-test-result")).toContainText("accepted_to_queue");
 });
@@ -154,8 +158,9 @@ test("settings runtime invite can be accepted and employee receives restricted w
   const email = `runtime-employee-${runId}@volga.example`;
   const employeeName = `Runtime Employee ${runId}`;
   const password = "correct-password";
-  const inviteForm = page.locator(".employee-invite-form");
 
+  await page.locator(".settings-invite-employee").click();
+  const inviteForm = page.locator(".employee-invite-form");
   await inviteForm.locator("input").first().fill(employeeName);
   await inviteForm.locator("input[type='email']").fill(email);
   await inviteForm.locator("select").first().selectOption("employee");
@@ -164,7 +169,7 @@ test("settings runtime invite can be accepted and employee receives restricted w
   const inviteResponsePromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/settings/employees/invites") && response.request().method() === "POST"
   );
-  await inviteForm.getByRole("button", { name: "Пригласить" }).click();
+  await page.locator(".settings-modal-panel").getByRole("button", { name: "Пригласить" }).click();
   const inviteResponse = await inviteResponsePromise;
   expect(inviteResponse.ok()).toBeTruthy();
   const invitePayload = await inviteResponse.json();
@@ -220,7 +225,7 @@ test("settings runtime topic directory and rule test stay backend-backed", async
   await firstRule.getByRole("button", { name: "Проверить" }).click();
   await expect(page.locator(".toast")).toContainText("Аудит");
 
-  const auditResponse = await request.get("/api/v1/service-admin/audit-events?tenantId=tenant-volga", {
+  const auditResponse = await request.get("/api/v1/audit/events?limit=5", {
     headers: { authorization: `Bearer ${session.accessToken}` }
   });
   expect(auditResponse.ok()).toBeTruthy();
@@ -235,6 +240,7 @@ test("settings runtime creates archives and restores topics while refreshing run
 
   const runId = Date.now().toString(36);
   const topicName = `Runtime Topic ${runId}`;
+  await page.locator(".topic-add-button").click();
   const topicForm = page.locator(".topic-editor-form");
   await topicForm.locator("input").nth(0).fill("Runtime Group");
   await topicForm.locator("input").nth(1).fill("Runtime Branch");
@@ -242,7 +248,7 @@ test("settings runtime creates archives and restores topics while refreshing run
   await topicForm.locator("input").nth(3).fill("Line 1");
   await topicForm.locator("select").selectOption("all");
 
-  await topicForm.getByRole("button", { name: "Сохранить тематику" }).click();
+  await page.locator(".settings-modal-panel").getByRole("button", { name: "Сохранить тематику" }).click();
   const createdTopicRow = page.locator(".topic-row").filter({ hasText: topicName });
   await expect(createdTopicRow).toBeVisible();
   await expect(page.locator(".toast")).toContainText("Audit");
@@ -253,8 +259,8 @@ test("settings runtime creates archives and restores topics while refreshing run
 
   await openSection(page, "Диалоги");
   await page.getByRole("button", { name: /Расширенные фильтры/ }).click();
-  const dialogTopicSelect = page.locator(".queue-filter-panel select").nth(1);
-  await expect(dialogTopicSelect.locator("option", { hasText: topicName })).toHaveCount(1);
+  const dialogTopicSelect = () => page.locator(".queue-filter-panel label").filter({ hasText: "Тематика" }).locator("select");
+  await expect(dialogTopicSelect().locator("option", { hasText: topicName })).toHaveCount(1);
 
   await openSection(page, "Настройки");
   await openSettingsTab(page, "topics");
@@ -266,7 +272,7 @@ test("settings runtime creates archives and restores topics while refreshing run
 
   await openSection(page, "Диалоги");
   await page.getByRole("button", { name: /Расширенные фильтры/ }).click();
-  await expect(page.locator(".queue-filter-panel select").nth(1).locator("option", { hasText: topicName })).toHaveCount(0);
+  await expect(dialogTopicSelect().locator("option", { hasText: topicName })).toHaveCount(0);
 
   await openSection(page, "Настройки");
   await openSettingsTab(page, "topics");
@@ -280,7 +286,7 @@ test("settings runtime creates archives and restores topics while refreshing run
 
   await openSection(page, "Диалоги");
   await page.getByRole("button", { name: /Расширенные фильтры/ }).click();
-  await expect(page.locator(".queue-filter-panel select").nth(1).locator("option", { hasText: topicName })).toHaveCount(1);
+  await expect(dialogTopicSelect().locator("option", { hasText: topicName })).toHaveCount(1);
 });
 
 test("reports runtime creates export retries failed jobs and downloads file bytes from API", async ({ page, request }) => {

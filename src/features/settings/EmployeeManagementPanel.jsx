@@ -21,6 +21,8 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
   const [error, setError] = useState("");
   const [inviteDraft, setInviteDraft] = useState({ email: "", name: "", roleKey: "employee", groupId: "group-line-1" });
   const [groupDraft, setGroupDraft] = useState({ channels: ["SDK"], groupId: "", name: "", scope: "" });
+  const [inviteError, setInviteError] = useState("");
+  const [groupError, setGroupError] = useState("");
   const [isInviteOpen, setInviteOpen] = useState(false);
   const [isGroupsOpen, setGroupsOpen] = useState(false);
   const [isRoleMatrixOpen, setRoleMatrixOpen] = useState(false);
@@ -179,12 +181,12 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
     }
 
     setSaving(true);
-    setError("");
+    setInviteError("");
     const response = await settingsService.inviteEmployee(inviteDraft);
     setSaving(false);
 
     if (response.status !== "ok") {
-      setError(response.error?.message ?? "Не удалось отправить приглашение.");
+      setInviteError(response.error?.message ?? "Не удалось отправить приглашение.");
       return;
     }
 
@@ -208,19 +210,19 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
       scope: groupDraft.scope.trim()
     };
     if (!payload.name || !payload.scope) {
-      setError("Укажите название и область ответственности группы.");
+      setGroupError("Укажите название и область ответственности группы.");
       return;
     }
 
     setSaving(true);
-    setError("");
+    setGroupError("");
     const response = groupDraft.groupId
       ? await settingsService.updateGroup({ groupId: groupDraft.groupId, ...payload })
       : await settingsService.createGroup(payload);
     setSaving(false);
 
     if (response.status !== "ok") {
-      setError(response.error?.message ?? "Не удалось сохранить группу.");
+      setGroupError(response.error?.message ?? "Не удалось сохранить группу.");
       return;
     }
 
@@ -238,6 +240,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
       return;
     }
 
+    setInviteError("");
     setInviteOpen(true);
   }
 
@@ -526,6 +529,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                 <FieldHint>Зона ответственности сотрудника.</FieldHint>
               </label>
             </div>
+            {inviteError ? <div className="settings-form-error" role="alert">{inviteError}</div> : null}
           </form>
         </SettingsModal>
       ) : null}
@@ -568,7 +572,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                 </label>
               ))}
             </div>
-            {error ? <div className="employee-error">{error}</div> : null}
+            {groupError ? <div className="settings-form-error" role="alert">{groupError}</div> : null}
             <div className="settings-form-actions">
               {groupDraft.groupId ? (
                 <button onClick={() => setGroupDraft({ channels: ["SDK"], groupId: "", name: "", scope: "" })} type="button">

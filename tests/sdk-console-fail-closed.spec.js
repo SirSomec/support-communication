@@ -22,6 +22,7 @@ async function openSdkConsole(page) {
   await expect(page.getByTestId("route-app-shell")).toBeVisible({ timeout: 15_000 });
   await page.locator(".role-switcher select").selectOption({ label: "Администратор" });
   await page.locator("nav button").filter({ hasText: "Настройки" }).click();
+  await page.locator("#settings-tab-sdk").click();
 
   const panel = page.locator(".sdk-console");
   await expect(panel).toBeVisible();

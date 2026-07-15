@@ -18,6 +18,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [saveError, setSaveError] = useState("");
   const canMutateTopics = canEditSettings && !error;
 
   const normalizedTopicQuery = topicQuery.trim().toLowerCase();
@@ -105,6 +106,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
 
     setSelectedTopicId("");
     setDraft(emptyDraft());
+    setSaveError("");
     setEditorOpen(true);
   }
 
@@ -124,6 +126,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
       required: Boolean(topic.required),
       routingTarget: topic.routingTarget ?? topic.routing ?? "Line 1"
     });
+    setSaveError("");
     setEditorOpen(true);
   }
 
@@ -152,7 +155,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
     }
 
     setSaving(true);
-    setError("");
+    setSaveError("");
     const payload = {
       ...draft,
       channels: draft.channels.length ? draft.channels : ["SDK"]
@@ -163,7 +166,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
     setSaving(false);
 
     if (response.status !== "ok") {
-      setError(response.error?.message ?? "Не удалось сохранить тематику.");
+      setSaveError(response.error?.message ?? "Не удалось сохранить тематику.");
       return;
     }
 
@@ -385,7 +388,7 @@ export function TopicDirectoryPanel({ access, canEditSettings, onToast, onTopicO
                 </label>
               ))}
             </div>
-            {error ? <div className="topic-error">{error}</div> : null}
+            {saveError ? <div className="settings-form-error" role="alert">{saveError}</div> : null}
           </form>
         </SettingsModal>
       ) : null}

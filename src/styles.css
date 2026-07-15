@@ -539,11 +539,6 @@ select:disabled {
     grid-column: 2;
   }
 
-  .role-mode-panel {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .secondary-grid {
     grid-template-columns: 1fr;
   }

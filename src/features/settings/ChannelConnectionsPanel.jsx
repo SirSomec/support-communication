@@ -48,6 +48,8 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
+  const [queueError, setQueueError] = useState("");
   const [detailTab, setDetailTab] = useState("overview");
   const [isCreateOpen, setCreateOpen] = useState(false);
   const [isQueueManagerOpen, setQueueManagerOpen] = useState(false);
@@ -216,7 +218,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     const name = newQueueName.trim();
     if (!name || !canMutateConnections) return;
     setBusy("create-queue");
-    setError("");
+    setQueueError("");
     const selectedTeam = teams.find((team) => team.id === newQueueTeamId);
     const response = await routingService.createQueue({
       ...(selectedTeam ? { defaultTeamId: selectedTeam.id, memberIds: selectedTeam.memberIds ?? [] } : {}),
@@ -224,7 +226,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     });
     setBusy("");
     if (response.status !== "ok") {
-      setError(response.error?.message ?? "Не удалось создать очередь.");
+      setQueueError(response.error?.message ?? "Не удалось создать очередь.");
       return;
     }
     setNewQueueName("");
@@ -236,14 +238,14 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
   async function updateQueueTeam(queue, teamId) {
     const team = teams.find((item) => item.id === teamId);
     setBusy(`queue:${queue.id}`);
-    setError("");
+    setQueueError("");
     const response = await routingService.updateQueue(queue.id, {
       defaultTeamId: team?.id ?? null,
       memberIds: team?.memberIds ?? []
     });
     setBusy("");
     if (response.status !== "ok") {
-      setError(response.error?.message ?? "Не удалось изменить команду очереди.");
+      setQueueError(response.error?.message ?? "Не удалось изменить команду очереди.");
       return;
     }
     await loadConnections();
@@ -258,12 +260,12 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
 
     const name = form.name.trim();
     if (!name) {
-      setError("Укажите название подключения.");
+      setFormError("Укажите название подключения.");
       return;
     }
 
     setBusy("create");
-    setError("");
+    setFormError("");
     const payload = {
       chatLimit: Number(form.chatLimit),
       credentials: form.credentials.trim() ? { token: form.credentials.trim() } : undefined,
@@ -279,7 +281,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     setBusy("");
 
     if (response.status !== "ok") {
-      setError(response.error?.message ?? "Не удалось создать подключение.");
+      setFormError(response.error?.message ?? "Не удалось создать подключение.");
       return;
     }
 
@@ -379,6 +381,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
       return;
     }
 
+    setFormError("");
     setCreateOpen(true);
   }
 
@@ -390,7 +393,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
         hint="Каналы, по которым клиенты пишут в поддержку. Новые обращения попадают в выбранную очередь."
         actions={
           <>
-            <button className="settings-ghost-action" onClick={() => setQueueManagerOpen(true)} title="Очереди приема и команды, которые их разбирают" type="button">
+            <button className="settings-ghost-action" onClick={() => { setQueueError(""); setQueueManagerOpen(true); }} title="Очереди приема и команды, которые их разбирают" type="button">
               <ListTree size={16} />
               Очереди
             </button>
@@ -634,7 +637,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
           ) : (
             <div className="settings-empty-state">
               <Inbox size={22} />
-              <strong>{loading ? "Загружаем подключения" : "Каналы еще не подключены"}</strong>
+              <strong>{loading ? "Загружаем подключения" : "Каналы пока не настроены"}</strong>
               <span>{loading ? "Получаем список подключений из backend." : "Подключите Telegram, MAX, VK или SDK — и обращения клиентов появятся в диалогах."}</span>
               {!loading ? (
                 <button className="primary-action" disabled={!canMutateConnections} onClick={openCreateModal} type="button">
@@ -718,6 +721,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
                 <FieldHint>{form.type === "telegram" ? "Токен бота из @BotFather." : "Ключ доступа канала. Хранится только в backend."}</FieldHint>
               </label>
             </div>
+            {formError ? <div className="settings-form-error" role="alert">{formError}</div> : null}
           </form>
         </SettingsModal>
       ) : null}
@@ -732,6 +736,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
         >
           <div className="queue-manager">
             <InlineHint>Очередь определяет, какая команда разбирает обращения. Подключение всегда направляет сообщения в одну очередь.</InlineHint>
+            {queueError ? <div className="settings-form-error" role="alert">{queueError}</div> : null}
             <div className="queue-manager-list settings-scroll" aria-label="Список очередей">
               {queues.map((queue) => (
                 <div className="connection-row queue-row" key={queue.id}>

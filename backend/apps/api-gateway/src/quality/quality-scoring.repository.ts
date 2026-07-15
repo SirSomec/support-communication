@@ -95,12 +95,103 @@ export interface QualityScoringState {
   responseTelemetry: QualityScoringResponseTelemetryRecord[];
 }
 
+type MaybePromise<T> = T | Promise<T>;
+
+/**
+ * Observability sink for AI quality-scoring telemetry. Every field is bucketed/redacted by the
+ * adapter before it reaches storage, so records are safe to persist durably (Postgres) rather than
+ * held in an ephemeral buffer. Writes are first-write-wins per identity key.
+ */
+export interface QualityScoringRepositoryPort {
+  listRequestTelemetry(filter?: QualityScoringTelemetryFilter): MaybePromise<QualityScoringRequestTelemetryRecord[]>;
+  listResponseTelemetry(filter?: QualityScoringResponseTelemetryFilter): MaybePromise<QualityScoringResponseTelemetryRecord[]>;
+  listFailureEnvelopes(filter?: QualityScoringFailureEnvelopeFilter): MaybePromise<QualityScoringFailureEnvelopeRecord[]>;
+  saveRequestTelemetry(record: QualityScoringRequestTelemetryRecordInput): MaybePromise<QualityScoringRequestTelemetryRecord>;
+  saveResponseTelemetry(record: QualityScoringResponseTelemetryRecordInput): MaybePromise<QualityScoringResponseTelemetryRecord>;
+  saveFailureEnvelope(record: QualityScoringFailureEnvelopeRecordInput): MaybePromise<QualityScoringFailureEnvelopeRecord>;
+}
+
 export interface QualityScoringRepositoryOptions {
   filePath: string;
 }
 
-export class QualityScoringRepository {
+export interface PrismaQualityScoringRepositoryOptions {
+  client: PrismaQualityScoringClient;
+}
+
+interface PrismaQualityScoringRequestTelemetryRow {
+  recordedAt: Date | string;
+  telemetry: QualityScoringRequestTelemetry;
+  telemetryId: string;
+  tenantId: string;
+}
+
+interface PrismaQualityScoringResponseTelemetryRow {
+  conversationId: string | null;
+  recordedAt: Date | string;
+  status: QualityScoringResponseTelemetry["status"];
+  telemetry: QualityScoringResponseTelemetry;
+  telemetryId: string;
+  tenantId: string;
+}
+
+interface PrismaQualityScoringFailureEnvelopeRow {
+  envelope: QualityScoringFailureEnvelope;
+  errorCode: string;
+  failureId: string;
+  recordedAt: Date | string;
+  tenantId: string;
+}
+
+export interface PrismaQualityScoringClient {
+  qualityScoringRequestTelemetry: {
+    create(input: { data: PrismaQualityScoringRequestTelemetryRow }): Promise<PrismaQualityScoringRequestTelemetryRow>;
+    findMany(input: {
+      orderBy?: Array<Record<string, "asc" | "desc">>;
+      where: { tenantId?: string };
+    }): Promise<PrismaQualityScoringRequestTelemetryRow[]>;
+    findUnique(input: {
+      where: { tenantId_telemetryId: { telemetryId: string; tenantId: string } };
+    }): Promise<PrismaQualityScoringRequestTelemetryRow | null>;
+  };
+  qualityScoringResponseTelemetry: {
+    create(input: { data: PrismaQualityScoringResponseTelemetryRow }): Promise<PrismaQualityScoringResponseTelemetryRow>;
+    findMany(input: {
+      orderBy?: Array<Record<string, "asc" | "desc">>;
+      where: { conversationId?: string | null; status?: string; tenantId?: string };
+    }): Promise<PrismaQualityScoringResponseTelemetryRow[]>;
+    findUnique(input: {
+      where: { tenantId_telemetryId: { telemetryId: string; tenantId: string } };
+    }): Promise<PrismaQualityScoringResponseTelemetryRow | null>;
+  };
+  qualityScoringFailureEnvelope: {
+    create(input: { data: PrismaQualityScoringFailureEnvelopeRow }): Promise<PrismaQualityScoringFailureEnvelopeRow>;
+    findMany(input: {
+      orderBy?: Array<Record<string, "asc" | "desc">>;
+      where: { errorCode?: string; tenantId?: string };
+    }): Promise<PrismaQualityScoringFailureEnvelopeRow[]>;
+    findUnique(input: {
+      where: { tenantId_failureId: { failureId: string; tenantId: string } };
+    }): Promise<PrismaQualityScoringFailureEnvelopeRow | null>;
+  };
+}
+
+let defaultQualityScoringRepository: QualityScoringRepositoryPort | null = null;
+
+export class QualityScoringRepository implements QualityScoringRepositoryPort {
   private constructor(private readonly store: DurableStore<QualityScoringState>) {}
+
+  static default(): QualityScoringRepositoryPort {
+    return defaultQualityScoringRepository ?? QualityScoringRepository.inMemory();
+  }
+
+  static useDefault(repository: QualityScoringRepositoryPort): void {
+    defaultQualityScoringRepository = repository;
+  }
+
+  static clearDefault(): void {
+    defaultQualityScoringRepository = null;
+  }
 
   static inMemory(seed: QualityScoringState = seedQualityScoringState()): QualityScoringRepository {
     return new QualityScoringRepository(new InMemoryStore(seed));
@@ -108,6 +199,10 @@ export class QualityScoringRepository {
 
   static open({ filePath }: QualityScoringRepositoryOptions): QualityScoringRepository {
     return new QualityScoringRepository(new JsonFileStore({ filePath, seed: seedQualityScoringState() }));
+  }
+
+  static prisma({ client }: PrismaQualityScoringRepositoryOptions): PrismaQualityScoringRepository {
+    return new PrismaQualityScoringRepository(client);
   }
 
   readState(): QualityScoringState {
@@ -206,6 +301,189 @@ export class QualityScoringRepository {
 
     return clone(saved);
   }
+}
+
+/**
+ * Postgres-backed telemetry sink. Reuses the exact same redaction/normalization pipeline as the
+ * in-memory store, then persists the sanitized record. Identity keys are first-write-wins.
+ */
+export class PrismaQualityScoringRepository implements QualityScoringRepositoryPort {
+  constructor(private readonly client: PrismaQualityScoringClient) {}
+
+  async listRequestTelemetry(
+    filter: QualityScoringTelemetryFilter = {}
+  ): Promise<QualityScoringRequestTelemetryRecord[]> {
+    const rows = await this.client.qualityScoringRequestTelemetry.findMany({
+      orderBy: [{ recordedAt: "asc" }],
+      where: filter.tenantId ? { tenantId: filter.tenantId } : {}
+    });
+
+    return rows.map(toRequestTelemetryRecord);
+  }
+
+  async listResponseTelemetry(
+    filter: QualityScoringResponseTelemetryFilter = {}
+  ): Promise<QualityScoringResponseTelemetryRecord[]> {
+    const rows = await this.client.qualityScoringResponseTelemetry.findMany({
+      orderBy: [{ recordedAt: "asc" }],
+      where: {
+        ...(filter.tenantId ? { tenantId: filter.tenantId } : {}),
+        ...(filter.status === undefined ? {} : { status: filter.status }),
+        ...(filter.conversationId === undefined ? {} : { conversationId: filter.conversationId })
+      }
+    });
+
+    return rows.map(toResponseTelemetryRecord);
+  }
+
+  async listFailureEnvelopes(
+    filter: QualityScoringFailureEnvelopeFilter = {}
+  ): Promise<QualityScoringFailureEnvelopeRecord[]> {
+    const rows = await this.client.qualityScoringFailureEnvelope.findMany({
+      orderBy: [{ recordedAt: "asc" }],
+      where: {
+        ...(filter.tenantId ? { tenantId: filter.tenantId } : {}),
+        ...(filter.errorCode ? { errorCode: filter.errorCode } : {})
+      }
+    });
+
+    return rows.map(toFailureEnvelopeRecord);
+  }
+
+  async saveRequestTelemetry(
+    record: QualityScoringRequestTelemetryRecordInput
+  ): Promise<QualityScoringRequestTelemetryRecord> {
+    const persisted = normalizeRequestTelemetryRecord(record);
+    const where = {
+      tenantId_telemetryId: { telemetryId: persisted.telemetryId, tenantId: persisted.telemetry.tenantId }
+    };
+
+    const existing = await this.client.qualityScoringRequestTelemetry.findUnique({ where });
+    if (existing) {
+      return toRequestTelemetryRecord(existing);
+    }
+
+    let row: PrismaQualityScoringRequestTelemetryRow;
+    try {
+      row = await this.client.qualityScoringRequestTelemetry.create({
+        data: {
+          recordedAt: new Date(persisted.recordedAt),
+          telemetry: clone(persisted.telemetry),
+          telemetryId: persisted.telemetryId,
+          tenantId: persisted.telemetry.tenantId
+        }
+      });
+    } catch (error) {
+      const concurrent = await this.client.qualityScoringRequestTelemetry.findUnique({ where });
+      if (!concurrent) throw error;
+      row = concurrent;
+    }
+
+    return toRequestTelemetryRecord(row);
+  }
+
+  async saveResponseTelemetry(
+    record: QualityScoringResponseTelemetryRecordInput
+  ): Promise<QualityScoringResponseTelemetryRecord> {
+    const persisted = normalizeResponseTelemetryRecord(record);
+    const where = {
+      tenantId_telemetryId: { telemetryId: persisted.telemetryId, tenantId: persisted.tenantId }
+    };
+
+    const existing = await this.client.qualityScoringResponseTelemetry.findUnique({ where });
+    if (existing) {
+      return toResponseTelemetryRecord(existing);
+    }
+
+    let row: PrismaQualityScoringResponseTelemetryRow;
+    try {
+      row = await this.client.qualityScoringResponseTelemetry.create({
+        data: {
+          conversationId: persisted.telemetry.conversationId,
+          recordedAt: new Date(persisted.recordedAt),
+          status: persisted.telemetry.status,
+          telemetry: clone(persisted.telemetry),
+          telemetryId: persisted.telemetryId,
+          tenantId: persisted.tenantId
+        }
+      });
+    } catch (error) {
+      const concurrent = await this.client.qualityScoringResponseTelemetry.findUnique({ where });
+      if (!concurrent) throw error;
+      row = concurrent;
+    }
+
+    return toResponseTelemetryRecord(row);
+  }
+
+  async saveFailureEnvelope(
+    record: QualityScoringFailureEnvelopeRecordInput
+  ): Promise<QualityScoringFailureEnvelopeRecord> {
+    const persisted = normalizeFailureEnvelopeRecord(record);
+    const where = {
+      tenantId_failureId: { failureId: persisted.failureId, tenantId: persisted.tenantId }
+    };
+
+    const existing = await this.client.qualityScoringFailureEnvelope.findUnique({ where });
+    if (existing) {
+      return toFailureEnvelopeRecord(existing);
+    }
+
+    let row: PrismaQualityScoringFailureEnvelopeRow;
+    try {
+      row = await this.client.qualityScoringFailureEnvelope.create({
+        data: {
+          envelope: clone(persisted.envelope),
+          errorCode: persisted.envelope.error.code,
+          failureId: persisted.failureId,
+          recordedAt: new Date(persisted.recordedAt),
+          tenantId: persisted.tenantId
+        }
+      });
+    } catch (error) {
+      const concurrent = await this.client.qualityScoringFailureEnvelope.findUnique({ where });
+      if (!concurrent) throw error;
+      row = concurrent;
+    }
+
+    return toFailureEnvelopeRecord(row);
+  }
+}
+
+function toRequestTelemetryRecord(
+  row: PrismaQualityScoringRequestTelemetryRow
+): QualityScoringRequestTelemetryRecord {
+  return normalizeRequestTelemetryRecord({
+    recordedAt: toIsoString(row.recordedAt),
+    telemetry: row.telemetry,
+    telemetryId: row.telemetryId
+  }, { preserveInternalKeys: true });
+}
+
+function toResponseTelemetryRecord(
+  row: PrismaQualityScoringResponseTelemetryRow
+): QualityScoringResponseTelemetryRecord {
+  return normalizeResponseTelemetryRecord({
+    recordedAt: toIsoString(row.recordedAt),
+    telemetry: row.telemetry,
+    telemetryId: row.telemetryId,
+    tenantId: row.tenantId
+  }, { preserveInternalKeys: true });
+}
+
+function toFailureEnvelopeRecord(
+  row: PrismaQualityScoringFailureEnvelopeRow
+): QualityScoringFailureEnvelopeRecord {
+  return normalizeFailureEnvelopeRecord({
+    envelope: row.envelope,
+    failureId: row.failureId,
+    recordedAt: toIsoString(row.recordedAt),
+    tenantId: row.tenantId
+  }, { preserveInternalKeys: true });
+}
+
+function toIsoString(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : String(value);
 }
 
 function seedQualityScoringState(): QualityScoringState {

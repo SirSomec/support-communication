@@ -2708,6 +2708,46 @@ model AiScoringAudit {
   @@map("ai_scoring_audits")
 }
 
+model QualityScoringRequestTelemetry {
+  telemetryId String   @map("telemetry_id")
+  tenantId    String   @map("tenant_id")
+  recordedAt  DateTime @map("recorded_at") @db.Timestamptz(3)
+  telemetry   Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([tenantId, telemetryId], map: "quality_scoring_request_telemetry_pkey")
+  @@index([tenantId, recordedAt], map: "quality_scoring_request_telemetry_tenant_recorded_idx")
+  @@map("quality_scoring_request_telemetry")
+}
+
+model QualityScoringResponseTelemetry {
+  telemetryId    String   @map("telemetry_id")
+  tenantId       String   @map("tenant_id")
+  recordedAt     DateTime @map("recorded_at") @db.Timestamptz(3)
+  status         String
+  conversationId String?  @map("conversation_id")
+  telemetry      Json
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([tenantId, telemetryId], map: "quality_scoring_response_telemetry_pkey")
+  @@index([tenantId, status, recordedAt], map: "quality_scoring_response_telemetry_tenant_status_recorded_idx")
+  @@index([tenantId, conversationId, recordedAt], map: "quality_scoring_response_telemetry_tenant_conv_recorded_idx")
+  @@map("quality_scoring_response_telemetry")
+}
+
+model QualityScoringFailureEnvelope {
+  failureId  String   @map("failure_id")
+  tenantId   String   @map("tenant_id")
+  recordedAt DateTime @map("recorded_at") @db.Timestamptz(3)
+  errorCode  String   @map("error_code")
+  envelope   Json
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@id([tenantId, failureId], map: "quality_scoring_failure_envelopes_pkey")
+  @@index([tenantId, errorCode, recordedAt], map: "quality_scoring_failure_envelopes_tenant_error_recorded_idx")
+  @@map("quality_scoring_failure_envelopes")
+}
+
 model ProactiveExposure {
   exposureId          String   @id @map("exposure_id")
   tenantId            String   @map("tenant_id")

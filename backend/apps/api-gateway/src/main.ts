@@ -21,6 +21,7 @@ import { configurePlatformRepository } from "./platform/bootstrap.js";
 import { configureOperatorPresenceRepository } from "./presence/bootstrap.js";
 import { OperatorPresenceService } from "./presence/presence.service.js";
 import { configureQualityRepository } from "./quality/bootstrap.js";
+import { configureQualityScoringRepository } from "./quality/quality-scoring.bootstrap.js";
 import { configureReportRepository } from "./reports/bootstrap.js";
 import { configureRoutingRepository } from "./routing/bootstrap.js";
 import { configureWorkspaceRepository } from "./workspace/bootstrap.js";
@@ -51,6 +52,7 @@ export async function bootstrap(): Promise<void> {
   configureOperatorPresenceRepository(config);
   OperatorPresenceService.configureRealtimeFanoutFromEnv(process.env);
   configureQualityRepository(config, { seed: localSeeds.quality });
+  configureQualityScoringRepository(config);
   configureOperationsRepository(config, { seed: localSeeds.operations });
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true

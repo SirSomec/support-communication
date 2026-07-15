@@ -51,6 +51,8 @@ const backendConfigSchema = z.object({
   PUBLIC_API_KEY_SECRET: z.string().min(16).optional(),
   QUALITY_REPOSITORY: z.enum(["json", "prisma"]).default("json"),
   QUALITY_STORE_FILE: z.string().min(1).optional(),
+  QUALITY_SCORING_REPOSITORY: z.enum(["json", "prisma"]).default("json"),
+  QUALITY_SCORING_STORE_FILE: z.string().min(1).optional(),
   REDIS_URL: z.string().url(),
   REPORT_REPOSITORY: z.enum(["json", "prisma"]).default("json"),
   REPORT_STORE_FILE: z.string().min(1).optional(),

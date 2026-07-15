@@ -206,7 +206,11 @@ export class TenantProvisionService {
           id: `grant_${randomUUID()}`,
           policyVersionId: activePolicy.id,
           resource: "tenant",
-          roleKey: "owner",
+          // Канонический ключ роли владельца тенанта — "admin" ("owner"/"владелец"
+          // лишь его алиасы). permission.service грузит гранты по резолвнутому
+          // ключу роли (admin), а FK rbac_role_grants → permission_roles(key)
+          // отвергает alias-значение на Postgres.
+          roleKey: "admin",
           tenantId,
           traceId
         };

@@ -430,6 +430,10 @@
   gap: 12px;
 }
 
+.settings-form-grid .settings-form-wide {
+  grid-column: 1 / -1;
+}
+
 .settings-form-grid label,
 .queue-manager-create label {
   display: grid;
@@ -2064,6 +2068,83 @@
 .api-key-card.rotated {
   border-color: #a9dec1;
   background: #f3fbf7;
+}
+
+.api-key-card.revoked {
+  border-color: #e6d3d3;
+  background: #fbf6f6;
+}
+
+.api-key-card.revoked b {
+  color: #b04747;
+}
+
+.api-key-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.api-key-revoke:not(:disabled) {
+  color: #b04747;
+}
+
+.webhook-endpoint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #edf1f7;
+}
+
+.webhook-endpoint-actions button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.webhook-endpoint-actions .webhook-endpoint-delete:not(:disabled) {
+  color: #b04747;
+}
+
+.api-key-reveal {
+  display: grid;
+  gap: 12px;
+}
+
+.api-key-reveal-row {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.api-key-reveal-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.api-key-reveal-secret {
+  padding: 8px;
+  overflow-x: auto;
+  border: 1px solid #dce7f5;
+  border-radius: 7px;
+  background: #f8fbff;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  user-select: all;
+  white-space: nowrap;
 }
 
 .api-key-card header {

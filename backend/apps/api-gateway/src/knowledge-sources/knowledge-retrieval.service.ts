@@ -73,7 +73,7 @@ export class KnowledgeRetrievalService {
     const scoreThreshold = Math.max(0.05, Number.isFinite(input.scoreThreshold) ? Number(input.scoreThreshold) : 0);
     const candidates: KnowledgeRetrievalPassage[] = [];
     for (const binding of input.sourceBindings) {
-      const source = this.sources.find(input.tenantId, binding.sourceId);
+      const source = await this.sources.find(input.tenantId, binding.sourceId);
       if (!source || !isKnowledgeSourceRetrievalEligible(source)) continue;
       if (binding.sourceVersion && String(source.version) !== binding.sourceVersion) continue;
       if (source.kind === "mcp") {
@@ -97,7 +97,7 @@ export class KnowledgeRetrievalService {
     const queryPrefixes = queryTerms.map((term) => term.slice(0, 4)).filter((prefix) => prefix.length >= 4);
     if (candidates.length === 0 && queryPrefixes.length > 0 && scoreThreshold <= 0.05) {
       for (const binding of input.sourceBindings) {
-        const source = this.sources.find(input.tenantId, binding.sourceId);
+        const source = await this.sources.find(input.tenantId, binding.sourceId);
         if (!source || !isKnowledgeSourceRetrievalEligible(source)) continue;
         if (binding.sourceVersion && String(source.version) !== binding.sourceVersion) continue;
         const text = await sourceText(source, this.workspace, input.tenantId);
@@ -166,7 +166,7 @@ export class KnowledgeRetrievalService {
   }
 }
 
-async function sourceText(source: ReturnType<KnowledgeSourceRepository["find"]> & {}, workspace: WorkspaceRepository, tenantId: string): Promise<string> {
+async function sourceText(source: KnowledgeSourceRecord, workspace: WorkspaceRepository, tenantId: string): Promise<string> {
   // Чанки исторически хранились строками; ingestion (BAI-402+) пишет объекты
   // {content, offsets}. Поддерживаем оба вида — иначе document-источники немы.
   if (Array.isArray(source.metadata.chunks)) {

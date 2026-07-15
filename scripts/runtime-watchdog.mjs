@@ -44,7 +44,7 @@ function databaseMetrics() {
     (SELECT count(*) FROM report_export_jobs WHERE status_key IN ('failed','dead_lettered')),
     count(*) FILTER (WHERE last_error IS NOT NULL AND occurred_at > now()-interval '15 minutes' AND lower(queue)='message-delivery')
     FROM outbox_events;`;
-  const compose = ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.pilot.yml", "--profile", "prisma-postgres", "exec", "-T", "postgres", "psql", "-U", "support", "-d", "support_communication", "-tA", "-F", "|", "-c", sql];
+  const compose = ["compose", "-f", "docker-compose.yml", "exec", "-T", "postgres", "psql", "-U", "support", "-d", "support_communication", "-tA", "-F", "|", "-c", sql];
   const result = spawnSync("docker", compose, { cwd: root, encoding: "utf8", windowsHide: true });
   if (result.status !== 0) return { deadLetters: 0, failedReports: 0, oldestPendingSeconds: 0, pending: 0, providerFailures: 0, unavailable: true };
   const [pending, oldestPendingSeconds, deadLetters, failedReports, providerFailures] = result.stdout.trim().split("|").map(Number);

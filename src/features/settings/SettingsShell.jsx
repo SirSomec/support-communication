@@ -10,7 +10,8 @@ const navGroups = [
     label: "Каналы",
     items: [
       { id: "connections", label: "Подключения", hint: "Мессенджеры, виджет и очереди приема", icon: Cable },
-      { id: "sdk", label: "SDK-консоль", hint: "Сниппет, playground и события SDK", icon: TerminalSquare }
+      { id: "sdk", label: "SDK-консоль", hint: "Сниппет, playground и события SDK", icon: TerminalSquare },
+      { id: "api", label: "API и webhooks", hint: "Ключи, endpoint'ы и доставки", icon: Webhook }
     ]
   },
   {
@@ -26,7 +27,6 @@ const navGroups = [
     label: "Контроль",
     items: [
       { id: "rules", label: "Правила", hint: "Ограничения обработки обращений", icon: ListChecks },
-      { id: "api", label: "API и webhooks", hint: "Ключи, доставки, changelog", icon: Webhook },
       { id: "security", label: "Безопасность", hint: "Сессии, 2FA и диагностика", icon: ShieldCheck }
     ]
   }

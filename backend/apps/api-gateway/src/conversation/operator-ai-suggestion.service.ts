@@ -68,8 +68,7 @@ export class OperatorAiSuggestionService {
       return failure("invalid", "ai_suggestions_no_client_message", "В диалоге ещё нет сообщений клиента — анализировать нечего.", conversation.id);
     }
 
-    const connection = this.connections
-      .list(tenantId)
+    const connection = (await this.connections.list(tenantId))
       .filter((item) => item.status === "ready" && item.disabledAt === null && item.capabilities.includes("chat_completion"))
       .sort((a, b) => a.id.localeCompare(b.id))[0];
     if (!connection) {
@@ -78,7 +77,7 @@ export class OperatorAiSuggestionService {
 
     let release: (() => void) | null = null;
     try {
-      release = this.usage.reserve({
+      release = await this.usage.reserve({
         connectionId: connection.id,
         maxConcurrentRuns: connection.limits.maxConcurrentRuns,
         monthlyTokenBudget: connection.limits.monthlyTokenBudget,
@@ -94,8 +93,7 @@ export class OperatorAiSuggestionService {
     try {
       const retrieval = await new KnowledgeRetrievalService(this.sources, this.workspace, undefined, this.mcpInvoker).retrieve({
         query: transcript.retrievalQuery,
-        sourceBindings: this.sources
-          .list(tenantId)
+        sourceBindings: (await this.sources.list(tenantId))
           .filter((source) => isKnowledgeSourceRetrievalEligible(source))
           .map((source) => ({ sourceId: source.id })),
         tenantId,
@@ -126,7 +124,7 @@ export class OperatorAiSuggestionService {
         responseFormat: "json_object",
         temperature: 0.6
       });
-      this.usage.recordUsage(tenantId, connection.id, completion.usage.totalTokens ?? estimateTokens(transcript.text, completion.content));
+      await this.usage.recordUsage(tenantId, connection.id, completion.usage.totalTokens ?? estimateTokens(transcript.text, completion.content));
 
       const suggestions = parseSuggestions(completion.content);
       if (!suggestions.length) {

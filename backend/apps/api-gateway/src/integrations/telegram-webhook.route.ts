@@ -53,7 +53,8 @@ export function loadTelegramWebhookConfig(
   return {
     enabled: ingressMode ? ingressMode === "webhook" : env.TELEGRAM_WEBHOOK_ENABLED === "true",
     legacySecret: String(env.TELEGRAM_WEBHOOK_SECRET ?? "").trim() || undefined,
-    legacyTenantId: String(env.PILOT_TELEGRAM_TENANT_ID ?? env.TELEGRAM_WEBHOOK_TENANT_ID ?? "").trim() || undefined
+    // PILOT_TELEGRAM_TENANT_ID — устаревшее имя, поддерживается один релиз.
+    legacyTenantId: String(env.TELEGRAM_LEGACY_TENANT_ID ?? env.PILOT_TELEGRAM_TENANT_ID ?? env.TELEGRAM_WEBHOOK_TENANT_ID ?? "").trim() || undefined
   };
 }
 

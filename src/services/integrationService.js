@@ -112,6 +112,61 @@ export const integrationService = {
     });
   },
 
+  async createApiKey(payload = {}) {
+    return apiRequest("/integrations/api-keys", {
+      body: payload,
+      method: "POST",
+      operation: "createApiKey",
+      service: SERVICE
+    });
+  },
+
+  async revokeApiKey(keyId) {
+    if (!hasRouteId(keyId)) {
+      return missingIdEnvelope("revokeApiKey", "API key id is required.");
+    }
+
+    return apiRequest(`/integrations/api-keys/${encodeURIComponent(keyId)}/revoke`, {
+      method: "POST",
+      operation: "revokeApiKey",
+      service: SERVICE
+    });
+  },
+
+  async createWebhookEndpoint(payload = {}) {
+    return apiRequest("/integrations/webhooks/endpoints", {
+      body: payload,
+      method: "POST",
+      operation: "createWebhookEndpoint",
+      service: SERVICE
+    });
+  },
+
+  async updateWebhookEndpoint({ endpointId, ...payload } = {}) {
+    if (!hasRouteId(endpointId)) {
+      return missingIdEnvelope("updateWebhookEndpoint", "Webhook endpoint id is required.");
+    }
+
+    return apiRequest(`/integrations/webhooks/endpoints/${encodeURIComponent(endpointId)}`, {
+      body: payload,
+      method: "PATCH",
+      operation: "updateWebhookEndpoint",
+      service: SERVICE
+    });
+  },
+
+  async deleteWebhookEndpoint(endpointId) {
+    if (!hasRouteId(endpointId)) {
+      return missingIdEnvelope("deleteWebhookEndpoint", "Webhook endpoint id is required.");
+    }
+
+    return apiRequest(`/integrations/webhooks/endpoints/${encodeURIComponent(endpointId)}`, {
+      method: "DELETE",
+      operation: "deleteWebhookEndpoint",
+      service: SERVICE
+    });
+  },
+
   async replayWebhookDelivery(delivery = {}) {
     const deliveryId = getDeliveryId(delivery);
     if (!hasRouteId(deliveryId)) {
@@ -177,6 +232,11 @@ export const integrationService = {
         "fetchChannelConnectionEvents",
         "testChannelConnection",
         "rotateApiKey",
+        "createApiKey",
+        "revokeApiKey",
+        "createWebhookEndpoint",
+        "updateWebhookEndpoint",
+        "deleteWebhookEndpoint",
         "replayWebhookDelivery",
         "revokeSecuritySession",
         "fetchTelegramConnection",

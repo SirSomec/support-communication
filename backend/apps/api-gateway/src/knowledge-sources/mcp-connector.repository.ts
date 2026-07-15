@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore, JsonFileStore, createPrismaClient } from "@support-communication/database";
 
 export interface McpConnectorRecord {
   allowedHosts: string[];
@@ -19,34 +19,177 @@ export interface McpConnectorRecord {
   updatedAt: string;
 }
 
+type MaybePromise<T> = Promise<T> | T;
+
+export interface PrismaMcpConnectorRow {
+  allowedHosts: unknown;
+  approvedAt: Date | null;
+  approvedBy: string | null;
+  createdAt: Date;
+  description: string | null;
+  endpoint: string;
+  id: string;
+  name: string | null;
+  rateLimitPerMinute: number;
+  rejectedReason: string | null;
+  requestedBy: string | null;
+  status: string;
+  tenantId: string;
+  tools: unknown;
+  updatedAt: Date;
+}
+
+export interface PrismaMcpConnectorCreateInput {
+  allowedHosts: string[];
+  approvedAt: Date | null;
+  approvedBy: string | null;
+  createdAt: Date;
+  description: string | null;
+  endpoint: string;
+  id: string;
+  name: string | null;
+  rateLimitPerMinute: number;
+  rejectedReason: string | null;
+  requestedBy: string | null;
+  status: string;
+  tenantId: string;
+  tools: Array<{ mode: "read"; name: string }>;
+  updatedAt: Date;
+}
+
+export interface McpConnectorPrismaClient {
+  mcpConnector: {
+    findMany(input: { orderBy?: { createdAt: "asc" }; where?: { tenantId: string } }): MaybePromise<PrismaMcpConnectorRow[]>;
+    upsert(input: {
+      create: PrismaMcpConnectorCreateInput;
+      update: Omit<PrismaMcpConnectorCreateInput, "createdAt" | "id" | "tenantId">;
+      where: { tenantId_id: { id: string; tenantId: string } };
+    }): MaybePromise<PrismaMcpConnectorRow>;
+  };
+}
+
 interface McpConnectorState { connectors: McpConnectorRecord[]; }
 let defaultRepository: McpConnectorRepository | null = null;
 
 export class McpConnectorRepository {
-  constructor(private readonly store: DurableStore<McpConnectorState>) {}
+  constructor(
+    private readonly store: DurableStore<McpConnectorState>,
+    private readonly prismaClient?: McpConnectorPrismaClient
+  ) {}
 
   static default(): McpConnectorRepository {
-    if (!defaultRepository) defaultRepository = McpConnectorRepository.open(process.env.MCP_CONNECTORS_STORE_FILE ?? ".runtime/mcp-connectors.json");
+    if (!defaultRepository) {
+      // Prisma-only рантайм (план 2026-07-15): production-like профиль всегда
+      // персистится в Postgres; json-store остаётся тестовым бэкендом.
+      defaultRepository = isPrismaRuntimeProfile(process.env)
+        ? McpConnectorRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as McpConnectorPrismaClient })
+        : McpConnectorRepository.open(process.env.MCP_CONNECTORS_STORE_FILE ?? ".runtime/mcp-connectors.json");
+    }
     return defaultRepository;
   }
   static clearDefault(): void { defaultRepository = null; }
   static inMemory(seed: McpConnectorState = { connectors: [] }): McpConnectorRepository { return new McpConnectorRepository(new InMemoryStore(normalizeState(seed))); }
   static open(filePath: string): McpConnectorRepository { return new McpConnectorRepository(new JsonFileStore({ filePath, seed: { connectors: [] } })); }
+  static prisma({ client }: { client: McpConnectorPrismaClient }): McpConnectorRepository {
+    return new McpConnectorRepository(new InMemoryStore({ connectors: [] }), client);
+  }
   static useDefault(repository: McpConnectorRepository): void { defaultRepository = repository; }
 
-  list(tenantId: string): McpConnectorRecord[] { return clone(this.store.read().connectors.filter((item) => item.tenantId === required(tenantId))); }
-  find(tenantId: string, id: string): McpConnectorRecord | undefined {
-    const found = this.store.read().connectors.find((item) => item.tenantId === required(tenantId) && item.id === required(id));
+  list(tenantId: string): MaybePromise<McpConnectorRecord[]> {
+    const tenant = required(tenantId);
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.mcpConnector.findMany({ orderBy: { createdAt: "asc" }, where: { tenantId: tenant } }))
+        .then((rows) => rows.map(toRecord));
+    }
+    return clone(this.store.read().connectors.filter((item) => item.tenantId === tenant));
+  }
+
+  find(tenantId: string, id: string): MaybePromise<McpConnectorRecord | undefined> {
+    const tenant = required(tenantId);
+    const connectorId = required(id);
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.mcpConnector.findMany({ orderBy: { createdAt: "asc" }, where: { tenantId: tenant } }))
+        .then((rows) => {
+          const row = rows.find((item) => item.id === connectorId);
+          return row ? toRecord(row) : undefined;
+        });
+    }
+    const found = this.store.read().connectors.find((item) => item.tenantId === tenant && item.id === connectorId);
     return found ? clone(found) : undefined;
   }
-  save(record: McpConnectorRecord): McpConnectorRecord {
+
+  save(record: McpConnectorRecord): MaybePromise<McpConnectorRecord> {
     const value = normalize(record);
+    if (this.prismaClient) {
+      const create = toCreateInput(value);
+      const { createdAt: _createdAt, id: _id, tenantId: _tenantId, ...update } = create;
+      return Promise.resolve(this.prismaClient.mcpConnector.upsert({
+        create,
+        update,
+        where: { tenantId_id: { id: value.id, tenantId: value.tenantId } }
+      })).then(toRecord);
+    }
     this.store.update((state) => {
       const current = normalizeState(state); const exists = current.connectors.some((item) => item.tenantId === value.tenantId && item.id === value.id);
       return { connectors: exists ? current.connectors.map((item) => item.tenantId === value.tenantId && item.id === value.id ? value : item) : [...current.connectors, value] };
     });
     return clone(value);
   }
+}
+
+function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
+  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
+}
+
+function toCreateInput(record: McpConnectorRecord): PrismaMcpConnectorCreateInput {
+  return {
+    allowedHosts: record.allowedHosts,
+    approvedAt: record.approvedAt ? new Date(record.approvedAt) : null,
+    approvedBy: record.approvedBy ?? null,
+    createdAt: new Date(record.createdAt),
+    description: record.description ?? null,
+    endpoint: record.endpoint,
+    id: record.id,
+    name: record.name ?? null,
+    rateLimitPerMinute: record.rateLimitPerMinute,
+    rejectedReason: record.rejectedReason ?? null,
+    requestedBy: record.requestedBy ?? null,
+    status: record.status,
+    tenantId: record.tenantId,
+    tools: record.tools,
+    updatedAt: new Date(record.updatedAt)
+  };
+}
+
+function toRecord(row: PrismaMcpConnectorRow): McpConnectorRecord {
+  return normalize({
+    allowedHosts: toStringArray(row.allowedHosts),
+    approvedAt: row.approvedAt ? row.approvedAt.toISOString() : null,
+    approvedBy: row.approvedBy,
+    createdAt: row.createdAt.toISOString(),
+    ...(row.description ? { description: row.description } : {}),
+    endpoint: row.endpoint,
+    id: row.id,
+    ...(row.name ? { name: row.name } : {}),
+    rateLimitPerMinute: row.rateLimitPerMinute,
+    ...(row.rejectedReason ? { rejectedReason: row.rejectedReason } : {}),
+    ...(row.requestedBy ? { requestedBy: row.requestedBy } : {}),
+    status: row.status === "enabled" ? "enabled" : "disabled",
+    tenantId: row.tenantId,
+    tools: toTools(row.tools),
+    updatedAt: row.updatedAt.toISOString()
+  });
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item ?? "").trim()).filter(Boolean) : [];
+}
+
+function toTools(value: unknown): Array<{ mode: "read"; name: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => ({ mode: "read" as const, name: String((item as { name?: unknown })?.name ?? "").trim() }))
+    .filter((item) => Boolean(item.name));
 }
 
 function normalizeState(state: Partial<McpConnectorState>): McpConnectorState { return { connectors: (state.connectors ?? []).map(normalize) }; }

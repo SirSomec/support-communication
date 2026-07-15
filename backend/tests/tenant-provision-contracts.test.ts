@@ -49,6 +49,15 @@ describe("tenant provision contracts", () => {
     assert.equal(String(provisionEnvelope.data.embedSnippet).includes("data-api-key"), true);
     assert.equal((await IdentityRepository.default().findTenant("tenant-acme-pilot"))?.id, "tenant-acme-pilot");
 
+    // The tenant owner grant must reference the canonical "admin" role key: it
+    // satisfies the rbac_role_grants → permission_roles(key) FK on Postgres and
+    // is actually matched at auth time (permission checks resolve "Owner" → admin).
+    const activePolicy = await IdentityRepository.default().getActiveRbacPolicyVersion();
+    const ownerGrants = await IdentityRepository.default().listRbacRoleGrants({ policyVersionId: activePolicy?.id, tenantId: "tenant-acme-pilot" });
+    assert.equal(ownerGrants.length >= 1, true);
+    assert.equal(ownerGrants.every((grant) => grant.roleKey === "admin"), true);
+    assert.equal(ownerGrants.some((grant) => grant.roleKey === "owner"), false);
+
     const tenantLogin = await fetch(`${baseUrl}/api/v1/auth/tenant/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },

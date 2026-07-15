@@ -45,11 +45,11 @@ function resolveBearerTokenForRequest(
     return bearerToken;
   }
 
-  if (!isRealtimeSseRoute(request) || !isPilotSseQueryTokenEnabled()) {
+  if (!isRealtimeSseRoute(request) || !isRealtimeSseQueryTokenEnabled()) {
     return "";
   }
 
-  // Pilot-only staging fallback: EventSource cannot set Authorization headers.
+  // Staging-only fallback: EventSource cannot set Authorization headers.
   return readQueryAccessToken(request.query);
 }
 
@@ -61,8 +61,10 @@ function isRealtimeSseRoute(request: { route?: { path?: string }; url?: string }
   return String(request.url ?? "").includes("/realtime/events/stream");
 }
 
-function isPilotSseQueryTokenEnabled(): boolean {
-  return String(process.env.PILOT_SSE_QUERY_TOKEN ?? "").trim().toLowerCase() === "true";
+function isRealtimeSseQueryTokenEnabled(): boolean {
+  // PILOT_SSE_QUERY_TOKEN — устаревшее имя, поддерживается один релиз.
+  const configured = process.env.REALTIME_SSE_QUERY_TOKEN ?? process.env.PILOT_SSE_QUERY_TOKEN;
+  return String(configured ?? "").trim().toLowerCase() === "true";
 }
 
 function readQueryAccessToken(query?: Record<string, string | string[] | undefined>): string {

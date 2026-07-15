@@ -2113,24 +2113,28 @@ model BotScenarioVersion {
 }
 
 model AiConnection {
-  id               String    @id
-  tenantId         String    @map("tenant_id")
-  providerType     String    @map("provider_type")
-  baseUrl          String    @map("base_url")
-  chatModel        String    @map("chat_model")
-  embeddingModel   String?   @map("embedding_model")
-  secretCiphertext String?   @map("secret_ciphertext")
-  secretRef        String?   @map("secret_ref")
-  keyVersion       String?   @map("key_version")
-  capabilities     Json      @default("[]")
-  limits           Json      @default("{}")
-  status           String    @default("disabled")
-  lastTestedAt     DateTime? @map("last_tested_at") @db.Timestamptz(3)
-  lastTestStatus   String?   @map("last_test_status")
-  lastTestMessage  String?   @map("last_test_message")
-  disabledAt       DateTime? @map("disabled_at") @db.Timestamptz(3)
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                    String    @id
+  tenantId              String    @map("tenant_id")
+  providerType          String    @map("provider_type")
+  baseUrl               String    @map("base_url")
+  chatModel             String    @map("chat_model")
+  embeddingModel        String?   @map("embedding_model")
+  secretCiphertext      String?   @map("secret_ciphertext")
+  secretIv              String?   @map("secret_iv")
+  secretAuthTag         String?   @map("secret_auth_tag")
+  secretAlgorithm       String?   @map("secret_algorithm")
+  secretEnvelopeVersion Int?      @map("secret_envelope_version")
+  secretRef             String?   @map("secret_ref")
+  keyVersion            String?   @map("key_version")
+  capabilities          Json      @default("[]")
+  limits                Json      @default("{}")
+  status                String    @default("disabled")
+  lastTestedAt          DateTime? @map("last_tested_at") @db.Timestamptz(3)
+  lastTestStatus        String?   @map("last_test_status")
+  lastTestMessage       String?   @map("last_test_message")
+  disabledAt            DateTime? @map("disabled_at") @db.Timestamptz(3)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([tenantId, id], map: "ai_connections_tenant_id_key")
   @@index([tenantId, status], map: "ai_connections_tenant_status_idx")
@@ -2177,6 +2181,115 @@ model KnowledgeSource {
   @@map("knowledge_sources")
 }
 
+model WebhookEndpoint {
+  id           String   @id
+  channel      String
+  name         String
+  url          String
+  status       String
+  signature    String
+  retries      String
+  failureRate  String   @map("failure_rate")
+  lastDelivery String   @map("last_delivery")
+  custom       Boolean  @default(true)
+  deleted      Boolean  @default(false)
+  createdAt    DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@map("webhook_endpoints")
+}
+
+model AiUsageCounter {
+  tenantId     String   @map("tenant_id")
+  connectionId String   @map("connection_id")
+  month        String
+  usedTokens   Int      @default(0) @map("used_tokens")
+  requestTimes Json     @default("[]") @map("request_times")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([tenantId, connectionId, month])
+  @@map("ai_usage_counters")
+}
+
+model AgentSessionState {
+  tenantId           String   @map("tenant_id")
+  conversationId     String   @map("conversation_id")
+  schemaVersion      Int      @default(1) @map("schema_version")
+  summary            String   @default("")
+  intent             String?
+  openQuestion       String?  @map("open_question")
+  scenarioRevisionId String?  @map("scenario_revision_id")
+  facts              Json     @default("[]")
+  recentTurns        Json     @default("[]") @map("recent_turns")
+  tokenEstimate      Int      @default(0) @map("token_estimate")
+  turnCount          Int      @default(0) @map("turn_count")
+  version            Int      @default(1)
+  createdAt          DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime @map("updated_at") @db.Timestamptz(3)
+  expiresAt          DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@id([tenantId, conversationId])
+  @@index([expiresAt], map: "agent_session_states_expires_at_idx")
+  @@map("agent_session_states")
+}
+
+model UnansweredQuestion {
+  id                String   @id
+  tenantId          String   @map("tenant_id")
+  normalizedKey     String   @map("normalized_key")
+  question          String
+  reason            String
+  channel           String?
+  scenarioId        String?  @map("scenario_id")
+  resolvedArticleId String?  @map("resolved_article_id")
+  status            String   @default("open")
+  count             Int      @default(1)
+  firstAskedAt      DateTime @map("first_asked_at") @db.Timestamptz(3)
+  lastAskedAt       DateTime @map("last_asked_at") @db.Timestamptz(3)
+
+  @@index([tenantId, status, normalizedKey], map: "unanswered_questions_tenant_status_key_idx")
+  @@index([tenantId, lastAskedAt], map: "unanswered_questions_tenant_last_asked_idx")
+  @@map("unanswered_questions")
+}
+
+model BotAiFeedback {
+  feedbackId        String    @id @map("feedback_id")
+  tenantId          String    @map("tenant_id")
+  conversationId    String    @map("conversation_id")
+  scenarioId        String?   @map("scenario_id")
+  actorId           String    @map("actor_id")
+  outcome           String
+  comment           String?
+  citationSourceIds Json      @default("[]") @map("citation_source_ids")
+  reviewRequired    Boolean   @default(false) @map("review_required")
+  resolvedAction    String?   @map("resolved_action")
+  resolvedAt        DateTime? @map("resolved_at") @db.Timestamptz(3)
+  idempotencyKey    String    @map("idempotency_key")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, idempotencyKey], map: "bot_ai_feedback_tenant_idempotency_key")
+  @@index([tenantId, conversationId], map: "bot_ai_feedback_tenant_conversation_idx")
+  @@map("bot_ai_feedback")
+}
+
+model KnowledgeIngestionJob {
+  jobId          String   @id @map("job_id")
+  tenantId       String   @map("tenant_id")
+  sourceId       String   @map("source_id")
+  fileId         String   @map("file_id")
+  fingerprint    String
+  idempotencyKey String   @map("idempotency_key")
+  status         String   @default("pending")
+  errorCode      String?  @map("error_code")
+  attempts       Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, idempotencyKey], map: "knowledge_ingestion_jobs_tenant_idempotency_key")
+  @@index([status, createdAt], map: "knowledge_ingestion_jobs_status_created_idx")
+  @@map("knowledge_ingestion_jobs")
+}
+
 model McpConnector {
   id String @id
   tenantId String @map("tenant_id")
@@ -2185,6 +2298,10 @@ model McpConnector {
   tools Json
   rateLimitPerMinute Int @default(60) @map("rate_limit_per_minute")
   status String @default("disabled")
+  name String?
+  description String?
+  rejectedReason String? @map("rejected_reason")
+  requestedBy String? @map("requested_by")
   approvedAt DateTime? @map("approved_at") @db.Timestamptz(3)
   approvedBy String? @map("approved_by")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

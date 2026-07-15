@@ -29,8 +29,10 @@ export class AiConnectionsService {
     private readonly testProviderFactory: AiConnectionTestProviderFactory = createOpenAiCompatibleChatProvider
   ) {}
 
-  list(tenantId: string): BackendEnvelope<Record<string, unknown>> {
-    return envelope("listAiConnections", tenantId, { connections: this.repository.list(tenantId).map((connection) => ({ ...publicConnection(connection), usage: this.usage.current(tenantId, connection.id) })) });
+  async list(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const connections = await this.repository.list(tenantId);
+    const withUsage = await Promise.all(connections.map(async (connection) => ({ ...publicConnection(connection), usage: await this.usage.current(tenantId, connection.id) })));
+    return envelope("listAiConnections", tenantId, { connections: withUsage });
   }
 
   async create(tenantId: string, input: AiConnectionWriteInput): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -58,7 +60,7 @@ export class AiConnectionsService {
         tenantId,
         updatedAt: now
       };
-      const connection = this.repository.save(record);
+      const connection = await this.repository.save(record);
       return envelope("createAiConnection", tenantId, { connection: publicConnection(connection), auditEvent: await this.recordAudit("ai.connection.create", tenantId, connection.id, "created") });
     } catch (error) {
       return invalid("createAiConnection", tenantId, safeMessage(error));
@@ -66,13 +68,13 @@ export class AiConnectionsService {
   }
 
   async update(tenantId: string, connectionId: string, input: AiConnectionWriteInput): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const existing = this.repository.find(tenantId, connectionId);
+    const existing = await this.repository.find(tenantId, connectionId);
     if (!existing) return notFound("updateAiConnection", tenantId, connectionId);
     const violation = validateWrite(input, false);
     if (violation) return invalid("updateAiConnection", tenantId, violation);
     try {
       const rotated = input.secret ? this.secretStore().encrypt(input.secret) : existing.secret;
-      const record = this.repository.save({
+      const record = await this.repository.save({
         ...existing,
         ...(input.baseUrl ? { baseUrl: normalizeBaseUrl(input.baseUrl) } : {}),
         ...(input.chatModel ? { chatModel: input.chatModel.trim() } : {}),
@@ -101,7 +103,7 @@ export class AiConnectionsService {
   }
 
   async test(tenantId: string, connectionId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const existing = this.repository.find(tenantId, connectionId);
+    const existing = await this.repository.find(tenantId, connectionId);
     if (!existing) return notFound("testAiConnection", tenantId, connectionId);
     const now = new Date().toISOString();
     const traceId = `trc_ai_connection_test_${randomUUID()}`;
@@ -114,25 +116,25 @@ export class AiConnectionsService {
         timeoutMs: 5_000
       });
       await provider.complete({ maxTokens: 1, messages: [{ content: "Reply with OK.", role: "user" }], temperature: 0 });
-      const record = this.repository.save({ ...existing, disabledAt: null, lastTestMessage: null, lastTestStatus: "passed", lastTestedAt: now, status: "ready", updatedAt: now });
+      const record = await this.repository.save({ ...existing, disabledAt: null, lastTestMessage: null, lastTestStatus: "passed", lastTestedAt: now, status: "ready", updatedAt: now });
       return envelope("testAiConnection", tenantId, { auditEvent: await this.recordAudit("ai.connection.test", tenantId, record.id, "passed", traceId), connection: publicConnection(record), test: { diagnostic: { code: "ok", traceId }, status: "passed" } }, "ok", null, traceId);
     } catch (error) {
       const diagnostic = testDiagnostic(error);
-      const record = this.repository.save({ ...existing, lastTestMessage: diagnostic, lastTestStatus: "failed", lastTestedAt: now, status: "error", updatedAt: now });
+      const record = await this.repository.save({ ...existing, lastTestMessage: diagnostic, lastTestStatus: "failed", lastTestedAt: now, status: "error", updatedAt: now });
       return envelope("testAiConnection", tenantId, { auditEvent: await this.recordAudit("ai.connection.test", tenantId, record.id, diagnostic, traceId), connection: publicConnection(record), test: { diagnostic: { code: diagnostic, traceId }, status: "failed" } }, "invalid", { code: "ai_connection_test_failed", message: "AI connection test failed. Check the diagnostic trace." }, traceId);
     }
   }
 
   async disable(tenantId: string, connectionId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const existing = this.repository.find(tenantId, connectionId);
+    const existing = await this.repository.find(tenantId, connectionId);
     if (!existing) return notFound("disableAiConnection", tenantId, connectionId);
     const now = new Date().toISOString();
-    const record = this.repository.save({ ...existing, disabledAt: now, status: "disabled", updatedAt: now });
+    const record = await this.repository.save({ ...existing, disabledAt: now, status: "disabled", updatedAt: now });
     return envelope("disableAiConnection", tenantId, { connection: publicConnection(record), auditEvent: await this.recordAudit("ai.connection.disable", tenantId, record.id, "disabled") });
   }
 
   async remove(tenantId: string, connectionId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    if (!this.repository.remove(tenantId, connectionId)) return notFound("deleteAiConnection", tenantId, connectionId);
+    if (!(await this.repository.remove(tenantId, connectionId))) return notFound("deleteAiConnection", tenantId, connectionId);
     return envelope("deleteAiConnection", tenantId, { auditEvent: await this.recordAudit("ai.connection.delete", tenantId, connectionId, "deleted"), connectionId, deleted: true });
   }
 

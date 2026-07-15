@@ -164,13 +164,12 @@ describe("routing worker runtime contracts", () => {
     const root = resolve(import.meta.dirname, "../..");
     const packageJson = readFileSync(resolve(root, "backend/package.json"), "utf8");
     const compose = readFileSync(resolve(root, "docker-compose.yml"), "utf8");
-    const pilot = readFileSync(resolve(root, "docker-compose.pilot.yml"), "utf8");
 
     assert.match(packageJson, /start:sla-timer-worker/);
     assert.match(packageJson, /start:rescue-return-worker/);
     assert.match(compose, /sla-timer-worker:[\s\S]*sla-timer\.main\.js[\s\S]*\/health/);
     assert.match(compose, /rescue-return-worker:[\s\S]*rescue-return\.main\.js[\s\S]*\/health/);
-    assert.match(pilot, /sla-timer-worker:[\s\S]*ROUTING_REPOSITORY: prisma/);
-    assert.match(pilot, /rescue-return-worker:[\s\S]*ROUTING_REPOSITORY: prisma/);
+    assert.match(compose, /sla-timer-worker:[\s\S]*ROUTING_REPOSITORY: prisma/);
+    assert.match(compose, /rescue-return-worker:[\s\S]*ROUTING_REPOSITORY: prisma/);
   });
 });

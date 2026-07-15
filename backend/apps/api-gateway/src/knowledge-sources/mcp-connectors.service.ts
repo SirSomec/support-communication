@@ -12,7 +12,7 @@ const SERVICE = "mcpConnectorsService";
 export class McpConnectorsService {
   constructor(private readonly repository = McpConnectorRepository.default(), private readonly identity = IdentityRepository.default(), private readonly environment: NodeJS.ProcessEnv = process.env) {}
 
-  list(tenantId: string): BackendEnvelope<Record<string, unknown>> { return ok("listMcpConnectors", tenantId, { connectors: this.repository.list(tenantId) }); }
+  async list(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> { return ok("listMcpConnectors", tenantId, { connectors: await this.repository.list(tenantId) }); }
 
   /**
    * BAI-831: заявка тенант-администратора. Коннектор создаётся неодобренным и
@@ -23,7 +23,7 @@ export class McpConnectorsService {
     const now = new Date().toISOString(); const id = `mcp_${randomUUID()}`;
     const candidate = this.build({ approvedAt: null, approvedBy: null, createdAt: now, id, requestedBy, status: "disabled", tenantId, updatedAt: now }, input);
     if (typeof candidate === "string") return invalid("requestMcpConnector", tenantId, candidate);
-    const record = this.repository.save({ ...candidate, name: input.name, description: input.description });
+    const record = await this.repository.save({ ...candidate, name: input.name, description: input.description });
     return ok("requestMcpConnector", tenantId, { auditEvent: await this.audit("mcp.connector.request", record, { id: requestedBy, name: requestedBy }, "requested"), connector: record });
   }
 
@@ -31,29 +31,29 @@ export class McpConnectorsService {
     const now = new Date().toISOString(); const id = `mcp_${randomUUID()}`;
     const candidate = this.build({ approvedAt: null, approvedBy: null, createdAt: now, id, status: "disabled", tenantId, updatedAt: now }, input);
     if (typeof candidate === "string") return invalid("createMcpConnector", tenantId, candidate);
-    const record = this.repository.save(candidate);
+    const record = await this.repository.save(candidate);
     return ok("createMcpConnector", tenantId, { auditEvent: await this.audit("mcp.connector.create", record, actor, "created"), connector: record });
   }
 
   async update(tenantId: string, id: string, input: McpConnectorWriteInput, actor: ServiceAdminActor): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const prior = this.repository.find(tenantId, id); if (!prior) return missing("updateMcpConnector", tenantId, id);
+    const prior = await this.repository.find(tenantId, id); if (!prior) return missing("updateMcpConnector", tenantId, id);
     const candidate = this.build({ ...prior, approvedAt: null, approvedBy: null, status: "disabled", updatedAt: new Date().toISOString() }, input);
     if (typeof candidate === "string") return invalid("updateMcpConnector", tenantId, candidate);
-    const record = this.repository.save(candidate);
+    const record = await this.repository.save(candidate);
     return ok("updateMcpConnector", tenantId, { auditEvent: await this.audit("mcp.connector.update", record, actor, "approval_reset"), connector: record });
   }
 
   async approve(tenantId: string, id: string, actor: ServiceAdminActor): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const prior = this.repository.find(tenantId, id); if (!prior) return missing("approveMcpConnector", tenantId, id);
-    const record = this.repository.save({ ...prior, approvedAt: new Date().toISOString(), approvedBy: actor.id, updatedAt: new Date().toISOString() });
+    const prior = await this.repository.find(tenantId, id); if (!prior) return missing("approveMcpConnector", tenantId, id);
+    const record = await this.repository.save({ ...prior, approvedAt: new Date().toISOString(), approvedBy: actor.id, updatedAt: new Date().toISOString() });
     return ok("approveMcpConnector", tenantId, { auditEvent: await this.audit("mcp.connector.approve", record, actor, "approved"), connector: record });
   }
 
   async setEnabled(tenantId: string, id: string, enabled: boolean, actor: ServiceAdminActor): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const operation = enabled ? "enableMcpConnector" : "disableMcpConnector"; const prior = this.repository.find(tenantId, id);
+    const operation = enabled ? "enableMcpConnector" : "disableMcpConnector"; const prior = await this.repository.find(tenantId, id);
     if (!prior) return missing(operation, tenantId, id);
     if (enabled && !prior.approvedAt) return invalid(operation, tenantId, "Connector must be approved before it can be enabled.");
-    const record = this.repository.save({ ...prior, status: enabled ? "enabled" : "disabled", updatedAt: new Date().toISOString() });
+    const record = await this.repository.save({ ...prior, status: enabled ? "enabled" : "disabled", updatedAt: new Date().toISOString() });
     return ok(operation, tenantId, { auditEvent: await this.audit(`mcp.connector.${enabled ? "enable" : "disable"}`, record, actor, enabled ? "enabled" : "disabled"), connector: record });
   }
 

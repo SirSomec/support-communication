@@ -170,15 +170,15 @@ export const featureFlags: FeatureFlag[] = [
   {
     id: "flag-ai-agents-v1",
     key: "ai_agents_v1",
-    name: "AI agents v1 (pilot)",
+    name: "AI agents v1",
     status: "on",
     environment: "production",
     scope: "tenant",
     rollout: 0,
     owner: "AI team",
     segments: [],
-    enabledTenantIds: ["tenant-pilot-001"],
-    variants: [{ id: "pilot", weight: 100 }],
+    enabledTenantIds: ["tenant-local-001"],
+    variants: [{ id: "rollout", weight: 100 }],
     killSwitch: true,
     updatedAt: "2026-07-12T00:00:00.000Z"
   },

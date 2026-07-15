@@ -22,10 +22,12 @@ class TenantOperatorDialogContractTestModule {}
 
 describe("tenant operator dialog and realtime contracts", () => {
   const apps: INestApplication[] = [];
-  const previousPilotQueryToken = process.env.PILOT_SSE_QUERY_TOKEN;
+  const previousRealtimeQueryToken = process.env.REALTIME_SSE_QUERY_TOKEN;
+  const previousLegacyQueryToken = process.env.PILOT_SSE_QUERY_TOKEN;
 
   afterEach(async () => {
-    process.env.PILOT_SSE_QUERY_TOKEN = previousPilotQueryToken;
+    process.env.REALTIME_SSE_QUERY_TOKEN = previousRealtimeQueryToken;
+    process.env.PILOT_SSE_QUERY_TOKEN = previousLegacyQueryToken;
 
     while (apps.length > 0) {
       const app = apps.pop();
@@ -103,7 +105,7 @@ describe("tenant operator dialog and realtime contracts", () => {
     });
     assert.equal(demoRealtime.status, 200);
 
-    process.env.PILOT_SSE_QUERY_TOKEN = "false";
+    process.env.REALTIME_SSE_QUERY_TOKEN = "false";
     const deniedQueryStream = await fetch(`${baseUrl}/api/v1/realtime/events/stream?accessToken=${encodeURIComponent(accessToken)}`, {
       headers: {
         accept: "text/event-stream"
@@ -111,7 +113,7 @@ describe("tenant operator dialog and realtime contracts", () => {
     });
     assert.equal(deniedQueryStream.status, 401);
 
-    process.env.PILOT_SSE_QUERY_TOKEN = "true";
+    process.env.REALTIME_SSE_QUERY_TOKEN = "true";
     const allowedQueryStream = await fetch(`${baseUrl}/api/v1/realtime/events/stream?accessToken=${encodeURIComponent(accessToken)}`, {
       headers: {
         accept: "text/event-stream"
@@ -121,6 +123,17 @@ describe("tenant operator dialog and realtime contracts", () => {
     const allowedQueryStreamContentType = String(allowedQueryStream.headers.get("content-type") ?? "");
     assert.equal(allowedQueryStreamContentType.includes("text/event-stream"), true, allowedQueryStreamContentType);
     allowedQueryStream.body?.cancel();
+
+    // Устаревшее имя PILOT_SSE_QUERY_TOKEN поддерживается один релиз.
+    delete process.env.REALTIME_SSE_QUERY_TOKEN;
+    process.env.PILOT_SSE_QUERY_TOKEN = "true";
+    const legacyQueryStream = await fetch(`${baseUrl}/api/v1/realtime/events/stream?accessToken=${encodeURIComponent(accessToken)}`, {
+      headers: {
+        accept: "text/event-stream"
+      }
+    });
+    assert.equal(legacyQueryStream.status, 200);
+    legacyQueryStream.body?.cancel();
   });
 });
 
@@ -136,7 +149,8 @@ async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: st
   process.env.S3_SECRET_KEY = "test-secret-key";
   process.env.DEMO_SERVICE_ADMIN_KEY = "dev-service-admin-key-0001";
   process.env.PILOT_SKIP_MFA = "true";
-  process.env.PILOT_SSE_QUERY_TOKEN = "false";
+  process.env.REALTIME_SSE_QUERY_TOKEN = "false";
+  delete process.env.PILOT_SSE_QUERY_TOKEN;
 
   const identityRepository = IdentityRepository.inMemory();
   await seedPilotOperator(identityRepository);

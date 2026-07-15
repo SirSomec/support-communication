@@ -414,6 +414,135 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     }
   });
 
+  it("creates public API keys with one-time raw secret and hash-only persistence", async () => {
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
+    const integrations = new IntegrationService(repository);
+
+    const invalid = await integrations.createPublicApiKey({ name: "   " });
+    assert.equal(invalid.status, "invalid");
+    assert.equal(invalid.error?.code, "api_key_name_required");
+
+    const badEnvironment = await integrations.createPublicApiKey({ environment: "sandbox", name: "CRM key" });
+    assert.equal(badEnvironment.status, "invalid");
+    assert.equal(badEnvironment.error?.code, "api_key_environment_invalid");
+
+    const created = await integrations.createPublicApiKey({ environment: "stage", name: "CRM key", scopes: ["clients:identify"] });
+    assert.equal(created.status, "ok");
+    assert.equal(created.data.rawKeyShownOnce, true);
+    assert.match(created.data.rawKey, /^sk_test_[0-9a-f]{36}$/);
+    assert.equal(created.data.key.name, "CRM key");
+    assert.equal(created.data.key.env, "stage");
+    assert.equal(created.data.key.status, "Active");
+    assert.ok(created.data.key.keyPreview.includes("****"));
+    assert.match(created.data.auditId, /^evt_key_/);
+
+    const state = repository.readState();
+    const stored = state.publicApiKeys.find((key) => key.keyId === created.data.key.id);
+    assert.ok(stored);
+    assert.equal(JSON.stringify(state).includes(created.data.rawKey), false);
+    assert.equal(state.publicApiKeyRevealStates.find((item) => item.keyId === stored.keyId)?.status, "consumed");
+    assert.ok(state.apiKeyRotationAuditEvents.some((event) => event.action === "public_api_key.created" && event.keyId === stored.keyId));
+
+    const workspace = await integrations.fetchIntegrationWorkspace();
+    const listed = workspace.data.apiEnvironmentKeys.find((key) => key.id === created.data.key.id);
+    assert.ok(listed);
+    assert.equal("rawKey" in listed, false);
+    assert.ok(listed.keyPreview.includes("****"));
+  });
+
+  it("revokes created and fixture public API keys with immutable audit evidence", async () => {
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
+    const integrations = new IntegrationService(repository);
+
+    const missing = await integrations.revokePublicApiKey("missing-key");
+    assert.equal(missing.status, "not_found");
+    assert.equal(missing.error?.code, "api_key_not_found");
+
+    const created = await integrations.createPublicApiKey({ name: "Revocable key" });
+    const revoked = await integrations.revokePublicApiKey(created.data.key.id);
+    assert.equal(revoked.status, "ok");
+    assert.equal(revoked.data.status, "revoked");
+    assert.equal(revoked.data.rawKeyShownOnce, false);
+    assert.match(revoked.data.auditId, /^evt_key_/);
+
+    const activeKeys = await repository.listActiveKeys();
+    assert.equal(activeKeys.some((key) => key.keyId === created.data.key.id), false);
+
+    const fixtureRevoked = await integrations.revokePublicApiKey("stage-key");
+    assert.equal(fixtureRevoked.status, "ok");
+
+    const workspace = await integrations.fetchIntegrationWorkspace();
+    const createdView = workspace.data.apiEnvironmentKeys.find((key) => key.id === created.data.key.id);
+    const stageView = workspace.data.apiEnvironmentKeys.find((key) => key.id === "stage-key");
+    assert.equal(createdView?.status, "Revoked");
+    assert.equal(stageView?.status, "Revoked");
+    assert.ok(repository.readState().apiKeyRotationAuditEvents.some((event) => event.action === "public_api_key.revoked" && event.keyId === "stage-key"));
+  });
+
+  it("manages webhook endpoints with validation, seed overrides and tombstones", async () => {
+    const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
+
+    const noName = await integrations.createWebhookEndpoint({ url: "https://crm.example.test/hooks" });
+    assert.equal(noName.status, "invalid");
+    assert.equal(noName.error?.code, "webhook_endpoint_name_required");
+
+    const badUrl = await integrations.createWebhookEndpoint({ name: "CRM hooks", url: "ftp://crm.example.test" });
+    assert.equal(badUrl.status, "invalid");
+    assert.equal(badUrl.error?.code, "webhook_endpoint_url_invalid");
+
+    const created = await integrations.createWebhookEndpoint({ channel: "SDK", name: "CRM hooks", url: "https://crm.example.test/hooks" });
+    assert.equal(created.status, "ok");
+    assert.match(created.data.endpoint.id, /^wh_/);
+    assert.equal(created.data.endpoint.signature, "HMAC SHA-256");
+
+    const missing = await integrations.updateWebhookEndpoint("missing-endpoint", { name: "Ghost" });
+    assert.equal(missing.status, "not_found");
+    assert.equal(missing.error?.code, "webhook_endpoint_not_found");
+
+    const badStatus = await integrations.updateWebhookEndpoint(created.data.endpoint.id, { status: "paused" });
+    assert.equal(badStatus.status, "invalid");
+    assert.equal(badStatus.error?.code, "webhook_endpoint_status_invalid");
+
+    const disabled = await integrations.updateWebhookEndpoint(created.data.endpoint.id, { status: "disabled" });
+    assert.equal(disabled.status, "ok");
+    assert.equal(disabled.data.endpoint.status, "Отключён");
+
+    const seedOverride = await integrations.updateWebhookEndpoint("vk-inbound", { url: "https://api.support.local/webhooks/vk-2" });
+    assert.equal(seedOverride.status, "ok");
+    assert.equal(seedOverride.data.endpoint.url, "https://api.support.local/webhooks/vk-2");
+
+    const deleted = await integrations.deleteWebhookEndpoint(created.data.endpoint.id);
+    assert.equal(deleted.status, "ok");
+    assert.equal(deleted.data.deleted, true);
+
+    const workspace = await integrations.fetchIntegrationWorkspace();
+    const endpointIds = workspace.data.webhookEndpoints.map((endpoint) => endpoint.id);
+    assert.equal(endpointIds.includes(created.data.endpoint.id), false);
+    const vkEndpoint = workspace.data.webhookEndpoints.find((endpoint) => endpoint.id === "vk-inbound");
+    assert.equal(vkEndpoint?.url, "https://api.support.local/webhooks/vk-2");
+    assert.ok(workspace.data.webhookEndpoints.every((endpoint) => endpoint.signature));
+  });
+
+  it("persists webhook endpoint records in the JSON store across reopen", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "integration-webhook-endpoints-"));
+    try {
+      const filePath = join(workspace, "integration-webhook-endpoints.json");
+      const integrations = new IntegrationService(IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() }));
+
+      const created = await integrations.createWebhookEndpoint({ name: "Durable hooks", url: "https://durable.example.test/hooks" });
+      await integrations.deleteWebhookEndpoint("vk-inbound");
+
+      const reopened = new IntegrationService(IntegrationRepository.open({ filePath }));
+      const reopenedWorkspace = await reopened.fetchIntegrationWorkspace();
+      const endpointIds = reopenedWorkspace.data.webhookEndpoints.map((endpoint) => endpoint.id);
+
+      assert.equal(endpointIds.includes(created.data.endpoint.id), true);
+      assert.equal(endpointIds.includes("vk-inbound"), false);
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+    }
+  });
+
   it("replays webhook deliveries idempotently while preserving original trace id", async () => {
     const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 
@@ -1299,7 +1428,6 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     const backendPackageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
     const releaseChecklist = readFileSync(new URL("../scripts/release-checklist.mjs", import.meta.url), "utf8");
     const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
-    const pilotCompose = readFileSync(new URL("../../docker-compose.pilot.yml", import.meta.url), "utf8");
     const composeHealthCheck = readFileSync(new URL("../../scripts/compose-health-check.mjs", import.meta.url), "utf8");
     const smokeUrl = new URL("../scripts/webhook-delivery-worker-smoke.mjs", import.meta.url);
 
@@ -1315,8 +1443,8 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.match(readFileSync(smokeUrl, "utf8"), /createServer[\s\S]*webhook-delivery\.main\.js[\s\S]*webhook-delivery/);
     assert.match(releaseChecklist, /script: "webhook:worker:once"/);
     assert.match(compose, /webhook-delivery-worker:[\s\S]*command: \["node", "apps\/api-gateway\/dist\/integrations\/webhook-delivery\.main\.js"\]/);
-    assert.match(compose, /webhook-delivery-worker:[\s\S]*WEBHOOK_DELIVERY_PROVIDER_MODE: local/);
-    assert.match(pilotCompose, /webhook-delivery-worker:[\s\S]*INTEGRATION_REPOSITORY: prisma/);
+    assert.match(compose, /webhook-delivery-worker:[\s\S]*WEBHOOK_DELIVERY_PROVIDER_MODE: \$\{WEBHOOK_DELIVERY_PROVIDER_MODE:-http\}/);
+    assert.match(compose, /webhook-delivery-worker:[\s\S]*INTEGRATION_REPOSITORY: prisma/);
     assert.match(composeHealthCheck, /\["webhook-delivery-worker", \{\}\]/);
   });
 

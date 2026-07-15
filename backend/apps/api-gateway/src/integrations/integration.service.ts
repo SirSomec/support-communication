@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
 import type { ApiEnvironmentKey, ChannelDetail, IntegrationConnection, SecuritySession, WebhookDelivery } from "./integration.types.js";
@@ -8,9 +8,12 @@ import {
   type ChannelConnectionStoredRecord,
   type IntegrationWorkspaceCatalog,
   type ProviderConnectionCredentialRecord,
+  type PublicApiKeyStoredRecord,
   type WebhookDeliveryJournalEntry,
+  type WebhookEndpointStoredRecord,
   type WebhookReplayAuditEvent
 } from "./integration.repository.js";
+import type { PublicApiEnvironment } from "./public-api-auth.js";
 import {
   disableTelegramConnectionRecord,
   saveTelegramConnectionRecord,
@@ -23,6 +26,9 @@ import { ProviderConnectionCrypto } from "./provider-connection-crypto.js";
 
 const INTEGRATION_SERVICE = "integrationService";
 const DEFAULT_FIXTURE_TENANT_ID = "tenant-volga";
+const WEBHOOK_ENDPOINT_STATUS_ACTIVE = "Активен";
+const WEBHOOK_ENDPOINT_STATUS_DISABLED = "Отключён";
+const DEFAULT_PUBLIC_API_KEY_SCOPES = ["clients:identify", "conversations:write"];
 
 interface ChannelTestPayload {
   channelId?: string;
@@ -53,6 +59,19 @@ interface ChannelTypeStatusMutationPayload {
 interface ReplayPayload {
   deliveryId?: string;
   idempotencyKey?: string;
+}
+
+interface PublicApiKeyCreatePayload {
+  environment?: string;
+  name?: string;
+  scopes?: string[];
+}
+
+interface WebhookEndpointMutationPayload {
+  channel?: string;
+  name?: string;
+  status?: string;
+  url?: string;
 }
 
 interface IntegrationServiceOptions {
@@ -97,6 +116,8 @@ export class IntegrationService {
   async fetchIntegrationWorkspace(): Promise<BackendEnvelope<Record<string, unknown>>> {
     const webhookDeliveryJournal = await this.integrationRepository.listWebhookDeliveryJournalAsync();
     const securitySessions = overlaySecuritySessions(this.sessions, await this.integrationRepository.listSecuritySessionsAsync());
+    const storedApiKeys = await this.integrationRepository.listPublicApiKeyRecords();
+    const endpointRecords = await this.integrationRepository.listWebhookEndpointRecords();
 
     return createEnvelope({
       service: INTEGRATION_SERVICE,
@@ -106,8 +127,8 @@ export class IntegrationService {
       meta: apiMeta(),
       data: {
         channelDetails: clone(this.channels),
-        apiEnvironmentKeys: this.apiKeys.map(maskApiKey),
-        webhookEndpoints: clone(this.workspace.webhookEndpoints),
+        apiEnvironmentKeys: buildApiKeyReadSide(this.apiKeys, storedApiKeys),
+        webhookEndpoints: buildWebhookEndpointReadSide(this.workspace.webhookEndpoints, endpointRecords),
         webhookDeliveryLog: buildWebhookDeliveryReadSide(this.deliveries, webhookDeliveryJournal),
         webhookDeadLetters: buildWebhookDeadLetterReadSide(webhookDeliveryJournal),
         apiChangelog: clone(this.workspace.apiChangelog),
@@ -636,6 +657,235 @@ export class IntegrationService {
     });
   }
 
+  async createPublicApiKey(payload: PublicApiKeyCreatePayload = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const name = String(payload.name ?? "").trim();
+    if (!name) {
+      return invalidEnvelope("createPublicApiKey", "api_key_name_required", "API key name is required.", { field: "name" });
+    }
+
+    const environment = normalizePublicApiEnvironment(payload.environment);
+    if (!environment) {
+      return invalidEnvelope("createPublicApiKey", "api_key_environment_invalid", "API key environment must be production or stage.", { field: "environment" });
+    }
+
+    const scopes = normalizePublicApiKeyScopes(payload.scopes);
+    const createdAt = new Date().toISOString();
+    const keyId = `key_${randomUUID()}`;
+    const rawSecret = `${environment === "production" ? "sk_live" : "sk_test"}_${randomBytes(18).toString("hex")}`;
+    const saved = await this.integrationRepository.savePublicApiKey({
+      createdAt,
+      environment,
+      keyId,
+      name,
+      owner: "Администратор",
+      rawSecret,
+      scopes,
+      status: "active",
+      tenantId: DEFAULT_FIXTURE_TENANT_ID
+    });
+    // Секрет показывается один раз в этом ответе — reveal-состояние сразу гасим.
+    await this.integrationRepository.consumePublicApiKeyReveal({ consumedAt: createdAt, keyId });
+    const auditId = makeAuditId("key");
+    await this.integrationRepository.saveApiKeyRotationAuditEvent({
+      action: "public_api_key.created",
+      at: createdAt,
+      auditId,
+      environment,
+      immutable: true,
+      keyId,
+      keyPreview: saved.keyPreview,
+      rotationId: makeQueueId("key_create"),
+      status: "created"
+    });
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "createPublicApiKey",
+      traceId: integrationTraceId("createPublicApiKey"),
+      meta: apiMeta({ keyId }),
+      data: {
+        auditId,
+        key: toApiEnvironmentKeyView(saved),
+        rawKey: rawSecret,
+        rawKeyShownOnce: true
+      }
+    });
+  }
+
+  async revokePublicApiKey(keyId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const fixture = this.findApiKey(keyId);
+    if (fixture) {
+      await this.integrationRepository.ensurePublicApiKeyReference({
+        createdAt: fixtureKeyCreatedAt(fixture),
+        environment: fixture.env,
+        keyId,
+        keyPreview: fixture.keyPreview,
+        name: fixture.name,
+        owner: fixture.owner,
+        scopes: fixture.scopes,
+        status: fixtureKeyStatus(fixture),
+        tenantId: DEFAULT_FIXTURE_TENANT_ID
+      });
+    }
+
+    const updated = await this.integrationRepository.updatePublicApiKeyStatus({ keyId, status: "revoked" });
+    if (!updated) {
+      return notFoundEnvelope("revokePublicApiKey", "api_key_not_found", `API key ${keyId} was not found.`, { keyId });
+    }
+
+    const auditId = makeAuditId("key");
+    await this.integrationRepository.saveApiKeyRotationAuditEvent({
+      action: "public_api_key.revoked",
+      at: new Date().toISOString(),
+      auditId,
+      environment: updated.environment,
+      immutable: true,
+      keyId,
+      keyPreview: updated.keyPreview,
+      rotationId: makeQueueId("key_revoke"),
+      status: "revoked"
+    });
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "revokePublicApiKey",
+      traceId: integrationTraceId("revokePublicApiKey"),
+      meta: apiMeta({ keyId }),
+      data: {
+        auditId,
+        keyId,
+        rawKeyShownOnce: false,
+        status: "revoked"
+      }
+    });
+  }
+
+  async createWebhookEndpoint(payload: WebhookEndpointMutationPayload = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const name = String(payload.name ?? "").trim();
+    if (!name) {
+      return invalidEnvelope("createWebhookEndpoint", "webhook_endpoint_name_required", "Webhook endpoint name is required.", { field: "name" });
+    }
+
+    const url = String(payload.url ?? "").trim();
+    if (!isValidWebhookEndpointUrl(url)) {
+      return invalidEnvelope("createWebhookEndpoint", "webhook_endpoint_url_invalid", "Webhook endpoint URL must be a valid http(s) URL.", { field: "url" });
+    }
+
+    const now = new Date().toISOString();
+    const record = await this.integrationRepository.saveWebhookEndpointRecord({
+      channel: String(payload.channel ?? "").trim() || "SDK",
+      createdAt: now,
+      custom: true,
+      deleted: false,
+      failureRate: "0%",
+      id: makeQueueId("wh"),
+      lastDelivery: "—",
+      name,
+      retries: "3 попытки / 30 сек",
+      signature: "HMAC SHA-256",
+      status: WEBHOOK_ENDPOINT_STATUS_ACTIVE,
+      updatedAt: now,
+      url
+    });
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "createWebhookEndpoint",
+      traceId: integrationTraceId("createWebhookEndpoint"),
+      meta: apiMeta({ endpointId: record.id }),
+      data: { endpoint: toWebhookEndpointView(record) }
+    });
+  }
+
+  async updateWebhookEndpoint(endpointId: string, payload: WebhookEndpointMutationPayload = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const current = await this.resolveWebhookEndpointView(endpointId);
+    if (!current) {
+      return notFoundEnvelope("updateWebhookEndpoint", "webhook_endpoint_not_found", `Webhook endpoint ${endpointId} was not found.`, { endpointId });
+    }
+
+    const name = payload.name === undefined ? String(current.name ?? "") : String(payload.name).trim();
+    if (!name) {
+      return invalidEnvelope("updateWebhookEndpoint", "webhook_endpoint_name_required", "Webhook endpoint name is required.", { field: "name" });
+    }
+
+    const url = payload.url === undefined ? String(current.url ?? "") : String(payload.url).trim();
+    if (!isValidWebhookEndpointUrl(url)) {
+      return invalidEnvelope("updateWebhookEndpoint", "webhook_endpoint_url_invalid", "Webhook endpoint URL must be a valid http(s) URL.", { field: "url" });
+    }
+
+    const status = payload.status === undefined
+      ? String(current.status ?? WEBHOOK_ENDPOINT_STATUS_ACTIVE)
+      : normalizeWebhookEndpointStatus(payload.status);
+    if (!status) {
+      return invalidEnvelope("updateWebhookEndpoint", "webhook_endpoint_status_invalid", "Webhook endpoint status must be active or disabled.", { field: "status" });
+    }
+
+    const existingRecord = (await this.integrationRepository.listWebhookEndpointRecords()).find((record) => record.id === endpointId);
+    const now = new Date().toISOString();
+    const record = await this.integrationRepository.saveWebhookEndpointRecord({
+      channel: String(current.channel ?? "SDK"),
+      createdAt: existingRecord?.createdAt ?? now,
+      custom: existingRecord?.custom ?? false,
+      deleted: false,
+      failureRate: String(current.failureRate ?? "0%"),
+      id: endpointId,
+      lastDelivery: String(current.lastDelivery ?? "—"),
+      name,
+      retries: String(current.retries ?? "3 попытки / 30 сек"),
+      signature: String(current.signature ?? "HMAC SHA-256"),
+      status,
+      updatedAt: now,
+      url
+    });
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "updateWebhookEndpoint",
+      traceId: integrationTraceId("updateWebhookEndpoint"),
+      meta: apiMeta({ endpointId }),
+      data: { endpoint: toWebhookEndpointView(record) }
+    });
+  }
+
+  async deleteWebhookEndpoint(endpointId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const current = await this.resolveWebhookEndpointView(endpointId);
+    if (!current) {
+      return notFoundEnvelope("deleteWebhookEndpoint", "webhook_endpoint_not_found", `Webhook endpoint ${endpointId} was not found.`, { endpointId });
+    }
+
+    const existingRecord = (await this.integrationRepository.listWebhookEndpointRecords()).find((record) => record.id === endpointId);
+    const now = new Date().toISOString();
+    await this.integrationRepository.saveWebhookEndpointRecord({
+      channel: String(current.channel ?? "SDK"),
+      createdAt: existingRecord?.createdAt ?? now,
+      custom: existingRecord?.custom ?? false,
+      deleted: true,
+      failureRate: String(current.failureRate ?? "0%"),
+      id: endpointId,
+      lastDelivery: String(current.lastDelivery ?? "—"),
+      name: String(current.name ?? endpointId),
+      retries: String(current.retries ?? "3 попытки / 30 сек"),
+      signature: String(current.signature ?? "HMAC SHA-256"),
+      status: String(current.status ?? WEBHOOK_ENDPOINT_STATUS_ACTIVE),
+      updatedAt: now,
+      url: String(current.url ?? "")
+    });
+
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "deleteWebhookEndpoint",
+      traceId: integrationTraceId("deleteWebhookEndpoint"),
+      meta: apiMeta({ endpointId }),
+      data: { deleted: true, endpointId }
+    });
+  }
+
+  private async resolveWebhookEndpointView(endpointId: string): Promise<Record<string, unknown> | undefined> {
+    const merged = buildWebhookEndpointReadSide(this.workspace.webhookEndpoints, await this.integrationRepository.listWebhookEndpointRecords());
+
+    return merged.find((endpoint) => String(endpoint.id) === endpointId);
+  }
+
   async replayWebhookDelivery(payload: ReplayPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
     const delivery = await this.findDelivery(payload.deliveryId ?? "");
 
@@ -1099,6 +1349,112 @@ function webhookReplayTransition(delivery: WebhookDelivery): WebhookReplayAuditE
 
 function maskApiKey(key: ApiEnvironmentKey): ApiEnvironmentKey {
   return clone(key);
+}
+
+function buildApiKeyReadSide(fixtures: ApiEnvironmentKey[], stored: PublicApiKeyStoredRecord[]): ApiEnvironmentKey[] {
+  const fixtureIds = new Set(fixtures.map((key) => key.id));
+  const overlays = new Map(stored.map((key) => [key.keyId, key]));
+  const fixtureView = fixtures.map((key) => {
+    const overlay = overlays.get(key.id);
+
+    return maskApiKey(overlay?.status === "revoked" ? { ...key, status: "Revoked" } : key);
+  });
+  const storedView = stored
+    .filter((key) => !fixtureIds.has(key.keyId))
+    .map(toApiEnvironmentKeyView);
+
+  return [...fixtureView, ...storedView];
+}
+
+function toApiEnvironmentKeyView(key: PublicApiKeyStoredRecord): ApiEnvironmentKey {
+  return {
+    env: key.environment,
+    id: key.keyId,
+    keyPreview: key.keyPreview,
+    lastRotated: String(key.createdAt ?? "").slice(0, 10),
+    name: key.name,
+    owner: key.owner,
+    protection: "Bearer + SHA-256 hash",
+    scopes: clone(key.scopes),
+    status: key.status === "revoked" ? "Revoked" : "Active"
+  };
+}
+
+function buildWebhookEndpointReadSide(
+  seedEndpoints: Array<Record<string, unknown>>,
+  records: WebhookEndpointStoredRecord[]
+): Array<Record<string, unknown>> {
+  const overrides = new Map(records.map((record) => [record.id, record]));
+  const seedIds = new Set(seedEndpoints.map((endpoint) => String(endpoint.id)));
+  const seedView: Array<Record<string, unknown>> = [];
+  for (const endpoint of seedEndpoints) {
+    const override = overrides.get(String(endpoint.id));
+    if (!override) {
+      seedView.push(clone(endpoint));
+      continue;
+    }
+
+    if (!override.deleted) {
+      seedView.push({ ...clone(endpoint), name: override.name, status: override.status, url: override.url });
+    }
+  }
+
+  const customView = records
+    .filter((record) => record.custom && !record.deleted && !seedIds.has(record.id))
+    .map(toWebhookEndpointView);
+
+  return [...seedView, ...customView];
+}
+
+function toWebhookEndpointView(record: WebhookEndpointStoredRecord): Record<string, unknown> {
+  return {
+    channel: record.channel,
+    failureRate: record.failureRate,
+    id: record.id,
+    lastDelivery: record.lastDelivery,
+    name: record.name,
+    retries: record.retries,
+    signature: record.signature,
+    status: record.status,
+    url: record.url
+  };
+}
+
+function isValidWebhookEndpointUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function normalizePublicApiEnvironment(environment?: string): PublicApiEnvironment | undefined {
+  const normalized = String(environment ?? "stage").trim().toLowerCase();
+
+  return normalized === "production" || normalized === "stage" ? normalized : undefined;
+}
+
+function normalizePublicApiKeyScopes(scopes?: string[]): string[] {
+  const normalized = (Array.isArray(scopes) ? scopes : [])
+    .map((scope) => String(scope ?? "").trim())
+    .filter((scope) => scope.length > 0);
+
+  return normalized.length > 0 ? [...new Set(normalized)] : [...DEFAULT_PUBLIC_API_KEY_SCOPES];
+}
+
+function normalizeWebhookEndpointStatus(status?: string): string | undefined {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  if (normalized === "active" || normalized === WEBHOOK_ENDPOINT_STATUS_ACTIVE.toLowerCase()) {
+    return WEBHOOK_ENDPOINT_STATUS_ACTIVE;
+  }
+
+  if (normalized === "disabled" || normalized === WEBHOOK_ENDPOINT_STATUS_DISABLED.toLowerCase()) {
+    return WEBHOOK_ENDPOINT_STATUS_DISABLED;
+  }
+
+  return undefined;
 }
 
 function maskChannelConnection(connection: ChannelConnectionStoredRecord): Record<string, unknown> {

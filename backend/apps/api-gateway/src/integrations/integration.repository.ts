@@ -15,7 +15,7 @@ export interface ApiKeyRotationJob {
 }
 
 export interface ApiKeyRotationAuditEvent {
-  action: "public_api_key.rotation_queued";
+  action: "public_api_key.created" | "public_api_key.revoked" | "public_api_key.rotation_queued";
   at: string;
   auditId: string;
   environment: string;
@@ -135,6 +135,46 @@ export interface PublicApiKeyRevealResult {
   keyPreview?: string;
   rawSecret?: string;
   status: "consumed" | "not_found" | "revealed";
+}
+
+export interface UpdatePublicApiKeyStatusInput {
+  keyId: string;
+  status: PublicApiKeyRecord["status"];
+}
+
+// Пользовательские webhook-эндпоинты и правки/удаления сидовых.
+// custom=false означает override сидового эндпоинта из workspace-каталога;
+// deleted=true — tombstone, скрывающий эндпоинт из выдачи workspace.
+export interface WebhookEndpointStoredRecord {
+  channel: string;
+  createdAt: string;
+  custom: boolean;
+  deleted: boolean;
+  failureRate: string;
+  id: string;
+  lastDelivery: string;
+  name: string;
+  retries: string;
+  signature: string;
+  status: string;
+  updatedAt: string;
+  url: string;
+}
+
+export interface PrismaWebhookEndpointRow {
+  channel: string;
+  createdAt: Date;
+  custom: boolean;
+  deleted: boolean;
+  failureRate: string;
+  id: string;
+  lastDelivery: string;
+  name: string;
+  retries: string;
+  signature: string;
+  status: string;
+  updatedAt: Date;
+  url: string;
 }
 
 export interface PublicDemoRequestRecord {
@@ -264,6 +304,7 @@ export interface IntegrationState {
   sdkVisitorPresenceSessions: SdkVisitorPresenceSessionRecord[];
   telegramConnections: TelegramConnectionStoredRecord[];
   webhookDeliveryJournal: WebhookDeliveryJournalEntry[];
+  webhookEndpointRecords: WebhookEndpointStoredRecord[];
   webhookReplayAuditEvents: WebhookReplayAuditEvent[];
   webhookReplayJournal: WebhookReplayJournalEntry[];
   workspace: IntegrationWorkspaceCatalog;
@@ -494,6 +535,17 @@ export interface PrismaIntegrationClient {
       update: PrismaTelegramConnectionUpdateInput;
       where: { channelConnectionId: string };
     }): MaybePromise<PrismaTelegramConnectionRow>;
+  };
+  // Optional: real generated PrismaClient always has it; partial fake clients in
+  // tests omit it and fall back to the store, so it stays out of the required
+  // completeness assertion.
+  webhookEndpoint?: {
+    findMany(input: { orderBy?: { createdAt: "asc" } }): MaybePromise<PrismaWebhookEndpointRow[]>;
+    upsert(input: {
+      create: PrismaWebhookEndpointRow;
+      update: Omit<PrismaWebhookEndpointRow, "createdAt" | "id">;
+      where: { id: string };
+    }): MaybePromise<PrismaWebhookEndpointRow>;
   };
   webhookDeliveryJournalEntry: {
     findMany(input: { orderBy?: { createdAt: "asc" | "desc" }; take?: number; where?: PrismaWebhookDeliveryJournalWhereInput }): MaybePromise<PrismaWebhookDeliveryJournalRow[]>;
@@ -974,6 +1026,7 @@ export class IntegrationRepository {
       Promise.resolve(this.prismaClient.webhookReplayJournalEntry.findMany({ orderBy: { createdAt: "asc" } }))
         .then((rows) => rows.map(toWebhookReplayJournalEntry))
     ]);
+    const webhookEndpointRecords = await this.listWebhookEndpointRecords();
 
     return normalizeState({
       ...createEmptyIntegrationState(),
@@ -991,6 +1044,7 @@ export class IntegrationRepository {
       securitySessions,
       telegramConnections,
       webhookDeliveryJournal,
+      webhookEndpointRecords,
       webhookReplayAuditEvents,
       webhookReplayJournal,
       workspace: this.readWorkspaceCatalog()
@@ -1201,6 +1255,69 @@ export class IntegrationRepository {
       rawSecret,
       status: "revealed"
     };
+  }
+
+  listPublicApiKeyRecords(): MaybePromise<PublicApiKeyStoredRecord[]> {
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.publicApiKey.findMany({ orderBy: { createdAt: "asc" } }))
+        .then((rows) => rows.map(toPublicApiKeyStoredRecord));
+    }
+
+    return clone(this.readState().publicApiKeys);
+  }
+
+  updatePublicApiKeyStatus(input: UpdatePublicApiKeyStatusInput): MaybePromise<PublicApiKeyStoredRecord | undefined> {
+    if (this.prismaClient) {
+      return this.updatePrismaPublicApiKeyStatus(input);
+    }
+
+    const existing = this.readState().publicApiKeys.find((key) => key.keyId === input.keyId);
+    if (!existing) {
+      return undefined;
+    }
+
+    const persisted: PublicApiKeyStoredRecord = { ...clone(existing), status: input.status };
+    this.store.update((state) => {
+      const current = normalizeState(state);
+
+      return {
+        ...current,
+        publicApiKeys: current.publicApiKeys.map((item) => item.keyId === input.keyId ? persisted : item)
+      };
+    });
+
+    return clone(persisted);
+  }
+
+  listWebhookEndpointRecords(): MaybePromise<WebhookEndpointStoredRecord[]> {
+    if (this.prismaClient?.webhookEndpoint) {
+      return Promise.resolve(this.prismaClient.webhookEndpoint.findMany({ orderBy: { createdAt: "asc" } }))
+        .then((rows) => rows.map(toWebhookEndpointRecord));
+    }
+    return clone(normalizeState(this.store.read()).webhookEndpointRecords);
+  }
+
+  saveWebhookEndpointRecord(record: WebhookEndpointStoredRecord): MaybePromise<WebhookEndpointStoredRecord> {
+    const persisted = normalizeWebhookEndpointRecords([record])[0]!;
+    if (this.prismaClient?.webhookEndpoint) {
+      const row = toWebhookEndpointRow(persisted);
+      const { createdAt: _c, id: _id, ...update } = row;
+      return Promise.resolve(this.prismaClient.webhookEndpoint.upsert({ create: row, update, where: { id: persisted.id } }))
+        .then(toWebhookEndpointRecord);
+    }
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const exists = current.webhookEndpointRecords.some((item) => item.id === persisted.id);
+
+      return {
+        ...current,
+        webhookEndpointRecords: exists
+          ? current.webhookEndpointRecords.map((item) => item.id === persisted.id ? persisted : item)
+          : [...current.webhookEndpointRecords, persisted]
+      };
+    });
+
+    return clone(persisted);
   }
 
   findPublicDemoRequestByFingerprint(requestFingerprint: string): PublicDemoRequestRecord | undefined {
@@ -1510,6 +1627,25 @@ export class IntegrationRepository {
     });
 
     return toPublicApiKeyStoredRecord(row);
+  }
+
+  private async updatePrismaPublicApiKeyStatus(input: UpdatePublicApiKeyStatusInput): Promise<PublicApiKeyStoredRecord | undefined> {
+    if (!this.prismaClient) {
+      return undefined;
+    }
+
+    const row = await this.prismaClient.publicApiKey.findUnique({ where: { keyId: input.keyId } });
+    if (!row) {
+      return undefined;
+    }
+
+    const updated = await this.prismaClient.publicApiKey.upsert({
+      create: row,
+      update: { status: input.status },
+      where: { keyId: input.keyId }
+    });
+
+    return toPublicApiKeyStoredRecord(updated);
   }
 
   private async consumePrismaPublicApiKeyReveal(input: ConsumePublicApiKeyRevealInput): Promise<PublicApiKeyRevealResult> {
@@ -2527,6 +2663,7 @@ export function createEmptyIntegrationState(): IntegrationState {
     sdkVisitorPresenceSessions: [],
     telegramConnections: [],
     webhookDeliveryJournal: [],
+    webhookEndpointRecords: [],
     webhookReplayAuditEvents: [],
     webhookReplayJournal: [],
     workspace: emptyIntegrationWorkspace()
@@ -2550,6 +2687,7 @@ function normalizeState(state: Partial<IntegrationState>): IntegrationState {
     sdkVisitorPresenceSessions: (state.sdkVisitorPresenceSessions ?? []).map(normalizeSdkVisitorPresence),
     telegramConnections: normalizeTelegramConnections(state.telegramConnections),
     webhookDeliveryJournal: normalizeWebhookDeliveryJournal(state.webhookDeliveryJournal),
+    webhookEndpointRecords: normalizeWebhookEndpointRecords(state.webhookEndpointRecords),
     webhookReplayAuditEvents: state.webhookReplayAuditEvents ?? [],
     webhookReplayJournal: state.webhookReplayJournal ?? [],
     workspace: state.workspace ?? emptyIntegrationWorkspace()
@@ -2580,6 +2718,60 @@ function fromPrismaSdkVisitorPresence(value: PrismaSdkVisitorPresenceRow): SdkVi
   return normalizeSdkVisitorPresence({ ...value, createdAt: value.createdAt.toISOString(),
     disconnectedAt: value.disconnectedAt?.toISOString() ?? null, expiresAt: value.expiresAt.toISOString(),
     firstSeenAt: value.firstSeenAt.toISOString(), lastSeenAt: value.lastSeenAt.toISOString(), updatedAt: value.updatedAt.toISOString() });
+}
+
+function normalizeWebhookEndpointRecords(records: WebhookEndpointStoredRecord[] | undefined): WebhookEndpointStoredRecord[] {
+  return (records ?? []).map((record) => ({
+    channel: String(record.channel ?? "").trim() || "SDK",
+    createdAt: record.createdAt,
+    custom: Boolean(record.custom),
+    deleted: Boolean(record.deleted),
+    failureRate: String(record.failureRate ?? "0%"),
+    id: String(record.id ?? "").trim(),
+    lastDelivery: String(record.lastDelivery ?? "—"),
+    name: String(record.name ?? "").trim(),
+    retries: String(record.retries ?? "3 попытки / 30 сек"),
+    signature: String(record.signature ?? "HMAC SHA-256"),
+    status: String(record.status ?? "Активен"),
+    updatedAt: record.updatedAt,
+    url: String(record.url ?? "").trim()
+  }));
+}
+
+function toWebhookEndpointRow(record: WebhookEndpointStoredRecord): PrismaWebhookEndpointRow {
+  return {
+    channel: record.channel,
+    createdAt: new Date(record.createdAt),
+    custom: record.custom,
+    deleted: record.deleted,
+    failureRate: record.failureRate,
+    id: record.id,
+    lastDelivery: record.lastDelivery,
+    name: record.name,
+    retries: record.retries,
+    signature: record.signature,
+    status: record.status,
+    updatedAt: new Date(record.updatedAt),
+    url: record.url
+  };
+}
+
+function toWebhookEndpointRecord(row: PrismaWebhookEndpointRow): WebhookEndpointStoredRecord {
+  return normalizeWebhookEndpointRecords([{
+    channel: row.channel,
+    createdAt: row.createdAt.toISOString(),
+    custom: row.custom,
+    deleted: row.deleted,
+    failureRate: row.failureRate,
+    id: row.id,
+    lastDelivery: row.lastDelivery,
+    name: row.name,
+    retries: row.retries,
+    signature: row.signature,
+    status: row.status,
+    updatedAt: row.updatedAt.toISOString(),
+    url: row.url
+  }])[0]!;
 }
 
 function normalizeTelegramConnections(connections: TelegramConnectionStoredRecord[] | undefined): TelegramConnectionStoredRecord[] {

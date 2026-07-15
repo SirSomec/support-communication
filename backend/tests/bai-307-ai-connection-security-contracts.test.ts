@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { AiConnectionRepository } from "../apps/api-gateway/src/ai-connections/ai-connection.repository.ts";
+import {
+  AiConnectionRepository,
+  type AiConnectionPrismaClient,
+  type PrismaAiConnectionRow
+} from "../apps/api-gateway/src/ai-connections/ai-connection.repository.ts";
 import { AiConnectionsService, type AiConnectionTestProviderFactory } from "../apps/api-gateway/src/ai-connections/ai-connections.service.ts";
 import { AiUsageRepository } from "../apps/api-gateway/src/ai-connections/ai-usage.repository.ts";
 import { createOpenAiCompatibleChatProvider } from "../apps/api-gateway/src/ai-connections/openai-compatible-chat.provider.ts";
@@ -22,6 +26,33 @@ const controllerSource = readFileSync(
 );
 
 const SECRET = "sk-live-bai-307-must-never-leak";
+
+function inMemoryPrismaAiConnectionClient(): AiConnectionPrismaClient {
+  const rows = new Map<string, PrismaAiConnectionRow>();
+  const rowKey = (tenantId: string, id: string) => `${tenantId} ${id}`;
+
+  return {
+    aiConnection: {
+      delete: async ({ where }) => {
+        const key = rowKey(where.ai_connections_tenant_id_key.tenantId, where.ai_connections_tenant_id_key.id);
+        const existing = rows.get(key);
+        if (!existing) throw Object.assign(new Error("record not found"), { code: "P2025" });
+        rows.delete(key);
+        return existing;
+      },
+      findMany: async ({ where } = {}) => [...rows.values()]
+        .filter((row) => !where?.tenantId || row.tenantId === where.tenantId)
+        .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime()),
+      upsert: async ({ create, update, where }) => {
+        const key = rowKey(where.ai_connections_tenant_id_key.tenantId, where.ai_connections_tenant_id_key.id);
+        const existing = rows.get(key);
+        const next: PrismaAiConnectionRow = existing ? { ...existing, ...update } : { ...create };
+        rows.set(key, next);
+        return next;
+      }
+    }
+  };
+}
 
 function hasCredentialMaterial(value: unknown): boolean {
   if (value == null) {
@@ -97,9 +128,9 @@ describe("BAI-307 AI connection security contracts", () => {
     assert.equal(hasCredentialMaterial(created), false);
 
     const id = String((created.data.connection as { id: string }).id);
-    const listed = service.list("tenant-volga");
+    const listed = await service.list("tenant-volga");
     assert.equal(hasCredentialMaterial(listed), false);
-    assert.equal(service.list("tenant-ladoga").data.connections.length, 0);
+    assert.equal(((await service.list("tenant-ladoga")).data.connections as unknown[]).length, 0);
 
     const rotated = await service.rotate("tenant-volga", id, { secret: `${SECRET}-rotated` });
     assert.equal(rotated.status, "ok");
@@ -112,7 +143,7 @@ describe("BAI-307 AI connection security contracts", () => {
 
     const removed = await service.remove("tenant-volga", id);
     assert.equal(removed.status, "ok");
-    assert.equal(repository.find("tenant-volga", id), undefined);
+    assert.equal(await repository.find("tenant-volga", id), undefined);
     assert.equal(hasCredentialMaterial(removed), false);
 
     const events = await audit.listServiceAdminAuditEvents();
@@ -121,6 +152,39 @@ describe("BAI-307 AI connection security contracts", () => {
     assert.equal(events.some((event) => event.action === "ai.connection.disable" && event.immutable), true);
     assert.equal(events.some((event) => event.action === "ai.connection.delete" && event.immutable), true);
     assert.equal(hasCredentialMaterial(events), false);
+  });
+
+  it("persists the encrypted envelope intact through the prisma branch", async () => {
+    const client = inMemoryPrismaAiConnectionClient();
+    const repository = AiConnectionRepository.prisma({ client });
+    const audit = IdentityRepository.inMemory();
+    const service = new AiConnectionsService(repository, environment, undefined, audit);
+
+    const created = await service.create("tenant-volga", {
+      baseUrl: "https://provider.example.test/v1",
+      chatModel: "support-model",
+      limits: { monthlyTokenBudget: 500 },
+      secret: SECRET
+    });
+    assert.equal(created.status, "ok");
+    assert.equal(hasCredentialMaterial(created), false);
+    const id = String((created.data.connection as { id: string }).id);
+
+    const stored = await repository.find("tenant-volga", id);
+    assert.ok(stored);
+    assert.equal(stored!.secret.algorithm, "aes-256-gcm");
+    assert.equal(stored!.secret.envelopeVersion, 1);
+    assert.equal(stored!.secret.keyVersion, environment.AI_CONNECTIONS_KEY_VERSION);
+    assert.ok(stored!.secret.ciphertext.length > 0);
+    assert.ok(stored!.secret.iv.length > 0);
+    assert.ok(stored!.secret.authTag.length > 0);
+    assert.equal(stored!.secret.ciphertext.includes(SECRET), false);
+    assert.deepEqual(stored!.limits, { monthlyTokenBudget: 500 });
+
+    assert.equal((await repository.list("tenant-ladoga")).length, 0);
+    assert.equal(await repository.remove("tenant-volga", id), true);
+    assert.equal(await repository.remove("tenant-volga", id), false);
+    assert.equal(await repository.find("tenant-volga", id), undefined);
   });
 
   it("enforces rate, budget and concurrency limits before a provider call", () => {

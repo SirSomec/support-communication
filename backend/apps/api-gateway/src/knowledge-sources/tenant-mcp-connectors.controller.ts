@@ -24,10 +24,10 @@ export class TenantMcpConnectorsController {
   @RequireTenantOperatorPermission("knowledge.read")
   @RequireServiceAdminAction("knowledge.read")
   @ApiOkResponse({ description: "Tenant MCP connectors with approval status; no credentials" })
-  list(@Req() request: TenantOperatorRequest & ServiceAdminRequest): BackendEnvelope<Record<string, unknown>> {
+  async list(@Req() request: TenantOperatorRequest & ServiceAdminRequest): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = resolveTenant(request);
     return createEnvelope({
-      data: { connectors: McpConnectorRepository.default().list(tenantId) },
+      data: { connectors: await McpConnectorRepository.default().list(tenantId) },
       meta: { apiVersion: "v1", tenantId },
       operation: "listTenantMcpConnectors",
       service: "tenantMcpConnectorsService",

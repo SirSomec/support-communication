@@ -35,10 +35,6 @@ const result = spawnSync(
     "compose",
     "-f",
     "docker-compose.yml",
-    "-f",
-    "docker-compose.pilot.yml",
-    "--profile",
-    "prisma-postgres",
     "ps",
     "--format",
     "json"

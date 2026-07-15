@@ -126,7 +126,9 @@ export function shouldOpenRealtimeEventSource({
 }
 
 function isSseQueryTokenEnabled() {
-  return import.meta.env?.VITE_PILOT_SSE_QUERY_TOKEN === SSE_QUERY_TOKEN_FLAG
+  // VITE_PILOT_SSE_QUERY_TOKEN — устаревшее имя, поддерживается один релиз.
+  return import.meta.env?.VITE_REALTIME_SSE_QUERY_TOKEN === SSE_QUERY_TOKEN_FLAG
+    || import.meta.env?.VITE_PILOT_SSE_QUERY_TOKEN === SSE_QUERY_TOKEN_FLAG
     || import.meta.env?.VITE_SSE_QUERY_TOKEN === SSE_QUERY_TOKEN_FLAG;
 }
 

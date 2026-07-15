@@ -40,28 +40,28 @@ export class AiBotResponseService {
 
   async respond(input: AiBotResponseInput): Promise<AiBotResponse> {
     const startedAt = Date.now();
-    const connection = this.connections.list(input.tenantId).filter((item) => item.status === "ready" && item.disabledAt === null && item.capabilities.includes("chat_completion")).sort((a, b) => a.id.localeCompare(b.id))[0];
+    const connection = (await this.connections.list(input.tenantId)).filter((item) => item.status === "ready" && item.disabledAt === null && item.capabilities.includes("chat_completion")).sort((a, b) => a.id.localeCompare(b.id))[0];
     if (!connection) {
       recordBotAiRequest({ errorCode: "bot_ai_connection_not_ready", latencyMs: Date.now() - startedAt, scenarioId: input.scenarioId, status: "error", tenantId: input.tenantId });
       throw new Error("bot_ai_connection_not_ready");
     }
     let release: (() => void) | null = null;
     try {
-      release = this.usage.reserve({ connectionId: connection.id, maxConcurrentRuns: connection.limits.maxConcurrentRuns, monthlyTokenBudget: connection.limits.monthlyTokenBudget, requestsPerMinute: connection.limits.requestsPerMinute, tenantId: input.tenantId, worstCaseTokens: Math.min(500, connection.limits.monthlyTokenBudget ?? 500) });
+      release = await this.usage.reserve({ connectionId: connection.id, maxConcurrentRuns: connection.limits.maxConcurrentRuns, monthlyTokenBudget: connection.limits.monthlyTokenBudget, requestsPerMinute: connection.limits.requestsPerMinute, tenantId: input.tenantId, worstCaseTokens: Math.min(500, connection.limits.monthlyTokenBudget ?? 500) });
       const materials = await this.materials(input.tenantId, input.sourceBindings, input.message, input.scenarioId, input.retrievalScoreThreshold);
       // Пустой retrieval — не повод жёстко эскалировать: приветствия и smalltalk не
       // совпадают со знаниями по лексике. Зовём модель с пустыми знаниями, а её
       // rails решают: поздороваться/уточнить либо честно признать, что ответа нет и
       // предложить оператора. Реальные пробелы знаний копим в «вопросах без ответа».
       if (!materials.length && looksLikeQuestion(input.message) && !String(input.conversationId ?? "").startsWith("sandbox:")) {
-        UnansweredQuestionRepository.default().record({
+        await UnansweredQuestionRepository.default().record({
           question: input.message,
           reason: "knowledge_not_ready",
           scenarioId: input.scenarioId,
           tenantId: input.tenantId
         });
       }
-      const session = input.conversationId ? this.sessions.get(input.tenantId, input.conversationId) : null;
+      const session = input.conversationId ? await this.sessions.get(input.tenantId, input.conversationId) : null;
       const secret = new SecretStore({ keyVersion: this.environment.AI_CONNECTIONS_KEY_VERSION ?? "local-v1", masterKeyBase64: this.environment.AI_CONNECTIONS_MASTER_KEY ?? this.environment.PROVIDER_CREDENTIAL_MASTER_KEY ?? "" }).decrypt(connection.secret);
       const provider = createOpenAiCompatibleChatProvider({ apiKey: secret, baseUrl: connection.baseUrl, maxRetries: 1, model: connection.chatModel, timeoutMs: 12_000 });
       // BAI-851: стабильный ключ префикса (tenant + scenario revision), без PII и user id.
@@ -77,7 +77,7 @@ export class AiBotResponseService {
         { role: "user", content: input.message.slice(0, 4_000) }
       ] });
       const tokens = completion.usage.totalTokens ?? 500;
-      this.usage.recordUsage(input.tenantId, connection.id, tokens);
+      await this.usage.recordUsage(input.tenantId, connection.id, tokens);
       recordBotAiRequest({
         connectionId: connection.id,
         latencyMs: Date.now() - startedAt,
@@ -88,7 +88,7 @@ export class AiBotResponseService {
       });
       const text = completion.content.slice(0, 8_000);
       if (input.conversationId) {
-        this.sessions.updateAfterRun({
+        await this.sessions.updateAfterRun({
           assistantText: text,
           conversationId: input.conversationId,
           intent: session?.intent ?? null,

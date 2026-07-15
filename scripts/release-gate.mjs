@@ -102,8 +102,8 @@ const releaseGateSteps = [
   },
   "npm run build",
   {
-    command: "docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build",
-    display: "docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build",
+    command: "docker compose -f docker-compose.yml up -d --build",
+    display: "docker compose -f docker-compose.yml up -d --build",
     scrubProviderEnv: true
   },
   "node scripts/compose-health-check.mjs",

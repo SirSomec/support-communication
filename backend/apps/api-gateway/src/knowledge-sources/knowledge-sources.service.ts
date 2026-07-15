@@ -40,7 +40,7 @@ export class KnowledgeSourcesService {
 
   async list(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
     return envelope("listKnowledgeSources", tenantId, {
-      sources: this.repository.list(tenantId),
+      sources: await this.repository.list(tenantId),
       usage: await this.scenarioUsage(tenantId)
     });
   }
@@ -64,21 +64,21 @@ export class KnowledgeSourcesService {
   }
 
   async update(tenantId: string, sourceId: string, input: { title?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("updateKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
     const title = String(input.title ?? "").trim();
     if (!title) return invalid("updateKnowledgeSource", tenantId, "knowledge_source_title_required", "Укажите название источника.");
-    const source = this.repository.save({ ...current, title, updatedAt: new Date().toISOString(), version: current.version + 1 });
+    const source = await this.repository.save({ ...current, title, updatedAt: new Date().toISOString(), version: current.version + 1 });
     return envelope("updateKnowledgeSource", tenantId, { source });
   }
 
   async enable(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("enableKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
     if (current.status !== "disabled") return invalid("enableKnowledgeSource", tenantId, "knowledge_source_not_disabled", "Включить можно только отключённый источник.");
     const hasIndexedContent = Array.isArray(current.metadata.chunks) && current.metadata.chunks.length > 0;
     const now = new Date().toISOString();
-    const source = this.repository.save({
+    const source = await this.repository.save({
       ...current,
       disabledAt: null,
       status: hasIndexedContent ? "ready" : "draft",
@@ -89,32 +89,32 @@ export class KnowledgeSourcesService {
   }
 
   async archive(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("archiveKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
     const bound = await this.boundScenarios(tenantId, sourceId);
     if (bound.length) {
       return invalid("archiveKnowledgeSource", tenantId, "knowledge_source_in_use", `Источник привязан к сценариям: ${bound.map((item) => item.name).join(", ")}. Сначала отвяжите его.`, { scenarios: bound });
     }
     const now = new Date().toISOString();
-    const source = this.repository.save({ ...current, archivedAt: now, status: "archived", updatedAt: now, version: current.version + 1 });
+    const source = await this.repository.save({ ...current, archivedAt: now, status: "archived", updatedAt: now, version: current.version + 1 });
     return envelope("archiveKnowledgeSource", tenantId, { source });
   }
 
   async remove(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("removeKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
     if (current.status !== "archived") return invalid("removeKnowledgeSource", tenantId, "knowledge_source_not_archived", "Сначала переместите источник в архив.");
     const bound = await this.boundScenarios(tenantId, sourceId);
     if (bound.length) {
       return invalid("removeKnowledgeSource", tenantId, "knowledge_source_in_use", `Источник привязан к сценариям: ${bound.map((item) => item.name).join(", ")}.`, { scenarios: bound });
     }
-    this.repository.delete(tenantId, sourceId);
+    await this.repository.delete(tenantId, sourceId);
     return envelope("removeKnowledgeSource", tenantId, { deleted: true, sourceId });
   }
 
   /** BAI-825: «что именно знает бот» — проиндексированные фрагменты без выдачи целого документа. */
-  preview(tenantId: string, sourceId: string): BackendEnvelope<Record<string, unknown>> {
-    const current = this.repository.find(tenantId, sourceId);
+  async preview(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("previewKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
     const chunks = Array.isArray(current.metadata.chunks) ? current.metadata.chunks as Array<{ content?: string; id?: string }> : [];
     const extractedText = typeof current.metadata.extractedText === "string" ? current.metadata.extractedText : "";
@@ -164,7 +164,7 @@ export class KnowledgeSourcesService {
       const connectorId = String(sourceConfig.connectorId ?? "").trim();
       const tool = String(sourceConfig.tool ?? sourceConfig.toolName ?? "").trim();
       if (!connectorId || !tool) return invalid("createKnowledgeSource", tenantId, "mcp_connector_required", "Выберите одобренный read-only MCP-коннектор и его инструмент.");
-      const connector = McpConnectorRepository.default().find(tenantId, connectorId);
+      const connector = await McpConnectorRepository.default().find(tenantId, connectorId);
       if (!connector || !connector.approvedAt || connector.status !== "enabled") {
         return invalid("createKnowledgeSource", tenantId, "mcp_connector_not_ready", "MCP-коннектор должен быть одобрен и включён.");
       }
@@ -179,7 +179,7 @@ export class KnowledgeSourcesService {
       metadata = { connectorEndpoint: connector.endpoint, connectorName: connector.name ?? connectorId };
     }
 
-    const source = this.repository.save({
+    const source = await this.repository.save({
       approvalStatus,
       approvedAt: approvalStatus === "approved" ? now : null,
       approvedBy: approvalStatus === "approved" ? "knowledge-governance" : null,
@@ -211,24 +211,24 @@ export class KnowledgeSourcesService {
   }
 
   async disable(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("disableKnowledgeSource", tenantId, "knowledge_source_not_found", "Knowledge source was not found.");
     const now = new Date().toISOString();
-    const source = this.repository.save({ ...current, disabledAt: now, status: "disabled", updatedAt: now, version: current.version + 1 });
+    const source = await this.repository.save({ ...current, disabledAt: now, status: "disabled", updatedAt: now, version: current.version + 1 });
     const data: Record<string, unknown> = { source };
     if (current.kind === "url") data.auditEvent = await this.recordUrlAudit("knowledge_source.url.disable", tenantId, source.id, "disabled");
     return envelope("disableKnowledgeSource", tenantId, data);
   }
 
   async refreshUrl(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current || current.kind !== "url") return invalid("refreshKnowledgeSourceUrl", tenantId, "knowledge_source_not_found", "URL source was not found.");
     const validated = validateUrlKnowledgeSourceConfig(current.sourceConfig, validationOptions(this.policyRepository.get(tenantId)));
     if (!validated.ok) return invalid("refreshKnowledgeSourceUrl", tenantId, validated.code, "This URL cannot be refreshed safely.");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 10_000); const now = new Date().toISOString();
     try {
       await assertPublicResolution(validated.hostname, this.options.resolveHostname);
-      this.repository.save({ ...current, status: "fetching", updatedAt: now, version: current.version + 1 });
+      await this.repository.save({ ...current, status: "fetching", updatedAt: now, version: current.version + 1 });
       const transport = await (this.options.fetch ?? defaultUrlTransport)(validated.config.url, { headers: { accept: "text/html,text/plain;q=0.9" }, redirect: "error", signal: controller.signal });
       const { connectedPeerAddress, response } = normalizeTransportResult(transport);
       // The default Node fetch does not expose the TCP peer. Re-resolving
@@ -242,19 +242,19 @@ export class KnowledgeSourcesService {
       const raw = (await readBoundedText(response, URL_SOURCE_MAX_BYTES)).slice(0, 200_000);
       const extractedText = stripHtml(raw).slice(0, 100_000);
       if (!extractedText) throw new Error("url_source_content_empty");
-      const source = this.repository.save({ ...current, approvalStatus: "pending", contentChecksum: createHash("sha256").update(extractedText).digest("hex"), failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, extractedText, nextRefreshAt: new Date(Date.now() + URL_SOURCE_REFRESH_INTERVAL_MS).toISOString() }, status: "ready", updatedAt: now, version: current.version + 1 });
+      const source = await this.repository.save({ ...current, approvalStatus: "pending", contentChecksum: createHash("sha256").update(extractedText).digest("hex"), failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, extractedText, nextRefreshAt: new Date(Date.now() + URL_SOURCE_REFRESH_INTERVAL_MS).toISOString() }, status: "ready", updatedAt: now, version: current.version + 1 });
       return envelope("refreshKnowledgeSourceUrl", tenantId, { auditEvent: await this.recordUrlAudit("knowledge_source.url.refresh", tenantId, source.id, "refreshed"), source });
     } catch {
-      const source = this.repository.save({ ...current, failedAt: now, failureCode: "url_source_fetch_failed", metadata: { ...current.metadata, nextRefreshAt: new Date(Date.now() + URL_SOURCE_REFRESH_INTERVAL_MS).toISOString() }, status: "failed", updatedAt: now, version: current.version + 1 });
+      const source = await this.repository.save({ ...current, failedAt: now, failureCode: "url_source_fetch_failed", metadata: { ...current.metadata, nextRefreshAt: new Date(Date.now() + URL_SOURCE_REFRESH_INTERVAL_MS).toISOString() }, status: "failed", updatedAt: now, version: current.version + 1 });
       return invalid("refreshKnowledgeSourceUrl", tenantId, "url_source_fetch_failed", "The URL could not be read safely.", { auditEvent: await this.recordUrlAudit("knowledge_source.url.refresh", tenantId, source.id, "failed") });
     } finally { clearTimeout(timeout); }
   }
 
   async approve(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current || current.status !== "ready") return invalid("approveKnowledgeSource", tenantId, "knowledge_source_not_ready", "Refresh the source successfully before approving it.");
     const now = new Date().toISOString();
-    const source = this.repository.save({ ...current, approvalStatus: "approved", approvedAt: now, approvedBy: "current-operator", updatedAt: now, version: current.version + 1 });
+    const source = await this.repository.save({ ...current, approvalStatus: "approved", approvedAt: now, approvedBy: "current-operator", updatedAt: now, version: current.version + 1 });
     const data: Record<string, unknown> = { source };
     if (current.kind === "url") data.auditEvent = await this.recordUrlAudit("knowledge_source.url.approve", tenantId, source.id, "approved");
     return envelope("approveKnowledgeSource", tenantId, data);
@@ -274,7 +274,7 @@ export class KnowledgeSourcesService {
 
   async refreshDueUrls(now = new Date()): Promise<{ failed: number; refreshed: number }> {
     let failed = 0; let refreshed = 0;
-    for (const source of this.repository.listAll().filter((item) => item.kind === "url" && item.status !== "disabled" && item.status !== "archived" && dueForRefresh(item, now))) {
+    for (const source of (await this.repository.listAll()).filter((item) => item.kind === "url" && item.status !== "disabled" && item.status !== "archived" && dueForRefresh(item, now))) {
       const result = await this.refreshUrl(source.tenantId, source.id);
       if (result.status === "ok") refreshed += 1; else failed += 1;
     }
@@ -283,18 +283,18 @@ export class KnowledgeSourcesService {
 
   /** Rebuild article chunks only from its current published and approved version. */
   async refreshDocument(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current || current.kind !== "document") return invalid("refreshKnowledgeSourceDocument", tenantId, "knowledge_source_not_found", "Document source was not found.");
     const articleId = String(current.sourceConfig.articleId ?? current.sourceRef ?? "").trim();
     const article = await this.workspaceRepository.findKnowledgeArticle(articleId, { tenantId });
     const prepared = article ? preparePublishedArticle(article) : null;
     if (!prepared || !article) {
       const now = new Date().toISOString();
-      const source = this.repository.save({ ...current, approvalStatus: "pending", failedAt: now, failureCode: "knowledge_article_not_ready", status: "failed", updatedAt: now, version: current.version + 1 });
+      const source = await this.repository.save({ ...current, approvalStatus: "pending", failedAt: now, failureCode: "knowledge_article_not_ready", status: "failed", updatedAt: now, version: current.version + 1 });
       return invalid("refreshKnowledgeSourceDocument", tenantId, "knowledge_article_not_ready", "Publish and approve the article version before refreshing this source.");
     }
     const now = new Date().toISOString();
-    const source = this.repository.save({ ...current, approvalStatus: "pending", approvedAt: null, approvedBy: null, contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, articleVersion: article.version, chunks: prepared.chunks, language: prepared.language }, sourceConfig: { articleId: article.id, articleVersion: article.version }, sourceRef: article.id, status: "ready", updatedAt: now, version: current.version + 1 });
+    const source = await this.repository.save({ ...current, approvalStatus: "pending", approvedAt: null, approvedBy: null, contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, articleVersion: article.version, chunks: prepared.chunks, language: prepared.language }, sourceConfig: { articleId: article.id, articleVersion: article.version }, sourceRef: article.id, status: "ready", updatedAt: now, version: current.version + 1 });
     return envelope("refreshKnowledgeSourceDocument", tenantId, { source });
   }
 
@@ -304,7 +304,7 @@ export class KnowledgeSourcesService {
    * the trusted worker; callers cannot make an unscanned object retrievable.
    */
   async ingestScannedAttachment(tenantId: string, sourceId: string, input: { extractedText?: string; fileId?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current || current.kind !== "document") return invalid("ingestScannedKnowledgeAttachment", tenantId, "knowledge_source_not_found", "Document source was not found.");
     const fileId = String(input.fileId ?? "").trim();
     const file = fileId ? await this.workspaceRepository.findFile(fileId, { tenantId }) : undefined;
@@ -312,7 +312,7 @@ export class KnowledgeSourcesService {
     const prepared = ingestKnowledgeDocument(input.extractedText);
     if (!prepared) return invalid("ingestScannedKnowledgeAttachment", tenantId, "knowledge_document_text_required", "The trusted extractor returned no usable document text.");
     const now = new Date().toISOString();
-    const source = this.repository.save({ ...current, approvalStatus: "pending", approvedAt: null, approvedBy: null, contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, attachmentFileId: file.fileId, chunks: prepared.chunks, extraction: "trusted_worker", language: prepared.language }, status: "ready", updatedAt: now, version: current.version + 1 });
+    const source = await this.repository.save({ ...current, approvalStatus: "pending", approvedAt: null, approvedBy: null, contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, attachmentFileId: file.fileId, chunks: prepared.chunks, extraction: "trusted_worker", language: prepared.language }, status: "ready", updatedAt: now, version: current.version + 1 });
     return envelope("ingestScannedKnowledgeAttachment", tenantId, { source });
   }
 
@@ -324,20 +324,20 @@ export class KnowledgeSourcesService {
   }
 
   async enqueueAttachmentIngestion(tenantId: string, sourceId: string, input: { fileId?: string; idempotencyKey?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = this.repository.find(tenantId, sourceId);
+    const current = await this.repository.find(tenantId, sourceId);
     if (!current || current.kind !== "document") return invalid("enqueueKnowledgeAttachmentIngestion", tenantId, "knowledge_source_not_found", "Document source was not found.");
     const fileId = String(input.fileId ?? "").trim(); const idempotencyKey = String(input.idempotencyKey ?? "").trim();
     if (!fileId || !idempotencyKey) return invalid("enqueueKnowledgeAttachmentIngestion", tenantId, "knowledge_ingestion_request_invalid", "A file and idempotency key are required.");
     const file = await this.workspaceRepository.findFile(fileId, { tenantId });
     if (!file || file.storageState !== "uploaded" || file.scanVerdict !== "clean" || !["clean", "scan_clean"].includes(file.scanState)) return invalid("enqueueKnowledgeAttachmentIngestion", tenantId, "knowledge_attachment_scan_required", "Only uploaded and scan-clean attachments can be indexed.");
-    const fingerprint = `${sourceId}:${fileId}`; const existing = this.repository.findIngestionJob(tenantId, idempotencyKey);
+    const fingerprint = `${sourceId}:${fileId}`; const existing = await this.repository.findIngestionJob(tenantId, idempotencyKey);
     if (existing) {
       if (existing.fingerprint !== fingerprint) return invalid("enqueueKnowledgeAttachmentIngestion", tenantId, "idempotency_key_reused", "This idempotency key belongs to a different ingestion request.");
       return envelope("enqueueKnowledgeAttachmentIngestion", tenantId, { duplicate: true, job: existing });
     }
     const now = new Date().toISOString();
-    const job = this.repository.saveIngestionJob({ attempts: 0, createdAt: now, errorCode: null, fileId, fingerprint, idempotencyKey, jobId: `knowledge_ingest_${randomUUID()}`, sourceId, status: "pending", tenantId, updatedAt: now });
-    const source = this.repository.save({ ...current, approvalStatus: "pending", failedAt: null, failureCode: null, metadata: { ...current.metadata, ingestionJobId: job.jobId }, status: "indexing", updatedAt: now, version: current.version + 1 });
+    const job = await this.repository.saveIngestionJob({ attempts: 0, createdAt: now, errorCode: null, fileId, fingerprint, idempotencyKey, jobId: `knowledge_ingest_${randomUUID()}`, sourceId, status: "pending", tenantId, updatedAt: now });
+    const source = await this.repository.save({ ...current, approvalStatus: "pending", failedAt: null, failureCode: null, metadata: { ...current.metadata, ingestionJobId: job.jobId }, status: "indexing", updatedAt: now, version: current.version + 1 });
     return envelope("enqueueKnowledgeAttachmentIngestion", tenantId, { duplicate: false, job, source });
   }
 }

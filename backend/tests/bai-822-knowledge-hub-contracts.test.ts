@@ -9,7 +9,11 @@ import { KnowledgeRetrievalApiService } from "../apps/api-gateway/src/knowledge-
 import { KnowledgeRetrievalService } from "../apps/api-gateway/src/knowledge-sources/knowledge-retrieval.service.ts";
 import { KnowledgeSourceRepository } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.repository.ts";
 import { KnowledgeSourcesService } from "../apps/api-gateway/src/knowledge-sources/knowledge-sources.service.ts";
-import { UnansweredQuestionRepository } from "../apps/api-gateway/src/knowledge-sources/unanswered-question.repository.ts";
+import {
+  UnansweredQuestionRepository,
+  type PrismaUnansweredQuestionRow,
+  type UnansweredQuestionPrismaClient
+} from "../apps/api-gateway/src/knowledge-sources/unanswered-question.repository.ts";
 import { WorkspaceRepository } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 
 const TENANT = "tenant-volga";
@@ -73,7 +77,7 @@ describe("BAI-822 source manager operations", () => {
     const enabled = await service.enable(TENANT, "src-1");
     assert.equal((enabled.data.source as { status: string }).status, "ready");
 
-    const preview = service.preview(TENANT, "src-1");
+    const preview = await service.preview(TENANT, "src-1");
     assert.equal(preview.data.chunkCount, 1);
     assert.equal(String((preview.data.chunks as Array<{ content: string }>)[0]?.content).includes("три рабочих дня"), true);
   });
@@ -108,7 +112,7 @@ describe("BAI-822 source manager operations", () => {
       await service.enable("tenant-ladoga", "src-1"),
       await service.archive("tenant-ladoga", "src-1"),
       await service.remove("tenant-ladoga", "src-1"),
-      service.preview("tenant-ladoga", "src-1")
+      await service.preview("tenant-ladoga", "src-1")
     ]) {
       assert.equal(result.error?.code, "knowledge_source_not_found");
     }
@@ -173,6 +177,27 @@ describe("BAI-826 unanswered questions", () => {
     assert.equal(resolved?.resolvedArticleId, "kb-9");
   });
 
+  it("dedups, lists, resolves and keeps tenant scope through the prisma branch", async () => {
+    const repository = UnansweredQuestionRepository.prisma({ client: inMemoryPrismaUnansweredClient() });
+
+    await repository.record({ question: "Как вернуть заказ?", reason: "knowledge_not_ready", tenantId: TENANT });
+    const again = await repository.record({ question: "как вернуть заказ", reason: "knowledge_not_ready", tenantId: TENANT });
+    assert.equal(again?.count, 2);
+    await repository.record({ question: "Как отменить подписку?", reason: "knowledge_not_ready", tenantId: TENANT });
+    await repository.record({ question: "Foreign tenant question", reason: "knowledge_not_ready", tenantId: "tenant-ladoga" });
+
+    const list = await repository.list(TENANT);
+    assert.equal(list.length, 2);
+    assert.equal((await repository.list("tenant-ladoga")).length, 1);
+
+    const target = list.find((item) => item.count === 2)!;
+    const dismissed = await repository.setStatus(TENANT, target.id, "dismissed");
+    assert.equal(dismissed?.status, "dismissed");
+    const resolved = await repository.setStatus(TENANT, target.id, "resolved", "kb-9");
+    assert.equal(resolved?.resolvedArticleId, "kb-9");
+    assert.equal(await repository.setStatus("tenant-ladoga", target.id, "dismissed"), null);
+  });
+
   it("records a question when the bot has no knowledge, but never from the sandbox", async () => {
     const unanswered = UnansweredQuestionRepository.inMemory();
     UnansweredQuestionRepository.useDefault(unanswered);
@@ -216,3 +241,49 @@ describe("BAI-826 unanswered questions", () => {
     assert.equal(unanswered.list(TENANT).length, 1);
   });
 });
+
+function inMemoryPrismaUnansweredClient(): UnansweredQuestionPrismaClient {
+  const rows = new Map<string, PrismaUnansweredQuestionRow>();
+  return {
+    unansweredQuestion: {
+      create: async ({ data }) => {
+        rows.set(data.id, { ...data });
+        return { ...data };
+      },
+      deleteMany: async ({ where }) => {
+        let count = 0;
+        for (const id of where.id.in) if (rows.delete(id)) count += 1;
+        return { count };
+      },
+      findFirst: async ({ where }) => [...rows.values()].find((row) =>
+        (!where.tenantId || row.tenantId === where.tenantId)
+        && (!where.status || row.status === where.status)
+        && (!where.normalizedKey || row.normalizedKey === where.normalizedKey)) ?? null,
+      findMany: async ({ orderBy, where } = {}) => {
+        const list = [...rows.values()].filter((row) =>
+          (!where?.tenantId || row.tenantId === where.tenantId) && (!where?.status || row.status === where.status));
+        if (orderBy?.lastAskedAt) {
+          const dir = orderBy.lastAskedAt === "desc" ? -1 : 1;
+          list.sort((left, right) => (left.lastAskedAt.getTime() - right.lastAskedAt.getTime()) * dir);
+        }
+        return list;
+      },
+      update: async ({ data, where }) => {
+        const existing = rows.get(where.id)!;
+        const next = { ...existing, ...data } as PrismaUnansweredQuestionRow;
+        rows.set(where.id, next);
+        return next;
+      },
+      updateMany: async ({ data, where }) => {
+        let count = 0;
+        for (const row of rows.values()) {
+          if (row.id === where.id && row.tenantId === where.tenantId) {
+            rows.set(row.id, { ...row, ...data });
+            count += 1;
+          }
+        }
+        return { count };
+      }
+    }
+  };
+}

@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore, JsonFileStore, createPrismaClient } from "@support-communication/database";
 import {
   deriveKnowledgeSourceReadiness,
   knowledgeSourceApprovalStatuses,
@@ -7,6 +7,8 @@ import {
   type KnowledgeSourceRecord
 } from "./knowledge-source.types.js";
 import { KnowledgeRetrievalCache } from "./knowledge-retrieval-cache.js";
+
+type MaybePromise<T> = Promise<T> | T;
 
 export interface KnowledgeSourcesState {
   ingestionJobs: KnowledgeDocumentIngestionJob[];
@@ -27,6 +29,70 @@ export interface KnowledgeDocumentIngestionJob {
   updatedAt: string;
 }
 
+export interface PrismaKnowledgeSourceRow {
+  approvalStatus: string;
+  approvedAt: Date | null;
+  approvedBy: string | null;
+  archivedAt: Date | null;
+  contentChecksum: string | null;
+  createdAt: Date;
+  disabledAt: Date | null;
+  failedAt: Date | null;
+  failureCode: string | null;
+  id: string;
+  kind: string;
+  lastIndexedAt: Date | null;
+  lastIngestedAt: Date | null;
+  metadata: unknown;
+  owner: string;
+  readiness: string;
+  retentionUntil: Date | null;
+  sourceConfig: unknown;
+  sourceRef: string | null;
+  status: string;
+  tenantId: string;
+  title: string;
+  updatedAt: Date;
+  version: number;
+}
+
+export interface PrismaKnowledgeSourceCreateInput extends Omit<PrismaKnowledgeSourceRow, "metadata" | "sourceConfig"> {
+  metadata: Record<string, unknown>;
+  sourceConfig: Record<string, unknown>;
+}
+
+export interface PrismaKnowledgeIngestionJobRow {
+  attempts: number;
+  createdAt: Date;
+  errorCode: string | null;
+  fileId: string;
+  fingerprint: string;
+  idempotencyKey: string;
+  jobId: string;
+  sourceId: string;
+  status: string;
+  tenantId: string;
+  updatedAt: Date;
+}
+
+export interface KnowledgeSourcePrismaClient {
+  knowledgeIngestionJob: {
+    create(input: { data: PrismaKnowledgeIngestionJobRow }): MaybePromise<PrismaKnowledgeIngestionJobRow>;
+    findFirst(input: { orderBy?: { createdAt: "asc" }; where: { status?: string; tenantId?: string; idempotencyKey?: string } }): MaybePromise<PrismaKnowledgeIngestionJobRow | null>;
+    findUnique(input: { where: { jobId: string } }): MaybePromise<PrismaKnowledgeIngestionJobRow | null>;
+    updateMany(input: { data: Partial<Omit<PrismaKnowledgeIngestionJobRow, "jobId" | "tenantId">>; where: { jobId: string; status?: string } }): MaybePromise<{ count: number }>;
+  };
+  knowledgeSource: {
+    deleteMany(input: { where: { id: string; tenantId: string } }): MaybePromise<{ count: number }>;
+    findMany(input: { orderBy?: { createdAt: "asc" }; where?: { tenantId?: string } }): MaybePromise<PrismaKnowledgeSourceRow[]>;
+    upsert(input: {
+      create: PrismaKnowledgeSourceCreateInput;
+      update: Omit<PrismaKnowledgeSourceCreateInput, "createdAt" | "id" | "tenantId">;
+      where: { knowledge_sources_tenant_id_key: { id: string; tenantId: string } };
+    }): MaybePromise<PrismaKnowledgeSourceRow>;
+  };
+}
+
 let defaultRepository: KnowledgeSourceRepository | null = null;
 
 /**
@@ -34,13 +100,18 @@ let defaultRepository: KnowledgeSourceRepository | null = null;
  * and retrieval deliberately remain outside this repository.
  */
 export class KnowledgeSourceRepository {
-  constructor(private readonly store: DurableStore<KnowledgeSourcesState>) {}
+  constructor(
+    private readonly store: DurableStore<KnowledgeSourcesState>,
+    private readonly prismaClient?: KnowledgeSourcePrismaClient
+  ) {}
 
   static default(): KnowledgeSourceRepository {
     if (!defaultRepository) {
-      defaultRepository = KnowledgeSourceRepository.open(
-        process.env.KNOWLEDGE_SOURCES_STORE_FILE ?? ".runtime/knowledge-sources.json"
-      );
+      // Prisma-only рантайм (план 2026-07-15): production-like профиль всегда
+      // персистится в Postgres; json-store остаётся тестовым бэкендом.
+      defaultRepository = isPrismaRuntimeProfile(process.env)
+        ? KnowledgeSourceRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as KnowledgeSourcePrismaClient })
+        : KnowledgeSourceRepository.open(process.env.KNOWLEDGE_SOURCES_STORE_FILE ?? ".runtime/knowledge-sources.json");
     }
     return defaultRepository;
   }
@@ -59,25 +130,58 @@ export class KnowledgeSourceRepository {
     return new KnowledgeSourceRepository(new JsonFileStore({ filePath, seed: { ingestionJobs: [], sources: [] } }));
   }
 
+  static prisma({ client }: { client: KnowledgeSourcePrismaClient }): KnowledgeSourceRepository {
+    return new KnowledgeSourceRepository(new InMemoryStore({ ingestionJobs: [], sources: [] }), client);
+  }
+
   static useDefault(repository: KnowledgeSourceRepository): void { defaultRepository = repository; }
 
-  list(tenantId: string): KnowledgeSourceRecord[] {
+  list(tenantId: string): MaybePromise<KnowledgeSourceRecord[]> {
     const tenant = requiredIdentifier(tenantId, "knowledge_source_tenant_required");
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.knowledgeSource.findMany({ orderBy: { createdAt: "asc" }, where: { tenantId: tenant } }))
+        .then((rows) => rows.map(toSourceRecord));
+    }
     return clone(this.store.read().sources.filter((source) => source.tenantId === tenant));
   }
 
   /** Internal worker read model. Callers must keep each subsequent mutation tenant-scoped. */
-  listAll(): KnowledgeSourceRecord[] { return clone(this.store.read().sources); }
+  listAll(): MaybePromise<KnowledgeSourceRecord[]> {
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.knowledgeSource.findMany({ orderBy: { createdAt: "asc" } }))
+        .then((rows) => rows.map(toSourceRecord));
+    }
+    return clone(this.store.read().sources);
+  }
 
-  find(tenantId: string, id: string): KnowledgeSourceRecord | undefined {
+  find(tenantId: string, id: string): MaybePromise<KnowledgeSourceRecord | undefined> {
     const tenant = requiredIdentifier(tenantId, "knowledge_source_tenant_required");
     const sourceId = requiredIdentifier(id, "knowledge_source_identity_required");
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.knowledgeSource.findMany({ orderBy: { createdAt: "asc" }, where: { tenantId: tenant } }))
+        .then((rows) => {
+          const row = rows.find((item) => item.id === sourceId);
+          return row ? toSourceRecord(row) : undefined;
+        });
+    }
     const source = this.store.read().sources.find((item) => item.tenantId === tenant && item.id === sourceId);
     return source ? clone(source) : undefined;
   }
 
-  save(record: KnowledgeSourceRecord): KnowledgeSourceRecord {
+  save(record: KnowledgeSourceRecord): MaybePromise<KnowledgeSourceRecord> {
     const normalized = normalizeRecord(record);
+    if (this.prismaClient) {
+      const create = toSourceCreateInput(normalized);
+      const { createdAt: _createdAt, id: _id, tenantId: _tenantId, ...update } = create;
+      return Promise.resolve(this.prismaClient.knowledgeSource.upsert({
+        create,
+        update,
+        where: { knowledge_sources_tenant_id_key: { id: normalized.id, tenantId: normalized.tenantId } }
+      })).then((row) => {
+        KnowledgeRetrievalCache.default().purgeSource(normalized.tenantId, normalized.id);
+        return toSourceRecord(row);
+      });
+    }
     this.store.update((state) => {
       const current = normalizeState(state);
       const exists = current.sources.some((item) => item.tenantId === normalized.tenantId && item.id === normalized.id);
@@ -92,9 +196,15 @@ export class KnowledgeSourceRepository {
   }
 
   /** Hard delete of an archived source; ingestion jobs of the source are dropped with it. */
-  delete(tenantId: string, id: string): void {
+  delete(tenantId: string, id: string): MaybePromise<void> {
     const tenant = requiredIdentifier(tenantId, "knowledge_source_tenant_required");
     const sourceId = requiredIdentifier(id, "knowledge_source_identity_required");
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.knowledgeSource.deleteMany({ where: { id: sourceId, tenantId: tenant } }))
+        .then(() => {
+          KnowledgeRetrievalCache.default().purgeSource(tenant, sourceId);
+        });
+    }
     this.store.update((state) => {
       const current = normalizeState(state);
       return {
@@ -106,9 +216,23 @@ export class KnowledgeSourceRepository {
   }
 
   /** BAI-827: пометить document-источники статьи, что вышла новая версия статьи. */
-  markArticleUpdated(tenantId: string, articleId: string, articleVersion: string): number {
+  markArticleUpdated(tenantId: string, articleId: string, articleVersion: string): MaybePromise<number> {
     const tenant = requiredIdentifier(tenantId, "knowledge_source_tenant_required");
     const article = requiredIdentifier(articleId, "knowledge_source_identity_required");
+    if (this.prismaClient) {
+      return Promise.resolve(this.list(tenant)).then(async (sources) => {
+        let marked = 0;
+        for (const item of sources) {
+          if (item.kind !== "document") continue;
+          const boundArticle = String(item.sourceConfig.articleId ?? item.sourceRef ?? "");
+          if (boundArticle !== article) continue;
+          if (String(item.metadata.articleVersion ?? "") === articleVersion) continue;
+          marked += 1;
+          await this.save({ ...item, metadata: { ...item.metadata, articleUpdatedAt: new Date().toISOString(), pendingArticleVersion: articleVersion } });
+        }
+        return marked;
+      });
+    }
     let marked = 0;
     this.store.update((state) => {
       const current = normalizeState(state);
@@ -127,12 +251,21 @@ export class KnowledgeSourceRepository {
     return marked;
   }
 
-  findIngestionJob(tenantId: string, idempotencyKey: string): KnowledgeDocumentIngestionJob | undefined {
-    const job = this.store.read().ingestionJobs.find((item) => item.tenantId === requiredIdentifier(tenantId, "knowledge_source_tenant_required") && item.idempotencyKey === requiredIdentifier(idempotencyKey, "knowledge_ingestion_key_required"));
+  findIngestionJob(tenantId: string, idempotencyKey: string): MaybePromise<KnowledgeDocumentIngestionJob | undefined> {
+    const tenant = requiredIdentifier(tenantId, "knowledge_source_tenant_required");
+    const key = requiredIdentifier(idempotencyKey, "knowledge_ingestion_key_required");
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.knowledgeIngestionJob.findFirst({ where: { idempotencyKey: key, tenantId: tenant } }))
+        .then((row) => row ? toJobRecord(row) : undefined);
+    }
+    const job = this.store.read().ingestionJobs.find((item) => item.tenantId === tenant && item.idempotencyKey === key);
     return job ? clone(job) : undefined;
   }
 
-  claimNextIngestionJob(): KnowledgeDocumentIngestionJob | undefined {
+  claimNextIngestionJob(): MaybePromise<KnowledgeDocumentIngestionJob | undefined> {
+    if (this.prismaClient) {
+      return this.claimNextPrismaIngestionJob();
+    }
     let claimed: KnowledgeDocumentIngestionJob | undefined;
     this.store.update((state) => {
       const current = normalizeState(state); const job = current.ingestionJobs.find((item) => item.status === "pending");
@@ -143,8 +276,12 @@ export class KnowledgeSourceRepository {
     return claimed ? clone(claimed) : undefined;
   }
 
-  saveIngestionJob(job: KnowledgeDocumentIngestionJob): KnowledgeDocumentIngestionJob {
-    const normalized = normalizeJob(job); let saved = normalized;
+  saveIngestionJob(job: KnowledgeDocumentIngestionJob): MaybePromise<KnowledgeDocumentIngestionJob> {
+    const normalized = normalizeJob(job);
+    if (this.prismaClient) {
+      return this.savePrismaIngestionJob(normalized);
+    }
+    let saved = normalized;
     this.store.update((state) => {
       const current = normalizeState(state); const existing = current.ingestionJobs.find((item) => item.tenantId === normalized.tenantId && item.idempotencyKey === normalized.idempotencyKey);
       if (existing) { saved = existing; return current; }
@@ -153,7 +290,17 @@ export class KnowledgeSourceRepository {
     return clone(saved);
   }
 
-  completeIngestionJob(jobId: string, status: "completed" | "failed", errorCode: string | null = null): KnowledgeDocumentIngestionJob | undefined {
+  completeIngestionJob(jobId: string, status: "completed" | "failed", errorCode: string | null = null): MaybePromise<KnowledgeDocumentIngestionJob | undefined> {
+    if (this.prismaClient) {
+      return Promise.resolve(this.prismaClient.knowledgeIngestionJob.updateMany({
+        data: { errorCode, status, updatedAt: new Date() },
+        where: { jobId }
+      })).then(async (result) => {
+        if (!result.count) return undefined;
+        const row = await this.prismaClient!.knowledgeIngestionJob.findUnique({ where: { jobId } });
+        return row ? toJobRecord(row) : undefined;
+      });
+    }
     let saved: KnowledgeDocumentIngestionJob | undefined;
     this.store.update((state) => {
       const current = normalizeState(state);
@@ -164,6 +311,130 @@ export class KnowledgeSourceRepository {
     });
     return saved ? clone(saved) : undefined;
   }
+
+  private async claimNextPrismaIngestionJob(): Promise<KnowledgeDocumentIngestionJob | undefined> {
+    // Оптимистичный claim: updateMany с where по прежнему статусу — второй
+    // конкурирующий воркер получит count=0 и возьмёт следующую задачу.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const candidate = await this.prismaClient!.knowledgeIngestionJob.findFirst({
+        orderBy: { createdAt: "asc" },
+        where: { status: "pending" }
+      });
+      if (!candidate) return undefined;
+      const result = await this.prismaClient!.knowledgeIngestionJob.updateMany({
+        data: { attempts: candidate.attempts + 1, status: "processing", updatedAt: new Date() },
+        where: { jobId: candidate.jobId, status: "pending" }
+      });
+      if (result.count) {
+        const row = await this.prismaClient!.knowledgeIngestionJob.findUnique({ where: { jobId: candidate.jobId } });
+        return row ? toJobRecord(row) : undefined;
+      }
+    }
+    return undefined;
+  }
+
+  private async savePrismaIngestionJob(job: KnowledgeDocumentIngestionJob): Promise<KnowledgeDocumentIngestionJob> {
+    const existing = await this.prismaClient!.knowledgeIngestionJob.findFirst({
+      where: { idempotencyKey: job.idempotencyKey, tenantId: job.tenantId }
+    });
+    if (existing) return toJobRecord(existing);
+    const row = await this.prismaClient!.knowledgeIngestionJob.create({ data: toJobRow(job) });
+    return toJobRecord(row);
+  }
+}
+
+function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
+  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
+}
+
+function toSourceCreateInput(record: KnowledgeSourceRecord): PrismaKnowledgeSourceCreateInput {
+  return {
+    approvalStatus: record.approvalStatus,
+    approvedAt: record.approvedAt ? new Date(record.approvedAt) : null,
+    approvedBy: record.approvedBy,
+    archivedAt: record.archivedAt ? new Date(record.archivedAt) : null,
+    contentChecksum: record.contentChecksum,
+    createdAt: new Date(record.createdAt),
+    disabledAt: record.disabledAt ? new Date(record.disabledAt) : null,
+    failedAt: record.failedAt ? new Date(record.failedAt) : null,
+    failureCode: record.failureCode,
+    id: record.id,
+    kind: record.kind,
+    lastIndexedAt: record.lastIndexedAt ? new Date(record.lastIndexedAt) : null,
+    lastIngestedAt: record.lastIngestedAt ? new Date(record.lastIngestedAt) : null,
+    metadata: record.metadata,
+    owner: record.owner,
+    readiness: record.readiness,
+    retentionUntil: record.retentionUntil ? new Date(record.retentionUntil) : null,
+    sourceConfig: record.sourceConfig,
+    sourceRef: record.sourceRef,
+    status: record.status,
+    tenantId: record.tenantId,
+    title: record.title,
+    updatedAt: new Date(record.updatedAt),
+    version: record.version
+  };
+}
+
+function toSourceRecord(row: PrismaKnowledgeSourceRow): KnowledgeSourceRecord {
+  return normalizeRecord({
+    approvalStatus: row.approvalStatus as KnowledgeSourceRecord["approvalStatus"],
+    approvedAt: row.approvedAt ? row.approvedAt.toISOString() : null,
+    approvedBy: row.approvedBy,
+    archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
+    contentChecksum: row.contentChecksum,
+    createdAt: row.createdAt.toISOString(),
+    disabledAt: row.disabledAt ? row.disabledAt.toISOString() : null,
+    failedAt: row.failedAt ? row.failedAt.toISOString() : null,
+    failureCode: row.failureCode,
+    id: row.id,
+    kind: row.kind as KnowledgeSourceRecord["kind"],
+    lastIndexedAt: row.lastIndexedAt ? row.lastIndexedAt.toISOString() : null,
+    lastIngestedAt: row.lastIngestedAt ? row.lastIngestedAt.toISOString() : null,
+    metadata: toRecord(row.metadata),
+    owner: row.owner,
+    readiness: row.readiness as KnowledgeSourceRecord["readiness"],
+    retentionUntil: row.retentionUntil ? row.retentionUntil.toISOString() : null,
+    sourceConfig: toRecord(row.sourceConfig),
+    sourceRef: row.sourceRef,
+    status: row.status as KnowledgeSourceRecord["status"],
+    tenantId: row.tenantId,
+    title: row.title,
+    updatedAt: row.updatedAt.toISOString(),
+    version: row.version
+  });
+}
+
+function toJobRow(job: KnowledgeDocumentIngestionJob): PrismaKnowledgeIngestionJobRow {
+  return {
+    attempts: job.attempts,
+    createdAt: new Date(job.createdAt),
+    errorCode: job.errorCode,
+    fileId: job.fileId,
+    fingerprint: job.fingerprint,
+    idempotencyKey: job.idempotencyKey,
+    jobId: job.jobId,
+    sourceId: job.sourceId,
+    status: job.status,
+    tenantId: job.tenantId,
+    updatedAt: new Date(job.updatedAt)
+  };
+}
+
+function toJobRecord(row: PrismaKnowledgeIngestionJobRow): KnowledgeDocumentIngestionJob {
+  return normalizeJob({
+    attempts: row.attempts,
+    createdAt: row.createdAt.toISOString(),
+    errorCode: row.errorCode,
+    fileId: row.fileId,
+    fingerprint: row.fingerprint,
+    idempotencyKey: row.idempotencyKey,
+    jobId: row.jobId,
+    sourceId: row.sourceId,
+    status: row.status as KnowledgeDocumentIngestionJob["status"],
+    tenantId: row.tenantId,
+    updatedAt: row.updatedAt.toISOString()
+  });
 }
 
 function normalizeState(input: Partial<KnowledgeSourcesState>): KnowledgeSourcesState {

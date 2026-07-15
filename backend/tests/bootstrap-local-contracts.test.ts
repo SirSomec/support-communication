@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
-describe("pilot bootstrap", () => {
-  it("defines pilot compose overlay with prisma repositories", () => {
-    const compose = readFileSync(new URL("../../docker-compose.pilot.yml", import.meta.url), "utf8");
-    assert.match(compose, /profiles:\s*\[\s*"prisma-postgres"\s*\]/);
+describe("local stack bootstrap", () => {
+  it("keeps the single compose file on prisma repositories without pilot overlays", () => {
+    const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+    assert.equal(existsSync(new URL("../../docker-compose.pilot.yml", import.meta.url)), false);
+    assert.doesNotMatch(compose, /profiles:/);
+    assert.doesNotMatch(compose, /IDENTITY_REPOSITORY:\s*json/);
+    assert.doesNotMatch(compose, /CONVERSATION_REPOSITORY:\s*json/);
+    assert.doesNotMatch(compose, /INTEGRATION_REPOSITORY:\s*json/);
     assert.match(compose, /IDENTITY_REPOSITORY:\s*prisma/);
     assert.match(compose, /BILLING_REPOSITORY:\s*prisma/);
     assert.match(compose, /CONVERSATION_REPOSITORY:\s*prisma/);
@@ -17,18 +21,19 @@ describe("pilot bootstrap", () => {
     assert.doesNotMatch(compose, /ALLOW_DEMO_SERVICE_ADMIN_HEADERS:\s*"true"/);
   });
 
-  it("runs pilot bootstrap before the API gateway starts in the pilot compose overlay", () => {
-    const compose = readFileSync(new URL("../../docker-compose.pilot.yml", import.meta.url), "utf8");
+  it("runs the bootstrap before the API gateway starts", () => {
+    const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
 
-    assert.match(compose, /pilot-bootstrap:/);
-    assert.match(compose, /command:\s*\[\s*"npm",\s*"run",\s*"pilot:bootstrap"\s*\]/);
-    assert.match(compose, /api-gateway:[\s\S]*pilot-bootstrap:[\s\S]*condition:\s*service_completed_successfully/);
-    assert.match(compose, /pilot-bootstrap:[\s\S]*DATABASE_URL:\s*postgresql:\/\/support:support@postgres:5432\/support_communication/);
+    assert.match(compose, /^  bootstrap:/m);
+    assert.match(compose, /command:\s*\[\s*"npm",\s*"run",\s*"bootstrap:local"\s*\]/);
+    assert.match(compose, /api-gateway:[\s\S]*bootstrap:[\s\S]*condition:\s*service_completed_successfully/);
+    assert.match(compose, /bootstrap:[\s\S]*DATABASE_URL:\s*postgresql:\/\/support:support@postgres:5432\/support_communication/);
   });
 
-  it("exposes pilot-bootstrap script in package.json", () => {
+  it("exposes the bootstrap:local script in package.json", () => {
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-    assert.equal(pkg.scripts["pilot:bootstrap"], "node --env-file=.env.example scripts/pilot-bootstrap.mjs");
+    assert.equal(pkg.scripts["bootstrap:local"], "node --env-file=.env.example scripts/bootstrap-local.mjs");
+    assert.equal(pkg.scripts["pilot:bootstrap"], undefined);
   });
 
   it("keeps the TypeScript seed runner available after Docker production pruning", () => {

@@ -36,12 +36,12 @@
       <h1>Support Widget — локальная демо-страница</h1>
       <p>
         Эта страница подключает собранный бандл <code>dist/widget.js</code> и инициализирует
-        <code>SupportWidget</code> для ручной проверки пилота.
+        <code>SupportWidget</code> для ручной проверки виджета.
       </p>
 
       <h2>Локальная разработка</h2>
       <ol>
-        <li>Поднимите pilot stack (API доступен через proxy на <code>:8080</code>).</li>
+        <li>Поднимите локальный стек: <code>docker compose up -d</code> (API доступен через proxy на <code>:8080</code>).</li>
         <li>Соберите виджет: <code>npm run widget:build</code> из корня репозитория.</li>
         <li>
           Запустите preview с прокси:
@@ -49,7 +49,7 @@
         </li>
         <li>
           Откройте <code>http://127.0.0.1:5174/demo.html</code> и подставьте stage public key из
-          <code>npm run pilot:bootstrap</code>.
+          <code>npm run bootstrap:local</code>.
         </li>
       </ol>
 

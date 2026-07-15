@@ -1,24 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { PrismaClient } = require("@prisma/client");
 
-const PILOT_TENANT_ID = "tenant-pilot-001";
-const PILOT_OPERATOR_ID = "usr-pilot-operator";
-const PILOT_API_KEY_ID = "key-pilot-sdk-stage";
+const BOOTSTRAP_TENANT_ID = "tenant-local-001";
+const BOOTSTRAP_OPERATOR_ID = "usr-local-operator";
+const BOOTSTRAP_API_KEY_ID = "key-local-sdk-stage";
 
-const tenantSlug = String(process.env.PILOT_TENANT_SLUG ?? "pilot-client").trim() || "pilot-client";
-const operatorEmail = String(process.env.PILOT_OPERATOR_EMAIL ?? "operator@pilot-client.test").trim().toLowerCase();
-const operatorPassword = String(process.env.PILOT_OPERATOR_PASSWORD ?? "Pilot-Operator-2026!");
-const integrationStoreFile = resolve(
-  process.cwd(),
-  String(process.env.INTEGRATION_STORE_FILE ?? ".runtime/integration-store.json").trim()
-    || ".runtime/integration-store.json"
-);
+const tenantSlug = String(process.env.BOOTSTRAP_TENANT_SLUG ?? "local-client").trim() || "local-client";
+const operatorEmail = String(process.env.BOOTSTRAP_OPERATOR_EMAIL ?? "operator@local-client.test").trim().toLowerCase();
+const operatorPassword = String(process.env.BOOTSTRAP_OPERATOR_PASSWORD ?? "Local-Operator-2026!");
 
 runNpmScript("identity:bootstrap:postgres");
 
@@ -29,36 +22,27 @@ try {
   const keyPreview = maskPublicApiKeySecret(rawSecret);
   const createdAt = new Date().toISOString();
 
-  await upsertPilotTenant(prisma, tenantSlug);
-  await upsertPilotOperator(prisma, operatorEmail);
-  await upsertPilotPasswordCredential(prisma, operatorEmail, operatorPassword);
-  await seedPilotDomainCatalog(prisma, ["tenant-volga", PILOT_TENANT_ID]);
-
-  const prismaKeySaved = await upsertPilotPublicApiKeyPrisma(prisma, {
+  await upsertBootstrapTenant(prisma, tenantSlug);
+  await upsertBootstrapOperator(prisma, operatorEmail);
+  await upsertBootstrapPasswordCredential(prisma, operatorEmail, operatorPassword);
+  await seedDomainCatalog(prisma, ["tenant-volga", BOOTSTRAP_TENANT_ID]);
+  const keySaved = await upsertBootstrapPublicApiKey(prisma, {
     createdAt,
     keyPreview,
     rawSecret,
-    tenantId: PILOT_TENANT_ID
-  });
-  const jsonKeySaved = savePilotPublicApiKeyJson({
-    createdAt,
-    keyPreview,
-    rawSecret,
-    tenantId: PILOT_TENANT_ID
+    tenantId: BOOTSTRAP_TENANT_ID
   });
 
   const summary = {
-    tenantId: PILOT_TENANT_ID,
+    tenantId: BOOTSTRAP_TENANT_ID,
     operatorEmail,
     publicApiKeyPrefix: keyPreview
   };
 
-  process.stderr.write(
-    `[pilot:bootstrap] Public API key storage: prisma=${prismaKeySaved ? "yes" : "no"}, json=${jsonKeySaved ? "yes" : "no"} (${integrationStoreFile})\n`
-  );
-  process.stderr.write("[pilot:bootstrap] === PUBLIC API KEY (shown once) ===\n");
+  process.stderr.write(`[bootstrap:local] Public API key storage: prisma=${keySaved ? "yes" : "no"}\n`);
+  process.stderr.write("[bootstrap:local] === PUBLIC API KEY (shown once) ===\n");
   process.stderr.write(`${rawSecret}\n`);
-  process.stderr.write("[pilot:bootstrap] =====================================\n");
+  process.stderr.write("[bootstrap:local] =====================================\n");
   process.stdout.write(`${JSON.stringify(summary)}\n`);
 } finally {
   await prisma.$disconnect();
@@ -83,11 +67,11 @@ function runNpmScript(script) {
   }
 }
 
-async function seedPilotDomainCatalog(client, tenantIds) {
+async function seedDomainCatalog(client, tenantIds) {
   const automationCatalog = loadSeedCatalog("../apps/api-gateway/dist/automation/seed-catalog.js");
   const qualityCatalog = loadSeedCatalog("../apps/api-gateway/dist/quality/seed-catalog.js");
   if (!automationCatalog && !qualityCatalog) {
-    process.stderr.write("[pilot:bootstrap] Domain catalog seed skipped: compiled seed catalogs are unavailable.\n");
+    process.stderr.write("[bootstrap:local] Domain catalog seed skipped: compiled seed catalogs are unavailable.\n");
     return;
   }
 
@@ -220,7 +204,7 @@ async function seedPilotDomainCatalog(client, tenantIds) {
     }
   }
 
-  process.stderr.write(`[pilot:bootstrap] Seeded automation and quality catalogs for ${tenantIds.join(", ")}.\n`);
+  process.stderr.write(`[bootstrap:local] Seeded automation and quality catalogs for ${tenantIds.join(", ")}.\n`);
 }
 
 function mapSeedBotScenarioStatus(seedStatus) {
@@ -242,90 +226,89 @@ function loadSeedCatalog(relativePath) {
     return require(relativePath);
   } catch (error) {
     process.stderr.write(
-      `[pilot:bootstrap] Failed to load ${relativePath}: ${error instanceof Error ? error.message : String(error)}\n`
+      `[bootstrap:local] Failed to load ${relativePath}: ${error instanceof Error ? error.message : String(error)}\n`
     );
     return null;
   }
 }
 
-async function upsertPilotTenant(client, slug) {
+async function upsertBootstrapTenant(client, slug) {
   const metadata = {
     slug,
-    pilot: true,
-    owner: "Pilot Client",
+    owner: "Local Client",
     ownerEmail: operatorEmail,
-    planId: "pilot",
+    planId: "local",
     region: "staging",
     domains: [`${slug}.example`],
     flags: [],
     incidentIds: [],
-    notes: "First client pilot tenant created by pilot:bootstrap."
+    notes: "Local stack tenant created by bootstrap:local."
   };
 
   await client.tenant.upsert({
     create: {
       healthScore: 100,
-      id: PILOT_TENANT_ID,
+      id: BOOTSTRAP_TENANT_ID,
       metadata,
-      name: "Pilot Client",
+      name: "Local Client",
       status: "active"
     },
     update: {
       healthScore: 100,
       metadata,
-      name: "Pilot Client",
+      name: "Local Client",
       status: "active"
     },
-    where: { id: PILOT_TENANT_ID }
+    where: { id: BOOTSTRAP_TENANT_ID }
   });
 }
 
-async function upsertPilotOperator(client, email) {
+async function upsertBootstrapOperator(client, email) {
   await client.tenantUser.upsert({
     create: {
-      device: "Pilot bootstrap",
+      device: "Local bootstrap",
       email,
-      id: PILOT_OPERATOR_ID,
+      id: BOOTSTRAP_OPERATOR_ID,
       inviteStatus: "accepted",
       lastActiveAt: null,
-      metadata: { pilot: true },
+      metadata: { bootstrap: true },
       mfa: "disabled",
-      name: "Pilot Operator",
+      name: "Local Operator",
       risk: "low",
       role: "Admin",
       sessions: 0,
       status: "active",
-      supportNotes: "Created by pilot:bootstrap for first client pilot.",
-      tenantId: PILOT_TENANT_ID
+      supportNotes: "Created by bootstrap:local for the local stack.",
+      tenantId: BOOTSTRAP_TENANT_ID
     },
     update: {
-      device: "Pilot bootstrap",
+      device: "Local bootstrap",
       email,
-      metadata: { pilot: true },
+      metadata: { bootstrap: true },
       mfa: "disabled",
-      name: "Pilot Operator",
+      name: "Local Operator",
       role: "Admin",
       status: "active",
-      supportNotes: "Created by pilot:bootstrap for first client pilot.",
-      tenantId: PILOT_TENANT_ID
+      supportNotes: "Created by bootstrap:local for the local stack.",
+      tenantId: BOOTSTRAP_TENANT_ID
     },
-    where: { id: PILOT_OPERATOR_ID }
+    where: { id: BOOTSTRAP_OPERATOR_ID }
   });
 }
 
-async function upsertPilotPasswordCredential(client, email, password) {
+async function upsertBootstrapPasswordCredential(client, email, password) {
   await client.passwordCredential.upsert({
     create: {
       algorithm: "sha256",
       email,
       hash: hashPasswordCredential(password),
-      subjectId: PILOT_OPERATOR_ID,
+      subjectId: BOOTSTRAP_OPERATOR_ID,
       updatedAt: new Date(),
       version: 1
     },
     update: {
       hash: hashPasswordCredential(password),
-      subjectId: PILOT_OPERATOR_ID,
+      subjectId: BOOTSTRAP_OPERATOR_ID,
       updatedAt: new Date(),
       version: 1
     },
@@ -333,7 +316,7 @@ async function upsertPilotPasswordCredential(client, email, password) {
   });
 }
 
-async function upsertPilotPublicApiKeyPrisma(client, input) {
+async function upsertBootstrapPublicApiKey(client, input) {
   try {
     const now = new Date(input.createdAt);
     const secretHash = hashPublicApiKeySecret(input.rawSecret);
@@ -342,10 +325,10 @@ async function upsertPilotPublicApiKeyPrisma(client, input) {
       create: {
         createdAt: now,
         environment: "stage",
-        keyId: PILOT_API_KEY_ID,
+        keyId: BOOTSTRAP_API_KEY_ID,
         keyPreview: input.keyPreview,
-        name: "Pilot SDK stage key",
-        owner: "Pilot bootstrap",
+        name: "Local SDK stage key",
+        owner: "Local bootstrap",
         scopes: ["clients:identify", "conversations:write"],
         secretHash,
         status: "active",
@@ -355,22 +338,22 @@ async function upsertPilotPublicApiKeyPrisma(client, input) {
       update: {
         environment: "stage",
         keyPreview: input.keyPreview,
-        name: "Pilot SDK stage key",
-        owner: "Pilot bootstrap",
+        name: "Local SDK stage key",
+        owner: "Local bootstrap",
         scopes: ["clients:identify", "conversations:write"],
         secretHash,
         status: "active",
         tenantId: input.tenantId,
         updatedAt: now
       },
-      where: { keyId: PILOT_API_KEY_ID }
+      where: { keyId: BOOTSTRAP_API_KEY_ID }
     });
 
     await client.publicApiKeyRevealState.upsert({
       create: {
         consumedAt: null,
         createdAt: now,
-        keyId: PILOT_API_KEY_ID,
+        keyId: BOOTSTRAP_API_KEY_ID,
         keyPreview: input.keyPreview,
         status: "available"
       },
@@ -379,94 +362,20 @@ async function upsertPilotPublicApiKeyPrisma(client, input) {
         keyPreview: input.keyPreview,
         status: "available"
       },
-      where: { keyId: PILOT_API_KEY_ID }
+      where: { keyId: BOOTSTRAP_API_KEY_ID }
     });
 
     return true;
   } catch (error) {
     process.stderr.write(
-      `[pilot:bootstrap] Prisma public API key persistence skipped: ${error instanceof Error ? error.message : String(error)}\n`
+      `[bootstrap:local] Prisma public API key persistence skipped: ${error instanceof Error ? error.message : String(error)}\n`
     );
     return false;
-  }
-}
-
-function savePilotPublicApiKeyJson(input) {
-  try {
-    mkdirSync(dirname(integrationStoreFile), { recursive: true });
-    const state = readIntegrationStore(integrationStoreFile);
-    const secretHash = hashPublicApiKeySecret(input.rawSecret);
-    const keyRecord = {
-      createdAt: input.createdAt,
-      environment: "stage",
-      keyId: PILOT_API_KEY_ID,
-      keyPreview: input.keyPreview,
-      name: "Pilot SDK stage key",
-      owner: "Pilot bootstrap",
-      scopes: ["clients:identify", "conversations:write"],
-      secretHash,
-      status: "active",
-      tenantId: input.tenantId
-    };
-    const revealState = {
-      consumedAt: null,
-      createdAt: input.createdAt,
-      keyId: PILOT_API_KEY_ID,
-      keyPreview: input.keyPreview,
-      status: "available"
-    };
-
-    const publicApiKeys = state.publicApiKeys.filter((item) => item.keyId !== PILOT_API_KEY_ID);
-    publicApiKeys.push(keyRecord);
-
-    const publicApiKeyRevealStates = state.publicApiKeyRevealStates.filter((item) => item.keyId !== PILOT_API_KEY_ID);
-    publicApiKeyRevealStates.push(revealState);
-
-    writeFileSync(integrationStoreFile, `${JSON.stringify({
-      ...state,
-      publicApiKeys,
-      publicApiKeyRevealStates
-    }, null, 2)}\n`, "utf8");
-
-    return true;
-  } catch (error) {
-    process.stderr.write(
-      `[pilot:bootstrap] JSON integration store persistence failed: ${error instanceof Error ? error.message : String(error)}\n`
-    );
-    return false;
-  }
-}
-
-function readIntegrationStore(filePath) {
-  try {
-    const raw = readFileSync(filePath, "utf8");
-    const parsed = JSON.parse(raw);
-    return {
-      apiKeyRotationAuditEvents: parsed.apiKeyRotationAuditEvents ?? [],
-      apiKeyRotationJobs: parsed.apiKeyRotationJobs ?? [],
-      publicApiKeys: parsed.publicApiKeys ?? [],
-      publicApiKeyRevealStates: parsed.publicApiKeyRevealStates ?? [],
-      securitySessions: parsed.securitySessions ?? [],
-      webhookDeliveryJournal: parsed.webhookDeliveryJournal ?? [],
-      webhookReplayAuditEvents: parsed.webhookReplayAuditEvents ?? [],
-      webhookReplayJournal: parsed.webhookReplayJournal ?? []
-    };
-  } catch {
-    return {
-      apiKeyRotationAuditEvents: [],
-      apiKeyRotationJobs: [],
-      publicApiKeys: [],
-      publicApiKeyRevealStates: [],
-      securitySessions: [],
-      webhookDeliveryJournal: [],
-      webhookReplayAuditEvents: [],
-      webhookReplayJournal: []
-    };
   }
 }
 
 function generateStagePublicApiKeySecret() {
-  return `sk_test_pilot_${randomBytes(16).toString("hex")}`;
+  return `sk_test_local_${randomBytes(16).toString("hex")}`;
 }
 
 function hashPasswordCredential(password) {

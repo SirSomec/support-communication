@@ -27,7 +27,6 @@ describe("report export worker contracts", () => {
     };
     const releaseChecklist = readFileSync(new URL("../scripts/release-checklist.mjs", import.meta.url), "utf8");
     const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
-    const pilotCompose = readFileSync(new URL("../../docker-compose.pilot.yml", import.meta.url), "utf8");
     const main = readFileSync(new URL("../apps/api-gateway/src/reports/report-digest.main.ts", import.meta.url), "utf8");
 
     assert.match(packageJson.scripts["start:report-digest-worker"], /apps\/api-gateway\/dist\/reports\/report-digest\.main\.js/);
@@ -46,7 +45,7 @@ describe("report export worker contracts", () => {
     assert.match(compose, /command: \["node", "apps\/api-gateway\/dist\/reports\/report-digest\.main\.js"\]/);
     assert.match(compose, /REPORT_DIGEST_WORKER_INTERVAL_MS: 10000/);
     assert.match(compose, /REPORT_DIGEST_WORKER_LIMIT: 10/);
-    assert.match(pilotCompose, /report-digest-worker:[\s\S]*REPORT_REPOSITORY: prisma/);
+    assert.match(compose, /report-digest-worker:[\s\S]*REPORT_REPOSITORY: prisma/);
     assert.match(main, /runReportDigestWorkerFromEnv/);
     assert.match(main, /queueScheduledDigestExportJob/);
   });
@@ -57,7 +56,6 @@ describe("report export worker contracts", () => {
     };
     const releaseChecklist = readFileSync(new URL("../scripts/release-checklist.mjs", import.meta.url), "utf8");
     const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
-    const pilotCompose = readFileSync(new URL("../../docker-compose.pilot.yml", import.meta.url), "utf8");
 
     assert.match(packageJson.scripts["start:report-export-worker"], /apps\/api-gateway\/dist\/reports\/report-export\.main\.js/);
     assert.equal(packageJson.scripts["report-export:worker:once"], "npm run build && node --env-file=.env.example scripts/report-export-worker-smoke.mjs");
@@ -80,7 +78,7 @@ describe("report export worker contracts", () => {
     assert.match(compose, /REPORT_EXPORT_WORKER_INTERVAL_MS: 10000/);
     assert.match(compose, /REPORT_EXPORT_WORKER_LIMIT: 10/);
     assert.match(compose, /REPORT_EXPORT_OBJECT_ROOT: \.runtime\/report-exports/);
-    assert.match(pilotCompose, /report-export-worker:[\s\S]*REPORT_REPOSITORY: prisma/);
+    assert.match(compose, /report-export-worker:[\s\S]*REPORT_REPOSITORY: prisma/);
   });
 
   it("serializes report rows as deterministic CSV", () => {

@@ -88,6 +88,8 @@ export function bootstrapIntegrationState(base?: Partial<IntegrationState>): Int
 
     webhookDeliveryJournal: base?.webhookDeliveryJournal ?? [],
 
+    webhookEndpointRecords: base?.webhookEndpointRecords ?? [],
+
     webhookReplayAuditEvents: base?.webhookReplayAuditEvents ?? [],
 
     webhookReplayJournal: base?.webhookReplayJournal ?? [],

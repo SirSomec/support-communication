@@ -17,7 +17,7 @@ import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase, normalizeBotTri
 import { DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS, ProactiveExposureRepository } from "./proactive-exposure.repository.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
 import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
-import { isKnowledgeSourceRetrievalEligible } from "../knowledge-sources/knowledge-source.types.js";
+import { isKnowledgeSourceRetrievalEligible, type KnowledgeSourceRecord } from "../knowledge-sources/knowledge-source.types.js";
 import {
   buildScenarioOperationalSummariesFromState,
   buildTenantAiUsageSummary
@@ -137,7 +137,7 @@ export class AutomationService {
     const state = await this.automationRepository.readStateAsync();
     this.syncLocalCaches(state);
     const scenarios = scopedBotScenarios(state.botScenarios, tenantId);
-    const aiUsage = resolveTenantAiUsage(tenantId, context);
+    const aiUsage = await resolveTenantAiUsage(tenantId, context);
 
     return createEnvelope({
       service: AUTOMATION_SERVICE,
@@ -146,7 +146,7 @@ export class AutomationService {
       partial: true,
       meta: apiMeta({ tenantId }),
       data: {
-        aiReadiness: aiReadinessForTenant(tenantId),
+        aiReadiness: await aiReadinessForTenant(tenantId),
         aiUsage,
         auditEvents: [
           ...clone(state.workspaceAuditEvents.filter((event) => scenarioTenantId(event) === tenantId)),
@@ -333,7 +333,7 @@ export class AutomationService {
     }
     const versions = await this.automationRepository.listBotScenarioVersions(scenarioId);
     const state = await this.automationRepository.readStateAsync();
-    const aiUsage = resolveTenantAiUsage(tenantId, context);
+    const aiUsage = await resolveTenantAiUsage(tenantId, context);
     const operations = buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)
       .find((item) => item.scenarioId === scenarioId) ?? null;
     return createEnvelope({
@@ -376,14 +376,14 @@ export class AutomationService {
       const tenantId = resolveAutomationTenantId(context);
       if (tenantId) {
         for (const binding of sourceBindings) {
-          const source = this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
+          const source = await this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
           if (!source || !isKnowledgeSourceRetrievalEligible(source)) {
             policyErrors.push(`Источник знаний «${binding.sourceId}» недоступен или не готов.`);
           }
         }
         if (payload.flowNodes.some((node) => node.type === "ai_reply")) {
           if (!sourceBindings.length) policyErrors.push("AI-ответу нужен хотя бы один готовый источник знаний.");
-          if (aiReadinessForTenant(tenantId).status !== "ready") {
+          if ((await aiReadinessForTenant(tenantId)).status !== "ready") {
             policyErrors.push("AI-подключение организации не настроено или не прошло проверку.");
           }
           if (!payload.flowNodes.some((node) => node.type === "handoff" || node.type === "fallback")) {
@@ -466,10 +466,14 @@ export class AutomationService {
       return publishFailure(tenantId, scenarioId, "trigger_conflict", conflictEnvelope("publishBotScenario", "trigger_conflict", "Another published scenario already owns this keyword phrase and priority.", triggerConflict));
     }
     const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? draftOverlay?.sourceBindings ?? existing.sourceBindings ?? []);
-    const unavailableSourceId = sourceBindings.find((binding) => {
-      const source = this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
-      return !source || !isKnowledgeSourceRetrievalEligible(source);
-    })?.sourceId;
+    let unavailableSourceId: string | undefined;
+    for (const binding of sourceBindings) {
+      const source = await this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
+      if (!source || !isKnowledgeSourceRetrievalEligible(source)) {
+        unavailableSourceId = binding.sourceId;
+        break;
+      }
+    }
     if (unavailableSourceId) {
       recordBotSourceError({ failureCode: "knowledge_source_not_ready", tenantId });
       return publishFailure(tenantId, scenarioId, "knowledge_source_not_ready", invalidEnvelope("publishBotScenario", "knowledge_source_not_ready", "Every selected knowledge source must be ready and approved before publication.", { scenarioId, sourceId: unavailableSourceId }));
@@ -479,7 +483,7 @@ export class AutomationService {
     const aiNodes = nodes.filter((node) => node.type === "ai_reply");
     if (aiNodes.length) {
       if (!sourceBindings.length) prerequisiteViolations.push("AI-ответу нужен хотя бы один готовый источник знаний.");
-      if (aiReadinessForTenant(tenantId).status !== "ready") prerequisiteViolations.push("AI-подключение организации не настроено или не прошло проверку.");
+      if ((await aiReadinessForTenant(tenantId)).status !== "ready") prerequisiteViolations.push("AI-подключение организации не настроено или не прошло проверку.");
       const hasHandoffPath = nodes.some((node) => node.type === "handoff" || node.type === "fallback");
       if (!hasHandoffPath) prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");
       // BAI-844: рамки ответов должны безопасно закрывать red-team-категории.
@@ -995,7 +999,7 @@ export class AutomationService {
   }
 
   private async botRuntimeFeatureFlags(): Promise<FeatureFlag[] | undefined> {
-    return String(process.env.BOT_AI_AGENTS_PILOT_ENFORCE ?? "").trim() === "1"
+    return isBotAiAgentsFlagEnforced()
       ? this.platformRepository.listFeatureFlagsAsync()
       : undefined;
   }
@@ -1266,7 +1270,7 @@ export class AutomationService {
 
   async handleBotRuntimeInboundEvent(event: BotRuntimeInboundEvent, options: BotRuntimeOptions = {}) {
     const featureFlags = options.featureFlags
-      ?? (String(process.env.BOT_AI_AGENTS_PILOT_ENFORCE ?? "").trim() === "1"
+      ?? (isBotAiAgentsFlagEnforced()
         ? await this.platformRepository.listFeatureFlagsAsync()
         : undefined);
     return new BotRuntimeService(this.automationRepository, { ...options, featureFlags }).handleInboundEvent(event);
@@ -1536,20 +1540,20 @@ function canTransitionBotScenario(from: string, to: string): boolean {
   return from === to || (BOT_SCENARIO_TRANSITIONS[from] ?? []).includes(to);
 }
 
-function aiReadinessForTenant(tenantId: string): { connectionCount: number; readyConnectionCount: number; status: "not_configured" | "ready" | "unavailable" } {
-  const connections = AiConnectionRepository.default().list(tenantId);
+async function aiReadinessForTenant(tenantId: string): Promise<{ connectionCount: number; readyConnectionCount: number; status: "not_configured" | "ready" | "unavailable" }> {
+  const connections = await AiConnectionRepository.default().list(tenantId);
   const readyConnectionCount = connections.filter((connection) => connection.status === "ready" && connection.disabledAt === null && connection.capabilities.includes("chat_completion")).length;
   return { connectionCount: connections.length, readyConnectionCount, status: readyConnectionCount ? "ready" : connections.length ? "unavailable" : "not_configured" };
 }
 
-function resolveTenantAiUsage(tenantId: string, context: AutomationRequestContext) {
-  const connections = AiConnectionRepository.default().list(tenantId);
+async function resolveTenantAiUsage(tenantId: string, context: AutomationRequestContext) {
+  const connections = await AiConnectionRepository.default().list(tenantId);
   const primary = connections.find((connection) => connection.status === "ready" && connection.disabledAt === null)
     ?? connections[0];
   if (!primary) {
     return buildTenantAiUsageSummary({ usedTokens: 0, viewer: context });
   }
-  const usage = AiUsageRepository.default().current(tenantId, primary.id);
+  const usage = await AiUsageRepository.default().current(tenantId, primary.id);
   return buildTenantAiUsageSummary({
     month: usage.month,
     monthlyTokenBudget: primary.limits.monthlyTokenBudget ?? null,
@@ -1560,10 +1564,11 @@ function resolveTenantAiUsage(tenantId: string, context: AutomationRequestContex
 
 async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string, testMessage: string): Promise<Record<string, unknown>> {
   const sourceBindings = scenario.sourceBindings ?? [];
-  const sources = sourceBindings.flatMap((binding) => {
-    const source = KnowledgeSourceRepository.default().find(tenantId, binding.sourceId);
-    return source && isKnowledgeSourceRetrievalEligible(source) ? [source] : [];
-  });
+  const sources: KnowledgeSourceRecord[] = [];
+  for (const binding of sourceBindings) {
+    const source = await KnowledgeSourceRepository.default().find(tenantId, binding.sourceId);
+    if (source && isKnowledgeSourceRetrievalEligible(source)) sources.push(source);
+  }
   const phraseRule = (scenario.triggerRules ?? []).find((rule) => rule.type === "phrase");
   const alwaysExceptRule = (scenario.triggerRules ?? []).find((rule) => rule.type === "always_except");
   const phraseMatched = phraseRule ? Boolean(testMessage) && (phraseRule.phrases ?? []).some((phrase) => matchesBotTriggerPhrase(testMessage, phrase, phraseRule.matchMode ?? "contains", phraseRule.locale)) : null;
@@ -1580,7 +1585,7 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
         dryRun: true,
         isolation: "no_runtime_steps_no_outbound",
         knowledgeSourceCount: sources.length,
-        readiness: aiReadinessForTenant(tenantId).status,
+        readiness: (await aiReadinessForTenant(tenantId)).status,
         retrievalCache: "skipped",
         retrievalTokenBudget: 0,
         retrievalTokensUsed: 0
@@ -1604,7 +1609,7 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
           dryRun: true,
           isolation: "no_runtime_steps_no_outbound",
           knowledgeSourceCount: sources.length,
-          readiness: aiReadinessForTenant(tenantId).status,
+          readiness: (await aiReadinessForTenant(tenantId)).status,
           retrievalCache: "skipped",
           retrievalTokenBudget: 0,
           retrievalTokensUsed: 0
@@ -1620,7 +1625,7 @@ async function buildScenarioTestPreview(scenario: BotScenario, tenantId: string,
   }
 
   const aiNode = scenario.flowNodes.find((node) => node.type === "ai_reply");
-  const readiness = aiReadinessForTenant(tenantId);
+  const readiness = await aiReadinessForTenant(tenantId);
   let retrieval: { cache: "hit" | "miss"; passages: Array<{ citation: { sourceId: string; sourceVersion: number; title: string }; content: string; score: number }>; tokenBudget: number; tokensUsed: number } = {
     cache: "miss",
     passages: [],
@@ -1848,6 +1853,12 @@ function validRangeDate(value: string | undefined): Date | null {
 
 function automationTenantIdempotencyKey(tenantId: string, key: string): string {
   return `${tenantId}\u0000${key}`;
+}
+
+function isBotAiAgentsFlagEnforced(): boolean {
+  // BOT_AI_AGENTS_PILOT_ENFORCE — устаревшее имя, поддерживается один релиз.
+  const configured = process.env.BOT_AI_AGENTS_FLAG_ENFORCE ?? process.env.BOT_AI_AGENTS_PILOT_ENFORCE;
+  return String(configured ?? "").trim() === "1";
 }
 
 function proactiveRuleTenantId(rule: ProactiveRule): string | null {

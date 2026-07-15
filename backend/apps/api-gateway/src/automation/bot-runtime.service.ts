@@ -13,7 +13,7 @@ import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runt
 import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
 import { AiBotResponseService, type AiBotResponse } from "./ai-bot-response.service.js";
 import { evaluatePostPolicy, evaluatePrePolicy, normalizeAgentPolicy } from "./agent-policy.js";
-import { evaluateAiAgentsPilot } from "./ai-agents-pilot.js";
+import { evaluateAiAgentsRollout } from "./ai-agents-rollout.js";
 import { recordBotHandoff, recordBotTriggerMatch } from "./bot-observability.js";
 import type { FeatureFlag } from "../platform/platform.types.js";
 
@@ -252,14 +252,14 @@ export class BotRuntimeService {
         };
       }
       if (this.options.featureFlags) {
-        const pilot = evaluateAiAgentsPilot({ flags: this.options.featureFlags, tenantId: event.tenantId });
-        if (!pilot.eligible) {
+        const rollout = evaluateAiAgentsRollout({ flags: this.options.featureFlags, tenantId: event.tenantId });
+        if (!rollout.eligible) {
           const handoffSummary = {
             botId: scenarioId ?? event.scenarioId ?? "",
             collectedFields: redactObject(context),
             nodeId: node.id,
             queue: String(node.config?.handoffQueue ?? "default"),
-            reason: "bot_ai_pilot_disabled"
+            reason: "bot_ai_flag_disabled"
           };
           return {
             aiResponse: {
@@ -267,7 +267,7 @@ export class BotRuntimeService {
               model: "unavailable",
               text: String(node.config?.fallbackMessage ?? "AI-агент временно отключён для этого tenant. Передаю вопрос специалисту.")
             },
-            context: { ...context, lastAiFailure: "bot_ai_pilot_disabled", pilotReason: pilot.reason },
+            context: { ...context, lastAiFailure: "bot_ai_flag_disabled", rolloutReason: rollout.reason },
             handoffSummary,
             outcome: "ai_handoff_requested",
             status: "handoff" as const

@@ -19,7 +19,7 @@ for (const file of manifest.files ?? []) {
 const suffix = randomBytes(5).toString("hex");
 const database = `support_restore_${suffix}`;
 const bucket = `support-restore-${suffix}`;
-const compose = ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.pilot.yml", "--profile", "prisma-postgres"];
+const compose = ["compose", "-f", "docker-compose.yml"];
 const postgresContainer = command("docker", [...compose, "ps", "-q", "postgres"]).trim();
 const minioContainer = command("docker", [...compose, "ps", "-q", "minio"]).trim();
 if (!postgresContainer || !minioContainer) throw new Error("runtime_restore_required_container_missing");

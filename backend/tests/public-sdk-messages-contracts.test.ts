@@ -343,7 +343,7 @@ async function createTestApiApp(apps: INestApplication[]): Promise<{ baseUrl: st
   process.env.S3_ACCESS_KEY = "test-access-key";
   process.env.S3_SECRET_KEY = "test-secret-key";
   process.env.DEMO_SERVICE_ADMIN_KEY = "dev-service-admin-key-0001";
-  process.env.PILOT_VISITOR_TOKEN_SECRET = "pilot-visitor-token-contract-secret";
+  process.env.SDK_VISITOR_TOKEN_SECRET = "sdk-visitor-token-contract-secret";
 
   const identityRepository = IdentityRepository.inMemory();
   IdentityRepository.useDefault(identityRepository);

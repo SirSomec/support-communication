@@ -545,13 +545,14 @@ function signVisitorToken(encodedBody: string): string {
 }
 
 function visitorTokenSecret(): string {
-  const configured = String(process.env.PILOT_VISITOR_TOKEN_SECRET ?? "").trim();
+  // PILOT_VISITOR_TOKEN_SECRET — устаревшее имя, поддерживается один релиз.
+  const configured = String(process.env.SDK_VISITOR_TOKEN_SECRET ?? process.env.PILOT_VISITOR_TOKEN_SECRET ?? "").trim();
   if (configured) {
     return configured;
   }
 
   const fallback = String(process.env.DEMO_SERVICE_ADMIN_KEY ?? "").trim();
-  return fallback || "pilot-visitor-session-secret";
+  return fallback || "sdk-visitor-session-secret";
 }
 
 function encodeBase64Url(value: string | Buffer): string {

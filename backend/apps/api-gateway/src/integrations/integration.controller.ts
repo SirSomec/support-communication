@@ -173,6 +173,32 @@ export class IntegrationController {
     return this.integrationService.testChannelConnection(payload);
   }
 
+  @Post("api-keys")
+  @UseGuards(TenantOperatorOrServiceAdminGuard)
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    description: "Creates a public API key; the raw secret is returned exactly once in this response and only its hash is stored.",
+    operationId: "createPublicApiKey",
+    summary: "Create a public API key"
+  })
+  @ApiBody({
+    schema: {
+      properties: {
+        environment: { enum: ["production", "stage"], type: "string" },
+        name: { type: "string" },
+        scopes: { items: { type: "string" }, type: "array" }
+      },
+      required: ["name"],
+      type: "object"
+    }
+  })
+  @ApiOkResponse({ description: "Created API key envelope; the raw secret appears only in this one-time response" })
+  createPublicApiKey(@Body() payload: { environment?: string; name?: string; scopes?: string[] } = {}) {
+    return this.integrationService.createPublicApiKey(payload);
+  }
+
   @Post("api-keys/:keyId/rotate")
   @UseGuards(TenantOperatorOrServiceAdminGuard)
   @RequireTenantOperatorPermission("settings.manage")
@@ -187,6 +213,91 @@ export class IntegrationController {
   @ApiOkResponse({ description: "Queued API key rotation envelope; raw key material is never returned" })
   rotateApiKey(@Param("keyId") keyId: string) {
     return this.integrationService.rotateApiKey(keyId);
+  }
+
+  @Post("api-keys/:keyId/revoke")
+  @UseGuards(TenantOperatorOrServiceAdminGuard)
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    description: "Revokes a public API key immediately; revoked keys stop authenticating public API requests.",
+    operationId: "revokePublicApiKey",
+    summary: "Revoke a public API key"
+  })
+  @ApiParam({ name: "keyId", description: "Public API key identifier to revoke" })
+  @ApiOkResponse({ description: "Revoked API key envelope with immutable audit evidence" })
+  revokePublicApiKey(@Param("keyId") keyId: string) {
+    return this.integrationService.revokePublicApiKey(keyId);
+  }
+
+  @Post("webhooks/endpoints")
+  @UseGuards(TenantOperatorOrServiceAdminGuard)
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    operationId: "createWebhookEndpoint",
+    summary: "Create a signed webhook endpoint"
+  })
+  @ApiBody({
+    schema: {
+      properties: {
+        channel: { type: "string" },
+        name: { type: "string" },
+        url: { type: "string" }
+      },
+      required: ["name", "url"],
+      type: "object"
+    }
+  })
+  @ApiOkResponse({ description: "Created webhook endpoint envelope" })
+  createWebhookEndpoint(@Body() payload: { channel?: string; name?: string; url?: string } = {}) {
+    return this.integrationService.createWebhookEndpoint(payload);
+  }
+
+  @Patch("webhooks/endpoints/:endpointId")
+  @UseGuards(TenantOperatorOrServiceAdminGuard)
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    operationId: "updateWebhookEndpoint",
+    summary: "Update or enable/disable a signed webhook endpoint"
+  })
+  @ApiParam({ name: "endpointId", description: "Webhook endpoint identifier" })
+  @ApiBody({
+    required: false,
+    schema: {
+      properties: {
+        name: { type: "string" },
+        status: { enum: ["active", "disabled"], type: "string" },
+        url: { type: "string" }
+      },
+      type: "object"
+    }
+  })
+  @ApiOkResponse({ description: "Updated webhook endpoint envelope" })
+  updateWebhookEndpoint(
+    @Param("endpointId") endpointId: string,
+    @Body() payload: { name?: string; status?: string; url?: string } = {}
+  ) {
+    return this.integrationService.updateWebhookEndpoint(endpointId, payload);
+  }
+
+  @Delete("webhooks/endpoints/:endpointId")
+  @UseGuards(TenantOperatorOrServiceAdminGuard)
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    operationId: "deleteWebhookEndpoint",
+    summary: "Delete a signed webhook endpoint"
+  })
+  @ApiParam({ name: "endpointId", description: "Webhook endpoint identifier" })
+  @ApiOkResponse({ description: "Deleted webhook endpoint envelope" })
+  deleteWebhookEndpoint(@Param("endpointId") endpointId: string) {
+    return this.integrationService.deleteWebhookEndpoint(endpointId);
   }
 
   @Post("webhooks/deliveries/:deliveryId/replay")

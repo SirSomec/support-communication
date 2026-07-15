@@ -241,7 +241,7 @@ async function createTestApiApp(apps: INestApplication[]) {
   process.env.DEMO_SERVICE_ADMIN_KEY = process.env.DEMO_SERVICE_ADMIN_KEY ?? "dev-service-admin-key-0001";
   process.env.TELEGRAM_WEBHOOK_ENABLED = "true";
   process.env.TELEGRAM_WEBHOOK_SECRET = WEBHOOK_SECRET;
-  process.env.PILOT_TELEGRAM_TENANT_ID = TENANT_ID;
+  process.env.TELEGRAM_LEGACY_TENANT_ID = TENANT_ID;
 
   IdentityRepository.useDefault(IdentityRepository.inMemory());
   ConversationRepository.useDefault(ConversationRepository.inMemory());

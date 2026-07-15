@@ -139,7 +139,7 @@ export class BotSandboxService {
 
     const resolved = await this.resolveScenarioConfig(input.tenantId, input.scenarioId, session.mode, session.versionId);
     const hasAiNode = resolved.config.flowNodes.some((node) => node.type === "ai_reply");
-    if (hasAiNode) this.assertSandboxBudget(input.tenantId, now);
+    if (hasAiNode) await this.assertSandboxBudget(input.tenantId, now);
 
     const isFirstTurn = session.turns.length === 0;
     const trigger = isFirstTurn ? evaluateTriggerTrace(resolved.config, text) : { evaluated: false, matched: null };
@@ -271,8 +271,8 @@ export class BotSandboxService {
     return this.options.now?.() ?? new Date();
   }
 
-  private assertSandboxBudget(tenantId: string, now: Date): void {
-    const connection = this.connections.list(tenantId)
+  private async assertSandboxBudget(tenantId: string, now: Date): Promise<void> {
+    const connection = (await this.connections.list(tenantId))
       .filter((item) => item.status === "ready" && item.disabledAt === null && item.capabilities.includes("chat_completion"))
       .sort((a, b) => a.id.localeCompare(b.id))[0];
     const envBudget = Number(this.environment.BOT_SANDBOX_MONTHLY_TOKEN_BUDGET);
@@ -510,7 +510,7 @@ function sandboxHandoffNote(reason: string): string {
     bot_ai_connection_not_ready: "AI-подключение не настроено или не готово — диалог передан оператору.",
     bot_ai_consultation_turn_limit: "Достигнут лимит реплик консультации — диалог передан оператору.",
     bot_ai_knowledge_not_ready: "Нет готовых источников знаний — диалог передан оператору.",
-    bot_ai_pilot_disabled: "AI-агент выключен для этой организации (пилотный флаг) — диалог передан оператору.",
+    bot_ai_flag_disabled: "AI-агент выключен для этой организации (флаг раскатки) — диалог передан оператору.",
     bot_ai_quota_exhausted: "Исчерпан месячный бюджет токенов — диалог передан оператору.",
     bot_ai_rate_limit_reached: "Превышен лимит запросов в минуту — диалог передан оператору.",
     client_requested_operator: "Клиент попросил живого оператора — диалог передан.",

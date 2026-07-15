@@ -5,7 +5,61 @@ import { join } from "node:path";
 import { resetMetricsRegistry } from "../packages/observability/src/index.ts";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { AutomationService } from "../apps/api-gateway/src/automation/automation.service.ts";
-import { BotFeedbackRepository } from "../apps/api-gateway/src/automation/bot-feedback.repository.ts";
+import {
+  BotFeedbackRepository,
+  type BotAiFeedbackRecord,
+  type BotFeedbackPrismaClient,
+  type PrismaBotAiFeedbackRow
+} from "../apps/api-gateway/src/automation/bot-feedback.repository.ts";
+
+function inMemoryPrismaBotFeedbackClient(): BotFeedbackPrismaClient {
+  const rows = new Map<string, PrismaBotAiFeedbackRow>();
+  return {
+    botAiFeedback: {
+      create: async ({ data }) => {
+        const row: PrismaBotAiFeedbackRow = { ...data, citationSourceIds: data.citationSourceIds };
+        rows.set(row.feedbackId, row);
+        return row;
+      },
+      findFirst: async ({ where }) => [...rows.values()].find((row) =>
+        (!where.tenantId || row.tenantId === where.tenantId) && (!where.idempotencyKey || row.idempotencyKey === where.idempotencyKey)) ?? null,
+      findMany: async ({ where } = {}) => [...rows.values()]
+        .filter((row) => (!where?.tenantId || row.tenantId === where.tenantId) && (!where?.conversationId || row.conversationId === where.conversationId))
+        .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()),
+      findUnique: async ({ where }) => rows.get(where.feedbackId) ?? null,
+      updateMany: async ({ data, where }) => {
+        let count = 0;
+        for (const row of rows.values()) {
+          if (row.tenantId === where.tenantId && row.feedbackId === where.feedbackId) {
+            rows.set(row.feedbackId, { ...row, ...data });
+            count += 1;
+          }
+        }
+        return { count };
+      }
+    }
+  };
+}
+
+function feedbackRecord(overrides: Partial<BotAiFeedbackRecord> = {}): BotAiFeedbackRecord {
+  return {
+    actorId: "op-1",
+    citationSourceIds: ["src-faq"],
+    comment: null,
+    conversationId: "maria",
+    createdAt: new Date("2026-07-15T10:00:00.000Z").toISOString(),
+    feedbackId: "fb-prisma-1",
+    idempotencyKey: "idem-1",
+    knowledgeMutated: false,
+    outcome: "wrong_source",
+    resolvedAction: null,
+    resolvedAt: null,
+    reviewRequired: true,
+    scenarioId: "bot-delivery",
+    tenantId: "tenant-volga",
+    ...overrides
+  };
+}
 
 describe("BAI-703 bot AI feedback loop", () => {
   beforeEach(() => {
@@ -62,6 +116,30 @@ describe("BAI-703 bot AI feedback loop", () => {
     assert.equal(second.status, "ok");
     assert.equal(second.data.duplicate, true);
     assert.equal(second.data.feedback.feedbackId, first.data.feedback.feedbackId);
+  });
+
+  it("persists feedback lifecycle through the prisma branch, idempotent and tenant-scoped", async () => {
+    const repository = BotFeedbackRepository.prisma({ client: inMemoryPrismaBotFeedbackClient() });
+
+    const saved = await repository.saveFeedback(feedbackRecord());
+    assert.equal(saved.feedbackId, "fb-prisma-1");
+    assert.equal(saved.knowledgeMutated, false);
+    assert.equal(saved.reviewRequired, true);
+
+    // Idempotent by (tenant, idempotencyKey): a second save with a different id
+    // returns the original record, not a duplicate.
+    const dup = await repository.saveFeedback(feedbackRecord({ feedbackId: "fb-prisma-2" }));
+    assert.equal(dup.feedbackId, "fb-prisma-1");
+
+    await repository.saveFeedback(feedbackRecord({ feedbackId: "fb-other-tenant", idempotencyKey: "idem-2", tenantId: "tenant-ladoga" }));
+    assert.equal((await repository.listFeedback({ tenantId: "tenant-volga" })).length, 1);
+    assert.equal((await repository.listFeedback({ tenantId: "tenant-ladoga" })).length, 1);
+
+    const resolved = await repository.resolveFeedback("tenant-volga", "fb-prisma-1", "created_article");
+    assert.equal(resolved?.resolvedAction, "created_article");
+    assert.equal(resolved?.reviewRequired, false);
+    assert.equal(typeof resolved?.resolvedAt, "string");
+    assert.equal(await repository.resolveFeedback("tenant-ladoga", "fb-prisma-1", "x"), undefined);
   });
 
   it("exposes the bot-feedback route with operator permission guards", () => {

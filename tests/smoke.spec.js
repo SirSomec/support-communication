@@ -1105,11 +1105,11 @@ test("settings expose webhooks api keys and security controls", async ({ page })
   await openSection(page, "Настройки");
 
   await page.locator("#settings-tab-api").click();
-  await expect(page.locator(".api-governance-panel")).toContainText("Webhooks / API keys");
+  await expect(page.locator(".api-governance-panel")).toContainText("API-ключи");
   const productionKey = page.locator(".api-key-card").filter({ hasText: "Production SDK key" });
   if (await productionKey.count()) {
-    await productionKey.locator("button").click();
-    await expect(productionKey).toContainText("Rotation queued");
+    await productionKey.locator("button.api-key-rotate").click();
+    await expect(productionKey).toContainText("Ротация в очереди");
     await expect(page.locator(".toast")).toContainText("prod-key");
   } else {
     await expect(page.locator(".api-governance-panel")).toContainText("Webhook endpoints");
@@ -1123,7 +1123,7 @@ test("settings expose webhooks api keys and security controls", async ({ page })
     await expect(page.locator(".webhook-delivery-row").filter({ hasText: "message_new" })).toContainText("replay_queued");
     await expect(page.locator(".toast")).toContainText("повтор доставки поставлен в очередь");
   } else {
-    await expect(page.locator(".webhook-detail")).toContainText("Webhook endpoints");
+    await expect(page.locator(".webhook-detail")).toContainText("endpoint");
   }
   await expectNoElementOverflow(page, ".admin-workspace-layout");
   await expectNoElementOverflow(page, ".api-governance-panel");
@@ -1152,6 +1152,53 @@ test("settings expose webhooks api keys and security controls", async ({ page })
   await expect(page.locator(".product-screen")).not.toContainText("sk_test_****_44ST");
   await expect(page.locator(".product-screen")).not.toContainText("https://api.support.local/webhooks/vk");
   await expect(page.locator(".product-screen")).not.toContainText("185.17.32.90");
+  await expectHealthyPage(page);
+});
+
+test("settings manage api keys and webhook endpoints lifecycle", async ({ page }) => {
+  // Уникальные имена на прогон: stub-store живет, пока жив сервер, и при
+  // повторном прогоне без рестарта одинаковые имена дали бы дубли карточек.
+  const runTag = Date.now().toString(36);
+  const keyName = `Smoke QA key ${runTag}`;
+  const endpointName = `Smoke QA endpoint ${runTag}`;
+
+  await openAppShell(page);
+  await selectRole(page, "Администратор");
+  await openSection(page, "Настройки");
+  await page.locator("#settings-tab-api").click();
+
+  // Ключ: создание с одноразовым показом секрета, затем отзыв.
+  await page.locator(".settings-create-api-key").click();
+  await page.locator(".api-key-create-form input").first().fill(keyName);
+  await page.locator("button[form='api-key-create-form']").click();
+  await expect(page.locator(".api-key-reveal-secret")).toContainText("sk_test_");
+  await page.locator(".settings-modal-panel button").filter({ hasText: "Я сохранил ключ" }).click();
+
+  const smokeKey = page.locator(".api-key-card").filter({ hasText: keyName });
+  await expect(smokeKey).toContainText("Активен");
+  await smokeKey.locator("button.api-key-revoke").click();
+  await page.locator(".confirm-panel .danger-action").click();
+  await expect(page.locator(".toast")).toContainText("ключ отозван");
+  await expect(smokeKey).toContainText("Отозван");
+
+  // Endpoint: создание, пауза доставки и удаление.
+  await page.locator(".settings-create-endpoint").click();
+  await page.locator(".webhook-endpoint-create-form input").first().fill(endpointName);
+  await page.locator(".webhook-endpoint-create-form input").nth(1).fill("https://qa.example.test/webhooks/support");
+  await page.locator("button[form='webhook-endpoint-create-form']").click();
+
+  const smokeEndpoint = page.locator(".webhook-endpoint").filter({ hasText: endpointName });
+  await expect(smokeEndpoint).toContainText("Активен");
+  await expect(page.locator(".webhook-detail")).toContainText("https://qa.example.test/webhooks/support");
+
+  await page.locator(".webhook-endpoint-toggle").click();
+  await expect(page.locator(".toast")).toContainText("endpoint отключён");
+  await expect(smokeEndpoint).toContainText("Отключён");
+
+  await page.locator(".webhook-endpoint-delete").click();
+  await page.locator(".confirm-panel .danger-action").click();
+  await expect(page.locator(".toast")).toContainText("endpoint удалён");
+  await expect(smokeEndpoint).toHaveCount(0);
   await expectHealthyPage(page);
 });
 

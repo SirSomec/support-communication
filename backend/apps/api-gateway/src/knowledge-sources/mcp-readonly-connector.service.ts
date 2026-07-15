@@ -92,7 +92,7 @@ export class McpReadOnlyConnectorService {
     toolName: string,
     toolInput: Record<string, unknown> = {}
   ): Promise<McpReadOnlyResult> {
-    const persisted = this.repository?.find(tenantId, connectorId);
+    const persisted = await this.repository?.find(tenantId, connectorId);
     const connector: ReadOnlyMcpConnector | undefined = persisted ? { ...persisted, approved: Boolean(persisted.approvedAt) } : this.connectors.get(key(tenantId, connectorId));
     if (!connector) return { ok: false, code: "mcp_connector_not_found" };
     if (!connector.approved) return { ok: false, code: "mcp_connector_unapproved" };

@@ -5,24 +5,24 @@ import { BotRuntimeService } from "../apps/api-gateway/src/automation/bot-runtim
 import {
   AI_AGENTS_FLAG_KEY,
   aiAgentsKillSwitchSteps,
-  evaluateAiAgentsPilot
-} from "../apps/api-gateway/src/automation/ai-agents-pilot.ts";
+  evaluateAiAgentsRollout
+} from "../apps/api-gateway/src/automation/ai-agents-rollout.ts";
 import { featureFlags } from "../apps/api-gateway/src/platform/seed-catalog.ts";
 import type { FeatureFlag } from "../apps/api-gateway/src/platform/platform.types.ts";
 
-describe("BAI-706 AI agents pilot feature flag", () => {
+describe("BAI-706 AI agents rollout feature flag", () => {
   afterEach(() => AutomationRepository.clearDefault());
 
-  it("seeds ai_agents_v1 with kill switch and pilot tenant allowlist", () => {
+  it("seeds ai_agents_v1 with kill switch and rollout tenant allowlist", () => {
     const flag = featureFlags.find((item) => item.key === AI_AGENTS_FLAG_KEY);
     assert.ok(flag);
     assert.equal(flag!.killSwitch, true);
-    assert.deepEqual(flag!.enabledTenantIds, ["tenant-pilot-001"]);
-    assert.equal(evaluateAiAgentsPilot({ tenantId: "tenant-pilot-001" }).eligible, true);
-    assert.equal(evaluateAiAgentsPilot({ tenantId: "tenant-volga" }).eligible, false);
+    assert.deepEqual(flag!.enabledTenantIds, ["tenant-local-001"]);
+    assert.equal(evaluateAiAgentsRollout({ tenantId: "tenant-local-001" }).eligible, true);
+    assert.equal(evaluateAiAgentsRollout({ tenantId: "tenant-volga" }).eligible, false);
   });
 
-  it("hands off AI replies when the pilot flag excludes the tenant", async () => {
+  it("hands off AI replies when the rollout flag excludes the tenant", async () => {
     const state = createEmptyAutomationState();
     const nodes = [
       { id: "start", type: "condition" },
@@ -33,8 +33,8 @@ describe("BAI-706 AI agents pilot feature flag", () => {
       channels: ["SDK"],
       flowEdges: edges,
       flowNodes: nodes,
-      id: "bot-pilot",
-      name: "Pilot",
+      id: "bot-rollout",
+      name: "Rollout",
       schemaVersion: "bot-flow/v1",
       status: "published",
       tenantId: "tenant-volga"
@@ -43,7 +43,7 @@ describe("BAI-706 AI agents pilot feature flag", () => {
       createdAt: "2026-07-12T00:00:00.000Z",
       flowEdges: edges,
       flowNodes: nodes,
-      scenarioId: "bot-pilot",
+      scenarioId: "bot-rollout",
       status: "published",
       tenantId: "tenant-volga",
       versionId: "ver-1"
@@ -52,7 +52,7 @@ describe("BAI-706 AI agents pilot feature flag", () => {
     const flags: FeatureFlag[] = [
       {
         ...featureFlags.find((item) => item.key === AI_AGENTS_FLAG_KEY)!,
-        enabledTenantIds: ["tenant-pilot-001"],
+        enabledTenantIds: ["tenant-local-001"],
         rollout: 0,
         status: "on"
       }
@@ -73,14 +73,14 @@ describe("BAI-706 AI agents pilot feature flag", () => {
       conversationId: "c1",
       eventId: "e1",
       payload: { text: "hello" },
-      scenarioId: "bot-pilot",
+      scenarioId: "bot-rollout",
       tenantId: "tenant-volga",
-      traceId: "trc_pilot"
+      traceId: "trc_rollout"
     });
 
     assert.equal(aiCalled, false);
     assert.equal(result.step.outcome, "ai_handoff_requested");
-    assert.equal(result.step.handoffSummary?.reason, "bot_ai_pilot_disabled");
+    assert.equal(result.step.handoffSummary?.reason, "bot_ai_flag_disabled");
   });
 
   it("documents kill switch recovery steps", () => {

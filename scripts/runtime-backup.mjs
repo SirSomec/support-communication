@@ -9,7 +9,7 @@ const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const target = resolve(process.argv[2] || join(root, ".runtime", "backups", stamp));
 mkdirSync(target, { recursive: true });
 
-const compose = ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.pilot.yml", "--profile", "prisma-postgres"];
+const compose = ["compose", "-f", "docker-compose.yml"];
 const postgresDump = join(target, "postgres.dump");
 await pipeCommand("docker", [...compose, "exec", "-T", "postgres", "pg_dump", "-U", "support", "-d", "support_communication", "--format=custom", "--no-owner", "--no-privileges"], postgresDump);
 

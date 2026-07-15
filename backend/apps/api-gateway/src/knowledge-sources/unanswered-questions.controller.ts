@@ -23,16 +23,16 @@ export class UnansweredQuestionsController {
   @RequireTenantOperatorPermission("knowledge.read")
   @RequireServiceAdminAction("knowledge.read")
   @ApiOkResponse({ description: "Tenant-scoped unanswered client questions (PII redacted)" })
-  list(@Req() request: TenantOperatorRequest & ServiceAdminRequest): BackendEnvelope<Record<string, unknown>> {
-    return envelope("listUnansweredQuestions", tenantId(request), { questions: this.repository.list(tenantId(request)) });
+  async list(@Req() request: TenantOperatorRequest & ServiceAdminRequest): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return envelope("listUnansweredQuestions", tenantId(request), { questions: await this.repository.list(tenantId(request)) });
   }
 
   @Post(":questionId/dismiss")
   @RequireTenantOperatorPermission("knowledge.write")
   @RequireServiceAdminAction("knowledge.write")
   @HttpCode(HttpStatus.OK)
-  dismiss(@Param("questionId") questionId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest): BackendEnvelope<Record<string, unknown>> {
-    const question = this.repository.setStatus(tenantId(request), questionId, "dismissed");
+  async dismiss(@Param("questionId") questionId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const question = await this.repository.setStatus(tenantId(request), questionId, "dismissed");
     if (!question) return invalid("dismissUnansweredQuestion", tenantId(request));
     return envelope("dismissUnansweredQuestion", tenantId(request), { question });
   }
@@ -41,12 +41,12 @@ export class UnansweredQuestionsController {
   @RequireTenantOperatorPermission("knowledge.write")
   @RequireServiceAdminAction("knowledge.write")
   @HttpCode(HttpStatus.OK)
-  resolve(
+  async resolve(
     @Param("questionId") questionId: string,
     @Body() body: { articleId?: string } | null,
     @Req() request: TenantOperatorRequest & ServiceAdminRequest
-  ): BackendEnvelope<Record<string, unknown>> {
-    const question = this.repository.setStatus(tenantId(request), questionId, "resolved", String(body?.articleId ?? "").trim() || null);
+  ): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const question = await this.repository.setStatus(tenantId(request), questionId, "resolved", String(body?.articleId ?? "").trim() || null);
     if (!question) return invalid("resolveUnansweredQuestion", tenantId(request));
     return envelope("resolveUnansweredQuestion", tenantId(request), { question });
   }

@@ -633,7 +633,7 @@ Acceptance criteria:
 План запуска пилота с первым реальным клиентом (сквозной поток SDK → inbox → ответ оператора, PostgreSQL, tenant auth, embeddable widget):
 
 - [First Client Pilot Plan](superpowers/plans/2026-07-01-first-client-pilot.md)
-- [Pilot Runbook](pilot-runbook.md) — операционная инструкция
+- [Local Stack Runbook](local-stack-runbook.md) — операционная инструкция
 
 Критерии успеха пилота и scope вынесены в план; полный production backlog остаётся в §7.2 и [backend-development-plan.md](backend-development-plan.md).
 

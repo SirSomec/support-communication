@@ -51,13 +51,13 @@ npm run start:billing-bullmq-worker
 docker compose up -d postgres redis minio mailpit
 ```
 
-The root `docker-compose.yml` is the fast local, non-production mode: it starts PostgreSQL, Redis, MinIO and Mailpit, but the API Gateway uses JSON-backed domain stores by default. For the guarded production-like PostgreSQL slice, use the named `prisma-postgres` compose profile:
+The snippet above starts only the backing services (PostgreSQL, Redis, MinIO, Mailpit) for host-run backend development. The root `docker-compose.yml` is the single local stack and runs the full product on PostgreSQL — there is no separate pilot overlay or profile:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build
+docker compose up -d --build
 ```
 
-That overlay sets `RUNTIME_PROFILE=production-like`, disables demo service-admin header auth, and switches automation, identity, billing, conversation, workspace, integrations, notifications, operations, platform, quality, routing and reports repositories to Prisma. It should start without JSON fallback store blockers when those repository modes are active.
+It sets `RUNTIME_PROFILE=production-like`, disables demo service-admin header auth, and runs automation, identity, billing, conversation, workspace, integrations, notifications, operations, platform, quality, routing and reports repositories on Prisma. A one-shot `bootstrap` service (`npm run bootstrap:local`) applies migrations and seeds `tenant-local-001` before the API Gateway starts. JSON-backed domain stores remain only as the in-memory unit-test backend.
 
 ## Frontend Real API Mode
 

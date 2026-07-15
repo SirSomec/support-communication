@@ -1,5 +1,7 @@
 # First Client Pilot Implementation Plan
 
+> **Архивный документ (исторический).** «Пилотный» контур упразднён: проект перешёл на единый Prisma-рантайм — см. [Prisma-only runtime plan](../2026-07-15-prisma-only-runtime-plan.md) и [Local Stack Runbook](../../local-stack-runbook.md). Команды из этого плана (`docker-compose.pilot.yml`, `pilot-bootstrap`, `pilot-runbook.md`) больше не актуальны; документ сохранён как история реализации первого сквозного потока.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Запустить управляемый пилот с первым реальным клиентом: посетитель пишет через Web SDK на сайте клиента, оператор видит диалог в inbox, отвечает, клиент получает ответ — с персистентным хранением в PostgreSQL и без зависимости от seed-данных `src/data.js`.

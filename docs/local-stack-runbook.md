@@ -1,8 +1,8 @@
-# Pilot Runbook — First Client
+# Local Stack Runbook
 
-Операционная инструкция для команды при запуске пилота с первым клиентом.
+Операционная инструкция для команды при запуске единого локального стенда на PostgreSQL.
 
-Связанный план: [First Client Pilot Plan](superpowers/plans/2026-07-01-first-client-pilot.md).
+Проект работает на едином Prisma-рантайме: отдельного «пилотного» контура и оверлея больше нет — базовый `docker-compose.yml` поднимает весь стек на Postgres. См. план перехода: [Prisma-only runtime plan](superpowers/plans/2026-07-15-prisma-only-runtime-plan.md).
 
 ## 1. Prerequisites
 
@@ -13,37 +13,35 @@
 
 | Переменная | Назначение | Значение по умолчанию |
 | --- | --- | --- |
-| `PILOT_TENANT_SLUG` | slug клиента в metadata tenant | `pilot-client` |
-| `PILOT_OPERATOR_EMAIL` | email оператора пилота | `operator@pilot-client.test` |
-| `PILOT_OPERATOR_PASSWORD` | пароль оператора | `Pilot-Operator-2026!` |
+| `BOOTSTRAP_OPERATOR_EMAIL` | email оператора локального стенда | `operator@local-client.test` |
+| `BOOTSTRAP_OPERATOR_PASSWORD` | пароль оператора | `Local-Operator-2026!` |
 | `DEMO_SERVICE_ADMIN_KEY` | service-admin ключ (staging) | **не** `dev-service-admin-key` |
 | `DATABASE_URL` | Postgres для bootstrap с хоста | см. `backend/.env.example` |
-| `INTEGRATION_REPOSITORY` | Repository mode for public API key, Telegram and integration runtime state | `prisma` in pilot overlay |
 | `PUBLIC_WEBHOOK_BASE_URL` | публичный URL API для webhook-инструкций | `https://<your-host>` |
-| `TELEGRAM_WEBHOOK_ENABLED` | приём webhook в API Gateway | `true` в pilot overlay |
-| `TELEGRAM_POLLING_ENABLED` | получение входящих сообщений без публичного webhook | `true` в pilot overlay |
+| `TELEGRAM_WEBHOOK_ENABLED` | приём webhook в API Gateway | `true` |
+| `TELEGRAM_POLLING_ENABLED` | получение входящих сообщений без публичного webhook | `true` |
 | `TELEGRAM_POLLING_INTERVAL_MS` | период опроса Telegram Bot API | `5000` |
 | `OUTBOX_TELEGRAM_ENABLED` | исходящая доставка в Telegram | `true` + worker |
 
-Для staging через Docker overlay также нужны S3/MinIO credentials из базового `docker-compose.yml`.
+Все репозитории рантайма работают на Prisma безусловно (`RUNTIME_PROFILE=production-like` в compose); отдельного `*_REPOSITORY`-переключателя на JSON для стенда больше нет. S3/MinIO credentials берутся из базового `docker-compose.yml`.
 
 ## 2. Поднятие стенда
 
-Pilot overlay переключает `api-gateway` на Prisma-репозитории и включает Redis fan-out для realtime:
+Базовый compose уже включает Prisma-репозитории, Redis fan-out для realtime и одноразовый `bootstrap`-сервис:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build
+docker compose up -d --build
 ```
 
-При запуске overlay одноразовый `pilot-bootstrap` автоматически выполняет миграции и seed до старта API Gateway. Отдельный ручной bootstrap для обычного запуска не нужен.
+Сервис `bootstrap` (`npm run bootstrap:local`) автоматически выполняет миграции и seed до старта API Gateway. Отдельный ручной bootstrap для обычного запуска не нужен.
 
-Для намеренного сброса только фиксированного pilot-аккаунта и ротации его stage API key выполните:
+Для намеренного пересоздания фиксированного локального аккаунта и ротации его stage API key выполните:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres run --rm pilot-bootstrap
+docker compose run --rm bootstrap
 ```
 
-Bootstrap создаёт tenant `tenant-pilot-001`, оператора и stage public API key. Полный ключ печатается **один раз** в stderr; в stdout — JSON `{ tenantId, operatorEmail, publicApiKeyPrefix }`. Команда сбрасывает пароль фиксированного pilot-оператора к `PILOT_OPERATOR_PASSWORD`, поэтому не запускайте её во время ручной сессии без необходимости.
+Bootstrap создаёт tenant `tenant-local-001`, оператора и stage public API key. Полный ключ печатается **один раз** в stderr; в stdout — JSON `{ tenantId, operatorEmail, publicApiKeyPrefix }`. Команда сбрасывает пароль фиксированного локального оператора к `BOOTSTRAP_OPERATOR_PASSWORD`, поэтому не запускайте её во время ручной сессии без необходимости.
 
 Проверка health (через frontend proxy на `:8080`):
 
@@ -54,9 +52,9 @@ curl -s http://127.0.0.1:8080/api/v1/ready
 
 Прямой доступ к API Gateway (если нужен): `http://127.0.0.1:4101/api/v1/health`.
 
-### Вход оператора в локальном pilot-контуре
+### Вход оператора в локальном контуре
 
-1. Откройте `http://127.0.0.1:8080` и войдите с существующим tenant-аккаунтом либо с bootstrap-аккаунтом `operator@pilot-client.test` / `Pilot-Operator-2026!`.
+1. Откройте `http://127.0.0.1:8080` и войдите с существующим tenant-аккаунтом либо с bootstrap-аккаунтом `operator@local-client.test` / `Local-Operator-2026!`.
 2. После проверки пароля API отправит случайный шестизначный код. Фиксированный код `123456` больше не используется в staging.
 3. Откройте Mailpit на `http://127.0.0.1:18025`, найдите последнее письмо для email аккаунта и введите код до истечения десятиминутного срока.
 4. На экране подтверждения при запуске через `localhost` или `127.0.0.1` доступна команда **Открыть тестовую почту**.
@@ -65,17 +63,17 @@ curl -s http://127.0.0.1:8080/api/v1/ready
 
 ## 3. Создание tenant клиента
 
-**Вариант A — автоматический bootstrap compose** (фиксированный pilot tenant, рекомендуется для Task 1):
+**Вариант A — автоматический bootstrap compose** (фиксированный локальный tenant, рекомендуется для быстрого старта):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build
+docker compose up -d --build
 ```
 
-Локальный pilot использует `telegram-polling-worker`, потому что адреса `127.0.0.1` и `localhost` недоступны серверам Telegram для webhook-доставки. На публичном стенде можно использовать webhook, но одновременно должен быть активен только один способ получения обновлений для одного бота.
+Локальный стенд использует `telegram-polling-worker`, потому что адреса `127.0.0.1` и `localhost` недоступны серверам Telegram для webhook-доставки. На публичном стенде можно использовать webhook, но одновременно должен быть активен только один способ получения обновлений для одного бота.
 
-Результат: tenant `tenant-pilot-001`, operator credential и stage SDK key. Сохраните ключ из stderr.
+Результат: tenant `tenant-local-001`, operator credential и stage SDK key. Сохраните ключ из stderr.
 
-**Вариант B — onboarding UI** (после Task 9 плана):
+**Вариант B — onboarding UI**:
 
 1. Открыть `#/onboarding`
 2. Пройти wizard до конца
@@ -101,7 +99,7 @@ docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prism
 
 - Сборка виджета: `npm run widget:build`
 - Локальная demo-страница: `packages/web-widget/demo.html`
-- Рекомендуемый `apiBase` для пилота через frontend proxy: `http://127.0.0.1:8080/api/v1`
+- Рекомендуемый `apiBase` через frontend proxy: `http://127.0.0.1:8080/api/v1`
 - Если proxy не используется: `http://127.0.0.1:4101/api/v1`
 
 Проверка после установки:
@@ -129,16 +127,15 @@ curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
   -d "secret_token=<secret_token_из_ЛК>"
 ```
 
-6. Для **исходящих** ответов оператора запустите outbox worker (токен берётся из `INTEGRATION_REPOSITORY=prisma` по tenant):
+6. Для **исходящих** ответов оператора запустите outbox worker (токен берётся из Prisma-репозитория интеграций по tenant):
 
 ```bash
 cd backend
 OUTBOX_TELEGRAM_ENABLED=true \
-INTEGRATION_REPOSITORY=prisma \
 npm run outbox:worker:once
 ```
 
-В production worker должен работать постоянно (`start:outbox-bullmq-worker` или аналог) с тем же `INTEGRATION_REPOSITORY=prisma`, что и api-gateway.
+В production worker должен работать постоянно (`start:outbox-bullmq-worker` или аналог).
 
 Проверка:
 
@@ -158,7 +155,7 @@ Webhook ingress: `POST /api/v1/webhooks/telegram`
 ## 5. Чеклист дня запуска
 
 - [ ] `GET /health` и `GET /ready` возвращают 200
-- [ ] Выполнен `npm run pilot:bootstrap`, сохранены `operator` credentials и `PILOT_PUBLIC_API_KEY`
+- [ ] Выполнен `npm run bootstrap:local` (или сервис `bootstrap` в compose), сохранены `operator` credentials и публичный API key
 - [ ] После обновления со статусами операторов выполнен повторный `npm run prisma:seed` (добавляет действия ролей `presence.write`/`presence.read`), операторы перелогинились и `PUT /api/v1/presence/me` отвечает `ok`
 - [ ] Оператор успешно логинится через `POST /api/v1/auth/tenant/login`
 - [ ] Виджет на клиентской странице отправляет тестовое сообщение
@@ -174,31 +171,31 @@ Webhook ingress: `POST /api/v1/webhooks/telegram`
 Порядок отката при инциденте:
 
 1. Приостановить tenant в service-admin (`tenant status = suspended`) или заблокировать public key.
-2. Выключить pilot overlay:
+2. Остановить стенд:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres down
+docker compose down
 ```
 
-3. Если нужен быстрый возврат на предыдущий образ/конфиг, поднять базовый compose без pilot overlay.
+3. Если нужен быстрый возврат на предыдущий образ/конфиг, поднять стек из предыдущего git-тега/образа.
 4. Данные диалогов остаются в volume `postgres-data`; удалять volume только при осознанном destructive rollback.
 5. После стабилизации выполнить smoke-проверку (`health`, `ready`, login, test dialog) и зафиксировать incident note.
 
-## 7. Known limitations (pilot)
+## 7. Known limitations
 
 - Web SDK + **Telegram** (без VK/MAX)
 - Виджет получает ответы через poll, не push
 - Telegram: исходящая доставка требует работающего outbox worker с `OUTBOX_TELEGRAM_ENABLED=true`
 - Realtime inbox оператора через SSE, но для production нужен отдельный hardening токен/сессия
 - MFA для операторов обязательна на staging: код генерируется для каждого challenge, хранится только как HMAC и доставляется через SMTP в Mailpit (`http://127.0.0.1:18025`)
-- Integration repository в pilot runtime Prisma (`INTEGRATION_REPOSITORY=prisma`); local root compose can still use JSON for resettable development
 - Базовые отчеты по диалогам и отчет по назначениям/передачам используют данные PostgreSQL; исторические разрезы по темам, статусам, rescue и CSAT еще не завершены.
-- Разделы ботов и proactive требуют отдельной проверки каждого сценария перед пилотным использованием.
+- Разделы ботов и proactive требуют отдельной проверки каждого сценария перед использованием на реальном трафике.
 
 ## 8. Support
 
-- План реализации пилота: [2026-07-01-first-client-pilot.md](superpowers/plans/2026-07-01-first-client-pilot.md)
+- План перехода на единый Prisma-рантайм: [2026-07-15-prisma-only-runtime-plan.md](superpowers/plans/2026-07-15-prisma-only-runtime-plan.md)
+- Исторический план первого клиента (архив): [2026-07-01-first-client-pilot.md](superpowers/plans/2026-07-01-first-client-pilot.md)
 - API примеры SDK: [backend/docs/public-api-examples.md](../backend/docs/public-api-examples.md)
 - Виджет и демо: `packages/web-widget/`
 - Smoke и E2E тесты: `tests/pilot-smoke.test.js`, `tests/pilot-flow.spec.js`
-- Эскалация инцидентов: on-call backend + on-call frontend + owner пилота (назначается в launch-day checklist)
+- Эскалация инцидентов: on-call backend + on-call frontend + owner релиза (назначается в launch-day checklist)

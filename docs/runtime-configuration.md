@@ -83,15 +83,13 @@ Repository defaults:
 | `ROUTING_REPOSITORY` | JSON store unless set to `prisma` |
 | `REPORT_REPOSITORY` | JSON store unless set to `prisma` |
 
-The root `docker-compose.yml` is the fast local, non-production mode. It starts PostgreSQL, Redis, MinIO and Mailpit, but the API Gateway uses JSON-backed domain stores by default so local UI checks can be reset quickly.
-
-For the guarded production-like PostgreSQL slice, use the named `prisma-postgres` compose profile through the pilot overlay:
+The root `docker-compose.yml` is the single local stack and runs the full product on PostgreSQL — there is no separate pilot overlay or profile. It starts PostgreSQL, Redis, MinIO and Mailpit, sets `RUNTIME_PROFILE=production-like`, disables demo service-admin header auth, and runs every product-critical repository with Prisma:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build
+docker compose up -d --build
 ```
 
-That overlay sets `RUNTIME_PROFILE=production-like`, disables demo service-admin header auth, and requires product-critical repositories to run with Prisma: automation, identity, billing, conversation, workspace, integrations, notifications, operations, platform, routing and reports. Automation Prisma mode stores bot scenarios, runtime versions, publish audit rows, publish idempotency keys, bot test runs, proactive rules, execution windows, frequency caps, experiment assignments, delivery attempts, delivery idempotency keys and delivery attributions in PostgreSQL. Integrations Prisma mode stores public API keys/reveal state/rotation audit, key rotation jobs, public demo request leads/audit/notification descriptors, webhook replay journal/audit, webhook delivery journal, security sessions, channel connections/events/audit, and Telegram connection runtime state in PostgreSQL. Operations Prisma mode stores load-test, restore-check, dead-letter replay, migration rollback-check and idempotency runtime records in PostgreSQL, using dedicated restore-result tables plus `operations_runtime_records` for queued operation descriptors. Platform Prisma mode stores telemetry samples, health rollups, alert routing rules, feature flag rules, immutable platform audit/outbox rows, and platform runtime descriptors in `platform_runtime_records`. Workspace Prisma mode stores file metadata, scan-result idempotency records, client profiles, client export jobs, template records and knowledge records in PostgreSQL. Notifications Prisma mode stores inbox notifications, preferences, browser push subscriptions, delivery descriptors and preference audit events in PostgreSQL. Routing Prisma mode persists rules, queue membership, capacity records, analytics rows, assignment/SLA/rescue job descriptors, and the conversation/operator/queue/rescue-report runtime snapshot in PostgreSQL. Reports Prisma mode persists metric definitions, metric versions, tenant overrides, saved templates, idempotency keys, export jobs, query executions, file descriptors, notification descriptors, scheduled digest descriptors and retry audit events in PostgreSQL. Use the root local compose file for runnable JSON-mode development.
+A one-shot `bootstrap` service (`npm run bootstrap:local`) applies migrations and seeds `tenant-local-001` before the API Gateway starts. Prisma persistence covers automation, identity, billing, conversation, workspace, integrations, notifications, operations, platform, routing and reports. Automation Prisma mode stores bot scenarios, runtime versions, publish audit rows, publish idempotency keys, bot test runs, proactive rules, execution windows, frequency caps, experiment assignments, delivery attempts, delivery idempotency keys and delivery attributions in PostgreSQL. Integrations Prisma mode stores public API keys/reveal state/rotation audit, key rotation jobs, public demo request leads/audit/notification descriptors, webhook replay journal/audit, webhook delivery journal, security sessions, channel connections/events/audit, and Telegram connection runtime state in PostgreSQL. Operations Prisma mode stores load-test, restore-check, dead-letter replay, migration rollback-check and idempotency runtime records in PostgreSQL, using dedicated restore-result tables plus `operations_runtime_records` for queued operation descriptors. Platform Prisma mode stores telemetry samples, health rollups, alert routing rules, feature flag rules, immutable platform audit/outbox rows, and platform runtime descriptors in `platform_runtime_records`. Workspace Prisma mode stores file metadata, scan-result idempotency records, client profiles, client export jobs, template records and knowledge records in PostgreSQL. Notifications Prisma mode stores inbox notifications, preferences, browser push subscriptions, delivery descriptors and preference audit events in PostgreSQL. Routing Prisma mode persists rules, queue membership, capacity records, analytics rows, assignment/SLA/rescue job descriptors, and the conversation/operator/queue/rescue-report runtime snapshot in PostgreSQL. Reports Prisma mode persists metric definitions, metric versions, tenant overrides, saved templates, idempotency keys, export jobs, query executions, file descriptors, notification descriptors, scheduled digest descriptors and retry audit events in PostgreSQL. JSON-backed domain stores now exist only as the in-memory unit-test backend and the Playwright stub launcher; there is no JSON runtime mode for the compose stack.
 
 ## Test Mode
 
@@ -148,7 +146,7 @@ npm run prisma:seed
 npm run identity:bootstrap:postgres
 ```
 
-Pilot/local bootstrap helpers live under `backend/scripts/`.
+Local bootstrap helpers live under `backend/scripts/`.
 
 ## Notifications Runtime
 
@@ -207,7 +205,7 @@ Pilot/local bootstrap helpers live under `backend/scripts/`.
 - External scanner smoke: `cd backend && npm run file-scan:external-scanner-smoke` skips unless `FILE_SCAN_EXTERNAL_SCANNER_SMOKE_ENABLED=true`. Root `npm run release:gate` includes it after production-like API readiness with the host API and PostgreSQL URLs; set `OUTBOX_SCANNER_URL` to a real scanner endpoint to verify HTTP scanner dispatch plus the live `/files/:fileId/scan-result` callback path. Optional `FILE_SCAN_EXTERNAL_SCANNER_EXPECTED_SCANNER` pins the expected scanner name returned by the provider.
 - `outbox-worker` is scoped to the `message-delivery` queue; `billing-sync-worker` is scoped to the `billing-sync` queue.
 - Local deterministic billing sync: `BILLING_SYNC_PROVIDER_MODE=local`.
-- External billing provider dispatch: set `BILLING_SYNC_PROVIDER_MODE=http` and `BILLING_SYNC_PROVIDER_URL`; production-like pilot defaults to `disabled` without an explicit provider so queued jobs fail/retry instead of being silently published.
+- External billing provider dispatch: set `BILLING_SYNC_PROVIDER_MODE=http` and `BILLING_SYNC_PROVIDER_URL`; production-like mode defaults to `disabled` without an explicit provider so queued jobs fail/retry instead of being silently published.
 - External channel delivery still requires configured provider env such as `OUTBOX_CHANNEL_CONNECTORS` or `OUTBOX_TELEGRAM_ENABLED=true`. In production-like Prisma mode, Telegram bot tokens resolve from active `telegram_connections` rows by tenant, with `OUTBOX_TELEGRAM_BOT_TOKEN` as an env fallback.
 - Provider runtime smoke: `cd backend && npm run provider:outbox:smoke` is skip-safe unless `OUTBOX_PROVIDER_SMOKE_ENABLED=true`. Backend `release:checklist` enables it with local provider endpoints by default. When enabled it seeds one queued descriptor each for Telegram, VK and MAX, starts local provider endpoints, runs `outbox-worker --once` through `OUTBOX_TELEGRAM_*`, `OUTBOX_VK_*` and `OUTBOX_MAX_*` runtime env, and verifies 3 published dispatches. Disable individual providers with `OUTBOX_PROVIDER_SMOKE_TELEGRAM_ENABLED=false`, `OUTBOX_PROVIDER_SMOKE_VK_ENABLED=false` or `OUTBOX_PROVIDER_SMOKE_MAX_ENABLED=false`.
 - Telegram live provider smoke: `cd backend && npm run provider:telegram-live-smoke` skips unless `OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true`. Root `npm run release:gate` includes it after production-like API readiness with host PostgreSQL and `INTEGRATION_REPOSITORY=prisma`; set `OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID` plus either `OUTBOX_TELEGRAM_BOT_TOKEN` or an active Prisma `telegram_connections` token for `OUTBOX_PROVIDER_LIVE_SMOKE_TENANT_ID` to send one real Telegram message and verify the outbox event is published.
@@ -258,34 +256,34 @@ External quality scoring uses an OpenAI-compatible `chat/completions` endpoint. 
 
 ## Docker Compose
 
-Fast local JSON-mode containers:
+Minimal subset for faster startup (core services only, same Prisma stack):
 
 ```bash
 docker compose build frontend api-gateway notification-delivery-worker lead-notification-worker webhook-delivery-worker report-digest-worker outbox-worker billing-sync-worker
 docker compose up -d frontend api-gateway notification-delivery-worker lead-notification-worker webhook-delivery-worker report-digest-worker outbox-worker billing-sync-worker
 ```
 
-Production-like Prisma/PostgreSQL profile:
+Full production-like Prisma/PostgreSQL stack:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres up -d --build
+docker compose up -d --build
 ```
 
-Optional scanner worker profile with deterministic local scanner:
+The file scanner worker runs as part of the stack; to rebuild just it with the deterministic local ClamAV scanner:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres --profile scanner-runtime up -d --build file-scan-scanner-worker
+docker compose up -d --build file-scan-scanner-worker
 ```
 
-Optional scanner worker profile with an external scanner:
+Scanner worker with an external scanner:
 
 ```bash
-OUTBOX_SCANNER_PROVIDER_MODE=http OUTBOX_SCANNER_URL=https://scanner.example.test/runtime OUTBOX_SCANNER_BEARER_TOKEN=scanner-token docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile prisma-postgres --profile scanner-runtime up -d --build file-scan-scanner-worker
+OUTBOX_SCANNER_PROVIDER_MODE=http OUTBOX_SCANNER_URL=https://scanner.example.test/runtime OUTBOX_SCANNER_BEARER_TOKEN=scanner-token docker compose up -d --build file-scan-scanner-worker
 ```
 
-This command is the production-like Prisma/PostgreSQL gate. It should start without JSON fallback store blockers when every product-critical repository variable is set to `prisma`.
-The pilot overlay also runs `notification-delivery-worker` with `RUNTIME_PROFILE=production-like`, `NOTIFICATION_REPOSITORY=prisma`, and browser push fully disabled by default on both API and worker. Supplying `BROWSER_PUSH_ENABLED=true` or VAPID key material activates the fail-fast live-provider gate; set `NOTIFICATION_DELIVERY_PROVIDER_MODE=web-push` with complete credentials. It runs `lead-notification-worker` with `INTEGRATION_REPOSITORY=prisma` and provider dispatch disabled unless a real lead notification provider is configured. It runs `webhook-delivery-worker` with `INTEGRATION_REPOSITORY=prisma`; set `WEBHOOK_DELIVERY_PROVIDER_MODE=http` when replay/delivery rows should call their `targetUrl`, otherwise the pilot default is disabled. It also runs `outbox-worker`, `billing-sync-worker`, ClamAV and the persistent file scanner worker backed by PostgreSQL. An external scanner remains available by overriding `OUTBOX_SCANNER_URL` and the HTTP provider credentials.
-The pilot overlay passes `PUBLIC_DEMO_NOTIFICATION_SMTP_USERNAME`, `PUBLIC_DEMO_NOTIFICATION_SMTP_PASSWORD`, `PUBLIC_DEMO_NOTIFICATION_SMTP_SECURE`, and `PUBLIC_DEMO_NOTIFICATION_SMTP_TLS_REJECT_UNAUTHORIZED` into `lead-notification-worker` so production-like SMTP auth/SMTPS settings match the live smoke contract.
+This is the production-like Prisma/PostgreSQL gate. Every product-critical repository runs on Prisma, so there are no JSON fallback store blockers.
+The stack also runs `notification-delivery-worker` with `RUNTIME_PROFILE=production-like`, `NOTIFICATION_REPOSITORY=prisma`, and browser push fully disabled by default on both API and worker. Supplying `BROWSER_PUSH_ENABLED=true` or VAPID key material activates the fail-fast live-provider gate; set `NOTIFICATION_DELIVERY_PROVIDER_MODE=web-push` with complete credentials. It runs `lead-notification-worker` with `INTEGRATION_REPOSITORY=prisma` and provider dispatch disabled unless a real lead notification provider is configured. It runs `webhook-delivery-worker` with `INTEGRATION_REPOSITORY=prisma`; set `WEBHOOK_DELIVERY_PROVIDER_MODE=http` when replay/delivery rows should call their `targetUrl`, otherwise the default is disabled. It also runs `outbox-worker`, `billing-sync-worker`, ClamAV and the persistent file scanner worker backed by PostgreSQL. An external scanner remains available by overriding `OUTBOX_SCANNER_URL` and the HTTP provider credentials.
+The stack passes `PUBLIC_DEMO_NOTIFICATION_SMTP_USERNAME`, `PUBLIC_DEMO_NOTIFICATION_SMTP_PASSWORD`, `PUBLIC_DEMO_NOTIFICATION_SMTP_SECURE`, and `PUBLIC_DEMO_NOTIFICATION_SMTP_TLS_REJECT_UNAUTHORIZED` into `lead-notification-worker` so production-like SMTP auth/SMTPS settings match the live smoke contract.
 
 Health checks:
 

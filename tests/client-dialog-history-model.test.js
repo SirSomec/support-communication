@@ -53,14 +53,15 @@ describe("client dialog history model", () => {
     assert.equal(entries[1].dateLabel, "01.07.2026");
   });
 
-  it("labels open dialogs with the updated date, not the time-of-day", () => {
+  it("labels dialogs with the appeal start date, not the time-of-day", () => {
     const current = conversationFixture();
     const openSibling = conversationFixture({
       id: "conv-open",
       status: "active",
       topic: "Оплата",
       time: "12:40",
-      updatedAt: "2026-07-10T08:15:00.000Z"
+      updatedAt: "2026-07-14T08:15:00.000Z",
+      messages: [{ id: 1, side: "client", text: "Вопрос", time: "09:00", createdAt: "2026-07-10T09:00:00.000Z" }]
     });
 
     const entries = buildClientDialogHistory({ conversation: current, conversations: [openSibling] });
@@ -68,6 +69,25 @@ describe("client dialog history model", () => {
 
     assert.equal(openEntry.isClosed, false);
     assert.equal(openEntry.dateLabel, "10.07.2026");
+  });
+
+  it("labels a closed dialog with its start date so the list matches the appeal it opens", () => {
+    const current = conversationFixture();
+    // Обращение прошло 10.07, но закрыто позже (15.07) — в списке должна стоять
+    // дата обращения, а не дата закрытия, иначе клик уводит на «другую» дату.
+    const closedSibling = conversationFixture({
+      id: "conv-closed",
+      status: "closed",
+      topic: "Товар / Несоответствие",
+      metadata: { closedAt: "2026-07-15T12:00:00.000Z" },
+      messages: [{ id: 1, side: "client", text: "Брак", time: "16:56", createdAt: "2026-07-10T16:56:00.000Z" }]
+    });
+
+    const entries = buildClientDialogHistory({ conversation: current, conversations: [closedSibling] });
+    const closedEntry = entries.find((entry) => entry.conversationId === "conv-closed");
+
+    assert.equal(closedEntry.isClosed, true);
+    assert.equal(closedEntry.dateLabel, "10.07.2026");
   });
 
   it("keeps archive tuples, dedupes them across siblings and skips rows covered by real closed dialogs", () => {

@@ -1,5 +1,6 @@
 import { resolveClientThreadKey } from "../../app/clientProfileModel.js";
 import { statusLabels } from "../../app/dialogModel.js";
+import { appealDateLabel, resolveAppealDate } from "./clientThreadModel.js";
 
 export const CLIENT_HISTORY_PAGE_SIZE = 8;
 
@@ -121,20 +122,18 @@ function toConversationEntry(conversation, currentConversationId) {
   const isClosed = isClosedStatusValue(status);
   const closedAt = String(conversation.metadata?.closedAt ?? "").trim();
   const updatedAt = String(conversation.updatedAt ?? "").trim();
-  const sortSource = closedAt || updatedAt;
-  const timestamp = Date.parse(sortSource);
   const closedDateKey = (closedAt || (isClosed ? updatedAt : "")).slice(0, 10);
   const topic = String(conversation.topic ?? "").trim();
   const preview = String(conversation.preview ?? "").trim();
   const title = topic || preview || NO_TOPIC_LABEL;
   const statusLabel = statusLabels[status] ?? (status || "—");
-  // Всегда показываем дату обращения (дд.мм.гггг): для закрытых — дату закрытия,
-  // для открытых — дату последнего обновления. conversation.time — это метка
-  // времени суток («12:40»/«сейчас»), она годится только как крайний фолбэк.
-  const dateKey = (isClosed && closedDateKey ? closedDateKey : sortSource.slice(0, 10)).trim();
-  const dateLabel = dateKey
-    ? formatHistoryDate(dateKey)
-    : String(conversation.time ?? "").trim() || "—";
+  // Дата и порядок — по дате обращения (первое сообщение), как в разделителе
+  // окна чата: строка списка ведёт именно к этому обращению, даты должны совпадать.
+  const appealDate = resolveAppealDate(conversation);
+  const dateLabel = appealDateLabel(conversation);
+  // Обращение без разбираемой даты считается недавним и встаёт над датированными
+  // архивными строками, а не проваливается в конец списка.
+  const timestamp = appealDate ? appealDate.getTime() : Number.MAX_SAFE_INTEGER;
   const messageTexts = (Array.isArray(conversation.messages) ? conversation.messages : [])
     .filter((message) => message && message.type !== "event")
     .map((message) => String(message.text ?? ""));
@@ -161,9 +160,7 @@ function toConversationEntry(conversation, currentConversationId) {
       ...messageTexts
     ]),
     statusLabel,
-    // Диалог без метки времени считается недавним: он должен стоять выше
-    // датированных архивных строк, а не проваливаться в конец списка.
-    timestamp: Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER,
+    timestamp,
     title,
     topic
   };

@@ -253,8 +253,11 @@ function mergeThreadTags(primary, appeals) {
   return tags;
 }
 
-function appealDateLabel(appeal) {
-  const started = firstParsableDate(appeal);
+// Дата обращения = дата начала (первое сообщение), как в разделителе окна чата.
+// Экспортируется, чтобы список «Предыдущих диалогов» показывал ту же дату,
+// на которую он потом переводит.
+export function appealDateLabel(appeal) {
+  const started = resolveAppealDate(appeal);
   if (started) {
     return `${pad(started.getDate())}.${pad(started.getMonth() + 1)}.${started.getFullYear()}`;
   }
@@ -263,7 +266,7 @@ function appealDateLabel(appeal) {
   return time || "—";
 }
 
-function firstParsableDate(appeal) {
+export function resolveAppealDate(appeal) {
   const messages = Array.isArray(appeal?.messages) ? appeal.messages : [];
   for (const message of messages) {
     const value = Date.parse(String(message?.createdAt ?? ""));

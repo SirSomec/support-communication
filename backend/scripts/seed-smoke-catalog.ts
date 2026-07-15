@@ -686,6 +686,35 @@ async function seedQuality(repo, state) {
   // It cannot be persisted to Postgres through any write method on `repo`.
 }
 
+async function seedReferencedSupportQueues(client: never, integrationState: never): Promise<void> {
+  // integration_channel_connections.routing_queue_id is a NOT NULL FK to
+  // support_queues(tenant_id, id), but routing seeds queues only into its JSON
+  // snapshot, never the normalized table. Create the exact queues the demo channel
+  // connections reference (default_team_id null → no Team FK) so integrations can seed.
+  const queueClient = client as unknown as {
+    supportQueue: {
+      upsert(input: {
+        where: { tenantId_id: { tenantId: string; id: string } };
+        create: { id: string; tenantId: string; name: string; status: string };
+        update: Record<string, never>;
+      }): Promise<unknown>;
+    };
+  };
+  const state = integrationState as { channelConnections?: Array<{ tenantId?: string; routingQueueId?: string | null }> };
+  const seen = new Set<string>();
+  for (const connection of state.channelConnections ?? []) {
+    const tenantId = connection.tenantId;
+    const id = connection.routingQueueId;
+    if (!tenantId || !id || seen.has(`${tenantId}:${id}`)) continue;
+    seen.add(`${tenantId}:${id}`);
+    await queueClient.supportQueue.upsert({
+      where: { tenantId_id: { tenantId, id } },
+      create: { id, tenantId, name: id, status: "active" },
+      update: {}
+    });
+  }
+}
+
 async function main(): Promise<void> {
   const client = createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as never;
   const seeds = createLocalDevelopmentRepositorySeeds();
@@ -706,6 +735,7 @@ async function main(): Promise<void> {
   catch (error) { failures.push("automation: " + describe(error)); console.log("  FAIL automation"); }
   try { await seedReports(ReportRepository.prisma({ client }) as never, seeds.reports as never); console.log("  ok reports"); }
   catch (error) { failures.push("reports: " + describe(error)); console.log("  FAIL reports"); }
+  try { await seedReferencedSupportQueues(client, seeds.integrations as never); } catch (error) { failures.push("support-queues: " + describe(error)); }
   try { await seedIntegrations(IntegrationRepository.prisma({ client }) as never, seeds.integrations as never); console.log("  ok integrations"); }
   catch (error) { failures.push("integrations: " + describe(error)); console.log("  FAIL integrations"); }
   try { await seedOperations(OperationsRepository.prisma({ client }) as never, seeds.operations as never); console.log("  ok operations"); }

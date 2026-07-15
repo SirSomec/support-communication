@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
 import { KnowledgeSourceRepository } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.repository.ts";
 import { KnowledgeSourcesService, type UrlSourceTransport } from "../apps/api-gateway/src/knowledge-sources/knowledge-sources.service.ts";
-import { UrlSourcePolicyRepository } from "../apps/api-gateway/src/knowledge-sources/url-source-policy.repository.ts";
+import { UrlSourcePolicyRepository, type PrismaUrlSourcePolicyRow, type UrlSourcePolicyPrismaClient } from "../apps/api-gateway/src/knowledge-sources/url-source-policy.repository.ts";
 import { runUrlSourceRefreshOnce } from "../apps/api-gateway/src/knowledge-sources/url-source-refresh.worker.ts";
 import { WorkspaceRepository } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 
@@ -75,5 +75,49 @@ describe("URL knowledge source refresh contracts", () => {
     assert.equal(refreshed.status, "ready");
     assert.equal(refreshed.approvalStatus, "pending");
     assert.equal(refreshed.readiness, "stale");
+  });
+});
+
+function inMemoryPrismaUrlSourcePolicyClient(): UrlSourcePolicyPrismaClient {
+  const rows = new Map<string, PrismaUrlSourcePolicyRow>();
+  return {
+    urlSourcePolicy: {
+      findUnique: async ({ where }) => rows.get(where.tenantId) ?? null,
+      upsert: async ({ create, update, where }) => {
+        const existing = rows.get(where.tenantId);
+        const next = (existing ? { ...existing, ...update } : { ...create }) as PrismaUrlSourcePolicyRow;
+        rows.set(where.tenantId, next);
+        return next;
+      }
+    }
+  };
+}
+
+describe("URL source policy prisma branch", () => {
+  it("persists the exact-host allowlist, keeps null vs empty-array meaning, and stays tenant-scoped", async () => {
+    const repository = UrlSourcePolicyRepository.prisma({ client: inMemoryPrismaUrlSourcePolicyClient() });
+
+    // No row yet → default: null means unrestricted, empty updatedAt.
+    const initial = await repository.get("tenant-volga");
+    assert.equal(initial.allowedHosts, null);
+    assert.equal(initial.updatedAt, "");
+
+    // Save normalizes, dedupes and lower-cases hosts, then round-trips.
+    const saved = await repository.save({ allowedHosts: ["Docs.Example.Test", "docs.example.test."], tenantId: "tenant-volga", updatedAt: "2026-07-12T10:00:00.000Z" });
+    assert.deepEqual(saved.allowedHosts, ["docs.example.test"]);
+    const fetched = await repository.get("tenant-volga");
+    assert.deepEqual(fetched.allowedHosts, ["docs.example.test"]);
+    assert.equal(fetched.updatedAt, "2026-07-12T10:00:00.000Z");
+
+    // Empty array denies every host — it must not collapse to null.
+    await repository.save({ allowedHosts: [], tenantId: "tenant-volga", updatedAt: "2026-07-12T11:00:00.000Z" });
+    assert.deepEqual((await repository.get("tenant-volga")).allowedHosts, []);
+
+    // null lifts the restriction again.
+    await repository.save({ allowedHosts: null, tenantId: "tenant-volga", updatedAt: "2026-07-12T12:00:00.000Z" });
+    assert.equal((await repository.get("tenant-volga")).allowedHosts, null);
+
+    // A different tenant keeps its own unrestricted default.
+    assert.equal((await repository.get("tenant-other")).allowedHosts, null);
   });
 });

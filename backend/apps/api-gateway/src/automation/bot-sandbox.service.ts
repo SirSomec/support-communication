@@ -106,14 +106,14 @@ export class BotSandboxService {
   }
 
   async getSession(tenantId: string, scenarioId: string, sessionId: string): Promise<BotSandboxSession> {
-    const session = this.sessions.find(tenantId, sessionId, this.now());
+    const session = await this.sessions.find(tenantId, sessionId, this.now());
     if (!session || session.scenarioId !== scenarioId) throw new Error("bot_sandbox_session_not_found");
     return session;
   }
 
   async deleteSession(tenantId: string, scenarioId: string, sessionId: string): Promise<void> {
     await this.getSession(tenantId, scenarioId, sessionId);
-    this.sessions.delete(tenantId, sessionId);
+    await this.sessions.delete(tenantId, sessionId);
   }
 
   async postMessage(input: BotSandboxMessageInput): Promise<{ session: BotSandboxSession; turn: BotSandboxTurn }> {
@@ -134,7 +134,7 @@ export class BotSandboxService {
         messages: [],
         trace: null
       }, now);
-      return { session: this.sessions.save(session), turn };
+      return { session: await this.sessions.save(session), turn };
     }
 
     const resolved = await this.resolveScenarioConfig(input.tenantId, input.scenarioId, session.mode, session.versionId);
@@ -238,11 +238,11 @@ export class BotSandboxService {
     }
     if (typeof usageTokens === "number" && usageTokens > 0) {
       session.usage.totalTokens += usageTokens;
-      this.sessions.recordSandboxUsage(input.tenantId, usageTokens, now);
+      await this.sessions.recordSandboxUsage(input.tenantId, usageTokens, now);
     }
     if (input.webhooksEnabled !== undefined) session.webhooksEnabled = Boolean(input.webhooksEnabled);
     this.appendTurn(session, turn, now);
-    return { session: this.sessions.save(session), turn };
+    return { session: await this.sessions.save(session), turn };
   }
 
   async saveRegression(input: { actor: string; name?: string; scenarioId: string; sessionId: string; tenantId: string }): Promise<AutomationBotTestRun> {
@@ -278,7 +278,7 @@ export class BotSandboxService {
     const envBudget = Number(this.environment.BOT_SANDBOX_MONTHLY_TOKEN_BUDGET);
     const budget = connection?.limits.sandboxMonthlyTokenBudget
       ?? (Number.isInteger(envBudget) && envBudget > 0 ? envBudget : DEFAULT_SANDBOX_MONTHLY_TOKEN_BUDGET);
-    if (this.sessions.sandboxUsage(tenantId, now) + SANDBOX_WORST_CASE_TOKENS > budget) throw new Error("bot_sandbox_budget_exhausted");
+    if ((await this.sessions.sandboxUsage(tenantId, now)) + SANDBOX_WORST_CASE_TOKENS > budget) throw new Error("bot_sandbox_budget_exhausted");
   }
 
   private appendTurn(session: BotSandboxSession, turn: BotSandboxTurn, now: Date): BotSandboxTurn {

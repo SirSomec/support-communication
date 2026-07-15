@@ -2290,6 +2290,48 @@ model KnowledgeIngestionJob {
   @@map("knowledge_ingestion_jobs")
 }
 
+model UrlSourcePolicy {
+  tenantId     String   @id @map("tenant_id")
+  allowedHosts Json?    @map("allowed_hosts")
+  updatedAt    DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@map("url_source_policies")
+}
+
+model BotSandboxSession {
+  id              String   @id
+  tenantId        String   @map("tenant_id")
+  scenarioId      String   @map("scenario_id")
+  scenarioName    String   @map("scenario_name")
+  versionId       String   @map("version_id")
+  mode            String
+  status          String
+  channel         String
+  locale          String
+  createdBy       String   @map("created_by")
+  currentNodeId   String?  @map("current_node_id")
+  context         Json     @default("{}")
+  turns           Json     @default("[]")
+  usage           Json     @default("{}")
+  webhooksEnabled Boolean  @default(false) @map("webhooks_enabled")
+  createdAt       DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @map("updated_at") @db.Timestamptz(3)
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@index([tenantId, updatedAt], map: "bot_sandbox_sessions_tenant_updated_idx")
+  @@index([expiresAt], map: "bot_sandbox_sessions_expires_at_idx")
+  @@map("bot_sandbox_sessions")
+}
+
+model BotSandboxUsageCounter {
+  tenantId   String @map("tenant_id")
+  month      String
+  usedTokens Int    @default(0) @map("used_tokens")
+
+  @@id([tenantId, month])
+  @@map("bot_sandbox_usage_counters")
+}
+
 model McpConnector {
   id String @id
   tenantId String @map("tenant_id")

@@ -155,7 +155,7 @@ export class KnowledgeSourcesService {
       metadata = { articleVersion: article.version, category: article.category, chunks: prepared.chunks, language: prepared.language, topics: article.topics };
     }
     if (kind === "url") {
-      const validated = validateUrlKnowledgeSourceConfig(sourceConfig, validationOptions(this.policyRepository.get(tenantId)));
+      const validated = validateUrlKnowledgeSourceConfig(sourceConfig, validationOptions(await this.policyRepository.get(tenantId)));
       if (!validated.ok) return invalid("createKnowledgeSource", tenantId, validated.code, "This URL cannot be used as a knowledge source.");
       sourceConfig = { ...validated.config };
       sourceRef = validated.config.url;
@@ -223,7 +223,7 @@ export class KnowledgeSourcesService {
   async refreshUrl(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
     const current = await this.repository.find(tenantId, sourceId);
     if (!current || current.kind !== "url") return invalid("refreshKnowledgeSourceUrl", tenantId, "knowledge_source_not_found", "URL source was not found.");
-    const validated = validateUrlKnowledgeSourceConfig(current.sourceConfig, validationOptions(this.policyRepository.get(tenantId)));
+    const validated = validateUrlKnowledgeSourceConfig(current.sourceConfig, validationOptions(await this.policyRepository.get(tenantId)));
     if (!validated.ok) return invalid("refreshKnowledgeSourceUrl", tenantId, validated.code, "This URL cannot be refreshed safely.");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 10_000); const now = new Date().toISOString();
     try {
@@ -260,15 +260,15 @@ export class KnowledgeSourcesService {
     return envelope("approveKnowledgeSource", tenantId, data);
   }
 
-  getUrlPolicy(tenantId: string): BackendEnvelope<Record<string, unknown>> {
-    return envelope("getUrlSourcePolicy", tenantId, { policy: this.policyRepository.get(tenantId) });
+  async getUrlPolicy(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return envelope("getUrlSourcePolicy", tenantId, { policy: await this.policyRepository.get(tenantId) });
   }
 
   async setUrlPolicy(tenantId: string, input: UrlSourcePolicyWriteInput): Promise<BackendEnvelope<Record<string, unknown>>> {
     if (!tenantId || (input.allowedHosts !== undefined && input.allowedHosts !== null && (!Array.isArray(input.allowedHosts) || input.allowedHosts.some((host) => !validAllowlistHost(host))))) {
       return invalid("setUrlSourcePolicy", tenantId, "url_source_policy_invalid", "Allowed hosts must be exact public host names.");
     }
-    const policy = this.policyRepository.save({ allowedHosts: input.allowedHosts === undefined ? null : input.allowedHosts, tenantId, updatedAt: new Date().toISOString() });
+    const policy = await this.policyRepository.save({ allowedHosts: input.allowedHosts === undefined ? null : input.allowedHosts, tenantId, updatedAt: new Date().toISOString() });
     return envelope("setUrlSourcePolicy", tenantId, { auditEvent: await this.recordUrlAudit("knowledge_source.url.policy", tenantId, "policy", "updated"), policy });
   }
 

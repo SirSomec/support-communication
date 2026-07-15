@@ -3,8 +3,9 @@ import { describe, it } from "node:test";
 import { AutomationRepository, createEmptyAutomationState } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { BotRuntimeService } from "../apps/api-gateway/src/automation/bot-runtime.service.ts";
 import { BotSandboxService } from "../apps/api-gateway/src/automation/bot-sandbox.service.ts";
-import { BotSandboxSessionRepository } from "../apps/api-gateway/src/automation/bot-sandbox-session.repository.ts";
+import { BotSandboxSessionRepository, type BotSandboxPrismaClient, type PrismaBotSandboxSessionRow, type PrismaBotSandboxUsageRow } from "../apps/api-gateway/src/automation/bot-sandbox-session.repository.ts";
 import { AiConnectionRepository, type AiConnectionRecord } from "../apps/api-gateway/src/ai-connections/ai-connection.repository.ts";
+import type { BotSandboxSession } from "../apps/api-gateway/src/automation/bot-sandbox.types.ts";
 import type { BotScenario } from "../apps/api-gateway/src/automation/automation.types.ts";
 
 const TENANT = "tenant-1";
@@ -250,5 +251,125 @@ describe("BAI-801/802 sandbox sessions: isolation, idempotency, budget", () => {
       () => sandbox.postMessage({ messageId: "m1", scenarioId: "bot-1", sessionId: session.id, tenantId: TENANT, text: "Привет" }),
       /bot_sandbox_session_not_found/
     );
+  });
+});
+
+function inMemoryPrismaBotSandboxClient(): BotSandboxPrismaClient {
+  const sessions = new Map<string, PrismaBotSandboxSessionRow>();
+  const usage = new Map<string, PrismaBotSandboxUsageRow>();
+  const usageKey = (tenantId: string, month: string) => `${tenantId} ${month}`;
+  return {
+    botSandboxSession: {
+      deleteMany: async ({ where }) => {
+        let count = 0;
+        for (const [key, row] of [...sessions.entries()]) {
+          const hasFilter = where.id !== undefined || where.tenantId !== undefined || where.expiresAt !== undefined;
+          const matchesId = where.id === undefined || row.id === where.id;
+          const matchesTenant = where.tenantId === undefined || row.tenantId === where.tenantId;
+          const matchesExpiry = where.expiresAt === undefined || row.expiresAt.getTime() <= where.expiresAt.lte.getTime();
+          if (hasFilter && matchesId && matchesTenant && matchesExpiry) { sessions.delete(key); count += 1; }
+        }
+        return { count };
+      },
+      findFirst: async ({ where }) => [...sessions.values()].find((row) => row.id === where.id && row.tenantId === where.tenantId) ?? null,
+      findMany: async ({ where }) => [...sessions.values()].filter((row) => row.tenantId === where.tenantId).sort((a, b) => a.updatedAt.getTime() - b.updatedAt.getTime()),
+      upsert: async ({ create, update, where }) => {
+        const existing = sessions.get(where.id);
+        const next = (existing ? { ...existing, ...update } : { ...create }) as PrismaBotSandboxSessionRow;
+        sessions.set(where.id, next);
+        return next;
+      }
+    },
+    botSandboxUsageCounter: {
+      findUnique: async ({ where }) => usage.get(usageKey(where.tenantId_month.tenantId, where.tenantId_month.month)) ?? null,
+      upsert: async ({ create, update, where }) => {
+        const key = usageKey(where.tenantId_month.tenantId, where.tenantId_month.month);
+        const existing = usage.get(key);
+        const next = (existing ? { ...existing, ...update } : { ...create }) as PrismaBotSandboxUsageRow;
+        usage.set(key, next);
+        return next;
+      }
+    }
+  };
+}
+
+function sandboxSession(overrides: Partial<BotSandboxSession> = {}): BotSandboxSession {
+  return {
+    channel: "SDK",
+    context: {},
+    createdAt: "2026-07-13T10:00:00.000Z",
+    createdBy: "admin-1",
+    currentNodeId: null,
+    expiresAt: "2026-07-13T12:00:00.000Z",
+    id: "sbx-1",
+    locale: "ru-RU",
+    mode: "draft",
+    scenarioId: "bot-1",
+    scenarioName: "Консультант",
+    status: "active",
+    tenantId: TENANT,
+    turns: [],
+    updatedAt: "2026-07-13T10:00:00.000Z",
+    usage: { totalTokens: 0 },
+    versionId: "v1",
+    webhooksEnabled: false,
+    ...overrides
+  };
+}
+
+describe("BAI-806 bot sandbox session prisma branch", () => {
+  it("persists, round-trips JSON fields, expires by TTL and stays tenant-scoped", async () => {
+    const repository = BotSandboxSessionRepository.prisma({ client: inMemoryPrismaBotSandboxClient() });
+    const now = new Date("2026-07-13T10:30:00.000Z");
+
+    await repository.save(sandboxSession({
+      id: "sbx-1",
+      turns: [{ at: "2026-07-13T10:05:00.000Z", clientMessageId: "m1", clientText: "Где заказ?", events: [], messages: [], trace: null }],
+      usage: { totalTokens: 42 }
+    }));
+    await repository.save(sandboxSession({ id: "sbx-2", tenantId: "tenant-2" }));
+
+    const found = await repository.find(TENANT, "sbx-1", now);
+    assert.equal(found?.scenarioName, "Консультант");
+    assert.equal(found?.usage.totalTokens, 42);
+    assert.equal(found?.turns.length, 1);
+    assert.equal(found?.turns[0]?.clientText, "Где заказ?");
+    assert.equal(await repository.find("tenant-2", "sbx-1", now), null);
+    assert.equal(await repository.find(TENANT, "sbx-2", now), null);
+
+    const expired = new Date("2026-07-13T12:30:00.000Z");
+    assert.equal(await repository.find(TENANT, "sbx-1", expired), null);
+    assert.equal(await repository.find(TENANT, "sbx-1", now), null);
+  });
+
+  it("counts sandbox usage per tenant and month and purges expired sessions", async () => {
+    const repository = BotSandboxSessionRepository.prisma({ client: inMemoryPrismaBotSandboxClient() });
+    const july = new Date("2026-07-13T10:00:00.000Z");
+    const august = new Date("2026-08-01T10:00:00.000Z");
+
+    await repository.recordSandboxUsage(TENANT, 90, july);
+    await repository.recordSandboxUsage(TENANT, 10, july);
+    await repository.recordSandboxUsage("tenant-2", 5, july);
+    assert.equal(await repository.sandboxUsage(TENANT, july), 100);
+    assert.equal(await repository.sandboxUsage("tenant-2", july), 5);
+    assert.equal(await repository.sandboxUsage(TENANT, august), 0);
+
+    await repository.save(sandboxSession({ id: "live", expiresAt: "2026-07-13T12:00:00.000Z" }));
+    await repository.save(sandboxSession({ id: "stale", expiresAt: "2026-07-13T09:00:00.000Z" }));
+    assert.equal(await repository.purgeExpired(new Date("2026-07-13T11:00:00.000Z")), 1);
+    assert.ok(await repository.find(TENANT, "live", july));
+    assert.equal(await repository.find(TENANT, "stale", july), null);
+  });
+
+  it("evicts the oldest session once a tenant crosses the per-tenant cap", async () => {
+    const repository = BotSandboxSessionRepository.prisma({ client: inMemoryPrismaBotSandboxClient() });
+    const now = new Date("2026-07-13T20:00:00.000Z");
+    for (let index = 0; index < 51; index += 1) {
+      const minute = String(index).padStart(2, "0");
+      await repository.save(sandboxSession({ id: `sbx-${index}`, updatedAt: `2026-07-13T10:${minute}:00.000Z`, expiresAt: "2026-07-13T23:00:00.000Z" }));
+    }
+    assert.equal(await repository.find(TENANT, "sbx-0", now), null);
+    assert.ok(await repository.find(TENANT, "sbx-1", now));
+    assert.ok(await repository.find(TENANT, "sbx-50", now));
   });
 });

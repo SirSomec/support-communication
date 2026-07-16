@@ -11,6 +11,7 @@ import {
   type BotFeedbackPrismaClient,
   type PrismaBotAiFeedbackRow
 } from "../apps/api-gateway/src/automation/bot-feedback.repository.ts";
+import { AiConnectionRepository } from "../apps/api-gateway/src/ai-connections/ai-connection.repository.ts";
 
 function inMemoryPrismaBotFeedbackClient(): BotFeedbackPrismaClient {
   const rows = new Map<string, PrismaBotAiFeedbackRow>();
@@ -66,9 +67,11 @@ describe("BAI-703 bot AI feedback loop", () => {
     resetMetricsRegistry();
     AutomationRepository.useDefault(AutomationRepository.inMemory());
     BotFeedbackRepository.useDefault(BotFeedbackRepository.inMemory());
+    AiConnectionRepository.useDefault(AiConnectionRepository.inMemory());
   });
 
   afterEach(() => {
+    AiConnectionRepository.clearDefault();
     BotFeedbackRepository.clearDefault();
     AutomationRepository.clearDefault();
     resetMetricsRegistry();

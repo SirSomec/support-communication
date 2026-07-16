@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type DurableStore, InMemoryStore, JsonFileStore, createPrismaClient } from "@support-communication/database";
+import { type DurableStore, InMemoryStore, createPrismaClient } from "@support-communication/database";
 import { redactSensitiveText } from "@support-communication/redaction";
 
 type MaybePromise<T> = Promise<T> | T;
@@ -71,10 +71,6 @@ const MAX_QUESTION_CHARS = 240;
 
 let defaultRepository: UnansweredQuestionRepository | null = null;
 
-function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
-  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
-}
-
 /**
  * BAI-826: очередь «вопросов без ответа» — обращения, на которые бот не смог
  * ответить из-за отсутствия готовых знаний. Текст редактируется от PII и
@@ -88,14 +84,9 @@ export class UnansweredQuestionRepository {
 
   static default(): UnansweredQuestionRepository {
     if (!defaultRepository) {
-      // Prisma-only рантайм (план 2026-07-15): production-like профиль всегда
-      // персистится в Postgres; json-store остаётся тестовым бэкендом.
-      defaultRepository = isPrismaRuntimeProfile(process.env)
-        ? UnansweredQuestionRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as UnansweredQuestionPrismaClient })
-        : new UnansweredQuestionRepository(new JsonFileStore({
-          filePath: process.env.UNANSWERED_QUESTIONS_STORE_FILE ?? ".runtime/unanswered-questions.json",
-          seed: { questions: [] }
-        }));
+      // Prisma-only рантайм (план 2026-07-15): персистентность всегда в Postgres,
+      // json-store выпилен; in-memory остаётся только тестовым бэкендом.
+      defaultRepository = UnansweredQuestionRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as UnansweredQuestionPrismaClient });
     }
     return defaultRepository;
   }

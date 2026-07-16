@@ -1,8 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
 import { type OutboxEvent, type OutboxEventClaimQuery, type OutboxEventListQuery, type OutboxEventStore, type OutboxRetryPolicy, type StoredOutboxEvent, type StoredOutboxEventStatus, resolveRetryFailureState } from "@support-communication/events";
 import { redactSensitiveText } from "@support-communication/redaction";
 
@@ -10,37 +7,6 @@ export interface DurableStore<TState> {
   read(): TState;
   update(mutator: (state: TState) => TState): TState;
   write(state: TState): TState;
-}
-
-export interface JsonFileStoreOptions<TState> {
-  filePath: string;
-  seed: TState;
-}
-
-export class JsonFileStore<TState> implements DurableStore<TState> {
-  constructor(private readonly options: JsonFileStoreOptions<TState>) {
-    mkdirSync(dirname(options.filePath), { recursive: true });
-
-    if (!existsSync(options.filePath)) {
-      this.write(options.seed);
-    }
-  }
-
-  read(): TState {
-    return clone(JSON.parse(readFileSync(this.options.filePath, "utf8")) as TState);
-  }
-
-  update(mutator: (state: TState) => TState): TState {
-    return this.write(mutator(this.read()));
-  }
-
-  write(state: TState): TState {
-    const next = clone(state);
-    const temporaryPath = `${this.options.filePath}.${process.pid}.${randomUUID()}.tmp`;
-    writeFileSync(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-    replaceJsonFile(temporaryPath, this.options.filePath);
-    return clone(next);
-  }
 }
 
 export class InMemoryStore<TState> implements DurableStore<TState> {
@@ -71,32 +37,11 @@ export interface PrismaClientFactoryOptions {
 
 export type RepositoryBootstrapSource = object;
 
-export interface RepositoryStoreFileInput {
-  defaultPort?: number | string;
-  defaultServiceName?: string;
-  source: RepositoryBootstrapSource;
-  storeFileEnv: string;
-  suffix: string;
-}
-
 export interface RepositoryBootstrapInput<TRepository, TPrismaClient> {
   createPrismaRepository(client: TPrismaClient): TRepository;
   prismaClientFactory(options: PrismaClientFactoryOptions): TPrismaClient;
   source: RepositoryBootstrapSource;
   useDefault(repository: TRepository): void;
-}
-
-export function resolveRepositoryStoreFile(input: RepositoryStoreFileInput): string {
-  const configuredPath = String(sourceValue(input.source, input.storeFileEnv) ?? "").trim();
-  if (configuredPath) {
-    return resolve(configuredPath);
-  }
-
-  const serviceName = sanitizePathSegment(String(sourceValue(input.source, "SERVICE_NAME") ?? input.defaultServiceName ?? "api-gateway"));
-  const nodeEnv = sanitizePathSegment(String(sourceValue(input.source, "NODE_ENV") ?? "development"));
-  const port = sanitizePathSegment(String(sourceValue(input.source, "PORT") ?? input.defaultPort ?? "4100"));
-
-  return join(tmpdir(), "support-communication", `${serviceName}-${nodeEnv}-${port}-${input.suffix}.json`);
 }
 
 export function configureRepositoryBootstrap<TRepository, TPrismaClient>(
@@ -108,44 +53,6 @@ export function configureRepositoryBootstrap<TRepository, TPrismaClient>(
   );
   input.useDefault(repository);
   return repository;
-}
-
-function sanitizePathSegment(value: string): string {
-  return value.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "default";
-}
-
-function replaceJsonFile(sourcePath: string, targetPath: string): void {
-  const maxAttempts = 6;
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    try {
-      renameSync(sourcePath, targetPath);
-      return;
-    } catch (error) {
-      lastError = error;
-      if (!isRetryableFileReplaceError(error) || attempt === maxAttempts - 1) {
-        break;
-      }
-      sleepSync(10 * (attempt + 1));
-    }
-  }
-
-  try {
-    writeFileSync(targetPath, readFileSync(sourcePath, "utf8"), "utf8");
-    rmSync(sourcePath, { force: true });
-  } catch {
-    throw lastError;
-  }
-}
-
-function isRetryableFileReplaceError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | undefined)?.code;
-  return code === "EBUSY" || code === "EPERM" || code === "EACCES";
-}
-
-function sleepSync(milliseconds: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
 function stringOrUndefined(value: number | string | undefined): string | undefined {

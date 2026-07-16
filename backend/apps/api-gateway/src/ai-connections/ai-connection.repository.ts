@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore, createPrismaClient } from "@support-communication/database";
+import { type DurableStore, InMemoryStore, createPrismaClient } from "@support-communication/database";
 import type { SecretEnvelope } from "./secret-store.js";
 
 type MaybePromise<T> = Promise<T> | T;
@@ -98,11 +98,9 @@ export class AiConnectionRepository {
 
   static default(): AiConnectionRepository {
     if (!defaultRepository) {
-      // Prisma-only рантайм (план 2026-07-15): production-like профиль всегда
-      // персистится в Postgres; json-store остаётся тестовым бэкендом.
-      defaultRepository = isPrismaRuntimeProfile(process.env)
-        ? AiConnectionRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as AiConnectionPrismaClient })
-        : AiConnectionRepository.open(process.env.AI_CONNECTIONS_STORE_FILE ?? ".runtime/ai-connections.json");
+      // Prisma-only рантайм (план 2026-07-15): дефолтный репозиторий всегда
+      // персистится в Postgres; json-ветка выпилена, файловых сторов больше нет.
+      defaultRepository = AiConnectionRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as AiConnectionPrismaClient });
     }
     return defaultRepository;
   }
@@ -110,9 +108,6 @@ export class AiConnectionRepository {
   static clearDefault(): void { defaultRepository = null; }
   static inMemory(seed: AiConnectionsState = { connections: [] }): AiConnectionRepository {
     return new AiConnectionRepository(new InMemoryStore(normalizeState(seed)));
-  }
-  static open(filePath: string): AiConnectionRepository {
-    return new AiConnectionRepository(new JsonFileStore({ filePath, seed: { connections: [] } }));
   }
   static prisma({ client }: { client: AiConnectionPrismaClient }): AiConnectionRepository {
     return new AiConnectionRepository(new InMemoryStore({ connections: [] }), client);
@@ -183,10 +178,6 @@ export class AiConnectionRepository {
     });
     return removed;
   }
-}
-
-function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
-  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
 }
 
 function isPrismaRecordNotFoundError(error: unknown): boolean {

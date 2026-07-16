@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore, createPrismaClient } from "@support-communication/database";
+import { type DurableStore, InMemoryStore, createPrismaClient } from "@support-communication/database";
 import { applySessionUpdate, DEFAULT_AGENT_SESSION_POLICY, isSessionExpired } from "./agent-session-state.js";
 import type {
   AgentSessionFact,
@@ -66,10 +66,6 @@ export interface AgentSessionPrismaClient {
 
 let defaultRepository: AgentSessionStateRepository | null = null;
 
-function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
-  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
-}
-
 /** Tenant- and conversation-scoped compact agent memory. Never a full transcript store. */
 export class AgentSessionStateRepository {
   constructor(
@@ -80,14 +76,9 @@ export class AgentSessionStateRepository {
 
   static default(): AgentSessionStateRepository {
     if (!defaultRepository) {
-      // Prisma-only рантайм (план 2026-07-15): production-like профиль всегда
-      // персистится в Postgres; json-store остаётся тестовым бэкендом.
-      defaultRepository = isPrismaRuntimeProfile(process.env)
-        ? AgentSessionStateRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as AgentSessionPrismaClient })
-        : new AgentSessionStateRepository(new JsonFileStore({
-          filePath: process.env.AGENT_SESSION_STORE_FILE ?? ".runtime/agent-session-state.json",
-          seed: { sessions: [] }
-        }));
+      // Prisma-only рантайм (план 2026-07-15): дефолтный репозиторий всегда
+      // персистится в Postgres; json-ветка выпилена вместе с JsonFileStore.
+      defaultRepository = AgentSessionStateRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as AgentSessionPrismaClient });
     }
     return defaultRepository;
   }

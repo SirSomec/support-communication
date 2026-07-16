@@ -1,5 +1,4 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { JsonFileStore, type DurableStore } from "@support-communication/database";
 
 export interface SignedWebhookTimestampVerificationInput {
   now: string;
@@ -99,14 +98,6 @@ interface PrismaSignedWebhookReplayNonceRow extends PrismaSignedWebhookReplayNon
   createdAt: Date;
 }
 
-export interface JsonFileSignedWebhookNonceStoreOptions {
-  filePath: string;
-}
-
-interface SignedWebhookNonceState {
-  nonces: SignedWebhookNonceRecord[];
-}
-
 export type SignedWebhookTimestampVerification =
   | {
     accepted: true;
@@ -174,39 +165,6 @@ export class InMemorySignedWebhookNonceStore implements SignedWebhookNonceStore 
     this.nonces.set(key, persisted);
 
     return { inserted: true, record: { ...persisted } };
-  }
-}
-
-export class JsonFileSignedWebhookNonceStore implements SignedWebhookNonceStore {
-  private constructor(private readonly store: DurableStore<SignedWebhookNonceState>) {}
-
-  static open(options: JsonFileSignedWebhookNonceStoreOptions): JsonFileSignedWebhookNonceStore {
-    return new JsonFileSignedWebhookNonceStore(new JsonFileStore({
-      filePath: options.filePath,
-      seed: seedNonceState()
-    }));
-  }
-
-  async saveNonce(record: SignedWebhookNonceRecord): Promise<SignedWebhookNonceSaveResult> {
-    const persisted = normalizeNonceRecord(record);
-    let result: SignedWebhookNonceSaveResult | undefined;
-    this.store.update((state) => {
-      const current = normalizeNonceState(state);
-      const existing = current.nonces.find((nonce) => isSameNonce(nonce, persisted));
-      if (existing) {
-        result = { inserted: false, record: { ...existing } };
-
-        return current;
-      }
-
-      result = { inserted: true, record: { ...persisted } };
-
-      return {
-        nonces: [...current.nonces, persisted]
-      };
-    });
-
-    return result ?? { inserted: true, record: { ...persisted } };
   }
 }
 
@@ -435,16 +393,6 @@ function nonceKey(endpointId: string, nonce: string): string {
   return `${endpointId}\u0000${nonce}`;
 }
 
-function seedNonceState(): SignedWebhookNonceState {
-  return { nonces: [] };
-}
-
-function normalizeNonceState(state: Partial<SignedWebhookNonceState>): SignedWebhookNonceState {
-  return {
-    nonces: (state.nonces ?? []).map(normalizeNonceRecord)
-  };
-}
-
 function normalizeNonceRecord(record: SignedWebhookNonceRecord): SignedWebhookNonceRecord {
   return {
     endpointId: record.endpointId,
@@ -459,10 +407,6 @@ function toSignedWebhookNonceRecord(row: PrismaSignedWebhookReplayNonceRow): Sig
     firstSeenAt: row.firstSeenAt.toISOString(),
     nonce: row.nonce
   };
-}
-
-function isSameNonce(left: SignedWebhookNonceRecord, right: SignedWebhookNonceRecord): boolean {
-  return left.endpointId === right.endpointId && left.nonce === right.nonce;
 }
 
 function parseNormalizationPayload(body: string): VerifiedInboundWebhookNormalizationDescriptor["normalizationPayload"] | null {

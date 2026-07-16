@@ -116,7 +116,8 @@ describe("BAI-307 AI connection security contracts", () => {
   it("keeps tenant binding, masking, rotation, revoke and audit free of credential material", async () => {
     const repository = AiConnectionRepository.inMemory();
     const audit = IdentityRepository.inMemory();
-    const service = new AiConnectionsService(repository, environment, undefined, audit);
+    // list() читает usage: без явного inMemory дефолт теперь prisma-only и требует БД.
+    const service = new AiConnectionsService(repository, environment, AiUsageRepository.inMemory(), audit);
 
     const created = await service.create("tenant-volga", {
       baseUrl: "https://provider.example.test/v1",

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 
 export type ProactiveExposureStatus = "planned" | "delivered" | "shown" | "dismissed" | "accepted" | "failed";
 
@@ -71,6 +71,9 @@ export class ProactiveExposureRepository {
   private constructor(private readonly store: DurableStore<ExposureState>, private readonly prisma?: PrismaExposureClient) {}
 
   static default(): ProactiveExposureRepository {
+    // Prisma-only рантайм (план 2026-07-15): прод получает Prisma-репозиторий через
+    // configureAutomationRepository → useDefault; ленивый fallback остаётся in-memory
+    // только для неинициализированных (тестовых) окружений. json-ветка выпилена вместе с JsonFileStore.
     if (!defaultRepository) defaultRepository = ProactiveExposureRepository.inMemory();
     return defaultRepository;
   }
@@ -78,9 +81,6 @@ export class ProactiveExposureRepository {
   static clearDefault(): void { defaultRepository = null; }
   static inMemory(seed: ProactiveExposure[] = []): ProactiveExposureRepository {
     return new ProactiveExposureRepository(new InMemoryStore({ conversions: [], exposures: seed }));
-  }
-  static open(filePath: string): ProactiveExposureRepository {
-    return new ProactiveExposureRepository(new JsonFileStore({ filePath, seed: { conversions: [], exposures: [] } }));
   }
   static prisma(client: PrismaExposureClient): ProactiveExposureRepository {
     return new ProactiveExposureRepository(new InMemoryStore({ conversions: [], exposures: [] }), client);

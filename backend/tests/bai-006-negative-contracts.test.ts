@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { AutomationService } from "../apps/api-gateway/src/automation/automation.service.ts";
+import { AiConnectionRepository } from "../apps/api-gateway/src/ai-connections/ai-connection.repository.ts";
 import { evaluateFeatureFlagRollout, featureFlagToRolloutRule } from "../apps/api-gateway/src/feature-flags/feature-flag-rollout.engine.ts";
 import { featureFlags } from "../apps/api-gateway/src/platform/seed-catalog.ts";
 
@@ -14,8 +15,14 @@ const scenario = (id: string) => ({
 });
 
 describe("BAI-006 negative bot contracts", () => {
-  beforeEach(() => AutomationRepository.useDefault(AutomationRepository.inMemory()));
-  afterEach(() => AutomationRepository.clearDefault());
+  beforeEach(() => {
+    AutomationRepository.useDefault(AutomationRepository.inMemory());
+    AiConnectionRepository.useDefault(AiConnectionRepository.inMemory());
+  });
+  afterEach(() => {
+    AiConnectionRepository.clearDefault();
+    AutomationRepository.clearDefault();
+  });
 
   it("fails closed for every cross-tenant scenario action without changing the owner record", async () => {
     const automation = new AutomationService();

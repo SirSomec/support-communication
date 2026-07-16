@@ -276,7 +276,6 @@ email}`, `analytics`.
 
 | Переменная | Назначение | По умолчанию |
 | --- | --- | --- |
-| `OPEN_CHANNEL_STORE_FILE` | Файл хранилища слоя | `.runtime/open-channel.json` |
 | `OPEN_CHANNEL_DISABLED` | `true` — отключить фоновые циклы | — |
 | `OPEN_CHANNEL_DELIVERY_INTERVAL_MS` | Период очереди доставки | `3000` |
 | `OPEN_CHANNEL_PUMP_INTERVAL_MS` | Период событийного насоса | `2000` |

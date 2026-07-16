@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   ConversationRepository,
   type ConversationOutboundDescriptor
 } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { AutomationService } from "../apps/api-gateway/src/automation/automation.service.ts";
+import { AiConnectionRepository } from "../apps/api-gateway/src/ai-connections/ai-connection.repository.ts";
+import { BotFeedbackRepository } from "../apps/api-gateway/src/automation/bot-feedback.repository.ts";
 import { bootstrapAutomationState } from "../apps/api-gateway/src/automation/seed.ts";
 import {
   planEligibleProactiveRuleDelivery,
@@ -37,6 +39,16 @@ import { QualityService } from "../apps/api-gateway/src/quality/quality.service.
 import { bootstrapQualityState } from "../apps/api-gateway/src/quality/seed.ts";
 
 describe("phase 7 automation, bot runtime, proactive and quality backend contracts", () => {
+  beforeEach(() => {
+    BotFeedbackRepository.useDefault(BotFeedbackRepository.inMemory());
+    AiConnectionRepository.useDefault(AiConnectionRepository.inMemory());
+  });
+
+  afterEach(() => {
+    AiConnectionRepository.clearDefault();
+    BotFeedbackRepository.clearDefault();
+  });
+
   it("loads automation fixtures only when a seed is passed explicitly", () => {
     const empty = AutomationRepository.inMemory().readState();
     const seeded = AutomationRepository.inMemory(bootstrapAutomationState()).readState();

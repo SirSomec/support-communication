@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { resolveServiceAdminContext } from "@support-communication/auth-context";
-import { configureRepositoryBootstrap, resolveRepositoryStoreFile } from "@support-communication/database";
+import { configureRepositoryBootstrap } from "@support-communication/database";
 import { BillingRepository as RuntimeBillingRepository } from "../apps/api-gateway/src/billing/billing.repository.ts";
 import { bootstrapBillingState } from "../apps/api-gateway/src/billing/seed.ts";
 import { configureIdentityRepository } from "../apps/api-gateway/src/identity/bootstrap.ts";
@@ -25,36 +24,7 @@ describe("persistent backend foundation and identity services", () => {
     RuntimeBillingRepository.useDefault(RuntimeBillingRepository.inMemory(bootstrapBillingState()));
     RuntimeIdentityRepository.useDefault(RuntimeIdentityRepository.inMemory(bootstrapIdentityState()));
   });
-  it("uses shared repository bootstrap helpers for Prisma store-file resolution and client selection", () => {
-    assert.equal(
-      resolveRepositoryStoreFile({
-        source: { SUPPORT_STORE_FILE: " C:/tmp/support.json " },
-        storeFileEnv: "SUPPORT_STORE_FILE",
-        suffix: "support"
-      }),
-      resolve("C:/tmp/support.json")
-    );
-    assert.equal(
-      resolveRepositoryStoreFile({
-        source: { SUPPORT_STORE_FILE: " relative/support.json " },
-        storeFileEnv: "SUPPORT_STORE_FILE",
-        suffix: "support"
-      }),
-      resolve("relative/support.json")
-    );
-    assert.match(
-      resolveRepositoryStoreFile({
-        source: {
-          NODE_ENV: "test env",
-          PORT: "41/00",
-          SERVICE_NAME: "api gateway"
-        },
-        storeFileEnv: "SUPPORT_STORE_FILE",
-        suffix: "support"
-      }),
-      /support-communication[\\/]+api-gateway-test-env-41-00-support\.json$/
-    );
-
+  it("uses the shared repository bootstrap helper for Prisma client selection", () => {
     const configuredDefaults: string[] = [];
     const prismaFactoryCalls: Array<{ datasourceUrl?: string }> = [];
     const repository = configureRepositoryBootstrap({

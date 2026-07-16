@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore, createPrismaClient } from "@support-communication/database";
+import { type DurableStore, InMemoryStore, createPrismaClient } from "@support-communication/database";
 import {
   deriveKnowledgeSourceReadiness,
   knowledgeSourceApprovalStatuses,
@@ -107,11 +107,9 @@ export class KnowledgeSourceRepository {
 
   static default(): KnowledgeSourceRepository {
     if (!defaultRepository) {
-      // Prisma-only рантайм (план 2026-07-15): production-like профиль всегда
-      // персистится в Postgres; json-store остаётся тестовым бэкендом.
-      defaultRepository = isPrismaRuntimeProfile(process.env)
-        ? KnowledgeSourceRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as KnowledgeSourcePrismaClient })
-        : KnowledgeSourceRepository.open(process.env.KNOWLEDGE_SOURCES_STORE_FILE ?? ".runtime/knowledge-sources.json");
+      // Prisma-only рантайм (план 2026-07-15): каталог источников всегда
+      // персистится в Postgres; json-ветки выпилены.
+      defaultRepository = KnowledgeSourceRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as KnowledgeSourcePrismaClient });
     }
     return defaultRepository;
   }
@@ -124,10 +122,6 @@ export class KnowledgeSourceRepository {
 
   static inMemory(seed: KnowledgeSourcesState = { ingestionJobs: [], sources: [] }): KnowledgeSourceRepository {
     return new KnowledgeSourceRepository(new InMemoryStore(normalizeState(seed)));
-  }
-
-  static open(filePath: string): KnowledgeSourceRepository {
-    return new KnowledgeSourceRepository(new JsonFileStore({ filePath, seed: { ingestionJobs: [], sources: [] } }));
   }
 
   static prisma({ client }: { client: KnowledgeSourcePrismaClient }): KnowledgeSourceRepository {
@@ -341,10 +335,6 @@ export class KnowledgeSourceRepository {
     const row = await this.prismaClient!.knowledgeIngestionJob.create({ data: toJobRow(job) });
     return toJobRecord(row);
   }
-}
-
-function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
-  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
 }
 
 function toSourceCreateInput(record: KnowledgeSourceRecord): PrismaKnowledgeSourceCreateInput {

@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore, createPrismaClient } from "@support-communication/database";
+import { type DurableStore, InMemoryStore, createPrismaClient } from "@support-communication/database";
 
 export interface McpConnectorRecord {
   allowedHosts: string[];
@@ -79,17 +79,14 @@ export class McpConnectorRepository {
 
   static default(): McpConnectorRepository {
     if (!defaultRepository) {
-      // Prisma-only рантайм (план 2026-07-15): production-like профиль всегда
-      // персистится в Postgres; json-store остаётся тестовым бэкендом.
-      defaultRepository = isPrismaRuntimeProfile(process.env)
-        ? McpConnectorRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as McpConnectorPrismaClient })
-        : McpConnectorRepository.open(process.env.MCP_CONNECTORS_STORE_FILE ?? ".runtime/mcp-connectors.json");
+      // Prisma-only рантайм (план 2026-07-15): дефолтный репозиторий всегда
+      // персистится в Postgres; json-файловая ветка выпилена.
+      defaultRepository = McpConnectorRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as McpConnectorPrismaClient });
     }
     return defaultRepository;
   }
   static clearDefault(): void { defaultRepository = null; }
   static inMemory(seed: McpConnectorState = { connectors: [] }): McpConnectorRepository { return new McpConnectorRepository(new InMemoryStore(normalizeState(seed))); }
-  static open(filePath: string): McpConnectorRepository { return new McpConnectorRepository(new JsonFileStore({ filePath, seed: { connectors: [] } })); }
   static prisma({ client }: { client: McpConnectorPrismaClient }): McpConnectorRepository {
     return new McpConnectorRepository(new InMemoryStore({ connectors: [] }), client);
   }
@@ -135,10 +132,6 @@ export class McpConnectorRepository {
     });
     return clone(value);
   }
-}
-
-function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
-  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
 }
 
 function toCreateInput(record: McpConnectorRecord): PrismaMcpConnectorCreateInput {

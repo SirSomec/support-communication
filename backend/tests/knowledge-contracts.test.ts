@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { KnowledgeSourceRepository } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.repository.ts";
 import { WorkspaceRepository, type KnowledgeArticle } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 import { WorkspaceService } from "../apps/api-gateway/src/workspace/workspace.service.ts";
 import { bootstrapWorkspaceState } from "../apps/api-gateway/src/workspace/seed.ts";
 
 describe("knowledge workspace contracts", () => {
+  beforeEach(() => {
+    // publishKnowledgeArticle помечает document-источники через
+    // KnowledgeSourceRepository.default(); рантайм теперь prisma-only,
+    // поэтому тестам нужен явный in-memory default вместо ленивого Prisma-клиента.
+    KnowledgeSourceRepository.useDefault(KnowledgeSourceRepository.inMemory());
+  });
+
+  afterEach(() => {
+    KnowledgeSourceRepository.clearDefault();
+  });
+
   it("lists knowledge articles for tenant workspace reads", async () => {
     const workspace = createWorkspace();
     const articles = await workspace.fetchKnowledgeArticles({}, { tenantId: "tenant-volga" });

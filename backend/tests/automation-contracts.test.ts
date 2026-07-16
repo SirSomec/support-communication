@@ -2,14 +2,20 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { AutomationRepository, createEmptyAutomationState } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { AutomationService } from "../apps/api-gateway/src/automation/automation.service.ts";
+import { BotFeedbackRepository } from "../apps/api-gateway/src/automation/bot-feedback.repository.ts";
 import { KnowledgeSourceRepository } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.repository.ts";
+import { AiConnectionRepository } from "../apps/api-gateway/src/ai-connections/ai-connection.repository.ts";
 
 describe("automation bot scenario contracts", () => {
   beforeEach(() => {
     AutomationRepository.useDefault(AutomationRepository.inMemory());
+    BotFeedbackRepository.useDefault(BotFeedbackRepository.inMemory());
+    AiConnectionRepository.useDefault(AiConnectionRepository.inMemory());
   });
 
   afterEach(() => {
+    AiConnectionRepository.clearDefault();
+    BotFeedbackRepository.clearDefault();
     AutomationRepository.clearDefault();
   });
 

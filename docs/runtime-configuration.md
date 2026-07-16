@@ -55,33 +55,16 @@ VITE_API_BASE_URL=http://127.0.0.1:4100 npm run dev
 
 | Variable | Purpose |
 | --- | --- |
-| `RUNTIME_PROFILE=local` | Keep local/test JSON fallbacks enabled. Set `RUNTIME_PROFILE=production-like` only for the guarded PostgreSQL profile. |
-| `LOCAL_DEVELOPMENT_SEED_ENABLED=true` | Explicitly load sample users and workspace data for the local JSON profile. Startup rejects this switch outside local development/test. |
+| `RUNTIME_PROFILE=local` | Local development/test profile with relaxed secret validation. Set `RUNTIME_PROFILE=production-like` for the guarded profile; both run on PostgreSQL/Prisma. |
+| `LOCAL_DEVELOPMENT_SEED_ENABLED=true` | Explicitly load sample users and workspace data for local development. Startup rejects this switch outside local development/test. |
 | `ALLOW_DEMO_SERVICE_ADMIN_HEADERS=true` | Allow demo service-admin headers in dev/test only |
 | `VITE_ENABLE_SERVICE_ADMIN=true` | Expose service-admin route in frontend dev builds |
 | `REALTIME_REDIS_FANOUT_ENABLED=true` | Enable Redis-backed realtime fanout |
 | `REDIS_URL` | Redis connection for realtime fanout |
 | `AUTH_ALLOW_PARTIAL_SSO_FLOWS=true` | Разрешить частичные OIDC/SAML flows вне dev/test. По умолчанию вне dev/test эндпоинты `/auth/oidc/*` и `/auth/saml/acs` отвечают `denied sso_flow_unavailable`, потому что token exchange (OIDC) и проверка подписи assertion (SAML) ещё не реализованы и сессия не выдается. Флаг предназначен только для контрактного тестирования. |
-| `BOT_SANDBOX_STORE_FILE` | Путь к JSON-хранилищу sandbox-сессий тест-чата ботов (по умолчанию `.runtime/bot-sandbox-sessions.json`). Сессии эфемерны (TTL 2 часа) и не являются продакшен-диалогами. |
 | `BOT_SANDBOX_MONTHLY_TOKEN_BUDGET` | Месячный лимит токенов на живой тест-чат для tenant, если у AI-подключения не задан `limits.sandboxMonthlyTokenBudget` (по умолчанию 100000). Расход песочницы дополнительно учитывается в общем месячном бюджете подключения. |
 
-Repository defaults:
-
-| Variable | Default local behavior |
-| --- | --- |
-| `AUTOMATION_REPOSITORY` | JSON store unless set to `prisma` |
-| `IDENTITY_REPOSITORY` | JSON store unless set to `prisma` |
-| `CONVERSATION_REPOSITORY` | JSON store unless set to `prisma` |
-| `BILLING_REPOSITORY` | JSON store unless set to `prisma` |
-| `WORKSPACE_REPOSITORY` | JSON store unless set to `prisma` |
-| `INTEGRATION_REPOSITORY` | JSON store unless set to `prisma` |
-| `NOTIFICATION_REPOSITORY` | JSON store unless set to `prisma` |
-| `OPERATIONS_REPOSITORY` | JSON store unless set to `prisma` |
-| `PLATFORM_REPOSITORY` | JSON store unless set to `prisma` |
-| `QUALITY_REPOSITORY` | JSON store unless set to `prisma` |
-| `PRESENCE_REPOSITORY` | JSON store unless set to `prisma`; operator presence statuses that gate routing (`PRESENCE_STORE_FILE` overrides the JSON path). Workers that auto-assign (telegram polling) must use the same repository mode as the api-gateway. |
-| `ROUTING_REPOSITORY` | JSON store unless set to `prisma` |
-| `REPORT_REPOSITORY` | JSON store unless set to `prisma` |
+Repositories: every domain runs on Prisma/PostgreSQL unconditionally (`DATABASE_URL` is the only storage switch). The former `*_REPOSITORY`/`*_STORE_FILE` selection envs were removed in the prisma-only runtime migration (phase D, 2026-07); `InMemoryStore` survives only as a unit/contract-test backend.
 
 The root `docker-compose.yml` is the single local stack and runs the full product on PostgreSQL — there is no separate pilot overlay or profile. It starts PostgreSQL, Redis, MinIO and Mailpit, sets `RUNTIME_PROFILE=production-like`, disables demo service-admin header auth, and runs every product-critical repository with Prisma:
 
@@ -172,7 +155,7 @@ Local bootstrap helpers live under `backend/scripts/`.
 - Eligibility: enabled rule, exact channel, exact configured segment, tenant execution window, tenant frequency cap and deterministic experiment assignment.
 - Persistence: queued conversation outbound descriptor plus `message-delivery` outbox event, delivery attempt, idempotency fingerprint and experiment attribution. A successful queue operation consumes active frequency caps once; replay does not consume them again.
 - Runtime variables: `PROACTIVE_DELIVERY_INTERVAL_MS`, `PROACTIVE_DELIVERY_LIMIT`, `PROACTIVE_DELIVERY_ACTIVE_VARIANTS`, and `PROACTIVE_DELIVERY_VISITOR_TTL_MS` (default 15 minutes); `PROACTIVE_DELIVERY_EVALUATED_AT` and `PROACTIVE_DELIVERY_TRACE_ID` are intended for deterministic smoke/replay runs.
-- Production-like repositories: set both `AUTOMATION_REPOSITORY=prisma` and `CONVERSATION_REPOSITORY=prisma`. The regular `outbox-worker` consumes the resulting `message-delivery` event.
+- The regular `outbox-worker` consumes the resulting `message-delivery` event.
 - Scaling constraint: run one `proactive-delivery-worker` replica. Duplicate polling is idempotent, but horizontal replicas remain blocked until frequency-cap reservation and cross-domain evidence are moved behind one PostgreSQL claim/transaction boundary.
 
 ## Public Demo Lead Notification Runtime
@@ -208,11 +191,11 @@ Local bootstrap helpers live under `backend/scripts/`.
 - External billing provider dispatch: set `BILLING_SYNC_PROVIDER_MODE=http` and `BILLING_SYNC_PROVIDER_URL`; production-like mode defaults to `disabled` without an explicit provider so queued jobs fail/retry instead of being silently published.
 - External channel delivery still requires configured provider env such as `OUTBOX_CHANNEL_CONNECTORS` or `OUTBOX_TELEGRAM_ENABLED=true`. In production-like Prisma mode, Telegram bot tokens resolve from active `telegram_connections` rows by tenant, with `OUTBOX_TELEGRAM_BOT_TOKEN` as an env fallback.
 - Provider runtime smoke: `cd backend && npm run provider:outbox:smoke` is skip-safe unless `OUTBOX_PROVIDER_SMOKE_ENABLED=true`. Backend `release:checklist` enables it with local provider endpoints by default. When enabled it seeds one queued descriptor each for Telegram, VK and MAX, starts local provider endpoints, runs `outbox-worker --once` through `OUTBOX_TELEGRAM_*`, `OUTBOX_VK_*` and `OUTBOX_MAX_*` runtime env, and verifies 3 published dispatches. Disable individual providers with `OUTBOX_PROVIDER_SMOKE_TELEGRAM_ENABLED=false`, `OUTBOX_PROVIDER_SMOKE_VK_ENABLED=false` or `OUTBOX_PROVIDER_SMOKE_MAX_ENABLED=false`.
-- Telegram live provider smoke: `cd backend && npm run provider:telegram-live-smoke` skips unless `OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true`. Root `npm run release:gate` includes it after production-like API readiness with host PostgreSQL and `INTEGRATION_REPOSITORY=prisma`; set `OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID` plus either `OUTBOX_TELEGRAM_BOT_TOKEN` or an active Prisma `telegram_connections` token for `OUTBOX_PROVIDER_LIVE_SMOKE_TENANT_ID` to send one real Telegram message and verify the outbox event is published.
+- Telegram live provider smoke: `cd backend && npm run provider:telegram-live-smoke` skips unless `OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true`. Root `npm run release:gate` includes it after production-like API readiness with host PostgreSQL; set `OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID` plus either `OUTBOX_TELEGRAM_BOT_TOKEN` or an active Prisma `telegram_connections` token for `OUTBOX_PROVIDER_LIVE_SMOKE_TENANT_ID` to send one real Telegram message and verify the outbox event is published.
 - VK/MAX live official-provider smoke: `cd backend && npm run provider:vk-max-live-smoke` skips unless `OUTBOX_PROVIDER_VK_MAX_LIVE_SMOKE_ENABLED=true`. It requires the ids of existing encrypted tenant connections (`..._VK_CONNECTION_ID`, `..._MAX_CONNECTION_ID`) plus a real VK peer id and MAX chat id. The worker resolves each saved credential, sends through the official API and verifies durable outbox delivery state. Disable either provider explicitly with its `..._ENABLED=false` flag.
 
 ```bash
-OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID=123456789 OUTBOX_TELEGRAM_BOT_TOKEN=123456:token DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication INTEGRATION_REPOSITORY=prisma npm run --prefix backend provider:telegram-live-smoke
+OUTBOX_PROVIDER_LIVE_SMOKE_ENABLED=true OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID=123456789 OUTBOX_TELEGRAM_BOT_TOKEN=123456:token DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication npm run --prefix backend provider:telegram-live-smoke
 ```
 
 ```bash

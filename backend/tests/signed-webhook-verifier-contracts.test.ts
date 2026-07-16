@@ -1,13 +1,9 @@
 import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   createVerifiedInboundWebhookNormalizationDescriptor,
   InMemorySignedWebhookNonceStore,
-  JsonFileSignedWebhookNonceStore,
   PrismaSignedWebhookNonceStore,
   verifySignedWebhookNonce,
   verifySignedWebhookSignature,
@@ -191,44 +187,6 @@ describe("signed inbound webhook verification contracts", () => {
       accepted: false,
       code: "webhook_nonce_required"
     });
-  });
-
-  it("persists signed webhook nonce replay protection across JSON store reopen", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "signed-webhook-nonce-"));
-    try {
-      const filePath = join(workspace, "nonce-store.json");
-      const firstStore = JsonFileSignedWebhookNonceStore.open({ filePath });
-
-      const first = await verifySignedWebhookNonce({
-        endpointId: "vk-inbound",
-        nonceHeader: "nonce-json-001",
-        receivedAt: "2026-06-30T13:02:00.000Z",
-        store: firstStore
-      });
-
-      const reopenedStore = JsonFileSignedWebhookNonceStore.open({ filePath });
-      const replay = await verifySignedWebhookNonce({
-        endpointId: "vk-inbound",
-        nonceHeader: "nonce-json-001",
-        receivedAt: "2026-06-30T13:03:00.000Z",
-        store: reopenedStore
-      });
-
-      assert.deepEqual(first, {
-        accepted: true,
-        endpointId: "vk-inbound",
-        nonce: "nonce-json-001"
-      });
-      assert.deepEqual(replay, {
-        accepted: false,
-        code: "webhook_nonce_replay",
-        endpointId: "vk-inbound",
-        firstSeenAt: "2026-06-30T13:02:00.000Z",
-        nonce: "nonce-json-001"
-      });
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
   });
 
   it("persists signed webhook nonce replay protection through Prisma delegates", async () => {

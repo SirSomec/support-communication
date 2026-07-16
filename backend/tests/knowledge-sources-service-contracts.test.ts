@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { KnowledgeSourceRepository } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.repository.ts";
 import { KnowledgeSourcesService } from "../apps/api-gateway/src/knowledge-sources/knowledge-sources.service.ts";
+import { UrlSourcePolicyRepository } from "../apps/api-gateway/src/knowledge-sources/url-source-policy.repository.ts";
 import { WorkspaceRepository } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 
 describe("knowledge source catalog service", () => {
   it("keeps a remote URL pending and rejects unsafe URLs", async () => {
-    const service = new KnowledgeSourcesService(KnowledgeSourceRepository.inMemory(), WorkspaceRepository.inMemory());
+    const service = new KnowledgeSourcesService(KnowledgeSourceRepository.inMemory(), WorkspaceRepository.inMemory(), {}, UrlSourcePolicyRepository.inMemory());
     const unsafe = await service.create("tenant-volga", { kind: "url", sourceConfig: { url: "http://127.0.0.1/private" }, title: "Unsafe" });
     const safe = await service.create("tenant-volga", { kind: "url", sourceConfig: { url: "https://docs.example.test/faq#fragment" }, title: "FAQ" });
 
@@ -20,7 +21,7 @@ describe("knowledge source catalog service", () => {
 
   it("does not reveal sources across tenants and can disable one safely", async () => {
     const repository = KnowledgeSourceRepository.inMemory();
-    const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory());
+    const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), {}, UrlSourcePolicyRepository.inMemory());
     const created = await service.create("tenant-volga", { kind: "url", sourceConfig: { url: "https://docs.example.test/faq" }, title: "FAQ" });
     const id = String((created.data.source as { id: string }).id);
     const disabled = await service.disable("tenant-volga", id);
@@ -34,7 +35,7 @@ describe("knowledge source catalog service", () => {
     const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), {
       fetch: async () => new Response("<html><script>ignore()</script><body>Delivery status FAQ</body></html>", { headers: { "content-type": "text/html" }, status: 200 }),
       resolveHostname: async () => [{ address: "8.8.8.8" }]
-    });
+    }, UrlSourcePolicyRepository.inMemory());
     const created = await service.create("tenant-volga", { kind: "url", sourceConfig: { url: "https://docs.example.test/faq" }, title: "FAQ" });
     const id = String((created.data.source as { id: string }).id);
     const refreshed = await service.refreshUrl("tenant-volga", id);
@@ -46,7 +47,7 @@ describe("knowledge source catalog service", () => {
 
   it("rejects a URL when DNS resolves it to a private address", async () => {
     const repository = KnowledgeSourceRepository.inMemory();
-    const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), { resolveHostname: async () => [{ address: "127.0.0.1" }] });
+    const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), { resolveHostname: async () => [{ address: "127.0.0.1" }] }, UrlSourcePolicyRepository.inMemory());
     const created = await service.create("tenant-volga", { kind: "url", sourceConfig: { url: "https://docs.example.test/private" }, title: "Unsafe DNS" });
     const refreshed = await service.refreshUrl("tenant-volga", String((created.data.source as { id: string }).id));
     assert.equal(refreshed.error?.code, "url_source_fetch_failed");

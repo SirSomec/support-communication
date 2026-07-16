@@ -23,8 +23,14 @@ const scenarioPayload = (title: string) => ({
 });
 
 describe("BAI-812 draft-over-published scenario", () => {
-  beforeEach(() => AutomationRepository.useDefault(AutomationRepository.inMemory()));
-  afterEach(() => AutomationRepository.clearDefault());
+  beforeEach(() => {
+    AutomationRepository.useDefault(AutomationRepository.inMemory());
+    AiConnectionRepository.useDefault(AiConnectionRepository.inMemory());
+  });
+  afterEach(() => {
+    AiConnectionRepository.clearDefault();
+    AutomationRepository.clearDefault();
+  });
 
   async function publishBaseline(automation: AutomationService, title = "Ответ v1") {
     await automation.createBotScenario(scenarioPayload(title), CONTEXT);
@@ -128,8 +134,14 @@ describe("BAI-812 draft-over-published scenario", () => {
 });
 
 describe("BAI-813 scenario version rollback", () => {
-  beforeEach(() => AutomationRepository.useDefault(AutomationRepository.inMemory()));
-  afterEach(() => AutomationRepository.clearDefault());
+  beforeEach(() => {
+    AutomationRepository.useDefault(AutomationRepository.inMemory());
+    AiConnectionRepository.useDefault(AiConnectionRepository.inMemory());
+  });
+  afterEach(() => {
+    AiConnectionRepository.clearDefault();
+    AutomationRepository.clearDefault();
+  });
 
   it("rolls a published scenario back to an earlier published version", async () => {
     const automation = new AutomationService();

@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore, createPrismaClient } from "@support-communication/database";
+import { type DurableStore, InMemoryStore, createPrismaClient } from "@support-communication/database";
 import type { BotSandboxSession, BotSandboxSessionMode, BotSandboxSessionStatus, BotSandboxTurn, BotSandboxUsageRecord } from "./bot-sandbox.types.js";
 
 type MaybePromise<T> = Promise<T> | T;
@@ -8,7 +8,6 @@ interface BotSandboxStore {
   usage: BotSandboxUsageRecord[];
 }
 
-const EMPTY_STORE: BotSandboxStore = { sessions: [], usage: [] };
 export const BOT_SANDBOX_SESSION_TTL_MS = 2 * 60 * 60 * 1_000;
 const MAX_SESSIONS_PER_TENANT = 50;
 
@@ -79,24 +78,15 @@ export interface BotSandboxPrismaClient {
 
 let defaultRepository: BotSandboxSessionRepository | null = null;
 
-function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
-  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
-}
-
 /** Tenant-scoped sandbox chat sessions. Ephemeral by design: TTL-bound, never part of production dialogs. */
 export class BotSandboxSessionRepository {
   constructor(private readonly store: DurableStore<BotSandboxStore>, private readonly prismaClient?: BotSandboxPrismaClient) {}
 
   static default(): BotSandboxSessionRepository {
     if (!defaultRepository) {
-      // Prisma-only рантайм (план 2026-07-15, фаза A3): production-like профиль
-      // всегда персистится в Postgres; json-store остаётся тестовым бэкендом.
-      defaultRepository = isPrismaRuntimeProfile(process.env)
-        ? BotSandboxSessionRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as BotSandboxPrismaClient })
-        : new BotSandboxSessionRepository(new JsonFileStore({
-          filePath: process.env.BOT_SANDBOX_STORE_FILE ?? ".runtime/bot-sandbox-sessions.json",
-          seed: { ...EMPTY_STORE }
-        }));
+      // Prisma-only рантайм (план 2026-07-15, фаза D): дефолт всегда персистится
+      // в Postgres; json-ветка выпилена, тестовый бэкенд — inMemory().
+      defaultRepository = BotSandboxSessionRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as BotSandboxPrismaClient });
     }
     return defaultRepository;
   }

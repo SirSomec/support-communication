@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore, createPrismaClient } from "@support-communication/database";
+import { type DurableStore, InMemoryStore, createPrismaClient } from "@support-communication/database";
 
 type MaybePromise<T> = Promise<T> | T;
 
@@ -35,10 +35,6 @@ export interface UrlSourcePolicyPrismaClient {
 
 let defaultRepository: UrlSourcePolicyRepository | null = null;
 
-function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
-  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
-}
-
 /** Tenant-level exact-host policy for remote URL ingestion. `null` means the
  * tenant has not restricted public HTTPS hosts yet; an empty array denies all. */
 export class UrlSourcePolicyRepository {
@@ -49,17 +45,14 @@ export class UrlSourcePolicyRepository {
 
   static default(): UrlSourcePolicyRepository {
     if (!defaultRepository) {
-      // Prisma-only рантайм (план 2026-07-15, фаза A3): production-like профиль
-      // всегда персистится в Postgres; json-store остаётся тестовым бэкендом.
-      defaultRepository = isPrismaRuntimeProfile(process.env)
-        ? UrlSourcePolicyRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as UrlSourcePolicyPrismaClient })
-        : UrlSourcePolicyRepository.open(process.env.URL_SOURCE_POLICIES_STORE_FILE ?? ".runtime/url-source-policies.json");
+      // Prisma-only рантайм (план 2026-07-15): политика URL-источников всегда
+      // персистится в Postgres; json-ветка выпилена вместе с JsonFileStore.
+      defaultRepository = UrlSourcePolicyRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as UrlSourcePolicyPrismaClient });
     }
     return defaultRepository;
   }
   static clearDefault(): void { defaultRepository = null; }
   static inMemory(seed: UrlSourcePolicyState = { policies: [] }): UrlSourcePolicyRepository { return new UrlSourcePolicyRepository(new InMemoryStore(normalizeState(seed))); }
-  static open(filePath: string): UrlSourcePolicyRepository { return new UrlSourcePolicyRepository(new JsonFileStore({ filePath, seed: { policies: [] } })); }
   static prisma({ client }: { client: UrlSourcePolicyPrismaClient }): UrlSourcePolicyRepository { return new UrlSourcePolicyRepository(new InMemoryStore({ policies: [] }), client); }
 
   get(tenantId: string): MaybePromise<UrlSourcePolicy> {

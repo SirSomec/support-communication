@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { AutomationRepository, createEmptyAutomationState } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { AutomationService } from "../apps/api-gateway/src/automation/automation.service.ts";
 import { BotRuntimeService } from "../apps/api-gateway/src/automation/bot-runtime.service.ts";
+import { AiConnectionRepository } from "../apps/api-gateway/src/ai-connections/ai-connection.repository.ts";
 import { buildAiBotSystemPrompt } from "../apps/api-gateway/src/automation/ai-bot-response.service.ts";
 import { evaluatePostPolicy, evaluatePrePolicy, normalizeAgentPolicy } from "../apps/api-gateway/src/automation/agent-policy.ts";
 import type { BotScenario } from "../apps/api-gateway/src/automation/automation.types.ts";
@@ -109,6 +110,7 @@ describe("BAI-842 policy evaluator", () => {
 describe("BAI-844 publish guard for ungrounded answers", () => {
   it("blocks publishing an ungrounded AI scenario without an operator path", async () => {
     AutomationRepository.useDefault(AutomationRepository.inMemory());
+    AiConnectionRepository.useDefault(AiConnectionRepository.inMemory());
     try {
       const automation = new AutomationService();
       const scenario = {
@@ -127,6 +129,7 @@ describe("BAI-844 publish guard for ungrounded answers", () => {
       assert.equal(result.error?.code, "bot_publish_prerequisites_invalid");
       assert.ok((result.data.violations as string[]).some((item) => item.includes("передачей оператору")));
     } finally {
+      AiConnectionRepository.clearDefault();
       AutomationRepository.clearDefault();
     }
   });

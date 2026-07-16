@@ -5,17 +5,23 @@ import {
   createEmptyAutomationState
 } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { AutomationService } from "../apps/api-gateway/src/automation/automation.service.ts";
+import { BotFeedbackRepository } from "../apps/api-gateway/src/automation/bot-feedback.repository.ts";
 import { runProactiveDeliveryWorkerOnce } from "../apps/api-gateway/src/automation/proactive-delivery.worker.ts";
 import { ProactiveExposureRepository } from "../apps/api-gateway/src/automation/proactive-exposure.repository.ts";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { IntegrationRepository } from "../apps/api-gateway/src/integrations/integration.repository.ts";
+import { AiConnectionRepository } from "../apps/api-gateway/src/ai-connections/ai-connection.repository.ts";
 
 describe("automation proactive visitor workspace contracts", () => {
   beforeEach(() => {
     AutomationRepository.useDefault(AutomationRepository.inMemory());
+    BotFeedbackRepository.useDefault(BotFeedbackRepository.inMemory());
+    AiConnectionRepository.useDefault(AiConnectionRepository.inMemory());
   });
 
   afterEach(() => {
+    AiConnectionRepository.clearDefault();
+    BotFeedbackRepository.clearDefault();
     AutomationRepository.clearDefault();
     ProactiveExposureRepository.clearDefault();
   });

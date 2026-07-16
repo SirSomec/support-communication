@@ -1,6 +1,3 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createPrismaClient } from "@support-communication/database";
 
 export type BotAiFeedbackOutcome = "helped" | "not_helped" | "wrong_source";
@@ -79,10 +76,6 @@ export interface BotFeedbackPrismaClient {
   };
 }
 
-function isPrismaRuntimeProfile(env: NodeJS.ProcessEnv): boolean {
-  return String(env.RUNTIME_PROFILE ?? "").trim().toLowerCase() === "production-like";
-}
-
 const OUTCOMES = new Set<BotAiFeedbackOutcome>(["helped", "not_helped", "wrong_source"]);
 
 export function isBotAiFeedbackOutcome(value: unknown): value is BotAiFeedbackOutcome {
@@ -93,19 +86,15 @@ export class BotFeedbackRepository implements BotFeedbackRepositoryPort {
   private static defaultInstance: BotFeedbackRepository | null = null;
 
   private constructor(
-    private readonly mode: "file" | "memory" | "prisma",
-    private readonly filePath: string,
     private records: BotAiFeedbackRecord[],
     private readonly prismaClient?: BotFeedbackPrismaClient
   ) {}
 
   static default(): BotFeedbackRepository {
     if (!BotFeedbackRepository.defaultInstance) {
-      // Prisma-only рантайм (план 2026-07-15): production-like профиль всегда
-      // персистится в Postgres; json-store остаётся тестовым бэкендом.
-      BotFeedbackRepository.defaultInstance = isPrismaRuntimeProfile(process.env)
-        ? BotFeedbackRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as BotFeedbackPrismaClient })
-        : BotFeedbackRepository.file();
+      // Prisma-only рантайм (план 2026-07-15): дефолтный репозиторий всегда
+      // персистится в Postgres; json-ветка выпилена вместе с JsonFileStore.
+      BotFeedbackRepository.defaultInstance = BotFeedbackRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as BotFeedbackPrismaClient });
     }
     return BotFeedbackRepository.defaultInstance;
   }
@@ -119,15 +108,11 @@ export class BotFeedbackRepository implements BotFeedbackRepositoryPort {
   }
 
   static inMemory(seed: BotAiFeedbackRecord[] = []): BotFeedbackRepository {
-    return new BotFeedbackRepository("memory", "", seed.map(normalizeFeedback));
-  }
-
-  static file(filePath = defaultFeedbackPath()): BotFeedbackRepository {
-    return new BotFeedbackRepository("file", filePath, readFeedbackFile(filePath));
+    return new BotFeedbackRepository(seed.map(normalizeFeedback));
   }
 
   static prisma({ client }: { client: BotFeedbackPrismaClient }): BotFeedbackRepository {
-    return new BotFeedbackRepository("prisma", "", [], client);
+    return new BotFeedbackRepository([], client);
   }
 
   listFeedback(filter: BotAiFeedbackFilter = {}): MaybePromise<BotAiFeedbackRecord[]> {
@@ -156,7 +141,6 @@ export class BotFeedbackRepository implements BotFeedbackRepositoryPort {
       return clone(existing);
     }
     this.records = [persisted, ...this.records];
-    this.persist();
     return clone(persisted);
   }
 
@@ -172,7 +156,6 @@ export class BotFeedbackRepository implements BotFeedbackRepositoryPort {
       resolved = { ...item, resolvedAction: String(action ?? "reviewed").trim().slice(0, 80) || "reviewed", resolvedAt: new Date().toISOString(), reviewRequired: false };
       return resolved;
     });
-    if (resolved) this.persist();
     return resolved ? clone(resolved) : undefined;
   }
 
@@ -193,12 +176,6 @@ export class BotFeedbackRepository implements BotFeedbackRepositoryPort {
     if (!result.count) return undefined;
     const row = await this.prismaClient!.botAiFeedback.findUnique({ where: { feedbackId: id } });
     return row ? fromRow(row) : undefined;
-  }
-
-  private persist(): void {
-    if (this.mode !== "file") return;
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, `${JSON.stringify({ feedback: this.records }, null, 2)}\n`, "utf8");
   }
 }
 
@@ -237,21 +214,6 @@ function fromRow(row: PrismaBotAiFeedbackRow): BotAiFeedbackRecord {
     scenarioId: row.scenarioId,
     tenantId: row.tenantId
   });
-}
-
-function defaultFeedbackPath(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return join(here, "..", "..", "..", "..", ".runtime", "bot-ai-feedback.json");
-}
-
-function readFeedbackFile(filePath: string): BotAiFeedbackRecord[] {
-  if (!existsSync(filePath)) return [];
-  try {
-    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as { feedback?: BotAiFeedbackRecord[] };
-    return Array.isArray(parsed.feedback) ? parsed.feedback.map(normalizeFeedback) : [];
-  } catch {
-    return [];
-  }
 }
 
 function normalizeFeedback(record: BotAiFeedbackRecord): BotAiFeedbackRecord {

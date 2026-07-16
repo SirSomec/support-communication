@@ -40,9 +40,9 @@ describe("outbox worker runtime contracts", () => {
     assert.doesNotMatch(main, /handlers:\s*\{\s*\}/);
     assert.match(main, /createRuntimeBillingSyncHandlers/);
     assert.match(main, /createPrismaConversationOutboundDescriptorStore/);
-    assert.match(main, /createJsonConversationOutboxStore/);
-    assert.match(main, /createJsonConversationOutboundDescriptorStore/);
-    assert.match(main, /CONVERSATION_REPOSITORY/);
+    assert.match(main, /createPrismaOutboxStore/);
+    assert.doesNotMatch(main, /createJsonConversationOutboxStore/);
+    assert.doesNotMatch(main, /CONVERSATION_REPOSITORY/);
     assert.match(main, /createRuntimeOutboxHandlers/);
     assert.match(main, /queue:\s*config\.queue\s*\?\?\s*"file-scan"/);
     assert.doesNotMatch(main, /queue:\s*"file-scan"/);

@@ -21,7 +21,7 @@ describe("notification delivery worker contracts", () => {
     const smoke = readFileSync(new URL("../scripts/notification-delivery-worker-smoke.mjs", import.meta.url), "utf8");
     assert.match(smoke, /browserPushSubscription\.create/);
     assert.match(smoke, /notificationDeliveryDescriptor\.create/);
-    assert.match(smoke, /NOTIFICATION_REPOSITORY: "prisma"/);
+    assert.doesNotMatch(smoke, /NOTIFICATION_REPOSITORY/);
     assert.match(smoke, /NOTIFICATION_DELIVERY_PROVIDER_MODE: "local"/);
     assert.match(smoke, /result\.scanned !== 1/);
     assert.match(smoke, /result\.delivered !== 1/);

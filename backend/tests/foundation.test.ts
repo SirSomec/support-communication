@@ -59,62 +59,23 @@ describe("phase 0 shared backend foundation", () => {
     assert.equal(config.LOCAL_DEVELOPMENT_SEED_ENABLED, "false");
     assert.equal(config.PORT, 4201);
     assert.equal(config.SERVICE_NAME, "api-gateway");
-    assert.equal(config.AUTOMATION_REPOSITORY, "json");
-    assert.equal(config.BILLING_REPOSITORY, "json");
-    assert.equal(config.CONVERSATION_REPOSITORY, "json");
-    assert.equal(config.INTEGRATION_REPOSITORY, "json");
-    assert.equal(config.NOTIFICATION_REPOSITORY, "json");
-    assert.equal(config.OPERATIONS_REPOSITORY, "json");
-    assert.equal(config.PLATFORM_REPOSITORY, "json");
-    assert.equal(config.PRESENCE_REPOSITORY, "json");
-    assert.equal(config.QUALITY_REPOSITORY, "json");
-    assert.equal(config.REPORT_REPOSITORY, "json");
-    assert.equal(config.ROUTING_REPOSITORY, "json");
     assert.equal(config.S3_REGION, "us-east-1");
-    assert.equal(loadBackendConfig(createTestEnv({ AUTOMATION_REPOSITORY: "prisma" })).AUTOMATION_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ BILLING_REPOSITORY: "prisma" })).BILLING_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ CONVERSATION_REPOSITORY: "prisma" })).CONVERSATION_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ INTEGRATION_REPOSITORY: "prisma" })).INTEGRATION_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ NOTIFICATION_REPOSITORY: "prisma" })).NOTIFICATION_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ OPERATIONS_REPOSITORY: "prisma" })).OPERATIONS_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ PLATFORM_REPOSITORY: "prisma" })).PLATFORM_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ PRESENCE_REPOSITORY: "prisma" })).PRESENCE_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ QUALITY_REPOSITORY: "prisma" })).QUALITY_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ REPORT_REPOSITORY: "prisma" })).REPORT_REPOSITORY, "prisma");
-    assert.equal(loadBackendConfig(createTestEnv({ ROUTING_REPOSITORY: "prisma" })).ROUTING_REPOSITORY, "prisma");
     assert.equal(loadBackendConfig(createTestEnv({ BROWSER_PUSH_PUBLIC_KEY: "" })).BROWSER_PUSH_PUBLIC_KEY, undefined);
   });
 
-  it("rejects product-critical JSON repositories outside local runtime", () => {
+  it("rejects the local development seed outside the local runtime", () => {
     const productionEnv = createTestEnv({
-      AUTOMATION_REPOSITORY: "prisma",
-      BILLING_REPOSITORY: "json",
-      CONVERSATION_REPOSITORY: "prisma",
       DEMO_SERVICE_ADMIN_KEY: "prod-service-admin-key",
-      IDENTITY_REPOSITORY: "prisma",
-      INTEGRATION_REPOSITORY: "prisma",
       JWT_ACCESS_SECRET: "prod-access-secret-16",
       JWT_REFRESH_SECRET: "prod-refresh-secret-16",
       NODE_ENV: "production",
-      NOTIFICATION_REPOSITORY: "prisma",
-      OPERATIONS_REPOSITORY: "prisma",
-      PLATFORM_REPOSITORY: "prisma",
-      PRESENCE_REPOSITORY: "prisma",
-      QUALITY_REPOSITORY: "prisma",
-      PUBLIC_API_KEY_SECRET: "prod-public-api-secret",
-      REPORT_REPOSITORY: "prisma",
-      ROUTING_REPOSITORY: "prisma",
-      WORKSPACE_REPOSITORY: "prisma"
+      PUBLIC_API_KEY_SECRET: "prod-public-api-secret"
     });
 
-    assert.throws(
-      () => loadBackendConfig(productionEnv),
-      /BILLING_REPOSITORY must be prisma outside local runtime/
-    );
+    assert.equal(loadBackendConfig(productionEnv).NODE_ENV, "production");
     assert.throws(
       () => loadBackendConfig({
         ...productionEnv,
-        BILLING_REPOSITORY: "prisma",
         LOCAL_DEVELOPMENT_SEED_ENABLED: "true"
       }),
       /Local development seed cannot be enabled outside/
@@ -132,39 +93,21 @@ describe("phase 0 shared backend foundation", () => {
     assert.ok(seeds.reports?.workspace.reportColumnOptions.length);
   });
 
-  it("allows legacy JSON store file envs in production-like profile when Prisma repositories are selected", () => {
+  it("loads the production-like profile without any repository-selection envs", () => {
     const productionLikeEnv = createTestEnv({
-      AUTOMATION_REPOSITORY: "prisma",
-      AUTOMATION_STORE_FILE: ".runtime/automation-store.json",
-      BILLING_REPOSITORY: "prisma",
-      CONVERSATION_REPOSITORY: "prisma",
       DEMO_SERVICE_ADMIN_KEY: "production-like-service-admin-key",
-      IDENTITY_REPOSITORY: "prisma",
-      INTEGRATION_REPOSITORY: "prisma",
       JWT_ACCESS_SECRET: "production-like-access-secret-16",
       JWT_REFRESH_SECRET: "production-like-refresh-secret-16",
-      NOTIFICATION_REPOSITORY: "prisma",
-      NOTIFICATION_STORE_FILE: ".runtime/notification-store.json",
       NODE_ENV: "test",
-      OPEN_CHANNEL_REPOSITORY: "prisma",
-      OPERATIONS_REPOSITORY: "prisma",
-      OPERATIONS_STORE_FILE: ".runtime/operations-store.json",
-      PLATFORM_REPOSITORY: "prisma",
-      PRESENCE_REPOSITORY: "prisma",
-      QUALITY_REPOSITORY: "prisma",
-      PLATFORM_STORE_FILE: ".runtime/platform-store.json",
       PUBLIC_API_KEY_SECRET: "production-like-public-api-secret",
-      REPORT_REPOSITORY: "prisma",
-      REPORT_STORE_FILE: ".runtime/report-store.json",
-      ROUTING_REPOSITORY: "prisma",
-      RUNTIME_PROFILE: "production-like",
-      WORKSPACE_REPOSITORY: "prisma"
+      RUNTIME_PROFILE: "production-like"
     });
 
     const config = loadBackendConfig(productionLikeEnv);
 
     assert.equal(config.RUNTIME_PROFILE, "production-like");
-    assert.equal(config.PLATFORM_REPOSITORY, "prisma");
+    assert.equal("PLATFORM_REPOSITORY" in config, false);
+    assert.equal("PLATFORM_STORE_FILE" in config, false);
   });
 
   it("requires explicit non-default demo service-admin key outside local test environments", () => {
@@ -183,24 +126,10 @@ describe("phase 0 shared backend foundation", () => {
 
     const config = loadBackendConfig(createTestEnv({
       NODE_ENV: "staging",
-      AUTOMATION_REPOSITORY: "prisma",
-      BILLING_REPOSITORY: "prisma",
-      CONVERSATION_REPOSITORY: "prisma",
       DEMO_SERVICE_ADMIN_KEY: "staging-service-admin-key",
-      IDENTITY_REPOSITORY: "prisma",
-      INTEGRATION_REPOSITORY: "prisma",
       JWT_ACCESS_SECRET: "staging-access-secret-16",
       JWT_REFRESH_SECRET: "staging-refresh-secret-16",
-      NOTIFICATION_REPOSITORY: "prisma",
-      OPEN_CHANNEL_REPOSITORY: "prisma",
-      OPERATIONS_REPOSITORY: "prisma",
-      PLATFORM_REPOSITORY: "prisma",
-      PRESENCE_REPOSITORY: "prisma",
-      QUALITY_REPOSITORY: "prisma",
-      PUBLIC_API_KEY_SECRET: "staging-public-api-secret",
-      REPORT_REPOSITORY: "prisma",
-      ROUTING_REPOSITORY: "prisma",
-      WORKSPACE_REPOSITORY: "prisma"
+      PUBLIC_API_KEY_SECRET: "staging-public-api-secret"
     }));
 
     assert.equal(config.NODE_ENV, "staging");

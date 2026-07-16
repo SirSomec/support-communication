@@ -71,7 +71,6 @@ async function runWorkerOnce(input) {
     REPORT_DIGEST_WORKER_LIMIT: "1",
     REPORT_DIGEST_WORKER_NOW: "2026-07-04T12:00:00.000Z",
     REPORT_DIGEST_WORKER_TENANT_ID: input.tenantId,
-    REPORT_REPOSITORY: "prisma",
     RUNTIME_PROFILE: "local"
   };
   const child = spawn(process.execPath, ["apps/api-gateway/dist/reports/report-digest.main.js", "--once"], {

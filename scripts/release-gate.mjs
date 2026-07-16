@@ -131,10 +131,9 @@ const releaseGateSteps = [
   },
   {
     command: "cd backend && npm run provider:telegram-live-smoke",
-    display: "DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication INTEGRATION_REPOSITORY=prisma cd backend && npm run provider:telegram-live-smoke",
+    display: "DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication cd backend && npm run provider:telegram-live-smoke",
     env: {
-      DATABASE_URL: "postgresql://support:support@127.0.0.1:56432/support_communication",
-      INTEGRATION_REPOSITORY: "prisma"
+      DATABASE_URL: "postgresql://support:support@127.0.0.1:56432/support_communication"
     }
   },
   {

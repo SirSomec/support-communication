@@ -447,11 +447,8 @@ function reflectorForAction(action: string) {
 function requiredConfigEnv(overrides: Record<string, string>): Record<string, string> {
   return {
     API_VERSION: "v1",
-    BILLING_REPOSITORY: "prisma",
-    CONVERSATION_REPOSITORY: "prisma",
     DATABASE_URL: "postgresql://support:support@127.0.0.1:5432/support_communication",
     DEMO_SERVICE_ADMIN_KEY: "dev-service-admin-key",
-    IDENTITY_REPOSITORY: "prisma",
     JWT_ACCESS_SECRET: "test-access-secret-16chars",
     JWT_REFRESH_SECRET: "test-refresh-secret-16chars",
     LOG_LEVEL: "info",
@@ -461,13 +458,11 @@ function requiredConfigEnv(overrides: Record<string, string>): Record<string, st
     PORT: "4191",
     PUBLIC_API_KEY_SECRET: "test-public-api-secret",
     REDIS_URL: "redis://127.0.0.1:6379",
-    ROUTING_REPOSITORY: "prisma",
     S3_ACCESS_KEY: "minio",
     S3_BUCKET: "support-communication-local",
     S3_ENDPOINT: "http://127.0.0.1:9000",
     S3_SECRET_KEY: "minio-password",
     SERVICE_NAME: "api-gateway",
-    WORKSPACE_REPOSITORY: "prisma",
     ...overrides
   };
 }

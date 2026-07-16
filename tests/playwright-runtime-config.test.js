@@ -18,10 +18,11 @@ describe("Playwright runtime configuration", () => {
     );
   });
 
-  it("isolates notification runtime state for browser tests", () => {
+  it("isolates runtime state for browser tests through the dedicated smoke database", () => {
     const gatewayScript = readFileSync(new URL("./playwright-api-gateway.mjs", import.meta.url), "utf8");
 
-    assert.match(gatewayScript, /NOTIFICATION_STORE_FILE/);
-    assert.match(gatewayScript, /notification\.json/);
+    assert.match(gatewayScript, /smokeDatabaseUrl/);
+    assert.doesNotMatch(gatewayScript, /_STORE_FILE/);
+    assert.doesNotMatch(gatewayScript, /_REPOSITORY/);
   });
 });

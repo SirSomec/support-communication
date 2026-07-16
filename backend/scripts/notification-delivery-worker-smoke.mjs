@@ -107,7 +107,6 @@ async function runWorkerOnce() {
     NOTIFICATION_DELIVERY_LIMIT: "1",
     NOTIFICATION_DELIVERY_PROVIDER_MODE: "local",
     NOTIFICATION_DELIVERY_QUEUE: smoke.queue,
-    NOTIFICATION_REPOSITORY: "prisma",
     RUNTIME_PROFILE: "local"
   };
   const child = spawn(process.execPath, [

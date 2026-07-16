@@ -1,29 +1,31 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { createPrismaClient } from "../packages/database/dist/index.js";
 
+// Single-run proactive delivery worker smoke on the Prisma runtime: seeds one
+// eligible visitor rule, runs the worker once and verifies the persisted
+// delivery evidence in Postgres (phase D: the JSON-store runtime is removed).
 const backendRoot = fileURLToPath(new URL("..", import.meta.url));
-const evaluatedAt = "2026-06-30T08:30:00.000Z";
+const smokePrefix = "proactive_delivery_worker_smoke";
+const runId = `${smokePrefix}_${Date.now()}_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+const evaluatedAt = new Date().toISOString();
 const smoke = {
-  channel: "Telegram",
-  idempotencyKey: "proactive-delivery:tenant-smoke:rule-smoke:visitor-smoke",
-  ruleId: "rule-smoke",
-  segment: "checkout",
-  subjectId: "visitor-smoke",
-  tenantId: "tenant-smoke",
-  traceId: "trc_proactive_delivery_worker_smoke"
+  capId: `cap_${runId}`,
+  conversationId: `visitor_${runId}`,
+  descriptorId: `proactive_rule_${runId}_tenant_${runId}_visitor_${runId}`,
+  idempotencyKey: `proactive-delivery:tenant_${runId}:rule_${runId}:visitor_${runId}`,
+  ruleId: `rule_${runId}`,
+  tenantId: `tenant_${runId}`,
+  traceId: `trc_${runId}`
 };
-const temporaryDirectory = await mkdtemp(join(tmpdir(), "proactive-delivery-worker-smoke-"));
-const automationStoreFile = join(temporaryDirectory, "automation.json");
-const conversationStoreFile = join(temporaryDirectory, "conversation.json");
+const client = createPrismaClient({
+  datasourceUrl: requireConfigured(process.env.DATABASE_URL, "DATABASE_URL")
+});
 
 try {
-  await Promise.all([
-    writeJson(automationStoreFile, createAutomationSeed()),
-    writeJson(conversationStoreFile, createConversationSeed())
-  ]);
+  await cleanupStaleSmokeRows(client);
+  await seedSmokeRows(client);
 
   const output = await runWorkerOnce();
   const result = parseWorkerRunResult(output.stdout);
@@ -38,11 +40,7 @@ try {
     throw new Error(`proactive_delivery_worker_smoke_unexpected_result:${JSON.stringify(result)}`);
   }
 
-  const [automationState, conversationState] = await Promise.all([
-    readJson(automationStoreFile),
-    readJson(conversationStoreFile)
-  ]);
-  const evidence = assertPersistedDelivery(automationState, conversationState);
+  const evidence = await assertPersistedDelivery(client);
 
   process.stdout.write(`proactive delivery worker smoke passed ${JSON.stringify({
     descriptorId: evidence.descriptor.id,
@@ -50,87 +48,73 @@ try {
     result
   })}\n`);
 } finally {
-  await rm(temporaryDirectory, { force: true, recursive: true });
+  if (process.env.PROACTIVE_DELIVERY_SMOKE_KEEP_DATA !== "true") {
+    await cleanupSmokeRows(client, smoke.tenantId, smoke.traceId);
+  }
+  await client.$disconnect?.();
 }
 
-function createAutomationSeed() {
-  return {
-    activeVisitors: [{
-      channel: smoke.channel,
-      message: "A support specialist is available to help with checkout.",
-      phone: "+70000000000",
-      segment: smoke.segment,
-      subjectId: smoke.subjectId,
-      tenantId: smoke.tenantId,
-      topic: "Checkout assistance"
-    }],
-    botPublishAuditEvents: [],
-    botScenarios: [],
-    botScenarioVersions: [],
-    botTestRuns: [],
-    proactiveDeliveryAttributions: [],
-    proactiveDeliveryAttempts: [],
-    proactiveDeliveryIdempotencyKeys: [],
-    proactiveExecutionWindows: [{
-      active: true,
-      daysOfWeek: [2],
-      endsAt: "12:00",
-      ruleId: smoke.ruleId,
-      startsAt: "08:00",
-      tenantId: smoke.tenantId,
-      timezone: "UTC",
-      windowId: "window-smoke"
-    }],
-    proactiveExperimentAssignments: [],
-    proactiveFrequencyCaps: [{
-      active: true,
-      capId: "cap-smoke",
-      limit: 1,
-      period: "day",
-      resetAt: "2026-07-01T00:00:00.000Z",
-      ruleId: smoke.ruleId,
-      tenantId: smoke.tenantId,
-      used: 0
-    }],
-    proactiveRules: [{
-      activeVariant: "A",
-      channels: [smoke.channel],
-      id: smoke.ruleId,
-      segment: smoke.segment,
-      status: "enabled",
-      tenantId: smoke.tenantId
-    }],
-    publishIdempotencyKeys: [],
-    rescueChats: [],
-    workspaceAuditEvents: [],
-    workspaceRuntimeMetrics: []
-  };
-}
-
-function createConversationSeed() {
-  return {
-    channelCatalog: [],
-    conversations: [],
-    deliveryReceipts: [],
-    inboundEvents: [],
-    outboundDescriptors: [],
-    outboxEvents: [],
-    realtimeEvents: []
-  };
+async function seedSmokeRows(prisma) {
+  const resetAt = new Date(Date.parse(evaluatedAt) + 24 * 60 * 60 * 1000);
+  await prisma.$transaction([
+    prisma.proactiveRule.create({
+      data: {
+        activeVariant: "A",
+        channels: ["SDK"],
+        id: smoke.ruleId,
+        segment: "checkout",
+        status: "enabled",
+        tenantId: smoke.tenantId
+      }
+    }),
+    prisma.proactiveFrequencyCap.create({
+      data: {
+        active: true,
+        capId: smoke.capId,
+        limit: 1,
+        period: "day",
+        resetAt,
+        ruleId: smoke.ruleId,
+        tenantId: smoke.tenantId,
+        used: 0
+      }
+    }),
+    prisma.conversation.create({
+      data: {
+        channel: "SDK",
+        clientSince: evaluatedAt.slice(0, 10),
+        device: "web",
+        entry: "proactive delivery worker smoke",
+        id: smoke.conversationId,
+        initials: "PS",
+        language: "ru",
+        metadata: { smoke: true },
+        name: "Proactive Worker Smoke",
+        phone: "+70000000000",
+        preview: "Checkout assistance",
+        previous: {},
+        sla: "ok",
+        slaTone: "neutral",
+        status: "open",
+        tags: ["smoke", "segment:checkout", "page:checkout"],
+        tenantId: smoke.tenantId,
+        time: "12:00",
+        topic: "Checkout assistance",
+        updatedAt: new Date(evaluatedAt)
+      }
+    })
+  ]);
 }
 
 async function runWorkerOnce() {
   const env = {
     ...process.env,
-    AUTOMATION_REPOSITORY: "json",
-    AUTOMATION_STORE_FILE: automationStoreFile,
-    CONVERSATION_REPOSITORY: "json",
-    CONVERSATION_STORE_FILE: conversationStoreFile,
     NODE_ENV: "production",
     PROACTIVE_DELIVERY_ACTIVE_VARIANTS: "A",
     PROACTIVE_DELIVERY_EVALUATED_AT: evaluatedAt,
     PROACTIVE_DELIVERY_LIMIT: "1",
     PROACTIVE_DELIVERY_TRACE_ID: smoke.traceId,
+    PROACTIVE_DELIVERY_VISITOR_TTL_MS: String(60 * 60 * 1000),
     SERVICE_NAME: "proactive-delivery-worker-smoke"
   };
   const child = spawn(process.execPath, [
@@ -200,35 +184,34 @@ function parseWorkerRunResult(stdout) {
   return workerRecord.result;
 }
 
-function assertPersistedDelivery(automationState, conversationState) {
-  const descriptors = requireArray(conversationState.outboundDescriptors, "outbound_descriptors");
-  const outboxEvents = requireArray(conversationState.outboxEvents, "outbox_events");
-  const attempts = requireArray(automationState.proactiveDeliveryAttempts, "delivery_attempts");
-  const idempotencyRecords = requireArray(
-    automationState.proactiveDeliveryIdempotencyKeys,
-    "delivery_idempotency_keys"
-  );
-  const attributions = requireArray(automationState.proactiveDeliveryAttributions, "delivery_attributions");
+async function assertPersistedDelivery(prisma) {
+  const [descriptors, outboxEvents, attempts, idempotencyKeys, attributions, cap] = await Promise.all([
+    prisma.conversationOutboundDescriptor.findMany({ where: { tenantId: smoke.tenantId } }),
+    prisma.outboxEvent.findMany({ where: { aggregateId: smoke.descriptorId } }),
+    prisma.proactiveDeliveryAttempt.findMany({ where: { tenantId: smoke.tenantId } }),
+    prisma.proactiveDeliveryIdempotencyKey.findMany({ where: { tenantId: smoke.tenantId } }),
+    prisma.proactiveDeliveryAttribution.findMany({ where: { tenantId: smoke.tenantId } }),
+    prisma.proactiveFrequencyCap.findUnique({ where: { capId: smoke.capId } })
+  ]);
 
   assertExactlyOne(descriptors, "outbound_descriptor");
   assertExactlyOne(outboxEvents, "outbox_event");
   assertExactlyOne(attempts, "delivery_attempt");
-  assertExactlyOne(idempotencyRecords, "delivery_idempotency_key");
+  assertExactlyOne(idempotencyKeys, "delivery_idempotency_key");
   assertExactlyOne(attributions, "delivery_attribution");
 
   const descriptor = descriptors[0];
   const outbox = outboxEvents[0];
   const attempt = attempts[0];
-  const idempotency = idempotencyRecords[0];
+  const idempotency = idempotencyKeys[0];
   const attribution = attributions[0];
 
   if (
-    descriptor.idempotencyKey !== smoke.idempotencyKey
+    descriptor.id !== smoke.descriptorId
+    || descriptor.idempotencyKey !== smoke.idempotencyKey
     || descriptor.tenantId !== smoke.tenantId
     || descriptor.traceId !== smoke.traceId
-    || descriptor.createdAt !== evaluatedAt
     || descriptor.status !== "queued"
-    || descriptor.deliveryState !== "queued"
     || descriptor.outboxEventId !== outbox.id
   ) {
     throw new Error(`proactive_delivery_worker_smoke_descriptor_mismatch:${JSON.stringify(descriptor)}`);
@@ -242,42 +225,29 @@ function assertPersistedDelivery(automationState, conversationState) {
     throw new Error(`proactive_delivery_worker_smoke_outbox_mismatch:${JSON.stringify(outbox)}`);
   }
   if (
-    attempt.attemptedAt !== evaluatedAt
-    || attempt.descriptorId !== descriptor.id
+    attempt.descriptorId !== descriptor.id
     || attempt.ruleId !== smoke.ruleId
     || attempt.status !== "queued"
-    || attempt.subjectId !== smoke.subjectId
     || attempt.tenantId !== smoke.tenantId
   ) {
     throw new Error(`proactive_delivery_worker_smoke_attempt_mismatch:${JSON.stringify(attempt)}`);
   }
-  if (
-    idempotency.key !== smoke.idempotencyKey
-    || idempotency.fingerprint !== descriptor.requestFingerprint
-    || idempotency.result?.descriptorId !== descriptor.id
-    || idempotency.result?.outboxEventId !== outbox.id
-  ) {
+  if (idempotency.key !== smoke.idempotencyKey) {
     throw new Error(`proactive_delivery_worker_smoke_idempotency_mismatch:${JSON.stringify(idempotency)}`);
   }
   if (
-    attribution.assignedAt !== evaluatedAt
-    || attribution.descriptorId !== descriptor.id
+    attribution.descriptorId !== descriptor.id
     || attribution.ruleId !== smoke.ruleId
-    || attribution.subjectId !== smoke.subjectId
     || attribution.tenantId !== smoke.tenantId
     || attribution.variant !== "A"
   ) {
     throw new Error(`proactive_delivery_worker_smoke_attribution_mismatch:${JSON.stringify(attribution)}`);
   }
+  if (cap?.used !== 1) {
+    throw new Error(`proactive_delivery_worker_smoke_frequency_cap_mismatch:${JSON.stringify(cap)}`);
+  }
 
   return { descriptor, outbox };
-}
-
-function requireArray(value, name) {
-  if (!Array.isArray(value)) {
-    throw new Error(`proactive_delivery_worker_smoke_${name}_missing`);
-  }
-  return value;
 }
 
 function assertExactlyOne(records, name) {
@@ -286,10 +256,29 @@ function assertExactlyOne(records, name) {
   }
 }
 
-async function writeJson(filePath, value) {
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+async function cleanupStaleSmokeRows(prisma) {
+  await cleanupSmokeRows(prisma, { startsWith: `tenant_${smokePrefix}_` }, `trc_${smokePrefix}_`);
 }
 
-async function readJson(filePath) {
-  return JSON.parse(await readFile(filePath, "utf8"));
+async function cleanupSmokeRows(prisma, tenantId, tracePrefix) {
+  await prisma.$transaction([
+    prisma.proactiveDeliveryAttribution.deleteMany({ where: { tenantId } }),
+    prisma.proactiveDeliveryAttempt.deleteMany({ where: { tenantId } }),
+    prisma.proactiveDeliveryIdempotencyKey.deleteMany({ where: { tenantId } }),
+    prisma.proactiveExperimentAssignment.deleteMany({ where: { tenantId } }),
+    prisma.conversationOutboundDescriptor.deleteMany({ where: { tenantId } }),
+    prisma.outboxEvent.deleteMany({ where: { traceId: { startsWith: tracePrefix } } }),
+    prisma.proactiveFrequencyCap.deleteMany({ where: { tenantId } }),
+    prisma.proactiveExecutionWindow.deleteMany({ where: { tenantId } }),
+    prisma.proactiveRule.deleteMany({ where: { tenantId } }),
+    prisma.conversation.deleteMany({ where: { tenantId } })
+  ]);
+}
+
+function requireConfigured(value, name) {
+  const configured = typeof value === "string" ? value.trim() : "";
+  if (!configured) {
+    throw new Error(`${name}_required`);
+  }
+  return configured;
 }

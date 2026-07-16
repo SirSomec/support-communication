@@ -51,15 +51,7 @@ export function createLocalDevelopmentRepositorySeeds(): LocalDevelopmentReposit
   };
 }
 
-export function createPrismaCatalogFallbackSeeds(config: {
-  AUTOMATION_REPOSITORY?: string;
-  QUALITY_REPOSITORY?: string;
-}): LocalDevelopmentRepositorySeeds {
-  const seeds: LocalDevelopmentRepositorySeeds = {};
-
-  if (config.QUALITY_REPOSITORY === "prisma") {
-    seeds.quality = bootstrapQualityState();
-  }
-
-  return seeds;
+export function createPrismaCatalogFallbackSeeds(): LocalDevelopmentRepositorySeeds {
+  // Prisma-only runtime: the quality read model keeps its in-memory catalog fallback seeded.
+  return { quality: bootstrapQualityState() };
 }

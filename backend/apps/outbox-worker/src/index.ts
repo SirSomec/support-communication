@@ -652,10 +652,7 @@ export function createHttpWorkerAdaptersFromEnv(
   };
   const telegramConfig = loadTelegramRuntimeConnectorConfig(env);
   if (telegramConfig.enabled) {
-    const tokenResolver = telegramBotTokenResolver ?? createIntegrationTelegramTokenResolver(
-      stringValue(env.INTEGRATION_STORE_FILE),
-      telegramConfig.botToken
-    );
+    const tokenResolver = telegramBotTokenResolver ?? createIntegrationTelegramTokenResolver(telegramConfig.botToken);
     channelConnectors[telegramConfig.channel] = createTenantTelegramChannelConnector({
       apiBaseUrl: telegramConfig.apiBaseUrl,
       channel: telegramConfig.channel,

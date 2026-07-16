@@ -114,7 +114,6 @@ async function seedSmokeLeadNotification(prisma, input) {
 async function runWorkerOnce() {
   const env = {
     ...process.env,
-    INTEGRATION_REPOSITORY: "prisma",
     NODE_ENV: "development",
     PUBLIC_DEMO_NOTIFICATION_DELIVERY_LIMIT: "1",
     PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE: "smtp",

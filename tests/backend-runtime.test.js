@@ -58,18 +58,8 @@ describe("backend API Gateway runtime contracts", () => {
       cwd: process.cwd(),
       env: {
         ...backendEnv,
-        AUTOMATION_STORE_FILE: join(workspace, "automation.json"),
-        BILLING_STORE_FILE: join(workspace, "billing.json"),
-        CONVERSATION_STORE_FILE: join(workspace, "conversation.json"),
-        IDENTITY_STORE_FILE: join(workspace, "identity.json"),
-        INTEGRATION_STORE_FILE: join(workspace, "integrations.json"),
-        OPERATIONS_STORE_FILE: join(workspace, "operations.json"),
-        PLATFORM_STORE_FILE: join(workspace, "platform.json"),
         PORT: String(activeRuntimePort),
-        REPORT_EXPORT_OBJECT_ROOT: join(workspace, "report-exports"),
-        REPORT_STORE_FILE: join(workspace, "reports.json"),
-        ROUTING_STORE_FILE: join(workspace, "routing.json"),
-        WORKSPACE_STORE_FILE: join(workspace, "workspace.json")
+        REPORT_EXPORT_OBJECT_ROOT: join(workspace, "report-exports")
       },
       stdio: ["ignore", "pipe", "pipe"]
     });

@@ -145,7 +145,6 @@ async function seedSmokeOutboxEvent(prisma, input) {
 async function runWorkerOnce(input) {
   const env = {
     ...process.env,
-    INTEGRATION_REPOSITORY: stringValue(process.env.INTEGRATION_REPOSITORY) || "prisma",
     OUTBOX_BATCH_SIZE: "1",
     OUTBOX_ONCE: "true",
     OUTBOX_QUEUE: queue,

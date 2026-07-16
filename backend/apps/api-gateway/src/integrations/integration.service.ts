@@ -93,8 +93,7 @@ export class IntegrationService {
     private readonly integrationRepository: IntegrationRepository = IntegrationRepository.default(),
     private readonly options: IntegrationServiceOptions = {}
   ) {
-    this.queueDirectoryRepository = options.queueDirectoryRepository
-      ?? (process.env.INTEGRATION_REPOSITORY === "prisma" ? new QueueDirectoryRepository() : undefined);
+    this.queueDirectoryRepository = options.queueDirectoryRepository;
     const state = readInitialIntegrationState(this.integrationRepository);
     this.workspace = this.integrationRepository.readWorkspaceCatalog();
     this.channels = clone(this.workspace.channelDetails);

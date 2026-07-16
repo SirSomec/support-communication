@@ -99,8 +99,6 @@ async function seedSmokeRows(prisma) {
 async function runWorkerOnce(workerIndex) {
   const env = {
     ...process.env,
-    AUTOMATION_REPOSITORY: "prisma",
-    CONVERSATION_REPOSITORY: "prisma",
     NODE_ENV: "production",
     PROACTIVE_DELIVERY_ACTIVE_VARIANTS: "A",
     PROACTIVE_DELIVERY_EVALUATED_AT: evaluatedAt,

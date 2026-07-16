@@ -345,8 +345,8 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
       assert.match(pollingSource, /configureOperatorPresenceRepository\(source\)/);
 
       const configSource = readFileSync(new URL("../packages/config/src/index.ts", import.meta.url), "utf8");
-      assert.match(configSource, /PRESENCE_REPOSITORY/);
-      assert.match(configSource, /"PRESENCE_REPOSITORY",/);
+      // Prisma-only runtime (phase D): repository-selection envs are gone from the config.
+      assert.doesNotMatch(configSource, /PRESENCE_REPOSITORY/);
     });
 
     it("grants presence actions to the seeded tenant roles", async () => {
@@ -361,11 +361,11 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
     });
 
     it("keeps presence stores out of shared runtime defaults in the playwright gateway", () => {
-      // The smoke gateway now runs prisma-only against a dedicated, per-run Postgres
-      // database (phase C/D); presence isolation is enforced by PRESENCE_REPOSITORY=prisma
-      // there instead of a per-run JSON store file.
+      // The smoke gateway runs prisma-only against a dedicated, per-run Postgres database
+      // (phase C/D); repository-selection envs no longer exist, so presence isolation is
+      // the per-run database itself, not env wiring or a per-run JSON store file.
       const playwrightGateway = readFileSync(new URL("../../tests/playwright-api-gateway.mjs", import.meta.url), "utf8");
-      assert.match(playwrightGateway, /PRESENCE_REPOSITORY/);
+      assert.doesNotMatch(playwrightGateway, /PRESENCE_STORE_FILE/);
       assert.equal(existsSync(new URL("../apps/api-gateway/src/presence/bootstrap.ts", import.meta.url)), true);
     });
   });

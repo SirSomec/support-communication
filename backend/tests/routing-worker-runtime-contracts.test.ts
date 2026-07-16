@@ -169,7 +169,6 @@ describe("routing worker runtime contracts", () => {
     assert.match(packageJson, /start:rescue-return-worker/);
     assert.match(compose, /sla-timer-worker:[\s\S]*sla-timer\.main\.js[\s\S]*\/health/);
     assert.match(compose, /rescue-return-worker:[\s\S]*rescue-return\.main\.js[\s\S]*\/health/);
-    assert.match(compose, /sla-timer-worker:[\s\S]*ROUTING_REPOSITORY: prisma/);
-    assert.match(compose, /rescue-return-worker:[\s\S]*ROUTING_REPOSITORY: prisma/);
+    assert.doesNotMatch(compose, /ROUTING_REPOSITORY/);
   });
 });

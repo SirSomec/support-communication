@@ -1327,7 +1327,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.match(releaseChecklist, /script: "webhook:worker:once"/);
     assert.match(compose, /webhook-delivery-worker:[\s\S]*command: \["node", "apps\/api-gateway\/dist\/integrations\/webhook-delivery\.main\.js"\]/);
     assert.match(compose, /webhook-delivery-worker:[\s\S]*WEBHOOK_DELIVERY_PROVIDER_MODE: \$\{WEBHOOK_DELIVERY_PROVIDER_MODE:-http\}/);
-    assert.match(compose, /webhook-delivery-worker:[\s\S]*INTEGRATION_REPOSITORY: prisma/);
+    assert.doesNotMatch(compose, /INTEGRATION_REPOSITORY/);
     assert.match(composeHealthCheck, /\["webhook-delivery-worker", \{\}\]/);
   });
 

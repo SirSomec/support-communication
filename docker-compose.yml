@@ -65,21 +65,6 @@ services:
       PROVIDER_CREDENTIAL_KEY_VERSION: ${PROVIDER_CREDENTIAL_KEY_VERSION:-local-v1}
       AI_CONNECTIONS_MASTER_KEY: ${AI_CONNECTIONS_MASTER_KEY:-ERERERERERERERERERERERERERERERERERERERERERE=}
       AI_CONNECTIONS_KEY_VERSION: ${AI_CONNECTIONS_KEY_VERSION:-local-v1}
-      IDENTITY_REPOSITORY: prisma
-      BILLING_REPOSITORY: prisma
-      CONVERSATION_REPOSITORY: prisma
-      WORKSPACE_REPOSITORY: prisma
-      ROUTING_REPOSITORY: prisma
-      PRESENCE_REPOSITORY: prisma
-      INTEGRATION_REPOSITORY: prisma
-      NOTIFICATION_REPOSITORY: prisma
-      OPERATIONS_REPOSITORY: prisma
-      PLATFORM_REPOSITORY: prisma
-      QUALITY_REPOSITORY: prisma
-      QUALITY_SCORING_REPOSITORY: prisma
-      OPEN_CHANNEL_REPOSITORY: prisma
-      AUTOMATION_REPOSITORY: prisma
-      REPORT_REPOSITORY: prisma
       BROWSER_PUSH_PUBLIC_KEY: ${BROWSER_PUSH_PUBLIC_KEY:-}
       QUALITY_AI_ENABLED: ${QUALITY_AI_ENABLED:-false}
       QUALITY_AI_BASE_URL: ${QUALITY_AI_BASE_URL:-}
@@ -139,7 +124,6 @@ services:
       LOCAL_DEVELOPMENT_SEED_ENABLED: "true"
       SERVICE_NAME: notification-delivery-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      NOTIFICATION_REPOSITORY: prisma
       BROWSER_PUSH_ENABLED: ${BROWSER_PUSH_ENABLED:-false}
       BROWSER_PUSH_PUBLIC_KEY: ${BROWSER_PUSH_PUBLIC_KEY:-}
       BROWSER_PUSH_PRIVATE_KEY: ${BROWSER_PUSH_PRIVATE_KEY:-}
@@ -166,7 +150,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: lead-notification-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      INTEGRATION_REPOSITORY: prisma
       PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE: ${PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE:-smtp}
       PUBLIC_DEMO_NOTIFICATION_SMTP_FROM: ${PUBLIC_DEMO_NOTIFICATION_SMTP_FROM:-noreply@support-communication.local}
       PUBLIC_DEMO_NOTIFICATION_SMTP_HOST: ${PUBLIC_DEMO_NOTIFICATION_SMTP_HOST:-mailpit}
@@ -195,7 +178,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: webhook-delivery-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      INTEGRATION_REPOSITORY: prisma
       WEBHOOK_DELIVERY_PROVIDER_MODE: ${WEBHOOK_DELIVERY_PROVIDER_MODE:-http}
       WEBHOOK_DELIVERY_SIGNING_SECRET: ${WEBHOOK_DELIVERY_SIGNING_SECRET:-local-dev-webhook-signing-secret}
       WEBHOOK_DELIVERY_INTERVAL_MS: 10000
@@ -223,15 +205,6 @@ services:
       # The polling worker matches scenarios, writes side effects and reads
       # canonical operators/presence — every domain below must live in the
       # same Prisma store as the api-gateway, otherwise data is silently lost.
-      AUTOMATION_REPOSITORY: prisma
-      INTEGRATION_REPOSITORY: prisma
-      CONVERSATION_REPOSITORY: prisma
-      IDENTITY_REPOSITORY: prisma
-      PRESENCE_REPOSITORY: prisma
-      ROUTING_REPOSITORY: prisma
-      QUALITY_REPOSITORY: prisma
-      QUALITY_SCORING_REPOSITORY: prisma
-      OPEN_CHANNEL_REPOSITORY: prisma
       AI_CONNECTIONS_MASTER_KEY: ${AI_CONNECTIONS_MASTER_KEY:-ERERERERERERERERERERERERERERERERERERERERERE=}
       AI_CONNECTIONS_KEY_VERSION: ${AI_CONNECTIONS_KEY_VERSION:-local-v1}
       TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-true}
@@ -257,8 +230,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: proactive-delivery-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      AUTOMATION_REPOSITORY: prisma
-      CONVERSATION_REPOSITORY: prisma
       PROACTIVE_DELIVERY_ACTIVE_VARIANTS: A,B
       PROACTIVE_DELIVERY_INTERVAL_MS: 10000
       PROACTIVE_DELIVERY_LIMIT: 50
@@ -280,8 +251,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: bot-runtime-reconciliation-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      AUTOMATION_REPOSITORY: prisma
-      CONVERSATION_REPOSITORY: prisma
       REDIS_URL: redis://redis:6379
       REALTIME_REDIS_FANOUT_ENABLED: ${REALTIME_REDIS_FANOUT_ENABLED:-true}
       REALTIME_REDIS_CHANNEL: ${REALTIME_REDIS_CHANNEL:-support:realtime}
@@ -309,7 +278,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: knowledge-document-ingestion-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      WORKSPACE_REPOSITORY: prisma
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: support-communication-local
       S3_REGION: us-east-1
@@ -333,7 +301,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: url-source-refresh-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      WORKSPACE_REPOSITORY: prisma
       URL_SOURCE_REFRESH_INTERVAL_MS: 60000
     volumes:
       - api-gateway-runtime:/app/backend/.runtime
@@ -352,7 +319,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: report-digest-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      REPORT_REPOSITORY: prisma
       REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: support-communication-local
@@ -380,7 +346,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: report-export-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      REPORT_REPOSITORY: prisma
       REPORT_EXPORT_OBJECT_ROOT: .runtime/report-exports
       REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
       S3_ENDPOINT: http://minio:9000
@@ -407,7 +372,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: sla-timer-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      ROUTING_REPOSITORY: prisma
       SLA_TIMER_WORKER_HEALTH_PORT: 4110
       SLA_TIMER_WORKER_INTERVAL_MS: 5000
       SLA_TIMER_WORKER_LIMIT: 50
@@ -436,7 +400,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: rescue-return-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      ROUTING_REPOSITORY: prisma
       RESCUE_RETURN_WORKER_HEALTH_PORT: 4110
       RESCUE_RETURN_WORKER_INTERVAL_MS: 5000
       RESCUE_RETURN_WORKER_LIMIT: 50
@@ -466,8 +429,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: outbox-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      INTEGRATION_REPOSITORY: prisma
-      CONVERSATION_REPOSITORY: prisma
       OUTBOX_QUEUE: message-delivery
       OUTBOX_POLL_INTERVAL_MS: 10000
       OUTBOX_BATCH_SIZE: 50
@@ -509,7 +470,6 @@ services:
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
       # The outbox runtime opens the conversation delivery store on boot; without
       # prisma here the worker dies with conversation_store_file_required.
-      CONVERSATION_REPOSITORY: prisma
       OUTBOX_QUEUE: identity-events
       OUTBOX_POLL_INTERVAL_MS: 10000
       OUTBOX_BATCH_SIZE: 50
@@ -530,8 +490,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: billing-sync-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      BILLING_REPOSITORY: prisma
-      CONVERSATION_REPOSITORY: prisma
       BILLING_SYNC_WORKER: "true"
       BILLING_SYNC_PROVIDER_MODE: ${BILLING_SYNC_PROVIDER_MODE:-disabled}
       BILLING_SYNC_PROVIDER_URL: ${BILLING_SYNC_PROVIDER_URL:-}
@@ -557,7 +515,6 @@ services:
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: file-scan-scanner-worker
       DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
-      CONVERSATION_REPOSITORY: prisma
       OUTBOX_FILE_SCAN_SCANNER_WORKER: "true"
       OUTBOX_QUEUE: file-scan
       OUTBOX_SCANNER_ENABLED: ${OUTBOX_SCANNER_ENABLED:-true}

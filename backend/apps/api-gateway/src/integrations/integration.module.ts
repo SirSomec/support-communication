@@ -4,6 +4,7 @@ import { AutomationModule } from "../automation/automation.module.js";
 import { TenantOperatorOrServiceAdminGuard } from "../conversation/tenant-operator-or-service-admin.guard.js";
 import { IdentityModule } from "../identity/identity.module.js";
 import { RoutingModule } from "../routing/routing.module.js";
+import { QueueDirectoryRepository } from "../routing/queue-directory.repository.js";
 import { QualityModule } from "../quality/quality.module.js";
 import { IntegrationController } from "./integration.controller.js";
 import { IntegrationService } from "./integration.service.js";
@@ -16,6 +17,15 @@ import { ProviderWebhookController } from "./provider-webhook.controller.js";
 @Module({
   imports: [AutomationModule, ConversationModule, IdentityModule, QualityModule, RoutingModule],
   controllers: [IntegrationController, ProviderWebhookController, PublicApiController, PublicDemoRequestController, TelegramWebhookController],
-  providers: [IntegrationService, PublicDemoRequestService, TenantOperatorOrServiceAdminGuard]
+  providers: [
+    {
+      provide: IntegrationService,
+      // Composition root: the SupportQueue directory always reads Postgres in the
+      // prisma-only runtime; tests construct IntegrationService directly and inject fakes.
+      useFactory: () => new IntegrationService(undefined, { queueDirectoryRepository: new QueueDirectoryRepository() })
+    },
+    PublicDemoRequestService,
+    TenantOperatorOrServiceAdminGuard
+  ]
 })
 export class IntegrationModule {}

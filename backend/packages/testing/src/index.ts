@@ -1,7 +1,6 @@
 export function createTestEnv(overrides: Record<string, string> = {}): Record<string, string> {
   return {
     API_VERSION: "v1",
-    BILLING_REPOSITORY: "json",
     DATABASE_URL: "postgresql://support:support@127.0.0.1:5432/support_communication",
     DEMO_SERVICE_ADMIN_KEY: "dev-service-admin-key",
     LOG_LEVEL: "info",

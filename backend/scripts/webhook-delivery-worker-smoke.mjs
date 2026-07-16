@@ -116,7 +116,6 @@ async function seedWebhookDelivery(prisma, input) {
 async function runWorkerOnce() {
   const env = {
     ...process.env,
-    INTEGRATION_REPOSITORY: "prisma",
     NODE_ENV: "development",
     RUNTIME_PROFILE: "local",
     WEBHOOK_DELIVERY_LIMIT: "1",

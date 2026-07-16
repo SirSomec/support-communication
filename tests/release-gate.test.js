@@ -70,7 +70,7 @@ describe("product release gate", () => {
       "curl.exe -fsS http://127.0.0.1:4101/api/v1/ready",
       "FILE_SCAN_API_CALLBACK_SMOKE_ENABLED=true DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication BACKEND_API_BASE_URL=http://127.0.0.1:4101/api/v1 cd backend && npm run file-scan:api-callback-smoke",
       "BACKEND_API_BASE_URL=http://127.0.0.1:4101/api/v1 DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication cd backend && npm run file-scan:external-scanner-smoke",
-      "DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication INTEGRATION_REPOSITORY=prisma cd backend && npm run provider:telegram-live-smoke",
+      "DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication cd backend && npm run provider:telegram-live-smoke",
       "DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication cd backend && npm run provider:vk-max-live-smoke",
       "DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication cd backend && npm run lead-notification:smtp-live-smoke",
       "BACKEND_API_BASE_URL=http://127.0.0.1:4101/api/v1 DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication PILOT_PUBLIC_API_ENVIRONMENT=stage npm run test:pilot-smoke",
@@ -170,7 +170,7 @@ describe("product release gate", () => {
     assert.equal(workerEnv.NODE_ENV, "staging");
     assert.equal(workerEnv.RUNTIME_PROFILE, "production-like");
     assert.equal(workerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
-    assert.equal(workerEnv.NOTIFICATION_REPOSITORY, "prisma");
+    assert.equal(workerEnv.NOTIFICATION_REPOSITORY, undefined);
     assert.equal(workerEnv.BROWSER_PUSH_ENABLED, "false");
     assert.equal(workerEnv.BROWSER_PUSH_PUBLIC_KEY, "");
     assert.equal(workerEnv.BROWSER_PUSH_PRIVATE_KEY, "");
@@ -185,7 +185,7 @@ describe("product release gate", () => {
     assert.equal(leadWorkerEnv.NODE_ENV, "staging");
     assert.equal(leadWorkerEnv.RUNTIME_PROFILE, "production-like");
     assert.equal(leadWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
-    assert.equal(leadWorkerEnv.INTEGRATION_REPOSITORY, "prisma");
+    assert.equal(leadWorkerEnv.INTEGRATION_REPOSITORY, undefined);
     assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE, "smtp");
     assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_SMTP_FROM, "noreply@support-communication.local");
     assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_SMTP_HOST, "mailpit");
@@ -266,8 +266,8 @@ describe("product release gate", () => {
     assert.equal(proactiveDeliveryWorkerEnv.NODE_ENV, "staging");
     assert.equal(proactiveDeliveryWorkerEnv.RUNTIME_PROFILE, "production-like");
     assert.equal(proactiveDeliveryWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
-    assert.equal(proactiveDeliveryWorkerEnv.AUTOMATION_REPOSITORY, "prisma");
-    assert.equal(proactiveDeliveryWorkerEnv.CONVERSATION_REPOSITORY, "prisma");
+    assert.equal(proactiveDeliveryWorkerEnv.AUTOMATION_REPOSITORY, undefined);
+    assert.equal(proactiveDeliveryWorkerEnv.CONVERSATION_REPOSITORY, undefined);
     assert.equal(proactiveDeliveryWorkerEnv.PROACTIVE_DELIVERY_LIMIT, "50");
 
     const composeHealthCheck = readFileSync(join(root, "scripts/compose-health-check.mjs"), "utf8");
@@ -585,7 +585,7 @@ describe("product release gate", () => {
     );
     assert.ok(existsSync(smokePath));
     assert.match(releaseGate, /provider:telegram-live-smoke/);
-    assert.match(releaseGate, /INTEGRATION_REPOSITORY:\s*"prisma"/);
+    assert.doesNotMatch(releaseGate, /INTEGRATION_REPOSITORY/);
     assert.match(releaseGate, /DATABASE_URL:\s*"postgresql:\/\/support:support@127\.0\.0\.1:56432\/support_communication"/);
 
     const smokeScript = readFileSync(smokePath, "utf8");
@@ -593,7 +593,7 @@ describe("product release gate", () => {
     assert.match(smokeScript, /OUTBOX_PROVIDER_LIVE_SMOKE_TELEGRAM_CHAT_ID/);
     assert.match(smokeScript, /OUTBOX_TELEGRAM_ENABLED:\s*"true"/);
     assert.match(smokeScript, /OUTBOX_TELEGRAM_API_BASE_URL/);
-    assert.match(smokeScript, /INTEGRATION_REPOSITORY/);
+    assert.doesNotMatch(smokeScript, /INTEGRATION_REPOSITORY/);
     assert.match(smokeScript, /Telegram live provider smoke skipped/);
     assert.match(smokeScript, /Telegram live provider smoke passed/);
     assert.match(smokeScript, /apps\/outbox-worker\/dist\/main\.js/);

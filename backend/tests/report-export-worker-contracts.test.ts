@@ -45,7 +45,7 @@ describe("report export worker contracts", () => {
     assert.match(compose, /command: \["node", "apps\/api-gateway\/dist\/reports\/report-digest\.main\.js"\]/);
     assert.match(compose, /REPORT_DIGEST_WORKER_INTERVAL_MS: 10000/);
     assert.match(compose, /REPORT_DIGEST_WORKER_LIMIT: 10/);
-    assert.match(compose, /report-digest-worker:[\s\S]*REPORT_REPOSITORY: prisma/);
+    assert.doesNotMatch(compose, /REPORT_REPOSITORY/);
     assert.match(main, /runReportDigestWorkerFromEnv/);
     assert.match(main, /queueScheduledDigestExportJob/);
   });
@@ -78,7 +78,7 @@ describe("report export worker contracts", () => {
     assert.match(compose, /REPORT_EXPORT_WORKER_INTERVAL_MS: 10000/);
     assert.match(compose, /REPORT_EXPORT_WORKER_LIMIT: 10/);
     assert.match(compose, /REPORT_EXPORT_OBJECT_ROOT: \.runtime\/report-exports/);
-    assert.match(compose, /report-export-worker:[\s\S]*REPORT_REPOSITORY: prisma/);
+    assert.doesNotMatch(compose, /REPORT_REPOSITORY/);
   });
 
   it("serializes report rows as deterministic CSV", () => {

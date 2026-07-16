@@ -3,20 +3,12 @@ import { describe, it } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 
 describe("local stack bootstrap", () => {
-  it("keeps the single compose file on prisma repositories without pilot overlays", () => {
+  it("keeps the single compose file prisma-only without pilot overlays or repository-selection envs", () => {
     const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
     assert.equal(existsSync(new URL("../../docker-compose.pilot.yml", import.meta.url)), false);
     assert.doesNotMatch(compose, /profiles:/);
-    assert.doesNotMatch(compose, /IDENTITY_REPOSITORY:\s*json/);
-    assert.doesNotMatch(compose, /CONVERSATION_REPOSITORY:\s*json/);
-    assert.doesNotMatch(compose, /INTEGRATION_REPOSITORY:\s*json/);
-    assert.match(compose, /IDENTITY_REPOSITORY:\s*prisma/);
-    assert.match(compose, /BILLING_REPOSITORY:\s*prisma/);
-    assert.match(compose, /CONVERSATION_REPOSITORY:\s*prisma/);
-    assert.match(compose, /WORKSPACE_REPOSITORY:\s*prisma/);
-    assert.match(compose, /ROUTING_REPOSITORY:\s*prisma/);
-    assert.match(compose, /OPERATIONS_REPOSITORY:\s*prisma/);
-    assert.match(compose, /PLATFORM_REPOSITORY:\s*prisma/);
+    assert.doesNotMatch(compose, /_REPOSITORY:/);
+    assert.doesNotMatch(compose, /_STORE_FILE:/);
     assert.match(compose, /RUNTIME_PROFILE:\s*production-like/);
     assert.doesNotMatch(compose, /ALLOW_DEMO_SERVICE_ADMIN_HEADERS:\s*"true"/);
   });

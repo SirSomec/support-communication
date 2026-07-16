@@ -26,26 +26,8 @@ if (seed.status !== 0) {
 }
 
 // 2. Production-like Prisma mode against the smoke database. NODE_ENV=test keeps
-//    the deterministic MFA OTP (123456) the smokes rely on; every repository runs
-//    on Postgres so there is no JSON-store third mode.
-const repositoryEnvVars = [
-  "IDENTITY_REPOSITORY",
-  "BILLING_REPOSITORY",
-  "CONVERSATION_REPOSITORY",
-  "WORKSPACE_REPOSITORY",
-  "ROUTING_REPOSITORY",
-  "PRESENCE_REPOSITORY",
-  "INTEGRATION_REPOSITORY",
-  "NOTIFICATION_REPOSITORY",
-  "OPERATIONS_REPOSITORY",
-  "PLATFORM_REPOSITORY",
-  "QUALITY_REPOSITORY",
-  "QUALITY_SCORING_REPOSITORY",
-  "OPEN_CHANNEL_REPOSITORY",
-  "AUTOMATION_REPOSITORY",
-  "REPORT_REPOSITORY"
-];
-
+//    the deterministic MFA OTP (123456) the smokes rely on; the runtime is
+//    prisma-only, so pointing DATABASE_URL at the smoke database is all it takes.
 const env = {
   ...process.env,
   SERVICE_NAME: "api-gateway-playwright",
@@ -62,9 +44,6 @@ const env = {
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET ?? "local-dev-refresh-secret-16",
   PUBLIC_API_KEY_SECRET: process.env.PUBLIC_API_KEY_SECRET ?? "local-dev-public-api-secret"
 };
-for (const name of repositoryEnvVars) {
-  env[name] = "prisma";
-}
 
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const child = spawn(npmCommand, ["run", "start:api-gateway"], {

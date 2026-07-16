@@ -79,7 +79,6 @@ async function runWorkerOnce(input) {
     REPORT_EXPORT_WORKER_LIMIT: "1",
     REPORT_EXPORT_WORKER_NOW: "2026-07-04T12:00:00.000Z",
     REPORT_EXPORT_WORKER_QUEUE: input.queue,
-    REPORT_REPOSITORY: "prisma",
     RUNTIME_PROFILE: "local"
   };
   const child = spawn(process.execPath, ["apps/api-gateway/dist/reports/report-export.main.js", "--once"], {

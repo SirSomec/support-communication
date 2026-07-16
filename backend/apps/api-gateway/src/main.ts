@@ -37,7 +37,7 @@ export async function bootstrap(): Promise<void> {
   }
   const localSeeds: LocalDevelopmentRepositorySeeds = config.LOCAL_DEVELOPMENT_SEED_ENABLED === "true"
     ? (await import("./runtime/local-development-seed.js")).createLocalDevelopmentRepositorySeeds()
-    : (await import("./runtime/local-development-seed.js")).createPrismaCatalogFallbackSeeds(config);
+    : (await import("./runtime/local-development-seed.js")).createPrismaCatalogFallbackSeeds();
   configureAutomationRepository(config, { seed: localSeeds.automation });
   configureIdentityRepository(config, { seed: localSeeds.identity });
   configureBillingRepository(config, { seed: localSeeds.billing });

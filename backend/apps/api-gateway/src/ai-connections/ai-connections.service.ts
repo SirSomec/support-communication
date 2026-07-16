@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
+import { writeStructuredLog } from "@support-communication/observability";
 import { makeAuditId } from "../identity/backend-ids.js";
 import { IdentityRepository, type IdentityServiceAdminAuditEvent } from "../identity/identity.repository.js";
 import { createOpenAiCompatibleChatProvider, AiProviderError, type OpenAiCompatibleChatConnection, type OpenAiCompatibleChatProvider } from "./openai-compatible-chat.provider.js";
@@ -63,6 +64,7 @@ export class AiConnectionsService {
       const connection = await this.repository.save(record);
       return envelope("createAiConnection", tenantId, { connection: publicConnection(connection), auditEvent: await this.recordAudit("ai.connection.create", tenantId, connection.id, "created") });
     } catch (error) {
+      logWriteFailure("createAiConnection", tenantId, error);
       return invalid("createAiConnection", tenantId, safeMessage(error));
     }
   }
@@ -92,6 +94,7 @@ export class AiConnectionsService {
       const action = input.secret ? "ai.connection.rotate" : "ai.connection.update";
       return envelope("updateAiConnection", tenantId, { connection: publicConnection(record), auditEvent: await this.recordAudit(action, tenantId, record.id, input.secret ? "secret_rotated" : "updated") });
     } catch (error) {
+      logWriteFailure("updateAiConnection", tenantId, error);
       return invalid("updateAiConnection", tenantId, safeMessage(error));
     }
   }
@@ -176,4 +179,15 @@ function normalizeCapabilities(value: AiConnectionCapability[] | undefined): AiC
 function normalizeLimits(value: AiConnectionWriteInput["limits"]): AiConnectionRecord["limits"] { const source = value ?? {}; const limits: AiConnectionRecord["limits"] = {}; for (const key of ["maxConcurrentRuns", "monthlyTokenBudget", "requestsPerMinute", "sandboxMonthlyTokenBudget"] as const) { const parsed = Number(source[key]); if (Number.isInteger(parsed) && parsed > 0) limits[key] = parsed; } return limits; }
 function validateWrite(input: AiConnectionWriteInput, creating: boolean): string | null { if (creating && !input.secret?.trim()) return "API key is required."; if (input.secret !== undefined && !input.secret.trim()) return "API key must not be empty."; if (creating && (!input.baseUrl || !input.chatModel)) return "Provider URL and chat model are required."; try { if (input.baseUrl) normalizeBaseUrl(input.baseUrl); } catch { return "Provider URL must be a valid HTTPS URL."; } return null; }
 function safeMessage(error: unknown): string { if (error instanceof AiProviderError) return error.message; if (error instanceof SecretStoreError) return "Secret storage is unavailable."; return "AI connection could not be completed safely."; }
+function logWriteFailure(operation: string, tenantId: string, error: unknown): void {
+  // В лог только name/code: message (например, у PrismaClientValidationError) включает аргументы запроса с шифртекстом секрета — BAI-307 запрещает credential-материал в логах.
+  const code = (error as { code?: unknown } | null)?.code;
+  writeStructuredLog("error", "AI connection write failed", {
+    errorCode: typeof code === "string" || typeof code === "number" ? String(code) : null,
+    errorName: error instanceof Error ? error.name : typeof error,
+    operation,
+    service: SERVICE,
+    tenantId
+  });
+}
 function testDiagnostic(error: unknown): string { return error instanceof AiProviderError ? error.code : error instanceof SecretStoreError ? "secret_storage_unavailable" : "provider_unavailable"; }

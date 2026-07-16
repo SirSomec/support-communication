@@ -322,6 +322,8 @@ test("keyboard navigation exposes focus states and modal trap", async ({ page })
   await page.locator(".quick-action").focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog", { name: "Новый исходящий диалог" })).toBeVisible();
+  await expect(page.locator(".outbound-panel").getByPlaceholder("+7 999 000-00-00")).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
   await expect(page.locator(".outbound-panel").getByRole("button", { name: "Закрыть" })).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(page.locator(".outbound-panel > footer button").filter({ hasText: "Отмена" })).toBeFocused();

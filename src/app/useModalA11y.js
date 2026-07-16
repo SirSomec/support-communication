@@ -11,18 +11,28 @@ const modalFocusableSelector = [
 
 export function useModalA11y(onClose) {
   const panelRef = useRef(null);
+  const onCloseRef = useRef(onClose);
 
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
+  // Эффект ставит фокус и ловушку один раз на открытие модалки: перезапуск на
+  // каждый новый inline-onClose уводил фокус из полей формы на кнопку закрытия.
   useEffect(() => {
     const previousElement = document.activeElement;
     const panel = panelRef.current;
     const focusable = panel ? Array.from(panel.querySelectorAll(modalFocusableSelector)) : [];
+    const firstField = focusable.find((element) =>
+      ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName)
+    );
 
-    focusable[0]?.focus();
+    (firstField ?? focusable[0])?.focus();
 
     function handleKeyDown(event) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -58,7 +68,7 @@ export function useModalA11y(onClose) {
         previousElement.focus();
       }
     };
-  }, [onClose]);
+  }, []);
 
   return panelRef;
 }

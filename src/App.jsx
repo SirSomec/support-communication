@@ -137,7 +137,11 @@ function App() {
     setFilter,
     setQuery,
     updateQueueFilter
-  } = useDialogQueueFilters({ conversationItems: clientThreads, topics });
+  } = useDialogQueueFilters({
+    conversationItems: clientThreads,
+    operatorId: tenantSession.operator?.id ?? "",
+    topics
+  });
   const {
     handleConversationSelect,
     handleDiscardDraftAndSwitch,
@@ -588,6 +592,7 @@ function App() {
               onClientPhoneSave={handleClientPhoneSave}
               onTagsApply={handleTagsApply}
               onTopic={handleTopicChange}
+              operatorId={tenantSession.operator?.id ?? ""}
               query={query}
               queueFilters={queueFilters}
               replyChannel={replyChannel}

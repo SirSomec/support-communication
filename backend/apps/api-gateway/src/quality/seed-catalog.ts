@@ -1,4 +1,39 @@
 import type { QualityMetric } from "./quality.types.js";
+import type { QualityRatingRecord } from "./quality.repository.js";
+
+// Персистированные клиентские оценки демо-диалогов: инбокс подсвечивает ими
+// вкладку «Оценки». Идентификаторы совпадают с qualityMetrics, чтобы merge
+// в quality workspace не плодил дубликатов строк.
+export const qualityRatings: QualityRatingRecord[] = [
+  {
+    auditId: "evt_quality_seed_maria",
+    channel: "MAX",
+    clientId: "client-maria",
+    conversationId: "maria",
+    createdAt: "2026-07-15T16:20:00.000Z",
+    operator: "operator-anna",
+    ratingId: "csat-1001",
+    realtimeEventId: "evt_quality_score_seed_maria",
+    scale: "CSAT",
+    score: 5,
+    tenantId: "tenant-volga",
+    topic: "Payment / Refund"
+  },
+  {
+    auditId: "evt_quality_seed_vladimir",
+    channel: "Telegram",
+    clientId: "client-vladimir",
+    conversationId: "vladimir",
+    createdAt: "2026-07-15T18:45:00.000Z",
+    operator: "operator-kirill",
+    ratingId: "csat-1002",
+    realtimeEventId: "evt_quality_score_seed_vladimir",
+    scale: "CSAT",
+    score: 2,
+    tenantId: "tenant-volga",
+    topic: "Product / Mismatch"
+  }
+];
 
 export const qualityMetrics: QualityMetric[] = [
   {

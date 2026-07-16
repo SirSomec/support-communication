@@ -46,6 +46,8 @@ export function mapApiConversation(input) {
     ...(nonEmptyString(input?.operatorId) ? { operatorId: nonEmptyString(input.operatorId) } : {}),
     ...(nonEmptyString(input?.operatorName) ? { operatorName: nonEmptyString(input.operatorName) } : {}),
     ...(nonEmptyString(input?.teamId) ? { teamId: nonEmptyString(input.teamId) } : {}),
+    ...(isRecord(input?.botSession) ? { botSession: mapBotSession(input.botSession) } : {}),
+    ...(isRecord(input?.qualityAssessment) ? { qualityAssessment: mapQualityAssessment(input.qualityAssessment) } : {}),
     ...(isRecord(input?.botHandoff) ? { botHandoff: mapBotHandoff(input.botHandoff) } : {})
   };
 
@@ -54,6 +56,24 @@ export function mapApiConversation(input) {
   }
 
   return mapped;
+}
+
+function mapBotSession(input) {
+  return {
+    scenarioId: nonEmptyString(input.scenarioId),
+    status: nonEmptyString(input.status),
+    updatedAt: nonEmptyString(input.updatedAt)
+  };
+}
+
+function mapQualityAssessment(input) {
+  // score: null — клиент открыл форму оценки, но балл не выставил.
+  const score = input.score === null || input.score === undefined ? NaN : Number(input.score);
+  return {
+    createdAt: nonEmptyString(input.createdAt),
+    scale: nonEmptyString(input.scale, "CSAT"),
+    score: Number.isFinite(score) ? score : null
+  };
 }
 
 function mapBotHandoff(input) {

@@ -109,6 +109,14 @@
   background: var(--amber);
 }
 
+.tab-count.info {
+  background: #4d7cd6;
+}
+
+.tab-count.neutral {
+  background: #8a97ad;
+}
+
 .queue-controls {
   display: grid;
   min-width: 0;
@@ -348,6 +356,48 @@
   font-size: 11px;
   font-weight: 650;
   white-space: nowrap;
+}
+
+/* Флаги строки очереди: почему диалог попал во вкладку («У бота»,
+   «Спасти», «Оценки») видно прямо из списка. */
+.queue-flag {
+  width: max-content;
+  padding: 1px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.queue-flag.bot {
+  border-color: #bcd0f5;
+  background: #e9f0fd;
+  color: #2f5bb7;
+}
+
+.queue-flag.rescue {
+  border-color: #f3c1c8;
+  background: #fdeef0;
+  color: #b4232f;
+}
+
+.queue-flag.rating {
+  border-color: #cfdcee;
+  background: #f2f7fd;
+  color: #46587a;
+}
+
+.queue-flag.rating.good {
+  border-color: #bfe3c8;
+  background: #ecf9ef;
+  color: #1d7a34;
+}
+
+.queue-flag.rating.bad {
+  border-color: #f3c1c8;
+  background: #fdeef0;
+  color: #b4232f;
 }
 
 .queue-preview {

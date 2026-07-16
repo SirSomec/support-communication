@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, Clock3, Search, SlidersHorizontal } from "lucide-react";
 import {
+  getConversationQualityAssessment,
   getStatusMeta,
-  queueSlaTones,
-  queueWaitingStatuses,
+  hasActiveRescue,
+  isBotHandledConversation,
+  matchesQueueTab,
   statusLabels
 } from "../../app/dialogModel.js";
 import { StatusBadge } from "../../ui.jsx";
@@ -17,6 +19,7 @@ export function ConversationList({
   onSelect,
   filter,
   onFilter,
+  operatorId = "",
   queueFilters,
   onQueueFilterChange,
   onQueueFiltersReset,
@@ -43,21 +46,26 @@ export function ConversationList({
     queueFilters.sort !== "time",
     queueFilters.onlyInternal
   ].filter(Boolean).length;
+  // Счетчик вкладки = размер ее списка: обе стороны считаются matchesQueueTab.
+  const tabCount = (tab) => allConversations.filter((item) => matchesQueueTab(item, tab, { operatorId })).length;
   const counters = {
-    waiting: allConversations.filter((item) => queueWaitingStatuses.includes(item.status)).length,
-    sla: allConversations.filter((item) => queueSlaTones.includes(item.slaTone)).length,
-    rescue: allConversations.filter((item) => !topics[item.id] || item.slaTone === "danger").length,
-    quality: allConversations.filter((item) => item.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))).length
+    mine: tabCount("mine"),
+    waiting: tabCount("waiting"),
+    sla: tabCount("sla"),
+    rescue: tabCount("rescue"),
+    bot: tabCount("bot"),
+    quality: tabCount("quality")
   };
 
   return (
     <section className="conversation-list" aria-label="Список диалогов">
       <div className="queue-tabs">
-        <TabButton id="mine" active={filter} onClick={onFilter} label="Мои" />
+        <TabButton id="mine" active={filter} onClick={onFilter} label="Мои" count={counters.mine} tone="neutral" />
         <TabButton id="waiting" active={filter} onClick={onFilter} label="Ожидают" count={counters.waiting} tone="danger" />
         <TabButton id="sla" active={filter} onClick={onFilter} label="SLA" count={counters.sla} tone="warn" />
         <TabButton id="rescue" active={filter} onClick={onFilter} label="Спасти" count={counters.rescue} tone="danger" />
         <TabButton id="quality" active={filter} onClick={onFilter} label="Оценки" count={counters.quality} tone="warn" />
+        <TabButton id="bot" active={filter} onClick={onFilter} label="У бота" count={counters.bot} tone="info" />
         <TabButton id="all" active={filter} onClick={onFilter} label="Все" />
       </div>
       <div className="queue-controls">
@@ -139,7 +147,9 @@ export function ConversationList({
         ) : null}
       </div>
       <div className="queue-items">
-        {conversations.map((conversation) => (
+        {conversations.map((conversation) => {
+          const qualityAssessment = getConversationQualityAssessment(conversation);
+          return (
           <button
             aria-current={selectedId === conversation.id ? "true" : undefined}
             className={`queue-row ${selectedId === conversation.id ? "selected" : ""} ${conversation.slaTone === "danger" ? "danger" : ""}`}
@@ -162,6 +172,20 @@ export function ConversationList({
                     {conversation.appealCount} обращ.
                   </span>
                 ) : null}
+                {isBotHandledConversation(conversation) ? (
+                  <span className="queue-flag bot" title="Диалог сейчас обрабатывает бот">Бот</span>
+                ) : null}
+                {hasActiveRescue(conversation) ? (
+                  <span className="queue-flag rescue" title="Запущено спасение диалога">Спасение</span>
+                ) : null}
+                {qualityAssessment ? (
+                  <span
+                    className={`queue-flag rating ${qualityAssessment.score === null ? "" : qualityAssessment.score < 4 ? "bad" : "good"}`}
+                    title="Оценка клиента"
+                  >
+                    {qualityAssessment.scale} {qualityAssessment.score ?? "—"}
+                  </span>
+                ) : null}
               </span>
               <StatusBadge tone={getStatusMeta(conversation.status).tone}>{statusLabels[conversation.status] ?? conversation.status}</StatusBadge>
               <span className="queue-preview">{conversation.preview}</span>
@@ -174,7 +198,8 @@ export function ConversationList({
             </span>
             {conversation.unread ? <span className="unread-dot" /> : null}
           </button>
-        ))}
+          );
+        })}
         {!conversations.length ? (
           <div className="queue-empty">
             <strong>Нет диалогов</strong>

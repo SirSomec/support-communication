@@ -66,7 +66,7 @@ const CONTENT_TAG_RULES = [
   { tag: "возврат", hint: "Клиент говорит о возврате", pattern: /возврат|верните|верну[тл]|refund|return/ },
   { tag: "оплата", hint: "Вопрос об оплате или списании", pattern: /оплат|плат[её]ж|списан|списал|карт[аеуы]|payment|charge/ },
   { tag: "авторизация", hint: "Проблема со входом или кодом", pattern: /авториз|логин|парол|не могу войти|код подтверждения|confirmation code|authorization|login/ },
-  { tag: "жалоба", hint: "Похоже на жалобу — учитывается фильтром качества", pattern: /жалоб|недоволь|возмущ|ужасн|безобраз|complaint/ },
+  { tag: "жалоба", hint: "Похоже на жалобу", pattern: /жалоб|недоволь|возмущ|ужасн|безобраз|complaint/ },
   { tag: "технический сбой", hint: "Клиент сообщает об ошибке", pattern: /не работает|ошибк|сбо[йяе]|завис|вылета|error|bug|crash/ },
   { tag: "промокод", hint: "Речь о промокоде или скидке", pattern: /промокод|скидк|promo|discount/ },
   { tag: "адрес", hint: "Изменение адреса", pattern: /адрес|address/ },
@@ -100,7 +100,7 @@ export function buildTagSuggestions({ conversation, topic = "", conversations = 
     push("спасение", "Для диалога запущен rescue-таймер", "situation");
   }
   if (conversation.slaTone === "warn" || conversation.slaTone === "danger") {
-    push("важно", "SLA под угрозой — тег учитывается фильтром качества", "situation");
+    push("важно", "SLA под угрозой", "situation");
   }
   if (conversation.botHandoff) {
     push("передано ботом", "Диалог передан оператору из бот-сценария", "situation");

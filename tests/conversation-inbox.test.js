@@ -7,6 +7,13 @@ import {
   mapApiConversation,
   mapApiConversationCollection
 } from "../src/app/conversationApiMapper.js";
+import {
+  getConversationQualityAssessment,
+  hasActiveRescue,
+  isAssignedToOperator,
+  isBotHandledConversation,
+  matchesQueueTab
+} from "../src/app/dialogModel.js";
 
 describe("conversationApiMapper", () => {
   it("maps a dialog API item to UI conversation shape", () => {
@@ -762,5 +769,117 @@ describe("dialog transcript behavior", () => {
     assert.equal(formatMessageTime({ createdAt: "2026-07-02T12:00:00.000", time: "now" }, { now }), "12:00");
     assert.equal(formatMessageTime({ createdAt: "2026-07-01T09:05:00.000", time: "now" }, { now }), "01.07.2026 09:05");
     assert.equal(formatMessageTime({ time: "10:42" }, { now }), "10:42");
+  });
+});
+
+describe("queue tab logic", () => {
+  it("maps bot session and client quality assessment from the API payload", () => {
+    const mapped = mapApiConversation({
+      id: "conv-bot",
+      botSession: { scenarioId: "bot-delivery-status", status: "active", updatedAt: "2026-07-16T08:05:00.000Z" },
+      qualityAssessment: { createdAt: "2026-07-15T16:20:00.000Z", scale: "CSAT", score: 2 }
+    });
+
+    assert.deepEqual(mapped.botSession, {
+      scenarioId: "bot-delivery-status",
+      status: "active",
+      updatedAt: "2026-07-16T08:05:00.000Z"
+    });
+    assert.deepEqual(mapped.qualityAssessment, {
+      createdAt: "2026-07-15T16:20:00.000Z",
+      scale: "CSAT",
+      score: 2
+    });
+
+    const unrated = mapApiConversation({
+      id: "conv-unrated",
+      qualityAssessment: { createdAt: "2026-07-15T16:20:00.000Z", scale: "CSAT", score: null }
+    });
+    assert.equal(unrated.qualityAssessment.score, null);
+  });
+
+  it("keeps the Mine tab scoped to conversations assigned to the operator", () => {
+    const mine = { id: "c-1", status: "active", operatorId: "op-1" };
+    const foreign = { id: "c-2", status: "active", operatorId: "op-2" };
+    const unassigned = { id: "c-3", status: "queued" };
+
+    assert.equal(isAssignedToOperator(mine, "op-1"), true);
+    assert.equal(isAssignedToOperator(foreign, "op-1"), false);
+    assert.equal(isAssignedToOperator(unassigned, "op-1"), false);
+    assert.equal(isAssignedToOperator(mine, ""), false);
+    assert.equal(matchesQueueTab(foreign, "mine", { operatorId: "op-1" }), false);
+    assert.equal(matchesQueueTab(foreign, "all", { operatorId: "op-1" }), true);
+  });
+
+  it("treats a thread as mine when any open appeal is assigned to the operator", () => {
+    const thread = {
+      id: "current",
+      status: "active",
+      operatorId: "op-2",
+      appeals: [
+        { id: "closed-mine", status: "closed", operatorId: "op-1" },
+        { id: "open-mine", status: "waiting_operator", operatorId: "op-1" },
+        { id: "current", status: "active", operatorId: "op-2" }
+      ]
+    };
+
+    assert.equal(isAssignedToOperator(thread, "op-1"), true);
+
+    const historicalOnly = {
+      id: "current",
+      status: "active",
+      operatorId: "op-2",
+      appeals: [
+        { id: "closed-mine", status: "closed", operatorId: "op-1" },
+        { id: "current", status: "active", operatorId: "op-2" }
+      ]
+    };
+    assert.equal(isAssignedToOperator(historicalOnly, "op-1"), false);
+  });
+
+  it("keeps the Rescue tab scoped to active rescue timers", () => {
+    const activeRescue = { id: "c-1", status: "assigned", rescue: { state: "active" } };
+    const savedRescue = { id: "c-2", status: "closed", rescue: { state: "saved" } };
+    const noTopic = { id: "c-3", status: "active", topic: "" };
+
+    assert.equal(hasActiveRescue(activeRescue), true);
+    assert.equal(hasActiveRescue(savedRescue), false);
+    assert.equal(hasActiveRescue(noTopic), false);
+    assert.equal(matchesQueueTab(activeRescue, "rescue", {}), true);
+    assert.equal(matchesQueueTab(noTopic, "rescue", {}), false);
+  });
+
+  it("shows only dialogs with a live bot session on the Bot tab", () => {
+    const botActive = { id: "c-1", status: "active", botSession: { status: "active" } };
+    const botRetry = { id: "c-2", status: "active", botSession: { status: "retry_scheduled" } };
+    const handedOff = { id: "c-3", status: "waiting_operator", botSession: { status: "handoff" } };
+    const closed = { id: "c-4", status: "closed", botSession: { status: "active" } };
+
+    assert.equal(isBotHandledConversation(botActive), true);
+    assert.equal(isBotHandledConversation(botRetry), true);
+    assert.equal(isBotHandledConversation(handedOff), false);
+    assert.equal(isBotHandledConversation(closed), false);
+    assert.equal(matchesQueueTab(botActive, "bot", {}), true);
+    assert.equal(matchesQueueTab(handedOff, "bot", {}), false);
+  });
+
+  it("keeps the Ratings tab scoped to client-rated dialogs and picks the latest score", () => {
+    const rated = {
+      id: "current",
+      status: "closed",
+      appeals: [
+        { id: "old", status: "closed", qualityAssessment: { createdAt: "2026-07-10T10:00:00.000Z", scale: "CSAT", score: 5 } },
+        { id: "current", status: "closed", qualityAssessment: { createdAt: "2026-07-15T10:00:00.000Z", scale: "CSAT", score: 2 } }
+      ]
+    };
+    const tagged = { id: "c-2", status: "active", tags: ["жалоба"] };
+
+    assert.deepEqual(getConversationQualityAssessment(rated), {
+      createdAt: "2026-07-15T10:00:00.000Z",
+      scale: "CSAT",
+      score: 2
+    });
+    assert.equal(matchesQueueTab(rated, "quality", {}), true);
+    assert.equal(matchesQueueTab(tagged, "quality", {}), false);
   });
 });

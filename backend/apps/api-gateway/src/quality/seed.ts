@@ -6,7 +6,8 @@ import {
   aiRealtimeChecks,
   aiSuggestions,
   knowledgeArticles,
-  qualityMetrics
+  qualityMetrics,
+  qualityRatings
 } from "./seed-catalog.js";
 import type { QualityState } from "./quality.repository.js";
 
@@ -19,7 +20,7 @@ export function bootstrapQualityState(base?: Partial<QualityState>): QualityStat
     aiSuggestionDecisions: [],
     aiScoringAudits: base?.aiScoringAudits ?? [],
     manualQaReviews: base?.manualQaReviews ?? [],
-    ratings: base?.ratings ?? [],
+    ratings: base?.ratings ?? clone(qualityRatings),
     workspace: {
       aiCoachingQueue: clone(aiCoachingQueue),
       aiEffectivenessMetrics: clone(aiEffectivenessMetrics),

@@ -52,6 +52,85 @@ export const slaSortRank = {
 export const queueWaitingStatuses = ["queued", "waiting_client", "waiting_operator"];
 export const queueSlaTones = ["warn", "danger"];
 
+// Статусы бот-сессии, при которых диалог считается «у бота»: сценарий
+// работает или ждет повторной попытки. handoff/completed/dead_lettered —
+// бот уже отдал диалог людям.
+export const botSessionActiveStatuses = ["active", "retry_scheduled"];
+
+// Строка списка — клиентский тред; фильтры смотрят на все его обращения.
+function conversationAppeals(conversation) {
+  if (!conversation) {
+    return [];
+  }
+
+  return Array.isArray(conversation.appeals) && conversation.appeals.length
+    ? conversation.appeals
+    : [conversation];
+}
+
+// «Мои»: актуальное обращение назначено на оператора или на него назначено
+// любое открытое обращение треда.
+export function isAssignedToOperator(conversation, operatorId) {
+  if (!conversation || !operatorId) {
+    return false;
+  }
+
+  if (conversation.operatorId === operatorId) {
+    return true;
+  }
+
+  return conversationAppeals(conversation).some((appeal) =>
+    appeal.status !== "closed" && appeal.operatorId === operatorId);
+}
+
+// «Спасти»: запущенное и не завершенное спасение (state active).
+export function hasActiveRescue(conversation) {
+  return conversationAppeals(conversation).some((appeal) =>
+    appeal.status !== "closed" && appeal.rescue?.state === "active");
+}
+
+// «У бота»: открытое обращение с активной бот-сессией.
+export function isBotHandledConversation(conversation) {
+  return conversationAppeals(conversation).some((appeal) =>
+    appeal.status !== "closed" && botSessionActiveStatuses.includes(appeal.botSession?.status));
+}
+
+// «Оценки»: последняя клиентская оценка среди обращений треда.
+export function getConversationQualityAssessment(conversation) {
+  let latest = null;
+  for (const appeal of conversationAppeals(conversation)) {
+    const assessment = appeal.qualityAssessment;
+    if (!assessment) {
+      continue;
+    }
+    if (!latest || Date.parse(assessment.createdAt ?? "") >= Date.parse(latest.createdAt ?? "")) {
+      latest = assessment;
+    }
+  }
+  return latest;
+}
+
+// Единая логика вкладок очереди: список и счетчики на вкладках обязаны
+// считаться одним и тем же предикатом.
+export function matchesQueueTab(conversation, filter, { operatorId } = {}) {
+  switch (filter) {
+    case "mine":
+      return isAssignedToOperator(conversation, operatorId);
+    case "waiting":
+      return queueWaitingStatuses.includes(conversation.status);
+    case "sla":
+      return queueSlaTones.includes(conversation.slaTone);
+    case "rescue":
+      return hasActiveRescue(conversation);
+    case "bot":
+      return isBotHandledConversation(conversation);
+    case "quality":
+      return Boolean(getConversationQualityAssessment(conversation));
+    default:
+      return true;
+  }
+}
+
 export const aiActionLabels = {
   accept: "принята",
   edit: "открыта на редактирование",

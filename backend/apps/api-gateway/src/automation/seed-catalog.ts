@@ -1,4 +1,48 @@
 import type { BotScenario, ProactiveRule } from "./automation.types.js";
+import type { AutomationBotRuntimeInstance, AutomationBotScenarioVersion } from "./automation.repository.js";
+
+// Закрепленная версия demo-сценария доставки: на нее ссылается (FK в Postgres)
+// демо-инстанс бота ниже. Правила триггеров заданы явно — рантайм читает
+// правила версии, а не сценария.
+export const botScenarioVersions: AutomationBotScenarioVersion[] = [
+  {
+    createdAt: "2026-07-16T07:55:00.000Z",
+    flowEdges: [
+      { from: "delivery-message", to: "delivery-contact", label: "needs_contact" },
+      { from: "delivery-contact", to: "delivery-handoff", label: "delay" }
+    ],
+    flowNodes: [
+      { id: "delivery-message", type: "message", title: "Accept delivery question" },
+      { id: "delivery-contact", type: "contact_request", title: "Verify contact" },
+      { id: "delivery-handoff", type: "handoff", title: "Transfer to operator" }
+    ],
+    scenarioId: "bot-delivery-status",
+    status: "published",
+    tenantId: "tenant-volga",
+    triggerRules: [{ id: "delivery-new-conversation", priority: 0, type: "new_conversation" }],
+    versionId: "bot-delivery-status-v1"
+  }
+];
+
+// Демо-диалог «olga» сейчас ведет бот: инстанс подсвечивает вкладку
+// «У бота» в инбоксе без прогона реального сценария.
+export const botRuntimeInstances: AutomationBotRuntimeInstance[] = [
+  {
+    attempts: 0,
+    context: { lastClientMessage: "Как поменять способ оплаты?" },
+    conversationId: "olga",
+    createdAt: "2026-07-16T08:00:00.000Z",
+    currentNodeId: "delivery-contact",
+    id: "bot_runtime_seed_olga",
+    lastError: null,
+    nextAttemptAt: null,
+    scenarioId: "bot-delivery-status",
+    status: "active",
+    tenantId: "tenant-volga",
+    updatedAt: "2026-07-16T08:05:00.000Z",
+    versionId: "bot-delivery-status-v1"
+  }
+];
 
 export const botScenarios: BotScenario[] = [
   {

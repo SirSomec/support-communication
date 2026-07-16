@@ -379,6 +379,7 @@ interface AutomationRepositoryPort {
   updateBotRuntimeSideEffect(effect: AutomationBotRuntimeSideEffect): MaybePromise<AutomationBotRuntimeSideEffect>;
   commitBotRuntimeTransition(input: AutomationBotRuntimeCommitInput): MaybePromise<AutomationBotRuntimeCommitResult>;
   findBotRuntimeInstance(tenantId: string, conversationId: string): MaybePromise<AutomationBotRuntimeInstance | undefined>;
+  listBotRuntimeInstances(tenantId: string): MaybePromise<AutomationBotRuntimeInstance[]>;
   findBotRuntimeStep(tenantId: string, conversationId: string, inputEventId: string): MaybePromise<AutomationBotRuntimeStep | undefined>;
   findBotPublishAuditEvent(auditId: string): MaybePromise<AutomationBotPublishAuditEvent | undefined>;
   findBotScenario(scenarioId: string): MaybePromise<BotScenario | undefined>;
@@ -423,6 +424,7 @@ interface AutomationRepositoryAsyncPort {
   updateBotRuntimeSideEffectAsync(effect: AutomationBotRuntimeSideEffect): Promise<AutomationBotRuntimeSideEffect>;
   commitBotRuntimeTransitionAsync(input: AutomationBotRuntimeCommitInput): Promise<AutomationBotRuntimeCommitResult>;
   findBotRuntimeInstanceAsync(tenantId: string, conversationId: string): Promise<AutomationBotRuntimeInstance | undefined>;
+  listBotRuntimeInstancesAsync(tenantId: string): Promise<AutomationBotRuntimeInstance[]>;
   findBotRuntimeStepAsync(tenantId: string, conversationId: string, inputEventId: string): Promise<AutomationBotRuntimeStep | undefined>;
   commitProactiveDeliveryAsync(
     input: AutomationProactiveDeliveryCommitInput
@@ -488,6 +490,7 @@ interface PrismaAtomicOutboxEventDelegate {
 
 interface PrismaBotRuntimeInstanceDelegate {
   create(input: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  findMany(input: { where: Record<string, unknown> }): Promise<Array<Record<string, unknown>>>;
   findUnique(input: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
   updateMany(input: { data: Record<string, unknown>; where: Record<string, unknown> }): Promise<{ count: number }>;
 }
@@ -893,6 +896,18 @@ export class AutomationRepository implements AutomationRepositoryPort {
   findBotRuntimeInstance(tenantId: string, conversationId: string): AutomationBotRuntimeInstance | undefined {
     if (this.adapter) return this.adapter.findBotRuntimeInstance(tenantId, conversationId) as AutomationBotRuntimeInstance | undefined;
     return clone(this.readState().botRuntimeInstances.find((item) => item.tenantId === tenantId && item.conversationId === conversationId));
+  }
+
+  async listBotRuntimeInstancesAsync(tenantId: string): Promise<AutomationBotRuntimeInstance[]> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) {
+      return this.adapter.listBotRuntimeInstancesAsync(tenantId);
+    }
+    return this.listBotRuntimeInstances(tenantId);
+  }
+
+  listBotRuntimeInstances(tenantId: string): AutomationBotRuntimeInstance[] {
+    if (this.adapter) return this.adapter.listBotRuntimeInstances(tenantId) as AutomationBotRuntimeInstance[];
+    return clone(this.readState().botRuntimeInstances.filter((item) => item.tenantId === tenantId));
   }
 
   async findBotRuntimeStepAsync(tenantId: string, conversationId: string, inputEventId: string): Promise<AutomationBotRuntimeStep | undefined> {
@@ -1699,6 +1714,17 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
     if (!delegate) return this.fallback.findBotRuntimeInstanceAsync(tenantId, conversationId);
     const row = await delegate.findUnique({ where: { tenantId_conversationId: { tenantId, conversationId } } });
     return row ? toBotRuntimeInstance(row) : undefined;
+  }
+
+  listBotRuntimeInstances(_tenantId: string): AutomationBotRuntimeInstance[] {
+    throw new Error("prisma_automation_async_required");
+  }
+
+  async listBotRuntimeInstancesAsync(tenantId: string): Promise<AutomationBotRuntimeInstance[]> {
+    const delegate = this.client.botRuntimeInstance;
+    if (!delegate) return this.fallback.listBotRuntimeInstancesAsync(tenantId);
+    const rows = await delegate.findMany({ where: { tenantId } });
+    return rows.map(toBotRuntimeInstance);
   }
 
   findBotRuntimeStep(_tenantId: string, _conversationId: string, _inputEventId: string): AutomationBotRuntimeStep | undefined {

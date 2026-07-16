@@ -2,7 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
-import type { ConversationMessage, ConversationRecord } from "./conversation.types.js";
+import type {
+  ConversationBotSession,
+  ConversationMessage,
+  ConversationQualityAssessment,
+  ConversationRecord
+} from "./conversation.types.js";
 import { APPEAL_ANCHOR_TAG_PREFIX, REPEAT_APPEAL_TAG, recordClosedAppealHistory } from "./appeal-lifecycle.js";
 import {
   ConversationAssignmentConflictError,
@@ -21,6 +26,8 @@ import type { ObjectStorageSigner, SignedObjectStorageUrl } from "../workspace/w
 import { WorkspaceRepository, type FileRecord } from "../workspace/workspace.repository.js";
 import { IdentityRepository } from "../identity/identity.repository.js";
 import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
+import { AutomationRepository } from "../automation/automation.repository.js";
+import { QualityRepository } from "../quality/quality.repository.js";
 
 const DIALOG_SERVICE = "dialogService";
 const CHANNEL_SERVICE = "channelService";
@@ -174,7 +181,9 @@ export interface OutboundMessageDispatcher {
 
 interface ConversationServiceOptions {
   attachmentStorage?: ConversationAttachmentStorage;
+  automationRepository?: Pick<AutomationRepository, "listBotRuntimeInstancesAsync">;
   identityRepository?: Pick<IdentityRepository, "findTenantUsers">;
+  qualityRepository?: Pick<QualityRepository, "listQualityRatings">;
   teamDirectoryRepository?: Pick<TeamDirectoryRepository, "findActiveTeamId">;
   outboundMessageDispatcher?: OutboundMessageDispatcher;
   realtimeFanout?: RealtimeFanoutAdapter;
@@ -208,6 +217,8 @@ function createDefaultAttachmentStorage(): ConversationAttachmentStorage {
 
 export class ConversationService {
   private readonly attachmentStorage: ConversationAttachmentStorage;
+  private readonly automationRepository?: Pick<AutomationRepository, "listBotRuntimeInstancesAsync">;
+  private readonly qualityRepository?: Pick<QualityRepository, "listQualityRatings">;
   private readonly identityRepository: Pick<IdentityRepository, "findTenantUsers">;
   private readonly teamDirectoryRepository: Pick<TeamDirectoryRepository, "findActiveTeamId">;
   private lastRealtimeOccurredAtMs = 0;
@@ -220,6 +231,11 @@ export class ConversationService {
     options: ConversationServiceOptions = {}
   ) {
     this.attachmentStorage = options.attachmentStorage ?? createDefaultAttachmentStorage();
+    // Источники бейджей инбокса резолвятся лениво в decorateInboxConversations:
+    // на момент конструирования сервиса prisma-дефолты доменов могут быть
+    // еще не сконфигурированы бутстрапом.
+    this.automationRepository = options.automationRepository;
+    this.qualityRepository = options.qualityRepository;
     this.identityRepository = options.identityRepository ?? IdentityRepository.default();
     this.teamDirectoryRepository = options.teamDirectoryRepository ?? TeamDirectoryRepository.default();
     this.outboundMessageDispatcher = options.outboundMessageDispatcher ?? defaultOutboundMessageDispatcher;
@@ -237,6 +253,65 @@ export class ConversationService {
 
   static useDefaultOutboundMessageDispatcher(dispatcher: OutboundMessageDispatcher): void {
     defaultOutboundMessageDispatcher = dispatcher;
+  }
+
+  // Инбокс размечает диалоги статусом бот-сессии (automation) и последней
+  // клиентской оценкой (quality); фильтры «У бота» и «Оценки» держатся на
+  // этих полях. Обогащение не персистится и не должно ронять выдачу:
+  // при деградации соседнего домена диалоги возвращаются без бейджей.
+  private async decorateInboxConversations(items: ConversationRecord[]): Promise<ConversationRecord[]> {
+    if (!items.length) {
+      return items;
+    }
+
+    const automationRepository = this.automationRepository ?? AutomationRepository.default();
+    const qualityRepository = this.qualityRepository ?? QualityRepository.default();
+    const tenantIds = [...new Set(items.map((item) => String(item.tenantId ?? "").trim()).filter(Boolean))];
+    const botSessions = new Map<string, ConversationBotSession>();
+    const assessments = new Map<string, ConversationQualityAssessment>();
+
+    for (const tenantId of tenantIds) {
+      try {
+        for (const instance of await automationRepository.listBotRuntimeInstancesAsync(tenantId)) {
+          botSessions.set(`${tenantId}:${instance.conversationId}`, {
+            scenarioId: instance.scenarioId,
+            status: instance.status,
+            updatedAt: instance.updatedAt
+          });
+        }
+      } catch {
+        // Бот-домен недоступен: инбокс отдается без признака «у бота».
+      }
+      try {
+        for (const rating of await Promise.resolve(qualityRepository.listQualityRatings({ tenantId }))) {
+          const key = `${tenantId}:${rating.conversationId}`;
+          const current = assessments.get(key);
+          if (!current || Date.parse(rating.createdAt) >= Date.parse(current.createdAt)) {
+            assessments.set(key, { createdAt: rating.createdAt, scale: rating.scale, score: rating.score });
+          }
+        }
+      } catch {
+        // Домен оценок недоступен: инбокс отдается без клиентских оценок.
+      }
+    }
+
+    if (!botSessions.size && !assessments.size) {
+      return items;
+    }
+
+    return items.map((item) => {
+      const key = `${String(item.tenantId ?? "").trim()}:${item.id}`;
+      const botSession = botSessions.get(key);
+      const qualityAssessment = assessments.get(key);
+      if (!botSession && !qualityAssessment) {
+        return item;
+      }
+      return {
+        ...item,
+        ...(botSession ? { botSession } : {}),
+        ...(qualityAssessment ? { qualityAssessment } : {})
+      };
+    });
   }
 
   async fetchDialogs(filters: DialogFilters = {}, scope: TenantScope = {}): Promise<BackendEnvelope<{
@@ -279,7 +354,7 @@ export class ConversationService {
       partial: true,
       meta: apiMeta({ filters }),
       data: {
-        items: clone(filtered.slice(start, start + pageSize)),
+        items: await this.decorateInboxConversations(clone(filtered.slice(start, start + pageSize))),
         pagination: {
           mode: "backend-ready",
           page,
@@ -303,13 +378,15 @@ export class ConversationService {
       tenantId: conversation.tenantId
     });
 
+    const [decorated] = await this.decorateInboxConversations([clone(conversation)]);
+
     return createEnvelope({
       service: DIALOG_SERVICE,
       operation: "fetchDialogDetail",
       traceId: conversationTraceId(DIALOG_SERVICE, "fetchDialogDetail"),
       meta: apiMeta({ conversationId }),
       data: {
-        conversation: clone(conversation),
+        conversation: decorated,
         lifecycleEvents: clone(lifecycleEvents),
         messages: clone(conversation.messages)
       }

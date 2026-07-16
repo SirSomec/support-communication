@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
 import {
   getConversationTimeValue,
+  matchesQueueTab,
   queueFilterDefaults,
-  queueSlaTones,
-  queueWaitingStatuses,
   slaSortRank
 } from "./dialogModel.js";
 
-export function useDialogQueueFilters({ conversationItems, topics }) {
-  const [filter, setFilter] = useState("mine");
+export function useDialogQueueFilters({ conversationItems, topics, operatorId = "" }) {
+  // «Все» по умолчанию: «Мои» показывает только назначенные на оператора
+  // диалоги, и до первого назначения список был бы пуст.
+  const [filter, setFilter] = useState("all");
   const [queueFilters, setQueueFilters] = useState(() => ({ ...queueFilterDefaults }));
   const [query, setQuery] = useState("");
 
@@ -29,13 +30,7 @@ export function useDialogQueueFilters({ conversationItems, topics }) {
         const matchesQuery = `${conversation.name} ${conversation.phone} ${conversation.preview} ${channels.join(" ")} ${conversation.queueId ?? ""} ${topic} ${conversation.status}`
           .toLowerCase()
           .includes(query.toLowerCase());
-        const matchesFilter =
-          filter === "mine" ||
-          (filter === "waiting" && queueWaitingStatuses.includes(conversation.status)) ||
-          (filter === "sla" && queueSlaTones.includes(conversation.slaTone)) ||
-          (filter === "rescue" && (!topic || conversation.slaTone === "danger")) ||
-          (filter === "quality" && conversation.tags.some((tag) => ["жалоба", "важно", "возврат"].includes(tag.toLowerCase()))) ||
-          filter === "all";
+        const matchesFilter = matchesQueueTab(conversation, filter, { operatorId });
         const matchesChannel = queueFilters.channel === "all" || channels.includes(queueFilters.channel);
         const matchesQueue = queueFilters.queueId === "all" || conversation.queueId === queueFilters.queueId;
         const matchesTopic =
@@ -62,7 +57,7 @@ export function useDialogQueueFilters({ conversationItems, topics }) {
 
         return getConversationTimeValue(right.time) - getConversationTimeValue(left.time);
       });
-  }, [conversationItems, filter, query, queueFilters, topics]);
+  }, [conversationItems, filter, operatorId, query, queueFilters, topics]);
 
   function handleQueueFilterChange(field, value) {
     setQueueFilters((current) => ({ ...current, [field]: value }));

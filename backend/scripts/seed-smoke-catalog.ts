@@ -265,6 +265,34 @@ async function seedAutomation(repo, state) {
     await repo.saveBotScenarioVersion(version);
   }
 
+  // 2b. Bot runtime instances (FK: pinned scenario version; parent of the step
+  //     journal). The repo's only write path is commitBotRuntimeTransitionAsync
+  //     (instance + step journal in one transaction), so each demo instance
+  //     commits a synthetic seed step with no side effects. Re-runs replay as
+  //     duplicates by (tenantId, conversationId, inputEventId).
+  for (const instance of state.botRuntimeInstances ?? []) {
+    await repo.commitBotRuntimeTransitionAsync({
+      instance,
+      step: {
+        conversationId: instance.conversationId,
+        createdAt: instance.createdAt,
+        error: null,
+        handoffSummary: null,
+        id: `${instance.id}_seed_step`,
+        inputEvent: { seeded: true },
+        inputEventId: `${instance.id}:seed`,
+        lifecycleEvent: null,
+        nodeId: instance.currentNodeId,
+        nodeType: "message",
+        outcome: "message",
+        runtimeId: instance.id,
+        sideEffects: [],
+        tenantId: instance.tenantId,
+        webhookResponse: null
+      }
+    });
+  }
+
   // 3. Publish audit events (FK: scenarioId; immutable/RESTRICT).
   for (const event of state.botPublishAuditEvents ?? []) {
     await repo.saveBotPublishAuditEvent(event);
@@ -321,12 +349,13 @@ async function seedAutomation(repo, state) {
   }
 
   // NOT WRITTEN (no Postgres write path — see gaps):
-  //   botRuntimeInstances, botRuntimeSteps, botRuntimeSideEffects,
-  //   activeVisitors, rescueChats, workspaceAuditEvents, workspaceRuntimeMetrics.
-  // For the default bootstrapAutomationState() fixture the only populated ones
-  // among these are workspaceAuditEvents and workspaceRuntimeMetrics, which
-  // carry demo data but cannot be persisted via the repo (would need raw SQL /
-  // a repo change). The runtime/visitor/rescue collections are empty [].
+  //   botRuntimeSteps, botRuntimeSideEffects (beyond the synthetic seed steps
+  //   from 2b), activeVisitors, rescueChats, workspaceAuditEvents,
+  //   workspaceRuntimeMetrics.
+  // For the default bootstrapAutomationState() fixture the populated ones among
+  // these are workspaceAuditEvents and workspaceRuntimeMetrics, which carry
+  // demo data but cannot be persisted via the repo (would need raw SQL /
+  // a repo change). The visitor/rescue collections are empty [].
 }
 
 async function seedReports(repo, state) {

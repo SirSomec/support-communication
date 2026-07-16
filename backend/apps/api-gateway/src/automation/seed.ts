@@ -4,7 +4,11 @@ import {
 
   automationAuditEvents,
 
+  botRuntimeInstances,
+
   botScenarios,
+
+  botScenarioVersions,
 
   proactiveRules,
 
@@ -28,7 +32,7 @@ export function bootstrapAutomationState(base?: Partial<AutomationState>): Autom
 
     botPublishAuditEvents: base?.botPublishAuditEvents ?? [],
 
-    botRuntimeInstances: base?.botRuntimeInstances ?? [],
+    botRuntimeInstances: base?.botRuntimeInstances ?? clone(botRuntimeInstances),
 
     botRuntimeSideEffects: base?.botRuntimeSideEffects ?? [],
 
@@ -36,7 +40,7 @@ export function bootstrapAutomationState(base?: Partial<AutomationState>): Autom
 
     botScenarios: base?.botScenarios ?? clone(botScenarios),
 
-    botScenarioVersions: base?.botScenarioVersions ?? [],
+    botScenarioVersions: base?.botScenarioVersions ?? clone(botScenarioVersions),
 
     botTestRuns: base?.botTestRuns ?? [],
 

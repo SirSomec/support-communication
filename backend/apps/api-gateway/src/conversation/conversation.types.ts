@@ -16,6 +16,21 @@ export interface ConversationAppealMetadata {
   parentConversationId?: string;
 }
 
+// Read-time данные для инбокса: активная бот-сессия и последняя клиентская
+// оценка живут в доменах automation/quality и подмешиваются при выдаче,
+// в conversations они не персистятся.
+export interface ConversationBotSession {
+  scenarioId: string;
+  status: "active" | "completed" | "dead_lettered" | "handoff" | "retry_scheduled";
+  updatedAt: string;
+}
+
+export interface ConversationQualityAssessment {
+  createdAt: string;
+  scale: string;
+  score: number | null;
+}
+
 export interface ConversationRecord {
   avatar?: string;
   botHandoff?: {
@@ -30,6 +45,7 @@ export interface ConversationRecord {
     sessionState?: string;
     topic?: string;
   };
+  botSession?: ConversationBotSession;
   channel: string;
   channelConnectionId?: string;
   clientSince: string;
@@ -48,6 +64,7 @@ export interface ConversationRecord {
   previous: string[][];
   providerConversationId?: string;
   providerUserId?: string;
+  qualityAssessment?: ConversationQualityAssessment;
   queueId?: string;
   rescueState?: Record<string, unknown>;
   resolutionOutcome?: string;

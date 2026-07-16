@@ -40,6 +40,7 @@ export function DialogWorkspace({
   onStatusChange,
   onTagsApply,
   onTopic,
+  operatorId,
   query,
   queueFilters,
   replyChannel,
@@ -66,6 +67,7 @@ export function DialogWorkspace({
         onSelect={onConversationSelect}
         filter={filter}
         onFilter={onFilter}
+        operatorId={operatorId}
         queueFilters={queueFilters}
         onQueueFilterChange={onQueueFilterChange}
         onQueueFiltersReset={onQueueFiltersReset}

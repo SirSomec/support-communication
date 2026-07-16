@@ -108,6 +108,34 @@ describe("durable bot runtime core", () => {
     assert.equal(JSON.stringify(result.instance.context).includes("What are your hours?"), false);
   });
 
+  it("hands off when the model emits the [[HANDOFF]] marker and never shows the marker to the client", async () => {
+    const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: { handoffQueue: "Support" } }], [{ from: "start", to: "answer" }]);
+    // Сырой текст модели: кастомный aiResponder без собственного парсинга —
+    // рантайм обязан сам вырезать маркер и перевести диалог в handoff.
+    const runtime = new BotRuntimeService(repo, {
+      aiResponder: { respond: async () => ({ citations: [], model: "test-model", text: "Передаю диалог оператору — он продолжит с этого места. [[HANDOFF]]" }) }
+    });
+    const result = await runtime.handleInboundEvent(event("evt-ai-marker", { text: "Хочу оформить возврат денег" }));
+    assert.equal(result.instance.status, "handoff");
+    assert.equal(result.step.outcome, "ai_handoff_requested");
+    assert.equal(result.step.handoffSummary?.reason, "ai_requested_handoff");
+    assert.equal(result.step.handoffSummary?.queue, "Support");
+    const clientText = (result.step.sideEffects[0] as { descriptor: { payload: { text: string } } }).descriptor.payload.text;
+    assert.equal(clientText, "Передаю диалог оператору — он продолжит с этого места.");
+    assert.equal(clientText.toLowerCase().includes("handoff"), false);
+    assert.equal(result.step.sideEffects[1]?.kind, "bot_handoff");
+  });
+
+  it("substitutes the acknowledgement text when the model reply is the marker alone", async () => {
+    const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: { handoffAcknowledgement: "Соединяю с оператором." } }], [{ from: "start", to: "answer" }]);
+    const runtime = new BotRuntimeService(repo, {
+      aiResponder: { respond: async () => ({ citations: [], handoffRequested: true, model: "test-model", text: "" }) }
+    });
+    const result = await runtime.handleInboundEvent(event("evt-ai-marker-only", { text: "Позовите человека пожалуйста" }));
+    assert.equal(result.instance.status, "handoff");
+    assert.equal((result.step.sideEffects[0] as { descriptor: { payload: { text: string } } }).descriptor.payload.text, "Соединяю с оператором.");
+  });
+
   it("safely hands off when AI is unavailable instead of retrying or inventing an answer", async () => {
     const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: { handoffQueue: "Support" } }], [{ from: "start", to: "answer" }]);
     const runtime = new BotRuntimeService(repo, { aiResponder: { respond: async () => { throw new Error("bot_ai_connection_not_ready"); } } });

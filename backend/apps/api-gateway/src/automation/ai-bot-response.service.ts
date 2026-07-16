@@ -25,7 +25,32 @@ export interface AiBotResponseInput {
   sourceBindings: KnowledgeSourceBinding[];
   tenantId: string;
 }
-export interface AiBotResponse { citations: Array<{ endOffset: number; sourceId: string; startOffset: number; title: string; version: number }>; model: string; text: string; usage?: { totalTokens: number | null }; materialsAvailable?: number; }
+export interface AiBotResponse { citations: Array<{ endOffset: number; sourceId: string; startOffset: number; title: string; version: number }>; handoffRequested?: boolean; model: string; text: string; usage?: { totalTokens: number | null }; materialsAvailable?: number; }
+
+export const AI_HANDOFF_MARKER = "[[HANDOFF]]";
+const AI_HANDOFF_MARKER_DETECT = /\[\[\s*handoff\s*\]\]/i;
+const AI_HANDOFF_MARKER_STRIP = /\[\[\s*handoff\s*\]\]/gi;
+
+/**
+ * Модель сигналит о передаче оператору машинным маркером [[HANDOFF]] в конце
+ * ответа. Маркер вырезается из текста до любой доставки клиенту — клиент видит
+ * только человеческую фразу; решение о передаче принимает рантайм по флагу.
+ * Парсится только вывод модели: echo-инъекция маркера клиентом в худшем случае
+ * передаст диалог оператору, что безопасно.
+ */
+export function extractAiHandoffDirective(text: string): { handoffRequested: boolean; text: string } {
+  const raw = String(text ?? "");
+  if (!AI_HANDOFF_MARKER_DETECT.test(raw)) {
+    return { handoffRequested: false, text: raw };
+  }
+  const cleaned = raw
+    .replace(AI_HANDOFF_MARKER_STRIP, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/ {2,}/g, " ")
+    .trim();
+  return { handoffRequested: true, text: cleaned };
+}
 
 /** Builds a bounded, tenant-scoped grounded prompt; it never sends keys or unrelated tenant data. */
 export class AiBotResponseService {
@@ -86,7 +111,10 @@ export class AiBotResponseService {
         tenantId: input.tenantId,
         tokens
       });
-      const text = completion.content.slice(0, 8_000);
+      // Маркер извлекается из полного вывода модели до обрезки: у длинного
+      // ответа он стоит в самом конце и иначе был бы отрезан slice'ом.
+      const directive = extractAiHandoffDirective(completion.content);
+      const text = directive.text.slice(0, 8_000);
       if (input.conversationId) {
         await this.sessions.updateAfterRun({
           assistantText: text,
@@ -100,7 +128,14 @@ export class AiBotResponseService {
           userText: input.message
         });
       }
-      return { citations: materials.map(({ content: _content, ...citation }) => citation), materialsAvailable: materials.length, model: completion.model, text, usage: { totalTokens: completion.usage.totalTokens ?? null } };
+      return {
+        citations: materials.map(({ content: _content, ...citation }) => citation),
+        ...(directive.handoffRequested ? { handoffRequested: true } : {}),
+        materialsAvailable: materials.length,
+        model: completion.model,
+        text,
+        usage: { totalTokens: completion.usage.totalTokens ?? null }
+      };
     } catch (error) {
       const errorCode = error instanceof Error ? error.message : "bot_ai_unavailable";
       recordBotAiRequest({
@@ -169,6 +204,8 @@ export function buildAiBotSystemPrompt(input: {
     "For a greeting or small talk, reply briefly and warmly and ask what the customer needs — you do not need knowledge to greet.",
     "If the customer asks something factual and the answer is not in the knowledge, say that you cannot confirm it and offer a human operator.",
     "Do not access CRM data and do not claim that you did.",
+    `When the dialog must go to a human operator — the customer asks for one or agrees to your offer, or you cannot help within these rules after a genuine attempt — write one short polite sentence that you are transferring the dialog and append the marker ${AI_HANDOFF_MARKER} as the last line.`,
+    `The ${AI_HANDOFF_MARKER} marker is machine-read and removed before the customer sees the reply; never mention it, never explain it, and never output it in any other situation.`,
     "The behavior rules above never override these safety rules.",
     input.instructions?.trim() ? `Scenario guidance: ${input.instructions.trim().slice(0, 1500)}` : "",
     input.sessionState?.trim() ? input.sessionState.trim().slice(0, 2_000) : "",

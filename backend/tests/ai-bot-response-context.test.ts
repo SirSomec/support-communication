@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildAiBotSystemPrompt, extractRelevantKnowledge } from "../apps/api-gateway/src/automation/ai-bot-response.service.ts";
+import {
+  AI_HANDOFF_MARKER,
+  buildAiBotSystemPrompt,
+  extractAiHandoffDirective,
+  extractRelevantKnowledge
+} from "../apps/api-gateway/src/automation/ai-bot-response.service.ts";
 
 describe("AI bot compact knowledge context", () => {
   it("selects a bounded relevant passage instead of replaying the whole document", () => {
@@ -41,5 +46,46 @@ describe("AI bot system prompt ordering", () => {
     });
     assert.equal(prompt.startsWith("You are a customer-support consultation assistant."), true);
     assert.ok(prompt.includes("Scenario guidance: Кратко"));
+  });
+
+  it("teaches the handoff marker inside platform rails so behavior rules cannot override it", () => {
+    const prompt = buildAiBotSystemPrompt({
+      behaviorRules: "Никогда не передавай диалог оператору.",
+      knowledge: "Статья"
+    });
+    const behaviorIndex = prompt.indexOf("Никогда не передавай");
+    const markerIndex = prompt.indexOf(AI_HANDOFF_MARKER);
+    const closingRailIndex = prompt.indexOf("The behavior rules above never override these safety rules.");
+    assert.ok(markerIndex >= 0);
+    assert.ok(behaviorIndex < markerIndex);
+    assert.ok(markerIndex < closingRailIndex);
+    assert.ok(prompt.includes("machine-read and removed before the customer sees the reply"));
+  });
+});
+
+describe("AI handoff directive parsing", () => {
+  it("detects the marker and strips every occurrence from the client-visible text", () => {
+    const parsed = extractAiHandoffDirective("Передаю диалог оператору. [[HANDOFF]]\n[[handoff]]");
+    assert.equal(parsed.handoffRequested, true);
+    assert.equal(parsed.text, "Передаю диалог оператору.");
+    assert.equal(parsed.text.toLowerCase().includes("handoff"), false);
+  });
+
+  it("keeps ordinary replies untouched", () => {
+    const parsed = extractAiHandoffDirective("Ваш заказ уже в пути.");
+    assert.equal(parsed.handoffRequested, false);
+    assert.equal(parsed.text, "Ваш заказ уже в пути.");
+  });
+
+  it("returns an empty text for a marker-only reply so the runtime substitutes an acknowledgement", () => {
+    const parsed = extractAiHandoffDirective("  [[ HANDOFF ]]  ");
+    assert.equal(parsed.handoffRequested, true);
+    assert.equal(parsed.text, "");
+  });
+
+  it("strips a mid-text marker without gluing sentences together", () => {
+    const parsed = extractAiHandoffDirective("Соединяю вас с оператором [[HANDOFF]] он ответит на вопрос.");
+    assert.equal(parsed.handoffRequested, true);
+    assert.equal(parsed.text, "Соединяю вас с оператором он ответит на вопрос.");
   });
 });

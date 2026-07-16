@@ -11,7 +11,7 @@ import {
 import { planBotRuntimeConsultationStay, planBotRuntimeLabeledTransition, resolveBotRuntimeDeadLetterState, resolveBotRuntimeRetryState } from "./bot-runtime.worker.js";
 import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runtime.worker.js";
 import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
-import { AiBotResponseService, type AiBotResponse } from "./ai-bot-response.service.js";
+import { AiBotResponseService, extractAiHandoffDirective, type AiBotResponse } from "./ai-bot-response.service.js";
 import { evaluatePostPolicy, evaluatePrePolicy, normalizeAgentPolicy } from "./agent-policy.js";
 import { evaluateAiAgentsRollout } from "./ai-agents-rollout.js";
 import { recordBotHandoff, recordBotTriggerMatch } from "./bot-observability.js";
@@ -275,7 +275,7 @@ export class BotRuntimeService {
         }
       }
       try {
-        const aiResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({
+        const rawResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({
           basePrompt,
           behaviorRules: policy.behaviorRules || undefined,
           conversationId: event.conversationId,
@@ -287,6 +287,28 @@ export class BotRuntimeService {
           sourceBindings,
           tenantId: event.tenantId
         });
+        // Директива передачи от модели: флаг уже выставлен сервисом, но маркер
+        // зачищается и здесь — кастомный aiResponder мог вернуть сырой текст.
+        // Клиент сервисный маркер не видит ни при каком ответчике.
+        const directive = extractAiHandoffDirective(rawResponse.text);
+        const aiResponse = { ...rawResponse, text: directive.text };
+        if (rawResponse.handoffRequested === true || directive.handoffRequested) {
+          return {
+            aiResponse: aiResponse.text.trim()
+              ? aiResponse
+              : { ...aiResponse, text: String(node.config?.handoffAcknowledgement ?? "Передаю диалог оператору — он продолжит с этого места.") },
+            context: { ...context, lastAiFailure: "ai_requested_handoff" },
+            handoffSummary: {
+              botId: scenarioId ?? event.scenarioId ?? "",
+              collectedFields: redactObject(context),
+              nodeId: node.id,
+              queue: String(node.config?.handoffQueue ?? "default"),
+              reason: "ai_requested_handoff"
+            },
+            outcome: "ai_handoff_requested",
+            status: "handoff" as const
+          };
+        }
         // BAI-842: post-policy — фактический ответ без источника (при наличии знаний) передаём оператору.
         const postDecision = evaluatePostPolicy(aiResponse.citations.length, aiResponse.materialsAvailable ?? 0, policy);
         if (postDecision.action === "handoff") {

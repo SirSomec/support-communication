@@ -78,12 +78,12 @@ export interface PrismaAiConnectionCreateInput {
 
 export interface AiConnectionPrismaClient {
   aiConnection: {
-    delete(input: { where: { ai_connections_tenant_id_key: { id: string; tenantId: string } } }): MaybePromise<PrismaAiConnectionRow>;
+    delete(input: { where: { tenantId_id: { id: string; tenantId: string } } }): MaybePromise<PrismaAiConnectionRow>;
     findMany(input: { orderBy?: { createdAt: "asc" }; where?: { tenantId: string } }): MaybePromise<PrismaAiConnectionRow[]>;
     upsert(input: {
       create: PrismaAiConnectionCreateInput;
       update: Omit<PrismaAiConnectionCreateInput, "createdAt" | "id" | "tenantId">;
-      where: { ai_connections_tenant_id_key: { id: string; tenantId: string } };
+      where: { tenantId_id: { id: string; tenantId: string } };
     }): MaybePromise<PrismaAiConnectionRow>;
   };
 }
@@ -142,7 +142,7 @@ export class AiConnectionRepository {
       return Promise.resolve(this.prismaClient.aiConnection.upsert({
         create,
         update,
-        where: { ai_connections_tenant_id_key: { id: normalized.id, tenantId: normalized.tenantId } }
+        where: { tenantId_id: { id: normalized.id, tenantId: normalized.tenantId } }
       })).then(toRecord);
     }
     this.store.update((state) => {
@@ -159,7 +159,7 @@ export class AiConnectionRepository {
 
   remove(tenantId: string, id: string): MaybePromise<boolean> {
     if (this.prismaClient) {
-      return Promise.resolve(this.prismaClient.aiConnection.delete({ where: { ai_connections_tenant_id_key: { id, tenantId } } }))
+      return Promise.resolve(this.prismaClient.aiConnection.delete({ where: { tenantId_id: { id, tenantId } } }))
         .then(() => true)
         .catch((error) => {
           if (isPrismaRecordNotFoundError(error)) return false;

@@ -116,7 +116,9 @@ export class AiConnectionsService {
         baseUrl: existing.baseUrl,
         maxRetries: 0,
         model: existing.chatModel,
-        timeoutMs: 5_000
+        // Холодный первый вызов через агрегатор (например, AITunnel) может
+        // превышать 5с — держим потолок теста равным рантайм-дефолту провайдера.
+        timeoutMs: 15_000
       });
       await provider.complete({ maxTokens: 1, messages: [{ content: "Reply with OK.", role: "user" }], temperature: 0 });
       const record = await this.repository.save({ ...existing, disabledAt: null, lastTestMessage: null, lastTestStatus: "passed", lastTestedAt: now, status: "ready", updatedAt: now });

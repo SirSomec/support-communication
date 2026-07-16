@@ -88,7 +88,7 @@ export interface KnowledgeSourcePrismaClient {
     upsert(input: {
       create: PrismaKnowledgeSourceCreateInput;
       update: Omit<PrismaKnowledgeSourceCreateInput, "createdAt" | "id" | "tenantId">;
-      where: { knowledge_sources_tenant_id_key: { id: string; tenantId: string } };
+      where: { tenantId_id: { id: string; tenantId: string } };
     }): MaybePromise<PrismaKnowledgeSourceRow>;
   };
 }
@@ -170,7 +170,7 @@ export class KnowledgeSourceRepository {
       return Promise.resolve(this.prismaClient.knowledgeSource.upsert({
         create,
         update,
-        where: { knowledge_sources_tenant_id_key: { id: normalized.id, tenantId: normalized.tenantId } }
+        where: { tenantId_id: { id: normalized.id, tenantId: normalized.tenantId } }
       })).then((row) => {
         KnowledgeRetrievalCache.default().purgeSource(normalized.tenantId, normalized.id);
         return toSourceRecord(row);

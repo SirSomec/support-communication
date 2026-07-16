@@ -34,7 +34,7 @@ function inMemoryPrismaAiConnectionClient(): AiConnectionPrismaClient {
   return {
     aiConnection: {
       delete: async ({ where }) => {
-        const key = rowKey(where.ai_connections_tenant_id_key.tenantId, where.ai_connections_tenant_id_key.id);
+        const key = rowKey(where.tenantId_id.tenantId, where.tenantId_id.id);
         const existing = rows.get(key);
         if (!existing) throw Object.assign(new Error("record not found"), { code: "P2025" });
         rows.delete(key);
@@ -44,7 +44,7 @@ function inMemoryPrismaAiConnectionClient(): AiConnectionPrismaClient {
         .filter((row) => !where?.tenantId || row.tenantId === where.tenantId)
         .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime()),
       upsert: async ({ create, update, where }) => {
-        const key = rowKey(where.ai_connections_tenant_id_key.tenantId, where.ai_connections_tenant_id_key.id);
+        const key = rowKey(where.tenantId_id.tenantId, where.tenantId_id.id);
         const existing = rows.get(key);
         const next: PrismaAiConnectionRow = existing ? { ...existing, ...update } : { ...create };
         rows.set(key, next);

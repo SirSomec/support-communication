@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, it } from "node:test";
 import { AuthService } from "../apps/api-gateway/src/identity/auth.service.ts";
 import { resetIdentityAuthFlowStore } from "../apps/api-gateway/src/identity/identity-auth-flow.repository.ts";
@@ -15,8 +13,7 @@ import { TenantService } from "../apps/api-gateway/src/identity/tenant.service.t
 
 type IdentityRepository = RuntimeIdentityRepository;
 const IdentityRepository = {
-  inMemory: () => RuntimeIdentityRepository.inMemory(bootstrapIdentityState()),
-  open: ({ filePath }: { filePath: string }) => RuntimeIdentityRepository.open({ filePath, seed: bootstrapIdentityState() })
+  inMemory: () => RuntimeIdentityRepository.inMemory(bootstrapIdentityState())
 };
 
 interface DeliveredRecoveryToken {
@@ -361,140 +358,61 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     }
   });
 
-  it("persists invite tokens through the identity repository across process restarts", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "identity-invite-token-"));
-    try {
-      const filePath = join(workspace, "identity.json");
-      const issuingRepository = IdentityRepository.open({ filePath });
-      const settings = new SettingsEmployeeService(issuingRepository);
-      const email = `durable-invite-${Date.now()}@volga.example`;
-      const password = "Durable-Invite-2026!";
+  it("keeps invite tokens in the identity repository across auth flow store resets", async () => {
+    const repository = IdentityRepository.inMemory();
+    const settings = new SettingsEmployeeService(repository);
+    const email = `durable-invite-${Date.now()}@volga.example`;
+    const password = "Durable-Invite-2026!";
 
-      const invite = await settings.inviteEmployee({
-        email,
-        groupId: "group-line-1",
-        name: "Durable Invite",
-        roleKey: "employee"
-      }, { tenantId: "tenant-volga" });
-      assert.equal(invite.status, "ok");
-      assert.equal(typeof invite.data.inviteDescriptor?.code, "string");
+    const invite = await settings.inviteEmployee({
+      email,
+      groupId: "group-line-1",
+      name: "Durable Invite",
+      roleKey: "employee"
+    }, { tenantId: "tenant-volga" });
+    assert.equal(invite.status, "ok");
+    assert.equal(typeof invite.data.inviteDescriptor?.code, "string");
 
-      resetIdentityAuthFlowStore();
-      const acceptingRepository = IdentityRepository.open({ filePath });
-      const auth = new AuthService(acceptingRepository);
-      const accepted = await auth.acceptInvite({
-        code: invite.data.inviteDescriptor.code,
-        email,
-        password
-      });
+    resetIdentityAuthFlowStore();
+    const auth = new AuthService(repository);
+    const accepted = await auth.acceptInvite({
+      code: invite.data.inviteDescriptor.code,
+      email,
+      password
+    });
 
-      assert.equal(accepted.status, "ok");
-      assert.notEqual(accepted.error?.code, "invite_not_found");
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
+    assert.equal(accepted.status, "ok");
+    assert.notEqual(accepted.error?.code, "invite_not_found");
   });
 
-  it("persists recovery tokens through the identity repository across process restarts", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "identity-recovery-token-"));
-    try {
-      const filePath = join(workspace, "identity.json");
-      const issuingRepository = IdentityRepository.open({ filePath });
-      const deliveredRecoveryTokens: DeliveredRecoveryToken[] = [];
-      const issuingAuth = new AuthService(
-        issuingRepository,
-        createTestMfaOtpRuntime(deliveredRecoveryTokens)
-      );
-      const email = "sergey@volga.example";
-      const password = "Durable-Recovery-2026!";
+  it("keeps recovery tokens in the identity repository across auth flow store resets", async () => {
+    const repository = IdentityRepository.inMemory();
+    const deliveredRecoveryTokens: DeliveredRecoveryToken[] = [];
+    const issuingAuth = new AuthService(
+      repository,
+      createTestMfaOtpRuntime(deliveredRecoveryTokens)
+    );
+    const email = "sergey@volga.example";
+    const password = "Durable-Recovery-2026!";
 
-      const recovery = await issuingAuth.requestRecovery({ email });
-      assert.equal(recovery.status, "ok");
-      assert.deepEqual(recovery.data, { queued: true });
-      assert.equal(deliveredRecoveryTokens.length, 1);
-      const recoveryToken = deliveredRecoveryTokens[0]?.recoveryToken;
-      assert.equal(typeof recoveryToken, "string");
-      assert.doesNotMatch(JSON.stringify(recovery), new RegExp(String(recoveryToken)));
+    const recovery = await issuingAuth.requestRecovery({ email });
+    assert.equal(recovery.status, "ok");
+    assert.deepEqual(recovery.data, { queued: true });
+    assert.equal(deliveredRecoveryTokens.length, 1);
+    const recoveryToken = deliveredRecoveryTokens[0]?.recoveryToken;
+    assert.equal(typeof recoveryToken, "string");
+    assert.doesNotMatch(JSON.stringify(recovery), new RegExp(String(recoveryToken)));
 
-      resetIdentityAuthFlowStore();
-      const completingRepository = IdentityRepository.open({ filePath });
-      const completingAuth = new AuthService(completingRepository);
-      const completed = await completingAuth.completeRecovery({
-        email,
-        password,
-        token: recoveryToken
-      });
+    resetIdentityAuthFlowStore();
+    const completingAuth = new AuthService(repository);
+    const completed = await completingAuth.completeRecovery({
+      email,
+      password,
+      token: recoveryToken
+    });
 
-      assert.equal(completed.status, "ok");
-      assert.notEqual(completed.error?.code, "recovery_not_found");
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
-  });
-
-  it("does not mutate persisted service-admin permissions implicitly on JSON store restart", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "identity-service-admin-backfill-"));
-    try {
-      const filePath = join(workspace, "identity.json");
-      const staleRepository = IdentityRepository.open({ filePath });
-      const staleSession = await staleRepository.createServiceAdminSession({
-        actorId: "stale-service-admin",
-        actorName: "Stale Service Admin",
-        adminEmail: "stale-service-admin@example.com",
-        allowedActions: ["tenants.read"],
-        availableOrganizations: [],
-        currentTenantId: "",
-        role: "service_admin"
-      });
-      const staleState = JSON.parse(readFileSync(filePath, "utf8")) as {
-        permissionRoles: Array<{ actions: string[]; key: string }>;
-        privilegedServiceAdminActions: string[];
-        rbacRoleGrants: Array<{ action: string; roleKey: string }>;
-        serviceAdminSessions: Array<{ allowedActions: string[]; id: string; role: string }>;
-      };
-      staleState.permissionRoles = staleState.permissionRoles.map((role) => (
-        role.key === "service_admin"
-          ? { ...role, actions: role.actions.filter((action) => !["operations.read", "operations.write", "security.review"].includes(action)) }
-          : role
-      ));
-      staleState.privilegedServiceAdminActions = staleState.privilegedServiceAdminActions
-        .filter((action) => !["operations.read", "operations.write", "security.review"].includes(action));
-      staleState.rbacRoleGrants = staleState.rbacRoleGrants.filter((grant) => (
-        grant.roleKey !== "service_admin" || !["operations.read", "operations.write", "security.review"].includes(grant.action)
-      ));
-      staleState.serviceAdminSessions = staleState.serviceAdminSessions.map((session) => (
-        session.id === staleSession.id
-          ? {
-              ...session,
-              allowedActions: session.allowedActions
-                .filter((action) => !["operations.read", "operations.write", "security.review"].includes(action))
-            }
-          : session
-      ));
-      writeFileSync(filePath, `${JSON.stringify(staleState, null, 2)}\n`);
-
-      const backfilledRepository = IdentityRepository.open({ filePath });
-      const backfilledSession = await backfilledRepository.findServiceAdminSession(staleSession.id);
-      const serviceAdminRole = (await backfilledRepository.listPermissionRoles())
-        .find((role) => role.key === "service_admin");
-      const privilegedActions = await backfilledRepository.listPrivilegedServiceAdminActions();
-      const serviceAdminGrants = await backfilledRepository.listRbacRoleGrants({ roleKey: "service_admin" });
-
-      assert.equal(backfilledSession?.allowedActions.includes("operations.read"), false);
-      assert.equal(backfilledSession?.allowedActions.includes("operations.write"), false);
-      assert.equal(backfilledSession?.allowedActions.includes("security.review"), false);
-      assert.equal(serviceAdminRole?.actions.includes("operations.read"), false);
-      assert.equal(serviceAdminRole?.actions.includes("operations.write"), false);
-      assert.equal(serviceAdminRole?.actions.includes("security.review"), false);
-      assert.equal(privilegedActions.includes("operations.read"), false);
-      assert.equal(privilegedActions.includes("operations.write"), false);
-      assert.equal(privilegedActions.includes("security.review"), false);
-      assert.equal(serviceAdminGrants.some((grant) => grant.action === "operations.read" && grant.effect === "allow"), false);
-      assert.equal(serviceAdminGrants.some((grant) => grant.action === "operations.write" && grant.effect === "allow"), false);
-      assert.equal(serviceAdminGrants.some((grant) => grant.action === "security.review" && grant.effect === "allow"), false);
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
+    assert.equal(completed.status, "ok");
+    assert.notEqual(completed.error?.code, "recovery_not_found");
   });
 
   it("starts and completes OIDC callbacks with replay protection", async () => {

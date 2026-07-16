@@ -1310,7 +1310,6 @@ describe("Prisma-backed identity repository contracts", () => {
 
     const repository = configureIdentityRepository({
       DATABASE_URL: "postgresql://support:support@127.0.0.1:5432/support_communication",
-      IDENTITY_REPOSITORY: "prisma",
       NODE_ENV: "test",
       PORT: "4191",
       SERVICE_NAME: "api-gateway"

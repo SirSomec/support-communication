@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 import { configureAutomationRepository } from "../apps/api-gateway/src/automation/bootstrap.ts";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
@@ -10,22 +7,17 @@ import { bootstrapAutomationState } from "../apps/api-gateway/src/automation/see
 
 describe("Prisma-backed automation repository contracts", () => {
   it("applies local automation fixtures only through an explicit seed, never inferred", () => {
-    // The JSON file store stays a test-only utility (the JSON runtime is removed in
-    // phase D); it must still seed only when a seed is passed explicitly, not inferred.
-    const workspace = mkdtempSync(join(tmpdir(), "automation-bootstrap-"));
-    try {
-      const empty = AutomationRepository.open({ filePath: join(workspace, "empty.json") });
-      const seeded = AutomationRepository.open({
-        filePath: join(workspace, "seeded.json"),
-        seed: bootstrapAutomationState()
-      });
+    // InMemoryStore stays a test-only utility (the JSON runtime is removed in phase D);
+    // it must still seed only when a seed is passed explicitly, not inferred.
+    const empty = AutomationRepository.inMemory();
+    const seeded = AutomationRepository.inMemory(bootstrapAutomationState());
 
+    try {
       assert.equal(empty.readState().botScenarios.length, 0);
       assert.ok(seeded.readState().botScenarios.length > 0);
       assert.ok(seeded.readState().botScenarios.every((scenario) => scenario.tenantId === "tenant-volga"));
     } finally {
       AutomationRepository.clearDefault();
-      rmSync(workspace, { force: true, recursive: true });
     }
   });
 
@@ -34,7 +26,6 @@ describe("Prisma-backed automation repository contracts", () => {
     let datasourceUrl: string | undefined;
 
     const repository = configureAutomationRepository({
-      AUTOMATION_REPOSITORY: "prisma",
       DATABASE_URL: "postgresql://automation-bootstrap"
     }, {
       prismaClientFactory(options) {

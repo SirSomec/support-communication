@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import type {
   BackupDrill,
   DeadLetterMessage,
@@ -211,11 +211,6 @@ export interface OperationsState {
   securityControls: SecurityControl[];
 }
 
-interface OperationsRepositoryOptions {
-  filePath: string;
-  seed?: OperationsState;
-}
-
 export interface PrismaOperationsClient {
   operationsObjectStorageRestoreCheckResult: PrismaOperationsObjectStorageRestoreCheckResultDelegate;
   operationsPostgresRestoreCheckResult: PrismaOperationsPostgresRestoreCheckResultDelegate;
@@ -386,10 +381,6 @@ export class OperationsRepository {
 
   static inMemory(seed?: OperationsState): OperationsRepository {
     return new OperationsRepository(new InMemoryStore(seed ?? createEmptyOperationsState()));
-  }
-
-  static open({ filePath, seed = createEmptyOperationsState() }: OperationsRepositoryOptions): OperationsRepository {
-    return new OperationsRepository(new JsonFileStore({ filePath, seed }));
   }
 
   static prisma({ client, seed }: { client: PrismaOperationsClient; seed?: OperationsState }): OperationsRepository {

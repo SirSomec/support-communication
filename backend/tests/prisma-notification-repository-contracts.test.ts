@@ -16,8 +16,7 @@ describe("Prisma-backed notification repository contracts", () => {
 
     const repository = configureNotificationRepository({
       DATABASE_URL: "postgresql://support:support@127.0.0.1:56432/support_communication",
-      NODE_ENV: "test",
-      NOTIFICATION_REPOSITORY: "prisma"
+      NODE_ENV: "test"
     }, {
       prismaClientFactory(options) {
         calls.datasourceUrl = options.datasourceUrl;

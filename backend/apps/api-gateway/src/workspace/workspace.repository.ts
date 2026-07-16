@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 
 export interface FileRecord {
   auditId: string;
@@ -231,11 +231,6 @@ export interface WorkspaceRepositoryPort {
   updateKnowledgeDraftVersionState(articleId: string, draftId: string, state: KnowledgeDraftVersionStateRecord): KnowledgeDraftVersionRecord | Promise<KnowledgeDraftVersionRecord | undefined> | undefined;
 }
 
-interface WorkspaceRepositoryOptions {
-  filePath: string;
-  seed?: WorkspaceState;
-}
-
 interface WorkspaceTenantScope {
   tenantId?: string;
 }
@@ -268,10 +263,6 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
 
   static inMemory(seed: WorkspaceState = createEmptyWorkspaceState()): WorkspaceRepository {
     return new WorkspaceRepository(createDurableWorkspaceRepository(new InMemoryStore(seed)));
-  }
-
-  static open({ filePath, seed = createEmptyWorkspaceState() }: WorkspaceRepositoryOptions): WorkspaceRepository {
-    return new WorkspaceRepository(createDurableWorkspaceRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client, fallback }: PrismaWorkspaceRepositoryOptions): WorkspaceRepository {

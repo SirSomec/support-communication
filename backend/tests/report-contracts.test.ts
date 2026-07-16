@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { configureReportRepository, resolveReportStoreFile } from "../apps/api-gateway/src/reports/bootstrap.ts";
+import { configureReportRepository } from "../apps/api-gateway/src/reports/bootstrap.ts";
 import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.ts";
 import { ReportService } from "../apps/api-gateway/src/reports/report.service.ts";
 import type { ReportExportJob } from "../apps/api-gateway/src/reports/report.types.ts";
@@ -55,8 +55,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     try {
       const repository = configureReportRepository({
         DATABASE_URL: "postgresql://reports:secret@127.0.0.1:5432/support",
-        NODE_ENV: "test",
-        REPORT_REPOSITORY: "prisma"
+        NODE_ENV: "test"
       }, {
         prismaClientFactory() {
           return client;
@@ -597,23 +596,6 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     }, { tenantId: "tenant-volga" });
     assert.equal(duplicateFromFreshInstance.data.duplicate, true);
     assert.equal(duplicateFromFreshInstance.data.job.id, firstQueued.data.job.id);
-  });
-
-  it("isolates default report store files by service, environment and port", () => {
-    const first = resolveReportStoreFile({
-      NODE_ENV: "test",
-      PORT: "5101",
-      SERVICE_NAME: "api-gateway"
-    });
-    const second = resolveReportStoreFile({
-      NODE_ENV: "test",
-      PORT: "5102",
-      SERVICE_NAME: "api-gateway"
-    });
-
-    assert.notEqual(first, second);
-    assert.match(first, /api-gateway-test-5101-reports\.json$/);
-    assert.match(second, /api-gateway-test-5102-reports\.json$/);
   });
 
   it("retries export jobs and exposes permission-aware file descriptors", async () => {

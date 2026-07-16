@@ -42,7 +42,6 @@ describe("Prisma-backed quality repository contracts", () => {
     const repository = configureQualityRepository({
       DATABASE_URL: "postgresql://quality:quality@127.0.0.1:5432/quality",
       NODE_ENV: "staging",
-      QUALITY_REPOSITORY: "prisma",
       SERVICE_NAME: "quality-contract"
     }, {
       prismaClientFactory: () => client

@@ -30,8 +30,6 @@ describe("Prisma-backed operations repository contracts", () => {
       const repository = configureOperationsRepository({
         DATABASE_URL: "postgresql://support:support@localhost:5432/support_communication",
         NODE_ENV: "staging",
-        OPERATIONS_REPOSITORY: "prisma",
-        OPERATIONS_STORE_FILE: filePath,
         PORT: "4100",
         SERVICE_NAME: "api-gateway"
       }, {

@@ -1,4 +1,4 @@
-import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
+import { configureRepositoryBootstrap, createPrismaClient, type PrismaClientFactoryOptions } from "@support-communication/database";
 import { ConversationRepository, type ConversationState, type PrismaConversationClient } from "./conversation.repository.js";
 import { ConversationService } from "./conversation.service.js";
 import {
@@ -11,8 +11,6 @@ import {
 
 export interface ConversationRepositoryBootstrapSource {
   DATABASE_URL?: string;
-  CONVERSATION_REPOSITORY?: string;
-  CONVERSATION_STORE_FILE?: string;
   NODE_ENV?: string;
   PORT?: number | string;
   REALTIME_REDIS_CHANNEL?: string;
@@ -35,13 +33,9 @@ export function configureConversationRepository(
   options: ConversationRepositoryBootstrapOptions = {}
 ): ConversationRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => ConversationRepository.open({ filePath, seed: options.seed }),
     createPrismaRepository: (client) => ConversationRepository.prisma({ client }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
-    repositoryEnv: "CONVERSATION_REPOSITORY",
     source,
-    storeFileEnv: "CONVERSATION_STORE_FILE",
-    suffix: "conversation",
     useDefault: (repository) => ConversationRepository.useDefault(repository)
   });
 }
@@ -60,12 +54,4 @@ export function configureConversationRealtimeFanout(
 
 function defaultPrismaClientFactory(options: PrismaClientFactoryOptions): PrismaConversationClient {
   return createPrismaClient(options) as PrismaConversationClient;
-}
-
-export function resolveConversationStoreFile(source: ConversationRepositoryBootstrapSource = process.env): string {
-  return resolveRepositoryStoreFile({
-    source,
-    storeFileEnv: "CONVERSATION_STORE_FILE",
-    suffix: "conversation"
-  });
 }

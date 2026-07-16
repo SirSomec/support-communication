@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import { redactSensitiveText } from "@support-communication/redaction";
 import type { BillingInvoice, BillingSubscription, BillingTariff, TenantBillingState } from "./billing.types.js";
 import { billingTariffCatalog } from "./tariff-catalog.js";
@@ -452,11 +452,6 @@ export interface BillingRepositoryPort {
   releaseExpiredQuotaReservation(input: BillingExpiredQuotaReservationReleaseInput): MaybePromise<BillingQuotaReservation | undefined>;
 }
 
-interface BillingRepositoryOptions {
-  filePath: string;
-  seed?: BillingState;
-}
-
 interface BillingTariffChangeInput {
   changes: Partial<BillingTenantState>;
   syncJob: BillingSyncJob;
@@ -524,10 +519,6 @@ export class BillingRepository implements BillingRepositoryPort {
 
   static inMemory(seed: BillingState = createEmptyBillingState()): BillingRepository {
     return new BillingRepository(createDurableBillingRepository(new InMemoryStore(seed)));
-  }
-
-  static open({ filePath, seed = createEmptyBillingState() }: BillingRepositoryOptions): BillingRepository {
-    return new BillingRepository(createDurableBillingRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client }: PrismaBillingRepositoryOptions): BillingRepository {

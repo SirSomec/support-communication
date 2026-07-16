@@ -1,7 +1,6 @@
 import {
   configureRepositoryBootstrap,
   createPrismaClient,
-  resolveRepositoryStoreFile,
   type PrismaClientFactoryOptions
 } from "@support-communication/database";
 
@@ -39,10 +38,6 @@ export interface OperationsRepositoryBootstrapSource {
 
   NODE_ENV?: string;
 
-  OPERATIONS_REPOSITORY?: string;
-
-  OPERATIONS_STORE_FILE?: string;
-
   PORT?: number | string;
 
   SERVICE_NAME?: string;
@@ -66,13 +61,9 @@ export function configureOperationsRepository(
 ): OperationsRepository {
 
   const repository = configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => OperationsRepository.open({ filePath, ...(options.seed ? { seed: options.seed } : {}) }),
     createPrismaRepository: (client) => OperationsRepository.prisma({ client, ...(options.seed ? { seed: options.seed } : {}) }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
-    repositoryEnv: "OPERATIONS_REPOSITORY",
     source,
-    storeFileEnv: "OPERATIONS_STORE_FILE",
-    suffix: "operations",
     useDefault: (configuredRepository) => OperationsRepository.useDefault(configuredRepository)
   });
 
@@ -117,14 +108,6 @@ export function clearOperationsRuntime(): void {
 }
 
 
-
-export function resolveOperationsStoreFile(source: OperationsRepositoryBootstrapSource = process.env): string {
-  return resolveRepositoryStoreFile({
-    source,
-    storeFileEnv: "OPERATIONS_STORE_FILE",
-    suffix: "operations"
-  });
-}
 
 function defaultPrismaClientFactory(options: PrismaClientFactoryOptions): PrismaOperationsClient {
   return createPrismaClient(options) as PrismaOperationsClient;

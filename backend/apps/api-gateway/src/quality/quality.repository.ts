@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import type { ConversationLifecycleEvent } from "../conversation/conversation.repository.js";
 
 export type QualityRatingScale = "CSAT" | "CSI" | "QA";
@@ -110,11 +110,6 @@ export interface QualityRepositoryPort {
   saveManualQaReview(record: ManualQaReviewRecord, lifecycleEvent?: ConversationLifecycleEvent): MaybePromise<ManualQaReviewRecord>;
   saveQualityRating(record: QualityRatingRecord, lifecycleEvent?: ConversationLifecycleEvent): MaybePromise<QualityRatingRecord>;
   saveAiSuggestionDecision(record: AiSuggestionDecisionRecord, lifecycleEvent: ConversationLifecycleEvent): MaybePromise<AiSuggestionDecisionRecord>;
-}
-
-export interface QualityRepositoryOptions {
-  filePath: string;
-  seed?: Partial<QualityState>;
 }
 
 export interface PrismaQualityRepositoryOptions {
@@ -294,10 +289,6 @@ export class QualityRepository {
 
   static inMemory(seed: Partial<QualityState> = seedQualityState()): QualityRepository {
     return new QualityRepository(new InMemoryStore(normalizeState(seed)));
-  }
-
-  static open({ filePath, seed = seedQualityState() }: QualityRepositoryOptions): QualityRepository {
-    return new QualityRepository(new JsonFileStore({ filePath, seed: normalizeState(seed) }));
   }
 
   static prisma({ client, fallback }: PrismaQualityRepositoryOptions): PrismaQualityRepository {

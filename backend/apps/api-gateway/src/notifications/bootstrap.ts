@@ -1,11 +1,9 @@
-import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
+import { configureRepositoryBootstrap, createPrismaClient, type PrismaClientFactoryOptions } from "@support-communication/database";
 import { NotificationRepository, type PrismaNotificationClient } from "./notification.repository.js";
 
 export interface NotificationRepositoryBootstrapSource {
   DATABASE_URL?: string;
   NODE_ENV?: string;
-  NOTIFICATION_REPOSITORY?: string;
-  NOTIFICATION_STORE_FILE?: string;
   PORT?: number | string;
   SERVICE_NAME?: string;
 }
@@ -19,22 +17,10 @@ export function configureNotificationRepository(
   options: NotificationRepositoryBootstrapOptions = {}
 ): NotificationRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => NotificationRepository.open({ filePath }),
     createPrismaRepository: (client) => NotificationRepository.prisma({ client }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
-    repositoryEnv: "NOTIFICATION_REPOSITORY",
     source,
-    storeFileEnv: "NOTIFICATION_STORE_FILE",
-    suffix: "notifications",
     useDefault: (repository) => NotificationRepository.useDefault(repository)
-  });
-}
-
-export function resolveNotificationStoreFile(source: NotificationRepositoryBootstrapSource = process.env): string {
-  return resolveRepositoryStoreFile({
-    source,
-    storeFileEnv: "NOTIFICATION_STORE_FILE",
-    suffix: "notifications"
   });
 }
 

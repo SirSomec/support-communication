@@ -79,11 +79,10 @@ export interface RepositoryStoreFileInput {
   suffix: string;
 }
 
-export interface RepositoryBootstrapInput<TRepository, TPrismaClient> extends RepositoryStoreFileInput {
-  createJsonRepository(filePath: string): TRepository;
-  createPrismaRepository(client: TPrismaClient, createJsonFallback: () => TRepository): TRepository;
+export interface RepositoryBootstrapInput<TRepository, TPrismaClient> {
+  createPrismaRepository(client: TPrismaClient): TRepository;
   prismaClientFactory(options: PrismaClientFactoryOptions): TPrismaClient;
-  repositoryEnv: string;
+  source: RepositoryBootstrapSource;
   useDefault(repository: TRepository): void;
 }
 
@@ -103,15 +102,9 @@ export function resolveRepositoryStoreFile(input: RepositoryStoreFileInput): str
 export function configureRepositoryBootstrap<TRepository, TPrismaClient>(
   input: RepositoryBootstrapInput<TRepository, TPrismaClient>
 ): TRepository {
-  // Prisma-only runtime (plan 2026-07-15, phase D): the JSON runtime store is removed —
-  // repositories always run on Prisma regardless of the (now inert) *_REPOSITORY env.
-  // The json factory remains only as the in-memory fallback some Prisma adapters accept
-  // for read models that are not persisted to Postgres; InMemoryStore stays for unit tests.
-  const filePath = resolveRepositoryStoreFile(input);
-  const createJsonRepository = () => input.createJsonRepository(filePath);
+  // Prisma-only runtime (plan 2026-07-15, phase D): repositories always run on Prisma.
   const repository = input.createPrismaRepository(
-    input.prismaClientFactory({ datasourceUrl: stringOrUndefined(sourceValue(input.source, "DATABASE_URL")) }),
-    createJsonRepository
+    input.prismaClientFactory({ datasourceUrl: stringOrUndefined(sourceValue(input.source, "DATABASE_URL")) })
   );
   input.useDefault(repository);
   return repository;

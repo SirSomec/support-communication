@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 
 export type NotificationCategory =
   | "sla_risk"
@@ -122,10 +122,6 @@ export interface NotificationListFilter {
   tenantId?: string;
   unreadOnly?: boolean;
   userId?: string;
-}
-
-export interface NotificationRepositoryOptions {
-  filePath: string;
 }
 
 export interface PrismaNotificationRepositoryOptions {
@@ -324,10 +320,6 @@ export class NotificationRepository {
 
   static inMemory(seed: NotificationState = seedNotificationState()): NotificationRepository {
     return new NotificationRepository(new InMemoryStore(normalizeState(seed)));
-  }
-
-  static open({ filePath }: NotificationRepositoryOptions): NotificationRepository {
-    return new NotificationRepository(new JsonFileStore({ filePath, seed: seedNotificationState() }));
   }
 
   static prisma({ client }: PrismaNotificationRepositoryOptions): NotificationRepository {

@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { type ServiceAdminSessionRecord } from "@support-communication/auth-context";
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import { createOutboxEvent, type OutboxEvent } from "@support-communication/events";
 import { addMinutes, makeAuditId, makeMfaChallengeId } from "./backend-ids.js";
 import {
@@ -580,11 +580,6 @@ export interface IdentityRepositoryPort {
   }>;
 }
 
-interface IdentityRepositoryOptions {
-  filePath: string;
-  seed?: IdentityState;
-}
-
 interface CreateServiceAdminSessionInput {
   actorId?: string;
   actorName?: string;
@@ -717,10 +712,6 @@ export class IdentityRepository implements IdentityRepositoryPort {
 
   static inMemory(seed: IdentityState = createEmptyIdentityState()): IdentityRepository {
     return new IdentityRepository(createDurableIdentityRepository(new InMemoryStore(seed)));
-  }
-
-  static open({ filePath, seed = createEmptyIdentityState() }: IdentityRepositoryOptions): IdentityRepository {
-    return new IdentityRepository(createDurableIdentityRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client }: PrismaIdentityRepositoryOptions): IdentityRepository {

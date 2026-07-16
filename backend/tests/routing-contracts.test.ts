@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { resolveRoutingStoreFile } from "../apps/api-gateway/src/routing/bootstrap.ts";
 import {
   rescueReportSeedRows,
   routingConversationFixtures,
@@ -2804,23 +2803,6 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
       tenantId: "tenant-volga",
       totalEvents: 2
     });
-  });
-
-  it("isolates default routing store files by service, environment and port", () => {
-    const first = resolveRoutingStoreFile({
-      NODE_ENV: "test",
-      PORT: "4101",
-      SERVICE_NAME: "api-gateway"
-    });
-    const second = resolveRoutingStoreFile({
-      NODE_ENV: "test",
-      PORT: "4102",
-      SERVICE_NAME: "api-gateway"
-    });
-
-    assert.notEqual(first, second);
-    assert.match(first, /api-gateway-test-4101-routing\.json$/);
-    assert.match(second, /api-gateway-test-4102-routing\.json$/);
   });
 
   it("updates workload counters when rescue auto-returns an assigned dialog", async () => {

@@ -51,8 +51,6 @@ describe("Prisma-backed platform repository contracts", () => {
       const repository = configurePlatformRepository({
         DATABASE_URL: "postgresql://support:support@localhost:5432/support_communication",
         NODE_ENV: "staging",
-        PLATFORM_REPOSITORY: "prisma",
-        PLATFORM_STORE_FILE: filePath,
         PORT: "4100",
         SERVICE_NAME: "api-gateway"
       }, {

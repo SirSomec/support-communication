@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import {
   isOperatorPresenceStatus,
   type OperatorPresenceCurrentRecord,
@@ -59,11 +59,6 @@ export interface PrismaOperatorPresenceClient {
   $transaction<T>(callback: (client: PrismaOperatorPresenceClient) => Promise<T>): Promise<T>;
 }
 
-export interface OperatorPresenceJsonOptions {
-  filePath: string;
-  seed?: Partial<OperatorPresenceState>;
-}
-
 export interface OperatorPresencePrismaOptions {
   client: PrismaOperatorPresenceClient;
 }
@@ -84,13 +79,6 @@ export class OperatorPresenceRepository implements OperatorPresenceRepositoryPor
 
   static clearDefault(): void {
     defaultRepository = null;
-  }
-
-  static open(options: OperatorPresenceJsonOptions): OperatorPresenceRepository {
-    return new OperatorPresenceRepository(createStoreAdapter(new JsonFileStore({
-      filePath: options.filePath,
-      seed: normalizeState(options.seed)
-    })));
   }
 
   static inMemory(seed: Partial<OperatorPresenceState> = {}): OperatorPresenceRepository {

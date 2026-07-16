@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import {
   bucketQualityScoringAttachmentStatus,
   bucketQualityScoringTelemetryChannel,
@@ -111,10 +111,6 @@ export interface QualityScoringRepositoryPort {
   saveFailureEnvelope(record: QualityScoringFailureEnvelopeRecordInput): MaybePromise<QualityScoringFailureEnvelopeRecord>;
 }
 
-export interface QualityScoringRepositoryOptions {
-  filePath: string;
-}
-
 export interface PrismaQualityScoringRepositoryOptions {
   client: PrismaQualityScoringClient;
 }
@@ -195,10 +191,6 @@ export class QualityScoringRepository implements QualityScoringRepositoryPort {
 
   static inMemory(seed: QualityScoringState = seedQualityScoringState()): QualityScoringRepository {
     return new QualityScoringRepository(new InMemoryStore(seed));
-  }
-
-  static open({ filePath }: QualityScoringRepositoryOptions): QualityScoringRepository {
-    return new QualityScoringRepository(new JsonFileStore({ filePath, seed: seedQualityScoringState() }));
   }
 
   static prisma({ client }: PrismaQualityScoringRepositoryOptions): PrismaQualityScoringRepository {

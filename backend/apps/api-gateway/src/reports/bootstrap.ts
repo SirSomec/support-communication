@@ -1,12 +1,10 @@
-import { configureRepositoryBootstrap, createPrismaClient, resolveRepositoryStoreFile, type PrismaClientFactoryOptions } from "@support-communication/database";
+import { configureRepositoryBootstrap, createPrismaClient, type PrismaClientFactoryOptions } from "@support-communication/database";
 import { ReportRepository, type PrismaReportClient, type ReportState } from "./report.repository.js";
 
 export interface ReportRepositoryBootstrapSource {
   DATABASE_URL?: string;
   NODE_ENV?: string;
   PORT?: number | string;
-  REPORT_REPOSITORY?: string;
-  REPORT_STORE_FILE?: string;
   SERVICE_NAME?: string;
 }
 
@@ -20,22 +18,10 @@ export function configureReportRepository(
   options: ReportRepositoryBootstrapOptions = {}
 ): ReportRepository {
   return configureRepositoryBootstrap({
-    createJsonRepository: (filePath) => ReportRepository.open({ filePath, ...(options.seed ? { seed: options.seed } : {}) }),
     createPrismaRepository: (client) => ReportRepository.prisma({ client }),
     prismaClientFactory: options.prismaClientFactory ?? defaultPrismaClientFactory,
-    repositoryEnv: "REPORT_REPOSITORY",
     source,
-    storeFileEnv: "REPORT_STORE_FILE",
-    suffix: "reports",
     useDefault: (repository) => ReportRepository.useDefault(repository)
-  });
-}
-
-export function resolveReportStoreFile(source: ReportRepositoryBootstrapSource = process.env): string {
-  return resolveRepositoryStoreFile({
-    source,
-    storeFileEnv: "REPORT_STORE_FILE",
-    suffix: "reports"
   });
 }
 

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import type { FeatureFlag, PlatformComponent, PlatformIncident, PlatformMetric, PlatformTenant } from "./platform.types.js";
 import type {
   PlatformFeatureFlagRule,
@@ -533,11 +533,6 @@ type PlatformRuntimeCollection =
   | "incidentIdempotencyKeys"
   | "incidents";
 
-interface PlatformRepositoryOptions {
-  filePath: string;
-  seed?: PlatformState;
-}
-
 let defaultRepository: PlatformRepository | null = null;
 
 export class PlatformRepository implements PlatformAuditOutboxRepository {
@@ -564,10 +559,6 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
 
   static inMemory(seed?: PlatformState): PlatformRepository {
     return new PlatformRepository(new InMemoryStore(seed ?? seedPlatformState()));
-  }
-
-  static open({ filePath, seed = seedPlatformState() }: PlatformRepositoryOptions): PlatformRepository {
-    return new PlatformRepository(new JsonFileStore({ filePath, seed }));
   }
 
   static prisma({ client, seed }: { client: PrismaPlatformClient; seed?: PlatformState }): PlatformRepository {

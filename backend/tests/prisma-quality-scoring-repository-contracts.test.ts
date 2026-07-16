@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   createQualityScoringProviderRequest,
@@ -17,10 +14,7 @@ import {
   QualityScoringRepository,
   type PrismaQualityScoringClient
 } from "../apps/api-gateway/src/quality/quality-scoring.repository.ts";
-import {
-  configureQualityScoringRepository,
-  resolveQualityScoringStoreFile
-} from "../apps/api-gateway/src/quality/quality-scoring.bootstrap.ts";
+import { configureQualityScoringRepository } from "../apps/api-gateway/src/quality/quality-scoring.bootstrap.ts";
 
 describe("Prisma-backed quality scoring telemetry contracts", () => {
   it("persists sanitized request telemetry through Prisma with tenant-scoped first-write-wins replay", async () => {
@@ -225,7 +219,6 @@ describe("Prisma-backed quality scoring telemetry contracts", () => {
     const repository = configureQualityScoringRepository({
       DATABASE_URL: "postgresql://quality:quality@127.0.0.1:5432/quality",
       NODE_ENV: "staging",
-      QUALITY_SCORING_REPOSITORY: "prisma",
       SERVICE_NAME: "quality-scoring-contract"
     }, {
       prismaClientFactory: () => client
@@ -233,11 +226,6 @@ describe("Prisma-backed quality scoring telemetry contracts", () => {
     assert.ok(repository instanceof PrismaQualityScoringRepository);
     assert.equal(QualityScoringRepository.default(), repository);
     QualityScoringRepository.clearDefault();
-  });
-
-  it("resolves a local store path even when no store-file env is configured", () => {
-    const resolved = resolveQualityScoringStoreFile({});
-    assert.match(resolved, /quality-scoring/);
   });
 });
 

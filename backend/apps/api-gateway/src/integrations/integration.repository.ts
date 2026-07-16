@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import { redactSensitiveText } from "@support-communication/redaction";
 import type { ApiEnvironmentKey, ChannelDetail, SecuritySession, WebhookDelivery } from "./integration.types.js";
 import { hashPublicApiKeySecret, type PublicApiEnvironment, type PublicApiKeyRecord } from "./public-api-auth.js";
@@ -410,11 +410,6 @@ export interface ChannelConnectionAuditEventRecord {
   result: string;
   tenantId: string;
   type: string;
-}
-
-interface IntegrationRepositoryOptions {
-  filePath: string;
-  seed?: IntegrationState;
 }
 
 export interface PrismaIntegrationRepositoryOptions {
@@ -949,10 +944,6 @@ export class IntegrationRepository {
 
   static inMemory(seed?: IntegrationState): IntegrationRepository {
     return new IntegrationRepository(new InMemoryStore(seed ?? createEmptyIntegrationState()));
-  }
-
-  static open({ filePath, seed }: IntegrationRepositoryOptions): IntegrationRepository {
-    return new IntegrationRepository(new JsonFileStore({ filePath, seed: seed ?? createEmptyIntegrationState() }));
   }
 
   static prisma({ client, seed }: PrismaIntegrationRepositoryOptions): IntegrationRepository {

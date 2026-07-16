@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import { REPORT_COLUMN_OPTIONS, REPORT_METRIC_DEFINITION_VERSION } from "./report-definition.js";
 import { listJsonConversationReportSourceRows } from "./report-json-conversation-source.js";
 import type { ReportExportJob } from "./report.types.js";
@@ -248,11 +248,6 @@ export interface ReportState {
   savedReportTemplates: SavedReportTemplateRecord[];
   scheduledDigestDescriptors: ScheduledDigestDescriptorRecord[];
   workspace: ReportWorkspaceCatalog;
-}
-
-interface ReportRepositoryOptions {
-  filePath: string;
-  seed?: ReportState;
 }
 
 export interface PrismaReportRepositoryOptions {
@@ -716,10 +711,6 @@ export class ReportRepository {
 
   static inMemory(seed?: ReportState): ReportRepository {
     return new ReportRepository(new InMemoryStore(seed ?? createEmptyReportState()));
-  }
-
-  static open({ filePath, seed = createEmptyReportState() }: ReportRepositoryOptions): ReportRepository {
-    return new ReportRepository(new JsonFileStore({ filePath, seed }));
   }
 
   static prisma({ client }: PrismaReportRepositoryOptions): ReportRepository {

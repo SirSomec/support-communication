@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import type { OutboxEvent } from "@support-communication/events";
 import type {
   ConversationOutboundDescriptor,
@@ -286,11 +286,6 @@ export interface AutomationState {
   rescueChats?: Array<Record<string, unknown>>;
   workspaceAuditEvents: Array<Record<string, unknown>>;
   workspaceRuntimeMetrics: Array<Record<string, unknown>>;
-}
-
-interface AutomationRepositoryOptions {
-  filePath: string;
-  seed?: AutomationState;
 }
 
 type MaybePromise<T> = T | Promise<T>;
@@ -831,10 +826,6 @@ export class AutomationRepository implements AutomationRepositoryPort {
 
   static inMemory(seed: AutomationState = createEmptyAutomationState()): AutomationRepository {
     return new AutomationRepository(new InMemoryStore(seed));
-  }
-
-  static open({ filePath, seed = createEmptyAutomationState() }: AutomationRepositoryOptions): AutomationRepository {
-    return new AutomationRepository(new JsonFileStore({ filePath, seed }));
   }
 
   static prisma({ client, fallback }: PrismaAutomationRepositoryOptions): AutomationRepository {

@@ -34,8 +34,7 @@ describe("Prisma-backed report repository contracts", () => {
     try {
       const repository = configureReportRepository({
         DATABASE_URL: "postgresql://reports:secret@127.0.0.1:5432/support",
-        NODE_ENV: "test",
-        REPORT_REPOSITORY: "prisma"
+        NODE_ENV: "test"
       }, {
         prismaClientFactory(options) {
           datasourceUrl = options.datasourceUrl;

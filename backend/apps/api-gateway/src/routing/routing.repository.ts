@@ -1,4 +1,4 @@
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import { Prisma } from "@prisma/client";
 import type { RealtimeEvent } from "../conversation/conversation.repository.js";
 import type { RescueReportRow, RoutingConversation, RoutingOperator, RoutingQueue } from "./routing.types.js";
@@ -238,11 +238,6 @@ export interface OperatorCapacityFilters extends RoutingTenantScope {
 
 export interface RoutingAnalyticsFilters extends RoutingTenantScope {
   eventKind?: RoutingAnalyticsEventKind;
-}
-
-interface RoutingRepositoryOptions {
-  filePath: string;
-  seed?: Partial<RoutingState>;
 }
 
 export interface PrismaRoutingRepositoryOptions {
@@ -620,11 +615,6 @@ export class RoutingRepository implements RoutingRepositoryPort {
   static inMemory(seed?: Partial<RoutingState>): RoutingRepository {
     const resolved = seed ?? seedRoutingState();
     return new RoutingRepository(createDurableRoutingRepository(new InMemoryStore(normalizeState(resolved))));
-  }
-
-  static open({ filePath, seed }: RoutingRepositoryOptions): RoutingRepository {
-    const resolved = seed ?? seedRoutingState();
-    return new RoutingRepository(createDurableRoutingRepository(new JsonFileStore({ filePath, seed: normalizeState(resolved) })));
   }
 
   static prisma({ client, fallback }: PrismaRoutingRepositoryOptions): RoutingRepository {

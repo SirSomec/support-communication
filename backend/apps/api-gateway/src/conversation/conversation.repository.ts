@@ -3,8 +3,7 @@ import {
   type ChannelDeliveryReceiptListQuery,
   createPrismaChannelDeliveryReceiptStore,
   type DurableStore,
-  InMemoryStore,
-  JsonFileStore
+  InMemoryStore
 } from "@support-communication/database";
 import { type OutboxEvent } from "@support-communication/events";
 import { Prisma } from "@prisma/client";
@@ -212,11 +211,6 @@ export interface ConversationRepositoryPort {
   saveConversationMutation(input: ConversationMutationRecordInput): MaybePromise<ConversationMutationRecord>;
 }
 
-interface ConversationRepositoryOptions {
-  filePath: string;
-  seed?: ConversationState;
-}
-
 type MaybePromise<T> = T | Promise<T>;
 let defaultRepository: ConversationRepository | null = null;
 
@@ -234,10 +228,6 @@ export class ConversationRepository implements ConversationRepositoryPort {
 
   static inMemory(seed: ConversationState = createEmptyConversationState()): ConversationRepository {
     return new ConversationRepository(createDurableConversationRepository(new InMemoryStore(seed)));
-  }
-
-  static open({ filePath, seed = createEmptyConversationState() }: ConversationRepositoryOptions): ConversationRepository {
-    return new ConversationRepository(createDurableConversationRepository(new JsonFileStore({ filePath, seed })));
   }
 
   static prisma({ client }: PrismaConversationRepositoryOptions): ConversationRepository {

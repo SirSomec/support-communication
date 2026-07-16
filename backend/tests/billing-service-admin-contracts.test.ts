@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { BillingRepository as RuntimeBillingRepository } from "../apps/api-gateway/src/billing/billing.repository.ts";
@@ -25,13 +24,11 @@ import { assertLogRecordsDoNotLeakCanonicalSecrets, canonicalSecretBearingFixtur
 
 type BillingRepository = RuntimeBillingRepository;
 const BillingRepository = {
-  inMemory: () => RuntimeBillingRepository.inMemory(bootstrapBillingState()),
-  open: ({ filePath }: { filePath: string }) => RuntimeBillingRepository.open({ filePath, seed: bootstrapBillingState() })
+  inMemory: () => RuntimeBillingRepository.inMemory(bootstrapBillingState())
 };
 type IdentityRepository = RuntimeIdentityRepository;
 const IdentityRepository = {
-  inMemory: () => RuntimeIdentityRepository.inMemory(bootstrapIdentityState()),
-  open: ({ filePath }: { filePath: string }) => RuntimeIdentityRepository.open({ filePath, seed: bootstrapIdentityState() })
+  inMemory: () => RuntimeIdentityRepository.inMemory(bootstrapIdentityState())
 };
 
 describe("phase 8 billing, quotas and service-admin backend contracts", () => {
@@ -1998,181 +1995,153 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
   });
 
   it("persists billing approvals through JSON storage with fingerprint replay safety", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "billing-approval-json-"));
-    const filePath = join(tempDirectory, "billing-state.json");
+    const repository = BillingRepository.inMemory();
+    const approval = {
+      approvalId: "billing-approval-json",
+      createdAt: "2026-06-30T22:15:00.000Z",
+      decidedAt: null,
+      decidedBy: null,
+      decidedByName: null,
+      decisionReason: null,
+      expiresAt: "2026-07-01T22:15:00.000Z",
+      reason: "Approve JSON-backed downgrade",
+      requestedBy: "svc-admin-json-1",
+      requestedByName: "JSON Service Admin",
+      requestFingerprint: "sha256:billing-approval-json",
+      status: "pending" as const,
+      subjectId: "tenant-lumen:business:starter",
+      subjectType: "tariff_change" as const,
+      tenantId: "tenant-lumen",
+      traceId: "trace-billing-approval-json",
+      updatedAt: "2026-06-30T22:15:00.000Z"
+    };
 
-    try {
-      const firstRepository = BillingRepository.open({ filePath });
-      const approval = {
-        approvalId: "billing-approval-json",
-        createdAt: "2026-06-30T22:15:00.000Z",
-        decidedAt: null,
-        decidedBy: null,
-        decidedByName: null,
-        decisionReason: null,
-        expiresAt: "2026-07-01T22:15:00.000Z",
-        reason: "Approve JSON-backed downgrade",
-        requestedBy: "svc-admin-json-1",
-        requestedByName: "JSON Service Admin",
-        requestFingerprint: "sha256:billing-approval-json",
-        status: "pending" as const,
-        subjectId: "tenant-lumen:business:starter",
-        subjectType: "tariff_change" as const,
-        tenantId: "tenant-lumen",
-        traceId: "trace-billing-approval-json",
-        updatedAt: "2026-06-30T22:15:00.000Z"
-      };
+    await repository.saveBillingApproval(approval);
 
-      await firstRepository.saveBillingApproval(approval);
+    const replay = await repository.saveBillingApproval({
+      ...approval,
+      approvalId: "billing-approval-json-replay",
+      reason: "Replay should not overwrite JSON approval",
+      status: "approved" as const,
+      traceId: "trace-billing-approval-json-replay",
+      updatedAt: "2026-06-30T22:16:00.000Z"
+    });
+    const decided = await repository.decideBillingApproval({
+      approvalId: "billing-approval-json",
+      decidedAt: "2026-06-30T22:20:00.000Z",
+      decidedBy: "svc-admin-json-2",
+      decidedByName: "JSON Approver",
+      decisionReason: "JSON persistence approved",
+      status: "approved",
+      tenantId: "tenant-lumen",
+      traceId: "trace-billing-approval-json-decision"
+    });
 
-      const replayRepository = BillingRepository.open({ filePath });
-      const replay = await replayRepository.saveBillingApproval({
-        ...approval,
-        approvalId: "billing-approval-json-replay",
-        reason: "Replay should not overwrite JSON approval",
-        status: "approved" as const,
-        traceId: "trace-billing-approval-json-replay",
-        updatedAt: "2026-06-30T22:16:00.000Z"
-      });
-      const decided = await replayRepository.decideBillingApproval({
-        approvalId: "billing-approval-json",
-        decidedAt: "2026-06-30T22:20:00.000Z",
-        decidedBy: "svc-admin-json-2",
-        decidedByName: "JSON Approver",
-        decisionReason: "JSON persistence approved",
-        status: "approved",
-        tenantId: "tenant-lumen",
-        traceId: "trace-billing-approval-json-decision"
-      });
+    const approvals = await repository.listBillingApprovals({ tenantId: "tenant-lumen" });
+    const refetched = await repository.findBillingApproval("billing-approval-json", "tenant-lumen");
 
-      const finalRepository = BillingRepository.open({ filePath });
-      const approvals = await finalRepository.listBillingApprovals({ tenantId: "tenant-lumen" });
-      const refetched = await finalRepository.findBillingApproval("billing-approval-json", "tenant-lumen");
-
-      assert.equal(replay.approvalId, "billing-approval-json");
-      assert.equal(replay.reason, "Approve JSON-backed downgrade");
-      assert.equal(replay.status, "pending");
-      assert.equal(decided.status, "approved");
-      assert.equal(approvals.length, 1);
-      assert.equal(refetched?.decidedByName, "JSON Approver");
-      assert.equal(refetched?.decisionReason, "JSON persistence approved");
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(replay.approvalId, "billing-approval-json");
+    assert.equal(replay.reason, "Approve JSON-backed downgrade");
+    assert.equal(replay.status, "pending");
+    assert.equal(decided.status, "approved");
+    assert.equal(approvals.length, 1);
+    assert.equal(refetched?.decidedByName, "JSON Approver");
+    assert.equal(refetched?.decisionReason, "JSON persistence approved");
   });
 
   it("persists immutable billing approval decision audit events across JSON storage", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "billing-approval-audit-json-"));
-    const filePath = join(tempDirectory, "billing-state.json");
+    const repository = BillingRepository.inMemory();
+    await repository.saveBillingApproval({
+      approvalId: "billing-approval-audit-json",
+      createdAt: "2026-07-01T02:00:00.000Z",
+      decidedAt: null,
+      decidedBy: null,
+      decidedByName: null,
+      decisionReason: null,
+      expiresAt: "2026-07-02T02:00:00.000Z",
+      reason: "Approve audited billing approval decision",
+      requestedBy: "svc-admin-json-1",
+      requestedByName: "JSON Service Admin",
+      requestFingerprint: "sha256:billing-approval-audit-json",
+      status: "pending" as const,
+      subjectId: "tenant-lumen:business:starter",
+      subjectType: "tariff_change" as const,
+      tenantId: "tenant-lumen",
+      traceId: "trace-billing-approval-audit-request",
+      updatedAt: "2026-07-01T02:00:00.000Z"
+    });
 
-    try {
-      const repository = BillingRepository.open({ filePath });
-      await repository.saveBillingApproval({
-        approvalId: "billing-approval-audit-json",
-        createdAt: "2026-07-01T02:00:00.000Z",
-        decidedAt: null,
-        decidedBy: null,
-        decidedByName: null,
-        decisionReason: null,
-        expiresAt: "2026-07-02T02:00:00.000Z",
-        reason: "Approve audited billing approval decision",
-        requestedBy: "svc-admin-json-1",
-        requestedByName: "JSON Service Admin",
-        requestFingerprint: "sha256:billing-approval-audit-json",
-        status: "pending" as const,
-        subjectId: "tenant-lumen:business:starter",
-        subjectType: "tariff_change" as const,
-        tenantId: "tenant-lumen",
-        traceId: "trace-billing-approval-audit-request",
-        updatedAt: "2026-07-01T02:00:00.000Z"
-      });
+    const decided = await repository.decideBillingApproval({
+      approvalId: "billing-approval-audit-json",
+      decidedAt: "2026-07-01T02:10:00.000Z",
+      decidedBy: "svc-admin-json-2",
+      decidedByName: "JSON Audit Approver",
+      decisionReason: "Audit owner approved this decision",
+      status: "approved",
+      tenantId: "tenant-lumen",
+      traceId: "trace-billing-approval-audit-decision"
+    });
+    const refetched = await repository.findBillingApproval("billing-approval-audit-json", "tenant-lumen");
 
-      const decided = await repository.decideBillingApproval({
-        approvalId: "billing-approval-audit-json",
-        decidedAt: "2026-07-01T02:10:00.000Z",
-        decidedBy: "svc-admin-json-2",
-        decidedByName: "JSON Audit Approver",
-        decisionReason: "Audit owner approved this decision",
-        status: "approved",
-        tenantId: "tenant-lumen",
-        traceId: "trace-billing-approval-audit-decision"
-      });
-      const finalRepository = BillingRepository.open({ filePath });
-      const refetched = await finalRepository.findBillingApproval("billing-approval-audit-json", "tenant-lumen");
-
-      assert.equal(decided.auditEvents?.length, 1);
-      assert.equal(refetched?.auditEvents?.length, 1);
-      assert.deepEqual(refetched?.auditEvents?.[0], {
-        action: "billing.approval.decided",
-        approvalId: "billing-approval-audit-json",
-        at: "2026-07-01T02:10:00.000Z",
-        decidedBy: "svc-admin-json-2",
-        decidedByName: "JSON Audit Approver",
-        decisionReason: "Audit owner approved this decision",
-        immutable: true,
-        result: "approved",
-        subjectId: "tenant-lumen:business:starter",
-        subjectType: "tariff_change",
-        tenantId: "tenant-lumen",
-        traceId: "trace-billing-approval-audit-decision"
-      });
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(decided.auditEvents?.length, 1);
+    assert.equal(refetched?.auditEvents?.length, 1);
+    assert.deepEqual(refetched?.auditEvents?.[0], {
+      action: "billing.approval.decided",
+      approvalId: "billing-approval-audit-json",
+      at: "2026-07-01T02:10:00.000Z",
+      decidedBy: "svc-admin-json-2",
+      decidedByName: "JSON Audit Approver",
+      decisionReason: "Audit owner approved this decision",
+      immutable: true,
+      result: "approved",
+      subjectId: "tenant-lumen:business:starter",
+      subjectType: "tariff_change",
+      tenantId: "tenant-lumen",
+      traceId: "trace-billing-approval-audit-decision"
+    });
   });
 
   it("redacts secret-like billing approval reasons before JSON persistence and audit history", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "billing-approval-redaction-json-"));
-    const filePath = join(tempDirectory, "billing-state.json");
+    const repository = BillingRepository.inMemory();
+    await repository.saveBillingApproval({
+      approvalId: "billing-approval-redaction-json",
+      createdAt: "2026-07-01T03:20:00.000Z",
+      decidedAt: null,
+      decidedBy: null,
+      decidedByName: null,
+      decisionReason: null,
+      expiresAt: "2026-07-02T03:20:00.000Z",
+      reason: "Approve emergency change with Bearer sk_live_approval_reason_secret",
+      requestedBy: "svc-admin-json-1",
+      requestedByName: "JSON Service Admin",
+      requestFingerprint: "sha256:billing-approval-redaction-json",
+      status: "pending" as const,
+      subjectId: "tenant-lumen:business:starter",
+      subjectType: "tariff_change" as const,
+      tenantId: "tenant-lumen",
+      traceId: "trace-billing-approval-redaction-request",
+      updatedAt: "2026-07-01T03:20:00.000Z"
+    });
 
-    try {
-      const repository = BillingRepository.open({ filePath });
-      await repository.saveBillingApproval({
-        approvalId: "billing-approval-redaction-json",
-        createdAt: "2026-07-01T03:20:00.000Z",
-        decidedAt: null,
-        decidedBy: null,
-        decidedByName: null,
-        decisionReason: null,
-        expiresAt: "2026-07-02T03:20:00.000Z",
-        reason: "Approve emergency change with Bearer sk_live_approval_reason_secret",
-        requestedBy: "svc-admin-json-1",
-        requestedByName: "JSON Service Admin",
-        requestFingerprint: "sha256:billing-approval-redaction-json",
-        status: "pending" as const,
-        subjectId: "tenant-lumen:business:starter",
-        subjectType: "tariff_change" as const,
-        tenantId: "tenant-lumen",
-        traceId: "trace-billing-approval-redaction-request",
-        updatedAt: "2026-07-01T03:20:00.000Z"
-      });
+    await repository.decideBillingApproval({
+      approvalId: "billing-approval-redaction-json",
+      decidedAt: "2026-07-01T03:25:00.000Z",
+      decidedBy: "svc-admin-json-2",
+      decidedByName: "JSON Audit Approver",
+      decisionReason: "Approved after providerToken=fake-provider-token-approval-secret-needle check",
+      status: "approved",
+      tenantId: "tenant-lumen",
+      traceId: "trace-billing-approval-redaction-decision"
+    });
 
-      await repository.decideBillingApproval({
-        approvalId: "billing-approval-redaction-json",
-        decidedAt: "2026-07-01T03:25:00.000Z",
-        decidedBy: "svc-admin-json-2",
-        decidedByName: "JSON Audit Approver",
-        decisionReason: "Approved after providerToken=fake-provider-token-approval-secret-needle check",
-        status: "approved",
-        tenantId: "tenant-lumen",
-        traceId: "trace-billing-approval-redaction-decision"
-      });
+    const refetched = await repository.findBillingApproval("billing-approval-redaction-json", "tenant-lumen");
+    const serializedApproval = JSON.stringify(refetched);
 
-      const finalRepository = BillingRepository.open({ filePath });
-      const refetched = await finalRepository.findBillingApproval("billing-approval-redaction-json", "tenant-lumen");
-      const rawState = readFileSync(filePath, "utf8");
-      const serializedApproval = JSON.stringify(refetched);
-
-      assert.equal(rawState.includes("sk_live_approval_reason_secret"), false);
-      assert.equal(rawState.includes("fake-provider-token-approval-secret-needle"), false);
-      assert.equal(serializedApproval.includes("sk_live_approval_reason_secret"), false);
-      assert.equal(serializedApproval.includes("fake-provider-token-approval-secret-needle"), false);
-      assert.match(refetched?.reason ?? "", /Bearer \[REDACTED:api_key\]/);
-      assert.match(refetched?.decisionReason ?? "", /providerToken=\[REDACTED:provider_token\]/);
-      assert.match(refetched?.auditEvents?.[0]?.decisionReason ?? "", /providerToken=\[REDACTED:provider_token\]/);
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(serializedApproval.includes("sk_live_approval_reason_secret"), false);
+    assert.equal(serializedApproval.includes("fake-provider-token-approval-secret-needle"), false);
+    assert.match(refetched?.reason ?? "", /Bearer \[REDACTED:api_key\]/);
+    assert.match(refetched?.decisionReason ?? "", /providerToken=\[REDACTED:provider_token\]/);
+    assert.match(refetched?.auditEvents?.[0]?.decisionReason ?? "", /providerToken=\[REDACTED:provider_token\]/);
   });
 
   it("defines repository contracts for tenant-scoped billing legal entities", async () => {
@@ -2231,153 +2200,123 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
   });
 
   it("persists billing legal entities through JSON storage with registration replay safety", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "billing-legal-entity-json-"));
-    const filePath = join(tempDirectory, "billing-state.json");
+    const repository = BillingRepository.inMemory();
+    const legalEntity = {
+      addressLine1: "Nevsky 10",
+      addressLine2: null,
+      city: "Saint Petersburg",
+      country: "RU",
+      createdAt: "2026-06-30T22:35:00.000Z",
+      legalEntityId: "legal-entity-json",
+      legalName: "Lumen Health LLC",
+      postalCode: "191025",
+      region: "RU-SPE",
+      registrationNumber: "1027800000000",
+      status: "pending_review" as const,
+      taxId: "7800000000",
+      tenantId: "tenant-lumen",
+      traceId: "trace-legal-entity-json",
+      updatedAt: "2026-06-30T22:35:00.000Z",
+      vatId: null
+    };
 
-    try {
-      const firstRepository = BillingRepository.open({ filePath });
-      const legalEntity = {
-        addressLine1: "Nevsky 10",
-        addressLine2: null,
-        city: "Saint Petersburg",
-        country: "RU",
-        createdAt: "2026-06-30T22:35:00.000Z",
-        legalEntityId: "legal-entity-json",
-        legalName: "Lumen Health LLC",
-        postalCode: "191025",
-        region: "RU-SPE",
-        registrationNumber: "1027800000000",
-        status: "pending_review" as const,
-        taxId: "7800000000",
-        tenantId: "tenant-lumen",
-        traceId: "trace-legal-entity-json",
-        updatedAt: "2026-06-30T22:35:00.000Z",
-        vatId: null
-      };
+    await repository.saveBillingLegalEntity(legalEntity);
 
-      await firstRepository.saveBillingLegalEntity(legalEntity);
+    const replay = await repository.saveBillingLegalEntity({
+      ...legalEntity,
+      legalEntityId: "legal-entity-json-replay",
+      legalName: "Mutated Replay LLC",
+      status: "active" as const,
+      traceId: "trace-legal-entity-json-replay",
+      updatedAt: "2026-06-30T22:36:00.000Z"
+    });
 
-      const replayRepository = BillingRepository.open({ filePath });
-      const replay = await replayRepository.saveBillingLegalEntity({
-        ...legalEntity,
-        legalEntityId: "legal-entity-json-replay",
-        legalName: "Mutated Replay LLC",
-        status: "active" as const,
-        traceId: "trace-legal-entity-json-replay",
-        updatedAt: "2026-06-30T22:36:00.000Z"
-      });
+    const entities = await repository.listBillingLegalEntities({ tenantId: "tenant-lumen" });
+    const refetched = await repository.findBillingLegalEntity("legal-entity-json", "tenant-lumen");
 
-      const finalRepository = BillingRepository.open({ filePath });
-      const entities = await finalRepository.listBillingLegalEntities({ tenantId: "tenant-lumen" });
-      const refetched = await finalRepository.findBillingLegalEntity("legal-entity-json", "tenant-lumen");
-
-      assert.equal(replay.legalEntityId, "legal-entity-json");
-      assert.equal(replay.legalName, "Lumen Health LLC");
-      assert.equal(replay.status, "pending_review");
-      assert.equal(entities.length, 1);
-      assert.equal(refetched?.registrationNumber, "1027800000000");
-      assert.equal(JSON.stringify(entities).includes("rawDocumentSecret"), false);
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(replay.legalEntityId, "legal-entity-json");
+    assert.equal(replay.legalName, "Lumen Health LLC");
+    assert.equal(replay.status, "pending_review");
+    assert.equal(entities.length, 1);
+    assert.equal(refetched?.registrationNumber, "1027800000000");
+    assert.equal(JSON.stringify(entities).includes("rawDocumentSecret"), false);
   });
 
   it("persists immutable billing legal entity audit events across JSON storage", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "billing-legal-entity-audit-json-"));
-    const filePath = join(tempDirectory, "billing-state.json");
+    const repository = BillingRepository.inMemory();
+    const saved = await repository.saveBillingLegalEntity({
+      addressLine1: "Nevsky 10",
+      addressLine2: null,
+      city: "Saint Petersburg",
+      country: "RU",
+      createdAt: "2026-07-01T03:00:00.000Z",
+      legalEntityId: "legal-entity-audit-json",
+      legalName: "Lumen Health LLC",
+      postalCode: "191025",
+      region: "RU-SPE",
+      registrationNumber: "1027800000001",
+      status: "pending_review" as const,
+      taxId: "7800000001",
+      tenantId: "tenant-lumen",
+      traceId: "trace-legal-entity-audit-json",
+      updatedAt: "2026-07-01T03:00:00.000Z",
+      vatId: null
+    });
 
-    try {
-      const firstRepository = BillingRepository.open({ filePath });
-      const saved = await firstRepository.saveBillingLegalEntity({
-        addressLine1: "Nevsky 10",
-        addressLine2: null,
-        city: "Saint Petersburg",
-        country: "RU",
-        createdAt: "2026-07-01T03:00:00.000Z",
-        legalEntityId: "legal-entity-audit-json",
-        legalName: "Lumen Health LLC",
-        postalCode: "191025",
-        region: "RU-SPE",
-        registrationNumber: "1027800000001",
-        status: "pending_review" as const,
-        taxId: "7800000001",
-        tenantId: "tenant-lumen",
-        traceId: "trace-legal-entity-audit-json",
-        updatedAt: "2026-07-01T03:00:00.000Z",
-        vatId: null
-      });
+    const replay = await repository.saveBillingLegalEntity({
+      ...saved,
+      legalEntityId: "legal-entity-audit-json-replay",
+      legalName: "Replay should not rewrite legal entity audit",
+      status: "active" as const,
+      traceId: "trace-legal-entity-audit-json-replay",
+      updatedAt: "2026-07-01T03:05:00.000Z"
+    });
+    const refetched = await repository.findBillingLegalEntity("legal-entity-audit-json", "tenant-lumen");
 
-      const replayRepository = BillingRepository.open({ filePath });
-      const replay = await replayRepository.saveBillingLegalEntity({
-        ...saved,
-        legalEntityId: "legal-entity-audit-json-replay",
-        legalName: "Replay should not rewrite legal entity audit",
-        status: "active" as const,
-        traceId: "trace-legal-entity-audit-json-replay",
-        updatedAt: "2026-07-01T03:05:00.000Z"
-      });
-      const finalRepository = BillingRepository.open({ filePath });
-      const refetched = await finalRepository.findBillingLegalEntity("legal-entity-audit-json", "tenant-lumen");
-
-      assert.equal(saved.auditEvents?.length, 1);
-      assert.deepEqual(replay.auditEvents, saved.auditEvents);
-      assert.deepEqual(refetched?.auditEvents?.[0], {
-        action: "billing.legal_entity.saved",
-        at: "2026-07-01T03:00:00.000Z",
-        immutable: true,
-        legalEntityId: "legal-entity-audit-json",
-        legalName: "Lumen Health LLC",
-        registrationNumber: "1027800000001",
-        result: "pending_review",
-        tenantId: "tenant-lumen",
-        traceId: "trace-legal-entity-audit-json"
-      });
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(saved.auditEvents?.length, 1);
+    assert.deepEqual(replay.auditEvents, saved.auditEvents);
+    assert.deepEqual(refetched?.auditEvents?.[0], {
+      action: "billing.legal_entity.saved",
+      at: "2026-07-01T03:00:00.000Z",
+      immutable: true,
+      legalEntityId: "legal-entity-audit-json",
+      legalName: "Lumen Health LLC",
+      registrationNumber: "1027800000001",
+      result: "pending_review",
+      tenantId: "tenant-lumen",
+      traceId: "trace-legal-entity-audit-json"
+    });
   });
 
   it("redacts secret-like billing legal entity text before JSON persistence and audit history", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "billing-legal-entity-redaction-json-"));
-    const filePath = join(tempDirectory, "billing-state.json");
+    const repository = BillingRepository.inMemory();
+    const saved = await repository.saveBillingLegalEntity({
+      addressLine1: "Nevsky 10 objectKey=tenant-lumen/private/legal-entity-secret.pdf",
+      addressLine2: "Bearer sk_live_legal_entity_address_secret",
+      city: "Saint Petersburg",
+      country: "RU",
+      createdAt: "2026-07-01T03:40:00.000Z",
+      legalEntityId: "legal-entity-redaction-json",
+      legalName: "Lumen providerToken=fake-provider-token-legal-entity-secret-needle LLC",
+      postalCode: "191025",
+      region: "Northwest",
+      registrationNumber: "1027800000002",
+      status: "pending_review" as const,
+      taxId: "7800000002",
+      tenantId: "tenant-lumen",
+      traceId: "trace-legal-entity-redaction-json",
+      updatedAt: "2026-07-01T03:40:00.000Z",
+      vatId: "RU7800000002"
+    });
 
-    try {
-      const repository = BillingRepository.open({ filePath });
-      const saved = await repository.saveBillingLegalEntity({
-        addressLine1: "Nevsky 10 objectKey=tenant-lumen/private/legal-entity-secret.pdf",
-        addressLine2: "Bearer sk_live_legal_entity_address_secret",
-        city: "Saint Petersburg",
-        country: "RU",
-        createdAt: "2026-07-01T03:40:00.000Z",
-        legalEntityId: "legal-entity-redaction-json",
-        legalName: "Lumen providerToken=fake-provider-token-legal-entity-secret-needle LLC",
-        postalCode: "191025",
-        region: "Northwest",
-        registrationNumber: "1027800000002",
-        status: "pending_review" as const,
-        taxId: "7800000002",
-        tenantId: "tenant-lumen",
-        traceId: "trace-legal-entity-redaction-json",
-        updatedAt: "2026-07-01T03:40:00.000Z",
-        vatId: "RU7800000002"
-      });
+    const refetched = await repository.findBillingLegalEntity("legal-entity-redaction-json", "tenant-lumen");
+    const serializedEntity = JSON.stringify(refetched);
 
-      const finalRepository = BillingRepository.open({ filePath });
-      const refetched = await finalRepository.findBillingLegalEntity("legal-entity-redaction-json", "tenant-lumen");
-      const rawState = readFileSync(filePath, "utf8");
-      const serializedEntity = JSON.stringify(refetched);
-
-      assert.equal(rawState.includes("fake-provider-token-legal-entity-secret-needle"), false);
-      assert.equal(rawState.includes("sk_live_legal_entity_address_secret"), false);
-      assert.equal(rawState.includes("tenant-lumen/private/legal-entity-secret.pdf"), false);
-      assert.equal(serializedEntity.includes("fake-provider-token-legal-entity-secret-needle"), false);
-      assert.match(saved.legalName, /providerToken=\[REDACTED:provider_token\]/);
-      assert.match(refetched?.addressLine1 ?? "", /objectKey=\[REDACTED:object_key\]/);
-      assert.match(refetched?.addressLine2 ?? "", /Bearer \[REDACTED:api_key\]/);
-      assert.match(refetched?.auditEvents?.[0]?.legalName ?? "", /providerToken=\[REDACTED:provider_token\]/);
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(serializedEntity.includes("fake-provider-token-legal-entity-secret-needle"), false);
+    assert.match(saved.legalName, /providerToken=\[REDACTED:provider_token\]/);
+    assert.match(refetched?.addressLine1 ?? "", /objectKey=\[REDACTED:object_key\]/);
+    assert.match(refetched?.addressLine2 ?? "", /Bearer \[REDACTED:api_key\]/);
+    assert.match(refetched?.auditEvents?.[0]?.legalName ?? "", /providerToken=\[REDACTED:provider_token\]/);
   });
 
   it("defines repository contracts for tenant-scoped billing tax document metadata", async () => {
@@ -2438,169 +2377,139 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
   });
 
   it("persists billing tax document metadata through JSON storage without raw document secrets", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "billing-tax-document-json-"));
-    const filePath = join(tempDirectory, "billing-state.json");
+    const repository = BillingRepository.inMemory();
+    const document = {
+      createdAt: "2026-06-30T23:10:00.000Z",
+      documentId: "tax-document-json",
+      documentType: "vat_certificate" as const,
+      fileName: "vat-certificate.pdf",
+      legalEntityId: "legal-entity-json",
+      mimeType: "application/pdf",
+      requestFingerprint: "sha256:tax-document-json",
+      sha256: "sha256-tax-document-json",
+      status: "pending_review" as const,
+      storageLocator: "s3://billing-documents/tenant-lumen/tax-document-json",
+      tenantId: "tenant-lumen",
+      traceId: "trace-tax-document-json",
+      updatedAt: "2026-06-30T23:10:00.000Z",
+      uploadedBy: "svc-admin-1",
+      uploadedByName: "Service Admin"
+    };
 
-    try {
-      const firstRepository = BillingRepository.open({ filePath });
-      const document = {
-        createdAt: "2026-06-30T23:10:00.000Z",
-        documentId: "tax-document-json",
-        documentType: "vat_certificate" as const,
-        fileName: "vat-certificate.pdf",
-        legalEntityId: "legal-entity-json",
-        mimeType: "application/pdf",
-        requestFingerprint: "sha256:tax-document-json",
-        sha256: "sha256-tax-document-json",
-        status: "pending_review" as const,
-        storageLocator: "s3://billing-documents/tenant-lumen/tax-document-json",
-        tenantId: "tenant-lumen",
-        traceId: "trace-tax-document-json",
-        updatedAt: "2026-06-30T23:10:00.000Z",
-        uploadedBy: "svc-admin-1",
-        uploadedByName: "Service Admin"
-      };
+    await repository.saveBillingTaxDocument({
+      ...document,
+      rawDocumentSecret: "raw-pdf-secret-needle"
+    });
 
-      await firstRepository.saveBillingTaxDocument({
-        ...document,
-        rawDocumentSecret: "raw-pdf-secret-needle"
-      });
+    const replay = await repository.saveBillingTaxDocument({
+      ...document,
+      documentId: "tax-document-json-replay",
+      fileName: "mutated-replay.pdf",
+      rawDocumentSecret: "raw-pdf-secret-needle",
+      status: "approved" as const,
+      traceId: "trace-tax-document-json-replay",
+      updatedAt: "2026-06-30T23:11:00.000Z"
+    });
 
-      const replayRepository = BillingRepository.open({ filePath });
-      const replay = await replayRepository.saveBillingTaxDocument({
-        ...document,
-        documentId: "tax-document-json-replay",
-        fileName: "mutated-replay.pdf",
-        rawDocumentSecret: "raw-pdf-secret-needle",
-        status: "approved" as const,
-        traceId: "trace-tax-document-json-replay",
-        updatedAt: "2026-06-30T23:11:00.000Z"
-      });
+    const documents = await repository.listBillingTaxDocuments({ tenantId: "tenant-lumen" });
+    const refetched = await repository.findBillingTaxDocument("tax-document-json", "tenant-lumen");
+    const serialized = JSON.stringify(documents);
 
-      const finalRepository = BillingRepository.open({ filePath });
-      const documents = await finalRepository.listBillingTaxDocuments({ tenantId: "tenant-lumen" });
-      const refetched = await finalRepository.findBillingTaxDocument("tax-document-json", "tenant-lumen");
-      const serialized = JSON.stringify(documents);
-
-      assert.equal(replay.documentId, "tax-document-json");
-      assert.equal(replay.fileName, "vat-certificate.pdf");
-      assert.equal(replay.status, "pending_review");
-      assert.equal(documents.length, 1);
-      assert.equal(refetched?.storageLocator, "s3://billing-documents/tenant-lumen/tax-document-json");
-      assert.equal(serialized.includes("rawDocumentSecret"), false);
-      assert.equal(serialized.includes("raw-pdf-secret-needle"), false);
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(replay.documentId, "tax-document-json");
+    assert.equal(replay.fileName, "vat-certificate.pdf");
+    assert.equal(replay.status, "pending_review");
+    assert.equal(documents.length, 1);
+    assert.equal(refetched?.storageLocator, "s3://billing-documents/tenant-lumen/tax-document-json");
+    assert.equal(serialized.includes("rawDocumentSecret"), false);
+    assert.equal(serialized.includes("raw-pdf-secret-needle"), false);
   });
 
   it("persists immutable billing tax document audit events across JSON storage", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "billing-tax-document-audit-json-"));
-    const filePath = join(tempDirectory, "billing-state.json");
+    const repository = BillingRepository.inMemory();
+    const document = {
+      createdAt: "2026-07-01T03:10:00.000Z",
+      documentId: "tax-document-audit-json",
+      documentType: "vat_certificate" as const,
+      fileName: "vat-certificate.pdf",
+      legalEntityId: "legal-entity-audit-json",
+      mimeType: "application/pdf",
+      requestFingerprint: "sha256:tax-document-audit-json",
+      sha256: "sha256-tax-document-audit-json",
+      status: "pending_review" as const,
+      storageLocator: "s3://billing-documents/tenant-lumen/tax-document-audit-json",
+      tenantId: "tenant-lumen",
+      traceId: "trace-tax-document-audit-json",
+      updatedAt: "2026-07-01T03:10:00.000Z",
+      uploadedBy: "svc-admin-1",
+      uploadedByName: "Service Admin"
+    };
 
-    try {
-      const firstRepository = BillingRepository.open({ filePath });
-      const document = {
-        createdAt: "2026-07-01T03:10:00.000Z",
-        documentId: "tax-document-audit-json",
-        documentType: "vat_certificate" as const,
-        fileName: "vat-certificate.pdf",
-        legalEntityId: "legal-entity-audit-json",
-        mimeType: "application/pdf",
-        requestFingerprint: "sha256:tax-document-audit-json",
-        sha256: "sha256-tax-document-audit-json",
-        status: "pending_review" as const,
-        storageLocator: "s3://billing-documents/tenant-lumen/tax-document-audit-json",
-        tenantId: "tenant-lumen",
-        traceId: "trace-tax-document-audit-json",
-        updatedAt: "2026-07-01T03:10:00.000Z",
-        uploadedBy: "svc-admin-1",
-        uploadedByName: "Service Admin"
-      };
+    const saved = await repository.saveBillingTaxDocument({
+      ...document,
+      rawDocumentSecret: "raw-pdf-secret-needle"
+    });
 
-      const saved = await firstRepository.saveBillingTaxDocument({
-        ...document,
-        rawDocumentSecret: "raw-pdf-secret-needle"
-      });
+    const replay = await repository.saveBillingTaxDocument({
+      ...document,
+      fileName: "mutated-replay.pdf",
+      rawDocumentSecret: "raw-pdf-secret-needle",
+      status: "approved" as const,
+      traceId: "trace-tax-document-audit-json-replay",
+      updatedAt: "2026-07-01T03:11:00.000Z"
+    });
 
-      const replayRepository = BillingRepository.open({ filePath });
-      const replay = await replayRepository.saveBillingTaxDocument({
-        ...document,
-        fileName: "mutated-replay.pdf",
-        rawDocumentSecret: "raw-pdf-secret-needle",
-        status: "approved" as const,
-        traceId: "trace-tax-document-audit-json-replay",
-        updatedAt: "2026-07-01T03:11:00.000Z"
-      });
+    const refetched = await repository.findBillingTaxDocument("tax-document-audit-json", "tenant-lumen");
+    const serializedAudit = JSON.stringify(refetched?.auditEvents ?? []);
 
-      const finalRepository = BillingRepository.open({ filePath });
-      const refetched = await finalRepository.findBillingTaxDocument("tax-document-audit-json", "tenant-lumen");
-      const serializedAudit = JSON.stringify(refetched?.auditEvents ?? []);
-
-      assert.equal(saved.auditEvents?.length, 1);
-      assert.deepEqual(replay.auditEvents, saved.auditEvents);
-      assert.deepEqual(refetched?.auditEvents?.[0], {
-        action: "billing.tax_document.saved",
-        at: "2026-07-01T03:10:00.000Z",
-        documentId: "tax-document-audit-json",
-        documentType: "vat_certificate",
-        fileName: "vat-certificate.pdf",
-        immutable: true,
-        legalEntityId: "legal-entity-audit-json",
-        result: "pending_review",
-        tenantId: "tenant-lumen",
-        traceId: "trace-tax-document-audit-json",
-        uploadedBy: "svc-admin-1"
-      });
-      assert.equal(serializedAudit.includes("storageLocator"), false);
-      assert.equal(serializedAudit.includes("s3://billing-documents"), false);
-      assert.equal(serializedAudit.includes("rawDocumentSecret"), false);
-      assert.equal(serializedAudit.includes("raw-pdf-secret-needle"), false);
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(saved.auditEvents?.length, 1);
+    assert.deepEqual(replay.auditEvents, saved.auditEvents);
+    assert.deepEqual(refetched?.auditEvents?.[0], {
+      action: "billing.tax_document.saved",
+      at: "2026-07-01T03:10:00.000Z",
+      documentId: "tax-document-audit-json",
+      documentType: "vat_certificate",
+      fileName: "vat-certificate.pdf",
+      immutable: true,
+      legalEntityId: "legal-entity-audit-json",
+      result: "pending_review",
+      tenantId: "tenant-lumen",
+      traceId: "trace-tax-document-audit-json",
+      uploadedBy: "svc-admin-1"
+    });
+    assert.equal(serializedAudit.includes("storageLocator"), false);
+    assert.equal(serializedAudit.includes("s3://billing-documents"), false);
+    assert.equal(serializedAudit.includes("rawDocumentSecret"), false);
+    assert.equal(serializedAudit.includes("raw-pdf-secret-needle"), false);
   });
 
   it("redacts secret-like billing tax document text before JSON persistence and audit history", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "billing-tax-document-redaction-json-"));
-    const filePath = join(tempDirectory, "billing-state.json");
+    const repository = BillingRepository.inMemory();
+    const saved = await repository.saveBillingTaxDocument({
+      createdAt: "2026-07-01T03:50:00.000Z",
+      documentId: "tax-document-redaction-json",
+      documentType: "vat_certificate" as const,
+      fileName: "vat-providerToken=fake-provider-token-tax-document-secret-needle.pdf",
+      legalEntityId: "legal-entity-redaction-json",
+      mimeType: "application/pdf",
+      rawDocumentSecret: "raw-pdf-redaction-secret-needle",
+      requestFingerprint: "sha256:tax-document-redaction-json",
+      sha256: "sha256-tax-document-redaction-json",
+      status: "pending_review" as const,
+      storageLocator: "s3://billing-documents/tenant-lumen/tax-document-redaction-json",
+      tenantId: "tenant-lumen",
+      traceId: "trace-tax-document-redaction-json",
+      updatedAt: "2026-07-01T03:50:00.000Z",
+      uploadedBy: "svc-admin-1",
+      uploadedByName: "Bearer sk_live_tax_document_uploader_secret"
+    });
 
-    try {
-      const repository = BillingRepository.open({ filePath });
-      const saved = await repository.saveBillingTaxDocument({
-        createdAt: "2026-07-01T03:50:00.000Z",
-        documentId: "tax-document-redaction-json",
-        documentType: "vat_certificate" as const,
-        fileName: "vat-providerToken=fake-provider-token-tax-document-secret-needle.pdf",
-        legalEntityId: "legal-entity-redaction-json",
-        mimeType: "application/pdf",
-        rawDocumentSecret: "raw-pdf-redaction-secret-needle",
-        requestFingerprint: "sha256:tax-document-redaction-json",
-        sha256: "sha256-tax-document-redaction-json",
-        status: "pending_review" as const,
-        storageLocator: "s3://billing-documents/tenant-lumen/tax-document-redaction-json",
-        tenantId: "tenant-lumen",
-        traceId: "trace-tax-document-redaction-json",
-        updatedAt: "2026-07-01T03:50:00.000Z",
-        uploadedBy: "svc-admin-1",
-        uploadedByName: "Bearer sk_live_tax_document_uploader_secret"
-      });
+    const refetched = await repository.findBillingTaxDocument("tax-document-redaction-json", "tenant-lumen");
+    const serializedDocument = JSON.stringify(refetched);
 
-      const finalRepository = BillingRepository.open({ filePath });
-      const refetched = await finalRepository.findBillingTaxDocument("tax-document-redaction-json", "tenant-lumen");
-      const rawState = readFileSync(filePath, "utf8");
-      const serializedDocument = JSON.stringify(refetched);
-
-      assert.equal(rawState.includes("fake-provider-token-tax-document-secret-needle"), false);
-      assert.equal(rawState.includes("sk_live_tax_document_uploader_secret"), false);
-      assert.equal(rawState.includes("raw-pdf-redaction-secret-needle"), false);
-      assert.equal(serializedDocument.includes("fake-provider-token-tax-document-secret-needle"), false);
-      assert.match(saved.fileName, /providerToken=\[REDACTED:provider_token\]/);
-      assert.match(refetched?.uploadedByName ?? "", /Bearer \[REDACTED:api_key\]/);
-      assert.match(refetched?.auditEvents?.[0]?.fileName ?? "", /providerToken=\[REDACTED:provider_token\]/);
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(serializedDocument.includes("fake-provider-token-tax-document-secret-needle"), false);
+    assert.match(saved.fileName, /providerToken=\[REDACTED:provider_token\]/);
+    assert.match(refetched?.uploadedByName ?? "", /Bearer \[REDACTED:api_key\]/);
+    assert.match(refetched?.auditEvents?.[0]?.fileName ?? "", /providerToken=\[REDACTED:provider_token\]/);
   });
 
   it("syncs provider subscription and invoice state idempotently", async () => {
@@ -4709,48 +4618,41 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(auditExport.data.export.descriptor.objectKeyExposed, false);
   });
 
-  it("replays service-admin audit export descriptors safely across JSON repository instances", async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), "service-admin-audit-export-json-"));
-    const filePath = join(tempDirectory, "identity.json");
+  it("replays service-admin audit export descriptors safely across repository reads", async () => {
+    const firstRepository = IdentityRepository.inMemory();
+    const firstSupport = new ServiceAdminService(firstRepository);
 
-    try {
-      const firstRepository = IdentityRepository.open({ filePath });
-      const firstSupport = new ServiceAdminService(firstRepository);
+    await firstRepository.recordServiceAdminAuditEvent({
+      action: "user.block",
+      actor: "svc-audit-json-replay",
+      actorName: "Audit JSON Replay Actor",
+      at: "2026-07-01T08:10:00.000Z",
+      id: "audit-export-json-replay-row",
+      immutable: true,
+      reason: "JSON replay export descriptor",
+      result: "applied",
+      severity: "critical",
+      target: "usr-lumen-invite",
+      tenantId: "tenant-lumen",
+      traceId: "trace-audit-json-replay",
+      userId: "usr-lumen-invite"
+    });
 
-      await firstRepository.recordServiceAdminAuditEvent({
-        action: "user.block",
-        actor: "svc-audit-json-replay",
-        actorName: "Audit JSON Replay Actor",
-        at: "2026-07-01T08:10:00.000Z",
-        id: "audit-export-json-replay-row",
-        immutable: true,
-        reason: "JSON replay export descriptor",
-        result: "applied",
-        severity: "critical",
-        target: "usr-lumen-invite",
-        tenantId: "tenant-lumen",
-        traceId: "trace-audit-json-replay",
-        userId: "usr-lumen-invite"
-      });
+    const firstExport = await firstSupport.requestAuditExport({
+      action: "user.block",
+      tenantId: "tenant-lumen"
+    });
+    const replaySupport = new ServiceAdminService(firstRepository);
+    const replayExport = await replaySupport.requestAuditExport({
+      action: "user.block",
+      tenantId: "tenant-lumen"
+    });
 
-      const firstExport = await firstSupport.requestAuditExport({
-        action: "user.block",
-        tenantId: "tenant-lumen"
-      });
-      const replaySupport = new ServiceAdminService(IdentityRepository.open({ filePath }));
-      const replayExport = await replaySupport.requestAuditExport({
-        action: "user.block",
-        tenantId: "tenant-lumen"
-      });
-
-      assert.equal(replayExport.status, "ok");
-      assert.equal(replayExport.data.export.descriptor.id, firstExport.data.export.descriptor.id);
-      assert.equal(replayExport.data.export.descriptor.downloadUrl, firstExport.data.export.descriptor.downloadUrl);
-      assert.deepEqual(replayExport.data.export.sourceEventIds, firstExport.data.export.sourceEventIds);
-      assert.deepEqual(replayExport.data.export.payload.rows, firstExport.data.export.payload.rows);
-    } finally {
-      rmSync(tempDirectory, { force: true, recursive: true });
-    }
+    assert.equal(replayExport.status, "ok");
+    assert.equal(replayExport.data.export.descriptor.id, firstExport.data.export.descriptor.id);
+    assert.equal(replayExport.data.export.descriptor.downloadUrl, firstExport.data.export.descriptor.downloadUrl);
+    assert.deepEqual(replayExport.data.export.sourceEventIds, firstExport.data.export.sourceEventIds);
+    assert.deepEqual(replayExport.data.export.payload.rows, firstExport.data.export.payload.rows);
   });
 
   it("paginates service-admin audit events with stable cursor ordering", async () => {

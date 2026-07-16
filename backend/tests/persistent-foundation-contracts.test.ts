@@ -58,20 +58,12 @@ describe("persistent backend foundation and identity services", () => {
     const configuredDefaults: string[] = [];
     const prismaFactoryCalls: Array<{ datasourceUrl?: string }> = [];
     const repository = configureRepositoryBootstrap({
-      createJsonRepository: (filePath) => `json:${filePath}`,
       createPrismaRepository: (client) => `prisma:${client}`,
       prismaClientFactory: (options) => {
         prismaFactoryCalls.push(options);
         return "client";
       },
-      repositoryEnv: "SUPPORT_REPOSITORY",
-      source: {
-        DATABASE_URL: "postgres://support",
-        SUPPORT_REPOSITORY: "PrIsMa",
-        SUPPORT_STORE_FILE: "ignored.json"
-      },
-      storeFileEnv: "SUPPORT_STORE_FILE",
-      suffix: "support",
+      source: { DATABASE_URL: "postgres://support" },
       useDefault: (next) => {
         configuredDefaults.push(next);
       }
@@ -81,19 +73,16 @@ describe("persistent backend foundation and identity services", () => {
     assert.deepEqual(configuredDefaults, ["prisma:client"]);
     assert.deepEqual(prismaFactoryCalls, [{ datasourceUrl: "postgres://support" }]);
 
-    const withoutFallback = configureRepositoryBootstrap({
-      createJsonRepository: () => {
-        throw new Error("json fallback should not be opened");
-      },
+    const withoutDatabaseUrl = configureRepositoryBootstrap({
       createPrismaRepository: (client) => `prisma:${client}`,
-      prismaClientFactory: () => "client-no-fallback",
-      repositoryEnv: "SUPPORT_REPOSITORY",
-      source: { SUPPORT_REPOSITORY: "prisma" },
-      storeFileEnv: "SUPPORT_STORE_FILE",
-      suffix: "support",
+      prismaClientFactory: (options) => {
+        assert.equal(options.datasourceUrl, undefined);
+        return "client-no-url";
+      },
+      source: {},
       useDefault: () => undefined
     });
-    assert.equal(withoutFallback, "prisma:client-no-fallback");
+    assert.equal(withoutDatabaseUrl, "prisma:client-no-url");
   });
 
   it("auth state fails closed for unverified and expired persisted sessions", async () => {

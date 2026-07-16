@@ -64,8 +64,6 @@ describe("Prisma-backed integration repository contracts", () => {
     try {
       const repository = configureIntegrationRepository({
         DATABASE_URL: "postgresql://support:support@localhost:5432/support_communication",
-        INTEGRATION_REPOSITORY: "prisma",
-        INTEGRATION_STORE_FILE: filePath,
         NODE_ENV: "staging",
         PORT: "4100",
         SERVICE_NAME: "api-gateway"

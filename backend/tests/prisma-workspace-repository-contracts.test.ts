@@ -221,8 +221,7 @@ describe("Prisma-backed workspace repository contracts", () => {
       DATABASE_URL: "postgresql://support:support@127.0.0.1:5432/support_communication",
       NODE_ENV: "test",
       PORT: "4191",
-      SERVICE_NAME: "api-gateway",
-      WORKSPACE_REPOSITORY: "prisma"
+      SERVICE_NAME: "api-gateway"
     }, {
       prismaClientFactory: (options) => {
         factoryCalls.push(options);

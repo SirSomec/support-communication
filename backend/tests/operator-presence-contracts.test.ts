@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { RealtimeEvent } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { OperatorPresenceRepository } from "../apps/api-gateway/src/presence/operator-presence.repository.ts";
@@ -118,19 +115,6 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
         () => repository.setStatus({ operatorId: "operator-anna", status: "away" as never, tenantId: TENANT }),
         TypeError
       );
-    });
-
-    it("persists intervals across reopenings of the json store", async () => {
-      const filePath = join(tmpdir(), `operator-presence-${randomUUID()}.json`);
-      try {
-        const repository = OperatorPresenceRepository.open({ filePath });
-        await repository.setStatus({ operatorId: "operator-anna", status: "busy", tenantId: TENANT });
-
-        const reopened = OperatorPresenceRepository.open({ filePath });
-        assert.equal((await reopened.findCurrent(TENANT, "operator-anna"))?.status, "busy");
-      } finally {
-        rmSync(filePath, { force: true });
-      }
     });
   });
 

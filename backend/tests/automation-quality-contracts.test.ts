@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   ConversationRepository,
@@ -2552,75 +2550,6 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.match(identityFixtures, /"quality\.ratings\.write"/);
   });
 
-  it("persists JSON quality ratings with tenant-scoped replay parity across repository reopen", () => {
-    const workspace = makeTempWorkspace();
-
-    try {
-      const filePath = join(workspace, "quality-ratings.json");
-      const first = QualityRepository.open({ filePath });
-      const rating = {
-        auditId: "evt_quality_rating_json",
-        channel: "SDK",
-        clientId: "client-json",
-        conversationId: "conv-rating-json",
-        createdAt: "2026-06-30T14:00:00.000Z",
-        operator: "operator-json",
-        ratingId: "quality_rating_json",
-        realtimeEventId: "evt_quality_score_json",
-        scale: "CSI" as const,
-        score: 4,
-        tenantId: "tenant-volga",
-        topic: "Delivery"
-      };
-
-      const saved = first.saveQualityRating(rating);
-      rating.score = 1;
-      saved.score = 1;
-
-      const second = QualityRepository.open({ filePath });
-      const replay = second.saveQualityRating({
-        ...rating,
-        channel: "Email",
-        createdAt: "2026-06-30T14:01:00.000Z",
-        score: 2,
-        tenantId: "tenant-volga"
-      });
-      const otherTenant = second.saveQualityRating({
-        ...rating,
-        createdAt: "2026-06-30T14:02:00.000Z",
-        score: 5,
-        tenantId: "tenant-other"
-      });
-      const reopenedRows = QualityRepository.open({ filePath }).listQualityRatings({ tenantId: "tenant-volga" });
-      const state = JSON.parse(readFileSync(filePath, "utf8")) as {
-        ratings: Array<Record<string, unknown>>;
-      };
-
-      assert.equal(replay.createdAt, "2026-06-30T14:00:00.000Z");
-      assert.equal(replay.channel, "SDK");
-      assert.equal(replay.score, 4);
-      assert.equal(otherTenant.tenantId, "tenant-other");
-      assert.equal(otherTenant.score, 5);
-      assert.equal(reopenedRows.length, 1);
-      assert.equal(reopenedRows[0].ratingId, "quality_rating_json");
-      assert.equal(reopenedRows[0].score, 4);
-      assert.equal(state.ratings.length, 2);
-      assert.ok(state.ratings.some((row) =>
-        row.tenantId === "tenant-volga"
-          && row.ratingId === "quality_rating_json"
-          && row.score === 4
-          && row.channel === "SDK"
-      ));
-      assert.ok(state.ratings.some((row) =>
-        row.tenantId === "tenant-other"
-          && row.ratingId === "quality_rating_json"
-          && row.score === 5
-      ));
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
-  });
-
   it("preserves immutable quality rating audit evidence on duplicate replay", () => {
     const repository = QualityRepository.inMemory();
     const first = repository.saveQualityRating({
@@ -2726,79 +2655,6 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.match(identityFixtures, /"quality\.manual-reviews\.write"/);
   });
 
-  it("persists JSON manual QA reviews with tenant-scoped replay parity across repository reopen", () => {
-    const workspace = makeTempWorkspace();
-
-    try {
-      const filePath = join(workspace, "quality-manual-reviews.json");
-      const first = QualityRepository.open({ filePath });
-      const review = {
-        auditId: "evt_quality_manual_review_json",
-        conversationId: "conv-review-json",
-        createdAt: "2026-06-30T14:05:00.000Z",
-        criteria: {
-          completeness: 5,
-          correctness: 4,
-          speed: 5,
-          tone: 4
-        },
-        overrideReason: "senior_review",
-        reviewId: "qa_review_json",
-        reviewer: "senior-json",
-        score: 92,
-        tenantId: "tenant-volga"
-      };
-
-      const saved = first.saveManualQaReview(review);
-      review.criteria.tone = 1;
-      saved.criteria.tone = 1;
-
-      const second = QualityRepository.open({ filePath });
-      const replay = second.saveManualQaReview({
-        ...review,
-        createdAt: "2026-06-30T14:06:00.000Z",
-        reviewer: "senior-replay",
-        score: 70,
-        tenantId: "tenant-volga"
-      });
-      const otherTenant = second.saveManualQaReview({
-        ...review,
-        createdAt: "2026-06-30T14:07:00.000Z",
-        reviewer: "senior-other",
-        score: 88,
-        tenantId: "tenant-other"
-      });
-      const reopenedRows = QualityRepository.open({ filePath }).listManualQaReviews({ tenantId: "tenant-volga" });
-      const state = JSON.parse(readFileSync(filePath, "utf8")) as {
-        manualQaReviews: Array<Record<string, unknown> & { criteria?: Record<string, unknown> }>;
-      };
-
-      assert.equal(replay.createdAt, "2026-06-30T14:05:00.000Z");
-      assert.equal(replay.reviewer, "senior-json");
-      assert.equal(replay.score, 92);
-      assert.equal(replay.criteria.tone, 4);
-      assert.equal(otherTenant.tenantId, "tenant-other");
-      assert.equal(otherTenant.score, 88);
-      assert.equal(reopenedRows.length, 1);
-      assert.equal(reopenedRows[0].reviewId, "qa_review_json");
-      assert.equal(reopenedRows[0].criteria.tone, 4);
-      assert.equal(state.manualQaReviews.length, 2);
-      assert.ok(state.manualQaReviews.some((row) =>
-        row.tenantId === "tenant-volga"
-          && row.reviewId === "qa_review_json"
-          && row.score === 92
-          && row.criteria?.tone === 4
-      ));
-      assert.ok(state.manualQaReviews.some((row) =>
-        row.tenantId === "tenant-other"
-          && row.reviewId === "qa_review_json"
-          && row.score === 88
-      ));
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
-  });
-
   it("preserves immutable manual QA review audit evidence on duplicate replay", () => {
     const repository = QualityRepository.inMemory();
     const first = repository.saveManualQaReview({
@@ -2893,82 +2749,6 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.match(source, /@Post\("draft-score"\)[\s\S]*@RequireServiceAdminAction\("quality\.scoring-audits\.write"\)[\s\S]*scoreDraftResponse\(/);
     assert.match(source, /@Post\("draft-scores"\)[\s\S]*@RequireServiceAdminAction\("quality\.scoring-audits\.write"\)[\s\S]*scoreDraftResponseAlias\(/);
     assert.match(identityFixtures, /"quality\.scoring-audits\.write"/);
-  });
-
-  it("persists JSON AI scoring audit rows with tenant-scoped replay parity across repository reopen", () => {
-    const workspace = makeTempWorkspace();
-
-    try {
-      const filePath = join(workspace, "quality-ai-scoring-audits.json");
-      const first = QualityRepository.open({ filePath });
-      const audit = {
-        auditId: "evt_ai_scoring_json",
-        conversationId: "conv-scoring-json",
-        createdAt: "2026-06-30T14:10:00.000Z",
-        providerId: "deterministic-quality-scoring",
-        providerResultId: "quality_deterministic_json",
-        queue: "quality-ai-scoring",
-        score: 96,
-        status: "ok" as const,
-        tenantId: "tenant-volga",
-        traceId: "trc_quality_scoring_json"
-      };
-
-      const saved = first.saveAiScoringAudit(audit);
-      audit.score = 10;
-      saved.score = 10;
-
-      const second = QualityRepository.open({ filePath });
-      const replay = second.saveAiScoringAudit({
-        ...audit,
-        createdAt: "2026-06-30T14:11:00.000Z",
-        providerResultId: "quality_deterministic_changed",
-        score: 20,
-        status: "failed",
-        tenantId: "tenant-volga"
-      });
-      const otherTenant = second.saveAiScoringAudit({
-        ...audit,
-        createdAt: "2026-06-30T14:12:00.000Z",
-        providerResultId: null,
-        score: null,
-        status: "failed",
-        tenantId: "tenant-other"
-      });
-      const reopenedRows = QualityRepository.open({ filePath }).listAiScoringAudits({ tenantId: "tenant-volga" });
-      const state = JSON.parse(readFileSync(filePath, "utf8")) as {
-        aiScoringAudits: Array<Record<string, unknown>>;
-      };
-
-      assert.equal(replay.createdAt, "2026-06-30T14:10:00.000Z");
-      assert.equal(replay.providerResultId, "quality_deterministic_json");
-      assert.equal(replay.score, 96);
-      assert.equal(replay.status, "ok");
-      assert.equal(otherTenant.tenantId, "tenant-other");
-      assert.equal(otherTenant.providerResultId, null);
-      assert.equal(otherTenant.score, null);
-      assert.equal(otherTenant.status, "failed");
-      assert.equal(reopenedRows.length, 1);
-      assert.equal(reopenedRows[0].auditId, "evt_ai_scoring_json");
-      assert.equal(reopenedRows[0].queue, "quality-ai-scoring");
-      assert.equal(reopenedRows[0].traceId, "trc_quality_scoring_json");
-      assert.equal(state.aiScoringAudits.length, 2);
-      assert.ok(state.aiScoringAudits.some((row) =>
-        row.tenantId === "tenant-volga"
-          && row.auditId === "evt_ai_scoring_json"
-          && row.providerResultId === "quality_deterministic_json"
-          && row.score === 96
-          && row.status === "ok"
-      ));
-      assert.ok(state.aiScoringAudits.some((row) =>
-        row.tenantId === "tenant-other"
-          && row.auditId === "evt_ai_scoring_json"
-          && row.providerResultId === null
-          && row.status === "failed"
-      ));
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
   });
 
   it("preserves immutable AI scoring audit evidence on duplicate replay", () => {
@@ -3100,7 +2880,3 @@ describe("phase 7 automation, bot runtime, proactive and quality backend contrac
     assert.match(review.data.auditId, /^evt_quality_/);
   });
 });
-
-function makeTempWorkspace(): string {
-  return mkdtempSync(join(tmpdir(), "support-quality-"));
-}

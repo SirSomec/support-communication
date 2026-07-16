@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   RoutingRepository,
@@ -91,24 +88,6 @@ describe("Phase 4.1 routing rule, queue membership and operator capacity reposit
     assert.equal(refetched?.overrideAllowed, false);
     assert.equal(byOperatorChannel?.id, "capacity_vk_anna");
     assert.deepEqual(capacities.map((item) => item.id), ["capacity_vk_anna"]);
-  });
-
-  it("persists routing rules, queue membership and operator capacity across JSON repository instances", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "support-routing-json-"));
-    const storeFile = join(workspace, "routing.json");
-    try {
-      const first = RoutingRepository.open({ filePath: storeFile });
-      await first.saveRoutingRule(routingRule({ channel: "SDK", id: "rule_sdk", tenantId: "tenant-volga" }));
-      await first.saveQueueMembership(queueMembership({ id: "membership_sdk_ivan", operatorId: "operator-ivan", queueId: "SDK", tenantId: "tenant-volga" }));
-      await first.saveOperatorCapacity(operatorCapacity({ channel: "SDK", id: "capacity_sdk_ivan", operatorId: "operator-ivan", tenantId: "tenant-volga" }));
-
-      const second = RoutingRepository.open({ filePath: storeFile });
-      assert.equal((await second.findRoutingRule("rule_sdk", { tenantId: "tenant-volga" }))?.channel, "SDK");
-      assert.deepEqual((await second.listQueueMemberships({ tenantId: "tenant-volga" })).map((item) => item.id), ["membership_sdk_ivan"]);
-      assert.deepEqual((await second.listOperatorCapacities({ tenantId: "tenant-volga" })).map((item) => item.id), ["capacity_sdk_ivan"]);
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
   });
 
   it("scopes routing rule reads to the requested tenant", async () => {

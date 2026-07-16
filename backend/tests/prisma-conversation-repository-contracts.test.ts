@@ -449,7 +449,6 @@ describe("Prisma-backed conversation repository contracts", () => {
     const factoryCalls: unknown[] = [];
 
     const repository = configureConversationRepository({
-      CONVERSATION_REPOSITORY: "prisma",
       DATABASE_URL: "postgresql://support:support@127.0.0.1:5432/support_communication",
       NODE_ENV: "test",
       PORT: "4191",

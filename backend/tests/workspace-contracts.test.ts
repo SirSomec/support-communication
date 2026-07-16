@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, it } from "node:test";
 import { createDeterministicObjectStorageSigner, createS3CompatibleObjectStorageSigner } from "../apps/api-gateway/src/workspace/object-storage.ts";
 import { WorkspaceRepository, type ClientProfileRecord, type KnowledgeArticle, type TemplateRecord } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
@@ -552,44 +550,6 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.equal((await repository.listClientMergeConflicts({
       tenantId: "tenant-volga"
     }))[0]?.state, "open");
-  });
-
-  it("persists client identity, merge graph and conflicts across JSON repository instances", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "support-workspace-json-"));
-    const storeFile = join(workspace, "workspace.json");
-    try {
-      const firstRepository = WorkspaceRepository.open({ filePath: storeFile }) as unknown as ClientProfileIdentityRepository;
-      await firstRepository.saveClientProfile(clientProfile({
-        id: "maria",
-        phone: "+7 999 204-18-44",
-        sourceProfileId: "src_sdk_maria",
-        tenantId: "tenant-volga"
-      }));
-      await firstRepository.saveClientMergeEvent(clientMergeGraphEvent({
-        candidateProfileId: "src_telegram_dmitry",
-        id: "evt_merge_json_1",
-        primaryProfileId: "src_sdk_maria",
-        tenantId: "tenant-volga"
-      }));
-      await firstRepository.saveClientMergeConflict(clientMergeConflict({
-        candidateProfileId: "src_telegram_dmitry",
-        id: "conflict_json_1",
-        primaryProfileId: "src_sdk_maria",
-        tenantId: "tenant-volga"
-      }));
-
-      const secondRepository = WorkspaceRepository.open({ filePath: storeFile }) as unknown as ClientProfileIdentityRepository;
-      assert.equal((await secondRepository.findClientProfile("src_sdk_maria", { tenantId: "tenant-volga" }))?.phone, "+7 999 204-18-44");
-      assert.deepEqual((await secondRepository.listClientMergeEvents({ tenantId: "tenant-volga" })).map((event) => event.id), ["evt_merge_json_1"]);
-      assert.deepEqual((await secondRepository.listClientMergeConflicts({ state: "open", tenantId: "tenant-volga" })).map((conflict) => conflict.id), ["conflict_json_1"]);
-
-      await secondRepository.updateClientMergeConflictState("conflict_json_1", "resolved");
-
-      const thirdRepository = WorkspaceRepository.open({ filePath: storeFile }) as unknown as ClientProfileIdentityRepository;
-      assert.deepEqual((await thirdRepository.listClientMergeConflicts({ state: "resolved", tenantId: "tenant-volga" })).map((conflict) => conflict.id), ["conflict_json_1"]);
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
   });
 
   it("creates file upload, finalize and permission-aware download policy descriptors", async () => {
@@ -1821,45 +1781,6 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.deepEqual(deliveryEvents.map((event) => event.immutable), [true, true]);
     assert.equal(firstEvent?.reason, "Initial delivery template");
     assert.equal(missingEvent, undefined);
-  });
-
-  it("persists template records, versions and audit rows across JSON repository instances", async () => {
-    const runtimeDir = mkdtempSync(join(tmpdir(), "workspace-template-json-"));
-    const storeFile = join(runtimeDir, "workspace.json");
-
-    try {
-      const first = WorkspaceRepository.open({ filePath: storeFile }) as unknown as TemplateRecordRepository & TemplateVersionRepository & TemplateAuditRepository;
-      await first.saveTemplate(templateRecord({
-        id: "tpl_json_delivery",
-        text: "We are checking your delivery status.",
-        title: "JSON delivery template",
-        version: 1
-      }));
-      await first.saveTemplateVersion(templateVersion({
-        id: "tpl_json_delivery_v1",
-        templateId: "tpl_json_delivery",
-        text: "We are checking your delivery status.",
-        title: "JSON delivery template",
-        version: 1
-      }));
-      await first.saveTemplateAuditEvent(templateAuditEvent({
-        action: "template.created",
-        id: "evt_template_json_delivery_created",
-        reason: "Initial JSON template",
-        templateId: "tpl_json_delivery"
-      }));
-
-      const second = WorkspaceRepository.open({ filePath: storeFile }) as unknown as TemplateRecordRepository & TemplateVersionRepository & TemplateAuditRepository;
-      const template = await second.findTemplate("tpl_json_delivery");
-      const versions = await second.listTemplateVersions("tpl_json_delivery");
-      const auditEvents = await second.listTemplateAuditEvents("tpl_json_delivery");
-
-      assert.equal(template?.title, "JSON delivery template");
-      assert.deepEqual(versions.map((version) => version.id), ["tpl_json_delivery_v1"]);
-      assert.deepEqual(auditEvents.map((event) => event.id), ["evt_template_json_delivery_created"]);
-    } finally {
-      rmSync(runtimeDir, { force: true, recursive: true });
-    }
   });
 
   it("preserves knowledge article versions and approval history", async () => {

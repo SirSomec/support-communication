@@ -1,8 +1,6 @@
 import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   handlePublicIdentifyUserRequest,
@@ -266,37 +264,6 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(providerCredentialCrypto.decrypt(JSON.parse(String(maxCredential?.accessTokenEncrypted))), "max-token");
   });
 
-  it("persists tenant channel connections across JSON repository reopen without raw secrets", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "integration-channel-connections-"));
-    const filePath = join(workspace, "integration-store.json");
-    const tenantId = "tenant-durable";
-
-    try {
-      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
-      const firstService = new IntegrationService(firstRepository, { telegramFetch: telegramFetchOk("durable_bot") });
-      const created = await firstService.createChannelConnection(tenantId, {
-        credentials: { botToken: "123:durable-secret" },
-        name: "Durable Telegram",
-        type: "telegram"
-      });
-      assert.equal(created.status, "ok");
-
-      const reopenedRepository = IntegrationRepository.open({ filePath });
-      const reopenedService = new IntegrationService(reopenedRepository);
-      const list = await reopenedService.fetchChannelConnections(tenantId, { type: "telegram" });
-      const connections = list.data.connections as Array<Record<string, unknown>>;
-
-      assert.equal(list.status, "ok");
-      assert.equal(connections.length, 1);
-      assert.equal(connections[0]?.name, "Durable Telegram");
-      assert.equal(connections[0]?.credentialsMasked, true);
-      assert.equal(JSON.stringify(connections).includes("durable-secret"), false);
-      assert.equal(reopenedRepository.findTelegramConnectionByTenantId(tenantId)?.botToken, "123:durable-secret");
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
-  });
-
   it("queues API key rotation without returning raw key material", async () => {
     const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 
@@ -348,33 +315,6 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     ]);
     assert.equal(JSON.stringify(state.apiKeyRotationAuditEvents).includes("rawKey"), false);
     assert.equal(JSON.stringify(state.apiKeyRotationAuditEvents).includes("sk_test_support_secret"), false);
-  });
-
-  it("reloads public API key rotation audit rows from JSON store without raw key material", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "integration-rotation-audit-"));
-    try {
-      const filePath = join(workspace, "integration-rotation-audit.json");
-      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
-      const integrations = new IntegrationService(firstRepository);
-
-      const rotated = await integrations.rotateApiKey("stage-key");
-      const fileContents = readFileSync(filePath, "utf8");
-      const reopenedRepository = IntegrationRepository.open({ filePath });
-      const state = reopenedRepository.readState();
-
-      assert.equal(rotated.status, "ok");
-      assert.equal(fileContents.includes("sk_test_support_secret"), false);
-      assert.equal(state.apiKeyRotationAuditEvents.length, 1);
-      assert.equal("rawKey" in state.apiKeyRotationAuditEvents[0], false);
-      assert.equal("rawSecret" in state.apiKeyRotationAuditEvents[0], false);
-      assert.equal(state.apiKeyRotationAuditEvents[0].auditId, rotated.data.auditId);
-      assert.equal(state.apiKeyRotationAuditEvents[0].rotationId, rotated.data.rotationId);
-      assert.equal(state.apiKeyRotationAuditEvents[0].keyId, "stage-key");
-      assert.equal(state.apiKeyRotationAuditEvents[0].keyPreview, "sk_test_****_44ST");
-      assert.equal(state.apiKeyRotationAuditEvents[0].immutable, true);
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
   });
 
   it("creates public API keys with one-time raw secret and hash-only persistence", async () => {
@@ -484,26 +424,6 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     const vkEndpoint = workspace.data.webhookEndpoints.find((endpoint) => endpoint.id === "vk-inbound");
     assert.equal(vkEndpoint?.url, "https://api.support.local/webhooks/vk-2");
     assert.ok(workspace.data.webhookEndpoints.every((endpoint) => endpoint.signature));
-  });
-
-  it("persists webhook endpoint records in the JSON store across reopen", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "integration-webhook-endpoints-"));
-    try {
-      const filePath = join(workspace, "integration-webhook-endpoints.json");
-      const integrations = new IntegrationService(IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() }));
-
-      const created = await integrations.createWebhookEndpoint({ name: "Durable hooks", url: "https://durable.example.test/hooks" });
-      await integrations.deleteWebhookEndpoint("vk-inbound");
-
-      const reopened = new IntegrationService(IntegrationRepository.open({ filePath }));
-      const reopenedWorkspace = await reopened.fetchIntegrationWorkspace();
-      const endpointIds = reopenedWorkspace.data.webhookEndpoints.map((endpoint) => endpoint.id);
-
-      assert.equal(endpointIds.includes(created.data.endpoint.id), true);
-      assert.equal(endpointIds.includes("vk-inbound"), false);
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
   });
 
   it("replays webhook deliveries idempotently while preserving original trace id", async () => {
@@ -1612,48 +1532,6 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(spacedAuth.context.keyId, "pak_contract_hash_spaced");
   });
 
-  it("reloads hashed public API keys from JSON store without raw secret material", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "integration-public-key-"));
-    try {
-      const filePath = join(workspace, "integration-public-key.json");
-      const rawSecret = "sk_live_json_hash_secret_4411";
-      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
-      await firstRepository.savePublicApiKey({
-        createdAt: "2026-06-30T09:10:00.000Z",
-        environment: "production",
-        keyId: "pak_json_hash",
-        name: "JSON hash key",
-        owner: "Security",
-        rawSecret,
-        scopes: ["clients:identify"],
-        status: "active",
-        tenantId: "tenant-volga"
-      });
-
-      const fileContents = readFileSync(filePath, "utf8");
-      const reopenedRepository = IntegrationRepository.open({ filePath });
-      const state = reopenedRepository.readState();
-      const auth = await resolvePublicApiRequest({
-        authorization: `Bearer ${rawSecret}`,
-        environment: "production",
-        lookup: reopenedRepository,
-        requiredScope: "clients:identify"
-      });
-
-      assert.equal(fileContents.includes(rawSecret), false);
-      assert.equal(fileContents.includes(hashPublicApiKeySecret(rawSecret)), true);
-      assert.equal(state.publicApiKeys.length, 1);
-      assert.equal(state.publicApiKeys[0].secretHash, hashPublicApiKeySecret(rawSecret));
-      assert.equal(state.publicApiKeys[0].keyPreview, "sk_live_****_4411");
-      assert.equal("rawSecret" in state.publicApiKeys[0], false);
-      assert.equal(auth.allowed, true);
-      assert.equal(auth.context.keyId, "pak_json_hash");
-      assert.equal(auth.context.tenantId, "tenant-volga");
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
-  });
-
   it("reveals public API key secrets only once without storing raw secret in state", async () => {
     const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const rawSecret = "sk_live_reveal_once_secret_7788";
@@ -1696,92 +1574,6 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
       keyPreview: "sk_live_****_7788",
       status: "consumed"
     });
-  });
-
-  it("marks reveal state consumed when one-time raw secret is unavailable after repository reopen", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "integration-reveal-"));
-    try {
-      const filePath = join(workspace, "integration-reveal.json");
-      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
-      await firstRepository.savePublicApiKey({
-        createdAt: "2026-06-30T10:05:00.000Z",
-        environment: "production",
-        keyId: "pak_reveal_reopened",
-        name: "Reveal reopened key",
-        owner: "Security",
-        rawSecret: "sk_live_reopened_reveal_secret_8844",
-        scopes: ["clients:identify"],
-        status: "active",
-        tenantId: "tenant-volga"
-      });
-
-      const reopenedRepository = IntegrationRepository.open({ filePath });
-      const reveal = reopenedRepository.consumePublicApiKeyReveal({
-        consumedAt: "2026-06-30T10:06:00.000Z",
-        keyId: "pak_reveal_reopened"
-      });
-      const state = reopenedRepository.readState();
-
-      assert.equal(reveal.status, "consumed");
-      assert.equal("rawSecret" in reveal, false);
-      assert.equal(JSON.stringify(state).includes("sk_live_reopened_reveal_secret_8844"), false);
-      assert.deepEqual(state.publicApiKeyRevealStates[0], {
-        consumedAt: "2026-06-30T10:06:00.000Z",
-        createdAt: "2026-06-30T10:05:00.000Z",
-        keyId: "pak_reveal_reopened",
-        keyPreview: "sk_live_****_8844",
-        status: "consumed"
-      });
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
-  });
-
-  it("persists consumed public API key reveal state across JSON repository reopen", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "integration-reveal-consumed-"));
-    try {
-      const filePath = join(workspace, "integration-reveal-consumed.json");
-      const rawSecret = "sk_live_reveal_json_secret_5566";
-      const firstRepository = IntegrationRepository.open({ filePath, seed: bootstrapIntegrationState() });
-      await firstRepository.savePublicApiKey({
-        createdAt: "2026-06-30T10:10:00.000Z",
-        environment: "production",
-        keyId: "pak_reveal_json",
-        name: "Reveal JSON key",
-        owner: "Security",
-        rawSecret,
-        scopes: ["clients:identify"],
-        status: "active",
-        tenantId: "tenant-volga"
-      });
-
-      const revealed = firstRepository.consumePublicApiKeyReveal({
-        consumedAt: "2026-06-30T10:11:00.000Z",
-        keyId: "pak_reveal_json"
-      });
-      const fileContents = readFileSync(filePath, "utf8");
-      const reopenedRepository = IntegrationRepository.open({ filePath });
-      const state = reopenedRepository.readState();
-      const replay = reopenedRepository.consumePublicApiKeyReveal({
-        consumedAt: "2026-06-30T10:12:00.000Z",
-        keyId: "pak_reveal_json"
-      });
-
-      assert.equal(revealed.status, "revealed");
-      assert.equal(revealed.rawSecret, rawSecret);
-      assert.equal(fileContents.includes(rawSecret), false);
-      assert.equal(replay.status, "consumed");
-      assert.equal("rawSecret" in replay, false);
-      assert.deepEqual(state.publicApiKeyRevealStates[0], {
-        consumedAt: "2026-06-30T10:11:00.000Z",
-        createdAt: "2026-06-30T10:10:00.000Z",
-        keyId: "pak_reveal_json",
-        keyPreview: "sk_live_****_5566",
-        status: "consumed"
-      });
-    } finally {
-      rmSync(workspace, { force: true, recursive: true });
-    }
   });
 
   it("does not reopen one-time public API key reveal state when key creation is replayed", async () => {

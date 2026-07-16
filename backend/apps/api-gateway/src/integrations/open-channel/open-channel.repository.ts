@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { type DurableStore, InMemoryStore, JsonFileStore } from "@support-communication/database";
+import { type DurableStore, InMemoryStore } from "@support-communication/database";
 
 /**
  * External integration layer storage: Open Channel chat channels,
@@ -274,7 +274,7 @@ export class OpenChannelRepository {
 
   static default(): OpenChannelRepository {
     if (!defaultRepository) {
-      defaultRepository = OpenChannelRepository.open(process.env.OPEN_CHANNEL_STORE_FILE ?? ".runtime/open-channel.json");
+      defaultRepository = OpenChannelRepository.inMemory();
     }
     return defaultRepository;
   }
@@ -283,10 +283,6 @@ export class OpenChannelRepository {
 
   static inMemory(seed: Partial<OpenChannelState> = {}): OpenChannelRepository {
     return new OpenChannelRepository(new InMemoryStore({ ...clone(EMPTY_STATE), ...clone(seed) } as OpenChannelState));
-  }
-
-  static open(filePath: string): OpenChannelRepository {
-    return new OpenChannelRepository(new JsonFileStore({ filePath, seed: clone(EMPTY_STATE) }));
   }
 
   static prisma({ client }: PrismaOpenChannelRepositoryOptions): OpenChannelRepository {

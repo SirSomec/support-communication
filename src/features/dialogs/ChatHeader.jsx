@@ -91,19 +91,21 @@ export function ChatHeader({
           aria-label="Назначить оператора"
           disabled={!access.canManageDialogs || isClosed}
           onClick={toggleAssignmentPanel}
-          title={access.canManageDialogs ? "Назначить или передать диалог" : access.reason}
+          title={access.canManageDialogs ? "Назначить или передать диалог другому оператору" : access.reason}
           type="button"
         >
           <UserRoundCheck size={19} />
+          <span>{conversation.operatorId ? "Передать" : "Назначить"}</span>
         </button>
         <button
           aria-expanded={isActionPanelOpen}
           aria-label="Действия с диалогом"
           onClick={() => setActionPanelOpen((current) => !current)}
-          title="Действия с диалогом"
+          title="Действия с диалогом: передать старшему, вернуть в очередь, запустить спасение, пауза SLA"
           type="button"
         >
           <MoreHorizontal size={21} />
+          <span>Действия</span>
         </button>
         <button aria-label="Информация" title="Информация" type="button"><Info size={20} /></button>
       </div>

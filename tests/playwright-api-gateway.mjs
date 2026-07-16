@@ -10,8 +10,12 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const backendDir = resolve(repoRoot, "backend");
 
 const smokeDatabaseName = process.env.SMOKE_DATABASE_NAME ?? "support_communication_smoke";
+// connection_limit caps every lazy PrismaClient pool in the gateway: the prisma-only
+// runtime holds ~26 clients (per-domain bootstraps + self-booting defaults), and the
+// per-client default pool (cpus*2+1) would burst past Postgres max_connections=100
+// under smoke load, surfacing as flaky 500s ("sorry, too many clients already").
 const smokeDatabaseUrl = process.env.SMOKE_DATABASE_URL
-  ?? `postgresql://support:support@127.0.0.1:56432/${smokeDatabaseName}`;
+  ?? `postgresql://support:support@127.0.0.1:56432/${smokeDatabaseName}?connection_limit=2&pool_timeout=30`;
 
 // 1. Hermetic reset + seed of the dedicated smoke database (idempotent per run).
 const seed = spawnSync(process.execPath, ["--env-file=.env.example", "scripts/smoke-db-seed.mjs"], {

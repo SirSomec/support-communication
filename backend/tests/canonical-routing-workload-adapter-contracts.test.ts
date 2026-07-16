@@ -5,6 +5,8 @@ import type { IdentityTenantUser } from "../apps/api-gateway/src/identity/identi
 import type { TeamDirectoryRecord } from "../apps/api-gateway/src/identity/team-directory.repository.ts";
 import type { QueueDirectoryRecord } from "../apps/api-gateway/src/routing/queue-directory.repository.ts";
 import { CanonicalRoutingWorkloadAdapter } from "../apps/api-gateway/src/routing/canonical-routing-workload.adapter.ts";
+import { CanonicalRoutingConversationRepository } from "../apps/api-gateway/src/routing/canonical-routing-conversation.repository.ts";
+import type { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { RoutingRepository } from "../apps/api-gateway/src/routing/routing.repository.ts";
 import { RoutingService } from "../apps/api-gateway/src/routing/routing.service.ts";
 
@@ -112,6 +114,43 @@ describe("canonical routing workload adapter contracts", () => {
       waiting: item.waiting
     })), [{ name: "Real support queue", queueId: "queue-support", waiting: 1 }]);
     assert.equal(response.data?.operators?.[0]?.availability?.source, "not_recorded");
+  });
+
+  // Возврат бота в очередь без свободных операторов: диалог обязан получить
+  // статус queued (вкладка «Ожидают»), а не остаться «в работе».
+  it("returns an unassigned dialog to the waiting queue when auto-assignment finds no eligible operator", async () => {
+    const botDialog = conversation({ id: "conversation-bot", operatorId: undefined, status: "active" });
+    const adapter = workloadAdapter({
+      conversations: [botDialog],
+      queues: [queue()],
+      teams: [team()],
+      // Канал оператора (telegram) не совпадает с очередью диалога
+      // (queue-support) -> channel_access:denied -> кандидат blocked.
+      users: [user()]
+    });
+    const routingRepository = RoutingRepository.inMemory();
+    const canonicalConversations = new CanonicalRoutingConversationRepository({
+      listConversations: async () => [botDialog]
+    } as unknown as ConversationRepository);
+    const service = new RoutingService(routingRepository, adapter, canonicalConversations);
+
+    const response = await service.autoAssignConversation("conversation-bot", { tenantId: "tenant-a" });
+
+    assert.equal(response.status, "ok");
+    assert.equal(response.data?.assigned, false);
+    assert.equal(response.data?.queued, true);
+    const queuedConversation = response.data?.conversation as { operatorId?: string; status?: string } | undefined;
+    assert.equal(queuedConversation?.status, "queued");
+    assert.equal(queuedConversation?.operatorId, undefined);
+    const persisted = routingRepository.readState().conversations.find((item) => item.id === "conversation-bot");
+    assert.equal(persisted?.status, "queued");
+
+    // Повторный inbound по уже стоящему в очереди диалогу не создает
+    // второй transition: канонический статус queued пропускает возврат.
+    botDialog.status = "queued";
+    const replay = await service.autoAssignConversation("conversation-bot", { tenantId: "tenant-a" });
+    assert.equal(replay.data?.queued, true);
+    assert.equal("conversation" in (replay.data ?? {}), false);
   });
 });
 

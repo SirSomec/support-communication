@@ -396,12 +396,34 @@ export class RoutingService {
     const candidates = await this.buildAssignmentCandidates(conversation, tenantId);
     const candidate = candidates.find((item) => item.recommendation === "eligible");
     if (!candidate) {
+      // Свободных операторов нет: диалог реально возвращается в очередь
+      // (status queued + queue.entered), иначе после handoff бота он
+      // остается «в работе» и не виден во вкладке «Ожидают».
+      let queuedConversation: Record<string, unknown> | undefined;
+      if (conversation.status !== "queued" && conversation.status !== "closed") {
+        const returned = await this.returnConversationToQueue(
+          clone(conversation),
+          tenantId,
+          "No eligible operator available for automatic assignment",
+          context,
+          conversation
+        );
+        if (returned.status === "ok") {
+          queuedConversation = returned.data.conversation as Record<string, unknown>;
+        }
+      }
       return createEnvelope({
         service: ROUTING_SERVICE,
         operation: "autoAssignConversation",
         traceId: routingTraceId("autoAssignConversation"),
         meta: apiMeta({ reason: "no_eligible_operator" }),
-        data: { assigned: false, candidates, conversationId, queued: true }
+        data: {
+          assigned: false,
+          candidates,
+          conversationId,
+          queued: true,
+          ...(queuedConversation ? { conversation: queuedConversation } : {})
+        }
       });
     }
     return this.createAssignment({

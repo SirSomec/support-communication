@@ -4,6 +4,7 @@ import { AutomationRepository, createEmptyAutomationState } from "../apps/api-ga
 import { BotRuntimeService } from "../apps/api-gateway/src/automation/bot-runtime.service.ts";
 import { runBotRuntimeReconciliationOnce } from "../apps/api-gateway/src/automation/bot-runtime-reconciliation.worker.ts";
 import { ConversationRepository, createEmptyConversationState } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
+import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
 import { InMemoryOutboxStore } from "@support-communication/events";
 
 function automation(kind: "handoff" | "message") {
@@ -24,6 +25,22 @@ function conversations() {
 
 async function createStep(repository: AutomationRepository) {
   return new BotRuntimeService(repository, { now: () => new Date("2026-07-11T11:00:00.000Z") }).handleInboundEvent({ channel: "SDK", conversationId: "conv-1", eventId: "evt-1", scenarioId: "bot-1", tenantId: "tenant-1", traceId: "trace-1" });
+}
+
+function aiAutomation() {
+  const state = createEmptyAutomationState();
+  const nodes = [{ id: "start", type: "condition" }, { config: {}, id: "answer", type: "ai_reply", title: "Консультация" }];
+  const edges = [{ from: "start", to: "answer" }];
+  state.botScenarios.push({ activeVersionId: "v1", channels: ["SDK"], flowEdges: edges, flowNodes: nodes, id: "bot-1", name: "Bot", schemaVersion: "bot-flow/v1", status: "published", tenantId: "tenant-1" });
+  state.botScenarioVersions.push({ createdAt: "2026-07-11T10:00:00.000Z", flowEdges: edges, flowNodes: nodes, scenarioId: "bot-1", status: "published", tenantId: "tenant-1", versionId: "v1" });
+  return AutomationRepository.inMemory(state);
+}
+
+async function createResolvedStep(repository: AutomationRepository) {
+  return new BotRuntimeService(repository, {
+    aiResponder: { respond: async () => ({ citations: [], model: "test-model", text: "Рад был помочь! [[RESOLVED]]" }) },
+    now: () => new Date("2026-07-11T11:00:00.000Z")
+  }).handleInboundEvent({ channel: "SDK", conversationId: "conv-1", eventId: "evt-1", payload: { text: "Спасибо, всё решилось!" }, scenarioId: "bot-1", tenantId: "tenant-1", traceId: "trace-1" });
 }
 
 describe("bot runtime side-effect reconciliation", () => {
@@ -112,6 +129,75 @@ describe("bot runtime side-effect reconciliation", () => {
     assert.equal(deliveries.length, 1);
     assert.equal(deliveries[0]?.conversationId, "provider-chat-42");
     assert.equal(deliveries[0]?.text, "Hello");
+  });
+
+  it("closes a bot-resolved conversation through the canonical dialog transition after the goodbye", async () => {
+    const automationRepository = aiAutomation();
+    const conversationRepository = conversations();
+    const conversationService = new ConversationService(conversationRepository);
+    const step = await createResolvedStep(automationRepository);
+    assert.equal(step.instance.status, "completed");
+    const input = {
+      automationRepository,
+      closeConversation: (payload: { conversationId: string; reason: string; resolutionOutcome: string; topic?: string }, scope: { tenantId: string }) =>
+        conversationService.transitionConversationStatus({ ...payload, nextStatus: "closed" }, scope),
+      conversationRepository
+    };
+
+    // Прощальное сообщение доставляется первым; закрытие отложено на +3с.
+    const first = await runBotRuntimeReconciliationOnce({ ...input, now: "2026-07-11T11:00:01.000Z" });
+    assert.equal(first.delivered, 1);
+    let conversation = await conversationRepository.findConversation("conv-1");
+    assert.equal(conversation?.status, "assigned");
+    assert.equal(conversation?.messages.at(-1)?.text, "Рад был помочь!");
+
+    const second = await runBotRuntimeReconciliationOnce({ ...input, now: "2026-07-11T11:00:05.000Z" });
+    assert.equal(second.delivered, 1);
+    conversation = await conversationRepository.findConversation("conv-1");
+    assert.equal(conversation?.status, "closed");
+    assert.equal(conversation?.resolutionOutcome, "resolved");
+    assert.ok(conversation?.metadata?.closedAt);
+    const events = await conversationRepository.listLifecycleEvents({ conversationId: "conv-1", tenantId: "tenant-1" });
+    const closeEvent = events.find((event) => event.eventType === "status.changed" && event.data?.toStatus === "closed");
+    assert.ok(closeEvent);
+    assert.equal(closeEvent?.reason, "ai_resolved");
+
+    // Все эффекты доставлены; повторный тик ничего не переигрывает.
+    const third = await runBotRuntimeReconciliationOnce({ ...input, now: "2026-07-11T11:00:09.000Z" });
+    assert.equal(third.scanned, 0);
+  });
+
+  it("skips the close callback when the conversation is already closed", async () => {
+    const automationRepository = aiAutomation();
+    const conversationRepository = conversations();
+    const conversationService = new ConversationService(conversationRepository);
+    await createResolvedStep(automationRepository);
+    await conversationService.transitionConversationStatus(
+      { conversationId: "conv-1", nextStatus: "closed", resolutionOutcome: "resolved", topic: "Support" },
+      { tenantId: "tenant-1" }
+    );
+    let closeCalls = 0;
+    const result = await runBotRuntimeReconciliationOnce({
+      automationRepository,
+      closeConversation: async () => {
+        closeCalls += 1;
+        return { status: "ok" };
+      },
+      conversationRepository,
+      now: "2026-07-11T11:00:05.000Z"
+    });
+    assert.equal(result.delivered, 2);
+    assert.equal(closeCalls, 0);
+  });
+
+  it("retries the close effect when the callback is not wired", async () => {
+    const automationRepository = aiAutomation();
+    const conversationRepository = conversations();
+    await createResolvedStep(automationRepository);
+    const result = await runBotRuntimeReconciliationOnce({ automationRepository, conversationRepository, now: "2026-07-11T11:00:05.000Z" });
+    assert.equal(result.failed, 1);
+    const closeEffect = automationRepository.readState().botRuntimeSideEffects.find((effect) => effect.kind === "conversation_close");
+    assert.equal(closeEffect?.status, "retry_scheduled");
   });
 
   it("reconciles handoff into canonical conversation queue and one lifecycle event", async () => {

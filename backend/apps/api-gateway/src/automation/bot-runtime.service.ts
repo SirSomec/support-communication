@@ -11,7 +11,7 @@ import {
 import { planBotRuntimeConsultationStay, planBotRuntimeLabeledTransition, resolveBotRuntimeDeadLetterState, resolveBotRuntimeRetryState } from "./bot-runtime.worker.js";
 import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runtime.worker.js";
 import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
-import { AiBotResponseService, extractAiHandoffDirective, type AiBotResponse } from "./ai-bot-response.service.js";
+import { AiBotResponseService, extractAiDirectives, type AiBotResponse } from "./ai-bot-response.service.js";
 import { evaluatePostPolicy, evaluatePrePolicy, normalizeAgentPolicy } from "./agent-policy.js";
 import { evaluateAiAgentsRollout } from "./ai-agents-rollout.js";
 import { recordBotHandoff, recordBotTriggerMatch } from "./bot-observability.js";
@@ -96,6 +96,8 @@ export class BotRuntimeService {
       );
       applyGeneratedMessage(transition.sideEffects, executed.aiResponse);
       if (executed.outcome === "ai_handoff_requested" && executed.handoffSummary) transition.sideEffects.push(createAiFailureHandoff(event, node, executed.handoffSummary));
+      const closeSummary = (executed as { closeSummary?: { botId?: string; nodeId: string; reason?: string; resolutionOutcome?: string } }).closeSummary;
+      if (executed.outcome === "ai_resolved" && closeSummary) transition.sideEffects.push(createAiResolutionClose(event, node, closeSummary));
       if (executed.outcome === "handed_off" || executed.outcome === "ai_handoff_requested") {
         const context = executed.context as Record<string, unknown>;
         recordBotHandoff({
@@ -287,11 +289,13 @@ export class BotRuntimeService {
           sourceBindings,
           tenantId: event.tenantId
         });
-        // Директива передачи от модели: флаг уже выставлен сервисом, но маркер
-        // зачищается и здесь — кастомный aiResponder мог вернуть сырой текст.
-        // Клиент сервисный маркер не видит ни при каком ответчике.
-        const directive = extractAiHandoffDirective(rawResponse.text);
+        // Директивы модели: флаги уже выставлены сервисом, но маркеры
+        // зачищаются и здесь — кастомный aiResponder мог вернуть сырой текст.
+        // Клиент сервисные маркеры не видит ни при каком ответчике.
+        const directive = extractAiDirectives(rawResponse.text);
         const aiResponse = { ...rawResponse, text: directive.text };
+        // При обоих маркерах приоритет у передачи оператору: закрытие
+        // необратимее, пусть спорный случай посмотрит человек.
         if (rawResponse.handoffRequested === true || directive.handoffRequested) {
           return {
             aiResponse: aiResponse.text.trim()
@@ -307,6 +311,25 @@ export class BotRuntimeService {
             },
             outcome: "ai_handoff_requested",
             status: "handoff" as const
+          };
+        }
+        // Клиент явно подтвердил решение — обращение закрывается штатным
+        // переходом (история, resolutionOutcome, CSAT) через side effect;
+        // проверка до post-policy: прощальная реплика не обязана цитировать.
+        if (rawResponse.resolveRequested === true || directive.resolveRequested) {
+          return {
+            aiResponse: aiResponse.text.trim()
+              ? aiResponse
+              : { ...aiResponse, text: String(node.config?.resolveAcknowledgement ?? "Рад был помочь! Если появятся вопросы — напишите нам.") },
+            closeSummary: {
+              botId: scenarioId ?? event.scenarioId ?? "",
+              nodeId: node.id,
+              reason: "ai_resolved",
+              resolutionOutcome: "resolved"
+            },
+            context: { ...context, lastAiOutcome: "ai_resolved" },
+            outcome: "ai_resolved",
+            status: "completed" as const
           };
         }
         // BAI-842: post-policy — фактический ответ без источника (при наличии знаний) передаём оператору.
@@ -446,6 +469,27 @@ function consultationHandoffResult(
     },
     outcome: "ai_handoff_requested",
     status: "handoff" as const
+  };
+}
+
+function createAiResolutionClose(event: BotRuntimeInboundEvent, node: BotFlowNode, summary: { botId?: string; nodeId: string; reason?: string; resolutionOutcome?: string }): BotRuntimeSideEffect {
+  return {
+    descriptor: {
+      eventId: `evt_bot_resolution_${sanitizeIdentifierSegment(event.eventId)}_${sanitizeIdentifierSegment(node.id)}`,
+      eventName: "bot.resolution.completed",
+      resourceId: event.conversationId,
+      resourceType: "conversation",
+      schemaVersion: "bot-resolution/v1",
+      summary: {
+        botId: summary.botId ?? event.scenarioId ?? "",
+        nodeId: summary.nodeId,
+        reason: summary.reason ?? "ai_resolved",
+        resolutionOutcome: summary.resolutionOutcome ?? "resolved"
+      },
+      tenantId: event.tenantId,
+      traceId: event.traceId
+    },
+    kind: "conversation_close"
   };
 }
 

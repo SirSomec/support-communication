@@ -12,6 +12,17 @@ import type { AutomationBotRuntimeSideEffect, AutomationRepository } from "./aut
 
 export interface BotRuntimeReconciliationWorkerInput {
   automationRepository: AutomationRepository;
+  /**
+   * Штатное закрытие обращения (ConversationService.transitionConversationStatus):
+   * история обращения, resolutionOutcome, журнал, realtime и CSAT-опрос —
+   * воркер не дублирует эту логику, а вызывает сервис через колбэк.
+   */
+  closeConversation?: (payload: {
+    conversationId: string;
+    reason: string;
+    resolutionOutcome: string;
+    topic?: string;
+  }, scope: { tenantId: string }) => Promise<{ error?: { code?: string } | null; status: string }>;
   conversationRepository: Pick<
     ConversationRepository,
     | "findConversation"
@@ -210,6 +221,32 @@ async function reconcileEffect(
     const persisted = await repository.saveConversationMutation({ conversation: updated, lifecycleEvent, realtimeEvent });
     await input.realtimeFanout?.publish(persisted.realtimeEvent);
     return;
+  }
+
+  if (effect.kind === "conversation_close") {
+    const descriptor = effect.payload.descriptor as Record<string, any> | undefined;
+    if (!descriptor || descriptor.tenantId !== effect.tenantId || descriptor.resourceId !== effect.conversationId) {
+      throw new Error("bot_runtime_close_descriptor_invalid");
+    }
+    if (!input.closeConversation) throw new Error("bot_runtime_close_callback_required");
+
+    const conversation = await repository.findConversation(effect.conversationId);
+    if (!conversation || conversation.tenantId !== effect.tenantId) {
+      throw new Error("bot_runtime_close_conversation_not_found");
+    }
+    if (conversation.status === "closed") return;
+
+    const summary = (descriptor.summary ?? {}) as Record<string, unknown>;
+    const envelope = await input.closeConversation({
+      conversationId: effect.conversationId,
+      reason: String(summary.reason ?? "ai_resolved"),
+      resolutionOutcome: String(summary.resolutionOutcome ?? "resolved"),
+      // Тематика обязательна для закрытия; у бот-диалогов она есть с создания,
+      // fallback защищает от dead-letter на диалоге без тематики.
+      topic: String(conversation.topic ?? "").trim() || "Бот: вопрос решен"
+    }, { tenantId: effect.tenantId });
+    if (envelope.status === "ok" || envelope.error?.code === "conversation_already_closed") return;
+    throw new Error(`bot_runtime_close_rejected:${envelope.error?.code ?? envelope.status}`);
   }
 
   throw new Error("bot_runtime_side_effect_kind_unsupported");

@@ -137,7 +137,8 @@ describe("conversationApiMapper", () => {
       lifecycleEvents: [
         { eventType: "sla.overdue", id: "sla-event", occurredAt: "2026-07-11T08:00:00.000Z" },
         { eventType: "rescue.started", id: "rescue-event", occurredAt: "2026-07-11T08:01:00.000Z" },
-        { eventType: "quality.assessment.changed", id: "quality-event", occurredAt: "2026-07-11T08:02:00.000Z" }
+        { eventType: "quality.assessment.changed", id: "quality-event", occurredAt: "2026-07-11T08:02:00.000Z" },
+        { eventType: "status.changed", id: "bot-close-event", occurredAt: "2026-07-11T08:03:00.000Z", reason: "ai_resolved" }
       ],
       messages: []
     });
@@ -145,7 +146,8 @@ describe("conversationApiMapper", () => {
     assert.deepEqual(mapped.messages.map((message) => message.text), [
       "Нарушен срок ответа",
       "Запущено спасение диалога",
-      "Оценка качества изменена"
+      "Оценка качества изменена",
+      "Бот закрыл обращение: клиент подтвердил решение"
     ]);
   });
 });

@@ -91,7 +91,7 @@ export interface AutomationBotRuntimeSideEffect {
   deadLetteredAt: string | null;
   deliveredAt: string | null;
   id: string;
-  kind: "bot_handoff" | "message_delivery";
+  kind: "bot_handoff" | "conversation_close" | "message_delivery";
   lastError: string | null;
   leaseUntil: string | null;
   nextAttemptAt: string | null;
@@ -3299,7 +3299,11 @@ function runtimeSideEffectsFromStep(step: AutomationBotRuntimeStep): AutomationB
     kind: String(sideEffect.kind) as AutomationBotRuntimeSideEffect["kind"],
     lastError: null,
     leaseUntil: null,
-    nextAttemptAt: step.createdAt,
+    // Закрытие обращения откладывается на пару секунд: прощальное сообщение
+    // бота должно среконсилиться раньше, чем диалог станет закрытым.
+    nextAttemptAt: String(sideEffect.kind) === "conversation_close"
+      ? new Date(Date.parse(step.createdAt) + 3_000).toISOString()
+      : step.createdAt,
     payload: clone(sideEffect),
     status: "pending",
     stepId: step.id,

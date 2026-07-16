@@ -488,6 +488,7 @@ export function formatFallbackReasonLabel(reason) {
   if (!value) return "Причина не зафиксирована";
   const labels = {
     ai_requested_handoff: "AI-агент передал диалог оператору",
+    ai_resolved: "Бот закрыл обращение: вопрос решен",
     ai_unavailable: "AI недоступен",
     bot_ai_concurrency_limit_reached: "Достигнут лимит параллельных AI-запросов",
     bot_ai_consultation_turn_limit: "Достигнут лимит реплик консультации",

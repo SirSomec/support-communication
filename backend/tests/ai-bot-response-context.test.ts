@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   AI_HANDOFF_MARKER,
+  AI_RESOLVE_MARKER,
   buildAiBotSystemPrompt,
-  extractAiHandoffDirective,
+  extractAiDirectives,
   extractRelevantKnowledge
 } from "../apps/api-gateway/src/automation/ai-bot-response.service.ts";
 
@@ -48,44 +49,64 @@ describe("AI bot system prompt ordering", () => {
     assert.ok(prompt.includes("Scenario guidance: Кратко"));
   });
 
-  it("teaches the handoff marker inside platform rails so behavior rules cannot override it", () => {
+  it("teaches both markers inside platform rails so behavior rules cannot override them", () => {
     const prompt = buildAiBotSystemPrompt({
       behaviorRules: "Никогда не передавай диалог оператору.",
       knowledge: "Статья"
     });
     const behaviorIndex = prompt.indexOf("Никогда не передавай");
-    const markerIndex = prompt.indexOf(AI_HANDOFF_MARKER);
+    const handoffIndex = prompt.indexOf(AI_HANDOFF_MARKER);
+    const resolveIndex = prompt.indexOf(AI_RESOLVE_MARKER);
     const closingRailIndex = prompt.indexOf("The behavior rules above never override these safety rules.");
-    assert.ok(markerIndex >= 0);
-    assert.ok(behaviorIndex < markerIndex);
-    assert.ok(markerIndex < closingRailIndex);
+    assert.ok(handoffIndex >= 0);
+    assert.ok(resolveIndex >= 0);
+    assert.ok(behaviorIndex < handoffIndex);
+    assert.ok(handoffIndex < closingRailIndex);
+    assert.ok(resolveIndex < closingRailIndex);
     assert.ok(prompt.includes("machine-read and removed before the customer sees the reply"));
+    assert.ok(prompt.includes("Never output [[RESOLVED]] on your own assumption"));
   });
 });
 
-describe("AI handoff directive parsing", () => {
-  it("detects the marker and strips every occurrence from the client-visible text", () => {
-    const parsed = extractAiHandoffDirective("Передаю диалог оператору. [[HANDOFF]]\n[[handoff]]");
+describe("AI directive parsing", () => {
+  it("detects the handoff marker and strips every occurrence from the client-visible text", () => {
+    const parsed = extractAiDirectives("Передаю диалог оператору. [[HANDOFF]]\n[[handoff]]");
     assert.equal(parsed.handoffRequested, true);
+    assert.equal(parsed.resolveRequested, false);
     assert.equal(parsed.text, "Передаю диалог оператору.");
     assert.equal(parsed.text.toLowerCase().includes("handoff"), false);
   });
 
-  it("keeps ordinary replies untouched", () => {
-    const parsed = extractAiHandoffDirective("Ваш заказ уже в пути.");
+  it("detects the resolve marker and strips it from the goodbye", () => {
+    const parsed = extractAiDirectives("Рад был помочь! Хорошего дня. [[RESOLVED]]");
+    assert.equal(parsed.resolveRequested, true);
     assert.equal(parsed.handoffRequested, false);
+    assert.equal(parsed.text, "Рад был помочь! Хорошего дня.");
+    assert.equal(parsed.text.toLowerCase().includes("resolved"), false);
+  });
+
+  it("keeps ordinary replies untouched", () => {
+    const parsed = extractAiDirectives("Ваш заказ уже в пути.");
+    assert.equal(parsed.handoffRequested, false);
+    assert.equal(parsed.resolveRequested, false);
     assert.equal(parsed.text, "Ваш заказ уже в пути.");
   });
 
   it("returns an empty text for a marker-only reply so the runtime substitutes an acknowledgement", () => {
-    const parsed = extractAiHandoffDirective("  [[ HANDOFF ]]  ");
-    assert.equal(parsed.handoffRequested, true);
-    assert.equal(parsed.text, "");
+    assert.deepEqual(extractAiDirectives("  [[ HANDOFF ]]  "), { handoffRequested: true, resolveRequested: false, text: "" });
+    assert.deepEqual(extractAiDirectives("[[ RESOLVED ]]"), { handoffRequested: false, resolveRequested: true, text: "" });
   });
 
   it("strips a mid-text marker without gluing sentences together", () => {
-    const parsed = extractAiHandoffDirective("Соединяю вас с оператором [[HANDOFF]] он ответит на вопрос.");
+    const parsed = extractAiDirectives("Соединяю вас с оператором [[HANDOFF]] он ответит на вопрос.");
     assert.equal(parsed.handoffRequested, true);
     assert.equal(parsed.text, "Соединяю вас с оператором он ответит на вопрос.");
+  });
+
+  it("reports both markers so the runtime can prefer the safer handoff", () => {
+    const parsed = extractAiDirectives("Спасибо! [[RESOLVED]] [[HANDOFF]]");
+    assert.equal(parsed.handoffRequested, true);
+    assert.equal(parsed.resolveRequested, true);
+    assert.equal(parsed.text, "Спасибо!");
   });
 });

@@ -126,6 +126,37 @@ describe("durable bot runtime core", () => {
     assert.equal(result.step.sideEffects[1]?.kind, "bot_handoff");
   });
 
+  it("closes the runtime and schedules a conversation_close effect when the model emits [[RESOLVED]]", async () => {
+    const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: {} }], [{ from: "start", to: "answer" }]);
+    const runtime = new BotRuntimeService(repo, {
+      aiResponder: { respond: async () => ({ citations: [], model: "test-model", text: "Рад был помочь! Хорошего дня. [[RESOLVED]]" }) }
+    });
+    const result = await runtime.handleInboundEvent(event("evt-ai-resolved", { text: "Спасибо, всё получилось!" }));
+    assert.equal(result.instance.status, "completed");
+    assert.equal(result.step.outcome, "ai_resolved");
+    const clientText = (result.step.sideEffects[0] as { descriptor: { payload: { text: string } } }).descriptor.payload.text;
+    assert.equal(clientText, "Рад был помочь! Хорошего дня.");
+    assert.equal(clientText.toLowerCase().includes("resolved"), false);
+    const closeEffect = result.step.sideEffects[1] as { descriptor: { summary: Record<string, string> }; kind: string };
+    assert.equal(closeEffect?.kind, "conversation_close");
+    assert.equal(closeEffect?.descriptor.summary.reason, "ai_resolved");
+    assert.equal(closeEffect?.descriptor.summary.resolutionOutcome, "resolved");
+    // Повторное сообщение клиента в закрытый рантайм отбивается — новое
+    // обращение пойдёт через форк повторного обращения с новым id.
+    await assert.rejects(() => runtime.handleInboundEvent(event("evt-after-close", { text: "ещё вопрос" })), /bot_runtime_conversation_inactive/);
+  });
+
+  it("prefers handoff over close when the model emits both markers", async () => {
+    const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: {} }], [{ from: "start", to: "answer" }]);
+    const runtime = new BotRuntimeService(repo, {
+      aiResponder: { respond: async () => ({ citations: [], model: "test-model", text: "Спасибо! [[RESOLVED]] [[HANDOFF]]" }) }
+    });
+    const result = await runtime.handleInboundEvent(event("evt-ai-both", { text: "Спасибо, но есть ещё вопрос" }));
+    assert.equal(result.instance.status, "handoff");
+    assert.equal(result.step.outcome, "ai_handoff_requested");
+    assert.equal(result.step.sideEffects.some((effect) => effect.kind === "conversation_close"), false);
+  });
+
   it("substitutes the acknowledgement text when the model reply is the marker alone", async () => {
     const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: { handoffAcknowledgement: "Соединяю с оператором." } }], [{ from: "start", to: "answer" }]);
     const runtime = new BotRuntimeService(repo, {

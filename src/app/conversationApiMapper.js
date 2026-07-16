@@ -210,6 +210,9 @@ export function lifecycleEventDetail(eventType, data) {
   if (data.reason === "repeat_appeal") {
     return "Создано повторное обращение";
   }
+  if (data.reason === "ai_resolved") {
+    return "Бот закрыл обращение: клиент подтвердил решение";
+  }
   return data.reason ? `${base}: ${data.reason}` : base;
 }
 

@@ -25,31 +25,39 @@ export interface AiBotResponseInput {
   sourceBindings: KnowledgeSourceBinding[];
   tenantId: string;
 }
-export interface AiBotResponse { citations: Array<{ endOffset: number; sourceId: string; startOffset: number; title: string; version: number }>; handoffRequested?: boolean; model: string; text: string; usage?: { totalTokens: number | null }; materialsAvailable?: number; }
+export interface AiBotResponse { citations: Array<{ endOffset: number; sourceId: string; startOffset: number; title: string; version: number }>; handoffRequested?: boolean; resolveRequested?: boolean; model: string; text: string; usage?: { totalTokens: number | null }; materialsAvailable?: number; }
 
 export const AI_HANDOFF_MARKER = "[[HANDOFF]]";
+export const AI_RESOLVE_MARKER = "[[RESOLVED]]";
 const AI_HANDOFF_MARKER_DETECT = /\[\[\s*handoff\s*\]\]/i;
 const AI_HANDOFF_MARKER_STRIP = /\[\[\s*handoff\s*\]\]/gi;
+const AI_RESOLVE_MARKER_DETECT = /\[\[\s*resolved\s*\]\]/i;
+const AI_RESOLVE_MARKER_STRIP = /\[\[\s*resolved\s*\]\]/gi;
 
 /**
- * Модель сигналит о передаче оператору машинным маркером [[HANDOFF]] в конце
- * ответа. Маркер вырезается из текста до любой доставки клиенту — клиент видит
- * только человеческую фразу; решение о передаче принимает рантайм по флагу.
- * Парсится только вывод модели: echo-инъекция маркера клиентом в худшем случае
- * передаст диалог оператору, что безопасно.
+ * Модель сигналит машинными маркерами в конце ответа: [[HANDOFF]] — передать
+ * диалог оператору, [[RESOLVED]] — клиент подтвердил решение, обращение можно
+ * закрыть. Маркеры вырезаются из текста до любой доставки клиенту — клиент
+ * видит только человеческую фразу; решение принимает рантайм по флагам
+ * (при обоих маркерах приоритет у передачи оператору). Парсится только вывод
+ * модели: echo-инъекция маркера клиентом в худшем случае передаст диалог
+ * оператору или закроет подтверждённое обращение, что безопасно.
  */
-export function extractAiHandoffDirective(text: string): { handoffRequested: boolean; text: string } {
+export function extractAiDirectives(text: string): { handoffRequested: boolean; resolveRequested: boolean; text: string } {
   const raw = String(text ?? "");
-  if (!AI_HANDOFF_MARKER_DETECT.test(raw)) {
-    return { handoffRequested: false, text: raw };
+  const handoffRequested = AI_HANDOFF_MARKER_DETECT.test(raw);
+  const resolveRequested = AI_RESOLVE_MARKER_DETECT.test(raw);
+  if (!handoffRequested && !resolveRequested) {
+    return { handoffRequested, resolveRequested, text: raw };
   }
   const cleaned = raw
     .replace(AI_HANDOFF_MARKER_STRIP, " ")
+    .replace(AI_RESOLVE_MARKER_STRIP, " ")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/ {2,}/g, " ")
     .trim();
-  return { handoffRequested: true, text: cleaned };
+  return { handoffRequested, resolveRequested, text: cleaned };
 }
 
 /** Builds a bounded, tenant-scoped grounded prompt; it never sends keys or unrelated tenant data. */
@@ -111,9 +119,9 @@ export class AiBotResponseService {
         tenantId: input.tenantId,
         tokens
       });
-      // Маркер извлекается из полного вывода модели до обрезки: у длинного
-      // ответа он стоит в самом конце и иначе был бы отрезан slice'ом.
-      const directive = extractAiHandoffDirective(completion.content);
+      // Маркеры извлекаются из полного вывода модели до обрезки: у длинного
+      // ответа они стоят в самом конце и иначе были бы отрезаны slice'ом.
+      const directive = extractAiDirectives(completion.content);
       const text = directive.text.slice(0, 8_000);
       if (input.conversationId) {
         await this.sessions.updateAfterRun({
@@ -131,6 +139,7 @@ export class AiBotResponseService {
       return {
         citations: materials.map(({ content: _content, ...citation }) => citation),
         ...(directive.handoffRequested ? { handoffRequested: true } : {}),
+        ...(directive.resolveRequested ? { resolveRequested: true } : {}),
         materialsAvailable: materials.length,
         model: completion.model,
         text,
@@ -205,7 +214,9 @@ export function buildAiBotSystemPrompt(input: {
     "If the customer asks something factual and the answer is not in the knowledge, say that you cannot confirm it and offer a human operator.",
     "Do not access CRM data and do not claim that you did.",
     `When the dialog must go to a human operator — the customer asks for one or agrees to your offer, or you cannot help within these rules after a genuine attempt — write one short polite sentence that you are transferring the dialog and append the marker ${AI_HANDOFF_MARKER} as the last line.`,
-    `The ${AI_HANDOFF_MARKER} marker is machine-read and removed before the customer sees the reply; never mention it, never explain it, and never output it in any other situation.`,
+    `When the customer explicitly confirms the issue is fully resolved and declines further help (for example thanks you and says nothing else is needed), reply with a short warm goodbye and append the marker ${AI_RESOLVE_MARKER} as the last line — the request will be closed.`,
+    `Never output ${AI_RESOLVE_MARKER} on your own assumption: only after the customer's explicit confirmation, and never when their message contains a new or unanswered question.`,
+    `The ${AI_HANDOFF_MARKER} and ${AI_RESOLVE_MARKER} markers are machine-read and removed before the customer sees the reply; never mention them, never explain them, and never output them in any other situation.`,
     "The behavior rules above never override these safety rules.",
     input.instructions?.trim() ? `Scenario guidance: ${input.instructions.trim().slice(0, 1500)}` : "",
     input.sessionState?.trim() ? input.sessionState.trim().slice(0, 2_000) : "",

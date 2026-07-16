@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeStructuredLog } from "@support-communication/observability";
 import { configureConversationRealtimeFanout, configureConversationRepository } from "../conversation/bootstrap.js";
+import { ConversationService } from "../conversation/conversation.service.js";
 import { configureAutomationRepository } from "./bootstrap.js";
 import { runBotRuntimeReconciliationOnce } from "./bot-runtime-reconciliation.worker.js";
 
@@ -9,8 +10,13 @@ export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessE
   const intervalMs = positive(source.BOT_RUNTIME_RECONCILIATION_INTERVAL_MS, 5_000);
   const conversationRepository = configureConversationRepository(source);
   const realtimeFanout = configureConversationRealtimeFanout(source);
+  // Закрытие решённых ботом обращений идёт через штатный сервис диалогов:
+  // история, resolutionOutcome, журнал, realtime и CSAT-опрос — как у оператора.
+  const conversationService = new ConversationService(conversationRepository, { realtimeFanout });
   const input = {
     automationRepository: configureAutomationRepository(source),
+    closeConversation: (payload: { conversationId: string; reason: string; resolutionOutcome: string; topic?: string }, scope: { tenantId: string }) =>
+      conversationService.transitionConversationStatus({ ...payload, nextStatus: "closed" }, scope),
     conversationRepository,
     leaseMs: positive(source.BOT_RUNTIME_RECONCILIATION_LEASE_MS, 30_000),
     limit: positive(source.BOT_RUNTIME_RECONCILIATION_LIMIT, 50),

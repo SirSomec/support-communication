@@ -103,7 +103,28 @@ export interface BotRuntimeHandoffSideEffect {
   kind: "bot_handoff";
 }
 
-export type BotRuntimeSideEffect = BotRuntimeOutboundMessageSideEffect | BotRuntimeHandoffSideEffect;
+export interface BotRuntimeCloseDescriptor {
+  eventId: string;
+  eventName: "bot.resolution.completed";
+  resourceId: string;
+  resourceType: "conversation";
+  schemaVersion: "bot-resolution/v1";
+  summary: {
+    botId: string;
+    nodeId: string;
+    reason: string;
+    resolutionOutcome: string;
+  };
+  tenantId: string;
+  traceId: string;
+}
+
+export interface BotRuntimeCloseSideEffect {
+  descriptor: BotRuntimeCloseDescriptor;
+  kind: "conversation_close";
+}
+
+export type BotRuntimeSideEffect = BotRuntimeOutboundMessageSideEffect | BotRuntimeHandoffSideEffect | BotRuntimeCloseSideEffect;
 
 export interface BotRuntimeOutboundPersistenceInput {
   conversationRepository: Pick<ConversationRepository, "recordOutboundDescriptor">;

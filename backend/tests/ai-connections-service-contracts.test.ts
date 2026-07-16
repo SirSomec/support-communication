@@ -27,7 +27,7 @@ describe("tenant AI connection service", () => {
     assert.equal(connection.secretConfigured, true);
     assert.equal(connection.status, "disabled");
     assert.equal(repository.list("tenant-volga")[0]?.secret.ciphertext.includes("super-secret-key"), false);
-    assert.equal(service.list("tenant-ladoga").data.connections.length, 0);
+    assert.equal((await service.list("tenant-ladoga")).data.connections.length, 0);
     const events = await audit.listServiceAdminAuditEvents();
     assert.equal(events.length, 1);
     assert.equal(events[0]?.action, "ai.connection.create");

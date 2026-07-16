@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { uploadComposerAttachment } from "../../app/useComposerAttachments.js";
+import { buildSourceBotHints } from "./knowledgeSourceHints.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
 import { automationService } from "../../services/automationService.js";
 import { ConfirmDialog, MetricTile, Modal, ProductScreen, SectionTitle, SegmentedControl, StatusBadge } from "../../ui.jsx";
@@ -728,8 +729,11 @@ function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onApp
                   <strong>{source.title}</strong>
                   <span className="knowledge-source-badges">
                     <StatusBadge tone={statusMeta.tone}>{statusMeta.label}</StatusBadge>
-                    {source.readiness === "ready" ? <StatusBadge tone="ok">отвечает клиентам</StatusBadge> : null}
-                    {source.status === "ready" && source.approvalStatus === "pending" ? <StatusBadge tone="warn">ждёт одобрения</StatusBadge> : null}
+                    {buildSourceBotHints(source, sourceUsage).map((hint) => (
+                      <span className="knowledge-source-hint" key={hint.id} title={hint.title}>
+                        <StatusBadge tone={hint.tone}>{hint.label}</StatusBadge>
+                      </span>
+                    ))}
                     {articleOutdated ? <StatusBadge tone="warn">статья обновилась</StatusBadge> : null}
                   </span>
                   <small>

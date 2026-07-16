@@ -46,20 +46,20 @@ export class KnowledgeSourcesService {
   }
 
   /** BAI-822: где используется каждый источник — по обычным привязкам и черновикам сценариев. */
-  private async scenarioUsage(tenantId: string): Promise<Record<string, Array<{ name: string; scenarioId: string; status: string }>>> {
+  private async scenarioUsage(tenantId: string): Promise<Record<string, Array<{ enabled: boolean; name: string; scenarioId: string; status: string }>>> {
     const state = await this.automationRepository.readStateAsync();
-    const usage: Record<string, Array<{ name: string; scenarioId: string; status: string }>> = {};
+    const usage: Record<string, Array<{ enabled: boolean; name: string; scenarioId: string; status: string }>> = {};
     for (const scenario of state.botScenarios) {
       if (scenario.tenantId !== tenantId || scenario.status === "archived") continue;
       const bindings = [...(scenario.sourceBindings ?? []), ...(scenario.draft?.sourceBindings ?? [])];
       for (const sourceId of new Set(bindings.map((binding) => binding.sourceId).filter(Boolean))) {
-        usage[sourceId] = [...(usage[sourceId] ?? []), { name: scenario.name, scenarioId: scenario.id, status: scenario.status }];
+        usage[sourceId] = [...(usage[sourceId] ?? []), { enabled: scenario.enabled !== false, name: scenario.name, scenarioId: scenario.id, status: scenario.status }];
       }
     }
     return usage;
   }
 
-  private async boundScenarios(tenantId: string, sourceId: string): Promise<Array<{ name: string; scenarioId: string; status: string }>> {
+  private async boundScenarios(tenantId: string, sourceId: string): Promise<Array<{ enabled: boolean; name: string; scenarioId: string; status: string }>> {
     return (await this.scenarioUsage(tenantId))[sourceId] ?? [];
   }
 

@@ -469,15 +469,49 @@
 
 .chat-pane {
   display: grid;
-  --operator-transcript-min-height: clamp(156px, 24vh, 236px);
-  grid-template-rows: auto auto auto minmax(var(--operator-transcript-min-height), 1fr) minmax(0, auto);
-  overflow: hidden;
+  /* Минимум транскрипта ниже минимума композера: при нехватке высоты уступает лента
+     (она скроллится по дизайну), а зона ответа оператору держит рабочую высоту. */
+  --operator-transcript-min-height: clamp(96px, 18vh, 236px);
+  --operator-composer-min-height: clamp(184px, 28vh, 300px);
+  grid-template-rows: auto auto auto minmax(var(--operator-transcript-min-height), 1fr) minmax(var(--operator-composer-min-height), auto);
+  /* Вертикальный скролл — только аварийный фолбэк: когда минимумы рядов не помещаются
+     (низкое окно + handoff-сводка), панель прокручивается вместо обрезания композера. */
+  overflow: hidden auto;
   background: var(--surface);
+}
+
+@media (max-height: 780px) {
+  .chat-pane {
+    --operator-transcript-min-height: 96px;
+    --operator-composer-min-height: 184px;
+  }
 }
 
 .chat-pane > * {
   min-width: 0;
   max-width: 100%;
+}
+
+/* Handoff-сводка опциональна: без явных рядов её отсутствие сдвигало транскрипт
+   в auto-ряд, а композер — в fr-ряд ленты, из-за чего его высоту зажимало. */
+.chat-pane > .chat-header {
+  grid-row: 1;
+}
+
+.chat-pane > .transcript-toolbar {
+  grid-row: 2;
+}
+
+.chat-pane > .bot-handoff-summary {
+  grid-row: 3;
+}
+
+.chat-pane > .chat-transcript {
+  grid-row: 4;
+}
+
+.chat-pane > .composer {
+  grid-row: 5;
 }
 
 .chat-header {

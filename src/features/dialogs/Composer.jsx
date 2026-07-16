@@ -1,7 +1,10 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   BookOpen,
+  ChevronDown,
+  ChevronUp,
   Info,
   MessageCircle,
   Paperclip,
@@ -42,8 +45,52 @@ export function Composer({
 }) {
   const primaryTemplate = templates[0];
   const fileInputRef = useRef(null);
+  const qualityBarRef = useRef(null);
+  const qualityPopoverRef = useRef(null);
   const [isTemplatePickerOpen, setTemplatePickerOpen] = useState(false);
-  const [isQualityOpen, setQualityOpen] = useState(true);
+  // Детали pre-send check живут в поповере-оверлее (портал в body):
+  // раскрытие не меняет высоту композера и не вызывает его скролл.
+  const [isQualityOpen, setQualityOpen] = useState(false);
+  const [qualityPopoverPosition, setQualityPopoverPosition] = useState(null);
+
+  function toggleQualityPopover() {
+    setQualityOpen((current) => {
+      const next = !current;
+      if (next && qualityBarRef.current) {
+        const rect = qualityBarRef.current.getBoundingClientRect();
+        setQualityPopoverPosition({
+          left: rect.left,
+          width: rect.width,
+          bottom: window.innerHeight - rect.top + 6
+        });
+      }
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!isQualityOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event) {
+      if (qualityPopoverRef.current?.contains(event.target) || qualityBarRef.current?.contains(event.target)) {
+        return;
+      }
+      setQualityOpen(false);
+    }
+
+    function handleResize() {
+      setQualityOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [isQualityOpen]);
   const blockingAttachment = attachments.find((attachment) => attachment.status !== "ready");
   const sendDisabled = disabled || Boolean(blockingAttachment);
   const attachmentReason = blockingAttachment
@@ -65,116 +112,146 @@ export function Composer({
 
   return (
     <section className={`composer ${mode === "internal" ? "internal-mode" : ""}`}>
-      <div className="composer-tabs">
-        <button className={mode === "reply" ? "active" : ""} onClick={() => setMode("reply")} disabled={disabled}>
-          <MessageCircle size={17} />
-          Ответ клиенту
-        </button>
-        <button className={mode === "internal" ? "active" : ""} onClick={() => setMode("internal")} disabled={disabled}>
-          <Info size={17} />
-          Внутренний комментарий
-        </button>
-        <button
-          aria-expanded={isTemplatePickerOpen}
-          onClick={() => setTemplatePickerOpen((current) => !current)}
-          disabled={disabled || !primaryTemplate}
-          type="button"
-        >
-          <BookOpen size={17} />
-          Шаблоны
-        </button>
-      </div>
-      {isTemplatePickerOpen ? (
-        <div className="composer-template-picker">
-          {templates.slice(0, 4).map((template) => (
-            <button
-              key={template.id}
-              onClick={() => {
-                setDraft(template.text);
-                setTemplatePickerOpen(false);
-              }}
-              type="button"
-            >
-              <strong>{template.title}</strong>
-              <span>{template.scope} · {template.channel} · {template.topic}</span>
-            </button>
-          ))}
+      <div className="composer-scroll">
+        <div className="composer-tabs">
+          <button className={mode === "reply" ? "active" : ""} onClick={() => setMode("reply")} disabled={disabled}>
+            <MessageCircle size={17} />
+            Ответ клиенту
+          </button>
+          <button className={mode === "internal" ? "active" : ""} onClick={() => setMode("internal")} disabled={disabled}>
+            <Info size={17} />
+            Внутренний комментарий
+          </button>
+          <button
+            aria-expanded={isTemplatePickerOpen}
+            onClick={() => setTemplatePickerOpen((current) => !current)}
+            disabled={disabled || !primaryTemplate}
+            type="button"
+          >
+            <BookOpen size={17} />
+            Шаблоны
+          </button>
         </div>
-      ) : null}
-      <AiComposerPanel suggestions={inlineAiSuggestions} disabled={disabled} onAction={onAiSuggestionAction} />
-      <textarea
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        placeholder={disabled ? "Диалог закрыт" : mode === "internal" ? "Текст увидят только сотрудники..." : "Введите сообщение..."}
-        disabled={disabled}
-      />
-      <input
-        accept=".pdf,.png,.jpg,.jpeg,.webp"
-        aria-label="Выбор вложений"
-        className="visually-hidden-file-input"
-        disabled={disabled}
-        multiple
-        onChange={handleFileInputChange}
-        ref={fileInputRef}
-        type="file"
-      />
-      {attachments.length ? (
-        <div className="attachment-queue" aria-label="Очередь вложений">
-          {attachments.map((attachment) => (
-            <article className={`attachment-card ${attachment.status}`} key={attachment.id}>
-              <AttachmentPreview attachment={attachment} />
-              <span className={`attachment-status ${attachment.status}`}>
-                {attachment.status === "uploading" ? <UploadCloud size={14} /> : null}
-                {attachment.status === "error" ? <AlertTriangle size={14} /> : null}
-                {attachmentStatusLabels[attachment.status]}
-              </span>
-              <div className="attachment-progress" aria-hidden="true">
-                <i style={{ width: `${attachment.progress}%` }} />
-              </div>
-              {attachment.error ? <p>{attachment.error}</p> : null}
-              <div className="attachment-actions">
-                {attachment.status === "error" && attachment.retryable ? (
-                  <button disabled={disabled} onClick={() => onAttachmentRetry(attachment.id)} type="button">
-                    <RotateCcw size={14} />
-                    Повторить
+        {isTemplatePickerOpen ? (
+          <div className="composer-template-picker">
+            {templates.slice(0, 4).map((template) => (
+              <button
+                key={template.id}
+                onClick={() => {
+                  setDraft(template.text);
+                  setTemplatePickerOpen(false);
+                }}
+                type="button"
+              >
+                <strong>{template.title}</strong>
+                <span>{template.scope} · {template.channel} · {template.topic}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <AiComposerPanel suggestions={inlineAiSuggestions} disabled={disabled} onAction={onAiSuggestionAction} />
+        <textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder={disabled ? "Диалог закрыт" : mode === "internal" ? "Текст увидят только сотрудники..." : "Введите сообщение..."}
+          disabled={disabled}
+        />
+        <input
+          accept=".pdf,.png,.jpg,.jpeg,.webp"
+          aria-label="Выбор вложений"
+          className="visually-hidden-file-input"
+          disabled={disabled}
+          multiple
+          onChange={handleFileInputChange}
+          ref={fileInputRef}
+          type="file"
+        />
+        {attachments.length ? (
+          <div className="attachment-queue" aria-label="Очередь вложений">
+            {attachments.map((attachment) => (
+              <article className={`attachment-card ${attachment.status}`} key={attachment.id}>
+                <AttachmentPreview attachment={attachment} />
+                <span className={`attachment-status ${attachment.status}`}>
+                  {attachment.status === "uploading" ? <UploadCloud size={14} /> : null}
+                  {attachment.status === "error" ? <AlertTriangle size={14} /> : null}
+                  {attachmentStatusLabels[attachment.status]}
+                </span>
+                <div className="attachment-progress" aria-hidden="true">
+                  <i style={{ width: `${attachment.progress}%` }} />
+                </div>
+                {attachment.error ? <p>{attachment.error}</p> : null}
+                <div className="attachment-actions">
+                  {attachment.status === "error" && attachment.retryable ? (
+                    <button disabled={disabled} onClick={() => onAttachmentRetry(attachment.id)} type="button">
+                      <RotateCcw size={14} />
+                      Повторить
+                    </button>
+                  ) : null}
+                  <button aria-label={`Удалить ${attachment.name}`} disabled={disabled} onClick={() => onAttachmentRemove(attachment.id)} title="Удалить вложение" type="button">
+                    <Trash2 size={14} />
+                    Удалить
                   </button>
-                ) : null}
-                <button aria-label={`Удалить ${attachment.name}`} disabled={disabled} onClick={() => onAttachmentRemove(attachment.id)} title="Удалить вложение" type="button">
-                  <Trash2 size={14} />
-                  Удалить
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : null}
-      {attachmentReason ? (
-        <div className="composer-warning">
-          <AlertTriangle size={15} />
-          {attachmentReason}
-        </div>
-      ) : null}
-      <section className={`pre-send-quality ${preSendTone}`} aria-label="Проверка качества перед отправкой">
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+        {attachmentReason ? (
+          <div className="composer-warning">
+            <AlertTriangle size={15} />
+            {attachmentReason}
+          </div>
+        ) : null}
+      </div>
+      <section
+        className={`pre-send-quality ${preSendTone}`}
+        aria-label="Проверка качества перед отправкой"
+        ref={qualityBarRef}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setQualityOpen(false);
+          }
+        }}
+      >
         <button
           aria-expanded={isQualityOpen}
-          onClick={() => setQualityOpen((current) => !current)}
+          onClick={toggleQualityPopover}
           type="button"
         >
-          <span>
+          <span className="pre-send-title">
             <ShieldCheck size={16} />
             Pre-send check
           </span>
-          <b>{preSendTone === "ok" ? "готово" : preSendTone === "warn" ? "есть замечания" : "нужна проверка"}</b>
-        </button>
-        {isQualityOpen ? (
-          <div className="pre-send-check-list">
+          <span className="pre-send-chips" aria-hidden="true">
             {preSendChecks.map((check) => (
-              <span className={check.tone} key={check.id}>
-                <strong>{check.label}</strong>
-                <small>{check.detail}</small>
-              </span>
+              <i className={check.tone} key={check.id}>{check.label}</i>
             ))}
-          </div>
+          </span>
+          <b>{preSendTone === "ok" ? "готово" : preSendTone === "warn" ? "есть замечания" : "нужна проверка"}</b>
+          {isQualityOpen ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+        </button>
+        {isQualityOpen && qualityPopoverPosition ? createPortal(
+          <div
+            className="pre-send-popover"
+            ref={qualityPopoverRef}
+            role="region"
+            aria-label="Детали pre-send check"
+            style={{
+              left: `${qualityPopoverPosition.left}px`,
+              width: `${qualityPopoverPosition.width}px`,
+              bottom: `${qualityPopoverPosition.bottom}px`
+            }}
+          >
+            <div className="pre-send-check-list">
+              {preSendChecks.map((check) => (
+                <span className={check.tone} key={check.id}>
+                  <strong>{check.label}</strong>
+                  <small>{check.detail}</small>
+                </span>
+              ))}
+            </div>
+          </div>,
+          document.body
         ) : null}
       </section>
       <footer className="composer-footer">

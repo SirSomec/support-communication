@@ -152,6 +152,30 @@ describe("canonical routing workload adapter contracts", () => {
     assert.equal(replay.data?.queued, true);
     assert.equal("conversation" in (replay.data ?? {}), false);
   });
+
+  // Повторное обращение (форк со статусом new): канонический маппер считает его
+  // «queued», но запись остается new и не видна в «Ожидают» — guard обязан
+  // смотреть на persistedStatus и переводить диалог в настоящий queued.
+  it("queues a repeat-appeal fork (record status new) when the bot hands off without operators", async () => {
+    const repeatAppeal = conversation({ id: "conversation-repeat", operatorId: undefined, status: "new" });
+    const adapter = workloadAdapter({
+      conversations: [repeatAppeal],
+      queues: [queue()],
+      teams: [team()],
+      users: [user()]
+    });
+    const canonicalConversations = new CanonicalRoutingConversationRepository({
+      listConversations: async () => [repeatAppeal]
+    } as unknown as ConversationRepository);
+    const service = new RoutingService(RoutingRepository.inMemory(), adapter, canonicalConversations);
+
+    const response = await service.autoAssignConversation("conversation-repeat", { tenantId: "tenant-a" });
+
+    assert.equal(response.status, "ok");
+    assert.equal(response.data?.assigned, false);
+    assert.equal(response.data?.queued, true);
+    assert.equal((response.data?.conversation as { status?: string } | undefined)?.status, "queued");
+  });
 });
 
 function workloadAdapter(input: {

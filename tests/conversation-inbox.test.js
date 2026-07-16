@@ -811,6 +811,12 @@ describe("queue tab logic", () => {
     assert.equal(matchesQueueTab(foreign, "all", { operatorId: "op-1" }), true);
   });
 
+  it("counts new unassigned appeals as waiting so bot returns are visible", () => {
+    assert.equal(matchesQueueTab({ id: "c-new", status: "new" }, "waiting", {}), true);
+    assert.equal(matchesQueueTab({ id: "c-queued", status: "queued" }, "waiting", {}), true);
+    assert.equal(matchesQueueTab({ id: "c-active", status: "active" }, "waiting", {}), false);
+  });
+
   it("treats a thread as mine when any open appeal is assigned to the operator", () => {
     const thread = {
       id: "current",

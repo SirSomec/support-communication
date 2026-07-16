@@ -49,7 +49,9 @@ export const slaSortRank = {
   closed: 4
 };
 
-export const queueWaitingStatuses = ["queued", "waiting_client", "waiting_operator"];
+// «Ожидают» включает и new: неназначенное новое обращение (в т.ч. повторное,
+// возвращенное ботом до перевода в очередь) ждет оператора так же, как queued.
+export const queueWaitingStatuses = ["new", "queued", "waiting_client", "waiting_operator"];
 export const queueSlaTones = ["warn", "danger"];
 
 // Статусы бот-сессии, при которых диалог считается «у бота»: сценарий

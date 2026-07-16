@@ -399,8 +399,12 @@ export class RoutingService {
       // Свободных операторов нет: диалог реально возвращается в очередь
       // (status queued + queue.entered), иначе после handoff бота он
       // остается «в работе» и не виден во вкладке «Ожидают».
+      // Guard по persistedStatus (сырой статус записи), а не по каноническому:
+      // маппер роутинга переводит неназначенные new/waiting_* в "queued", и
+      // guard по нему пропускал бы перевод — повторное обращение (форк со
+      // статусом new) навсегда оставалось бы вне «Ожидают».
       let queuedConversation: Record<string, unknown> | undefined;
-      if (conversation.status !== "queued" && conversation.status !== "closed") {
+      if (conversation.persistedStatus !== "queued" && conversation.persistedStatus !== "closed") {
         const returned = await this.returnConversationToQueue(
           clone(conversation),
           tenantId,

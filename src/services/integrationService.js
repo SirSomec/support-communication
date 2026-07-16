@@ -193,6 +193,47 @@ export const integrationService = {
     });
   },
 
+  async fetchExternalChatChannels() {
+    return apiRequest("/integrations/external/chat-channels", {
+      operation: "fetchExternalChatChannels",
+      service: SERVICE
+    });
+  },
+
+  async createExternalChatChannel(payload = {}) {
+    return apiRequest("/integrations/external/chat-channels", {
+      body: payload,
+      method: "POST",
+      operation: "createExternalChatChannel",
+      service: SERVICE
+    });
+  },
+
+  async updateExternalChatChannel({ channelId, ...payload } = {}) {
+    if (!hasRouteId(channelId)) {
+      return missingIdEnvelope("updateExternalChatChannel", "External chat channel id is required.");
+    }
+
+    return apiRequest(`/integrations/external/chat-channels/${encodeURIComponent(channelId)}`, {
+      body: payload,
+      method: "PATCH",
+      operation: "updateExternalChatChannel",
+      service: SERVICE
+    });
+  },
+
+  async deleteExternalChatChannel(channelId) {
+    if (!hasRouteId(channelId)) {
+      return missingIdEnvelope("deleteExternalChatChannel", "External chat channel id is required.");
+    }
+
+    return apiRequest(`/integrations/external/chat-channels/${encodeURIComponent(channelId)}`, {
+      method: "DELETE",
+      operation: "deleteExternalChatChannel",
+      service: SERVICE
+    });
+  },
+
   async fetchTelegramConnection() {
     return apiRequest("/integrations/channels/telegram", {
       operation: "fetchTelegramConnection",
@@ -238,6 +279,10 @@ export const integrationService = {
         "updateWebhookEndpoint",
         "deleteWebhookEndpoint",
         "replayWebhookDelivery",
+        "fetchExternalChatChannels",
+        "createExternalChatChannel",
+        "updateExternalChatChannel",
+        "deleteExternalChatChannel",
         "revokeSecuritySession",
         "fetchTelegramConnection",
         "saveTelegramConnection",

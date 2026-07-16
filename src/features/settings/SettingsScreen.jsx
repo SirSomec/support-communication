@@ -3,6 +3,7 @@ import { AlertTriangle, ChevronLeft } from "lucide-react";
 import { AdminWorkspaces } from "./AdminWorkspaces.jsx";
 import { ChannelConnectionsPanel } from "./ChannelConnectionsPanel.jsx";
 import { EmployeeManagementPanel } from "./EmployeeManagementPanel.jsx";
+import { ExternalAppPanel } from "./ExternalAppPanel.jsx";
 import { RulesPanel } from "./RulesPanel.jsx";
 import { SettingsShell, settingsTabIds } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
@@ -13,6 +14,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
   const requestedTab = resolveSettingsNavigationTab(navigationTarget);
   const [activeTab, setActiveTab] = useState(requestedTab || "connections");
   const [connectionSummary, setConnectionSummary] = useState({ active: 0, total: 0 });
+  const [externalSummary, setExternalSummary] = useState({ active: 0, total: 0 });
   const [employeeSummary, setEmployeeSummary] = useState({ total: 0 });
   const [topicTotals, setTopicTotals] = useState({ active: 0, archived: 0, total: 0 });
   const [rulesSummary, setRulesSummary] = useState({ active: 0 });
@@ -57,6 +59,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
 
   const summaries = {
     connections: `${connectionSummary.active} из ${connectionSummary.total} активны`,
+    external: externalSummary.total ? `${externalSummary.active} из ${externalSummary.total} активны` : "нет подключений",
     employees: `${employeeSummary.total} сотрудников`,
     topics: `${topicTotals.active} активных / ${topicTotals.archived} архив`,
     rules: `${rulesSummary.active} активных правил`
@@ -94,6 +97,15 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
             focusChannelType={navigationTarget?.tab === "connections" ? navigationTarget.channelType : ""}
             focusConnectionId={navigationTarget?.tab === "connections" ? navigationTarget.connectionId : ""}
             onSummaryChange={setConnectionSummary}
+            onToast={onToast}
+          />
+        ) : null}
+
+        {activeTab === "external" ? (
+          <ExternalAppPanel
+            access={access}
+            canEditSettings={canEditSettings}
+            onSummaryChange={setExternalSummary}
             onToast={onToast}
           />
         ) : null}

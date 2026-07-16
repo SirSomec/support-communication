@@ -2755,3 +2755,159 @@
     flex: 1;
   }
 }
+
+/* Внешнее приложение (Open Channel API): карточки подключений и окно выдачи токена. */
+.external-app-list {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.external-app-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.external-app-card > header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.external-app-card > header strong {
+  font-size: 14px;
+}
+
+.external-app-status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: none;
+}
+
+.external-app-status.active {
+  background: #e7f5ec;
+  color: #1d7a45;
+}
+
+.external-app-status.disabled {
+  background: #f4f0e2;
+  color: #8a6d1f;
+}
+
+.external-app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.external-app-grid div,
+.external-app-grid label {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  min-width: 0;
+}
+
+.external-app-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.external-app-grid input,
+.external-app-grid select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  outline: 0;
+}
+
+.external-app-grid code {
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.external-app-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.external-app-actions button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.external-app-actions .external-app-delete:not(:disabled) {
+  color: #b04747;
+}
+
+.external-app-copy-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.external-app-copy-row code {
+  flex: 1;
+  min-width: 0;
+}
+
+.external-app-copy-row button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.external-app-secret.multiline {
+  white-space: pre;
+}
+
+.external-app-outbound-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.external-app-outbound-note code {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

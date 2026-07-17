@@ -12,6 +12,14 @@ export interface ObjectStorageSignerSource {
   S3_ACCESS_KEY?: string;
   S3_BUCKET?: string;
   S3_ENDPOINT?: string;
+  /**
+   * Публичная база для БРАУЗЕРНЫХ upload-URL (напр. "/s3"): подпись остаётся
+   * по хосту S3_ENDPOINT, а origin URL заменяется на относительный префикс —
+   * файл уходит same-origin через nginx-прокси (см. docker/nginx.conf),
+   * что не требует DNS до minio и проходит CSP connect-src 'self'.
+   * Серверные операции (signDownload, метаданные) продолжают ходить напрямую.
+   */
+  S3_PUBLIC_UPLOAD_BASE?: string;
   S3_REGION?: string;
   S3_SECRET_KEY?: string;
 }
@@ -89,6 +97,7 @@ export function createS3CompatibleObjectStorageSigner(
   const secretKey = source.S3_SECRET_KEY;
   const bucket = source.S3_BUCKET;
   const region = source.S3_REGION?.trim() || "us-east-1";
+  const publicUploadBase = normalizePublicUploadBase(source.S3_PUBLIC_UPLOAD_BASE);
   const expiresSeconds = options.expiresSeconds ?? 900;
   const metadataFetcher = options.metadataFetcher ?? globalThis.fetch;
   const metadataTimeoutMs = Math.max(1, Math.trunc(Number(options.metadataTimeoutMs)) || 10_000);
@@ -139,22 +148,23 @@ export function createS3CompatibleObjectStorageSigner(
 
     signUpload(input: ObjectStorageSignUploadInput): SignedObjectStorageUrl {
       const signedAt = now();
+      const signedUrl = presignS3Url({
+        accessKey,
+        bucket,
+        endpoint,
+        expiresSeconds,
+        headers: {
+          "content-type": input.contentType
+        },
+        method: "PUT",
+        objectKey: input.objectKey,
+        region,
+        secretKey,
+        signedAt
+      });
       return {
         method: "PUT",
-        url: presignS3Url({
-          accessKey,
-          bucket,
-          endpoint,
-          expiresSeconds,
-          headers: {
-            "content-type": input.contentType
-          },
-          method: "PUT",
-          objectKey: input.objectKey,
-          region,
-          secretKey,
-          signedAt
-        }),
+        url: publicUploadBase ? `${publicUploadBase}${signedUrl.slice(endpoint.origin.length)}` : signedUrl,
         expiresAt: addSeconds(signedAt, expiresSeconds).toISOString(),
         headers: {
           "content-type": input.contentType
@@ -162,6 +172,19 @@ export function createS3CompatibleObjectStorageSigner(
       };
     }
   };
+}
+
+/** "/s3" или абсолютный http(s)-префикс без хвостового слэша; пустое/кривое значение выключает rewrite. */
+function normalizePublicUploadBase(value: string | undefined): string | null {
+  const trimmed = String(value ?? "").trim().replace(/\/+$/, "");
+  if (!trimmed) return null;
+  if (trimmed.startsWith("/")) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? trimmed : null;
+  } catch {
+    return null;
+  }
 }
 
 export function createLocalObjectStorageSigner(options: ObjectStorageSignerOptions = {}): ObjectStorageSigner {

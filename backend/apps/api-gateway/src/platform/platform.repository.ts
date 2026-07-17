@@ -596,8 +596,10 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
       if (!transaction.$queryRawUnsafe) {
         throw new Error("platform_advisory_lock_unavailable");
       }
+      // ::text — pg_advisory_xact_lock возвращает void, который Prisma-клиент
+      // не десериализует (Failed to deserialize column of type 'void').
       await transaction.$queryRawUnsafe(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text",
         normalizedLockKey
       );
       return operation(new PlatformRepository(this.store, transaction));

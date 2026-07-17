@@ -194,8 +194,10 @@ function createPrismaAdapter(client: PrismaOperatorPresenceClient): OperatorPres
         if (!transaction.$queryRawUnsafe) {
           throw new Error("operator_presence_advisory_lock_unavailable");
         }
+        // ::text — pg_advisory_xact_lock возвращает void, который Prisma-клиент
+        // не десериализует (Failed to deserialize column of type 'void').
         await transaction.$queryRawUnsafe(
-          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text",
           `${input.tenantId}:${input.operatorId}`
         );
         const openRows = await transaction.operatorPresenceInterval.findMany({

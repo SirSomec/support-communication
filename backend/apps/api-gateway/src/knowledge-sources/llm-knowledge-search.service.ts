@@ -108,15 +108,16 @@ export class LlmKnowledgeSearchService implements LlmKnowledgeSearchInvoker {
         };
       const completion = await provider.complete(request);
       // Диагностика кеш-экономики: hit-rate виден прямо в логах гейтвея
-      // (cachedTokens > 0 = префикс читается из кеша провайдера).
+      // (cacheRead > 0 = префикс читается из кеша провайдера). Имена полей без
+      // «token» — редакция логов маскирует такие ключи как секреты.
       writeStructuredLog("info", "LLM knowledge search completed", {
-        cacheWriteTokens: completion.usage.cacheWriteTokens ?? null,
-        cachedTokens: completion.usage.cachedTokens ?? null,
+        cacheRead: completion.usage.cachedTokens ?? null,
+        cacheWrite: completion.usage.cacheWriteTokens ?? null,
         corpusChecksum: input.corpus.checksum.slice(0, 16),
-        corpusTokens: input.corpus.tokenEstimate,
-        inputTokens: completion.usage.inputTokens ?? null,
+        corpusSize: input.corpus.tokenEstimate,
         model: String(connection.retrievalModel),
         operation: "llmKnowledgeSearch",
+        promptSize: completion.usage.inputTokens ?? null,
         scenarioId: input.scenarioId ?? null,
         service: "knowledgeRetrievalService",
         tenantId: input.tenantId

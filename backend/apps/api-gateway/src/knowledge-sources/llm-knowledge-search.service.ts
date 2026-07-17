@@ -1,8 +1,11 @@
+import { writeStructuredLog } from "@support-communication/observability";
 import { AiConnectionRepository } from "../ai-connections/ai-connection.repository.js";
 import { AiUsageRepository } from "../ai-connections/ai-usage.repository.js";
 import { SecretStore } from "../ai-connections/secret-store.js";
 import {
   createOpenAiCompatibleChatProvider,
+  usesExplicitPromptCacheBreakpoints,
+  type ChatCompletionRequest,
   type OpenAiCompatibleChatConnection,
   type OpenAiCompatibleChatProvider
 } from "../ai-connections/openai-compatible-chat.provider.js";
@@ -75,17 +78,48 @@ export class LlmKnowledgeSearchService implements LlmKnowledgeSearchInvoker {
       // Ключ кеша/роутинга без PII: тенант + сценарий + checksum корпуса. Смена
       // корпуса меняет ключ → прогрев виден в метриках как cache_write_tokens.
       const cacheKey = `kr:${input.tenantId}:${input.scenarioId ?? "none"}:${input.corpus.checksum.slice(0, 16)}`;
-      const completion = await provider.complete({
-        maxTokens: 300,
-        messages: [{ content: input.query.slice(0, 4_000), role: "user" }],
-        promptCacheKey: cacheKey,
-        responseFormat: "json_object",
-        sessionId: cacheKey,
-        systemBlocks: [
-          { text: SELECTOR_INSTRUCTIONS },
-          { cacheControl: { ttl: "1h" }, text: input.corpus.promptText }
-        ],
-        temperature: 0
+      // Форма кеш-запроса зависит от семейства модели: Anthropic/Gemini/Qwen —
+      // явный брейкпоинт на корпусе; OpenAI/DeepSeek и прочие кешируют префикс
+      // автоматически, а посторонний cache_control им только мешает — шлём
+      // обычную system-строку с тем же стабильным префиксом.
+      const request: ChatCompletionRequest = usesExplicitPromptCacheBreakpoints(String(connection.retrievalModel))
+        ? {
+          maxTokens: 300,
+          messages: [{ content: input.query.slice(0, 4_000), role: "user" }],
+          promptCacheKey: cacheKey,
+          responseFormat: "json_object",
+          sessionId: cacheKey,
+          systemBlocks: [
+            { text: SELECTOR_INSTRUCTIONS },
+            { cacheControl: { ttl: "1h" }, text: input.corpus.promptText }
+          ],
+          temperature: 0
+        }
+        : {
+          maxTokens: 300,
+          messages: [
+            { content: `${SELECTOR_INSTRUCTIONS}\n\n${input.corpus.promptText}`, role: "system" },
+            { content: input.query.slice(0, 4_000), role: "user" }
+          ],
+          promptCacheKey: cacheKey,
+          responseFormat: "json_object",
+          sessionId: cacheKey,
+          temperature: 0
+        };
+      const completion = await provider.complete(request);
+      // Диагностика кеш-экономики: hit-rate виден прямо в логах гейтвея
+      // (cachedTokens > 0 = префикс читается из кеша провайдера).
+      writeStructuredLog("info", "LLM knowledge search completed", {
+        cacheWriteTokens: completion.usage.cacheWriteTokens ?? null,
+        cachedTokens: completion.usage.cachedTokens ?? null,
+        corpusChecksum: input.corpus.checksum.slice(0, 16),
+        corpusTokens: input.corpus.tokenEstimate,
+        inputTokens: completion.usage.inputTokens ?? null,
+        model: String(connection.retrievalModel),
+        operation: "llmKnowledgeSearch",
+        scenarioId: input.scenarioId ?? null,
+        service: "knowledgeRetrievalService",
+        tenantId: input.tenantId
       });
       await this.usage.recordUsage(
         input.tenantId,

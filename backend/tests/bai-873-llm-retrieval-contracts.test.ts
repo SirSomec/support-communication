@@ -80,14 +80,14 @@ describe("BAI-874 selector output parsing", () => {
 });
 
 describe("BAI-874 LlmKnowledgeSearchService", () => {
-  it("sends the corpus as a 1h-cached system block with a PII-free session key and records usage", async () => {
+  it("sends explicit 1h cache breakpoints for Anthropic-family retrieval models", async () => {
     const requests: ChatCompletionRequest[] = [];
     const usage = AiUsageRepository.inMemory();
     const corpus = buildKnowledgeCorpus([
       { source: { id: "src-a", title: "A", version: 1 }, text: "Возврат средств занимает до 10 дней." }
     ]);
     const service = new LlmKnowledgeSearchService(
-      AiConnectionRepository.inMemory({ connections: [connection()] }),
+      AiConnectionRepository.inMemory({ connections: [connection({ retrievalModel: "claude-sonnet-4-5" })] }),
       ENVIRONMENT,
       usage,
       () => fakeProvider((request) => {
@@ -109,6 +109,36 @@ describe("BAI-874 LlmKnowledgeSearchService", () => {
     assert.match(String(request.sessionId), new RegExp(`^kr:${TENANT}:bot-1:${corpus.checksum.slice(0, 16)}$`));
     assert.equal(String(request.sessionId).includes("вернуть"), false);
     assert.equal((await usage.current(TENANT, "conn-retrieval")).usedTokens > 0, true);
+  });
+
+  it("sends a plain stable system prefix (automatic caching) for OpenAI-family retrieval models", async () => {
+    // Регрессия инцидента 2026-07-17: Anthropic-стиль cache_control, отправленный
+    // OpenAI-семейству через агрегатор, ломал автоматическое кеширование —
+    // каждый запрос оплачивал полный корпус.
+    const requests: ChatCompletionRequest[] = [];
+    const corpus = buildKnowledgeCorpus([
+      { source: { id: "src-a", title: "A", version: 1 }, text: "Возврат средств занимает до 10 дней." }
+    ]);
+    const service = new LlmKnowledgeSearchService(
+      AiConnectionRepository.inMemory({ connections: [connection({ retrievalModel: "gpt-5.6-luna-pro" })] }),
+      ENVIRONMENT,
+      AiUsageRepository.inMemory(),
+      () => fakeProvider((request) => {
+        requests.push(request);
+        return JSON.stringify({ chunks: [{ confidence: 0.9, id: corpus.chunks[0]!.chunkId }], insufficient: false });
+      })
+    );
+
+    await service.search({ corpus, query: "как вернуть деньги?", scenarioId: "bot-1", tenantId: TENANT });
+
+    const request = requests[0]!;
+    assert.equal(request.systemBlocks, undefined);
+    assert.equal(request.cacheControl, undefined);
+    assert.equal(request.messages.length, 2);
+    assert.equal(request.messages[0]!.role, "system");
+    assert.equal(request.messages[0]!.content, request.messages[0]!.content.trim());
+    assert.equal(request.messages[0]!.content.endsWith(corpus.promptText), true);
+    assert.match(String(request.sessionId), new RegExp(`^kr:${TENANT}:bot-1:${corpus.checksum.slice(0, 16)}$`));
   });
 
   it("fails loudly when no ready connection has a retrieval model (caller falls back)", async () => {

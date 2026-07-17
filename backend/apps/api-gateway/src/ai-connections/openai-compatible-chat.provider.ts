@@ -32,6 +32,17 @@ export interface ChatCompletionCacheControl {
 }
 
 /**
+ * BAI-871: провайдерский prompt-кеш включается по-разному (docs.aitunnel.ru):
+ * Anthropic/Gemini/Qwen требуют явные cache_control-брейкпоинты, OpenAI-,
+ * DeepSeek-, Grok-семейства кешируют префикс автоматически, а лишний
+ * cache_control в content-частях может сломать нормализацию у агрегатора.
+ * Отправляйте брейкпоинты только когда эта функция вернула true.
+ */
+export function usesExplicitPromptCacheBreakpoints(model: string): boolean {
+  return /claude|sonnet|opus|haiku|gemini|qwen/i.test(String(model ?? ""));
+}
+
+/**
  * BAI-871: one text block of the system message. A block with `cacheControl`
  * becomes an explicit cache breakpoint — everything up to and including it is
  * cached by the provider (AITunnel serializes it as `cache_control` on the

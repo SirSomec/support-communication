@@ -1,7 +1,7 @@
 import { AiConnectionRepository } from "../ai-connections/ai-connection.repository.js";
 import { AiUsageRepository } from "../ai-connections/ai-usage.repository.js";
 import { SecretStore } from "../ai-connections/secret-store.js";
-import { createOpenAiCompatibleChatProvider } from "../ai-connections/openai-compatible-chat.provider.js";
+import { createOpenAiCompatibleChatProvider, usesExplicitPromptCacheBreakpoints } from "../ai-connections/openai-compatible-chat.provider.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
 import { KnowledgeRetrievalService, type KnowledgeRetrievalMode, type LlmKnowledgeSearchInvoker, type McpRetrievalInvoker } from "../knowledge-sources/knowledge-retrieval.service.js";
 import { LlmKnowledgeSearchService } from "../knowledge-sources/llm-knowledge-search.service.js";
@@ -113,7 +113,7 @@ export class AiBotResponseService {
       // BAI-879: тот же ключ идёт в session_id (sticky routing AITunnel) и включается
       // top-level cache_control — префикс промпта (policy/rails) кешируется провайдером.
       const promptCacheKey = `bot:${input.tenantId}:${input.scenarioId ?? "none"}:${input.scenarioRevisionId ?? "current"}`;
-      const completion = await provider.complete({ cacheControl: {}, maxTokens: maxResponseTokens, promptCacheKey, sessionId: promptCacheKey, temperature: 0.2, messages: [
+      const completion = await provider.complete({ ...(usesExplicitPromptCacheBreakpoints(connection.chatModel) ? { cacheControl: {} } : {}), maxTokens: maxResponseTokens, promptCacheKey, sessionId: promptCacheKey, temperature: 0.2, messages: [
         { role: "system", content: buildAiBotSystemPrompt({
           basePrompt: input.basePrompt,
           behaviorRules: input.behaviorRules,

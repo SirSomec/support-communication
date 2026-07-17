@@ -46,16 +46,19 @@ export function ScenarioArchiveConfirmModal({ isSaving, onClose, onConfirm, scen
 
 export function ScenarioPublishChecklistModal({
   aiReadiness,
+  canFixAiConnection = false,
   isSaving,
   knowledgeSources,
   onApproveSources,
   onClose,
   onConfirm,
+  onOpenAiConnections,
   sandboxVerified,
   scenario
 }) {
   const checklist = buildPublishChecklist(scenario, { aiReadiness, knowledgeSources, sandboxVerified });
   const approvableSourceIds = checklist.unavailableSources.filter((item) => item.approvable).map((item) => item.sourceId);
+  const aiBlocked = checklist.items.some((item) => item.id === "ai" && !item.ok);
 
   return (
     <Modal
@@ -86,6 +89,17 @@ export function ScenarioPublishChecklistModal({
             </li>
           ))}
         </ul>
+        {aiBlocked ? (
+          <div className="scenario-publish-sources">
+            <p>Бот использует AI-ответ, а AI-подключение организации не настроено или не прошло проверку — публикация невозможна, даже когда источники готовы.</p>
+            <p>Подключение настраивает администратор сервиса: сервис-админка → «AI-подключения» (провайдер и ключ, затем проверка).</p>
+            {canFixAiConnection && onOpenAiConnections ? (
+              <button disabled={isSaving} onClick={onOpenAiConnections} type="button">
+                Открыть AI-подключения
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {checklist.unavailableSources.length ? (
           <div className="scenario-publish-sources">
             <p>Бот не сможет отвечать по этим источникам, пока они не готовы и не одобрены:</p>

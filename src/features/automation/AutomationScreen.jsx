@@ -1131,11 +1131,13 @@ export function AutomationScreen({ onBack, onToast, access }) {
       {publishChecklistOpen && selectedScenario ? (
         <ScenarioPublishChecklistModal
           aiReadiness={aiReadiness}
+          canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")}
           isSaving={isSaving}
           knowledgeSources={knowledgeSources}
           onApproveSources={(sourceIds) => void approveSourcesFromChecklist(sourceIds)}
           onClose={() => setPublishChecklistOpen(false)}
           onConfirm={() => void confirmScenarioPublish()}
+          onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")}
           sandboxVerified={sandboxVerifiedScenarioId === selectedScenario.id}
           scenario={selectedScenario}
         />

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, History, PauseCircle, Plus, RotateCcw, Save, Trash2, Undo2 } from "lucide-react";
 import { ConfirmDialog, SectionTitle, SegmentedControl, StatusBadge } from "../../ui.jsx";
+import { ScenarioKnowledgeSourceActions } from "./ScenarioKnowledgeSourceActions.jsx";
 import { ScenarioKnowledgeSourceSelector } from "./ScenarioKnowledgeSourceSelector.jsx";
 import { ScenarioOperationalPanel } from "./ScenarioOperationalPanel.jsx";
 import { ScenarioSandboxChat } from "./ScenarioSandboxChat.jsx";
@@ -40,6 +41,8 @@ export function ScenarioConsole({
   knowledgeSources,
   knowledgeSourcesError,
   knowledgeSourcesLoading,
+  knowledgeUploadProgress = null,
+  onAddArticleSource,
   onAddUrlSource,
   onArchive,
   onDisable,
@@ -50,6 +53,7 @@ export function ScenarioConsole({
   onTabChange,
   onToast,
   onUpdateScenario,
+  onUploadKnowledgeFiles,
   onVerified,
   operations,
   scenario,
@@ -392,7 +396,7 @@ export function ScenarioConsole({
         <div className="scenario-console-knowledge">
           <ScenarioKnowledgeSourceSelector
             disabled={!canManage || isSaving}
-            emptyMessage="Нет готовых источников. Добавьте URL-страницу или подготовьте документ в разделе «Знания», затем выберите его здесь."
+            emptyMessage="Источников пока нет. Загрузите файлы, создайте источник из статьи или добавьте URL-страницу — всё прямо отсюда."
             error={knowledgeSourcesError}
             id={`console-sources-${scenario.id}`}
             isLoading={knowledgeSourcesLoading}
@@ -400,9 +404,13 @@ export function ScenarioConsole({
             selectedSourceIds={(effective.sourceBindings ?? []).map((binding) => binding.sourceId).filter(Boolean)}
             sources={knowledgeSources}
           />
-          <button disabled={!canManage || isSaving} onClick={onAddUrlSource} type="button">
-            <Plus size={15} /> Добавить URL-страницу
-          </button>
+          <ScenarioKnowledgeSourceActions
+            disabled={!canManage || isSaving}
+            onAddArticleSource={onAddArticleSource}
+            onAddUrlSource={onAddUrlSource}
+            onUploadFiles={onUploadKnowledgeFiles}
+            uploadProgress={knowledgeUploadProgress}
+          />
         </div>
       ) : null}
 

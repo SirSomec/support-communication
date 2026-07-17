@@ -18,6 +18,8 @@ import { createScreenStateItems } from "../../app/screenState.js";
 import { buildBotScenarioUpdatePatch, changeBotScenarioLifecycle, discardBotScenarioDraft, publishBotScenario, rollbackBotScenario, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { automationService } from "../../services/automationService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
+import { summarizeBulkUpload } from "../knowledge/knowledgeBulkModel.js";
+import { uploadKnowledgeDocumentFiles } from "../knowledge/knowledgeUploadPipeline.js";
 import { ConfirmDialog, MetricTile, ProductScreen, SectionTitle, SegmentedControl } from "../../ui.jsx";
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
 import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
@@ -52,6 +54,9 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [pauseTarget, setPauseTarget] = useState(null);
   const [urlSourceForm, setUrlSourceForm] = useState(null);
+  const [articleSourceForm, setArticleSourceForm] = useState(null);
+  const [knowledgeArticles, setKnowledgeArticles] = useState([]);
+  const [knowledgeUploadProgress, setKnowledgeUploadProgress] = useState(null);
   const [publishChecklistOpen, setPublishChecklistOpen] = useState(false);
   const [advancedMode, setAdvancedMode] = useState(() => loadAdvancedModePreference());
   const [scenarioOperations, setScenarioOperations] = useState([]);
@@ -66,9 +71,10 @@ export function AutomationScreen({ onBack, onToast, access }) {
   async function loadWorkspace({ ignoreSignal } = {}) {
     setLoading(true);
     setError("");
-    const [response, sourcesResponse] = await Promise.all([
+    const [response, sourcesResponse, articlesResponse] = await Promise.all([
       automationService.fetchAutomationWorkspace(),
-      knowledgeService.fetchSources()
+      knowledgeService.fetchSources(),
+      knowledgeService.fetchArticles()
     ]);
     if (ignoreSignal?.ignored) {
       return;
@@ -106,6 +112,9 @@ export function AutomationScreen({ onBack, onToast, access }) {
       setKnowledgeSources([]);
       setKnowledgeSourcesError(sourcesResponse.error?.message ?? "Не удалось загрузить источники знаний.");
     }
+    setKnowledgeArticles(articlesResponse.status === "ok"
+      ? (articlesResponse.data?.articles ?? articlesResponse.data?.items ?? [])
+      : []);
     setKnowledgeSourcesLoading(false);
     setLoading(false);
   }
@@ -149,6 +158,32 @@ export function AutomationScreen({ onBack, onToast, access }) {
           placeholder="Страница знаний"
           value={urlSourceForm.title}
         />
+      </label>
+    </ConfirmDialog>
+  ) : null;
+  const publishedArticles = knowledgeArticles.filter((article) => String(article.status).toLowerCase().includes("publish") || article.status === "Опубликована");
+  const articleSourceDialog = articleSourceForm ? (
+    <ConfirmDialog
+      confirmDisabled={!articleSourceForm.articleId}
+      confirmLabel="Создать источник"
+      description="Источник строится по опубликованной версии статьи и сразу готов отвечать — одобрение не требуется."
+      eyebrow="Источник знаний"
+      onCancel={() => setArticleSourceForm(null)}
+      onConfirm={() => void submitArticleKnowledgeSource()}
+      title="Источник из статьи"
+    >
+      <label>
+        <span>Опубликованная статья</span>
+        {publishedArticles.length ? (
+          <select autoFocus onChange={(event) => setArticleSourceForm({ articleId: event.target.value })} value={articleSourceForm.articleId}>
+            <option value="">Выберите статью…</option>
+            {publishedArticles.map((article) => (
+              <option key={article.id} value={article.id}>{article.title}</option>
+            ))}
+          </select>
+        ) : (
+          <small>Опубликованных статей пока нет. Напишите и опубликуйте статью в разделе «Знания», затем вернитесь сюда.</small>
+        )}
       </label>
     </ConfirmDialog>
   ) : null;
@@ -240,8 +275,9 @@ export function AutomationScreen({ onBack, onToast, access }) {
           selectedScenarioId={selectedScenarioId}
           versions={scenarioVersions}
         />
-        {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} /> : null}
+        {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} knowledgeUploadProgress={knowledgeUploadProgress} onAddArticleSource={addArticleKnowledgeSource} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} onUploadKnowledgeFiles={uploadKnowledgeFiles} /> : null}
         {urlSourceDialog}
+        {articleSourceDialog}
       </ProductScreen>
     );
   }
@@ -355,6 +391,52 @@ export function AutomationScreen({ onBack, onToast, access }) {
       if (approved.status !== "ok") return onToast(approved.error?.message ?? "Страница подготовлена и ждёт подтверждения.");
       setKnowledgeSources((current) => [...current.filter((item) => item.id !== source.id), approved.data.source]);
       onToast("URL-источник подготовлен и доступен для выбора.");
+    } finally { setSavingAction(""); }
+  }
+
+  async function refreshKnowledgeSources() {
+    const response = await knowledgeService.fetchSources();
+    if (response.status === "ok") {
+      setKnowledgeSources(response.data?.sources ?? []);
+      setKnowledgeSourcesError("");
+    }
+  }
+
+  /** Массовая загрузка файлов знаний прямо из настроек бота — тот же конвейер, что в разделе «Знания». */
+  async function uploadKnowledgeFiles(files) {
+    if (!canManageAutomation) return onToast(access.reason);
+    setSavingAction("knowledge-upload");
+    let outcomes = [];
+    try {
+      outcomes = await uploadKnowledgeDocumentFiles(files, { onProgress: setKnowledgeUploadProgress });
+    } finally {
+      setKnowledgeUploadProgress(null);
+      setSavingAction("");
+    }
+    onToast(summarizeBulkUpload(outcomes));
+    await refreshKnowledgeSources();
+  }
+
+  function addArticleKnowledgeSource() {
+    setArticleSourceForm({ articleId: "" });
+  }
+
+  async function submitArticleKnowledgeSource() {
+    const articleId = articleSourceForm?.articleId;
+    setArticleSourceForm(null);
+    if (!articleId) return;
+    const article = knowledgeArticles.find((item) => item.id === articleId);
+    setSavingAction("article-source");
+    try {
+      const created = await knowledgeService.createSource({
+        kind: "document",
+        sourceRef: articleId,
+        title: article?.title ?? "Статья базы знаний"
+      });
+      const source = created.data?.source;
+      if (created.status !== "ok" || !source) return onToast(created.error?.message ?? "Не удалось создать источник из статьи.");
+      setKnowledgeSources((current) => [...current.filter((item) => item.id !== source.id), source]);
+      onToast("Источник из статьи создан и сразу доступен для выбора.");
     } finally { setSavingAction(""); }
   }
 
@@ -797,6 +879,8 @@ export function AutomationScreen({ onBack, onToast, access }) {
               knowledgeSources={knowledgeSources}
               knowledgeSourcesError={knowledgeSourcesError}
               knowledgeSourcesLoading={knowledgeSourcesLoading}
+              knowledgeUploadProgress={knowledgeUploadProgress}
+              onAddArticleSource={addArticleKnowledgeSource}
               onAddUrlSource={addUrlKnowledgeSource}
               onArchive={archiveScenario}
               onDisable={disableScenario}
@@ -807,6 +891,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
               onTabChange={setConsoleTab}
               onToast={onToast}
               onUpdateScenario={handleConsoleUpdate}
+              onUploadKnowledgeFiles={uploadKnowledgeFiles}
               onVerified={setSandboxVerifiedScenarioId}
               operations={selectedOperations}
               scenario={selectedScenario}
@@ -1026,10 +1111,11 @@ export function AutomationScreen({ onBack, onToast, access }) {
           <p>Основной путь — мастер, список сценариев и песочница. Включите дополнительный режим выше, если нужен canvas или JSON import/export.</p>
         </section>
       )}
-      {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} /> : null}
+      {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} knowledgeUploadProgress={knowledgeUploadProgress} onAddArticleSource={addArticleKnowledgeSource} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} onUploadKnowledgeFiles={uploadKnowledgeFiles} /> : null}
       {archiveTarget ? <ScenarioArchiveConfirmModal isSaving={isSaving} onClose={() => setArchiveTarget(null)} onConfirm={(scenario) => void confirmArchiveScenario(scenario)} scenario={archiveTarget} /> : null}
       {pauseTarget ? <ScenarioPauseConfirmModal isSaving={isSaving} onClose={() => setPauseTarget(null)} onConfirm={(scenario) => void confirmDisableScenario(scenario)} scenario={pauseTarget} /> : null}
       {urlSourceDialog}
+      {articleSourceDialog}
       {publishChecklistOpen && selectedScenario ? (
         <ScenarioPublishChecklistModal
           aiReadiness={aiReadiness}

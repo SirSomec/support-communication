@@ -30,6 +30,7 @@ import {
   scenarioWizardSteps
 } from "./automationModel.js";
 import { getNextRadioOptionId, isRadioGroupNavigationKey } from "./automationA11y.js";
+import { ScenarioKnowledgeSourceActions } from "./ScenarioKnowledgeSourceActions.jsx";
 import { ScenarioKnowledgeSourceSelector } from "./ScenarioKnowledgeSourceSelector.jsx";
 import { StatusBadge } from "../../ui.jsx";
 
@@ -51,10 +52,13 @@ export function ScenarioCreationWizard({
   knowledgeSources = [],
   knowledgeSourcesError = "",
   knowledgeSourcesLoading = false,
+  knowledgeUploadProgress = null,
+  onAddArticleSource,
   onAddUrlSource,
   onClose,
   onCreate,
-  onOpenAiConnections
+  onOpenAiConnections,
+  onUploadKnowledgeFiles
 }) {
   const restored = useMemo(() => loadWizardDraft(), []);
   const [step, setStep] = useState(restored?.step ?? 0);
@@ -419,7 +423,13 @@ export function ScenarioCreationWizard({
             selectedSourceIds={form.selectedSourceIds}
             sources={knowledgeSources}
           />
-          {onAddUrlSource ? <button className="scenario-wizard-secondary" disabled={isSaving} onClick={onAddUrlSource} type="button">Добавить URL-страницу</button> : null}
+          <ScenarioKnowledgeSourceActions
+            disabled={isSaving}
+            onAddArticleSource={onAddArticleSource}
+            onAddUrlSource={onAddUrlSource}
+            onUploadFiles={onUploadKnowledgeFiles}
+            uploadProgress={knowledgeUploadProgress}
+          />
           <label className="scenario-wizard-field">
             <span>Базовый промпт сценария</span>
             <textarea

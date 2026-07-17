@@ -939,6 +939,47 @@ test("knowledge documents support bulk approval of ready sources", async ({ page
   await expectHealthyPage(page);
 });
 
+test("scenario wizard knowledge step offers files, articles and urls", async ({ page }) => {
+  await openAppShell(page);
+  await selectRole(page, "Администратор");
+  await openSection(page, "Боты");
+
+  await page.evaluate(() => sessionStorage.removeItem("bot-scenario-wizard-draft-v1"));
+  await page.getByRole("button", { name: "Создать в мастере" }).click();
+  const wizard = page.getByRole("dialog", { name: "Мастер создания сценария" });
+  await expect(wizard).toBeVisible();
+
+  // Дефолты каждого шага валидны — три «Далее» доводят до шага «Знания и передача».
+  for (let advanced = 0; advanced < 3; advanced += 1) {
+    await wizard.getByRole("button", { name: "Далее" }).click();
+  }
+  await expect(wizard.locator(".scenario-wizard-progress li[aria-current='step']")).toContainText("Знания");
+
+  // Все типы источников доступны прямо из настроек бота, не только URL.
+  await expect(wizard.getByRole("button", { name: /Загрузить файлы/ })).toBeVisible();
+  await expect(wizard.getByRole("button", { name: "Добавить URL-страницу" })).toBeVisible();
+
+  const createPromise = page.waitForResponse((response) =>
+    response.url().endsWith("/api/v1/knowledge-sources") && response.request().method() === "POST"
+  );
+  await wizard.getByRole("button", { name: "Из статьи" }).click();
+  const articleDialog = page.getByRole("dialog", { name: "Источник из статьи" });
+  await articleDialog.locator("select").selectOption({ label: "Return policy" });
+  await articleDialog.getByRole("button", { name: "Создать источник" }).click();
+  const createResponse = await createPromise;
+  expect(createResponse.ok()).toBeTruthy();
+  expect((await createResponse.json()).status).toBe("ok");
+
+  const sourceRow = wizard.locator(".scenario-knowledge-source-list label").filter({ hasText: "Return policy" }).first();
+  await expect(sourceRow).toBeVisible();
+  await sourceRow.locator("input[type=checkbox]").check();
+  await expect(sourceRow.locator("input[type=checkbox]")).toBeChecked();
+
+  await page.keyboard.press("Escape");
+  await expect(wizard).toHaveCount(0);
+  await expectHealthyPage(page);
+});
+
 test("quality AI workspace exposes real-time scoring and coaching", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");

@@ -29,6 +29,7 @@ const SELECTOR_INSTRUCTIONS = [
   "Given the customer's message, select the chunks that contain the information needed to answer it.",
   'Return STRICT JSON only: {"chunks":[{"id":"<chunk id>","confidence":<0..1>}],"insufficient":<boolean>}.',
   "Rules: at most 8 chunks ordered by relevance; never answer the question; never quote, translate or rewrite chunk text; ids must be copied exactly from the corpus.",
+  'Valid ids ALWAYS start with "c:" and come from the square brackets before each chunk. The header line "Knowledge corpus, sources: …" lists source ids — those are NOT valid answer ids.',
   'If the corpus does not contain the answer, return {"chunks":[],"insufficient":true}.'
 ].join("\n");
 
@@ -138,7 +139,13 @@ export class LlmKnowledgeSearchService implements LlmKnowledgeSearchInvoker {
   }
 }
 
-/** Терпимый разбор вывода селектора: JSON-объект с chunks, markdown-обёртка допускается; всё невалидное отбрасывается. */
+/**
+ * Терпимый разбор вывода селектора: JSON-объект с chunks, markdown-обёртка
+ * допускается; всё невалидное отбрасывается. Модели периодически возвращают
+ * вместо chunk-id идентификатор ИСТОЧНИКА из заголовка корпуса («ks_…@v3») —
+ * такой выбор честный, просто в другом формате, поэтому разворачиваем его в
+ * чанки этого источника, а не молча теряем найденное знание.
+ */
 export function selectPassages(content: string, chunks: KnowledgeCorpusChunk[]): KnowledgeRetrievalPassage[] {
   const raw = String(content ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
   let parsed: unknown;
@@ -149,14 +156,15 @@ export function selectPassages(content: string, chunks: KnowledgeCorpusChunk[]):
   }
   const items = Array.isArray((parsed as { chunks?: unknown })?.chunks) ? (parsed as { chunks: unknown[] }).chunks : [];
   const byId = new Map(chunks.map((chunk) => [chunk.chunkId, chunk]));
+  const bySource = new Map<string, KnowledgeCorpusChunk[]>();
+  for (const chunk of chunks) {
+    bySource.set(chunk.sourceId, [...(bySource.get(chunk.sourceId) ?? []), chunk]);
+  }
   const passages: KnowledgeRetrievalPassage[] = [];
   const seen = new Set<string>();
-  for (const item of items) {
-    const id = String((item as { id?: unknown })?.id ?? "").trim();
-    const chunk = byId.get(id);
-    if (!chunk || seen.has(id)) continue;
-    seen.add(id);
-    const confidence = Number((item as { confidence?: unknown })?.confidence);
+  const push = (chunk: KnowledgeCorpusChunk, score: number) => {
+    if (seen.has(chunk.chunkId) || passages.length >= 8) return;
+    seen.add(chunk.chunkId);
     passages.push({
       citation: {
         endOffset: chunk.endOffset,
@@ -166,9 +174,25 @@ export function selectPassages(content: string, chunks: KnowledgeCorpusChunk[]):
         title: chunk.title
       },
       content: chunk.content,
-      score: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.8
+      score
     });
+  };
+  for (const item of items) {
     if (passages.length >= 8) break;
+    const id = String((item as { id?: unknown })?.id ?? "").trim().replace(/^\[|\]$/g, "");
+    const confidence = Number((item as { confidence?: unknown })?.confidence);
+    const score = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.8;
+    const exact = byId.get(id);
+    if (exact) {
+      push(exact, score);
+      continue;
+    }
+    // Формы source-id: «ks_x@v3», «ks_x», «c:ks_x» (без номера чанка).
+    const sourceId = id.replace(/^c:/, "").replace(/@v\d+$/, "").replace(/:\d+$/, "");
+    for (const chunk of bySource.get(sourceId) ?? []) {
+      push(chunk, score);
+      if (passages.length >= 8) break;
+    }
   }
   return passages;
 }

@@ -77,6 +77,27 @@ describe("BAI-874 selector output parsing", () => {
     assert.deepEqual(selectPassages('{"chunks":[],"insufficient":true}', chunks), []);
     assert.throws(() => selectPassages("I think chunk 1 is best", chunks), /llm_retrieval_invalid_response/);
   });
+
+  it("recovers source-id shaped answers copied from the corpus header (mygig incident)", () => {
+    const multi = buildKnowledgeCorpus([
+      { source: { id: "ks_aaa", title: "Самозанятость", version: 3 }, text: "Кто может стать самозанятым: физлица и ИП без сотрудников. ".repeat(40) },
+      { source: { id: "ks_bbb", title: "Магазины", version: 2 }, text: "Служебный вход для магазина в ТЦ." }
+    ]).chunks;
+    assert.ok(multi.filter((chunk) => chunk.sourceId === "ks_aaa").length > 1, "нужен многочанковый источник");
+
+    // Модель вернула id источника с версией из заголовка корпуса — разворачиваем в чанки источника.
+    const headerShaped = selectPassages('{"chunks":[{"id":"ks_aaa@v3","confidence":0.99}],"insufficient":false}', multi);
+    assert.ok(headerShaped.length >= 1);
+    assert.ok(headerShaped.every((passage) => passage.citation.sourceId === "ks_aaa"));
+    assert.equal(headerShaped[0]!.score, 0.99);
+
+    // Прочие формы: голый source-id, «c:source» без номера чанка, скобки вокруг корректного id.
+    assert.ok(selectPassages('{"chunks":[{"id":"ks_bbb"}]}', multi).every((passage) => passage.citation.sourceId === "ks_bbb"));
+    assert.equal(selectPassages('{"chunks":[{"id":"c:ks_bbb"}]}', multi).length, 1);
+    assert.equal(selectPassages(`{"chunks":[{"id":"[${multi[0]!.chunkId}]"}]}`, multi)[0]!.content, multi[0]!.content);
+    // Мусорный id по-прежнему отбрасывается молча.
+    assert.deepEqual(selectPassages('{"chunks":[{"id":"ghost@v9"}]}', multi), []);
+  });
 });
 
 describe("BAI-874 LlmKnowledgeSearchService", () => {

@@ -28,6 +28,30 @@ describe("knowledge retrieval", () => {
     assert.equal((await service.retrieve({ query: "космический корабль", sourceBindings: [{ sourceId: "ready" }], tenantId: "tenant-a" })).passages.length, 0);
   });
 
+  it("does not cache empty llm selections so the next question retries the selector", async () => {
+    const repository = KnowledgeSourceRepository.inMemory({ sources: [source("tenant-a", "ready")] });
+    const cache = new KnowledgeRetrievalCache();
+    let call = 0;
+    const flaky = {
+      // Первый ответ селектора пустой (модель вернула мимо формата/insufficient),
+      // второй — нормальный: пустота не должна залипнуть в кэше на TTL.
+      search: async (input: { corpus: { chunks: Array<{ chunkId: string; content: string; endOffset: number; sourceId: string; sourceVersion: number; startOffset: number; title: string }> } }) => {
+        call += 1;
+        if (call === 1) return { passages: [] };
+        const chunk = input.corpus.chunks[0]!;
+        return { passages: [{ citation: { endOffset: chunk.endOffset, sourceId: chunk.sourceId, sourceVersion: chunk.sourceVersion, startOffset: chunk.startOffset, title: chunk.title }, content: chunk.content, score: 0.9 }] };
+      }
+    };
+    const service = new KnowledgeRetrievalService(repository, undefined, cache, undefined, flaky);
+    const first = await service.retrieve({ query: "доставка заказа", sourceBindings: [{ sourceId: "ready" }], tenantId: "tenant-a", mode: "llm" });
+    const second = await service.retrieve({ query: "доставка заказа", sourceBindings: [{ sourceId: "ready" }], tenantId: "tenant-a", mode: "llm" });
+    assert.equal(first.passages.length, 0);
+    assert.equal(second.cache, "miss");
+    assert.equal(second.passages.length, 1);
+    const third = await service.retrieve({ query: "доставка заказа", sourceBindings: [{ sourceId: "ready" }], tenantId: "tenant-a", mode: "llm" });
+    assert.equal(third.cache, "hit");
+  });
+
   it("does not reuse cached passages across different score thresholds", async () => {
     const repository = KnowledgeSourceRepository.inMemory({ sources: [source("tenant-a", "ready")] });
     const cache = new KnowledgeRetrievalCache();

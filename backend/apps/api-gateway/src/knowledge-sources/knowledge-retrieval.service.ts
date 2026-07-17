@@ -109,10 +109,14 @@ export class KnowledgeRetrievalService {
     if (mode === "llm") {
       try {
         const result = await this.llmRetrieve(input, budget);
-        this.cache.set(cacheKey, result, {
-          sourceIds: input.sourceBindings.map((binding) => binding.sourceId),
-          tenantId: input.tenantId
-        });
+        // Пустой выбор LLM не кэшируем: селектор недетерминирован, и разовый
+        // пустой ответ модели иначе залипает на весь TTL «бот молчит по знаниям».
+        if (result.passages.length) {
+          this.cache.set(cacheKey, result, {
+            sourceIds: input.sourceBindings.map((binding) => binding.sourceId),
+            tenantId: input.tenantId
+          });
+        }
         recordBotRetrieval({
           cache: "miss",
           mode: "llm",

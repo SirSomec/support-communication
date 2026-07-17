@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  mergeScenarioSourceBindings,
   selectApprovableSources,
-  summarizeBulkApprove,
+  summarizeBulkAction,
   summarizeBulkUpload
 } from "../src/features/knowledge/knowledgeBulkModel.js";
 
@@ -46,11 +47,29 @@ describe("knowledge bulk operations model", () => {
     assert.doesNotMatch(message, /d\.txt/);
   });
 
-  it("summarizes bulk approve results including skipped sources", () => {
-    assert.match(summarizeBulkApprove({ approved: [{ id: "a" }, { id: "b" }], skipped: [] }), /Одобрено источников: 2/);
-    const mixed = summarizeBulkApprove({ approved: [{ id: "a" }], skipped: [{ code: "knowledge_source_not_ready", sourceId: "b" }] });
+  it("summarizes bulk action results per action including skipped sources", () => {
+    assert.match(summarizeBulkAction("approve", { affected: [{ id: "a" }, { id: "b" }], skipped: [] }), /Одобрено источников: 2\. Бот сможет отвечать по ним\./);
+    const mixed = summarizeBulkAction("approve", { affected: [{ id: "a" }], skipped: [{ code: "knowledge_source_not_ready", sourceId: "b" }] });
     assert.match(mixed, /Одобрено источников: 1/);
     assert.match(mixed, /Пропущено: 1/);
-    assert.match(summarizeBulkApprove({ approved: [], skipped: [] }), /Ни один источник не одобрен/);
+    assert.match(summarizeBulkAction("approve", { affected: [], skipped: [] }), /Ни один источник не одобрен/);
+    assert.match(summarizeBulkAction("disable", { affected: [{ id: "a" }], skipped: [] }), /Отключено источников: 1/);
+    assert.match(summarizeBulkAction("enable", { affected: [], skipped: [{ code: "x", sourceId: "a" }] }), /Ничего не включено\. Пропущено: 1/);
+    assert.match(summarizeBulkAction("archive", { affected: [{ id: "a" }], skipped: [] }), /Перемещено в архив: 1/);
+    assert.match(summarizeBulkAction("delete", { affected: [{ id: "a" }], skipped: [] }), /Удалено источников: 1/);
+  });
+
+  it("merges scenario bindings with selected documents preferring the draft set", () => {
+    const scenario = {
+      draft: { sourceBindings: [{ sourceId: "draft-a" }] },
+      sourceBindings: [{ sourceId: "published-b" }]
+    };
+    const merged = mergeScenarioSourceBindings(scenario, [{ id: "draft-a" }, { id: "doc-new" }, { id: "doc-new" }, null]);
+    assert.equal(merged.additions, 1);
+    assert.deepEqual(merged.merged, [{ sourceId: "draft-a" }, { sourceId: "doc-new" }]);
+
+    const withoutDraft = mergeScenarioSourceBindings({ sourceBindings: [{ sourceId: "published-b" }] }, [{ id: "doc-new" }]);
+    assert.deepEqual(withoutDraft.merged, [{ sourceId: "published-b" }, { sourceId: "doc-new" }]);
+    assert.equal(mergeScenarioSourceBindings(null, [{ id: "doc-new" }]).additions, 1);
   });
 });

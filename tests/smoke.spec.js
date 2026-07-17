@@ -930,12 +930,51 @@ test("knowledge documents support bulk approval of ready sources", async ({ page
   expect(bulkResponse.ok()).toBeTruthy();
   const bulkPayload = await bulkResponse.json();
   expect(bulkPayload.status).toBe("ok");
-  expect(bulkPayload.data.approved.length).toBeGreaterThanOrEqual(2);
+  expect(bulkPayload.data.affected.length).toBeGreaterThanOrEqual(2);
 
   await expect(page.locator(".toast")).toContainText(/Одобрено источников: \d+/);
   await expect(returnRows.nth(0)).toContainText("отвечает клиентам");
   await expect(returnRows.nth(1)).toContainText("отвечает клиентам");
   await expect(page.getByRole("button", { name: /Одобрить готовые/ })).toHaveCount(0);
+
+  // Массовое изменение состояния по выделению: выключить и включить обратно.
+  await returnRows.nth(0).locator("input.knowledge-source-select").check();
+  await returnRows.nth(1).locator("input.knowledge-source-select").check();
+  const toolbar = page.locator(".knowledge-bulk-toolbar");
+  await expect(toolbar).toContainText("Выбрано: 2");
+  const disablePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/knowledge-sources/bulk/disable") && response.request().method() === "POST"
+  );
+  await toolbar.getByRole("button", { name: "Выключить" }).click();
+  expect((await (await disablePromise).json()).data.affected.length).toBe(2);
+  await expect(returnRows.nth(0)).toContainText("Отключён");
+  await expect(returnRows.nth(1)).toContainText("Отключён");
+
+  await returnRows.nth(0).locator("input.knowledge-source-select").check();
+  await returnRows.nth(1).locator("input.knowledge-source-select").check();
+  const enablePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/knowledge-sources/bulk/enable") && response.request().method() === "POST"
+  );
+  await page.locator(".knowledge-bulk-toolbar").getByRole("button", { name: "Включить" }).click();
+  expect((await (await enablePromise).json()).data.affected.length).toBe(2);
+  await expect(returnRows.nth(0)).toContainText("Готов");
+
+  // Массовая привязка выбранных документов к сценарию бота.
+  await returnRows.nth(0).locator("input.knowledge-source-select").check();
+  await returnRows.nth(1).locator("input.knowledge-source-select").check();
+  await page.locator(".knowledge-bulk-toolbar").getByRole("button", { name: "Привязать к боту" }).click();
+  const bindDialog = page.getByRole("dialog", { name: /Привязать документы к боту/ });
+  await bindDialog.locator("select").selectOption({ label: "Auth code" });
+  const bindPromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/automation/bot-scenarios/") && response.request().method() === "PATCH"
+  );
+  await bindDialog.getByRole("button", { name: /Привязать \(\d+\)/ }).click();
+  const bindResponse = await bindPromise;
+  expect(bindResponse.ok()).toBeTruthy();
+  expect((await bindResponse.json()).status).toBe("ok");
+  await expect(page.locator(".toast")).toContainText(/Привязано документов: 2/);
+  await expect(returnRows.nth(0)).toContainText("Auth code");
+  await expect(returnRows.nth(1)).toContainText("Auth code");
   await expectHealthyPage(page);
 });
 

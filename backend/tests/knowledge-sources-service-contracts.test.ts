@@ -61,23 +61,55 @@ describe("knowledge source catalog service", () => {
     await repository.save({ ...base, approvalStatus: "approved", id: "doc-approved" });
     await repository.save({ ...base, id: "doc-foreign", tenantId: "tenant-ladoga" });
 
-    const empty = await service.approveBulk("tenant-volga", { sourceIds: [] });
-    assert.equal(empty.error?.code, "knowledge_bulk_approve_invalid");
-    const oversized = await service.approveBulk("tenant-volga", { sourceIds: Array.from({ length: 101 }, (_, index) => `doc-${index}`) });
-    assert.equal(oversized.error?.code, "knowledge_bulk_approve_too_many");
+    const empty = await service.applyBulk("tenant-volga", "approve", { sourceIds: [] });
+    assert.equal(empty.error?.code, "knowledge_bulk_request_invalid");
+    const oversized = await service.applyBulk("tenant-volga", "approve", { sourceIds: Array.from({ length: 101 }, (_, index) => `doc-${index}`) });
+    assert.equal(oversized.error?.code, "knowledge_bulk_request_too_many");
 
-    const result = await service.approveBulk("tenant-volga", { sourceIds: ["doc-a", "doc-b", "doc-a", "doc-draft", "doc-approved", "doc-foreign", "missing"] });
+    const result = await service.applyBulk("tenant-volga", "approve", { sourceIds: ["doc-a", "doc-b", "doc-a", "doc-draft", "doc-approved", "doc-foreign", "missing"] });
     assert.equal(result.status, "ok");
-    const approved = result.data.approved as Array<{ approvalStatus: string; id: string; readiness: string }>;
-    assert.deepEqual(approved.map((source) => source.id), ["doc-a", "doc-b"]);
-    assert.ok(approved.every((source) => source.approvalStatus === "approved" && source.readiness === "ready"));
+    const affected = result.data.affected as Array<{ approvalStatus: string; id: string; readiness: string }>;
+    assert.deepEqual(affected.map((source) => source.id), ["doc-a", "doc-b"]);
+    assert.ok(affected.every((source) => source.approvalStatus === "approved" && source.readiness === "ready"));
     assert.deepEqual(result.data.skipped, [
       { code: "knowledge_source_not_ready", sourceId: "doc-draft" },
       { code: "knowledge_source_already_approved", sourceId: "doc-approved" },
-      { code: "knowledge_source_not_ready", sourceId: "doc-foreign" },
-      { code: "knowledge_source_not_ready", sourceId: "missing" }
+      { code: "knowledge_source_not_found", sourceId: "doc-foreign" },
+      { code: "knowledge_source_not_found", sourceId: "missing" }
     ]);
     assert.equal((await repository.find("tenant-ladoga", "doc-foreign"))?.approvalStatus, "pending");
+  });
+
+  it("bulk state changes disable, enable, archive and delete with per-source skip codes", async () => {
+    const repository = KnowledgeSourceRepository.inMemory();
+    const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), {}, UrlSourcePolicyRepository.inMemory());
+    const now = "2026-07-17T10:00:00.000Z";
+    const base = {
+      approvalStatus: "approved" as const, approvedAt: now, approvedBy: "op", archivedAt: null, contentChecksum: null, createdAt: now,
+      disabledAt: null, failedAt: null, failureCode: null, kind: "document" as const, lastIndexedAt: now, lastIngestedAt: now,
+      metadata: { chunks: [{ content: "готовый фрагмент", id: "chunk_1" }] }, owner: "op", readiness: "ready" as const, retentionUntil: null,
+      sourceConfig: {}, sourceRef: null, status: "ready" as const, tenantId: "tenant-volga", title: "Doc", updatedAt: now, version: 1
+    };
+    await repository.save({ ...base, id: "doc-a" });
+    await repository.save({ ...base, id: "doc-b" });
+
+    const disabled = await service.applyBulk("tenant-volga", "disable", { sourceIds: ["doc-a", "doc-b", "doc-a"] });
+    assert.deepEqual((disabled.data.affected as Array<{ id: string; status: string }>).map((s) => [s.id, s.status]), [["doc-a", "disabled"], ["doc-b", "disabled"]]);
+    const disabledAgain = await service.applyBulk("tenant-volga", "disable", { sourceIds: ["doc-a"] });
+    assert.deepEqual(disabledAgain.data.skipped, [{ code: "knowledge_source_already_disabled", sourceId: "doc-a" }]);
+
+    const enabled = await service.applyBulk("tenant-volga", "enable", { sourceIds: ["doc-a", "missing"] });
+    assert.deepEqual((enabled.data.affected as Array<{ id: string; status: string }>).map((s) => [s.id, s.status]), [["doc-a", "ready"]]);
+    assert.deepEqual(enabled.data.skipped, [{ code: "knowledge_source_not_found", sourceId: "missing" }]);
+
+    const archived = await service.applyBulk("tenant-volga", "archive", { sourceIds: ["doc-a"] });
+    assert.equal((archived.data.affected as Array<{ status: string }>)[0]?.status, "archived");
+
+    // delete: doc-a уже в архиве, doc-b (включённый) архивируется по пути.
+    const deleted = await service.applyBulk("tenant-volga", "delete", { sourceIds: ["doc-a", "doc-b"] });
+    assert.equal((deleted.data.affected as unknown[]).length, 2);
+    assert.deepEqual(deleted.data.skipped, []);
+    assert.equal(((await service.list("tenant-volga")).data.sources as unknown[]).length, 0);
   });
 
   it("rejects a URL when DNS resolves it to a private address", async () => {

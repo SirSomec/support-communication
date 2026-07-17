@@ -26,7 +26,7 @@ export const knowledgeService = {
   async refreshSource(sourceId) { return sourceRequest(sourceId, "refresh", "refreshKnowledgeSource", { method: "POST" }); },
   async refreshDocumentSource(sourceId) { return sourceRequest(sourceId, "refresh-document", "refreshKnowledgeSourceDocument", { method: "POST" }); },
   async approveSource(sourceId) { return sourceRequest(sourceId, "approve", "approveKnowledgeSource", { method: "POST" }); },
-  async approveSources(sourceIds) { return apiRequest("/knowledge-sources/bulk/approve", { body: { sourceIds }, method: "POST", operation: "approveKnowledgeSourcesBulk", service: SERVICE }); },
+  async bulkSourceAction(action, sourceIds) { return apiRequest(`/knowledge-sources/bulk/${encodeURIComponent(action)}`, { body: { sourceIds }, method: "POST", operation: "bulkKnowledgeSourceAction", service: SERVICE }); },
   async updateSource(sourceId, payload = {}) { return sourceRequest(sourceId, "", "updateKnowledgeSource", { body: payload, method: "PATCH" }); },
   async disableSource(sourceId) { return sourceRequest(sourceId, "disable", "disableKnowledgeSource", { method: "POST" }); },
   async enableSource(sourceId) { return sourceRequest(sourceId, "enable", "enableKnowledgeSource", { method: "POST" }); },

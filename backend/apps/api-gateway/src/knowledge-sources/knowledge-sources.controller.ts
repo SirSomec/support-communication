@@ -20,12 +20,32 @@ export class KnowledgeSourcesController {
   @RequireServiceAdminAction("knowledge.write")
   @HttpCode(HttpStatus.OK)
   create(@Body() body: KnowledgeSourceCreateInput, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.create(tenantId(request), body ?? {}); }
-  // Статический сегмент «bulk» объявлен раньше «:sourceId», иначе он матчился бы как sourceId.
+  // Статические сегменты «bulk/...» объявлены раньше «:sourceId», иначе «bulk» матчился бы как sourceId.
   @Post("bulk/approve")
   @RequireTenantOperatorPermission("knowledge.write")
   @RequireServiceAdminAction("knowledge.write")
   @HttpCode(HttpStatus.OK)
-  approveBulk(@Body() body: { sourceIds?: string[] }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.approveBulk(tenantId(request), body ?? {}); }
+  bulkApprove(@Body() body: { sourceIds?: string[] }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.applyBulk(tenantId(request), "approve", body ?? {}); }
+  @Post("bulk/disable")
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  bulkDisable(@Body() body: { sourceIds?: string[] }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.applyBulk(tenantId(request), "disable", body ?? {}); }
+  @Post("bulk/enable")
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  bulkEnable(@Body() body: { sourceIds?: string[] }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.applyBulk(tenantId(request), "enable", body ?? {}); }
+  @Post("bulk/archive")
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  bulkArchive(@Body() body: { sourceIds?: string[] }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.applyBulk(tenantId(request), "archive", body ?? {}); }
+  @Post("bulk/delete")
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  bulkDelete(@Body() body: { sourceIds?: string[] }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.applyBulk(tenantId(request), "delete", body ?? {}); }
   @Post(":sourceId/disable")
   @RequireTenantOperatorPermission("knowledge.write")
   @RequireServiceAdminAction("knowledge.write")

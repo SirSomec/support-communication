@@ -21,7 +21,10 @@ import { McpConnectorRepository } from "./mcp-connector.repository.js";
 const SERVICE = "knowledgeSourcesService";
 const URL_SOURCE_MAX_BYTES = 1_000_000;
 const URL_SOURCE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BULK_APPROVE_MAX_SOURCES = 100;
+const BULK_MAX_SOURCES = 100;
+
+export const knowledgeSourceBulkActions = ["approve", "archive", "delete", "disable", "enable"] as const;
+export type KnowledgeSourceBulkAction = typeof knowledgeSourceBulkActions[number];
 
 export interface KnowledgeSourceCreateInput {
   kind?: KnowledgeSourceKind;
@@ -298,26 +301,55 @@ export class KnowledgeSourcesService {
     return envelope("approveKnowledgeSource", tenantId, data);
   }
 
-  /** Массовое одобрение после пакетной загрузки: каждый источник проходит те же проверки, что и одиночный approve. */
-  async approveBulk(tenantId: string, input: { sourceIds?: unknown }): Promise<BackendEnvelope<Record<string, unknown>>> {
+  /**
+   * Массовые операции над источниками (после пакетной загрузки): каждый источник
+   * проходит те же проверки, что и одиночное действие; уже находящиеся в целевом
+   * состоянии и невозможные переходы попадают в skipped с кодом причины.
+   */
+  async applyBulk(tenantId: string, action: KnowledgeSourceBulkAction, input: { sourceIds?: unknown }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const operation = `bulkKnowledgeSources:${action}`;
     const sourceIds = Array.isArray(input.sourceIds)
       ? [...new Set(input.sourceIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
       : [];
-    if (!sourceIds.length) return invalid("approveKnowledgeSourcesBulk", tenantId, "knowledge_bulk_approve_invalid", "Укажите хотя бы один источник для одобрения.");
-    if (sourceIds.length > BULK_APPROVE_MAX_SOURCES) return invalid("approveKnowledgeSourcesBulk", tenantId, "knowledge_bulk_approve_too_many", `За один запрос можно одобрить не больше ${BULK_APPROVE_MAX_SOURCES} источников.`);
-    const approved: KnowledgeSourceRecord[] = [];
+    if (!sourceIds.length) return invalid(operation, tenantId, "knowledge_bulk_request_invalid", "Укажите хотя бы один источник.");
+    if (sourceIds.length > BULK_MAX_SOURCES) return invalid(operation, tenantId, "knowledge_bulk_request_too_many", `За один запрос можно обработать не больше ${BULK_MAX_SOURCES} источников.`);
+    const affected: KnowledgeSourceRecord[] = [];
     const skipped: Array<{ code: string; sourceId: string }> = [];
     for (const sourceId of sourceIds) {
-      const current = await this.repository.find(tenantId, sourceId);
-      if (current?.approvalStatus === "approved") {
-        skipped.push({ code: "knowledge_source_already_approved", sourceId });
-        continue;
-      }
-      const result = await this.approve(tenantId, sourceId);
-      if (result.status === "ok") approved.push(result.data.source as KnowledgeSourceRecord);
-      else skipped.push({ code: result.error?.code ?? "knowledge_source_not_ready", sourceId });
+      const outcome = await this.applyBulkOne(tenantId, action, sourceId);
+      if (outcome.source) affected.push(outcome.source);
+      else skipped.push({ code: outcome.code ?? "knowledge_source_transition_invalid", sourceId });
     }
-    return envelope("approveKnowledgeSourcesBulk", tenantId, { approved, skipped });
+    return envelope(operation, tenantId, { action, affected, skipped });
+  }
+
+  private async applyBulkOne(tenantId: string, action: KnowledgeSourceBulkAction, sourceId: string): Promise<{ code?: string; source?: KnowledgeSourceRecord }> {
+    const current = await this.repository.find(tenantId, sourceId);
+    if (!current) return { code: "knowledge_source_not_found" };
+    if (action === "approve") {
+      if (current.approvalStatus === "approved") return { code: "knowledge_source_already_approved" };
+      return unwrap(await this.approve(tenantId, sourceId));
+    }
+    if (action === "disable") {
+      if (current.status === "disabled") return { code: "knowledge_source_already_disabled" };
+      return unwrap(await this.disable(tenantId, sourceId));
+    }
+    if (action === "enable") {
+      if (current.status !== "disabled") return { code: "knowledge_source_not_disabled" };
+      return unwrap(await this.enable(tenantId, sourceId));
+    }
+    if (action === "archive") {
+      if (current.status === "archived") return { code: "knowledge_source_already_archived" };
+      return unwrap(await this.archive(tenantId, sourceId));
+    }
+    // delete: неархивные сначала архивируются — как двухшаговое одиночное удаление.
+    if (current.status !== "archived") {
+      const archived = unwrap(await this.archive(tenantId, sourceId));
+      if (!archived.source) return archived;
+    }
+    const removed = await this.remove(tenantId, sourceId);
+    if (removed.status !== "ok") return { code: removed.error?.code ?? "knowledge_source_transition_invalid" };
+    return { source: { ...current, status: "archived" } };
   }
 
   async getUrlPolicy(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -434,6 +466,11 @@ function validAllowlistHost(value: unknown): boolean {
 function dueForRefresh(source: KnowledgeSourceRecord, now: Date): boolean {
   const next = Date.parse(String(source.metadata.nextRefreshAt ?? ""));
   return !Number.isFinite(next) || next <= now.getTime();
+}
+
+function unwrap(result: BackendEnvelope<Record<string, unknown>>): { code?: string; source?: KnowledgeSourceRecord } {
+  if (result.status !== "ok") return { code: result.error?.code ?? "knowledge_source_transition_invalid" };
+  return { source: result.data.source as KnowledgeSourceRecord };
 }
 
 function envelope(operation: string, tenantId: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {

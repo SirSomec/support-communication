@@ -22,13 +22,36 @@ export function summarizeBulkUpload(outcomes) {
   return `В очереди индексации: ${queued} из ${list.length}. Не загрузились: ${shown.join("; ")}${hidden > 0 ? ` и ещё ${hidden}` : ""}.`;
 }
 
-export function summarizeBulkApprove(data) {
-  const approvedCount = Array.isArray(data?.approved) ? data.approved.length : 0;
+const BULK_ACTION_LABELS = {
+  approve: { done: "Одобрено источников", none: "Ни один источник не одобрен.", suffix: " Бот сможет отвечать по ним." },
+  archive: { done: "Перемещено в архив", none: "Ничего не перемещено в архив." },
+  delete: { done: "Удалено источников", none: "Ничего не удалено." },
+  disable: { done: "Отключено источников", none: "Ничего не отключено." },
+  enable: { done: "Включено источников", none: "Ничего не включено." }
+};
+
+export function summarizeBulkAction(action, data) {
+  const labels = BULK_ACTION_LABELS[action] ?? { done: "Обработано источников", none: "Ничего не изменилось." };
+  const affectedCount = Array.isArray(data?.affected) ? data.affected.length : 0;
   const skippedCount = Array.isArray(data?.skipped) ? data.skipped.length : 0;
-  const base = approvedCount
-    ? `Одобрено источников: ${approvedCount}. Бот сможет отвечать по ним.`
-    : "Ни один источник не одобрен.";
+  const base = affectedCount ? `${labels.done}: ${affectedCount}.${labels.suffix ?? ""}` : labels.none;
   return skippedCount
-    ? `${base} Пропущено: ${skippedCount} — источники изменились или уже одобрены, список обновлён.`
+    ? `${base} Пропущено: ${skippedCount} — источники в другом состоянии, список обновлён.`
     : base;
+}
+
+/** Слияние привязок сценария с выбранными документами: черновик приоритетнее опубликованного набора. */
+export function mergeScenarioSourceBindings(scenario, sources) {
+  const base = Array.isArray(scenario?.draft?.sourceBindings)
+    ? scenario.draft.sourceBindings
+    : Array.isArray(scenario?.sourceBindings) ? scenario.sourceBindings : [];
+  const known = new Set(base.map((binding) => binding?.sourceId).filter(Boolean));
+  const additions = [];
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const sourceId = source?.id;
+    if (!sourceId || known.has(sourceId)) continue;
+    known.add(sourceId);
+    additions.push({ sourceId });
+  }
+  return { additions: additions.length, merged: [...base, ...additions] };
 }

@@ -3,6 +3,7 @@ import "./knowledge.css";
 import {
   Archive,
   BookOpen,
+  Bot,
   CheckCircle2,
   Eye,
   FileText,
@@ -20,8 +21,9 @@ import {
 import { createScreenStateItems } from "../../app/screenState.js";
 import { KNOWLEDGE_UPLOAD_ACCEPT, uploadKnowledgeDocumentFiles } from "./knowledgeUploadPipeline.js";
 import { buildSourceBotHints } from "./knowledgeSourceHints.js";
-import { selectApprovableSources, summarizeBulkApprove, summarizeBulkUpload } from "./knowledgeBulkModel.js";
+import { mergeScenarioSourceBindings, selectApprovableSources, summarizeBulkAction, summarizeBulkUpload } from "./knowledgeBulkModel.js";
 import { collectKnowledgeLoadErrors } from "./knowledgeLoadModel.js";
+import { buildBotScenarioUpdatePatch, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
 import { automationService } from "../../services/automationService.js";
 import { ConfirmDialog, MetricTile, Modal, ProductScreen, SectionTitle, SegmentedControl, StatusBadge } from "../../ui.jsx";
@@ -72,6 +74,9 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   const [renameTarget, setRenameTarget] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [bulkApproveTarget, setBulkApproveTarget] = useState(null);
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [bulkDeleteTarget, setBulkDeleteTarget] = useState(null);
+  const [bindTarget, setBindTarget] = useState(null);
   const canWrite = Boolean(access.canManageKnowledge);
   const busy = Boolean(busyAction);
 
@@ -118,6 +123,11 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
 
   const documents = useMemo(() => sources.filter((source) => source.kind === "document"), [sources]);
   const approvableDocuments = useMemo(() => selectApprovableSources(documents), [documents]);
+  // Выделение переживает silent-перезагрузки списка; исчезнувшие источники выпадают сами.
+  const selectedDocuments = useMemo(() => {
+    const selected = new Set(selectedDocIds);
+    return documents.filter((document) => selected.has(document.id));
+  }, [documents, selectedDocIds]);
   const pages = useMemo(() => sources.filter((source) => source.kind === "url" || source.kind === "link"), [sources]);
   const mcpSources = useMemo(() => sources.filter((source) => source.kind === "mcp"), [sources]);
   const approvedMcp = useMemo(() => mcpConnectors.filter((connector) => connector.approvedAt && connector.status === "enabled"), [mcpConnectors]);
@@ -160,8 +170,64 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   }
 
   async function handleBulkApprove(sourcesToApprove) {
-    const response = await runSourceAction("bulk-approve", () => knowledgeService.approveSources(sourcesToApprove.map((source) => source.id)));
-    if (response) onToast(summarizeBulkApprove(response.data));
+    const response = await runSourceAction("bulk-approve", () => knowledgeService.bulkSourceAction("approve", sourcesToApprove.map((source) => source.id)));
+    if (response) {
+      onToast(summarizeBulkAction("approve", response.data));
+      setSelectedDocIds([]);
+    }
+  }
+
+  /** Массовое изменение состояния выбранных документов — сервер вернёт skipped по тем, кому переход недоступен. */
+  async function handleBulkState(action) {
+    const ids = selectedDocuments.map((document) => document.id);
+    if (!ids.length) return;
+    const response = await runSourceAction(`bulk-${action}`, () => knowledgeService.bulkSourceAction(action, ids));
+    if (response) {
+      onToast(summarizeBulkAction(action, response.data));
+      setSelectedDocIds([]);
+    }
+  }
+
+  function toggleDocSelection(sourceId) {
+    setSelectedDocIds((current) => current.includes(sourceId) ? current.filter((id) => id !== sourceId) : [...current, sourceId]);
+  }
+
+  function toggleAllDocs() {
+    setSelectedDocIds((current) => current.length >= documents.length ? [] : documents.map((document) => document.id));
+  }
+
+  async function openBindDialog() {
+    if (!canWrite) return onToast(access.reason);
+    const docs = selectedDocuments;
+    if (!docs.length) return;
+    setBindTarget({ loading: true, scenarioId: "", scenarios: [], sources: docs });
+    const response = await automationService.listBotScenarios();
+    if (response.status !== "ok") {
+      onToast(response.error?.message ?? "Не удалось загрузить сценарии ботов.");
+      setBindTarget(null);
+      return;
+    }
+    const scenarios = normalizeList(response.data?.scenarios).filter((scenario) => scenario.status !== "archived");
+    setBindTarget({ loading: false, scenarioId: scenarios[0]?.id ?? "", scenarios, sources: docs });
+  }
+
+  async function handleBindToScenario() {
+    const target = bindTarget;
+    setBindTarget(null);
+    const scenario = target?.scenarios?.find((item) => item.id === target.scenarioId);
+    if (!scenario) return;
+    const { additions, merged } = mergeScenarioSourceBindings(scenario, target.sources);
+    if (!additions) return onToast("Все выбранные документы уже привязаны к этому сценарию.");
+    setBusyAction("bulk-bind");
+    try {
+      const result = await submitBotScenarioUpdate(buildBotScenarioUpdatePatch(scenario.id, { sourceBindings: merged }));
+      if (!result.ok) return onToast(result.message);
+      onToast(`Привязано документов: ${additions} к сценарию «${scenario.name}».${scenario.status === "published" ? " Изменения в черновике — опубликуйте сценарий." : ""}`);
+      setSelectedDocIds([]);
+      await loadAll({ silent: true });
+    } finally {
+      setBusyAction("");
+    }
   }
 
   async function handleCreateUrlSource() {
@@ -355,6 +421,36 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
 
       {tab === "documents" ? (
         <SourceManagerPanel
+          onToggleSelect={canWrite ? toggleDocSelection : undefined}
+          onToggleSelectAll={canWrite ? toggleAllDocs : undefined}
+          selectedIds={selectedDocIds}
+          selectionToolbar={selectedDocuments.length ? (
+            <div className="knowledge-bulk-toolbar">
+              <span className="knowledge-bulk-count">Выбрано: {selectedDocuments.length}</span>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  const approvable = selectApprovableSources(selectedDocuments);
+                  if (!approvable.length) return onToast("Среди выбранных нет готовых к одобрению документов.");
+                  setBulkApproveTarget(approvable);
+                }}
+                type="button"
+              >
+                <CheckCircle2 size={14} /> Одобрить
+              </button>
+              <button disabled={busy} onClick={() => void handleBulkState("disable")} type="button">Выключить</button>
+              <button disabled={busy} onClick={() => void handleBulkState("enable")} type="button">Включить</button>
+              <button disabled={busy} onClick={() => void handleBulkState("archive")} type="button">
+                <Archive size={14} /> В архив
+              </button>
+              <button className="danger" disabled={busy} onClick={() => setBulkDeleteTarget(selectedDocuments)} type="button">
+                <Trash2 size={14} /> Удалить
+              </button>
+              <button disabled={busy} onClick={() => void openBindDialog()} type="button">
+                <Bot size={14} /> Привязать к боту
+              </button>
+            </div>
+          ) : null}
           actions={
             <>
               {approvableDocuments.length ? (
@@ -632,6 +728,60 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
         />
       ) : null}
 
+      {bulkDeleteTarget ? (
+        <ConfirmDialog
+          confirmLabel={`Удалить (${bulkDeleteTarget.length})`}
+          danger
+          description="Неархивные документы сначала переместятся в архив, затем будут удалены навсегда. Привязанные к сценариям — пропустятся."
+          onCancel={() => setBulkDeleteTarget(null)}
+          onConfirm={async () => {
+            setBulkDeleteTarget(null);
+            await handleBulkState("delete");
+          }}
+          title={`Удалить выбранные документы (${bulkDeleteTarget.length})?`}
+        >
+          <span className="knowledge-bulk-approve-list">
+            {bulkDeleteTarget.slice(0, 8).map((source) => (
+              <span key={source.id}>{source.title}</span>
+            ))}
+            {bulkDeleteTarget.length > 8 ? <span>и ещё {bulkDeleteTarget.length - 8}…</span> : null}
+          </span>
+        </ConfirmDialog>
+      ) : null}
+
+      {bindTarget ? (
+        <ConfirmDialog
+          confirmDisabled={bindTarget.loading || !bindTarget.scenarioId}
+          confirmLabel={`Привязать (${bindTarget.sources.length})`}
+          description="Документы добавятся к знаниям сценария. У опубликованного сценария изменения попадут в черновик — опубликуйте его, чтобы бот начал отвечать по новым документам."
+          eyebrow="Знания для бота"
+          onCancel={() => setBindTarget(null)}
+          onConfirm={() => void handleBindToScenario()}
+          title={`Привязать документы к боту (${bindTarget.sources.length})`}
+        >
+          <span className="knowledge-url-form">
+            {bindTarget.loading ? <span>Загружаем сценарии…</span> : bindTarget.scenarios.length ? (
+              <label>
+                <span>Сценарий бота</span>
+                <select autoFocus onChange={(event) => setBindTarget((current) => current ? { ...current, scenarioId: event.target.value } : current)} value={bindTarget.scenarioId}>
+                  {bindTarget.scenarios.map((scenario) => (
+                    <option key={scenario.id} value={scenario.id}>{scenario.name}{scenario.status === "published" ? " · опубликован" : ""}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <span>Сценариев пока нет. Создайте бота в разделе «Боты», затем привяжите документы.</span>
+            )}
+            <span className="knowledge-bulk-approve-list">
+              {bindTarget.sources.slice(0, 8).map((source) => (
+                <span key={source.id}>{source.title}</span>
+              ))}
+              {bindTarget.sources.length > 8 ? <span>и ещё {bindTarget.sources.length - 8}…</span> : null}
+            </span>
+          </span>
+        </ConfirmDialog>
+      ) : null}
+
       {bulkApproveTarget ? (
         <ConfirmDialog
           confirmLabel={`Одобрить (${bulkApproveTarget.length})`}
@@ -745,10 +895,25 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   );
 }
 
-function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onApprove, onArchive, onDelete, onDisable, onEnable, onPreview, onRefresh, onRename, sources, title, usage }) {
+function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onApprove, onArchive, onDelete, onDisable, onEnable, onPreview, onRefresh, onRename, onToggleSelect, onToggleSelectAll, selectedIds = [], selectionToolbar = null, sources, title, usage }) {
+  const selectable = Boolean(onToggleSelect);
+  const selectedSet = new Set(selectedIds);
   return (
     <section className="work-panel">
       <SectionTitle action={<span className="knowledge-panel-actions">{actions}</span>} title={title} />
+      {selectable && sources.length ? (
+        <div className="knowledge-select-all-row">
+          <label>
+            <input
+              checked={sources.length > 0 && sources.every((source) => selectedSet.has(source.id))}
+              onChange={() => onToggleSelectAll?.()}
+              type="checkbox"
+            />
+            <span>Выбрать все</span>
+          </label>
+          {selectionToolbar}
+        </div>
+      ) : null}
       {!sources.length ? (
         <div className="knowledge-empty">
           <FileText size={19} />
@@ -763,6 +928,15 @@ function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onApp
             const articleOutdated = Boolean(source.metadata?.pendingArticleVersion);
             return (
               <li className="knowledge-source-row" key={source.id}>
+                {selectable ? (
+                  <input
+                    aria-label={`Выбрать «${source.title}»`}
+                    checked={selectedSet.has(source.id)}
+                    className="knowledge-source-select"
+                    onChange={() => onToggleSelect(source.id)}
+                    type="checkbox"
+                  />
+                ) : null}
                 <div className="knowledge-source-main">
                   <strong>{source.title}</strong>
                   <span className="knowledge-source-badges">

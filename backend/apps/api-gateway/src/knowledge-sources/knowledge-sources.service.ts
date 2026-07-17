@@ -21,7 +21,6 @@ import { McpConnectorRepository } from "./mcp-connector.repository.js";
 const SERVICE = "knowledgeSourcesService";
 const URL_SOURCE_MAX_BYTES = 1_000_000;
 const URL_SOURCE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BULK_MAX_SOURCES = 100;
 
 export const knowledgeSourceBulkActions = ["approve", "archive", "delete", "disable", "enable"] as const;
 export type KnowledgeSourceBulkAction = typeof knowledgeSourceBulkActions[number];
@@ -312,7 +311,6 @@ export class KnowledgeSourcesService {
       ? [...new Set(input.sourceIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
       : [];
     if (!sourceIds.length) return invalid(operation, tenantId, "knowledge_bulk_request_invalid", "Укажите хотя бы один источник.");
-    if (sourceIds.length > BULK_MAX_SOURCES) return invalid(operation, tenantId, "knowledge_bulk_request_too_many", `За один запрос можно обработать не больше ${BULK_MAX_SOURCES} источников.`);
     const affected: KnowledgeSourceRecord[] = [];
     const skipped: Array<{ code: string; sourceId: string }> = [];
     for (const sourceId of sourceIds) {

@@ -63,8 +63,19 @@ describe("knowledge source catalog service", () => {
 
     const empty = await service.applyBulk("tenant-volga", "approve", { sourceIds: [] });
     assert.equal(empty.error?.code, "knowledge_bulk_request_invalid");
-    const oversized = await service.applyBulk("tenant-volga", "approve", { sourceIds: Array.from({ length: 101 }, (_, index) => `doc-${index}`) });
-    assert.equal(oversized.error?.code, "knowledge_bulk_request_too_many");
+
+    // Ограничения на размер пакета нет: партия заметно больше сотни проходит целиком.
+    const batchIds: string[] = [];
+    for (let index = 0; index < 150; index += 1) {
+      const id = `doc-batch-${index}`;
+      batchIds.push(id);
+      await repository.save({ ...base, id });
+    }
+    const big = await service.applyBulk("tenant-volga", "approve", { sourceIds: batchIds });
+    assert.equal(big.status, "ok");
+    assert.equal((big.data.affected as unknown[]).length, 150);
+    assert.deepEqual(big.data.skipped, []);
+    await service.applyBulk("tenant-volga", "delete", { sourceIds: batchIds });
 
     const result = await service.applyBulk("tenant-volga", "approve", { sourceIds: ["doc-a", "doc-b", "doc-a", "doc-draft", "doc-approved", "doc-foreign", "missing"] });
     assert.equal(result.status, "ok");

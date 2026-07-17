@@ -9,6 +9,8 @@ import {
 import { KnowledgeRetrievalCache } from "./knowledge-retrieval-cache.js";
 
 type MaybePromise<T> = Promise<T> | T;
+const KNOWLEDGE_INGESTION_LEASE_MS = 5 * 60 * 1000;
+const KNOWLEDGE_INGESTION_MAX_ATTEMPTS = 5;
 
 export interface KnowledgeSourcesState {
   ingestionJobs: KnowledgeDocumentIngestionJob[];
@@ -78,9 +80,10 @@ export interface PrismaKnowledgeIngestionJobRow {
 export interface KnowledgeSourcePrismaClient {
   knowledgeIngestionJob: {
     create(input: { data: PrismaKnowledgeIngestionJobRow }): MaybePromise<PrismaKnowledgeIngestionJobRow>;
-    findFirst(input: { orderBy?: { createdAt: "asc" }; where: { status?: string; tenantId?: string; idempotencyKey?: string } }): MaybePromise<PrismaKnowledgeIngestionJobRow | null>;
+    deleteMany(input: { where: { sourceId?: string; tenantId?: string } }): MaybePromise<{ count: number }>;
+    findFirst(input: { orderBy?: { createdAt: "asc" }; where: { status?: string; tenantId?: string; idempotencyKey?: string; updatedAt?: { lt: Date } } }): MaybePromise<PrismaKnowledgeIngestionJobRow | null>;
     findUnique(input: { where: { jobId: string } }): MaybePromise<PrismaKnowledgeIngestionJobRow | null>;
-    updateMany(input: { data: Partial<Omit<PrismaKnowledgeIngestionJobRow, "jobId" | "tenantId">>; where: { jobId: string; status?: string } }): MaybePromise<{ count: number }>;
+    updateMany(input: { data: Partial<Omit<PrismaKnowledgeIngestionJobRow, "jobId" | "tenantId">>; where: { jobId: string; status?: string; updatedAt?: Date } }): MaybePromise<{ count: number }>;
   };
   knowledgeSource: {
     deleteMany(input: { where: { id: string; tenantId: string } }): MaybePromise<{ count: number }>;
@@ -194,7 +197,8 @@ export class KnowledgeSourceRepository {
     const tenant = requiredIdentifier(tenantId, "knowledge_source_tenant_required");
     const sourceId = requiredIdentifier(id, "knowledge_source_identity_required");
     if (this.prismaClient) {
-      return Promise.resolve(this.prismaClient.knowledgeSource.deleteMany({ where: { id: sourceId, tenantId: tenant } }))
+      return Promise.resolve(this.prismaClient.knowledgeIngestionJob.deleteMany({ where: { sourceId, tenantId: tenant } }))
+        .then(() => this.prismaClient!.knowledgeSource.deleteMany({ where: { id: sourceId, tenantId: tenant } }))
         .then(() => {
           KnowledgeRetrievalCache.default().purgeSource(tenant, sourceId);
         });
@@ -262,10 +266,26 @@ export class KnowledgeSourceRepository {
     }
     let claimed: KnowledgeDocumentIngestionJob | undefined;
     this.store.update((state) => {
-      const current = normalizeState(state); const job = current.ingestionJobs.find((item) => item.status === "pending");
-      if (!job) return current;
-      claimed = { ...job, attempts: job.attempts + 1, status: "processing", updatedAt: new Date().toISOString() };
-      return { ...current, ingestionJobs: current.ingestionJobs.map((item) => item.jobId === job.jobId ? claimed! : item) };
+      const current = normalizeState(state);
+      const now = new Date();
+      const staleBefore = now.getTime() - KNOWLEDGE_INGESTION_LEASE_MS;
+      const isClaimable = (item: KnowledgeDocumentIngestionJob) => item.status === "pending"
+        || (item.status === "processing" && Date.parse(item.updatedAt) < staleBefore);
+      const job = current.ingestionJobs.find((item) => isClaimable(item) && item.attempts < KNOWLEDGE_INGESTION_MAX_ATTEMPTS);
+      const updatedAt = now.toISOString();
+      if (job) {
+        claimed = { ...job, attempts: job.attempts + 1, errorCode: null, status: "processing", updatedAt };
+      }
+      return {
+        ...current,
+        ingestionJobs: current.ingestionJobs.map((item) => {
+          if (item.jobId === job?.jobId) return claimed!;
+          if (isClaimable(item) && item.attempts >= KNOWLEDGE_INGESTION_MAX_ATTEMPTS) {
+            return { ...item, errorCode: "knowledge_ingestion_attempts_exhausted", status: "failed", updatedAt };
+          }
+          return item;
+        })
+      };
     });
     return claimed ? clone(claimed) : undefined;
   }
@@ -310,14 +330,27 @@ export class KnowledgeSourceRepository {
     // Оптимистичный claim: updateMany с where по прежнему статусу — второй
     // конкурирующий воркер получит count=0 и возьмёт следующую задачу.
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const candidate = await this.prismaClient!.knowledgeIngestionJob.findFirst({
+      const staleBefore = new Date(Date.now() - KNOWLEDGE_INGESTION_LEASE_MS);
+      const pending = await this.prismaClient!.knowledgeIngestionJob.findFirst({
         orderBy: { createdAt: "asc" },
         where: { status: "pending" }
       });
+      const candidate = pending ?? await this.prismaClient!.knowledgeIngestionJob.findFirst({
+        orderBy: { createdAt: "asc" },
+        where: { status: "processing", updatedAt: { lt: staleBefore } }
+      });
       if (!candidate) return undefined;
+      const claimWhere = { jobId: candidate.jobId, status: candidate.status, updatedAt: candidate.updatedAt };
+      if (candidate.attempts >= KNOWLEDGE_INGESTION_MAX_ATTEMPTS) {
+        await this.prismaClient!.knowledgeIngestionJob.updateMany({
+          data: { errorCode: "knowledge_ingestion_attempts_exhausted", status: "failed", updatedAt: new Date() },
+          where: claimWhere
+        });
+        continue;
+      }
       const result = await this.prismaClient!.knowledgeIngestionJob.updateMany({
-        data: { attempts: candidate.attempts + 1, status: "processing", updatedAt: new Date() },
-        where: { jobId: candidate.jobId, status: "pending" }
+        data: { attempts: candidate.attempts + 1, errorCode: null, status: "processing", updatedAt: new Date() },
+        where: claimWhere
       });
       if (result.count) {
         const row = await this.prismaClient!.knowledgeIngestionJob.findUnique({ where: { jobId: candidate.jobId } });
@@ -332,9 +365,22 @@ export class KnowledgeSourceRepository {
       where: { idempotencyKey: job.idempotencyKey, tenantId: job.tenantId }
     });
     if (existing) return toJobRecord(existing);
-    const row = await this.prismaClient!.knowledgeIngestionJob.create({ data: toJobRow(job) });
-    return toJobRecord(row);
+    try {
+      const row = await this.prismaClient!.knowledgeIngestionJob.create({ data: toJobRow(job) });
+      return toJobRecord(row);
+    } catch (error) {
+      if (!isPrismaUniqueConstraintError(error)) throw error;
+      const raced = await this.prismaClient!.knowledgeIngestionJob.findFirst({
+        where: { idempotencyKey: job.idempotencyKey, tenantId: job.tenantId }
+      });
+      if (!raced) throw error;
+      return toJobRecord(raced);
+    }
   }
+}
+
+function isPrismaUniqueConstraintError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
 }
 
 function toSourceCreateInput(record: KnowledgeSourceRecord): PrismaKnowledgeSourceCreateInput {

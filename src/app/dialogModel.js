@@ -204,36 +204,6 @@ export function createAuditEvent({
   };
 }
 
-export function createOutboundConversation(outbound, { now = Date.now } = {}) {
-  const id = `outbound-${now()}`;
-
-  return {
-    id,
-    name: outbound.clientName || "Новый клиент",
-    initials: outbound.clientName ? outbound.clientName.split(" ").map((part) => part[0]).join("").slice(0, 2) : "НК",
-    avatar: "",
-    channel: outbound.channel,
-    phone: outbound.phone,
-    time: "сейчас",
-    preview: outbound.message,
-    status: "active",
-    sla: "00:00",
-    slaTone: "ok",
-    topic: outbound.topic,
-    unread: false,
-    device: outbound.device,
-    entry: outbound.channel,
-    language: "Русский",
-    clientSince: outbound.existing ? outbound.existing.clientSince : "Новый контакт",
-    tags: ["исходящий", outbound.channel.toLowerCase()],
-    previous: outbound.existing ? outbound.existing.previous : [],
-    messages: [
-      { id: 1, type: "event", text: `Диалог инициирован через ${outbound.channel} по номеру телефона`, time: "сейчас" },
-      { id: 2, side: "agent", text: outbound.message, time: "сейчас" }
-    ]
-  };
-}
-
 function getFileExtension(fileName) {
   const parts = fileName.toLowerCase().split(".");
   return parts.length > 1 ? parts.at(-1) : "";

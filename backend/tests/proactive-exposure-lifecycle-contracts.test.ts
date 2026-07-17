@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ProactiveExposureRepository } from "../apps/api-gateway/src/automation/proactive-exposure.repository.ts";
+import {
+  ProactiveExposureRepository,
+  type PrismaExposureClient
+} from "../apps/api-gateway/src/automation/proactive-exposure.repository.ts";
 import { handlePublicSdkInvitationAcknowledge, handlePublicSdkInvitationPoll } from "../apps/api-gateway/src/integrations/public-sdk-invitations.route.ts";
 import { hashPublicApiKeySecret } from "../apps/api-gateway/src/integrations/public-api-auth.ts";
 import { IntegrationRepository } from "../apps/api-gateway/src/integrations/integration.repository.ts";
 import { scopedSdkPresenceHash } from "../apps/api-gateway/src/integrations/public-sdk-presence.route.ts";
+import { validateVisitorSessionToken } from "../apps/api-gateway/src/integrations/public-sdk-messages.route.ts";
 
 describe("durable proactive SDK exposure lifecycle", () => {
   it("polls only the exact live tenant session and acknowledges lifecycle idempotently", async () => {
@@ -43,6 +47,15 @@ describe("durable proactive SDK exposure lifecycle", () => {
     assert.equal(acceptedReplay.data.status, "accepted");
     assert.equal(createCalls, 1);
     assert.equal(accepted.data.conversationId, "sdk-conversation");
+    assert.equal(typeof accepted.data.visitorSessionToken, "string");
+    assert.deepEqual(validateVisitorSessionToken(String(accepted.data.visitorSessionToken), {
+      conversationId: "sdk-conversation",
+      tenantId
+    }), { valid: true });
+    assert.deepEqual(validateVisitorSessionToken(String(accepted.data.visitorSessionToken), {
+      conversationId: "sdk-other",
+      tenantId
+    }), { code: "visitor_session_token_scope_mismatch", valid: false });
     assert.deepEqual(accepted.data.attribution, { experimentId: "exp-rule", experimentVersion: "v1",
       exposureId: planned.exposure.exposureId, ruleId: "rule", variant: "B" });
     assert.equal((await handlePublicSdkInvitationPoll(base)).data.invitations instanceof Array, true);
@@ -102,5 +115,57 @@ describe("durable proactive SDK exposure lifecycle", () => {
     assert.deepEqual(metrics[0]?.counts, { accepted: 1, converted: 1, delivered: 1, dismissed: 0, eligible: 1, planned: 1, shown: 1 });
     assert.equal(metrics[0]?.rates.conversionRate, 1);
     assert.deepEqual(foreignMetrics[0]?.counts, { accepted: 0, converted: 0, delivered: 0, dismissed: 0, eligible: 0, planned: 0, shown: 0 });
+  });
+
+  it("propagates non-unique Prisma conversion write failures", async () => {
+    const acceptedAt = new Date("2026-07-01T10:03:00.000Z");
+    const exposure = {
+      acceptedAt,
+      attributionWindowEndsAt: new Date("2026-07-08T10:03:00.000Z"),
+      channelConnectionId: "conn",
+      conversationId: "sdk-conversation",
+      deliveredAt: new Date("2026-07-01T10:01:00.000Z"),
+      dismissedAt: null,
+      experimentId: "exp",
+      experimentVersion: "v1",
+      exposureId: "exposure-prisma",
+      failedAt: null,
+      failureCode: null,
+      message: "Help",
+      occurrenceKey: "period",
+      plannedAt: new Date("2026-07-01T10:00:00.000Z"),
+      presenceSessionId: "session",
+      ruleId: "rule",
+      segmentSnapshot: {},
+      shownAt: new Date("2026-07-01T10:02:00.000Z"),
+      status: "accepted",
+      subjectId: "subject",
+      tenantId: "tenant-a",
+      variant: "A"
+    };
+    const client: PrismaExposureClient = {
+      proactiveConversionEvent: {
+        create: async () => { throw new Error("database unavailable"); },
+        findMany: async () => [],
+        findUnique: async () => null
+      },
+      proactiveExposure: {
+        create: async () => exposure,
+        findMany: async () => [exposure],
+        findUnique: async () => exposure,
+        updateMany: async () => ({ count: 0 })
+      }
+    };
+    const repository = ProactiveExposureRepository.prisma(client);
+
+    await assert.rejects(
+      repository.recordMessageConversion({
+        conversationId: "sdk-conversation",
+        messageId: "message-1",
+        occurredAt: "2026-07-02T10:03:00.000Z",
+        tenantId: "tenant-a"
+      }),
+      /database unavailable/
+    );
   });
 });

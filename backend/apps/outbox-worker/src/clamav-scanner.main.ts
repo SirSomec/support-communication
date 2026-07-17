@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import { connect } from "node:net";
+import { classifyClamAvScannerError } from "./clamav-scanner-errors.js";
 
 const port = positiveInteger(process.env.CLAMAV_SCANNER_HTTP_PORT, 4120);
 const clamHost = process.env.CLAMAV_HOST?.trim() || "clamav";
@@ -53,7 +54,8 @@ createServer(async (request, response) => {
       verdict: result.infected ? "infected" : "clean"
     });
   } catch (error) {
-    return json(response, 503, { error: error instanceof Error ? error.message : "scan_failed" });
+    const failure = classifyClamAvScannerError(error);
+    return json(response, failure.status, { error: failure.code });
   }
 }).listen(port, "0.0.0.0");
 
@@ -138,7 +140,12 @@ function allowedOrigins(value: string | undefined): Set<string> {
 }
 
 function requireAllowedDownloadUrl(value: string, origins: Set<string>): URL {
-  const url = new URL(value);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("signed_file_url_invalid");
+  }
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || !origins.has(url.origin)) {
     throw new Error("signed_file_origin_denied");
   }

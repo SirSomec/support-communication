@@ -486,7 +486,7 @@ function toPublicAttachmentRecord(attachment: Record<string, unknown>): Record<s
   };
 }
 
-function createVisitorSessionToken(payload: { conversationId: string; tenantId: string }): string {
+export function createVisitorSessionToken(payload: { conversationId: string; tenantId: string }): string {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const body = {
     conversationId: payload.conversationId,
@@ -498,7 +498,7 @@ function createVisitorSessionToken(payload: { conversationId: string; tenantId: 
   return `${encodedBody}.${signature}`;
 }
 
-function validateVisitorSessionToken(
+export function validateVisitorSessionToken(
   token: string | undefined,
   expected: { conversationId: string; tenantId: string }
 ): { valid: true } | { valid: false; code: string } {

@@ -30,6 +30,12 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
       url: `http://127.0.0.1:${webPort}`
+    },
+    {
+      command: "npm run widget:preview:e2e",
+      reuseExistingServer: false,
+      timeout: 120_000,
+      url: "http://127.0.0.1:5174/demo.html"
     }
   ],
   projects: [

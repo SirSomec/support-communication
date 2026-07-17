@@ -4,6 +4,7 @@ import { maskPhone, resolutionOutcomeLabels, isRepeatAppeal } from "../../app/di
 import { mapApiConversationCollection } from "../../app/conversationApiMapper.js";
 import { dialogService } from "../../services/dialogService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
+import { copyTextToClipboard } from "../../services/clipboardService.js";
 import {
   buildClientDialogHistory,
   clientHistoryDefaultFilters,
@@ -51,6 +52,7 @@ export function CustomerPanel({
   const [phoneDraft, setPhoneDraft] = useState("");
   const [phoneError, setPhoneError] = useState("");
   const [phoneSaving, setPhoneSaving] = useState(false);
+  const [copyState, setCopyState] = useState("idle");
   const phoneValue = String(conversation.phone ?? "").trim();
   // Пустой телефон (источник его не передал) может заполнить любой оператор
   // с правом ведения диалогов; исправлять уже сохраненный номер — только
@@ -121,7 +123,21 @@ export function CustomerPanel({
     setPhoneDraft("");
     setPhoneError("");
     setPhoneSaving(false);
+    setCopyState("idle");
   }, [conversation.id]);
+
+  async function copyClientSummary() {
+    const visiblePhone = phoneValue
+      ? (access.canViewSensitive ? phoneValue : maskPhone(phoneValue))
+      : "Не указан";
+    const result = await copyTextToClipboard([
+      `Клиент: ${conversation.name}`,
+      `Телефон: ${visiblePhone}`,
+      `Канал: ${conversation.channel || "Не указан"}`,
+      `Тематика: ${topic || conversation.topic || "Не выбрана"}`
+    ].join("\n"));
+    setCopyState(result.ok ? "copied" : "error");
+  }
 
   // Зависимость — булев флаг, а не объект historyView: переключение
   // список <-> переписка не должно прерывать запрос полного списка.
@@ -214,7 +230,16 @@ export function CustomerPanel({
 
   return (
     <aside className="customer-panel" aria-label="Карточка клиента">
-      <PanelSection title="О клиенте" action={<button aria-label="Копировать"><Copy size={18} /></button>}>
+      <PanelSection title="О клиенте" action={(
+        <button
+          aria-label={copyState === "copied" ? "Данные клиента скопированы" : "Копировать данные клиента"}
+          onClick={() => void copyClientSummary()}
+          title={copyState === "copied" ? "Скопировано" : copyState === "error" ? "Не удалось скопировать" : "Копировать данные клиента"}
+          type="button"
+        >
+          <Copy size={18} />
+        </button>
+      )}>
         {isRepeatAppeal(conversation) ? (
           <div className="repeat-appeal-panel-note">
             <RepeatAppealBadge conversation={conversation} />

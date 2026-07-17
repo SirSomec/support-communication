@@ -2,11 +2,13 @@ const POLL_INTERVAL_MS = 3000;
 const INVITATION_POLL_INTERVAL_MS = 5000;
 const PRESENCE_INTERVAL_MS = 15000;
 const AGENTS_STATUS_INTERVAL_MS = 30000;
-const DEFAULT_ENVIRONMENT = "stage";
+const MAX_POLL_BACKOFF_MS = 5 * 60 * 1000;
+const DEFAULT_ENVIRONMENT = "production";
 const SUBJECT_STORAGE_KEY = "support-widget:subject-id";
 const SESSION_STORAGE_KEY = "support-widget:session-id";
 const UTM_STORAGE_KEY = "support-widget:utm";
 const USER_TOKEN_STORAGE_KEY = "support-widget:user-token";
+const SCRIPT_STYLE_NONCE = typeof document !== "undefined" ? String(document.currentScript?.nonce ?? "").trim() : "";
 
 const state = {
   apiBase: "",
@@ -17,17 +19,24 @@ const state = {
   environment: DEFAULT_ENVIRONMENT,
   subjectId: null,
   sessionId: null,
+  styleNonce: SCRIPT_STYLE_NONCE,
   presencePath: "/public/sdk/presence/heartbeat",
   disconnectPath: "/public/sdk/presence/disconnect",
   presenceIntervalMs: PRESENCE_INTERVAL_MS,
   presenceTimer: null,
+  presenceFailures: 0,
+  presencePollGeneration: 0,
   presenceListenersAttached: false,
   conversationId: null,
   visitorSessionToken: null,
   visitorTokenErrorShown: false,
   lastOperatorMessageId: null,
   pollTimer: null,
+  pollFailures: 0,
+  messagePollGeneration: 0,
   invitationPollTimer: null,
+  invitationPollFailures: 0,
+  invitationPollGeneration: 0,
   currentInvitation: null,
   messages: [],
   panelOpen: false,
@@ -42,6 +51,7 @@ const state = {
   operatorAccepted: false,
   pageTitleOverride: null,
   pageUrlOverride: null,
+  pollingErrorKeys: new Set(),
   unreadCount: 0,
   userToken: "",
   utm: null,
@@ -76,6 +86,7 @@ export function init(options = {}) {
   state.presencePath = String(options.presencePath ?? "/public/sdk/presence/heartbeat").trim();
   state.disconnectPath = String(options.disconnectPath ?? "/public/sdk/presence/disconnect").trim();
   state.presenceIntervalMs = normalizeInterval(options.presenceIntervalMs);
+  state.styleNonce = String(options.styleNonce ?? SCRIPT_STYLE_NONCE).trim();
 
   injectStyles();
   renderShell();
@@ -247,15 +258,33 @@ async function acknowledgeInvitation(exposureId, action) {
 
 function startInvitationPolling() {
   stopInvitationPolling();
-  pollInvitations().catch(() => {});
-  state.invitationPollTimer = window.setInterval(() => {
-    pollInvitations().catch(() => {});
-  }, INVITATION_POLL_INTERVAL_MS);
+  state.invitationPollFailures = 0;
+  state.invitationPollTimer = 0;
+  void runInvitationPollLoop(state.invitationPollGeneration);
+}
+
+async function runInvitationPollLoop(generation) {
+  if (state.invitationPollTimer == null || generation !== state.invitationPollGeneration) return;
+  try {
+    await pollInvitations();
+    state.invitationPollFailures = 0;
+    clearWidgetPollingError("invitations");
+  } catch (error) {
+    state.invitationPollFailures += 1;
+    reportWidgetPollingError("invitations", error);
+  }
+  if (state.invitationPollTimer != null && generation === state.invitationPollGeneration) {
+    state.invitationPollTimer = window.setTimeout(
+      () => runInvitationPollLoop(generation),
+      nextPollingDelay(INVITATION_POLL_INTERVAL_MS, state.invitationPollFailures)
+    );
+  }
 }
 
 function stopInvitationPolling() {
+  state.invitationPollGeneration += 1;
   if (state.invitationPollTimer != null) {
-    window.clearInterval(state.invitationPollTimer);
+    window.clearTimeout(state.invitationPollTimer);
     state.invitationPollTimer = null;
   }
 }
@@ -303,10 +332,10 @@ async function handleInvitationAction(action, ...buttons) {
   try {
     const data = await acknowledgeInvitation(invitation.exposureId, action);
     if (action === "accepted") {
-      const conversationId = String(data.conversationId ?? "").trim();
-      if (!conversationId) throw new Error("Invitation acceptance did not include a conversation.");
-      setConversationId(conversationId);
-      state.visitorSessionToken = null;
+      const acceptedSession = acceptedInvitationSession(data);
+      setConversationId(acceptedSession.conversationId);
+      state.visitorSessionToken = acceptedSession.visitorSessionToken;
+      state.visitorTokenErrorShown = false;
       open();
     }
     clearInvitation();
@@ -345,10 +374,9 @@ function sendDisconnect() {
 function startPresence() {
   stopPresence();
   stopAgentsStatusPolling();
-  sendPresenceHeartbeat().catch(() => {});
-  state.presenceTimer = window.setInterval(() => {
-    sendPresenceHeartbeat().catch(() => {});
-  }, state.presenceIntervalMs);
+  state.presenceFailures = 0;
+  state.presenceTimer = 0;
+  void runPresenceLoop(state.presencePollGeneration);
   if (!state.presenceListenersAttached) {
     document.addEventListener("visibilitychange", handlePageUpdate);
     window.addEventListener("pageshow", handlePageUpdate);
@@ -357,9 +385,28 @@ function startPresence() {
   }
 }
 
+async function runPresenceLoop(generation) {
+  if (state.presenceTimer == null || generation !== state.presencePollGeneration) return;
+  try {
+    await sendPresenceHeartbeat();
+    state.presenceFailures = 0;
+    clearWidgetPollingError("presence");
+  } catch (error) {
+    state.presenceFailures += 1;
+    reportWidgetPollingError("presence", error);
+  }
+  if (state.presenceTimer != null && generation === state.presencePollGeneration) {
+    state.presenceTimer = window.setTimeout(
+      () => runPresenceLoop(generation),
+      nextPollingDelay(state.presenceIntervalMs, state.presenceFailures)
+    );
+  }
+}
+
 function stopPresence() {
+  state.presencePollGeneration += 1;
   if (state.presenceTimer != null) {
-    window.clearInterval(state.presenceTimer);
+    window.clearTimeout(state.presenceTimer);
     state.presenceTimer = null;
   }
 }
@@ -389,9 +436,28 @@ async function sendQualityRating(score) {
 
 function startPolling() {
   stopPolling();
-  state.pollTimer = window.setInterval(() => {
-    pollOperatorReplies().catch(handlePollError);
-  }, POLL_INTERVAL_MS);
+  state.pollFailures = 0;
+  const generation = state.messagePollGeneration;
+  state.pollTimer = window.setTimeout(() => runOperatorPollLoop(generation), POLL_INTERVAL_MS);
+}
+
+async function runOperatorPollLoop(generation) {
+  if (state.pollTimer == null || generation !== state.messagePollGeneration) return;
+  try {
+    await pollOperatorReplies();
+    state.pollFailures = 0;
+    clearWidgetPollingError("messages");
+  } catch (error) {
+    state.pollFailures += 1;
+    handlePollError(error);
+    reportWidgetPollingError("messages", error);
+  }
+  if (state.pollTimer != null && generation === state.messagePollGeneration) {
+    state.pollTimer = window.setTimeout(
+      () => runOperatorPollLoop(generation),
+      nextPollingDelay(POLL_INTERVAL_MS, state.pollFailures)
+    );
+  }
 }
 
 function handlePollError(error) {
@@ -406,9 +472,30 @@ function handlePollError(error) {
 }
 
 function stopPolling() {
+  state.messagePollGeneration += 1;
   if (state.pollTimer != null) {
-    window.clearInterval(state.pollTimer);
+    window.clearTimeout(state.pollTimer);
     state.pollTimer = null;
+  }
+}
+
+function nextPollingDelay(baseIntervalMs, consecutiveFailures) {
+  const base = Math.max(1000, Number(baseIntervalMs) || 1000);
+  const exponent = Math.min(8, Math.max(0, Math.floor(Number(consecutiveFailures) || 0)));
+  return Math.min(MAX_POLL_BACKOFF_MS, base * (2 ** exponent));
+}
+
+function reportWidgetPollingError(kind, error) {
+  const code = String(error?.code ?? `http_${error?.httpStatus ?? "network"}`).slice(0, 80);
+  const key = `${kind}:${code}`;
+  if (state.pollingErrorKeys.has(key)) return;
+  state.pollingErrorKeys.add(key);
+  console.warn(`[SupportWidget] ${kind} polling failed (${code}); retries will use exponential backoff.`);
+}
+
+function clearWidgetPollingError(kind) {
+  for (const key of state.pollingErrorKeys) {
+    if (key.startsWith(`${kind}:`)) state.pollingErrorKeys.delete(key);
   }
 }
 
@@ -492,6 +579,23 @@ function firstInvitation(value) {
 
 function invitationAcknowledgePath(exposureId, action) {
   return `/public/sdk/invitations/${encodeURIComponent(exposureId)}/${action}`;
+}
+
+function acceptedInvitationSession(data) {
+  const conversationId = String(data?.conversationId ?? "").trim();
+  const visitorSessionToken = String(data?.visitorSessionToken ?? "").trim();
+  if (!conversationId || !visitorSessionToken) {
+    throw new Error("Invitation acceptance did not include a conversation session.");
+  }
+  return { conversationId, visitorSessionToken };
+}
+
+function resetWidgetIdentity(target, local, session) {
+  writeStoredValue(local, SUBJECT_STORAGE_KEY, "");
+  writeStoredValue(session, SESSION_STORAGE_KEY, "");
+  target.subjectId = getOrCreateIdentity(local, SUBJECT_STORAGE_KEY, "visitor");
+  target.sessionId = getOrCreateIdentity(session, SESSION_STORAGE_KEY, "session");
+  target.externalId = target.subjectId;
 }
 
 // --- Page API (window.sw_api) ---------------------------------------------
@@ -634,8 +738,7 @@ function createPageApi() {
       return state.agentsOnline === false ? "offline" : "online";
     },
     clearHistory() {
-      writeStoredValue(localStorage, SUBJECT_STORAGE_KEY, "");
-      writeStoredValue(sessionStorage, SESSION_STORAGE_KEY, "");
+      resetWidgetIdentity(state, localStorage, sessionStorage);
       writeStoredValue(localStorage, USER_TOKEN_STORAGE_KEY, "");
       state.conversationId = null;
       state.visitorSessionToken = null;
@@ -648,7 +751,7 @@ function createPageApi() {
       state.contactInfo = {};
       state.userToken = "";
       if (messagesEl) {
-        messagesEl.innerHTML = "";
+        messagesEl.replaceChildren();
       }
       return { result: "ok" };
     },
@@ -764,15 +867,17 @@ function createPageApi() {
 }
 
 function applyWidgetColor(color, color2) {
-  const primary = String(color ?? "").trim();
+  const primary = normalizeWidgetColor(color);
   if (!primary || typeof document === "undefined") return;
-  const background = String(color2 ?? "").trim()
-    ? `linear-gradient(135deg, ${primary}, ${String(color2).trim()})`
+  const secondary = normalizeWidgetColor(color2);
+  const background = secondary
+    ? `linear-gradient(135deg, ${primary}, ${secondary})`
     : primary;
   let style = document.getElementById("support-widget-color-override");
   if (!style) {
     style = document.createElement("style");
     style.id = "support-widget-color-override";
+    applyStyleNonce(style);
     document.head.appendChild(style);
   }
   style.textContent = `
@@ -784,6 +889,21 @@ function applyWidgetColor(color, color2) {
       border-color: transparent;
     }
   `;
+}
+
+function applyStyleNonce(style) {
+  if (state.styleNonce) {
+    style.setAttribute("nonce", state.styleNonce);
+  }
+}
+
+function normalizeWidgetColor(value) {
+  const color = String(value ?? "").trim();
+  if (!color || /[;{}]/.test(color)) return "";
+  if (typeof CSS !== "undefined" && typeof CSS.supports === "function") {
+    return CSS.supports("color", color) ? color : "";
+  }
+  return /^(#[\da-f]{3,8}|(?:rgb|hsl)a?\([\d\s.,%+-]+\)|[a-z]+)$/i.test(color) ? color : "";
 }
 
 function installPageApi() {
@@ -809,7 +929,7 @@ function installPageApi() {
   setTimeout(() => callPageCallback("onLoadCallback"), 0);
 }
 
-export const __test__ = { applyConversationIdentity, callPageCallback, createPageApi, downloadableAttachments, firstInvitation, formatAttachmentSize, getOrCreateIdentity, invitationAcknowledgePath, isLocalInvitation, normalizeInterval, parseUtmParams, resolveWidgetUrl };
+export const __test__ = { acceptedInvitationSession, applyConversationIdentity, callPageCallback, createPageApi, defaultEnvironment: DEFAULT_ENVIRONMENT, downloadableAttachments, firstInvitation, formatAttachmentSize, getOrCreateIdentity, invitationAcknowledgePath, isLocalInvitation, nextPollingDelay, normalizeInterval, normalizeWidgetColor, parseUtmParams, resetWidgetIdentity, resolveWidgetUrl };
 
 function renderShell() {
   if (rootEl) {
@@ -818,24 +938,57 @@ function renderShell() {
 
   rootEl = document.createElement("div");
   rootEl.className = "support-widget";
-  rootEl.innerHTML = `
-    <button type="button" class="sw-toggle" aria-label="Открыть чат поддержки">💬</button>
-    <section class="sw-panel" aria-label="Чат поддержки">
-      <header class="sw-header">
-        <strong>Поддержка</strong>
-        <button type="button" class="sw-close" aria-label="Закрыть">×</button>
-      </header>
-      <div class="sw-messages" role="log" aria-live="polite"></div>
-      <div class="sw-rating" hidden>
-        <span>Оцените помощь</span>
-        <div>${[1, 2, 3, 4, 5].map((score) => `<button type="button" data-score="${score}" aria-label="Оценка ${score} из 5">${score}</button>`).join("")}</div>
-      </div>
-      <form class="sw-composer">
-        <textarea class="sw-input" rows="2" placeholder="Напишите сообщение…" required></textarea>
-        <button type="submit" class="sw-send">Отправить</button>
-      </form>
-    </section>
-  `;
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "sw-toggle";
+  toggle.setAttribute("aria-label", "Открыть чат поддержки");
+  toggle.textContent = "💬";
+  const panel = document.createElement("section");
+  panel.className = "sw-panel";
+  panel.setAttribute("aria-label", "Чат поддержки");
+  const header = document.createElement("header");
+  header.className = "sw-header";
+  const title = document.createElement("strong");
+  title.textContent = "Поддержка";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "sw-close";
+  close.setAttribute("aria-label", "Закрыть");
+  close.textContent = "×";
+  header.append(title, close);
+  const messages = document.createElement("div");
+  messages.className = "sw-messages";
+  messages.setAttribute("role", "log");
+  messages.setAttribute("aria-live", "polite");
+  const rating = document.createElement("div");
+  rating.className = "sw-rating";
+  rating.hidden = true;
+  const ratingLabel = document.createElement("span");
+  ratingLabel.textContent = "Оцените помощь";
+  const ratingButtons = document.createElement("div");
+  for (const score of [1, 2, 3, 4, 5]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.score = String(score);
+    button.setAttribute("aria-label", `Оценка ${score} из 5`);
+    button.textContent = String(score);
+    ratingButtons.appendChild(button);
+  }
+  rating.append(ratingLabel, ratingButtons);
+  const composer = document.createElement("form");
+  composer.className = "sw-composer";
+  const textarea = document.createElement("textarea");
+  textarea.className = "sw-input";
+  textarea.rows = 2;
+  textarea.placeholder = "Напишите сообщение…";
+  textarea.required = true;
+  const send = document.createElement("button");
+  send.type = "submit";
+  send.className = "sw-send";
+  send.textContent = "Отправить";
+  composer.append(textarea, send);
+  panel.append(header, messages, rating, composer);
+  rootEl.append(toggle, panel);
 
   document.body.appendChild(rootEl);
 
@@ -982,6 +1135,7 @@ function injectStyles() {
 
   const style = document.createElement("style");
   style.id = "support-widget-styles";
+  applyStyleNonce(style);
   style.textContent = `
     .support-widget {
       position: fixed;

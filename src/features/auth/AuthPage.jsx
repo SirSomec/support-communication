@@ -22,7 +22,6 @@ import {
   getInitialMode,
   hasEmailShape,
   normalizeCode,
-  organizationOptions,
   ssoProviders
 } from "./authModel.js";
 import "./auth.css";
@@ -67,8 +66,8 @@ export function AuthPage({
   const [recoveryToken, setRecoveryToken] = useState("");
   const [recoveryPassword, setRecoveryPassword] = useState("");
   const [invite, setInvite] = useState({ code: "", email: "", password: "" });
-  const [memberships, setMemberships] = useState(organizationOptions);
-  const [selectedOrganizationId, setSelectedOrganizationId] = useState(organizationOptions[0].id);
+  const [memberships, setMemberships] = useState([]);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,7 +88,9 @@ export function AuthPage({
     const nextMode = response.data?.nextStep === "otp" ? "twoFactor" : mapAuthErrorToMode(response.error?.code);
     if (nextMode) {
       if (nextMode === "organizationSelect" && Array.isArray(response.data?.memberships)) {
-        setMemberships(response.data.memberships.map(mapMembershipOption));
+        const nextMemberships = response.data.memberships.map(mapMembershipOption);
+        setMemberships(nextMemberships);
+        setSelectedOrganizationId(nextMemberships[0]?.id ?? "");
       }
       if (nextMode === "twoFactor") {
         const contextEmail = String(
@@ -193,6 +194,7 @@ export function AuthPage({
     try {
       const redirectUri = `${window.location.origin}${window.location.pathname}#/auth/oidc/callback`;
       const response = await authService.startOidcLogin({
+        domain,
         providerId: mapSsoProviderId(sso.provider),
         redirectUri
       });
@@ -399,16 +401,6 @@ export function AuthPage({
 
     setIsSubmitting(true);
     try {
-      const selection = await authService.selectTenant({
-        email,
-        tenantId: selectedOrganization.tenantId ?? selectedOrganization.id
-      });
-
-      if (selection.status !== "ok") {
-        handleAuthDenial(selection, "Не удалось выбрать организацию.");
-        return;
-      }
-
       const response = await authService.loginTenantOperator({
         email,
         password: login.password,
@@ -776,10 +768,8 @@ export function AuthPage({
 }
 
 function mapSsoProviderId(provider) {
-  if (provider === "SAML") {
-    return "saml-main";
-  }
-
+  if (provider === "Microsoft Entra ID") return "oidc-entra";
+  if (provider === "Okta") return "oidc-okta";
   return "oidc-main";
 }
 

@@ -89,7 +89,7 @@ export interface NotificationDeliveryDescriptor {
   };
   providerMessageId?: string | null;
   queue: string;
-  status: "delivered" | "failed" | "queued";
+  status: "delivered" | "failed" | "processing" | "queued";
   subscriptionId: string;
   tenantId: string;
   traceId: string;
@@ -150,6 +150,10 @@ interface PrismaNotificationDataClient {
   notificationDeliveryDescriptor: {
     findMany(input: { orderBy: { createdAt: "asc" }; take?: number; where?: PrismaNotificationDeliveryDescriptorWhereInput }): Promise<PrismaNotificationDeliveryDescriptorRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaNotificationDeliveryDescriptorRow | null>;
+    updateMany(input: {
+      data: Partial<PrismaNotificationDeliveryDescriptorUpdateInput>;
+      where: PrismaNotificationDeliveryDescriptorWhereInput;
+    }): Promise<{ count: number }>;
     upsert(input: {
       create: PrismaNotificationDeliveryDescriptorCreateInput;
       update: PrismaNotificationDeliveryDescriptorUpdateInput;
@@ -247,9 +251,11 @@ interface PrismaBrowserPushSubscriptionCreateInput extends PrismaBrowserPushSubs
 type PrismaBrowserPushSubscriptionUpdateInput = Omit<PrismaBrowserPushSubscriptionCreateInput, "createdAt" | "id">;
 
 interface PrismaNotificationDeliveryDescriptorWhereInput {
+  id?: string;
   queue?: string;
-  status?: string;
+  status?: string | { in: string[] };
   tenantId?: string;
+  updatedAt?: Date;
 }
 
 interface PrismaNotificationDeliveryDescriptorRow {
@@ -776,9 +782,96 @@ export class NotificationRepository {
     return this.listNotificationDeliveryDescriptors(filter);
   }
 
+  async claimNotificationDeliveryDescriptorsAsync(input: {
+    leaseMs: number;
+    limit?: number;
+    now: string;
+    queue: string;
+    tenantId?: string;
+  }): Promise<NotificationDeliveryDescriptor[]> {
+    const now = requireString(input.now);
+    const leaseMs = Number(input.leaseMs);
+    if (!Number.isInteger(leaseMs) || leaseMs <= 0) {
+      throw new Error("notification_delivery_lease_invalid");
+    }
+    const queue = requireString(input.queue) || "browser-push";
+    const limit = Number.isInteger(input.limit) && Number(input.limit) >= 0 ? Number(input.limit) : 50;
+    const staleBefore = new Date(Date.parse(now) - leaseMs).toISOString();
+
+    if (this.prismaClient) {
+      const rows = await this.prismaClient.notificationDeliveryDescriptor.findMany({
+        orderBy: { createdAt: "asc" },
+        where: {
+          queue,
+          status: { in: ["queued", "processing"] },
+          ...(input.tenantId ? { tenantId: input.tenantId } : {})
+        }
+      });
+      const candidates = rows.map(toNotificationDeliveryDescriptor)
+        .filter((descriptor) => descriptor.status === "queued"
+          ? !descriptor.nextAttemptAt || descriptor.nextAttemptAt <= now
+          : String(descriptor.updatedAt ?? descriptor.createdAt) <= staleBefore)
+        .slice(0, limit);
+      const claimed: NotificationDeliveryDescriptor[] = [];
+      for (const candidate of candidates) {
+        const expectedUpdatedAt = String(candidate.updatedAt ?? candidate.createdAt);
+        const result = await this.prismaClient.notificationDeliveryDescriptor.updateMany({
+          data: {
+            status: "processing",
+            updatedAt: new Date(now)
+          },
+          where: {
+            id: candidate.id,
+            status: candidate.status,
+            updatedAt: new Date(expectedUpdatedAt)
+          }
+        });
+        if (result.count !== 1) {
+          continue;
+        }
+        const row = await this.prismaClient.notificationDeliveryDescriptor.findUnique({ where: { id: candidate.id } });
+        if (row) {
+          claimed.push(toNotificationDeliveryDescriptor(row));
+        }
+      }
+      return claimed;
+    }
+
+    const claimed: NotificationDeliveryDescriptor[] = [];
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const candidateIds = new Set(current.deliveryDescriptors
+        .filter((descriptor) => descriptor.queue === queue)
+        .filter((descriptor) => !input.tenantId || descriptor.tenantId === input.tenantId)
+        .filter((descriptor) => descriptor.status === "queued"
+          ? !descriptor.nextAttemptAt || descriptor.nextAttemptAt <= now
+          : descriptor.status === "processing" && String(descriptor.updatedAt ?? descriptor.createdAt) <= staleBefore)
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        .slice(0, limit)
+        .map((descriptor) => descriptor.id));
+      return {
+        ...current,
+        deliveryDescriptors: current.deliveryDescriptors.map((descriptor) => {
+          if (!candidateIds.has(descriptor.id)) {
+            return descriptor;
+          }
+          const next = normalizeNotificationDeliveryDescriptor({
+            ...descriptor,
+            status: "processing",
+            updatedAt: now
+          });
+          claimed.push(clone(next));
+          return next;
+        })
+      };
+    });
+    return claimed;
+  }
+
   markNotificationDeliveryDescriptorDelivered(input: {
     deliveredAt: string;
     descriptorId: string;
+    expectedClaimedAt?: string;
     providerMessageId: string;
   }): NotificationDeliveryDescriptor | undefined {
     return this.updateNotificationDeliveryDescriptor(input.descriptorId, (descriptor) => ({
@@ -791,12 +884,13 @@ export class NotificationRepository {
       providerMessageId: input.providerMessageId,
       status: "delivered",
       updatedAt: input.deliveredAt
-    }));
+    }), input.expectedClaimedAt);
   }
 
   async markNotificationDeliveryDescriptorDeliveredAsync(input: {
     deliveredAt: string;
     descriptorId: string;
+    expectedClaimedAt?: string;
     providerMessageId: string;
   }): Promise<NotificationDeliveryDescriptor | undefined> {
     return this.updateNotificationDeliveryDescriptorAsync(input.descriptorId, (descriptor) => ({
@@ -809,12 +903,13 @@ export class NotificationRepository {
       providerMessageId: input.providerMessageId,
       status: "delivered",
       updatedAt: input.deliveredAt
-    }));
+    }), input.expectedClaimedAt);
   }
 
   markNotificationDeliveryDescriptorFailed(input: {
     failedAt?: string | null;
     descriptorId: string;
+    expectedClaimedAt?: string;
     lastError: string;
     nextAttemptAt?: string | null;
     retriable: boolean;
@@ -830,12 +925,13 @@ export class NotificationRepository {
       providerMessageId: null,
       status: input.retriable ? "queued" : "failed",
       updatedAt
-    }));
+    }), input.expectedClaimedAt);
   }
 
   async markNotificationDeliveryDescriptorFailedAsync(input: {
     failedAt?: string | null;
     descriptorId: string;
+    expectedClaimedAt?: string;
     lastError: string;
     nextAttemptAt?: string | null;
     retriable: boolean;
@@ -851,12 +947,13 @@ export class NotificationRepository {
       providerMessageId: null,
       status: input.retriable ? "queued" : "failed",
       updatedAt
-    }));
+    }), input.expectedClaimedAt);
   }
 
   private updateNotificationDeliveryDescriptor(
     descriptorId: string,
-    update: (descriptor: NotificationDeliveryDescriptor) => NotificationDeliveryDescriptor
+    update: (descriptor: NotificationDeliveryDescriptor) => NotificationDeliveryDescriptor,
+    expectedClaimedAt?: string
   ): NotificationDeliveryDescriptor | undefined {
     if (this.prismaClient) {
       throw new Error("prisma_notification_delivery_descriptors_async_required");
@@ -874,6 +971,13 @@ export class NotificationRepository {
             return descriptor;
           }
 
+          if (expectedClaimedAt && (
+            descriptor.status !== "processing"
+            || descriptor.updatedAt !== expectedClaimedAt
+          )) {
+            return descriptor;
+          }
+
           updated = normalizeNotificationDeliveryDescriptor(update(descriptor));
           return updated;
         })
@@ -885,7 +989,8 @@ export class NotificationRepository {
 
   private async updateNotificationDeliveryDescriptorAsync(
     descriptorId: string,
-    update: (descriptor: NotificationDeliveryDescriptor) => NotificationDeliveryDescriptor
+    update: (descriptor: NotificationDeliveryDescriptor) => NotificationDeliveryDescriptor,
+    expectedClaimedAt?: string
   ): Promise<NotificationDeliveryDescriptor | undefined> {
     if (this.prismaClient) {
       const normalizedDescriptorId = requireString(descriptorId);
@@ -894,10 +999,32 @@ export class NotificationRepository {
         return undefined;
       }
 
+      if (expectedClaimedAt) {
+        const descriptor = toNotificationDeliveryDescriptor(row);
+        if (descriptor.status !== "processing" || descriptor.updatedAt !== expectedClaimedAt) {
+          return undefined;
+        }
+        const updated = normalizeNotificationDeliveryDescriptor(update(descriptor));
+        const create = toPrismaNotificationDeliveryDescriptorCreateInput(updated);
+        const result = await this.prismaClient.notificationDeliveryDescriptor.updateMany({
+          data: toPrismaNotificationDeliveryDescriptorUpdateInput(create),
+          where: {
+            id: normalizedDescriptorId,
+            status: "processing",
+            updatedAt: new Date(expectedClaimedAt)
+          }
+        });
+        if (result.count !== 1) {
+          return undefined;
+        }
+        const persisted = await this.prismaClient.notificationDeliveryDescriptor.findUnique({ where: { id: normalizedDescriptorId } });
+        return persisted ? toNotificationDeliveryDescriptor(persisted) : undefined;
+      }
+
       return this.saveNotificationDeliveryDescriptorAsync(update(toNotificationDeliveryDescriptor(row)));
     }
 
-    return this.updateNotificationDeliveryDescriptor(descriptorId, update);
+    return this.updateNotificationDeliveryDescriptor(descriptorId, update, expectedClaimedAt);
   }
 
   recordPreferenceAuditEvent(event: NotificationPreferenceAuditEvent): NotificationPreferenceAuditEvent {
@@ -1271,7 +1398,9 @@ function normalizeBrowserPushSubscription(record: BrowserPushSubscriptionRecord)
 }
 
 function normalizeNotificationDeliveryDescriptor(descriptor: NotificationDeliveryDescriptor): NotificationDeliveryDescriptor {
-  const status = descriptor.status === "delivered" || descriptor.status === "failed" ? descriptor.status : "queued";
+  const status = descriptor.status === "delivered" || descriptor.status === "failed" || descriptor.status === "processing"
+    ? descriptor.status
+    : "queued";
   const createdAt = requireString(descriptor.createdAt);
   return {
     attempts: typeof descriptor.attempts === "number" && Number.isFinite(descriptor.attempts)

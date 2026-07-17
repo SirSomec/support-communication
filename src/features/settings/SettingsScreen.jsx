@@ -8,6 +8,7 @@ import { RulesPanel } from "./RulesPanel.jsx";
 import { SettingsShell, settingsTabIds } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
 import { TopicDirectoryPanel } from "./TopicDirectoryPanel.jsx";
+import { integrationService } from "../../services/integrationService.js";
 import { settingsService } from "../../services/settingsService.js";
 
 export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptionsChange, navigationTarget = null }) {
@@ -15,8 +16,9 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
   const requestedNavigationKey = settingsNavigationKey(navigationTarget);
   const hasNavigationTarget = Boolean(navigationTarget);
   const appliedNavigationKeyRef = useRef(requestedTab ? requestedNavigationKey : "");
+  const connectionSummaryLoadedRef = useRef(false);
   const [activeTab, setActiveTab] = useState(requestedTab || "connections");
-  const [connectionSummary, setConnectionSummary] = useState({ active: 0, total: 0 });
+  const [connectionSummary, setConnectionSummary] = useState(null);
   const [externalSummary, setExternalSummary] = useState({ active: 0, total: 0 });
   const [employeeSummary, setEmployeeSummary] = useState({ total: 0 });
   const [topicTotals, setTopicTotals] = useState({ active: 0, archived: 0, total: 0 });
@@ -67,8 +69,43 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
     };
   }, []);
 
+  useEffect(() => {
+    if (activeTab === "connections" || connectionSummaryLoadedRef.current) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    integrationService.fetchChannelConnections().then((response) => {
+      if (cancelled) {
+        return;
+      }
+      connectionSummaryLoadedRef.current = true;
+      if (response.status !== "ok") {
+        setConnectionSummary({ unavailable: true });
+        return;
+      }
+      const connections = response.data?.connections ?? [];
+      setConnectionSummary({
+        active: connections.filter((connection) => connection.status === "active").length,
+        total: connections.length
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  function handleConnectionSummaryChange(summary) {
+    connectionSummaryLoadedRef.current = true;
+    setConnectionSummary(summary);
+  }
+
   const summaries = {
-    connections: `${connectionSummary.active} из ${connectionSummary.total} активны`,
+    connections: connectionSummary?.unavailable
+      ? "данные недоступны"
+      : connectionSummary
+        ? `${connectionSummary.active} из ${connectionSummary.total} активны`
+        : "загрузка...",
     external: externalSummary.total ? `${externalSummary.active} из ${externalSummary.total} активны` : "нет подключений",
     employees: `${employeeSummary.total} сотрудников`,
     topics: `${topicTotals.active} активных / ${topicTotals.archived} архив`,
@@ -106,7 +143,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
             canEditSettings={canEditSettings}
             focusChannelType={navigationTarget?.tab === "connections" ? navigationTarget.channelType : ""}
             focusConnectionId={navigationTarget?.tab === "connections" ? navigationTarget.connectionId : ""}
-            onSummaryChange={setConnectionSummary}
+            onSummaryChange={handleConnectionSummaryChange}
             onToast={onToast}
           />
         ) : null}

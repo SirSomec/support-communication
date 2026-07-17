@@ -239,6 +239,15 @@ export class WorkspaceService {
       return tenantContextRequiredEnvelope(CLIENT_SERVICE, "mergeClientProfiles");
     }
 
+    const profiles = await this.listClientProfiles(context);
+    const profileIds = new Set(profiles.flatMap((profile) => [profile.id, profile.sourceProfileId]));
+    const missingProfileIds = [payload.primaryProfileId, payload.candidateProfileId].filter((profileId) => !profileIds.has(profileId));
+    if (missingProfileIds.length > 0) {
+      return notFoundEnvelope(CLIENT_SERVICE, "mergeClientProfiles", "client_profile_not_found", "Every profile in a merge must exist in the current tenant.", {
+        missingProfileIds
+      });
+    }
+
     const audit = auditEvent("client_merge", "client.merge", payload.reason);
     const mergeEvent = await this.workspaceRepository.saveClientMergeEvent({
       action: "client.merge",
@@ -276,6 +285,15 @@ export class WorkspaceService {
     }
     if (!context.tenantId) {
       return tenantContextRequiredEnvelope(CLIENT_SERVICE, "unmergeClientProfile");
+    }
+
+    const profiles = await this.listClientProfiles(context);
+    const profileIds = new Set(profiles.flatMap((profile) => [profile.id, profile.sourceProfileId]));
+    const missingProfileIds = [payload.primaryProfileId, payload.detachedProfileId].filter((profileId) => !profileIds.has(profileId));
+    if (missingProfileIds.length > 0) {
+      return notFoundEnvelope(CLIENT_SERVICE, "unmergeClientProfile", "client_profile_not_found", "Every profile in an unmerge must exist in the current tenant.", {
+        missingProfileIds
+      });
     }
 
     const audit = auditEvent("client_merge", "client.unmerge", payload.reason);

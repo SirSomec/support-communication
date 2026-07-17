@@ -39,6 +39,7 @@ interface LoginPayload {
 }
 
 interface StartOidcLoginPayload {
+  domain?: string;
   providerId?: string;
   redirectUri?: string;
 }
@@ -462,6 +463,7 @@ export class AuthService {
   }
 
   async startOidcLogin({
+    domain,
     providerId = "oidc-main",
     redirectUri
   }: StartOidcLoginPayload = {}): Promise<BackendEnvelope<OidcLoginStartData>> {
@@ -505,6 +507,29 @@ export class AuthService {
         error: {
           code: "oidc_redirect_uri_required",
           message: "OIDC redirect URI is required."
+        }
+      });
+    }
+
+    const normalizedDomain = String(domain ?? "").trim().toLowerCase();
+    if (!normalizedDomain || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(normalizedDomain)) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "startOidcLogin",
+        traceId,
+        status: "invalid",
+        meta: apiMeta(),
+        data: {
+          authorizationUrl: "",
+          callbackDescriptorId: "",
+          expiresAt: "",
+          providerId,
+          redirectUri,
+          state: ""
+        },
+        error: {
+          code: "oidc_domain_required",
+          message: "A valid organization domain is required for OIDC login."
         }
       });
     }
@@ -554,6 +579,30 @@ export class AuthService {
       });
     }
 
+    const providerTenant = await this.identityRepository.findTenant(provider.tenantId);
+    const allowedDomains = (providerTenant?.domains ?? []).map((value) => value.trim().toLowerCase());
+    if (!allowedDomains.includes(normalizedDomain)) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "startOidcLogin",
+        traceId,
+        status: "denied",
+        meta: apiMeta({ tenantId: provider.tenantId }),
+        data: {
+          authorizationUrl: "",
+          callbackDescriptorId: "",
+          expiresAt: "",
+          providerId,
+          redirectUri,
+          state: ""
+        },
+        error: {
+          code: "oidc_domain_not_allowed",
+          message: "The organization domain is not linked to this OIDC provider."
+        }
+      });
+    }
+
     const now = new Date();
     const expiresAt = addMinutes(now, 10).toISOString();
     const state = `oidc_state_${randomUUID()}`;
@@ -576,7 +625,7 @@ export class AuthService {
       operation: "startOidcLogin",
       traceId,
       partial: true,
-      meta: apiMeta({ tenantId: provider.tenantId }),
+      meta: apiMeta({ domain: normalizedDomain, tenantId: provider.tenantId }),
       data: {
         authorizationUrl: buildOidcAuthorizationUrl(provider, { nonce, redirectUri, state }),
         callbackDescriptorId,
@@ -1572,9 +1621,12 @@ export class AuthService {
     return this.loginTenantOperator({ email: normalizedEmail, password }, { forceMfa: true });
   }
 
-  async selectTenant({ email, tenantId }: { email?: string; tenantId?: string } = {}) {
+  async selectTenant({ email, tenantId, userId }: { email?: string; tenantId?: string; userId?: string } = {}) {
     const traceId = identityTraceId(SERVICE, "selectTenant");
-    const normalizedEmail = String(email ?? "").trim().toLowerCase();
+    const authenticatedUser = userId
+      ? await this.identityRepository.findTenantUser(userId)
+      : undefined;
+    const normalizedEmail = String(userId ? authenticatedUser?.email ?? "" : email ?? "").trim().toLowerCase();
     const normalizedTenantId = String(tenantId ?? "").trim();
 
     if (!normalizedEmail || !normalizedTenantId) {

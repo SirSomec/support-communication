@@ -9,6 +9,7 @@ import type {
 import type { ConversationMessage, ConversationRecord } from "../conversation/conversation.types.js";
 import type { RealtimeFanoutAdapter } from "../conversation/realtime.fanout.js";
 import type { AutomationBotRuntimeSideEffect, AutomationRepository } from "./automation.repository.js";
+import { recordBotDeliveryFailure } from "./bot-observability.js";
 
 export interface BotRuntimeReconciliationWorkerInput {
   automationRepository: AutomationRepository;
@@ -75,6 +76,7 @@ export async function runBotRuntimeReconciliationOnce(input: BotRuntimeReconcili
       result.delivered += 1;
     } catch (error) {
       const dead = effect.attempts >= (input.maxAttempts ?? 5);
+      recordSideEffectDeliveryFailure(effect);
       const nextAttemptAt = dead
         ? null
         : new Date(new Date(now).getTime() + (input.retryBackoffMs ?? 5_000) * 2 ** Math.max(0, effect.attempts - 1)).toISOString();
@@ -92,6 +94,33 @@ export async function runBotRuntimeReconciliationOnce(input: BotRuntimeReconcili
     }
   }
   return result;
+}
+
+function recordSideEffectDeliveryFailure(effect: AutomationBotRuntimeSideEffect): void {
+  const descriptor = effect.payload.descriptor as Record<string, any> | undefined;
+  if (effect.kind === "message_delivery") {
+    const payload = descriptor?.payload as Record<string, unknown> | undefined;
+    recordBotDeliveryFailure({
+      kind: "message",
+      scenarioId: optionalString(payload?.scenarioId),
+      tenantId: effect.tenantId
+    });
+    return;
+  }
+
+  if (effect.kind === "bot_handoff") {
+    const summary = descriptor?.summary as Record<string, unknown> | undefined;
+    recordBotDeliveryFailure({
+      kind: "handoff",
+      scenarioId: optionalString(summary?.botId),
+      tenantId: effect.tenantId
+    });
+  }
+}
+
+function optionalString(value: unknown): string | undefined {
+  const normalized = String(value ?? "").trim();
+  return normalized || undefined;
 }
 
 async function reconcileEffect(

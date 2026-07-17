@@ -20,7 +20,7 @@ import { normalizeOpenChannelOutboundUrl } from "./outbound-url-policy.js";
  * connections and event webhook subscriptions.
  */
 
-const SUPPORTED_WEBHOOK_EVENTS = ["chat_accepted", "chat_updated", "chat_finished", "client_attribute_updated", "client_updated", "offline_message"];
+const SUPPORTED_WEBHOOK_EVENTS = ["chat_accepted", "chat_updated", "chat_finished", "client_attribute_updated", "offline_message"];
 
 @ApiTags("open-channel")
 @ApiBearerAuth()

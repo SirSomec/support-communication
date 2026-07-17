@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createTestEnv } from "../packages/testing/src/index.ts";
-import { loadBackendConfig } from "../packages/config/src/index.ts";
+import { assertCredentialMasterKeySafety, loadBackendConfig } from "../packages/config/src/index.ts";
 import { createEnvelope } from "../packages/envelope/src/index.ts";
 import { buildHealthEnvelope, buildReadinessEnvelope } from "../apps/api-gateway/src/health.response.ts";
 import { createRequestTraceId, shouldWriteStructuredLog } from "../packages/observability/src/index.ts";
 import { createLocalDevelopmentRepositorySeeds } from "../apps/api-gateway/src/runtime/local-development-seed.ts";
+
+const providerCredentialMasterKey = Buffer.alloc(32, 0x21).toString("base64");
+const aiConnectionsMasterKey = Buffer.alloc(32, 0x22).toString("base64");
 
 describe("phase 0 shared backend foundation", () => {
   it("filters structured logs using the configured minimum level", () => {
@@ -82,10 +85,12 @@ describe("phase 0 shared backend foundation", () => {
 
   it("rejects the local development seed outside the local runtime", () => {
     const productionEnv = createTestEnv({
+      AI_CONNECTIONS_MASTER_KEY: aiConnectionsMasterKey,
       DEMO_SERVICE_ADMIN_KEY: "prod-service-admin-key",
       JWT_ACCESS_SECRET: "prod-access-secret-16",
       JWT_REFRESH_SECRET: "prod-refresh-secret-16",
       NODE_ENV: "production",
+      PROVIDER_CREDENTIAL_MASTER_KEY: providerCredentialMasterKey,
       PUBLIC_API_KEY_SECRET: "prod-public-api-secret"
     });
 
@@ -112,10 +117,12 @@ describe("phase 0 shared backend foundation", () => {
 
   it("loads the production-like profile without any repository-selection envs", () => {
     const productionLikeEnv = createTestEnv({
+      AI_CONNECTIONS_MASTER_KEY: aiConnectionsMasterKey,
       DEMO_SERVICE_ADMIN_KEY: "production-like-service-admin-key",
       JWT_ACCESS_SECRET: "production-like-access-secret-16",
       JWT_REFRESH_SECRET: "production-like-refresh-secret-16",
       NODE_ENV: "test",
+      PROVIDER_CREDENTIAL_MASTER_KEY: providerCredentialMasterKey,
       PUBLIC_API_KEY_SECRET: "production-like-public-api-secret",
       RUNTIME_PROFILE: "production-like"
     });
@@ -142,15 +149,44 @@ describe("phase 0 shared backend foundation", () => {
     );
 
     const config = loadBackendConfig(createTestEnv({
+      AI_CONNECTIONS_MASTER_KEY: aiConnectionsMasterKey,
       NODE_ENV: "staging",
       DEMO_SERVICE_ADMIN_KEY: "staging-service-admin-key",
       JWT_ACCESS_SECRET: "staging-access-secret-16",
       JWT_REFRESH_SECRET: "staging-refresh-secret-16",
+      PROVIDER_CREDENTIAL_MASTER_KEY: providerCredentialMasterKey,
       PUBLIC_API_KEY_SECRET: "staging-public-api-secret"
     }));
 
     assert.equal(config.NODE_ENV, "staging");
     assert.equal(config.DEMO_SERVICE_ADMIN_KEY, "staging-service-admin-key");
+  });
+
+  it("fails closed on missing, malformed, or known credential master keys outside local", () => {
+    const guardedEnv = {
+      AI_CONNECTIONS_MASTER_KEY: aiConnectionsMasterKey,
+      NODE_ENV: "staging",
+      PROVIDER_CREDENTIAL_MASTER_KEY: providerCredentialMasterKey,
+      RUNTIME_PROFILE: "production-like"
+    };
+
+    assert.doesNotThrow(() => assertCredentialMasterKeySafety(guardedEnv));
+    assert.throws(
+      () => assertCredentialMasterKeySafety({ ...guardedEnv, PROVIDER_CREDENTIAL_MASTER_KEY: "" }),
+      /PROVIDER_CREDENTIAL_MASTER_KEY is required/
+    );
+    assert.throws(
+      () => assertCredentialMasterKeySafety({ ...guardedEnv, AI_CONNECTIONS_MASTER_KEY: "not-base64" }),
+      /canonical base64-encoded 32-byte key/
+    );
+    assert.throws(
+      () => assertCredentialMasterKeySafety({
+        ...guardedEnv,
+        PROVIDER_CREDENTIAL_MASTER_KEY: Buffer.alloc(32, 0x11).toString("base64")
+      }),
+      /known development fallback/
+    );
+    assert.doesNotThrow(() => assertCredentialMasterKeySafety({ NODE_ENV: "test", RUNTIME_PROFILE: "local" }));
   });
 
   it("returns envelope-shaped health and readiness responses with propagated request IDs", () => {

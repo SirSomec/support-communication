@@ -106,6 +106,15 @@ Production-like startup requires:
 - `DATABASE_URL`
 - JWT/session secrets
 - public API key secret
+- unique `PROVIDER_CREDENTIAL_MASTER_KEY` and `AI_CONNECTIONS_MASTER_KEY` values, each encoded as canonical base64 for exactly 32 random bytes
+
+Generate each master key independently before starting compose (never reuse these local values in another environment):
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+The release gate generates ephemeral keys for its own local run. A direct `docker compose up` leaves both values empty unless they are supplied explicitly, and the production-like API/worker startup then fails closed.
 - object storage credentials (`S3_*`)
 - billing provider mode outside sandbox/local
 - `NODE_ENV=production`
@@ -265,7 +274,7 @@ OUTBOX_SCANNER_PROVIDER_MODE=http OUTBOX_SCANNER_URL=https://scanner.example.tes
 ```
 
 This is the production-like Prisma/PostgreSQL gate. Every product-critical repository runs on Prisma, so there are no JSON fallback store blockers.
-The stack also runs `notification-delivery-worker` with `RUNTIME_PROFILE=production-like`, `NOTIFICATION_REPOSITORY=prisma`, and browser push fully disabled by default on both API and worker. Supplying `BROWSER_PUSH_ENABLED=true` or VAPID key material activates the fail-fast live-provider gate; set `NOTIFICATION_DELIVERY_PROVIDER_MODE=web-push` with complete credentials. It runs `lead-notification-worker` with `INTEGRATION_REPOSITORY=prisma` and provider dispatch disabled unless a real lead notification provider is configured. It runs `webhook-delivery-worker` with `INTEGRATION_REPOSITORY=prisma`; set `WEBHOOK_DELIVERY_PROVIDER_MODE=http` when replay/delivery rows should call their `targetUrl`, otherwise the default is disabled. It also runs `outbox-worker`, `billing-sync-worker`, ClamAV and the persistent file scanner worker backed by PostgreSQL. An external scanner remains available by overriding `OUTBOX_SCANNER_URL` and the HTTP provider credentials.
+The stack also runs `notification-delivery-worker` with `RUNTIME_PROFILE=production-like` and browser push fully disabled by default on both API and worker. Supplying `BROWSER_PUSH_ENABLED=true` or VAPID key material activates the fail-fast live-provider gate; set `NOTIFICATION_DELIVERY_PROVIDER_MODE=web-push` with complete credentials. `lead-notification-worker` keeps provider dispatch disabled unless a real lead notification provider is configured. Set `WEBHOOK_DELIVERY_PROVIDER_MODE=http` when `webhook-delivery-worker` should call each row-owned `targetUrl`; otherwise delivery stays disabled. All of these services use the same Prisma/PostgreSQL storage selected by `DATABASE_URL`. The stack also runs `outbox-worker`, `billing-sync-worker`, ClamAV and the persistent file scanner worker. An external scanner remains available by overriding `OUTBOX_SCANNER_URL` and the HTTP provider credentials.
 The stack passes `PUBLIC_DEMO_NOTIFICATION_SMTP_USERNAME`, `PUBLIC_DEMO_NOTIFICATION_SMTP_PASSWORD`, `PUBLIC_DEMO_NOTIFICATION_SMTP_SECURE`, and `PUBLIC_DEMO_NOTIFICATION_SMTP_TLS_REJECT_UNAUTHORIZED` into `lead-notification-worker` so production-like SMTP auth/SMTPS settings match the live smoke contract.
 
 Health checks:

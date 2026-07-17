@@ -101,6 +101,55 @@ describe("official VK/MAX outbound connectors", () => {
     assert.equal(transfer.status, "uploaded");
   });
 
+  it("bounds VK and MAX attachment provider requests with the connector timeout", async () => {
+    const vk = createTenantVkChannelConnector({
+      apiBaseUrl: "https://api.vk.com",
+      fetcher: async (_url, init) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      }),
+      resolveCredential: async () => ({ accessToken: "vk-secret-token", apiVersion: "5.199", externalAccountId: "group-1" }),
+      timeoutMs: 10
+    });
+    await assert.rejects(
+      () => vk.deliverMessage({
+        ...request("VK", "conn-vk", "peer-7"),
+        attachments: [{
+          fileId: "file-vk-timeout",
+          fileName: "photo.png",
+          mimeType: "image/png",
+          signedFile: { expiresAt: "2099-01-01T00:00:00.000Z", method: "GET", url: "https://storage.test/vk-timeout" }
+        }]
+      }),
+      /vk_upload_server_failed_timeout:10/
+    );
+
+    const max = createTenantMaxChannelConnector({
+      apiBaseUrl: "https://platform-api2.max.ru",
+      fetcher: async (url, init) => {
+        if (url === "https://storage.test/max-timeout") {
+          return { ok: true, status: 200, text: async () => "", arrayBuffer: async () => new Uint8Array([1]).buffer };
+        }
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+      resolveCredential: async () => ({ accessToken: "max-secret-token", externalAccountId: "bot-1" }),
+      timeoutMs: 10
+    });
+    await assert.rejects(
+      () => max.deliverMessage({
+        ...request("MAX", "conn-max", "chat-7"),
+        attachments: [{
+          fileId: "file-max-timeout",
+          fileName: "photo.png",
+          mimeType: "image/png",
+          signedFile: { expiresAt: "2099-01-01T00:00:00.000Z", method: "GET", url: "https://storage.test/max-timeout" }
+        }]
+      }),
+      /max_upload_descriptor_failed_timeout:10/
+    );
+  });
+
   it("persists provider message binding before marking a descriptor delivered", async () => {
     const transitions: string[] = [];
     const bindings: Array<Record<string, unknown>> = [];

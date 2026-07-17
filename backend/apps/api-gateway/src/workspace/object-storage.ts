@@ -18,7 +18,17 @@ export interface ObjectStorageSignerSource {
 
 export interface ObjectStorageSignerOptions {
   expiresSeconds?: number;
+  metadataFetcher?: ObjectStorageMetadataFetch;
+  metadataTimeoutMs?: number;
   now?: () => Date;
+}
+
+interface ObjectStorageMetadataFetch {
+  (input: string, init: { method: "HEAD"; signal: AbortSignal }): Promise<{
+    headers: { get(name: string): string | null };
+    ok: boolean;
+    status: number;
+  }>;
 }
 
 export interface DeterministicObjectStorageSignerOptions extends ObjectStorageSignerOptions {
@@ -80,9 +90,44 @@ export function createS3CompatibleObjectStorageSigner(
   const bucket = source.S3_BUCKET;
   const region = source.S3_REGION?.trim() || "us-east-1";
   const expiresSeconds = options.expiresSeconds ?? 900;
+  const metadataFetcher = options.metadataFetcher ?? globalThis.fetch;
+  const metadataTimeoutMs = Math.max(1, Math.trunc(Number(options.metadataTimeoutMs)) || 10_000);
   const now = options.now ?? (() => new Date());
 
   return {
+    async getObjectMetadata(input: ObjectStorageMetadataInput): Promise<ObjectStorageObjectMetadata | undefined> {
+      const signedAt = now();
+      const url = presignS3Url({
+        accessKey,
+        bucket,
+        endpoint,
+        expiresSeconds,
+        method: "HEAD",
+        objectKey: input.objectKey,
+        region,
+        secretKey,
+        signedAt
+      });
+      const response = await metadataFetcher(url, {
+        method: "HEAD",
+        signal: AbortSignal.timeout(metadataTimeoutMs)
+      });
+      if (response.status === 404) {
+        return undefined;
+      }
+      if (!response.ok) {
+        throw new Error(`object_storage_metadata_failed:${response.status}`);
+      }
+      const size = Number(response.headers.get("content-length"));
+      const checksum = response.headers.get("x-amz-checksum-sha256")
+        ?? response.headers.get("x-amz-meta-sha256")
+        ?? undefined;
+      return {
+        ...(checksum ? { checksum } : {}),
+        ...(Number.isFinite(size) && size >= 0 ? { sizeBytes: size } : {})
+      };
+    },
+
     signDownload(input: ObjectStorageSignDownloadInput): SignedObjectStorageUrl {
       const signedAt = now();
       return {
@@ -148,7 +193,7 @@ interface PresignS3UrlInput {
   endpoint: URL;
   expiresSeconds: number;
   headers?: Record<string, string>;
-  method: "GET" | "PUT";
+  method: "GET" | "HEAD" | "PUT";
   objectKey: string;
   region: string;
   secretKey: string;

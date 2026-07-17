@@ -113,6 +113,32 @@ describe("Prisma-backed routing repository contracts", () => {
     assert.deepEqual(calls.operatorCapacityUpserts[0]?.where, { id: "capacity_prisma_vk_anna" });
   });
 
+  it("persists append-only routing analytics history in one batch", async () => {
+    const { client, calls } = createFakePrismaRoutingClient();
+    const repository = RoutingRepository.prisma({ client });
+    const state = emptyRoutingState({
+      routingAnalyticsRows: Array.from({ length: 100 }, (_, index) => ({
+        channel: "VK",
+        conversationId: `conversation-${index}`,
+        eventKind: "assignment",
+        fromOperatorId: null,
+        id: `analytics-${index}`,
+        occurredAt: `2026-07-17T10:${String(index % 60).padStart(2, "0")}:00.000Z`,
+        source: "routing-contract",
+        tenantId: "tenant-volga",
+        toOperatorId: "operator-anna"
+      }))
+    });
+
+    await repository.saveState(state);
+
+    assert.equal(calls.routingAnalyticsRowCreateMany.length, 1);
+    assert.equal(calls.routingAnalyticsRowCreateMany[0].data.length, 100);
+    assert.equal(calls.routingAnalyticsRowCreateMany[0].skipDuplicates, true);
+    assert.equal(calls.routingAnalyticsRowUpserts.length, 0);
+    assert.equal((await repository.listRoutingAnalyticsRows({ tenantId: "tenant-volga" })).length, 100);
+  });
+
   it("persists routing runtime job descriptors through Prisma delegates without fallback", async () => {
     const { client, calls } = createFakePrismaRoutingClient();
     const fallback = RoutingRepository.inMemory();
@@ -1078,6 +1104,7 @@ function createFakePrismaRoutingClient() {
       where: { id: string };
     }>,
     routingAnalyticsRowFindMany: [] as Array<{ orderBy: { occurredAt: "desc" }; where?: Record<string, unknown> }>,
+    routingAnalyticsRowCreateMany: [] as Array<{ data: FakeRoutingAnalyticsCreateInput[]; skipDuplicates: true }>,
     routingAnalyticsRowUpserts: [] as Array<{
       create: FakeRoutingAnalyticsCreateInput;
       update: Omit<FakeRoutingAnalyticsCreateInput, "id">;
@@ -1237,6 +1264,16 @@ function createFakePrismaRoutingClient() {
       }
     },
     routingAnalyticsRow: {
+      createMany(input: { data: FakeRoutingAnalyticsCreateInput[]; skipDuplicates: true }) {
+        calls.routingAnalyticsRowCreateMany.push(input);
+        let count = 0;
+        for (const row of input.data) {
+          if (routingAnalyticsRows.has(row.id)) continue;
+          routingAnalyticsRows.set(row.id, row);
+          count += 1;
+        }
+        return Promise.resolve({ count });
+      },
       findMany(input: { orderBy: { occurredAt: "desc" }; where?: Record<string, unknown> }) {
         calls.routingAnalyticsRowFindMany.push(input);
         return Promise.resolve(Array.from(routingAnalyticsRows.values())

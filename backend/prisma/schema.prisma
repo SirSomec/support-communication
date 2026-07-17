@@ -203,6 +203,7 @@ model ServiceAdminImpersonation {
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([approvalId], map: "service_admin_impersonations_approval_id_idx")
+  @@index([auditEventId], map: "service_admin_impersonations_audit_event_id_idx")
   @@index([tenantId, userId, stoppedAt, expiresAt], map: "service_admin_impersonations_tenant_user_active_idx")
   @@map("service_admin_impersonations")
 }
@@ -660,6 +661,7 @@ model Conversation {
   @@unique([tenantId, id], map: "conversations_tenant_id_id_key")
   @@index([status, channel], map: "conversations_status_channel_idx")
   @@index([tenantId, status, updatedAt], map: "conversations_tenant_status_updated_at_idx")
+  @@index([tenantId, resolutionOutcome, updatedAt], map: "conversations_tenant_resolution_outcome_updated_idx")
   @@index([tenantId, operatorId, updatedAt], map: "conversations_tenant_operator_updated_at_idx")
   @@index([tenantId, queueId, teamId, updatedAt], map: "conversations_tenant_queue_team_updated_at_idx")
   @@unique([tenantId, channelConnectionId, providerConversationId], map: "conversations_tenant_connection_provider_key")
@@ -1809,6 +1811,7 @@ model PublicApiKey {
 
   @@index([tenantId, environment, status], map: "public_api_keys_tenant_environment_status_idx")
   @@index([tenantId, keyId], map: "public_api_keys_tenant_key_idx")
+  @@index([tenantId, channelConnectionId, status], map: "public_api_keys_tenant_channel_connection_idx")
   @@map("public_api_keys")
 }
 
@@ -2382,7 +2385,7 @@ model McpConnector {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   @@unique([tenantId, id])
-  @@index([tenantId, status])
+  @@index([tenantId, status], map: "mcp_connectors_tenant_status_idx")
   @@map("mcp_connectors")
 }
 
@@ -2478,6 +2481,25 @@ model ProviderAttachmentTransfer {
   @@index([tenantId, channelConnectionId, provider, status], map: "provider_attachment_transfers_connection_status_idx")
   @@index([fileId, updatedAt], map: "provider_attachment_transfers_file_updated_idx")
   @@map("provider_attachment_transfers")
+}
+
+model WorkspaceTopic {
+  id            String   @id
+  tenantId      String   @map("tenant_id")
+  accessScope   String   @map("access_scope")
+  archived      Boolean  @default(false)
+  branchName    String   @map("branch_name")
+  channels      String[] @default([])
+  groupName     String   @map("group_name")
+  name          String
+  required      Boolean  @default(true)
+  routingTarget String   @map("routing_target")
+  sortOrder     Int      @map("sort_order")
+  updatedAt     DateTime @map("updated_at") @db.Timestamptz(3)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, archived, sortOrder], map: "workspace_topics_tenant_archived_sort_order_idx")
+  @@map("workspace_topics")
 }
 
 model AutomationWorkspaceAuditEvent {

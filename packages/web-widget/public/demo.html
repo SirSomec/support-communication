@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Support Widget — Local Demo</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, sans-serif;
+        background: linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%);
+        color: #0f172a;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 48px 24px;
+      }
+      code {
+        background: #e2e8f0;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      pre {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 16px;
+        border-radius: 12px;
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Support Widget — локальная демо-страница</h1>
+      <p>
+        Эта страница подключает собранный бандл <code>widget.js</code> и инициализирует
+        <code>SupportWidget</code> для ручной проверки виджета.
+      </p>
+
+      <h2>Локальная разработка</h2>
+      <ol>
+        <li>Задайте два ephemeral master key по runbook и поднимите локальный стек: <code>docker compose up -d</code> (API доступен через proxy на <code>:8080</code>).</li>
+        <li>Соберите виджет: <code>npm run widget:build</code> из корня репозитория.</li>
+        <li>
+          Запустите preview с прокси:
+          <code>npm run preview --prefix packages/web-widget</code>
+        </li>
+        <li>
+          Откройте <code>http://127.0.0.1:5174/demo.html</code> и подставьте stage public key из
+          <code>npm run bootstrap:local</code>.
+        </li>
+      </ol>
+
+      <h2>apiBase</h2>
+      <p>
+        При preview через Vite proxy достаточно относительного пути
+        <code>/api/v1</code>. Если открываете HTML напрямую без proxy, укажите полный URL:
+      </p>
+      <pre><code>apiBase: "http://127.0.0.1:8080/api/v1"</code></pre>
+      <p>Альтернатива — прямой доступ к API Gateway: <code>http://127.0.0.1:4101/api/v1</code>.</p>
+
+      <h2>Embed snippet</h2>
+      <pre><code>&lt;script src="https://cdn.example.com/widget.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  SupportWidget.init({
+    apiBase: "/api/v1",
+    environment: "stage",
+    publicKey: "sk_stage_...",
+    externalId: "visitor-1"
+  });
+&lt;/script&gt;</code></pre>
+    </main>
+
+    <script src="/widget.js"></script>
+    <script>
+      SupportWidget.init({
+        apiBase: "/api/v1",
+        environment: "stage",
+        publicKey: "sk_stage_REPLACE_WITH_BOOTSTRAP_KEY",
+        externalId: "demo-visitor-1"
+      });
+    </script>
+  </body>
+</html>

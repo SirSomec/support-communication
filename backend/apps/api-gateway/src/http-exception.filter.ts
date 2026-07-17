@@ -1,6 +1,7 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from "@nestjs/common";
 import { createEnvelope, type EnvelopeStatus } from "@support-communication/envelope";
-import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import { createRequestTraceId, getCurrentTraceId, writeStructuredLog } from "@support-communication/observability";
+import { redactSensitiveText } from "@support-communication/redaction";
 
 interface HttpRequestLike {
   method?: string;
@@ -14,21 +15,36 @@ interface HttpResponseLike {
   };
 }
 
-@Catch(HttpException)
-export class EnvelopeHttpExceptionFilter implements ExceptionFilter<HttpException> {
-  catch(exception: HttpException, host: ArgumentsHost): void {
+@Catch()
+export class EnvelopeHttpExceptionFilter implements ExceptionFilter<unknown> {
+  catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
     const request = http.getRequest<HttpRequestLike>();
     const response = http.getResponse<HttpResponseLike>();
-    const statusCode = exception.getStatus();
-    const exceptionResponse = exception.getResponse();
-    const errorMessage = getExceptionMessage(exceptionResponse, exception.message);
+    const httpException = exception instanceof HttpException ? exception : null;
+    const statusCode = httpException?.getStatus() ?? HttpStatus.INTERNAL_SERVER_ERROR;
+    const exceptionResponse = httpException?.getResponse();
+    const traceId = request.traceId ?? getCurrentTraceId() ?? createRequestTraceId("api-gateway", "httpException");
+    const errorMessage = httpException
+      ? getExceptionMessage(exceptionResponse ?? httpException.message, httpException.message)
+      : "Internal server error.";
+
+    if (!httpException) {
+      writeStructuredLog("error", "Unhandled HTTP exception", {
+        error: redactSensitiveText(exception instanceof Error ? exception.message : String(exception)),
+        method: request.method,
+        operation: "httpException",
+        path: redactSensitiveText(String(request.originalUrl ?? "")),
+        service: "api-gateway",
+        traceId
+      });
+    }
 
     response.status(statusCode).json(createEnvelope({
       service: "api-gateway",
       operation: "httpException",
       status: mapHttpStatus(statusCode),
-      traceId: request.traceId ?? getCurrentTraceId() ?? createRequestTraceId("api-gateway", "httpException"),
+      traceId,
       meta: {
         httpStatus: statusCode,
         method: request.method,
@@ -36,9 +52,9 @@ export class EnvelopeHttpExceptionFilter implements ExceptionFilter<HttpExceptio
       },
       data: {},
       error: {
-        code: mapErrorCode(statusCode),
+        code: httpException ? mapErrorCode(statusCode) : "internal_error",
         message: errorMessage,
-        details: typeof exceptionResponse === "object" ? exceptionResponse : undefined
+        details: httpException && typeof exceptionResponse === "object" ? exceptionResponse : undefined
       }
     }));
   }

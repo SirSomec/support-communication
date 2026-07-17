@@ -135,6 +135,38 @@
   font-weight: 800;
 }
 
+.template-preview-body {
+  display: grid;
+  gap: 12px;
+}
+
+.template-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.template-preview-meta span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--surface-selected);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.template-preview-message {
+  min-height: 120px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 1180px) {
   .templates-workspace {
     grid-template-columns: 1fr;

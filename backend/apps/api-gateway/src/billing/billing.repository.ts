@@ -412,6 +412,7 @@ export interface BillingRepositoryPort {
     tenant: BillingTenantState;
   }>;
   createQuotaReservation(reservation: BillingQuotaReservation): MaybePromise<BillingQuotaReservation>;
+  reserveQuotaAtomically(input: BillingQuotaReservationAtomicInput): MaybePromise<BillingQuotaReservationAtomicResult>;
   applyTenantTariffChange(input: BillingTariffChangeInput): MaybePromise<{
     syncJob: BillingSyncJob;
     tenant: BillingTenantState;
@@ -477,6 +478,21 @@ export interface BillingQuotaReservationListInput {
   statuses?: BillingQuotaReservation["status"][];
   tenantId?: string;
 }
+
+export interface BillingQuotaReservationAtomicInput {
+  limit: number;
+  reservation: BillingQuotaReservation;
+  used: number;
+}
+
+export type BillingQuotaReservationAtomicResult = {
+  kind: "created" | "replay";
+  reservation: BillingQuotaReservation;
+  reserved: number;
+} | {
+  kind: "denied";
+  reserved: number;
+};
 
 export interface BillingQuotaReservationClaimInput {
   leaseTimeoutMs?: number;
@@ -678,6 +694,10 @@ export class BillingRepository implements BillingRepositoryPort {
     return this.adapter.createQuotaReservation(reservation);
   }
 
+  reserveQuotaAtomically(input: BillingQuotaReservationAtomicInput): MaybePromise<BillingQuotaReservationAtomicResult> {
+    return this.adapter.reserveQuotaAtomically(input);
+  }
+
   claimExpiredQuotaReservations(input?: BillingQuotaReservationClaimInput): MaybePromise<BillingQuotaReservation[]> {
     return this.adapter.claimExpiredQuotaReservations(input);
   }
@@ -734,6 +754,7 @@ export interface PrismaBillingClient extends PrismaBillingDelegates {
 type PrismaBillingTransactionalClient = PrismaBillingDelegates;
 
 interface PrismaBillingDelegates {
+  $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   billingApproval: {
     create(input: { data: PrismaBillingApprovalCreateInput }): Promise<PrismaBillingApprovalRow>;
     findFirst(input: { where: { OR: Array<{ approvalId?: string; requestFingerprint?: string; tenantId?: string }> } }): Promise<PrismaBillingApprovalRow | null>;
@@ -2010,6 +2031,40 @@ class PrismaBillingRepository implements BillingRepositoryPort {
     return clone(toBillingQuotaReservation(row));
   }
 
+  async reserveQuotaAtomically(input: BillingQuotaReservationAtomicInput): Promise<BillingQuotaReservationAtomicResult> {
+    return this.client.$transaction(async (transaction) => {
+      if (!transaction.$queryRawUnsafe) {
+        throw new Error("billing_quota_advisory_lock_unavailable");
+      }
+      await transaction.$queryRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        `${input.reservation.tenantId}:${input.reservation.resource}`
+      );
+      const existing = await transaction.billingQuotaReservation.findUnique({
+        where: { idempotencyKey: input.reservation.idempotencyKey }
+      });
+      const active = await transaction.billingQuotaReservation.findMany({
+        orderBy: { createdAt: "desc" },
+        where: {
+          resource: input.reservation.resource,
+          status: "reserved",
+          tenantId: input.reservation.tenantId
+        }
+      });
+      const reserved = active.reduce((sum, reservation) => sum + reservation.requested, 0);
+      if (existing) {
+        return { kind: "replay", reservation: clone(toBillingQuotaReservation(existing)), reserved };
+      }
+      if (input.used + reserved + input.reservation.requested > input.limit) {
+        return { kind: "denied", reserved };
+      }
+      const row = await transaction.billingQuotaReservation.create({
+        data: toPrismaBillingQuotaReservationCreateInput(input.reservation)
+      });
+      return { kind: "created", reservation: clone(toBillingQuotaReservation(row)), reserved };
+    });
+  }
+
   async commitQuotaReservation(input: BillingQuotaReservationCommitInput): Promise<{
     reservation: BillingQuotaReservation;
     tenant: BillingTenantState;
@@ -2926,6 +2981,33 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
       }));
 
       return clone(reservation);
+    },
+
+    reserveQuotaAtomically(input: BillingQuotaReservationAtomicInput): BillingQuotaReservationAtomicResult {
+      let result: BillingQuotaReservationAtomicResult | null = null;
+      store.update((state) => {
+        const reservations = state.quotaReservations ?? [];
+        const active = reservations.filter((reservation) => reservation.tenantId === input.reservation.tenantId
+          && reservation.resource === input.reservation.resource
+          && reservation.status === "reserved");
+        const reserved = active.reduce((sum, reservation) => sum + reservation.requested, 0);
+        const existing = reservations.find((reservation) => reservation.idempotencyKey === input.reservation.idempotencyKey);
+        if (existing) {
+          result = { kind: "replay", reservation: clone(existing), reserved };
+          return state;
+        }
+        if (input.used + reserved + input.reservation.requested > input.limit) {
+          result = { kind: "denied", reserved };
+          return state;
+        }
+        result = { kind: "created", reservation: clone(input.reservation), reserved };
+        return {
+          ...state,
+          quotaReservations: [input.reservation, ...reservations]
+        };
+      });
+      if (!result) throw new Error("quota_reservation_atomic_result_missing");
+      return clone(result);
     },
 
     commitQuotaReservation(input: BillingQuotaReservationCommitInput): {

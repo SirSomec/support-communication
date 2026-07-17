@@ -78,6 +78,72 @@ describe("notification delivery worker contracts", () => {
     assert.match(descriptor?.providerMessageId ?? "", /^deterministic_push_/);
   });
 
+  it("claims a descriptor before provider I/O so overlapping workers cannot send it twice", async () => {
+    const repository = seedNotificationDeliveryRepository();
+    let releaseProvider!: () => void;
+    let notifyEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      notifyEntered = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    let sends = 0;
+    const provider = createNotificationDeliveryProviderPort({
+      async send() {
+        sends += 1;
+        notifyEntered();
+        await blocked;
+        return { providerMessageId: "provider-message-once" };
+      }
+    });
+
+    const first = executeNotificationDeliveryWorker({
+      notificationRepository: repository,
+      now: new Date("2026-07-03T10:00:00.000Z"),
+      provider
+    });
+    await entered;
+    const overlapping = await executeNotificationDeliveryWorker({
+      notificationRepository: repository,
+      now: new Date("2026-07-03T10:00:01.000Z"),
+      provider
+    });
+    releaseProvider();
+    const completed = await first;
+
+    assert.equal(sends, 1);
+    assert.equal(overlapping.scanned, 0);
+    assert.equal(completed.delivered, 1);
+    assert.equal(repository.readState().deliveryDescriptors[0]?.attempts, 1);
+  });
+
+  it("recovers a processing descriptor after its worker lease expires", async () => {
+    const repository = seedNotificationDeliveryRepository();
+    const descriptor = repository.readState().deliveryDescriptors[0]!;
+    repository.saveNotificationDeliveryDescriptor({
+      ...descriptor,
+      status: "processing",
+      updatedAt: "2026-07-03T09:50:00.000Z"
+    });
+
+    const claimed = await repository.claimNotificationDeliveryDescriptorsAsync({
+      leaseMs: 60_000,
+      now: "2026-07-03T10:00:00.000Z",
+      queue: "browser-push"
+    });
+    const duplicate = await repository.claimNotificationDeliveryDescriptorsAsync({
+      leaseMs: 60_000,
+      now: "2026-07-03T10:00:00.000Z",
+      queue: "browser-push"
+    });
+
+    assert.deepEqual(claimed.map((item) => item.id), ["notif_delivery_worker_001"]);
+    assert.equal(claimed[0]?.status, "processing");
+    assert.equal(claimed[0]?.updatedAt, "2026-07-03T10:00:00.000Z");
+    assert.deepEqual(duplicate, []);
+  });
+
   it("adapts browser-push delivery requests to a web-push provider client", async () => {
     const calls: Array<Record<string, unknown>> = [];
     const provider = createWebPushNotificationDeliveryProviderAdapter({

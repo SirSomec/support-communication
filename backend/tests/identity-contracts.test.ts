@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, it } from "node:test";
 import { AuthService } from "../apps/api-gateway/src/identity/auth.service.ts";
-import { resetIdentityAuthFlowStore } from "../apps/api-gateway/src/identity/identity-auth-flow.repository.ts";
+import {
+  listTenantMembershipsForEmail,
+  resetIdentityAuthFlowStore
+} from "../apps/api-gateway/src/identity/identity-auth-flow.repository.ts";
 import { IdentityRepository as RuntimeIdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
 import { bootstrapIdentityState } from "../apps/api-gateway/src/identity/seed.ts";
 import { createMfaOtpRuntime } from "../apps/api-gateway/src/identity/mfa-otp.ts";
@@ -213,6 +216,31 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(completed.data.authenticated, true);
     assert.equal(completed.data.tenantId, "tenant-lumen");
     assert.equal(completed.data.operator?.email, "multi@example.com");
+  });
+
+  it("queries tenant memberships with a bounded email lookup", async () => {
+    const repository = IdentityRepository.inMemory();
+    const originalListTenants = repository.listTenants.bind(repository);
+    const originalFindTenantUsersByEmail = repository.findTenantUsersByEmail.bind(repository);
+    const calls = { findTenantUsers: 0, findTenantUsersByEmail: 0, listTenants: 0 };
+
+    (repository as unknown as { listTenants: typeof repository.listTenants }).listTenants = async () => {
+      calls.listTenants += 1;
+      return originalListTenants();
+    };
+    (repository as unknown as { findTenantUsersByEmail: typeof repository.findTenantUsersByEmail }).findTenantUsersByEmail = async (email) => {
+      calls.findTenantUsersByEmail += 1;
+      return originalFindTenantUsersByEmail(email);
+    };
+    (repository as unknown as { findTenantUsers: typeof repository.findTenantUsers }).findTenantUsers = async () => {
+      calls.findTenantUsers += 1;
+      throw new Error("tenant-wide membership scan must not run");
+    };
+
+    const memberships = await listTenantMembershipsForEmail("multi@example.com", repository);
+
+    assert.deepEqual(memberships.map((membership) => membership.tenantId).sort(), ["tenant-lumen", "tenant-northstar"]);
+    assert.deepEqual(calls, { findTenantUsers: 0, findTenantUsersByEmail: 1, listTenants: 1 });
   });
   it("keeps fallback permission roles aligned with presence actions and localized aliases", () => {
     const employee = identityPermissionRoleCatalog.find((role) => role.key === "employee");
@@ -489,6 +517,7 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     const auth = new AuthService(repository);
 
     const started = await auth.startOidcLogin({
+      domain: "volga.example",
       providerId: "oidc-main",
       redirectUri: "https://support.example.com/auth/oidc/callback"
     });
@@ -507,6 +536,15 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(authorizationUrl.searchParams.get("scope"), "openid email profile");
     assert.equal(authorizationUrl.searchParams.get("state"), started.data.state);
     assert.ok(authorizationUrl.searchParams.get("nonce"));
+    assert.equal(started.meta.domain, "volga.example");
+
+    const foreignDomain = await auth.startOidcLogin({
+      domain: "lumen.example",
+      providerId: "oidc-main",
+      redirectUri: "https://support.example.com/auth/oidc/callback"
+    });
+    assert.equal(foreignDomain.status, "denied");
+    assert.equal(foreignDomain.error?.code, "oidc_domain_not_allowed");
 
     const descriptor = await repository.findOidcCallbackDescriptor(started.data.state);
     assert.equal(descriptor?.id, started.data.callbackDescriptorId);
@@ -537,6 +575,7 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(replay.data.authenticated, false);
 
     const errorStarted = await auth.startOidcLogin({
+      domain: "volga.example",
       providerId: "oidc-main",
       redirectUri: "https://support.example.com/auth/oidc/callback"
     });

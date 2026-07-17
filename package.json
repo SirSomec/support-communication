@@ -59,7 +59,8 @@
     "test:ui-mutation-guards": "node --test tests/ui-mutation-guards.test.js",
     "test:services": "node --test tests/backend-services.test.js",
     "test:smoke": "playwright test tests/smoke.spec.js",
-    "widget:build": "npm run build --prefix packages/web-widget"
+    "widget:build": "npm run build --prefix packages/web-widget",
+    "widget:preview:e2e": "npm run widget:build && npm run preview --prefix packages/web-widget"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

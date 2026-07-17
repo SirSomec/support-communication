@@ -777,6 +777,30 @@ describe("outbox worker runtime contracts", () => {
     assert.ok(calls[0].init.signal instanceof AbortSignal);
   });
 
+  it("preserves a redacted network failure reason from HTTP adapters", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const adapters = worker.createHttpWorkerAdaptersFromEnv({
+      OUTBOX_CHANNEL_CONNECTORS: "SDK=https://provider.example.test/sdk",
+      OUTBOX_HTTP_TIMEOUT_MS: "25"
+    }, async () => {
+      throw new Error("connect ECONNREFUSED provider.example.test");
+    });
+
+    await assert.rejects(
+      adapters.channelConnectors.SDK.deliverMessage({
+        channel: "SDK",
+        conversationId: "maria",
+        descriptorId: "descriptor_http_network_failure",
+        idempotencyKey: "delivery-http-network-failure",
+        messageId: "msg_http_network_failure",
+        outboxEventId: "outbox_http_network_failure",
+        text: "Hello",
+        traceId: "trc_http_network_failure"
+      }),
+      /worker_http_dispatch_failed:connect ECONNREFUSED provider\.example\.test/
+    );
+  });
+
   it("defines a Telegram connector adapter with DTO validation and sanitized provider failures", async () => {
     const worker = await import("../apps/outbox-worker/src/index.ts");
     assert.equal(typeof worker.createTelegramChannelConnector, "function");
@@ -955,6 +979,44 @@ describe("outbox worker runtime contracts", () => {
     assert.match(multipart, /name="document"; filename="квитанция\.pdf"/);
     assert.match(multipart, /Content-Type: application\/pdf/);
     assert.match(multipart, /PDFBYTES/);
+  });
+
+  it("aborts a stalled Telegram attachment download at the connector timeout", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const connector = worker.createTenantTelegramChannelConnector({
+      apiBaseUrl: "https://telegram.example.test",
+      channel: "Telegram",
+      fetcher: async (_url: string, init: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      }),
+      resolveBotToken: async () => "123:BOT-TOKEN",
+      timeoutMs: 10
+    });
+
+    await assert.rejects(
+      () => connector.deliverMessage({
+        attachments: [{
+          fileId: "file_tg_timeout",
+          fileName: "timeout.pdf",
+          mimeType: "application/pdf",
+          signedFile: {
+            expiresAt: "2999-01-01T00:00:00.000Z",
+            method: "GET",
+            url: "https://storage.example.test/signed/file_tg_timeout"
+          }
+        }],
+        channel: "Telegram",
+        conversationId: "tg-chat-timeout",
+        descriptorId: "telegram_delivery_attachment_timeout",
+        idempotencyKey: "telegram-attachment-timeout-key",
+        messageId: "msg_telegram_attachment_timeout",
+        outboxEventId: "outbox_telegram_attachment_timeout",
+        tenantId: "tenant-volga",
+        text: "Attachment",
+        traceId: "trc_telegram_attachment_timeout"
+      }),
+      /provider_attachment_download_timeout:10/
+    );
   });
 
   it("keeps plain Telegram text delivery on sendMessage and rejects expired attachment access", async () => {
@@ -1218,6 +1280,62 @@ describe("outbox worker runtime contracts", () => {
     assert.deepEqual(deliveryStates, ["failed"]);
     assert.doesNotMatch(failed?.lastError ?? "", /SECRET|token|bot123456/i);
     assert.equal(logs.some((entry) => /SECRET|token|bot123456/i.test(entry)), false);
+  });
+
+  it("does not resend after provider success when delivery accounting fails", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    await store.append(createOutboxEvent({
+      aggregateId: "conversation-accounting-failure",
+      aggregateType: "conversation",
+      payload: { descriptorId: "descriptor-accounting-failure" },
+      queue: "message-delivery",
+      traceId: "trace-accounting-failure",
+      type: "message.delivery.requested"
+    }));
+    let providerCalls = 0;
+    const logs: string[] = [];
+    const handlers = worker.createExternalChannelOutboxHandlers({
+      channelConnectors: {
+        VK: {
+          deliverMessage: async () => {
+            providerCalls += 1;
+            return { providerMessageId: "vk-message-confirmed" };
+          },
+          startConversation: async () => undefined
+        }
+      },
+      outboundDescriptorStore: {
+        findOutboundDescriptorById: async () => ({
+          channel: "VK",
+          conversationId: "conversation-accounting-failure",
+          id: "descriptor-accounting-failure",
+          idempotencyKey: "idempotency-accounting-failure",
+          kind: "message_delivery",
+          messageId: "message-accounting-failure",
+          payload: { channelConnectionId: "connection-vk", providerConversationId: "peer-vk", text: "Reply" },
+          tenantId: "tenant-volga"
+        }),
+        markOutboundDescriptorDelivery: async () => {
+          throw new Error("delivery-state-database-unavailable");
+        },
+        recordProviderMessageBinding: async () => {
+          throw new Error("binding-database-unavailable");
+        }
+      },
+      writeLog: (_level: string, message: string) => {
+        logs.push(message);
+      }
+    });
+
+    const first = await worker.runOutboxWorker({ handlers, once: true, queue: "message-delivery", store });
+    const second = await worker.runOutboxWorker({ handlers, once: true, queue: "message-delivery", store });
+
+    assert.deepEqual(first, { failed: 0, iterations: 1, published: 1, scanned: 1, stopped: false });
+    assert.deepEqual(second, { failed: 0, iterations: 1, published: 0, scanned: 0, stopped: false });
+    assert.equal(providerCalls, 1);
+    assert.equal(logs.includes("provider delivery accounting requires reconciliation"), true);
+    assert.equal(logs.includes("outbound descriptor delivery state update failed"), true);
   });
 
   it("routes Telegram message-delivery descriptors through runtime handlers with stable metadata", async () => {
@@ -2150,6 +2268,50 @@ describe("outbox worker runtime contracts", () => {
     assert.deepEqual(await store.list({ queue: "file-scan", statuses: ["published"] }), []);
   });
 
+  it("marks an empty scanner result as retryable instead of leaving it publishing", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    const event = await store.append(createOutboxEvent({
+      aggregateId: "attachment_empty_scan_result",
+      aggregateType: "attachment",
+      payload: { descriptorId: "attachment_empty_scan_result" },
+      queue: "file-scan",
+      traceId: "trc_empty_scan_result",
+      type: "attachment.upload.requested"
+    }));
+
+    const result = await worker.runFileScanScannerWorker({
+      maxAttempts: 3,
+      now: new Date("2026-06-29T09:04:30.000Z"),
+      outboundDescriptorStore: {
+        findOutboundDescriptorById: async () => ({
+          channel: "SDK",
+          conversationId: null,
+          id: "attachment_empty_scan_result",
+          idempotencyKey: "empty-scan-result-key",
+          kind: "attachment_upload",
+          messageId: null,
+          payload: {
+            fileId: "file_empty_scan_result",
+            fileName: "empty-scan-result.pdf",
+            sizeBytes: 1024
+          }
+        })
+      },
+      retryBackoffMs: 60_000,
+      scanResultCallback: { recordScanResult: async () => { throw new Error("callback must not run"); } },
+      scanner: { scanAttachment: async () => undefined },
+      store
+    });
+
+    assert.equal(result.failed, 1);
+    assert.equal(result.published, 0);
+    const [failed] = await store.list({ queue: "file-scan", statuses: ["failed"] });
+    assert.equal(failed.id, event.id);
+    assert.equal(failed.lastError, "file_scan_result_required");
+    assert.deepEqual(await store.list({ queue: "file-scan", statuses: ["publishing"] }), []);
+  });
+
   it("runs scanner worker execution from an explicitly configured scanner queue", async () => {
     const worker = await import("../apps/outbox-worker/src/index.ts");
     const store = new InMemoryOutboxStore();
@@ -2457,6 +2619,62 @@ describe("outbox worker runtime contracts", () => {
     assert.equal(failed.nextAttemptAt, "2026-06-29T09:42:00.000Z");
     assert.equal(failed.deadLetteredAt, null);
     assert.deepEqual(await store.list({ queue: "file-scan", statuses: ["published"] }), []);
+  });
+
+  it("dead-letters permanent scanner HTTP errors without retrying", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const store = new InMemoryOutboxStore();
+    const failedAt = new Date("2026-06-29T09:42:30.000Z");
+    const event = await store.append(createOutboxEvent({
+      aggregateId: "attachment_runtime_permanent_error",
+      aggregateType: "attachment",
+      payload: { descriptorId: "attachment_runtime_permanent_error" },
+      queue: "file-scan",
+      traceId: "trc_file_scan_runtime_permanent_error",
+      type: "attachment.upload.requested"
+    }));
+
+    const result = await worker.runRuntimeFileScanScannerWorker({
+      env: {
+        OUTBOX_FILE_SCAN_RESULT_BASE_URL: "https://api.example.test/api/v1",
+        OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN: "service-admin-scan-token",
+        OUTBOX_SCANNER_ENABLED: "true",
+        OUTBOX_SCANNER_PROVIDER_MODE: "http",
+        OUTBOX_SCANNER_URL: "https://scanner.example.test/runtime"
+      },
+      fetcher: async () => ({
+        ok: false,
+        status: 410,
+        text: async () => JSON.stringify({ error: "signed_file_expired" })
+      }),
+      maxAttempts: 5,
+      now: failedAt,
+      outboundDescriptorStore: {
+        findOutboundDescriptorById: async () => ({
+          channel: "SDK",
+          conversationId: null,
+          id: "attachment_runtime_permanent_error",
+          idempotencyKey: "runtime-permanent-error-key",
+          kind: "attachment_upload",
+          messageId: null,
+          payload: {
+            fileId: "file_runtime_permanent_error",
+            fileName: "runtime-permanent-error.pdf",
+            sizeBytes: 2048
+          }
+        })
+      },
+      retryBackoffMs: 120_000,
+      store
+    });
+
+    assert.equal(result.failed, 1);
+    const [deadLettered] = await store.list({ queue: "file-scan", statuses: ["dead_lettered"] });
+    assert.equal(deadLettered.id, event.id);
+    assert.equal(deadLettered.attempts, 1);
+    assert.equal(deadLettered.lastError, "worker_http_dispatch_failed:410");
+    assert.equal(deadLettered.nextAttemptAt, null);
+    assert.equal(deadLettered.deadLetteredAt, "2026-06-29T09:42:30.000Z");
   });
 
   it("dead-letters scanner worker failures after the attempt budget is exhausted", async () => {

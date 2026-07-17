@@ -21,6 +21,7 @@ export function ChatHeader({
 }) {
   const [isActionPanelOpen, setActionPanelOpen] = useState(false);
   const [isAssignmentPanelOpen, setAssignmentPanelOpen] = useState(false);
+  const [isInfoPanelOpen, setInfoPanelOpen] = useState(false);
   const [assignmentReason, setAssignmentReason] = useState("");
   const [assignmentError, setAssignmentError] = useState("");
   const [assignmentPending, setAssignmentPending] = useState(false);
@@ -35,6 +36,7 @@ export function ChatHeader({
     setAssignmentReason("");
     setAssignmentError("");
     setClosurePanelOpen(false);
+    setInfoPanelOpen(false);
     setResolutionOutcome("resolved");
     setTargetOperatorId("");
   }, [conversation.id]);
@@ -107,8 +109,25 @@ export function ChatHeader({
           <MoreHorizontal size={21} />
           <span>Действия</span>
         </button>
-        <button aria-label="Информация" title="Информация" type="button"><Info size={20} /></button>
+        <button
+          aria-controls="chat-information-panel"
+          aria-expanded={isInfoPanelOpen}
+          aria-label="Информация"
+          onClick={() => setInfoPanelOpen((current) => !current)}
+          title="Показать информацию о текущем диалоге"
+          type="button"
+        >
+          <Info size={20} />
+        </button>
       </div>
+      {isInfoPanelOpen ? (
+        <div className="chat-info-panel" id="chat-information-panel">
+          <span><b>Клиент</b>{conversation.name}</span>
+          <span><b>Контакт</b>{visiblePhone || "Не указан"}</span>
+          <span><b>Статус</b>{statusLabels[status] ?? status}</span>
+          <span><b>Тематика</b>{topic || conversation.topic || "Не выбрана"}</span>
+        </div>
+      ) : null}
       {isActionPanelOpen ? (
         <DialogActionMenu
           access={access}

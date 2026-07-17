@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { BookOpen, CheckCircle2, Plus } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { templateService } from "../../services/templateService.js";
-import { ProductScreen, ScreenStateStrip, SectionTitle, ToolbarSearch } from "../../ui.jsx";
+import { Modal, ProductScreen, ScreenStateStrip, SectionTitle, ToolbarSearch } from "../../ui.jsx";
+import { insertTemplateVariable, renderTemplatePreview, TEMPLATE_VARIABLES } from "./templateModel.js";
 import "./templates.css";
 
 export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange }) {
@@ -13,6 +14,8 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
   const setItems = onTemplatesChange ?? setLocalItems;
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const textAreaRef = useRef(null);
   const selected = items.find((template) => template.id === selectedId) ?? items[0] ?? null;
   const visibleItems = items.filter((template) => `${template.title} ${template.text} ${template.topic}`.toLowerCase().includes(query.toLowerCase()));
 
@@ -57,6 +60,19 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
     }
 
     setItems((current) => current.map((template) => template.id === selected.id ? { ...template, [field]: value } : template));
+  }
+
+  function addVariable(variable) {
+    if (!selected) {
+      return;
+    }
+    const field = textAreaRef.current;
+    const inserted = insertTemplateVariable(selected.text, variable, field?.selectionStart, field?.selectionEnd);
+    updateSelected("text", inserted.text);
+    requestAnimationFrame(() => {
+      textAreaRef.current?.focus();
+      textAreaRef.current?.setSelectionRange(inserted.cursor, inserted.cursor);
+    });
   }
 
   async function createTemplate() {
@@ -214,14 +230,14 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
               </div>
               <label className="large-field">
                 <span>Текст ответа</span>
-                <textarea value={selected.text} onChange={(event) => updateSelected("text", event.target.value)} />
+                <textarea ref={textAreaRef} value={selected.text} onChange={(event) => updateSelected("text", event.target.value)} />
               </label>
               <div className="variable-row">
-                {["{client_name}", "{operator_name}", "{ticket_id}", "{topic}"].map((variable) => <button key={variable}>{variable}</button>)}
+                {TEMPLATE_VARIABLES.map((variable) => <button key={variable} onClick={() => addVariable(variable)} type="button">{variable}</button>)}
               </div>
               <footer className="editor-actions">
-                <button onClick={() => onToast("Предпросмотр шаблона открыт.")}><BookOpen size={17} /> Предпросмотр</button>
-                <button className="primary-action" onClick={saveSelectedTemplate}><CheckCircle2 size={17} /> Сохранить</button>
+                <button onClick={() => setPreviewOpen(true)} type="button"><BookOpen size={17} /> Предпросмотр</button>
+                <button className="primary-action" onClick={saveSelectedTemplate} type="button"><CheckCircle2 size={17} /> Сохранить</button>
               </footer>
             </>
           ) : (
@@ -232,6 +248,27 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
           )}
         </section>
       </div>
+      {previewOpen && selected ? (
+        <Modal
+          eyebrow="Шаблон ответа"
+          footer={<button className="primary-action" onClick={() => setPreviewOpen(false)} type="button">Закрыть</button>}
+          onClose={() => setPreviewOpen(false)}
+          overlayClassName="confirm-overlay"
+          panelClassName="confirm-panel"
+          title="Предпросмотр шаблона"
+          titleId="template-preview-title"
+        >
+          <div className="confirm-body template-preview-body">
+            <div className="template-preview-meta">
+              <span>{selected.channel}</span>
+              <span>{selected.topic || "Без тематики"}</span>
+            </div>
+            <p className="template-preview-message">
+              {renderTemplatePreview(selected.text, { topic: selected.topic || "Общий вопрос" }) || "Текст шаблона пока пуст."}
+            </p>
+          </div>
+        </Modal>
+      ) : null}
     </ProductScreen>
   );
 }

@@ -9,7 +9,6 @@
     { "path": "packages/database" },
     { "path": "packages/redaction" },
     { "path": "packages/observability" },
-    { "path": "packages/contracts" },
     { "path": "packages/testing" },
     { "path": "apps/api-gateway" },
     { "path": "apps/outbox-worker" }

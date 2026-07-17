@@ -43,6 +43,24 @@ describe("UI mutation guards", () => {
     assert.match(source, /tenantId:\s*context\.tenantId \|\| undefined/);
   });
 
+  it("does not enumerate tenant membership before password login", () => {
+    const source = readFileSync(new URL("../src/features/auth/AuthPage.jsx", import.meta.url), "utf8");
+    const service = readFileSync(new URL("../src/services/authService.js", import.meta.url), "utf8");
+
+    assert.doesNotMatch(source, /authService\.selectTenant/);
+    assert.match(service, /async selectTenant[\s\S]*?authMode:\s*"tenant"/);
+  });
+
+  it("uses only API memberships in the organization selector", () => {
+    const source = readFileSync(new URL("../src/features/auth/AuthPage.jsx", import.meta.url), "utf8");
+    const model = readFileSync(new URL("../src/features/auth/authModel.js", import.meta.url), "utf8");
+
+    assert.match(source, /useState\(\[\]\)/);
+    assert.match(source, /const nextMemberships = response\.data\.memberships\.map\(mapMembershipOption\)/);
+    assert.match(source, /setSelectedOrganizationId\(nextMemberships\[0\]\?\.id \?\? ""\)/);
+    assert.doesNotMatch(`${source}\n${model}`, /North Retail|City Care|Internal Support/);
+  });
+
   it("uses report export download bytes instead of descriptor-only toast", () => {
     const source = readFileSync(new URL("../src/features/reports/ReportsScreen.jsx", import.meta.url), "utf8");
 
@@ -182,6 +200,15 @@ describe("UI mutation guards", () => {
     assert.match(channelsSource, /focusChannelType/);
     assert.match(channelsSource, /consumedFocusRef\.current === focusNavigationKey/);
     assert.match(channelsSource, /consumedFocusRef\.current = focusNavigationKey/);
+  });
+
+  it("loads the connection navigation summary even when another settings tab is active", () => {
+    const settingsSource = readFileSync(new URL("../src/features/settings/SettingsScreen.jsx", import.meta.url), "utf8");
+
+    assert.match(settingsSource, /activeTab === "connections" \|\| connectionSummaryLoadedRef\.current/);
+    assert.match(settingsSource, /integrationService\.fetchChannelConnections\(\)/);
+    assert.match(settingsSource, /connections\.filter\(\(connection\) => connection\.status === "active"\)\.length/);
+    assert.match(settingsSource, /onSummaryChange=\{handleConnectionSummaryChange\}/);
   });
 
   it("guards service-admin notification actions before rendering tenant-shell buttons", async () => {
@@ -852,6 +879,16 @@ describe("UI mutation guards", () => {
     assert.match(source, /setBusy\(`rotate:\$\{keyId\}`\)/);
     assert.match(source, /setBusy\(`replay:\$\{delivery\.id\}`\)/);
     assert.match(source, /setBusy\(`session:\$\{sessionId\}`\)/);
+  });
+
+  it("cancels stale AI connection loads and resets editing on tenant changes", () => {
+    const source = readFileSync(new URL("../src/features/service-admin/AiConnectionsWorkspace.jsx", import.meta.url), "utf8");
+    const service = readFileSync(new URL("../src/services/supportAdminService.js", import.meta.url), "utf8");
+
+    assert.match(source, /connectionRequestRef\.current\.controller\?\.abort\(\)/);
+    assert.match(source, /setEditingId\(""\);[\s\S]*setForm\(initialForm\);[\s\S]*\}, \[loadConnections, tenantId\]\);/);
+    assert.match(service, /fetchAiConnections\(tenantId, options = \{\}\)/);
+    assert.match(service, /signal: options\.signal/);
   });
 
   it("blocks duplicate SDK playground submissions while a request is running", () => {

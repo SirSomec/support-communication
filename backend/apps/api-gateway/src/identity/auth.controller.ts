@@ -50,9 +50,13 @@ export class AuthController {
 
   @Post("tenant/select")
   @HttpCode(HttpStatus.OK)
+  @UseGuards(TenantOperatorAuthGuard)
   @ApiOkResponse({ description: "Tenant membership selection envelope" })
-  selectTenant(@Body() payload: { email?: string; tenantId?: string }) {
-    return this.authService.selectTenant(payload);
+  selectTenant(@Body() payload: { tenantId?: string }, @Req() request: TenantOperatorRequest) {
+    return this.authService.selectTenant({
+      tenantId: payload.tenantId,
+      userId: request.tenantOperatorContext?.userId
+    });
   }
 
   @Post("invites/accept")
@@ -79,7 +83,7 @@ export class AuthController {
   @Post("oidc/start")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "OIDC authorization redirect envelope" })
-  startOidcLogin(@Body() payload: { providerId?: string; redirectUri?: string }) {
+  startOidcLogin(@Body() payload: { domain?: string; providerId?: string; redirectUri?: string }) {
     return this.authService.startOidcLogin(payload);
   }
 

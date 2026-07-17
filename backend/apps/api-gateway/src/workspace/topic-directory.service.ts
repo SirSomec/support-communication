@@ -1,25 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import { TopicDirectoryRepository, type TopicRecord } from "./topic-directory.repository.js";
 
 const SERVICE = "settingsService";
-const DEFAULT_TENANT_ID = "tenant-northstar";
 const supportedChannels = ["SDK", "Telegram", "MAX", "VK"];
-
-interface TopicRecord {
-  accessScope: string;
-  archived: boolean;
-  branchName: string;
-  channels: string[];
-  groupName: string;
-  id: string;
-  name: string;
-  required: boolean;
-  routingTarget: string;
-  sortOrder: number;
-  tenantId: string;
-  updatedAt: string;
-}
 
 interface TopicMutationPayload {
   accessScope?: string;
@@ -34,18 +19,14 @@ interface TopicMutationPayload {
 }
 
 export class TopicDirectoryService {
-  private readonly topics: Map<string, TopicRecord>;
-
-  constructor(topics: Map<string, TopicRecord> = sharedTopicStore) {
-    this.topics = topics;
-  }
+  constructor(private readonly repository = TopicDirectoryRepository.default()) {}
 
   async fetchTopics(filters: { query?: string; status?: string }, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requireTenantId(scope.tenantId);
     const query = String(filters.query ?? "").trim().toLowerCase();
     const status = String(filters.status ?? "all").trim().toLowerCase();
-    const topics = Array.from(this.topics.values())
-      .filter((topic) => topic.tenantId === tenantId)
+    const allTenantTopics = await this.repository.listTopics(tenantId);
+    const topics = allTenantTopics
       .filter((topic) => status === "all" || !status || (status === "active" ? !topic.archived : status === "archived" ? topic.archived : true))
       .filter((topic) => !query || [
         topic.groupName,
@@ -57,7 +38,6 @@ export class TopicDirectoryService {
       ].join(" ").toLowerCase().includes(query))
       .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name));
 
-    const allTenantTopics = Array.from(this.topics.values()).filter((topic) => topic.tenantId === tenantId);
     return createEnvelope({
       service: SERVICE,
       operation: "fetchTopics",
@@ -85,6 +65,7 @@ export class TopicDirectoryService {
       return invalidEnvelope("createTopic", "topic_path_required", "groupName, branchName and name are required.", { tenantId });
     }
 
+    const tenantTopics = await this.repository.listTopics(tenantId);
     const topic: TopicRecord = {
       accessScope: String(payload.accessScope ?? "admins").trim(),
       archived: false,
@@ -95,11 +76,11 @@ export class TopicDirectoryService {
       name,
       required: Boolean(payload.required ?? true),
       routingTarget: String(payload.routingTarget ?? "Line 1").trim(),
-      sortOrder: normalizeSortOrder(payload.sortOrder, this.topics.size + 1),
+      sortOrder: normalizeSortOrder(payload.sortOrder, tenantTopics.length + 1),
       tenantId,
       updatedAt: new Date().toISOString()
     };
-    this.topics.set(topic.id, topic);
+    const saved = await this.repository.saveTopic(topic);
 
     return createEnvelope({
       service: SERVICE,
@@ -108,15 +89,15 @@ export class TopicDirectoryService {
       meta: apiMeta({ tenantId, topicId: topic.id }),
       data: {
         auditEvent: auditEvent("topic.create", tenantId, topic.id, "Topic created"),
-        topic: toPublicTopic(topic)
+        topic: toPublicTopic(saved)
       }
     });
   }
 
   async updateTopic(topicId: string, payload: TopicMutationPayload, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requireTenantId(scope.tenantId);
-    const topic = this.topics.get(topicId);
-    if (!topic || topic.tenantId !== tenantId) {
+    const topic = await this.repository.findTopic(topicId, tenantId);
+    if (!topic) {
       return notFoundEnvelope("updateTopic", topicId);
     }
 
@@ -132,7 +113,7 @@ export class TopicDirectoryService {
       sortOrder: payload.sortOrder === undefined ? topic.sortOrder : normalizeSortOrder(payload.sortOrder, topic.sortOrder),
       updatedAt: new Date().toISOString()
     };
-    this.topics.set(topicId, updated);
+    const saved = await this.repository.saveTopic(updated);
 
     return createEnvelope({
       service: SERVICE,
@@ -141,7 +122,7 @@ export class TopicDirectoryService {
       meta: apiMeta({ tenantId: updated.tenantId, topicId }),
       data: {
         auditEvent: auditEvent("topic.update", updated.tenantId, topicId, "Topic updated"),
-        topic: toPublicTopic(updated)
+        topic: toPublicTopic(saved)
       }
     });
   }
@@ -156,8 +137,8 @@ export class TopicDirectoryService {
 
   async fetchTopicUsage(topicId: string, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requireTenantId(scope.tenantId);
-    const topic = this.topics.get(topicId);
-    if (!topic || topic.tenantId !== tenantId) {
+    const topic = await this.repository.findTopic(topicId, tenantId);
+    if (!topic) {
       return notFoundEnvelope("fetchTopicUsage", topicId);
     }
 
@@ -178,13 +159,13 @@ export class TopicDirectoryService {
 
   private async setArchiveState(operation: string, topicId: string, archived: boolean, reason: string, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requireTenantId(scope.tenantId);
-    const topic = this.topics.get(topicId);
-    if (!topic || topic.tenantId !== tenantId) {
+    const topic = await this.repository.findTopic(topicId, tenantId);
+    if (!topic) {
       return notFoundEnvelope(operation, topicId);
     }
 
     const updated = { ...topic, archived, updatedAt: new Date().toISOString() };
-    this.topics.set(topicId, updated);
+    const saved = await this.repository.saveTopic(updated);
     return createEnvelope({
       service: SERVICE,
       operation,
@@ -192,47 +173,11 @@ export class TopicDirectoryService {
       meta: apiMeta({ tenantId: topic.tenantId, topicId }),
       data: {
         auditEvent: auditEvent(archived ? "topic.archive" : "topic.restore", topic.tenantId, topicId, reason),
-        topic: toPublicTopic(updated),
-        usage: buildUsage(updated)
+        topic: toPublicTopic(saved),
+        usage: buildUsage(saved)
       }
     });
   }
-}
-
-const seedTopics: TopicRecord[] = [
-  topic("topic-delivery-status", "Доставка", "Заказ", "Статус заказа", ["SDK", "Telegram"], true, false, "Line 1", "admins", 10),
-  topic("topic-delivery-address", "Доставка", "Заказ", "Адрес доставки", ["SDK", "MAX"], true, false, "Operations", "admins", 20),
-  topic("topic-delivery-courier", "Доставка", "Курьер", "Связь с курьером", ["Telegram", "VK"], false, false, "Senior operators", "senior", 30),
-  topic("topic-payment-refund", "Оплата", "Возвраты", "Возврат", ["SDK", "VK"], true, false, "Finance queue", "admins", 40),
-  topic("topic-payment-card-change", "Оплата", "Возвраты", "Смена карты", ["SDK"], false, true, "Finance queue", "admins", 50),
-  topic("topic-account-code", "Авторизация", "Вход", "Код", ["MAX", "VK"], true, false, "Antifraud", "admins", 60),
-  topic("topic-account-identity", "Авторизация", "Вход", "Проверка личности", ["SDK", "Telegram", "MAX"], true, false, "Senior operators", "senior", 70),
-  topic("topic-product-mismatch", "Товар", "Качество", "Несоответствие", ["Telegram", "VK"], true, false, "Catalog", "admins", 80)
-];
-
-const sharedTopicStore = new Map<string, TopicRecord>([
-  ...seedTopics.map((item) => [item.id, cloneTopic(item)] as const),
-  ...seedTopics.map((item) => {
-    const tenantTopic = { ...cloneTopic(item), id: `${item.id}-tenant-volga`, tenantId: "tenant-volga" };
-    return [tenantTopic.id, tenantTopic] as const;
-  })
-]);
-
-function topic(id: string, groupName: string, branchName: string, name: string, channels: string[], required: boolean, archived: boolean, routingTarget: string, accessScope: string, sortOrder: number): TopicRecord {
-  return {
-    accessScope,
-    archived,
-    branchName,
-    channels,
-    groupName,
-    id,
-    name,
-    required,
-    routingTarget,
-    sortOrder,
-    tenantId: DEFAULT_TENANT_ID,
-    updatedAt: "2026-07-01T00:00:00.000Z"
-  };
 }
 
 function buildDirectory(topics: TopicRecord[]) {
@@ -263,7 +208,8 @@ function buildDirectory(topics: TopicRecord[]) {
 
 function toPublicTopic(topic: TopicRecord) {
   return {
-    ...cloneTopic(topic),
+    ...topic,
+    channels: [...topic.channels],
     access: topic.accessScope,
     routing: topic.routingTarget
   };
@@ -344,10 +290,6 @@ function normalizeSortOrder(value: unknown, fallback: number): number {
 
 function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9а-яё]+/gi, "-").replace(/^-|-$/g, "") || "topic";
-}
-
-function cloneTopic(topic: TopicRecord): TopicRecord {
-  return { ...topic, channels: [...topic.channels] };
 }
 
 function ownerForGroup(groupName: string): string {

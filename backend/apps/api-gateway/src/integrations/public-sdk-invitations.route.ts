@@ -3,6 +3,7 @@ import type { ProactiveExposureRepository, ProactiveExposureStatus } from "../au
 import type { IntegrationRepository } from "./integration.repository.js";
 import { resolvePublicApiRequest, type PublicApiEnvironment, type PublicApiKeyLookup } from "./public-api-auth.js";
 import { scopedSdkPresenceHash } from "./public-sdk-presence.route.js";
+import { createVisitorSessionToken } from "./public-sdk-messages.route.js";
 
 interface BaseInput {
   authorization?: string;
@@ -47,7 +48,10 @@ export async function handlePublicSdkInvitationAcknowledge(input: BaseInput & { 
   return createEnvelope({ service: "integrationService", operation, meta: { apiVersion: "v1", source: "api" },
     data: { attribution: { experimentId: exposure.experimentId, experimentVersion: exposure.experimentVersion,
       exposureId: exposure.exposureId, ruleId: exposure.ruleId, variant: exposure.variant }, conversationId: exposure.conversationId,
-      exposureId: exposure.exposureId, status: exposure.status } });
+      exposureId: exposure.exposureId, status: exposure.status,
+      ...(input.action === "accepted" && exposure.conversationId ? {
+        visitorSessionToken: createVisitorSessionToken({ conversationId: exposure.conversationId, tenantId: context.tenantId })
+      } : {}) } });
 }
 
 async function resolveSession(input: BaseInput, operation: string): Promise<{ tenantId: string; presenceSessionId: string; sessionId: string } | { response: ReturnType<typeof invalid> }> {

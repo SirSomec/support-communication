@@ -13,7 +13,6 @@ export interface ProactiveDeliveryWorkerRuntimeConfig {
   limit: number;
   once: boolean;
   traceId?: string;
-  visitorTtlMs: number;
 }
 
 export async function runProactiveDeliveryWorkerFromEnv(
@@ -34,8 +33,7 @@ export async function runProactiveDeliveryWorkerFromEnv(
       integrationRepository,
       ...(config.evaluatedAt ? { evaluatedAt: config.evaluatedAt } : {}),
       limit: config.limit,
-      ...(config.traceId ? { traceId: config.traceId } : {}),
-      visitorTtlMs: config.visitorTtlMs
+      ...(config.traceId ? { traceId: config.traceId } : {})
     });
     writeStructuredLog("info", "Proactive delivery worker run completed", {
       ...result,
@@ -85,8 +83,7 @@ export function loadProactiveDeliveryWorkerRuntimeConfig(
     intervalMs: positiveInteger(source.PROACTIVE_DELIVERY_INTERVAL_MS, 10_000),
     limit: positiveInteger(source.PROACTIVE_DELIVERY_LIMIT, 50),
     once: argv.includes("--once") || source.PROACTIVE_DELIVERY_ONCE === "true",
-    ...(traceId ? { traceId } : {}),
-    visitorTtlMs: positiveInteger(source.PROACTIVE_DELIVERY_VISITOR_TTL_MS, 15 * 60 * 1000)
+    ...(traceId ? { traceId } : {})
   };
 }
 

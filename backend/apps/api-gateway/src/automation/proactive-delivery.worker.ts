@@ -66,7 +66,6 @@ export interface ProactiveDeliveryWorkerRunInput {
   evaluatedAt?: string;
   limit?: number;
   traceId?: string;
-  visitorTtlMs?: number;
 }
 
 export interface ProactiveDeliveryWorkerRunResult {
@@ -365,6 +364,7 @@ export async function runProactiveDeliveryWorkerOnce(
         segmentSnapshot: { page: visitor.topic, segment: visitor.segment ?? null }, subjectId: visitor.subjectId,
         tenantId: visitor.tenantId, variant });
       if (created.created) {
+        await persistProactiveDeliveryPlan({ conversationRepository: input.conversationRepository, plan });
         result.queued += 1;
       } else {
         result.duplicate += 1;
@@ -443,10 +443,6 @@ function segmentFromPath(path: string | null): string | undefined {
 
 function normalizeLimit(value: number | undefined): number {
   return Number.isInteger(value) && Number(value) > 0 ? Number(value) : 50;
-}
-
-function normalizeVisitorTtlMs(value: number | undefined): number {
-  return Number.isInteger(value) && Number(value) > 0 ? Number(value) : 15 * 60 * 1000;
 }
 
 function normalizeVariants(values: string[] | undefined): string[] {

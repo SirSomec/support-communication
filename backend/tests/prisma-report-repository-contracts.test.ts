@@ -17,6 +17,81 @@ import { configureReportRepository } from "../apps/api-gateway/src/reports/boots
 import type { ReportExportJob } from "../apps/api-gateway/src/reports/report.types.ts";
 
 describe("Prisma-backed report repository contracts", () => {
+  it("atomically claims scheduled digests and recovers an expired running lease", async () => {
+    const { client } = createFakePrismaReportClient();
+    const firstRepository = ReportRepository.prisma({ client });
+    const secondRepository = ReportRepository.prisma({ client });
+    await firstRepository.saveScheduledDigestDescriptorAsync({
+      createdAt: "2026-07-04T10:00:00.000Z",
+      dueAt: "2026-07-04T10:00:00.000Z",
+      id: "digest-prisma-claim",
+      periodKey: "2026-07-04",
+      reportType: "daily_support_digest",
+      scheduleId: "digest-daily",
+      status: "due",
+      tenantId: "tenant-volga",
+      updatedAt: "2026-07-04T10:00:00.000Z"
+    });
+
+    const concurrent = await Promise.all([
+      firstRepository.claimScheduledDigestDescriptorsAsync({
+        leaseMs: 60_000,
+        now: new Date("2026-07-04T10:01:00.000Z")
+      }),
+      secondRepository.claimScheduledDigestDescriptorsAsync({
+        leaseMs: 60_000,
+        now: new Date("2026-07-04T10:01:00.000Z")
+      })
+    ]);
+
+    assert.equal(concurrent.flat().length, 1);
+    assert.equal(concurrent.flat()[0]?.status, "running");
+    assert.deepEqual(await secondRepository.claimScheduledDigestDescriptorsAsync({
+      leaseMs: 60_000,
+      now: new Date("2026-07-04T10:01:30.000Z")
+    }), []);
+
+    const recovered = await secondRepository.claimScheduledDigestDescriptorsAsync({
+      leaseMs: 60_000,
+      now: new Date("2026-07-04T10:02:01.000Z")
+    });
+    assert.equal(recovered.length, 1);
+    assert.equal(recovered[0]?.updatedAt, "2026-07-04T10:02:01.000Z");
+  });
+
+  it("atomically claims queued exports and recovers an expired running lease", async () => {
+    const { client } = createFakePrismaReportClient();
+    const firstRepository = ReportRepository.prisma({ client });
+    const secondRepository = ReportRepository.prisma({ client });
+    await firstRepository.saveExportJobAsync(reportExportJob({
+      createdAt: "2026-07-04T10:00:00.000Z",
+      id: "export-prisma-claim"
+    }));
+
+    const concurrent = await Promise.all([
+      firstRepository.claimQueuedExportJobsAsync({
+        leaseMs: 60_000,
+        now: new Date("2026-07-04T10:01:00.000Z")
+      }),
+      secondRepository.claimQueuedExportJobsAsync({
+        leaseMs: 60_000,
+        now: new Date("2026-07-04T10:01:00.000Z")
+      })
+    ]);
+    const firstClaim = concurrent.flat();
+
+    assert.equal(firstClaim.length, 1);
+    assert.equal(firstClaim[0]?.statusKey, "running");
+    assert.match(String(firstClaim[0]?.filters?.workerClaimToken), /^report_claim_/);
+
+    const recovered = await secondRepository.claimQueuedExportJobsAsync({
+      leaseMs: 60_000,
+      now: new Date("2026-07-04T10:02:01.000Z")
+    });
+    assert.equal(recovered.length, 1);
+    assert.notEqual(recovered[0]?.filters?.workerClaimToken, firstClaim[0]?.filters?.workerClaimToken);
+  });
+
   it("fails closed when Prisma report delegates are incomplete", () => {
     const { client } = createFakePrismaReportClient();
     delete (client as { metricVersion?: unknown }).metricVersion;
@@ -552,7 +627,7 @@ function createFakePrismaReportClient() {
   const metricDefinitions = new Map<string, FakeMetricDefinitionCreateInput>();
   const metricTenantOverrides = new Map<string, FakeMetricTenantOverrideCreateInput>();
   const metricVersions = new Map<string, FakeMetricVersionCreateInput>();
-  const reportExportJobs = new Map<string, FakeReportExportJobCreateInput>();
+  const reportExportJobs = new Map<string, FakeReportExportJobRow>();
   const reportIdempotencyKeys = new Map<string, FakeReportIdempotencyKeyCreateInput>();
   const savedReportTemplates = new Map<string, FakeSavedReportTemplateCreateInput>();
   const reportQueryExecutions = new Map<string, FakeReportQueryExecutionCreateInput>();
@@ -590,7 +665,11 @@ function createFakePrismaReportClient() {
       update: FakeReportIdempotencyKeyUpdateInput;
       where: FakeReportIdempotencyKeyWhereUniqueInput;
     }>,
-    reportExportJobFindMany: [] as Array<{ orderBy: { createdAt: "desc" } }>,
+    reportExportJobFindMany: [] as Array<{
+      orderBy: { createdAt: "asc" | "desc" };
+      take?: number;
+      where?: Record<string, unknown>;
+    }>,
     reportExportJobFindUnique: [] as Array<{ where: { id: string } }>,
     reportExportJobUpserts: [] as Array<{
       create: FakeReportExportJobCreateInput;
@@ -760,10 +839,13 @@ function createFakePrismaReportClient() {
         }
       },
       reportExportJob: {
-        findMany(input: { orderBy: { createdAt: "desc" } }) {
+        findMany(input: { orderBy: { createdAt: "asc" | "desc" }; take?: number; where?: Record<string, unknown> }) {
           calls.reportExportJobFindMany.push(input);
-          return Promise.resolve(Array.from(reportExportJobs.values())
-            .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime()));
+          const direction = input.orderBy.createdAt === "asc" ? 1 : -1;
+          const rows = Array.from(reportExportJobs.values())
+            .filter((row) => matchesWhere(row, input.where))
+            .sort((left, right) => direction * (left.createdAt.getTime() - right.createdAt.getTime()));
+          return Promise.resolve(Number.isInteger(input.take) ? rows.slice(0, input.take) : rows);
         },
         findUnique(input: { where: { id: string } }) {
           calls.reportExportJobFindUnique.push(input);
@@ -776,11 +858,25 @@ function createFakePrismaReportClient() {
         }) {
           calls.reportExportJobUpserts.push(input);
           const current = reportExportJobs.get(input.where.id);
-          const next: FakeReportExportJobCreateInput = current
+          const next: FakeReportExportJobRow = current
             ? { ...current, ...input.update, id: current.id, createdAt: current.createdAt }
-            : input.create;
+            : { ...input.create, updatedAt: input.create.updatedAt ?? input.create.createdAt };
           reportExportJobs.set(input.where.id, next);
           return Promise.resolve(next);
+        },
+        updateMany(input: {
+          data: Partial<FakeReportExportJobUpdateInput> & { updatedAt?: Date };
+          where: Record<string, unknown>;
+        }) {
+          let count = 0;
+          for (const [id, row] of reportExportJobs) {
+            if (!matchesWhere(row, input.where)) {
+              continue;
+            }
+            reportExportJobs.set(id, { ...row, ...input.data, updatedAt: input.data.updatedAt ?? row.updatedAt });
+            count += 1;
+          }
+          return Promise.resolve({ count });
         }
       },
       savedReportTemplate: {
@@ -883,6 +979,22 @@ function createFakePrismaReportClient() {
         },
         findUnique(input: { where: { id: string } }) {
           return Promise.resolve(scheduledDigestDescriptors.get(input.where.id) ?? null);
+        },
+        updateMany(input: {
+          data: { status: string; updatedAt: Date };
+          where: Record<string, unknown>;
+        }) {
+          const current = typeof input.where.id === "string"
+            ? scheduledDigestDescriptors.get(input.where.id)
+            : undefined;
+          if (!current || !matchesWhere(current, input.where)) {
+            return Promise.resolve({ count: 0 });
+          }
+          scheduledDigestDescriptors.set(current.id, {
+            ...current,
+            ...input.data
+          });
+          return Promise.resolve({ count: 1 });
         },
         upsert(input: {
           create: FakeScheduledDigestDescriptorCreateInput;
@@ -1005,9 +1117,11 @@ interface FakeReportExportJobCreateInput {
   rows: number;
   status: string;
   statusKey: string;
+  updatedAt?: Date;
 }
 
 type FakeReportExportJobUpdateInput = Omit<FakeReportExportJobCreateInput, "createdAt" | "id">;
+type FakeReportExportJobRow = Omit<FakeReportExportJobCreateInput, "updatedAt"> & { updatedAt: Date };
 
 interface FakeSavedReportTemplateCreateInput {
   columns: string[];
@@ -1158,6 +1272,13 @@ function matchesWhere(row: Record<string, unknown>, where: Record<string, unknow
     if (value && typeof value === "object" && "lte" in value) {
       const limit = (value as { lte: unknown }).lte;
       return rowValue instanceof Date && limit instanceof Date && rowValue.getTime() <= limit.getTime();
+    }
+    if (value && typeof value === "object" && "in" in value) {
+      const allowed = (value as { in: unknown }).in;
+      return Array.isArray(allowed) && allowed.includes(rowValue);
+    }
+    if (value instanceof Date && rowValue instanceof Date) {
+      return value.getTime() === rowValue.getTime();
     }
 
     return rowValue === value;

@@ -29,6 +29,24 @@
 
 Базовый compose уже включает Prisma-репозитории, Redis fan-out для realtime и одноразовый `bootstrap`-сервис:
 
+Перед прямым запуском задайте два независимых ephemeral master key. Известных fallback-значений больше нет, поэтому production-like сервисы завершают старт fail-closed без этих переменных.
+
+PowerShell:
+
+```powershell
+$env:PROVIDER_CREDENTIAL_MASTER_KEY = node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+$env:AI_CONNECTIONS_MASTER_KEY = node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Bash:
+
+```bash
+export PROVIDER_CREDENTIAL_MASTER_KEY="$(node -e 'console.log(require("node:crypto").randomBytes(32).toString("base64"))')"
+export AI_CONNECTIONS_MASTER_KEY="$(node -e 'console.log(require("node:crypto").randomBytes(32).toString("base64"))')"
+```
+
+После этого поднимите стенд в том же shell:
+
 ```bash
 docker compose up -d --build
 ```
@@ -98,7 +116,7 @@ docker compose up -d --build
 Для локального стенда:
 
 - Сборка виджета: `npm run widget:build`
-- Локальная demo-страница: `packages/web-widget/demo.html`
+- Локальная demo-страница после `npm run widget:preview:e2e`: `http://127.0.0.1:5174/demo.html` (исходник `packages/web-widget/public/demo.html` копируется в `dist` при сборке)
 - Рекомендуемый `apiBase` через frontend proxy: `http://127.0.0.1:8080/api/v1`
 - Если proxy не используется: `http://127.0.0.1:4101/api/v1`
 

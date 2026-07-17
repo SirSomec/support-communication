@@ -72,8 +72,8 @@ export const supportAdminService = {
     });
   },
 
-  async fetchAiConnections(tenantId) {
-    return aiConnectionRequest({ operation: "fetchAiConnections", tenantId });
+  async fetchAiConnections(tenantId, options = {}) {
+    return aiConnectionRequest({ operation: "fetchAiConnections", signal: options.signal, tenantId });
   },
 
   async createAiConnection(tenantId, payload = {}) {
@@ -136,7 +136,7 @@ function userActionRequest({ operation, payload, route, userId }) {
   });
 }
 
-function aiConnectionRequest({ body, connectionId, method = "GET", operation, suffix, tenantId }) {
+function aiConnectionRequest({ body, connectionId, method = "GET", operation, signal, suffix, tenantId }) {
   if (!hasRouteId(tenantId)) return missingIdEnvelope(operation, "Tenant id is required.");
   const connectionRequired = method === "PATCH" || method === "DELETE" || Boolean(suffix);
   if (connectionRequired && !hasRouteId(connectionId)) {
@@ -148,6 +148,7 @@ function aiConnectionRequest({ body, connectionId, method = "GET", operation, su
     ...(body ? { body } : {}),
     method,
     operation,
+    ...(signal ? { signal } : {}),
     service: SERVICE
   });
 }

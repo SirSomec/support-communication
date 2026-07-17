@@ -81,6 +81,15 @@ export function OnboardingStepContent({
                     <option value="healthcare">Healthcare</option>
                   </select>
                 </label>
+                <label className="onboarding-field">
+                  <span>Домен сайта для SDK</span>
+                  <input
+                    autoCapitalize="none"
+                    onChange={(event) => setTenant((current) => ({ ...current, domain: event.target.value.toLowerCase() }))}
+                    placeholder="support.company.ru"
+                    value={tenant.domain}
+                  />
+                </label>
               </div>
               <div className="onboarding-preview-row">
                 <KeyRound size={17} />

@@ -1,5 +1,5 @@
 import { configureRepositoryBootstrap, createPrismaClient, type PrismaClientFactoryOptions } from "@support-communication/database";
-import { OperatorPresenceRepository, type OperatorPresenceState, type PrismaOperatorPresenceClient } from "./operator-presence.repository.js";
+import { OperatorPresenceRepository, type PrismaOperatorPresenceClient } from "./operator-presence.repository.js";
 
 export interface OperatorPresenceBootstrapSource {
   DATABASE_URL?: string;
@@ -10,7 +10,6 @@ export interface OperatorPresenceBootstrapSource {
 
 export interface OperatorPresenceBootstrapOptions {
   prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaOperatorPresenceClient;
-  seed?: Partial<OperatorPresenceState>;
 }
 
 export function configureOperatorPresenceRepository(

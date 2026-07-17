@@ -10,6 +10,7 @@ import { createSharedReportObjectStorage } from "./report-object-storage.js";
 
 interface ReportExportWorkerRuntimeConfig {
   intervalMs: number;
+  leaseMs: number;
   limit: number;
   now?: Date;
   once: boolean;
@@ -34,6 +35,7 @@ export async function runReportExportWorkerFromEnv(
 
   const runOnce = async (): Promise<ReportExportWorkerRunResult> => {
     const result = await executeReportExportWorkerOnce({
+      leaseMs: config.leaseMs,
       limit: config.limit,
       now: config.now ?? new Date(),
       queue: config.queue,
@@ -77,6 +79,7 @@ export function loadReportExportWorkerRuntimeConfig(
   const now = source.REPORT_EXPORT_WORKER_NOW?.trim();
   return {
     intervalMs: positiveInteger(source.REPORT_EXPORT_WORKER_INTERVAL_MS, 10_000),
+    leaseMs: positiveInteger(source.REPORT_EXPORT_WORKER_LEASE_MS, 15 * 60_000),
     limit: positiveInteger(source.REPORT_EXPORT_WORKER_LIMIT, 10),
     now: now ? new Date(now) : undefined,
     once: argv.includes("--once") || source.REPORT_EXPORT_WORKER_ONCE === "true",

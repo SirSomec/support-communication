@@ -220,6 +220,7 @@ export type ConversationOutboundDescriptorKind = "attachment_upload" | "message_
 export interface WorkerConversationOutboundDescriptor {
   channel: string;
   conversationId: string | null;
+  deliveryState?: string | null;
   id: string;
   idempotencyKey?: string | null;
   kind: ConversationOutboundDescriptorKind;
@@ -292,6 +293,7 @@ interface PrismaConversationOutboundDescriptorFindUniqueInput {
 interface PrismaConversationOutboundDescriptorRow {
   channel: string;
   conversationId: string | null;
+  deliveryState?: string | null;
   id: string;
   idempotencyKey?: string | null;
   kind: string;
@@ -1231,6 +1233,7 @@ function toWorkerConversationOutboundDescriptor(row: PrismaConversationOutboundD
   return {
     channel: row.channel,
     conversationId: row.conversationId,
+    deliveryState: row.deliveryState ?? null,
     id: row.id,
     idempotencyKey: row.idempotencyKey ?? null,
     kind: row.kind as ConversationOutboundDescriptorKind,

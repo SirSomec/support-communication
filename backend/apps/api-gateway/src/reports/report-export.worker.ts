@@ -148,6 +148,7 @@ export interface XlsxReportExportExecutionInput extends ReportCsvSerializationIn
 }
 
 export interface ReportExportWorkerOnceInput {
+  leaseMs?: number;
   limit?: number;
   now?: Date;
   queue?: string;
@@ -453,6 +454,7 @@ export async function executeXlsxReportExport(input: XlsxReportExportExecutionIn
 export async function executeReportExportWorkerOnce(input: ReportExportWorkerOnceInput): Promise<ReportExportWorkerResult> {
   const now = input.now ?? new Date();
   const claimed = await input.reportRepository.claimQueuedExportJobsAsync({
+    ...(input.leaseMs === undefined ? {} : { leaseMs: input.leaseMs }),
     limit: input.limit,
     now,
     queue: input.queue

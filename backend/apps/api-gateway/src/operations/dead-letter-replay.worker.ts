@@ -105,7 +105,7 @@ const QUEUE_OWNERSHIP: Record<string, DeadLetterQueueOwnershipRecord> = {
   },
   "realtime-fanout": {
     ownerQueue: "realtime-fanout",
-    replayEnabled: true,
+    replayEnabled: false,
     resourceType: "realtime_fanout"
   },
   "report-export": {

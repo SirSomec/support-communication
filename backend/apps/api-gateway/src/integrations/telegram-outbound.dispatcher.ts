@@ -54,7 +54,7 @@ export function createTelegramOutboundMessageDispatcher(
       const connections = integrationRepository.listTelegramConnectionsAsync
         ? await integrationRepository.listTelegramConnectionsAsync()
         : integrationRepository.listTelegramConnections();
-      const token = findActiveTelegramBotToken(connections, request.tenantId);
+      const token = findActiveTelegramBotToken(connections, request.tenantId, request.channelConnectionId);
       if (!token) {
         return { status: "failed", reason: "telegram_connection_not_found" };
       }

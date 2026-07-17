@@ -53,6 +53,7 @@ export function redactSensitiveText(value: string): string {
     .replace(/\b(Public API key\s+)[^"',.}\]\s]+/gi, "$1[REDACTED:api_key]")
     .replace(/\b(key\s+)[^"',.}\]\s]+/gi, "$1[REDACTED:api_key]")
     .replace(/\bapiKey=[^"',.}\]\s]+/gi, "apiKey=[REDACTED:api_key]")
+    .replace(/(\baccess[_-]?token=)(?!\[REDACTED:)[^&#"',.}\]\s]+/gi, "$1[REDACTED:provider_token]")
     .replace(/("authorization"\s*:\s*"Bearer\s*)[^"]+(")/gi, "$1[REDACTED:api_key]$2")
     .replace(
       /\b[A-Za-z0-9._-]*(?:[Pp]ublic[-_])?[Aa][Pp][Ii][-_]?[Kk][Ee][Yy][-_](?=[A-Za-z0-9._-]*(?:[Ss]ecret|[Nn]eedle|[A-Z0-9]))[A-Za-z0-9._-]{8,}\b/g,

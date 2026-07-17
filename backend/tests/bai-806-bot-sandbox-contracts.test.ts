@@ -285,7 +285,14 @@ function inMemoryPrismaBotSandboxClient(): BotSandboxPrismaClient {
       upsert: async ({ create, update, where }) => {
         const key = usageKey(where.tenantId_month.tenantId, where.tenantId_month.month);
         const existing = usage.get(key);
-        const next = (existing ? { ...existing, ...update } : { ...create }) as PrismaBotSandboxUsageRow;
+        const next = existing
+          ? {
+            ...existing,
+            usedTokens: typeof update.usedTokens === "number"
+              ? update.usedTokens
+              : existing.usedTokens + update.usedTokens.increment
+          }
+          : { ...create };
         usage.set(key, next);
         return next;
       }
@@ -359,6 +366,15 @@ describe("BAI-806 bot sandbox session prisma branch", () => {
     assert.equal(await repository.purgeExpired(new Date("2026-07-13T11:00:00.000Z")), 1);
     assert.ok(await repository.find(TENANT, "live", july));
     assert.equal(await repository.find(TENANT, "stale", july), null);
+  });
+
+  it("atomically accumulates concurrent sandbox token usage", async () => {
+    const repository = BotSandboxSessionRepository.prisma({ client: inMemoryPrismaBotSandboxClient() });
+    const july = new Date("2026-07-13T10:00:00.000Z");
+
+    await Promise.all(Array.from({ length: 25 }, () => repository.recordSandboxUsage(TENANT, 4, july)));
+
+    assert.equal(await repository.sandboxUsage(TENANT, july), 100);
   });
 
   it("evicts the oldest session once a tenant crosses the per-tenant cap", async () => {

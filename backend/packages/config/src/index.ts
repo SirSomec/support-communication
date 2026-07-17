@@ -1,13 +1,21 @@
 import { z } from "zod";
 
 const defaultDemoServiceAdminKey = "dev-service-admin-key";
+const knownInsecureCredentialMasterKey = Buffer.alloc(32, 0x11).toString("base64");
+const credentialMasterKeyNames = ["PROVIDER_CREDENTIAL_MASTER_KEY", "AI_CONNECTIONS_MASTER_KEY"] as const;
+type CredentialMasterKeyName = typeof credentialMasterKeyNames[number];
 const optionalNonEmptyString = z.preprocess(
   (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
   z.string().min(1).optional()
 );
+const optionalCredentialMasterKey = optionalNonEmptyString.refine(
+  (value) => value === undefined || isCanonical32ByteBase64(value),
+  "Must be a canonical base64-encoded 32-byte key."
+);
 
 const backendConfigSchema = z.object({
   ALLOW_DEMO_SERVICE_ADMIN_HEADERS: z.enum(["true", "false"]).optional(),
+  AI_CONNECTIONS_MASTER_KEY: optionalCredentialMasterKey,
   API_VERSION: z.string().min(1).default("v1"),
   RUNTIME_PROFILE: z.enum(["local", "production-like"]).default("local"),
   BILLING_PROVIDER_MODE: z.enum(["sandbox", "production"]).default("sandbox"),
@@ -30,6 +38,7 @@ const backendConfigSchema = z.object({
   NOTIFICATION_DELIVERY_PROVIDER_MODE: z.enum(["disabled", "local", "web-push"]).optional(),
   NOTIFICATION_DELIVERY_RETRY_DELAY_MS: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().default(4100),
+  PROVIDER_CREDENTIAL_MASTER_KEY: optionalCredentialMasterKey,
   PUBLIC_API_KEY_SECRET: z.string().min(16).optional(),
   REDIS_URL: z.string().url(),
   S3_ACCESS_KEY: z.string().min(1),
@@ -45,6 +54,8 @@ const backendConfigSchema = z.object({
   if (allowsLocalFallbacks) {
     return;
   }
+
+  addCredentialMasterKeyIssues(config, context, credentialMasterKeyNames);
 
   if (config.LOCAL_DEVELOPMENT_SEED_ENABLED === "true") {
     context.addIssue({
@@ -104,4 +115,67 @@ export function loadBackendConfig(source: NodeJS.ProcessEnv = process.env): Back
 
 export function assertProductionRuntimeSafety(source: NodeJS.ProcessEnv = process.env): void {
   loadBackendConfig(source);
+}
+
+export interface CredentialMasterKeySafetyOptions {
+  required?: readonly CredentialMasterKeyName[];
+}
+
+export function assertCredentialMasterKeySafety(
+  source: NodeJS.ProcessEnv = process.env,
+  options: CredentialMasterKeySafetyOptions = {}
+): void {
+  const schema = z.object({
+    AI_CONNECTIONS_MASTER_KEY: optionalCredentialMasterKey,
+    NODE_ENV: z.enum(["development", "test", "staging", "production"]),
+    PROVIDER_CREDENTIAL_MASTER_KEY: optionalCredentialMasterKey,
+    RUNTIME_PROFILE: z.enum(["local", "production-like"]).default("local")
+  }).superRefine((config, context) => {
+    const isLocalEnvironment = config.NODE_ENV === "development" || config.NODE_ENV === "test";
+    if (isLocalEnvironment && config.RUNTIME_PROFILE === "local") {
+      return;
+    }
+    addCredentialMasterKeyIssues(config, context, options.required ?? credentialMasterKeyNames);
+  });
+  const parsed = schema.safeParse(source);
+
+  if (!parsed.success) {
+    const details = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
+    throw new Error(`Invalid credential master-key configuration: ${details}`);
+  }
+}
+
+function addCredentialMasterKeyIssues(
+  config: Partial<Record<CredentialMasterKeyName, string | undefined>>,
+  context: z.RefinementCtx,
+  requiredNames: readonly CredentialMasterKeyName[]
+): void {
+  for (const key of credentialMasterKeyNames) {
+    const value = config[key];
+    if (value === knownInsecureCredentialMasterKey) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} must not use the known development fallback outside the local profile.`
+      });
+    }
+  }
+
+  for (const key of requiredNames) {
+    if (!config[key]) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} is required outside the local development/test profile.`
+      });
+    }
+  }
+}
+
+function isCanonical32ByteBase64(value: string): boolean {
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(value)) {
+    return false;
+  }
+  const decoded = Buffer.from(value, "base64");
+  return decoded.length === 32 && decoded.toString("base64") === value;
 }

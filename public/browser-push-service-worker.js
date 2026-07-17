@@ -1,10 +1,11 @@
 self.addEventListener("push", (event) => {
   const payload = readPushPayload(event);
+  const targetUrl = normalizeTargetUrl(payload.url);
   event.waitUntil(
     self.registration.showNotification(payload.title || "Support Communication", {
       body: payload.body || "New notification",
       data: {
-        url: payload.url || "/#/app"
+        url: targetUrl
       },
       tag: payload.tag || "support-communication-notification"
     })
@@ -13,7 +14,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || "/#/app";
+  const targetUrl = normalizeTargetUrl(event.notification.data?.url);
   event.waitUntil(focusOrOpenClient(targetUrl));
 });
 
@@ -28,6 +29,18 @@ function readPushPayload(event) {
     return {
       body: event.data.text()
     };
+  }
+}
+
+function normalizeTargetUrl(value) {
+  try {
+    const target = new URL(typeof value === "string" && value.trim() ? value : "/#/app", self.location.origin);
+    if (target.origin !== self.location.origin) {
+      return "/#/app";
+    }
+    return `${target.pathname}${target.search}${target.hash}` || "/#/app";
+  } catch {
+    return "/#/app";
   }
 }
 

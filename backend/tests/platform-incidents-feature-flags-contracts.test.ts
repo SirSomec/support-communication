@@ -931,6 +931,52 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
     assert.ok((snapshot.data.incidents as Array<Record<string, unknown>>).some((incident) => incident.id === "inc-webhook-retry" && incident.status === "resolved"));
   });
 
+  it("serializes concurrent incident updates without losing either timeline entry", async () => {
+    const repository = seededPlatformRepository();
+    const incidents = new IncidentService(repository);
+
+    const responses = await Promise.all([
+      incidents.addIncidentUpdate({
+        confirmed: true,
+        idempotencyKey: "incident-concurrent-a",
+        incidentId: "inc-webhook-retry",
+        message: "Concurrent incident update from responder A.",
+        reason: "Concurrent responder A",
+        status: "monitoring"
+      }),
+      incidents.addIncidentUpdate({
+        confirmed: true,
+        idempotencyKey: "incident-concurrent-b",
+        incidentId: "inc-webhook-retry",
+        message: "Concurrent incident update from responder B.",
+        reason: "Concurrent responder B",
+        status: "monitoring"
+      })
+    ]);
+    const detail = await incidents.fetchIncidentDetail("inc-webhook-retry");
+    const updateTexts = (detail.data.incident.updates as Array<{ text: string }>).map((update) => update.text);
+
+    assert.equal(responses.every((response) => response.status === "ok"), true);
+    assert.ok(updateTexts.includes("Concurrent incident update from responder A."));
+    assert.ok(updateTexts.includes("Concurrent incident update from responder B."));
+  });
+
+  it("rolls back an in-memory platform transaction when a later write fails", async () => {
+    const repository = seededPlatformRepository();
+    const before = (await repository.listIncidentsAsync()).find((incident) => incident.id === "inc-webhook-retry")!;
+
+    await assert.rejects(
+      repository.runInTransaction("platform:incident:rollback-test", async (transaction) => {
+        await transaction.saveIncidentAsync({ ...before, status: "resolved" });
+        throw new Error("simulated outbox failure");
+      }),
+      /simulated outbox failure/
+    );
+
+    const after = (await repository.listIncidentsAsync()).find((incident) => incident.id === "inc-webhook-retry")!;
+    assert.equal(after.status, before.status);
+  });
+
   it("previews, updates and internally tests feature flag rollout rules", async () => {
     const flags = new FeatureFlagService(seededPlatformRepository());
 
@@ -996,6 +1042,27 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
     assert.equal(invalidStatus.status, "invalid");
     assert.equal(invalidStatus.error?.code, "flag_status_unsupported");
 
+    const invalidRollout = await flags.updateFeatureFlag({
+      flagId: "flag-ai-replies",
+      nextRollout: 101,
+      nextStatus: "on",
+      reason: "QA rollout validation",
+      confirmed: true,
+      confirmationText: "UPDATE ff-ai-replies"
+    });
+    assert.equal(invalidRollout.status, "invalid");
+    assert.equal(invalidRollout.error?.code, "flag_rollout_invalid");
+
+    const unknownTenant = await flags.previewFlagChange({
+      flagId: "flag-ai-replies",
+      nextRollout: 50,
+      nextStatus: "gradual",
+      reason: "QA tenant validation",
+      tenantIds: ["tenant-does-not-exist"]
+    });
+    assert.equal(unknownTenant.status, "invalid");
+    assert.equal(unknownTenant.error?.code, "flag_tenant_not_found");
+
     const updated = await flags.updateFeatureFlag({
       flagId: "flag-ai-replies",
       nextRollout: 100,
@@ -1060,6 +1127,27 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
     assert.deepEqual(repository.listPlatformOutboxRows({ mutationKind: "rollout" }).map((row) => row.id), [
       first.data.platformOutbox.id
     ]);
+  });
+
+  it("does not roll a feature flag back when an old idempotency key is replayed", async () => {
+    const repository = seededPlatformRepository();
+    const flags = new FeatureFlagService(repository);
+    const base = {
+      confirmed: true,
+      flagId: "flag-billing-v2",
+      nextStatus: "gradual" as const,
+      reason: "QA rollout replay ordering"
+    };
+
+    await flags.updateFeatureFlag({ ...base, idempotencyKey: "rollout-order-a", nextRollout: 40 });
+    await flags.updateFeatureFlag({ ...base, idempotencyKey: "rollout-order-b", nextRollout: 70 });
+    const replay = await flags.updateFeatureFlag({ ...base, idempotencyKey: "rollout-order-a", nextRollout: 40 });
+    const current = (await repository.listFeatureFlagsAsync()).find((flag) => flag.id === "flag-billing-v2");
+
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.data.duplicate, true);
+    assert.equal(replay.data.flag.rollout, 70);
+    assert.equal(current?.rollout, 70);
   });
 
   it("wires feature flag update idempotency through the HTTP header", () => {

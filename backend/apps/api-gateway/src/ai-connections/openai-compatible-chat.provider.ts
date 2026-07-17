@@ -158,16 +158,20 @@ function parseCompletion(value: unknown, configuredModel: string): ChatCompletio
   const content = messageContent(record(firstChoice.message).content);
   if (!content) throw new AiProviderError("invalid_response", false, "AI provider returned an invalid response.");
   const usage = record(payload.usage);
+  const cachedTokens = nonNegativeInteger(record(usage.prompt_tokens_details).cached_tokens);
+  const inputTokens = nonNegativeInteger(usage.prompt_tokens);
+  const outputTokens = nonNegativeInteger(usage.completion_tokens);
+  const totalTokens = nonNegativeInteger(usage.total_tokens);
   return {
     content,
     model: text(payload.model) ?? configuredModel,
     providerId: OPENAI_COMPATIBLE_CHAT_PROVIDER_ID,
     providerRequestId: text(payload.id),
     usage: {
-      cachedTokens: nonNegativeInteger(record(usage.prompt_tokens_details).cached_tokens),
-      inputTokens: nonNegativeInteger(usage.prompt_tokens),
-      outputTokens: nonNegativeInteger(usage.completion_tokens),
-      totalTokens: nonNegativeInteger(usage.total_tokens)
+      ...(cachedTokens === undefined ? {} : { cachedTokens }),
+      ...(inputTokens === undefined ? {} : { inputTokens }),
+      ...(outputTokens === undefined ? {} : { outputTokens }),
+      ...(totalTokens === undefined ? {} : { totalTokens })
     }
   };
 }

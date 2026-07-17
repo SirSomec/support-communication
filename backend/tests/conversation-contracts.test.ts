@@ -282,6 +282,17 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     assert.equal(duplicateClose.status, "conflict");
     assert.equal(duplicateClose.error?.code, "conversation_already_closed");
 
+    const bypassReopen = await conversations.transitionConversationStatus({
+      conversationId: "vladimir",
+      nextStatus: "active"
+    });
+    assert.equal(bypassReopen.status, "conflict");
+    assert.equal(bypassReopen.error?.code, "conversation_closed");
+
+    const stillClosed = await conversations.fetchDialogDetail("vladimir");
+    assert.equal(stillClosed.data.conversation.status, "closed");
+    assert.equal(stillClosed.data.conversation.resolutionOutcome, "resolved");
+
     const reopened = await conversations.transitionConversationStatus({
       conversationId: "vladimir",
       nextStatus: "reopened"

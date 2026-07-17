@@ -171,6 +171,26 @@ describe("useConversationInbox", () => {
     assert.match(dependencyList, /\bsessionActive\b/);
   });
 
+  it("retries dialog details once and marks them loaded only after success", async () => {
+    const { fetchConversationDetailWithRetry } = await import("../src/app/useConversationInbox.js");
+    const appSource = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+    let calls = 0;
+    const response = await fetchConversationDetailWithRetry("conv-retry", {
+      fetchDetail: async () => {
+        calls += 1;
+        return calls === 1
+          ? { status: "error", error: { message: "temporary failure" } }
+          : { status: "ok", data: { conversation: { id: "conv-retry" } } };
+      },
+      retryCount: 1
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(response.status, "ok");
+    assert.match(appSource, /if \(active && result\?\.ok\) \{\s*loadedDetailIdRef\.current = activeConversationId/);
+    assert.doesNotMatch(appSource, /loadedDetailIdRef\.current = activeConversationId;\s*void loadConversationDetail/);
+  });
+
   it("replays realtime events fetched with the authorized API fallback", async () => {
     const { replayRealtimeEvents } = await import("../src/app/useRealtimeInbox.js");
     const seen = [];

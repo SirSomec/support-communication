@@ -10,6 +10,7 @@ import {
 import type { FeatureFlag, PlatformTenant } from "../platform/platform.types.js";
 import { PlatformRepository } from "../platform/platform.repository.js";
 import {
+  buildPlatformAuditIdempotencyKey,
   makeEphemeralPlatformMutationIdempotencyKey,
   persistPlatformRolloutMutationAsync
 } from "../platform/platform-audit-outbox.js";
@@ -90,6 +91,12 @@ export class FeatureFlagService {
         status: request.nextStatus ?? null
       });
     }
+    if (!isSupportedRollout(request.nextRollout)) {
+      return invalidEnvelope("previewFlagChange", "flag_rollout_invalid", "Feature flag rollout must be a number from 0 to 100.", {
+        flagId: request.flagId ?? null,
+        rollout: request.nextRollout ?? null
+      });
+    }
 
     const flag = await this.findFlag(request.flagId ?? "");
     if (!flag) {
@@ -99,6 +106,13 @@ export class FeatureFlagService {
     }
 
     const tenants = await this.listTenants();
+    const unknownTenantIds = findUnknownTenantIds(request.tenantIds, tenants);
+    if (unknownTenantIds.length) {
+      return invalidEnvelope("previewFlagChange", "flag_tenant_not_found", "Feature flag rollout contains unknown tenant ids.", {
+        flagId: flag.id,
+        tenantIds: unknownTenantIds
+      });
+    }
     return createEnvelope({
       service: FEATURE_FLAG_SERVICE,
       operation: "previewFlagChange",
@@ -137,6 +151,12 @@ export class FeatureFlagService {
         status: request.nextStatus ?? null
       });
     }
+    if (!isSupportedRollout(request.nextRollout)) {
+      return invalidEnvelope("updateFeatureFlag", "flag_rollout_invalid", "Feature flag rollout must be a number from 0 to 100.", {
+        flagId: request.flagId ?? null,
+        rollout: request.nextRollout ?? null
+      });
+    }
 
     const flag = await this.findFlag(request.flagId ?? "");
     if (!flag) {
@@ -146,6 +166,13 @@ export class FeatureFlagService {
     }
 
     const tenants = await this.listTenants();
+    const unknownTenantIds = findUnknownTenantIds(request.tenantIds, tenants);
+    if (unknownTenantIds.length) {
+      return invalidEnvelope("updateFeatureFlag", "flag_tenant_not_found", "Feature flag rollout contains unknown tenant ids.", {
+        flagId: flag.id,
+        tenantIds: unknownTenantIds
+      });
+    }
     const preview = buildFlagPreview({
       flag,
       nextRollout: request.nextRollout,
@@ -168,26 +195,58 @@ export class FeatureFlagService {
     }
 
     const traceId = flagTraceId("updateFeatureFlag");
-    const nextFlag = {
-      ...flag,
-      enabledTenantIds: request.tenantIds?.length ? request.tenantIds : flag.enabledTenantIds,
-      rollout: normalizeRollout(request.nextRollout, flag.rollout),
-      status: request.nextStatus ?? flag.status,
-      updatedAt: new Date().toISOString()
+    const mutationIdempotencyKey = isNonEmptyString(request.idempotencyKey)
+      ? request.idempotencyKey.trim()
+      : makeEphemeralPlatformMutationIdempotencyKey(`rollout-${flag.id}`);
+    let outcome: {
+      duplicate: boolean;
+      flag: FeatureFlag;
+      mutationPersistence: Awaited<ReturnType<typeof persistPlatformRolloutMutationAsync>>;
+      outbox: Awaited<ReturnType<PlatformRepository["saveFeatureFlagOutboxAsync"]>> | null;
     };
-    let mutationPersistence: Awaited<ReturnType<typeof persistPlatformRolloutMutationAsync>>;
     try {
-      mutationPersistence = await persistPlatformRolloutMutationAsync({
-        actor: request.actor,
-        flagKey: nextFlag.key,
-        idempotencyKey: isNonEmptyString(request.idempotencyKey)
-          ? request.idempotencyKey.trim()
-          : makeEphemeralPlatformMutationIdempotencyKey(`rollout-${nextFlag.id}`),
-        reason: String(request.reason).trim(),
-        repository: this.platformRepository,
-        rollout: nextFlag.rollout,
-        status: nextFlag.status,
-        traceId
+      outcome = await this.platformRepository.runInTransaction(`platform:feature-flag:${flag.id}`, async (repository) => {
+        const currentFlag = (await repository.listFeatureFlagsAsync()).find((item) => item.id === flag.id || item.key === flag.key);
+        if (!currentFlag) {
+          throw new Error(`feature_flag_not_found_during_transaction:${flag.id}`);
+        }
+        const nextFlag: FeatureFlag = {
+          ...currentFlag,
+          enabledTenantIds: request.tenantIds?.length ? request.tenantIds : currentFlag.enabledTenantIds,
+          rollout: normalizeRollout(request.nextRollout, currentFlag.rollout),
+          status: request.nextStatus ?? currentFlag.status,
+          updatedAt: new Date().toISOString()
+        };
+        const auditIdempotencyKey = buildPlatformAuditIdempotencyKey("rollout", mutationIdempotencyKey, nextFlag.key);
+        const duplicate = Boolean(await repository.findPlatformAuditRowAsync(auditIdempotencyKey));
+        const mutationPersistence = await persistPlatformRolloutMutationAsync({
+          actor: request.actor,
+          enabledTenantIds: request.tenantIds?.length ? request.tenantIds : undefined,
+          flagKey: nextFlag.key,
+          idempotencyKey: mutationIdempotencyKey,
+          idempotencyPayload: {
+            nextRollout: request.nextRollout === undefined ? null : Number(request.nextRollout),
+            nextStatus: request.nextStatus ?? null,
+            tenantIds: request.tenantIds?.length ? [...new Set(request.tenantIds)].sort() : []
+          },
+          reason: String(request.reason).trim(),
+          repository,
+          rollout: nextFlag.rollout,
+          status: nextFlag.status,
+          traceId
+        });
+        if (duplicate) {
+          return { duplicate, flag: currentFlag, mutationPersistence, outbox: null };
+        }
+
+        const persistedFlag = await repository.saveFeatureFlagAsync(nextFlag);
+        await repository.saveFeatureFlagRuleAsync(buildPreviewRule(persistedFlag, request));
+        const outbox = await repository.saveFeatureFlagOutboxAsync({
+          id: mutationPersistence.outbox?.id ?? makeQueueId("feature_flag_rollout"),
+          queue: "feature-flag-rollout",
+          target: persistedFlag.key
+        });
+        return { duplicate, flag: persistedFlag, mutationPersistence, outbox };
       });
     } catch (error) {
       if (isPlatformIdempotencyConflict(error)) {
@@ -199,15 +258,7 @@ export class FeatureFlagService {
 
       throw error;
     }
-
-    const persistedFlag = await this.platformRepository.saveFeatureFlagAsync(nextFlag);
-    Object.assign(flag, persistedFlag);
-    await this.platformRepository.saveFeatureFlagRuleAsync(buildPreviewRule(persistedFlag, request));
-    const outbox = await this.platformRepository.saveFeatureFlagOutboxAsync({
-      id: mutationPersistence.outbox?.id ?? makeQueueId("feature_flag_rollout"),
-      queue: "feature-flag-rollout",
-      target: persistedFlag.key
-    });
+    Object.assign(flag, outcome.flag);
 
     return createEnvelope({
       service: FEATURE_FLAG_SERVICE,
@@ -217,11 +268,12 @@ export class FeatureFlagService {
       data: {
         ...preview,
         applied: true,
+        duplicate: outcome.duplicate,
         auditEvent: auditEvent("feature_flag.update", flag.key, request.reason, request.actor, "queued"),
-        flag: clone(persistedFlag),
-        outbox,
-        platformAudit: mutationPersistence.audit,
-        platformOutbox: mutationPersistence.outbox
+        flag: clone(outcome.flag),
+        outbox: outcome.outbox,
+        platformAudit: outcome.mutationPersistence.audit,
+        platformOutbox: outcome.mutationPersistence.outbox
       }
     });
   }
@@ -419,6 +471,17 @@ function makeQueueId(scope: string): string {
 
 function isSupportedFlagStatus(status: FeatureFlag["status"] | undefined): boolean {
   return status === undefined || ["guarded", "gradual", "off", "on"].includes(status);
+}
+
+function isSupportedRollout(value: unknown): boolean {
+  return value === undefined || (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100);
+}
+
+function findUnknownTenantIds(tenantIds: string[] | undefined, tenants: PlatformTenant[]): string[] {
+  if (!tenantIds?.length) return [];
+  const known = new Set(tenants.map((tenant) => tenant.id));
+  return [...new Set(tenantIds.map((tenantId) => String(tenantId).trim()).filter(Boolean))]
+    .filter((tenantId) => !known.has(tenantId));
 }
 
 function normalizeReason(reason: string | undefined): string | null {

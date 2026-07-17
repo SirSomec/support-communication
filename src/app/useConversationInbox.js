@@ -5,6 +5,7 @@ import { clearTenantSession } from "./sessionStore.js";
 import { mapApiConversation, mapApiConversationCollection } from "./conversationApiMapper.js";
 import { useRealtimeInbox } from "./useRealtimeInbox.js";
 import { dialogService } from "../services/dialogService.js";
+import { CONVERSATION_PAGE_SIZE, normalizeConversationPagination } from "../features/dialogs/conversationPaginationModel.js";
 
 const ATTACHMENT_PREVIEW_LABEL = "Вложение";
 const NOW_LABEL = "сейчас";
@@ -17,8 +18,10 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [assignees, setAssignees] = useState([]);
+  const [pagination, setPagination] = useState(() => normalizeConversationPagination(null));
   const detailInFlightRef = useRef(new Set());
   const detailDebounceRef = useRef(new Map());
+  const inboxRequestRef = useRef(0);
   const processedRealtimeEventIdsRef = useRef(new Set());
   const onPresenceEventRef = useRef(onPresenceEvent);
 
@@ -31,20 +34,26 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
     setClosedIds(new Set(items.filter((conversation) => conversation.status === "closed").map((conversation) => conversation.id)));
   }, []);
 
-  const refreshInbox = useCallback(async () => {
+  const loadInboxPage = useCallback(async (requestedPage = 1) => {
+    const requestId = ++inboxRequestRef.current;
     if (!sessionActive) {
       setConversationItems([]);
       setTopics({});
       setClosedIds(new Set());
       setError("");
       setLoading(false);
+      setPagination(normalizeConversationPagination(null));
       return { ok: false };
     }
 
     setLoading(true);
     setRefreshing(true);
     setError("");
-    const response = await dialogService.fetchDialogs({ page: 1, pageSize: 50 });
+    const page = Math.max(1, Math.trunc(Number(requestedPage)) || 1);
+    const response = await dialogService.fetchDialogs({ page, pageSize: CONVERSATION_PAGE_SIZE });
+    if (requestId !== inboxRequestRef.current) {
+      return { ok: false, stale: true };
+    }
     if (response.status !== "ok") {
       if (response.error?.code === "unauthorized" || response.error?.code === "session_revoked" || response.error?.code === "session_expired") {
         clearTenantSession();
@@ -58,10 +67,17 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
     const items = mapApiConversationCollection(response.data);
     setConversationItems(items);
     syncMetaFromItems(items);
+    setPagination(normalizeConversationPagination(response.data?.pagination, {
+      fallbackPage: page,
+      fallbackPageSize: CONVERSATION_PAGE_SIZE,
+      loaded: items.length
+    }));
     setLoading(false);
     setRefreshing(false);
     return { ok: true, response };
   }, [sessionActive, syncMetaFromItems]);
+
+  const refreshInbox = useCallback(() => loadInboxPage(1), [loadInboxPage]);
 
   useEffect(() => {
     void refreshInbox();
@@ -369,33 +385,39 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
     }
 
     detailInFlightRef.current.add(normalizedId);
-    const response = await dialogService.fetchDialogDetail(normalizedId);
-    if (response.status !== "ok") {
-      detailInFlightRef.current.delete(normalizedId);
-      return { ok: false, response };
-    }
-
-    const mapped = mapApiConversation({
-      ...(response.data?.conversation ?? {}),
-      lifecycleEvents: response.data?.lifecycleEvents ?? []
-    });
-    setConversationItems((current) =>
-      current.some((item) => item.id === mapped.id)
-        ? current.map((item) => (item.id === mapped.id ? mapped : item))
-        : [mapped, ...current]
-    );
-    setTopics((current) => ({ ...current, [mapped.id]: mapped.topic ?? "" }));
-    setClosedIds((current) => {
-      const next = new Set(current);
-      if (mapped.status === "closed") {
-        next.add(mapped.id);
-      } else {
-        next.delete(mapped.id);
+    try {
+      const response = await fetchConversationDetailWithRetry(normalizedId, {
+        retryCount: options.retryCount
+      });
+      if (response.status !== "ok") {
+        setError(response.error?.message ?? "Не удалось загрузить детали диалога.");
+        return { ok: false, response };
       }
-      return next;
-    });
-    detailInFlightRef.current.delete(normalizedId);
-    return { ok: true, response };
+
+      const mapped = mapApiConversation({
+        ...(response.data?.conversation ?? {}),
+        lifecycleEvents: response.data?.lifecycleEvents ?? []
+      });
+      setConversationItems((current) =>
+        current.some((item) => item.id === mapped.id)
+          ? current.map((item) => (item.id === mapped.id ? mapped : item))
+          : [mapped, ...current]
+      );
+      setTopics((current) => ({ ...current, [mapped.id]: mapped.topic ?? "" }));
+      setClosedIds((current) => {
+        const next = new Set(current);
+        if (mapped.status === "closed") {
+          next.add(mapped.id);
+        } else {
+          next.delete(mapped.id);
+        }
+        return next;
+      });
+      setError("");
+      return { ok: true, response };
+    } finally {
+      detailInFlightRef.current.delete(normalizedId);
+    }
   }, [sessionActive]);
 
   const scheduleConversationDetailRefresh = useCallback((conversationId) => {
@@ -471,7 +493,9 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
     conversationItems,
     error,
     loadConversationDetail,
+    loadInboxPage,
     loading,
+    pagination,
     refreshInbox,
     refreshing,
     setClosedIds,
@@ -489,11 +513,37 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
     conversationItems,
     error,
     loadConversationDetail,
+    loadInboxPage,
     loading,
+    pagination,
     refreshInbox,
     refreshing,
     topics
   ]);
+}
+
+export async function fetchConversationDetailWithRetry(conversationId, options = {}) {
+  const retryCount = Math.min(2, Math.max(0, Number(options.retryCount) || 0));
+  const fetchDetail = options.fetchDetail ?? dialogService.fetchDialogDetail;
+  let response = null;
+
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    try {
+      response = await fetchDetail(conversationId);
+    } catch {
+      response = {
+        data: null,
+        error: { code: "dialog_detail_request_failed", message: "Не удалось загрузить детали диалога." },
+        status: "error"
+      };
+    }
+
+    if (response?.status === "ok") {
+      return response;
+    }
+  }
+
+  return response;
 }
 
 function withAppendedMessage(conversation, message) {

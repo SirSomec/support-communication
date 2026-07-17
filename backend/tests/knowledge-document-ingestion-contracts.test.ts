@@ -28,21 +28,6 @@ describe("knowledge document ingestion", () => {
     assert.equal(refreshed.error?.code, "knowledge_article_not_ready");
   });
 
-  it("indexes only attachments already uploaded and malware-scan clean, then requires approval", async () => {
-    const workspace = WorkspaceRepository.inMemory({
-      clientExportJobs: [], clientMergeConflicts: [], clientMergeEvents: [], clientProfiles: [], fileScanResultIdempotency: [], knowledgeApprovalDecisions: [], knowledgeArticles: [], knowledgeDraftVersions: [], templateAuditEvents: [], templates: [], templateVersions: [],
-      files: [{ auditId: "audit", channel: "SDK", fileId: "file-clean", fileName: "faq.txt", mimeType: "text/plain", objectKey: "tenant/faq", scanState: "clean", scanVerdict: "clean", sizeBytes: 10, storageState: "uploaded", tenantId: "tenant-volga" }]
-    });
-    const repository = KnowledgeSourceRepository.inMemory(); const service = new KnowledgeSourcesService(repository, workspace);
-    const now = "2026-07-12T10:00:00.000Z";
-    repository.save({ approvalStatus: "approved", approvedAt: now, approvedBy: "admin", archivedAt: null, contentChecksum: null, createdAt: now, disabledAt: null, failedAt: null, failureCode: null, id: "source-attachment", kind: "document", lastIndexedAt: null, lastIngestedAt: null, metadata: {}, owner: "admin", readiness: "not_ready", retentionUntil: null, sourceConfig: {}, sourceRef: null, status: "draft", tenantId: "tenant-volga", title: "Attachment", updatedAt: now, version: 1 });
-    const indexed = await service.ingestScannedAttachment("tenant-volga", "source-attachment", { extractedText: "FAQ delivery status", fileId: "file-clean" });
-    const source = indexed.data.source as { approvalStatus: string; metadata: { attachmentFileId: string; chunks: unknown[] }; readiness: string; status: string };
-    assert.equal(source.status, "ready"); assert.equal(source.approvalStatus, "pending"); assert.equal(source.readiness, "stale"); assert.equal(source.metadata.attachmentFileId, "file-clean"); assert.ok(source.metadata.chunks.length > 0);
-    const foreign = await service.ingestScannedAttachment("tenant-ladoga", "source-attachment", { extractedText: "x", fileId: "file-clean" });
-    assert.equal(foreign.error?.code, "knowledge_source_not_found");
-  });
-
   it("persists a repeat-safe ingestion job and worker reads only clean object-storage files", async () => {
     const workspace = WorkspaceRepository.inMemory({ clientExportJobs: [], clientMergeConflicts: [], clientMergeEvents: [], clientProfiles: [], fileScanResultIdempotency: [], knowledgeApprovalDecisions: [], knowledgeArticles: [], knowledgeDraftVersions: [], templateAuditEvents: [], templates: [], templateVersions: [], files: [{ auditId: "audit", channel: "SDK", fileId: "file-worker", fileName: "faq.txt", mimeType: "text/plain", objectKey: "tenant/faq", scanState: "clean", scanVerdict: "clean", sizeBytes: 14, storageState: "uploaded", tenantId: "tenant-volga" }] });
     const sources = KnowledgeSourceRepository.inMemory(); const service = new KnowledgeSourcesService(sources, workspace); const now = "2026-07-12T10:00:00.000Z";

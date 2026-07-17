@@ -3,6 +3,17 @@ import test from "node:test";
 
 import { __test__ } from "../src/index.js";
 
+test("widget defaults to the backend production environment", () => {
+  assert.equal(__test__.defaultEnvironment, "production");
+});
+
+test("widget color overrides reject CSS injection payloads", () => {
+  assert.equal(__test__.normalizeWidgetColor("#2563eb"), "#2563eb");
+  assert.equal(__test__.normalizeWidgetColor("rgb(37, 99, 235)"), "rgb(37, 99, 235)");
+  assert.equal(__test__.normalizeWidgetColor("red; } body { display:none"), "");
+  assert.equal(__test__.normalizeWidgetColor("url(javascript:alert(1))"), "");
+});
+
 test("anonymous identity remains stable in the supplied storage", () => {
   const values = new Map();
   const storage = {
@@ -30,6 +41,13 @@ test("presence heartbeat interval rejects overly aggressive values", () => {
   assert.equal(__test__.normalizeInterval(8000), 8000);
   assert.equal(__test__.normalizeInterval(1000), 15000);
   assert.equal(__test__.normalizeInterval("invalid"), 15000);
+});
+
+test("poll retries use bounded exponential backoff", () => {
+  assert.equal(__test__.nextPollingDelay(3000, 0), 3000);
+  assert.equal(__test__.nextPollingDelay(3000, 1), 6000);
+  assert.equal(__test__.nextPollingDelay(3000, 4), 48000);
+  assert.equal(__test__.nextPollingDelay(15000, 8), 300000);
 });
 
 test("widget URL resolution supports the documented relative api base", () => {

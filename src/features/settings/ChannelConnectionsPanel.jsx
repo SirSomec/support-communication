@@ -178,7 +178,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
       setConnections([]);
       setQueues([]);
       setTeams([]);
-      onSummaryChange?.({ active: 0, total: 0 });
+      onSummaryChange?.({ unavailable: true });
     }
     setLoading(false);
   }

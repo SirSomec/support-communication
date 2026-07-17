@@ -6,6 +6,10 @@ import {
 
 import { parseLoadTestRunnerRuntimeConfig, type LoadTestRunnerRuntimeConfig } from "./load-test-runner.worker.js";
 import { createDeterministicDeadLetterReplayBackendStore } from "./dead-letter-replay.worker.js";
+import {
+  createReportExportDeadLetterReplayBackendStore,
+  createWebhookDeliveryDeadLetterReplayBackendStore
+} from "./operations-dead-letter-runtime.backends.js";
 
 import {
 
@@ -70,15 +74,25 @@ export function configureOperationsRepository(
 
   loadTestRunnerRuntimeConfig = parseLoadTestRunnerRuntimeConfig(source as Record<string, string | undefined>);
 
-  const registry = createDefaultOperationsDeadLetterBackendRegistry();
-  if (isLocalRuntime(source.NODE_ENV)) {
-    registry.register("webhook-delivery", createDeterministicDeadLetterReplayBackendStore());
-    registry.register("report-export", createDeterministicDeadLetterReplayBackendStore());
-  }
+  const registry = createOperationsDeadLetterBackendRegistry(source);
   useOperationsDeadLetterBackendRegistry(registry);
 
   return repository;
 
+}
+
+export function createOperationsDeadLetterBackendRegistry(
+  source: Pick<OperationsRepositoryBootstrapSource, "NODE_ENV"> = process.env
+) {
+  const registry = createDefaultOperationsDeadLetterBackendRegistry();
+  if (isLocalRuntime(source.NODE_ENV)) {
+    registry.register("webhook-delivery", createDeterministicDeadLetterReplayBackendStore());
+    registry.register("report-export", createDeterministicDeadLetterReplayBackendStore());
+  } else {
+    registry.register("webhook-delivery", createWebhookDeliveryDeadLetterReplayBackendStore());
+    registry.register("report-export", createReportExportDeadLetterReplayBackendStore());
+  }
+  return registry;
 }
 
 

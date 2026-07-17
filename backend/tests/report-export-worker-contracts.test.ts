@@ -503,6 +503,40 @@ describe("report export worker contracts", () => {
     assert.equal(jobs.find((job) => job.id === "export-default-queue")?.statusKey, "queued");
   });
 
+  it("does not double-claim an export and recovers it after the lease expires", async () => {
+    const repository = ReportRepository.inMemory(bootstrapReportState({ exportJobs: [] }));
+    repository.saveExportJob(reportExportJob({
+      createdAt: "2026-07-04T08:00:00.000Z",
+      id: "export-lease-recovery",
+      queue: "report-export"
+    }));
+
+    const concurrent = await Promise.all([
+      repository.claimQueuedExportJobsAsync({
+        leaseMs: 60_000,
+        now: new Date("2026-07-04T08:01:00.000Z"),
+        queue: "report-export"
+      }),
+      repository.claimQueuedExportJobsAsync({
+        leaseMs: 60_000,
+        now: new Date("2026-07-04T08:01:00.000Z"),
+        queue: "report-export"
+      })
+    ]);
+    const firstClaim = concurrent.flat();
+
+    assert.equal(firstClaim.length, 1);
+    assert.equal(firstClaim[0]?.statusKey, "running");
+
+    const recovered = await repository.claimQueuedExportJobsAsync({
+      leaseMs: 60_000,
+      now: new Date("2026-07-04T08:02:01.000Z"),
+      queue: "report-export"
+    });
+    assert.equal(recovered.length, 1);
+    assert.notEqual(recovered[0]?.filters?.workerClaimToken, firstClaim[0]?.filters?.workerClaimToken);
+  });
+
   it("executes one claimed report export job into a persisted file descriptor", async () => {
     const repository = ReportRepository.inMemory(bootstrapReportState({
       exportJobs: [],
@@ -841,6 +875,33 @@ describe("report export worker contracts", () => {
     assert.equal(conflict.descriptor.status, "failed");
     assert.equal(conflict.descriptor.updatedAt, "2026-07-03T15:05:00.000Z");
     assert.equal(repository.findScheduledDigestDescriptor("digest-volga-run-conflict")?.status, "failed");
+  });
+
+  it("returns a scheduled digest to the due queue when export preparation throws", async () => {
+    const repository = ReportRepository.inMemory();
+    const running = repository.saveScheduledDigestDescriptor({
+      createdAt: "2026-07-03T12:00:00.000Z",
+      dueAt: "2026-07-03T14:00:00.000Z",
+      id: "digest-volga-retry",
+      periodKey: "invalid-period",
+      reportType: "daily_support_digest",
+      scheduleId: "digest-volga-daily",
+      status: "running",
+      tenantId: "tenant-volga",
+      updatedAt: "2026-07-03T15:00:00.000Z"
+    });
+
+    await assert.rejects(
+      () => queueScheduledDigestExportJob({
+        descriptor: running,
+        now: new Date("2026-07-03T15:05:00.000Z"),
+        reportRepository: repository,
+        reportService: new ReportService(repository)
+      }),
+      /scheduled_digest_period_key_invalid/
+    );
+    assert.equal(repository.findScheduledDigestDescriptor(running.id)?.status, "due");
+    assert.equal(repository.findScheduledDigestDescriptor(running.id)?.updatedAt, "2026-07-03T15:05:00.000Z");
   });
 
   it("emits idempotent scheduled digest export notification descriptors", async () => {

@@ -9,20 +9,30 @@ import {
 function inMemoryPrismaAiUsageClient(): AiUsagePrismaClient {
   const rows = new Map<string, PrismaAiUsageRow>();
   const key = (tenantId: string, connectionId: string, month: string) => `${tenantId} ${connectionId} ${month}`;
-  return {
+  let transactionTail = Promise.resolve();
+  const client = {
     aiUsageCounter: {
       findUnique: async ({ where }) => rows.get(key(where.tenantId_connectionId_month.tenantId, where.tenantId_connectionId_month.connectionId, where.tenantId_connectionId_month.month)) ?? null,
       upsert: async ({ create, update, where }) => {
         const mapKey = key(where.tenantId_connectionId_month.tenantId, where.tenantId_connectionId_month.connectionId, where.tenantId_connectionId_month.month);
         const existing = rows.get(mapKey);
+        const usedTokens = typeof update.usedTokens === "object"
+          ? (existing?.usedTokens ?? 0) + update.usedTokens.increment
+          : update.usedTokens ?? existing?.usedTokens ?? create.usedTokens;
         const next: PrismaAiUsageRow = existing
-          ? { ...existing, ...update, requestTimes: update.requestTimes ?? existing.requestTimes }
+          ? { ...existing, ...update, requestTimes: update.requestTimes ?? existing.requestTimes, usedTokens }
           : { connectionId: create.connectionId, month: create.month, requestTimes: create.requestTimes, tenantId: create.tenantId, usedTokens: create.usedTokens };
         rows.set(mapKey, next);
         return next;
       }
     }
+  } as AiUsagePrismaClient;
+  client.$transaction = async (operation) => {
+    const run = transactionTail.then(() => operation(client));
+    transactionTail = run.then(() => undefined, () => undefined);
+    return run;
   };
+  return client;
 }
 
 describe("AI usage limits", () => {
@@ -71,5 +81,21 @@ describe("AI usage limits", () => {
     const snapshot = await repository.current("tenant-a", "d", now);
     assert.equal(snapshot.usedTokens, 400);
     assert.equal(snapshot.month, "2026-07");
+  });
+
+  it("serializes concurrent RPM reservations and atomically increments token usage", async () => {
+    const repository = AiUsageRepository.prisma({ client: inMemoryPrismaAiUsageClient() });
+    const now = new Date("2026-07-12T10:00:00.000Z");
+
+    const reservations = await Promise.allSettled([
+      repository.reserve({ connectionId: "race", now, requestsPerMinute: 1, tenantId: "tenant-a", worstCaseTokens: 1 }),
+      repository.reserve({ connectionId: "race", now, requestsPerMinute: 1, tenantId: "tenant-a", worstCaseTokens: 1 })
+    ]);
+    assert.equal(reservations.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(reservations.filter((result) => result.status === "rejected").length, 1);
+
+    await Promise.all(Array.from({ length: 25 }, () => repository.recordUsage("tenant-a", "tokens", 4, now)));
+    const snapshot = await repository.current("tenant-a", "tokens", now);
+    assert.equal(snapshot.usedTokens, 100);
   });
 });

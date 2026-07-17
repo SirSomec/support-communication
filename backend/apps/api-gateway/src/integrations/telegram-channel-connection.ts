@@ -207,10 +207,15 @@ export function disableTelegramConnectionRecord(
 
 export function findActiveTelegramBotToken(
   connections: TelegramConnectionRecord[],
-  tenantId: string
+  tenantId: string,
+  channelConnectionId?: string
 ): string | undefined {
   const normalizedTenantId = String(tenantId ?? "").trim();
-  const connection = connections.find((item) => item.tenantId === normalizedTenantId && item.status === "active");
+  const normalizedConnectionId = String(channelConnectionId ?? "").trim();
+  const candidates = connections.filter((item) => item.tenantId === normalizedTenantId && item.status === "active");
+  const connection = normalizedConnectionId
+    ? candidates.find((item) => item.channelConnectionId === normalizedConnectionId)
+    : candidates.length === 1 ? candidates[0] : undefined;
   const token = String(connection?.botToken ?? "").trim();
   return token || undefined;
 }

@@ -31,8 +31,10 @@ interface PersistPlatformAlertMutationInput {
 
 interface PersistPlatformRolloutMutationInput {
   actor?: ServiceAdminActor;
+  enabledTenantIds?: string[];
   flagKey: string;
   idempotencyKey: string;
+  idempotencyPayload?: Record<string, unknown>;
   reason: string;
   repository: PlatformAuditOutboxRepository;
   rollout: number;
@@ -290,14 +292,20 @@ export function persistPlatformRolloutMutation(
   const auditIdempotencyKey = buildPlatformAuditIdempotencyKey("rollout", input.idempotencyKey, input.flagKey);
   const outboxIdempotencyKey = buildPlatformOutboxIdempotencyKey("rollout", input.idempotencyKey, input.flagKey);
   const auditFingerprint = fingerprintPlatformMutation("rollout-audit", {
+    request: input.idempotencyPayload ?? {
+      enabledTenantIds: normalizedEnabledTenantIds(input.enabledTenantIds),
+      rollout: input.rollout,
+      status: input.status
+    },
     reason: input.reason,
-    rollout: input.rollout,
-    status: input.status
   });
   const outboxFingerprint = fingerprintPlatformMutation("rollout-outbox", {
     flagKey: input.flagKey,
-    rollout: input.rollout,
-    status: input.status
+    request: input.idempotencyPayload ?? {
+      enabledTenantIds: normalizedEnabledTenantIds(input.enabledTenantIds),
+      rollout: input.rollout,
+      status: input.status
+    }
   });
 
   const audit = persistPlatformAuditRow(input.repository, {
@@ -311,6 +319,7 @@ export function persistPlatformRolloutMutation(
     immutable: true,
     mutationKind: "rollout",
     payload: {
+      ...(input.enabledTenantIds ? { enabledTenantIds: normalizedEnabledTenantIds(input.enabledTenantIds) } : {}),
       flagKey: input.flagKey,
       rollout: input.rollout,
       status: input.status
@@ -330,6 +339,7 @@ export function persistPlatformRolloutMutation(
     idempotencyKey: outboxIdempotencyKey,
     mutationKind: "rollout",
     payload: {
+      ...(input.enabledTenantIds ? { enabledTenantIds: normalizedEnabledTenantIds(input.enabledTenantIds) } : {}),
       flagKey: input.flagKey,
       rollout: input.rollout,
       status: input.status
@@ -350,14 +360,20 @@ export async function persistPlatformRolloutMutationAsync(
   const auditIdempotencyKey = buildPlatformAuditIdempotencyKey("rollout", input.idempotencyKey, input.flagKey);
   const outboxIdempotencyKey = buildPlatformOutboxIdempotencyKey("rollout", input.idempotencyKey, input.flagKey);
   const auditFingerprint = fingerprintPlatformMutation("rollout-audit", {
+    request: input.idempotencyPayload ?? {
+      enabledTenantIds: normalizedEnabledTenantIds(input.enabledTenantIds),
+      rollout: input.rollout,
+      status: input.status
+    },
     reason: input.reason,
-    rollout: input.rollout,
-    status: input.status
   });
   const outboxFingerprint = fingerprintPlatformMutation("rollout-outbox", {
     flagKey: input.flagKey,
-    rollout: input.rollout,
-    status: input.status
+    request: input.idempotencyPayload ?? {
+      enabledTenantIds: normalizedEnabledTenantIds(input.enabledTenantIds),
+      rollout: input.rollout,
+      status: input.status
+    }
   });
   const audit = await persistPlatformAuditRowAsync(input.repository, {
     action: "feature_flag.update",
@@ -370,6 +386,7 @@ export async function persistPlatformRolloutMutationAsync(
     immutable: true,
     mutationKind: "rollout",
     payload: {
+      ...(input.enabledTenantIds ? { enabledTenantIds: normalizedEnabledTenantIds(input.enabledTenantIds) } : {}),
       flagKey: input.flagKey,
       rollout: input.rollout,
       status: input.status
@@ -388,6 +405,7 @@ export async function persistPlatformRolloutMutationAsync(
     idempotencyKey: outboxIdempotencyKey,
     mutationKind: "rollout",
     payload: {
+      ...(input.enabledTenantIds ? { enabledTenantIds: normalizedEnabledTenantIds(input.enabledTenantIds) } : {}),
       flagKey: input.flagKey,
       rollout: input.rollout,
       status: input.status
@@ -466,12 +484,16 @@ async function persistPlatformOutboxRowAsync(
   return repository.savePlatformOutboxRowAsync(row);
 }
 
-function buildPlatformAuditIdempotencyKey(
+export function buildPlatformAuditIdempotencyKey(
   kind: PlatformMutationKind,
   idempotencyKey: string | undefined,
   target: string
 ): string {
   return `platform-audit:${kind}:${idempotencyKey ?? target}`;
+}
+
+function normalizedEnabledTenantIds(tenantIds: string[] | undefined): string[] | undefined {
+  return tenantIds ? [...new Set(tenantIds.map((tenantId) => tenantId.trim()).filter(Boolean))].sort() : undefined;
 }
 
 function buildPlatformOutboxIdempotencyKey(

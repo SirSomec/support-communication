@@ -138,7 +138,7 @@ export const authService = {
 
   async selectTenant(payload = {}) {
     return apiRequest("/auth/tenant/select", {
-      authMode: "public",
+      authMode: "tenant",
       body: payload,
       method: "POST",
       operation: "selectTenant",

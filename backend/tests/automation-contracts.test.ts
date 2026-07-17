@@ -42,6 +42,45 @@ describe("automation bot scenario contracts", () => {
     assert.equal(updated.data.scenario.name, "Draft bot updated");
   });
 
+  it("does not mass-assign server-owned scenario fields from an update payload", async () => {
+    const automation = new AutomationService();
+    const created = await automation.createBotScenario({
+      channels: ["SDK"],
+      flowEdges: [],
+      flowNodes: [{ id: "start", type: "message" }],
+      id: "bot-mass-assignment",
+      name: "Protected scenario"
+    }, { tenantId: "tenant-volga" });
+    const originalCreatedAt = created.data.scenario.createdAt;
+
+    const updated = await automation.updateBotScenario("bot-mass-assignment", {
+      activeVersionId: "attacker-version",
+      auditHold: true,
+      createdAt: "2000-01-01T00:00:00.000Z",
+      draft: { name: "Injected draft", updatedAt: "2000-01-01T00:00:00.000Z" },
+      enabled: false,
+      id: "foreign-id",
+      legalHold: true,
+      name: "Allowed title",
+      retentionUntil: "2099-01-01T00:00:00.000Z",
+      status: "draft",
+      tenantId: "tenant-ladoga"
+    }, { tenantId: "tenant-volga" });
+    const scenario = updated.data.scenario;
+
+    assert.equal(updated.status, "ok");
+    assert.equal(scenario.id, "bot-mass-assignment");
+    assert.equal(scenario.tenantId, "tenant-volga");
+    assert.equal(scenario.name, "Allowed title");
+    assert.equal(scenario.createdAt, originalCreatedAt);
+    assert.equal(scenario.activeVersionId, undefined);
+    assert.equal(scenario.auditHold, undefined);
+    assert.equal(scenario.draft, undefined);
+    assert.equal(scenario.enabled, true);
+    assert.equal(scenario.legalHold, undefined);
+    assert.equal(scenario.retentionUntil, undefined);
+  });
+
   it("normalizes legacy localized draft statuses before persistence", async () => {
     const automation = new AutomationService();
 

@@ -1,3 +1,4 @@
+import { assertCredentialMasterKeySafety } from "@support-communication/config";
 import { createPrismaBillingSyncJobStore, createPrismaClient, createPrismaConversationOutboundDescriptorStore, createPrismaOutboxStore, type ConversationOutboundDescriptorStore, type PrismaBillingSyncJobClient, type PrismaConversationOutboundDescriptorClient, type PrismaOutboxClient } from "@support-communication/database";
 import { type OutboxEventStore } from "@support-communication/events";
 import { createBullMqWorkerBridge, createRuntimeBillingSyncHandlers, createRuntimeOutboxHandlers, loadBullMqWorkerConfig, loadOutboxWorkerConfig, runBillingSyncWorker, runOutboxWorker, runRuntimeFileScanScannerWorker } from "./index.js";
@@ -8,6 +9,8 @@ import { createPrismaProviderAttachmentTransferStore, type PrismaProviderAttachm
 interface DisconnectableWorkerPrismaClient extends PrismaOutboxClient, PrismaBillingSyncJobClient, PrismaConversationOutboundDescriptorClient, PrismaTelegramConnectionTokenClient, PrismaProviderConnectionCredentialClient, PrismaProviderAttachmentTransferClient {
   $disconnect?: () => Promise<void>;
 }
+
+assertCredentialMasterKeySafety(process.env, { required: ["PROVIDER_CREDENTIAL_MASTER_KEY"] });
 
 const client = createPrismaClient({
   datasourceUrl: process.env.DATABASE_URL

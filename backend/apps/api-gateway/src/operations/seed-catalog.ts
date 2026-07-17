@@ -81,7 +81,7 @@ export const deadLetterQueues: DeadLetterQueue[] = [
     domain: "delivery",
     depth: 0,
     oldestMessageAgeMinutes: 0,
-    replayEnabled: true,
+    replayEnabled: false,
     status: "clear"
   },
   {

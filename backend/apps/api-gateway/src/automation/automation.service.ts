@@ -272,7 +272,6 @@ export class AutomationService {
 
     const scenario: BotScenario = {
       ...existing,
-      ...request,
       basePrompt: request.basePrompt !== undefined
         ? normalizeScenarioBasePrompt(request.basePrompt)
         : existing.basePrompt,

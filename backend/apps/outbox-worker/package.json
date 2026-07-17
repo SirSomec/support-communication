@@ -4,5 +4,8 @@
   "private": true,
   "type": "module",
   "main": "dist/main.js",
-  "types": "dist/index.d.ts"
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@support-communication/config": "0.1.0"
+  }
 }

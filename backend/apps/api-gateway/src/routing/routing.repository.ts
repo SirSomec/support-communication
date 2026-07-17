@@ -315,6 +315,7 @@ export interface PrismaRoutingClient {
     }): Promise<PrismaQueueMembershipRow>;
   };
   routingAnalyticsRow: {
+    createMany?(input: { data: PrismaRoutingAnalyticsCreateInput[]; skipDuplicates: true }): Promise<{ count: number }>;
     findMany(input: { orderBy: { occurredAt: "desc" }; where?: PrismaRoutingAnalyticsWhereInput }): Promise<PrismaRoutingAnalyticsRow[]>;
     upsert(input: {
       create: PrismaRoutingAnalyticsCreateInput;
@@ -1423,14 +1424,22 @@ class PrismaRoutingRepository implements RoutingRepositoryPort {
       });
       persistedQueueMemberships.push(toQueueMembershipRecord(row));
     }
-    for (const row of state.routingAnalyticsRows) {
-      const create = toPrismaRoutingAnalyticsCreateInput(row);
-      const persisted = await client.routingAnalyticsRow.upsert({
-        create,
-        update: toPrismaRoutingAnalyticsUpdateInput(create),
-        where: { id: row.id }
+    if (state.routingAnalyticsRows.length && client.routingAnalyticsRow.createMany) {
+      await client.routingAnalyticsRow.createMany({
+        data: state.routingAnalyticsRows.map(toPrismaRoutingAnalyticsCreateInput),
+        skipDuplicates: true
       });
-      persistedRoutingAnalyticsRows.push(toRoutingAnalyticsRow(persisted));
+      persistedRoutingAnalyticsRows.push(...state.routingAnalyticsRows.map(normalizeRoutingAnalyticsRow));
+    } else {
+      for (const row of state.routingAnalyticsRows) {
+        const create = toPrismaRoutingAnalyticsCreateInput(row);
+        const persisted = await client.routingAnalyticsRow.upsert({
+          create,
+          update: toPrismaRoutingAnalyticsUpdateInput(create),
+          where: { id: row.id }
+        });
+        persistedRoutingAnalyticsRows.push(toRoutingAnalyticsRow(persisted));
+      }
     }
     for (const rule of state.routingRules) {
       const create = toPrismaRoutingRuleCreateInput(rule);

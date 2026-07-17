@@ -270,6 +270,12 @@ function createFakePrismaPlatformClient(): { calls: FakePlatformCalls; client: P
   return {
     calls,
     client: {
+      $queryRawUnsafe() {
+        return Promise.resolve([]);
+      },
+      $transaction<T>(callback: (client: PrismaPlatformClient) => Promise<T>) {
+        return callback(this as PrismaPlatformClient);
+      },
       featureFlagRule: {
         findMany(input: { orderBy?: { updatedAt: "desc" }; where?: Record<string, unknown> } = {}) {
           return Promise.resolve(Array.from(featureFlagRuleRows.values())

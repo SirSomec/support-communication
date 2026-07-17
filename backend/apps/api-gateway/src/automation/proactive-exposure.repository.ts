@@ -196,9 +196,11 @@ export class ProactiveExposureRepository {
       return clone(saved);
     }
     try { return conversionFromRow(await this.prisma.proactiveConversionEvent.create({ data: conversionToRow(conversion) })); }
-    catch {
+    catch (error) {
+      if (!isPrismaUniqueConstraintError(error)) throw error;
       const existing = await this.prisma.proactiveConversionEvent.findUnique({ where: { tenantId_exposureId: { exposureId: exposure.exposureId, tenantId: input.tenantId } } });
-      return existing ? conversionFromRow(existing) : null;
+      if (!existing) throw error;
+      return conversionFromRow(existing);
     }
   }
 
@@ -261,3 +263,6 @@ function validTimestamp(value: string): string { return Number.isFinite(Date.par
 function inRange(value: string | null, from: string, to: string): boolean { return Boolean(value) && Date.parse(value!) >= Date.parse(from) && Date.parse(value!) <= Date.parse(to); }
 function ratio(numerator: number, denominator: number): number { return denominator > 0 ? Number((numerator / denominator).toFixed(4)) : 0; }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
+function isPrismaUniqueConstraintError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
+}

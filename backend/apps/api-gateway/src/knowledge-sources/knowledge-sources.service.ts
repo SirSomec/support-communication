@@ -335,24 +335,6 @@ export class KnowledgeSourcesService {
     return envelope("refreshKnowledgeSourceDocument", tenantId, { source });
   }
 
-  /**
-   * Internal ingestion callback for an attachment that already passed the
-   * existing upload and malware-scan workflow. Text extraction itself stays in
-   * the trusted worker; callers cannot make an unscanned object retrievable.
-   */
-  async ingestScannedAttachment(tenantId: string, sourceId: string, input: { extractedText?: string; fileId?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = await this.repository.find(tenantId, sourceId);
-    if (!current || current.kind !== "document") return invalid("ingestScannedKnowledgeAttachment", tenantId, "knowledge_source_not_found", "Document source was not found.");
-    const fileId = String(input.fileId ?? "").trim();
-    const file = fileId ? await this.workspaceRepository.findFile(fileId, { tenantId }) : undefined;
-    if (!file || file.storageState !== "uploaded" || file.scanVerdict !== "clean" || !["clean", "scan_clean"].includes(file.scanState)) return invalid("ingestScannedKnowledgeAttachment", tenantId, "knowledge_attachment_scan_required", "Only uploaded and scan-clean attachments can be indexed.");
-    const prepared = ingestKnowledgeDocument(input.extractedText);
-    if (!prepared) return invalid("ingestScannedKnowledgeAttachment", tenantId, "knowledge_document_text_required", "The trusted extractor returned no usable document text.");
-    const now = new Date().toISOString();
-    const source = await this.repository.save({ ...current, approvalStatus: "pending", approvedAt: null, approvedBy: null, contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, attachmentFileId: file.fileId, chunks: prepared.chunks, extraction: "trusted_worker", language: prepared.language }, status: "ready", updatedAt: now, version: current.version + 1 });
-    return envelope("ingestScannedKnowledgeAttachment", tenantId, { source });
-  }
-
   private async recordUrlAudit(action: string, tenantId: string, sourceId: string, result: string): Promise<IdentityServiceAdminAuditEvent> {
     return await this.identityRepository.recordServiceAdminAuditEvent({
       action, actor: "knowledge-source-service", actorName: "Knowledge source service", at: new Date().toISOString(), id: makeAuditId("knowledge_source"), immutable: true,

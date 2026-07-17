@@ -236,6 +236,7 @@ interface DeliveryReceiptPayload {
 
 export interface OutboundMessageDispatchRequest {
   channel: string;
+  channelConnectionId?: string;
   chatId: string;
   conversationId: string;
   descriptorId: string;
@@ -704,6 +705,13 @@ export class ConversationService {
     if (conversation.status === "closed" && nextStatus === "closed") {
       return conflictEnvelope(DIALOG_SERVICE, "transitionConversationStatus", "conversation_already_closed", "The conversation is already closed.", {
         conversationId: conversation.id
+      });
+    }
+
+    if (conversation.status === "closed" && nextStatus !== "reopened") {
+      return conflictEnvelope(DIALOG_SERVICE, "transitionConversationStatus", "conversation_closed", "A closed conversation must be reopened before any other status transition.", {
+        conversationId: conversation.id,
+        nextStatus
       });
     }
 
@@ -1979,6 +1987,7 @@ export class ConversationService {
     try {
       const result = await this.outboundMessageDispatcher.deliverMessage({
         channel: input.conversation.channel,
+        ...(input.conversation.channelConnectionId ? { channelConnectionId: input.conversation.channelConnectionId } : {}),
         chatId: input.chatId,
         conversationId: input.conversation.id,
         descriptorId: input.descriptor.id,

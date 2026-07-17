@@ -18,6 +18,19 @@ export interface IdentityTenant {
   monthlyRevenue: number;
   name: string;
   notes: string;
+  onboarding?: {
+    adminRole: "Admin" | "Owner";
+    billingCycle: "annual" | "monthly";
+    industry: string;
+    limits: {
+      afterHoursBot: boolean;
+      aiAssist: boolean;
+      concurrentDialogs: number;
+      dailyMessages: number;
+      operatorLimit: number;
+    };
+    mfaRequired: boolean;
+  };
   owner: string;
   ownerEmail: string;
   planId: string;

@@ -161,6 +161,11 @@ describe("automation proactive visitor workspace contracts", () => {
     });
     const exposures = await exposureRepository.listPendingForSession("tenant-demo",
       (await integrationRepository.listLiveSdkVisitorPresence({ at: input.evaluatedAt }))[0]!.id);
+    const descriptors = await conversationRepository.listOutboundDescriptors({
+      idempotencyKey: "proactive-delivery:tenant-demo:rule-checkout:client-42",
+      tenantId: "tenant-demo"
+    });
+    const outboxEvents = await conversationRepository.listOutboxEvents();
 
     assert.deepEqual(first, {
       conflicted: 0,
@@ -190,6 +195,8 @@ describe("automation proactive visitor workspace contracts", () => {
     assert.equal(exposures[0].status, "planned");
     assert.equal(exposures[0].variant, "A");
     assert.equal(exposures[0].presenceSessionId.length > 0, true);
+    assert.equal(descriptors.length, 1);
+    assert.equal(outboxEvents.filter((event) => event.type === "conversation.outbound.requested").length, 1);
   });
 
   it("uses only live SDK presence and ignores stale or disconnected sessions", async () => {

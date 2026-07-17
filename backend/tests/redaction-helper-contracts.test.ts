@@ -74,6 +74,18 @@ describe("shared redaction helper contracts", () => {
     );
   });
 
+  it("redacts bearer access tokens carried in URL query parameters", () => {
+    const redacted = redactSensitiveText(
+      "GET /api/v1/realtime/events/stream?since=42&accessToken=operator-access-token-secret&mode=sse"
+    );
+
+    assert.equal(
+      redacted,
+      "GET /api/v1/realtime/events/stream?since=42&accessToken=[REDACTED:provider_token]&mode=sse"
+    );
+    assert.doesNotMatch(redacted, /operator-access-token-secret/);
+  });
+
   it("classifies sensitive field names for package consumers", () => {
     assert.equal(sensitiveRedactionLabel("authorization"), "api_key");
     assert.equal(sensitiveRedactionLabel("objectKey"), "object_key");

@@ -8,6 +8,7 @@ import {
 } from "@support-communication/events";
 import { type BillingSyncJobStore, type StoredBillingSyncJob } from "@support-communication/database";
 import { type LogContext, writeStructuredLog } from "@support-communication/observability";
+import { redactSensitiveText } from "@support-communication/redaction";
 import { createIntegrationTelegramTokenResolver, type TelegramBotTokenResolver } from "./integration-telegram-store.js";
 import type { ProviderAttachmentTransferStore } from "./provider-attachment-transfer-store.js";
 
@@ -112,6 +113,8 @@ export interface AttachmentScanResult {
   verdict: string;
 }
 
+class NonRetryableWorkerHttpError extends Error {}
+
 export interface AttachmentScanner {
   scanAttachment(request: AttachmentScanRequest): AttachmentScanResult | void | Promise<AttachmentScanResult | void>;
 }
@@ -136,6 +139,7 @@ export type WorkerOutboundDescriptorKind = "attachment_upload" | "message_delive
 export interface WorkerOutboundDescriptor {
   channel: string;
   conversationId: string | null;
+  deliveryState?: string | null;
   id: string;
   idempotencyKey?: string | null;
   kind: WorkerOutboundDescriptorKind;
@@ -474,6 +478,9 @@ export async function runFileScanScannerWorker(input: RunFileScanScannerWorkerIn
           outboundDescriptorStore: input.outboundDescriptorStore,
           scanner: input.scanner
         });
+        if (!callback) {
+          throw new Error("file_scan_result_required");
+        }
         if (callback && input.scanResultCallback) {
           await input.scanResultCallback.recordScanResult(callback);
           await input.store.markPublished(event.id);
@@ -482,7 +489,7 @@ export async function runFileScanScannerWorker(input: RunFileScanScannerWorkerIn
       } catch (error) {
         await input.store.markFailed(event.id, error instanceof Error ? error : String(error), input.now ?? new Date(), {
           currentAttempts: event.attempts,
-          maxAttempts: config.maxAttempts,
+          maxAttempts: error instanceof NonRetryableWorkerHttpError ? event.attempts + 1 : config.maxAttempts,
           retryBackoffMs: config.retryBackoffMs
         });
         failed += 1;
@@ -994,6 +1001,19 @@ function createChannelConnectorHandler(
     const descriptor = await loadOutboundDescriptor(event, descriptorStore);
     requireDescriptorKind(descriptor, expectedKind);
     const channel = requireString(descriptor.channel, "channel_required");
+    if (descriptor.deliveryState === "delivered") {
+      writeLog("info", "channel connector dispatch already completed", {
+        channel,
+        descriptorId: descriptor.id,
+        eventId: event.id,
+        operation: method,
+        queue: event.queue,
+        service: "outbox-worker",
+        traceId: event.traceId,
+        type: event.type
+      });
+      return;
+    }
     const connector = ownValue(channelConnectors, channel);
     if (!connector) {
       throw new Error(`channel_connector_not_registered:${channel}`);
@@ -1003,19 +1023,10 @@ function createChannelConnectorHandler(
       ? toMessageDeliveryRequest(event, descriptor, channel)
       : toOutboundConversationRequest(event, descriptor, channel);
 
+    let providerMessageId: string | undefined;
     try {
       const result = await connector[method](request);
-      if (result?.providerMessageId && descriptorStore.recordProviderMessageBinding && descriptor.messageId) {
-        await descriptorStore.recordProviderMessageBinding({
-          channelConnectionId: requireString(request.channelConnectionId, "provider_channel_connection_id_required"),
-          conversationId: requireString(descriptor.conversationId, "provider_conversation_record_id_required"),
-          internalMessageId: descriptor.messageId,
-          provider: channel.toLowerCase(),
-          providerConversationId: requireString(request.conversationId, "provider_conversation_id_required"),
-          providerMessageId: result.providerMessageId,
-          tenantId: requireString(descriptor.tenantId, "provider_tenant_id_required")
-        });
-      }
+      providerMessageId = result?.providerMessageId;
     } catch (error) {
       await markOutboundDescriptorDelivery(descriptorStore, descriptor.id, "failed", writeLog, event);
       writeLog("error", "channel connector dispatch failed", {
@@ -1030,6 +1041,33 @@ function createChannelConnectorHandler(
         type: event.type
       });
       throw error;
+    }
+
+    if (providerMessageId && descriptorStore.recordProviderMessageBinding && descriptor.messageId) {
+      try {
+        await descriptorStore.recordProviderMessageBinding({
+          channelConnectionId: requireString(request.channelConnectionId, "provider_channel_connection_id_required"),
+          conversationId: requireString(descriptor.conversationId, "provider_conversation_record_id_required"),
+          internalMessageId: descriptor.messageId,
+          provider: channel.toLowerCase(),
+          providerConversationId: requireString(request.conversationId, "provider_conversation_id_required"),
+          providerMessageId,
+          tenantId: requireString(descriptor.tenantId, "provider_tenant_id_required")
+        });
+      } catch (error) {
+        writeLog("error", "provider delivery accounting requires reconciliation", {
+          channel,
+          descriptorId: descriptor.id,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          eventId: event.id,
+          operation: "recordProviderMessageBinding",
+          providerMessageId,
+          queue: event.queue,
+          service: "outbox-worker",
+          traceId: event.traceId,
+          type: event.type
+        });
+      }
     }
 
     await markOutboundDescriptorDelivery(descriptorStore, descriptor.id, "delivered", writeLog, event);
@@ -1090,9 +1128,6 @@ async function markOutboundDescriptorDelivery(
       traceId: event.traceId,
       type: event.type
     });
-    if (deliveryState === "delivered") {
-      throw error;
-    }
   }
 }
 
@@ -1219,6 +1254,7 @@ export function createTenantTelegramChannelConnector({
         attachments: request.attachments,
         botToken,
         chatId: requireString(request.conversationId ?? request.phone, "telegram_chat_id_required"),
+        downloadTimeoutMs: timeoutMs,
         fetcher,
         idempotencyKey: requireString(request.idempotencyKey, "telegram_idempotency_key_required"),
         replyMarkup: request.replyMarkup,
@@ -1311,6 +1347,7 @@ export function createTenantVkChannelConnector({ apiBaseUrl, fetcher, providerAt
         fetcher,
         peerId: requireString(request.conversationId, "vk_peer_id_required"),
         tenantId: requireString(request.tenantId, "vk_tenant_id_required"),
+        timeoutMs,
         transferStore: providerAttachmentTransferStore
       });
       const params = new URLSearchParams({
@@ -1480,7 +1517,7 @@ async function postWorkerHttpRequest(
       throw new Error(`worker_http_dispatch_timeout:${timeoutMs}`);
     }
 
-    throw new Error("worker_http_dispatch_failed");
+    throw workerHttpDispatchError("worker_http_dispatch_failed", error);
   } finally {
     clearTimeout(timeout);
   }
@@ -1488,6 +1525,12 @@ async function postWorkerHttpRequest(
   if (!response.ok) {
     throw new Error(`worker_http_dispatch_failed:${response.status}`);
   }
+}
+
+function workerHttpDispatchError(prefix: string, error: unknown): Error {
+  const rawDetail = error instanceof Error ? error.message : String(error ?? "");
+  const detail = redactSensitiveText(rawDetail).replace(/\s+/g, " ").trim().slice(0, 512) || "unknown_error";
+  return new Error(`${prefix}:${detail}`);
 }
 
 async function postFileScanResultCallbackRequest(
@@ -1525,7 +1568,7 @@ async function postFileScanResultCallbackRequest(
       throw new Error(`file_scan_result_callback_timeout:${timeoutMs}`);
     }
 
-    throw new Error("file_scan_result_callback_failed");
+    throw workerHttpDispatchError("file_scan_result_callback_failed", error);
   } finally {
     clearTimeout(timeout);
   }
@@ -1575,13 +1618,17 @@ async function postWorkerHttpJsonRequest({
       throw new Error(`worker_http_dispatch_timeout:${timeoutMs}`);
     }
 
-    throw new Error("worker_http_dispatch_failed");
+    throw workerHttpDispatchError("worker_http_dispatch_failed", error);
   } finally {
     clearTimeout(timeout);
   }
 
   if (!response.ok) {
-    throw new Error(`worker_http_dispatch_failed:${response.status}`);
+    const message = `worker_http_dispatch_failed:${response.status}`;
+    if (response.status >= 400 && response.status < 500) {
+      throw new NonRetryableWorkerHttpError(message);
+    }
+    throw new Error(message);
   }
 
   const text = await response.text();
@@ -1774,6 +1821,7 @@ function providerAttachmentIds(attachments: Array<Record<string, unknown>> | und
 async function resolveVkAttachments(input: {
   accessToken: string; apiBaseUrl: string; apiVersion: string; attachments?: Array<Record<string, unknown>>;
   channelConnectionId: string; fetcher: WorkerHttpFetch; peerId: string; tenantId: string; transferStore?: ProviderAttachmentTransferStore;
+  timeoutMs: number;
 }): Promise<string[]> {
   const ids: string[] = [];
   for (const attachment of input.attachments ?? []) {
@@ -1790,15 +1838,15 @@ async function resolveVkAttachments(input: {
       if (!isImage) serverParams.set("type", "doc");
       const server = await providerJsonFetch(input.fetcher, `${input.apiBaseUrl.replace(/\/+$/, "")}/method/${method}`, {
         body: serverParams.toString(), headers: { "content-type": "application/x-www-form-urlencoded" }, method: "POST"
-      }, "vk_upload_server_failed");
+      }, "vk_upload_server_failed", input.timeoutMs);
       const serverResponse = objectValue(server.response);
       const uploadUrl = requireString(serverResponse?.upload_url, "vk_upload_url_required");
-      const bytes = await downloadProviderAttachment(attachment, input.fetcher);
+      const bytes = await downloadProviderAttachment(attachment, input.fetcher, input.timeoutMs);
       const boundary = `----support-${fileId.replace(/[^A-Za-z0-9]/g, "").slice(-24)}`;
       const uploaded = await providerJsonFetch(input.fetcher, uploadUrl, {
         body: multipartFileBody(boundary, bytes, requireString(attachment.fileName, "provider_attachment_file_name_required"), stringValue(attachment.mimeType) || "application/octet-stream", isImage ? "photo" : "file"),
         headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, method: "POST"
-      }, "vk_attachment_upload_failed");
+      }, "vk_attachment_upload_failed", input.timeoutMs);
       const saveMethod = isImage ? "photos.saveMessagesPhoto" : "docs.save";
       const saveParams = new URLSearchParams({ access_token: input.accessToken, v: input.apiVersion });
       if (isImage) {
@@ -1811,7 +1859,7 @@ async function resolveVkAttachments(input: {
       }
       const saved = await providerJsonFetch(input.fetcher, `${input.apiBaseUrl.replace(/\/+$/, "")}/method/${saveMethod}`, {
         body: saveParams.toString(), headers: { "content-type": "application/x-www-form-urlencoded" }, method: "POST"
-      }, "vk_attachment_save_failed");
+      }, "vk_attachment_save_failed", input.timeoutMs);
       const raw = isImage ? (Array.isArray(saved.response) ? saved.response[0] : undefined) : (objectValue(saved.response)?.doc ?? saved.response);
       const item = objectValue(raw);
       const prefix = isImage ? "photo" : "doc";
@@ -1852,12 +1900,12 @@ async function resolveMaxAttachments(input: {
     }
     try {
       const type = maxAttachmentType(attachment);
-      const bytes = await downloadProviderAttachment(attachment, input.fetcher);
+      const bytes = await downloadProviderAttachment(attachment, input.fetcher, input.timeoutMs);
       const uploadDescriptor = await providerJsonFetch(input.fetcher, `${input.apiBaseUrl.replace(/\/+$/, "")}/uploads?type=${type}`, {
         body: "",
         headers: { authorization: input.accessToken },
         method: "POST"
-      }, "max_upload_descriptor_failed");
+      }, "max_upload_descriptor_failed", input.timeoutMs);
       const uploadUrl = requireString(uploadDescriptor.url, "max_upload_url_required");
       const boundary = `----support-${fileId.replace(/[^A-Za-z0-9]/g, "").slice(-24)}`;
       const body = multipartFileBody(boundary, bytes, requireString(attachment.fileName, "provider_attachment_file_name_required"), stringValue(attachment.mimeType) || "application/octet-stream");
@@ -1865,7 +1913,7 @@ async function resolveMaxAttachments(input: {
         body,
         headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
         method: "POST"
-      }, "max_attachment_upload_failed");
+      }, "max_attachment_upload_failed", input.timeoutMs);
       const token = requireString(uploaded.token ?? uploadDescriptor.token, "max_attachment_token_required");
       if (input.transferStore) await input.transferStore.markUploaded({ ...key, providerAttachmentToken: token });
       resolved.push({ payload: { token }, type });
@@ -1885,22 +1933,49 @@ function maxAttachmentType(attachment: Record<string, unknown>): "audio" | "file
   return "file";
 }
 
-async function downloadProviderAttachment(attachment: Record<string, unknown>, fetcher: WorkerHttpFetch): Promise<Uint8Array> {
+async function downloadProviderAttachment(attachment: Record<string, unknown>, fetcher: WorkerHttpFetch, timeoutMs: number): Promise<Uint8Array> {
   const signedFile = signedAttachmentFileAccess(attachment.signedFile);
   if (!signedFile) throw new Error("provider_attachment_file_access_required");
   if (new Date(signedFile.expiresAt).getTime() <= Date.now()) throw new Error("provider_attachment_file_access_expired");
-  const response = await fetcher(signedFile.url, { headers: signedFile.headers ?? {}, method: "GET" });
+  const response = await providerFetchWithTimeout(fetcher, signedFile.url, {
+    headers: signedFile.headers ?? {},
+    method: "GET"
+  }, timeoutMs, "provider_attachment_download_timeout");
   if (!response.ok || !response.arrayBuffer) throw new Error(`provider_attachment_download_failed:${response.status}`);
   return new Uint8Array(await response.arrayBuffer());
 }
 
-async function providerJsonFetch(fetcher: WorkerHttpFetch, url: string, init: WorkerHttpRequestInit, errorCode: string): Promise<Record<string, unknown>> {
-  const response = await fetcher(url, init);
+async function providerJsonFetch(fetcher: WorkerHttpFetch, url: string, init: WorkerHttpRequestInit, errorCode: string, timeoutMs: number): Promise<Record<string, unknown>> {
+  const response = await providerFetchWithTimeout(fetcher, url, init, timeoutMs, `${errorCode}_timeout`);
   if (!response.ok) throw new Error(`${errorCode}:${response.status}`);
   const text = await response.text();
   const value = text ? JSON.parse(text) : {};
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(errorCode);
   return value as Record<string, unknown>;
+}
+
+async function providerFetchWithTimeout(
+  fetcher: WorkerHttpFetch,
+  url: string,
+  init: WorkerHttpRequestInit,
+  timeoutMs: number,
+  timeoutCode: string
+): Promise<WorkerHttpResponse> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetcher(url, {
+      ...init,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${timeoutCode}:${timeoutMs}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function multipartFileBody(boundary: string, bytes: Uint8Array, fileName: string, mimeType: string, fieldName = "data"): Uint8Array {
@@ -1978,6 +2053,7 @@ async function sendTelegramAttachments(input: {
   attachments: Array<Record<string, unknown>>;
   botToken: string;
   chatId: string;
+  downloadTimeoutMs: number;
   fetcher: WorkerHttpFetch;
   idempotencyKey: string;
   replyMarkup?: Record<string, unknown>;
@@ -2006,7 +2082,7 @@ async function sendTelegramAttachments(input: {
     const fileId = requireString(attachment.fileId, "provider_attachment_file_required");
     const fileName = requireString(attachment.fileName, "provider_attachment_file_name_required");
     const mimeType = stringValue(attachment.mimeType) || "application/octet-stream";
-    const bytes = await downloadProviderAttachment(attachment, input.fetcher);
+    const bytes = await downloadProviderAttachment(attachment, input.fetcher, input.downloadTimeoutMs);
     const caption = !separateText && index === 0 ? input.text : "";
     const isLast = index === input.attachments.length - 1;
     const boundary = `----support-${fileId.replace(/[^A-Za-z0-9]/g, "").slice(-24)}`;

@@ -43,6 +43,7 @@ describe("tenant provision session contracts", () => {
     const duplicateSlug = await provisionTenant(baseUrl, {
       tenant: { name: "Acme Pilot 2", slug: "acme-pilot", region: "ru-1" },
       admin: { name: "Other Owner", email: "other@acme-pilot.test", password: "Owner-2026!" },
+      channel: { type: "sdk", domain: "acme-duplicate.example" },
       plan: { id: "trial", trial: true }
     });
     assert.equal(duplicateSlug.envelope.error?.code, "tenant_slug_duplicate");
@@ -50,6 +51,7 @@ describe("tenant provision session contracts", () => {
     const duplicateEmail = await provisionTenant(baseUrl, {
       tenant: { name: "Another Pilot", slug: "another-pilot", region: "ru-1" },
       admin: { name: "Owner", email: "owner@acme-pilot.test", password: "Owner-2026!" },
+      channel: { type: "sdk", domain: "another.example" },
       plan: { id: "trial", trial: true }
     });
     assert.equal(duplicateEmail.envelope.error?.code, "tenant_admin_email_duplicate");

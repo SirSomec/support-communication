@@ -4961,6 +4961,9 @@ function toIdentityTenant(row: PrismaTenantRow): IdentityTenant {
     monthlyRevenue: numberFromMetadata(metadata.monthlyRevenue, 0),
     name: row.name,
     notes: stringFromMetadata(metadata.notes, ""),
+    ...(metadata.onboarding && typeof metadata.onboarding === "object" && !Array.isArray(metadata.onboarding)
+      ? { onboarding: clone(metadata.onboarding) as IdentityTenant["onboarding"] }
+      : {}),
     owner: stringFromMetadata(metadata.owner, ""),
     ownerEmail: stringFromMetadata(metadata.ownerEmail, ""),
     planId: stringFromMetadata(metadata.planId, "unknown"),
@@ -5140,6 +5143,7 @@ function toPrismaTenantCreateInput(tenant: IdentityTenant): PrismaTenantCreateIn
       legalName: tenant.legalName,
       monthlyRevenue: tenant.monthlyRevenue,
       notes: tenant.notes,
+      ...(tenant.onboarding ? { onboarding: tenant.onboarding } : {}),
       owner: tenant.owner,
       ownerEmail: tenant.ownerEmail,
       planId: tenant.planId,

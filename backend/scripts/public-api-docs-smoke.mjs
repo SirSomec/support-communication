@@ -36,6 +36,28 @@ const checks = [
       /sk_live_[A-Za-z0-9]{8,}/,
       /whsec_[A-Za-z0-9_]+/
     ]
+  },
+  {
+    file: "../docs/open-channel-api.md",
+    patterns: [
+      /`chat_accepted`, `chat_updated`, `chat_finished`, `client_attribute_updated`,\s*`offline_message`/,
+      /`invalid_client` \(401\), `invalid_request` \(400\)/,
+      /Офлайн-формы нет — `offline_message` зарезервировано, событие не эмитится/
+    ],
+    forbidden: [
+      /\bclient_updated\b/,
+      /\bunauthorized_client\b/,
+      /\bdepartment\b/
+    ]
+  },
+  {
+    file: "apps/api-gateway/src/integrations/open-channel/open-channel-admin.controller.ts",
+    patterns: [
+      /SUPPORTED_WEBHOOK_EVENTS = \["chat_accepted", "chat_updated", "chat_finished", "client_attribute_updated", "offline_message"\]/
+    ],
+    forbidden: [
+      /"client_updated"/
+    ]
   }
 ];
 

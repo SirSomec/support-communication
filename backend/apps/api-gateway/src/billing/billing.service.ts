@@ -440,29 +440,6 @@ export class BillingService {
       });
     }
 
-    const reserved = await this.activeReservedAmount(tenant.id, resource);
-    const projected = quota.used + reserved + requested;
-    if (projected > quota.limit) {
-      return createEnvelope({
-        service: QUOTA_SERVICE,
-        operation: "reserveQuota",
-        traceId: billingTraceId(QUOTA_SERVICE, "reserveQuota"),
-        status: "denied",
-        meta: apiMeta({ tenantId: tenant.id }),
-        data: {
-          decision: "deny",
-          limit: quota.limit,
-          projected,
-          requested,
-          reserved,
-          resource,
-          tenantId: tenant.id,
-          used: quota.used
-        },
-        error: { code: "quota_exceeded", message: `Quota ${resource} would be exceeded for tenant ${tenant.id}.` }
-      });
-    }
-
     const now = new Date();
     const createdAt = now.toISOString();
     const traceId = billingTraceId(QUOTA_SERVICE, "reserveQuota");
@@ -498,11 +475,45 @@ export class BillingService {
       usedBefore: quota.used
     };
 
-    let persisted: BillingQuotaReservation;
+    let atomicReservation: Awaited<ReturnType<BillingRepository["reserveQuotaAtomically"]>>;
     try {
-      persisted = await this.billingRepository.createQuotaReservation(reservation);
+      atomicReservation = await this.billingRepository.reserveQuotaAtomically({
+        limit: quota.limit,
+        reservation,
+        used: quota.used
+      });
     } catch {
       return errorEnvelope(QUOTA_SERVICE, "reserveQuota", "quota_reservation_persistence_failed", "Quota reservation could not be persisted.", {
+        idempotencyKey,
+        tenantId: tenant.id
+      });
+    }
+
+    if (atomicReservation.kind === "denied") {
+      const projected = quota.used + atomicReservation.reserved + requested;
+      return createEnvelope({
+        service: QUOTA_SERVICE,
+        operation: "reserveQuota",
+        traceId,
+        status: "denied",
+        meta: apiMeta({ tenantId: tenant.id }),
+        data: {
+          decision: "deny",
+          limit: quota.limit,
+          projected,
+          requested,
+          reserved: atomicReservation.reserved,
+          resource,
+          tenantId: tenant.id,
+          used: quota.used
+        },
+        error: { code: "quota_exceeded", message: `Quota ${resource} would be exceeded for tenant ${tenant.id}.` }
+      });
+    }
+
+    const persisted = atomicReservation.reservation;
+    if (atomicReservation.kind === "replay" && persisted.requestFingerprint !== requestFingerprint) {
+      return conflictEnvelope(QUOTA_SERVICE, "reserveQuota", "idempotency_key_reused", "Idempotency key was already used for a different quota reservation request.", {
         idempotencyKey,
         tenantId: tenant.id
       });
@@ -513,7 +524,7 @@ export class BillingService {
       operation: "reserveQuota",
       traceId: persisted.traceId,
       meta: apiMeta({ tenantId: tenant.id }),
-      data: quotaReservationResponseData(persisted, false, "quota.reserve")
+      data: quotaReservationResponseData(persisted, atomicReservation.kind === "replay", "quota.reserve")
     });
   }
 

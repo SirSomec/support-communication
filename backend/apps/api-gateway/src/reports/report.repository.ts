@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { type DurableStore, InMemoryStore } from "@support-communication/database";
 import { REPORT_COLUMN_OPTIONS, REPORT_METRIC_DEFINITION_VERSION } from "./report-definition.js";
 import type { ReportExportJob } from "./report.types.js";
@@ -14,9 +15,17 @@ export type ReportExportJobIdempotencyWriteResult =
   | { idempotencyKey: ReportIdempotencyRecord; status: "conflict" };
 
 export interface ClaimQueuedReportExportJobsInput {
+  leaseMs?: number;
   limit?: number;
   now?: Date;
   queue?: string;
+}
+
+export interface ClaimScheduledDigestDescriptorsInput {
+  leaseMs?: number;
+  limit?: number;
+  now: Date;
+  tenantId?: string;
 }
 
 export interface MetricDefinitionRecord {
@@ -330,6 +339,10 @@ interface PrismaReportDataClient {
   reportExportJob: {
     findMany(input: { orderBy: { createdAt: "asc" | "desc" }; take?: number; where?: PrismaReportExportJobWhereInput }): Promise<PrismaReportExportJobRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaReportExportJobRow | null>;
+    updateMany(input: {
+      data: Partial<PrismaReportExportJobUpdateInput> & { updatedAt?: Date };
+      where: PrismaReportExportJobWhereInput;
+    }): Promise<{ count: number }>;
     upsert(input: {
       create: PrismaReportExportJobCreateInput;
       update: PrismaReportExportJobUpdateInput;
@@ -375,6 +388,10 @@ interface PrismaReportDataClient {
   scheduledDigestDescriptor: {
     findMany(input: { orderBy: { dueAt: "asc" }; where?: PrismaScheduledDigestDescriptorWhereInput }): Promise<PrismaScheduledDigestDescriptorRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaScheduledDigestDescriptorRow | null>;
+    updateMany(input: {
+      data: { status: string; updatedAt: Date };
+      where: PrismaScheduledDigestDescriptorWhereInput;
+    }): Promise<{ count: number }>;
     upsert(input: {
       create: PrismaScheduledDigestDescriptorCreateInput;
       update: PrismaScheduledDigestDescriptorUpdateInput;
@@ -556,15 +573,20 @@ interface PrismaReportExportJobRow {
   status: string;
   statusKey: string;
   tenantId: string;
+  updatedAt: Date;
 }
 
 interface PrismaReportExportJobWhereInput {
+  id?: string;
   queue?: string;
-  statusKey?: string;
+  statusKey?: string | { in: string[] };
   tenantId?: string;
+  updatedAt?: Date;
 }
 
-interface PrismaReportExportJobCreateInput extends PrismaReportExportJobRow {}
+interface PrismaReportExportJobCreateInput extends Omit<PrismaReportExportJobRow, "updatedAt"> {
+  updatedAt?: Date;
+}
 
 type PrismaReportExportJobUpdateInput = Omit<PrismaReportExportJobCreateInput, "createdAt" | "id">;
 
@@ -644,8 +666,10 @@ type PrismaReportNotificationDescriptorUpdateInput = Omit<PrismaReportNotificati
 
 interface PrismaScheduledDigestDescriptorWhereInput {
   dueAt?: { lte: Date };
+  id?: string;
   status?: string;
   tenantId?: string;
+  updatedAt?: Date;
 }
 
 interface PrismaScheduledDigestDescriptorRow {
@@ -881,8 +905,16 @@ export class ReportRepository {
   async claimQueuedExportJobsAsync(input: ClaimQueuedReportExportJobsInput = {}): Promise<ReportExportJob[]> {
     const limit = normalizeClaimLimit(input.limit);
     const queue = normalizeExportQueue(input.queue);
-    const claimJob = (job: ReportExportJob): ReportExportJob => ({
+    const now = input.now ?? new Date();
+    const nowIso = now.toISOString();
+    const staleBefore = new Date(now.getTime() - normalizeClaimLeaseMs(input.leaseMs)).toISOString();
+    const claimJob = (job: ReportExportJob, claimToken: string): ReportExportJob => ({
       ...job,
+      filters: {
+        ...(job.filters ?? {}),
+        workerClaimToken: claimToken,
+        workerClaimedAt: nowIso
+      },
       progress: Math.max(job.progress, 20),
       queue,
       status: "Running",
@@ -892,15 +924,40 @@ export class ReportRepository {
     if (this.prismaClient) {
       const rows = await this.prismaClient.reportExportJob.findMany({
         orderBy: { createdAt: "asc" },
-        take: limit,
         where: {
           queue,
-          statusKey: "queued"
+          statusKey: { in: ["queued", "running"] }
         }
       });
       const claimed: ReportExportJob[] = [];
-      for (const row of rows) {
-        claimed.push(await this.saveExportJobAsync(claimJob(toReportExportJob(row))));
+      const candidates = rows
+        .filter((row) => row.statusKey === "queued" || row.updatedAt.toISOString() <= staleBefore)
+        .slice(0, limit);
+      for (const row of candidates) {
+        const claimToken = `report_claim_${randomUUID()}`;
+        const next = claimJob(toReportExportJob(row), claimToken);
+        const result = await this.prismaClient.reportExportJob.updateMany({
+          data: {
+            filters: clone(next.filters ?? {}),
+            progress: next.progress,
+            queue,
+            status: next.status,
+            statusKey: next.statusKey,
+            updatedAt: now
+          },
+          where: {
+            id: row.id,
+            statusKey: row.statusKey,
+            updatedAt: row.updatedAt
+          }
+        });
+        if (result.count !== 1) {
+          continue;
+        }
+        const persisted = await this.prismaClient.reportExportJob.findUnique({ where: { id: row.id } });
+        if (persisted) {
+          claimed.push(toReportExportJob(persisted));
+        }
       }
       return claimed;
     }
@@ -909,7 +966,11 @@ export class ReportRepository {
     this.store.update((state) => {
       const current = normalizeState(state);
       const claimableIds = current.exportJobs
-        .filter((job) => job.statusKey === "queued" && (job.queue ?? "report-export") === queue)
+        .filter((job) => (job.queue ?? "report-export") === queue)
+        .filter((job) => job.statusKey === "queued" || (
+          job.statusKey === "running"
+          && String(job.filters?.workerClaimedAt ?? job.createdAt) <= staleBefore
+        ))
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
         .slice(0, limit)
         .map((job) => job.id);
@@ -918,7 +979,7 @@ export class ReportRepository {
         if (!claimable.has(job.id)) {
           return job;
         }
-        const next = claimJob(job);
+        const next = claimJob(job, `report_claim_${randomUUID()}`);
         claimed.push(clone(next));
         return next;
       });
@@ -1122,6 +1183,87 @@ export class ReportRepository {
     }
 
     return this.listScheduledDigestDescriptors(filters);
+  }
+
+  claimScheduledDigestDescriptors(input: ClaimScheduledDigestDescriptorsInput): ScheduledDigestDescriptorRecord[] {
+    if (this.prismaClient) {
+      throw new Error("prisma_scheduled_digest_descriptors_async_required");
+    }
+
+    const { limit, nowIso, staleBefore } = normalizeScheduledDigestClaimInput(input);
+    const claimed: ScheduledDigestDescriptorRecord[] = [];
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const claimableIds = new Set(current.scheduledDigestDescriptors
+        .filter((descriptor) => input.tenantId === undefined || descriptor.tenantId === input.tenantId)
+        .filter((descriptor) => descriptor.dueAt <= nowIso)
+        .filter((descriptor) => descriptor.status === "due"
+          || (descriptor.status === "running" && descriptor.updatedAt <= staleBefore))
+        .sort(compareScheduledDigestDescriptors)
+        .slice(0, limit)
+        .map((descriptor) => descriptor.id));
+
+      return {
+        ...current,
+        scheduledDigestDescriptors: current.scheduledDigestDescriptors.map((descriptor) => {
+          if (!claimableIds.has(descriptor.id)) {
+            return descriptor;
+          }
+          const next = normalizeScheduledDigestDescriptor({
+            ...descriptor,
+            status: "running",
+            updatedAt: nowIso
+          });
+          claimed.push(clone(next));
+          return next;
+        })
+      };
+    });
+
+    return claimed;
+  }
+
+  async claimScheduledDigestDescriptorsAsync(input: ClaimScheduledDigestDescriptorsInput): Promise<ScheduledDigestDescriptorRecord[]> {
+    if (!this.prismaClient) {
+      return this.claimScheduledDigestDescriptors(input);
+    }
+
+    const { limit, now, staleBefore } = normalizeScheduledDigestClaimInput(input);
+    const rows = await this.prismaClient.scheduledDigestDescriptor.findMany({
+      orderBy: { dueAt: "asc" },
+      where: {
+        dueAt: { lte: now },
+        ...(input.tenantId !== undefined ? { tenantId: input.tenantId } : {})
+      }
+    });
+    const candidates = rows.map(toScheduledDigestDescriptorRecord)
+      .filter((descriptor) => descriptor.status === "due"
+        || (descriptor.status === "running" && descriptor.updatedAt <= staleBefore))
+      .slice(0, limit);
+    const claimed: ScheduledDigestDescriptorRecord[] = [];
+
+    for (const candidate of candidates) {
+      const result = await this.prismaClient.scheduledDigestDescriptor.updateMany({
+        data: {
+          status: "running",
+          updatedAt: now
+        },
+        where: {
+          id: candidate.id,
+          status: candidate.status,
+          updatedAt: new Date(candidate.updatedAt)
+        }
+      });
+      if (result.count !== 1) {
+        continue;
+      }
+      const row = await this.prismaClient.scheduledDigestDescriptor.findUnique({ where: { id: candidate.id } });
+      if (row) {
+        claimed.push(toScheduledDigestDescriptorRecord(row));
+      }
+    }
+
+    return claimed;
   }
 
   findScheduledDigestDescriptor(descriptorId: string, filters: ScheduledDigestDescriptorFilters = {}): ScheduledDigestDescriptorRecord | undefined {
@@ -2702,6 +2844,40 @@ function normalizeClaimLimit(value: number | undefined): number {
   }
 
   return normalized;
+}
+
+function normalizeClaimLeaseMs(value: number | undefined): number {
+  const normalized = value ?? 15 * 60_000;
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    throw new Error("report_export_claim_lease_invalid");
+  }
+  return normalized;
+}
+
+function normalizeScheduledDigestClaimInput(input: ClaimScheduledDigestDescriptorsInput): {
+  limit: number;
+  now: Date;
+  nowIso: string;
+  staleBefore: string;
+} {
+  const limit = input.limit ?? Number.MAX_SAFE_INTEGER;
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error("scheduled_digest_claim_limit_invalid");
+  }
+  const leaseMs = input.leaseMs ?? 15 * 60_000;
+  if (!Number.isInteger(leaseMs) || leaseMs <= 0) {
+    throw new Error("scheduled_digest_claim_lease_invalid");
+  }
+  if (!(input.now instanceof Date) || !Number.isFinite(input.now.getTime())) {
+    throw new Error("scheduled_digest_claim_now_invalid");
+  }
+
+  return {
+    limit,
+    now: input.now,
+    nowIso: input.now.toISOString(),
+    staleBefore: new Date(input.now.getTime() - leaseMs).toISOString()
+  };
 }
 
 function normalizeExportQueue(value: string | undefined): string {

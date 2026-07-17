@@ -103,4 +103,69 @@ describe("workspace audit contracts", () => {
     assert.deepEqual(items.map((item) => item.id), ["lc-fresh"]);
     assert.equal((response.data.page as Record<string, unknown>).totalRows, 1);
   });
+
+  it("defaults missing, blank, and unknown periods to 30 days", async () => {
+    const now = Date.now();
+    const service = new WorkspaceAuditService({
+      conversationRepository: {
+        listLifecycleEvents: async () => [
+          lifecycleEvent({ id: "lc-10d", occurredAt: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString() }),
+          lifecycleEvent({ id: "lc-45d", occurredAt: new Date(now - 45 * 24 * 60 * 60 * 1000).toISOString() })
+        ]
+      },
+      integrationRepository: { listChannelConnectionAuditEvents: () => [] }
+    });
+
+    for (const period of [undefined, "", "unexpected"]) {
+      const response = await service.fetchWorkspaceAuditEvents({ period }, { tenantId: TENANT_ID });
+      const items = response.data.items as Array<Record<string, unknown>>;
+      assert.deepEqual(items.map((item) => item.id), ["lc-10d"], `period=${String(period)}`);
+    }
+  });
+
+  it("applies every supported period boundary", async () => {
+    const now = Date.now();
+    const service = new WorkspaceAuditService({
+      conversationRepository: {
+        listLifecycleEvents: async () => [
+          lifecycleEvent({ id: "lc-1h", occurredAt: new Date(now - 60 * 60 * 1000).toISOString() }),
+          lifecycleEvent({ id: "lc-3d", occurredAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString() }),
+          lifecycleEvent({ id: "lc-20d", occurredAt: new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString() }),
+          lifecycleEvent({ id: "lc-100d", occurredAt: new Date(now - 100 * 24 * 60 * 60 * 1000).toISOString() }),
+          lifecycleEvent({ id: "lc-400d", occurredAt: new Date(now - 400 * 24 * 60 * 60 * 1000).toISOString() })
+        ]
+      },
+      integrationRepository: { listChannelConnectionAuditEvents: () => [] }
+    });
+    const expectedByPeriod = {
+      "24h": ["lc-1h"],
+      "7d": ["lc-1h", "lc-3d"],
+      "30d": ["lc-1h", "lc-3d", "lc-20d"],
+      "365d": ["lc-1h", "lc-3d", "lc-20d", "lc-100d"]
+    } as const;
+
+    for (const [period, expectedIds] of Object.entries(expectedByPeriod)) {
+      const response = await service.fetchWorkspaceAuditEvents({ period }, { tenantId: TENANT_ID });
+      const items = response.data.items as Array<Record<string, unknown>>;
+      assert.deepEqual(items.map((item) => item.id), expectedIds, `period=${period}`);
+    }
+  });
+
+  it("marks degraded source reads instead of silently presenting an empty complete audit", async () => {
+    const service = new WorkspaceAuditService({
+      conversationRepository: {
+        async listLifecycleEvents() {
+          throw new Error("conversation database unavailable");
+        }
+      },
+      integrationRepository: { listChannelConnectionAuditEvents: () => [] }
+    });
+
+    const response = await service.fetchWorkspaceAuditEvents({}, { tenantId: TENANT_ID });
+
+    assert.equal(response.status, "ok");
+    assert.equal(response.partial, true);
+    assert.deepEqual(response.data.unavailableSources, ["conversations"]);
+    assert.deepEqual(response.data.sourceHealth, { channels: "available", conversations: "unavailable" });
+  });
 });

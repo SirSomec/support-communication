@@ -1,6 +1,7 @@
 import { getServiceAdminAccessToken, getTenantAccessToken } from "../app/sessionStore.js";
 
 const DEFAULT_API_BASE_PATH = "/api/v1";
+const DEFAULT_API_TIMEOUT_MS = 30_000;
 
 let apiClientTestConfig = {};
 
@@ -40,7 +41,7 @@ export function buildApiUrl(path, query = {}) {
   return baseUrl ? url.toString() : `${url.pathname}${url.search}`;
 }
 
-export async function apiRequest(path, { authMode = "auto", body, headers = {}, method = "GET", operation, query, service } = {}) {
+export async function apiRequest(path, { authMode = "auto", body, headers = {}, method = "GET", operation, query, service, signal, timeoutMs } = {}) {
   const requestHeaders = {
     accept: "application/json",
     ...headers
@@ -67,9 +68,11 @@ export async function apiRequest(path, { authMode = "auto", body, headers = {}, 
     }
   }
 
+  const abortContext = createRequestAbortContext({ signal, timeoutMs });
   const requestInit = {
     headers: requestHeaders,
-    method
+    method,
+    signal: abortContext.signal
   };
 
   if (body !== undefined) {
@@ -111,6 +114,22 @@ export async function apiRequest(path, { authMode = "auto", body, headers = {}, 
 
     return envelope;
   } catch (error) {
+    if (abortContext.reason === "cancelled") {
+      return createApiErrorEnvelope({
+        code: "request_cancelled",
+        message: "Запрос отменён.",
+        operation,
+        service
+      });
+    }
+    if (abortContext.reason === "timeout") {
+      return createApiErrorEnvelope({
+        code: "request_timeout",
+        message: "Сервер не ответил вовремя. Попробуйте ещё раз.",
+        operation,
+        service
+      });
+    }
     const rawMessage = error instanceof Error ? error.message : "Network request failed.";
     const failureEnvelope = createApiErrorEnvelope({
       code: "network_error",
@@ -120,7 +139,43 @@ export async function apiRequest(path, { authMode = "auto", body, headers = {}, 
     });
     failureEnvelope.error.detail = rawMessage;
     return failureEnvelope;
+  } finally {
+    abortContext.cleanup();
   }
+}
+
+function createRequestAbortContext({ signal, timeoutMs }) {
+  const controller = new AbortController();
+  const configuredTimeout = Number(timeoutMs ?? getRuntimeConfigValue("timeoutMs", "VITE_API_TIMEOUT_MS", DEFAULT_API_TIMEOUT_MS));
+  const normalizedTimeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+    ? Math.min(Math.trunc(configuredTimeout), 120_000)
+    : DEFAULT_API_TIMEOUT_MS;
+  const context = {
+    cleanup: () => {},
+    reason: null,
+    signal: controller.signal
+  };
+  const cancelFromCaller = () => {
+    context.reason = "cancelled";
+    controller.abort(signal?.reason);
+  };
+
+  if (signal?.aborted) {
+    cancelFromCaller();
+  } else {
+    signal?.addEventListener("abort", cancelFromCaller, { once: true });
+  }
+  const timeout = globalThis.setTimeout(() => {
+    if (!controller.signal.aborted) {
+      context.reason = "timeout";
+      controller.abort(new DOMException("Request timed out", "TimeoutError"));
+    }
+  }, normalizedTimeout);
+  context.cleanup = () => {
+    globalThis.clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancelFromCaller);
+  };
+  return context;
 }
 
 const GENERIC_TECHNICAL_MESSAGES = new Set([

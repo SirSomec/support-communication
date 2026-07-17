@@ -31,6 +31,43 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.notEqual(secondPage[0]?.id, firstPage[0].id);
   });
 
+  it("pushes lifecycle cursor and limit into the Prisma query", async () => {
+    const { client, lifecycleEvents } = createFakePrismaConversationClient();
+    const repository = ConversationRepository.prisma({ client });
+    for (let index = 1; index <= 3; index += 1) {
+      const event = assignmentLifecycleEvent(`lifecycle-page-${index}`, `realtime-page-${index}`);
+      lifecycleEvents.set(`${event.tenantId}:${event.source}:${event.sourceEventId}`, {
+        ...event,
+        ingestedAt: new Date(`2026-07-16T10:00:0${index}.000Z`),
+        occurredAt: new Date(`2026-07-16T10:00:0${index}.000Z`)
+      });
+    }
+
+    const firstPage = await repository.listLifecycleEvents({ limit: 1, tenantId: "tenant-volga" });
+    const secondPage = await repository.listLifecycleEvents({
+      cursor: firstPage[0].id,
+      limit: 1,
+      tenantId: "tenant-volga"
+    });
+
+    assert.deepEqual(firstPage.map((event) => event.id), ["lifecycle-page-1"]);
+    assert.deepEqual(secondPage.map((event) => event.id), ["lifecycle-page-2"]);
+    assert.deepEqual(client.calls.conversationLifecycleEventFindMany, [
+      {
+        orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+        take: 1,
+        where: { tenantId: "tenant-volga" }
+      },
+      {
+        cursor: { id: "lifecycle-page-1" },
+        orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+        skip: 1,
+        take: 1,
+        where: { tenantId: "tenant-volga" }
+      }
+    ]);
+  });
+
   it("requires realtime scope and pages forward from an event cursor", async () => {
     const repository = ConversationRepository.inMemory();
     for (let index = 1; index <= 3; index += 1) {
@@ -819,13 +856,21 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
         lifecycleEvents.set(`${input.data.tenantId}:${input.data.source}:${input.data.sourceEventId}`, input.data);
         return input.data;
       },
-      findMany: async (input: { where: { conversationId?: string; eventType?: { in: string[] }; tenantId: string } }) => {
+      findMany: async (input: { cursor?: { id: string }; skip?: number; take: number; where: { conversationId?: string; eventType?: { in: string[] }; tenantId: string } }) => {
         calls.conversationLifecycleEventFindMany.push(input);
-        return Array.from(lifecycleEvents.values()).filter((event) =>
+        const rows = Array.from(lifecycleEvents.values()).filter((event) =>
           event.tenantId === input.where.tenantId
           && (!input.where.conversationId || event.conversationId === input.where.conversationId)
           && (!input.where.eventType || input.where.eventType.in.includes(event.eventType))
-        );
+        ).sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime() || left.id.localeCompare(right.id));
+        const cursorIndex = input.cursor ? rows.findIndex((event) => event.id === input.cursor?.id) : -1;
+        if (input.cursor && cursorIndex < 0) {
+          const error = new Error("Record to read does not exist") as Error & { code?: string };
+          error.code = "P2025";
+          throw error;
+        }
+        const start = cursorIndex >= 0 ? cursorIndex + Number(input.skip ?? 0) : 0;
+        return rows.slice(start, start + input.take);
       },
       findUnique: async (input: { where: { tenantId_source_sourceEventId: { source: string; sourceEventId: string; tenantId: string } } }) => {
         calls.conversationLifecycleEventFindUnique.push(input);
@@ -869,7 +914,7 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
     }
   };
 
-  return { client };
+  return { client, lifecycleEvents };
 }
 
 interface FakeConversationRowWithMessages {

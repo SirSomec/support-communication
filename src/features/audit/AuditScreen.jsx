@@ -5,6 +5,7 @@ import { lifecycleEventDetail } from "../../app/conversationApiMapper.js";
 import { auditService } from "../../services/auditService.js";
 import { copyTextToClipboard } from "../../services/clipboardService.js";
 import { MetricTile, ProductScreen, SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
+import { csvCell } from "./auditExport.js";
 
 const auditSourceOptions = ["Все источники", "Диалоги", "Качество", "Боты", "Каналы"];
 const auditSeverityOptions = ["Все уровни", "critical", "warning", "info"];
@@ -84,15 +85,11 @@ function mapAuditEvent(event) {
   };
 }
 
-function csvCell(value) {
-  const text = String(value ?? "");
-  return /[";\n]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
-}
-
 export function AuditScreen({ onBack, onToast, access }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [coverageWarning, setCoverageWarning] = useState("");
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState("Все источники");
   const [severityFilter, setSeverityFilter] = useState("Все уровни");
@@ -113,6 +110,7 @@ export function AuditScreen({ onBack, onToast, access }) {
     async function loadEvents() {
       setLoading(true);
       setError("");
+      setCoverageWarning("");
       const response = await auditService.fetchWorkspaceAuditEvents({
         period: auditPeriodValue(periodFilter)
       });
@@ -129,6 +127,10 @@ export function AuditScreen({ onBack, onToast, access }) {
       }
 
       const nextEvents = (response.data?.items ?? []).map(mapAuditEvent);
+      const unavailableSources = Array.isArray(response.data?.unavailableSources) ? response.data.unavailableSources : [];
+      if (response.partial || unavailableSources.length) {
+        setCoverageWarning(`Журнал загружен частично. Недоступные источники: ${unavailableSources.join(", ") || "не определены"}.`);
+      }
       setEvents(nextEvents);
       setSelectedEventId((current) => current && nextEvents.some((event) => event.id === current)
         ? current
@@ -250,6 +252,7 @@ export function AuditScreen({ onBack, onToast, access }) {
       }
     >
       {error ? <div className="entity-empty"><strong>{error}</strong></div> : null}
+      {coverageWarning ? <div className="entity-empty"><strong>{coverageWarning}</strong></div> : null}
       <div className="metric-strip">
         <MetricTile icon={<FileClock size={21} />} label="Событий" value={events.length} detail="за выбранный период" />
         <MetricTile icon={<ShieldAlert size={21} />} label="Критичные" value={criticalCount} detail="требуют внимания" tone="danger" />

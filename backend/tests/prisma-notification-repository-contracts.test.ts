@@ -11,6 +11,42 @@ import {
 } from "../apps/api-gateway/src/notifications/notification.repository.ts";
 
 describe("Prisma-backed notification repository contracts", () => {
+  it("atomically claims a browser-push descriptor across Prisma repository instances", async () => {
+    const { client } = createFakePrismaNotificationClient();
+    const firstRepository = NotificationRepository.prisma({ client });
+    const secondRepository = NotificationRepository.prisma({ client });
+    await firstRepository.saveNotificationDeliveryDescriptorAsync({
+      createdAt: "2026-07-03T10:00:00.000Z",
+      endpointHash: "sha256:claim",
+      id: "notif_delivery_prisma_claim",
+      notificationId: "notif-prisma-claim",
+      payload: { body: "Body", title: "Title", url: "/#/app" },
+      queue: "browser-push",
+      status: "queued",
+      subscriptionId: "push_sub_prisma_claim",
+      tenantId: "tenant-volga",
+      traceId: "trc_notification_prisma_claim",
+      type: "browser-push.critical-alert.test",
+      userId: "usr-volga-admin"
+    });
+
+    const claims = await Promise.all([
+      firstRepository.claimNotificationDeliveryDescriptorsAsync({
+        leaseMs: 60_000,
+        now: "2026-07-03T10:01:00.000Z",
+        queue: "browser-push"
+      }),
+      secondRepository.claimNotificationDeliveryDescriptorsAsync({
+        leaseMs: 60_000,
+        now: "2026-07-03T10:01:00.000Z",
+        queue: "browser-push"
+      })
+    ]);
+
+    assert.equal(claims.flat().length, 1);
+    assert.equal(claims.flat()[0]?.status, "processing");
+  });
+
   it("bootstraps the default notification repository from a Prisma client factory", async () => {
     const { calls, client } = createFakePrismaNotificationClient();
 
@@ -288,6 +324,20 @@ function createFakePrismaNotificationClient() {
         findUnique(input: { where: { id: string } }) {
           return Promise.resolve(notificationDeliveryDescriptors.get(input.where.id) ?? null);
         },
+        updateMany(input: {
+          data: Partial<FakeNotificationDeliveryDescriptorUpdateInput>;
+          where: Record<string, unknown>;
+        }) {
+          let count = 0;
+          for (const [id, row] of notificationDeliveryDescriptors) {
+            if (!matchesWhere(row, input.where)) {
+              continue;
+            }
+            notificationDeliveryDescriptors.set(id, { ...row, ...input.data });
+            count += 1;
+          }
+          return Promise.resolve({ count });
+        },
         upsert(input: {
           create: FakeNotificationDeliveryDescriptorCreateInput;
           update: FakeNotificationDeliveryDescriptorUpdateInput;
@@ -444,6 +494,9 @@ function matchesWhere(row: Record<string, unknown>, where: Record<string, unknow
     if (value && typeof value === "object" && "in" in value) {
       const allowed = (value as { in: unknown }).in;
       return Array.isArray(allowed) && allowed.includes(rowValue);
+    }
+    if (value instanceof Date && rowValue instanceof Date) {
+      return value.getTime() === rowValue.getTime();
     }
 
     return rowValue === value;

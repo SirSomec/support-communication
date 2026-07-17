@@ -116,6 +116,54 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
         TypeError
       );
     });
+
+    it("takes a tenant/operator advisory lock before changing a Prisma interval", async () => {
+      const calls: string[] = [];
+      const rows: Array<Record<string, unknown>> = [];
+      const transaction = {
+        async $queryRawUnsafe(query: string, key: unknown) {
+          calls.push(`${query}:${String(key)}`);
+          return [];
+        },
+        async $transaction<T>(callback: (client: unknown) => Promise<T>) {
+          return callback(transaction);
+        },
+        operatorPresenceInterval: {
+          async create({ data }: { data: Record<string, unknown> }) {
+            const row = {
+              ...data,
+              changedBy: data.changedBy ?? null,
+              endedAt: null,
+              startedAt: data.startedAt as Date
+            };
+            rows.push(row);
+            return row;
+          },
+          async findMany() {
+            calls.push("findMany");
+            return [];
+          },
+          async updateMany() {
+            calls.push("updateMany");
+            return { count: 0 };
+          }
+        }
+      };
+      const repository = OperatorPresenceRepository.prisma({ client: transaction as never });
+
+      await repository.setStatus({ operatorId: "operator-anna", status: "online", tenantId: TENANT });
+
+      assert.match(calls[0], /pg_advisory_xact_lock/);
+      assert.match(calls[0], /tenant-volga:operator-anna$/);
+      assert.equal(calls[1], "findMany");
+      assert.equal(rows.length, 1);
+    });
+
+    it("enforces one open Prisma interval per tenant and operator in the migration", () => {
+      const migration = readFileSync(new URL("../prisma/migrations/202607170002_operator_presence_open_uniqueness/migration.sql", import.meta.url), "utf8");
+      assert.match(migration, /CREATE UNIQUE INDEX "operator_presence_tenant_operator_open_uidx"/);
+      assert.match(migration, /WHERE "ended_at" IS NULL/);
+    });
   });
 
   describe("status catalog", () => {

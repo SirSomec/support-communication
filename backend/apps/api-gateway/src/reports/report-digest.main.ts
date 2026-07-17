@@ -42,16 +42,27 @@ export async function runReportDigestWorkerFromEnv(
     let completed = 0;
     let failed = 0;
     for (const descriptor of claim.claimed) {
-      const result = await queueScheduledDigestExportJob({
-        descriptor,
-        now,
-        reportRepository,
-        reportService
-      });
-      if (result.descriptor.status === "completed") {
-        completed += 1;
-      } else {
+      try {
+        const result = await queueScheduledDigestExportJob({
+          descriptor,
+          now,
+          reportRepository,
+          reportService
+        });
+        if (result.descriptor.status === "completed") {
+          completed += 1;
+        } else {
+          failed += 1;
+        }
+      } catch (error) {
         failed += 1;
+        writeStructuredLog("error", "Scheduled report digest failed", {
+          descriptorId: descriptor.id,
+          error: error instanceof Error ? error.message : String(error),
+          operation: "report.digest.queue",
+          service: "report-digest-worker",
+          tenantId: descriptor.tenantId
+        });
       }
     }
 

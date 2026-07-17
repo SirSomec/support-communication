@@ -356,13 +356,6 @@ export function getLoadTestRunStatus(
   return operationsRepository.findLoadTestRunExecution(runId);
 }
 
-export function getLoadTestRunStatusAsync(
-  operationsRepository: OperationsRepository,
-  runId: string
-): Promise<OperationsLoadTestRunExecutionRecord | undefined> {
-  return operationsRepository.findLoadTestRunExecutionAsync(runId);
-}
-
 export function getLoadTestRunMetrics(
   operationsRepository: OperationsRepository,
   runId: string
@@ -370,25 +363,11 @@ export function getLoadTestRunMetrics(
   return operationsRepository.findLoadTestRunMetrics(runId);
 }
 
-export function getLoadTestRunMetricsAsync(
-  operationsRepository: OperationsRepository,
-  runId: string
-): Promise<OperationsLoadTestRunMetricsRecord | undefined> {
-  return operationsRepository.findLoadTestRunMetricsAsync(runId);
-}
-
 export function getLoadTestRunErrorSummary(
   operationsRepository: OperationsRepository,
   runId: string
 ): OperationsLoadTestRunErrorSummaryRecord | undefined {
   return operationsRepository.findLoadTestRunErrorSummary(runId);
-}
-
-export function getLoadTestRunErrorSummaryAsync(
-  operationsRepository: OperationsRepository,
-  runId: string
-): Promise<OperationsLoadTestRunErrorSummaryRecord | undefined> {
-  return operationsRepository.findLoadTestRunErrorSummaryAsync(runId);
 }
 
 export function createLoadTestRunnerFailureEnvelope(

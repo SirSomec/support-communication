@@ -6,6 +6,7 @@ import { runBotRuntimeReconciliationOnce } from "../apps/api-gateway/src/automat
 import { ConversationRepository, createEmptyConversationState } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
 import { InMemoryOutboxStore } from "@support-communication/events";
+import { metricsRegistry, resetMetricsRegistry } from "@support-communication/observability";
 
 function automation(kind: "handoff" | "message") {
   const state = createEmptyAutomationState();
@@ -44,6 +45,34 @@ async function createResolvedStep(repository: AutomationRepository) {
 }
 
 describe("bot runtime side-effect reconciliation", () => {
+  it("records a bounded delivery-failure metric when reconciliation fails", async () => {
+    resetMetricsRegistry();
+    try {
+      const automationRepository = automation("message");
+      await createStep(automationRepository);
+
+      const result = await runBotRuntimeReconciliationOnce({
+        automationRepository,
+        conversationRepository: ConversationRepository.inMemory(createEmptyConversationState()),
+        now: "2026-07-11T11:00:01.000Z"
+      });
+
+      assert.equal(result.failed, 1);
+      const metric = metricsRegistry().snapshot().find((item) => item.name === "bot_delivery_failures_total");
+      assert.ok(metric && metric.type === "counter");
+      assert.deepEqual(metric.samples, [{
+        labels: {
+          kind: "message",
+          scenario_id: "bot-1",
+          tenant_id: "tenant-1"
+        },
+        value: 1
+      }]);
+    } finally {
+      resetMetricsRegistry();
+    }
+  });
+
   it("recovers a crash after real descriptor+outbox commit without creating duplicates", async () => {
     const automationRepository = automation("message");
     const conversationRepository = conversations();

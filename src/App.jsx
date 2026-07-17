@@ -77,7 +77,9 @@ function App() {
     conversationItems,
     error: inboxError,
     loadConversationDetail,
+    loadInboxPage,
     loading: inboxLoading,
+    pagination: inboxPagination,
     refreshInbox,
     setClosedIds,
     setConversationItems,
@@ -181,8 +183,16 @@ function App() {
       return;
     }
 
-    loadedDetailIdRef.current = activeConversationId;
-    void loadConversationDetail(activeConversationId, { force: true });
+    let active = true;
+    void loadConversationDetail(activeConversationId, { force: true, retryCount: 1 }).then((result) => {
+      if (active && result?.ok) {
+        loadedDetailIdRef.current = activeConversationId;
+      }
+    });
+
+    return () => {
+      active = false;
+    };
   }, [activeConversationId, conversationItems, inboxLoading, loadConversationDetail, tenantSession.authenticated]);
   const selectedTopic = topics[selected.id] ?? "";
   // Канал ответа: оператор выбирает, куда писать клиенту; по умолчанию —
@@ -575,6 +585,7 @@ function App() {
               draft={draft}
               filter={filter}
               isClosed={isClosed}
+              inboxPageLoading={inboxLoading}
               onAiSuggestionAction={handleAiSuggestionAction}
               onAttachFiles={handleAttachFiles}
               onAttachmentRemove={handleRemoveAttachment}
@@ -584,6 +595,7 @@ function App() {
               onDialogAction={handleDialogAction}
               onEnsureConversationLoaded={loadConversationDetail}
               onNavigateToAppeal={handleNavigateToAppeal}
+              onInboxPageChange={loadInboxPage}
               onAssignment={(payload) => applyConversationAssignment(selected.id, payload)}
               onFilter={setFilter}
               onQuery={setQuery}
@@ -598,6 +610,7 @@ function App() {
               onTagsApply={handleTagsApply}
               onTopic={handleTopicChange}
               operatorId={tenantSession.operator?.id ?? ""}
+              pagination={inboxPagination}
               query={query}
               queueFilters={queueFilters}
               replyChannel={replyChannel}

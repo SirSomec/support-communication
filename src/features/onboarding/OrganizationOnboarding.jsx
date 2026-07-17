@@ -31,7 +31,8 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     name: "",
     slug: "",
     region: "ru-1",
-    industry: "retail"
+    industry: "retail",
+    domain: ""
   });
   const [plan, setPlan] = useState({
     id: "Growth",
@@ -122,7 +123,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     setNotice({ tone: "info", text: "Создаем организацию..." });
 
     try {
-      const provisionPayload = mapOnboardingFormToProvisionPayload({ admin, employees, plan, tenant });
+      const provisionPayload = mapOnboardingFormToProvisionPayload({ admin, employees, limits, plan, tenant });
       const provisionResponse = await tenantProvisionService.provisionOrganization(provisionPayload);
 
       if (provisionResponse.status !== "ok" || !provisionResponse.data?.tenant) {

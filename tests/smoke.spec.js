@@ -1158,24 +1158,18 @@ test("settings expose webhooks api keys and security controls", async ({ page })
   await page.locator("#settings-tab-api").click();
   await expect(page.locator(".api-governance-panel")).toContainText("API-ключи");
   const productionKey = page.locator(".api-key-card").filter({ hasText: "Production SDK key" });
-  if (await productionKey.count()) {
-    await productionKey.locator("button.api-key-rotate").click();
-    await expect(productionKey).toContainText("Ротация в очереди");
-    await expect(page.locator(".toast")).toContainText("prod-key");
-  } else {
-    await expect(page.locator(".api-governance-panel")).toContainText("Webhook endpoints");
-  }
+  await expect(productionKey).toHaveCount(1);
+  await productionKey.locator("button.api-key-rotate").click();
+  await expect(productionKey).toContainText("Ротация в очереди");
+  await expect(page.locator(".toast")).toContainText("prod-key");
 
   const vkWebhook = page.locator(".webhook-endpoint").filter({ hasText: "VK inbound" });
-  if (await vkWebhook.count()) {
-    await vkWebhook.click();
-    await expect(page.locator(".webhook-detail")).toContainText("HMAC SHA-256");
-    await page.locator(".webhook-delivery-row").filter({ hasText: "signature_failed" }).locator("button").click();
-    await expect(page.locator(".webhook-delivery-row").filter({ hasText: "message_new" })).toContainText("replay_queued");
-    await expect(page.locator(".toast")).toContainText("повтор доставки поставлен в очередь");
-  } else {
-    await expect(page.locator(".webhook-detail")).toContainText("endpoint");
-  }
+  await expect(vkWebhook).toHaveCount(1);
+  await vkWebhook.click();
+  await expect(page.locator(".webhook-detail")).toContainText("HMAC SHA-256");
+  await page.locator(".webhook-delivery-row").filter({ hasText: "signature_failed" }).locator("button").click();
+  await expect(page.locator(".webhook-delivery-row").filter({ hasText: "message_new" })).toContainText("replay_queued");
+  await expect(page.locator(".toast")).toContainText("повтор доставки поставлен в очередь");
   await expectNoElementOverflow(page, ".admin-workspace-layout");
   await expectNoElementOverflow(page, ".api-governance-panel");
   await expectNoElementOverflow(page, ".webhook-workspace");

@@ -1,8 +1,13 @@
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const releaseLocalCredentialEnv = Object.freeze({
+  AI_CONNECTIONS_MASTER_KEY: randomBytes(32).toString("base64"),
+  PROVIDER_CREDENTIAL_MASTER_KEY: randomBytes(32).toString("base64")
+});
 
 const providerRuntimeEnvNames = [
   "AI_CONNECTIONS_KEY_VERSION",
@@ -210,7 +215,9 @@ function stepEnv(step) {
   if (typeof step !== "string" && step.scrubProviderEnv) {
     scrubProviderEnv(env);
   }
-  return typeof step === "string" ? env : { ...env, ...step.env };
+  return typeof step === "string"
+    ? { ...env, ...releaseLocalCredentialEnv }
+    : { ...env, ...releaseLocalCredentialEnv, ...step.env };
 }
 
 function scrubProviderEnv(env) {

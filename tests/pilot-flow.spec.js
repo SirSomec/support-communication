@@ -4,9 +4,6 @@ const demoUrl = process.env.PILOT_WIDGET_DEMO_URL ?? "http://127.0.0.1:5174/demo
 const appUrl = process.env.PILOT_OPERATOR_APP_URL ?? "http://127.0.0.1:5173";
 
 test("widget demo page loads and SupportWidget.init is available", async ({ page }) => {
-  const demoReachable = await isUrlReachable(demoUrl);
-  test.skip(!demoReachable, `Widget demo is unavailable: ${demoUrl}`);
-
   await page.goto(demoUrl, { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: /Support Widget/i })).toBeVisible();
 
@@ -202,15 +199,6 @@ test("notification center loads API-backed inbox", async ({ page, request }) => 
   await expect(page.locator(".notification-drawer")).toBeVisible();
   await expect(page.locator(".notification-list .notification-item").first()).toBeVisible();
 });
-
-async function isUrlReachable(url) {
-  try {
-    const response = await fetch(url, { method: "GET" });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
 
 function uniqueOutboundPhone() {
   const suffix = String(Date.now()).slice(-7).padStart(7, "0");

@@ -6,6 +6,7 @@ import {
   IdentityRepository,
   hashPasswordCredential,
   type IdentityRbacRoleGrant,
+  type IdentityTenant,
   type IdentityTenantUser
 } from "./identity.repository.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
@@ -17,8 +18,10 @@ const SERVICE = "tenantProvisionService";
 interface TenantProvisionPayload {
   admin?: {
     email?: string;
+    mfa?: boolean;
     name?: string;
     password?: string;
+    role?: string;
   };
   channel?: {
     domain?: string;
@@ -31,10 +34,19 @@ interface TenantProvisionPayload {
     team?: string;
   }>;
   plan?: {
+    billingCycle?: string;
     id?: string;
     trial?: boolean;
   };
+  limits?: {
+    afterHoursBot?: boolean;
+    aiAssist?: boolean;
+    concurrentDialogs?: number;
+    dailyMessages?: number;
+    operatorLimit?: number;
+  };
   tenant?: {
+    industry?: string;
     name?: string;
     region?: string;
     slug?: string;
@@ -92,13 +104,22 @@ export class TenantProvisionService {
     const adminName = String(payload.admin?.name ?? "").trim();
     const adminEmail = String(payload.admin?.email ?? "").trim().toLowerCase();
     const adminPassword = String(payload.admin?.password ?? "");
+    const adminRole = normalizeProvisionAdminRole(payload.admin?.role);
+    const mfaRequired = payload.admin?.mfa !== false;
     const channelDomain = String(payload.channel?.domain ?? "").trim();
+    const billingCycle = payload.plan?.billingCycle === "annual" ? "annual" : "monthly";
+    const industry = String(payload.tenant?.industry ?? "").trim().slice(0, 80) || "unspecified";
+    const limits = normalizeProvisionLimits(payload.limits);
 
     if (!tenantName || !tenantSlug || !adminName || !adminEmail || !adminPassword) {
       return invalidProvision(traceId, "tenant_provision_payload_invalid", "Tenant, admin email/name, and admin password are required.");
     }
 
-    if (channelDomain && !isValidChannelDomain(channelDomain)) {
+    if (!channelDomain) {
+      return invalidProvision(traceId, "tenant_provision_channel_domain_required", "A real SDK channel domain is required.");
+    }
+
+    if (!isValidChannelDomain(channelDomain)) {
       return invalidProvision(traceId, "tenant_provision_channel_domain_invalid", "Channel domain must be a valid hostname.");
     }
 
@@ -137,6 +158,13 @@ export class TenantProvisionService {
         monthlyRevenue: 0,
         name: tenantName,
         notes: "Provisioned through onboarding.",
+        onboarding: {
+          adminRole,
+          billingCycle,
+          industry,
+          limits,
+          mfaRequired
+        },
         owner: adminName,
         ownerEmail: adminEmail,
         planId,
@@ -179,10 +207,10 @@ export class TenantProvisionService {
         id: `usr-${randomUUID()}`,
         inviteStatus: "accepted",
         lastActiveAt: new Date().toISOString(),
-        mfa: "disabled",
+        mfa: mfaRequired ? "required" : "disabled",
         name: adminName,
         risk: "low",
-        role: "Owner",
+        role: adminRole,
         sessions: 0,
         status: "active",
         supportNotes: "Created by tenant onboarding.",
@@ -282,8 +310,7 @@ export class TenantProvisionService {
         userId: user.id
       });
 
-      const domain = channelDomain || "example.test";
-      const embedSnippet = `<script src="https://${domain}/sdk.js" data-api-key="${rawPublicApiKey}" data-tenant-id="${tenantId}" data-channel="${String(payload.channel?.type ?? "sdk").trim() || "sdk"}"></script>`;
+      const embedSnippet = `<script src="https://${channelDomain}/sdk.js" data-api-key="${rawPublicApiKey}" data-tenant-id="${tenantId}" data-channel="${String(payload.channel?.type ?? "sdk").trim() || "sdk"}"></script>`;
 
       return createEnvelope({
         service: SERVICE,
@@ -371,6 +398,28 @@ function normalizeSlug(input: string | undefined): string {
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function normalizeProvisionAdminRole(value: string | undefined): "Admin" | "Owner" {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "admin" || normalized === "administrator" || normalized === "администратор"
+    ? "Admin"
+    : "Owner";
+}
+
+function normalizeProvisionLimits(input: TenantProvisionPayload["limits"]): NonNullable<IdentityTenant["onboarding"]>["limits"] {
+  return {
+    afterHoursBot: Boolean(input?.afterHoursBot),
+    aiAssist: input?.aiAssist !== false,
+    concurrentDialogs: boundedInteger(input?.concurrentDialogs, 12, 1, 100),
+    dailyMessages: boundedInteger(input?.dailyMessages, 5000, 100, 10_000_000),
+    operatorLimit: boundedInteger(input?.operatorLimit, 8, 1, 10_000)
+  };
+}
+
+function boundedInteger(value: number | undefined, fallback: number, minimum: number, maximum: number): number {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
 }
 
 function isValidChannelDomain(domain: string): boolean {

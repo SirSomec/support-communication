@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { assertCredentialMasterKeySafety } from "@support-communication/config";
 import { writeStructuredLog } from "@support-communication/observability";
 import { configureAutomationRepository } from "../automation/bootstrap.js";
 import { AutomationService } from "../automation/automation.service.js";
@@ -27,6 +28,7 @@ interface TelegramPollingRuntimeConfig {
 }
 
 export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = process.env): void {
+  assertCredentialMasterKeySafety(source, { required: ["AI_CONNECTIONS_MASTER_KEY"] });
   const config = loadTelegramPollingRuntimeConfig(source);
   const conversationRepository = configureConversationRepository(source);
   const automationService = new AutomationService(configureAutomationRepository(source));

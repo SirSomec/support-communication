@@ -38,7 +38,7 @@ export const planOptions = [
 export const employeeRoles = ["Оператор", "Старший оператор", "Администратор", "Аудитор"];
 
 export const stepRequirements = {
-  tenant: "Укажите название организации (от 2 символов) и slug (от 3 символов).",
+  tenant: "Укажите название организации, slug и реальный домен сайта для SDK.",
   plan: "Выберите тариф.",
   admin: "Заполните имя, рабочий email и пароль от 8 символов.",
   limits: "Лимиты операторов и диалогов — больше нуля, сообщений в день — от 100.",
@@ -68,7 +68,9 @@ export function getCompletion({
   tenant
 }) {
   return {
-    tenant: tenant.name.trim().length >= 2 && tenant.slug.trim().length >= 3,
+    tenant: tenant.name.trim().length >= 2
+      && tenant.slug.trim().length >= 3
+      && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(String(tenant.domain ?? "").trim()),
     plan: Boolean(plan.id),
     admin: admin.name.trim().length >= 2
       && hasEmailShape(admin.email)

@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { __test__ } from "../src/index.js";
+
+test("stage-key demo snippets select the stage environment explicitly", () => {
+  const demo = readFileSync(new URL("../public/demo.html", import.meta.url), "utf8");
+  assert.match(demo, /<script src="\/widget\.js"><\/script>/);
+  assert.doesNotMatch(demo, /\/dist\/widget\.js/);
+  const snippets = [...demo.matchAll(/SupportWidget\.init\(\{([\s\S]*?)\}\);/g)].map((match) => match[1]);
+  assert.equal(snippets.length, 2);
+  for (const snippet of snippets) {
+    assert.match(snippet, /environment:\s*"stage"/);
+    assert.match(snippet, /publicKey:\s*"sk_stage_/);
+  }
+});
 
 test("utm parameters are captured from the first-visit query string", () => {
   const utm = __test__.parseUtmParams("?utm_source=ads&utm_medium=cpc&utm_campaign=spring&x=1");
@@ -60,6 +73,36 @@ test("page callbacks fan out to every alias prefix", () => {
   } finally {
     delete globalThis.window;
   }
+});
+
+test("accepted invitations require and retain a scoped conversation session", () => {
+  assert.deepEqual(__test__.acceptedInvitationSession({
+    conversationId: "conv-1",
+    visitorSessionToken: "visitor-token"
+  }), {
+    conversationId: "conv-1",
+    visitorSessionToken: "visitor-token"
+  });
+  assert.throws(() => __test__.acceptedInvitationSession({ conversationId: "conv-1" }), /conversation session/);
+});
+
+test("history clearing rotates every live anonymous identity field", () => {
+  const localValues = new Map([["support-widget:subject-id", "visitor-old"]]);
+  const sessionValues = new Map([["support-widget:session-id", "session-old"]]);
+  const storage = (values) => ({
+    getItem: (key) => values.get(key) ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, value)
+  });
+  const target = { externalId: "visitor-old", sessionId: "session-old", subjectId: "visitor-old" };
+
+  __test__.resetWidgetIdentity(target, storage(localValues), storage(sessionValues));
+
+  assert.match(target.subjectId, /^visitor-/);
+  assert.match(target.sessionId, /^session-/);
+  assert.notEqual(target.subjectId, "visitor-old");
+  assert.notEqual(target.sessionId, "session-old");
+  assert.equal(target.externalId, target.subjectId);
 });
 
 test("a follow-up conversation resets conversation-scoped rating and accept flags", () => {

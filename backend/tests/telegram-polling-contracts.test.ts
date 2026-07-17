@@ -659,6 +659,7 @@ describe("telegram polling ingress contracts", () => {
       },
       integrationRepository: {
         listTelegramConnections: () => [{
+          channelConnectionId: "telegram-outbound-primary",
           botId: "123456",
           botToken: "123456:support_bot_token",
           botUsername: "support_bot",
@@ -695,6 +696,53 @@ describe("telegram polling ingress contracts", () => {
       disable_web_page_preview: true,
       text: "Operator reply"
     });
+  });
+
+  it("sends through the telegram connection that owns the conversation", async () => {
+    const urls: string[] = [];
+    const connection = (channelConnectionId: string, botToken: string) => ({
+      botId: botToken.split(":")[0],
+      botToken,
+      botUsername: channelConnectionId,
+      channelConnectionId,
+      createdAt: "2026-07-17T10:00:00.000Z",
+      status: "active" as const,
+      tenantId: "tenant-telegram-multiple",
+      tokenPreview: `${botToken.split(":")[0]}:****`,
+      updatedAt: "2026-07-17T10:00:00.000Z",
+      webhookSecret: `secret-${channelConnectionId}`
+    });
+    const dispatcher = createTelegramOutboundMessageDispatcher({
+      apiBaseUrl: "https://telegram.provider.example.test",
+      fetcher: async (url: string) => {
+        urls.push(url);
+        return { json: async () => ({ ok: true }), ok: true, status: 200 };
+      },
+      integrationRepository: {
+        listTelegramConnections: () => [
+          connection("telegram-first", "111111:first_bot_token"),
+          connection("telegram-owner", "222222:owner_bot_token")
+        ]
+      }
+    });
+    const request = {
+      channel: "Telegram",
+      chatId: "99001122",
+      conversationId: "conversation-telegram-owner",
+      descriptorId: "delivery-telegram-owner",
+      idempotencyKey: "telegram-owner-key",
+      messageId: "msg-telegram-owner",
+      tenantId: "tenant-telegram-multiple",
+      text: "Owner bot reply",
+      traceId: "trc-telegram-owner"
+    };
+
+    const delivered = await dispatcher.deliverMessage({ ...request, channelConnectionId: "telegram-owner" });
+    const ambiguous = await dispatcher.deliverMessage(request);
+
+    assert.equal(delivered?.status, "delivered");
+    assert.deepEqual(urls, ["https://telegram.provider.example.test/bot222222:owner_bot_token/sendMessage"]);
+    assert.deepEqual(ambiguous, { status: "failed", reason: "telegram_connection_not_found" });
   });
 });
 

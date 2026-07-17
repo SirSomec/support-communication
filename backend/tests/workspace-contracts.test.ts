@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, it } from "node:test";
 import { createDeterministicObjectStorageSigner, createS3CompatibleObjectStorageSigner } from "../apps/api-gateway/src/workspace/object-storage.ts";
+import { createBillingFileUploadQuotaChecker } from "../apps/api-gateway/src/workspace/workspace-quota.ts";
 import { WorkspaceRepository, type ClientProfileRecord, type KnowledgeArticle, type TemplateRecord } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 import { WorkspaceService as RuntimeWorkspaceService, type WorkspaceRequestContext } from "../apps/api-gateway/src/workspace/workspace.service.ts";
 import { bootstrapWorkspaceState } from "../apps/api-gateway/src/workspace/seed.ts";
@@ -329,6 +330,15 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.equal(missingReason.status, "invalid");
     assert.equal(missingReason.error?.code, "reason_required");
 
+    const missingProfile = await workspace.mergeClientProfiles({
+      primaryProfileId: "src_sdk_maria",
+      candidateProfileId: "src_missing",
+      reason: "Duplicate customer confirmed by support"
+    });
+    assert.equal(missingProfile.status, "not_found");
+    assert.equal(missingProfile.error?.code, "client_profile_not_found");
+    assert.deepEqual(missingProfile.data.missingProfileIds, ["src_missing"]);
+
     const unmerge = await workspace.unmergeClientProfile({
       primaryProfileId: "src_sdk_maria",
       detachedProfileId: "src_telegram_dmitry",
@@ -337,6 +347,14 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.equal(unmerge.status, "ok");
     assert.equal(unmerge.data.conflictResolution, "manual_detach");
     assert.match(unmerge.data.auditEvent.id, /^evt_client_merge_/);
+
+    const missingDetachedProfile = await workspace.unmergeClientProfile({
+      primaryProfileId: "src_sdk_maria",
+      detachedProfileId: "src_missing",
+      reason: "Manual detach after conflict review"
+    });
+    assert.equal(missingDetachedProfile.status, "not_found");
+    assert.equal(missingDetachedProfile.error?.code, "client_profile_not_found");
   });
 
   it("returns client segment descriptors and filters profiles by segment", async () => {
@@ -721,6 +739,43 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.deepEqual(signUploadCalls, []);
     assert.deepEqual(saveCalls, []);
     assert.equal(JSON.stringify(denied).includes("objects/obj_"), false);
+  });
+
+  it("wires file upload quota checks to billing storage usage", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const checker = createBillingFileUploadQuotaChecker({
+      checkQuota: async (payload) => {
+        calls.push(payload as Record<string, unknown>);
+        return {
+          data: { decision: "deny", limit: 5, remaining: 0.25, used: 4.75 },
+          meta: {},
+          operation: "checkQuota",
+          service: "quotaService",
+          status: "denied",
+          traceId: "trace-quota"
+        };
+      }
+    } as never);
+
+    const decision = await checker.checkFileUpload({
+      channel: "SDK",
+      requestedBytes: 512 * 1024 ** 2,
+      resource: "storage",
+      tenantId: "tenant-lumen"
+    });
+
+    assert.deepEqual(calls, [{
+      mode: "inspect",
+      requested: 0.5,
+      resource: "storage",
+      tenantId: "tenant-lumen"
+    }]);
+    assert.deepEqual(decision, {
+      allowed: false,
+      limitBytes: 5 * 1024 ** 3,
+      remainingBytes: 256 * 1024 ** 2,
+      usedBytes: 4.75 * 1024 ** 3
+    });
   });
 
   it("returns upload denial audit descriptors for tenant quota blocks without object keys", async () => {
@@ -1528,6 +1583,46 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.match(download.url, /X-Amz-Signature=[a-f0-9]{64}/);
     assert.equal(upload.expiresAt, "2026-06-28T12:15:00.000Z");
     assert.equal(download.expiresAt, "2026-06-28T12:15:00.000Z");
+  });
+
+  it("reads S3 object metadata through a signed bounded HEAD request", async () => {
+    const calls: Array<{ method: string; signal: AbortSignal; url: string }> = [];
+    const headers = new Map([
+      ["content-length", "8192"],
+      ["x-amz-checksum-sha256", "sha256-contract"]
+    ]);
+    const signer = createS3CompatibleObjectStorageSigner({
+      S3_ACCESS_KEY: "minio",
+      S3_BUCKET: "support-communication-local",
+      S3_ENDPOINT: "http://127.0.0.1:9000",
+      S3_REGION: "us-east-1",
+      S3_SECRET_KEY: "minio-password"
+    }, {
+      metadataFetcher: async (url, init) => {
+        calls.push({ method: init.method, signal: init.signal, url });
+        return {
+          headers: { get: (name) => headers.get(name.toLowerCase()) ?? null },
+          ok: true,
+          status: 200
+        };
+      },
+      metadataTimeoutMs: 250,
+      now: () => new Date("2026-06-28T12:00:00.000Z")
+    });
+
+    const metadata = await signer.getObjectMetadata?.({
+      fileId: "file_s3_001",
+      fileName: "contract.pdf",
+      objectKey: "tenant-volga/file_s3_001/contract.pdf",
+      tenantId: "tenant-volga"
+    });
+
+    assert.deepEqual(metadata, { checksum: "sha256-contract", sizeBytes: 8192 });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "HEAD");
+    assert.ok(calls[0].signal instanceof AbortSignal);
+    assert.match(calls[0].url, /X-Amz-Signature=[a-f0-9]{64}/);
+    assert.doesNotMatch(calls[0].url, /minio-password/);
   });
 
   it("creates deterministic object storage URLs and metadata for finalize tests", async () => {

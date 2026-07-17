@@ -70,7 +70,7 @@ export interface BotSandboxPrismaClient {
     findUnique(input: { where: { tenantId_month: { month: string; tenantId: string } } }): MaybePromise<PrismaBotSandboxUsageRow | null>;
     upsert(input: {
       create: { month: string; tenantId: string; usedTokens: number };
-      update: { usedTokens: number };
+      update: { usedTokens: number | { increment: number } };
       where: { tenantId_month: { month: string; tenantId: string } };
     }): MaybePromise<PrismaBotSandboxUsageRow>;
   };
@@ -213,9 +213,11 @@ export class BotSandboxSessionRepository {
 
   private async recordSandboxUsagePrisma(tenantId: string, amount: number, month: string): Promise<void> {
     const where = { tenantId_month: { month, tenantId } };
-    const row = await this.prismaClient!.botSandboxUsageCounter.findUnique({ where });
-    const usedTokens = (row?.usedTokens ?? 0) + amount;
-    await this.prismaClient!.botSandboxUsageCounter.upsert({ create: { month, tenantId, usedTokens }, update: { usedTokens }, where });
+    await this.prismaClient!.botSandboxUsageCounter.upsert({
+      create: { month, tenantId, usedTokens: amount },
+      update: { usedTokens: { increment: amount } },
+      where
+    });
   }
 }
 

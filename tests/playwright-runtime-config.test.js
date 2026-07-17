@@ -11,7 +11,7 @@ describe("Playwright runtime configuration", () => {
   it("starts API Gateway before backend-dependent browser tests", () => {
     const servers = Array.isArray(config.webServer) ? config.webServer : [config.webServer].filter(Boolean);
 
-    assert.equal(servers.length >= 2, true);
+    assert.equal(servers.length >= 3, true);
     assert.equal(servers.every((server) => server.reuseExistingServer === false), true);
     assert.equal(
       servers.some((server) => String(server.url ?? "").includes("127.0.0.1:4100/api/v1/health")),
@@ -21,6 +21,26 @@ describe("Playwright runtime configuration", () => {
       servers.some((server) => String(server.url ?? "").includes("127.0.0.1:5173")),
       true
     );
+    assert.equal(
+      servers.some((server) => String(server.url ?? "").includes("127.0.0.1:5174/demo.html")),
+      true
+    );
+  });
+
+  it("does not silently skip the widget demo when its managed server fails", () => {
+    const pilotFlow = readFileSync(new URL("./pilot-flow.spec.js", import.meta.url), "utf8");
+
+    assert.doesNotMatch(pilotFlow, /test\.skip\([^\n]*demoReachable/);
+    assert.doesNotMatch(pilotFlow, /function isUrlReachable/);
+  });
+
+  it("fails settings smoke when required API fixtures are missing", () => {
+    const smoke = readFileSync(new URL("./smoke.spec.js", import.meta.url), "utf8");
+
+    assert.match(smoke, /expect\(productionKey\)\.toHaveCount\(1\)/);
+    assert.match(smoke, /expect\(vkWebhook\)\.toHaveCount\(1\)/);
+    assert.doesNotMatch(smoke, /if \(await productionKey\.count\(\)\)/);
+    assert.doesNotMatch(smoke, /if \(await vkWebhook\.count\(\)\)/);
   });
 
   it("isolates runtime state for browser tests through the dedicated smoke database", () => {

@@ -5,6 +5,7 @@ import { ReportService } from "./report.service.js";
 const SCHEDULED_DIGEST_EXPORT_COLUMNS = ["metric", "today", "previous", "delta", "status"];
 
 export interface ScheduledDigestClaimWorkerInput {
+  leaseMs?: number;
   limit?: number;
   now: Date;
   reportRepository: ReportRepository;
@@ -28,92 +29,80 @@ export interface ScheduledDigestExportJobWorkerResult {
 }
 
 export function claimDueScheduledDigestDescriptors(input: ScheduledDigestClaimWorkerInput): ScheduledDigestClaimWorkerResult {
-  if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 0)) {
-    throw new Error("scheduled_digest_claim_limit_invalid");
-  }
-
-  const dueDescriptors = input.reportRepository.listScheduledDigestDescriptors({
-    dueBefore: input.now.toISOString(),
-    status: "due",
+  const claimed = input.reportRepository.claimScheduledDigestDescriptors({
+    leaseMs: input.leaseMs,
+    limit: input.limit,
+    now: input.now,
     tenantId: input.tenantId
   });
-  const limit = input.limit ?? dueDescriptors.length;
-  const claimed = dueDescriptors.slice(0, limit).map((descriptor) =>
-    input.reportRepository.saveScheduledDigestDescriptor({
-      ...descriptor,
-      status: "running",
-      updatedAt: input.now.toISOString()
-    })
-  );
 
   return { claimed };
 }
 
 export async function claimDueScheduledDigestDescriptorsAsync(input: ScheduledDigestClaimWorkerInput): Promise<ScheduledDigestClaimWorkerResult> {
-  if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 0)) {
-    throw new Error("scheduled_digest_claim_limit_invalid");
-  }
-
-  const dueDescriptors = await input.reportRepository.listScheduledDigestDescriptorsAsync({
-    dueBefore: input.now.toISOString(),
-    status: "due",
+  const claimed = await input.reportRepository.claimScheduledDigestDescriptorsAsync({
+    leaseMs: input.leaseMs,
+    limit: input.limit,
+    now: input.now,
     tenantId: input.tenantId
   });
-  const limit = input.limit ?? dueDescriptors.length;
-  const claimed = await Promise.all(dueDescriptors.slice(0, limit).map((descriptor) =>
-    input.reportRepository.saveScheduledDigestDescriptorAsync({
-      ...descriptor,
-      status: "running",
-      updatedAt: input.now.toISOString()
-    })
-  ));
 
   return { claimed };
 }
 
 export async function queueScheduledDigestExportJob(input: ScheduledDigestExportJobWorkerInput): Promise<ScheduledDigestExportJobWorkerResult> {
   const descriptor = await input.reportRepository.saveScheduledDigestDescriptorAsync(input.descriptor);
-  const exportWindow = scheduledDigestExportWindow(descriptor);
-  const exportEnvelope = await input.reportService.requestReportExport({
-    columns: SCHEDULED_DIGEST_EXPORT_COLUMNS,
-    filters: {
-      periodKey: descriptor.periodKey,
-      scheduleId: descriptor.scheduleId,
-      scheduledDigest: true,
-      snapshotAt: exportWindow.snapshotAt,
-      tenantId: descriptor.tenantId
-    },
-    idempotencyKey: scheduledDigestExportIdempotencyKey(descriptor),
-    period: exportWindow.period,
-    reportType: descriptor.reportType
-  }, { tenantId: descriptor.tenantId });
-  const persistedDescriptor = await input.reportRepository.saveScheduledDigestDescriptorAsync({
-    ...descriptor,
-    status: exportEnvelope.status === "ok" ? "completed" : "failed",
-    updatedAt: (input.now ?? new Date()).toISOString()
-  });
-  if (exportEnvelope.status === "ok") {
-    const exportJobId = reportExportJobIdFromEnvelope(exportEnvelope);
-    await input.reportRepository.saveReportNotificationDescriptorAsync({
-      createdAt: (input.now ?? new Date()).toISOString(),
-      eventType: "export.ready",
-      exportJobId,
-      id: scheduledDigestNotificationDescriptorId(descriptor),
-      idempotencyKey: scheduledDigestNotificationIdempotencyKey(descriptor),
-      payload: {
+  const now = input.now ?? new Date();
+  try {
+    const exportWindow = scheduledDigestExportWindow(descriptor);
+    const exportEnvelope = await input.reportService.requestReportExport({
+      columns: SCHEDULED_DIGEST_EXPORT_COLUMNS,
+      filters: {
         periodKey: descriptor.periodKey,
-        reportType: descriptor.reportType,
-        scheduleId: descriptor.scheduleId
+        scheduleId: descriptor.scheduleId,
+        scheduledDigest: true,
+        snapshotAt: exportWindow.snapshotAt,
+        tenantId: descriptor.tenantId
       },
-      status: "queued",
-      tenantId: descriptor.tenantId
+      idempotencyKey: scheduledDigestExportIdempotencyKey(descriptor),
+      period: exportWindow.period,
+      reportType: descriptor.reportType
+    }, { tenantId: descriptor.tenantId });
+    if (exportEnvelope.status === "ok") {
+      const exportJobId = reportExportJobIdFromEnvelope(exportEnvelope);
+      await input.reportRepository.saveReportNotificationDescriptorAsync({
+        createdAt: now.toISOString(),
+        eventType: "export.ready",
+        exportJobId,
+        id: scheduledDigestNotificationDescriptorId(descriptor),
+        idempotencyKey: scheduledDigestNotificationIdempotencyKey(descriptor),
+        payload: {
+          periodKey: descriptor.periodKey,
+          reportType: descriptor.reportType,
+          scheduleId: descriptor.scheduleId
+        },
+        status: "queued",
+        tenantId: descriptor.tenantId
+      });
+    }
+    const persistedDescriptor = await input.reportRepository.saveScheduledDigestDescriptorAsync({
+      ...descriptor,
+      status: exportEnvelope.status === "ok" ? "completed" : "failed",
+      updatedAt: now.toISOString()
     });
-  }
 
-  return {
-    descriptor: persistedDescriptor,
-    exportEnvelope
-  };
+    return {
+      descriptor: persistedDescriptor,
+      exportEnvelope
+    };
+  } catch (error) {
+    await input.reportRepository.saveScheduledDigestDescriptorAsync({
+      ...descriptor,
+      status: "due",
+      updatedAt: now.toISOString()
+    });
+    throw error;
+  }
 }
 
 function scheduledDigestExportWindow(descriptor: ScheduledDigestDescriptorRecord): {

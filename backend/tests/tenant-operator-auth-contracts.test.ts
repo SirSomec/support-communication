@@ -33,6 +33,13 @@ describe("tenant operator auth contracts", () => {
   it("returns bearer tokens, resolves state with Bearer and revokes on logout", async () => {
     const { baseUrl } = await createTestApiApp(apps);
 
+    const anonymousSelectionResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/select`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: PILOT_OPERATOR_EMAIL, tenantId: PILOT_TENANT_ID })
+    });
+    assert.equal(anonymousSelectionResponse.status, 401);
+
     const loginResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -72,6 +79,19 @@ describe("tenant operator auth contracts", () => {
     assert.equal(stateEnvelope.data.tenantId, PILOT_TENANT_ID);
     assert.equal(typeof stateEnvelope.data.operator, "object");
     assert.equal((stateEnvelope.data.operator as Record<string, unknown>).email, PILOT_OPERATOR_EMAIL);
+
+    const selectionResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/select`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ email: "untrusted@example.test", tenantId: PILOT_TENANT_ID })
+    });
+    const selectionEnvelope = await selectionResponse.json() as { data: Record<string, unknown>; status: string };
+    assert.equal(selectionResponse.status, 200);
+    assert.equal(selectionEnvelope.status, "ok");
+    assert.equal(selectionEnvelope.data.tenantId, PILOT_TENANT_ID);
 
     const logoutResponse = await fetch(`${baseUrl}/api/v1/auth/tenant/logout`, {
       method: "POST",

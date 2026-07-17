@@ -19,7 +19,10 @@ export function ConversationList({
   onSelect,
   filter,
   onFilter,
+  onPageChange,
   operatorId = "",
+  pageLoading = false,
+  pagination,
   queueFilters,
   onQueueFilterChange,
   onQueueFiltersReset,
@@ -56,6 +59,8 @@ export function ConversationList({
     bot: tabCount("bot"),
     quality: tabCount("quality")
   };
+  const page = pagination?.page ?? 1;
+  const total = pagination?.total ?? allConversations.length;
 
   return (
     <section className="conversation-list" aria-label="Список диалогов">
@@ -208,10 +213,26 @@ export function ConversationList({
         ) : null}
       </div>
       <footer className="queue-footer">
-        <span>Показано {conversations.length} из {allConversations.length}</span>
+        <span>Показано {conversations.length} · страница {page} из {pagination?.pageCount ?? 1} · всего {total}</span>
         <div>
-          <button aria-label="Назад" title="Назад" type="button"><ChevronLeft size={18} /></button>
-          <button aria-label="Вперед" title="Вперед" type="button"><ChevronRight size={18} /></button>
+          <button
+            aria-label="Назад"
+            disabled={pageLoading || !pagination?.canPrevious}
+            onClick={() => void onPageChange?.(page - 1)}
+            title="Предыдущая страница"
+            type="button"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <button
+            aria-label="Вперед"
+            disabled={pageLoading || !pagination?.canNext}
+            onClick={() => void onPageChange?.(page + 1)}
+            title="Следующая страница"
+            type="button"
+          >
+            <ChevronRight size={18} />
+          </button>
         </div>
       </footer>
     </section>

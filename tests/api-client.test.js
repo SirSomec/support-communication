@@ -159,6 +159,43 @@ describe("api client", () => {
     assert.equal(response.states.error, true);
   });
 
+  it("passes an AbortSignal to fetch and returns a timeout envelope", async () => {
+    configureApiClientForTests({ timeoutMs: 5 });
+    globalThis.fetch = mock.fn(async (_url, options) => {
+      assert.ok(options.signal instanceof AbortSignal);
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+      });
+    });
+
+    const response = await apiRequest("/health", {
+      authMode: "public",
+      operation: "health",
+      service: "apiClient"
+    });
+
+    assert.equal(response.status, "error");
+    assert.equal(response.error.code, "request_timeout");
+  });
+
+  it("composes caller cancellation into the request signal", async () => {
+    const controller = new AbortController();
+    globalThis.fetch = mock.fn(async (_url, options) => {
+      controller.abort();
+      if (options.signal.aborted) throw options.signal.reason;
+      throw new Error("signal was not cancelled");
+    });
+
+    const response = await apiRequest("/health", {
+      authMode: "public",
+      operation: "health",
+      service: "apiClient",
+      signal: controller.signal
+    });
+
+    assert.equal(response.error.code, "request_cancelled");
+  });
+
   it("creates explicit error envelopes for adapter-level validation", () => {
     const response = createApiErrorEnvelope({
       code: "missing_id",

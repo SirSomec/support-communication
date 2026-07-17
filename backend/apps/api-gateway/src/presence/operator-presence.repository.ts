@@ -56,6 +56,7 @@ export interface PrismaOperatorPresenceClient {
     }): Promise<PrismaOperatorPresenceIntervalRow[]>;
     updateMany(input: { data: Record<string, unknown>; where: Record<string, unknown> }): Promise<unknown>;
   };
+  $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   $transaction<T>(callback: (client: PrismaOperatorPresenceClient) => Promise<T>): Promise<T>;
 }
 
@@ -190,6 +191,13 @@ function createPrismaAdapter(client: PrismaOperatorPresenceClient): OperatorPres
     async setStatus(input) {
       const at = input.at ?? new Date();
       return client.$transaction(async (transaction) => {
+        if (!transaction.$queryRawUnsafe) {
+          throw new Error("operator_presence_advisory_lock_unavailable");
+        }
+        await transaction.$queryRawUnsafe(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          `${input.tenantId}:${input.operatorId}`
+        );
         const openRows = await transaction.operatorPresenceInterval.findMany({
           orderBy: [{ startedAt: "desc" }],
           where: { endedAt: null, operatorId: input.operatorId, tenantId: input.tenantId }

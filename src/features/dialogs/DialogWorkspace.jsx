@@ -17,6 +17,7 @@ export function DialogWorkspace({
   conversations,
   draft,
   filter,
+  inboxPageLoading,
   isClosed,
   onAiSuggestionAction,
   onAttachFiles,
@@ -30,6 +31,7 @@ export function DialogWorkspace({
   onNavigateToAppeal,
   onAssignment,
   onFilter,
+  onInboxPageChange,
   onQuery,
   onQueueFilterChange,
   onQueueFiltersReset,
@@ -40,6 +42,7 @@ export function DialogWorkspace({
   onTagsApply,
   onTopic,
   operatorId,
+  pagination,
   query,
   queueFilters,
   replyChannel,
@@ -65,8 +68,11 @@ export function DialogWorkspace({
         selectedId={selectedId}
         onSelect={onConversationSelect}
         filter={filter}
+        pageLoading={inboxPageLoading}
         onFilter={onFilter}
+        onPageChange={onInboxPageChange}
         operatorId={operatorId}
+        pagination={pagination}
         queueFilters={queueFilters}
         onQueueFilterChange={onQueueFilterChange}
         onQueueFiltersReset={onQueueFiltersReset}

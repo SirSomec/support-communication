@@ -229,6 +229,8 @@ export interface PrismaPlatformClient {
   platformOutboxRow: PrismaPlatformOutboxRowDelegate;
   platformRuntimeRecord: PrismaPlatformRuntimeRecordDelegate;
   platformTelemetrySample: PrismaPlatformTelemetrySampleDelegate;
+  $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
+  $transaction?<T>(callback: (client: PrismaPlatformClient) => Promise<T>): Promise<T>;
 }
 
 interface PrismaPlatformRuntimeRecordDelegate {
@@ -535,6 +537,7 @@ type PlatformRuntimeCollection =
   | "incidents";
 
 let defaultRepository: PlatformRepository | null = null;
+const inMemoryTransactionTails = new Map<string, Promise<void>>();
 
 export class PlatformRepository implements PlatformAuditOutboxRepository {
   private constructor(
@@ -565,6 +568,40 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
   static prisma({ client, seed }: { client: PrismaPlatformClient; seed?: PlatformState }): PlatformRepository {
     assertCompletePrismaPlatformClient(client);
     return new PlatformRepository(new InMemoryStore(seed ?? seedPlatformState()), client);
+  }
+
+  async runInTransaction<T>(
+    lockKey: string,
+    operation: (repository: PlatformRepository) => Promise<T>
+  ): Promise<T> {
+    const normalizedLockKey = lockKey.trim();
+    if (!normalizedLockKey) {
+      throw new TypeError("platform_transaction_lock_key_required");
+    }
+
+    if (!this.prismaClient) {
+      return withInMemoryTransactionLock(normalizedLockKey, async () => {
+        const transactionRepository = PlatformRepository.inMemory(this.readState());
+        const result = await operation(transactionRepository);
+        const nextState = transactionRepository.readState();
+        this.store.update(() => nextState);
+        return result;
+      });
+    }
+
+    if (!this.prismaClient.$transaction) {
+      throw new Error("prisma_platform_transaction_required");
+    }
+    return this.prismaClient.$transaction(async (transaction) => {
+      if (!transaction.$queryRawUnsafe) {
+        throw new Error("platform_advisory_lock_unavailable");
+      }
+      await transaction.$queryRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        normalizedLockKey
+      );
+      return operation(new PlatformRepository(this.store, transaction));
+    });
   }
 
   readState(): PlatformState {
@@ -1657,6 +1694,9 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
 }
 
 function assertCompletePrismaPlatformClient(client: PrismaPlatformClient): void {
+  if (!client.$transaction) {
+    throw new Error("prisma_platform_transaction_required");
+  }
   if (!client.platformRuntimeRecord?.findMany || !client.platformRuntimeRecord.findUnique || !client.platformRuntimeRecord.upsert) {
     throw new Error("prisma_platform_runtime_record_delegate_required");
   }
@@ -1677,6 +1717,25 @@ function assertCompletePrismaPlatformClient(client: PrismaPlatformClient): void 
   }
   if (!client.platformOutboxRow?.findMany || !client.platformOutboxRow.findUnique || !client.platformOutboxRow.upsert) {
     throw new Error("prisma_platform_outbox_row_delegate_required");
+  }
+}
+
+async function withInMemoryTransactionLock<T>(lockKey: string, operation: () => Promise<T>): Promise<T> {
+  const previous = inMemoryTransactionTails.get(lockKey) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  inMemoryTransactionTails.set(lockKey, tail);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (inMemoryTransactionTails.get(lockKey) === tail) {
+      inMemoryTransactionTails.delete(lockKey);
+    }
   }
 }
 

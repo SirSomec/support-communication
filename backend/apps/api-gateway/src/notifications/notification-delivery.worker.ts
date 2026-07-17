@@ -63,6 +63,7 @@ export interface DeterministicNotificationDeliveryProviderOptions {
 }
 
 export interface NotificationDeliveryWorkerInput {
+  leaseMs?: number;
   limit?: number;
   maxAttempts?: number;
   notificationRepository: NotificationRepository;
@@ -82,6 +83,7 @@ export interface NotificationDeliveryWorkerResult {
 
 const DEFAULT_RETRY_DELAY_MS = 60_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_LEASE_MS = 5 * 60_000;
 
 export function createNotificationDeliveryProviderPort(
   adapter: NotificationDeliveryProviderAdapter
@@ -157,15 +159,16 @@ export async function executeNotificationDeliveryWorker(
   input: NotificationDeliveryWorkerInput
 ): Promise<NotificationDeliveryWorkerResult> {
   const now = input.now ?? new Date();
+  const leaseMs = normalizePositiveInteger(input.leaseMs, DEFAULT_LEASE_MS, "notification_delivery_lease_invalid");
   const limit = normalizePositiveInteger(input.limit, 50, "notification_delivery_limit_invalid");
   const maxAttempts = normalizePositiveInteger(input.maxAttempts, DEFAULT_MAX_ATTEMPTS, "notification_delivery_max_attempts_invalid");
   const queue = input.queue?.trim() || "browser-push";
   const retryDelayMs = normalizePositiveInteger(input.retryDelayMs, DEFAULT_RETRY_DELAY_MS, "notification_delivery_retry_delay_invalid");
-  const descriptors = await input.notificationRepository.listNotificationDeliveryDescriptorsAsync({
-    dueBefore: now.toISOString(),
+  const descriptors = await input.notificationRepository.claimNotificationDeliveryDescriptorsAsync({
+    leaseMs,
     limit,
+    now: now.toISOString(),
     queue,
-    status: "queued",
     tenantId: input.tenantId
   });
   const result: NotificationDeliveryWorkerResult = {
@@ -185,6 +188,7 @@ export async function executeNotificationDeliveryWorker(
     if (subscription?.status !== "active") {
       await input.notificationRepository.markNotificationDeliveryDescriptorFailedAsync({
         descriptorId: descriptor.id,
+        expectedClaimedAt: descriptor.updatedAt,
         failedAt: now.toISOString(),
         lastError: "browser_push_subscription_unavailable",
         retriable: false
@@ -198,6 +202,7 @@ export async function executeNotificationDeliveryWorker(
       await input.notificationRepository.markNotificationDeliveryDescriptorDeliveredAsync({
         deliveredAt: delivered.deliveredAt ?? now.toISOString(),
         descriptorId: descriptor.id,
+        expectedClaimedAt: descriptor.updatedAt,
         providerMessageId: delivered.providerMessageId
       });
       result.delivered += 1;
@@ -206,6 +211,7 @@ export async function executeNotificationDeliveryWorker(
       const retriable = attemptsAfterFailure < maxAttempts;
       await input.notificationRepository.markNotificationDeliveryDescriptorFailedAsync({
         descriptorId: descriptor.id,
+        expectedClaimedAt: descriptor.updatedAt,
         failedAt: now.toISOString(),
         lastError: sanitizeProviderError(error, subscription),
         nextAttemptAt: retriable ? new Date(now.getTime() + retryDelayMs).toISOString() : null,

@@ -18,7 +18,15 @@ const onboardingForm = {
     name: "Acme Pilot",
     slug: "acme-pilot",
     region: "ru-1",
-    industry: "retail"
+    industry: "retail",
+    domain: "support.acme-pilot.test"
+  },
+  limits: {
+    operatorLimit: 8,
+    concurrentDialogs: 12,
+    dailyMessages: 5000,
+    aiAssist: true,
+    afterHoursBot: false
   },
   plan: {
     id: "Growth",
@@ -49,10 +57,19 @@ describe("tenant provision service", () => {
 
     assert.equal(payload.tenant.name, "Acme Pilot");
     assert.equal(payload.admin.email, "owner@acme-pilot.test");
-    assert.equal(payload.plan.id, "trial");
+    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "business", trial: true });
+    assert.deepEqual(payload.limits, onboardingForm.limits);
+    assert.deepEqual(payload.admin, {
+      email: "owner@acme-pilot.test",
+      mfa: true,
+      name: "Owner",
+      password: "Owner-2026!",
+      role: "Владелец"
+    });
+    assert.equal(payload.tenant.industry, "retail");
     assert.equal(payload.employees.length, 1);
     assert.equal("testMessage" in payload, false);
-    assert.equal(payload.channel.domain, "acme-pilot.example.test");
+    assert.equal(payload.channel.domain, "support.acme-pilot.test");
   });
 
   it("does not include the test message step in onboarding completion", () => {

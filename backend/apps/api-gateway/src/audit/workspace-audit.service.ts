@@ -67,10 +67,19 @@ export class WorkspaceAuditService {
 
     const conversationRepository = this.sources.conversationRepository ?? ConversationRepository.default();
     const integrationRepository = this.sources.integrationRepository ?? IntegrationRepository.default();
-    const [lifecycleEvents, channelEvents] = await Promise.all([
-      Promise.resolve(conversationRepository.listLifecycleEvents({ tenantId })).catch(() => [] as ConversationLifecycleEvent[]),
-      loadChannelAuditEvents(integrationRepository).catch(() => [] as ChannelConnectionAuditEventRecord[])
+    const [lifecycleResult, channelResult] = await Promise.allSettled([
+      Promise.resolve(conversationRepository.listLifecycleEvents({ tenantId })),
+      loadChannelAuditEvents(integrationRepository)
     ]);
+    const lifecycleEvents = lifecycleResult.status === "fulfilled" ? lifecycleResult.value : [] as ConversationLifecycleEvent[];
+    const channelEvents = channelResult.status === "fulfilled" ? channelResult.value : [] as ChannelConnectionAuditEventRecord[];
+    const sourceHealth = {
+      channels: channelResult.status === "fulfilled" ? "available" : "unavailable",
+      conversations: lifecycleResult.status === "fulfilled" ? "available" : "unavailable"
+    } as const;
+    const unavailableSources = Object.entries(sourceHealth)
+      .filter(([, status]) => status === "unavailable")
+      .map(([source]) => source);
 
     const cutoff = auditPeriodCutoff(filters.period);
     const allItems = [
@@ -86,15 +95,17 @@ export class WorkspaceAuditService {
       service: AUDIT_SERVICE,
       operation: "fetchWorkspaceAuditEvents",
       traceId,
-      partial: true,
-      meta: { apiVersion: "v1", source: "api", tenantId },
+      partial: unavailableSources.length > 0,
+      meta: { apiVersion: "v1", source: "api", sourceHealth, tenantId, unavailableSources },
       data: {
         items,
         page: {
           limit,
           returnedRows: items.length,
           totalRows: allItems.length
-        }
+        },
+        sourceHealth,
+        unavailableSources
       }
     });
   }
@@ -166,7 +177,7 @@ function channelAuditItem(event: ChannelConnectionAuditEventRecord): WorkspaceAu
   };
 }
 
-function auditPeriodCutoff(period: string | undefined): number | null {
+function auditPeriodCutoff(period: string | undefined): number {
   const normalized = String(period ?? "30d").trim().toLowerCase();
   const durations: Record<string, number> = {
     "24h": 24 * 60 * 60 * 1000,
@@ -174,8 +185,8 @@ function auditPeriodCutoff(period: string | undefined): number | null {
     "30d": 30 * 24 * 60 * 60 * 1000,
     "365d": 365 * 24 * 60 * 60 * 1000
   };
-  const duration = durations[normalized];
-  return duration ? Date.now() - duration : null;
+  const duration = durations[normalized] ?? durations["30d"];
+  return Date.now() - duration;
 }
 
 function normalizeAuditLimit(limit: number | string | undefined): number {

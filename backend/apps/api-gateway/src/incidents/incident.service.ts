@@ -135,66 +135,76 @@ export class IncidentService {
 
     const idempotencyKey = request.idempotencyKey?.trim();
     const fingerprint = buildIncidentUpdateFingerprint(incident.id, request);
-    const persistedCached = idempotencyKey ? await this.platformRepository.findIncidentIdempotencyKeyAsync(idempotencyKey) : undefined;
-    const cached = persistedCached ?? (idempotencyKey ? this.idempotencyIndex.get(idempotencyKey) : undefined);
-    if (cached) {
-      if (cached.fingerprint !== fingerprint) {
-        return conflictEnvelope("addIncidentUpdate", "idempotency_key_reused", "Idempotency key was already used for a different incident update request.", {
-          idempotencyKey,
-          incidentId: incident.id
-        });
-      }
-
-      return createEnvelope({
-        service: INCIDENT_SERVICE,
-        operation: "addIncidentUpdate",
-        traceId: incidentTraceId("addIncidentUpdate"),
-        meta: apiMeta({ idempotencyKey, incidentId: incident.id }),
-        data: {
-          ...clone(cached.result),
-          duplicate: true
+    const traceId = incidentTraceId("addIncidentUpdate");
+    let outcome:
+      | { kind: "conflict" }
+      | { kind: "duplicate"; result: Record<string, unknown> }
+      | { kind: "created"; result: Record<string, unknown> };
+    try {
+      outcome = await this.platformRepository.runInTransaction(`platform:incident:${incident.id}`, async (repository) => {
+        const currentIncident = (await repository.listIncidentsAsync()).find((item) => item.id === incident.id);
+        if (!currentIncident) {
+          throw new Error(`incident_not_found_during_transaction:${incident.id}`);
         }
+        const persistedCached = idempotencyKey ? await repository.findIncidentIdempotencyKeyAsync(idempotencyKey) : undefined;
+        const cached = persistedCached ?? (idempotencyKey ? this.idempotencyIndex.get(idempotencyKey) : undefined);
+        if (cached) {
+          return cached.fingerprint === fingerprint
+            ? { kind: "duplicate" as const, result: clone(cached.result) }
+            : { kind: "conflict" as const };
+        }
+
+        const customerVisible = request.customerVisible !== false;
+        const nextIncident = clone(currentIncident);
+        nextIncident.status = request.status ?? nextIncident.status;
+        nextIncident.updatedAt = new Date().toISOString();
+        nextIncident.updates = [
+          { at: "now", author: request.actor?.name ?? "service-admin", text: String(request.message).trim() },
+          ...nextIncident.updates
+        ];
+        const persistedIncident = await repository.saveIncidentAsync(nextIncident);
+        const mutationPersistence = await persistPlatformIncidentMutationAsync({
+          actor: request.actor,
+          customerVisible,
+          idempotencyKey: idempotencyKey ?? makeEphemeralPlatformMutationIdempotencyKey(`incident-${incident.id}`),
+          incidentId: incident.id,
+          message: String(request.message).trim(),
+          reason: String(request.reason).trim(),
+          repository,
+          status: String(request.status ?? nextIncident.status),
+          traceId
+        });
+        const result = {
+          auditEvent: auditEvent("incident.update", incident.id, request.reason, request.actor),
+          incident: clone(persistedIncident),
+          platformAudit: mutationPersistence.audit,
+          platformOutbox: mutationPersistence.outbox,
+          reason: normalizeReason(request.reason),
+          realtimeEvent: realtimeIncidentEvent(persistedIncident, traceId),
+          statusPageSync: customerVisible ? statusPageSync("incident-update", persistedIncident.id) : null
+        };
+        if (idempotencyKey) {
+          await repository.saveIncidentIdempotencyKeyAsync({ key: idempotencyKey, fingerprint, result: clone(result) });
+        }
+        return { kind: "created" as const, result };
+      });
+    } catch (error) {
+      if (isPlatformIdempotencyConflict(error)) {
+        outcome = { kind: "conflict" };
+      } else {
+        throw error;
+      }
+    }
+
+    if (outcome.kind === "conflict") {
+      return conflictEnvelope("addIncidentUpdate", "idempotency_key_reused", "Idempotency key was already used for a different incident update request.", {
+        idempotencyKey,
+        incidentId: incident.id
       });
     }
 
-    const now = new Date().toISOString();
-    const customerVisible = request.customerVisible !== false;
-    incident.status = request.status ?? incident.status;
-    incident.updatedAt = now;
-    incident.updates = [
-      { at: "now", author: request.actor?.name ?? "service-admin", text: String(request.message).trim() },
-      ...incident.updates
-    ];
-
-    const traceId = incidentTraceId("addIncidentUpdate");
-    const persistedIncident = await this.platformRepository.saveIncidentAsync(incident);
-    const mutationPersistence = await persistPlatformIncidentMutationAsync({
-      actor: request.actor,
-      customerVisible,
-      idempotencyKey: idempotencyKey ?? makeEphemeralPlatformMutationIdempotencyKey(`incident-${incident.id}`),
-      incidentId: incident.id,
-      message: String(request.message).trim(),
-      reason: String(request.reason).trim(),
-      repository: this.platformRepository,
-      status: String(request.status ?? incident.status),
-      traceId
-    });
-    const result = {
-      auditEvent: auditEvent("incident.update", incident.id, request.reason, request.actor),
-      incident: clone(persistedIncident),
-      platformAudit: mutationPersistence.audit,
-      platformOutbox: mutationPersistence.outbox,
-      reason: normalizeReason(request.reason),
-      realtimeEvent: realtimeIncidentEvent(persistedIncident, traceId),
-      statusPageSync: customerVisible ? statusPageSync("incident-update", persistedIncident.id) : null
-    };
-
-    if (idempotencyKey) {
-      const saved = await this.platformRepository.saveIncidentIdempotencyKeyAsync({ key: idempotencyKey, fingerprint, result: clone(result) });
-      this.idempotencyIndex.set(idempotencyKey, {
-        fingerprint: saved.fingerprint,
-        result: clone(saved.result)
-      });
+    if (idempotencyKey && outcome.kind === "created") {
+      this.idempotencyIndex.set(idempotencyKey, { fingerprint, result: clone(outcome.result) });
     }
 
     return createEnvelope({
@@ -202,7 +212,7 @@ export class IncidentService {
       operation: "addIncidentUpdate",
       traceId,
       meta: apiMeta({ idempotencyKey: idempotencyKey ?? null, incidentId: incident.id }),
-      data: result
+      data: outcome.kind === "duplicate" ? { ...clone(outcome.result), duplicate: true } : outcome.result
     });
   }
 
@@ -247,6 +257,13 @@ function clone<T>(value: T): T {
 
 function hasAuditReason(reason: unknown): boolean {
   return typeof reason === "string" && reason.trim().length >= 8;
+}
+
+function isPlatformIdempotencyConflict(error: unknown): boolean {
+  return error instanceof Error && [
+    "platform_audit_idempotency_conflict",
+    "platform_outbox_idempotency_conflict"
+  ].some((code) => error.message.includes(code));
 }
 
 async function incidentDetailPayload(incident: PlatformIncident, platformRepository: PlatformRepository): Promise<Record<string, unknown>> {
@@ -318,13 +335,6 @@ function makeQueueId(scope: string): string {
 
 function normalizeReason(reason: string | undefined): string | null {
   return typeof reason === "string" ? reason.trim() : null;
-}
-
-function overlayById<T extends { id: string }>(base: T[], overlay: T[]): T[] {
-  const overrides = new Map(overlay.map((item) => [item.id, item]));
-  const merged = base.map((item) => overrides.get(item.id) ?? item);
-  const extra = overlay.filter((item) => !base.some((baseItem) => baseItem.id === item.id));
-  return clone([...extra, ...merged]);
 }
 
 function notFoundEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {

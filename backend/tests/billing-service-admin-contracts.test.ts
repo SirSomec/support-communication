@@ -888,6 +888,38 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(releasedCommitted.error?.code, "quota_reservation_already_committed");
   });
 
+  it("atomically denies a concurrent reservation that would exceed quota", async () => {
+    const repository = BillingRepository.inMemory();
+    const billing = new BillingService(repository);
+    const snapshot = await billing.fetchTenantQuotaSnapshot("tenant-lumen");
+    const webhookQuota = (snapshot.data.quotas as Array<Record<string, unknown>>)
+      .find((quota) => quota.resource === "webhooks");
+    const remaining = Number(webhookQuota?.remaining);
+    assert.ok(remaining > 0);
+
+    const results = await Promise.all([
+      billing.reserveQuota({
+        idempotencyKey: "reserve-concurrent-webhooks-a",
+        requested: remaining,
+        resource: "webhooks",
+        tenantId: "tenant-lumen"
+      }),
+      billing.reserveQuota({
+        idempotencyKey: "reserve-concurrent-webhooks-b",
+        requested: remaining,
+        resource: "webhooks",
+        tenantId: "tenant-lumen"
+      })
+    ]);
+
+    assert.deepEqual(results.map((result) => result.status).sort(), ["denied", "ok"]);
+    assert.equal((await repository.listQuotaReservations({
+      resource: "webhooks",
+      statuses: ["reserved"],
+      tenantId: "tenant-lumen"
+    })).length, 1);
+  });
+
   it("commits users and workspaces reservations into their quota counters", async () => {
     const billing = new BillingService(BillingRepository.inMemory());
 

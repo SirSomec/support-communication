@@ -607,7 +607,10 @@ interface PrismaConversationLifecycleEventCreateInput {
 interface PrismaConversationLifecycleEventRow extends PrismaConversationLifecycleEventCreateInput {}
 
 interface PrismaConversationLifecycleEventFindManyInput {
+  cursor?: { id: string };
   orderBy: Array<{ occurredAt: "asc" } | { id: "asc" }>;
+  skip?: number;
+  take: number;
   where: {
     conversationId?: string;
     eventType?: { in: string[] };
@@ -953,15 +956,30 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
   }
 
   async listLifecycleEvents(filter: ConversationLifecycleEventFilter): Promise<ConversationLifecycleEvent[]> {
-    const rows = await this.client.conversationLifecycleEvent.findMany({
+    const query: PrismaConversationLifecycleEventFindManyInput = {
+      ...(filter.cursor ? { cursor: { id: filter.cursor }, skip: 1 } : {}),
       orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+      take: lifecycleEventLimit(filter.limit),
       where: {
         tenantId: requireConversationTenantId(filter.tenantId),
         ...(filter.conversationId ? { conversationId: filter.conversationId } : {}),
         ...(filter.eventTypes?.length ? { eventType: { in: filter.eventTypes } } : {})
       }
-    });
-    return paginateLifecycleEvents(rows.map(toConversationLifecycleEvent), filter);
+    };
+    try {
+      const rows = await this.client.conversationLifecycleEvent.findMany(query);
+      return rows.map(toConversationLifecycleEvent);
+    } catch (error) {
+      if (!filter.cursor || !isPrismaCursorNotFoundError(error)) {
+        throw error;
+      }
+      const rows = await this.client.conversationLifecycleEvent.findMany({
+        ...query,
+        cursor: undefined,
+        skip: undefined
+      });
+      return rows.map(toConversationLifecycleEvent);
+    }
   }
 
   async queueOutboundMessageReply(input: ConversationOutboundMessageReplyInput): Promise<ConversationOutboundMessageReplyRecord> {
@@ -1998,8 +2016,12 @@ function paginateLifecycleEvents(
 ): ConversationLifecycleEvent[] {
   const cursorIndex = filter.cursor ? rows.findIndex((event) => event.id === filter.cursor) : -1;
   const start = cursorIndex >= 0 ? cursorIndex + 1 : 0;
-  const limit = Math.max(1, Math.min(200, Number.isFinite(filter.limit) ? Number(filter.limit) : 50));
+  const limit = lifecycleEventLimit(filter.limit);
   return rows.slice(start, start + limit);
+}
+
+function lifecycleEventLimit(value: number | undefined): number {
+  return Math.max(1, Math.min(200, Number.isFinite(value) ? Number(value) : 50));
 }
 
 export function createEmptyConversationState(): ConversationState {

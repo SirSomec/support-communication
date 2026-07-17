@@ -34,10 +34,11 @@ describe("tenant provision contracts", () => {
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        tenant: { name: "Acme Pilot", slug: "acme-pilot", region: "ru-1" },
-        admin: { name: "Owner", email: "owner@acme-pilot.test", password: "Owner-2026!" },
+        tenant: { name: "Acme Pilot", slug: "acme-pilot", region: "ru-1", industry: "retail" },
+        admin: { name: "Owner", email: "owner@acme-pilot.test", password: "Owner-2026!", role: "Владелец", mfa: true },
         channel: { type: "sdk", domain: "acme.example" },
-        plan: { id: "trial", trial: true }
+        plan: { billingCycle: "annual", id: "business", trial: true },
+        limits: { afterHoursBot: true, aiAssist: false, concurrentDialogs: 7, dailyMessages: 1200, operatorLimit: 4 }
       })
     });
     const provisionEnvelope = await provisionResponse.json() as { data: Record<string, any> };
@@ -49,7 +50,19 @@ describe("tenant provision contracts", () => {
     assert.equal(typeof provisionEnvelope.data.publicApiKey, "string");
     assert.equal(/^sk_stage_[a-f0-9]+$/i.test(String(provisionEnvelope.data.publicApiKey)), true);
     assert.equal(String(provisionEnvelope.data.embedSnippet).includes("data-api-key"), true);
-    assert.equal((await IdentityRepository.default().findTenant("tenant-acme-pilot"))?.id, "tenant-acme-pilot");
+    const persistedTenant = await IdentityRepository.default().findTenant("tenant-acme-pilot");
+    assert.equal(persistedTenant?.id, "tenant-acme-pilot");
+    assert.deepEqual(persistedTenant?.onboarding, {
+      adminRole: "Owner",
+      billingCycle: "annual",
+      industry: "retail",
+      limits: { afterHoursBot: true, aiAssist: false, concurrentDialogs: 7, dailyMessages: 1200, operatorLimit: 4 },
+      mfaRequired: true
+    });
+    const [owner] = await IdentityRepository.default().findTenantUsers("tenant-acme-pilot");
+    assert.equal(owner.role, "Owner");
+    assert.equal(owner.mfa, "required");
+    assert.match(String(provisionEnvelope.data.embedSnippet), /https:\/\/acme\.example\/sdk\.js/);
 
     // The tenant owner grant must reference the canonical "admin" role key: it
     // satisfies the rbac_role_grants → permission_roles(key) FK on Postgres and

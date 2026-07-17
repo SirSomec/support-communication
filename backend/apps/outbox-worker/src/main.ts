@@ -1,7 +1,7 @@
 import { assertCredentialMasterKeySafety } from "@support-communication/config";
 import { createPrismaBillingSyncJobStore, createPrismaClient, createPrismaConversationOutboundDescriptorStore, createPrismaOutboxStore, type ConversationOutboundDescriptorStore, type PrismaBillingSyncJobClient, type PrismaConversationOutboundDescriptorClient, type PrismaOutboxClient } from "@support-communication/database";
 import { type OutboxEventStore } from "@support-communication/events";
-import { createBullMqWorkerBridge, createRuntimeBillingSyncHandlers, createRuntimeOutboxHandlers, loadBullMqWorkerConfig, loadOutboxWorkerConfig, runBillingSyncWorker, runOutboxWorker, runRuntimeFileScanScannerWorker } from "./index.js";
+import { createBullMqWorkerBridge, createRuntimeBillingSyncHandlers, createRuntimeOutboxHandlers, loadBullMqWorkerConfig, loadOutboxWorkerConfig, requiresProviderCredentialMasterKey, runBillingSyncWorker, runOutboxWorker, runRuntimeFileScanScannerWorker } from "./index.js";
 import { createPrismaIntegrationTelegramTokenResolver, type PrismaTelegramConnectionTokenClient } from "./integration-telegram-store.js";
 import { resolveProviderConnectionCredential, type PrismaProviderConnectionCredentialClient } from "./provider-connection-store.js";
 import { createPrismaProviderAttachmentTransferStore, type PrismaProviderAttachmentTransferClient } from "./provider-attachment-transfer-store.js";
@@ -10,7 +10,13 @@ interface DisconnectableWorkerPrismaClient extends PrismaOutboxClient, PrismaBil
   $disconnect?: () => Promise<void>;
 }
 
-assertCredentialMasterKeySafety(process.env, { required: ["PROVIDER_CREDENTIAL_MASTER_KEY"] });
+const runBillingSync = process.argv.includes("--billing-sync") || process.env.BILLING_SYNC_WORKER === "true";
+const runFileScanScanner = process.argv.includes("--file-scan-scanner") || process.env.OUTBOX_FILE_SCAN_SCANNER_WORKER === "true";
+const runBullMq = process.argv.includes("--bullmq") || process.env.OUTBOX_BULLMQ_WORKER === "true";
+
+if (requiresProviderCredentialMasterKey(process.env, process.argv.slice(2))) {
+  assertCredentialMasterKeySafety(process.env, { required: ["PROVIDER_CREDENTIAL_MASTER_KEY"] });
+}
 
 const client = createPrismaClient({
   datasourceUrl: process.env.DATABASE_URL
@@ -28,9 +34,6 @@ const providerCredentialResolver = {
 
 try {
   const config = loadOutboxWorkerConfig();
-  const runBillingSync = process.argv.includes("--billing-sync") || process.env.BILLING_SYNC_WORKER === "true";
-  const runFileScanScanner = process.argv.includes("--file-scan-scanner") || process.env.OUTBOX_FILE_SCAN_SCANNER_WORKER === "true";
-  const runBullMq = process.argv.includes("--bullmq") || process.env.OUTBOX_BULLMQ_WORKER === "true";
   if (runBullMq) {
     const bullMqConfig = loadBullMqWorkerConfig(process.env, runFileScanScanner ? "file-scan-scanner-poll" : runBillingSync ? "billing-sync-poll" : "outbox-domain-poll");
     const service = runFileScanScanner ? "file-scan-scanner-worker" : runBillingSync ? "billing-sync-worker" : "outbox-worker";

@@ -910,6 +910,19 @@ export function loadOutboxWorkerConfig(env: Record<string, string | undefined> =
   };
 }
 
+export function requiresProviderCredentialMasterKey(
+  env: Record<string, string | undefined> = process.env,
+  argv: string[] = process.argv.slice(2)
+): boolean {
+  if (argv.includes("--billing-sync") || env.BILLING_SYNC_WORKER === "true") {
+    return false;
+  }
+  if (argv.includes("--file-scan-scanner") || env.OUTBOX_FILE_SCAN_SCANNER_WORKER === "true") {
+    return false;
+  }
+  return String(env.OUTBOX_QUEUE ?? "message-delivery").trim() !== "identity-events";
+}
+
 export function loadBullMqWorkerConfig(env: Record<string, string | undefined> = process.env, queueNameFallback = "outbox-worker-poll"): BullMqWorkerConfig {
   return {
     concurrency: positiveInteger(env.OUTBOX_BULLMQ_CONCURRENCY, 1),

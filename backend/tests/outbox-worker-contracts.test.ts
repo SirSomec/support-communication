@@ -3335,6 +3335,19 @@ describe("outbox worker runtime contracts", () => {
     });
   });
 
+  it("requires provider credential keys only for provider-capable outbox queues", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+
+    assert.equal(worker.requiresProviderCredentialMasterKey({}, []), true);
+    assert.equal(worker.requiresProviderCredentialMasterKey({ OUTBOX_QUEUE: "message-delivery" }, []), true);
+    assert.equal(worker.requiresProviderCredentialMasterKey({ OUTBOX_QUEUE: "custom-provider-queue" }, []), true);
+    assert.equal(worker.requiresProviderCredentialMasterKey({ OUTBOX_QUEUE: "identity-events" }, []), false);
+    assert.equal(worker.requiresProviderCredentialMasterKey({ BILLING_SYNC_WORKER: "true" }, []), false);
+    assert.equal(worker.requiresProviderCredentialMasterKey({}, ["--billing-sync"]), false);
+    assert.equal(worker.requiresProviderCredentialMasterKey({ OUTBOX_FILE_SCAN_SCANNER_WORKER: "true" }, []), false);
+    assert.equal(worker.requiresProviderCredentialMasterKey({}, ["--file-scan-scanner"]), false);
+  });
+
   it("loads BullMQ worker connection settings from the shared Redis environment", async () => {
     const worker = await import("../apps/outbox-worker/src/index.ts");
 

@@ -120,6 +120,18 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
     void loadAll();
   }, []);
 
+  // Перезагрузка/закрытие вкладки обрывает пакетную загрузку на середине —
+  // предупреждаем браузерным диалогом, пока конвейер работает.
+  useEffect(() => {
+    if (!uploadProgress) return undefined;
+    const warnBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [uploadProgress]);
+
   const documents = useMemo(() => sources.filter((source) => source.kind === "document"), [sources]);
   // Выделение переживает silent-перезагрузки списка; исчезнувшие источники выпадают сами.
   const selectedDocuments = useMemo(() => {
@@ -151,14 +163,25 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
     }
   }
 
-  /** Массовая загрузка: файлы идут последовательно через антивирус и очередь индексации. */
+  /** Массовая загрузка: до 3 файлов параллельно, список пополняется по ходу. */
   async function handleUploadDocuments(fileList) {
     const files = Array.from(fileList ?? []).filter(Boolean);
     if (!files.length || !canWrite) return;
     setBusyAction("upload-documents");
     let outcomes = [];
+    let lastRefreshedAt = 0;
     try {
-      outcomes = await uploadKnowledgeDocumentFiles(files, { onProgress: setUploadProgress });
+      outcomes = await uploadKnowledgeDocumentFiles(files, {
+        onProgress: (progress) => {
+          setUploadProgress(progress);
+          // Живое пополнение списка: обновляем каждые 5 завершённых файлов,
+          // чтобы строки появлялись по ходу, а не только в самом конце.
+          if (progress.outcome && progress.done - lastRefreshedAt >= 5 && progress.done < progress.total) {
+            lastRefreshedAt = progress.done;
+            void loadAll({ silent: true });
+          }
+        }
+      });
     } finally {
       setUploadProgress(null);
       setBusyAction("");
@@ -407,6 +430,18 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
           <SectionTitle action="черновик → проверка → публикация" title="Статьи базы знаний" />
           <KnowledgeBaseWorkspace articles={articles} canWrite={canWrite} key={articles.map((article) => article.id).join(",")} onToast={onToast} operator={operator} />
         </section>
+      ) : null}
+
+      {tab === "documents" && uploadProgress ? (
+        <div className="knowledge-upload-progress" role="status">
+          <div className="knowledge-upload-progress-bar">
+            <span style={{ width: `${Math.round((uploadProgress.done / Math.max(1, uploadProgress.total)) * 100)}%` }} />
+          </div>
+          <strong>
+            Загружаем {Math.min(uploadProgress.done + 1, uploadProgress.total)} из {uploadProgress.total}: {uploadProgress.fileName}
+          </strong>
+          <small>Готово: {uploadProgress.done}. Файлы идут через антивирус и индексацию — не закрывайте вкладку до конца загрузки.</small>
+        </div>
       ) : null}
 
       {tab === "documents" ? (

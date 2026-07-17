@@ -257,6 +257,39 @@
   font-size: 13px;
 }
 
+.knowledge-upload-progress {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid #bcd7f7;
+  border-radius: var(--radius-sm);
+  background: #f2f8ff;
+}
+
+.knowledge-upload-progress strong {
+  font-size: 13px;
+  color: #243650;
+}
+
+.knowledge-upload-progress small {
+  color: var(--muted);
+}
+
+.knowledge-upload-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #dbe7f5;
+  overflow: hidden;
+}
+
+.knowledge-upload-progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--blue);
+  transition: width 0.3s ease;
+}
+
 .knowledge-select-all-row {
   display: flex;
   align-items: center;

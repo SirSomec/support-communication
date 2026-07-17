@@ -53,13 +53,31 @@ export async function uploadKnowledgeDocumentFile(file) {
   return { fileName: file.name, ok: true };
 }
 
-/** Файлы идут последовательно: антивирус и индексация не любят параллельных заливок. */
-export async function uploadKnowledgeDocumentFiles(fileList, { onProgress } = {}) {
+/**
+ * Пакетная загрузка с ограниченной параллелью: каждый файл ждёт антивирус
+ * (до ~30 секунд поллинга), поэтому строгая очередь на больших партиях
+ * растягивалась на десятки минут. 3 параллельных потока безопасны: скан и
+ * индексация асинхронные (outbox/воркер), а minio спокойно держит несколько PUT.
+ * onProgress получает { done, total, fileName, outcome? }: done — число
+ * завершённых файлов; событие с outcome приходит после каждого файла.
+ */
+export async function uploadKnowledgeDocumentFiles(fileList, { concurrency = 3, onProgress, uploadOne = uploadKnowledgeDocumentFile } = {}) {
   const files = Array.from(fileList ?? []).filter(Boolean);
-  const outcomes = [];
-  for (const [index, file] of files.entries()) {
-    onProgress?.({ done: index, total: files.length });
-    outcomes.push(await uploadKnowledgeDocumentFile(file));
+  const outcomes = new Array(files.length);
+  let nextIndex = 0;
+  let completed = 0;
+  if (files.length) onProgress?.({ done: 0, fileName: files[0].name, total: files.length });
+  async function worker() {
+    while (nextIndex < files.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const file = files[index];
+      onProgress?.({ done: completed, fileName: file.name, total: files.length });
+      outcomes[index] = await uploadOne(file);
+      completed += 1;
+      onProgress?.({ done: completed, fileName: file.name, outcome: outcomes[index], total: files.length });
+    }
   }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, files.length)) }, () => worker()));
   return outcomes;
 }

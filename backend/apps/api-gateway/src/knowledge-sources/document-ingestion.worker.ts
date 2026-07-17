@@ -34,7 +34,7 @@ export async function processOneKnowledgeDocumentIngestion(input: {
     const text = await (input.extractor ?? plainTextExtractor).extract({ bytes, fileName: file.fileName, mimeType: file.mimeType });
     const prepared = ingestKnowledgeDocument(text); if (!prepared) throw new Error("knowledge_document_text_required");
     const now = new Date().toISOString();
-    await sources.save({ ...source, approvalStatus: "pending", approvedAt: null, approvedBy: null, contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...source.metadata, attachmentFileId: file.fileId, chunks: prepared.chunks, extraction: "object_storage_worker", ingestionJobId: job.jobId, language: prepared.language }, status: "ready", updatedAt: now, version: source.version + 1 });
+    await sources.save({ ...source, approvalStatus: "approved", approvedAt: source.approvedAt ?? now, approvedBy: source.approvedBy ?? "auto", contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...source.metadata, attachmentFileId: file.fileId, chunks: prepared.chunks, extraction: "object_storage_worker", ingestionJobId: job.jobId, language: prepared.language }, status: "ready", updatedAt: now, version: source.version + 1 });
     await sources.completeIngestionJob(job.jobId, "completed"); return { outcome: "completed", jobId: job.jobId };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "";

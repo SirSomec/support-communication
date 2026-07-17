@@ -21,7 +21,7 @@ import {
 import { createScreenStateItems } from "../../app/screenState.js";
 import { KNOWLEDGE_UPLOAD_ACCEPT, uploadKnowledgeDocumentFiles } from "./knowledgeUploadPipeline.js";
 import { buildSourceBotHints } from "./knowledgeSourceHints.js";
-import { mergeScenarioSourceBindings, selectApprovableSources, summarizeBulkAction, summarizeBulkUpload } from "./knowledgeBulkModel.js";
+import { mergeScenarioSourceBindings, summarizeBulkAction, summarizeBulkUpload } from "./knowledgeBulkModel.js";
 import { collectKnowledgeLoadErrors } from "./knowledgeLoadModel.js";
 import { buildBotScenarioUpdatePatch, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
@@ -73,7 +73,6 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   const [articleSourceForm, setArticleSourceForm] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(null);
-  const [bulkApproveTarget, setBulkApproveTarget] = useState(null);
   const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [bulkDeleteTarget, setBulkDeleteTarget] = useState(null);
   const [bindTarget, setBindTarget] = useState(null);
@@ -122,7 +121,6 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   }, []);
 
   const documents = useMemo(() => sources.filter((source) => source.kind === "document"), [sources]);
-  const approvableDocuments = useMemo(() => selectApprovableSources(documents), [documents]);
   // Выделение переживает silent-перезагрузки списка; исчезнувшие источники выпадают сами.
   const selectedDocuments = useMemo(() => {
     const selected = new Set(selectedDocIds);
@@ -167,14 +165,6 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
     }
     onToast(summarizeBulkUpload(outcomes));
     await loadAll({ silent: true });
-  }
-
-  async function handleBulkApprove(sourcesToApprove) {
-    const response = await runSourceAction("bulk-approve", () => knowledgeService.bulkSourceAction("approve", sourcesToApprove.map((source) => source.id)));
-    if (response) {
-      onToast(summarizeBulkAction("approve", response.data));
-      setSelectedDocIds([]);
-    }
   }
 
   /** Массовое изменение состояния выбранных документов — сервер вернёт skipped по тем, кому переход недоступен. */
@@ -244,7 +234,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
       if (refreshed.status !== "ok") {
         onToast(refreshed.error?.message ?? "URL добавлен, но страницу не удалось прочитать. Проверьте адрес и allowlist.");
       } else {
-        onToast("Страница прочитана. Проверьте предпросмотр и одобрите источник.");
+        onToast("Страница прочитана и сразу доступна боту. Проверьте предпросмотр.");
       }
       await loadAll({ silent: true });
     } finally {
@@ -427,17 +417,6 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
           selectionToolbar={selectedDocuments.length ? (
             <div className="knowledge-bulk-toolbar">
               <span className="knowledge-bulk-count">Выбрано: {selectedDocuments.length}</span>
-              <button
-                disabled={busy}
-                onClick={() => {
-                  const approvable = selectApprovableSources(selectedDocuments);
-                  if (!approvable.length) return onToast("Среди выбранных нет готовых к одобрению документов.");
-                  setBulkApproveTarget(approvable);
-                }}
-                type="button"
-              >
-                <CheckCircle2 size={14} /> Одобрить
-              </button>
               <button disabled={busy} onClick={() => void handleBulkState("disable")} type="button">Выключить</button>
               <button disabled={busy} onClick={() => void handleBulkState("enable")} type="button">Включить</button>
               <button disabled={busy} onClick={() => void handleBulkState("archive")} type="button">
@@ -453,11 +432,6 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
           ) : null}
           actions={
             <>
-              {approvableDocuments.length ? (
-                <button disabled={!canWrite || busy} onClick={() => setBulkApproveTarget(approvableDocuments)} type="button">
-                  <CheckCircle2 size={15} /> Одобрить готовые ({approvableDocuments.length})
-                </button>
-              ) : null}
               <button disabled={!canWrite || busy} onClick={() => setArticleSourceForm({ articleId: "" })} type="button">
                 <Plus size={15} /> Из статьи
               </button>
@@ -467,13 +441,12 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
           busyAction={busyAction}
           canWrite={canWrite}
           emptyMessage="Документов пока нет. Создайте источник из опубликованной статьи или загрузите файл (PDF, DOCX, TXT, MD)."
-          onApprove={(source) => runSourceAction(`approve-${source.id}`, () => knowledgeService.approveSource(source.id), { successMessage: "Источник одобрен: бот может отвечать по нему." })}
           onArchive={(source) => runSourceAction(`archive-${source.id}`, () => knowledgeService.archiveSource(source.id), { successMessage: "Источник перемещён в архив." })}
           onDelete={(source) => setDeleteTarget(source)}
           onDisable={(source) => runSourceAction(`disable-${source.id}`, () => knowledgeService.disableSource(source.id), { successMessage: "Источник отключён: бот перестанет использовать его после ближайшего поиска." })}
           onEnable={(source) => runSourceAction(`enable-${source.id}`, () => knowledgeService.enableSource(source.id), { successMessage: "Источник снова включён." })}
           onPreview={handleOpenPreview}
-          onRefresh={(source) => runSourceAction(`refresh-${source.id}`, () => knowledgeService.refreshDocumentSource(source.id), { successMessage: "Источник переиндексирован по текущей версии статьи. Одобрите его заново." })}
+          onRefresh={(source) => runSourceAction(`refresh-${source.id}`, () => knowledgeService.refreshDocumentSource(source.id), { successMessage: "Источник переиндексирован по текущей версии статьи и сразу отвечает клиентам." })}
           onRename={(source) => setRenameTarget({ source, title: source.title })}
           sources={documents}
           title="Документы"
@@ -491,13 +464,12 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
           busyAction={busyAction}
           canWrite={canWrite}
           emptyMessage="Страниц пока нет. Добавьте HTTPS-адрес — сервер безопасно прочитает страницу, а вы одобрите её содержимое. Допустимые домены настраивает администратор сервиса."
-          onApprove={(source) => runSourceAction(`approve-${source.id}`, () => knowledgeService.approveSource(source.id), { successMessage: "Страница одобрена: бот может отвечать по ней." })}
           onArchive={(source) => runSourceAction(`archive-${source.id}`, () => knowledgeService.archiveSource(source.id), { successMessage: "Источник перемещён в архив." })}
           onDelete={(source) => setDeleteTarget(source)}
           onDisable={(source) => runSourceAction(`disable-${source.id}`, () => knowledgeService.disableSource(source.id), { successMessage: "Источник отключён." })}
           onEnable={(source) => runSourceAction(`enable-${source.id}`, () => knowledgeService.enableSource(source.id), { successMessage: "Источник снова включён." })}
           onPreview={handleOpenPreview}
-          onRefresh={(source) => runSourceAction(`refresh-${source.id}`, () => knowledgeService.refreshSource(source.id), { successMessage: "Страница перечитана. Проверьте и одобрите новое содержимое." })}
+          onRefresh={(source) => runSourceAction(`refresh-${source.id}`, () => knowledgeService.refreshSource(source.id), { successMessage: "Страница перечитана: бот отвечает по новому содержимому." })}
           onRename={(source) => setRenameTarget({ source, title: source.title })}
           sources={pages}
           title="Страницы (URL)"
@@ -782,27 +754,6 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
         </ConfirmDialog>
       ) : null}
 
-      {bulkApproveTarget ? (
-        <ConfirmDialog
-          confirmLabel={`Одобрить (${bulkApproveTarget.length})`}
-          description="Бот сможет отвечать клиентам по этим источникам сразу после одобрения."
-          onCancel={() => setBulkApproveTarget(null)}
-          onConfirm={async () => {
-            const targets = bulkApproveTarget;
-            setBulkApproveTarget(null);
-            await handleBulkApprove(targets);
-          }}
-          title={`Одобрить готовые документы (${bulkApproveTarget.length})?`}
-        >
-          <span className="knowledge-bulk-approve-list">
-            {bulkApproveTarget.slice(0, 8).map((source) => (
-              <span key={source.id}>{source.title}</span>
-            ))}
-            {bulkApproveTarget.length > 8 ? <span>и ещё {bulkApproveTarget.length - 8}…</span> : null}
-          </span>
-        </ConfirmDialog>
-      ) : null}
-
       {urlForm ? (
         <ConfirmDialog
           confirmLabel="Добавить"
@@ -895,7 +846,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   );
 }
 
-function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onApprove, onArchive, onDelete, onDisable, onEnable, onPreview, onRefresh, onRename, onToggleSelect, onToggleSelectAll, selectedIds = [], selectionToolbar = null, sources, title, usage }) {
+function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onArchive, onDelete, onDisable, onEnable, onPreview, onRefresh, onRename, onToggleSelect, onToggleSelectAll, selectedIds = [], selectionToolbar = null, sources, title, usage }) {
   const selectable = Boolean(onToggleSelect);
   const selectedSet = new Set(selectedIds);
   return (
@@ -966,11 +917,6 @@ function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onApp
                   {source.status !== "archived" ? (
                     <button disabled={!canWrite || rowBusy} onClick={() => onRefresh(source)} title={articleOutdated ? "Статья обновилась — переиндексировать" : "Обновить и переиндексировать"} type="button">
                       <RefreshCw size={14} />
-                    </button>
-                  ) : null}
-                  {source.status === "ready" && source.approvalStatus === "pending" ? (
-                    <button disabled={!canWrite || rowBusy} onClick={() => onApprove(source)} title="Одобрить для ответов" type="button">
-                      <CheckCircle2 size={14} />
                     </button>
                   ) : null}
                   {source.status === "disabled" ? (

@@ -1,7 +1,7 @@
-// Как источник знаний показывается в настройках бота: выбираем ли он и какая
-// подпись объясняет его состояние. Раньше селектор показывал только ready —
-// загруженные документы «исчезали» на время индексации, а до одобрения бот
-// молча их игнорировал; теперь состояние видно прямо в списке.
+// Как источник знаний показывается в настройках бота. Логика одобрения выведена
+// из эксплуатации (2026-07-17): выбрать можно любой не-архивный источник — бот
+// использует его безусловно, как только контент проиндексирован. Подписи ниже
+// информируют о состоянии, но не блокируют выбор.
 
 const legacyReadyStatuses = new Set(["ready", "indexed", "published", "active", "готов", "готово", "опубликован"]);
 const preparingStatuses = new Set(["fetching", "indexing", "uploaded"]);
@@ -11,25 +11,17 @@ export function describeScenarioSourceState(source) {
   if (status === "archived") {
     return { hidden: true, hint: "", selectable: false };
   }
-  const ready = source?.isReady === true || legacyReadyStatuses.has(status);
-  if (ready) {
-    if (String(source?.approvalStatus ?? "").trim().toLowerCase() === "pending") {
-      return {
-        hidden: false,
-        hint: "ждёт одобрения в разделе «Знания» — бот начнёт использовать источник после одобрения",
-        selectable: true
-      };
-    }
+  if (source?.isReady === true || legacyReadyStatuses.has(status)) {
     return { hidden: false, hint: "", selectable: true };
   }
   if (preparingStatuses.has(status)) {
-    return { hidden: false, hint: "готовится: антивирус и индексация ещё идут", selectable: false };
+    return { hidden: false, hint: "готовится: антивирус и индексация ещё идут — бот начнёт использовать сразу после", selectable: true };
   }
   if (status === "failed") {
-    return { hidden: false, hint: "ошибка подготовки — обновите источник в разделе «Знания»", selectable: false };
+    return { hidden: false, hint: "ошибка подготовки — обновите источник в разделе «Знания»", selectable: true };
   }
   if (status === "disabled") {
-    return { hidden: false, hint: "источник отключён — включите его в разделе «Знания»", selectable: false };
+    return { hidden: false, hint: "источник отключён — бот не использует его, пока вы не включите", selectable: true };
   }
-  return { hidden: false, hint: "черновик — содержимое ещё не загружено", selectable: false };
+  return { hidden: false, hint: "черновик — содержимое ещё не загружено", selectable: true };
 }

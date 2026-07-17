@@ -22,7 +22,7 @@ import {
   buildScenarioOperationalSummariesFromState,
   buildTenantAiUsageSummary
 } from "./scenario-operational-summary.js";
-import { recordBotAiFeedback, recordBotPublishFailure, recordBotSourceError } from "./bot-observability.js";
+import { recordBotAiFeedback, recordBotPublishFailure } from "./bot-observability.js";
 import { evaluateBotAlerts, summarizeBotMetricsForAlerts } from "./bot-alert-catalog.js";
 import { buildOperatorHandoffView } from "./operator-handoff-view.js";
 import {
@@ -374,14 +374,16 @@ export class AutomationService {
       const sourceBindings = normalizeScenarioSourceBindings(raw?.sourceBindings ?? []);
       const tenantId = resolveAutomationTenantId(context);
       if (tenantId) {
+        // Гейтов готовности/одобрения больше нет: привязанный источник используется
+        // безусловно. Проверяем только существование в своём tenant'е (опечатки, чужие id).
         for (const binding of sourceBindings) {
           const source = await this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
-          if (!source || !isKnowledgeSourceRetrievalEligible(source)) {
-            policyErrors.push(`Источник знаний «${binding.sourceId}» недоступен или не готов.`);
+          if (!source) {
+            policyErrors.push(`Источник знаний «${binding.sourceId}» не найден.`);
           }
         }
         if (payload.flowNodes.some((node) => node.type === "ai_reply")) {
-          if (!sourceBindings.length) policyErrors.push("AI-ответу нужен хотя бы один готовый источник знаний.");
+          if (!sourceBindings.length) policyErrors.push("AI-ответу нужен хотя бы один источник знаний.");
           if ((await aiReadinessForTenant(tenantId)).status !== "ready") {
             policyErrors.push("AI-подключение организации не настроено или не прошло проверку.");
           }
@@ -464,31 +466,15 @@ export class AutomationService {
     if (triggerConflict) {
       return publishFailure(tenantId, scenarioId, "trigger_conflict", conflictEnvelope("publishBotScenario", "trigger_conflict", "Another published scenario already owns this keyword phrase and priority.", triggerConflict));
     }
+    // Гейт готовности/одобрения источников при публикации снят (2026-07-17):
+    // привязанный источник используется ботом безусловно; несуществующие id
+    // отсекает валидация сценария выше.
     const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? draftOverlay?.sourceBindings ?? existing.sourceBindings ?? []);
-    const unavailableSources: Array<{ approvalStatus: string | null; sourceId: string; status: string | null; title: string | null }> = [];
-    for (const binding of sourceBindings) {
-      const source = await this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
-      if (!source || !isKnowledgeSourceRetrievalEligible(source)) {
-        unavailableSources.push({
-          approvalStatus: source?.approvalStatus ?? null,
-          sourceId: binding.sourceId,
-          status: source?.status ?? null,
-          title: source?.title ?? null
-        });
-      }
-    }
-    if (unavailableSources.length) {
-      recordBotSourceError({ failureCode: "knowledge_source_not_ready", tenantId });
-      const shown = unavailableSources.slice(0, 5).map((item) => item.title ? `«${item.title}»` : item.sourceId).join(", ");
-      const rest = unavailableSources.length - Math.min(unavailableSources.length, 5);
-      const message = `Источники знаний ещё не готовы отвечать: ${shown}${rest > 0 ? ` и ещё ${rest}` : ""}. Одобрите их в разделе «Знания» (или из чеклиста публикации) либо снимите привязку.`;
-      return publishFailure(tenantId, scenarioId, "knowledge_source_not_ready", invalidEnvelope("publishBotScenario", "knowledge_source_not_ready", message, { scenarioId, sourceId: unavailableSources[0]?.sourceId, unavailableSources }));
-    }
     const prerequisiteViolations: string[] = [];
     const nodes = validation.payload?.flowNodes ?? [];
     const aiNodes = nodes.filter((node) => node.type === "ai_reply");
     if (aiNodes.length) {
-      if (!sourceBindings.length) prerequisiteViolations.push("AI-ответу нужен хотя бы один готовый источник знаний.");
+      if (!sourceBindings.length) prerequisiteViolations.push("AI-ответу нужен хотя бы один источник знаний.");
       if ((await aiReadinessForTenant(tenantId)).status !== "ready") prerequisiteViolations.push("AI-подключение организации не настроено или не прошло проверку.");
       const hasHandoffPath = nodes.some((node) => node.type === "handoff" || node.type === "fallback");
       if (!hasHandoffPath) prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");

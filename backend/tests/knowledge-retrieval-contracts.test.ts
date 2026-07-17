@@ -9,11 +9,16 @@ import { KnowledgeRetrievalCache } from "../apps/api-gateway/src/knowledge-sourc
 const source = (tenantId: string, id: string, approvalStatus: "approved" | "pending" = "approved") => ({ approvalStatus, approvedAt: approvalStatus === "approved" ? "2026-07-12T10:00:00.000Z" : null, approvedBy: approvalStatus === "approved" ? "admin" : null, archivedAt: null, contentChecksum: "sum", createdAt: "2026-07-12T10:00:00.000Z", disabledAt: null, failedAt: null, failureCode: null, id, kind: "url" as const, lastIndexedAt: "2026-07-12T10:00:00.000Z", lastIngestedAt: "2026-07-12T10:00:00.000Z", metadata: { extractedText: "Доставка заказа занимает три рабочих дня. Возврат оформляется через оператора." }, owner: "admin", readiness: approvalStatus === "approved" ? "ready" as const : "stale" as const, retentionUntil: null, sourceConfig: {}, sourceRef: null, status: "ready" as const, tenantId, title: id, updatedAt: "2026-07-12T10:00:00.000Z", version: 2 });
 
 describe("knowledge retrieval", () => {
-  it("returns only bound, approved tenant sources with versioned offset citations and budget", async () => {
+  it("returns bound tenant sources unconditionally once indexed — approval gates retired", async () => {
     const repository = KnowledgeSourceRepository.inMemory({ sources: [source("tenant-a", "ready"), source("tenant-a", "pending", "pending"), { ...source("tenant-a", "disabled"), disabledAt: "2026-07-12T11:00:00.000Z", readiness: "not_ready", status: "disabled" }, { ...source("tenant-a", "failed"), failedAt: "2026-07-12T11:00:00.000Z", readiness: "not_ready", status: "failed" }, source("tenant-b", "foreign")] });
-    const result = await new KnowledgeRetrievalService(repository).retrieve({ query: "Сколько занимает доставка заказа?", sourceBindings: [{ sourceId: "ready", sourceVersion: "2" }, { sourceId: "pending" }, { sourceId: "disabled" }, { sourceId: "failed" }, { sourceId: "foreign" }], tenantId: "tenant-a", tokenBudget: 200 });
-    assert.equal(result.passages.length, 1); assert.equal(result.passages[0]?.citation.sourceId, "ready"); assert.equal(result.passages[0]?.citation.sourceVersion, 2);
-    assert.equal(typeof result.passages[0]?.citation.startOffset, "number"); assert.ok(result.tokensUsed <= result.tokenBudget);
+    const result = await new KnowledgeRetrievalService(repository).retrieve({ query: "Сколько занимает доставка заказа?", sourceBindings: [{ sourceId: "ready", sourceVersion: "2" }, { sourceId: "pending" }, { sourceId: "disabled" }, { sourceId: "failed" }, { sourceId: "foreign" }], tenantId: "tenant-a", tokenBudget: 400 });
+    // Одобрение больше не требуется: участвуют оба проиндексированных источника,
+    // отключённые/сломанные/чужие — по-прежнему нет.
+    const cited = [...new Set(result.passages.map((passage) => passage.citation.sourceId))].sort();
+    assert.deepEqual(cited, ["pending", "ready"]);
+    const ready = result.passages.find((passage) => passage.citation.sourceId === "ready");
+    assert.equal(ready?.citation.sourceVersion, 2);
+    assert.equal(typeof ready?.citation.startOffset, "number"); assert.ok(result.tokensUsed <= result.tokenBudget);
   });
 
   it("rejects stale pinned versions and irrelevant material", async () => {

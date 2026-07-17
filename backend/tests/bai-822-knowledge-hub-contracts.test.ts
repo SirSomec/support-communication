@@ -170,8 +170,10 @@ describe("BAI-822 source manager operations", () => {
 });
 
 describe("BAI-825 retrieval by explicit sources", () => {
-  it("searches explicit tenant sources and keeps eligibility rules", async () => {
-    const sources = KnowledgeSourceRepository.inMemory({ ingestionJobs: [], sources: [readySource("src-1"), { ...readySource("src-2"), approvalStatus: "pending" as const, readiness: "stale" as const }] });
+  it("searches explicit tenant sources and skips non-indexed ones (approval retired)", async () => {
+    // Одобрение выведено из эксплуатации: проиндексированный источник используется
+    // безусловно, но отключённый/неготовый в retrieval по-прежнему не попадает.
+    const sources = KnowledgeSourceRepository.inMemory({ ingestionJobs: [], sources: [readySource("src-1"), { ...readySource("src-2"), disabledAt: "2026-07-12T11:00:00.000Z", readiness: "not_ready" as const, status: "disabled" as const }] });
     const api = new KnowledgeRetrievalApiService(new KnowledgeRetrievalService(sources), AutomationRepository.inMemory());
     const result = await api.retrieveScenario({ query: "Сколько занимает доставка заказа?", sourceIds: ["src-1", "src-2"], tenantId: TENANT, tokenBudget: 300 });
     assert.equal(result.status, "ok");

@@ -30,7 +30,7 @@ describe("knowledge source catalog service", () => {
     assert.equal((disabled.data.source as { status: string }).status, "disabled");
   });
 
-  it("refreshes a URL only on the server and requires approval before retrieval", async () => {
+  it("refreshes a URL on the server and the source answers immediately without approval", async () => {
     const repository = KnowledgeSourceRepository.inMemory();
     const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), {
       fetch: async () => new Response("<html><script>ignore()</script><body>Delivery status FAQ</body></html>", { headers: { "content-type": "text/html" }, status: 200 }),
@@ -39,56 +39,12 @@ describe("knowledge source catalog service", () => {
     const created = await service.create("tenant-volga", { kind: "url", sourceConfig: { url: "https://docs.example.test/faq" }, title: "FAQ" });
     const id = String((created.data.source as { id: string }).id);
     const refreshed = await service.refreshUrl("tenant-volga", id);
-    const pending = refreshed.data.source as { approvalStatus: string; metadata: { extractedText: string }; readiness: string; status: string };
-    assert.equal(pending.status, "ready"); assert.equal(pending.approvalStatus, "pending"); assert.equal(pending.readiness, "stale"); assert.equal(pending.metadata.extractedText.includes("ignore"), false);
-    const approved = await service.approve("tenant-volga", id);
-    assert.equal((approved.data.source as { readiness: string }).readiness, "ready");
-  });
-
-  it("bulk-approves only ready pending sources of the tenant and reports skipped ones", async () => {
-    const repository = KnowledgeSourceRepository.inMemory();
-    const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), {}, UrlSourcePolicyRepository.inMemory());
-    const now = "2026-07-17T10:00:00.000Z";
-    const base = {
-      approvalStatus: "pending" as const, approvedAt: null, approvedBy: null, archivedAt: null, contentChecksum: null, createdAt: now,
-      disabledAt: null, failedAt: null, failureCode: null, kind: "document" as const, lastIndexedAt: now, lastIngestedAt: now, metadata: {},
-      owner: "op", readiness: "stale" as const, retentionUntil: null, sourceConfig: {}, sourceRef: null, status: "ready" as const,
-      tenantId: "tenant-volga", title: "Doc", updatedAt: now, version: 1
-    };
-    await repository.save({ ...base, id: "doc-a" });
-    await repository.save({ ...base, id: "doc-b" });
-    await repository.save({ ...base, id: "doc-draft", status: "draft" });
-    await repository.save({ ...base, approvalStatus: "approved", id: "doc-approved" });
-    await repository.save({ ...base, id: "doc-foreign", tenantId: "tenant-ladoga" });
-
-    const empty = await service.applyBulk("tenant-volga", "approve", { sourceIds: [] });
-    assert.equal(empty.error?.code, "knowledge_bulk_request_invalid");
-
-    // Ограничения на размер пакета нет: партия заметно больше сотни проходит целиком.
-    const batchIds: string[] = [];
-    for (let index = 0; index < 150; index += 1) {
-      const id = `doc-batch-${index}`;
-      batchIds.push(id);
-      await repository.save({ ...base, id });
-    }
-    const big = await service.applyBulk("tenant-volga", "approve", { sourceIds: batchIds });
-    assert.equal(big.status, "ok");
-    assert.equal((big.data.affected as unknown[]).length, 150);
-    assert.deepEqual(big.data.skipped, []);
-    await service.applyBulk("tenant-volga", "delete", { sourceIds: batchIds });
-
-    const result = await service.applyBulk("tenant-volga", "approve", { sourceIds: ["doc-a", "doc-b", "doc-a", "doc-draft", "doc-approved", "doc-foreign", "missing"] });
-    assert.equal(result.status, "ok");
-    const affected = result.data.affected as Array<{ approvalStatus: string; id: string; readiness: string }>;
-    assert.deepEqual(affected.map((source) => source.id), ["doc-a", "doc-b"]);
-    assert.ok(affected.every((source) => source.approvalStatus === "approved" && source.readiness === "ready"));
-    assert.deepEqual(result.data.skipped, [
-      { code: "knowledge_source_not_ready", sourceId: "doc-draft" },
-      { code: "knowledge_source_already_approved", sourceId: "doc-approved" },
-      { code: "knowledge_source_not_found", sourceId: "doc-foreign" },
-      { code: "knowledge_source_not_found", sourceId: "missing" }
-    ]);
-    assert.equal((await repository.find("tenant-ladoga", "doc-foreign"))?.approvalStatus, "pending");
+    const source = refreshed.data.source as { approvalStatus: string; metadata: { extractedText: string }; readiness: string; status: string };
+    assert.equal(source.status, "ready");
+    // Логика одобрения выведена из эксплуатации: источник сразу пригоден для retrieval.
+    assert.equal(source.approvalStatus, "approved");
+    assert.equal(source.readiness, "ready");
+    assert.equal(source.metadata.extractedText.includes("ignore"), false);
   });
 
   it("bulk state changes disable, enable, archive and delete with per-source skip codes", async () => {
@@ -103,6 +59,20 @@ describe("knowledge source catalog service", () => {
     };
     await repository.save({ ...base, id: "doc-a" });
     await repository.save({ ...base, id: "doc-b" });
+
+    const empty = await service.applyBulk("tenant-volga", "disable", { sourceIds: [] });
+    assert.equal(empty.error?.code, "knowledge_bulk_request_invalid");
+
+    // Ограничения на размер пакета нет: партия заметно больше сотни проходит целиком.
+    const batchIds: string[] = [];
+    for (let index = 0; index < 150; index += 1) {
+      const id = `doc-batch-${index}`;
+      batchIds.push(id);
+      await repository.save({ ...base, id });
+    }
+    const bigDisable = await service.applyBulk("tenant-volga", "disable", { sourceIds: batchIds });
+    assert.equal((bigDisable.data.affected as unknown[]).length, 150);
+    await service.applyBulk("tenant-volga", "delete", { sourceIds: batchIds });
 
     const disabled = await service.applyBulk("tenant-volga", "disable", { sourceIds: ["doc-a", "doc-b", "doc-a"] });
     assert.deepEqual((disabled.data.affected as Array<{ id: string; status: string }>).map((s) => [s.id, s.status]), [["doc-a", "disabled"], ["doc-b", "disabled"]]);

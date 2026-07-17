@@ -49,7 +49,6 @@ export function ScenarioPublishChecklistModal({
   canFixAiConnection = false,
   isSaving,
   knowledgeSources,
-  onApproveSources,
   onClose,
   onConfirm,
   onOpenAiConnections,
@@ -57,7 +56,6 @@ export function ScenarioPublishChecklistModal({
   scenario
 }) {
   const checklist = buildPublishChecklist(scenario, { aiReadiness, knowledgeSources, sandboxVerified });
-  const approvableSourceIds = checklist.unavailableSources.filter((item) => item.approvable).map((item) => item.sourceId);
   const aiBlocked = checklist.items.some((item) => item.id === "ai" && !item.ok);
 
   return (
@@ -96,25 +94,6 @@ export function ScenarioPublishChecklistModal({
             {canFixAiConnection && onOpenAiConnections ? (
               <button disabled={isSaving} onClick={onOpenAiConnections} type="button">
                 Открыть AI-подключения
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {checklist.unavailableSources.length ? (
-          <div className="scenario-publish-sources">
-            <p>Бот не сможет отвечать по этим источникам, пока они не готовы и не одобрены:</p>
-            <ul>
-              {checklist.unavailableSources.slice(0, 6).map((item) => (
-                <li key={item.sourceId}>
-                  {item.title}
-                  {item.approvable ? " — готов, ждёт одобрения" : " — не готов (проверьте в разделе «Знания»)"}
-                </li>
-              ))}
-              {checklist.unavailableSources.length > 6 ? <li>и ещё {checklist.unavailableSources.length - 6}…</li> : null}
-            </ul>
-            {approvableSourceIds.length && onApproveSources ? (
-              <button disabled={isSaving} onClick={() => onApproveSources(approvableSourceIds)} type="button">
-                <CheckCircle2 size={15} /> Одобрить готовые ({approvableSourceIds.length})
               </button>
             ) : null}
           </div>

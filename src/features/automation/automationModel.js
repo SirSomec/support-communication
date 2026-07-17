@@ -398,28 +398,8 @@ export function buildPublishChecklist(scenario = {}, context = {}) {
       ok: bindings.length > 0
     });
   }
-  // Гейт публикации на сервере: каждый привязанный источник ready+approved.
-  // Показываем это заранее в чеклисте, а не английской ошибкой после нажатия.
-  const knowledgeSources = Array.isArray(context.knowledgeSources) ? context.knowledgeSources : [];
-  const sourcesById = new Map(knowledgeSources.map((source) => [source.id, source]));
-  const unavailableSources = bindings
-    .map((binding) => ({ binding, source: sourcesById.get(binding?.sourceId) ?? null }))
-    .filter(({ source }) => !source || !(source.status === "ready" && source.readiness === "ready" && source.approvalStatus === "approved"))
-    .map(({ binding, source }) => ({
-      approvable: Boolean(source && source.status === "ready" && source.approvalStatus === "pending"),
-      sourceId: binding?.sourceId ?? "",
-      title: source?.title ?? binding?.sourceId ?? "источник недоступен"
-    }));
-  if (bindings.length) {
-    items.push({
-      blocking: true,
-      id: "sources-ready",
-      label: unavailableSources.length
-        ? `Все привязанные источники готовы и одобрены (не готовы: ${unavailableSources.length})`
-        : "Все привязанные источники готовы и одобрены",
-      ok: unavailableSources.length === 0
-    });
-  }
+  // Гейтов готовности/одобрения источников больше нет: привязанные источники
+  // бот использует безусловно, как только они проиндексированы.
   items.push({
     blocking: false,
     id: "test",
@@ -430,8 +410,7 @@ export function buildPublishChecklist(scenario = {}, context = {}) {
   return {
     canPublish: items.every((item) => !item.blocking || item.ok),
     items,
-    retentionNote: `Удалённые сценарии хранятся в архиве ${SCENARIO_ARCHIVE_RETENTION_DAYS} дней и остаются доступными для восстановления.`,
-    unavailableSources
+    retentionNote: `Удалённые сценарии хранятся в архиве ${SCENARIO_ARCHIVE_RETENTION_DAYS} дней и остаются доступными для восстановления.`
   };
 }
 

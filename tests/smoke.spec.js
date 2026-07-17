@@ -883,7 +883,7 @@ test("knowledge hub manages URL sources with preview and lifecycle", async ({ pa
   await expectHealthyPage(page);
 });
 
-test("knowledge documents support bulk approval of ready sources", async ({ page }) => {
+test("knowledge documents support bulk state changes and bot binding", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Знания");
@@ -907,7 +907,8 @@ test("knowledge documents support bulk approval of ready sources", async ({ page
   const returnRows = page.locator(".knowledge-source-row").filter({ hasText: "Return policy" });
   await expect(returnRows).toHaveCount(2);
 
-  // Переиндексация возвращает источники в «ждёт одобрения» — материал для массового одобрения.
+  // Логика одобрения выведена из эксплуатации: после переиндексации источник
+  // сразу отвечает клиентам, кнопок одобрения в интерфейсе нет.
   for (let refreshed = 0; refreshed < 2; refreshed += 1) {
     const refreshPromise = page.waitForResponse((response) =>
       response.url().includes("/refresh-document") && response.request().method() === "POST"
@@ -915,27 +916,11 @@ test("knowledge documents support bulk approval of ready sources", async ({ page
     await returnRows.nth(refreshed).getByTitle("Обновить и переиндексировать").click();
     const refreshResponse = await refreshPromise;
     expect(refreshResponse.ok()).toBeTruthy();
+    expect((await refreshResponse.json()).data.source.approvalStatus).toBe("approved");
   }
-  await expect(returnRows.nth(0)).toContainText("ждёт одобрения");
-  await expect(returnRows.nth(1)).toContainText("ждёт одобрения");
-
-  await page.getByRole("button", { name: /Одобрить готовые \(\d+\)/ }).click();
-  const bulkDialog = page.getByRole("dialog", { name: /Одобрить готовые документы/ });
-  await expect(bulkDialog).toContainText("Return policy");
-  const bulkPromise = page.waitForResponse((response) =>
-    response.url().includes("/api/v1/knowledge-sources/bulk/approve") && response.request().method() === "POST"
-  );
-  await bulkDialog.getByRole("button", { name: /^Одобрить \(\d+\)$/ }).click();
-  const bulkResponse = await bulkPromise;
-  expect(bulkResponse.ok()).toBeTruthy();
-  const bulkPayload = await bulkResponse.json();
-  expect(bulkPayload.status).toBe("ok");
-  expect(bulkPayload.data.affected.length).toBeGreaterThanOrEqual(2);
-
-  await expect(page.locator(".toast")).toContainText(/Одобрено источников: \d+/);
   await expect(returnRows.nth(0)).toContainText("отвечает клиентам");
   await expect(returnRows.nth(1)).toContainText("отвечает клиентам");
-  await expect(page.getByRole("button", { name: /Одобрить готовые/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Одобрить/ })).toHaveCount(0);
 
   // Массовое изменение состояния по выделению: выключить и включить обратно.
   await returnRows.nth(0).locator("input.knowledge-source-select").check();

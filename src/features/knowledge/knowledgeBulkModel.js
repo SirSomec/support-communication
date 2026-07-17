@@ -1,11 +1,5 @@
-// Чистая логика массовых операций раздела «Знания → Документы»: какие
-// источники готовы к одобрению и как отчитаться о пакетной загрузке/одобрении.
-
-export function selectApprovableSources(sources) {
-  return (Array.isArray(sources) ? sources : []).filter(
-    (source) => source?.status === "ready" && source?.approvalStatus === "pending"
-  );
-}
+// Чистая логика массовых операций раздела «Знания → Документы»: сводки
+// пакетной загрузки/действий и слияние привязок с ботом.
 
 export function summarizeBulkUpload(outcomes) {
   const list = Array.isArray(outcomes) ? outcomes : [];
@@ -13,8 +7,8 @@ export function summarizeBulkUpload(outcomes) {
   const failed = list.filter((outcome) => !outcome?.ok);
   if (!failed.length) {
     return list.length === 1
-      ? "Файл в очереди индексации. Когда источник станет «Готов», одобрите его."
-      : `Все файлы в очереди индексации: ${list.length}. Когда источники станут «Готов», одобрите их кнопкой «Одобрить готовые».`;
+      ? "Файл в очереди индексации. Как только источник станет «Готов», бот сможет отвечать по нему."
+      : `Все файлы в очереди индексации: ${list.length}. Как только источники станут «Готов», бот сможет отвечать по ним.`;
   }
   const shown = failed.slice(0, 3).map((outcome) => `${outcome.fileName} (${outcome.reason ?? "неизвестная ошибка"})`);
   const hidden = failed.length - shown.length;
@@ -23,7 +17,6 @@ export function summarizeBulkUpload(outcomes) {
 }
 
 const BULK_ACTION_LABELS = {
-  approve: { done: "Одобрено источников", none: "Ни один источник не одобрен.", suffix: " Бот сможет отвечать по ним." },
   archive: { done: "Перемещено в архив", none: "Ничего не перемещено в архив." },
   delete: { done: "Удалено источников", none: "Ничего не удалено." },
   disable: { done: "Отключено источников", none: "Ничего не отключено." },

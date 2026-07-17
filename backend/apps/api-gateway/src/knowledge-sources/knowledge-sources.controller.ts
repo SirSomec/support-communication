@@ -21,11 +21,6 @@ export class KnowledgeSourcesController {
   @HttpCode(HttpStatus.OK)
   create(@Body() body: KnowledgeSourceCreateInput, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.create(tenantId(request), body ?? {}); }
   // Статические сегменты «bulk/...» объявлены раньше «:sourceId», иначе «bulk» матчился бы как sourceId.
-  @Post("bulk/approve")
-  @RequireTenantOperatorPermission("knowledge.write")
-  @RequireServiceAdminAction("knowledge.write")
-  @HttpCode(HttpStatus.OK)
-  bulkApprove(@Body() body: { sourceIds?: string[] }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.applyBulk(tenantId(request), "approve", body ?? {}); }
   @Post("bulk/disable")
   @RequireTenantOperatorPermission("knowledge.write")
   @RequireServiceAdminAction("knowledge.write")
@@ -66,11 +61,6 @@ export class KnowledgeSourcesController {
   @RequireServiceAdminAction("knowledge.write")
   @HttpCode(HttpStatus.OK)
   enqueueAttachment(@Param("sourceId") sourceId: string, @Body() body: { fileId?: string; idempotencyKey?: string }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.enqueueAttachmentIngestion(tenantId(request), sourceId, body ?? {}); }
-  @Post(":sourceId/approve")
-  @RequireTenantOperatorPermission("knowledge.write")
-  @RequireServiceAdminAction("knowledge.write")
-  @HttpCode(HttpStatus.OK)
-  approve(@Param("sourceId") sourceId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.approve(tenantId(request), sourceId); }
   @Patch(":sourceId")
   @RequireTenantOperatorPermission("knowledge.write")
   @RequireServiceAdminAction("knowledge.write")

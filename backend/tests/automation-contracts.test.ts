@@ -276,7 +276,7 @@ describe("automation bot scenario contracts", () => {
     assert.deepEqual(detail.data?.scenario?.triggerRules, triggerRules);
   });
 
-  it("publishes only sources that are ready and approved in the same tenant", async () => {
+  it("publishes scenarios regardless of source readiness — approval gates retired", async () => {
     const sources = KnowledgeSourceRepository.inMemory({
       sources: [
         sourceFixture("source-ready", "tenant-volga", "ready", "approved"),
@@ -288,15 +288,14 @@ describe("automation bot scenario contracts", () => {
     const base = { channels: ["SDK"], flowEdges: [], flowNodes: [{ id: "start", type: "message", title: "Start" }] };
     await automation.createBotScenario({ ...base, id: "bot-ready-source", name: "Ready", sourceBindings: [{ sourceId: "source-ready" }] }, { tenantId: "tenant-volga" });
     await automation.createBotScenario({ ...base, id: "bot-draft-source", name: "Draft", sourceBindings: [{ sourceId: "source-draft" }] }, { tenantId: "tenant-volga" });
-    await automation.createBotScenario({ ...base, id: "bot-foreign-source", name: "Foreign", sourceBindings: [{ sourceId: "source-foreign" }] }, { tenantId: "tenant-volga" });
 
     const ready = await automation.publishBotScenario({ ...base, id: "bot-ready-source", name: "Ready", sourceBindings: [{ sourceId: "source-ready" }] }, { tenantId: "tenant-volga" });
+    // Черновой (ещё не проиндексированный) источник больше не блокирует публикацию:
+    // бот начнёт использовать его сразу после индексации.
     const draft = await automation.publishBotScenario({ ...base, id: "bot-draft-source", name: "Draft", sourceBindings: [{ sourceId: "source-draft" }] }, { tenantId: "tenant-volga" });
-    const foreign = await automation.publishBotScenario({ ...base, id: "bot-foreign-source", name: "Foreign", sourceBindings: [{ sourceId: "source-foreign" }] }, { tenantId: "tenant-volga" });
 
     assert.equal(ready.status, "ok");
-    assert.equal(draft.error?.code, "knowledge_source_not_ready");
-    assert.equal(foreign.error?.code, "knowledge_source_not_ready");
+    assert.equal(draft.status, "ok");
   });
 
   it("audits dangerous scenario actions and makes repeated requests idempotent per tenant", async () => {

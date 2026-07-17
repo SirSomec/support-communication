@@ -2,24 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   mergeScenarioSourceBindings,
-  selectApprovableSources,
   summarizeBulkAction,
   summarizeBulkUpload
 } from "../src/features/knowledge/knowledgeBulkModel.js";
 
 describe("knowledge bulk operations model", () => {
-  it("selects only ready sources that wait for approval", () => {
-    const sources = [
-      { approvalStatus: "pending", id: "a", status: "ready" },
-      { approvalStatus: "approved", id: "b", status: "ready" },
-      { approvalStatus: "pending", id: "c", status: "indexing" },
-      { approvalStatus: "pending", id: "d", status: "failed" },
-      null
-    ];
-    assert.deepEqual(selectApprovableSources(sources).map((source) => source.id), ["a"]);
-    assert.deepEqual(selectApprovableSources(undefined), []);
-  });
-
   it("summarizes a fully queued upload batch with singular and plural wording", () => {
     assert.match(summarizeBulkUpload([{ fileName: "faq.txt", ok: true }]), /Файл в очереди индексации/);
     const plural = summarizeBulkUpload([
@@ -28,7 +15,8 @@ describe("knowledge bulk operations model", () => {
       { fileName: "delivery.html", ok: true }
     ]);
     assert.match(plural, /Все файлы в очереди индексации: 3/);
-    assert.match(plural, /Одобрить готовые/);
+    assert.match(plural, /бот сможет отвечать/);
+    assert.doesNotMatch(plural, /одобр/i);
   });
 
   it("lists failed files with reasons and caps the visible list", () => {
@@ -47,13 +35,11 @@ describe("knowledge bulk operations model", () => {
     assert.doesNotMatch(message, /d\.txt/);
   });
 
-  it("summarizes bulk action results per action including skipped sources", () => {
-    assert.match(summarizeBulkAction("approve", { affected: [{ id: "a" }, { id: "b" }], skipped: [] }), /Одобрено источников: 2\. Бот сможет отвечать по ним\./);
-    const mixed = summarizeBulkAction("approve", { affected: [{ id: "a" }], skipped: [{ code: "knowledge_source_not_ready", sourceId: "b" }] });
-    assert.match(mixed, /Одобрено источников: 1/);
+  it("summarizes bulk state actions including skipped sources", () => {
+    assert.match(summarizeBulkAction("disable", { affected: [{ id: "a" }, { id: "b" }], skipped: [] }), /Отключено источников: 2/);
+    const mixed = summarizeBulkAction("enable", { affected: [{ id: "a" }], skipped: [{ code: "knowledge_source_not_disabled", sourceId: "b" }] });
+    assert.match(mixed, /Включено источников: 1/);
     assert.match(mixed, /Пропущено: 1/);
-    assert.match(summarizeBulkAction("approve", { affected: [], skipped: [] }), /Ни один источник не одобрен/);
-    assert.match(summarizeBulkAction("disable", { affected: [{ id: "a" }], skipped: [] }), /Отключено источников: 1/);
     assert.match(summarizeBulkAction("enable", { affected: [], skipped: [{ code: "x", sourceId: "a" }] }), /Ничего не включено\. Пропущено: 1/);
     assert.match(summarizeBulkAction("archive", { affected: [{ id: "a" }], skipped: [] }), /Перемещено в архив: 1/);
     assert.match(summarizeBulkAction("delete", { affected: [{ id: "a" }], skipped: [] }), /Удалено источников: 1/);

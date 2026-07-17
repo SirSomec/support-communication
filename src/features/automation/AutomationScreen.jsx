@@ -18,7 +18,7 @@ import { createScreenStateItems } from "../../app/screenState.js";
 import { buildBotScenarioUpdatePatch, changeBotScenarioLifecycle, discardBotScenarioDraft, publishBotScenario, rollbackBotScenario, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { automationService } from "../../services/automationService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
-import { summarizeBulkAction, summarizeBulkUpload } from "../knowledge/knowledgeBulkModel.js";
+import { summarizeBulkUpload } from "../knowledge/knowledgeBulkModel.js";
 import { uploadKnowledgeDocumentFiles } from "../knowledge/knowledgeUploadPipeline.js";
 import { ConfirmDialog, MetricTile, ProductScreen, SectionTitle, SegmentedControl } from "../../ui.jsx";
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
@@ -136,7 +136,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
     <ConfirmDialog
       confirmDisabled={!/^https:\/\/.+/i.test(urlSourceForm.url.trim())}
       confirmLabel="Добавить"
-      description="Страница будет загружена, подготовлена и подтверждена как источник знаний для AI-ответов."
+      description="Страница будет загружена и подготовлена как источник знаний для AI-ответов — бот использует её сразу."
       eyebrow="Источник знаний"
       onCancel={() => setUrlSourceForm(null)}
       onConfirm={() => void submitUrlKnowledgeSource()}
@@ -387,9 +387,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
       if (created.status !== "ok" || !source) return onToast(created.error?.message ?? "Не удалось добавить URL.");
       const refreshed = await knowledgeService.refreshSource(source.id);
       if (refreshed.status !== "ok") return onToast(refreshed.error?.message ?? "URL добавлен, но страницу не удалось подготовить.");
-      const approved = await knowledgeService.approveSource(source.id);
-      if (approved.status !== "ok") return onToast(approved.error?.message ?? "Страница подготовлена и ждёт подтверждения.");
-      setKnowledgeSources((current) => [...current.filter((item) => item.id !== source.id), approved.data.source]);
+      setKnowledgeSources((current) => [...current.filter((item) => item.id !== source.id), refreshed.data.source]);
       onToast("URL-источник подготовлен и доступен для выбора.");
     } finally { setSavingAction(""); }
   }
@@ -419,18 +417,6 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
   function addArticleKnowledgeSource() {
     setArticleSourceForm({ articleId: "" });
-  }
-
-  /** Одобрение прямо из чеклиста публикации: убирает блокер «источники не готовы» без похода в «Знания». */
-  async function approveSourcesFromChecklist(sourceIds) {
-    if (!canManageAutomation) return onToast(access.reason);
-    setSavingAction("checklist-approve");
-    try {
-      const response = await knowledgeService.bulkSourceAction("approve", sourceIds);
-      if (response.status !== "ok") return onToast(response.error?.message ?? "Не удалось одобрить источники.");
-      onToast(summarizeBulkAction("approve", response.data));
-      await refreshKnowledgeSources();
-    } finally { setSavingAction(""); }
   }
 
   async function submitArticleKnowledgeSource() {
@@ -1134,7 +1120,6 @@ export function AutomationScreen({ onBack, onToast, access }) {
           canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")}
           isSaving={isSaving}
           knowledgeSources={knowledgeSources}
-          onApproveSources={(sourceIds) => void approveSourcesFromChecklist(sourceIds)}
           onClose={() => setPublishChecklistOpen(false)}
           onConfirm={() => void confirmScenarioPublish()}
           onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")}

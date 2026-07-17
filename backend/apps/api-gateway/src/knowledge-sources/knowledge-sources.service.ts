@@ -22,7 +22,7 @@ const SERVICE = "knowledgeSourcesService";
 const URL_SOURCE_MAX_BYTES = 1_000_000;
 const URL_SOURCE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-export const knowledgeSourceBulkActions = ["approve", "archive", "delete", "disable", "enable"] as const;
+export const knowledgeSourceBulkActions = ["archive", "delete", "disable", "enable"] as const;
 export type KnowledgeSourceBulkAction = typeof knowledgeSourceBulkActions[number];
 
 export interface KnowledgeSourceCreateInput {
@@ -166,7 +166,8 @@ export class KnowledgeSourcesService {
     let sourceConfig = input.sourceConfig ?? {};
     let sourceRef = String(input.sourceRef ?? "").trim() || null;
     let status: KnowledgeSourceRecord["status"] = "draft";
-    let approvalStatus: KnowledgeSourceRecord["approvalStatus"] = "pending";
+    // Одобрение выведено из эксплуатации: источник считается принятым с момента создания.
+    let approvalStatus: KnowledgeSourceRecord["approvalStatus"] = "approved";
     let metadata: Record<string, unknown> = {};
 
     if (kind === "document" && !sourceRef && sourceConfig.upload === true) {
@@ -282,22 +283,12 @@ export class KnowledgeSourcesService {
       const raw = (await readBoundedText(response, URL_SOURCE_MAX_BYTES)).slice(0, 200_000);
       const extractedText = stripHtml(raw).slice(0, 100_000);
       if (!extractedText) throw new Error("url_source_content_empty");
-      const source = await this.repository.save({ ...current, approvalStatus: "pending", contentChecksum: createHash("sha256").update(extractedText).digest("hex"), failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, extractedText, nextRefreshAt: new Date(Date.now() + URL_SOURCE_REFRESH_INTERVAL_MS).toISOString() }, status: "ready", updatedAt: now, version: current.version + 1 });
+      const source = await this.repository.save({ ...current, approvalStatus: "approved", approvedAt: current.approvedAt ?? now, approvedBy: current.approvedBy ?? "auto", contentChecksum: createHash("sha256").update(extractedText).digest("hex"), failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, extractedText, nextRefreshAt: new Date(Date.now() + URL_SOURCE_REFRESH_INTERVAL_MS).toISOString() }, status: "ready", updatedAt: now, version: current.version + 1 });
       return envelope("refreshKnowledgeSourceUrl", tenantId, { auditEvent: await this.recordUrlAudit("knowledge_source.url.refresh", tenantId, source.id, "refreshed"), source });
     } catch {
       const source = await this.repository.save({ ...current, failedAt: now, failureCode: "url_source_fetch_failed", metadata: { ...current.metadata, nextRefreshAt: new Date(Date.now() + URL_SOURCE_REFRESH_INTERVAL_MS).toISOString() }, status: "failed", updatedAt: now, version: current.version + 1 });
       return invalid("refreshKnowledgeSourceUrl", tenantId, "url_source_fetch_failed", "The URL could not be read safely.", { auditEvent: await this.recordUrlAudit("knowledge_source.url.refresh", tenantId, source.id, "failed") });
     } finally { clearTimeout(timeout); }
-  }
-
-  async approve(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const current = await this.repository.find(tenantId, sourceId);
-    if (!current || current.status !== "ready") return invalid("approveKnowledgeSource", tenantId, "knowledge_source_not_ready", "Refresh the source successfully before approving it.");
-    const now = new Date().toISOString();
-    const source = await this.repository.save({ ...current, approvalStatus: "approved", approvedAt: now, approvedBy: "current-operator", updatedAt: now, version: current.version + 1 });
-    const data: Record<string, unknown> = { source };
-    if (current.kind === "url") data.auditEvent = await this.recordUrlAudit("knowledge_source.url.approve", tenantId, source.id, "approved");
-    return envelope("approveKnowledgeSource", tenantId, data);
   }
 
   /**
@@ -324,10 +315,6 @@ export class KnowledgeSourcesService {
   private async applyBulkOne(tenantId: string, action: KnowledgeSourceBulkAction, sourceId: string): Promise<{ code?: string; source?: KnowledgeSourceRecord }> {
     const current = await this.repository.find(tenantId, sourceId);
     if (!current) return { code: "knowledge_source_not_found" };
-    if (action === "approve") {
-      if (current.approvalStatus === "approved") return { code: "knowledge_source_already_approved" };
-      return unwrap(await this.approve(tenantId, sourceId));
-    }
     if (action === "disable") {
       if (current.status === "disabled") return { code: "knowledge_source_already_disabled" };
       return unwrap(await this.disable(tenantId, sourceId));
@@ -380,11 +367,11 @@ export class KnowledgeSourcesService {
     const prepared = article ? preparePublishedArticle(article) : null;
     if (!prepared || !article) {
       const now = new Date().toISOString();
-      const source = await this.repository.save({ ...current, approvalStatus: "pending", failedAt: now, failureCode: "knowledge_article_not_ready", status: "failed", updatedAt: now, version: current.version + 1 });
+      const source = await this.repository.save({ ...current, failedAt: now, failureCode: "knowledge_article_not_ready", status: "failed", updatedAt: now, version: current.version + 1 });
       return invalid("refreshKnowledgeSourceDocument", tenantId, "knowledge_article_not_ready", "Publish and approve the article version before refreshing this source.");
     }
     const now = new Date().toISOString();
-    const source = await this.repository.save({ ...current, approvalStatus: "pending", approvedAt: null, approvedBy: null, contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, articleVersion: article.version, chunks: prepared.chunks, language: prepared.language }, sourceConfig: { articleId: article.id, articleVersion: article.version }, sourceRef: article.id, status: "ready", updatedAt: now, version: current.version + 1 });
+    const source = await this.repository.save({ ...current, approvalStatus: "approved", approvedAt: current.approvedAt ?? now, approvedBy: current.approvedBy ?? "auto", contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...current.metadata, articleVersion: article.version, chunks: prepared.chunks, language: prepared.language }, sourceConfig: { articleId: article.id, articleVersion: article.version }, sourceRef: article.id, status: "ready", updatedAt: now, version: current.version + 1 });
     return envelope("refreshKnowledgeSourceDocument", tenantId, { source });
   }
 
@@ -409,7 +396,7 @@ export class KnowledgeSourcesService {
     }
     const now = new Date().toISOString();
     const job = await this.repository.saveIngestionJob({ attempts: 0, createdAt: now, errorCode: null, fileId, fingerprint, idempotencyKey, jobId: `knowledge_ingest_${randomUUID()}`, sourceId, status: "pending", tenantId, updatedAt: now });
-    const source = await this.repository.save({ ...current, approvalStatus: "pending", failedAt: null, failureCode: null, metadata: { ...current.metadata, ingestionJobId: job.jobId }, status: "indexing", updatedAt: now, version: current.version + 1 });
+    const source = await this.repository.save({ ...current, approvalStatus: "approved", failedAt: null, failureCode: null, metadata: { ...current.metadata, ingestionJobId: job.jobId }, status: "indexing", updatedAt: now, version: current.version + 1 });
     return envelope("enqueueKnowledgeAttachmentIngestion", tenantId, { duplicate: false, job, source });
   }
 }

@@ -8,12 +8,15 @@ import {
 } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.types.ts";
 
 describe("Knowledge source lifecycle contracts", () => {
-  it("only exposes a ready and approved source to retrieval", () => {
+  it("exposes any indexed source to retrieval regardless of approval (approval retired)", () => {
+    // Логика одобрения выведена из эксплуатации (2026-07-17): готовность = проиндексирован.
     assert.equal(deriveKnowledgeSourceReadiness("ready", "approved"), "ready");
-    assert.equal(deriveKnowledgeSourceReadiness("ready", "pending"), "stale");
+    assert.equal(deriveKnowledgeSourceReadiness("ready", "pending"), "ready");
     assert.equal(deriveKnowledgeSourceReadiness("indexing", "approved"), "not_ready");
     assert.equal(isKnowledgeSourceRetrievalEligible({ approvalStatus: "approved", readiness: "ready", status: "ready" }), true);
-    assert.equal(isKnowledgeSourceRetrievalEligible({ approvalStatus: "pending", readiness: "stale", status: "ready" }), false);
+    assert.equal(isKnowledgeSourceRetrievalEligible({ approvalStatus: "pending", readiness: "ready", status: "ready" }), true);
+    assert.equal(isKnowledgeSourceRetrievalEligible({ approvalStatus: "approved", readiness: "not_ready", status: "indexing" }), false);
+    assert.equal(isKnowledgeSourceRetrievalEligible({ approvalStatus: "approved", readiness: "not_ready", status: "disabled" }), false);
   });
 
   it("allows only additive lifecycle paths and makes archive terminal", () => {

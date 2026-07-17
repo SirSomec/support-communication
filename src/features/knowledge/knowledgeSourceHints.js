@@ -1,10 +1,10 @@
 // Подсказки «видит ли бот источник и почему нет» для строк раздела «Знания».
-// Зеркалит серверный isKnowledgeSourceRetrievalEligible: retrieval пускает
-// источник только при status=ready + readiness=ready + approvalStatus=approved,
-// а сам источник должен быть привязан к опубликованному включённому сценарию.
+// Зеркалит серверный isKnowledgeSourceRetrievalEligible: с 2026-07-17 логика
+// одобрения выведена из эксплуатации — источник участвует в ответах, как только
+// контент проиндексирован (status=ready); привязка к сценарию по-прежнему нужна.
 
 export function isSourceBotEligible(source) {
-  return source?.status === "ready" && source?.readiness === "ready" && source?.approvalStatus === "approved";
+  return source?.status === "ready";
 }
 
 export function isActiveBotScenario(usageItem) {
@@ -21,15 +21,8 @@ export function buildSourceBotHints(source, scenarioUsage = []) {
     hints.push({
       id: "eligible",
       label: "отвечает клиентам",
-      title: "Источник одобрен и участвует в ответах бота.",
+      title: "Источник проиндексирован и участвует в ответах бота.",
       tone: "ok"
-    });
-  } else if (source.status === "ready" && source.approvalStatus === "pending") {
-    hints.push({
-      id: "approval-pending",
-      label: "ждёт одобрения",
-      title: "Бот не использует источник, пока вы не одобрите его содержимое.",
-      tone: "warn"
     });
   } else if (source.status === "disabled") {
     hints.push({
@@ -42,7 +35,7 @@ export function buildSourceBotHints(source, scenarioUsage = []) {
     hints.push({
       id: "not-ready",
       label: "бот не использует: не готов",
-      title: "Источник ещё не готов к ответам: дождитесь индексации или обновите содержимое, затем одобрите его.",
+      title: "Источник ещё не готов к ответам: дождитесь индексации или обновите содержимое.",
       tone: "warn"
     });
   }

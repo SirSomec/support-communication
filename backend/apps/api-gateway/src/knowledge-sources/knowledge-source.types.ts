@@ -69,16 +69,19 @@ export function canTransitionKnowledgeSourceStatus(
   return from === to || transitions[from].includes(to);
 }
 
-/** A source becomes eligible only after both ingestion and human approval. */
+/**
+ * Решение 2026-07-17: логика одобрения выведена из эксплуатации — привязанный
+ * источник используется ботом безусловно, как только контент проиндексирован.
+ * Поле approvalStatus осталось в модели ради совместимости данных и всегда
+ * ставится "approved" при создании/обновлении.
+ */
 export function deriveKnowledgeSourceReadiness(
   status: KnowledgeSourceStatus,
-  approvalStatus: KnowledgeSourceApprovalStatus
+  _approvalStatus: KnowledgeSourceApprovalStatus
 ): KnowledgeSourceReadiness {
-  if (status === "ready" && approvalStatus === "approved") return "ready";
-  if (status === "ready") return "stale";
-  return "not_ready";
+  return status === "ready" ? "ready" : "not_ready";
 }
 
 export function isKnowledgeSourceRetrievalEligible(source: Pick<KnowledgeSourceRecord, "approvalStatus" | "readiness" | "status">): boolean {
-  return source.status === "ready" && source.readiness === "ready" && source.approvalStatus === "approved";
+  return source.status === "ready";
 }

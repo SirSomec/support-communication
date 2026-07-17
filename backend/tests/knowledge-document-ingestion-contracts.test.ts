@@ -38,7 +38,7 @@ describe("knowledge document ingestion", () => {
     const processed = await processOneKnowledgeDocumentIngestion({ reader: { read: async () => new TextEncoder().encode("График доставки: ежедневно") }, sources, workspace });
     assert.equal(processed.outcome, "completed");
     const source = sources.find("tenant-volga", "source-worker")!;
-    assert.equal(source.status, "ready"); assert.equal(source.approvalStatus, "pending"); assert.equal(source.metadata.extraction, "object_storage_worker");
+    assert.equal(source.status, "ready"); assert.equal(source.approvalStatus, "approved"); assert.equal(source.metadata.extraction, "object_storage_worker");
     assert.equal((sources.findIngestionJob("tenant-volga", "ingest-1")!).status, "completed");
   });
 

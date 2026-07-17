@@ -1,12 +1,35 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// Мастер-ключи обязаны быть стабильными между прогонами: гейт пересоздаёт
+// долгоживущий compose-стек, и случайный ключ на каждый прогон ломал
+// расшифровку уже сохранённых секретов AI-подключений в Postgres
+// (инцидент tenant-mygig 2026-07-17, secret_storage_unavailable).
+// Приоритет: env шелла > .env рядом с docker-compose.yml > random (для
+// эфемерных прогонов без стека, где расшифровка старых данных не нужна).
+function readDotEnv() {
+  try {
+    return Object.fromEntries(
+      readFileSync(join(root, ".env"), "utf8")
+        .split(/\r?\n/)
+        .filter((line) => line.includes("=") && !line.trimStart().startsWith("#"))
+        .map((line) => [line.slice(0, line.indexOf("=")).trim(), line.slice(line.indexOf("=") + 1).trim()])
+    );
+  } catch {
+    return {};
+  }
+}
+
+const dotEnv = readDotEnv();
+const stableCredential = (name) => process.env[name] || dotEnv[name] || randomBytes(32).toString("base64");
 const releaseLocalCredentialEnv = Object.freeze({
-  AI_CONNECTIONS_MASTER_KEY: randomBytes(32).toString("base64"),
-  PROVIDER_CREDENTIAL_MASTER_KEY: randomBytes(32).toString("base64")
+  AI_CONNECTIONS_MASTER_KEY: stableCredential("AI_CONNECTIONS_MASTER_KEY"),
+  PROVIDER_CREDENTIAL_MASTER_KEY: stableCredential("PROVIDER_CREDENTIAL_MASTER_KEY")
 });
 
 const providerRuntimeEnvNames = [

@@ -33,7 +33,9 @@ services:
       PORT: 4100
       SERVICE_NAME: api-gateway
       API_VERSION: v1
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       REDIS_URL: redis://redis:6379
       REALTIME_REDIS_FANOUT_ENABLED: ${REALTIME_REDIS_FANOUT_ENABLED:-true}
       REALTIME_REDIS_CHANNEL: ${REALTIME_REDIS_CHANNEL:-support:realtime}
@@ -107,7 +109,9 @@ services:
       NODE_ENV: development
       RUNTIME_PROFILE: local
       LOCAL_DEVELOPMENT_SEED_ENABLED: "true"
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       BOOTSTRAP_TENANT_SLUG: ${BOOTSTRAP_TENANT_SLUG:-local-client}
       BOOTSTRAP_OPERATOR_EMAIL: ${BOOTSTRAP_OPERATOR_EMAIL:-operator@local-client.test}
       BOOTSTRAP_OPERATOR_PASSWORD: ${BOOTSTRAP_OPERATOR_PASSWORD:-Local-Operator-2026!}
@@ -126,7 +130,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: notification-delivery-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       BROWSER_PUSH_ENABLED: ${BROWSER_PUSH_ENABLED:-false}
       BROWSER_PUSH_PUBLIC_KEY: ${BROWSER_PUSH_PUBLIC_KEY:-}
       BROWSER_PUSH_PRIVATE_KEY: ${BROWSER_PUSH_PRIVATE_KEY:-}
@@ -152,7 +158,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: lead-notification-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE: ${PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE:-smtp}
       PUBLIC_DEMO_NOTIFICATION_SMTP_FROM: ${PUBLIC_DEMO_NOTIFICATION_SMTP_FROM:-noreply@support-communication.local}
       PUBLIC_DEMO_NOTIFICATION_SMTP_HOST: ${PUBLIC_DEMO_NOTIFICATION_SMTP_HOST:-mailpit}
@@ -180,7 +188,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: webhook-delivery-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       WEBHOOK_DELIVERY_PROVIDER_MODE: ${WEBHOOK_DELIVERY_PROVIDER_MODE:-http}
       WEBHOOK_DELIVERY_SIGNING_SECRET: ${WEBHOOK_DELIVERY_SIGNING_SECRET:-local-dev-webhook-signing-secret}
       WEBHOOK_DELIVERY_INTERVAL_MS: 10000
@@ -204,7 +214,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: telegram-polling-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       # The polling worker matches scenarios, writes side effects and reads
       # canonical operators/presence — every domain below must live in the
       # same Prisma store as the api-gateway, otherwise data is silently lost.
@@ -232,7 +244,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: proactive-delivery-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       PROACTIVE_DELIVERY_ACTIVE_VARIANTS: A,B
       PROACTIVE_DELIVERY_INTERVAL_MS: 10000
       PROACTIVE_DELIVERY_LIMIT: 50
@@ -253,7 +267,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: bot-runtime-reconciliation-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       REDIS_URL: redis://redis:6379
       REALTIME_REDIS_FANOUT_ENABLED: ${REALTIME_REDIS_FANOUT_ENABLED:-true}
       REALTIME_REDIS_CHANNEL: ${REALTIME_REDIS_CHANNEL:-support:realtime}
@@ -282,7 +298,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: knowledge-document-ingestion-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: support-communication-local
       S3_REGION: us-east-1
@@ -305,7 +323,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: url-source-refresh-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       URL_SOURCE_REFRESH_INTERVAL_MS: 60000
     volumes:
       - api-gateway-runtime:/app/backend/.runtime
@@ -323,7 +343,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: report-digest-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: support-communication-local
@@ -350,7 +372,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: report-export-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       REPORT_EXPORT_OBJECT_ROOT: .runtime/report-exports
       REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
       S3_ENDPOINT: http://minio:9000
@@ -377,7 +401,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: quota-expiration-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       QUOTA_EXPIRATION_WORKER_INTERVAL_MS: 10000
       QUOTA_EXPIRATION_WORKER_LEASE_TIMEOUT_MS: 300000
       QUOTA_EXPIRATION_WORKER_LIMIT: 100
@@ -396,7 +422,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: sla-timer-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       SLA_TIMER_WORKER_HEALTH_PORT: 4110
       SLA_TIMER_WORKER_INTERVAL_MS: 5000
       SLA_TIMER_WORKER_LIMIT: 50
@@ -424,7 +452,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: rescue-return-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       RESCUE_RETURN_WORKER_HEALTH_PORT: 4110
       RESCUE_RETURN_WORKER_INTERVAL_MS: 5000
       RESCUE_RETURN_WORKER_LIMIT: 50
@@ -453,7 +483,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: outbox-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       OUTBOX_QUEUE: message-delivery
       OUTBOX_POLL_INTERVAL_MS: 10000
       OUTBOX_BATCH_SIZE: 50
@@ -492,7 +524,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: identity-events-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       # The outbox runtime opens the conversation delivery store on boot; without
       # prisma here the worker dies with conversation_store_file_required.
       OUTBOX_QUEUE: identity-events
@@ -514,7 +548,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: billing-sync-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       BILLING_SYNC_WORKER: "true"
       BILLING_SYNC_PROVIDER_MODE: ${BILLING_SYNC_PROVIDER_MODE:-disabled}
       BILLING_SYNC_PROVIDER_URL: ${BILLING_SYNC_PROVIDER_URL:-}
@@ -539,7 +575,9 @@ services:
       NODE_ENV: staging
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: file-scan-scanner-worker
-      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication
+      # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
+      # съедал max_connections постгреса на всех вместе — инцидент 2026-07-17).
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
       OUTBOX_FILE_SCAN_SCANNER_WORKER: "true"
       OUTBOX_QUEUE: file-scan
       OUTBOX_SCANNER_ENABLED: ${OUTBOX_SCANNER_ENABLED:-true}
@@ -591,6 +629,10 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    # max_connections поднят со 100: у гейтвея ~20 PrismaClient-ов (по клиенту на
+    # домен), у каждого пул до cpus*2+1 — дефолтного лимита не хватало, стек
+    # падал с "sorry, too many clients already" (инцидент 2026-07-17).
+    command: postgres -c max_connections=300
     environment:
       POSTGRES_DB: support_communication
       POSTGRES_USER: support

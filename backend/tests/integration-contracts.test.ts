@@ -123,7 +123,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(created.data.connection.name, "Telegram VIP");
     assert.equal(created.data.connection.type, "telegram");
     assert.equal(created.data.connection.credentialsMasked, true);
-    assert.match(String(created.data.connection.webhookUrl), /\/integrations\/telegram\/webhook\/conn_telegram_/);
+    assert.match(String(created.data.connection.webhookUrl), /\/webhooks\/telegram$/);
     assert.equal(JSON.stringify(created.data).includes("123:secret"), false);
     assert.match(String(created.data.auditId), /^evt_channel_/);
     assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === created.data.auditId), true);
@@ -251,8 +251,8 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
 
     assert.equal(telegram.status, "ok");
     assert.equal(max.status, "ok");
-    assert.match(String(telegram.data.connection.webhookUrl), /\/integrations\/telegram\/webhook\/conn_telegram_/);
-    assert.match(String(max.data.connection.webhookUrl), /\/integrations\/max\/webhook\/conn_max_/);
+    assert.match(String(telegram.data.connection.webhookUrl), /\/webhooks\/telegram$/);
+    assert.match(String(max.data.connection.webhookUrl), /\/webhooks\/max\/conn_max_/);
     assert.match(telegramGetMeUrl, /https:\/\/api\.telegram\.org\/bot123:telegramToken_123\/getMe/);
     assert.equal(telegram.data.connection.rawExternalId, "telegram:support_bot");
     assert.equal(repository.findTelegramConnectionByTenantId(tenantId)?.botUsername, "support_bot");

@@ -5,7 +5,7 @@ import { loadBackendConfig } from "@support-communication/config";
 import { makeAuditId } from "./backend-ids.js";
 import { IdentityRepository, type IdentityPermissionRole, type StoredServiceAdminSession } from "./identity.repository.js";
 import { identityTraceId } from "./identity-meta.js";
-import { SERVICE_ADMIN_ACTION_KEY, type ServiceAdminRequest } from "./service-admin-auth.js";
+import { isServiceAdminSessionId, SERVICE_ADMIN_ACTION_KEY, type ServiceAdminRequest } from "./service-admin-auth.js";
 
 @Injectable()
 export class ServiceAdminSessionGuard implements CanActivate {
@@ -32,7 +32,7 @@ export class ServiceAdminSessionGuard implements CanActivate {
         requiredAction,
         sessionLookup: async (token) => {
           const session = (await repository.findServiceAdminSessionByAccessToken(token)) ?? null;
-          resolvedSession = session?.id.startsWith("top-session_") ? null : session;
+          resolvedSession = isServiceAdminSessionId(session?.id) ? session : null;
           return resolvedSession;
         }
       });

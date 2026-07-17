@@ -1250,7 +1250,7 @@ export class AutomationService {
       createdAt: new Date().toISOString(), fingerprint: input.idempotencyKey ? stableStringify({ action: input.action, reason: input.reason, scenarioId: input.scenarioId, tenantId: input.tenantId }) : undefined,
       idempotencyKey: input.idempotencyKey, immutable: true, payload: { afterStatus: input.afterStatus, beforeStatus: input.beforeStatus }, reason: input.reason ?? "unspecified",
       scenarioId: input.scenarioId, tenantId: input.tenantId, traceId: actionTraceId(input.context, input.action) });
-    this.automationRepository.saveWorkspaceAuditEvent({
+    await this.automationRepository.saveWorkspaceAuditEvent({
       action: input.action, actor: actionActor(input.context), afterStatus: input.afterStatus, auditId: input.auditId,
       beforeStatus: input.beforeStatus, createdAt: new Date().toISOString(),
       idempotencyKey: input.idempotencyKey ? `bot-action:${input.tenantId}:${input.idempotencyKey}` : input.auditId,

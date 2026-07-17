@@ -51,6 +51,7 @@ describe("BAI-600 scenario list model", () => {
     assert.equal(row.statusTone, scenarioStatusTone("published"));
     assert.equal(row.triggerSummary, "Первое сообщение клиента");
     assert.match(row.aiSummary, /Правила доставки/);
+    assert.deepEqual(row.sourceTitles, ["Правила доставки"]);
     assert.match(row.lastPublishedLabel, /12/);
     assert.equal(row.hasErrors, true);
     assert.ok(row.errors.some((item) => /AI-подключение не настроено/.test(item)));

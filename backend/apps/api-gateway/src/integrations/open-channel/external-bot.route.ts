@@ -64,6 +64,10 @@ export class ExternalBotBridge {
     if (state?.botState === "closed") return false;
 
     await this.repository.mergeConversationState({
+      attributes: {
+        ...(state?.attributes ?? {}),
+        externalBotConnectionId: connection.id
+      },
       botState: "active",
       clientId: input.clientId,
       conversationId: input.conversation.id,
@@ -103,7 +107,10 @@ export class ExternalBotBridge {
   async notifyChatClosed(input: { conversationId: string; tenantId: string }): Promise<void> {
     const state = await this.repository.findConversationState(input.conversationId);
     if (!state || state.botState !== "active") return;
-    const connection = (await this.repository.listBotConnections(input.tenantId)).find((item) => item.status === "active");
+    const connectionId = String(state.attributes?.externalBotConnectionId ?? "").trim();
+    if (!connectionId) return;
+    const connection = (await this.repository.listBotConnections(input.tenantId))
+      .find((item) => item.id === connectionId && item.status === "active");
     if (!connection) return;
     await this.repository.mergeConversationState({
       botState: "closed",

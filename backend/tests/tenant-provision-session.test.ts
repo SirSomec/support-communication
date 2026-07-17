@@ -36,6 +36,7 @@ describe("tenant provision session contracts", () => {
 
     assert.equal(first.response.status, 200);
     assert.equal(typeof first.envelope.data.session?.accessToken, "string");
+    assert.equal("refreshToken" in first.envelope.data.session, false);
     assert.equal(first.envelope.data.tenantId, "tenant-acme-pilot");
     assert.equal(Array.isArray(first.envelope.data.defaultWorkspaceIds), true);
 

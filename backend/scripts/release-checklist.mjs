@@ -5,7 +5,6 @@ const checklistSteps = [
   { name: "Prisma schema validation", script: "prisma:validate" },
   { name: "Prisma client generation", script: "prisma:generate" },
   { name: "Prisma migration deploy", script: "prisma:migrate:deploy" },
-  { name: "Prisma identity seed", script: "prisma:seed" },
   { name: "Dependency security audit", script: "security:audit" },
   { name: "Tenant isolation verification", script: "tenant-isolation:verify" },
   { name: "Immutable audit verification", script: "audit-immutability:verify" },

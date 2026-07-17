@@ -62,7 +62,6 @@ export interface TenantProvisionData {
   session: {
     accessToken: string;
     expiresAt: string;
-    refreshToken: string;
   };
   tenant: {
     id: string;
@@ -108,8 +107,11 @@ export class TenantProvisionService {
       return invalidProvision(traceId, "tenant_slug_duplicate", "Tenant slug is already in use.");
     }
 
-    const existingAdmin = await this.identityRepository.findTenantUserByEmail(adminEmail);
-    if (existingAdmin) {
+    const [existingAdmin, existingCredential] = await Promise.all([
+      this.identityRepository.findTenantUserByEmail(adminEmail),
+      this.identityRepository.findPasswordCredentialByEmail(adminEmail)
+    ]);
+    if (existingAdmin || existingCredential) {
       return invalidProvision(traceId, "tenant_admin_email_duplicate", "Admin email is already assigned to another tenant.");
     }
 
@@ -119,6 +121,9 @@ export class TenantProvisionService {
     const compensation: Array<() => Promise<void>> = [];
 
     try {
+      compensation.push(async () => {
+        await this.identityRepository.removeProvisionedTenant(tenantId);
+      });
       await this.identityRepository.saveTenant({
         activeUsers: 1,
         arr: 0,
@@ -142,9 +147,8 @@ export class TenantProvisionService {
         workspaces: defaultWorkspaceIds.length
       });
       compensation.push(async () => {
-        void tenantId;
+        await this.billingRepository.removeProvisionedTenant(tenantId);
       });
-
       await this.billingRepository.saveTenant({
         arr: 0,
         healthScore: 100,
@@ -242,6 +246,9 @@ export class TenantProvisionService {
       }
 
       const rawPublicApiKey = generateStageApiKey();
+      compensation.push(async () => {
+        await this.integrationRepository.removeProvisionedTenant(tenantId);
+      });
       await this.integrationRepository.savePublicApiKey({
         createdAt: new Date().toISOString(),
         environment: "stage",
@@ -308,8 +315,7 @@ export class TenantProvisionService {
           },
           session: {
             accessToken: createdSession.accessToken,
-            expiresAt: createdSession.expiresAt,
-            refreshToken: createdSession.refreshToken
+            expiresAt: createdSession.expiresAt
           },
           roleGrants,
           defaultWorkspaceIds,
@@ -318,13 +324,16 @@ export class TenantProvisionService {
         }
       });
     } catch (error) {
+      const rollbackErrors: string[] = [];
       for (const rollback of compensation.reverse()) {
         try {
           await rollback();
-        } catch {
-          // Best-effort compensation only.
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError instanceof Error ? rollbackError.message : "Unknown compensation failure.");
         }
       }
+
+      const causeMessage = error instanceof Error ? error.message : "Tenant provisioning failed.";
 
       return createEnvelope({
         service: SERVICE,
@@ -334,8 +343,10 @@ export class TenantProvisionService {
         meta: apiMeta(),
         data: {},
         error: {
-          code: "tenant_provision_failed",
-          message: error instanceof Error ? error.message : "Tenant provisioning failed."
+          code: rollbackErrors.length > 0 ? "tenant_provision_rollback_failed" : "tenant_provision_failed",
+          message: rollbackErrors.length > 0
+            ? `${causeMessage} Compensation errors: ${rollbackErrors.join("; ")}`
+            : causeMessage
         }
       });
     }

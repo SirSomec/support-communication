@@ -101,6 +101,7 @@ export const conversationFixtures: ConversationRecord[] = [
     status: "waiting_client",
     sla: "Waiting",
     slaTone: "hold",
+    queueId: "queue-vk",
     topic: "Authorization / Code",
     device: "Web",
     entry: "VK",

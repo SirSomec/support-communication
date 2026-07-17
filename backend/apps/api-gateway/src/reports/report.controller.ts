@@ -134,7 +134,11 @@ function reportContextFromServiceAdminRequest(request: TenantOperatorRequest & S
       : request.serviceAdminContext?.currentTenantId
         ? { tenantId: request.serviceAdminContext.currentTenantId }
         : {}),
-    ...(request.serviceAdminContext?.actor.id ? { requesterUserId: request.serviceAdminContext.actor.id } : {}),
+    ...(request.tenantOperatorContext?.userId
+      ? { requesterUserId: request.tenantOperatorContext.userId }
+      : request.serviceAdminContext?.actor.id
+        ? { requesterUserId: request.serviceAdminContext.actor.id }
+        : {}),
     requesterPermissions: request.tenantOperatorContext?.permissions ?? request.serviceAdminContext?.permissions ?? [],
     requesterRoles: request.serviceAdminContext?.roles ?? []
   };

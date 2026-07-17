@@ -736,10 +736,42 @@ describe("Prisma-backed integration repository contracts", () => {
     assert.deepEqual(calls.publicApiKeyUpserts[1].update, {});
     assert.equal(calls.publicApiKeyRotationAuditEventCreates[0].data.keyId, "stage-key");
   });
+
+  it("claims a Prisma webhook delivery only once across concurrent workers", async () => {
+    const barrier = createCallBarrier(2);
+    const { client } = createFakePrismaIntegrationClient({
+      afterWebhookFindManySnapshot: () => barrier.wait()
+    });
+    const left = IntegrationRepository.prisma({ client });
+    const right = IntegrationRepository.prisma({ client });
+    await left.saveWebhookDeliveryJournalEntryAsync({
+      attempts: 0,
+      createdAt: "2026-07-16T10:00:00.000Z",
+      deliveryId: "wdj-concurrent-claim",
+      endpointId: "endpoint-concurrent",
+      eventType: "message.created",
+      idempotencyKey: "wdj-concurrent-key",
+      payloadRef: "s3://runtime/concurrent.json",
+      queue: "webhook-delivery",
+      status: "queued",
+      targetUrl: "https://example.test/webhooks",
+      tenantId: "tenant-runtime",
+      traceId: "trc_wdj_concurrent"
+    });
+
+    const [leftClaim, rightClaim] = await Promise.all([
+      left.claimWebhookDeliveryJournalEntriesAsync({ limit: 1, now: "2026-07-16T10:01:00.000Z" }),
+      right.claimWebhookDeliveryJournalEntriesAsync({ limit: 1, now: "2026-07-16T10:01:00.000Z" })
+    ]);
+
+    assert.equal(leftClaim.length + rightClaim.length, 1);
+    assert.equal((leftClaim[0] ?? rightClaim[0])?.deliveryId, "wdj-concurrent-claim");
+  });
 });
 
 function createFakePrismaIntegrationClient(options: {
   afterRevealFindUniqueSnapshot?: () => Promise<void>;
+  afterWebhookFindManySnapshot?: () => Promise<void>;
 } = {}) {
   const rows = new Map<string, FakePublicApiKeyRow>();
   const revealRows = new Map<string, FakePublicApiKeyRevealStateRow>();
@@ -755,6 +787,7 @@ function createFakePrismaIntegrationClient(options: {
   const channelConnectionRows = new Map<string, FakeRuntimeRow>();
   const channelConnectionEventRows = new Map<string, FakeRuntimeRow>();
   const channelConnectionAuditRows = new Map<string, FakeRuntimeRow>();
+  const providerConnectionCredentialRows = new Map<string, FakeRuntimeRow>();
   const telegramConnectionRows = new Map<string, FakeRuntimeRow>();
   const calls: {
     publicApiKeyCreates: Array<{ data: FakePublicApiKeyRow }>;
@@ -979,6 +1012,22 @@ function createFakePrismaIntegrationClient(options: {
         return upsertRuntimeRow(securitySessionRows, input.where.id, input.create, input.update);
       }
     },
+    providerConnectionCredential: {
+      async findMany(input) {
+        return findRuntimeRows(providerConnectionCredentialRows, input.where, "createdAt");
+      },
+      async findUnique(input) {
+        return clone(providerConnectionCredentialRows.get(input.where.channelConnectionId) ?? null);
+      },
+      async upsert(input) {
+        return upsertRuntimeRow(
+          providerConnectionCredentialRows,
+          input.where.channelConnectionId,
+          input.create,
+          input.update
+        );
+      }
+    },
     telegramConnection: {
       async findFirst(input) {
         return clone([...telegramConnectionRows.values()].find((row) => matchesWhere(row, input.where)) ?? null);
@@ -995,7 +1044,9 @@ function createFakePrismaIntegrationClient(options: {
     },
     webhookDeliveryJournalEntry: {
       async findMany(input) {
-        return findRuntimeRows(webhookDeliveryRows, input.where, "createdAt").slice(0, input.take);
+        const snapshot = findRuntimeRows(webhookDeliveryRows, input.where, "createdAt").slice(0, input.take);
+        await options.afterWebhookFindManySnapshot?.();
+        return snapshot;
       },
       async findUnique(input) {
         return clone(webhookDeliveryRows.get(input.where.deliveryId) ?? null);
@@ -1009,6 +1060,17 @@ function createFakePrismaIntegrationClient(options: {
         const next = { ...existing, ...clone(input.data) };
         webhookDeliveryRows.set(input.where.deliveryId, next);
         return clone(next);
+      },
+      async updateMany(input) {
+        const existing = input.where.deliveryId
+          ? webhookDeliveryRows.get(input.where.deliveryId)
+          : undefined;
+        if (!existing || !matchesWhere(existing, input.where)) {
+          return { count: 0 };
+        }
+
+        webhookDeliveryRows.set(input.where.deliveryId, { ...existing, ...clone(input.data) });
+        return { count: 1 };
       },
       async upsert(input) {
         return upsertRuntimeRow(webhookDeliveryRows, input.where.deliveryId, input.create, input.update);
@@ -1125,6 +1187,10 @@ function matchesWhere(row: FakeRuntimeRow, where: FakeRuntimeRow | undefined): b
 
     if (expected && typeof expected === "object" && !Array.isArray(expected) && "in" in expected) {
       return Array.isArray(expected.in) && expected.in.includes(row[key]);
+    }
+
+    if (expected instanceof Date) {
+      return dateValue(row[key]) === expected.getTime();
     }
 
     return row[key] === expected;

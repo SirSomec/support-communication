@@ -12,7 +12,7 @@ export const serviceAdminPrivilegedActions: string[] = [
   "permissions.read", "permissions.validate", "platform.alert.acknowledge",
   "platform.alert-routing.write", "platform.health-rollups.write", "platform.read",
   "platform.telemetry.ingest", "quality.manual-reviews.write", "quality.ratings.write",
-  "quality.scoring-audits.write", "quotas.check", "quotas.read", "realtime.events.read",
+  "quality.scoring-audits.write", "presence.read", "quotas.check", "quotas.read", "realtime.events.read",
   "notifications.read", "operations.read", "operations.write", "settings.read",
   "settings.manage", "service-admin.users.read", "service-admin.users.write",
   "service-admin.audit.read", "service-admin.audit.export", "security.review",
@@ -24,8 +24,8 @@ export const identityPermissionRoleCatalog: IdentityPermissionRole[] = [
   {
     key: "employee",
     description: "Line support operator",
-    actions: ["dialogs.read", "templates.read", "templates.write", "clients.read"],
-    aliases: ["employee", "operator", "line_1", "line-1"],
+    actions: ["dialogs.read", "templates.read", "templates.write", "clients.read", "presence.write"],
+    aliases: ["employee", "operator", "line_1", "line-1", "сотрудник"],
     groupIds: ["line-1"],
     metadata: {}
   },
@@ -34,13 +34,14 @@ export const identityPermissionRoleCatalog: IdentityPermissionRole[] = [
     description: "Senior support operator",
     actions: [
       "dialogs.read", "dialogs.manage", "panel.read", "routing.read", "routing.redistribute",
+      "presence.read", "presence.write",
       "templates.read", "templates.write", "clients.read", "clients.merge", "visitors.read",
       "automation.proactive.read", "reports.read", "reports.export", "quality.read",
       "quality.scoring-audits.write", "quality.ratings.write", "quality.manual-reviews.write",
       "knowledge.read", "automation.read", "permissions.read", "notifications.read",
       "settings.read", "employees.passwordReset", "outbound.start"
     ],
-    aliases: ["senior", "senior_operator", "lead"],
+    aliases: ["senior", "senior_operator", "lead", "старший", "старший сотрудник"],
     groupIds: ["senior-shifts"],
     metadata: {}
   },
@@ -48,7 +49,7 @@ export const identityPermissionRoleCatalog: IdentityPermissionRole[] = [
     key: "admin",
     description: "Tenant administrator",
     actions: ["*"],
-    aliases: ["admin", "administrator", "owner"],
+    aliases: ["admin", "administrator", "owner", "админ", "администратор", "владелец"],
     groupIds: ["admins"],
     metadata: {}
   },

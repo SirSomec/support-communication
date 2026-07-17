@@ -56,4 +56,23 @@ describe("knowledge document ingestion", () => {
     assert.equal(source.status, "ready"); assert.equal(source.approvalStatus, "pending"); assert.equal(source.metadata.extraction, "object_storage_worker");
     assert.equal((sources.findIngestionJob("tenant-volga", "ingest-1")!).status, "completed");
   });
+
+  it("stores a stable machine failure code instead of a transport exception message", async () => {
+    const workspace = WorkspaceRepository.inMemory({ clientExportJobs: [], clientMergeConflicts: [], clientMergeEvents: [], clientProfiles: [], fileScanResultIdempotency: [], knowledgeApprovalDecisions: [], knowledgeArticles: [], knowledgeDraftVersions: [], templateAuditEvents: [], templates: [], templateVersions: [], files: [{ auditId: "audit", channel: "SDK", fileId: "file-failing", fileName: "faq.txt", mimeType: "text/plain", objectKey: "tenant/faq", scanState: "clean", scanVerdict: "clean", sizeBytes: 14, storageState: "uploaded", tenantId: "tenant-volga" }] });
+    const sources = KnowledgeSourceRepository.inMemory();
+    const service = new KnowledgeSourcesService(sources, workspace);
+    const now = "2026-07-12T10:00:00.000Z";
+    sources.save({ approvalStatus: "approved", approvedAt: now, approvedBy: "admin", archivedAt: null, contentChecksum: null, createdAt: now, disabledAt: null, failedAt: null, failureCode: null, id: "source-failing", kind: "document", lastIndexedAt: null, lastIngestedAt: null, metadata: {}, owner: "admin", readiness: "not_ready", retentionUntil: null, sourceConfig: {}, sourceRef: null, status: "draft", tenantId: "tenant-volga", title: "Attachment", updatedAt: now, version: 1 });
+    await service.enqueueAttachmentIngestion("tenant-volga", "source-failing", { fileId: "file-failing", idempotencyKey: "ingest-failing" });
+
+    const processed = await processOneKnowledgeDocumentIngestion({
+      reader: { read: async () => { throw new Error("ECONNRESET from object storage host"); } },
+      sources,
+      workspace
+    });
+
+    assert.equal(processed.outcome, "failed");
+    assert.equal(sources.find("tenant-volga", "source-failing")?.failureCode, "knowledge_ingestion_failed");
+    assert.equal(sources.findIngestionJob("tenant-volga", "ingest-failing")?.errorCode, "knowledge_ingestion_failed");
+  });
 });

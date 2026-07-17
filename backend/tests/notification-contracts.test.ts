@@ -310,6 +310,8 @@ describe("notification contracts", () => {
 
     assert.equal(tested.status, "ok");
     assert.equal(tested.data.notification.typeKey, "critical");
+    assert.equal(tested.data.notification.action, "Проверить critical route");
+    assert.equal(tested.data.notification.meta, "Notifications · delivery test");
     assert.equal(tested.data.notification.tenantId, "tenant-volga");
     assert.deepEqual(
       tested.data.deliveryResults.map((result: Record<string, unknown>) => result.channelId),
@@ -318,6 +320,12 @@ describe("notification contracts", () => {
     assert.equal(tested.data.auditEvent.immutable, true);
     assert.match(tested.data.auditEvent.id, /^notif_test_/);
     assert.equal(publishedEvents.some((event) => event.eventName === "notification.created"), true);
+  });
+
+  it("configures notification realtime fanout during API bootstrap", () => {
+    const mainSource = readFileSync(new URL("../apps/api-gateway/src/main.ts", import.meta.url), "utf8");
+
+    assert.match(mainSource, /NotificationService\.configureRealtimeFanoutFromEnv\(process\.env\)/);
   });
 
   it("fails critical alert tests closed when requested channels or browser push subscriptions are not deliverable", async () => {

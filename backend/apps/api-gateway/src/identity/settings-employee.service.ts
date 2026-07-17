@@ -4,6 +4,7 @@ import { makeAuditId } from "./backend-ids.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
 import { IdentityRepository, type IdentityTenantUser } from "./identity.repository.js";
 import { TeamDirectoryRepository } from "./team-directory.repository.js";
+import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
 
 const SERVICE = "settingsService";
 const supportedChannels = ["SDK", "Telegram", "MAX", "VK"];
@@ -65,7 +66,8 @@ export class SettingsEmployeeService {
 
   constructor(
     private readonly identityRepository = IdentityRepository.default(),
-    private readonly teamDirectoryRepository = TeamDirectoryRepository.default()
+    private readonly teamDirectoryRepository = TeamDirectoryRepository.default(),
+    private readonly recoveryDelivery?: Pick<MfaOtpRuntime, "deliverRecovery">
   ) {}
 
   listSettingsAuditEvents() {
@@ -223,7 +225,17 @@ export class SettingsEmployeeService {
     await this.hydrateGroups(user.tenantId);
 
     const current = this.getEmployeeSettings(user);
-    const nextRoleKey = payload.roleKey === undefined ? current.roleKey : normalizeRoleKey(payload.roleKey);
+    const requestedRoleKey = payload.roleKey === undefined ? current.roleKey : parseRoleKey(payload.roleKey);
+    if (!requestedRoleKey) {
+      return invalidEnvelope("updateEmployee", "employee_role_invalid", "Employee role is not supported.", { employeeId, tenantId: user.tenantId });
+    }
+    const nextStatus = payload.status === undefined ? user.status : normalizeEmployeeStatus(payload.status);
+    if (!nextStatus) {
+      return invalidEnvelope("updateEmployee", "employee_status_invalid", "Employee status is not supported.", { employeeId, tenantId: user.tenantId });
+    }
+    const nextRoleKey = requestedRoleKey;
+    const adminGuard = await this.validateLastActiveAdministrator(user, nextRoleKey, nextStatus, "updateEmployee");
+    if (adminGuard) return adminGuard;
     const nextGroupId = payload.groupId === undefined ? current.groupId : normalizeGroupId(payload.groupId, nextRoleKey);
     const next: EmployeeSettingsOverlay = {
       ...current,
@@ -239,7 +251,7 @@ export class SettingsEmployeeService {
       ...user,
       metadata: { ...(user.metadata ?? {}), employeeSettings: next },
       role: roleNameFromKey(next.roleKey),
-      status: payload.status ?? user.status
+      status: nextStatus
     });
     this.employeeSettings.set(saved.id, next);
     this.syncGroupMember(next.groupId, saved.id, saved.tenantId);
@@ -267,9 +279,28 @@ export class SettingsEmployeeService {
       return tenantMismatch;
     }
 
+    const recoveryToken = await this.identityRepository.createRecoveryToken(user.email);
+    const delivery = this.recoveryDelivery ?? createMfaOtpRuntimeFromEnv();
+    const delivered = await delivery.deliverRecovery({
+      email: user.email,
+      expiresAt: recoveryToken.expiresAt,
+      recoveryToken: recoveryToken.token,
+      requestId: recoveryToken.id
+    });
+    const requestedAt = new Date().toISOString();
     const saved = await this.identityRepository.saveTenantUser({
       ...user,
-      supportNotes: `${user.supportNotes ?? ""} Password reset sent. ${String(payload.reason ?? "").trim()}`.trim()
+      metadata: {
+        ...(user.metadata ?? {}),
+        passwordRecovery: {
+          expiresAt: recoveryToken.expiresAt,
+          providerMessageId: delivered.providerMessageId,
+          reason: String(payload.reason ?? "").trim() || "Password reset requested by tenant administrator",
+          requestId: recoveryToken.id,
+          requestedAt,
+          status: "queued"
+        }
+      }
     });
 
     return createEnvelope({
@@ -282,6 +313,11 @@ export class SettingsEmployeeService {
         employee: {
           ...this.toEmployee(saved),
           credentials: { passwordStatus: "reset_sent" }
+        },
+        recovery: {
+          expiresAt: recoveryToken.expiresAt,
+          requestId: recoveryToken.id,
+          status: "queued"
         }
       }
     });
@@ -320,16 +356,8 @@ export class SettingsEmployeeService {
       return tenantMismatch;
     }
 
-    if (this.getEmployeeSettings(user).roleKey === "admin") {
-      const tenantUsers = await this.identityRepository.findTenantUsers(user.tenantId);
-      const activeAdmins = tenantUsers.filter((candidate) => candidate.id !== user.id && candidate.status === "active" && this.getEmployeeSettings(candidate).roleKey === "admin");
-      if (!activeAdmins.length) {
-        return invalidEnvelope("deactivateEmployee", "last_admin_required", "At least one active administrator must remain in the tenant.", {
-          employeeId,
-          tenantId: user.tenantId
-        });
-      }
-    }
+    const adminGuard = await this.validateLastActiveAdministrator(user, this.getEmployeeSettings(user).roleKey, "deactivated", "deactivateEmployee");
+    if (adminGuard) return adminGuard;
 
     const saved = await this.identityRepository.saveTenantUser({ ...user, status: "deactivated", sessions: 0 });
     return createEnvelope({
@@ -351,6 +379,28 @@ export class SettingsEmployeeService {
       traceId: identityTraceId(SERVICE, "fetchRoles"),
       meta: apiMeta(),
       data: { roles: await this.buildRoleReadModel() }
+    });
+  }
+
+  private async validateLastActiveAdministrator(
+    user: IdentityTenantUser,
+    nextRoleKey: string,
+    nextStatus: string,
+    operation: string
+  ): Promise<BackendEnvelope<Record<string, unknown>> | null> {
+    const currentRoleKey = this.getEmployeeSettings(user).roleKey;
+    if (currentRoleKey !== "admin" || user.status !== "active" || (nextRoleKey === "admin" && nextStatus === "active")) {
+      return null;
+    }
+    const tenantUsers = await this.identityRepository.findTenantUsers(user.tenantId);
+    const activeAdmins = tenantUsers.filter((candidate) =>
+      candidate.id !== user.id
+      && candidate.status === "active"
+      && this.getEmployeeSettings(candidate).roleKey === "admin"
+    );
+    return activeAdmins.length ? null : invalidEnvelope(operation, "last_admin_required", "At least one active administrator must remain in the tenant.", {
+      employeeId: user.id,
+      tenantId: user.tenantId
     });
   }
 
@@ -716,6 +766,19 @@ function normalizeRoleKey(value: unknown): string {
   return "employee";
 }
 
+function parseRoleKey(value: unknown): string | null {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (["admin", "administrator", "owner", "администратор"].includes(raw)) return "admin";
+  if (["senior", "senior operator", "старший сотрудник", "lead"].includes(raw)) return "senior";
+  if (["employee", "operator", "сотрудник"].includes(raw)) return "employee";
+  return null;
+}
+
+function normalizeEmployeeStatus(value: unknown): string | null {
+  const status = String(value ?? "").trim().toLowerCase();
+  return ["active", "blocked", "deactivated", "inactive", "invited"].includes(status) ? status : null;
+}
+
 function roleNameFromKey(roleKey: string): string {
   if (roleKey === "admin") return "Администратор";
   if (roleKey === "senior") return "Старший сотрудник";
@@ -746,7 +809,9 @@ function normalizeChatLimit(value: unknown): number {
 
 function passwordStatusFromUser(user: IdentityTenantUser): string {
   if (user.status === "invited") return "invite_pending";
-  if (String(user.supportNotes ?? "").includes("Password reset sent")) return "reset_sent";
+  const recovery = user.metadata?.passwordRecovery;
+  if (recovery && typeof recovery === "object" && !Array.isArray(recovery)
+    && (recovery as Record<string, unknown>).status === "queued") return "reset_sent";
   return "active";
 }
 

@@ -7,8 +7,54 @@ import { bootstrapConversationState } from "../apps/api-gateway/src/conversation
 
 describe("Prisma-backed conversation repository contracts", () => {
   it("keeps repository defaults empty and requires explicit local seed injection", async () => {
-    assert.deepEqual(await ConversationRepository.inMemory().listConversations(), []);
-    assert.ok((await ConversationRepository.inMemory(bootstrapConversationState()).listConversations()).length > 0);
+    assert.deepEqual(await ConversationRepository.inMemory().listConversations({ tenantId: "tenant-volga" }), []);
+    assert.ok((await ConversationRepository.inMemory(bootstrapConversationState()).listConversations({ tenantId: "tenant-volga" })).length > 0);
+    await assert.rejects(
+      async () => (ConversationRepository.inMemory().listConversations as (filter?: unknown) => unknown)(),
+      /conversation_tenant_id_required/
+    );
+  });
+
+  it("bounds tenant conversation pages and nested message history", async () => {
+    const repository = ConversationRepository.inMemory(bootstrapConversationState());
+    const firstPage = await repository.listConversations({ tenantId: "tenant-volga", take: 1, messageTake: 1 });
+    assert.equal(firstPage.length, 1);
+    assert.ok(firstPage[0].messages.length <= 1);
+
+    const secondPage = await repository.listConversations({
+      cursor: firstPage[0].id,
+      messageTake: 1,
+      take: 1,
+      tenantId: "tenant-volga"
+    });
+    assert.ok(secondPage.every((conversation) => conversation.tenantId === "tenant-volga"));
+    assert.notEqual(secondPage[0]?.id, firstPage[0].id);
+  });
+
+  it("requires realtime scope and pages forward from an event cursor", async () => {
+    const repository = ConversationRepository.inMemory();
+    for (let index = 1; index <= 3; index += 1) {
+      await repository.appendRealtimeEvent({
+        data: { index },
+        eventId: `rt_page_${index}`,
+        eventName: "conversation.updated",
+        occurredAt: `2026-07-16T10:00:0${index}.000Z`,
+        resourceId: "conversation-1",
+        resourceType: "conversation",
+        schemaVersion: "v1",
+        tenantId: "tenant-volga",
+        traceId: `trace-page-${index}`
+      });
+    }
+
+    await assert.rejects(
+      async () => (repository.listRealtimeEvents as (filter?: unknown) => unknown)(),
+      /conversation_realtime_event_scope_required/
+    );
+    assert.deepEqual(
+      (await repository.listRealtimeEvents({ since: "rt_page_1", take: 1, tenantId: "tenant-volga" })).map((event) => event.eventId),
+      ["rt_page_2"]
+    );
   });
 
   it("rejects conversation writes without explicit tenant ownership", async () => {
@@ -25,7 +71,7 @@ describe("Prisma-backed conversation repository contracts", () => {
     const { client } = createFakePrismaConversationClient();
     const repository = ConversationRepository.prisma({ client });
 
-    const conversations = await repository.listConversations();
+    const conversations = await repository.listConversations({ tenantId: "tenant-volga" });
     const detail = await repository.findConversation("maria");
 
     assert.equal(conversations.length, 1);
@@ -36,8 +82,10 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.equal(detail?.messages[0].createdAt, "2026-06-28T10:00:00.000Z");
     assert.equal(detail?.messages[1].type, "internal");
     assert.deepEqual(client.calls.conversationFindMany, [{
-      include: { messages: { orderBy: { createdAt: "asc" } } },
-      orderBy: { updatedAt: "desc" }
+      include: { messages: { orderBy: { createdAt: "desc" }, take: 50 } },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 100,
+      where: { tenantId: "tenant-volga" }
     }]);
     assert.deepEqual(client.calls.conversationFindUnique, [{
       include: { messages: { orderBy: { createdAt: "asc" } } },
@@ -45,7 +93,7 @@ describe("Prisma-backed conversation repository contracts", () => {
     }]);
   });
 
-  it("saves conversation records and replaces message rows in one Prisma transaction", async () => {
+  it("saves conversation records and appends message rows idempotently in one Prisma transaction", async () => {
     const { client } = createFakePrismaConversationClient();
     const repository = ConversationRepository.prisma({ client });
     const conversation = await repository.findConversation("maria");
@@ -69,10 +117,9 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.equal(client.calls.conversationUpserts[0].create.resolutionOutcome, "resolved");
     assert.equal(saved.messages.some((message) => message.id === "msg_agent_prisma"), true);
     assert.equal(client.calls.conversationUpserts.length, 1);
-    assert.equal(client.calls.conversationMessageDeleteMany.length, 1);
-    assert.deepEqual(client.calls.conversationMessageDeleteMany[0], { where: { conversationId: "maria" } });
     assert.equal(client.calls.conversationMessageCreateMany.length, 1);
     assert.equal(client.calls.conversationMessageCreateMany[0].data.length, 3);
+    assert.equal(client.calls.conversationMessageCreateMany[0].skipDuplicates, true);
     assert.equal(client.calls.conversationMessageCreateMany[0].data[2].id, "msg_agent_prisma");
     assert.equal(client.calls.conversationMessageCreateMany[0].data.every((message) => message.createdAt instanceof Date), true);
     assert.equal(client.calls.conversationMessageCreateMany[0].data[0].createdAt.toISOString(), "2026-06-28T10:00:00.000Z");
@@ -80,6 +127,41 @@ describe("Prisma-backed conversation repository contracts", () => {
 
     const refetched = await repository.findConversation("maria");
     assert.deepEqual(refetched?.messages.map((message) => message.id), ["msg_1", "msg_2", "msg_agent_prisma"]);
+  });
+
+  it("does not lose messages when two stale conversation snapshots are saved", async () => {
+    const { client } = createFakePrismaConversationClient();
+    const repository = ConversationRepository.prisma({ client });
+    const firstSnapshot = await repository.findConversation("maria");
+    const secondSnapshot = await repository.findConversation("maria");
+    assert.ok(firstSnapshot);
+    assert.ok(secondSnapshot);
+
+    firstSnapshot.messages.push({
+      createdAt: "2026-06-28T10:02:00.000Z",
+      id: "msg_concurrent_a",
+      side: "client",
+      text: "Concurrent inbound message",
+      time: "11:26"
+    });
+    secondSnapshot.messages.push({
+      createdAt: "2026-06-28T10:03:00.000Z",
+      id: "msg_concurrent_b",
+      side: "agent",
+      text: "Concurrent operator reply",
+      time: "11:27"
+    });
+
+    await Promise.all([
+      repository.saveConversation(firstSnapshot),
+      repository.saveConversation(secondSnapshot)
+    ]);
+
+    const persisted = await repository.findConversation("maria");
+    assert.deepEqual(
+      persisted?.messages.map((message) => message.id),
+      ["msg_1", "msg_2", "msg_concurrent_a", "msg_concurrent_b"]
+    );
   });
 
   it("persists assignment, realtime notification and routing analytics in one Prisma transaction", async () => {
@@ -217,7 +299,7 @@ describe("Prisma-backed conversation repository contracts", () => {
       tenantId: "tenant-volga",
       traceId: "trc_conversation_prisma"
     });
-    const events = await repository.listRealtimeEvents();
+    const events = await repository.listRealtimeEvents({ allTenants: true });
     const tenantEvents = await repository.listRealtimeEvents({ tenantId: "tenant-volga" });
 
     assert.equal(realtime.eventId, "rt_prisma_001");
@@ -225,9 +307,36 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.deepEqual(tenantEvents.map((event) => event.eventId), ["rt_prisma_001"]);
     assert.equal(client.calls.conversationRealtimeEventCreates[0].data.occurredAt instanceof Date, true);
     assert.deepEqual(client.calls.conversationRealtimeEventFindMany, [
-      { orderBy: [{ occurredAt: "asc" }, { eventId: "asc" }] },
-      { orderBy: [{ occurredAt: "asc" }, { eventId: "asc" }], where: { tenantId: "tenant-volga" } }
+      { orderBy: [{ occurredAt: "desc" }, { eventId: "desc" }], take: 200 },
+      { orderBy: [{ occurredAt: "desc" }, { eventId: "desc" }], take: 200, where: { tenantId: "tenant-volga" } }
     ]);
+  });
+
+  it("deletes expired realtime events through a bounded Prisma retention predicate", async () => {
+    const { client } = createFakePrismaConversationClient();
+    const repository = ConversationRepository.prisma({ client });
+    await repository.appendRealtimeEvent({
+      data: {}, eventId: "rt_prisma_expired", eventName: "message.created",
+      occurredAt: "2026-06-01T00:00:00.000Z", resourceId: "maria", resourceType: "conversation",
+      schemaVersion: "v1", tenantId: "tenant-volga", traceId: "trace-expired"
+    });
+    await repository.appendRealtimeEvent({
+      data: {}, eventId: "rt_prisma_fresh", eventName: "message.created",
+      occurredAt: "2026-07-15T00:00:00.000Z", resourceId: "maria", resourceType: "conversation",
+      schemaVersion: "v1", tenantId: "tenant-volga", traceId: "trace-fresh"
+    });
+
+    const removed = await repository.pruneRealtimeEvents({
+      before: "2026-07-01T00:00:00.000Z",
+      tenantId: "tenant-volga"
+    });
+    const remaining = await repository.listRealtimeEvents({ tenantId: "tenant-volga" });
+
+    assert.equal(removed, 1);
+    assert.deepEqual(remaining.map((event) => event.eventId), ["rt_prisma_fresh"]);
+    assert.deepEqual(client.calls.conversationRealtimeEventDeleteMany, [{
+      where: { occurredAt: { lt: new Date("2026-07-01T00:00:00.000Z") }, tenantId: "tenant-volga" }
+    }]);
   });
 
   it("returns the existing inbound event when a concurrent Prisma create hits the unique key", async () => {
@@ -541,12 +650,12 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
     conversationLifecycleEventCreates: [] as Array<{ data: FakeConversationLifecycleEventCreateInput }>,
     conversationLifecycleEventFindMany: [] as unknown[],
     conversationLifecycleEventFindUnique: [] as unknown[],
-    conversationMessageCreateMany: [] as Array<{ data: FakeConversationMessageCreateInput[] }>,
-    conversationMessageDeleteMany: [] as Array<{ where: { conversationId: string } }>,
+    conversationMessageCreateMany: [] as Array<{ data: FakeConversationMessageCreateInput[]; skipDuplicates: true }>,
     conversationOutboundDescriptorCreates: [] as Array<{ data: FakeConversationOutboundDescriptorCreateInput }>,
     conversationOutboundDescriptorFindMany: [] as Array<{ orderBy: { createdAt: "desc" }; where: Partial<Record<"channel" | "conversationId" | "idempotencyKey" | "kind" | "status" | "tenantId", string>> }>,
     conversationOutboundDescriptorFindUnique: [] as Array<{ where: { idempotencyKey: string } }>,
     conversationRealtimeEventCreates: [] as Array<{ data: FakeConversationRealtimeEventCreateInput }>,
+    conversationRealtimeEventDeleteMany: [] as Array<{ where: { occurredAt: { lt: Date }; tenantId?: string } }>,
     conversationRealtimeEventFindMany: [] as unknown[],
     conversationUpserts: [] as Array<{ create: FakeConversationUpsertInput; update: FakeConversationUpsertInput; where: { id: string } }>,
     conversationUpdateMany: [] as Array<{ data: FakeConversationUpsertInput; where: { id: string; operatorId: string | null; tenantId: string } }>,
@@ -637,21 +746,17 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
       }
     },
     conversationMessage: {
-      createMany: async (input: { data: FakeConversationMessageCreateInput[] }) => {
+      createMany: async (input: { data: FakeConversationMessageCreateInput[]; skipDuplicates: true }) => {
         calls.conversationMessageCreateMany.push(input);
         const conversation = conversations.get(input.data[0]?.conversationId ?? "");
         if (conversation) {
-          conversation.messages = input.data.map((message) => ({ ...message, createdAt: message.createdAt }));
+          const existingIds = new Set(conversation.messages.map((message) => message.id));
+          conversation.messages.push(...input.data
+            .filter((message) => !existingIds.has(message.id))
+            .map((message) => ({ ...message, createdAt: message.createdAt })));
+          conversation.messages.sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
         }
         return { count: input.data.length };
-      },
-      deleteMany: async (input: { where: { conversationId: string } }) => {
-        calls.conversationMessageDeleteMany.push(input);
-        const conversation = conversations.get(input.where.conversationId);
-        if (conversation) {
-          conversation.messages = [];
-        }
-        return { count: 1 };
       }
     },
     conversationOutboundDescriptor: {
@@ -684,6 +789,18 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
         calls.conversationRealtimeEventCreates.push(input);
         realtimeEvents.set(input.data.eventId, input.data);
         return input.data;
+      },
+      deleteMany: async (input: { where: { occurredAt: { lt: Date }; tenantId?: string } }) => {
+        calls.conversationRealtimeEventDeleteMany.push(input);
+        let count = 0;
+        for (const [eventId, event] of realtimeEvents) {
+          if (event.occurredAt < input.where.occurredAt.lt
+            && (!input.where.tenantId || event.tenantId === input.where.tenantId)) {
+            realtimeEvents.delete(eventId);
+            count += 1;
+          }
+        }
+        return { count };
       },
       findMany: async (input: { where?: { tenantId?: string } }) => {
         calls.conversationRealtimeEventFindMany.push(input);

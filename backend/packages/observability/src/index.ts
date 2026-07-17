@@ -23,6 +23,13 @@ export interface LogContext {
 }
 
 const traceContext = new AsyncLocalStorage<{ traceId: string }>();
+const logLevelPriorities = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40
+} as const;
+type LogLevel = keyof typeof logLevelPriorities;
 
 export function createRequestTraceId(service: string, operation = "request", requestId?: string): string {
   const normalizedRequestId = normalizeRequestId(requestId);
@@ -52,13 +59,20 @@ export function getCurrentTraceId(): string | undefined {
   return traceContext.getStore()?.traceId;
 }
 
-export function writeStructuredLog(level: "debug" | "info" | "warn" | "error", message: string, context: LogContext): string {
+export function writeStructuredLog(level: LogLevel, message: string, context: LogContext): string {
   const line = formatStructuredLog(level, message, context);
-  process.stdout.write(`${line}\n`);
+  if (shouldWriteStructuredLog(level)) {
+    process.stdout.write(`${line}\n`);
+  }
   return line;
 }
 
-export function formatStructuredLog(level: "debug" | "info" | "warn" | "error", message: string, context: LogContext): string {
+export function shouldWriteStructuredLog(level: LogLevel, configuredLevel = process.env.LOG_LEVEL): boolean {
+  const minimumLevel = isLogLevel(configuredLevel) ? configuredLevel : "info";
+  return logLevelPriorities[level] >= logLevelPriorities[minimumLevel];
+}
+
+export function formatStructuredLog(level: LogLevel, message: string, context: LogContext): string {
   const entry = {
     level,
     message,
@@ -71,4 +85,8 @@ export function formatStructuredLog(level: "debug" | "info" | "warn" | "error", 
 
 function sanitizeTracePart(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
+}
+
+function isLogLevel(value: unknown): value is LogLevel {
+  return typeof value === "string" && Object.hasOwn(logLevelPriorities, value);
 }

@@ -91,7 +91,5 @@ export function evaluatePostPolicy(citationCount: number, materialsAvailable: nu
 
 function topicMatches(message: string, topics: string[], locale: string): boolean {
   if (!message.trim() || !topics.length) return false;
-  return topics.some((topic) => topic.split(/\s+/).length > 1
-    ? matchesBotTriggerPhrase(message, topic, "tokens", locale)
-    : matchesBotTriggerPhrase(message, topic, "tokens", locale));
+  return topics.some((topic) => matchesBotTriggerPhrase(message, topic, "tokens", locale));
 }

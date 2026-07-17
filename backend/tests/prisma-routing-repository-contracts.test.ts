@@ -353,6 +353,7 @@ describe("Prisma-backed routing repository contracts", () => {
     assert.equal(saved.conversations[0]?.status, "queued");
     assert.equal(repository.readState().queues[0]?.waiting, 8);
     assert.deepEqual(calls.routingStateSnapshotFindUnique, [
+      { where: { id: "default" } },
       { where: { id: "default" } }
     ]);
     assert.deepEqual(calls.routingStateSnapshotUpdateMany.at(-1), {
@@ -437,7 +438,7 @@ describe("Prisma-backed routing repository contracts", () => {
     assert.equal(repository.readState().conversations.some((conversation) => conversation.id === "dialog-json-fallback"), false);
   });
 
-  it("fails closed when a routing state snapshot save races a newer snapshot version", async () => {
+  it("refreshes a stale process snapshot version before saving after another worker", async () => {
     const { client, calls, seedRoutingStateSnapshot } = createFakePrismaRoutingClient();
     const initialState = emptyRoutingState({
       conversations: [{
@@ -464,11 +465,7 @@ describe("Prisma-backed routing repository contracts", () => {
         waiting: 1
       }]
     });
-    const routingJobUpsertsBeforeConflict = calls.routingJobUpserts.length;
-    const routingAnalyticsUpsertsBeforeConflict = calls.routingAnalyticsRowUpserts.length;
-
-    await assert.rejects(
-      () => first.saveState({
+    await first.saveState({
         ...first.readState(),
         conversations: [],
         jobs: [{
@@ -489,13 +486,10 @@ describe("Prisma-backed routing repository contracts", () => {
           tenantId: "tenant-volga",
           toOperatorId: null
         }]
-      }),
-      /routing_state_snapshot_conflict/
-    );
-    assert.equal(calls.routingJobUpserts.length, routingJobUpsertsBeforeConflict);
-    assert.equal(calls.routingAnalyticsRowUpserts.length, routingAnalyticsUpsertsBeforeConflict);
-    assert.equal((await first.listJobs()).some((job) => job.id === "job_prisma_conflict_should_not_commit"), false);
-    assert.equal((await first.listRoutingAnalyticsRows()).some((row) => row.id === "analytics_conflict_should_not_commit"), false);
+      });
+    assert.equal(calls.routingStateSnapshotUpdateMany.at(-1)?.where.version, 2);
+    assert.equal((await first.listJobs()).some((job) => job.id === "job_prisma_conflict_should_not_commit"), true);
+    assert.equal((await first.listRoutingAnalyticsRows()).some((row) => row.id === "analytics_conflict_should_not_commit"), true);
   });
 
   it("rolls back routing state when a lifecycle event identity is duplicated", async () => {

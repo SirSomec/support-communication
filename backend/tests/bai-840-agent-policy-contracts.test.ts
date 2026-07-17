@@ -98,8 +98,9 @@ describe("BAI-842 policy evaluator", () => {
   });
 
   it("evaluatePrePolicy uses whole-word token matching; postPolicy needs available materials", () => {
-    const policy = normalizeAgentPolicy({ blockedTopics: ["оплата"] });
+    const policy = normalizeAgentPolicy({ blockedTopics: ["оплата", "расторжение договора"] });
     assert.equal(evaluatePrePolicy("Вопрос про оплата заказа", policy).action, "refuse");
+    assert.equal(evaluatePrePolicy("Нужно расторжение договора", policy).action, "refuse");
     assert.equal(evaluatePrePolicy("Всё оплачено уже", policy).action, "allow");
     assert.equal(evaluatePostPolicy(0, 3, policy).action, "handoff");
     assert.equal(evaluatePostPolicy(2, 3, policy).action, "allow");

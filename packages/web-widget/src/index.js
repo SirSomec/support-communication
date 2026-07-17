@@ -1,6 +1,7 @@
 const POLL_INTERVAL_MS = 3000;
 const INVITATION_POLL_INTERVAL_MS = 5000;
 const PRESENCE_INTERVAL_MS = 15000;
+const AGENTS_STATUS_INTERVAL_MS = 30000;
 const DEFAULT_ENVIRONMENT = "stage";
 const SUBJECT_STORAGE_KEY = "support-widget:subject-id";
 const SESSION_STORAGE_KEY = "support-widget:session-id";
@@ -23,6 +24,7 @@ const state = {
   presenceListenersAttached: false,
   conversationId: null,
   visitorSessionToken: null,
+  visitorTokenErrorShown: false,
   lastOperatorMessageId: null,
   pollTimer: null,
   invitationPollTimer: null,
@@ -33,6 +35,7 @@ const state = {
   ratingSubmitted: false,
   // Page API (sw_api) state.
   agentsOnline: null,
+  agentsStatusTimer: null,
   contactInfo: {},
   firstMessageSent: false,
   lastInitOptions: null,
@@ -87,7 +90,7 @@ export function init(options = {}) {
   state.lastInitOptions = { ...options };
   state.userToken = readStoredValue(localStorage, USER_TOKEN_STORAGE_KEY);
   captureUtm();
-  refreshAgentsStatus();
+  startAgentsStatusPolling();
   if (options.pageApi !== false) {
     installPageApi();
   }
@@ -96,7 +99,10 @@ export function init(options = {}) {
 }
 
 function buildUrl(path, query = {}) {
-  const url = new URL(`${state.apiBase}${path}`);
+  const browserBase = typeof document !== "undefined"
+    ? document.baseURI
+    : (typeof window !== "undefined" ? window.location?.href : "http://local.widget/");
+  const url = new URL(resolveWidgetUrl(state.apiBase, path, browserBase));
   url.searchParams.set("environment", state.environment);
   for (const [key, value] of Object.entries(query)) {
     if (value != null && String(value).length > 0) {
@@ -104,6 +110,13 @@ function buildUrl(path, query = {}) {
     }
   }
   return url.toString();
+}
+
+function resolveWidgetUrl(apiBase, path, browserBase = "http://local.widget/") {
+  const normalizedBase = String(apiBase ?? "").trim().replace(/\/+$/, "");
+  const normalizedPath = String(path ?? "").trim();
+  const joined = `${normalizedBase}${normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`}`;
+  return new URL(joined, browserBase).toString();
 }
 
 async function apiRequest(method, path, { body, query } = {}) {
@@ -119,7 +132,10 @@ async function apiRequest(method, path, { body, query } = {}) {
   const envelope = await response.json().catch(() => ({}));
   if (!response.ok || envelope.status === "denied" || envelope.status === "invalid" || envelope.status === "not_found") {
     const message = envelope.error?.message || `Request failed (${response.status})`;
-    throw new Error(message);
+    const error = new Error(message);
+    error.code = envelope.error?.code ?? `http_${response.status}`;
+    error.httpStatus = response.status;
+    throw error;
   }
 
   return envelope.data ?? {};
@@ -136,10 +152,11 @@ async function sendVisitorMessage(text) {
   });
 
   if (data.conversationId) {
-    state.conversationId = data.conversationId;
+    setConversationId(data.conversationId);
   }
   if (data.visitorSessionToken) {
     state.visitorSessionToken = data.visitorSessionToken;
+    state.visitorTokenErrorShown = false;
   }
 
   if (!state.firstMessageSent) {
@@ -168,6 +185,11 @@ async function pollOperatorReplies() {
     `/public/sdk/conversations/${encodeURIComponent(state.conversationId)}/messages`,
     { query }
   );
+
+  if (data.visitorSessionToken) {
+    state.visitorSessionToken = data.visitorSessionToken;
+    state.visitorTokenErrorShown = false;
+  }
 
   const replies = Array.isArray(data.messages) ? data.messages : [];
   for (const reply of replies) {
@@ -283,11 +305,8 @@ async function handleInvitationAction(action, ...buttons) {
     if (action === "accepted") {
       const conversationId = String(data.conversationId ?? "").trim();
       if (!conversationId) throw new Error("Invitation acceptance did not include a conversation.");
-      state.conversationId = conversationId;
+      setConversationId(conversationId);
       state.visitorSessionToken = null;
-      state.lastOperatorMessageId = null;
-      state.ratingSubmitted = false;
-      if (ratingEl) ratingEl.hidden = true;
       open();
     }
     clearInvitation();
@@ -325,6 +344,7 @@ function sendDisconnect() {
 
 function startPresence() {
   stopPresence();
+  stopAgentsStatusPolling();
   sendPresenceHeartbeat().catch(() => {});
   state.presenceTimer = window.setInterval(() => {
     sendPresenceHeartbeat().catch(() => {});
@@ -370,8 +390,19 @@ async function sendQualityRating(score) {
 function startPolling() {
   stopPolling();
   state.pollTimer = window.setInterval(() => {
-    pollOperatorReplies().catch(() => {});
+    pollOperatorReplies().catch(handlePollError);
   }, POLL_INTERVAL_MS);
+}
+
+function handlePollError(error) {
+  if (!["visitor_session_token_expired", "visitor_session_token_invalid", "visitor_session_token_malformed", "visitor_session_token_scope_mismatch"].includes(error?.code)) {
+    return;
+  }
+  state.visitorSessionToken = null;
+  if (!state.visitorTokenErrorShown) {
+    state.visitorTokenErrorShown = true;
+    appendSystemMessage("Сессия чата истекла. Отправьте новое сообщение, чтобы безопасно продолжить диалог.");
+  }
 }
 
 function stopPolling() {
@@ -547,6 +578,37 @@ async function refreshAgentsStatus() {
   }
 }
 
+function startAgentsStatusPolling() {
+  stopAgentsStatusPolling();
+  void refreshAgentsStatus();
+  state.agentsStatusTimer = window.setInterval(() => {
+    void refreshAgentsStatus();
+  }, AGENTS_STATUS_INTERVAL_MS);
+}
+
+function stopAgentsStatusPolling() {
+  if (state.agentsStatusTimer != null) {
+    window.clearInterval(state.agentsStatusTimer);
+    state.agentsStatusTimer = null;
+  }
+}
+
+function setConversationId(conversationId) {
+  const changed = applyConversationIdentity(state, conversationId);
+  if (changed && ratingEl) ratingEl.hidden = true;
+  return changed;
+}
+
+function applyConversationIdentity(target, conversationId) {
+  const normalizedId = String(conversationId ?? "").trim();
+  if (!normalizedId || normalizedId === target.conversationId) return false;
+  target.conversationId = normalizedId;
+  target.lastOperatorMessageId = null;
+  target.operatorAccepted = false;
+  target.ratingSubmitted = false;
+  return true;
+}
+
 async function sendClientInfo(partial = {}) {
   const data = await apiRequest("POST", "/public/sdk/client-info", {
     body: {
@@ -558,7 +620,7 @@ async function sendClientInfo(partial = {}) {
     }
   });
   if (data.conversationId) {
-    state.conversationId = data.conversationId;
+    setConversationId(data.conversationId);
   }
   if (data.visitorNumber !== undefined && data.visitorNumber !== null) {
     state.visitorNumber = Number(data.visitorNumber);
@@ -747,7 +809,7 @@ function installPageApi() {
   setTimeout(() => callPageCallback("onLoadCallback"), 0);
 }
 
-export const __test__ = { callPageCallback, createPageApi, downloadableAttachments, firstInvitation, formatAttachmentSize, getOrCreateIdentity, invitationAcknowledgePath, isLocalInvitation, normalizeInterval, parseUtmParams };
+export const __test__ = { applyConversationIdentity, callPageCallback, createPageApi, downloadableAttachments, firstInvitation, formatAttachmentSize, getOrCreateIdentity, invitationAcknowledgePath, isLocalInvitation, normalizeInterval, parseUtmParams, resolveWidgetUrl };
 
 function renderShell() {
   if (rootEl) {

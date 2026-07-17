@@ -42,6 +42,7 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
   const conversationService = new ConversationService(conversationRepository);
   const qualityService = new QualityService(configureQualityRepository(source));
   const offsets = new Map<string, number>();
+  const connectionBackoff = new Map<string, { attempts: number; nextAttemptAt: number }>();
 
   startTelegramPollingWorker({
     intervalMs: config.intervalMs,
@@ -57,6 +58,7 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
         ? await pollTelegramUpdatesOnce({
             conversationRepository,
             conversationService,
+            connectionBackoff,
             integrationRepository,
           apiBaseUrl: config.apiBaseUrl,
             autoAssignConversation: (conversationId, tenantId) => routingService.autoAssignConversation(conversationId, { tenantId }),

@@ -813,8 +813,41 @@ model ConversationRealtimeEvent {
   traceId       String   @map("trace_id")
   data          Json
 
+  @@index([tenantId, occurredAt, eventId], map: "conversation_realtime_events_tenant_occurred_event_idx")
   @@index([resourceType, resourceId, occurredAt], map: "conversation_realtime_events_resource_idx")
   @@map("conversation_realtime_events")
+}
+
+model SettingsRule {
+  tenantId          String   @map("tenant_id")
+  id                String
+  affectedWorkflows Json     @map("affected_workflows")
+  description       String
+  enabled           Boolean
+  lastChangedAt     DateTime @map("last_changed_at") @db.Timestamptz(3)
+  lastViolation     String   @map("last_violation")
+  owner             String
+  parameters        Json
+  scope             String
+  severity          String
+  title             String
+
+  @@id([tenantId, id])
+  @@index([tenantId, severity, title], map: "settings_rules_tenant_severity_title_idx")
+  @@map("settings_rules")
+}
+
+model SettingsRuleAuditEvent {
+  id        String   @id
+  tenantId  String   @map("tenant_id")
+  action    String
+  ruleId    String   @map("rule_id")
+  reason    String
+  immutable Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([tenantId, createdAt, id], map: "settings_rule_audit_tenant_created_idx")
+  @@map("settings_rule_audit_events")
 }
 
 model ChannelDeliveryReceipt {
@@ -2447,6 +2480,18 @@ model ProviderAttachmentTransfer {
   @@map("provider_attachment_transfers")
 }
 
+model AutomationWorkspaceAuditEvent {
+  auditId        String   @id @map("audit_id")
+  tenantId       String   @map("tenant_id")
+  idempotencyKey String?  @map("idempotency_key")
+  payload        Json
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, idempotencyKey], map: "automation_workspace_audit_tenant_idempotency_key")
+  @@index([tenantId, createdAt, auditId], map: "automation_workspace_audit_tenant_created_idx")
+  @@map("automation_workspace_audit_events")
+}
+
 model BotRuntimeInstance {
   id                String   @id
   tenantId          String   @map("tenant_id")
@@ -2695,16 +2740,20 @@ model AiScoringAudit {
   providerId       String   @map("provider_id")
   providerResultId String?  @map("provider_result_id")
   queue            String
+  requestFingerprint String?  @map("request_fingerprint")
+  resultSnapshot   Json?      @map("result_snapshot")
   score            Float?
   status           String
   traceId          String   @map("trace_id")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@id([tenantId, auditId], map: "ai_scoring_audits_pkey")
   @@index([tenantId, conversationId, createdAt], map: "ai_scoring_audits_tenant_conversation_created_idx")
   @@index([tenantId, queue, status, createdAt], map: "ai_scoring_audits_tenant_queue_status_created_idx")
   @@index([tenantId, traceId], map: "ai_scoring_audits_tenant_trace_idx")
   @@index([tenantId, providerId, providerResultId], map: "ai_scoring_audits_tenant_provider_result_idx")
+  @@index([tenantId, status, updatedAt], map: "ai_scoring_audits_tenant_status_updated_idx")
   @@map("ai_scoring_audits")
 }
 

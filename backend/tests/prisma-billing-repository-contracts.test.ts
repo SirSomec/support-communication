@@ -206,9 +206,13 @@ describe("Prisma-backed billing repository contracts", () => {
     assert.equal(committed.reservation.auditEvent?.action, "quota.commit");
     assert.deepEqual(committed.reservation.auditEvents?.map((event) => event.action), ["quota.reserve", "quota.commit"]);
     assert.equal(committed.tenant.usage.webhooks, 19010);
-    assert.equal(client.calls.billingQuotaReservationUpdates.length, 1);
-    assert.equal(client.calls.billingQuotaReservationUpdates[0].data.auditEvent?.id, "evt_quota_commit_prisma");
-    assert.deepEqual(client.calls.billingQuotaReservationUpdates[0].data.auditEvents?.map((event) => event.action), ["quota.reserve", "quota.commit"]);
+    assert.equal(client.calls.billingQuotaReservationUpdateMany.length, 1);
+    assert.deepEqual(client.calls.billingQuotaReservationUpdateMany[0].where, {
+      id: "quota_reservation_prisma_test",
+      status: "reserved"
+    });
+    assert.equal(client.calls.billingQuotaReservationUpdateMany[0].data.auditEvent?.id, "evt_quota_commit_prisma");
+    assert.deepEqual(client.calls.billingQuotaReservationUpdateMany[0].data.auditEvents?.map((event) => event.action), ["quota.reserve", "quota.commit"]);
     assert.equal(client.calls.billingTenantUpdates[0].data.usage?.webhooks, 19010);
   });
 
@@ -270,7 +274,16 @@ describe("Prisma-backed billing repository contracts", () => {
       "2026-07-01T03:30:00.000Z",
       "2026-07-01T03:30:00.000Z"
     ]);
-    assert.deepEqual(client.calls.billingQuotaReservationUpdates.map((call) => call.data.lockedAt instanceof Date), [true, true]);
+    assert.deepEqual(client.calls.billingQuotaReservationUpdateMany.map((call) => call.data.lockedAt instanceof Date), [true, true]);
+    assert.deepEqual(client.calls.billingQuotaReservationUpdateMany.map((call) => call.where), [{
+      id: "quota_reservation_prisma_expired_unlocked",
+      lockedAt: null,
+      status: "reserved"
+    }, {
+      id: "quota_reservation_prisma_expired_stale_locked",
+      lockedAt: new Date("2026-07-01T03:00:00.000Z"),
+      status: "reserved"
+    }]);
     assert.deepEqual(client.calls.billingQuotaReservationFinds.at(-1), {
       orderBy: [{ expiresAt: "asc" }, { createdAt: "asc" }, { lockedAt: { nulls: "first", sort: "asc" } }, { id: "asc" }],
       take: 2,
@@ -283,6 +296,45 @@ describe("Prisma-backed billing repository contracts", () => {
         status: "reserved"
       }
     });
+  });
+
+  it("atomically excludes a quota reservation claimed concurrently by another Prisma worker", async () => {
+    const { client } = createFakePrismaBillingClient();
+    const firstRepository = BillingRepository.prisma({ client });
+    const secondRepository = BillingRepository.prisma({ client });
+    await firstRepository.createQuotaReservation({
+      auditEvent: null,
+      auditEvents: [],
+      commitIdempotencyKey: null,
+      committedAt: null,
+      createdAt: "2026-07-01T03:00:00.000Z",
+      expiresAt: "2026-07-01T03:10:00.000Z",
+      id: "quota_reservation_concurrent_claim",
+      idempotencyKey: "reserve-prisma-concurrent-claim",
+      limit: 100,
+      lockedAt: null,
+      planId: "starter",
+      releaseIdempotencyKey: null,
+      releasedAt: null,
+      requested: 5,
+      requestFingerprint: "{\"mode\":\"reserve\"}",
+      resource: "webhooks",
+      status: "reserved",
+      tenantId: "tenant-lumen",
+      traceId: "trace-prisma-concurrent-claim",
+      updatedAt: "2026-07-01T03:00:00.000Z",
+      usedAfter: null,
+      usedBefore: 10
+    });
+
+    const claims = await Promise.all([
+      firstRepository.claimExpiredQuotaReservations({ now: "2026-07-01T03:30:00.000Z" }),
+      secondRepository.claimExpiredQuotaReservations({ now: "2026-07-01T03:30:00.000Z" })
+    ]);
+
+    assert.equal(claims.flat().length, 1);
+    assert.equal(claims.flat()[0]?.id, "quota_reservation_concurrent_claim");
+    assert.equal(client.calls.billingQuotaReservationUpdateMany.length, 2);
   });
 
   it("releases claimed expired quota reservations through the Prisma billing adapter", async () => {
@@ -368,14 +420,20 @@ describe("Prisma-backed billing repository contracts", () => {
     assert.equal(duplicate?.releasedAt, "2026-07-01T03:31:00.000Z");
     assert.deepEqual(duplicate?.auditEvents?.map((event) => event.id), ["evt_quota_expired_release_prisma"]);
     assert.equal(notExpired, undefined);
-    assert.deepEqual(client.calls.billingQuotaReservationUpdates.map((call) => ({
+    assert.deepEqual(client.calls.billingQuotaReservationUpdateMany.map((call) => ({
       lockedAt: call.data.lockedAt,
       releasedAtIsDate: call.data.releasedAt instanceof Date,
-      status: call.data.status
+      status: call.data.status,
+      where: call.where
     })), [{
       lockedAt: null,
       releasedAtIsDate: true,
-      status: "released"
+      status: "released",
+      where: {
+        id: "quota_reservation_prisma_claimed_expired",
+        lockedAt: new Date("2026-07-01T03:30:00.000Z"),
+        status: "reserved"
+      }
     }]);
   });
 
@@ -1256,6 +1314,7 @@ function createFakePrismaBillingClient() {
     }>,
     billingQuotaReservationFindUnique: [] as Array<{ where: { id?: string; idempotencyKey?: string } }>,
     billingQuotaReservationUpdates: [] as Array<{ data: Partial<FakeBillingQuotaReservationRow>; where: { id: string } }>,
+    billingQuotaReservationUpdateMany: [] as Array<{ data: Partial<FakeBillingQuotaReservationRow>; where: { id: string; lockedAt?: Date | null; status: string } }>,
     billingPaymentRetryScheduleCreates: [] as Array<{ data: FakeBillingPaymentRetryScheduleCreateInput }>,
     billingPaymentRetryScheduleFindFirst: [] as Array<{ where: { OR: Array<{ idempotencyKey?: string; scheduleId?: string; tenantId?: string }> } }>,
     billingPaymentRetryScheduleFindMany: [] as Array<{
@@ -1529,6 +1588,19 @@ function createFakePrismaBillingClient() {
         const next = { ...row, ...input.data };
         quotaReservations.set(next.id, next);
         return next;
+      },
+      updateMany: async (input: { data: Partial<FakeBillingQuotaReservationRow>; where: { id: string; lockedAt?: Date | null; status: string } }) => {
+        calls.billingQuotaReservationUpdateMany.push(input);
+        const row = quotaReservations.get(input.where.id);
+        const lockedAtMatches = input.where.lockedAt === undefined
+          || (input.where.lockedAt === null
+            ? row?.lockedAt === null
+            : new Date(String(row?.lockedAt ?? "")).getTime() === input.where.lockedAt.getTime());
+        if (!row || row.status !== input.where.status || !lockedAtMatches) {
+          return { count: 0 };
+        }
+        quotaReservations.set(row.id, { ...row, ...input.data });
+        return { count: 1 };
       }
     },
     billingPaymentRetrySchedule: {

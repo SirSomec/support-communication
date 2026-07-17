@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/api": {
           // Docker pilot publishes api-gateway on 4101; a natively run gateway stays on 4100.
-          target: env.DEV_API_PROXY_TARGET || "http://127.0.0.1:4100",
+          target: process.env.DEV_API_PROXY_TARGET || env.DEV_API_PROXY_TARGET || "http://127.0.0.1:4100",
           changeOrigin: true
         }
       }

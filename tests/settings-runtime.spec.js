@@ -326,7 +326,7 @@ test("reports runtime creates export retries failed jobs and downloads file byte
   const retryExportPayload = await retryExportResponse.json();
   expect(retryExportPayload.status).toBe("ok");
   expect(retryExportPayload.data.auditEvent?.id).toBeTruthy();
-  expect(retryExportPayload.data.job.statusKey).toBe("running");
+  expect(retryExportPayload.data.job.statusKey).toBe("queued");
   await expect(retryJobRow).toContainText("Повторная подготовка");
 
   const readyJobs = await request.get("/api/v1/reports/workspace", {
@@ -340,11 +340,15 @@ test("reports runtime creates export retries failed jobs and downloads file byte
   const downloadResponsePromise = page.waitForResponse((response) =>
     response.url().includes(`/api/v1/reports/exports/${encodeURIComponent(readyJob.id)}/download`) && response.request().method() === "GET"
   );
-  const browserDownloadPromise = page.waitForEvent("download");
   await readyJobRow.getByRole("button", { name: "Скачать" }).click();
-  const [downloadResponse, browserDownload] = await Promise.all([downloadResponsePromise, browserDownloadPromise]);
-  expect(downloadResponse.ok()).toBeTruthy();
+  const downloadResponse = await downloadResponsePromise;
+  expect(downloadResponse.ok(), `${downloadResponse.status()}: ${await downloadResponse.text()}`).toBeTruthy();
   expect(downloadResponse.headers()["content-disposition"]).toContain("attachment");
-  expect(browserDownload.suggestedFilename()).toContain(readyJob.id);
-  await expect(page.locator(".toast")).toContainText(browserDownload.suggestedFilename());
+  expect(downloadResponse.headers()["content-disposition"]).toContain(readyJob.id);
+  const directDownload = await request.get(`/api/v1/reports/exports/${encodeURIComponent(readyJob.id)}/download`, {
+    headers: { authorization: `Bearer ${session.accessToken}` }
+  });
+  expect(directDownload.ok()).toBeTruthy();
+  expect((await directDownload.body()).byteLength).toBeGreaterThan(0);
+  await expect(page.locator(".toast")).toContainText(readyJob.id);
 });

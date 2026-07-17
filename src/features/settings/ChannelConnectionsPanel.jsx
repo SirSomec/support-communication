@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Inbox, ListTree, PauseCircle, PlayCircle, PlugZap, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import { ChannelBadge, ConfirmDialog } from "../../ui.jsx";
 import { FieldHint, InlineHint, SettingsModal, SettingsSectionHeader } from "./SettingsPrimitives.jsx";
@@ -64,6 +64,8 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
   const [connectionToDisable, setConnectionToDisable] = useState(null);
   const normalizedFocusChannelType = typeof focusChannelType === "string" ? focusChannelType.trim() : "";
   const normalizedFocusConnectionId = typeof focusConnectionId === "string" ? focusConnectionId.trim() : "";
+  const focusNavigationKey = [normalizedFocusChannelType, normalizedFocusConnectionId].filter(Boolean).join(":");
+  const consumedFocusRef = useRef("");
 
   useEffect(() => {
     loadConnections();
@@ -74,12 +76,6 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
       setForm((current) => ({ ...current, routingQueueId: queues[0].id }));
     }
   }, [form.routingQueueId, queues]);
-
-  useEffect(() => {
-    if (normalizedFocusChannelType && availableTypes.includes(normalizedFocusChannelType) && selectedType !== normalizedFocusChannelType) {
-      setSelectedType(normalizedFocusChannelType);
-    }
-  }, [availableTypes, normalizedFocusChannelType, selectedType]);
 
   const filteredConnections = useMemo(() => {
     return connections.filter((connection) => selectedType === "all" || connection.type === selectedType);
@@ -94,22 +90,29 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
   }, [selectedConnection, selectedConnectionId]);
 
   useEffect(() => {
+    if (!focusNavigationKey || consumedFocusRef.current === focusNavigationKey || loading) {
+      return;
+    }
+
     if (normalizedFocusConnectionId) {
       const focusedConnection = connections.find((connection) => connection.id === normalizedFocusConnectionId);
       if (focusedConnection) {
         setSelectedConnectionId(focusedConnection.id);
         setSelectedType(focusedConnection.type);
+        consumedFocusRef.current = focusNavigationKey;
         return;
       }
     }
 
-    if (normalizedFocusChannelType) {
+    if (normalizedFocusChannelType && availableTypes.includes(normalizedFocusChannelType)) {
+      setSelectedType(normalizedFocusChannelType);
       const focusedConnection = connections.find((connection) => connection.type === normalizedFocusChannelType);
       if (focusedConnection) {
         setSelectedConnectionId(focusedConnection.id);
       }
     }
-  }, [connections, normalizedFocusChannelType, normalizedFocusConnectionId]);
+    consumedFocusRef.current = focusNavigationKey;
+  }, [availableTypes, connections, focusNavigationKey, loading, normalizedFocusChannelType, normalizedFocusConnectionId]);
 
   useEffect(() => {
     if (!selectedConnection?.id) {

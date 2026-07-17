@@ -6,6 +6,56 @@ import { planEligibleProactiveRuleDeliveryAsync } from "../apps/api-gateway/src/
 import { bootstrapAutomationState } from "../apps/api-gateway/src/automation/seed.ts";
 
 describe("Prisma-backed automation repository contracts", () => {
+  it("hydrates runtime summaries and persists workspace audit through Prisma", async () => {
+    const { client, runtimeInstances, runtimeSteps } = createFakePrismaAutomationClient();
+    runtimeInstances.set("runtime-prisma", {
+      attempts: 0,
+      context: { locale: "ru" },
+      conversationId: "conversation-prisma",
+      createdAt: new Date("2026-07-16T10:00:00.000Z"),
+      currentNodeId: "reply",
+      id: "runtime-prisma",
+      lastError: null,
+      nextAttemptAt: null,
+      scenarioId: "scenario-prisma",
+      status: "active",
+      tenantId: "tenant-prisma",
+      updatedAt: new Date("2026-07-16T10:01:00.000Z"),
+      versionId: "version-prisma"
+    });
+    runtimeSteps.set("step-prisma", {
+      conversationId: "conversation-prisma",
+      createdAt: new Date("2026-07-16T10:00:30.000Z"),
+      error: null,
+      handoffSummary: null,
+      id: "step-prisma",
+      inputEvent: { text: "hello" },
+      inputEventId: "event-prisma",
+      lifecycleEvent: null,
+      nodeId: "reply",
+      nodeType: "message",
+      outcome: "message_queued",
+      runtimeId: "runtime-prisma",
+      sideEffects: [],
+      tenantId: "tenant-prisma",
+      webhookResponse: null
+    });
+    const first = AutomationRepository.prisma({ client });
+    const initial = await first.readStateAsync();
+    assert.equal(initial.botRuntimeInstances[0]?.id, "runtime-prisma");
+    assert.equal(initial.botRuntimeSteps[0]?.id, "step-prisma");
+
+    await first.saveWorkspaceAuditEvent({
+      action: "bot.draft.update",
+      auditId: "audit-workspace-prisma",
+      createdAt: "2026-07-16T10:02:00.000Z",
+      immutable: true,
+      tenantId: "tenant-prisma"
+    });
+    const restarted = AutomationRepository.prisma({ client });
+    assert.equal((await restarted.readStateAsync()).workspaceAuditEvents[0]?.auditId, "audit-workspace-prisma");
+  });
+
   it("applies local automation fixtures only through an explicit seed, never inferred", () => {
     // InMemoryStore stays a test-only utility (the JSON runtime is removed in phase D);
     // it must still seed only when a seed is passed explicitly, not inferred.
@@ -562,6 +612,9 @@ function createFakePrismaAutomationClient() {
   const proactiveDeliveryAttempts = new Map<string, FakeProactiveDeliveryAttemptRow>();
   const proactiveDeliveryIdempotencyKeys = new Map<string, FakeProactiveDeliveryIdempotencyKeyRow>();
   const proactiveDeliveryAttributions = new Map<string, FakeProactiveDeliveryAttributionRow>();
+  const runtimeInstances = new Map<string, Record<string, unknown>>();
+  const runtimeSteps = new Map<string, Record<string, unknown>>();
+  const workspaceAuditEvents = new Map<string, { payload: Record<string, unknown> }>();
   const calls = {
     automationPublishIdempotencyKeyCreates: [] as Array<{ data: FakeAutomationPublishIdempotencyKeyRow }>,
     automationBotTestRunUpserts: [] as Array<FakeGenericUpsertInput>,
@@ -592,6 +645,19 @@ function createFakePrismaAutomationClient() {
     proactiveDeliveryAttributionCreates: [] as Array<{ data: FakeProactiveDeliveryAttributionRow }>
   };
   const client = {
+    automationWorkspaceAuditEvent: {
+      async create(input: { data: { auditId: string; payload: Record<string, unknown> } }) {
+        const row = { payload: clone(input.data.payload) };
+        workspaceAuditEvents.set(input.data.auditId, row);
+        return clone(row);
+      },
+      async findMany() {
+        return [...workspaceAuditEvents.values()].map(clone);
+      },
+      async findUnique(input: { where: { auditId: string } }) {
+        return clone(workspaceAuditEvents.get(input.where.auditId) ?? null);
+      }
+    },
     automationPublishIdempotencyKey: {
       async create(input: { data: FakeAutomationPublishIdempotencyKeyRow }): Promise<FakeAutomationPublishIdempotencyKeyRow> {
         calls.automationPublishIdempotencyKeyCreates.push(input);
@@ -704,6 +770,16 @@ function createFakePrismaAutomationClient() {
         );
       }
     },
+    botRuntimeInstance: {
+      async findMany() {
+        return [...runtimeInstances.values()].map(clone);
+      }
+    },
+    botRuntimeStepJournal: {
+      async findMany() {
+        return [...runtimeSteps.values()].map(clone);
+      }
+    },
     proactiveRule: {
       async findMany(): Promise<FakeProactiveRuleRow[]> {
         return Array.from(proactiveRules.values()).sort((left, right) => left.id.localeCompare(right.id)).map(clone);
@@ -797,7 +873,7 @@ function createFakePrismaAutomationClient() {
     }
   };
 
-  return { calls, client };
+  return { calls, client, runtimeInstances, runtimeSteps };
 }
 
 interface FakeBotScenarioUpsertInput {

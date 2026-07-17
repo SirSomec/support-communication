@@ -11,6 +11,13 @@ import { createMfaOtpRuntime, createMfaOtpRuntimeFromEnv } from "../apps/api-gat
 const backendRoot = fileURLToPath(new URL("..", import.meta.url));
 
 describe("MFA OTP verification", () => {
+  it("fails closed when NODE_ENV is not explicitly configured", () => {
+    assert.throws(
+      () => createMfaOtpRuntimeFromEnv({}),
+      /NODE_ENV must be explicitly set/
+    );
+  });
+
   it("uses the fixed smoke code only with a local deterministic delivery provider", () => {
     const localRuntime = createMfaOtpRuntimeFromEnv({
       MFA_OTP_DELIVERY_MODE: "deterministic",

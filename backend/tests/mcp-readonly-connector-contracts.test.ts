@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { HttpMcpReadOnlyTransport, McpReadOnlyConnectorService } from "../apps/api-gateway/src/knowledge-sources/mcp-readonly-connector.service.ts";
 
@@ -7,6 +8,17 @@ describe("read-only MCP connector contract", () => {
     allowedHosts: ["mcp.example.test"], approved: true, endpoint: "https://mcp.example.test/v1", id: "mcp_docs", tenantId: "tenant-volga",
     tools: [{ mode: "read" as const, name: "search_documents" }]
   };
+
+  it("keeps one connector limiter for the lifetime of the AI bot response service", () => {
+    const source = readFileSync(new URL(
+      "../apps/api-gateway/src/automation/ai-bot-response.service.ts",
+      import.meta.url
+    ), "utf8");
+
+    assert.match(source, /private readonly mcpConnectors = new McpReadOnlyConnectorService/);
+    assert.match(source, /this\.mcpConnectors\.invoke/);
+    assert.doesNotMatch(source, /private mcpInvoker\(\)[\s\S]*const service = new McpReadOnlyConnectorService/);
+  });
 
   it("allows only preconfigured read tools for the owning tenant", async () => {
     const calls: string[] = [];

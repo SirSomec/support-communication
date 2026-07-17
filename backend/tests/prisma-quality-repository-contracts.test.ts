@@ -283,6 +283,46 @@ describe("Prisma-backed quality repository contracts", () => {
       where: { tenantId: "tenant-demo" }
     });
   });
+
+  it("claims and completes a durable AI scoring result snapshot through Prisma", async () => {
+    const { client, calls } = createFakePrismaQualityClient();
+    const repository = QualityRepository.prisma({ client });
+    const pending: AiScoringAuditRecord = {
+      auditId: "ai_claim_prisma",
+      conversationId: "conv-claim-prisma",
+      createdAt: "2026-07-16T12:00:00.000Z",
+      providerId: "pending",
+      providerResultId: null,
+      queue: "quality-ai-scoring",
+      requestFingerprint: "sha256-request",
+      resultSnapshot: null,
+      score: null,
+      status: "pending",
+      tenantId: "tenant-demo",
+      traceId: "trc-quality-claim",
+      updatedAt: "2026-07-16T12:00:00.000Z"
+    };
+
+    const claim = await repository.claimAiScoringAudit(pending);
+    const concurrent = await repository.claimAiScoringAudit(pending);
+    const completed = await repository.completeAiScoringAudit({
+      ...pending,
+      providerId: "quality-ai",
+      providerResultId: "provider-result-1",
+      resultSnapshot: { score: 91 },
+      score: 91,
+      status: "ok",
+      updatedAt: "2026-07-16T12:00:01.000Z"
+    }, qualityLifecycleEvent(pending, pending.auditId, "quality.assessment.completed"));
+
+    assert.equal(claim.claimed, true);
+    assert.equal(concurrent.claimed, false);
+    assert.equal(completed.status, "ok");
+    assert.deepEqual(completed.resultSnapshot, { score: 91 });
+    assert.equal(calls.aiScoringAuditCreates.length, 1);
+    assert.equal(calls.aiScoringAuditUpdates.length, 1);
+    assert.equal(calls.lifecycleEventCreates.length, 1);
+  });
 });
 
 function createFakePrismaQualityClient() {
@@ -298,6 +338,10 @@ function createFakePrismaQualityClient() {
       where: { conversationId?: string; tenantId: string };
     }>,
     aiScoringAuditFindUnique: [] as Array<{
+      where: { tenantId_auditId: { auditId: string; tenantId: string } };
+    }>,
+    aiScoringAuditUpdates: [] as Array<{
+      data: FakeAiScoringAuditCreateInput;
       where: { tenantId_auditId: { auditId: string; tenantId: string } };
     }>,
     manualQaReviewCreates: [] as Array<{ data: FakeManualQaReviewCreateInput }>,
@@ -367,6 +411,16 @@ function createFakePrismaQualityClient() {
         calls.aiScoringAuditFindUnique.push(input);
         const key = auditKey(input.where.tenantId_auditId.tenantId, input.where.tenantId_auditId.auditId);
         return clone(aiScoringAudits.get(key) ?? null);
+      },
+      async update(input: {
+        data: FakeAiScoringAuditCreateInput;
+        where: { tenantId_auditId: { auditId: string; tenantId: string } };
+      }): Promise<FakeAiScoringAuditRow> {
+        calls.aiScoringAuditUpdates.push(input);
+        const key = auditKey(input.where.tenantId_auditId.tenantId, input.where.tenantId_auditId.auditId);
+        const row = clone(input.data) as FakeAiScoringAuditRow;
+        aiScoringAudits.set(key, row);
+        return clone(row);
       }
     },
     manualQaReview: {
@@ -474,10 +528,13 @@ interface FakeAiScoringAuditCreateInput {
   providerId: string;
   providerResultId: string | null;
   queue: string;
+  requestFingerprint: string | null;
+  resultSnapshot: Record<string, unknown> | null;
   score: number | null;
   status: string;
   tenantId: string;
   traceId: string;
+  updatedAt: Date;
 }
 
 type FakeAiScoringAuditRow = FakeAiScoringAuditCreateInput;

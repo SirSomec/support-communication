@@ -90,7 +90,7 @@ export interface OpenChannelDeliveryRecord {
   maxAttempts: number;
   nextAttemptAt: string;
   retryBackoffMs: number;
-  status: "dead_lettered" | "delivered" | "pending";
+  status: "dead_lettered" | "delivered" | "in_flight" | "pending";
   tenantId: string;
   updatedAt: string;
   url: string;
@@ -158,6 +158,7 @@ export interface PrismaOpenChannelClient {
     create(input: { data: PrismaDeliveryCreateInput }): MaybePromise<PrismaDeliveryRow>;
     findMany(input: { orderBy?: PrismaOrderBy; take?: number; where?: PrismaDeliveryWhere }): MaybePromise<PrismaDeliveryRow[]>;
     update(input: { data: PrismaDeliveryUpdateInput; where: { id: string } }): MaybePromise<PrismaDeliveryRow>;
+    updateMany(input: { data: PrismaDeliveryUpdateInput; where: PrismaDeliveryWhere & { id: string } }): MaybePromise<{ count: number }>;
   };
   openChannelPumpCursor: {
     findMany(input: Record<string, never>): MaybePromise<PrismaPumpCursorRow[]>;
@@ -227,11 +228,13 @@ interface PrismaConversationStateRow {
 }
 
 interface PrismaDeliveryWhere {
+  attempts?: number;
   id?: string;
   kind?: OpenChannelDeliveryKind;
   nextAttemptAt?: { lte: string };
-  status?: OpenChannelDeliveryRecord["status"];
+  status?: OpenChannelDeliveryRecord["status"] | { in: OpenChannelDeliveryRecord["status"][] };
   tenantId?: string;
+  updatedAt?: string;
 }
 interface PrismaDeliveryCreateInput {
   attempts: number; body: Record<string, unknown>; conversationId: string | null; createdAt: string;
@@ -593,8 +596,14 @@ export class OpenChannelRepository {
     this.store.update((state) => {
       const current = normalizeState(state);
       const deliveries = current.deliveries.map((item) => {
-        if (due.length >= limit || item.status !== "pending" || item.nextAttemptAt > now) return item;
-        const claimed: OpenChannelDeliveryRecord = { ...item, attempts: item.attempts + 1, updatedAt: now };
+        if (due.length >= limit || !["pending", "in_flight"].includes(item.status) || item.nextAttemptAt > now) return item;
+        const claimed: OpenChannelDeliveryRecord = {
+          ...item,
+          attempts: item.attempts + 1,
+          nextAttemptAt: deliveryLeaseUntil(now),
+          status: "in_flight",
+          updatedAt: now
+        };
         due.push(clone(claimed));
         return claimed;
       });
@@ -608,16 +617,29 @@ export class OpenChannelRepository {
     const rows = await Promise.resolve(client.openChannelDelivery.findMany({
       orderBy: { createdAt: "asc" },
       take: limit,
-      where: { nextAttemptAt: { lte: now }, status: "pending" }
+      where: { nextAttemptAt: { lte: now }, status: { in: ["pending", "in_flight"] } }
     }));
     const claimed: OpenChannelDeliveryRecord[] = [];
     for (const row of rows) {
       const current = toDeliveryRecord(row);
-      const updated = await Promise.resolve(client.openChannelDelivery.update({
-        data: { attempts: current.attempts + 1, updatedAt: now },
-        where: { id: current.id }
+      const data: PrismaDeliveryUpdateInput = {
+        attempts: current.attempts + 1,
+        nextAttemptAt: deliveryLeaseUntil(now),
+        status: "in_flight",
+        updatedAt: now
+      };
+      const updated = await Promise.resolve(client.openChannelDelivery.updateMany({
+        data,
+        where: {
+          attempts: current.attempts,
+          id: current.id,
+          nextAttemptAt: { lte: now },
+          status: current.status
+        }
       }));
-      claimed.push(toDeliveryRecord(updated));
+      if (updated.count === 1) {
+        claimed.push(toDeliveryRecord({ ...row, ...data }));
+      }
     }
     return claimed;
   }
@@ -627,15 +649,15 @@ export class OpenChannelRepository {
     responseBody?: string;
     status: "dead_lettered" | "delivered" | "pending";
     statusCode?: number;
-  }): MaybePromise<OpenChannelDeliveryRecord | undefined> {
+  }, claimToken?: string): MaybePromise<OpenChannelDeliveryRecord | undefined> {
     if (this.prismaClient) {
-      return this.resolveDeliveryPrisma(id, outcome);
+      return this.resolveDeliveryPrisma(id, outcome, claimToken);
     }
     let resolved: OpenChannelDeliveryRecord | undefined;
     this.store.update((state) => {
       const current = normalizeState(state);
       const deliveries = current.deliveries.map((item) => {
-        if (item.id !== id) return item;
+        if (item.id !== id || (claimToken && (item.status !== "in_flight" || item.updatedAt !== claimToken))) return item;
         const nextAttemptAt = outcome.status === "pending"
           ? new Date(Date.parse(item.updatedAt) + item.retryBackoffMs * Math.max(1, item.attempts)).toISOString()
           : item.nextAttemptAt;
@@ -660,7 +682,7 @@ export class OpenChannelRepository {
     responseBody?: string;
     status: "dead_lettered" | "delivered" | "pending";
     statusCode?: number;
-  }): Promise<OpenChannelDeliveryRecord | undefined> {
+  }, claimToken?: string): Promise<OpenChannelDeliveryRecord | undefined> {
     const client = this.prismaClient!;
     const rows = await Promise.resolve(client.openChannelDelivery.findMany({ where: { id } }));
     const current = rows[0] ? toDeliveryRecord(rows[0]) : undefined;
@@ -668,18 +690,23 @@ export class OpenChannelRepository {
     const nextAttemptAt = outcome.status === "pending"
       ? new Date(Date.parse(current.updatedAt) + current.retryBackoffMs * Math.max(1, current.attempts)).toISOString()
       : current.nextAttemptAt;
-    const updated = await Promise.resolve(client.openChannelDelivery.update({
-      data: {
+    const data: PrismaDeliveryUpdateInput = {
         ...(outcome.error ? { lastError: outcome.error.slice(0, 500) } : {}),
         ...(outcome.responseBody !== undefined ? { lastResponseBody: outcome.responseBody.slice(0, 2_000) } : {}),
         ...(outcome.statusCode !== undefined ? { lastStatusCode: outcome.statusCode } : {}),
         nextAttemptAt,
         status: outcome.status,
         updatedAt: new Date().toISOString()
-      },
-      where: { id }
-    }));
-    return toDeliveryRecord(updated);
+    };
+    if (claimToken) {
+      const updated = await Promise.resolve(client.openChannelDelivery.updateMany({
+        data,
+        where: { id, status: "in_flight", updatedAt: claimToken }
+      }));
+      if (updated.count !== 1) return undefined;
+      return toDeliveryRecord({ ...rows[0]!, ...data });
+    }
+    return toDeliveryRecord(await Promise.resolve(client.openChannelDelivery.update({ data, where: { id } })));
   }
 
   // --- Event pump cursor ---
@@ -727,6 +754,10 @@ export class OpenChannelRepository {
     });
     return removed;
   }
+}
+
+function deliveryLeaseUntil(now: string): string {
+  return new Date(Date.parse(now) + 60_000).toISOString();
 }
 
 export function createOpenChannelToken(prefix: string): string {

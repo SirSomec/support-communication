@@ -71,6 +71,7 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
   const [sdkPlaygroundPhone, setSdkPlaygroundPhone] = useState("+7 985 430-09-40");
   const [sdkPlaygroundMessage, setSdkPlaygroundMessage] = useState("Здравствуйте, проверяем запуск диалога из SDK.");
   const [sdkPlaygroundResult, setSdkPlaygroundResult] = useState(null);
+  const [sdkPlaygroundRunning, setSdkPlaygroundRunning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,7 +179,7 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
   }, [sdkPlaygroundChannel, sdkPlaygroundEnv, sdkPlaygroundEvent, sdkPlaygroundMessage, sdkPlaygroundPhone, sdkPlaygroundUser]);
 
   async function handleSdkPlaygroundRun() {
-    if (!canEditSettings || loadError || loadingWorkspace) {
+    if (!canEditSettings || loadError || loadingWorkspace || sdkPlaygroundRunning) {
       return;
     }
 
@@ -194,6 +195,7 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
     }
 
     setSdkPlaygroundResult(null);
+    setSdkPlaygroundRunning(true);
 
     try {
       let serviceResponse;
@@ -250,6 +252,8 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
       setSdkPlaygroundResult(createSdkPlaygroundErrorResult(
         error instanceof Error ? error.message : "Не удалось выполнить SDK событие."
       ));
+    } finally {
+      setSdkPlaygroundRunning(false);
     }
   }
 
@@ -330,9 +334,9 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
         </div>
         <div className="sdk-playground-actions">
           {sdkPlaygroundResult ? <span className={sdkPlaygroundResult.tone}>{sdkPlaygroundResult.title}</span> : <span>Payload обновляется при изменении полей.</span>}
-          <button disabled={!canEditSettings || loadingWorkspace || Boolean(loadError)} onClick={handleSdkPlaygroundRun} title={canEditSettings ? "Запустить SDK событие" : access.reason} type="button">
+          <button disabled={!canEditSettings || loadingWorkspace || sdkPlaygroundRunning || Boolean(loadError)} onClick={handleSdkPlaygroundRun} title={canEditSettings ? "Запустить SDK событие" : access.reason} type="button">
             <PlayCircle size={16} />
-            Запустить событие
+            {sdkPlaygroundRunning ? "Выполняется..." : "Запустить событие"}
           </button>
         </div>
       </div>

@@ -182,6 +182,54 @@ describe("appeal lifecycle contracts", () => {
     assert.equal(forked.conversation.metadata?.isRepeatAppeal, true);
   });
 
+  it("creates one deterministic follow-up when concurrent ingresses observe the same closed appeal", async () => {
+    const anchorId = "tg_concurrent_follow_up";
+    const repository = ConversationRepository.inMemory();
+    const closedParent: ConversationRecord = {
+      channel: "Telegram",
+      clientSince: "2026-07-12",
+      device: "Telegram",
+      entry: "Telegram",
+      id: anchorId,
+      initials: "CF",
+      language: "Unknown",
+      messages: [],
+      name: "Concurrent Follow-up",
+      phone: "10004",
+      preview: "",
+      previous: [],
+      sla: "Closed",
+      slaTone: "muted",
+      status: "closed",
+      tags: ["telegram", `appeal-anchor:${anchorId}`],
+      tenantId: "tenant-volga",
+      time: "now",
+      topic: "Billing",
+      metadata: { anchorId, closedAt: "2026-07-12T10:00:00.000Z" }
+    };
+    await repository.saveConversationMutation(appealMutation(closedParent));
+    const input = {
+      anchorId,
+      conversationRepository: repository,
+      createInitial: () => closedParent,
+      createMutation: appealMutation,
+      tenantId: "tenant-volga"
+    };
+
+    const [first, second] = await Promise.all([
+      resolveOrForkAppealConversation(input),
+      resolveOrForkAppealConversation(input)
+    ]);
+    const followUps = (await repository.listConversations({ tenantId: "tenant-volga", take: 100, messageTake: 1 }))
+      .filter((conversation) => conversation.metadata?.parentConversationId === anchorId);
+
+    assert.ok(first);
+    assert.ok(second);
+    assert.equal(first.conversation.id, second.conversation.id);
+    assert.equal(followUps.length, 1);
+    assert.equal(followUps[0]?.id, first.conversation.id);
+  });
+
   it("records closed appeal history when an operator closes a dialog", async () => {
     const repository = ConversationRepository.inMemory();
     const conversations = new ConversationService(repository);

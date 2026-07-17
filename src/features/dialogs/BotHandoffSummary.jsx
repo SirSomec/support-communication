@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { BookOpenCheck, Bot, Shuffle, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
 import { automationService } from "../../services/automationService.js";
 import { buildOperatorHandoffViewModel } from "./operatorHandoffModel.js";
@@ -22,6 +22,12 @@ export function BotHandoffSummary({
   const [selected, setSelected] = useState(null);
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    setSelected(null);
+    setStatus("idle");
+    setError("");
+  }, [conversationId]);
 
   if (!view) return null;
 

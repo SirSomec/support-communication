@@ -19,6 +19,14 @@ import {
 } from "../src/app/qualityAiActions.js";
 
 describe("quality and knowledge workflow actions", () => {
+  it("uses the backing conversation id for coaching draft scoring", () => {
+    assert.equal(buildCoachingDraftScorePayload({
+      conversationId: "vladimir",
+      id: "coach-vladimir-next-step",
+      trigger: "missing_next_step"
+    }).conversationId, "vladimir");
+  });
+
   it("does not return a saved article when knowledge draft save fails", async () => {
     const result = await submitKnowledgeArticleDraft(
       { id: "kb-refund", body: "Updated body", title: "Refund" },

@@ -193,7 +193,7 @@ export function ScenarioCreationWizard({
 
   async function handleCreate() {
     if (canCreate && !isSaving) {
-      await onCreate({
+      const created = await onCreate({
         ...form,
         firstMessage: scenarioSummary.message,
         handoffQueue: form.handoffQueue.trim() || "Очередь 1-я линия",
@@ -202,7 +202,7 @@ export function ScenarioCreationWizard({
         sourceBindings: form.selectedSourceIds.map((sourceId) => ({ sourceId })),
         triggerPriority
       });
-      clearWizardDraft();
+      if (created) clearWizardDraft();
     }
   }
 

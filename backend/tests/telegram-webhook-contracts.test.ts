@@ -60,7 +60,8 @@ describe("telegram webhook ingress contracts", () => {
     const conversation = await repository.findConversation(conversationId);
     assert.ok(conversation);
     assert.equal(conversation?.channel, "Telegram");
-    assert.equal(conversation?.phone, "99887766");
+    assert.equal(conversation?.phone, "");
+    assert.equal(conversation?.providerConversationId, "99887766");
     assert.equal(conversation?.tenantId, TENANT_ID);
 
     const lifecycleEvents = await repository.listLifecycleEvents({ conversationId, tenantId: TENANT_ID });
@@ -152,7 +153,8 @@ describe("telegram webhook ingress contracts", () => {
 
     assert.ok(conversation);
     assert.equal(conversation?.id, telegramConversationId(TENANT_ID, undefined, "55667788"));
-    assert.equal(conversation?.phone, "55667788");
+    assert.equal(conversation?.phone, "");
+    assert.equal(conversation?.providerConversationId, "55667788");
     assert.equal(conversation?.channel, "Telegram");
     assert.ok(conversation?.tags.includes("telegram"));
 
@@ -210,6 +212,7 @@ describe("telegram webhook ingress contracts", () => {
     const integrationRepository = IntegrationRepository.inMemory(seedTelegramIntegrationState());
     const config = loadTelegramWebhookConfig({ TELEGRAM_WEBHOOK_ENABLED: "true" });
     let assignments = 0;
+    const newConversationFlags: boolean[] = [];
     const input = (updateId: number, status: "active" | "handoff") => ({
       autoAssignConversation: async () => { assignments += 1; return { data: {}, meta: {}, operation: "assign", service: "routing", status: "ok", traceId: "trace-assign" } as any; },
       body: { message: { chat: { id: 778899 }, from: { first_name: "Bot Client" }, message_id: updateId, text: `message-${updateId}` }, update_id: updateId },
@@ -217,7 +220,10 @@ describe("telegram webhook ingress contracts", () => {
       conversationService: conversations,
       headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
       integrationRepository,
-      runBotRuntime: async () => ({ instance: { status }, outcome: "committed" })
+      runBotRuntime: async (event) => {
+        newConversationFlags.push(event.payload?.isNewConversation === true);
+        return { instance: { status }, outcome: "committed" };
+      }
     });
 
     const active = await handleTelegramWebhookFromRoute(input(9101, "active"), config);
@@ -227,6 +233,7 @@ describe("telegram webhook ingress contracts", () => {
     assert.equal(active.data.autoAssignment, null);
     assert.equal(handoff.data.botRuntime?.status, "handoff");
     assert.equal(assignments, 1);
+    assert.deepEqual(newConversationFlags, [true, false]);
   });
 });
 

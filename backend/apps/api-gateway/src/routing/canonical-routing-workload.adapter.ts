@@ -68,7 +68,11 @@ export class CanonicalRoutingWorkloadAdapter {
       this.dependencies.identityRepository.findTenantUsers(requiredTenantId),
       this.dependencies.teamDirectoryRepository.listTeams(requiredTenantId),
       this.dependencies.queueDirectoryRepository.listQueues(requiredTenantId, "active"),
-      this.dependencies.conversationRepository.listConversations()
+      this.dependencies.conversationRepository.listConversations({
+        tenantId: requiredTenantId,
+        take: 500,
+        messageTake: 1
+      })
     ]);
     const tenantUsers = users.filter((user) => user.tenantId === requiredTenantId && user.status === "active");
     const tenantTeams = teams.filter((team) => team.tenantId === requiredTenantId && team.status === "active");

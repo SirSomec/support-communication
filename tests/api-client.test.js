@@ -36,7 +36,7 @@ describe("api client", () => {
 
     const url = buildApiUrl("/dialogs", { page: 1 });
 
-    assert.equal(url, "https://api.example.test/api/v1/dialogs?page=1");
+    assert.equal(url, "https://api.example.test/base/api/v1/dialogs?page=1");
   });
 
   it("sends JSON and tenant bearer token for default auth mode", async () => {

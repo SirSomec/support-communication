@@ -448,6 +448,7 @@ export interface PrismaIntegrationClient {
   };
   publicApiKey: {
     create(input: { data: PrismaPublicApiKeyCreateInput }): MaybePromise<PrismaPublicApiKeyRow>;
+    deleteMany(input: { where: { tenantId: string } }): MaybePromise<{ count: number }>;
     findMany(input: { orderBy?: { createdAt: "asc" | "desc" }; where?: PrismaPublicApiKeyWhereInput }): MaybePromise<PrismaPublicApiKeyRow[]>;
     findUnique(input: { where: { keyId: string } }): MaybePromise<PrismaPublicApiKeyRow | null>;
     upsert(input: {
@@ -549,6 +550,10 @@ export interface PrismaIntegrationClient {
       data: PrismaWebhookDeliveryJournalUpdateInput;
       where: { deliveryId: string };
     }): MaybePromise<PrismaWebhookDeliveryJournalRow>;
+    updateMany(input: {
+      data: PrismaWebhookDeliveryJournalUpdateInput;
+      where: PrismaWebhookDeliveryJournalWhereInput;
+    }): MaybePromise<{ count: number }>;
     upsert(input: {
       create: PrismaWebhookDeliveryJournalCreateInput;
       update: PrismaWebhookDeliveryJournalUpdateInput;
@@ -580,6 +585,7 @@ interface PrismaSdkVisitorPresenceRow extends PrismaSdkVisitorPresenceCreateInpu
 
 interface PrismaPublicApiKeyWhereInput {
   status?: PublicApiKeyRecord["status"];
+  tenantId?: string;
 }
 
 interface PrismaPublicApiKeyCreateInput {
@@ -759,6 +765,8 @@ interface PrismaWebhookReplayAuditEventRow extends PrismaWebhookReplayAuditEvent
 
 interface PrismaWebhookDeliveryJournalWhereInput {
   deliveryId?: string;
+  lockedAt?: Date | null;
+  nextAttemptAt?: Date | null;
   queue?: string;
   status?: string | { in?: string[] };
 }
@@ -1176,6 +1184,40 @@ export class IntegrationRepository {
     }
 
     return clone(persisted);
+  }
+
+  async removeProvisionedTenant(tenantId: string): Promise<void> {
+    if (this.prismaClient) {
+      const keys = await this.prismaClient.publicApiKey.findMany({ where: { tenantId } });
+      await this.prismaClient.publicApiKey.deleteMany({ where: { tenantId } });
+      for (const key of keys) {
+        this.publicApiRevealSecrets.delete(key.keyId);
+      }
+      const remaining = await this.prismaClient.publicApiKey.findMany({ where: { tenantId } });
+      if (remaining.length > 0) {
+        throw new Error(`Integration compensation did not remove tenant ${tenantId} API keys.`);
+      }
+      return;
+    }
+
+    const current = this.readState();
+    const keyIds = new Set(current.publicApiKeys
+      .filter((key) => key.tenantId === tenantId)
+      .map((key) => key.keyId));
+    this.store.update((state) => {
+      const normalized = normalizeState(state);
+      return {
+        ...normalized,
+        publicApiKeys: normalized.publicApiKeys.filter((key) => key.tenantId !== tenantId),
+        publicApiKeyRevealStates: normalized.publicApiKeyRevealStates.filter((reveal) => !keyIds.has(reveal.keyId))
+      };
+    });
+    for (const keyId of keyIds) {
+      this.publicApiRevealSecrets.delete(keyId);
+    }
+    if (this.readState().publicApiKeys.some((key) => key.tenantId === tenantId)) {
+      throw new Error(`Integration compensation did not remove tenant ${tenantId} API keys.`);
+    }
   }
 
   listActiveKeys(): MaybePromise<PublicApiKeyRecord[]> {
@@ -2130,15 +2172,25 @@ export class IntegrationRepository {
 
     const claimed: WebhookDeliveryJournalEntry[] = [];
     for (const candidate of candidates) {
-      const row = await this.prismaClient.webhookDeliveryJournalEntry.update({
+      const updated = await this.prismaClient.webhookDeliveryJournalEntry.updateMany({
         data: {
           lockedAt: new Date(input.now),
           status: "publishing",
           updatedAt: new Date(input.now)
         },
-        where: { deliveryId: candidate.deliveryId }
+        where: {
+          deliveryId: candidate.deliveryId,
+          lockedAt: candidate.lockedAt ? new Date(candidate.lockedAt) : null,
+          status: candidate.status
+        }
       });
-      claimed.push(toWebhookDeliveryJournalEntry(row));
+      if (updated.count === 1) {
+        claimed.push(normalizeWebhookDeliveryJournalEntry({
+          ...candidate,
+          lockedAt: input.now,
+          status: "publishing"
+        }));
+      }
     }
 
     return claimed;
@@ -3175,6 +3227,7 @@ function assertCompletePrismaIntegrationClient(client: PrismaIntegrationClient):
     !client.webhookDeliveryJournalEntry?.findMany
     || !client.webhookDeliveryJournalEntry.findUnique
     || !client.webhookDeliveryJournalEntry.update
+    || !client.webhookDeliveryJournalEntry.updateMany
     || !client.webhookDeliveryJournalEntry.upsert
   ) {
     throw new Error("prisma_integration_webhook_delivery_journal_delegate_required");

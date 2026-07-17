@@ -10,6 +10,10 @@ import { PermissionService } from "../apps/api-gateway/src/identity/permission.s
 import { SettingsEmployeeService } from "../apps/api-gateway/src/identity/settings-employee.service.ts";
 import { SettingsRulesService } from "../apps/api-gateway/src/identity/settings-rules.service.ts";
 import { TenantService } from "../apps/api-gateway/src/identity/tenant.service.ts";
+import { identityPermissionRoleCatalog } from "../apps/api-gateway/src/identity/runtime-catalog.ts";
+
+process.env.NODE_ENV = "test";
+process.env.MFA_OTP_DELIVERY_MODE = "deterministic";
 
 type IdentityRepository = RuntimeIdentityRepository;
 const IdentityRepository = {
@@ -159,6 +163,7 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
       assert.equal(completed.data.authenticated, true);
       assert.equal(completed.data.tenantId, "tenant-volga");
       assert.equal(typeof completed.data.accessToken, "string");
+      assert.equal("refreshToken" in completed.data, false);
       assert.equal(completed.data.operator?.email, "sergey@volga.example");
     } finally {
       if (originalNodeEnv === undefined) {
@@ -208,6 +213,59 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(completed.data.authenticated, true);
     assert.equal(completed.data.tenantId, "tenant-lumen");
     assert.equal(completed.data.operator?.email, "multi@example.com");
+  });
+  it("keeps fallback permission roles aligned with presence actions and localized aliases", () => {
+    const employee = identityPermissionRoleCatalog.find((role) => role.key === "employee");
+    const senior = identityPermissionRoleCatalog.find((role) => role.key === "senior");
+    const admin = identityPermissionRoleCatalog.find((role) => role.key === "admin");
+    const serviceAdmin = identityPermissionRoleCatalog.find((role) => role.key === "service_admin");
+
+    assert.ok(employee?.actions.includes("presence.write"));
+    assert.ok(employee?.aliases.includes("сотрудник"));
+    assert.ok(senior?.actions.includes("presence.read"));
+    assert.ok(senior?.actions.includes("presence.write"));
+    assert.ok(senior?.aliases.includes("старший сотрудник"));
+    assert.ok(admin?.aliases.includes("администратор"));
+    assert.ok(serviceAdmin?.actions.includes("presence.read"));
+  });
+
+
+  it("selects the active tenant membership even when an inactive duplicate email is stored first", async () => {
+    const repository = IdentityRepository.inMemory();
+    const active = await repository.findTenantUserByEmail("sergey@volga.example");
+    assert.ok(active);
+    await repository.saveTenantUser({
+      ...active,
+      id: "usr-inactive-duplicate-email",
+      status: "inactive",
+      tenantId: "tenant-northstar"
+    });
+
+    const login = await new AuthService(repository).loginTenantOperator({
+      email: "sergey@volga.example",
+      password: "correct-password"
+    });
+    assert.equal(login.status, "ok");
+    assert.equal(login.data.tenantId, "tenant-volga");
+  });
+
+  it("does not consume a valid invite when its tenant membership is missing", async () => {
+    const repository = IdentityRepository.inMemory();
+    const invite = await repository.createInviteToken({
+      code: "orphan-invite-code",
+      email: "orphan-invite@example.com",
+      tenantId: "tenant-volga"
+    });
+    const accepted = await new AuthService(repository).acceptInvite({
+      code: invite.code,
+      email: invite.email,
+      password: "Orphan-Invite-2026!"
+    });
+    const persisted = await repository.findInviteToken(invite.code);
+
+    assert.equal(accepted.status, "invalid");
+    assert.equal(accepted.error?.code, "invite_membership_not_found");
+    assert.equal(persisted?.consumedAt, null);
   });
 
   it("continues invite acceptance MFA without replaying the consumed invite token", async () => {
@@ -767,7 +825,8 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
 
   it("manages tenant employee settings with role, group, channel and reset audit evidence", async () => {
     const repository = IdentityRepository.inMemory();
-    const settings = new SettingsEmployeeService(repository);
+    const deliveredRecoveryTokens: DeliveredRecoveryToken[] = [];
+    const settings = new SettingsEmployeeService(repository, undefined, createTestMfaOtpRuntime(deliveredRecoveryTokens));
 
     const workspace = await settings.fetchEmployees({ tenantId: "tenant-northstar" });
     assert.equal(workspace.status, "ok");
@@ -801,6 +860,11 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     }, { tenantId: "tenant-northstar" });
     assert.equal(passwordReset.status, "ok");
     assert.equal(passwordReset.data.employee.credentials.passwordStatus, "reset_sent");
+    assert.equal(passwordReset.data.recovery.status, "queued");
+    assert.equal(deliveredRecoveryTokens.length, 1);
+    const passwordResetUser = await repository.findTenantUser("usr-ns-agent");
+    assert.equal(String(passwordResetUser?.supportNotes ?? "").includes("Password reset sent"), false);
+    assert.equal((passwordResetUser?.metadata?.passwordRecovery as Record<string, unknown>)?.requestId, passwordReset.data.recovery.requestId);
 
     const mfaReset = await settings.resetEmployeeMfa("usr-ns-agent", {
       reason: "Phone replacement approved"
@@ -832,17 +896,26 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     }, { tenantId: "tenant-northstar" });
     assert.equal(ownerDeactivation.status, "invalid");
     assert.equal(ownerDeactivation.error?.code, "last_admin_required");
+
+    const ownerDemotion = await settings.updateEmployee("usr-ns-owner", { roleKey: "employee" }, { tenantId: "tenant-northstar" });
+    const ownerStatusChange = await settings.updateEmployee("usr-ns-owner", { status: "inactive" }, { tenantId: "tenant-northstar" });
+    const invalidStatus = await settings.updateEmployee("usr-ns-agent", { status: "suspended-forever" }, { tenantId: "tenant-northstar" });
+    const invalidRole = await settings.updateEmployee("usr-ns-agent", { roleKey: "root-god" }, { tenantId: "tenant-northstar" });
+    assert.equal(ownerDemotion.error?.code, "last_admin_required");
+    assert.equal(ownerStatusChange.error?.code, "last_admin_required");
+    assert.equal(invalidStatus.error?.code, "employee_status_invalid");
+    assert.equal(invalidRole.error?.code, "employee_role_invalid");
   });
 
   it("scopes settings employee reads and mutations to the authenticated tenant context", async () => {
     const source = readFileSync(new URL("../apps/api-gateway/src/identity/settings.controller.ts", import.meta.url), "utf8");
 
     assert.match(source, /ServiceAdminRequest/);
-    assert.match(source, /tenantId:\s*request\.serviceAdminContext\?\.currentTenantId \?\? query\.tenantId/);
-    assert.match(source, /tenantId:\s*request\.serviceAdminContext\?\.currentTenantId \?\? payload\.tenantId/);
-    assert.match(source, /updateEmployee\(employeeId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
-    assert.match(source, /resetEmployeePassword\(employeeId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
-    assert.match(source, /deactivateEmployee\(employeeId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
+    assert.match(source, /tenantId: tenantIdFromRequest\(request\)/);
+    assert.match(source, /updateEmployee\(employeeId, payload, \{ tenantId: tenantIdFromRequest\(request\) \}\)/);
+    assert.match(source, /resetEmployeePassword\(employeeId, payload, \{ tenantId: tenantIdFromRequest\(request\) \}\)/);
+    assert.match(source, /deactivateEmployee\(employeeId, payload, \{ tenantId: tenantIdFromRequest\(request\) \}\)/);
+    assert.match(source, /return request\.tenantOperatorContext\?\.tenantId \?\? request\.serviceAdminContext\?\.currentTenantId/);
 
     const repository = IdentityRepository.inMemory();
     const settings = new SettingsEmployeeService(repository);
@@ -879,13 +952,13 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
   it("scopes settings groups and rules to the authenticated tenant context", async () => {
     const source = readFileSync(new URL("../apps/api-gateway/src/identity/settings.controller.ts", import.meta.url), "utf8");
 
-    assert.match(source, /fetchGroups\(@Query\(\) query: \{ tenantId\?: string \}, @Req\(\) request: ServiceAdminRequest\)/);
-    assert.match(source, /this\.settingsEmployeeService\.fetchGroups\(\{ tenantId: request\.serviceAdminContext\?\.currentTenantId \?\? query\.tenantId \}\)/);
-    assert.match(source, /this\.settingsEmployeeService\.createGroup\(payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
-    assert.match(source, /this\.settingsEmployeeService\.updateGroup\(groupId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
-    assert.match(source, /this\.settingsRulesService\.fetchRules\(\{[\s\S]*tenantId: request\.serviceAdminContext\?\.currentTenantId \?\? query\.tenantId/);
-    assert.match(source, /this\.settingsRulesService\.updateRule\(ruleId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
-    assert.match(source, /this\.settingsRulesService\.testRule\(ruleId, payload, \{ tenantId: request\.serviceAdminContext\?\.currentTenantId \}\)/);
+    assert.match(source, /fetchGroups\(@Query\(\) query: \{ tenantId\?: string \}, @Req\(\) request: SettingsRequest\)/);
+    assert.match(source, /this\.settingsEmployeeService\.fetchGroups\(\{ tenantId: tenantIdFromRequest\(request\) \}\)/);
+    assert.match(source, /this\.settingsEmployeeService\.createGroup\(payload, \{ tenantId: tenantIdFromRequest\(request\) \}\)/);
+    assert.match(source, /this\.settingsEmployeeService\.updateGroup\(groupId, payload, \{ tenantId: tenantIdFromRequest\(request\) \}\)/);
+    assert.match(source, /this\.settingsRulesService\.fetchRules\(\{[\s\S]*tenantId: tenantIdFromRequest\(request\)/);
+    assert.match(source, /this\.settingsRulesService\.updateRule\(ruleId, payload, \{ tenantId: tenantIdFromRequest\(request\) \}\)/);
+    assert.match(source, /this\.settingsRulesService\.testRule\(ruleId, payload, \{ tenantId: tenantIdFromRequest\(request\) \}\)/);
 
     const settings = new SettingsEmployeeService(IdentityRepository.inMemory());
     const volgaGroup = await settings.createGroup({
@@ -981,12 +1054,12 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
   it("guards settings management and reset routes with service-admin permissions", () => {
     const source = readFileSync(new URL("../apps/api-gateway/src/identity/settings.controller.ts", import.meta.url), "utf8");
 
-    assert.match(source, /@UseGuards\(ServiceAdminSessionGuard\)[\s\S]*@Controller\("settings"\)/);
+    assert.match(source, /@UseGuards\(TenantOperatorOrServiceAdminGuard\)[\s\S]*@Controller\("settings"\)/);
     assert.match(source, /@Get\("employees"\)[\s\S]*@RequireServiceAdminAction\("settings\.read"\)[\s\S]*fetchEmployees\(/);
     assert.match(source, /@Post\("employees\/invites"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*inviteEmployee\(/);
     assert.match(source, /@Patch\("employees\/:employeeId"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*updateEmployee\(/);
-    assert.match(source, /@Post\("employees\/:employeeId\/password-reset"\)[\s\S]*@RequireServiceAdminAction\("settings\.security\.reset"\)[\s\S]*resetEmployeePassword\(/);
-    assert.match(source, /@Post\("employees\/:employeeId\/mfa-reset"\)[\s\S]*@RequireServiceAdminAction\("settings\.security\.reset"\)[\s\S]*resetEmployeeMfa\(/);
+    assert.match(source, /@Post\("employees\/:employeeId\/password-reset"\)[\s\S]*@RequireTenantOperatorPermission\("employees\.passwordReset"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*resetEmployeePassword\(/);
+    assert.match(source, /@Post\("employees\/:employeeId\/mfa-reset"\)[\s\S]*@RequireTenantOperatorPermission\("employees\.passwordReset"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*resetEmployeeMfa\(/);
     assert.match(source, /@Post\("groups"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*createGroup\(/);
     assert.match(source, /@Patch\("groups\/:groupId"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*updateGroup\(/);
     assert.match(source, /@Patch\("rules\/:ruleId"\)[\s\S]*@RequireServiceAdminAction\("settings\.manage"\)[\s\S]*updateRule\(/);

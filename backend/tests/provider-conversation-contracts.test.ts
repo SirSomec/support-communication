@@ -22,7 +22,7 @@ describe("provider conversation identity", () => {
     assert.equal(first?.channelConnectionId, "conn-max-1");
     assert.equal(first?.providerConversationId, "chat-42");
     assert.equal(first?.providerUserId, "user-7");
-    assert.equal((await repository.listConversations()).length, 1);
+    assert.equal((await repository.listConversations({ tenantId: "tenant-a" })).length, 1);
   });
 
   it("isolates equal provider peer ids across connections and tenants", () => {

@@ -116,7 +116,7 @@ describe("redaction runtime smoke contracts", () => {
     }
     assert.equal(output.includes("restore-checks/backup-postgres-nightly/artifact.json"), false);
     assert.match(output, /export redaction smoke passed/);
-    assert.match(output, /reports\.local\/download/);
+    assert.match(output, /\/api\/v1\/reports\/exports\/export-2418\/download/);
     assert.match(output, /operations\/restore-checks\/backup-postgres-nightly\/artifact/);
     assert.match(output, /\[REDACTED:object_key\]/);
   });

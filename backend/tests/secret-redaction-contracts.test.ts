@@ -517,7 +517,10 @@ describe("secret redaction verification contracts", () => {
     assert.match(serialized, /\[REDACTED:provider_token\]/);
     assert.match(serialized, /\[REDACTED:webhook_signature\]/);
     assert.equal(reportDescriptor.data.objectKeyExposed, false);
-    assert.equal(String(reportDescriptor.data.downloadUrl).includes("reports.local/download"), true);
+    assert.equal(
+      String(reportDescriptor.data.downloadUrl).includes("/api/v1/reports/exports/export-2418/download"),
+      true
+    );
     const restoreCheck = restoreDescriptor.data.restoreCheck as Record<string, unknown>;
     const artifactDescriptor = restoreCheck.artifactDescriptor as Record<string, unknown>;
     assert.deepEqual(restoreCheck.targets, ["postgres", "object-storage-metadata"]);

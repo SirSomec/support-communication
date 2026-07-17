@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronDown, Globe2, Headphones, LogIn, Search, ShieldCheck, UsersRound, Zap } from "lucide-react";
+import { ChevronDown, Globe2, Headphones, LogOut, Search, ShieldCheck, UsersRound, Zap } from "lucide-react";
 import { roleModes } from "../../app/access.js";
 import { navigationItems } from "../../app/navigationModel.js";
 import { PRESENCE_STATUSES, PRESENCE_STATUS_NOT_SET_LABEL, presenceStatusClass, presenceStatusLabel } from "../../app/presenceModel.js";
@@ -53,7 +53,7 @@ export function TopBar({
   access,
   activeSection,
   getNotificationActionAvailability,
-  onOpenAuth,
+  onLogout,
   onOpenLanding,
   onNavigateNotificationAction,
   onOutbound,
@@ -103,9 +103,9 @@ export function TopBar({
             <Globe2 size={16} />
             Сайт
           </button>
-          <button className="ghost-action" onClick={onOpenAuth} type="button">
-            <LogIn size={16} />
-            Вход
+          <button className="ghost-action" onClick={onLogout} type="button">
+            <LogOut size={16} />
+            Выйти
           </button>
         </div>
         {notificationsEnabled ? (

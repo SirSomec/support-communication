@@ -32,6 +32,17 @@ test("presence heartbeat interval rejects overly aggressive values", () => {
   assert.equal(__test__.normalizeInterval("invalid"), 15000);
 });
 
+test("widget URL resolution supports the documented relative api base", () => {
+  assert.equal(
+    __test__.resolveWidgetUrl("/api/v1", "/public/sdk/messages", "https://shop.example/catalog/item"),
+    "https://shop.example/api/v1/public/sdk/messages"
+  );
+  assert.equal(
+    __test__.resolveWidgetUrl("https://support.example/api/v1/", "public/sdk/messages", "https://shop.example/"),
+    "https://support.example/api/v1/public/sdk/messages"
+  );
+});
+
 test("invitation polling ignores malformed entries and selects the first valid exposure", () => {
   const invitation = __test__.firstInvitation([
     null,

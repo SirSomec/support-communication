@@ -131,7 +131,8 @@ export function resolveTelegramTenantByWebhookSecret(
 export async function validateTelegramBotToken(
   botToken: string,
   fetcher: TelegramHttpFetch,
-  apiBaseUrl = "https://api.telegram.org"
+  apiBaseUrl = "https://api.telegram.org",
+  timeoutMs = 10_000
 ): Promise<{ botId: string; botUsername: string | null }> {
   const token = String(botToken ?? "").trim();
   if (!token || !/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
@@ -139,8 +140,17 @@ export async function validateTelegramBotToken(
   }
 
   const endpoint = `${apiBaseUrl.replace(/\/+$/, "")}/bot${token}/getMe`;
-  const response = await fetcher(endpoint);
-  const payload = await response.json() as TelegramGetMeResponse;
+  const signal = AbortSignal.timeout(Math.max(1, timeoutMs));
+  let response: Awaited<ReturnType<TelegramHttpFetch>>;
+  let payload: TelegramGetMeResponse;
+  try {
+    response = await fetcher(endpoint, { signal });
+    payload = await response.json() as TelegramGetMeResponse;
+  } catch {
+    throw new Error(signal.aborted
+      ? "telegram_bot_token_validation_timeout"
+      : "telegram_bot_token_validation_failed");
+  }
 
   if (!response.ok || !payload.ok || !payload.result?.id) {
     throw new Error("telegram_bot_token_rejected");

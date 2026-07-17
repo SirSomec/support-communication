@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  buildBotScenarioUpdatePatch,
   changeBotScenarioLifecycle,
   publishBotScenario,
   runBotScenarioTest,
@@ -8,6 +10,44 @@ import {
 } from "../src/app/automationScenarioActions.js";
 
 describe("automation workflow actions", () => {
+  it("keeps scenario settings dirty when persistence fails", () => {
+    const source = readFileSync(new URL("../src/features/automation/ScenarioConsole.jsx", import.meta.url), "utf8");
+
+    assert.match(source, /const persisted = await onUpdateScenario\(payload\);\s*if \(persisted\) setFormDirty\(false\);/);
+  });
+
+  it("renders the URL source dialog in the empty scenario workspace", () => {
+    const source = readFileSync(new URL("../src/features/automation/AutomationScreen.jsx", import.meta.url), "utf8");
+    const emptyBranch = source.slice(
+      source.indexOf("if (!selectedScenario || !selectedNode)"),
+      source.indexOf("const enabledScenarios")
+    );
+
+    assert.match(emptyBranch, /\{urlSourceDialog\}/);
+  });
+
+  it("preserves pinned source versions while normalizing scenarios", () => {
+    const source = readFileSync(new URL("../src/features/automation/AutomationScreen.jsx", import.meta.url), "utf8");
+
+    assert.match(source, /sourceVersion:\s*String\(binding\.sourceVersion\)\.trim\(\)/);
+  });
+
+  it("keeps the scenario wizard draft when creation fails", () => {
+    const source = readFileSync(new URL("../src/features/automation/ScenarioCreationWizard.jsx", import.meta.url), "utf8");
+
+    assert.match(source, /const created = await onCreate\(/);
+    assert.match(source, /if \(created\) clearWizardDraft\(\)/);
+  });
+
+  it("builds a narrow published-scenario draft patch without published fields", () => {
+    assert.deepEqual(buildBotScenarioUpdatePatch("bot-checkout", {
+      sourceBindings: [{ sourceId: "knowledge-v2" }]
+    }), {
+      id: "bot-checkout",
+      sourceBindings: [{ sourceId: "knowledge-v2" }]
+    });
+  });
+
   it("does not return an updated scenario when backend save fails", async () => {
     const result = await submitBotScenarioUpdate(
       { id: "bot-checkout", name: "Checkout" },

@@ -707,11 +707,11 @@ describe("report export worker contracts", () => {
     assert.equal(first.exportEnvelope.data.duplicate, false);
     assert.equal(first.exportEnvelope.data.job.statusKey, "queued");
     assert.equal(first.exportEnvelope.data.job.queue, "report-export");
-    assert.equal(first.exportEnvelope.data.job.period, "2026-06-30");
+    assert.equal(first.exportEnvelope.data.job.period, "today");
     assert.equal(first.exportEnvelope.data.job.reportType, undefined);
     assert.deepEqual(first.exportEnvelope.data.job.columns, ["metric", "today", "previous", "delta", "status"]);
     const { snapshotAt, ...persistedFilters } = first.exportEnvelope.data.job.filters;
-    assert.ok(Number.isFinite(Date.parse(snapshotAt)));
+    assert.equal(snapshotAt, "2026-06-30T23:59:59.999Z");
     assert.deepEqual(persistedFilters, {
       channel: "Все каналы",
       periodKey: "2026-06-30",
@@ -757,6 +757,32 @@ describe("report export worker contracts", () => {
     assert.equal(concurrentJobIds[0], concurrentJobIds[1]);
     assert.deepEqual([left.exportEnvelope.data.duplicate, right.exportEnvelope.data.duplicate].sort(), [false, true]);
     assert.equal(repository.readState().exportJobs.filter((job) => job.id === concurrentJobIds[0]).length, 1);
+  });
+
+  it("maps weekly scheduled digest keys to the supported seven-day export window", async () => {
+    const repository = ReportRepository.inMemory();
+    const running = repository.saveScheduledDigestDescriptor({
+      createdAt: "2026-07-05T12:00:00.000Z",
+      dueAt: "2026-07-05T14:00:00.000Z",
+      id: "digest-volga-weekly-2026-W27",
+      periodKey: "2026-W27",
+      reportType: "weekly_support_digest",
+      scheduleId: "digest-volga-weekly",
+      status: "running",
+      tenantId: "tenant-volga",
+      updatedAt: "2026-07-05T15:00:00.000Z"
+    });
+
+    const result = await queueScheduledDigestExportJob({
+      descriptor: running,
+      now: new Date("2026-07-05T15:05:00.000Z"),
+      reportRepository: repository,
+      reportService: new ReportService(repository)
+    });
+
+    assert.equal(result.exportEnvelope.status, "ok");
+    assert.equal(result.exportEnvelope.data.job.period, "7days");
+    assert.equal(result.exportEnvelope.data.job.filters.snapshotAt, "2026-07-05T23:59:59.999Z");
   });
 
   it("persists scheduled digest run status after export queue outcomes", async () => {

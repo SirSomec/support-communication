@@ -18,7 +18,9 @@ export function resetApiClientTestConfig() {
 export function buildApiUrl(path, query = {}) {
   const baseUrl = getApiBaseUrl();
   const normalizedPath = `${DEFAULT_API_BASE_PATH}${path.startsWith("/") ? path : `/${path}`}`;
-  const url = baseUrl ? new URL(normalizedPath, ensureTrailingSlash(baseUrl)) : new URL(normalizedPath, "http://local.frontend");
+  const url = baseUrl
+    ? new URL(normalizedPath.replace(/^\/+/, ""), ensureTrailingSlash(baseUrl))
+    : new URL(normalizedPath, "http://local.frontend");
 
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value === undefined || value === null || value === "") {

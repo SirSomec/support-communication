@@ -720,7 +720,6 @@ export class RoutingRepository implements RoutingRepositoryPort {
 
 class PrismaRoutingRepository implements RoutingRepositoryPort {
   private stateCache: RoutingState;
-  private stateSnapshotVersion = 0;
 
   constructor(private readonly client: PrismaRoutingClient, _fallback?: RoutingRepositoryPort) {
     void _fallback;
@@ -885,7 +884,6 @@ class PrismaRoutingRepository implements RoutingRepositoryPort {
     });
 
     if (result.completedJob && result.nextState && result.nextVersion !== undefined) {
-      this.stateSnapshotVersion = result.nextVersion;
       this.stateCache = normalizeState({
         ...this.stateCache,
         ...result.nextState,
@@ -997,7 +995,6 @@ class PrismaRoutingRepository implements RoutingRepositoryPort {
     });
 
     if (result.completedJob && result.nextState && result.nextVersion !== undefined) {
-      this.stateSnapshotVersion = result.nextVersion;
       this.stateCache = normalizeState({
         ...this.stateCache,
         ...result.nextState,
@@ -1090,7 +1087,6 @@ class PrismaRoutingRepository implements RoutingRepositoryPort {
         data: toPrismaRoutingStateSnapshotCreateInput(seedRoutingState())
       });
     }
-    this.stateSnapshotVersion = snapshot.version;
     const snapshotState = toRoutingStateFromSnapshot(snapshot, seedRoutingState());
     this.stateCache = normalizeState({
       ...snapshotState,
@@ -1202,7 +1198,6 @@ class PrismaRoutingRepository implements RoutingRepositoryPort {
       for (const event of input.realtimeEvents) await appendRealtimeEvent(client, event);
       return { nextVersion, persistedState };
     });
-    this.stateSnapshotVersion = result.nextVersion;
     this.stateCache = result.persistedState;
     return clone(this.stateCache);
   }
@@ -1261,7 +1256,6 @@ class PrismaRoutingRepository implements RoutingRepositoryPort {
       return { nextVersion, persistedState };
     });
 
-    this.stateSnapshotVersion = result.nextVersion;
     this.stateCache = result.persistedState;
     return clone(this.stateCache);
   }
@@ -1348,8 +1342,11 @@ class PrismaRoutingRepository implements RoutingRepositoryPort {
   async saveState(state: RoutingState): Promise<RoutingState> {
     const normalized = normalizeState(state);
     await this.assertStateNaturalKeys(normalized);
-    this.stateSnapshotVersion = await this.saveStateSnapshot(normalized);
-    await this.saveStateSideTables(normalized);
+    const persistedState = await this.withRoutingTransaction(async (client) => {
+      await this.saveStateSnapshot(normalized, client);
+      return this.saveStateSideTables(normalized, client, false);
+    });
+    this.stateCache = persistedState;
     return clone(this.stateCache);
   }
 
@@ -1364,7 +1361,6 @@ class PrismaRoutingRepository implements RoutingRepositoryPort {
       }
       return { nextVersion, persistedState };
     });
-    this.stateSnapshotVersion = result.nextVersion;
     this.stateCache = result.persistedState;
     return clone(this.stateCache);
   }
@@ -1475,20 +1471,29 @@ class PrismaRoutingRepository implements RoutingRepositoryPort {
     };
   }
 
-  private async saveStateSnapshot(state: RoutingState, client: PrismaRoutingClient = this.client, expectedVersion = this.stateSnapshotVersion): Promise<number> {
+  private async saveStateSnapshot(
+    state: RoutingState,
+    client: PrismaRoutingClient = this.client,
+    expectedVersion?: number,
+    retriesRemaining = 1
+  ): Promise<number> {
+    const resolvedVersion = expectedVersion ?? (await this.readCurrentStateSnapshot(client)).version;
     const create = {
       ...toPrismaRoutingStateSnapshotCreateInput(state),
-      version: expectedVersion > 0 ? expectedVersion + 1 : 1
+      version: resolvedVersion > 0 ? resolvedVersion + 1 : 1
     };
-    if (expectedVersion === 0) {
+    if (resolvedVersion === 0) {
       const snapshot = await client.routingStateSnapshot.create({ data: create });
       return snapshot.version;
     } else {
       const result = await client.routingStateSnapshot.updateMany({
         data: toPrismaRoutingStateSnapshotUpdateInput(create),
-        where: { id: ROUTING_STATE_SNAPSHOT_ID, version: expectedVersion }
+        where: { id: ROUTING_STATE_SNAPSHOT_ID, version: resolvedVersion }
       });
       if (result.count !== 1) {
+        if (expectedVersion === undefined && retriesRemaining > 0) {
+          return this.saveStateSnapshot(state, client, undefined, retriesRemaining - 1);
+        }
         throw new Error("routing_state_snapshot_conflict");
       }
       return create.version;

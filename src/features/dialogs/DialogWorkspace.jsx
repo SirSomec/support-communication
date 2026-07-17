@@ -20,7 +20,6 @@ export function DialogWorkspace({
   isClosed,
   onAiSuggestionAction,
   onAttachFiles,
-  onAttachmentComplete,
   onAttachmentRemove,
   onAttachmentRetry,
   onClientPhoneSave,
@@ -93,7 +92,6 @@ export function DialogWorkspace({
         onAiSuggestionAction={onAiSuggestionAction}
         attachments={attachments}
         onAttachFiles={onAttachFiles}
-        onAttachmentComplete={onAttachmentComplete}
         onAttachmentRetry={onAttachmentRetry}
         onAttachmentRemove={onAttachmentRemove}
         onReplyChannelChange={onReplyChannelChange}

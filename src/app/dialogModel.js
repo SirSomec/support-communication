@@ -318,7 +318,12 @@ export function getConversationTimeValue(time) {
 }
 
 export function maskPhone(phone) {
-  return phone.replace(/(\+7)\s(\d{3})\s(\d{3})-(\d{2})-(\d{2})/, "$1 *** ***-**-$5");
+  const value = String(phone ?? "").trim();
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "";
+
+  const suffix = digits.length > 2 ? digits.slice(-2) : "**";
+  return `*** ***-**-${suffix}`;
 }
 
 // Совпадает с серверной валидацией PATCH client-phone: телефон в свободном

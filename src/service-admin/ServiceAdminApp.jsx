@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { clearServiceAdminSession, hasServiceAdminSession } from "../app/sessionStore.js";
 import { RouteLoading } from "../app/RouteLoading.jsx";
+import { authService } from "../services/authService.js";
 import { Toast } from "../ui.jsx";
 import { parseServiceAdminPath, serviceAdminPathForView } from "./serviceAdminPath.js";
 import "../styles.css";
@@ -44,9 +45,13 @@ export function ServiceAdminApp() {
     navigate("dashboard");
   }
 
-  function handleLogoutOrBack() {
+  async function handleLogoutOrBack() {
+    const response = await authService.logout({ reason: "Service admin logged out from UI" });
     clearServiceAdminSession();
     navigate("login");
+    if (response.status !== "ok") {
+      setToast("Локальная сессия завершена, но сервер не подтвердил отзыв токена.");
+    }
   }
 
   if (view === "login") {

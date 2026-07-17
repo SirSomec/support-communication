@@ -668,6 +668,7 @@ export function buildScenarioListRow(scenario = {}, context = {}) {
       : (scenario.status === "published" ? "Опубликован" : "Ещё не публиковался"),
     name: String(scenario.name ?? scenario.id ?? "Сценарий"),
     sourceCount: sourceBindings.length,
+    sourceTitles,
     status: String(scenario.status ?? "draft"),
     statusLabel: formatScenarioStatusLabel(scenario.status),
     statusTone: scenarioStatusTone(scenario.status),

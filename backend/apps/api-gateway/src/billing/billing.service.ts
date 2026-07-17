@@ -1908,17 +1908,25 @@ function providerSyncResponseData(input: {
 }
 
 function paymentSummary(invoices: BillingInvoiceState[]): Record<string, unknown> {
-  const currency = invoices[0]?.currency ?? "RUB";
-  const openAmount = invoices
-    .filter((invoice) => invoice.status === "open" || invoice.status === "past_due")
-    .reduce((sum, invoice) => sum + Math.max(0, invoice.amountDue - invoice.amountPaid), 0);
-  const paidAmount = invoices.reduce((sum, invoice) => sum + invoice.amountPaid, 0);
+  const amountsByCurrency = [...invoices.reduce((groups, invoice) => {
+    const current = groups.get(invoice.currency) ?? { currency: invoice.currency, invoiceCount: 0, openAmount: 0, paidAmount: 0 };
+    current.invoiceCount += 1;
+    current.paidAmount += invoice.amountPaid;
+    if (invoice.status === "open" || invoice.status === "past_due") {
+      current.openAmount += Math.max(0, invoice.amountDue - invoice.amountPaid);
+    }
+    groups.set(invoice.currency, current);
+    return groups;
+  }, new Map<string, { currency: string; invoiceCount: number; openAmount: number; paidAmount: number }>()).values()]
+    .sort((left, right) => left.currency.localeCompare(right.currency));
+  const aggregate = amountsByCurrency.length === 1 ? amountsByCurrency[0] : null;
 
   return {
-    currency,
+    amountsByCurrency,
+    currency: aggregate?.currency ?? (invoices.length === 0 ? "RUB" : null),
     invoiceCount: invoices.length,
-    openAmount,
-    paidAmount
+    openAmount: aggregate?.openAmount ?? (invoices.length === 0 ? 0 : null),
+    paidAmount: aggregate?.paidAmount ?? (invoices.length === 0 ? 0 : null)
   };
 }
 

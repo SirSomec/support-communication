@@ -1,11 +1,12 @@
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
 import { makeAuditId } from "./backend-ids.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
+import { SettingsRulesRepository } from "./settings-rules.repository.js";
 
 const SERVICE = "settingsService";
 const SEED_TENANT_ID = "tenant-northstar";
 
-interface SettingsRule {
+export interface SettingsRule {
   affectedWorkflows: string[];
   description: string;
   enabled: boolean;
@@ -18,6 +19,16 @@ interface SettingsRule {
   severity: "critical" | "high" | "medium";
   tenantId: string;
   title: string;
+}
+
+export interface SettingsRuleAuditEvent {
+  action: string;
+  createdAt: string;
+  id: string;
+  immutable: true;
+  reason: string;
+  ruleId: string;
+  tenantId: string;
 }
 
 interface RuleMutationPayload {
@@ -33,11 +44,16 @@ interface SettingsTenantOptions {
 }
 
 export class SettingsRulesService {
-  private readonly rules = new Map<string, SettingsRule>();
-  private readonly auditEvents: Array<Record<string, unknown>> = [];
+  private readonly auditEvents: SettingsRuleAuditEvent[] = [];
+
+  constructor(private readonly repository = SettingsRulesRepository.default()) {}
 
   listSettingsAuditEvents() {
     return this.auditEvents.map((event) => ({ ...event }));
+  }
+
+  listSettingsAuditEventsAsync(tenantId?: string) {
+    return this.repository.listAuditEvents(normalizeTenantId(tenantId) || undefined);
   }
 
   async fetchRules(filters: { tenantId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -46,7 +62,7 @@ export class SettingsRulesService {
       return tenantContextRequiredEnvelope("fetchRules");
     }
 
-    const rules = this.listTenantRules(tenantId);
+    const rules = await this.listTenantRules(tenantId);
 
     return createEnvelope({
       service: SERVICE,
@@ -63,7 +79,7 @@ export class SettingsRulesService {
       return tenantContextRequiredEnvelope("updateRule", { ruleId });
     }
 
-    const rule = this.getRule(tenantId, ruleId);
+    const rule = await this.getRule(tenantId, ruleId);
     if (!rule) {
       return invalidEnvelope("updateRule", "rule_not_found", "Settings rule was not found.", { ruleId, tenantId });
     }
@@ -81,8 +97,8 @@ export class SettingsRulesService {
         ...normalizeParameters(payload.parameters)
       }
     };
-    this.rules.set(ruleKey(tenantId, ruleId), nextRule);
-    const auditEvent = this.persistAuditEvent(buildAuditEvent("settings.rule.update", tenantId, ruleId, payload.reason));
+    await this.repository.saveRule(nextRule);
+    const auditEvent = await this.persistAuditEvent(buildAuditEvent("settings.rule.update", tenantId, ruleId, payload.reason));
 
     return createEnvelope({
       service: SERVICE,
@@ -92,7 +108,7 @@ export class SettingsRulesService {
       data: {
         auditEvent,
         rule: toPublicRule(nextRule),
-        workspace: buildRulesWorkspace(this.listTenantRules(tenantId))
+        workspace: buildRulesWorkspace(await this.listTenantRules(tenantId))
       }
     });
   }
@@ -103,7 +119,7 @@ export class SettingsRulesService {
       return tenantContextRequiredEnvelope("testRule", { ruleId });
     }
 
-    const rule = this.getRule(tenantId, ruleId);
+    const rule = await this.getRule(tenantId, ruleId);
     if (!rule) {
       return invalidEnvelope("testRule", "rule_not_found", "Settings rule was not found.", { ruleId, tenantId });
     }
@@ -111,7 +127,7 @@ export class SettingsRulesService {
     const sampleSize = clampNumber(payload.sampleSize, 25, 1, 500);
     const affectedCount = Math.max(0, Math.round(sampleSize * affectedRatio(rule)));
 
-    const auditEvent = this.persistAuditEvent(buildAuditEvent("settings.rule.test", tenantId, ruleId));
+    const auditEvent = await this.persistAuditEvent(buildAuditEvent("settings.rule.test", tenantId, ruleId));
 
     return createEnvelope({
       service: SERVICE,
@@ -134,30 +150,31 @@ export class SettingsRulesService {
     });
   }
 
-  private listTenantRules(tenantId: string) {
-    this.ensureDefaultRulesForTenant(tenantId);
-    return Array.from(this.rules.values())
-      .filter((rule) => rule.tenantId === tenantId)
+  private async listTenantRules(tenantId: string) {
+    const rules = await this.ensureDefaultRulesForTenant(tenantId);
+    return rules
       .sort((left, right) => severityRank(left.severity) - severityRank(right.severity) || left.title.localeCompare(right.title));
   }
 
-  private getRule(tenantId: string, ruleId: string): SettingsRule | undefined {
-    this.ensureDefaultRulesForTenant(tenantId);
-    return this.rules.get(ruleKey(tenantId, ruleId));
+  private async getRule(tenantId: string, ruleId: string): Promise<SettingsRule | undefined> {
+    return (await this.ensureDefaultRulesForTenant(tenantId)).find((rule) => rule.id === ruleId);
   }
 
-  private ensureDefaultRulesForTenant(tenantId: string): void {
+  private async ensureDefaultRulesForTenant(tenantId: string): Promise<SettingsRule[]> {
+    const persisted = await this.repository.listRules(tenantId);
+    const byId = new Map(persisted.map((rule) => [rule.id, rule]));
     for (const rule of seedRules) {
-      const key = ruleKey(tenantId, rule.id);
-      if (!this.rules.has(key)) {
-        this.rules.set(key, cloneRule({ ...rule, tenantId }));
+      if (!byId.has(rule.id)) {
+        const saved = await this.repository.saveRule(cloneRule({ ...rule, tenantId }));
+        byId.set(saved.id, saved);
       }
     }
+    return [...byId.values()].map(cloneRule);
   }
 
-  private persistAuditEvent<TEvent extends Record<string, unknown>>(event: TEvent): TEvent {
+  private async persistAuditEvent(event: SettingsRuleAuditEvent): Promise<SettingsRuleAuditEvent> {
     this.auditEvents.push({ ...event });
-    return event;
+    return this.repository.saveAuditEvent(event);
   }
 }
 
@@ -185,9 +202,10 @@ function toPublicRule(rule: SettingsRule) {
   };
 }
 
-function buildAuditEvent(action: string, tenantId: string, ruleId: string, reason = "Settings rule mutation") {
+function buildAuditEvent(action: string, tenantId: string, ruleId: string, reason = "Settings rule mutation"): SettingsRuleAuditEvent {
   return {
     action,
+    createdAt: new Date().toISOString(),
     id: makeAuditId("settings_rule"),
     immutable: true,
     reason,
@@ -217,10 +235,6 @@ function tenantContextRequiredEnvelope(operation: string, data: Record<string, u
     ...data,
     tenantId: null
   });
-}
-
-function ruleKey(tenantId: string, ruleId: string): string {
-  return `${tenantId}:${ruleId}`;
 }
 
 function normalizeParameters(parameters?: Record<string, unknown>) {

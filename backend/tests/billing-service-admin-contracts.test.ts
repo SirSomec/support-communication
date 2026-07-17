@@ -8,8 +8,10 @@ import { changeTenantTariffFromRoute } from "../apps/api-gateway/src/billing/bil
 import { BillingService } from "../apps/api-gateway/src/billing/billing.service.ts";
 import {
   claimExpiredQuotaReservationsForWorker,
+  executeQuotaExpirationWorkerOnce,
   releaseExpiredQuotaReservationForWorker
 } from "../apps/api-gateway/src/billing/quota-expiration.worker.ts";
+import { loadQuotaExpirationWorkerRuntimeConfig } from "../apps/api-gateway/src/billing/quota-expiration.main.ts";
 import { IdentityRepository as RuntimeIdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
 import { bootstrapIdentityState } from "../apps/api-gateway/src/identity/seed.ts";
 import { authorizeServiceAdminPolicy } from "../apps/api-gateway/src/identity/privileged-policy.ts";
@@ -36,6 +38,31 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     RuntimeBillingRepository.useDefault(RuntimeBillingRepository.inMemory(bootstrapBillingState()));
     RuntimeIdentityRepository.useDefault(RuntimeIdentityRepository.inMemory(bootstrapIdentityState()));
   });
+
+  it("wires the quota expiration worker into package scripts and compose runtime", () => {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
+    const compose = readFileSync(join(process.cwd(), "..", "docker-compose.yml"), "utf8");
+    const mainSource = readFileSync(join(process.cwd(), "apps/api-gateway/src/billing/quota-expiration.main.ts"), "utf8");
+    const config = loadQuotaExpirationWorkerRuntimeConfig({
+      QUOTA_EXPIRATION_WORKER_INTERVAL_MS: "2500",
+      QUOTA_EXPIRATION_WORKER_LEASE_TIMEOUT_MS: "45000",
+      QUOTA_EXPIRATION_WORKER_LIMIT: "17",
+      QUOTA_EXPIRATION_WORKER_NOW: "2026-07-01T04:30:00.000Z"
+    }, ["node", "quota-expiration.main.js", "--once"]);
+
+    assert.match(packageJson.scripts["start:quota-expiration-worker"], /billing\/quota-expiration\.main\.js/);
+    assert.match(packageJson.scripts["quota-expiration:worker:once"], /--once/);
+    assert.match(compose, /quota-expiration-worker:[\s\S]*quota-expiration\.main\.js/);
+    assert.match(mainSource, /executeQuotaExpirationWorkerOnce/);
+    assert.deepEqual(config, {
+      intervalMs: 2500,
+      leaseTimeoutMs: 45000,
+      limit: 17,
+      now: new Date("2026-07-01T04:30:00.000Z"),
+      once: true
+    });
+  });
+
   it("returns tariff catalog and previews tariff changes with confirmation text", async () => {
     const billing = new BillingService();
 
@@ -260,7 +287,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
           id: "svc-admin-tenant",
           name: "Admin Tenant Writer"
         },
-        currentTenantId: "tenant-lumen",
+        currentTenantId: "tenant-volga",
         permissions: ["tenants.manage"],
         roles: ["admin"],
         sessionId: "sess-admin-tenant"
@@ -861,6 +888,35 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(releasedCommitted.error?.code, "quota_reservation_already_committed");
   });
 
+  it("commits users and workspaces reservations into their quota counters", async () => {
+    const billing = new BillingService(BillingRepository.inMemory());
+
+    for (const resource of ["users", "workspaces"] as const) {
+      const before = await billing.fetchTenantQuotaSnapshot("tenant-lumen");
+      const beforeQuota = (before.data.quotas as Array<Record<string, unknown>>).find((quota) => quota.resource === resource);
+      assert.ok(beforeQuota);
+
+      const reserved = await billing.reserveQuota({
+        idempotencyKey: `reserve-lumen-${resource}`,
+        requested: 1,
+        resource,
+        tenantId: "tenant-lumen"
+      });
+      assert.equal(reserved.status, "ok");
+
+      const committed = await billing.commitQuotaReservation({
+        idempotencyKey: `commit-lumen-${resource}`,
+        reservationId: reserved.data.reservationId as string
+      });
+      assert.equal(committed.status, "ok");
+      assert.equal(committed.data.usedAfter, Number(beforeQuota.used) + 1);
+
+      const after = await billing.fetchTenantQuotaSnapshot("tenant-lumen");
+      const afterQuota = (after.data.quotas as Array<Record<string, unknown>>).find((quota) => quota.resource === resource);
+      assert.equal(afterQuota?.used, Number(beforeQuota.used) + 1);
+    }
+  });
+
   it("releases reserved quota without mutating usage", async () => {
     const billing = new BillingService(BillingRepository.inMemory());
 
@@ -1235,6 +1291,42 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(skipped.status, "skipped");
     assert.equal(skipped.reason, "not_released");
     assert.equal((await repository.findQuotaReservation("quota_reservation_release_worker_not_expired"))?.status, "reserved");
+  });
+
+  it("claims and releases expired reservations in one quota expiration worker pass", async () => {
+    const repository = BillingRepository.inMemory();
+    await repository.createQuotaReservation({
+      auditEvent: undefined,
+      auditEvents: [],
+      commitIdempotencyKey: null,
+      committedAt: null,
+      createdAt: "2026-07-01T04:00:00.000Z",
+      expiresAt: "2026-07-01T04:10:00.000Z",
+      id: "quota_reservation_execute_worker_once",
+      idempotencyKey: "reserve-expiration-execute-worker-once",
+      limit: 100,
+      lockedAt: null,
+      planId: "starter",
+      releaseIdempotencyKey: null,
+      releasedAt: null,
+      requested: 5,
+      requestFingerprint: "{\"mode\":\"reserve\"}",
+      resource: "webhooks",
+      status: "reserved",
+      tenantId: "tenant-lumen",
+      traceId: "trace-expiration-execute-worker-once",
+      updatedAt: "2026-07-01T04:00:00.000Z",
+      usedAfter: null,
+      usedBefore: 10
+    });
+
+    const result = await executeQuotaExpirationWorkerOnce({
+      now: "2026-07-01T04:30:00.000Z",
+      repository
+    });
+
+    assert.deepEqual(result, { claimed: 1, released: 1, skipped: 0 });
+    assert.equal((await repository.findQuotaReservation("quota_reservation_execute_worker_once"))?.status, "released");
   });
 
   it("treats already released expired quota reservations as idempotent worker success", async () => {
@@ -1668,6 +1760,33 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(invoices.data.paymentSummary.currency, "RUB");
     assert.equal(items.some((invoice) => invoice.status === "open" && invoice.paymentStatus === "pending"), true);
     assert.equal(items.some((invoice) => invoice.providerSecret !== undefined), false);
+  });
+
+  it("does not aggregate invoice amounts across currencies", async () => {
+    const state = bootstrapBillingState();
+    const rubInvoice = state.invoices.find((invoice) => invoice.tenantId === "tenant-volga");
+    assert.ok(rubInvoice);
+    state.invoices = [
+      rubInvoice,
+      {
+        ...rubInvoice,
+        amountDue: 500,
+        currency: "USD",
+        id: "inv_volga_usd",
+        providerInvoiceId: "provider-invoice-volga-usd"
+      }
+    ];
+    const billing = new BillingService(RuntimeBillingRepository.inMemory(state));
+
+    const response = await billing.fetchTenantInvoices("tenant-volga");
+
+    assert.equal(response.data.paymentSummary.currency, null);
+    assert.equal(response.data.paymentSummary.openAmount, null);
+    assert.equal(response.data.paymentSummary.paidAmount, null);
+    assert.deepEqual(response.data.paymentSummary.amountsByCurrency, [
+      { currency: "RUB", invoiceCount: 1, openAmount: 380000, paidAmount: 0 },
+      { currency: "USD", invoiceCount: 1, openAmount: 500, paidAmount: 0 }
+    ]);
   });
 
   it("defines repository contracts for tenant-scoped payment retry schedules", async () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ChevronLeft } from "lucide-react";
 import { AdminWorkspaces } from "./AdminWorkspaces.jsx";
 import { ChannelConnectionsPanel } from "./ChannelConnectionsPanel.jsx";
@@ -12,6 +12,9 @@ import { settingsService } from "../../services/settingsService.js";
 
 export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptionsChange, navigationTarget = null }) {
   const requestedTab = resolveSettingsNavigationTab(navigationTarget);
+  const requestedNavigationKey = settingsNavigationKey(navigationTarget);
+  const hasNavigationTarget = Boolean(navigationTarget);
+  const appliedNavigationKeyRef = useRef(requestedTab ? requestedNavigationKey : "");
   const [activeTab, setActiveTab] = useState(requestedTab || "connections");
   const [connectionSummary, setConnectionSummary] = useState({ active: 0, total: 0 });
   const [externalSummary, setExternalSummary] = useState({ active: 0, total: 0 });
@@ -22,10 +25,17 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
   const canEditSettings = access.canManageSettings && !loadError;
 
   useEffect(() => {
-    if (requestedTab && requestedTab !== activeTab) {
+    if (!requestedTab) {
+      if (!hasNavigationTarget) {
+        appliedNavigationKeyRef.current = "";
+      }
+      return;
+    }
+    if (requestedNavigationKey !== appliedNavigationKeyRef.current) {
+      appliedNavigationKeyRef.current = requestedNavigationKey;
       setActiveTab(requestedTab);
     }
-  }, [activeTab, requestedTab]);
+  }, [hasNavigationTarget, requestedNavigationKey, requestedTab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,4 +183,15 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
 function resolveSettingsNavigationTab(navigationTarget) {
   const tab = typeof navigationTarget?.tab === "string" ? navigationTarget.tab : "";
   return settingsTabIds.includes(tab) ? tab : "";
+}
+
+function settingsNavigationKey(navigationTarget) {
+  if (!navigationTarget) return "";
+  return [
+    navigationTarget.navigationKey,
+    navigationTarget.tab,
+    navigationTarget.channelType,
+    navigationTarget.connectionId,
+    navigationTarget.resourceId
+  ].map((value) => String(value ?? "")).join(":");
 }

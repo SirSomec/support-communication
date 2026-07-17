@@ -88,11 +88,19 @@ export async function resolveOrCreatePublicSdkConversation(
   }
 
   const requestedConversationId = String(input.conversationId ?? "").trim();
+  if (requestedConversationId) {
+    const requestedConversation = await input.conversationRepository.findConversation(requestedConversationId);
+    if (requestedConversation && (
+      resolveConversationTenantId(requestedConversation) !== input.tenantId
+      || String(requestedConversation.providerConversationId ?? "").trim() !== externalId
+    )) {
+      return null;
+    }
+  }
   const anchorId = `sdk_${createHash("sha256")
     .update(`${input.tenantId}:${externalId}`)
     .digest("hex")
     .slice(0, 24)}`;
-  const conversationId = requestedConversationId || anchorId;
 
   const resolved = await resolveOrForkAppealConversation({
     anchorId,
@@ -102,7 +110,7 @@ export async function resolveOrCreatePublicSdkConversation(
       clientSince: new Date().toISOString().slice(0, 10),
       device: "Web",
       entry: "SDK",
-      id: conversationId,
+      id: anchorId,
       initials: initialsFromExternalId(externalId),
       language: "Unknown",
       messages: [],
@@ -227,6 +235,7 @@ export async function handlePublicSdkMessageIngressFromRoute(
       { conversationId: input.body.conversationId ?? null }
     );
   }
+  const isNewConversation = conversation.messages.length === 0;
 
   const eventId = `sdk_evt_${randomUUID()}`;
   const normalized = await input.conversationService.normalizeInboundEvent("sdk", {
@@ -241,7 +250,7 @@ export async function handlePublicSdkMessageIngressFromRoute(
       occurredAt: new Date().toISOString(), tenantId: auth.context.tenantId })
     : null;
   const botRuntime = normalized.status === "ok" && input.runBotRuntime
-    ? await tryBotRuntime(input.runBotRuntime, { channel: "SDK", conversationId: conversation.id, eventId, payload: { text }, tenantId: auth.context.tenantId, traceId: normalized.traceId })
+    ? await tryBotRuntime(input.runBotRuntime, { channel: "SDK", conversationId: conversation.id, eventId, payload: { isNewConversation, text }, tenantId: auth.context.tenantId, traceId: normalized.traceId })
     : null;
   const needsOperator = !botRuntime || ["handoff", "dead_lettered"].includes(String(botRuntime.instance?.status ?? ""));
   const autoAssignment = normalized.status === "ok" && needsOperator && input.autoAssignConversation
@@ -343,7 +352,11 @@ export async function handlePublicSdkMessagesPollFromRoute(
       conversationStatus: conversation.status,
       count: replies.length,
       messages: replies,
-      since: since || null
+      since: since || null,
+      visitorSessionToken: createVisitorSessionToken({
+        conversationId,
+        tenantId: auth.context.tenantId
+      })
     }
   });
 }

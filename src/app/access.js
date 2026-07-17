@@ -173,10 +173,3 @@ function fallbackActionsForRoleMode(roleMode) {
 
   return ["dialogs.read", "clients.read", "templates.read", "templates.write", "presence.write"];
 }
-
-/** @deprecated Use buildAccessProfile / buildAccessProfileForRoleMode */
-export const roleAccessProfiles = {
-  "Сотрудник": buildAccessProfileForRoleMode("Сотрудник"),
-  "Старший сотрудник": buildAccessProfileForRoleMode("Старший сотрудник"),
-  "Администратор": buildAccessProfileForRoleMode("Администратор")
-};

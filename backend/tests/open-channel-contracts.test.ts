@@ -138,7 +138,7 @@ describe("open channel chat ingress", () => {
     const replay = await receiveChatEvent(runtime, event);
     assert.equal((replay.body as Record<string, unknown>).duplicate, true);
 
-    const conversations = await runtime.conversations.listConversations();
+    const conversations = await runtime.conversations.listConversations({ tenantId: TENANT_ID });
     const dialog = conversations.find((item) => item.tenantId === TENANT_ID);
     assert.ok(dialog);
     assert.equal(dialog.channel, OPEN_CHAT_CHANNEL);
@@ -169,7 +169,7 @@ describe("open channel chat ingress", () => {
         file_name: "image.png", file_size: 1024, mime_type: "image/png"
       }
     });
-    const conversation = (await runtime.conversations.listConversations())[0];
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
     const media = conversation.messages.find((message) => message.side === "client");
     assert.ok(media?.attachments?.length);
     assert.equal(media.attachments[0].fileName, "image.png");
@@ -191,7 +191,7 @@ describe("open channel chat ingress", () => {
   it("records a CSAT rating from a rate event when an operator is assigned", async () => {
     const runtime = openChannelRuntime();
     await receiveChatEvent(runtime, { sender: { id: "client-3" }, message: { type: "text", id: "m-3", text: "Вопрос" } });
-    const conversation = (await runtime.conversations.listConversations())[0];
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
     await mutateConversation(runtime.conversations, conversation.id, { operatorId: "op-1", status: "assigned" }, { action: "assignment" });
 
     const ratings: Array<Record<string, unknown>> = [];
@@ -228,7 +228,7 @@ describe("external bot exchange", () => {
       updatedAt: new Date().toISOString()
     });
     await receiveChatEvent(runtime, { sender: { id: "client-9" }, message: { type: "text", id: "m-9", text: "Привет" } });
-    const conversation = (await runtime.conversations.listConversations())[0];
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
 
     const delivery = deliveryCapture();
     const bridge = new ExternalBotBridge({
@@ -277,7 +277,7 @@ describe("external bot exchange", () => {
       updatedAt: new Date().toISOString()
     });
     await receiveChatEvent(runtime, { sender: { id: "client-10" }, message: { type: "text", id: "m-10", text: "Здравствуйте" } });
-    const conversation = (await runtime.conversations.listConversations())[0];
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
     runtime.repository.mergeConversationState({
       botState: "active",
       clientId: "client-10",
@@ -331,8 +331,9 @@ describe("external bot exchange", () => {
       updatedAt: new Date().toISOString()
     });
     await receiveChatEvent(runtime, { sender: { id: "client-11" }, message: { type: "text", id: "m-11", text: "Оператора!" } });
-    const conversation = (await runtime.conversations.listConversations())[0];
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
     runtime.repository.mergeConversationState({
+      attributes: { externalBotConnectionId: "xbc-9" },
       botState: "active",
       clientId: "client-11",
       conversationId: conversation.id,
@@ -375,7 +376,8 @@ describe("open channel delivery queue", () => {
     let calls = 0;
     const service = new OpenChannelDeliveryService({
       fetcher: async () => responses[Math.min(calls++, responses.length - 1)],
-      repository
+      repository,
+      resolveHostname: async () => [{ address: "93.184.216.34" }]
     });
 
     service.enqueue({
@@ -403,7 +405,8 @@ describe("open channel delivery queue", () => {
     const repository = OpenChannelRepository.inMemory();
     const service = new OpenChannelDeliveryService({
       fetcher: async () => ({ ok: false, status: 400, text: async () => "bad request" }),
-      repository
+      repository,
+      resolveHostname: async () => [{ address: "93.184.216.34" }]
     });
     service.enqueue({
       body: { event_name: "chat_finished" },
@@ -420,7 +423,7 @@ describe("open channel delivery queue", () => {
   it("applies chat_accepted response enrichment to the dialog", async () => {
     const runtime = openChannelRuntime();
     await receiveChatEvent(runtime, { sender: { id: "client-20" }, message: { type: "text", id: "m-20", text: "Кто я?" } });
-    const conversation = (await runtime.conversations.listConversations())[0];
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
 
     const service = new OpenChannelDeliveryService({
       conversationRepository: runtime.conversations,
@@ -434,7 +437,8 @@ describe("open channel delivery queue", () => {
           crm_link: "https://crm.example/clients/1"
         })
       }),
-      repository: runtime.repository
+      repository: runtime.repository,
+      resolveHostname: async () => [{ address: "93.184.216.34" }]
     });
     service.enqueue({
       body: { event_name: "chat_accepted" },
@@ -483,8 +487,9 @@ describe("open channel event pump", () => {
       sender: { id: "client-30", name: "Клиент Тридцатый" },
       message: { type: "text", id: "m-30", text: "Мне нужна помощь" }
     });
-    const conversation = (await runtime.conversations.listConversations())[0];
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
     runtime.repository.mergeConversationState({
+      attributes: { externalBotConnectionId: "xbc-9" },
       botState: "active",
       clientId: "client-30",
       conversationId: conversation.id,
@@ -536,7 +541,7 @@ describe("open channel event pump", () => {
   it("delivers agent replies to the customer server for open-channel dialogs", async () => {
     const runtime = openChannelRuntime();
     await receiveChatEvent(runtime, { sender: { id: "client-31" }, message: { type: "text", id: "m-31", text: "Жду ответа" } });
-    const conversation = (await runtime.conversations.listConversations())[0];
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
 
     const delivery = deliveryCapture();
     const pump = new OpenChannelEventPump({
@@ -567,6 +572,111 @@ describe("open channel event pump", () => {
     assert.equal((body.message as Record<string, unknown>).type, "text");
     assert.equal((body.message as Record<string, unknown>).text, "Здравствуйте! Смотрю ваш вопрос.");
     assert.equal((body.sender as Record<string, unknown>).name, "Мария");
+  });
+
+  it("keeps a failed event at the cursor and retries it before later events", async () => {
+    const runtime = openChannelRuntime();
+    runtime.repository.saveWebhookSubscription({
+      createdAt: new Date().toISOString(),
+      events: ["chat_accepted"],
+      id: "owh-retry",
+      status: "active",
+      tenantId: TENANT_ID,
+      updatedAt: new Date().toISOString(),
+      url: "https://customer.example/retry"
+    });
+    await receiveChatEvent(runtime, { sender: { id: "client-retry" }, message: { type: "text", id: "m-retry", text: "Retry" } });
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
+    let shouldFail = true;
+    const enqueued: Array<Record<string, unknown>> = [];
+    const pump = new OpenChannelEventPump({
+      conversationRepository: runtime.conversations,
+      delivery: {
+        enqueue: async (input) => {
+          if (shouldFail) throw new Error("temporary_delivery_failure");
+          enqueued.push(input);
+          return {} as never;
+        }
+      },
+      repository: runtime.repository
+    });
+
+    await pump.runOnce();
+    const cursorBeforeFailure = await runtime.repository.readPumpCursor();
+    await mutateConversation(runtime.conversations, conversation.id,
+      { operatorId: "op-retry", operatorName: "Retry Agent", status: "assigned" },
+      { action: "assignment", toOperatorId: "op-retry" });
+    await pump.runOnce();
+    assert.deepEqual((await runtime.repository.readPumpCursor()).seenEventIds, cursorBeforeFailure.seenEventIds);
+    shouldFail = false;
+    await pump.runOnce();
+    assert.equal(enqueued.filter((item) => item.eventName === "chat_accepted").length, 1);
+    assert.equal((await runtime.repository.readPumpCursor()).seenEventIds.length, cursorBeforeFailure.seenEventIds.length + 1);
+  });
+
+  it("coalesces overlapping ticks into one journal scan", async () => {
+    const repository = OpenChannelRepository.inMemory();
+    let scans = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const pump = new OpenChannelEventPump({
+      conversationRepository: {
+        findConversation: async () => undefined,
+        listRealtimeEvents: async () => {
+          scans += 1;
+          await gate;
+          return [];
+        }
+      },
+      delivery: { enqueue: async () => ({} as never) },
+      repository
+    });
+
+    const first = pump.runOnce();
+    const second = pump.runOnce();
+    release();
+    await Promise.all([first, second]);
+    assert.equal(scans, 1);
+  });
+
+  it("sends CHAT_CLOSED only to the bot connection that owns the dialog", async () => {
+    const runtime = openChannelRuntime();
+    runtime.repository.saveBotConnection({
+      channels: null,
+      createdAt: new Date().toISOString(),
+      id: "xbc-owner",
+      name: "Owner bot",
+      providerUrl: "https://owner.example/hooks",
+      status: "active",
+      tenantId: TENANT_ID,
+      token: "owner-token",
+      updatedAt: new Date().toISOString()
+    });
+    runtime.repository.saveBotConnection({
+      channels: null,
+      createdAt: new Date().toISOString(),
+      id: "xbc-other",
+      name: "Other bot",
+      providerUrl: "https://other.example/hooks",
+      status: "active",
+      tenantId: TENANT_ID,
+      token: "other-token",
+      updatedAt: new Date().toISOString()
+    });
+    runtime.repository.mergeConversationState({
+      attributes: { externalBotConnectionId: "xbc-owner" },
+      botState: "active",
+      clientId: "client-owner",
+      conversationId: "conversation-owner",
+      tenantId: TENANT_ID
+    });
+    const delivery = deliveryCapture();
+    const bridge = new ExternalBotBridge({ delivery, repository: runtime.repository });
+
+    await bridge.notifyChatClosed({ conversationId: "conversation-owner", tenantId: TENANT_ID });
+
+    assert.equal(delivery.enqueued.length, 1);
+    assert.equal(delivery.enqueued[0]?.url, "https://owner.example/hooks/owner-token");
   });
 });
 
@@ -622,7 +732,7 @@ describe("widget client info", () => {
     assert.equal(updated.status, "ok");
     assert.equal(typeof updated.data?.visitorNumber, "number");
 
-    const conversation = (await runtime.conversations.listConversations())[0];
+    const conversation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
     assert.equal(conversation.name, "Анна");
     assert.equal(conversation.phone, "+79995556677");
     const state = runtime.repository.findConversationState(conversation.id);

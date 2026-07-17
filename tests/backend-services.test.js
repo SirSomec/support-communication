@@ -706,10 +706,22 @@ describe("frontend backend service contracts", () => {
       [() => supportAdminService.blockUser({ reason: "Account takeover" }), "supportAdminService", "blockUser"],
       [() => supportAdminService.resendInvite({ reason: "Invite expired" }), "supportAdminService", "resendInvite"],
       [() => supportAdminService.stopImpersonation({ reason: "QA exit reason" }), "supportAdminService", "stopImpersonation"],
+      [() => supportAdminService.updateAiConnection("tenant-volga", undefined, {}), "supportAdminService", "updateAiConnection"],
+      [() => supportAdminService.deleteAiConnection("tenant-volga", ""), "supportAdminService", "deleteAiConnection"],
+      [() => supportAdminService.testAiConnection("tenant-volga", null), "supportAdminService", "testAiConnection"],
+      [() => supportAdminService.disableAiConnection("tenant-volga", undefined), "supportAdminService", "disableAiConnection"],
       [() => incidentService.fetchIncidentDetail(null), "incidentService", "fetchIncidentDetail"],
       [() => incidentService.addIncidentUpdate({ message: "QA update note" }), "incidentService", "addIncidentUpdate"],
       [() => featureFlagService.previewFlagChange({ nextRollout: 100 }), "featureFlagService", "previewFlagChange"],
-      [() => featureFlagService.updateFeatureFlag({ nextStatus: "gradual" }), "featureFlagService", "updateFeatureFlag"]
+      [() => featureFlagService.updateFeatureFlag({ nextStatus: "gradual" }), "featureFlagService", "updateFeatureFlag"],
+      [() => dialogService.fetchDialogDetail(undefined), "dialogService", "fetchDialogDetail"],
+      [() => dialogService.appendMessage({ text: "hello" }), "dialogService", "appendMessage"],
+      [() => dialogService.fetchConversationTimeline("  "), "dialogService", "fetchConversationTimeline"],
+      [() => dialogService.finalizeAttachmentUpload({}), "dialogService", "finalizeAttachmentUpload"],
+      [() => knowledgeService.refreshSource(undefined), "knowledgeService", "refreshKnowledgeSource"],
+      [() => knowledgeService.updateSource("", {}), "knowledgeService", "updateKnowledgeSource"],
+      [() => knowledgeService.dismissUnansweredQuestion(null), "knowledgeService", "dismissUnansweredQuestion"],
+      [() => knowledgeService.resolveUnansweredQuestion("  ", {}), "knowledgeService", "resolveUnansweredQuestion"]
     ];
 
     for (const [callService, expectedService, expectedOperation] of cases) {

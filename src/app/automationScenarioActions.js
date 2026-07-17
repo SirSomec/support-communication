@@ -1,5 +1,12 @@
 import { automationService } from "../services/automationService.js";
 
+export function buildBotScenarioUpdatePatch(scenarioId, fields = {}) {
+  return {
+    id: String(scenarioId ?? "").trim(),
+    ...fields
+  };
+}
+
 export async function submitBotScenarioUpdate(
   scenario,
   { updateBotScenario = automationService.updateBotScenario } = {}

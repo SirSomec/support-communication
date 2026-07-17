@@ -5,6 +5,7 @@ import { resolveServiceAdminContextAsync } from "@support-communication/auth-con
 import type { BackendConfig } from "@support-communication/config";
 import { ConversationService } from "./conversation.service.js";
 import { IdentityRepository } from "../identity/identity.repository.js";
+import { isServiceAdminSessionId } from "../identity/service-admin-auth.js";
 
 const websocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const realtimeReadAction = "realtime.events.read";
@@ -67,15 +68,20 @@ async function handleRealtimeUpgrade(
 
   const lastEventId = readHeader(request.headers, "last-event-id");
   const since = lastEventId || url.searchParams.get("since") || undefined;
-  await writeRealtimeWebSocketReplay(options.conversationService, socket, since);
+  const limit = url.searchParams.get("limit") || undefined;
+  await writeRealtimeWebSocketReplay(options.conversationService, socket, since, {
+    ...(auth.tenantId ? { tenantId: auth.tenantId } : {})
+  }, limit);
 }
 
 export async function writeRealtimeWebSocketReplay(
   conversationService: ConversationService,
   socket: RealtimeWebSocketReplaySocket,
-  since?: string
+  since?: string,
+  scope: { tenantId?: string } = {},
+  limit?: number | string
 ): Promise<void> {
-  const envelope = await conversationService.fetchRealtimeEvents({ since });
+  const envelope = await conversationService.fetchRealtimeEvents({ limit, since }, scope);
   for (const event of envelope.data.events) {
     writeTextFrame(socket, JSON.stringify(event));
   }
@@ -83,17 +89,25 @@ export async function writeRealtimeWebSocketReplay(
   socket.end();
 }
 
-export async function authorizeRealtimeSocket(headers: IncomingHttpHeaders, config: BackendConfig): Promise<{ allowed: true } | { allowed: false; reason: string; statusCode: number }> {
+export async function authorizeRealtimeSocket(headers: IncomingHttpHeaders, config: BackendConfig): Promise<{ allowed: true; tenantId?: string } | { allowed: false; reason: string; statusCode: number }> {
   const authorization = readHeader(headers, "authorization");
   if (/^Bearer\s+/i.test(authorization)) {
+    let serviceAdminTenantId: string | undefined;
     const decision = await resolveServiceAdminContextAsync({
       headers,
       requiredAction: realtimeReadAction,
-      sessionLookup: async (token) => IdentityRepository.default().findServiceAdminSessionByAccessToken(token)
+      sessionLookup: async (token) => {
+        const session = await IdentityRepository.default().findServiceAdminSessionByAccessToken(token);
+        if (!isServiceAdminSessionId(session?.id)) {
+          return undefined;
+        }
+        serviceAdminTenantId = session?.currentTenantId || undefined;
+        return session;
+      }
     });
 
     return decision.allowed
-      ? { allowed: true }
+      ? { allowed: true, ...(serviceAdminTenantId ? { tenantId: serviceAdminTenantId } : {}) }
       : {
           allowed: false,
           reason: `Service-admin session denied: ${decision.code}`,
@@ -130,7 +144,8 @@ export async function authorizeRealtimeSocket(headers: IncomingHttpHeaders, conf
     return { allowed: false, reason: `Service-admin permission ${realtimeReadAction} is required for realtime sockets.`, statusCode: 403 };
   }
 
-  return { allowed: true };
+  const tenantId = readHeader(headers, "x-demo-service-admin-tenant-id");
+  return { allowed: true, ...(tenantId ? { tenantId } : {}) };
 }
 
 function writeUpgradeError(socket: Socket, statusCode: number, reason: string): void {

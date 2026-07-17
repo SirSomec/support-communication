@@ -57,7 +57,15 @@ describe("persistent backend foundation and identity services", () => {
 
   it("auth state fails closed for unverified and expired persisted sessions", async () => {
     const repository = IdentityRepository.inMemory();
-    const auth = new AuthService(repository);
+    const auth = new AuthService(repository, createMfaOtpRuntime({
+      delivery: {
+        async send({ challengeId }) {
+          return { providerMessageId: `test-${challengeId}` };
+        }
+      },
+      generateOtp: () => "123456",
+      hashKey: "persistent-foundation-test-key"
+    }));
     const unverified = await repository.createServiceAdminSession({
       actorId: "svc-unverified",
       actorName: "Unverified Admin",
@@ -246,6 +254,28 @@ describe("persistent backend foundation and identity services", () => {
     });
 
     assert.equal(auth.allowed, true);
+  });
+
+  it("realtime socket auth rejects tenant-operator bearer sessions", async () => {
+    const repository = IdentityRepository.inMemory();
+    IdentityRepository.useDefault(repository);
+    const tenantSession = await repository.createTenantOperatorSession({
+      tenantId: "tenant-volga",
+      userId: "usr-volga-admin"
+    });
+    const realtimeModule = await import("../apps/api-gateway/src/conversation/realtime.websocket.ts") as Record<string, unknown>;
+    const authorizeRealtimeSocket = realtimeModule.authorizeRealtimeSocket as ((headers: Record<string, string>, config: Record<string, string>) => Promise<{ allowed: boolean; statusCode?: number }>) | undefined;
+
+    assert.equal(typeof authorizeRealtimeSocket, "function");
+    const auth = await authorizeRealtimeSocket!({
+      authorization: `Bearer ${tenantSession.accessToken}`
+    }, {
+      DEMO_SERVICE_ADMIN_KEY: "demo-key",
+      NODE_ENV: "production"
+    });
+
+    assert.equal(auth.allowed, false);
+    assert.equal(auth.statusCode, 401);
   });
 
   it("production guard rejects empty bearer tokens even when a session-id fallback header is present", async () => {

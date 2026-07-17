@@ -6,6 +6,7 @@ import { BillingRepository } from "../apps/api-gateway/dist/billing/billing.repo
 import { EnvelopeHttpExceptionFilter } from "../apps/api-gateway/dist/http-exception.filter.js";
 import { IdentityModule } from "../apps/api-gateway/dist/identity/identity.module.js";
 import { IdentityRepository } from "../apps/api-gateway/dist/identity/identity.repository.js";
+import { TenantProvisionService } from "../apps/api-gateway/dist/identity/tenant-provision.service.js";
 import { IntegrationRepository } from "../apps/api-gateway/dist/integrations/integration.repository.js";
 
 @Module({
@@ -44,6 +45,7 @@ describe("tenant provision contracts", () => {
     assert.equal(provisionResponse.status, 200);
     assert.equal(provisionEnvelope.data.tenant.id, "tenant-acme-pilot");
     assert.equal(provisionEnvelope.data.admin.email, "owner@acme-pilot.test");
+    assert.equal("refreshToken" in provisionEnvelope.data.session, false);
     assert.equal(typeof provisionEnvelope.data.publicApiKey, "string");
     assert.equal(/^sk_stage_[a-f0-9]+$/i.test(String(provisionEnvelope.data.publicApiKey)), true);
     assert.equal(String(provisionEnvelope.data.embedSnippet).includes("data-api-key"), true);
@@ -98,6 +100,33 @@ describe("tenant provision contracts", () => {
 
     assert.equal(firstUsers.some((user) => user.email === "owner@first-pilot.test"), true);
     assert.equal(secondUsers.some((user) => user.email === "owner@second-pilot.test"), true);
+  });
+
+  it("compensates identity, billing, and integration writes when a late provisioning step fails", async () => {
+    const identityRepository = IdentityRepository.inMemory();
+    const billingRepository = BillingRepository.inMemory();
+    const integrationRepository = IntegrationRepository.inMemory();
+    identityRepository.recordServiceAdminAuditEvent = async () => {
+      throw new Error("injected audit failure");
+    };
+    const service = new TenantProvisionService(identityRepository, billingRepository, integrationRepository);
+
+    const envelope = await service.provisionTenant({
+      tenant: { name: "Rollback Pilot", slug: "rollback-pilot", region: "ru-1" },
+      admin: { name: "Rollback Owner", email: "owner@rollback-pilot.test", password: "Owner-2026!" },
+      employees: [{ name: "Operator", email: "operator@rollback-pilot.test" }],
+      channel: { type: "sdk", domain: "rollback.example" },
+      plan: { id: "trial", trial: true }
+    });
+
+    assert.equal(envelope.status, "error");
+    assert.equal(envelope.error?.code, "tenant_provision_failed");
+    assert.equal(await identityRepository.findTenant("tenant-rollback-pilot"), undefined);
+    assert.deepEqual(await identityRepository.findTenantUsers("tenant-rollback-pilot"), []);
+    assert.equal(await identityRepository.findPasswordCredentialByEmail("owner@rollback-pilot.test"), undefined);
+    assert.deepEqual(await identityRepository.listRbacRoleGrants({ tenantId: "tenant-rollback-pilot" }), []);
+    assert.equal(await billingRepository.findTenant("tenant-rollback-pilot"), undefined);
+    assert.equal(integrationRepository.readState().publicApiKeys.some((key) => key.tenantId === "tenant-rollback-pilot"), false);
   });
 });
 

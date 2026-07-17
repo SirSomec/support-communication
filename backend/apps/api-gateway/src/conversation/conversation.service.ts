@@ -99,6 +99,85 @@ function normalizeClientPhoneInput(value: unknown): string {
   return String(value ?? "").trim().replace(/\s+/g, " ");
 }
 
+function maskSensitivePhone(value: unknown): string {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  const suffix = digits.length > 2 ? digits.slice(-2) : "**";
+  return `*** ***-**-${suffix}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPhoneFieldName(value: string): boolean {
+  return /(^|[_-])(phone|mobile|telephone)([_-]|$)/i.test(value);
+}
+
+function redactBotHandoffFields(
+  handoff: ConversationRecord["botHandoff"]
+): ConversationRecord["botHandoff"] {
+  if (!handoff) return handoff;
+  const collectedFields = handoff.collectedFields
+    ? Object.fromEntries(Object.entries(handoff.collectedFields).map(([key, value]) => [
+      key,
+      isPhoneFieldName(key) ? maskSensitivePhone(value) : value
+    ]))
+    : undefined;
+  return {
+    ...handoff,
+    ...(handoff.phone ? { phone: maskSensitivePhone(handoff.phone) } : {}),
+    ...(collectedFields ? { collectedFields } : {})
+  };
+}
+
+function redactSensitiveConversationFields(conversation: ConversationRecord, scope: TenantScope): ConversationRecord {
+  if (scope.canViewSensitive) return conversation;
+  return {
+    ...conversation,
+    ...(conversation.botHandoff ? { botHandoff: redactBotHandoffFields(conversation.botHandoff) } : {}),
+    phone: maskSensitivePhone(conversation.phone)
+  };
+}
+
+function stringField(data: Record<string, unknown>, key: string): string | undefined {
+  const value = typeof data[key] === "string" ? data[key].trim() : "";
+  return value || undefined;
+}
+
+function botHandoffFromLifecycleEvents(
+  events: ConversationLifecycleEvent[]
+): ConversationRecord["botHandoff"] | undefined {
+  const event = [...events].reverse().find((item) => item.eventType === "bot.handoff.created" && isRecord(item.data));
+  if (!event) return undefined;
+  const data = event.data;
+  const citations = Array.isArray(data.citations)
+    ? data.citations.flatMap((item) => {
+      if (!isRecord(item)) return [];
+      const sourceId = stringField(item, "sourceId");
+      const title = stringField(item, "title");
+      if (!sourceId || !title) return [];
+      const version = Number(item.version);
+      return [{ sourceId, title, ...(Number.isFinite(version) ? { version } : {}) }];
+    })
+    : undefined;
+
+  return {
+    ...(stringField(data, "aiOutcome") ? { aiOutcome: stringField(data, "aiOutcome") } : {}),
+    ...(stringField(data, "botId") ? { botId: stringField(data, "botId") } : {}),
+    ...(citations ? { citations } : {}),
+    ...(isRecord(data.collectedFields) ? { collectedFields: clone(data.collectedFields) } : {}),
+    ...(stringField(data, "goal") ? { goal: stringField(data, "goal") } : {}),
+    ...(stringField(data, "nodeId") ? { nodeId: stringField(data, "nodeId") } : {}),
+    ...(stringField(data, "phone") ? { phone: stringField(data, "phone") } : {}),
+    ...(stringField(data, "queue") ? { queue: stringField(data, "queue") } : {}),
+    ...(stringField(data, "reason") ? { reason: stringField(data, "reason") } : {}),
+    ...(stringField(data, "scenarioName") ? { scenarioName: stringField(data, "scenarioName") } : {}),
+    ...(stringField(data, "sessionState") ? { sessionState: stringField(data, "sessionState") } : {}),
+    ...(stringField(data, "topic") ? { topic: stringField(data, "topic") } : {})
+  };
+}
+
 const CONVERSATION_TAG_MAX_LENGTH = 32;
 const CONVERSATION_TAG_LIMIT = 20;
 
@@ -198,10 +277,12 @@ interface TenantScope {
   actorId?: string;
   actorName?: string;
   actorType?: ConversationLifecycleEvent["actorType"];
+  canViewSensitive?: boolean;
   tenantId?: string;
 }
 
 let defaultRealtimeFanout = createDisabledRealtimeFanoutAdapter("realtime_fanout_not_configured");
+const LIVE_REALTIME_EVENT_LIMIT = 1_000;
 let defaultOutboundMessageDispatcher: OutboundMessageDispatcher = {
   deliverMessage() {
     return { status: "skipped", reason: "outbound_dispatcher_not_configured" };
@@ -242,6 +323,9 @@ export class ConversationService {
     this.realtimeFanout = options.realtimeFanout ?? defaultRealtimeFanout;
     void this.realtimeFanout.subscribe((event) => {
       this.liveRealtimeEvents.push(event);
+      if (this.liveRealtimeEvents.length > LIVE_REALTIME_EVENT_LIMIT) {
+        this.liveRealtimeEvents.splice(0, this.liveRealtimeEvents.length - LIVE_REALTIME_EVENT_LIMIT);
+      }
     }).catch(() => {
       // Persisted replay remains available if live fan-out subscription is degraded.
     });
@@ -319,7 +403,19 @@ export class ConversationService {
     pagination: { mode: string; page: number; pageSize: number; total: number };
     savedPresetId: string | null;
   }>> {
-    const conversations = await this.conversationRepository.listConversations();
+    const tenantId = String(scope.tenantId ?? "").trim();
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(DIALOG_SERVICE, "fetchDialogs", { filters }) as BackendEnvelope<{
+        items: ConversationRecord[];
+        pagination: { mode: string; page: number; pageSize: number; total: number };
+        savedPresetId: string | null;
+      }>;
+    }
+    const conversations = await this.conversationRepository.listConversations({
+      tenantId,
+      take: 500,
+      messageTake: 200
+    });
     const filtered = conversations.filter((conversation) => {
       if (!matchesTenantScope(conversation, scope.tenantId)) {
         return false;
@@ -347,6 +443,8 @@ export class ConversationService {
     const pageSize = toPositiveInt(filters.pageSize, 25);
     const start = (page - 1) * pageSize;
 
+    const pageItems = await this.decorateInboxConversations(clone(filtered.slice(start, start + pageSize)));
+
     return createEnvelope({
       service: DIALOG_SERVICE,
       operation: "fetchDialogs",
@@ -354,7 +452,7 @@ export class ConversationService {
       partial: true,
       meta: apiMeta({ filters }),
       data: {
-        items: await this.decorateInboxConversations(clone(filtered.slice(start, start + pageSize))),
+        items: pageItems.map((conversation) => redactSensitiveConversationFields(conversation, scope)),
         pagination: {
           mode: "backend-ready",
           page,
@@ -379,6 +477,8 @@ export class ConversationService {
     });
 
     const [decorated] = await this.decorateInboxConversations([clone(conversation)]);
+    const lifecycleBotHandoff = botHandoffFromLifecycleEvents(lifecycleEvents);
+    const decoratedDetail = lifecycleBotHandoff ? { ...decorated, botHandoff: lifecycleBotHandoff } : decorated;
 
     return createEnvelope({
       service: DIALOG_SERVICE,
@@ -386,7 +486,7 @@ export class ConversationService {
       traceId: conversationTraceId(DIALOG_SERVICE, "fetchDialogDetail"),
       meta: apiMeta({ conversationId }),
       data: {
-        conversation: decorated,
+        conversation: redactSensitiveConversationFields(decoratedDetail, scope),
         lifecycleEvents: clone(lifecycleEvents),
         messages: clone(conversation.messages)
       }
@@ -1828,13 +1928,22 @@ export class ConversationService {
   }
 
   async fetchRealtimeEvents(
-    filters: { since?: string } = {},
+    filters: { limit?: number | string; since?: string } = {},
     scope: TenantScope = {}
-  ): Promise<BackendEnvelope<{ events: RealtimeEvent[]; filters: { since?: string } }>> {
-    const events = mergeRealtimeEvents([
-      await this.conversationRepository.listRealtimeEvents(scope.tenantId ? { tenantId: scope.tenantId } : {}),
-      this.liveRealtimeEvents.filter((event) => !scope.tenantId || event.tenantId === scope.tenantId)
+  ): Promise<BackendEnvelope<{ events: RealtimeEvent[]; filters: { limit?: number | string; since?: string } }>> {
+    const tenantId = String(scope.tenantId ?? "").trim();
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope(REALTIME_SERVICE, "fetchRealtimeEvents", { filters }) as BackendEnvelope<{
+        events: RealtimeEvent[];
+        filters: { limit?: number | string; since?: string };
+      }>;
+    }
+    const limit = boundedRealtimeLimit(filters.limit);
+    const mergedEvents = mergeRealtimeEvents([
+      await this.conversationRepository.listRealtimeEvents({ tenantId, since: filters.since, take: limit }),
+      this.liveRealtimeEvents.filter((event) => event.tenantId === tenantId)
     ], filters.since);
+    const events = filters.since ? mergedEvents.slice(0, limit) : mergedEvents.slice(-limit);
 
     return createEnvelope({
       service: REALTIME_SERVICE,
@@ -2489,6 +2598,10 @@ function statusTone(status: string): string {
 function toPositiveInt(value: number | string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function boundedRealtimeLimit(value: number | string | undefined): number {
+  return Math.min(500, toPositiveInt(value, 200));
 }
 
 function matchesTenantScope(conversation: ConversationRecord, tenantId?: string): boolean {

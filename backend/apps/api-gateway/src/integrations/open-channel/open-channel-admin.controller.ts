@@ -12,6 +12,7 @@ import {
   type OpenChannelRecordStatus,
   type EventWebhookSubscriptionRecord
 } from "./open-channel.repository.js";
+import { normalizeOpenChannelOutboundUrl } from "./outbound-url-policy.js";
 
 /**
  * Tenant-operator management API for external integrations: Open Channel
@@ -409,13 +410,5 @@ function notFound(operation: string, code: string): BackendEnvelope<Record<strin
 }
 
 function optionalHttpUrl(value: string | undefined): string | null {
-  const text = String(value ?? "").trim();
-  if (!text) return null;
-  try {
-    const url = new URL(text);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    return url.toString().replace(/\/+$/, "");
-  } catch {
-    return null;
-  }
+  return normalizeOpenChannelOutboundUrl(value);
 }

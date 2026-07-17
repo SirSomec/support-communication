@@ -138,8 +138,11 @@ function userActionRequest({ operation, payload, route, userId }) {
 
 function aiConnectionRequest({ body, connectionId, method = "GET", operation, suffix, tenantId }) {
   if (!hasRouteId(tenantId)) return missingIdEnvelope(operation, "Tenant id is required.");
-  const connectionPath = connectionId ? `/${encodeURIComponent(connectionId)}${suffix ? `/${suffix}` : ""}` : "";
-  if (connectionId && !hasRouteId(connectionId)) return missingIdEnvelope(operation, "AI connection id is required.");
+  const connectionRequired = method === "PATCH" || method === "DELETE" || Boolean(suffix);
+  if (connectionRequired && !hasRouteId(connectionId)) {
+    return missingIdEnvelope(operation, "AI connection id is required.");
+  }
+  const connectionPath = hasRouteId(connectionId) ? `/${encodeURIComponent(connectionId)}${suffix ? `/${suffix}` : ""}` : "";
   return apiRequest(`/service-admin/tenants/${encodeURIComponent(tenantId)}/ai-connections${connectionPath}`, {
     authMode: "service-admin",
     ...(body ? { body } : {}),

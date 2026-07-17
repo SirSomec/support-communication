@@ -23,7 +23,7 @@ export function useAppNavigation({
 
   useEffect(() => {
     if (!canAccessSection) {
-      setSection("dialogs");
+      setSection(selectFallbackSection(access.sections));
       setToast(`${roleMode}: ${access.reason}`);
     }
   }, [access.reason, canAccessSection, roleMode, section, setToast]);
@@ -49,7 +49,7 @@ export function useAppNavigation({
   }
 
   function handleBackToDialogs() {
-    setSection("dialogs");
+    setSection(selectFallbackSection(access.sections));
   }
 
   function handleOutboundRequest() {
@@ -70,6 +70,10 @@ export function useAppNavigation({
     handleBackToDialogs,
     handleOutboundRequest
   };
+}
+
+export function selectFallbackSection(sections = []) {
+  return sections.includes("dialogs") ? "dialogs" : sections[0] ?? "";
 }
 
 export function resolveNavigationAccess({

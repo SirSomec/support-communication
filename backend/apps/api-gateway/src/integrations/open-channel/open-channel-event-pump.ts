@@ -38,6 +38,7 @@ export interface OpenChannelEventPumpRunResult {
 }
 
 export class OpenChannelEventPump {
+  private activeRun: Promise<OpenChannelEventPumpRunResult> | null = null;
   private readonly botBridge?: Pick<ExternalBotBridge, "notifyChatClosed">;
   private readonly conversationRepository: OpenChannelEventPumpOptions["conversationRepository"];
   private readonly delivery: Pick<OpenChannelDeliveryService, "enqueue">;
@@ -72,19 +73,38 @@ export class OpenChannelEventPump {
     }
   }
 
-  async runOnce(): Promise<OpenChannelEventPumpRunResult> {
+  runOnce(): Promise<OpenChannelEventPumpRunResult> {
+    if (this.activeRun) return this.activeRun;
+    const run = this.executeRunOnce();
+    this.activeRun = run;
+    void run.then(
+      () => { if (this.activeRun === run) this.activeRun = null; },
+      () => { if (this.activeRun === run) this.activeRun = null; }
+    );
+    return run;
+  }
+
+  private async executeRunOnce(): Promise<OpenChannelEventPumpRunResult> {
     const cursor = await this.repository.readPumpCursor();
-    const events = (await this.conversationRepository.listRealtimeEvents({}))
+    const events = (await this.conversationRepository.listRealtimeEvents({
+      allTenants: true,
+      since: cursor.seenEventIds.at(-1) ?? "1970-01-01T00:00:00.000Z",
+      take: 500
+    }))
       .filter((event) => !cursor.lastOccurredAt || event.occurredAt >= cursor.lastOccurredAt)
       .filter((event) => !cursor.seenEventIds.includes(event.eventId))
-      .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+      .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt) || left.eventId.localeCompare(right.eventId));
 
     const result: OpenChannelEventPumpRunResult = { botClosures: 0, chatDeliveries: 0, scanned: events.length, webhooks: 0 };
     if (!events.length) return result;
 
+    const processedEventIds: string[] = [];
+    let lastOccurredAt = cursor.lastOccurredAt;
     for (const event of events) {
       try {
         await this.handleEvent(event, result);
+        processedEventIds.push(event.eventId);
+        lastOccurredAt = event.occurredAt;
       } catch (error) {
         writeStructuredLog("warn", "Open channel event pump handler failed", {
           errorMessage: error instanceof Error ? error.message : String(error),
@@ -93,17 +113,19 @@ export class OpenChannelEventPump {
           operation: "openChannelEventPumpHandle",
           service: "api-gateway"
         });
+        break;
       }
     }
 
-    const lastOccurredAt = events[events.length - 1]!.occurredAt;
-    await this.repository.savePumpCursor({
-      lastOccurredAt,
-      seenEventIds: [
-        ...cursor.seenEventIds,
-        ...events.map((event) => event.eventId)
-      ].slice(-500)
-    });
+    if (processedEventIds.length > 0) {
+      await this.repository.savePumpCursor({
+        lastOccurredAt,
+        seenEventIds: [
+          ...cursor.seenEventIds,
+          ...processedEventIds
+        ].slice(-500)
+      });
+    }
     return result;
   }
 

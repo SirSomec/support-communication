@@ -16,6 +16,7 @@ export interface PlatformAlertAcknowledgement {
   acknowledgedAt: string;
   auditEvent: Record<string, unknown>;
   componentId: string;
+  idempotencyKey?: string;
   reason: string | null;
   statusPageSync: Record<string, unknown>;
 }
@@ -1086,8 +1087,13 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
   saveAlertAcknowledgement(acknowledgement: PlatformAlertAcknowledgement): PlatformAlertAcknowledgement {
     this.assertSyncRuntimeAvailable();
     const persisted = clone(acknowledgement);
+    let replay: PlatformAlertAcknowledgement | undefined;
     this.store.update((state) => {
       const current = normalizeState(state);
+      replay = persisted.idempotencyKey
+        ? current.alertAcknowledgements.find((item) => item.idempotencyKey === persisted.idempotencyKey)
+        : undefined;
+      if (replay) return current;
 
       return {
         ...current,
@@ -1095,13 +1101,15 @@ export class PlatformRepository implements PlatformAuditOutboxRepository {
       };
     });
 
-    return clone(persisted);
+    return clone(replay ?? persisted);
   }
 
   async saveAlertAcknowledgementAsync(acknowledgement: PlatformAlertAcknowledgement): Promise<PlatformAlertAcknowledgement> {
     return this.saveRuntimeRecord(
       "alertAcknowledgements",
-      String(toJsonRecord(acknowledgement.auditEvent).id ?? `${acknowledgement.componentId}:${acknowledgement.acknowledgedAt}`),
+      acknowledgement.idempotencyKey
+        ? `ack:${acknowledgement.idempotencyKey}`
+        : String(toJsonRecord(acknowledgement.auditEvent).id ?? `${acknowledgement.componentId}:${acknowledgement.acknowledgedAt}`),
       acknowledgement,
       acknowledgement.componentId
     );

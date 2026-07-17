@@ -4,10 +4,18 @@ import { createTestEnv } from "../packages/testing/src/index.ts";
 import { loadBackendConfig } from "../packages/config/src/index.ts";
 import { createEnvelope } from "../packages/envelope/src/index.ts";
 import { buildHealthEnvelope, buildReadinessEnvelope } from "../apps/api-gateway/src/health.response.ts";
-import { createRequestTraceId } from "../packages/observability/src/index.ts";
+import { createRequestTraceId, shouldWriteStructuredLog } from "../packages/observability/src/index.ts";
 import { createLocalDevelopmentRepositorySeeds } from "../apps/api-gateway/src/runtime/local-development-seed.ts";
 
 describe("phase 0 shared backend foundation", () => {
+  it("filters structured logs using the configured minimum level", () => {
+    assert.equal(shouldWriteStructuredLog("debug", "info"), false);
+    assert.equal(shouldWriteStructuredLog("info", "info"), true);
+    assert.equal(shouldWriteStructuredLog("warn", "error"), false);
+    assert.equal(shouldWriteStructuredLog("error", "error"), true);
+    assert.equal(shouldWriteStructuredLog("debug", "invalid"), false);
+  });
+
   it("creates frontend-compatible response envelopes", () => {
     const envelope = createEnvelope({
       service: "api-gateway",
@@ -48,6 +56,15 @@ describe("phase 0 shared backend foundation", () => {
     assert.throws(
       () => loadBackendConfig({ NODE_ENV: "test" }),
       /Invalid backend configuration: .*DATABASE_URL/
+    );
+  });
+
+  it("requires an explicit NODE_ENV instead of enabling local fallbacks implicitly", () => {
+    const environment = createTestEnv();
+    delete environment.NODE_ENV;
+    assert.throws(
+      () => loadBackendConfig(environment),
+      /Invalid backend configuration: .*NODE_ENV/
     );
   });
 

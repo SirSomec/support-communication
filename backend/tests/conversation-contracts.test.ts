@@ -6,6 +6,7 @@ import type { RealtimeFanoutAdapter, RealtimeFanoutEvent } from "../apps/api-gat
 import { ConversationRepository as RuntimeConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { bootstrapConversationState } from "../apps/api-gateway/src/conversation/seed.ts";
 import { createRealtimeSseStream } from "../apps/api-gateway/src/conversation/realtime.sse.ts";
+import { runRealtimeRetentionOnce } from "../apps/api-gateway/src/conversation/realtime-retention.worker.ts";
 import { writeRealtimeWebSocketReplay } from "../apps/api-gateway/src/conversation/realtime.websocket.ts";
 import { ConversationService } from "../apps/api-gateway/src/conversation/conversation.service.ts";
 import { createDeterministicObjectStorageSigner } from "../apps/api-gateway/src/workspace/object-storage.ts";
@@ -151,7 +152,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
   it("lists dialogs with frontend-compatible pagination and filters", async () => {
     const conversations = new ConversationService();
 
-    const queued = await conversations.fetchDialogs({ status: "queued", page: 1, pageSize: 10 });
+    const queued = await conversations.fetchDialogs({ status: "queued", page: 1, pageSize: 10 }, { tenantId: "tenant-volga" });
 
     assert.equal(queued.service, "dialogService");
     assert.equal(queued.operation, "fetchDialogs");
@@ -163,6 +164,79 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     assert.ok(queued.data.items.length > 0);
     assert.ok(queued.data.items.every((conversation) => conversation.status === "queued"));
     assert.ok(queued.data.items[0].messages.length > 0);
+  });
+
+  it("redacts dialog phones at the API service boundary unless the caller has sensitive access", async () => {
+    const conversations = new ConversationService();
+
+    const restrictedList = await conversations.fetchDialogs({}, {
+      canViewSensitive: false,
+      tenantId: "tenant-volga"
+    });
+    const restrictedDetail = await conversations.fetchDialogDetail("maria", {
+      canViewSensitive: false,
+      tenantId: "tenant-volga"
+    });
+    const privilegedDetail = await conversations.fetchDialogDetail("maria", {
+      canViewSensitive: true,
+      tenantId: "tenant-volga"
+    });
+
+    assert.ok(restrictedList.data.items.every((conversation) => !/\d{5,}/.test(conversation.phone)));
+    assert.match(String(restrictedDetail.data.conversation.phone), /^\*\*\* \*\*\*-\*\*-\d{2}$/);
+    assert.notEqual(restrictedDetail.data.conversation.phone, privilegedDetail.data.conversation.phone);
+    assert.match(String(privilegedDetail.data.conversation.phone), /\d{3}/);
+  });
+
+  it("hydrates bot handoff summaries from lifecycle events and redacts nested phones", async () => {
+    const state = bootstrapConversationState();
+    const maria = state.conversations.find((conversation) => conversation.id === "maria");
+    assert.ok(maria);
+    delete maria.botHandoff;
+    state.lifecycleEvents = [{
+      actorId: null,
+      actorName: "Bot runtime",
+      actorType: "worker",
+      conversationId: "maria",
+      data: {
+        botId: "bot-delivery",
+        collectedFields: { orderId: "A-1042", phone: "+7 999 204-18-44" },
+        nodeId: "handoff-delivery",
+        phone: "+7 999 204-18-44",
+        queue: "queue-sdk",
+        reason: "handoff_requested",
+        scenarioName: "Delivery status"
+      },
+      eventType: "bot.handoff.created",
+      id: "lifecycle_bot_handoff_maria",
+      ingestedAt: "2026-07-17T08:00:00.000Z",
+      occurredAt: "2026-07-17T08:00:00.000Z",
+      reason: "bot_handoff",
+      schemaVersion: "conversation-lifecycle/v1",
+      source: "bot-runtime-reconciliation",
+      sourceEventId: "bot-runtime-handoff:test",
+      tenantId: "tenant-volga",
+      traceId: "trace-bot-handoff-test"
+    }];
+    const conversations = new ConversationService(RuntimeConversationRepository.inMemory(state));
+
+    const restricted = await conversations.fetchDialogDetail("maria", {
+      canViewSensitive: false,
+      tenantId: "tenant-volga"
+    });
+    const privileged = await conversations.fetchDialogDetail("maria", {
+      canViewSensitive: true,
+      tenantId: "tenant-volga"
+    });
+    const restrictedHandoff = restricted.data.conversation.botHandoff as Record<string, any>;
+    const privilegedHandoff = privileged.data.conversation.botHandoff as Record<string, any>;
+
+    assert.equal(restrictedHandoff.scenarioName, "Delivery status");
+    assert.equal(restrictedHandoff.botId, "bot-delivery");
+    assert.equal(restrictedHandoff.phone, "*** ***-**-44");
+    assert.equal(restrictedHandoff.collectedFields.phone, "*** ***-**-44");
+    assert.equal(privilegedHandoff.phone, "+7 999 204-18-44");
+    assert.equal(privilegedHandoff.collectedFields.phone, "+7 999 204-18-44");
   });
 
   it("guards close transitions until a topic is selected", async () => {
@@ -897,7 +971,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     assert.equal(attachmentOnly.data.message.text, "Attachment received");
     assert.deepEqual(attachmentOnly.data.message.attachments, [{ providerAttachmentId: "max-image-001", type: "image" }]);
 
-    const events = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const events = await conversations.fetchRealtimeEvents({ since: "now-5m" }, { tenantId: "tenant-volga" });
     assert.equal(events.status, "ok");
     assert.ok(events.data.events.some((event) => event.eventName === "message.created"));
     assert.ok(events.data.events.every((event) => event.traceId));
@@ -951,7 +1025,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       conversationId: "dmitry",
       text: "Fan-out should not block persisted replay"
     });
-    const replay = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const replay = await conversations.fetchRealtimeEvents({ since: "now-5m" }, { tenantId: "tenant-volga" });
 
     assert.equal(inbound.status, "ok");
     assert.equal(fanout.publishAttempts, 1);
@@ -1011,7 +1085,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       secondPersistedAndLive,
       ...fanout.published
     ]);
-    const mergedReplayAndLive = await firstInstance.fetchRealtimeEvents();
+    const mergedReplayAndLive = await firstInstance.fetchRealtimeEvents({}, { tenantId: "tenant-volga" });
 
     assert.deepEqual(
       mergedReplayAndLive.data.events.map((event) => event.eventId),
@@ -1023,7 +1097,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     );
 
     const cursor = expectedEvents[0];
-    const afterCursor = await secondInstance.fetchRealtimeEvents({ since: cursor.eventId });
+    const afterCursor = await secondInstance.fetchRealtimeEvents({ since: cursor.eventId }, { tenantId: "tenant-volga" });
 
     assert.deepEqual(
       afterCursor.data.events.map((event) => event.eventId),
@@ -1048,7 +1122,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     });
     await fanout.publish(liveOnly);
 
-    const messages = await lastValueFrom(createRealtimeSseStream(conversations, {}, first.data.realtimeEvent.eventId).pipe(toArray()));
+    const messages = await lastValueFrom(createRealtimeSseStream(conversations, { tenantId: "tenant-volga" }, first.data.realtimeEvent.eventId).pipe(toArray()));
 
     assert.deepEqual(messages.map((message) => message.id), ["rt_sse_live_only"]);
     assert.deepEqual(messages.map((message) => message.type), ["message.created"]);
@@ -1060,7 +1134,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
 
     const messages = await lastValueFrom(createRealtimeSseStream(
       conversations,
-      {},
+      { tenantId: "tenant-volga" },
       undefined,
       { includeHandshake: true }
     ).pipe(toArray()));
@@ -1090,10 +1164,17 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       occurredAt: new Date(Date.parse(first.data.realtimeEvent.occurredAt) + 1).toISOString(),
       traceId: "trace-ws-live-only"
     });
+    const foreignTenantEvent = realtimeFanoutEventFixture({
+      eventId: "rt_ws_foreign_tenant",
+      occurredAt: new Date(Date.parse(first.data.realtimeEvent.occurredAt) + 2).toISOString(),
+      tenantId: "tenant-northstar",
+      traceId: "trace-ws-foreign-tenant"
+    });
     const socket = new FakeWebSocketReplaySocket();
 
     await fanout.publish(liveOnly);
-    await writeRealtimeWebSocketReplay(conversations, socket, first.data.realtimeEvent.eventId);
+    await fanout.publish(foreignTenantEvent);
+    await writeRealtimeWebSocketReplay(conversations, socket, first.data.realtimeEvent.eventId, { tenantId: "tenant-volga" });
 
     const messages = decodeWebSocketTextFrames(socket.writes).map((message) => JSON.parse(message) as RealtimeFanoutEvent);
     assert.deepEqual(messages.map((message) => message.eventId), ["rt_ws_live_only"]);
@@ -1124,7 +1205,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
 
     const messages = await lastValueFrom(createRealtimeSseStream(
       conversations,
-      { since: first.data.realtimeEvent.eventId },
+      { since: first.data.realtimeEvent.eventId, tenantId: "tenant-volga" },
       second.data.realtimeEvent.eventId
     ).pipe(toArray()));
 
@@ -1148,7 +1229,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       traceId: "trace-same-timestamp-a"
     }));
 
-    const events = await conversations.fetchRealtimeEvents();
+    const events = await conversations.fetchRealtimeEvents({}, { tenantId: "tenant-volga" });
 
     assert.deepEqual(
       events.data.events
@@ -1178,8 +1259,8 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     await fanout.publish({ ...duplicate, data: { source: "duplicate-live-delivery" } });
     await fanout.publish(afterDuplicate);
 
-    const events = await conversations.fetchRealtimeEvents();
-    const afterCursor = await conversations.fetchRealtimeEvents({ since: duplicate.eventId });
+    const events = await conversations.fetchRealtimeEvents({}, { tenantId: "tenant-volga" });
+    const afterCursor = await conversations.fetchRealtimeEvents({ since: duplicate.eventId }, { tenantId: "tenant-volga" });
 
     assert.deepEqual(
       events.data.events
@@ -1213,7 +1294,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       messageId: "msg_delivery_runtime_001",
       tenantId: "tenant-volga"
     });
-    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" }, { tenantId: "tenant-volga" });
     const deliveryEvent = realtime.data.events.find((event) => event.eventName === "message.delivery.updated");
 
     assert.equal(receipt.status, "ok");
@@ -1251,7 +1332,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       status: "failed",
       tenantId: "tenant-volga"
     });
-    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" }, { tenantId: "tenant-volga" });
     const deliveryEvents = realtime.data.events.filter((event) => event.eventName === "message.delivery.updated");
 
     assert.equal(first.status, "ok");
@@ -1284,7 +1365,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       providerEventId: "tg-delivery-malformed-replay-001",
       tenantId: "tenant-volga"
     });
-    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" }, { tenantId: "tenant-volga" });
     const deliveryEvents = realtime.data.events.filter((event) => event.eventName === "message.delivery.updated");
 
     assert.equal(first.status, "ok");
@@ -1340,7 +1421,7 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       status: "failed",
       tenantId: "tenant-volga"
     });
-    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" });
+    const realtime = await conversations.fetchRealtimeEvents({ since: "now-5m" }, { tenantId: "tenant-volga" });
     const deliveryEvents = realtime.data.events.filter((event) => event.eventName === "message.delivery.updated");
 
     assert.equal(replay.status, "ok");
@@ -1383,8 +1464,8 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       globalThis.Date = RealDate;
     }
 
-    const afterTimestamp = await conversations.fetchRealtimeEvents({ since: first.data.realtimeEvent.occurredAt });
-    const afterEventId = await conversations.fetchRealtimeEvents({ since: first.data.realtimeEvent.eventId });
+    const afterTimestamp = await conversations.fetchRealtimeEvents({ since: first.data.realtimeEvent.occurredAt }, { tenantId: "tenant-volga" });
+    const afterEventId = await conversations.fetchRealtimeEvents({ since: first.data.realtimeEvent.eventId }, { tenantId: "tenant-volga" });
 
     assert.ok(
       Date.parse(second.data.realtimeEvent.occurredAt) > Date.parse(first.data.realtimeEvent.occurredAt),
@@ -1416,9 +1497,33 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
       tenantId: "tenant-volga",
       traceId: "trc_same_ms_a"
     });
-    const sameMillisecond = await new ConversationService(repository).fetchRealtimeEvents({ since: "rt_same_ms_a" });
+    const sameMillisecond = await new ConversationService(repository).fetchRealtimeEvents({ since: "rt_same_ms_a" }, { tenantId: "tenant-volga" });
 
     assert.deepEqual(sameMillisecond.data.events.map((event) => event.eventId), ["rt_same_ms_b"]);
+  });
+
+  it("prunes only realtime events older than the configured retention window", async () => {
+    const repository = ConversationRepository.inMemory();
+    await repository.appendRealtimeEvent(realtimeFanoutEventFixture({
+      eventId: "rt_retention_expired",
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      tenantId: "tenant-volga"
+    }));
+    await repository.appendRealtimeEvent(realtimeFanoutEventFixture({
+      eventId: "rt_retention_fresh",
+      occurredAt: "2026-07-15T00:00:00.000Z",
+      tenantId: "tenant-volga"
+    }));
+
+    const result = await runRealtimeRetentionOnce({
+      now: () => new Date("2026-07-16T00:00:00.000Z"),
+      repository,
+      retentionMs: 30 * 24 * 60 * 60 * 1_000
+    });
+    const remaining = await repository.listRealtimeEvents({ tenantId: "tenant-volga", take: 20 });
+
+    assert.equal(result.removed, 1);
+    assert.deepEqual(remaining.map((event) => event.eventId), ["rt_retention_fresh"]);
   });
 });
 

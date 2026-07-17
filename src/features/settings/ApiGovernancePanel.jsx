@@ -168,7 +168,7 @@ export function ApiGovernancePanel({
                       </span>
                       <b>{isReplayed ? "replay_queued" : delivery.status}</b>
                       <span>{delivery.httpStatus} · {delivery.attempts} попытки</span>
-                      <button onClick={() => onReplayDelivery(delivery)} title="Повторить доставку" type="button">
+                      <button disabled={Boolean(busy)} onClick={() => onReplayDelivery(delivery)} title="Повторить доставку" type="button">
                         Повторить
                       </button>
                     </div>

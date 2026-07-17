@@ -4,6 +4,7 @@ import { createRequestTraceId, getCurrentTraceId } from "@support-communication/
 import {
   executeCsvReportExport,
   executeXlsxReportExport,
+  reportSnapshotAt,
   type ReportCsvColumn,
   type ReportObjectStorageBody,
   type ReportObjectStorageReader,
@@ -231,7 +232,21 @@ export class ReportService {
     const requesterRoles = normalizeStringList(context.requesterRoles);
     const workspace = this.readWorkspaceCatalog();
     const snapshotAt = this.now();
-    const reportSource = await this.buildTenantConversationWorkspace(tenantId, filters, snapshotAt);
+    let reportSource: Awaited<ReturnType<typeof this.buildTenantConversationWorkspace>>;
+    try {
+      reportSource = await this.buildTenantConversationWorkspace(tenantId, filters, snapshotAt);
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+      return invalidEnvelope(
+        "fetchReportWorkspace",
+        "report_workspace_filters_invalid",
+        "Report workspace filters are invalid.",
+        {
+          period: filters.period ?? null,
+          timezoneOffsetMinutes: filters.timezoneOffsetMinutes ?? null
+        }
+      );
+    }
     const liveWorkspace = reportSource.workspace;
     const hasConversationActivity = liveWorkspace.current.newConversations > 0
       || liveWorkspace.previous.newConversations > 0
@@ -888,7 +903,7 @@ export class ReportService {
       teamId: typeof job.filters?.teamId === "string" ? job.filters.teamId : undefined,
       timezoneOffsetMinutes: job.filters?.timezoneOffsetMinutes as number | string | undefined,
       topic: typeof job.filters?.topic === "string" ? job.filters.topic : undefined
-    });
+    }, reportSnapshotAt(job));
     const rows = liveWorkspace.workspace.rows.map((row) => ({
       delta: row.delta,
       metric: row.metric,
@@ -1332,14 +1347,6 @@ function aggregateRoutingActivityByOperator(rows: RoutingActivityReportSourceRow
   };
 }
 
-function rescueRowsForChannel(rows: Array<Record<string, unknown>>, channel: string): Array<Record<string, unknown>> {
-  if (channel === "all") {
-    return clone(rows);
-  }
-
-  return clone(rows.filter((row) => row.channel === channel));
-}
-
 function currentConversationMetricRows(reportRows: unknown[]): Array<Record<string, unknown>> {
   const rows = reportRows as Array<Record<string, unknown>>;
   const [newConversations, closedConversations, firstResponse, slaMet] = rows;
@@ -1371,11 +1378,6 @@ function currentConversationMetricRows(reportRows: unknown[]): Array<Record<stri
   ];
 }
 
-function isMissedRescueRow(row: Record<string, unknown>): boolean {
-  const outcome = String(row.outcome ?? "").toLowerCase();
-  return outcome.includes("проп") || outcome.includes("рџсђрѕрї");
-}
-
 function parseIntegerMetric(value: unknown): number {
   const parsed = Number.parseInt(String(value ?? "0").replace(/\D+/g, ""), 10);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -1392,13 +1394,4 @@ function parseTimerSeconds(value: string): number {
   }
 
   return minutes * 60 + seconds;
-}
-
-function slugify(value: string): string {
-  const slug = value
-    .toLowerCase()
-    .replace(/[^a-zа-яё0-9]+/giu, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return slug || "report-export";
 }

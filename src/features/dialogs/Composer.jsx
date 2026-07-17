@@ -32,7 +32,6 @@ export function Composer({
   onAiAssist,
   attachments,
   onAttachFiles,
-  onAttachmentComplete,
   onAttachmentRetry,
   onAttachmentRemove,
   onReplyChannelChange,

@@ -185,6 +185,17 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
 
   async function handleRefreshAuthState() {
     const envelope = await authService.getAuthState();
+    if (envelope.status !== "ok" || !envelope.data) {
+      const message = envelope.error?.message ?? "Не удалось обновить состояние входа.";
+      setFeedback({
+        id: envelope.traceId,
+        action: "auth.state.refresh",
+        result: "failed",
+        traceId: envelope.traceId
+      });
+      onToast(message);
+      return;
+    }
     setFeedback({
       id: envelope.traceId,
       action: "auth.state.refresh",

@@ -514,6 +514,7 @@ export interface IdentityRepositoryPort {
   createServiceAdminTokenPair(input: CreateServiceAdminTokenPairInput): MaybePromise<IdentityServiceAdminTokenPair>;
   findActiveServiceAdminImpersonation(input: FindActiveServiceAdminImpersonationInput): MaybePromise<IdentityServiceAdminImpersonationSession | undefined>;
   findBreakGlassApproval(approvalId: string | undefined): MaybePromise<IdentityBreakGlassApproval | undefined>;
+  findInviteToken(code: string): MaybePromise<IdentityAuthInviteToken | undefined>;
   findMfaChallenge(challengeId: string | undefined): MaybePromise<IdentityMfaChallenge | undefined>;
   findOidcCallbackDescriptor(state: string): MaybePromise<IdentityOidcCallbackDescriptor | undefined>;
   findOidcProviderConfig(providerId: string): MaybePromise<IdentityOidcProviderConfig | undefined>;
@@ -528,6 +529,7 @@ export interface IdentityRepositoryPort {
   findTenantAuditEvents(tenantId: string): MaybePromise<IdentityTenantAuditEvent[]>;
   findTenantUser(userId: string | undefined): MaybePromise<IdentityTenantUser | undefined>;
   findTenantUserByEmail(email: string): MaybePromise<IdentityTenantUser | undefined>;
+  findTenantUsersByEmail(email: string): MaybePromise<IdentityTenantUser[]>;
   findTenantUsers(tenantId: string): MaybePromise<IdentityTenantUser[]>;
   findTenantOperatorSession(sessionId: string | undefined): MaybePromise<StoredTenantOperatorSession | undefined>;
   findTenantOperatorSessionByAccessToken(accessToken: string): MaybePromise<{
@@ -558,6 +560,7 @@ export interface IdentityRepositoryPort {
   recordServiceAdminAuditEvent(event: IdentityServiceAdminAuditEvent): MaybePromise<IdentityServiceAdminAuditEvent>;
   recordServiceAdminAuditExport(exportRecord: IdentityServiceAdminAuditExport): MaybePromise<IdentityServiceAdminAuditExport>;
   recordServiceAdminAuditRedaction(redaction: IdentityServiceAdminAuditRedaction): MaybePromise<IdentityServiceAdminAuditRedaction>;
+  removeProvisionedTenant(tenantId: string): MaybePromise<void>;
   saveTenant(tenant: IdentityTenant): MaybePromise<IdentityTenant>;
   saveTenantUser(user: IdentityTenantUser): MaybePromise<IdentityTenantUser>;
   revokeTenantOperatorSession(input: { sessionId?: string; token?: string }): MaybePromise<boolean>;
@@ -746,6 +749,10 @@ export class IdentityRepository implements IdentityRepositoryPort {
     return this.adapter.findTenantUserByEmail(email);
   }
 
+  findTenantUsersByEmail(email: string): MaybePromise<IdentityTenantUser[]> {
+    return this.adapter.findTenantUsersByEmail(email);
+  }
+
   findTenantUsers(tenantId: string): MaybePromise<IdentityTenantUser[]> {
     return this.adapter.findTenantUsers(tenantId);
   }
@@ -816,6 +823,10 @@ export class IdentityRepository implements IdentityRepositoryPort {
 
   recordServiceAdminAuditRedaction(redaction: IdentityServiceAdminAuditRedaction): MaybePromise<IdentityServiceAdminAuditRedaction> {
     return this.adapter.recordServiceAdminAuditRedaction(redaction);
+  }
+
+  removeProvisionedTenant(tenantId: string): MaybePromise<void> {
+    return this.adapter.removeProvisionedTenant(tenantId);
   }
 
   applyServiceAdminUserAction(input: ServiceAdminUserActionInput): MaybePromise<{
@@ -911,6 +922,10 @@ export class IdentityRepository implements IdentityRepositoryPort {
 
   consumeSamlAcsRequestDescriptor(input: ConsumeSamlAcsRequestDescriptorInput): MaybePromise<SamlAcsRequestDescriptorConsumeResult> {
     return this.adapter.consumeSamlAcsRequestDescriptor(input);
+  }
+
+  findInviteToken(code: string): MaybePromise<IdentityAuthInviteToken | undefined> {
+    return this.adapter.findInviteToken(code);
   }
 
   findMfaChallenge(challengeId: string | undefined): MaybePromise<IdentityMfaChallenge | undefined> {
@@ -1115,6 +1130,7 @@ interface PrismaIdentityDelegates {
     findMany(input: { orderBy: { at: "desc" }; where: { subjectId: string } }): Promise<PrismaCredentialAuditEventRow[]>;
   };
   passwordCredential: {
+    deleteMany(input: { where: { subjectId: { in: string[] } } }): Promise<{ count: number }>;
     findUnique(input: { where: { email: string } }): Promise<PrismaPasswordCredentialRow | null>;
     upsert(input: {
       create: PrismaPasswordCredentialCreateInput;
@@ -1147,6 +1163,7 @@ interface PrismaIdentityDelegates {
   };
   rbacRoleGrant: {
     create(input: { data: PrismaRbacRoleGrantCreateInput }): Promise<PrismaRbacRoleGrantRow>;
+    deleteMany(input: { where: { tenantId: string } }): Promise<{ count: number }>;
     findMany(input: { orderBy: { createdAt: "asc" }; where: { policyVersionId?: string; roleKey?: string; tenantId?: string | null } }): Promise<PrismaRbacRoleGrantRow[]>;
   };
   permissionDenialEvent: {
@@ -1155,6 +1172,7 @@ interface PrismaIdentityDelegates {
   };
   serviceAdminSession: {
     create(input: { data: PrismaServiceAdminSessionCreateInput }): Promise<PrismaServiceAdminSessionRow>;
+    deleteMany(input: { where: { tenantScope: string } }): Promise<{ count: number }>;
     findMany(input: { where: { adminEmail: string; revokedAt?: null } }): Promise<PrismaServiceAdminSessionRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaServiceAdminSessionRow | null>;
     update(input: { data: { revokedAt: Date }; where: { id: string } }): Promise<PrismaServiceAdminSessionRow>;
@@ -1176,6 +1194,7 @@ interface PrismaIdentityDelegates {
   };
   serviceAdminAuditEvent: {
     create(input: { data: PrismaServiceAdminAuditEventCreateInput }): Promise<PrismaServiceAdminAuditEventRow>;
+    deleteMany(input: { where: { tenantId: string } }): Promise<{ count: number }>;
     findMany(input: { orderBy: { at: "desc" } }): Promise<PrismaServiceAdminAuditEventRow[]>;
   };
   serviceAdminAuditExport: {
@@ -1194,6 +1213,7 @@ interface PrismaIdentityDelegates {
   };
   tenant: {
     create(input: { data: PrismaTenantCreateInput }): Promise<PrismaTenantRow>;
+    deleteMany(input: { where: { id: string } }): Promise<{ count: number }>;
     findMany(input: { orderBy: { name: "asc" } }): Promise<PrismaTenantRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaTenantRow | null>;
     update(input: { data: PrismaTenantUpdateInput; where: { id: string } }): Promise<PrismaTenantRow>;
@@ -1206,7 +1226,10 @@ interface PrismaIdentityDelegates {
     create(input: { data: PrismaTenantUserCreateInput }): Promise<PrismaTenantUserRow>;
     findFirst(input: { where: { email: string } }): Promise<PrismaTenantUserRow | null>;
     findUnique(input: { where: { id: string } }): Promise<PrismaTenantUserRow | null>;
-    findMany(input: { orderBy: { name: "asc" }; where: { tenantId: string } }): Promise<PrismaTenantUserRow[]>;
+    findMany(input: {
+      orderBy: { name: "asc" } | Array<{ tenantId: "asc" } | { id: "asc" }>;
+      where: { email?: string; tenantId?: string };
+    }): Promise<PrismaTenantUserRow[]>;
     update(input: { data: PrismaTenantUserUpdateInput; where: { id: string } }): Promise<PrismaTenantUserRow>;
   };
 }
@@ -1942,6 +1965,27 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
     return clone(toIdentityTenant(row));
   }
 
+  async removeProvisionedTenant(tenantId: string): Promise<void> {
+    await this.client.$transaction(async (transaction) => {
+      const tenantUsers = await transaction.tenantUser.findMany({
+        orderBy: { name: "asc" },
+        where: { tenantId }
+      });
+      const subjectIds = tenantUsers.map((user) => user.id);
+
+      await transaction.serviceAdminSession.deleteMany({ where: { tenantScope: tenantId } });
+      if (subjectIds.length > 0) {
+        await transaction.passwordCredential.deleteMany({ where: { subjectId: { in: subjectIds } } });
+      }
+      await transaction.rbacRoleGrant.deleteMany({ where: { tenantId } });
+      await transaction.serviceAdminAuditEvent.deleteMany({ where: { tenantId } });
+      await transaction.tenant.deleteMany({ where: { id: tenantId } });
+    });
+    if (await this.findTenant(tenantId)) {
+      throw new Error(`Identity compensation did not remove tenant ${tenantId}.`);
+    }
+  }
+
   async saveTenantUser(user: IdentityTenantUser): Promise<IdentityTenantUser> {
     const existing = await this.client.tenantUser.findUnique({ where: { id: user.id } });
     const row = existing
@@ -1990,6 +2034,18 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
 
     const row = await this.client.tenantUser.findFirst({ where: { email: normalizedEmail } });
     return row ? clone(toTenantUser(row)) : undefined;
+  }
+
+  async findTenantUsersByEmail(email: string): Promise<IdentityTenantUser[]> {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) {
+      return [];
+    }
+    const rows = await this.client.tenantUser.findMany({
+      orderBy: [{ tenantId: "asc" }, { id: "asc" }],
+      where: { email: normalizedEmail }
+    });
+    return clone(rows.map(toTenantUser));
   }
 
   async listServiceAdminAuditEvents(): Promise<IdentityServiceAdminAuditEvent[]> {
@@ -2478,36 +2534,40 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
     };
   }
 
+  async findInviteToken(code: string): Promise<IdentityAuthInviteToken | undefined> {
+    const normalizedCode = String(code ?? "").trim();
+    if (!normalizedCode) return undefined;
+    const row = await this.client.authInviteToken.findUnique({ where: { codeHash: hashAuthFlowToken(normalizedCode) } });
+    return row ? clone(toInviteTokenDescriptor(row, normalizedCode)) : undefined;
+  }
+
   async consumeInviteToken({ code, email, now = new Date() }: ConsumeInviteTokenInput): Promise<InviteTokenConsumeResult> {
     const normalizedCode = String(code ?? "").trim();
-    const token = await this.client.authInviteToken.findUnique({ where: { codeHash: hashAuthFlowToken(normalizedCode) } });
-    if (!token) {
-      return { code: "invite_not_found", message: "Invite token was not found.", status: "denied" };
-    }
-
-    if (token.consumedAt) {
-      return { code: "invite_expired", message: "Invite token was already consumed.", status: "denied" };
-    }
-
-    if (!Number.isFinite(Date.parse(toIso(token.expiresAt))) || Date.parse(toIso(token.expiresAt)) <= now.getTime()) {
-      return { code: "invite_expired", message: "Invite token has expired.", status: "denied" };
-    }
-
-    if (normalizeEmail(email) !== token.email) {
-      return { code: "invite_email_mismatch", message: "Invite email does not match the token.", status: "denied" };
-    }
-
-    const persisted = await this.client.authInviteToken.updateMany({
-      data: { consumedAt: now },
-      where: { consumedAt: null, id: token.id }
-    });
-    if (persisted.count === 0) {
-      return { code: "invite_expired", message: "Invite token was already consumed.", status: "denied" };
-    }
-
-    return clone({
-      status: "consumed",
-      token: toInviteTokenDescriptor({ ...token, consumedAt: now }, normalizedCode)
+    return this.client.$transaction(async (transaction) => {
+      const token = await transaction.authInviteToken.findUnique({ where: { codeHash: hashAuthFlowToken(normalizedCode) } });
+      if (!token) {
+        return { code: "invite_not_found", message: "Invite token was not found.", status: "denied" as const };
+      }
+      if (token.consumedAt) {
+        return { code: "invite_expired", message: "Invite token was already consumed.", status: "denied" as const };
+      }
+      if (!Number.isFinite(Date.parse(toIso(token.expiresAt))) || Date.parse(toIso(token.expiresAt)) <= now.getTime()) {
+        return { code: "invite_expired", message: "Invite token has expired.", status: "denied" as const };
+      }
+      if (normalizeEmail(email) !== token.email) {
+        return { code: "invite_email_mismatch", message: "Invite email does not match the token.", status: "denied" as const };
+      }
+      const persisted = await transaction.authInviteToken.updateMany({
+        data: { consumedAt: now },
+        where: { consumedAt: null, id: token.id }
+      });
+      if (persisted.count === 0) {
+        return { code: "invite_expired", message: "Invite token was already consumed.", status: "denied" as const };
+      }
+      return clone({
+        status: "consumed" as const,
+        token: toInviteTokenDescriptor({ ...token, consumedAt: now }, normalizedCode)
+      });
     });
   }
 
@@ -3223,6 +3283,34 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       return clone(nextTenant);
     },
 
+    removeProvisionedTenant(tenantId: string): void {
+      const state = store.read();
+      const subjectIds = new Set((state.tenantUsers ?? [])
+        .filter((user) => user.tenantId === tenantId)
+        .map((user) => user.id));
+      const sessionIds = new Set((state.serviceAdminSessions ?? [])
+        .filter((session) => session.tenantScope === tenantId)
+        .map((session) => session.id));
+      const tokenPairIds = new Set((state.serviceAdminTokenPairs ?? [])
+        .filter((pair) => sessionIds.has(pair.sessionId) || subjectIds.has(pair.subjectId))
+        .map((pair) => pair.id));
+
+      store.write({
+        ...state,
+        passwordCredentials: (state.passwordCredentials ?? []).filter((credential) => !subjectIds.has(credential.subjectId)),
+        rbacRoleGrants: (state.rbacRoleGrants ?? []).filter((grant) => grant.tenantId !== tenantId),
+        serviceAdminAuditEvents: (state.serviceAdminAuditEvents ?? []).filter((event) => event.tenantId !== tenantId),
+        serviceAdminSessions: (state.serviceAdminSessions ?? []).filter((session) => !sessionIds.has(session.id)),
+        serviceAdminTokenPairs: (state.serviceAdminTokenPairs ?? []).filter((pair) => !tokenPairIds.has(pair.id)),
+        serviceAdminTokenRevocations: (state.serviceAdminTokenRevocations ?? []).filter((revocation) => !tokenPairIds.has(revocation.token.id)),
+        serviceAdminTokenRotations: (state.serviceAdminTokenRotations ?? []).filter((rotation) =>
+          !tokenPairIds.has(rotation.previous.id) && !tokenPairIds.has(rotation.next.id)),
+        tenantAuditEvents: (state.tenantAuditEvents ?? []).filter((event) => event.tenantId !== tenantId),
+        tenantUsers: (state.tenantUsers ?? []).filter((user) => user.tenantId !== tenantId),
+        tenants: (state.tenants ?? []).filter((tenant) => tenant.id !== tenantId)
+      });
+    },
+
     findTenantAuditEvents(tenantId: string): IdentityTenantAuditEvent[] {
       return clone(store.read().tenantAuditEvents.filter((event) => event.tenantId === tenantId));
     },
@@ -3249,6 +3337,14 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
 
       const state = store.read();
       return clone((state.tenantUsers ?? []).find((user) => normalizeEmail(user.email) === normalizedEmail));
+    },
+
+    findTenantUsersByEmail(email: string): IdentityTenantUser[] {
+      const normalizedEmail = normalizeEmail(email);
+      if (!normalizedEmail) return [];
+      return clone((store.read().tenantUsers ?? [])
+        .filter((user) => normalizeEmail(user.email) === normalizedEmail)
+        .sort((left, right) => left.tenantId.localeCompare(right.tenantId) || left.id.localeCompare(right.id)));
     },
 
     saveTenantUser(user: IdentityTenantUser): IdentityTenantUser {
@@ -3826,6 +3922,18 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       }
 
       return clone(result);
+    },
+
+    findInviteToken(code: string): IdentityAuthInviteToken | undefined {
+      const normalizedCode = String(code ?? "").trim();
+      if (!normalizedCode) return undefined;
+      const record = (store.read().authInviteTokens ?? []).find((item) => item.codeHash === hashAuthFlowToken(normalizedCode));
+      return record ? clone(toInviteTokenDescriptor({
+        ...record,
+        consumedAt: record.consumedAt ? new Date(record.consumedAt) : null,
+        createdAt: new Date(record.createdAt),
+        expiresAt: new Date(record.expiresAt)
+      }, normalizedCode)) : undefined;
     },
 
     consumeInviteToken({ code, email, now = new Date() }: ConsumeInviteTokenInput): InviteTokenConsumeResult {

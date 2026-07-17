@@ -696,6 +696,8 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
     assert.equal(replay.status, "ok");
     assert.equal(replay.data.platformAudit.id, first.data.platformAudit.id);
     assert.equal(replay.data.platformOutbox.id, first.data.platformOutbox.id);
+    assert.equal(replay.data.auditEvent.id, first.data.auditEvent.id);
+    assert.equal(repository.readState().alertAcknowledgements.length, 1);
     assert.deepEqual(repository.listPlatformAuditRows({
       mutationKind: "alert",
       target: "cmp-webhooks"

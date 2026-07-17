@@ -171,6 +171,98 @@ describe("telegram polling ingress contracts", () => {
     assert.notEqual(tenantA?.id, tenantB?.id);
   });
 
+  it("continues polling other tenant connections when one Telegram API call fails", async () => {
+    const now = new Date().toISOString();
+    const integrationRepository = IntegrationRepository.inMemory({
+      ...emptyIntegrationState(),
+      telegramConnections: ["tenant-failing", "tenant-healthy"].map((tenantId, index) => ({
+        botId: `isolated-bot-${index}`,
+        botToken: `${700000 + index}:isolated_token`,
+        botUsername: `isolated_${index}`,
+        createdAt: now,
+        status: "active" as const,
+        tenantId,
+        tokenPreview: `${700000 + index}:****`,
+        updatedAt: now,
+        webhookSecret: `isolated-secret-${index}`
+      }))
+    });
+    const conversationRepository = ConversationRepository.inMemory();
+    const result = await pollTelegramUpdatesOnce({
+      conversationRepository,
+      conversationService: new ConversationService(conversationRepository),
+      fetcher: async (url) => {
+        if (url.includes("bot700000:")) {
+          throw new Error("telegram_connection_unavailable");
+        }
+        return {
+          json: async () => ({
+            ok: true,
+            result: [{
+              message: { chat: { id: 8080 }, from: { first_name: "Healthy" }, message_id: 1, text: "Delivered" },
+              update_id: 1
+            }]
+          }),
+          ok: true,
+          status: 200
+        };
+      },
+      integrationRepository
+    });
+
+    assert.equal(result.polled, 2);
+    assert.equal(result.failed, 1);
+    assert.equal(result.accepted, 1);
+    assert.equal((await conversationRepository.listConversations({ tenantId: "tenant-healthy" })).length, 1);
+  });
+
+  it("backs off only the failing Telegram connection between polling passes", async () => {
+    const now = new Date("2026-07-16T12:00:00.000Z");
+    const connections = ["tenant-failing", "tenant-healthy"].map((tenantId, index) => ({
+      botId: `backoff-bot-${index}`,
+      botToken: `${800000 + index}:backoff_token`,
+      botUsername: `backoff_${index}`,
+      createdAt: now.toISOString(),
+      status: "active" as const,
+      tenantId,
+      tokenPreview: `${800000 + index}:****`,
+      updatedAt: now.toISOString(),
+      webhookSecret: `backoff-secret-${index}`
+    }));
+    const integrationRepository = {
+      listTelegramConnections: () => connections
+    };
+    const connectionBackoff = new Map<string, { attempts: number; nextAttemptAt: number }>();
+    const conversationRepository = ConversationRepository.inMemory();
+    const calls = new Map<string, number>();
+    const fetcher = async (url: string) => {
+      const key = url.includes("bot800000:") ? "failing" : "healthy";
+      calls.set(key, (calls.get(key) ?? 0) + 1);
+      if (key === "failing") throw new Error("telegram_connection_unavailable");
+      return { json: async () => ({ ok: true, result: [] }), ok: true, status: 200 };
+    };
+    const poll = () => pollTelegramUpdatesOnce({
+      backoffBaseMs: 1_000,
+      connectionBackoff,
+      conversationRepository,
+      conversationService: new ConversationService(conversationRepository),
+      fetcher,
+      integrationRepository,
+      now: () => now
+    });
+
+    const first = await poll();
+    const skipped = await poll();
+    now.setTime(now.getTime() + 1_000);
+    const retried = await poll();
+
+    assert.equal(first.failed, 1);
+    assert.equal(skipped.failed, 0);
+    assert.equal(retried.failed, 1);
+    assert.deepEqual(Object.fromEntries(calls), { failing: 2, healthy: 3 });
+    assert.equal(connectionBackoff.get("tenant-failing:backoff-bot-0")?.attempts, 2);
+  });
+
   it("starts a stoppable polling loop for runtime telegram ingestion", async () => {
     let ticks = 0;
     const worker = startTelegramPollingWorker({
@@ -224,13 +316,15 @@ describe("telegram polling ingress contracts", () => {
       throw new Error(`Unexpected Telegram API URL ${input}`);
     };
 
-    await assert.rejects(() => pollTelegramUpdatesOnce({
+    const result = await pollTelegramUpdatesOnce({
       conversationRepository,
       conversationService: conversations,
       fetcher: telegramFetch,
       integrationRepository
-    }), /telegram_polling_webhook_conflict/);
+    });
 
+    assert.equal(result.failed, 1);
+    assert.equal(result.accepted, 0);
     assert.equal(requestedUrls.some((url) => url.includes("/deleteWebhook")), false);
   });
 
@@ -397,7 +491,7 @@ describe("telegram polling ingress contracts", () => {
     assert.equal(ratings[0]?.idempotencyKey, "telegram:123456:cbq-77");
     assert.ok(requestedUrls.some((url) => url.includes("/getUpdates") && url.includes("callback_query")));
     assert.ok(requestedUrls.some((url) => url.includes("/answerCallbackQuery") && url.includes("callback_query_id=cbq-77")));
-    assert.equal((await conversationRepository.listConversations()).length, 1, "a rating callback must not fork a follow-up appeal");
+    assert.equal((await conversationRepository.listConversations({ tenantId: "tenant-rating" })).length, 1, "a rating callback must not fork a follow-up appeal");
     assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-rating"))?.pollingOffset, 121);
   });
 
@@ -498,7 +592,7 @@ describe("telegram polling ingress contracts", () => {
     assert.equal(result.failed, 0);
     assert.equal(ratings[0]?.conversationId, created!.id, "the rating belongs to the closed appeal, not the open follow-up");
     assert.equal(ratings[0]?.operator, "usr-closer", "the closing operator from lifecycle history is credited");
-    assert.equal((await conversationRepository.listConversations()).length, 2, "a rating callback must not create another appeal");
+    assert.equal((await conversationRepository.listConversations({ tenantId: "tenant-rating-unassigned" })).length, 2, "a rating callback must not create another appeal");
   });
 
   it("skips a rating callback without jamming the cursor when quality ingestion is not configured", async () => {
@@ -542,18 +636,19 @@ describe("telegram polling ingress contracts", () => {
 
     assert.equal(result.accepted, 0);
     assert.equal(result.failed, 1);
-    assert.equal((await conversationRepository.listConversations()).length, 0);
+    assert.equal((await conversationRepository.listConversations({ tenantId: "tenant-rating-unconfigured" })).length, 0);
     assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-rating-unconfigured"))?.pollingOffset, 206);
   });
 
   it("sends operator replies through the tenant telegram bot token", async () => {
-    const calls: Array<{ body: Record<string, unknown>; headers?: Record<string, string>; url: string }> = [];
+    const calls: Array<{ body: Record<string, unknown>; headers?: Record<string, string>; signal?: AbortSignal; url: string }> = [];
     const dispatcher = createTelegramOutboundMessageDispatcher({
       apiBaseUrl: "https://telegram.provider.example.test",
-      fetcher: async (url: string, init: { body: string; headers?: Record<string, string> }) => {
+      fetcher: async (url: string, init: { body: string; headers?: Record<string, string>; signal?: AbortSignal }) => {
         calls.push({
           body: JSON.parse(init.body),
           headers: init.headers,
+          signal: init.signal,
           url
         });
         return {
@@ -594,6 +689,7 @@ describe("telegram polling ingress contracts", () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "https://telegram.provider.example.test/bot123456:support_bot_token/sendMessage");
     assert.equal(calls[0].headers?.["idempotency-key"], "telegram-operator-key");
+    assert.ok(calls[0].signal instanceof AbortSignal);
     assert.deepEqual(calls[0].body, {
       chat_id: "99001122",
       disable_web_page_preview: true,

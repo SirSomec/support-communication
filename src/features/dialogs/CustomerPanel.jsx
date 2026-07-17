@@ -137,7 +137,6 @@ export function CustomerPanel({
       return undefined;
     }
 
-    historyFetchedForRef.current = conversation.id;
     let ignore = false;
     setHistoryFetchState({ error: "", loading: true });
     void dialogService.fetchDialogs({ page: 1, pageSize: 100, query: phone }).then((response) => {
@@ -146,6 +145,7 @@ export function CustomerPanel({
       }
 
       if (response.status === "ok") {
+        historyFetchedForRef.current = conversation.id;
         setHistoryExtras(mapApiConversationCollection(response.data));
         setHistoryFetchState({ error: "", loading: false });
       } else {

@@ -231,6 +231,15 @@ export interface WorkspaceRepositoryPort {
   updateKnowledgeDraftVersionState(articleId: string, draftId: string, state: KnowledgeDraftVersionStateRecord): KnowledgeDraftVersionRecord | Promise<KnowledgeDraftVersionRecord | undefined> | undefined;
 }
 
+export class TemplateOwnershipConflictError extends Error {
+  readonly code = "template_tenant_mismatch";
+
+  constructor(templateId: string) {
+    super(`Template ${templateId} belongs to another tenant.`);
+    this.name = "TemplateOwnershipConflictError";
+  }
+}
+
 interface WorkspaceTenantScope {
   tenantId?: string;
 }
@@ -462,9 +471,10 @@ export interface PrismaWorkspaceClient {
     upsert(input: PrismaKnowledgeDraftVersionUpsertInput): Promise<PrismaKnowledgeDraftVersionRow>;
   };
   templateRecord: {
+    create(input: { data: PrismaTemplateRecordCreateInput }): Promise<PrismaTemplateRecordRow>;
     findUnique(input: PrismaTemplateRecordFindUniqueInput): Promise<PrismaTemplateRecordRow | null>;
     findMany(input: PrismaTemplateRecordFindManyInput): Promise<PrismaTemplateRecordRow[]>;
-    upsert(input: PrismaTemplateRecordUpsertInput): Promise<PrismaTemplateRecordRow>;
+    updateMany(input: { data: PrismaTemplateRecordUpdateInput; where: { id: string; tenantId: string } }): Promise<{ count: number }>;
   };
   templateVersion: {
     findFirst(input: PrismaTemplateVersionFindFirstInput): Promise<PrismaTemplateVersionRow | null>;
@@ -766,12 +776,6 @@ interface PrismaTemplateRecordFindUniqueInput {
 interface PrismaTemplateRecordFindManyInput {
   orderBy: { updatedAt: "desc" };
   where?: { tenantId?: string };
-}
-
-interface PrismaTemplateRecordUpsertInput {
-  create: PrismaTemplateRecordCreateInput;
-  update: PrismaTemplateRecordUpdateInput;
-  where: { id: string };
 }
 
 interface PrismaTemplateRecordCreateInput {
@@ -1333,12 +1337,40 @@ class PrismaWorkspaceRepository implements WorkspaceRepositoryPort {
 
   async saveTemplate(template: TemplateRecord): Promise<TemplateRecord> {
     const create = toPrismaTemplateRecordCreateInput(template);
-    const row = await this.client.templateRecord.upsert({
-      create,
-      update: toPrismaTemplateRecordUpdateInput(create),
-      where: { id: template.id }
-    });
+    const existing = await this.client.templateRecord.findUnique({ where: { id: template.id } });
+    if (existing) {
+      return this.updateOwnedTemplate(existing, create);
+    }
 
+    try {
+      return toTemplateRecord(await this.client.templateRecord.create({ data: create }));
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+      const raced = await this.client.templateRecord.findUnique({ where: { id: template.id } });
+      if (!raced) {
+        throw error;
+      }
+      return this.updateOwnedTemplate(raced, create);
+    }
+  }
+
+  private async updateOwnedTemplate(existing: PrismaTemplateRecordRow, create: PrismaTemplateRecordCreateInput): Promise<TemplateRecord> {
+    if (existing.tenantId !== create.tenantId) {
+      throw new TemplateOwnershipConflictError(create.id);
+    }
+    const updated = await this.client.templateRecord.updateMany({
+      data: toPrismaTemplateRecordUpdateInput(create),
+      where: { id: create.id, tenantId: create.tenantId }
+    });
+    if (updated.count !== 1) {
+      throw new TemplateOwnershipConflictError(create.id);
+    }
+    const row = await this.client.templateRecord.findUnique({ where: { id: create.id } });
+    if (!row || row.tenantId !== create.tenantId) {
+      throw new TemplateOwnershipConflictError(create.id);
+    }
     return toTemplateRecord(row);
   }
 
@@ -1821,8 +1853,12 @@ function createDurableWorkspaceRepository(store: DurableStore<WorkspaceState>): 
       store.update((state) => {
         const current = normalizeState(state);
         const nextTemplate = clone(template);
+        const existingTemplate = current.templates.find((item) => item.id === nextTemplate.id);
+        if (existingTemplate && existingTemplate.tenantId !== nextTemplate.tenantId) {
+          throw new TemplateOwnershipConflictError(nextTemplate.id);
+        }
         persisted = nextTemplate;
-        const exists = current.templates.some((item) => item.id === nextTemplate.id);
+        const exists = Boolean(existingTemplate);
 
         return {
           ...current,

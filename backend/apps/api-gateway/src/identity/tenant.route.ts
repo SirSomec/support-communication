@@ -17,7 +17,7 @@ export async function updateTenantStatusFromRoute(
   request: ServiceAdminRequest,
   identityRepository = IdentityRepository.default()
 ): Promise<BackendEnvelope<Record<string, unknown>>> {
-  const tenantId = request.serviceAdminContext?.currentTenantId ?? payload.tenantId;
+  const tenantId = String(payload.tenantId ?? "").trim();
   const denied = await authorizeServiceAdminPolicy({
     action: "tenants.manage",
     identityRepository,

@@ -2,6 +2,13 @@ import { KnowledgeSourceRepository } from "./knowledge-source.repository.js";
 import { ingestKnowledgeDocument } from "./document-ingestion.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 
+const KNOWLEDGE_INGESTION_FAILURE_CODES = new Set([
+  "knowledge_attachment_scan_required",
+  "knowledge_document_mime_unsupported",
+  "knowledge_document_text_required",
+  "knowledge_document_too_large"
+]);
+
 export interface KnowledgeObjectReader {
   read(input: { fileId: string; objectKey: string; tenantId: string; maxBytes: number }): Promise<Uint8Array>;
 }
@@ -30,7 +37,10 @@ export async function processOneKnowledgeDocumentIngestion(input: {
     await sources.save({ ...source, approvalStatus: "pending", approvedAt: null, approvedBy: null, contentChecksum: prepared.checksum, failedAt: null, failureCode: null, lastIndexedAt: now, lastIngestedAt: now, metadata: { ...source.metadata, attachmentFileId: file.fileId, chunks: prepared.chunks, extraction: "object_storage_worker", ingestionJobId: job.jobId, language: prepared.language }, status: "ready", updatedAt: now, version: source.version + 1 });
     await sources.completeIngestionJob(job.jobId, "completed"); return { outcome: "completed", jobId: job.jobId };
   } catch (error) {
-    const code = error instanceof Error ? error.message : "knowledge_ingestion_failed";
+    const errorMessage = error instanceof Error ? error.message : "";
+    const code = KNOWLEDGE_INGESTION_FAILURE_CODES.has(errorMessage)
+      ? errorMessage
+      : "knowledge_ingestion_failed";
     const source = await sources.find(job.tenantId, job.sourceId);
     if (source) await sources.save({ ...source, failedAt: new Date().toISOString(), failureCode: code, status: "failed", updatedAt: new Date().toISOString(), version: source.version + 1 });
     await sources.completeIngestionJob(job.jobId, "failed", code); return { outcome: "failed", jobId: job.jobId };

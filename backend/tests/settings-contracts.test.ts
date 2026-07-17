@@ -5,6 +5,7 @@ import { IntegrationService } from "../apps/api-gateway/src/integrations/integra
 import { IntegrationRepository } from "../apps/api-gateway/src/integrations/integration.repository.ts";
 import { SettingsEmployeeService } from "../apps/api-gateway/src/identity/settings-employee.service.ts";
 import { SettingsRulesService } from "../apps/api-gateway/src/identity/settings-rules.service.ts";
+import { SettingsRulesRepository } from "../apps/api-gateway/src/identity/settings-rules.repository.ts";
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
 import { PermissionService } from "../apps/api-gateway/src/identity/permission.service.ts";
 import { permissionRoles, serviceAdminSession } from "../apps/api-gateway/src/identity/seed-catalog.ts";
@@ -93,6 +94,24 @@ describe("settings runtime contracts", () => {
     const testRun = await settingsRules.testRule("operator-chat-limit", { sampleSize: 50 }, { tenantId: "tenant-northstar" });
     assert.equal(testRun.status, "ok");
     assert.equal(testRun.data.result.sampleSize, 50);
+  });
+
+  it("persists tenant rules and immutable audit across service instances", async () => {
+    const repository = SettingsRulesRepository.inMemory();
+    const first = new SettingsRulesService(repository);
+    const updated = await first.updateRule("operator-chat-limit", {
+      parameters: { defaultLimit: 13 },
+      reason: "Capacity policy update"
+    }, { tenantId: "tenant-rules-persistence" });
+    assert.equal(updated.status, "ok");
+
+    const second = new SettingsRulesService(repository);
+    const workspace = await second.fetchRules({ tenantId: "tenant-rules-persistence" });
+    const persisted = workspace.data.rules.find((rule) => rule.id === "operator-chat-limit");
+    const audit = await second.listSettingsAuditEventsAsync("tenant-rules-persistence");
+    assert.equal(persisted.parameters.defaultLimit, 13);
+    assert.equal(audit.some((event) => event.id === updated.data.auditEvent.id && event.immutable), true);
+    assert.equal((await second.fetchRules({ tenantId: "tenant-other" })).data.rules.find((rule) => rule.id === "operator-chat-limit").parameters.defaultLimit, 8);
   });
 
   it("requires explicit tenant context for settings service workspaces and mutations", async () => {

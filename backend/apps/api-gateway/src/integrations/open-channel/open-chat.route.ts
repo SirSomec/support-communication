@@ -201,7 +201,11 @@ export async function handleOpenChatStatus(input: {
     return plain(404, "channel_not_found");
   }
 
-  const conversations = await input.conversationRepository.listConversations();
+  const conversations = await input.conversationRepository.listConversations({
+    tenantId: channel.tenantId,
+    take: 100,
+    messageTake: 1
+  });
   const active = conversations.some((conversation) => conversation.tenantId === channel.tenantId
     && conversation.channel === OPEN_CHAT_CHANNEL
     && conversation.tags.includes(`connection:${channel.id}`)

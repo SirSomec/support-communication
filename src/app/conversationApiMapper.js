@@ -79,6 +79,7 @@ function mapQualityAssessment(input) {
 function mapBotHandoff(input) {
   return {
     aiOutcome: nonEmptyString(input.aiOutcome),
+    botId: nonEmptyString(input.botId),
     citations: Array.isArray(input.citations)
       ? input.citations
         .map((item) => ({
@@ -90,6 +91,7 @@ function mapBotHandoff(input) {
       : [],
     collectedFields: isRecord(input.collectedFields) ? { ...input.collectedFields } : {},
     goal: nonEmptyString(input.goal),
+    nodeId: nonEmptyString(input.nodeId),
     phone: nonEmptyString(input.phone),
     queue: nonEmptyString(input.queue, "default"),
     reason: nonEmptyString(input.reason, "handoff_requested"),

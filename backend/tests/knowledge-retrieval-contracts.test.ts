@@ -4,6 +4,7 @@ import { KnowledgeRetrievalService } from "../apps/api-gateway/src/knowledge-sou
 import { KnowledgeSourceRepository } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.repository.ts";
 import { KnowledgeRetrievalApiService } from "../apps/api-gateway/src/knowledge-sources/knowledge-retrieval-api.service.ts";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.ts";
+import { KnowledgeRetrievalCache } from "../apps/api-gateway/src/knowledge-sources/knowledge-retrieval-cache.ts";
 
 const source = (tenantId: string, id: string, approvalStatus: "approved" | "pending" = "approved") => ({ approvalStatus, approvedAt: approvalStatus === "approved" ? "2026-07-12T10:00:00.000Z" : null, approvedBy: approvalStatus === "approved" ? "admin" : null, archivedAt: null, contentChecksum: "sum", createdAt: "2026-07-12T10:00:00.000Z", disabledAt: null, failedAt: null, failureCode: null, id, kind: "url" as const, lastIndexedAt: "2026-07-12T10:00:00.000Z", lastIngestedAt: "2026-07-12T10:00:00.000Z", metadata: { extractedText: "Доставка заказа занимает три рабочих дня. Возврат оформляется через оператора." }, owner: "admin", readiness: approvalStatus === "approved" ? "ready" as const : "stale" as const, retentionUntil: null, sourceConfig: {}, sourceRef: null, status: "ready" as const, tenantId, title: id, updatedAt: "2026-07-12T10:00:00.000Z", version: 2 });
 
@@ -20,6 +21,28 @@ describe("knowledge retrieval", () => {
     const service = new KnowledgeRetrievalService(repository);
     assert.equal((await service.retrieve({ query: "доставка", sourceBindings: [{ sourceId: "ready", sourceVersion: "1" }], tenantId: "tenant-a" })).passages.length, 0);
     assert.equal((await service.retrieve({ query: "космический корабль", sourceBindings: [{ sourceId: "ready" }], tenantId: "tenant-a" })).passages.length, 0);
+  });
+
+  it("does not reuse cached passages across different score thresholds", async () => {
+    const repository = KnowledgeSourceRepository.inMemory({ sources: [source("tenant-a", "ready")] });
+    const cache = new KnowledgeRetrievalCache();
+    const service = new KnowledgeRetrievalService(repository, undefined, cache);
+    const permissive = await service.retrieve({
+      query: "доставка неизвестное",
+      scoreThreshold: 0.05,
+      sourceBindings: [{ sourceId: "ready" }],
+      tenantId: "tenant-a"
+    });
+    const strict = await service.retrieve({
+      query: "доставка неизвестное",
+      scoreThreshold: 0.99,
+      sourceBindings: [{ sourceId: "ready" }],
+      tenantId: "tenant-a"
+    });
+
+    assert.equal(permissive.passages.length, 1);
+    assert.equal(strict.cache, "miss");
+    assert.equal(strict.passages.length, 0);
   });
 
   it("takes bindings from the tenant scenario instead of trusting caller-provided source ids", async () => {

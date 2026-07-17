@@ -132,6 +132,7 @@ export async function handleTelegramWebhookFromRoute(
   if (!conversation) {
     return deniedEnvelope("telegram_conversation_create_failed", "Telegram conversation could not be created.");
   }
+  const isNewConversation = conversation.messages.length === 0;
 
   const normalized = await input.conversationService.normalizeInboundEvent("telegram", {
     conversationId: conversation.id,
@@ -141,7 +142,7 @@ export async function handleTelegramWebhookFromRoute(
 
   const runtimeEventId = telegramTenantEventId(tenantId, tenantConnection?.botId ?? undefined, parsed.eventId);
   const botRuntime = normalized.status === "ok" && input.runBotRuntime
-    ? await tryBotRuntime(input.runBotRuntime, { channel: "Telegram", conversationId: conversation.id, eventId: runtimeEventId, payload: { text: parsed.text }, tenantId, traceId: normalized.traceId })
+    ? await tryBotRuntime(input.runBotRuntime, { channel: "Telegram", conversationId: conversation.id, eventId: runtimeEventId, payload: { isNewConversation, text: parsed.text }, tenantId, traceId: normalized.traceId })
     : null;
   const needsOperator = !botRuntime || ["handoff", "dead_lettered"].includes(String(botRuntime.instance?.status ?? ""));
   const autoAssignment = normalized.status === "ok" && needsOperator && input.autoAssignConversation
@@ -404,7 +405,7 @@ export async function resolveTelegramRatedTarget(
 ): Promise<TelegramRatedTarget | null> {
   const anchorId = telegramConversationId(input.tenantId, input.botId, input.chatId);
   const anchorTag = appealAnchorTag(anchorId);
-  const appeals = (await repository.listConversations())
+  const appeals = (await repository.listConversations({ tenantId: input.tenantId, take: 100, messageTake: 1 }))
     .filter((conversation) => resolveConversationTenantId(conversation) === input.tenantId)
     .filter((conversation) => conversation.id === anchorId || conversation.tags.includes(anchorTag))
     .sort((left, right) => conversationSortTimestamp(right) - conversationSortTimestamp(left));

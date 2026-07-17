@@ -26,7 +26,7 @@ if (result.status !== 0 || total > 0) {
     result.stderr.trim()
   ].filter(Boolean).join("\n"));
   process.stderr.write("\n");
-  process.exit(result.status ?? 1);
+  process.exit(result.status && result.status !== 0 ? result.status : 1);
 }
 
 process.stdout.write("Dependency security audit passed: 0 moderate/high/critical vulnerabilities.\n");

@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Typecheck, unit, integration, and isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            packages/web-widget/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: backend
+      - run: npm ci
+        working-directory: packages/web-widget
+      - run: npm run prisma:generate
+        working-directory: backend
+      - run: npm run build
+      - run: npm run test:unit
+      - run: npm run typecheck
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+      - run: npm run tenant-isolation:verify
+        working-directory: backend
+      - run: npm run migration-rollback-check:verify
+        working-directory: backend
+      - run: npm run prisma:validate
+        working-directory: backend
+      - run: npm test
+        working-directory: packages/web-widget
+      - run: npm run build
+        working-directory: packages/web-widget
+
+  e2e:
+    name: Playwright (isolated smoke database)
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: backend
+      - run: npm run prisma:generate
+        working-directory: backend
+      - run: npx playwright install --with-deps chromium
+      - name: Start isolated Postgres
+        run: docker compose up -d --wait postgres
+      - name: Run browser specs
+        run: npx playwright test
+        env:
+          CI: "true"
+          SMOKE_DATABASE_NAME: support_communication_smoke_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+      - name: Stop isolated services
+        if: always()
+        run: docker compose down --volumes

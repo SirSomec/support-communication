@@ -59,7 +59,7 @@ export function buildClientDialogHistory({ conversation, conversations = [] }) {
         continue;
       }
 
-      archiveEntries.push(toArchiveEntry({ channel: conversation.channel, date, status, topic }));
+      archiveEntries.push(toArchiveEntry({ channel: sibling.channel, date, status, topic }));
     }
   }
 

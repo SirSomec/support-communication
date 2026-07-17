@@ -115,6 +115,20 @@ describe("client dialog history model", () => {
     assert.equal(archiveEntries[0].statusLabel, "Закрыто");
   });
 
+  it("keeps the source appeal channel on archived sibling rows", () => {
+    const current = conversationFixture({ channel: "SDK" });
+    const telegramSibling = conversationFixture({
+      channel: "Telegram",
+      id: "conv-telegram",
+      previous: [["2024-05-05", "Доставка", "Closed"]]
+    });
+
+    const entries = buildClientDialogHistory({ conversation: current, conversations: [telegramSibling] });
+    const archiveEntry = entries.find((entry) => entry.kind === "archive");
+
+    assert.equal(archiveEntry.channel, "Telegram");
+  });
+
   it("returns nothing for the empty placeholder conversation", () => {
     assert.deepEqual(buildClientDialogHistory({ conversation: { id: "empty", previous: [] }, conversations: [] }), []);
   });

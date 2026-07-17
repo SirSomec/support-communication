@@ -1,5 +1,6 @@
 import {
   IdentityRepository,
+  type IdentityTenant,
   type IdentityTenantUser
 } from "./identity.repository.js";
 
@@ -22,26 +23,31 @@ export async function listTenantMembershipsForEmail(
   repository: IdentityRepository = IdentityRepository.default()
 ): Promise<IdentityTenantMembershipChoice[]> {
   const normalizedEmail = email.trim().toLowerCase();
+  const [tenants, users] = await Promise.all([
+    repository.listTenants(),
+    repository.findTenantUsersByEmail(normalizedEmail)
+  ]);
+  return tenantMembershipsFromUsers(normalizedEmail, users, tenants);
+}
 
-  const memberships: IdentityTenantMembershipChoice[] = [];
-  const tenants = await repository.listTenants();
-  for (const tenant of tenants) {
-    const tenantUsers = await repository.findTenantUsers(tenant.id);
-    for (const user of tenantUsers) {
-      if (user.email.toLowerCase() === normalizedEmail && user.status === "active") {
-        memberships.push({
-          email: normalizedEmail,
-          id: `${tenant.id}:${user.id}`,
-          role: user.role,
-          selectedAt: null,
-          tenantId: tenant.id,
-          tenantName: tenant.name
-        });
-      }
-    }
-  }
-
-  return memberships;
+export function tenantMembershipsFromUsers(
+  email: string,
+  users: IdentityTenantUser[],
+  tenants: IdentityTenant[]
+): IdentityTenantMembershipChoice[] {
+  const normalizedEmail = email.trim().toLowerCase();
+  const tenantNames = new Map(tenants.map((tenant) => [tenant.id, tenant.name]));
+  return users
+    .filter((user) => user.email.toLowerCase() === normalizedEmail)
+    .filter((user) => user.status === "active")
+    .map((user) => ({
+      email: normalizedEmail,
+      id: `${user.tenantId}:${user.id}`,
+      role: user.role,
+      selectedAt: null,
+      tenantId: user.tenantId,
+      tenantName: tenantNames.get(user.tenantId) ?? user.tenantId
+    }));
 }
 
 export async function selectTenantMembership(input: {
@@ -67,6 +73,6 @@ export async function findTenantUserForMembership(
   repository: IdentityRepository = IdentityRepository.default()
 ): Promise<IdentityTenantUser | undefined> {
   const normalizedEmail = email.trim().toLowerCase();
-  const tenantUsers = await repository.findTenantUsers(tenantId.trim());
-  return tenantUsers.find((user) => user.email.toLowerCase() === normalizedEmail && user.status === "active");
+  const tenantUsers = await repository.findTenantUsersByEmail(normalizedEmail);
+  return tenantUsers.find((user) => user.tenantId === tenantId.trim() && user.status === "active");
 }

@@ -3,6 +3,7 @@ import { SectionTitle } from "../../ui.jsx";
 
 export function SecurityControlsPanel({
   activeSecuritySessions,
+  busy,
   onRevokeSession,
   revokedSessionIds,
   securityAlerts,
@@ -33,7 +34,7 @@ export function SecurityControlsPanel({
               <code>{session.ip}</code>
               <b>{isRevoked ? "Отозвана" : session.status}</b>
               <time>{session.lastSeen}</time>
-              <button disabled={isRevoked} onClick={() => onRevokeSession(session.id)} title="Отозвать сессию" type="button">
+              <button disabled={isRevoked || Boolean(busy)} onClick={() => onRevokeSession(session.id)} title="Отозвать сессию" type="button">
                 Revoke
               </button>
             </div>

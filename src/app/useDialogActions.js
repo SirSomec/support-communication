@@ -32,19 +32,30 @@ export function useDialogActions({
 }) {
   const operatorName = String(operator?.name ?? "").trim() || "Оператор";
 
-  function handleTopicChange(value) {
+  async function handleTopicChange(value) {
+    if (!access.canManageDialogs) {
+      setToast(access.reason);
+      return { ok: false };
+    }
+
     const previousTopic = topics[selected.id] ?? "";
     setTopics((current) => ({ ...current, [selected.id]: value }));
 
     if (value && value !== previousTopic) {
-      applyConversationStatus(selected.id, selectedStatus, {
+      const result = await applyConversationStatus(selected.id, selectedStatus, {
         detail: previousTopic ? `Topic changed: ${previousTopic} -> ${value}` : `Topic selected: ${value}`,
         eventKind: "topic",
         fromTopic: previousTopic || "Not selected",
         toTopic: value
       });
+      if (!result?.ok) {
+        setTopics((current) => ({ ...current, [selected.id]: previousTopic }));
+        setToast(result?.response?.error?.message ?? "Не удалось сохранить тематику.");
+        return { ok: false, response: result?.response };
+      }
       setToast("Тематика сохранена в audit trail.");
     }
+    return { ok: true };
   }
 
   // Панель показывает объединенные теги треда, поэтому новый набор
@@ -139,7 +150,7 @@ export function useDialogActions({
     return { ok: true };
   }
 
-  function handleStatusChange(nextStatus, options = {}) {
+  async function handleStatusChange(nextStatus, options = {}) {
     if (!access.canManageDialogs) {
       setToast(access.reason);
       return;
@@ -150,8 +161,7 @@ export function useDialogActions({
     }
 
     if (nextStatus === "closed") {
-      handleClose(options);
-      return;
+      return handleClose(options);
     }
 
     if (isClosed && nextStatus !== "reopened") {
@@ -159,13 +169,7 @@ export function useDialogActions({
       return;
     }
 
-    if (nextStatus === "reopened") {
-      const nextClosedIds = new Set(closedIds);
-      nextClosedIds.delete(selected.id);
-      setClosedIds(nextClosedIds);
-    }
-
-    applyConversationStatus(
+    const result = await applyConversationStatus(
       selected.id,
       nextStatus,
       {
@@ -173,7 +177,18 @@ export function useDialogActions({
         eventKind: nextStatus === "reopened" ? "reopen" : "status"
       }
     );
+    if (!result?.ok) {
+      setToast(result?.response?.error?.message ?? "Не удалось изменить статус.");
+      return { ok: false, response: result?.response };
+    }
+
+    if (nextStatus === "reopened") {
+      const nextClosedIds = new Set(closedIds);
+      nextClosedIds.delete(selected.id);
+      setClosedIds(nextClosedIds);
+    }
     setToast(`Статус: ${statusLabels[nextStatus]}`);
+    return { ok: true };
   }
 
   async function handleRescueStart(actionConfig) {
@@ -228,7 +243,7 @@ export function useDialogActions({
     return { ok: true, response };
   }
 
-  function handleDialogAction(actionConfig) {
+  async function handleDialogAction(actionConfig) {
     if (!access.canManageDialogs) {
       setToast(access.reason);
       return;
@@ -239,21 +254,20 @@ export function useDialogActions({
     }
 
     if (actionConfig.nextStatus) {
-      applyConversationStatus(selected.id, actionConfig.nextStatus, {
+      const result = await applyConversationStatus(selected.id, actionConfig.nextStatus, {
         detail: `${actionConfig.title}: ${statusLabels[actionConfig.nextStatus]}`,
         eventKind: "action"
       });
-    } else {
-      appendMessage(selected.id, {
-        actor: operatorName,
-        detail: `${actionConfig.title}: ${operatorName}`,
-        eventKind: "action",
-        type: "event",
-        text: `${actionConfig.title}: ${operatorName}`,
-        time: "сейчас"
-      });
+      if (!result?.ok) {
+        setToast(result?.response?.error?.message ?? "Не удалось выполнить действие.");
+        return { ok: false, response: result?.response };
+      }
+      setToast(`${actionConfig.title} зафиксировано в истории диалога.`);
+      return { ok: true };
     }
-    setToast(`${actionConfig.title} зафиксировано в истории диалога.`);
+
+    setToast("Это действие больше не поддерживается.");
+    return { ok: false };
   }
 
   async function handleClose({ resolutionOutcome } = {}) {

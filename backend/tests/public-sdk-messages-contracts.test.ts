@@ -66,9 +66,40 @@ describe("public sdk message ingress and widget poll contracts", () => {
     assert.equal(lifecycleEvents[1]?.traceId, realtimeEvents[1]?.traceId);
   });
 
+  it("does not let a public SDK request overwrite a conversation owned by another tenant", async () => {
+    const { baseUrl } = await createTestApiApp(apps);
+    const bootstrap = await publicPost(baseUrl, "/public/sdk/messages", {
+      externalId: "bootstrap-cross-tenant",
+      text: "Bootstrap"
+    });
+    const repository = ConversationRepository.default();
+    const source = await repository.findConversation(String(bootstrap.data.conversationId));
+    assert.ok(source);
+    await repository.saveConversation({
+      ...source,
+      id: "victim-cross-tenant-conversation",
+      messages: [{ id: "victim-message", side: "client", text: "Must survive", time: "10:00" }],
+      providerConversationId: "victim-external-id",
+      tenantId: "tenant-other"
+    });
+
+    const attack = await publicPost(baseUrl, "/public/sdk/messages", {
+      conversationId: "victim-cross-tenant-conversation",
+      externalId: "attacker-external-id",
+      text: "Overwrite attempt"
+    });
+    const victim = await repository.findConversation("victim-cross-tenant-conversation");
+
+    assert.equal(attack.status, "denied");
+    assert.equal(attack.error?.code, "sdk_conversation_tenant_mismatch");
+    assert.equal(victim?.tenantId, "tenant-other");
+    assert.equal(victim?.providerConversationId, "victim-external-id");
+    assert.deepEqual(victim?.messages.map((message) => message.id), ["victim-message"]);
+  });
+
   it("tracks anonymous SDK presence before a conversation exists", async () => {
     const { baseUrl, integrationRepository } = await createTestApiApp(apps);
-    assert.equal((await ConversationRepository.default().listConversations()).length, 0);
+    assert.equal((await ConversationRepository.default().listConversations({ tenantId: TENANT_ID })).length, 0);
 
     const first = await publicPost(baseUrl, "/public/sdk/presence/heartbeat", {
       externalId: "visitor-presence@example.test",
@@ -84,7 +115,7 @@ describe("public sdk message ingress and widget poll contracts", () => {
 
     assert.equal(first.status, "ok");
     assert.equal(second.data.firstSeenAt, first.data.firstSeenAt);
-    assert.equal((await ConversationRepository.default().listConversations()).length, 0);
+    assert.equal((await ConversationRepository.default().listConversations({ tenantId: TENANT_ID })).length, 0);
     const sessions = await integrationRepository.listLiveSdkVisitorPresence({ at: new Date().toISOString() });
     assert.equal(sessions.length, 1);
     assert.equal(sessions[0]?.pagePath, "/checkout");
@@ -146,13 +177,15 @@ describe("public sdk message ingress and widget poll contracts", () => {
     const messages = poll.data.messages as Array<{ id: string; text: string }>;
     assert.equal(messages.some((message) => message.text.includes("вернусь с обновлением")), true);
     assert.equal(messages.some((message) => message.text.includes("Internal note")), false);
+    assert.equal(typeof poll.data.visitorSessionToken, "string");
+    assert.equal(String(poll.data.visitorSessionToken).length > 20, true);
 
     const pollSince = await publicGet(
       baseUrl,
       `/public/sdk/conversations/${encodeURIComponent(send.data.conversationId)}/messages`,
       {
         since: replyMessageId,
-        visitorSessionToken: String(send.data.visitorSessionToken)
+        visitorSessionToken: String(poll.data.visitorSessionToken)
       }
     );
     assert.equal(Array.isArray(pollSince.data.messages), true);

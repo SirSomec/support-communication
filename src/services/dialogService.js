@@ -1,4 +1,4 @@
-import { apiRequest } from "./apiClient.js";
+import { apiRequest, createApiErrorEnvelope } from "./apiClient.js";
 
 const SERVICE = "dialogService";
 
@@ -12,13 +12,15 @@ export const dialogService = {
   },
 
   async fetchDialogDetail(conversationId) {
+    if (!hasRouteId(conversationId)) return missingIdEnvelope("fetchDialogDetail", "Conversation id is required.");
     return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}`, {
       operation: "fetchDialogDetail",
       service: SERVICE
     });
   },
 
-  async appendMessage({ conversationId, ...payload }) {
+  async appendMessage({ conversationId, ...payload } = {}) {
+    if (!hasRouteId(conversationId)) return missingIdEnvelope("appendMessage", "Conversation id is required.");
     return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/messages`, {
       body: payload,
       method: "POST",
@@ -27,7 +29,8 @@ export const dialogService = {
     });
   },
 
-  async transitionConversationStatus({ conversationId, ...payload }) {
+  async transitionConversationStatus({ conversationId, ...payload } = {}) {
+    if (!hasRouteId(conversationId)) return missingIdEnvelope("transitionConversationStatus", "Conversation id is required.");
     return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/status`, {
       body: payload,
       method: "PATCH",
@@ -36,7 +39,8 @@ export const dialogService = {
     });
   },
 
-  async updateConversationTags({ conversationId, ...payload }) {
+  async updateConversationTags({ conversationId, ...payload } = {}) {
+    if (!hasRouteId(conversationId)) return missingIdEnvelope("updateConversationTags", "Conversation id is required.");
     return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/tags`, {
       body: payload,
       method: "PATCH",
@@ -45,7 +49,8 @@ export const dialogService = {
     });
   },
 
-  async updateConversationClientPhone({ conversationId, ...payload }) {
+  async updateConversationClientPhone({ conversationId, ...payload } = {}) {
+    if (!hasRouteId(conversationId)) return missingIdEnvelope("updateConversationClientPhone", "Conversation id is required.");
     return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/client-phone`, {
       body: payload,
       method: "PATCH",
@@ -64,6 +69,7 @@ export const dialogService = {
   },
 
   async fetchConversationTimeline(conversationId, filters = {}) {
+    if (!hasRouteId(conversationId)) return missingIdEnvelope("fetchConversationTimeline", "Conversation id is required.");
     return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/timeline`, {
       operation: "fetchConversationTimeline",
       query: filters,
@@ -78,7 +84,8 @@ export const dialogService = {
     });
   },
 
-  async assignConversation({ conversationId, ...payload }) {
+  async assignConversation({ conversationId, ...payload } = {}) {
+    if (!hasRouteId(conversationId)) return missingIdEnvelope("assignConversation", "Conversation id is required.");
     return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/assignment`, {
       body: payload,
       method: "PATCH",
@@ -87,7 +94,8 @@ export const dialogService = {
     });
   },
 
-  async finalizeAttachmentUpload({ fileId, ...payload }) {
+  async finalizeAttachmentUpload({ fileId, ...payload } = {}) {
+    if (!hasRouteId(fileId)) return missingIdEnvelope("finalizeAttachmentUpload", "Attachment id is required.");
     return apiRequest(`/dialogs/attachments/${encodeURIComponent(fileId)}/finalize`, {
       body: payload,
       method: "POST",
@@ -97,6 +105,7 @@ export const dialogService = {
   },
 
   async fetchAttachmentStatus(fileId) {
+    if (!hasRouteId(fileId)) return missingIdEnvelope("fetchAttachmentUploadStatus", "Attachment id is required.");
     return apiRequest(`/dialogs/attachments/${encodeURIComponent(fileId)}/status`, {
       operation: "fetchAttachmentUploadStatus",
       service: SERVICE
@@ -113,6 +122,7 @@ export const dialogService = {
   },
 
   async fetchAiReplySuggestions(conversationId) {
+    if (!hasRouteId(conversationId)) return missingIdEnvelope("fetchAiReplySuggestions", "Conversation id is required.");
     return apiRequest(`/dialogs/${encodeURIComponent(conversationId)}/ai-suggestions`, {
       method: "POST",
       operation: "fetchAiReplySuggestions",
@@ -146,3 +156,11 @@ export const dialogService = {
     };
   }
 };
+
+function hasRouteId(value) {
+  return String(value ?? "").trim().length > 0;
+}
+
+function missingIdEnvelope(operation, message) {
+  return createApiErrorEnvelope({ code: "missing_id", message, operation, service: SERVICE });
+}

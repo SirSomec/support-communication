@@ -348,6 +348,26 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.deepEqual(workspace.data.exportJobs, []);
   });
 
+  it("returns an invalid envelope for unsupported report workspace periods and timezone offsets", async () => {
+    const reports = new ReportService(ReportRepository.inMemory());
+
+    const invalidPeriod = await reports.fetchReportWorkspace({ period: "quarter-to-date" }, { tenantId: "tenant-volga" });
+    const invalidOffset = await reports.fetchReportWorkspace({ timezoneOffsetMinutes: 841 }, { tenantId: "tenant-volga" });
+
+    for (const envelope of [invalidPeriod, invalidOffset]) {
+      assert.equal(envelope.status, "invalid");
+      assert.equal(envelope.error?.code, "report_workspace_filters_invalid");
+    }
+    assert.deepEqual(invalidPeriod.data, {
+      period: "quarter-to-date",
+      timezoneOffsetMinutes: null
+    });
+    assert.deepEqual(invalidOffset.data, {
+      period: null,
+      timezoneOffsetMinutes: 841
+    });
+  });
+
   it("denies tenant-scoped report API operations without an explicit tenant", async () => {
     const repository = ReportRepository.inMemory();
     const reports = new ReportService(repository);
@@ -833,7 +853,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
       backendQueueId: "report_queue_lazy_download",
       columns: ["metric", "today"],
       createdAt: "2026-07-04T09:15:00.000Z",
-      filters: { tenantId: "tenant-volga" },
+      filters: { snapshotAt: "2026-07-03T23:59:59.000Z", tenantId: "tenant-volga" },
       format: "XLSX",
       id: "export-lazy-download",
       metricDefinitionVersion: "metrics/v1",
@@ -868,6 +888,19 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
         }
       }
     });
+    const reportInternals = reports as unknown as {
+      buildTenantConversationWorkspace: (
+        tenantId: string,
+        filters: Record<string, unknown>,
+        snapshotAt?: Date
+      ) => Promise<Record<string, unknown>>;
+    };
+    const buildWorkspace = reportInternals.buildTenantConversationWorkspace.bind(reports);
+    let materializedSnapshotAt: Date | undefined;
+    reportInternals.buildTenantConversationWorkspace = async (tenantId, filters, snapshotAt) => {
+      materializedSnapshotAt = snapshotAt;
+      return buildWorkspace(tenantId, filters, snapshotAt);
+    };
 
     const download = await reports.getExportFileDownload("export-lazy-download", {
       canDownload: true,
@@ -882,6 +915,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.equal(descriptor?.objectKey, "reports/tenant-volga/export-lazy-download/export-lazy-download.xlsx");
     assert.equal(descriptor?.checksum, "sha256:lazy-download");
     assert.equal(descriptor?.tenantId, "tenant-volga");
+    assert.equal(materializedSnapshotAt?.toISOString(), "2026-07-03T23:59:59.000Z");
     assert.equal(JSON.stringify(download.data).includes("reports/tenant-volga"), false);
   });
 
@@ -1086,6 +1120,7 @@ describe("phase 5 reports, exports and metric definition backend contracts", () 
     assert.match(controller, /saveSavedReportTemplate\(@Body\(\) payload:/);
     assert.match(controller, /@Req\(\) request: TenantOperatorRequest & ServiceAdminRequest/);
     assert.match(controller, /return this\.reportService\.saveSavedReportTemplate\(payload, reportContextFromServiceAdminRequest\(request\)\);/);
+    assert.match(controller, /request\.tenantOperatorContext\?\.userId[\s\S]*requesterUserId/);
   });
 
   it("routes report file descriptors with server-owned download context", () => {

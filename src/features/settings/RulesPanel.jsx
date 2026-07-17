@@ -3,6 +3,7 @@ import { ClipboardCheck, KeyRound, Loader2, Route, ShieldCheck } from "lucide-re
 import { ConfirmDialog } from "../../ui.jsx";
 import { SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import { settingsService } from "../../services/settingsService.js";
+import { normalizeRuleParameter } from "./rulesModel.js";
 
 const iconByRule = {
   "close-topic-required": ClipboardCheck,
@@ -120,13 +121,15 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
     onToast?.(`${rule.title}: проверка выполнена. Аудит ${response.data.auditEvent.id}.`);
   }
 
-  function updateParameter(rule, key, value) {
+  async function updateParameter(rule, key, value) {
     const currentValue = rule.parameters?.[key];
-    const normalizedValue = typeof currentValue === "number" ? Number(value) : value;
-    updateRule(rule, {
+    const { changed, value: normalizedValue } = normalizeRuleParameter(currentValue, value);
+    if (!changed) return false;
+    await updateRule(rule, {
       parameters: { [key]: normalizedValue },
       reason: `Rule parameter ${key} changed from settings`
     });
+    return true;
   }
 
   return (
@@ -173,7 +176,11 @@ export function RulesPanel({ access, canEditSettings, onToast }) {
                         <input
                           defaultValue={value}
                           disabled={!canMutateRules || busy}
-                          onBlur={(event) => updateParameter(rule, key, event.target.value)}
+                          onBlur={async (event) => {
+                            const input = event.currentTarget;
+                            const changed = await updateParameter(rule, key, input.value);
+                            if (!changed) input.value = String(value);
+                          }}
                           type={typeof value === "number" ? "number" : "text"}
                         />
                       )}

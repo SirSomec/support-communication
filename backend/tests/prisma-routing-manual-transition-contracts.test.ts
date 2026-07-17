@@ -56,23 +56,21 @@ describe("Prisma manual routing transition contracts", () => {
     assert.equal(fake.realtimeEvents.size, 0);
   });
 
-  it("rolls back the canonical conversation when routing snapshot version CAS conflicts", async () => {
+  it("retries one transient routing snapshot version conflict inside the transaction", async () => {
     const fake = createManualTransitionPrisma();
     const repository = RoutingRepository.prisma({ client: fake.client });
     await repository.hydrateStateSnapshot();
     fake.forceSnapshotConflict();
 
-    await assert.rejects(
-      () => repository.saveManualRoutingTransition(transitionInput()),
-      /routing_state_snapshot_conflict/
-    );
+    const saved = await repository.saveManualRoutingTransition(transitionInput());
 
-    assert.deepEqual(fake.conversations.get(CONVERSATION_ID), canonicalConversation());
-    assert.equal(fake.snapshots.get("default")?.version, 1);
-    assert.equal(fake.jobs.size, 0);
-    assert.equal(fake.analytics.size, 0);
-    assert.equal(fake.lifecycleEvents.size, 0);
-    assert.equal(fake.realtimeEvents.size, 0);
+    assert.equal(fake.conversations.get(CONVERSATION_ID)?.operatorId, "operator-next");
+    assert.equal(fake.snapshots.get("default")?.version, 2);
+    assert.equal(fake.jobs.size, 1);
+    assert.equal(fake.analytics.size, 1);
+    assert.equal(fake.lifecycleEvents.size, 1);
+    assert.equal(fake.realtimeEvents.size, 1);
+    assert.equal(saved.conversations[0]?.operatorId, "operator-next");
   });
 
   it("commits every canonical redistribution conversation or rolls the whole batch back", async () => {

@@ -274,7 +274,8 @@ export async function persistBotRuntimeHandoffDescriptors(
     }
 
     const existing = (await input.conversationRepository.listRealtimeEvents({
-      tenantId: sideEffect.descriptor.tenantId
+      tenantId: sideEffect.descriptor.tenantId,
+      take: 500
     })).find((event) => event.eventId === sideEffect.descriptor.eventId);
     const realtimeEvent = existing ?? await input.conversationRepository.appendRealtimeEvent(
       toBotRuntimeHandoffRealtimeEvent(sideEffect.descriptor, input.occurredAt ?? new Date().toISOString())

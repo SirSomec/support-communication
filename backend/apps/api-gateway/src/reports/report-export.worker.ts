@@ -642,7 +642,7 @@ function stringFilter(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function reportSnapshotAt(job: ReportExportJob): Date {
+export function reportSnapshotAt(job: ReportExportJob): Date {
   const requested = typeof job.filters?.snapshotAt === "string" ? job.filters.snapshotAt : job.createdAt;
   const parsed = new Date(requested);
   return Number.isFinite(parsed.getTime()) ? parsed : new Date(job.createdAt);

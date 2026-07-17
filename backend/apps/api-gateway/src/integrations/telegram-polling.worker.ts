@@ -15,6 +15,9 @@ import {
 export interface TelegramPollingInput {
   apiBaseUrl?: string;
   autoAssignConversation?: (conversationId: string, tenantId: string) => Promise<unknown>;
+  backoffBaseMs?: number;
+  backoffMaxMs?: number;
+  connectionBackoff?: Map<string, TelegramConnectionBackoffState>;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "listLifecycleEvents" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   fetcher?: TelegramHttpFetch;
@@ -26,7 +29,13 @@ export interface TelegramPollingInput {
   }, context: { actorId?: string; actorType?: "client"; tenantId?: string }) => Promise<BackendEnvelope<Record<string, unknown>>>;
   runBotRuntime?: (event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string }) => Promise<{ instance?: { status?: string }; outcome?: string }>;
   offsets?: Map<string, number>;
+  now?: () => Date;
   timeoutMs?: number;
+}
+
+export interface TelegramConnectionBackoffState {
+  attempts: number;
+  nextAttemptAt: number;
 }
 
 export interface TelegramConnectionReader {
@@ -128,6 +137,8 @@ export function startTelegramPollingWorker(input: TelegramPollingWorkerInput): T
 export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Promise<TelegramPollingResult> {
   const fetcher = input.fetcher ?? globalThis.fetch;
   const offsets = input.offsets ?? new Map<string, number>();
+  const connectionBackoff = input.connectionBackoff ?? new Map<string, TelegramConnectionBackoffState>();
+  const nowMs = (input.now?.() ?? new Date()).getTime();
   const allConnections = input.integrationRepository.listTelegramConnectionsAsync
     ? await input.integrationRepository.listTelegramConnectionsAsync()
     : input.integrationRepository.listTelegramConnections();
@@ -142,6 +153,11 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
 
   for (const connection of connections) {
     const cursorKey = telegramCursorKey(connection);
+    const backoff = connectionBackoff.get(cursorKey);
+    if (backoff && backoff.nextAttemptAt > nowMs) {
+      continue;
+    }
+    try {
     const updates = await fetchTelegramUpdates({
       apiBaseUrl: input.apiBaseUrl,
       connection,
@@ -199,6 +215,7 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
         result.failed += 1;
         continue;
       }
+      const isNewConversation = conversation.messages.length === 0;
 
       const normalized = await input.conversationService.normalizeInboundEvent("telegram", {
         conversationId: conversation.id,
@@ -219,7 +236,7 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
       let botRuntime: { instance?: { status?: string }; outcome?: string } | null = null;
       if (input.runBotRuntime) {
         try {
-          botRuntime = await input.runBotRuntime({ channel: "Telegram", conversationId: conversation.id, eventId: runtimeEventId, payload: { text: parsed.text }, tenantId: connection.tenantId, traceId: normalized.traceId });
+          botRuntime = await input.runBotRuntime({ channel: "Telegram", conversationId: conversation.id, eventId: runtimeEventId, payload: { isNewConversation, text: parsed.text }, tenantId: connection.tenantId, traceId: normalized.traceId });
         } catch (error) {
           writeStructuredLog("warn", "Telegram inbound bot runtime failed", {
             conversationId: conversation.id,
@@ -242,9 +259,30 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
 
       await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, parsed.updateId + 1);
     }
+    connectionBackoff.delete(cursorKey);
+    } catch (error) {
+      result.failed += 1;
+      const attempts = (backoff?.attempts ?? 0) + 1;
+      const baseMs = positiveBackoff(input.backoffBaseMs, 5_000);
+      const maxMs = positiveBackoff(input.backoffMaxMs, 5 * 60_000);
+      connectionBackoff.set(cursorKey, {
+        attempts,
+        nextAttemptAt: nowMs + Math.min(maxMs, baseMs * (2 ** Math.min(attempts - 1, 10)))
+      });
+      writeStructuredLog("warn", "Telegram polling connection failed", {
+        error: error instanceof Error ? error.message : String(error),
+        operation: "telegram.polling.connection",
+        service: "telegram-polling-worker",
+        tenantId: connection.tenantId
+      });
+    }
   }
 
   return result;
+}
+
+function positiveBackoff(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) && Number(value) > 0 ? Number(value) : fallback;
 }
 
 async function recordPolledQualityRating(input: {

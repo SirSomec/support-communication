@@ -16,10 +16,9 @@ import {
 import { apiMeta, identityTraceId } from "./identity-meta.js";
 import { resolveTenantOperatorPermissions, createTenantOperatorSessionTokens } from "./tenant-operator-auth.js";
 import {
-  findTenantUserForMembership,
   type IdentityTenantMembershipChoice,
-  listTenantMembershipsForEmail,
-  selectTenantMembership
+  selectTenantMembership,
+  tenantMembershipsFromUsers
 } from "./identity-auth-flow.repository.js";
 import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
 
@@ -37,10 +36,6 @@ interface LoginPayload {
   mfaChallengeId?: string;
   otp?: string;
   password?: string;
-}
-
-interface LoginContext {
-  privileged?: boolean;
 }
 
 interface StartOidcLoginPayload {
@@ -185,7 +180,6 @@ export interface TenantOperatorLoginData {
     role: string;
   } | null;
   permissions: string[];
-  refreshToken?: string;
   tenantId: string | null;
   nextStep?: "otp";
 }
@@ -271,10 +265,7 @@ export class AuthService {
     });
   }
 
-  async login(
-    { email, mfaChallengeId, otp, password }: LoginPayload = {},
-    { privileged = false }: LoginContext = {}
-  ): Promise<BackendEnvelope<LoginData>> {
+  async login({ email, mfaChallengeId, otp, password }: LoginPayload = {}): Promise<BackendEnvelope<LoginData>> {
     const traceId = identityTraceId(SERVICE, "login");
     const loginEmail = String(email ?? "").trim();
 
@@ -1004,8 +995,13 @@ export class AuthService {
       await this.upgradeLegacyPasswordCredential(password, credential);
     }
 
-    const tenantUser = await this.identityRepository.findTenantUserByEmail(normalizedEmail);
-    if (!tenantUser || tenantUser.status !== "active") {
+    const [membershipUsers, tenants] = await Promise.all([
+      this.identityRepository.findTenantUsersByEmail(normalizedEmail),
+      this.identityRepository.listTenants()
+    ]);
+    const memberships = tenantMembershipsFromUsers(normalizedEmail, membershipUsers, tenants);
+    if (memberships.length === 0) {
+      const inactiveUser = membershipUsers.find((user) => user.status === "inactive");
       return createEnvelope({
         service: SERVICE,
         operation: "loginTenantOperator",
@@ -1016,18 +1012,16 @@ export class AuthService {
           authenticated: false,
           operator: null,
           permissions: [],
-          tenantId: tenantUser?.tenantId ?? null
+          tenantId: inactiveUser?.tenantId ?? null
         },
         error: {
-          code: tenantUser?.status === "inactive" ? "tenant_operator_blocked" : "tenant_operator_not_available",
-          message: tenantUser?.status === "inactive"
+          code: inactiveUser ? "tenant_operator_blocked" : "tenant_operator_not_available",
+          message: inactiveUser
             ? "Tenant operator account is blocked or inactive."
             : "Tenant operator account is missing or inactive."
         }
       });
     }
-
-    const memberships = await listTenantMembershipsForEmail(normalizedEmail, this.identityRepository);
     const selectedMembership = requestedTenantId
       ? memberships.find((membership) => membership.tenantId === requestedTenantId)
       : null;
@@ -1073,9 +1067,10 @@ export class AuthService {
       });
     }
 
-    const effectiveTenantUser = selectedMembership
-      ? await findTenantUserForMembership(normalizedEmail, selectedMembership.tenantId, this.identityRepository)
-      : tenantUser;
+    const effectiveTenantId = selectedMembership?.tenantId ?? memberships[0]?.tenantId;
+    const effectiveTenantUser = membershipUsers.find((user) =>
+      user.tenantId === effectiveTenantId && user.status === "active"
+    );
 
     if (!effectiveTenantUser || effectiveTenantUser.status !== "active") {
       return createEnvelope({
@@ -1088,7 +1083,7 @@ export class AuthService {
           authenticated: false,
           operator: null,
           permissions: [],
-          tenantId: selectedMembership?.tenantId ?? tenantUser.tenantId
+          tenantId: selectedMembership?.tenantId ?? memberships[0]?.tenantId ?? null
         },
         error: {
           code: "tenant_membership_not_found",
@@ -1207,7 +1202,6 @@ export class AuthService {
           role: effectiveTenantUser.role
         },
         permissions,
-        refreshToken: createdSession.refreshToken,
         tenantId: effectiveTenantUser.tenantId
       }
     });
@@ -1347,6 +1341,30 @@ export class AuthService {
 
     await seedDefaultAuthFlowFixtures(this.identityRepository);
 
+    const invite = await this.identityRepository.findInviteToken(inviteCode);
+    const invitedUser = invite && invite.email === normalizedEmail
+      ? (await this.identityRepository.findTenantUsersByEmail(normalizedEmail))
+        .find((user) => user.tenantId === invite.tenantId)
+      : undefined;
+    if (invite && invite.email === normalizedEmail && !invitedUser) {
+      await this.recordAuthFlowAudit({
+        action: "auth.invite.accept",
+        email: normalizedEmail,
+        reason: "Invite token did not match an invited tenant user.",
+        result: "denied",
+        traceId
+      });
+      return createEnvelope({
+        service: SERVICE,
+        operation: "acceptInvite",
+        traceId,
+        status: "invalid",
+        meta: apiMeta({ tenantId: invite.tenantId }),
+        data: { authenticated: false },
+        error: { code: "invite_membership_not_found", message: "Invite token does not match an invited tenant membership." }
+      });
+    }
+
     const consumed = await this.identityRepository.consumeInviteToken({ code: inviteCode, email: normalizedEmail });
     if (consumed.status !== "consumed") {
       await this.recordAuthFlowAudit({
@@ -1367,7 +1385,6 @@ export class AuthService {
       });
     }
 
-    const invitedUser = await this.identityRepository.findTenantUserByEmail(normalizedEmail);
     if (!invitedUser || invitedUser.tenantId !== consumed.token.tenantId) {
       await this.recordAuthFlowAudit({
         action: "auth.invite.accept",
@@ -1658,7 +1675,7 @@ async function seedDefaultAuthFlowFixtures(repository: IdentityRepository): Prom
 }
 
 function currentNodeEnv(): string {
-  return process.env.NODE_ENV || "test";
+  return process.env.NODE_ENV || "production";
 }
 
 const PARTIAL_SSO_UNAVAILABLE_MESSAGE =

@@ -3,6 +3,7 @@ import { createWriteStream, mkdirSync, readdirSync, readFileSync, statSync, writ
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawn } from "node:child_process";
+import { pipeline } from "node:stream/promises";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -43,14 +44,20 @@ function command(executable, args) {
   return execFileSync(executable, args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
 }
 
-function pipeCommand(executable, args, destination) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(executable, args, { cwd: root, stdio: ["ignore", "pipe", "inherit"], windowsHide: true });
-    const output = createWriteStream(destination);
-    child.stdout.pipe(output);
+async function pipeCommand(executable, args, destination) {
+  const child = spawn(executable, args, { cwd: root, stdio: ["ignore", "pipe", "inherit"], windowsHide: true });
+  const output = createWriteStream(destination);
+  const commandCompleted = new Promise((resolvePromise, reject) => {
     child.once("error", reject);
-    child.once("exit", (code) => code === 0 ? output.end(resolvePromise) : reject(new Error(`runtime_backup_command_failed:${code}`)));
+    child.once("close", (code) => code === 0
+      ? resolvePromise()
+      : reject(new Error(`runtime_backup_command_failed:${code}`)));
   });
+
+  await Promise.all([
+    pipeline(child.stdout, output),
+    commandCompleted
+  ]);
 }
 
 function listFiles(path) {

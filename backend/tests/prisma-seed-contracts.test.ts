@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { tenantBillingStates } from "../apps/api-gateway/src/billing/seed-catalog.ts";
+import { verifyPasswordCredential } from "../apps/api-gateway/src/identity/identity.repository.ts";
 import { permissionRoles, tenantAuditEvents, tenants, tenantUsers } from "../apps/api-gateway/src/identity/seed-catalog.ts";
-import { seedIdentityPrisma } from "../scripts/seed-identity.ts";
+import { assertLocalIdentitySeedAllowed, seedIdentityPrisma } from "../scripts/seed-identity.ts";
 
 describe("Prisma identity seed contracts", () => {
   it("exposes a local Prisma seed script", () => {
@@ -15,6 +16,23 @@ describe("Prisma identity seed contracts", () => {
     assert.match(packageJson.scripts["prisma:seed"], /--env-file=.env.example/);
     assert.match(packageJson.scripts["identity:bootstrap:postgres"], /prisma:migrate:deploy/);
     assert.match(packageJson.scripts["identity:bootstrap:postgres"], /prisma:seed/);
+  });
+
+  it("rejects identity seed execution outside an explicitly enabled local runtime", () => {
+    assert.doesNotThrow(() => assertLocalIdentitySeedAllowed({
+      LOCAL_DEVELOPMENT_SEED_ENABLED: "true",
+      NODE_ENV: "development",
+      RUNTIME_PROFILE: "local"
+    }));
+    assert.throws(() => assertLocalIdentitySeedAllowed({
+      LOCAL_DEVELOPMENT_SEED_ENABLED: "true",
+      NODE_ENV: "production",
+      RUNTIME_PROFILE: "production-like"
+    }), /prisma_seed_local_runtime_required/);
+    assert.throws(() => assertLocalIdentitySeedAllowed({
+      NODE_ENV: "test",
+      RUNTIME_PROFILE: "local"
+    }), /prisma_seed_local_runtime_required/);
   });
 
   it("idempotently seeds tenants with canonical columns and full metadata", async () => {
@@ -43,11 +61,17 @@ describe("Prisma identity seed contracts", () => {
     assert.equal(client.calls.rbacPolicyVersionUpdateMany.length, 2);
     assert.equal(client.calls.rbacPolicyVersionUpserts.length, 2);
     assert.equal(client.calls.rbacRoleGrantUpserts.length, permissionRoles.reduce((total, role) => total + role.actions.length, 0) * 2);
-    assert.equal(client.passwordCredentials.get("service-admin@example.com")?.hash, "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf");
-    assert.doesNotMatch(client.passwordCredentials.get("service-admin@example.com")?.hash ?? "", /correct-password/);
-    assert.equal(client.passwordCredentials.get("sergey@volga.example")?.hash, "sha256:9246aa9be8de7b40d64eb664986430793b6cc13a19d2a456981e44f28303f9cf");
-    assert.equal(client.passwordCredentials.get("sergey@volga.example")?.subjectId, "usr-volga-admin");
-    assert.doesNotMatch(client.passwordCredentials.get("sergey@volga.example")?.hash ?? "", /correct-password/);
+    const serviceAdminCredential = client.passwordCredentials.get("service-admin@example.com");
+    const tenantAdminCredential = client.passwordCredentials.get("sergey@volga.example");
+    assert.equal(serviceAdminCredential?.algorithm, "scrypt");
+    assert.match(serviceAdminCredential?.hash ?? "", /^scrypt:16384:8:1:[a-f0-9]{32}:[a-f0-9]{64}$/);
+    assert.equal(verifiesSeededPassword(serviceAdminCredential), true);
+    assert.doesNotMatch(serviceAdminCredential?.hash ?? "", /correct-password/);
+    assert.equal(tenantAdminCredential?.algorithm, "scrypt");
+    assert.match(tenantAdminCredential?.hash ?? "", /^scrypt:16384:8:1:[a-f0-9]{32}:[a-f0-9]{64}$/);
+    assert.equal(verifiesSeededPassword(tenantAdminCredential), true);
+    assert.equal(tenantAdminCredential?.subjectId, "usr-volga-admin");
+    assert.doesNotMatch(tenantAdminCredential?.hash ?? "", /correct-password/);
     assert.equal(client.passwordPolicies.get("service-admin")?.requireMfa, true);
 
     const volga = client.tenants.get("tenant-volga");
@@ -588,6 +612,18 @@ interface FakePasswordCredentialRow {
   subjectId: string;
   updatedAt: Date | string;
   version: number;
+}
+
+function verifiesSeededPassword(row: FakePasswordCredentialRow | undefined): boolean {
+  if (!row || (row.algorithm !== "sha256" && row.algorithm !== "scrypt")) {
+    return false;
+  }
+
+  return verifyPasswordCredential("correct-password", {
+    ...row,
+    algorithm: row.algorithm,
+    updatedAt: new Date(row.updatedAt).toISOString()
+  });
 }
 
 interface FakePasswordPolicyRow {

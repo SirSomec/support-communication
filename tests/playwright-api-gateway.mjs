@@ -34,10 +34,13 @@ if (seed.status !== 0) {
 //    prisma-only, so pointing DATABASE_URL at the smoke database is all it takes.
 const env = {
   ...process.env,
+  PORT: process.env.PLAYWRIGHT_API_PORT ?? "4100",
   SERVICE_NAME: "api-gateway-playwright",
   TELEGRAM_POLLING_ENABLED: "false",
   RUNTIME_PROFILE: "production-like",
   LOCAL_DEVELOPMENT_SEED_ENABLED: "false",
+  REPORT_EXPORT_OBJECT_ROOT: ".runtime/playwright-report-exports",
+  REPORT_EXPORT_OBJECT_STORAGE_MODE: "local",
   NODE_ENV: "test",
   MFA_OTP_DELIVERY_MODE: "deterministic",
   DATABASE_URL: smokeDatabaseUrl,

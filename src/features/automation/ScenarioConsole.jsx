@@ -91,8 +91,8 @@ export function ScenarioConsole({
   async function handleSave() {
     if (!canManage) return onToast(access.reason);
     const payload = collectUpdatePayload(effective, form);
-    await onUpdateScenario(payload);
-    setFormDirty(false);
+    const persisted = await onUpdateScenario(payload);
+    if (persisted) setFormDirty(false);
   }
 
   return (

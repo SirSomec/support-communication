@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, scryptSync } from "node:crypto";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -299,7 +299,7 @@ async function upsertBootstrapOperator(client, email) {
 async function upsertBootstrapPasswordCredential(client, email, password) {
   await client.passwordCredential.upsert({
     create: {
-      algorithm: "sha256",
+      algorithm: "scrypt",
       email,
       hash: hashPasswordCredential(password),
       subjectId: BOOTSTRAP_OPERATOR_ID,
@@ -307,6 +307,7 @@ async function upsertBootstrapPasswordCredential(client, email, password) {
       version: 1
     },
     update: {
+      algorithm: "scrypt",
       hash: hashPasswordCredential(password),
       subjectId: BOOTSTRAP_OPERATOR_ID,
       updatedAt: new Date(),
@@ -379,7 +380,17 @@ function generateStagePublicApiKeySecret() {
 }
 
 function hashPasswordCredential(password) {
-  return `sha256:${createHash("sha256").update(password).digest("hex")}`;
+  const cost = 16384;
+  const blockSize = 8;
+  const parallelization = 1;
+  const salt = randomBytes(16);
+  const key = scryptSync(password, salt, 32, {
+    N: cost,
+    maxmem: 64 * 1024 * 1024,
+    p: parallelization,
+    r: blockSize
+  });
+  return `scrypt:${cost}:${blockSize}:${parallelization}:${salt.toString("hex")}:${key.toString("hex")}`;
 }
 
 function hashPublicApiKeySecret(rawSecret) {

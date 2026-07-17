@@ -21,3 +21,7 @@ export interface ServiceAdminRequest {
 }
 
 export const RequireServiceAdminAction = (action: string) => SetMetadata(SERVICE_ADMIN_ACTION_KEY, action);
+
+export function isServiceAdminSessionId(sessionId: string | null | undefined): boolean {
+  return typeof sessionId === "string" && sessionId.length > 0 && !sessionId.startsWith("top-session_");
+}

@@ -103,6 +103,7 @@ export interface RoutingRequestContext {
 
 export class RoutingService {
   private conversations: RoutingConversation[];
+  private operationTail: Promise<void> = Promise.resolve();
   private operators: RoutingOperator[];
   private queues: RoutingQueue[];
   private rescueReportRows: RescueReportRow[];
@@ -122,6 +123,10 @@ export class RoutingService {
   }
 
   async fetchWorkload(filters: WorkloadFilters = {}, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.fetchWorkloadUnlocked(filters, context));
+  }
+
+  private async fetchWorkloadUnlocked(filters: WorkloadFilters = {}, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
       return tenantContextRequiredEnvelope("fetchWorkload");
@@ -181,6 +186,10 @@ export class RoutingService {
   }
 
   async createAssignment(payload: AssignmentPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.createAssignmentUnlocked(payload, context));
+  }
+
+  private async createAssignmentUnlocked(payload: AssignmentPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
       return tenantContextRequiredEnvelope("createAssignment");
@@ -256,7 +265,8 @@ export class RoutingService {
     const operatorLimit = capacity?.chatLimit ?? operator.limit;
     const availableCapacity = Math.max(0, operatorLimit - operator.chats);
 
-    if (availableCapacity <= 0) {
+    const overrideApplied = availableCapacity <= 0 && Boolean(payload.overrideLimit) && Boolean(capacity?.overrideAllowed);
+    if (availableCapacity <= 0 && !overrideApplied) {
       return deniedEnvelope("createAssignment", "operator_limit_exceeded", "Operator chat limit has been reached.", {
         availableCapacity,
         guard: "operator_channel_limit",
@@ -341,12 +351,17 @@ export class RoutingService {
         conversation: clone(conversation),
         guard: "operator_channel_limit",
         queueJob: assignmentJob,
-        realtimeEvent: assignmentRealtimeEvent
+        realtimeEvent: assignmentRealtimeEvent,
+        overrideApplied
       }
     });
   }
 
   async simulateAssignment(payload: AssignmentSimulationPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.simulateAssignmentUnlocked(payload, context));
+  }
+
+  private async simulateAssignmentUnlocked(payload: AssignmentSimulationPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
       return tenantContextRequiredEnvelope("simulateAssignment");
@@ -378,6 +393,10 @@ export class RoutingService {
   }
 
   async autoAssignConversation(conversationId: string, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.autoAssignConversationUnlocked(conversationId, context));
+  }
+
+  private async autoAssignConversationUnlocked(conversationId: string, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) return tenantContextRequiredEnvelope("autoAssignConversation");
     const conversation = await this.hydrateCanonicalRoutingState(tenantId, conversationId);
@@ -430,7 +449,7 @@ export class RoutingService {
         }
       });
     }
-    return this.createAssignment({
+    return this.createAssignmentUnlocked({
       action: "assign",
       conversationId,
       reason: "Automatic least-loaded queue assignment",
@@ -439,6 +458,10 @@ export class RoutingService {
   }
 
   async previewRedistribution(payload: RedistributionPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.previewRedistributionUnlocked(payload, context));
+  }
+
+  private async previewRedistributionUnlocked(payload: RedistributionPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
       return tenantContextRequiredEnvelope("previewRedistribution");
@@ -468,6 +491,10 @@ export class RoutingService {
   }
 
   async commitRedistribution(payload: RedistributionPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.commitRedistributionUnlocked(payload, context));
+  }
+
+  private async commitRedistributionUnlocked(payload: RedistributionPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
       return tenantContextRequiredEnvelope("commitRedistribution");
@@ -642,6 +669,10 @@ export class RoutingService {
   }
 
   async pauseSla(payload: SlaPausePayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.pauseSlaUnlocked(payload, context));
+  }
+
+  private async pauseSlaUnlocked(payload: SlaPausePayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
       return tenantContextRequiredEnvelope("pauseSla");
@@ -723,6 +754,10 @@ export class RoutingService {
   }
 
   async startRescue(payload: RescueStartPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.startRescueUnlocked(payload, context));
+  }
+
+  private async startRescueUnlocked(payload: RescueStartPayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
       return tenantContextRequiredEnvelope("startRescue");
@@ -826,6 +861,10 @@ export class RoutingService {
   }
 
   async resolveRescue(payload: RescueResolvePayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.resolveRescueUnlocked(payload, context));
+  }
+
+  private async resolveRescueUnlocked(payload: RescueResolvePayload, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
       return tenantContextRequiredEnvelope("resolveRescue");
@@ -946,6 +985,10 @@ export class RoutingService {
   }
 
   async fetchRescueReport(filters: RescueReportFilters = {}, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.withRoutingState(() => this.fetchRescueReportUnlocked(filters, context));
+  }
+
+  private async fetchRescueReportUnlocked(filters: RescueReportFilters = {}, context: RoutingRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = requiredTenantId(context);
     if (!tenantId) {
       return tenantContextRequiredEnvelope("fetchRescueReport");
@@ -1343,6 +1386,25 @@ export class RoutingService {
 
   private rescueReportRowBelongsToTenant(row: RescueReportRow, tenantId: string): boolean {
     return row.tenantId === tenantId;
+  }
+
+  private async withRoutingState<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.operationTail;
+    let release!: () => void;
+    this.operationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      const state = await this.routingRepository.hydrateStateSnapshot();
+      this.conversations = clone(state.conversations);
+      this.operators = clone(state.operators);
+      this.queues = clone(state.queues);
+      this.rescueReportRows = clone(state.rescueReportRows);
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private async persistState(input: {

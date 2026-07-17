@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { AutomationRepository, createEmptyAutomationState } from "../apps/api-gateway/src/automation/automation.repository.ts";
 import { BotRuntimeService } from "../apps/api-gateway/src/automation/bot-runtime.service.ts";
+import { runBotRuntimeRetryOnce } from "../apps/api-gateway/src/automation/bot-runtime-retry.worker.ts";
 import type { BotScenario } from "../apps/api-gateway/src/automation/automation.types.ts";
 
 function repository(nodes: BotScenario["flowNodes"], edges: BotScenario["flowEdges"]) {
@@ -79,6 +80,33 @@ describe("durable bot runtime core", () => {
     now = new Date("2026-07-11T11:00:02.000Z");
     const second = await runtime.retryInboundEvent(event("evt-retry"));
     assert.equal(second.instance.status, "dead_lettered");
+    assert.equal(repo.readState().botRuntimeSteps.length, 2);
+  });
+
+  it("claims and executes a due retry through the runtime worker", async () => {
+    const repo = repository([{ id: "start", type: "condition" }, { id: "hook", type: "webhook", config: { url: "https://retry.example.test" } }], [{ from: "start", to: "hook" }]);
+    const failed = await new BotRuntimeService(repo, {
+      fetch: async () => new Response("temporary", { status: 503 }),
+      maxAttempts: 3,
+      now: () => new Date("2026-07-11T11:00:00.000Z"),
+      webhookAllowlist: ["retry.example.test"]
+    }).handleInboundEvent(event("evt-worker-retry"));
+    assert.equal(failed.instance.status, "retry_scheduled");
+
+    const runtime = new BotRuntimeService(repo, {
+      fetch: async () => new Response("ok", { status: 200 }),
+      maxAttempts: 3,
+      now: () => new Date("2026-07-11T11:00:02.000Z"),
+      webhookAllowlist: ["retry.example.test"]
+    });
+    const result = await runBotRuntimeRetryOnce({
+      automationRepository: repo,
+      now: "2026-07-11T11:00:02.000Z",
+      runtime
+    });
+
+    assert.deepEqual(result, { claimed: 1, deadLettered: 0, failed: 0, retried: 1, scanned: 1, skipped: 0 });
+    assert.notEqual((await repo.findBotRuntimeInstanceAsync("tenant-1", "conv-1"))?.status, "retry_scheduled");
     assert.equal(repo.readState().botRuntimeSteps.length, 2);
   });
 

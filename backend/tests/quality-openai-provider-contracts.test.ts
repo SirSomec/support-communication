@@ -151,6 +151,31 @@ describe("quality service AI consent and fallback", () => {
     assert.deepEqual(lifecycle?.data.usage, { inputTokens: 41, outputTokens: 17 });
   });
 
+  it("replays a durable score snapshot without a second provider call", async () => {
+    let calls = 0;
+    const repository = QualityRepository.inMemory();
+    const service = new QualityService(repository, configuredProvider(async () => {
+      calls += 1;
+      return jsonResponse(validProviderPayload());
+    }));
+    const request = {
+      aiConsent: true,
+      conversationId: "conversation-ai-replay",
+      idempotencyKey: "score-replay-001",
+      text: "I understand and will check this now."
+    };
+
+    const first = await service.scoreDraftResponse(request, { tenantId: "tenant-quality-ai" });
+    const replay = await service.scoreDraftResponse(request, { tenantId: "tenant-quality-ai" });
+
+    assert.equal(first.status, "ok");
+    assert.equal(replay.status, "ok");
+    assert.equal(calls, 1);
+    assert.deepEqual(replay.data, first.data);
+    assert.equal(replay.meta.idempotentReplay, true);
+    assert.equal(repository.listAiScoringAudits({ tenantId: "tenant-quality-ai" }).length, 1);
+  });
+
   it("falls back safely when the provider response is invalid", async () => {
     const repository = QualityRepository.inMemory();
     const service = new QualityService(repository, configuredProvider(async () => jsonResponse({ choices: [] })));

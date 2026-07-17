@@ -40,7 +40,7 @@ export interface ManualQaReviewFilter {
   tenantId?: string;
 }
 
-export type AiScoringAuditStatus = "failed" | "ok";
+export type AiScoringAuditStatus = "failed" | "ok" | "pending";
 
 export interface AiScoringAuditRecord {
   auditId: string;
@@ -49,10 +49,18 @@ export interface AiScoringAuditRecord {
   providerId: string;
   providerResultId: string | null;
   queue: string;
+  requestFingerprint?: string | null;
+  resultSnapshot?: Record<string, unknown> | null;
   score: number | null;
   status: AiScoringAuditStatus;
   tenantId: string;
   traceId: string;
+  updatedAt?: string;
+}
+
+export interface AiScoringAuditClaimResult {
+  claimed: boolean;
+  record: AiScoringAuditRecord;
 }
 
 export interface AiScoringAuditFilter {
@@ -101,6 +109,8 @@ export interface QualityState {
 type MaybePromise<T> = T | Promise<T>;
 
 export interface QualityRepositoryPort {
+  claimAiScoringAudit(record: AiScoringAuditRecord): MaybePromise<AiScoringAuditClaimResult>;
+  completeAiScoringAudit(record: AiScoringAuditRecord, lifecycleEvent?: ConversationLifecycleEvent): MaybePromise<AiScoringAuditRecord>;
   listAiSuggestionDecisions(filter?: AiSuggestionDecisionFilter): MaybePromise<AiSuggestionDecisionRecord[]>;
   listAiScoringAudits(filter?: AiScoringAuditFilter): MaybePromise<AiScoringAuditRecord[]>;
   listManualQaReviews(filter?: ManualQaReviewFilter): MaybePromise<ManualQaReviewRecord[]>;
@@ -123,6 +133,7 @@ export interface PrismaQualityClient {
     create(input: { data: PrismaAiScoringAuditCreateInput }): Promise<PrismaAiScoringAuditRow>;
     findMany(input: PrismaAiScoringAuditFindManyInput): Promise<PrismaAiScoringAuditRow[]>;
     findUnique(input: PrismaAiScoringAuditFindUniqueInput): Promise<PrismaAiScoringAuditRow | null>;
+    update(input: { data: PrismaAiScoringAuditCreateInput; where: PrismaAiScoringAuditFindUniqueInput["where"] }): Promise<PrismaAiScoringAuditRow>;
   };
   manualQaReview: {
     create(input: { data: PrismaManualQaReviewCreateInput }): Promise<PrismaManualQaReviewRow>;
@@ -176,10 +187,13 @@ interface PrismaAiScoringAuditCreateInput {
   providerId: string;
   providerResultId: string | null;
   queue: string;
+  requestFingerprint: string | null;
+  resultSnapshot: Record<string, unknown> | null;
   score: number | null;
   status: AiScoringAuditStatus;
   tenantId: string;
   traceId: string;
+  updatedAt: Date;
 }
 
 interface PrismaAiScoringAuditFindManyInput {
@@ -395,6 +409,61 @@ export class QualityRepository {
     return clone(saved);
   }
 
+  claimAiScoringAudit(record: AiScoringAuditRecord): AiScoringAuditClaimResult {
+    const persisted = normalizeAiScoringAudit({ ...record, status: "pending" });
+    let claimed = false;
+    let saved = persisted;
+
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const existing = current.aiScoringAudits.find((audit) =>
+        audit.tenantId === persisted.tenantId && audit.auditId === persisted.auditId
+      );
+      if (existing) {
+        saved = existing;
+        return current;
+      }
+      claimed = true;
+      return { ...current, aiScoringAudits: [...current.aiScoringAudits, persisted] };
+    });
+
+    return { claimed, record: clone(saved) };
+  }
+
+  completeAiScoringAudit(record: AiScoringAuditRecord, lifecycleEvent?: ConversationLifecycleEvent): AiScoringAuditRecord {
+    const persisted = normalizeAiScoringAudit(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
+    let saved = persisted;
+
+    this.store.update((state) => {
+      const current = normalizeState(state);
+      const index = current.aiScoringAudits.findIndex((audit) =>
+        audit.tenantId === persisted.tenantId && audit.auditId === persisted.auditId
+      );
+      if (index >= 0) {
+        const existing = current.aiScoringAudits[index];
+        if (existing.requestFingerprint !== persisted.requestFingerprint || existing.resultSnapshot) {
+          saved = existing;
+          return current;
+        }
+        const aiScoringAudits = [...current.aiScoringAudits];
+        aiScoringAudits[index] = persisted;
+        return {
+          ...current,
+          aiScoringAudits,
+          lifecycleEvents: appendLifecycleEvent(current.lifecycleEvents ?? [], event)
+        };
+      }
+      return {
+        ...current,
+        aiScoringAudits: [...current.aiScoringAudits, persisted],
+        lifecycleEvents: appendLifecycleEvent(current.lifecycleEvents ?? [], event)
+      };
+    });
+
+    return clone(saved);
+  }
+
   saveAiScoringAudit(record: AiScoringAuditRecord, lifecycleEvent?: ConversationLifecycleEvent): AiScoringAuditRecord {
     const persisted = normalizeAiScoringAudit(record);
     const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
@@ -579,6 +648,51 @@ export class PrismaQualityRepository {
     return clone(saved);
   }
 
+  async claimAiScoringAudit(record: AiScoringAuditRecord): Promise<AiScoringAuditClaimResult> {
+    const persisted = normalizeAiScoringAudit({ ...record, status: "pending" });
+    const where = { tenantId_auditId: { auditId: persisted.auditId, tenantId: persisted.tenantId } };
+    const existing = await this.client.aiScoringAudit.findUnique({ where });
+    if (existing) {
+      return { claimed: false, record: toAiScoringAuditRecord(existing) };
+    }
+
+    try {
+      const row = await this.client.aiScoringAudit.create({ data: toPrismaAiScoringAuditCreateInput(persisted) });
+      const saved = toAiScoringAuditRecord(row);
+      this.fallback.claimAiScoringAudit(saved);
+      return { claimed: true, record: clone(saved) };
+    } catch (error) {
+      const concurrent = await this.client.aiScoringAudit.findUnique({ where });
+      if (!concurrent) throw error;
+      return { claimed: false, record: toAiScoringAuditRecord(concurrent) };
+    }
+  }
+
+  async completeAiScoringAudit(record: AiScoringAuditRecord, lifecycleEvent?: ConversationLifecycleEvent): Promise<AiScoringAuditRecord> {
+    const persisted = normalizeAiScoringAudit(record);
+    const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
+    const where = { tenantId_auditId: { auditId: persisted.auditId, tenantId: persisted.tenantId } };
+    const existingRow = await this.client.aiScoringAudit.findUnique({ where });
+    if (existingRow) {
+      const existing = toAiScoringAuditRecord(existingRow);
+      if (existing.requestFingerprint !== persisted.requestFingerprint || existing.resultSnapshot) {
+        return clone(existing);
+      }
+    }
+
+    const row = await updatePrismaQualityRecord(
+      this.client,
+      (transaction) => transaction.aiScoringAudit.update({
+        data: toPrismaAiScoringAuditCreateInput(persisted),
+        where
+      }),
+      event
+    );
+    const saved = toAiScoringAuditRecord(row);
+    this.fallback.completeAiScoringAudit(saved, event);
+    return clone(saved);
+  }
+
   async saveAiScoringAudit(record: AiScoringAuditRecord, lifecycleEvent?: ConversationLifecycleEvent): Promise<AiScoringAuditRecord> {
     const persisted = normalizeAiScoringAudit(record);
     const event = normalizeLifecycleEvent(lifecycleEvent, persisted);
@@ -648,6 +762,21 @@ async function createPrismaQualityRecord<TRow>(
 
   return client.$transaction(async (transaction) => {
     const row = await create(transaction);
+    await transaction.conversationLifecycleEvent.create({
+      data: toPrismaLifecycleEventCreateInput(lifecycleEvent)
+    });
+    return row;
+  });
+}
+
+async function updatePrismaQualityRecord<TRow>(
+  client: PrismaQualityClient,
+  update: (transaction: PrismaQualityTransactionalClient) => Promise<TRow>,
+  lifecycleEvent: ConversationLifecycleEvent | undefined
+): Promise<TRow> {
+  if (!lifecycleEvent) return update(client);
+  return client.$transaction(async (transaction) => {
+    const row = await update(transaction);
     await transaction.conversationLifecycleEvent.create({
       data: toPrismaLifecycleEventCreateInput(lifecycleEvent)
     });
@@ -778,10 +907,13 @@ function toPrismaAiScoringAuditCreateInput(record: AiScoringAuditRecord): Prisma
     providerId: persisted.providerId,
     providerResultId: persisted.providerResultId,
     queue: persisted.queue,
+    requestFingerprint: persisted.requestFingerprint ?? null,
+    resultSnapshot: persisted.resultSnapshot ? clone(persisted.resultSnapshot) : null,
     score: persisted.score,
     status: persisted.status,
     tenantId: persisted.tenantId,
-    traceId: persisted.traceId
+    traceId: persisted.traceId,
+    updatedAt: new Date(persisted.updatedAt ?? persisted.createdAt)
   };
 }
 
@@ -810,10 +942,13 @@ function toAiScoringAuditRecord(row: PrismaAiScoringAuditRow): AiScoringAuditRec
     providerId: row.providerId,
     providerResultId: row.providerResultId,
     queue: row.queue,
+    requestFingerprint: row.requestFingerprint,
+    resultSnapshot: row.resultSnapshot,
     score: row.score,
     status: row.status,
     tenantId: row.tenantId,
-    traceId: row.traceId
+    traceId: row.traceId,
+    updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt)
   });
 }
 
@@ -901,10 +1036,15 @@ function normalizeAiScoringAudit(record: AiScoringAuditRecord): AiScoringAuditRe
     providerId: requireString(record.providerId),
     providerResultId: nullableString(record.providerResultId),
     queue: requireString(record.queue),
+    requestFingerprint: nullableString(record.requestFingerprint ?? null),
+    resultSnapshot: record.resultSnapshot && typeof record.resultSnapshot === "object" && !Array.isArray(record.resultSnapshot)
+      ? clone(record.resultSnapshot)
+      : null,
     score: normalizeNullableScore(record.score),
-    status: record.status === "failed" ? "failed" : "ok",
+    status: record.status === "failed" || record.status === "pending" ? record.status : "ok",
     tenantId: requireString(record.tenantId),
-    traceId: requireString(record.traceId)
+    traceId: requireString(record.traceId),
+    updatedAt: requireString(record.updatedAt ?? record.createdAt)
   };
 }
 

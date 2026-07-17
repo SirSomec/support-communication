@@ -23,22 +23,22 @@ export const knowledgeService = {
   },
 
   async createSource(payload = {}) { return apiRequest("/knowledge-sources", { body: payload, method: "POST", operation: "createKnowledgeSource", service: SERVICE }); },
-  async refreshSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/refresh`, { method: "POST", operation: "refreshKnowledgeSource", service: SERVICE }); },
-  async refreshDocumentSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/refresh-document`, { method: "POST", operation: "refreshKnowledgeSourceDocument", service: SERVICE }); },
-  async approveSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/approve`, { method: "POST", operation: "approveKnowledgeSource", service: SERVICE }); },
-  async updateSource(sourceId, payload = {}) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}`, { body: payload, method: "PATCH", operation: "updateKnowledgeSource", service: SERVICE }); },
-  async disableSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/disable`, { method: "POST", operation: "disableKnowledgeSource", service: SERVICE }); },
-  async enableSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/enable`, { method: "POST", operation: "enableKnowledgeSource", service: SERVICE }); },
-  async archiveSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/archive`, { method: "POST", operation: "archiveKnowledgeSource", service: SERVICE }); },
-  async deleteSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}`, { method: "DELETE", operation: "removeKnowledgeSource", service: SERVICE }); },
-  async previewSource(sourceId) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/preview`, { operation: "previewKnowledgeSource", service: SERVICE }); },
-  async enqueueSourceAttachment(sourceId, payload = {}) { return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}/attachments`, { body: payload, method: "POST", operation: "enqueueKnowledgeAttachmentIngestion", service: SERVICE }); },
+  async refreshSource(sourceId) { return sourceRequest(sourceId, "refresh", "refreshKnowledgeSource", { method: "POST" }); },
+  async refreshDocumentSource(sourceId) { return sourceRequest(sourceId, "refresh-document", "refreshKnowledgeSourceDocument", { method: "POST" }); },
+  async approveSource(sourceId) { return sourceRequest(sourceId, "approve", "approveKnowledgeSource", { method: "POST" }); },
+  async updateSource(sourceId, payload = {}) { return sourceRequest(sourceId, "", "updateKnowledgeSource", { body: payload, method: "PATCH" }); },
+  async disableSource(sourceId) { return sourceRequest(sourceId, "disable", "disableKnowledgeSource", { method: "POST" }); },
+  async enableSource(sourceId) { return sourceRequest(sourceId, "enable", "enableKnowledgeSource", { method: "POST" }); },
+  async archiveSource(sourceId) { return sourceRequest(sourceId, "archive", "archiveKnowledgeSource", { method: "POST" }); },
+  async deleteSource(sourceId) { return sourceRequest(sourceId, "", "removeKnowledgeSource", { method: "DELETE" }); },
+  async previewSource(sourceId) { return sourceRequest(sourceId, "preview", "previewKnowledgeSource"); },
+  async enqueueSourceAttachment(sourceId, payload = {}) { return sourceRequest(sourceId, "attachments", "enqueueKnowledgeAttachmentIngestion", { body: payload, method: "POST" }); },
   async searchSources(payload = {}) { return apiRequest("/knowledge-retrieval/query", { body: payload, method: "POST", operation: "retrieveKnowledgePreview", service: SERVICE }); },
   async fetchMcpConnectors() { return apiRequest("/knowledge-mcp-connectors", { operation: "fetchMcpConnectors", service: SERVICE }); },
   async requestMcpConnector(payload = {}) { return apiRequest("/knowledge-mcp-connectors/requests", { body: payload, method: "POST", operation: "requestMcpConnector", service: SERVICE }); },
   async fetchUnansweredQuestions() { return apiRequest("/knowledge-unanswered-questions", { operation: "fetchUnansweredQuestions", service: SERVICE }); },
-  async dismissUnansweredQuestion(questionId) { return apiRequest(`/knowledge-unanswered-questions/${encodeURIComponent(questionId)}/dismiss`, { method: "POST", operation: "dismissUnansweredQuestion", service: SERVICE }); },
-  async resolveUnansweredQuestion(questionId, payload = {}) { return apiRequest(`/knowledge-unanswered-questions/${encodeURIComponent(questionId)}/resolve`, { body: payload, method: "POST", operation: "resolveUnansweredQuestion", service: SERVICE }); },
+  async dismissUnansweredQuestion(questionId) { return questionRequest(questionId, "dismiss", "dismissUnansweredQuestion", { method: "POST" }); },
+  async resolveUnansweredQuestion(questionId, payload = {}) { return questionRequest(questionId, "resolve", "resolveUnansweredQuestion", { body: payload, method: "POST" }); },
 
   async fetchArticle(articleId) {
     if (!hasRouteId(articleId)) {
@@ -161,6 +161,17 @@ function postArticleWorkflow(articleId, route, operation, payload) {
     operation,
     service: SERVICE
   });
+}
+
+function sourceRequest(sourceId, route, operation, options = {}) {
+  if (!hasRouteId(sourceId)) return missingIdEnvelope(operation, "Knowledge source id is required.");
+  const suffix = route ? `/${route}` : "";
+  return apiRequest(`/knowledge-sources/${encodeURIComponent(sourceId)}${suffix}`, { ...options, operation, service: SERVICE });
+}
+
+function questionRequest(questionId, route, operation, options = {}) {
+  if (!hasRouteId(questionId)) return missingIdEnvelope(operation, "Unanswered question id is required.");
+  return apiRequest(`/knowledge-unanswered-questions/${encodeURIComponent(questionId)}/${route}`, { ...options, operation, service: SERVICE });
 }
 
 function hasRouteId(value) {

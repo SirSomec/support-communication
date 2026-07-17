@@ -178,6 +178,7 @@ function dialogContextFromRequest(request: TenantOperatorRequest & ServiceAdminR
   actorId?: string;
   actorName?: string;
   actorType?: "operator" | "service_admin";
+  canViewSensitive?: boolean;
   tenantId?: string;
 } {
   const tenantId = request.tenantOperatorContext?.tenantId ?? request.serviceAdminContext?.currentTenantId;
@@ -186,6 +187,7 @@ function dialogContextFromRequest(request: TenantOperatorRequest & ServiceAdminR
       actorId: request.tenantOperatorContext.userId,
       actorName: request.tenantOperatorContext.userId,
       actorType: "operator",
+      canViewSensitive: canViewSensitiveFields(request.tenantOperatorContext.permissions),
       tenantId
     };
   }
@@ -194,8 +196,13 @@ function dialogContextFromRequest(request: TenantOperatorRequest & ServiceAdminR
       actorId: request.serviceAdminContext.actor.id,
       actorName: request.serviceAdminContext.actor.name,
       actorType: "service_admin",
+      canViewSensitive: canViewSensitiveFields(request.serviceAdminContext.permissions),
       tenantId
     };
   }
   return {};
+}
+
+function canViewSensitiveFields(permissions: string[]): boolean {
+  return permissions.includes("*") || permissions.includes("dialogs.manage") || permissions.includes("clients.merge");
 }

@@ -12,7 +12,7 @@ import {
 const MESSAGE_TIME_TICK_MS = 1000;
 const APPEAL_HIGHLIGHT_MS = 2200;
 
-export function AuditTimeline({ appealScrollTarget, onSaveTemplate, timeline = [] }) {
+export function AuditTimeline({ appealScrollTarget, conversationId, onSaveTemplate, timeline = [] }) {
   const transcriptRef = useRef(null);
   const pinnedToBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
@@ -26,6 +26,14 @@ export function AuditTimeline({ appealScrollTarget, onSaveTemplate, timeline = [
     const timer = window.setInterval(() => setTimeNow(new Date()), MESSAGE_TIME_TICK_MS);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    pinnedToBottomRef.current = true;
+    userScrollIntentRef.current = false;
+    setHighlightedAppealId("");
+    window.clearTimeout(highlightTimerRef.current);
+    scrollTranscriptToBottom(transcriptRef.current);
+  }, [conversationId]);
 
   useEffect(() => {
     if (pinnedToBottomRef.current) {

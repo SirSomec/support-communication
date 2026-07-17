@@ -113,10 +113,16 @@ function App() {
     },
     onDenied: setToast
   });
+  const handleTenantLogout = useCallback(async () => {
+    const response = await tenantSession.logout();
+    routeActions.openAuth();
+    if (response.status !== "ok") {
+      setToast("Локальная сессия завершена, но сервер не подтвердил отзыв токена.");
+    }
+  }, [routeActions, setToast, tenantSession]);
   const {
     attachments,
     clearAttachments,
-    completeAttachment: handleCompleteAttachment,
     handleAttachFiles,
     hasAttachments,
     removeAttachment: handleRemoveAttachment,
@@ -489,7 +495,7 @@ function App() {
         <TopBar
           access={access}
           activeSection={section}
-          onOpenAuth={routeActions.openAuth}
+          onLogout={handleTenantLogout}
           onOpenLanding={routeActions.openLanding}
           getNotificationActionAvailability={getNotificationActionAvailability}
           onNavigateNotificationAction={handleNotificationNavigation}
@@ -571,7 +577,6 @@ function App() {
               isClosed={isClosed}
               onAiSuggestionAction={handleAiSuggestionAction}
               onAttachFiles={handleAttachFiles}
-              onAttachmentComplete={handleCompleteAttachment}
               onAttachmentRemove={handleRemoveAttachment}
               onAttachmentRetry={handleRetryAttachment}
               onCloseDialog={handleClose}

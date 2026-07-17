@@ -9,11 +9,13 @@ import { configureAutomationRepository } from "./automation/bootstrap.js";
 import { configureBillingRepository } from "./billing/bootstrap.js";
 import { configureConversationRealtimeFanout, configureConversationRepository } from "./conversation/bootstrap.js";
 import { ConversationService } from "./conversation/conversation.service.js";
+import { startRealtimeRetentionWorker } from "./conversation/realtime-retention.worker.js";
 import { installRealtimeWebSocketReplay } from "./conversation/realtime.websocket.js";
 import { EnvelopeHttpExceptionFilter } from "./http-exception.filter.js";
 import { configureIdentityRepository } from "./identity/bootstrap.js";
 import { configureIntegrationRepository } from "./integrations/bootstrap.js";
 import { configureNotificationRepository } from "./notifications/bootstrap.js";
+import { NotificationService } from "./notifications/notification.service.js";
 import { setupOpenApi } from "./openapi.js";
 import { configureOpenChannelRepository } from "./integrations/open-channel/bootstrap.js";
 import { startOpenChannelRuntime } from "./integrations/open-channel/open-channel-runtime.js";
@@ -41,7 +43,7 @@ export async function bootstrap(): Promise<void> {
   configureAutomationRepository(config, { seed: localSeeds.automation });
   configureIdentityRepository(config, { seed: localSeeds.identity });
   configureBillingRepository(config, { seed: localSeeds.billing });
-  configureConversationRepository(config, { seed: localSeeds.conversation });
+  const conversationRepository = configureConversationRepository(config, { seed: localSeeds.conversation });
   configureConversationRealtimeFanout(config);
   configureWorkspaceRepository(config, { seed: localSeeds.workspace });
   const routingRepository = configureRoutingRepository(config, { seed: localSeeds.routing });
@@ -50,6 +52,7 @@ export async function bootstrap(): Promise<void> {
   configureIntegrationRepository(config, { seed: localSeeds.integrations });
   configureOpenChannelRepository(config);
   configureNotificationRepository(config);
+  NotificationService.configureRealtimeFanoutFromEnv(process.env);
   configurePlatformRepository(config, { seed: localSeeds.platform });
   configureOperatorPresenceRepository(config);
   OperatorPresenceService.configureRealtimeFanoutFromEnv(process.env);
@@ -72,12 +75,24 @@ export async function bootstrap(): Promise<void> {
   });
   await app.listen(config.PORT);
   startOpenChannelRuntime();
+  if (["staging", "production"].includes(config.NODE_ENV) && process.env.REALTIME_RETENTION_ENABLED !== "false") {
+    startRealtimeRetentionWorker({
+      intervalMs: positiveRuntimeNumber(process.env.REALTIME_RETENTION_INTERVAL_MS),
+      repository: conversationRepository,
+      retentionMs: positiveRuntimeNumber(process.env.REALTIME_RETENTION_MS)
+    });
+  }
 
   writeStructuredLog("info", "API Gateway started", {
     operation: "bootstrap",
     port: config.PORT,
     service: config.SERVICE_NAME
   });
+}
+
+function positiveRuntimeNumber(value: string | undefined): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

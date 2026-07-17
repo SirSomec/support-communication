@@ -310,12 +310,14 @@
   background: #f8fbff;
 }
 
+.screen-state-item.partial,
 .screen-state-item.warn,
 .screen-state-item.error {
   border-color: #fecaca;
   background: #fff7f7;
 }
 
+.screen-state-item.partial svg,
 .screen-state-item.warn svg,
 .screen-state-item.error svg {
   color: var(--red);

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { ConversationLifecycleEvent, ConversationRepository, RealtimeEvent } from "./conversation.repository.js";
 import type { ConversationRecord } from "./conversation.types.js";
 
@@ -132,7 +132,10 @@ export function recordClosedAppealHistory(conversation: ConversationRecord, clos
 
 export function buildFollowUpAppeal(closedConversation: ConversationRecord, anchorId: string): ConversationRecord {
   const isRepeatAppeal = detectRepeatAppeal(closedConversation);
-  const appealId = `${anchorId}_appeal_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const appealId = `${anchorId}_appeal_${createHash("sha256")
+    .update(`${closedConversation.tenantId}:${closedConversation.id}:follow-up`)
+    .digest("hex")
+    .slice(0, 12)}`;
   const baseTags = closedConversation.tags.filter((tag) => tag !== REPEAT_APPEAL_TAG);
 
   return ensureAppealAnchorTag({
@@ -224,7 +227,7 @@ async function findLatestAppealConversation(
 ): Promise<ConversationRecord | undefined> {
   const anchorTag = appealAnchorTag(anchorId);
   const direct = await repository.findConversation(anchorId);
-  const conversations = await repository.listConversations();
+  const conversations = await repository.listConversations({ tenantId, take: 100, messageTake: 200 });
   const matches = conversations
     .filter((conversation) => conversation.tenantId === tenantId)
     .filter((conversation) => conversation.id === anchorId || conversation.tags.includes(anchorTag))

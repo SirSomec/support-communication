@@ -22,7 +22,7 @@ const backendConfigSchema = z.object({
   LOCAL_DEVELOPMENT_SEED_ENABLED: z.enum(["true", "false"]).default("false"),
   MAIL_HOST: z.string().min(1).default("127.0.0.1"),
   MAIL_PORT: z.coerce.number().int().positive().default(1025),
-  NODE_ENV: z.enum(["development", "test", "staging", "production"]).default("development"),
+  NODE_ENV: z.enum(["development", "test", "staging", "production"]),
   NOTIFICATION_DELIVERY_INTERVAL_MS: z.string().min(1).optional(),
   NOTIFICATION_DELIVERY_LIMIT: z.string().min(1).optional(),
   NOTIFICATION_DELIVERY_MAX_ATTEMPTS: z.string().min(1).optional(),

@@ -572,11 +572,11 @@ export class NotificationService {
     }
 
     const created = await this.createNotification({
-      action: "РџСЂРѕРІРµСЂРёС‚СЊ critical route",
+      action: "Проверить critical route",
       category: "privileged_admin",
       detail: String(payload?.message ?? "Notification critical alert delivery route test.").trim() || "Notification critical alert delivery route test.",
-      history: `${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} В· critical alert route test`,
-      meta: "Notifications В· delivery test",
+      history: `${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} · critical alert route test`,
+      meta: "Notifications · delivery test",
       recipientUserId: context.userId ?? null,
       tenantId,
       title: "Critical alert test",

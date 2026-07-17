@@ -492,18 +492,6 @@ async function postJson(url, payload, headers = {}) {
   return parseEnvelope(response, url);
 }
 
-async function patchJson(url, payload, headers = {}) {
-  const response = await fetch(url, {
-    method: "PATCH",
-    headers: {
-      "content-type": "application/json",
-      ...headers
-    },
-    body: JSON.stringify(payload)
-  });
-  return parseEnvelope(response, url);
-}
-
 async function getJson(url, headers = {}) {
   const response = await fetch(url, {
     headers

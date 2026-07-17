@@ -40,8 +40,8 @@ export class TopicDirectoryService {
     this.topics = topics;
   }
 
-  async fetchTopics(filters: { query?: string; status?: string; tenantId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const tenantId = normalizeTenantId(filters.tenantId);
+  async fetchTopics(filters: { query?: string; status?: string }, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = requireTenantId(scope.tenantId);
     const query = String(filters.query ?? "").trim().toLowerCase();
     const status = String(filters.status ?? "all").trim().toLowerCase();
     const topics = Array.from(this.topics.values())
@@ -76,8 +76,8 @@ export class TopicDirectoryService {
     });
   }
 
-  async createTopic(payload: TopicMutationPayload = {}, options: { tenantId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const tenantId = normalizeTenantId(options.tenantId);
+  async createTopic(payload: TopicMutationPayload, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = requireTenantId(scope.tenantId);
     const groupName = String(payload.groupName ?? "").trim();
     const branchName = String(payload.branchName ?? "").trim();
     const name = String(payload.name ?? "").trim();
@@ -113,9 +113,10 @@ export class TopicDirectoryService {
     });
   }
 
-  async updateTopic(topicId: string, payload: TopicMutationPayload = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async updateTopic(topicId: string, payload: TopicMutationPayload, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = requireTenantId(scope.tenantId);
     const topic = this.topics.get(topicId);
-    if (!topic) {
+    if (!topic || topic.tenantId !== tenantId) {
       return notFoundEnvelope("updateTopic", topicId);
     }
 
@@ -145,17 +146,18 @@ export class TopicDirectoryService {
     });
   }
 
-  async archiveTopic(topicId: string, payload: { reason?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    return this.setArchiveState("archiveTopic", topicId, true, payload.reason ?? "Topic archived");
+  async archiveTopic(topicId: string, payload: { reason?: string }, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.setArchiveState("archiveTopic", topicId, true, payload.reason ?? "Topic archived", scope);
   }
 
-  async restoreTopic(topicId: string, payload: { reason?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    return this.setArchiveState("restoreTopic", topicId, false, payload.reason ?? "Topic restored");
+  async restoreTopic(topicId: string, payload: { reason?: string }, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.setArchiveState("restoreTopic", topicId, false, payload.reason ?? "Topic restored", scope);
   }
 
-  async fetchTopicUsage(topicId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async fetchTopicUsage(topicId: string, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = requireTenantId(scope.tenantId);
     const topic = this.topics.get(topicId);
-    if (!topic) {
+    if (!topic || topic.tenantId !== tenantId) {
       return notFoundEnvelope("fetchTopicUsage", topicId);
     }
 
@@ -174,9 +176,10 @@ export class TopicDirectoryService {
     });
   }
 
-  private async setArchiveState(operation: string, topicId: string, archived: boolean, reason: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+  private async setArchiveState(operation: string, topicId: string, archived: boolean, reason: string, scope: { tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = requireTenantId(scope.tenantId);
     const topic = this.topics.get(topicId);
-    if (!topic) {
+    if (!topic || topic.tenantId !== tenantId) {
       return notFoundEnvelope(operation, topicId);
     }
 
@@ -207,7 +210,13 @@ const seedTopics: TopicRecord[] = [
   topic("topic-product-mismatch", "Товар", "Качество", "Несоответствие", ["Telegram", "VK"], true, false, "Catalog", "admins", 80)
 ];
 
-const sharedTopicStore = new Map<string, TopicRecord>(seedTopics.map((item) => [item.id, cloneTopic(item)]));
+const sharedTopicStore = new Map<string, TopicRecord>([
+  ...seedTopics.map((item) => [item.id, cloneTopic(item)] as const),
+  ...seedTopics.map((item) => {
+    const tenantTopic = { ...cloneTopic(item), id: `${item.id}-tenant-volga`, tenantId: "tenant-volga" };
+    return [tenantTopic.id, tenantTopic] as const;
+  })
+]);
 
 function topic(id: string, groupName: string, branchName: string, name: string, channels: string[], required: boolean, archived: boolean, routingTarget: string, accessScope: string, sortOrder: number): TopicRecord {
   return {
@@ -314,8 +323,12 @@ function notFoundEnvelope(operation: string, topicId: string) {
   });
 }
 
-function normalizeTenantId(value: unknown): string {
-  return String(value ?? DEFAULT_TENANT_ID).trim() || DEFAULT_TENANT_ID;
+function requireTenantId(value: unknown): string {
+  const tenantId = String(value ?? "").trim();
+  if (!tenantId) {
+    throw new Error("topic_tenant_id_required");
+  }
+  return tenantId;
 }
 
 function normalizeChannels(values: unknown): string[] {

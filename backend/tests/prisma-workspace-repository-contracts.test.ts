@@ -586,8 +586,8 @@ describe("Prisma-backed workspace repository contracts", () => {
     assert.equal(saved.id, "tpl_prisma_delivery");
     assert.equal(refetched?.updated, "2026-06-29T10:30:00.000Z");
     assert.deepEqual(templates.map((item) => item.id), ["tpl_prisma_delivery"]);
-    assert.deepEqual(client.calls.templateRecordUpserts[0], {
-      create: {
+    assert.deepEqual(client.calls.templateRecordCreates[0], {
+      data: {
         auditId: "evt_template_prisma",
         channel: "SDK",
         id: "tpl_prisma_delivery",
@@ -599,22 +599,10 @@ describe("Prisma-backed workspace repository contracts", () => {
         usage: 4,
         version: 2,
         tenantId: "tenant-volga"
-      },
-      update: {
-        auditId: "evt_template_prisma",
-        channel: "SDK",
-        scope: "team",
-        text: "We are checking your delivery status.",
-        title: "Delivery status",
-        topic: "Delivery",
-        updatedAt: new Date("2026-06-29T10:30:00.000Z"),
-        usage: 4,
-        version: 2,
-        tenantId: "tenant-volga"
-      },
-      where: { id: "tpl_prisma_delivery" }
+      }
     });
     assert.deepEqual(client.calls.templateRecordFindUnique, [
+      { where: { id: "tpl_prisma_delivery" } },
       { where: { id: "tpl_prisma_delivery" } }
     ]);
     assert.deepEqual(client.calls.templateRecordFindMany, [
@@ -1068,10 +1056,10 @@ function createFakePrismaWorkspaceClient() {
     }>,
     templateRecordFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: { tenantId?: string } }>,
     templateRecordFindUnique: [] as Array<{ where: { id: string } }>,
-    templateRecordUpserts: [] as Array<{
-      create: FakeTemplateRecordCreateInput;
-      update: Omit<FakeTemplateRecordCreateInput, "id">;
-      where: { id: string };
+    templateRecordCreates: [] as Array<{ data: FakeTemplateRecordCreateInput }>,
+    templateRecordUpdateMany: [] as Array<{
+      data: Omit<FakeTemplateRecordCreateInput, "id">;
+      where: { id: string; tenantId: string };
     }>,
     knowledgeArticleFindMany: [] as Array<{ orderBy: { updatedAt: "desc" }; where?: { tenantId?: string } }>,
     knowledgeArticleFindUnique: [] as Array<{ where: { id: string } }>,
@@ -1266,6 +1254,16 @@ function createFakePrismaWorkspaceClient() {
       }
     },
     templateRecord: {
+      create: async (input: { data: FakeTemplateRecordCreateInput }) => {
+        calls.templateRecordCreates.push(input);
+        if (templateRecords.has(input.data.id)) {
+          const error = new Error("Unique constraint failed on template id") as Error & { code?: string };
+          error.code = "P2002";
+          throw error;
+        }
+        templateRecords.set(input.data.id, input.data);
+        return input.data;
+      },
       findUnique: async (input: { where: { id: string } }) => {
         calls.templateRecordFindUnique.push(input);
         return templateRecords.get(input.where.id) ?? null;
@@ -1276,20 +1274,18 @@ function createFakePrismaWorkspaceClient() {
           .filter((template) => !input.where?.tenantId || template.tenantId === input.where.tenantId)
           .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
       },
-      upsert: async (input: {
-        create: FakeTemplateRecordCreateInput;
-        update: Omit<FakeTemplateRecordCreateInput, "id">;
-        where: { id: string };
+      updateMany: async (input: {
+        data: Omit<FakeTemplateRecordCreateInput, "id">;
+        where: { id: string; tenantId: string };
       }) => {
-        calls.templateRecordUpserts.push(input);
-        const next = {
-          ...(templateRecords.get(input.where.id) ?? {}),
-          ...input.create,
-          ...input.update,
-          id: input.where.id
-        };
+        calls.templateRecordUpdateMany.push(input);
+        const existing = templateRecords.get(input.where.id);
+        if (!existing || existing.tenantId !== input.where.tenantId) {
+          return { count: 0 };
+        }
+        const next = { ...existing, ...input.data, id: input.where.id };
         templateRecords.set(input.where.id, next);
-        return next;
+        return { count: 1 };
       }
     },
     knowledgeArticle: {

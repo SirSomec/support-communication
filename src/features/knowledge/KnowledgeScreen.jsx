@@ -20,6 +20,7 @@ import {
 import { createScreenStateItems } from "../../app/screenState.js";
 import { uploadComposerAttachment } from "../../app/useComposerAttachments.js";
 import { buildSourceBotHints } from "./knowledgeSourceHints.js";
+import { collectKnowledgeLoadErrors } from "./knowledgeLoadModel.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
 import { automationService } from "../../services/automationService.js";
 import { ConfirmDialog, MetricTile, Modal, ProductScreen, SectionTitle, SegmentedControl, StatusBadge } from "../../ui.jsx";
@@ -81,16 +82,19 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
       knowledgeService.fetchMcpConnectors(),
       automationService.listBotAiFeedback()
     ]);
+    const loadErrors = collectKnowledgeLoadErrors({
+      articlesResponse,
+      feedbackResponse,
+      mcpResponse,
+      sourcesResponse,
+      unansweredResponse
+    });
     if (articlesResponse.status === "ok") {
       setArticles(normalizeList(articlesResponse.data?.articles ?? articlesResponse.data?.items));
-    } else {
-      setError(articlesResponse.error?.message ?? "Не удалось загрузить статьи.");
     }
     if (sourcesResponse.status === "ok") {
       setSources(normalizeList(sourcesResponse.data?.sources));
       setUsage(sourcesResponse.data?.usage && typeof sourcesResponse.data.usage === "object" ? sourcesResponse.data.usage : {});
-    } else {
-      setError((current) => current || sourcesResponse.error?.message || "Не удалось загрузить источники.");
     }
     if (unansweredResponse.status === "ok") {
       setQuestions(normalizeList(unansweredResponse.data?.questions));
@@ -101,6 +105,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
     if (feedbackResponse.status === "ok") {
       setFeedback(normalizeList(feedbackResponse.data?.feedback));
     }
+    setError(loadErrors.join(" "));
     setLoading(false);
   }
 

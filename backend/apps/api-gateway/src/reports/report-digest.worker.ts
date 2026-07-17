@@ -73,16 +73,18 @@ export async function claimDueScheduledDigestDescriptorsAsync(input: ScheduledDi
 
 export async function queueScheduledDigestExportJob(input: ScheduledDigestExportJobWorkerInput): Promise<ScheduledDigestExportJobWorkerResult> {
   const descriptor = await input.reportRepository.saveScheduledDigestDescriptorAsync(input.descriptor);
+  const exportWindow = scheduledDigestExportWindow(descriptor);
   const exportEnvelope = await input.reportService.requestReportExport({
     columns: SCHEDULED_DIGEST_EXPORT_COLUMNS,
     filters: {
       periodKey: descriptor.periodKey,
       scheduleId: descriptor.scheduleId,
       scheduledDigest: true,
+      snapshotAt: exportWindow.snapshotAt,
       tenantId: descriptor.tenantId
     },
     idempotencyKey: scheduledDigestExportIdempotencyKey(descriptor),
-    period: descriptor.periodKey,
+    period: exportWindow.period,
     reportType: descriptor.reportType
   }, { tenantId: descriptor.tenantId });
   const persistedDescriptor = await input.reportRepository.saveScheduledDigestDescriptorAsync({
@@ -112,6 +114,51 @@ export async function queueScheduledDigestExportJob(input: ScheduledDigestExport
     descriptor: persistedDescriptor,
     exportEnvelope
   };
+}
+
+function scheduledDigestExportWindow(descriptor: ScheduledDigestDescriptorRecord): {
+  period: "today" | "7days";
+  snapshotAt: string;
+} {
+  if (descriptor.reportType === "daily_support_digest") {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(descriptor.periodKey);
+    if (!match) {
+      throw new Error("scheduled_digest_period_key_invalid");
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const start = new Date(Date.UTC(year, month - 1, day));
+    if (start.getUTCFullYear() !== year || start.getUTCMonth() !== month - 1 || start.getUTCDate() !== day) {
+      throw new Error("scheduled_digest_period_key_invalid");
+    }
+    return {
+      period: "today",
+      snapshotAt: new Date(start.getTime() + 24 * 60 * 60 * 1_000 - 1).toISOString()
+    };
+  }
+
+  if (descriptor.reportType === "weekly_support_digest") {
+    const match = /^(\d{4})-W(\d{2})$/.exec(descriptor.periodKey);
+    if (!match) {
+      throw new Error("scheduled_digest_period_key_invalid");
+    }
+    const year = Number(match[1]);
+    const week = Number(match[2]);
+    const januaryFourth = new Date(Date.UTC(year, 0, 4));
+    const mondayOffset = (januaryFourth.getUTCDay() + 6) % 7;
+    const weekStart = new Date(januaryFourth.getTime() - mondayOffset * 24 * 60 * 60 * 1_000 + (week - 1) * 7 * 24 * 60 * 60 * 1_000);
+    const weekThursday = new Date(weekStart.getTime() + 3 * 24 * 60 * 60 * 1_000);
+    if (week < 1 || week > 53 || weekThursday.getUTCFullYear() !== year) {
+      throw new Error("scheduled_digest_period_key_invalid");
+    }
+    return {
+      period: "7days",
+      snapshotAt: new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1_000 - 1).toISOString()
+    };
+  }
+
+  throw new Error("scheduled_digest_report_type_invalid");
 }
 
 function scheduledDigestExportIdempotencyKey(descriptor: ScheduledDigestDescriptorRecord): string {

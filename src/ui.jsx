@@ -8,6 +8,7 @@ const stateIcons = {
   ok: CheckCircle2,
   empty: Inbox,
   error: AlertTriangle,
+  partial: AlertTriangle,
   warn: AlertTriangle
 };
 

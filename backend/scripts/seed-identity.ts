@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 import { createPrismaClient } from "@support-communication/database";
 import { tenantBillingStates } from "../apps/api-gateway/src/billing/seed-catalog.ts";
 import { serviceAdminSession, permissionRoles, tenantAuditEvents, tenants, tenantUsers } from "../apps/api-gateway/src/identity/seed-catalog.ts";
-import { hashPasswordCredential } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import {
+  hashPasswordCredential,
+  PASSWORD_CREDENTIAL_ALGORITHM
+} from "../apps/api-gateway/src/identity/identity.repository.ts";
 
 export interface IdentitySeedResult {
   billingTenantStates: number;
@@ -179,7 +182,7 @@ interface PrismaRbacRoleGrantSeedInput {
 }
 
 interface PrismaPasswordCredentialSeedInput {
-  algorithm: "sha256";
+  algorithm: typeof PASSWORD_CREDENTIAL_ALGORITHM;
   email: string;
   hash: string;
   subjectId: string;
@@ -396,7 +399,7 @@ export async function seedIdentityPrisma(client: PrismaIdentitySeedClient): Prom
 
 function defaultServiceAdminPasswordCredential(): PrismaPasswordCredentialSeedInput {
   return {
-    algorithm: "sha256",
+    algorithm: PASSWORD_CREDENTIAL_ALGORITHM,
     email: serviceAdminSession.adminEmail,
     hash: hashPasswordCredential("correct-password"),
     subjectId: serviceAdminSession.adminId,
@@ -407,7 +410,7 @@ function defaultServiceAdminPasswordCredential(): PrismaPasswordCredentialSeedIn
 
 function defaultTenantPasswordCredentials(): PrismaPasswordCredentialSeedInput[] {
   return tenantUsers.map((user) => ({
-    algorithm: "sha256",
+    algorithm: PASSWORD_CREDENTIAL_ALGORITHM,
     email: user.email,
     hash: hashPasswordCredential("correct-password"),
     subjectId: user.id,
@@ -567,6 +570,7 @@ function defaultRbacRoleGrantSeedInputs(): PrismaRbacRoleGrantSeedInput[] {
 }
 
 async function main(): Promise<void> {
+  assertLocalIdentitySeedAllowed(process.env);
   const client = createPrismaClient() as PrismaIdentitySeedClient;
 
   try {
@@ -574,6 +578,15 @@ async function main(): Promise<void> {
     process.stdout.write(`Seeded identity data: ${result.tenants} tenants, ${result.tenantUsers} tenant users, ${result.permissionRoles} permission roles, ${result.billingTenantStates} billing tenant states, ${result.tenantAuditEvents} tenant audit events.\n`);
   } finally {
     await client.$disconnect?.();
+  }
+}
+
+export function assertLocalIdentitySeedAllowed(source: NodeJS.ProcessEnv): void {
+  const nodeEnv = String(source.NODE_ENV ?? "").trim().toLowerCase();
+  const runtimeProfile = String(source.RUNTIME_PROFILE ?? "").trim().toLowerCase();
+  const seedEnabled = String(source.LOCAL_DEVELOPMENT_SEED_ENABLED ?? "").trim().toLowerCase() === "true";
+  if (!["development", "test"].includes(nodeEnv) || runtimeProfile !== "local" || !seedEnabled) {
+    throw new Error("prisma_seed_local_runtime_required");
   }
 }
 

@@ -148,7 +148,7 @@ export class QualityService {
     const conversationRepository = this.directorySources.conversationRepository ?? ConversationRepository.default();
     const identityRepository = this.directorySources.identityRepository ?? IdentityRepository.default();
     const [conversations, users] = await Promise.all([
-      Promise.resolve(conversationRepository.listConversations()).catch(() => []),
+      Promise.resolve(conversationRepository.listConversations({ tenantId, take: 500, messageTake: 1 })).catch(() => []),
       Promise.resolve(identityRepository.findTenantUsers(tenantId)).catch(() => [])
     ]);
 
@@ -175,6 +175,54 @@ export class QualityService {
 
     const traceId = qualityTraceId("scoreDraftResponse");
     const requestedAt = new Date().toISOString();
+    const idempotencyKey = payload.idempotencyKey?.trim();
+    const auditId = idempotencyKey ? stableQualityId("ai", tenantId, idempotencyKey) : makeAuditId("ai");
+    const conversationId = payload.conversationId?.trim() || "draft";
+    const requestFingerprint = idempotencyKey ? qualityDraftRequestFingerprint(payload, tenantId) : null;
+    if (idempotencyKey && requestFingerprint) {
+      let claim;
+      try {
+        claim = await this.qualityRepository.claimAiScoringAudit({
+          auditId,
+          conversationId,
+          createdAt: requestedAt,
+          providerId: "pending",
+          providerResultId: null,
+          queue: "quality-ai-scoring",
+          requestFingerprint,
+          resultSnapshot: null,
+          score: null,
+          status: "pending",
+          tenantId,
+          traceId,
+          updatedAt: requestedAt
+        });
+      } catch {
+        return errorEnvelope("scoreDraftResponse", traceId, "quality_scoring_persistence_failed", "Quality scoring request could not be claimed.", {
+          conversationId: payload.conversationId ?? null,
+          tenantId
+        });
+      }
+      if (!claim.claimed) {
+        if (claim.record.requestFingerprint !== requestFingerprint) {
+          return idempotencyConflictEnvelope("scoreDraftResponse", traceId, idempotencyKey, tenantId);
+        }
+        if (claim.record.resultSnapshot) {
+          return createEnvelope({
+            service: QUALITY_SERVICE,
+            operation: "scoreDraftResponse",
+            traceId,
+            meta: apiMeta({ conversationId: payload.conversationId ?? null, idempotentReplay: true, tenantId }),
+            data: clone(claim.record.resultSnapshot)
+          });
+        }
+        return errorEnvelope("scoreDraftResponse", traceId, "quality_scoring_in_progress", "Quality scoring is already in progress for this idempotency key.", {
+          idempotencyKey,
+          tenantId
+        });
+      }
+    }
+
     const providerRequest = createQualityScoringProviderRequest({
       ...payload,
       attachments: payload.attachments?.map((attachment) => ({ ...attachment })),
@@ -204,11 +252,8 @@ export class QualityService {
     const checks = providerResult.checks;
     const score = providerResult.score;
     const scoringMode = providerResult.providerId === this.rulesProvider.providerId ? "rules" : "ai";
-    const idempotencyKey = payload.idempotencyKey?.trim();
-    const auditId = idempotencyKey ? stableQualityId("ai", tenantId, idempotencyKey) : makeAuditId("ai");
     const providerResultId = providerResult.providerResultId;
     const createdAt = requestedAt;
-    const conversationId = payload.conversationId?.trim() || "draft";
     const lifecycleEvent = conversationId === "draft" ? undefined : createQualityLifecycleEvent({
       context,
       conversationId,
@@ -230,20 +275,49 @@ export class QualityService {
       tenantId,
       traceId
     });
+    const responseData = {
+      checks,
+      conversationId: payload.conversationId ?? null,
+      explainability: providerResult.explainability,
+      fallbackReason,
+      provider: {
+        model: providerResult.telemetry.model,
+        providerId: providerResult.providerId,
+        providerResultId
+      },
+      repairActions: providerResult.repairActions,
+      score,
+      scoringMode,
+      telemetry: {
+        auditId,
+        effectivenessKey: `quality_${payload.conversationId ?? "draft"}`,
+        model: providerResult.telemetry.model,
+        persisted: true,
+        providerResultId,
+        queue: "quality-ai-scoring",
+        usage: providerResult.telemetry.usage ?? null
+      }
+    };
     let persisted: AiScoringAuditRecord;
     try {
-      persisted = await this.qualityRepository.saveAiScoringAudit({
+      const record: AiScoringAuditRecord = {
         auditId,
         conversationId,
         createdAt,
         providerId: providerResult.providerId,
         providerResultId,
         queue: "quality-ai-scoring",
+        requestFingerprint,
+        resultSnapshot: responseData,
         score,
         status: providerResult.status,
         tenantId,
-        traceId
-      }, lifecycleEvent);
+        traceId,
+        updatedAt: new Date().toISOString()
+      };
+      persisted = idempotencyKey
+        ? await this.qualityRepository.completeAiScoringAudit(record, lifecycleEvent)
+        : await this.qualityRepository.saveAiScoringAudit(record, lifecycleEvent);
     } catch {
       return errorEnvelope("scoreDraftResponse", traceId, "quality_scoring_persistence_failed", "Quality scoring result could not be persisted.", {
         conversationId: payload.conversationId ?? null,
@@ -259,29 +333,7 @@ export class QualityService {
       operation: "scoreDraftResponse",
       traceId,
       meta: apiMeta({ conversationId: payload.conversationId ?? null, tenantId }),
-      data: {
-        checks,
-        conversationId: payload.conversationId ?? null,
-        explainability: providerResult.explainability,
-        fallbackReason,
-        provider: {
-          model: providerResult.telemetry.model,
-          providerId: providerResult.providerId,
-          providerResultId
-        },
-        repairActions: providerResult.repairActions,
-        score,
-        scoringMode,
-        telemetry: {
-          auditId: persisted.auditId,
-          effectivenessKey: `quality_${payload.conversationId ?? "draft"}`,
-          model: providerResult.telemetry.model,
-          persisted: true,
-          providerResultId: persisted.providerResultId,
-          queue: "quality-ai-scoring",
-          usage: providerResult.telemetry.usage ?? null
-        }
-      }
+      data: responseData
     });
   }
 
@@ -629,6 +681,14 @@ function sameManualQaRequest(persisted: ManualQaReviewRecord, request: ManualQaP
     && persisted.score === (request.score ?? null)
     && persisted.overrideReason === (request.overrideReason?.trim() || null)
     && canonicalJson(persisted.criteria) === canonicalJson(request.criteria ?? {});
+}
+
+function qualityDraftRequestFingerprint(payload: ScoreDraftPayload, tenantId: string): string {
+  const request = { ...payload };
+  delete request.idempotencyKey;
+  return createHash("sha256")
+    .update(canonicalJson({ ...request, tenantId }))
+    .digest("hex");
 }
 
 function canonicalJson(value: unknown): string {

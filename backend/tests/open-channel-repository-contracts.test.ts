@@ -22,6 +22,7 @@ interface MockTable {
   findMany(input?: { orderBy?: Record<string, "asc" | "desc">; take?: number; where?: Record<string, unknown> }): Record<string, unknown>[];
   rows: Map<string, Record<string, unknown>>;
   update(input: { data: Record<string, unknown>; where: Record<string, unknown> }): Record<string, unknown>;
+  updateMany(input: { data: Record<string, unknown>; where: Record<string, unknown> }): { count: number };
   upsert(input: { create: Record<string, unknown>; update: Record<string, unknown>; where: Record<string, unknown> }): Record<string, unknown>;
 }
 
@@ -34,6 +35,9 @@ function matchesWhere(row: Record<string, unknown>, where?: Record<string, unkno
   return Object.entries(where).every(([key, condition]) => {
     if (condition && typeof condition === "object" && "lte" in (condition as Record<string, unknown>)) {
       return String(row[key]) <= String((condition as { lte: unknown }).lte);
+    }
+    if (condition && typeof condition === "object" && "in" in (condition as Record<string, unknown>)) {
+      return (condition as { in: unknown[] }).in.includes(row[key]);
     }
     return row[key] === condition;
   });
@@ -67,6 +71,15 @@ function makeTable(idKey: string): MockTable {
       const next = { ...existing, ...clone(data) };
       rows.set(key, next);
       return clone(next);
+    },
+    updateMany({ where, data }) {
+      let count = 0;
+      for (const [key, row] of rows.entries()) {
+        if (!matchesWhere(row, where)) continue;
+        rows.set(key, { ...row, ...clone(data) });
+        count += 1;
+      }
+      return { count };
     },
     upsert({ where, create, update }) {
       const key = whereKey(where);
@@ -250,7 +263,9 @@ describe("open channel repository (Prisma branch)", () => {
     const claimed = await repository.claimDueDeliveries(isoAt(2));
     assert.equal(claimed.length, 1);
     assert.equal(claimed[0].attempts, 1);
+    assert.equal(claimed[0].status, "in_flight");
     assert.equal(claimed[0].updatedAt, isoAt(2));
+    assert.equal((await repository.claimDueDeliveries(isoAt(2))).length, 0);
 
     // Transient failure → pending with a backed-off nextAttemptAt.
     const retried = await repository.resolveDelivery(claimed[0].id, { error: "boom", status: "pending", statusCode: 503 });

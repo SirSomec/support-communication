@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { AlertTriangle, Clock3, Lock, ShieldCheck } from "lucide-react";
 import { formatRescueNextAction, formatRescueTimer, resolutionOutcomeLabels } from "../../app/dialogModel.js";
 
@@ -10,6 +10,7 @@ const transcriptModes = [
 
 export function TranscriptToolbar({
   activeRescue,
+  conversationId,
   isClosed,
   isRescueExpired,
   onCloseDialog,
@@ -19,6 +20,11 @@ export function TranscriptToolbar({
   transcriptMode
 }) {
   const [resolutionOutcome, setResolutionOutcome] = useState("resolved");
+
+  useEffect(() => {
+    setResolutionOutcome("resolved");
+  }, [conversationId]);
+
   return (
     <>
       <div className="transcript-toolbar" aria-label="Фильтр истории чата">

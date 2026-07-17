@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { IntegrationRepository } from "../apps/api-gateway/dist/integrations/integration.repository.js";
 import { IntegrationService } from "../apps/api-gateway/dist/integrations/integration.service.js";
-import { saveTelegramConnectionRecord } from "../apps/api-gateway/dist/integrations/telegram-channel-connection.js";
+import { saveTelegramConnectionRecord, validateTelegramBotToken } from "../apps/api-gateway/dist/integrations/telegram-channel-connection.js";
 
 const TENANT_ID = "tenant-pilot-001";
 
 describe("tenant telegram channel settings contracts", () => {
   it("saves bot token for tenant and returns masked connection with webhook instructions", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = repositoryWithTelegramChannel();
     const service = new IntegrationService(repository);
 
     const saved = await service.saveTelegramConnection(TENANT_ID, {
@@ -38,7 +38,7 @@ describe("tenant telegram channel settings contracts", () => {
   });
 
   it("rejects invalid bot token on save", async () => {
-    const service = new IntegrationService(IntegrationRepository.inMemory());
+    const service = new IntegrationService(repositoryWithTelegramChannel());
     const response = await service.saveTelegramConnection(TENANT_ID, {
       botToken: "not-a-token"
     });
@@ -47,10 +47,20 @@ describe("tenant telegram channel settings contracts", () => {
     assert.equal(response.error?.code, "telegram_bot_token_invalid");
   });
 
+  it("bounds Telegram getMe validation with an abort signal", async () => {
+    await assert.rejects(
+      validateTelegramBotToken("7123456789:AAH-test-token-value", (_input, init) => new Promise<never>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      }), "https://api.telegram.org", 5),
+      /telegram_bot_token_validation_timeout/
+    );
+  });
+
   it("disconnects tenant telegram connection", async () => {
-    const repository = IntegrationRepository.inMemory();
+    const repository = repositoryWithTelegramChannel();
     const record = await saveTelegramConnectionRecord({
       botToken: "7123456789:AAH-test-token-value",
+      channelConnectionId: "channel-telegram-pilot",
       fetcher: async () => ({
         ok: true,
         status: 200,
@@ -72,3 +82,26 @@ describe("tenant telegram channel settings contracts", () => {
     assert.equal(disconnected.data.connection.tokenConfigured, false);
   });
 });
+
+function repositoryWithTelegramChannel() {
+  const repository = IntegrationRepository.inMemory();
+  repository.saveChannelConnection({
+    chatLimit: 100,
+    credentialsMasked: true,
+    createdAt: "2026-07-16T12:00:00.000Z",
+    environment: "test",
+    health: 100,
+    id: "channel-telegram-pilot",
+    lastSyncAt: "2026-07-16T12:00:00.000Z",
+    name: "Pilot Telegram",
+    rawExternalId: "pilot_support_bot",
+    routingQueueId: "queue-general",
+    status: "connected",
+    tenantId: TENANT_ID,
+    traffic: "0",
+    type: "telegram",
+    updatedAt: "2026-07-16T12:00:00.000Z",
+    webhookUrl: "https://support.example/api/v1/webhooks/telegram"
+  });
+  return repository;
+}

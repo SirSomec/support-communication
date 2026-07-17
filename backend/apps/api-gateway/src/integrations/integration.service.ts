@@ -1530,7 +1530,9 @@ function resolveChannelServiceEndpoint(type: string, connectionId: string, provi
   }
 
   const baseUrl = resolvePublicWebhookBaseUrl().replace(/\/+$/g, "");
-  return `${baseUrl}/api/v1/integrations/${type}/webhook/${connectionId}`;
+  return type === "telegram"
+    ? `${baseUrl}/api/v1/webhooks/telegram`
+    : `${baseUrl}/api/v1/webhooks/${type}/${connectionId}`;
 }
 
 function normalizeTenantId(tenantId?: string): string {

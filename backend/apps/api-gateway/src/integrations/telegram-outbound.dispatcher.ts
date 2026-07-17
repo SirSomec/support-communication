@@ -17,6 +17,7 @@ interface TelegramOutboundDispatcherOptions {
   apiBaseUrl?: string;
   fetcher?: TelegramOutboundFetch;
   integrationRepository?: TelegramConnectionReader;
+  timeoutMs?: number;
 }
 
 interface TelegramConnectionReader {
@@ -29,10 +30,12 @@ interface TelegramOutboundFetch {
     body: string;
     headers: Record<string, string>;
     method: "POST";
+    signal?: AbortSignal;
   }): Promise<{ json(): Promise<unknown>; ok: boolean; status: number }> | { json(): Promise<unknown>; ok: boolean; status: number };
 }
 
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
+const DEFAULT_TELEGRAM_TIMEOUT_MS = 10_000;
 
 export function createTelegramOutboundMessageDispatcher(
   options: TelegramOutboundDispatcherOptions = {}
@@ -40,6 +43,7 @@ export function createTelegramOutboundMessageDispatcher(
   const apiBaseUrl = String(options.apiBaseUrl ?? DEFAULT_TELEGRAM_API_BASE_URL).replace(/\/+$/, "");
   const fetcher = options.fetcher ?? globalThis.fetch;
   const integrationRepository = options.integrationRepository ?? IntegrationRepository.default();
+  const timeoutMs = Math.max(1, Math.trunc(Number(options.timeoutMs)) || DEFAULT_TELEGRAM_TIMEOUT_MS);
 
   return {
     async deliverMessage(request: OutboundMessageDispatchRequest): Promise<OutboundMessageDispatchResult> {
@@ -76,7 +80,8 @@ export function createTelegramOutboundMessageDispatcher(
           "idempotency-key": request.idempotencyKey,
           "x-trace-id": request.traceId
         },
-        method: "POST"
+        method: "POST",
+        signal: AbortSignal.timeout(timeoutMs)
       });
 
       let payload: TelegramSendMessageResponse | null = null;

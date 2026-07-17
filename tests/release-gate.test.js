@@ -18,6 +18,9 @@ describe("product release gate", () => {
     assert.match(nginx, /resolver 127\.0\.0\.11 ipv6=off valid=10s/);
     assert.match(nginx, /set \$api_gateway_upstream api-gateway:4100/);
     assert.match(nginx, /proxy_pass http:\/\/\$api_gateway_upstream\$request_uri/);
+    assert.match(nginx, /location = \/api\/v1\/realtime\/events\/stream/);
+    assert.match(nginx, /proxy_buffering off/);
+    assert.match(nginx, /proxy_read_timeout 1h/);
   });
 
   it("exposes a single root command for the Phase 10 release gate", () => {
@@ -27,6 +30,24 @@ describe("product release gate", () => {
     assert.equal(packageJson.scripts["backend:security:audit"], "cd backend && npm run security:audit");
     assert.ok(existsSync(join(root, "scripts/release-gate.mjs")));
     assert.ok(existsSync(join(root, "scripts/compose-health-check.mjs")));
+  });
+
+  it("waits for the complete pg_dump stream before finalizing a runtime backup", () => {
+    const backup = readFileSync(join(root, "scripts/runtime-backup.mjs"), "utf8");
+
+    assert.match(backup, /import \{ pipeline \} from "node:stream\/promises"/);
+    assert.match(backup, /child\.once\("close"/);
+    assert.match(backup, /Promise\.all\(\[\s*pipeline\(child\.stdout, output\),\s*commandCompleted\s*\]\)/);
+    assert.doesNotMatch(backup, /child\.once\("exit"/);
+    assert.doesNotMatch(backup, /output\.end\(/);
+  });
+
+  it("keeps watchdog webhook failures bounded and retryable", () => {
+    const watchdog = readFileSync(join(root, "scripts/runtime-watchdog.mjs"), "utf8");
+
+    assert.match(watchdog, /AbortSignal\.timeout\(positive\(process\.env\.RUNTIME_WATCHDOG_WEBHOOK_TIMEOUT_MS/);
+    assert.match(watchdog, /event: "runtime\.notification_failed"/);
+    assert.match(watchdog, /if \(notificationDelivered\) writeState\(snapshot\)/);
   });
 
   it("lists every required Phase 10 release gate step in execution order", () => {
@@ -61,7 +82,7 @@ describe("product release gate", () => {
       "DATABASE_URL=postgresql://support:support@127.0.0.1:56432/support_communication RELEASE_ALLOW_REMOTE_DATABASE=false RELEASE_TARGET_ENVIRONMENT=local-production-like npm run backend:release:checklist",
       "LEAD_NOTIFICATION_MAILPIT_SMOKE_ENABLED=true MAILPIT_API_BASE_URL=http://127.0.0.1:18025 PUBLIC_DEMO_NOTIFICATION_SMTP_HOST=127.0.0.1 PUBLIC_DEMO_NOTIFICATION_SMTP_PORT=11025 cd backend && npm run lead-notification:mailpit-smoke",
       "npm run build",
-      "docker compose -f docker-compose.yml up -d --build",
+      "docker compose -f docker-compose.yml up -d --build --wait --wait-timeout 180",
       "node scripts/compose-health-check.mjs",
       "node scripts/backup-restore-gate.mjs",
       "curl.exe -fsS http://127.0.0.1:8080/",
@@ -95,10 +116,9 @@ describe("product release gate", () => {
 
     const preflightIndex = releaseChecklist.indexOf('script: "release:database:preflight"');
     const migrationIndex = releaseChecklist.indexOf('script: "prisma:migrate:deploy"');
-    const seedIndex = releaseChecklist.indexOf('script: "prisma:seed"');
     assert.ok(preflightIndex > -1, "release database preflight is missing");
     assert.ok(preflightIndex < migrationIndex, "database preflight must run before migrations");
-    assert.ok(preflightIndex < seedIndex, "database preflight must run before seed");
+    assert.doesNotMatch(releaseChecklist, /script: "prisma:seed"/, "release checklist must never seed demo identities");
 
     const local = spawnSync(process.execPath, [preflightPath], {
       cwd: join(root, "backend"),
@@ -170,6 +190,7 @@ describe("product release gate", () => {
     assert.equal(workerEnv.NODE_ENV, "staging");
     assert.equal(workerEnv.RUNTIME_PROFILE, "production-like");
     assert.equal(workerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
+    assert.equal(workerEnv.LOCAL_DEVELOPMENT_SEED_ENABLED, undefined);
     assert.equal(workerEnv.NOTIFICATION_REPOSITORY, undefined);
     assert.equal(workerEnv.BROWSER_PUSH_ENABLED, "false");
     assert.equal(workerEnv.BROWSER_PUSH_PUBLIC_KEY, "");
@@ -275,6 +296,9 @@ describe("product release gate", () => {
     assert.match(composeHealthCheck, /"billing-sync-worker"/);
     assert.match(composeHealthCheck, /"report-export-worker"/);
     assert.match(composeHealthCheck, /"proactive-delivery-worker"/);
+    assert.match(composeHealthCheck, /"knowledge-document-ingestion-worker"/);
+    assert.match(composeHealthCheck, /"url-source-refresh-worker"/);
+    assert.match(composeHealthCheck, /"quota-expiration-worker"/);
   });
 
   it("wires proactive delivery runtime smoke into backend release verification", () => {
@@ -316,6 +340,9 @@ describe("product release gate", () => {
     assert.ok(existsSync(join(root, "backend/scripts/security-audit.mjs")));
     assert.match(releaseChecklist, /Dependency security audit/);
     assert.match(releaseChecklist, /script: "security:audit"/);
+    const securityAudit = readFileSync(join(root, "backend/scripts/security-audit.mjs"), "utf8");
+    assert.match(securityAudit, /total > 0/);
+    assert.match(securityAudit, /result\.status && result\.status !== 0 \? result\.status : 1/);
   });
 
   it("wires a non-skipping self-seeded public SDK smoke into the release gate", () => {
@@ -363,6 +390,13 @@ describe("product release gate", () => {
     assert.match(releaseGate, /OUTBOX_CHANNEL_CONNECTORS/);
     assert.match(releaseGate, /OUTBOX_SCANNER_BEARER_TOKEN/);
     assert.match(releaseGate, /OUTBOX_TELEGRAM_BOT_TOKEN/);
+    assert.match(releaseGate, /OUTBOX_MAX_API_BASE_URL/);
+    assert.match(releaseGate, /OUTBOX_VK_API_BASE_URL/);
+    assert.match(releaseGate, /QUALITY_AI_API_KEY/);
+    assert.match(releaseGate, /AI_CONNECTIONS_MASTER_KEY/);
+    assert.match(releaseGate, /PROVIDER_CREDENTIAL_MASTER_KEY/);
+    assert.match(releaseGate, /WEBHOOK_DELIVERY_SIGNING_SECRET/);
+    assert.match(releaseGate, /BILLING_SYNC_PROVIDER_URL/);
     assert.match(releaseGate, /PUBLIC_DEMO_NOTIFICATION_SMTP_TO/);
     assert.match(releaseGate, /LEAD_NOTIFICATION_MAILPIT_SMOKE_ENABLED:\s*"true"/);
     assert.match(releaseGate, /MAILPIT_API_BASE_URL:\s*"http:\/\/127\.0\.0\.1:18025"/);
@@ -498,10 +532,19 @@ describe("product release gate", () => {
     assert.equal(localResult.status, 0, localResult.stderr);
     const localConfig = JSON.parse(localResult.stdout);
     const localWorkerEnv = localConfig.services["file-scan-scanner-worker"].environment;
+    const localScanner = localConfig.services["clamav-scanner"];
 
     assert.equal(localWorkerEnv.OUTBOX_SCANNER_PROVIDER_MODE, "http");
     assert.equal(localWorkerEnv.OUTBOX_SCANNER_LOCAL_VERDICT, "clean");
     assert.equal(localWorkerEnv.OUTBOX_SCANNER_URL, "http://clamav-scanner:4120/scan");
+    assert.equal(localWorkerEnv.OUTBOX_SCANNER_BEARER_TOKEN, localScanner.environment.CLAMAV_SCANNER_BEARER_TOKEN);
+    assert.equal(localScanner.ports, undefined);
+    assert.equal(localScanner.environment.CLAMAV_ALLOWED_DOWNLOAD_ORIGINS, "http://kubernetes.docker.internal:19000");
+    const scannerSource = readFileSync(join(root, "backend/apps/outbox-worker/src/clamav-scanner.main.ts"), "utf8");
+    assert.match(scannerSource, /hasValidBearerToken/);
+    assert.match(scannerSource, /file_id_required/);
+    assert.match(scannerSource, /requireAllowedDownloadUrl/);
+    assert.match(scannerSource, /redirect: "error"/);
   });
 
   it("wires a live API callback smoke for the file scan scanner into the release gate", () => {

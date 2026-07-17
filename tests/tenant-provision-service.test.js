@@ -77,7 +77,7 @@ describe("tenant provision service", () => {
     const labels = steps.map((step) => step.label);
 
     assert.deepEqual(labels, [
-      "Tenant",
+      "Организация",
       "Тариф / trial",
       "Первый администратор",
       "Лимиты",

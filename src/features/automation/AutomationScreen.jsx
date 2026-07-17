@@ -15,7 +15,7 @@ import {
   Zap
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
-import { changeBotScenarioLifecycle, discardBotScenarioDraft, publishBotScenario, rollbackBotScenario, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
+import { buildBotScenarioUpdatePatch, changeBotScenarioLifecycle, discardBotScenarioDraft, publishBotScenario, rollbackBotScenario, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { automationService } from "../../services/automationService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
 import { ConfirmDialog, MetricTile, ProductScreen, SectionTitle, SegmentedControl } from "../../ui.jsx";
@@ -123,6 +123,35 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const selectedOperations = scenarioOperations.find((item) => item.scenarioId === selectedScenario?.id) ?? null;
   const canManageAutomation = access.canManageSettings;
   const isSaving = Boolean(savingAction);
+  const urlSourceDialog = urlSourceForm ? (
+    <ConfirmDialog
+      confirmDisabled={!/^https:\/\/.+/i.test(urlSourceForm.url.trim())}
+      confirmLabel="Добавить"
+      description="Страница будет загружена, подготовлена и подтверждена как источник знаний для AI-ответов."
+      eyebrow="Источник знаний"
+      onCancel={() => setUrlSourceForm(null)}
+      onConfirm={() => void submitUrlKnowledgeSource()}
+      title="Добавить URL-страницу"
+    >
+      <label>
+        <span>HTTPS-адрес страницы с ответами для клиентов</span>
+        <input
+          onChange={(event) => setUrlSourceForm((current) => ({ ...current, url: event.target.value }))}
+          placeholder="https://example.com/faq"
+          type="url"
+          value={urlSourceForm.url}
+        />
+      </label>
+      <label>
+        <span>Название источника</span>
+        <input
+          onChange={(event) => setUrlSourceForm((current) => ({ ...current, title: event.target.value }))}
+          placeholder="Страница знаний"
+          value={urlSourceForm.title}
+        />
+      </label>
+    </ConfirmDialog>
+  ) : null;
 
   if (loading) {
     return (
@@ -212,6 +241,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
           versions={scenarioVersions}
         />
         {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} /> : null}
+        {urlSourceDialog}
       </ProductScreen>
     );
   }
@@ -492,7 +522,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
       onToast(access.reason);
       return null;
     }
-    return persistScenarioDraft({ ...selectedScenario, ...fields }, {
+    return persistScenarioDraft(buildBotScenarioUpdatePatch(selectedScenario.id, fields), {
       successMessage: selectedScenario.status === "published"
         ? "Изменения сохранены в черновик. Клиенты увидят их после публикации."
         : "Настройки сценария сохранены."
@@ -999,35 +1029,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
       {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} /> : null}
       {archiveTarget ? <ScenarioArchiveConfirmModal isSaving={isSaving} onClose={() => setArchiveTarget(null)} onConfirm={(scenario) => void confirmArchiveScenario(scenario)} scenario={archiveTarget} /> : null}
       {pauseTarget ? <ScenarioPauseConfirmModal isSaving={isSaving} onClose={() => setPauseTarget(null)} onConfirm={(scenario) => void confirmDisableScenario(scenario)} scenario={pauseTarget} /> : null}
-      {urlSourceForm ? (
-        <ConfirmDialog
-          confirmDisabled={!/^https:\/\/.+/i.test(urlSourceForm.url.trim())}
-          confirmLabel="Добавить"
-          description="Страница будет загружена, подготовлена и подтверждена как источник знаний для AI-ответов."
-          eyebrow="Источник знаний"
-          onCancel={() => setUrlSourceForm(null)}
-          onConfirm={() => void submitUrlKnowledgeSource()}
-          title="Добавить URL-страницу"
-        >
-          <label>
-            <span>HTTPS-адрес страницы с ответами для клиентов</span>
-            <input
-              onChange={(event) => setUrlSourceForm((current) => ({ ...current, url: event.target.value }))}
-              placeholder="https://example.com/faq"
-              type="url"
-              value={urlSourceForm.url}
-            />
-          </label>
-          <label>
-            <span>Название источника</span>
-            <input
-              onChange={(event) => setUrlSourceForm((current) => ({ ...current, title: event.target.value }))}
-              placeholder="Страница знаний"
-              value={urlSourceForm.title}
-            />
-          </label>
-        </ConfirmDialog>
-      ) : null}
+      {urlSourceDialog}
       {publishChecklistOpen && selectedScenario ? (
         <ScenarioPublishChecklistModal
           aiReadiness={aiReadiness}
@@ -1102,7 +1104,12 @@ function normalizeScenario(scenario = {}) {
     status: String(scenario.status ?? "draft"),
     sourceBindings: Array.isArray(scenario.sourceBindings)
       ? scenario.sourceBindings
-        .map((binding) => ({ sourceId: String(binding?.sourceId ?? "").trim() }))
+        .map((binding) => ({
+          sourceId: String(binding?.sourceId ?? "").trim(),
+          ...(String(binding?.sourceVersion ?? "").trim()
+            ? { sourceVersion: String(binding.sourceVersion).trim() }
+            : {})
+        }))
         .filter((binding) => binding.sourceId)
       : [],
     steps: normalizeStringList(scenario.steps, flowNodes.map((node) => node.typeLabel ?? node.type)),

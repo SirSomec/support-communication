@@ -13,6 +13,7 @@ const requiredServices = new Map([
   ["file-scan-scanner-worker", {}],
   ["frontend", {}],
   ["identity-events-worker", {}],
+  ["knowledge-document-ingestion-worker", {}],
   ["lead-notification-worker", {}],
   ["mailpit", { health: "healthy" }],
   ["minio", { health: "healthy" }],
@@ -20,12 +21,14 @@ const requiredServices = new Map([
   ["outbox-worker", {}],
   ["postgres", { health: "healthy" }],
   ["proactive-delivery-worker", {}],
+  ["quota-expiration-worker", {}],
   ["report-digest-worker", {}],
   ["report-export-worker", {}],
   ["rescue-return-worker", { health: "healthy" }],
   ["redis", { health: "healthy" }],
   ["sla-timer-worker", { health: "healthy" }],
   ["telegram-polling-worker", {}],
+  ["url-source-refresh-worker", {}],
   ["webhook-delivery-worker", {}]
 ]);
 

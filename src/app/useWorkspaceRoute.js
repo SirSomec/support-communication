@@ -37,7 +37,11 @@ export function useWorkspaceRoute({
   tenantSession
 }) {
   const [route, setRoute] = useState(() => parseCurrentRoute());
-  const isAppDenied = route.namespace === "app" && !tenantSession.loading && !tenantSession.authenticated;
+  const sessionHydrated = tenantSession.hydrated ?? !tenantSession.loading;
+  const isAppDenied = route.namespace === "app"
+    && sessionHydrated
+    && !tenantSession.loading
+    && !tenantSession.authenticated;
 
   useEffect(() => {
     function handleHashChange() {
@@ -49,7 +53,7 @@ export function useWorkspaceRoute({
   }, []);
 
   useEffect(() => {
-    if (tenantSession.loading) {
+    if (!sessionHydrated || tenantSession.loading) {
       return;
     }
 
@@ -61,7 +65,7 @@ export function useWorkspaceRoute({
         window.history.replaceState(null, "", "#/login");
       }
     }
-  }, [isAppDenied, onDenied, tenantSession.denialReason, tenantSession.loading]);
+  }, [isAppDenied, onDenied, sessionHydrated, tenantSession.denialReason, tenantSession.loading]);
 
   const navigate = useCallback((namespace, view = namespace) => {
     const nextRoute = { namespace, view };

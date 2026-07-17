@@ -314,6 +314,11 @@ export interface PrismaAutomationClient {
     findMany(input?: PrismaAutomationFindManyInput): Promise<PrismaAutomationPublishIdempotencyKeyRow[]>;
     findUnique(input: { where: PrismaAutomationPublishIdempotencyKeyWhereUniqueInput }): Promise<PrismaAutomationPublishIdempotencyKeyRow | null>;
   };
+  automationWorkspaceAuditEvent?: {
+    create(input: { data: { auditId: string; createdAt: Date; idempotencyKey: string | null; payload: Record<string, unknown>; tenantId: string } }): Promise<{ payload: unknown }>;
+    findMany(input: { orderBy: { createdAt: "asc" }; where: Record<string, never> }): Promise<Array<{ payload: unknown }>>;
+    findUnique(input: { where: { auditId: string } }): Promise<{ payload: unknown } | null>;
+  };
   botPublishAuditEvent: {
     create(input: { data: PrismaBotPublishAuditEventCreateInput }): Promise<PrismaBotPublishAuditEventRow>;
     findMany(input: PrismaBotPublishAuditEventFindManyInput): Promise<PrismaBotPublishAuditEventRow[]>;
@@ -374,7 +379,10 @@ export interface PrismaAutomationClient {
 }
 
 interface AutomationRepositoryPort {
+  claimBotRuntimeRetry(id: string, expectedAttempts: number, now: string, leaseUntil: string): MaybePromise<AutomationBotRuntimeInstance | undefined>;
   claimBotRuntimeSideEffect(id: string, now: string, leaseUntil: string): MaybePromise<AutomationBotRuntimeSideEffect | undefined>;
+  findLatestBotRuntimeStep(runtimeId: string): MaybePromise<AutomationBotRuntimeStep | undefined>;
+  listDueBotRuntimeRetries(now: string, limit: number): MaybePromise<AutomationBotRuntimeInstance[]>;
   listDueBotRuntimeSideEffects(now: string, limit: number): MaybePromise<AutomationBotRuntimeSideEffect[]>;
   updateBotRuntimeSideEffect(effect: AutomationBotRuntimeSideEffect): MaybePromise<AutomationBotRuntimeSideEffect>;
   commitBotRuntimeTransition(input: AutomationBotRuntimeCommitInput): MaybePromise<AutomationBotRuntimeCommitResult>;
@@ -401,6 +409,7 @@ interface AutomationRepositoryPort {
   saveBotPublishAuditEvent(event: AutomationBotPublishAuditEvent): MaybePromise<AutomationBotPublishAuditEvent>;
   saveBotScenario(scenario: BotScenario): MaybePromise<BotScenario>;
   saveScenarioAuditEvent(event: AutomationScenarioAuditEvent): MaybePromise<AutomationScenarioAuditEvent>;
+  saveWorkspaceAuditEvent(event: Record<string, unknown>): MaybePromise<Record<string, unknown>>;
   purgeArchivedBotScenario(tenantId: string, scenarioId: string, now: string): MaybePromise<BotScenarioPurgeResult>;
   saveBotScenarioVersion(version: AutomationBotScenarioVersion): MaybePromise<AutomationBotScenarioVersion>;
   saveBotTestRun(run: AutomationBotTestRun): AutomationBotTestRun;
@@ -419,7 +428,10 @@ interface AutomationRepositoryPort {
 }
 
 interface AutomationRepositoryAsyncPort {
+  claimBotRuntimeRetryAsync(id: string, expectedAttempts: number, now: string, leaseUntil: string): Promise<AutomationBotRuntimeInstance | undefined>;
   claimBotRuntimeSideEffectAsync(id: string, now: string, leaseUntil: string): Promise<AutomationBotRuntimeSideEffect | undefined>;
+  findLatestBotRuntimeStepAsync(runtimeId: string): Promise<AutomationBotRuntimeStep | undefined>;
+  listDueBotRuntimeRetriesAsync(now: string, limit: number): Promise<AutomationBotRuntimeInstance[]>;
   listDueBotRuntimeSideEffectsAsync(now: string, limit: number): Promise<AutomationBotRuntimeSideEffect[]>;
   updateBotRuntimeSideEffectAsync(effect: AutomationBotRuntimeSideEffect): Promise<AutomationBotRuntimeSideEffect>;
   commitBotRuntimeTransitionAsync(input: AutomationBotRuntimeCommitInput): Promise<AutomationBotRuntimeCommitResult>;
@@ -490,13 +502,14 @@ interface PrismaAtomicOutboxEventDelegate {
 
 interface PrismaBotRuntimeInstanceDelegate {
   create(input: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
-  findMany(input: { where: Record<string, unknown> }): Promise<Array<Record<string, unknown>>>;
+  findMany(input: { orderBy?: Record<string, unknown>; take?: number; where: Record<string, unknown> }): Promise<Array<Record<string, unknown>>>;
   findUnique(input: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
   updateMany(input: { data: Record<string, unknown>; where: Record<string, unknown> }): Promise<{ count: number }>;
 }
 
 interface PrismaBotRuntimeStepDelegate {
   create(input: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  findMany(input: { orderBy?: Record<string, unknown>; take?: number; where: Record<string, unknown> }): Promise<Array<Record<string, unknown>>>;
   findUnique(input: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
 }
 
@@ -836,6 +849,51 @@ export class AutomationRepository implements AutomationRepositoryPort {
       new InMemoryStore(createEmptyAutomationState()),
       new PrismaAutomationRepository(client, fallback ?? AutomationRepository.inMemory())
     );
+  }
+
+  async listDueBotRuntimeRetriesAsync(now: string, limit: number): Promise<AutomationBotRuntimeInstance[]> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) return this.adapter.listDueBotRuntimeRetriesAsync(now, limit);
+    return this.listDueBotRuntimeRetries(now, limit);
+  }
+
+  listDueBotRuntimeRetries(now: string, limit: number): AutomationBotRuntimeInstance[] {
+    if (this.adapter) return this.adapter.listDueBotRuntimeRetries(now, limit) as AutomationBotRuntimeInstance[];
+    const at = new Date(now).getTime();
+    return clone(this.readState().botRuntimeInstances
+      .filter((instance) => instance.status === "retry_scheduled" && instance.nextAttemptAt !== null && new Date(instance.nextAttemptAt).getTime() <= at)
+      .sort((left, right) => String(left.nextAttemptAt).localeCompare(String(right.nextAttemptAt)) || left.id.localeCompare(right.id))
+      .slice(0, Math.max(1, limit)));
+  }
+
+  async claimBotRuntimeRetryAsync(id: string, expectedAttempts: number, now: string, leaseUntil: string): Promise<AutomationBotRuntimeInstance | undefined> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) return this.adapter.claimBotRuntimeRetryAsync(id, expectedAttempts, now, leaseUntil);
+    return this.claimBotRuntimeRetry(id, expectedAttempts, now, leaseUntil);
+  }
+
+  claimBotRuntimeRetry(id: string, expectedAttempts: number, now: string, leaseUntil: string): AutomationBotRuntimeInstance | undefined {
+    if (this.adapter) return this.adapter.claimBotRuntimeRetry(id, expectedAttempts, now, leaseUntil) as AutomationBotRuntimeInstance | undefined;
+    let claimed: AutomationBotRuntimeInstance | undefined;
+    this.store.update((raw) => {
+      const state = normalizeState(raw);
+      const at = new Date(now).getTime();
+      const current = state.botRuntimeInstances.find((item) => item.id === id);
+      if (!current || current.status !== "retry_scheduled" || current.attempts !== expectedAttempts || !current.nextAttemptAt || new Date(current.nextAttemptAt).getTime() > at) return state;
+      claimed = { ...current, nextAttemptAt: leaseUntil, updatedAt: now };
+      return { ...state, botRuntimeInstances: state.botRuntimeInstances.map((item) => item.id === id ? claimed! : item) };
+    });
+    return clone(claimed);
+  }
+
+  async findLatestBotRuntimeStepAsync(runtimeId: string): Promise<AutomationBotRuntimeStep | undefined> {
+    if (this.adapter && hasAsyncAutomationPort(this.adapter)) return this.adapter.findLatestBotRuntimeStepAsync(runtimeId);
+    return this.findLatestBotRuntimeStep(runtimeId);
+  }
+
+  findLatestBotRuntimeStep(runtimeId: string): AutomationBotRuntimeStep | undefined {
+    if (this.adapter) return this.adapter.findLatestBotRuntimeStep(runtimeId) as AutomationBotRuntimeStep | undefined;
+    return clone(this.readState().botRuntimeSteps
+      .filter((step) => step.runtimeId === runtimeId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))[0]);
   }
 
   async listDueBotRuntimeSideEffectsAsync(now: string, limit: number): Promise<AutomationBotRuntimeSideEffect[]> {
@@ -1305,7 +1363,10 @@ export class AutomationRepository implements AutomationRepositoryPort {
     return clone(this.readState().scenarioAuditEvents.filter((event) => event.scenarioId === scenarioId && event.tenantId === scopedTenantId));
   }
 
-  saveWorkspaceAuditEvent(event: Record<string, unknown>): Record<string, unknown> {
+  saveWorkspaceAuditEvent(event: Record<string, unknown>): MaybePromise<Record<string, unknown>> {
+    if (this.adapter) {
+      return this.adapter.saveWorkspaceAuditEvent(event);
+    }
     const persisted = normalizeWorkspaceAuditEvent(event);
     let saved = persisted;
     this.store.update((raw) => {
@@ -1670,6 +1731,39 @@ export class AutomationRepository implements AutomationRepositoryPort {
 
 class PrismaAutomationRepository implements AutomationRepositoryPort {
   constructor(private readonly client: PrismaAutomationClient, private readonly fallback: AutomationRepository) {}
+
+  listDueBotRuntimeRetries(_now: string, _limit: number): AutomationBotRuntimeInstance[] { throw new Error("prisma_automation_async_required"); }
+  async listDueBotRuntimeRetriesAsync(now: string, limit: number): Promise<AutomationBotRuntimeInstance[]> {
+    const delegate = this.client.botRuntimeInstance;
+    if (!delegate) return this.fallback.listDueBotRuntimeRetriesAsync(now, limit);
+    const rows = await delegate.findMany({
+      orderBy: { nextAttemptAt: "asc" },
+      take: Math.max(1, limit),
+      where: { nextAttemptAt: { lte: new Date(now) }, status: "retry_scheduled" }
+    });
+    return rows.map(toBotRuntimeInstance);
+  }
+
+  claimBotRuntimeRetry(_id: string, _expectedAttempts: number, _now: string, _leaseUntil: string): AutomationBotRuntimeInstance | undefined { throw new Error("prisma_automation_async_required"); }
+  async claimBotRuntimeRetryAsync(id: string, expectedAttempts: number, now: string, leaseUntil: string): Promise<AutomationBotRuntimeInstance | undefined> {
+    const delegate = this.client.botRuntimeInstance;
+    if (!delegate) return this.fallback.claimBotRuntimeRetryAsync(id, expectedAttempts, now, leaseUntil);
+    const claimed = await delegate.updateMany({
+      data: { nextAttemptAt: new Date(leaseUntil), updatedAt: new Date(now) },
+      where: { attempts: expectedAttempts, id, nextAttemptAt: { lte: new Date(now) }, status: "retry_scheduled" }
+    });
+    if (claimed.count !== 1) return undefined;
+    const row = await delegate.findUnique({ where: { id } });
+    return row ? toBotRuntimeInstance(row) : undefined;
+  }
+
+  findLatestBotRuntimeStep(_runtimeId: string): AutomationBotRuntimeStep | undefined { throw new Error("prisma_automation_async_required"); }
+  async findLatestBotRuntimeStepAsync(runtimeId: string): Promise<AutomationBotRuntimeStep | undefined> {
+    const delegate = this.client.botRuntimeStepJournal;
+    if (!delegate) return this.fallback.findLatestBotRuntimeStepAsync(runtimeId);
+    const rows = await delegate.findMany({ orderBy: { createdAt: "desc" }, take: 1, where: { runtimeId } });
+    return rows[0] ? toBotRuntimeStep(rows[0]) : undefined;
+  }
 
   listDueBotRuntimeSideEffects(_now: string, _limit: number): AutomationBotRuntimeSideEffect[] { throw new Error("prisma_automation_async_required"); }
   async listDueBotRuntimeSideEffectsAsync(now: string, limit: number): Promise<AutomationBotRuntimeSideEffect[]> {
@@ -2041,6 +2135,8 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
       botScenarios,
       botScenarioVersions,
       botTestRuns,
+      botRuntimeInstances,
+      botRuntimeSteps,
       proactiveDeliveryAttributions,
       proactiveDeliveryAttempts,
       proactiveDeliveryIdempotencyKeys,
@@ -2048,12 +2144,15 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
       proactiveExperimentAssignments,
       proactiveFrequencyCaps,
       proactiveRules,
-      publishIdempotencyKeys
+      publishIdempotencyKeys,
+      workspaceAuditEvents
     ] = await Promise.all([
       this.client.botPublishAuditEvent.findMany({ orderBy: { createdAt: "asc" }, where: {} as never }),
       this.client.botScenario.findMany({ orderBy: { updatedAt: "desc" } }),
       this.client.botScenarioVersion.findMany({ orderBy: { createdAt: "asc" }, where: {} as never }),
       this.client.automationBotTestRun.findMany({ orderBy: { testRunId: "asc" } }),
+      this.client.botRuntimeInstance?.findMany({ orderBy: { createdAt: "asc" }, where: {} }) ?? Promise.resolve([]),
+      this.client.botRuntimeStepJournal?.findMany({ orderBy: { createdAt: "asc" }, where: {} }) ?? Promise.resolve([]),
       this.client.proactiveDeliveryAttribution.findMany({ orderBy: { assignedAt: "asc" } }),
       this.client.proactiveDeliveryAttempt.findMany({ orderBy: { attemptedAt: "asc" } }),
       this.client.proactiveDeliveryIdempotencyKey.findMany({ orderBy: { key: "asc" } }),
@@ -2061,7 +2160,8 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
       this.client.proactiveExperimentAssignment.findMany({ orderBy: { assignedAt: "asc" } }),
       this.client.proactiveFrequencyCap.findMany({ orderBy: { capId: "asc" } }),
       this.client.proactiveRule.findMany({ orderBy: { id: "asc" } }),
-      this.client.automationPublishIdempotencyKey.findMany({ orderBy: { key: "asc" } })
+      this.client.automationPublishIdempotencyKey.findMany({ orderBy: { key: "asc" } }),
+      this.client.automationWorkspaceAuditEvent?.findMany({ orderBy: { createdAt: "asc" }, where: {} }) ?? Promise.resolve([])
     ]);
 
     return {
@@ -2070,6 +2170,8 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
       botScenarios: botScenarios.map(toBotScenario),
       botScenarioVersions: botScenarioVersions.map(toBotScenarioVersion),
       botTestRuns: botTestRuns.map(toAutomationBotTestRun),
+      botRuntimeInstances: botRuntimeInstances.map(toBotRuntimeInstance),
+      botRuntimeSteps: botRuntimeSteps.map(toBotRuntimeStep),
       proactiveDeliveryAttributions: proactiveDeliveryAttributions.map(toProactiveDeliveryAttribution),
       proactiveDeliveryAttempts: proactiveDeliveryAttempts.map(toProactiveDeliveryAttempt),
       proactiveDeliveryIdempotencyKeys: proactiveDeliveryIdempotencyKeys.map(toProactiveDeliveryIdempotencyRecord),
@@ -2077,8 +2179,38 @@ class PrismaAutomationRepository implements AutomationRepositoryPort {
       proactiveExperimentAssignments: proactiveExperimentAssignments.map(toProactiveExperimentAssignment),
       proactiveFrequencyCaps: proactiveFrequencyCaps.map(toProactiveFrequencyCap),
       proactiveRules: proactiveRules.map(toProactiveRule),
-      publishIdempotencyKeys: publishIdempotencyKeys.map(toAutomationPublishIdempotencyRecord)
+      publishIdempotencyKeys: publishIdempotencyKeys.map(toAutomationPublishIdempotencyRecord),
+      workspaceAuditEvents: workspaceAuditEvents
+        .map((row) => recordFromUnknown(row.payload))
+        .filter(hasAutomationTenantId)
+        .map(normalizeWorkspaceAuditEvent)
     };
+  }
+
+  async saveWorkspaceAuditEvent(event: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const persisted = normalizeWorkspaceAuditEvent(event);
+    const delegate = this.client.automationWorkspaceAuditEvent;
+    if (!delegate) {
+      throw new Error("prisma_automation_workspace_audit_delegate_required");
+    }
+    try {
+      const row = await delegate.create({
+        data: {
+          auditId: String(persisted.auditId),
+          createdAt: new Date(String(persisted.createdAt ?? new Date().toISOString())),
+          idempotencyKey: persisted.idempotencyKey ? String(persisted.idempotencyKey) : null,
+          payload: clone(persisted),
+          tenantId: String(persisted.tenantId)
+        }
+      });
+      return normalizeWorkspaceAuditEvent(recordFromUnknown(row.payload));
+    } catch (error) {
+      if (isPrismaUniqueConstraintError(error)) {
+        const existing = await delegate.findUnique({ where: { auditId: String(persisted.auditId) } });
+        if (existing) return normalizeWorkspaceAuditEvent(recordFromUnknown(existing.payload));
+      }
+      throw error;
+    }
   }
 
   async saveBotPublishAuditEvent(event: AutomationBotPublishAuditEvent): Promise<AutomationBotPublishAuditEvent> {
@@ -2644,6 +2776,12 @@ function normalizeWorkspaceAuditEvent(event: Record<string, unknown>): Record<st
     ...clone(event),
     tenantId: requireAutomationTenantId(event.tenantId)
   };
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? clone(value as Record<string, unknown>)
+    : {};
 }
 
 function toBotScenario(row: PrismaBotScenarioRow): BotScenario {

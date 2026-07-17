@@ -135,14 +135,15 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
   }
 
   async function handlePasswordReset() {
-    if (!selectedEmployee || !canResetEmployeePassword) {
+    if (!selectedEmployee || !canResetEmployeePassword || saving) {
       return;
     }
 
+    setSaving(true);
     const response = await settingsService.resetEmployeePassword({
       employeeId: selectedEmployee.id,
       reason: "Reset requested from employee settings"
-    });
+    }).finally(() => setSaving(false));
 
     if (response.status !== "ok") {
       setError(response.error?.message ?? "Не удалось отправить сброс пароля.");
@@ -155,14 +156,15 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
   }
 
   async function handleMfaReset() {
-    if (!selectedEmployee || !canResetEmployeePassword) {
+    if (!selectedEmployee || !canResetEmployeePassword || saving) {
       return;
     }
 
+    setSaving(true);
     const response = await settingsService.resetEmployeeMfa({
       employeeId: selectedEmployee.id,
       reason: "MFA reset requested from employee settings"
-    });
+    }).finally(() => setSaving(false));
 
     if (response.status !== "ok") {
       setError(response.error?.message ?? "Не удалось сбросить MFA.");
@@ -356,7 +358,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                   <span>{selectedEmployee.role} · {selectedEmployee.lastLogin}</span>
                 </div>
                 <button
-                  disabled={!canResetEmployeePassword}
+                  disabled={!canResetEmployeePassword || saving}
                   onClick={handlePasswordReset}
                   title={canResetEmployeePassword ? "Отправить сотруднику ссылку для смены пароля" : access.reason}
                   type="button"
@@ -365,7 +367,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                   Сбросить пароль
                 </button>
                 <button
-                  disabled={!canResetEmployeePassword}
+                  disabled={!canResetEmployeePassword || saving}
                   onClick={handleMfaReset}
                   title={canResetEmployeePassword ? "Сбросить второй фактор — сотрудник настроит его заново" : access.reason}
                   type="button"

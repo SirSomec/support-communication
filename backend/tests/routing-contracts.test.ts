@@ -760,6 +760,32 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(assigned.data.queueJob.kind, "assignment.commit");
   });
 
+  it("applies an explicit chat-limit override only when operator capacity allows it", async () => {
+    const repository = RoutingRepository.inMemory(bootstrapRoutingState());
+    await repository.saveOperatorCapacity({
+      channel: "VK",
+      chatLimit: 8,
+      id: "capacity-operator-full-vk-override",
+      operatorId: "operator-full",
+      overrideAllowed: true,
+      tenantId: "tenant-volga",
+      updatedAt: "2026-07-16T10:00:00.000Z"
+    });
+    const routing = new RoutingService(repository);
+
+    const assigned = await routing.createAssignment({
+      action: "assign",
+      conversationId: "alexey",
+      overrideLimit: true,
+      reason: "Approved capacity exception",
+      targetOperatorId: "operator-full"
+    }, VOLGA_CONTEXT);
+
+    assert.equal(assigned.status, "ok");
+    assert.equal(assigned.data.overrideApplied, true);
+    assert.equal(assigned.data.assignment.targetOperatorId, "operator-full");
+  });
+
   it("keeps operator and queue counters consistent across transfer and return-to-queue", async () => {
     const routing = new RoutingService();
 

@@ -56,7 +56,11 @@ export class CanonicalRoutingConversationRepository {
 
   async listConversations(tenantId: string): Promise<CanonicalRoutingConversation[]> {
     const requiredTenantId = requireTenantId(tenantId);
-    const records = await this.conversationRepository.listConversations();
+    const records = await this.conversationRepository.listConversations({
+      tenantId: requiredTenantId,
+      take: 500,
+      messageTake: 1
+    });
     return records
       .filter((record) => record.tenantId === requiredTenantId)
       .map(mapConversationRecordToRoutingConversation);

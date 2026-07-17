@@ -12,8 +12,19 @@ import {
   hasActiveRescue,
   isAssignedToOperator,
   isBotHandledConversation,
+  maskPhone,
   matchesQueueTab
 } from "../src/app/dialogModel.js";
+
+describe("sensitive dialog fields", () => {
+  it("masks phone numbers fail-closed regardless of their input format", () => {
+    assert.equal(maskPhone("+7 999 204-18-44"), "*** ***-**-44");
+    assert.equal(maskPhone("+79992041844"), "*** ***-**-44");
+    assert.equal(maskPhone("8 (999) 204 18 44"), "*** ***-**-44");
+    assert.equal(maskPhone("visitor-secret"), "");
+    assert.equal(maskPhone(""), "");
+  });
+});
 
 describe("conversationApiMapper", () => {
   it("maps a dialog API item to UI conversation shape", () => {
@@ -280,14 +291,14 @@ describe("dialog operator workflow", () => {
     assert.equal(toasts.at(-1), "Диалог не найден. Обновите список и попробуйте снова.");
   });
 
-  it("keeps topic selection internal and does not append a client-visible message", () => {
+  it("keeps topic selection internal and does not append a client-visible message", async () => {
     const appendedMessages = [];
     const toasts = [];
     let topics = { "conv-42": "" };
     const actions = useDialogActions({
       access: { canManageDialogs: true, reason: "" },
       appendMessage: (...args) => appendedMessages.push(args),
-      applyConversationStatus: () => {},
+      applyConversationStatus: async () => ({ ok: true }),
       attachments: [],
       clearAttachments: () => {},
       closedIds: new Set(),
@@ -308,11 +319,34 @@ describe("dialog operator workflow", () => {
       topics
     });
 
-    actions.handleTopicChange("Delivery / Status");
+    await actions.handleTopicChange("Delivery / Status");
 
     assert.equal(appendedMessages.length, 0);
     assert.equal(topics["conv-42"], "Delivery / Status");
     assert.match(toasts.at(-1), /audit/i);
+  });
+
+  it("rolls back topic state and success toast when persistence fails", async () => {
+    const toasts = [];
+    let topics = { "conv-42": "Old topic" };
+    const actions = useDialogActions({
+      access: { canManageDialogs: true, reason: "" },
+      applyConversationStatus: async () => ({ ok: false, response: { error: { message: "Backend rejected topic" } } }),
+      attachments: [],
+      closedIds: new Set(),
+      isClosed: false,
+      selected: { id: "conv-42", status: "active" },
+      selectedStatus: "active",
+      setToast: (message) => toasts.push(message),
+      setTopics: (updater) => { topics = typeof updater === "function" ? updater(topics) : updater; },
+      topics
+    });
+
+    const result = await actions.handleTopicChange("New topic");
+
+    assert.equal(result.ok, false);
+    assert.equal(topics["conv-42"], "Old topic");
+    assert.equal(toasts.at(-1), "Backend rejected topic");
   });
 });
 
@@ -450,6 +484,7 @@ describe("composer attachment workflow", () => {
     const requests = [];
     const fileUploads = [];
     const finalizes = [];
+    const progressUpdates = [];
     const statusChecks = [];
     const localFile = { size: 2048, type: "application/pdf" };
     const result = await uploadComposerAttachment(
@@ -517,6 +552,9 @@ describe("composer attachment workflow", () => {
             }
           };
         },
+        onProgress: (nextAttachment) => {
+          progressUpdates.push(nextAttachment);
+        },
         fetchAttachmentStatus: async (fileId) => {
           statusChecks.push(fileId);
           return {
@@ -559,6 +597,9 @@ describe("composer attachment workflow", () => {
       }
     }]);
     assert.deepEqual(finalizes, [{ fileId: "file_signed" }]);
+    assert.equal(progressUpdates.length, 1);
+    assert.equal(progressUpdates[0].status, "uploading");
+    assert.equal(progressUpdates[0].backendState.antivirusState, "scan_pending");
     assert.deepEqual(statusChecks, ["file_signed", "file_signed"]);
     assert.equal(result.status, "ready");
     assert.equal(result.backendState.antivirusState, "scan_clean");

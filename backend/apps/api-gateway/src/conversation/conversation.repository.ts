@@ -9,6 +9,8 @@ import { type OutboxEvent } from "@support-communication/events";
 import { Prisma } from "@prisma/client";
 import { type ConversationMessage, type ConversationAppealMetadata, type ConversationRecord } from "./conversation.types.js";
 
+const REALTIME_EVENT_BUFFER_LIMIT = 5_000;
+
 export interface RealtimeEvent {
   eventId: string;
   eventName: string;
@@ -100,7 +102,22 @@ export interface ConversationOutboundDescriptorFilter {
 }
 
 export interface ConversationRealtimeEventFilter {
+  allTenants?: boolean;
+  since?: string;
+  take?: number;
   tenantId?: string;
+}
+
+export interface ConversationRealtimeRetentionFilter {
+  before: string;
+  tenantId?: string;
+}
+
+export interface ConversationListFilter {
+  cursor?: string;
+  messageTake?: number;
+  take?: number;
+  tenantId: string;
 }
 
 export interface ConversationOutboundDescriptorRecordInput {
@@ -195,12 +212,13 @@ export interface ConversationRepositoryPort {
   findInboundEvent(channel: string, eventId: string): MaybePromise<ConversationInboundEvent | undefined>;
   findOutboundDescriptorByIdempotencyKey(idempotencyKey: string): MaybePromise<ConversationOutboundDescriptor | undefined>;
   listDeliveryReceipts(filter?: ConversationDeliveryReceiptFilter): MaybePromise<ConversationDeliveryReceipt[]>;
-  listConversations(): MaybePromise<ConversationRecord[]>;
+  listConversations(filter: ConversationListFilter): MaybePromise<ConversationRecord[]>;
   listLifecycleEvents(filter: ConversationLifecycleEventFilter): MaybePromise<ConversationLifecycleEvent[]>;
   listChannelCatalog(): MaybePromise<Array<Record<string, unknown>>>;
   listOutboundDescriptors(filter?: ConversationOutboundDescriptorFilter): MaybePromise<ConversationOutboundDescriptor[]>;
   listOutboxEvents(): MaybePromise<OutboxEvent[]>;
-  listRealtimeEvents(filter?: ConversationRealtimeEventFilter): MaybePromise<RealtimeEvent[]>;
+  listRealtimeEvents(filter: ConversationRealtimeEventFilter): MaybePromise<RealtimeEvent[]>;
+  pruneRealtimeEvents(filter: ConversationRealtimeRetentionFilter): MaybePromise<number>;
   queueOutboundConversation(input: ConversationOutboundConversationInput): MaybePromise<ConversationOutboundConversationRecord>;
   queueOutboundMessageReply(input: ConversationOutboundMessageReplyInput): MaybePromise<ConversationOutboundMessageReplyRecord>;
   recordDeliveryReceipt(receipt: ConversationDeliveryReceipt): MaybePromise<ConversationDeliveryReceipt>;
@@ -234,8 +252,8 @@ export class ConversationRepository implements ConversationRepositoryPort {
     return new ConversationRepository(new PrismaConversationRepository(client));
   }
 
-  listConversations(): MaybePromise<ConversationRecord[]> {
-    return this.adapter.listConversations();
+  listConversations(filter: ConversationListFilter): MaybePromise<ConversationRecord[]> {
+    return this.adapter.listConversations(filter);
   }
 
   listChannelCatalog(): MaybePromise<Array<Record<string, unknown>>> {
@@ -306,8 +324,12 @@ export class ConversationRepository implements ConversationRepositoryPort {
     return this.adapter.recordOutboundDescriptor(input);
   }
 
-  listRealtimeEvents(filter: ConversationRealtimeEventFilter = {}): MaybePromise<RealtimeEvent[]> {
+  listRealtimeEvents(filter: ConversationRealtimeEventFilter): MaybePromise<RealtimeEvent[]> {
     return this.adapter.listRealtimeEvents(filter);
+  }
+
+  pruneRealtimeEvents(filter: ConversationRealtimeRetentionFilter): MaybePromise<number> {
+    return this.adapter.pruneRealtimeEvents(filter);
   }
 
   queueOutboundConversation(input: ConversationOutboundConversationInput): MaybePromise<ConversationOutboundConversationRecord> {
@@ -347,8 +369,7 @@ interface PrismaConversationDelegates {
     findUnique(input: PrismaConversationLifecycleEventFindUniqueInput): Promise<PrismaConversationLifecycleEventRow | null>;
   };
   conversationMessage: {
-    createMany(input: { data: PrismaConversationMessageCreateInput[] }): Promise<{ count: number }>;
-    deleteMany(input: { where: { conversationId: string } }): Promise<{ count: number }>;
+    createMany(input: { data: PrismaConversationMessageCreateInput[]; skipDuplicates: true }): Promise<{ count: number }>;
   };
   conversationOutboundDescriptor: {
     create(input: { data: PrismaConversationOutboundDescriptorCreateInput }): Promise<PrismaConversationOutboundDescriptorRow>;
@@ -357,9 +378,13 @@ interface PrismaConversationDelegates {
   };
   conversationRealtimeEvent: {
     create(input: { data: PrismaConversationRealtimeEventCreateInput }): Promise<PrismaConversationRealtimeEventRow>;
+    deleteMany?(input: { where: { occurredAt: { lt: Date }; tenantId?: string } }): Promise<{ count: number }>;
     findMany(input: {
-      orderBy: Array<{ occurredAt: "asc" } | { eventId: "asc" }>;
-      where?: { tenantId?: string };
+      cursor?: { eventId: string };
+      orderBy: Array<{ occurredAt: "asc" | "desc" } | { eventId: "asc" | "desc" }>;
+      skip?: number;
+      take: number;
+      where?: { occurredAt?: { gt: Date }; tenantId?: string };
     }): Promise<PrismaConversationRealtimeEventRow[]>;
   };
   outboxEvent: {
@@ -372,8 +397,12 @@ interface PrismaConversationDelegates {
 }
 
 interface PrismaConversationFindManyInput {
-  include: { messages: { orderBy: { createdAt: "asc" } } };
-  orderBy: { updatedAt: "desc" };
+  cursor?: { id: string };
+  include: { messages: { orderBy: { createdAt: "desc" }; take: number } };
+  orderBy: Array<{ updatedAt: "desc" } | { id: "desc" }>;
+  skip?: number;
+  take: number;
+  where: { tenantId: string };
 }
 
 interface PrismaConversationFindUniqueInput {
@@ -628,16 +657,15 @@ async function savePrismaConversation(transaction: PrismaConversationTransaction
     update: conversationData,
     where: { id: conversation.id }
   });
-  await replacePrismaConversationMessages(transaction, conversation);
+  await appendPrismaConversationMessages(transaction, conversation);
 
   return clone(conversation);
 }
 
-async function replacePrismaConversationMessages(
+async function appendPrismaConversationMessages(
   transaction: PrismaConversationTransactionalClient,
   conversation: ConversationRecord
 ): Promise<void> {
-  await transaction.conversationMessage.deleteMany({ where: { conversationId: conversation.id } });
   const firstCreatedAt = new Date();
   const messages = conversation.messages.map((message, index) => toPrismaConversationMessageCreateInput(
     conversation.id,
@@ -645,7 +673,7 @@ async function replacePrismaConversationMessages(
     messageCreatedAtOrFallback(message.createdAt, new Date(firstCreatedAt.getTime() + index))
   ));
   if (messages.length > 0) {
-    await transaction.conversationMessage.createMany({ data: messages });
+    await transaction.conversationMessage.createMany({ data: messages, skipDuplicates: true });
   }
 }
 
@@ -707,8 +735,8 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
   }
   constructor(private readonly client: PrismaConversationClient) {}
 
-  async listConversations(): Promise<ConversationRecord[]> {
-    const rows = await this.client.conversation.findMany(conversationWithMessagesQuery());
+  async listConversations(filter: ConversationListFilter): Promise<ConversationRecord[]> {
+    const rows = await this.client.conversation.findMany(conversationWithMessagesQuery(filter));
     return rows.map(toConversationRecord);
   }
 
@@ -752,7 +780,7 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
       if (updated.count !== 1) {
         throw new ConversationAssignmentConflictError(input.conversation.id);
       }
-      await replacePrismaConversationMessages(transaction, input.conversation);
+      await appendPrismaConversationMessages(transaction, input.conversation);
       const conversation = clone(input.conversation);
       const lifecycleEvent = await appendPrismaLifecycleEvent(transaction, input.lifecycleEvent);
       const realtimeEvent = await appendPrismaRealtimeEvent(transaction, input.realtimeEvent);
@@ -848,12 +876,54 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
     return appendPrismaRealtimeEvent(this.client, event);
   }
 
-  async listRealtimeEvents(filter: ConversationRealtimeEventFilter = {}): Promise<RealtimeEvent[]> {
-    const rows = await this.client.conversationRealtimeEvent.findMany({
-      orderBy: [{ occurredAt: "asc" }, { eventId: "asc" }],
-      ...(filter.tenantId ? { where: { tenantId: filter.tenantId } } : {})
+  async listRealtimeEvents(filter: ConversationRealtimeEventFilter): Promise<RealtimeEvent[]> {
+    assertRealtimeEventScope(filter);
+    const since = parseRealtimeSince(filter.since);
+    const cursor = since ? undefined : realtimeEventCursor(filter.since);
+    const ascending = Boolean(since || cursor);
+    const query = {
+      ...(cursor ? { cursor: { eventId: cursor }, skip: 1 } : {}),
+      orderBy: [
+        { occurredAt: ascending ? "asc" as const : "desc" as const },
+        { eventId: ascending ? "asc" as const : "desc" as const }
+      ],
+      take: boundedTake(filter.take, 200, 500),
+      ...((filter.tenantId || since) ? {
+        where: {
+          ...(filter.tenantId ? { tenantId: requireConversationTenantId(filter.tenantId) } : {}),
+          ...(since ? { occurredAt: { gt: since } } : {})
+        }
+      } : {})
+    };
+    try {
+      const rows = await this.client.conversationRealtimeEvent.findMany(query);
+      const events = rows.map(toRealtimeEvent);
+      return ascending ? events : events.reverse();
+    } catch (error) {
+      if (!cursor || !isPrismaCursorNotFoundError(error)) {
+        throw error;
+      }
+      const rows = await this.client.conversationRealtimeEvent.findMany({
+        orderBy: [{ occurredAt: "desc" }, { eventId: "desc" }],
+        take: boundedTake(filter.take, 200, 500),
+        ...(filter.tenantId ? { where: { tenantId: requireConversationTenantId(filter.tenantId) } } : {})
+      });
+      return rows.map(toRealtimeEvent).reverse();
+    }
+  }
+
+  async pruneRealtimeEvents(filter: ConversationRealtimeRetentionFilter): Promise<number> {
+    const before = requireRetentionBoundary(filter.before);
+    if (!this.client.conversationRealtimeEvent.deleteMany) {
+      throw new Error("conversation_realtime_retention_delegate_required");
+    }
+    const result = await this.client.conversationRealtimeEvent.deleteMany({
+      where: {
+        occurredAt: { lt: before },
+        ...(filter.tenantId ? { tenantId: requireConversationTenantId(filter.tenantId) } : {})
+      }
     });
-    return rows.map(toRealtimeEvent);
+    return result.count;
   }
 
   async recordInboundMessage(input: ConversationInboundMessageRecordInput): Promise<ConversationInboundMessageRecord> {
@@ -1004,8 +1074,18 @@ class PrismaConversationRepository implements ConversationRepositoryPort {
 
 function createDurableConversationRepository(store: DurableStore<ConversationState>): ConversationRepositoryPort {
   return {
-    listConversations(): ConversationRecord[] {
-      return clone(store.read().conversations);
+    listConversations(filter: ConversationListFilter): ConversationRecord[] {
+      const tenantId = requireConversationTenantId(filter?.tenantId);
+      const messageTake = boundedTake(filter?.messageTake, 50, 200);
+      const rows = store.read().conversations
+        .filter((conversation) => conversation.tenantId === tenantId)
+        .sort(compareConversationsForList);
+      const cursorIndex = filter?.cursor ? rows.findIndex((conversation) => conversation.id === filter.cursor) : -1;
+      const start = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+      return clone(rows.slice(start, start + boundedTake(filter?.take, 100, 500)).map((conversation) => ({
+        ...conversation,
+        messages: conversation.messages.slice(-messageTake)
+      })));
     },
 
     listChannelCatalog(): Array<Record<string, unknown>> {
@@ -1124,9 +1204,7 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
           ...state,
           conversations: upsertConversationRows(state.conversations, nextConversation),
           lifecycleEvents: [...lifecycleEvents, nextLifecycleEvent],
-          realtimeEvents: (state.realtimeEvents ?? []).some((event) => event.eventId === nextRealtimeEvent.eventId)
-            ? state.realtimeEvents
-            : [...(state.realtimeEvents ?? []), nextRealtimeEvent]
+          realtimeEvents: realtimeEventsWithEvent(state.realtimeEvents ?? [], nextRealtimeEvent)
         };
       });
       if (!persisted) throw new Error(`Conversation mutation ${input.lifecycleEvent.id} was not persisted.`);
@@ -1157,9 +1235,7 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
           ...state,
           conversations: upsertConversationRows(state.conversations, nextConversation),
           lifecycleEvents: lifecycleEventsWithEvent(state.lifecycleEvents ?? [], nextLifecycleEvent),
-          realtimeEvents: (state.realtimeEvents ?? []).some((event) => event.eventId === nextRealtimeEvent.eventId)
-            ? state.realtimeEvents
-            : [...(state.realtimeEvents ?? []), nextRealtimeEvent],
+          realtimeEvents: realtimeEventsWithEvent(state.realtimeEvents ?? [], nextRealtimeEvent),
           routingAnalyticsRows: (state.routingAnalyticsRows ?? []).some((row) => row.id === nextAnalyticsRow.id)
             ? state.routingAnalyticsRows
             : [...(state.routingAnalyticsRows ?? []), nextAnalyticsRow]
@@ -1216,9 +1292,7 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
         const nextLifecycleEvent = clone(input.lifecycleEvent);
         const nextRealtimeEvent = clone(input.realtimeEvent);
         const conversations = upsertConversationRows(state.conversations, nextConversation);
-        const realtimeEvents = (state.realtimeEvents ?? []).some((event) => event.eventId === nextRealtimeEvent.eventId)
-          ? state.realtimeEvents
-          : [...(state.realtimeEvents ?? []), nextRealtimeEvent];
+        const realtimeEvents = realtimeEventsWithEvent(state.realtimeEvents ?? [], nextRealtimeEvent);
         const recorded = recordOutboundDescriptorInState({
           ...state,
           conversations,
@@ -1360,9 +1434,7 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
           conversations: upsertConversationRows(state.conversations, nextConversation),
           inboundEvents: [...state.inboundEvents, nextInboundEvent],
           lifecycleEvents: lifecycleEventsWithEvent(state.lifecycleEvents ?? [], nextLifecycleEvent),
-          realtimeEvents: (state.realtimeEvents ?? []).some((event) => event.eventId === nextRealtimeEvent.eventId)
-            ? state.realtimeEvents
-            : [...(state.realtimeEvents ?? []), nextRealtimeEvent]
+          realtimeEvents: realtimeEventsWithEvent(state.realtimeEvents ?? [], nextRealtimeEvent)
         };
       });
       if (!persisted) throw new Error(`Inbound message ${input.inboundEvent.channel}:${input.inboundEvent.eventId} was not persisted.`);
@@ -1373,15 +1445,43 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
       const nextEvent = clone(event);
       store.update((state) => ({
         ...state,
-        realtimeEvents: [...state.realtimeEvents, nextEvent]
+        realtimeEvents: realtimeEventsWithEvent(state.realtimeEvents, nextEvent)
       }));
 
       return clone(nextEvent);
     },
 
-    listRealtimeEvents(filter: ConversationRealtimeEventFilter = {}): RealtimeEvent[] {
-      return clone((store.read().realtimeEvents ?? [])
-        .filter((event) => !filter.tenantId || event.tenantId === filter.tenantId));
+    listRealtimeEvents(filter: ConversationRealtimeEventFilter): RealtimeEvent[] {
+      assertRealtimeEventScope(filter);
+      const since = parseRealtimeSince(filter.since);
+      const cursor = since ? undefined : realtimeEventCursor(filter.since);
+      const rows = (store.read().realtimeEvents ?? [])
+        .filter((event) => !filter.tenantId || event.tenantId === filter.tenantId)
+        .sort(compareRealtimeEventRows);
+      const take = boundedTake(filter.take, 200, 500);
+      if (since) {
+        return clone(rows.filter((event) => new Date(event.occurredAt).getTime() > since.getTime()).slice(0, take));
+      }
+      if (cursor) {
+        const cursorIndex = rows.findIndex((event) => event.eventId === cursor);
+        return clone(cursorIndex >= 0 ? rows.slice(cursorIndex + 1, cursorIndex + 1 + take) : rows.slice(-take));
+      }
+      return clone(rows.slice(-take));
+    },
+
+    pruneRealtimeEvents(filter: ConversationRealtimeRetentionFilter): number {
+      const before = requireRetentionBoundary(filter.before).getTime();
+      let removed = 0;
+      store.update((state) => ({
+        ...state,
+        realtimeEvents: (state.realtimeEvents ?? []).filter((event) => {
+          const expired = Date.parse(event.occurredAt) < before
+            && (!filter.tenantId || event.tenantId === filter.tenantId);
+          if (expired) removed += 1;
+          return !expired;
+        })
+      }));
+      return removed;
     },
 
     listLifecycleEvents(filter: ConversationLifecycleEventFilter): ConversationLifecycleEvent[] {
@@ -1490,10 +1590,18 @@ function outboundDescriptorWhere(filter: ConversationOutboundDescriptorFilter): 
   ) as Partial<Record<"channel" | "conversationId" | "idempotencyKey" | "kind" | "status" | "tenantId", string>>;
 }
 
-function conversationWithMessagesQuery(): PrismaConversationFindManyInput {
+function conversationWithMessagesQuery(filter: ConversationListFilter): PrismaConversationFindManyInput {
   return {
-    include: conversationMessagesInclude(),
-    orderBy: { updatedAt: "desc" }
+    ...(filter?.cursor ? { cursor: { id: filter.cursor }, skip: 1 } : {}),
+    include: {
+      messages: {
+        orderBy: { createdAt: "desc" },
+        take: boundedTake(filter?.messageTake, 50, 200)
+      }
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    take: boundedTake(filter?.take, 100, 500),
+    where: { tenantId: requireConversationTenantId(filter?.tenantId) }
   };
 }
 
@@ -1512,7 +1620,10 @@ function toConversationRecord(row: PrismaConversationRow): ConversationRecord {
     id: row.id,
     initials: row.initials,
     language: row.language,
-    messages: (row.messages ?? []).map(toConversationMessage),
+    messages: (row.messages ?? [])
+      .map(toConversationMessage)
+      .sort((left, right) => Date.parse(String(left.createdAt ?? "")) - Date.parse(String(right.createdAt ?? ""))
+        || String(left.id).localeCompare(String(right.id))),
     name: row.name,
     ...(row.operatorId ? { operatorId: row.operatorId } : {}),
     ...(row.operatorName ? { operatorName: row.operatorName } : {}),
@@ -1808,7 +1919,72 @@ function lifecycleEventsWithEvent(
 }
 
 function lifecycleRealtimeEventsWithEvent(events: RealtimeEvent[], event: RealtimeEvent): RealtimeEvent[] {
-  return events.some((item) => item.eventId === event.eventId) ? events : [...events, event];
+  return realtimeEventsWithEvent(events, event);
+}
+
+function realtimeEventsWithEvent(events: RealtimeEvent[], event: RealtimeEvent): RealtimeEvent[] {
+  if (events.some((item) => item.eventId === event.eventId)) {
+    return events.slice(-REALTIME_EVENT_BUFFER_LIMIT);
+  }
+  return [...events, event].slice(-REALTIME_EVENT_BUFFER_LIMIT);
+}
+
+function compareConversationsForList(left: ConversationRecord, right: ConversationRecord): number {
+  const updatedAt = Date.parse(String(right.updatedAt ?? "")) - Date.parse(String(left.updatedAt ?? ""));
+  return updatedAt === 0 ? right.id.localeCompare(left.id) : updatedAt;
+}
+
+function compareRealtimeEventRows(left: RealtimeEvent, right: RealtimeEvent): number {
+  const occurredAt = Date.parse(left.occurredAt) - Date.parse(right.occurredAt);
+  return occurredAt === 0 ? left.eventId.localeCompare(right.eventId) : occurredAt;
+}
+
+function boundedTake(value: number | undefined, fallback: number, maximum: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(maximum, Math.trunc(parsed))) : fallback;
+}
+
+function requireRetentionBoundary(value: string): Date {
+  const boundary = new Date(String(value ?? ""));
+  if (Number.isNaN(boundary.getTime())) {
+    throw new Error("conversation_realtime_retention_boundary_invalid");
+  }
+  return boundary;
+}
+
+function assertRealtimeEventScope(filter: ConversationRealtimeEventFilter | undefined): asserts filter is ConversationRealtimeEventFilter {
+  if (filter?.tenantId) {
+    requireConversationTenantId(filter.tenantId);
+    return;
+  }
+  if (filter?.allTenants === true) {
+    return;
+  }
+  throw new Error("conversation_realtime_event_scope_required");
+}
+
+function parseRealtimeSince(value: string | undefined): Date | undefined {
+  const cursor = String(value ?? "").trim();
+  if (!cursor || !cursor.includes("-") || /^rt[_-]/i.test(cursor)) {
+    return undefined;
+  }
+  const relative = /^now-(\d+)([smhd])$/.exec(cursor);
+  if (relative) {
+    const amount = Number(relative[1]);
+    const unitMs = relative[2] === "s" ? 1_000 : relative[2] === "m" ? 60_000 : relative[2] === "h" ? 3_600_000 : 86_400_000;
+    return new Date(Date.now() - amount * unitMs);
+  }
+  const parsed = new Date(cursor);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+function realtimeEventCursor(value: string | undefined): string | undefined {
+  const cursor = String(value ?? "").trim();
+  return cursor && !parseRealtimeSince(cursor) ? cursor : undefined;
+}
+
+function isPrismaCursorNotFoundError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "P2025");
 }
 
 function compareLifecycleEvents(left: ConversationLifecycleEvent, right: ConversationLifecycleEvent): number {

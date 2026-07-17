@@ -15,6 +15,8 @@ export interface QuotaExpirationReleaseRepository {
   releaseExpiredQuotaReservation(input: BillingExpiredQuotaReservationReleaseInput): MaybePromise<BillingQuotaReservation | undefined>;
 }
 
+export type QuotaExpirationRepository = QuotaExpirationClaimRepository & QuotaExpirationReleaseRepository;
+
 export interface ClaimExpiredQuotaReservationsForWorkerInput {
   leaseTimeoutMs?: number;
   limit?: number;
@@ -47,6 +49,43 @@ export type ReleaseExpiredQuotaReservationForWorkerResult =
       reservationId: string;
       status: "skipped";
     };
+
+export interface ExecuteQuotaExpirationWorkerOnceInput {
+  leaseTimeoutMs?: number;
+  limit?: number;
+  now?: Date | string;
+  repository: QuotaExpirationRepository;
+}
+
+export interface ExecuteQuotaExpirationWorkerOnceResult {
+  claimed: number;
+  released: number;
+  skipped: number;
+}
+
+export async function executeQuotaExpirationWorkerOnce(
+  input: ExecuteQuotaExpirationWorkerOnceInput
+): Promise<ExecuteQuotaExpirationWorkerOnceResult> {
+  const claim = await claimExpiredQuotaReservationsForWorker(input);
+  let released = 0;
+  let skipped = 0;
+
+  for (const reservation of claim.claimed) {
+    const result = await releaseExpiredQuotaReservationForWorker({
+      releasedAt: claim.claimedAt,
+      repository: input.repository,
+      reservation
+    });
+    if (result.status === "released") released += 1;
+    else skipped += 1;
+  }
+
+  return {
+    claimed: claim.claimed.length,
+    released,
+    skipped
+  };
+}
 
 export async function claimExpiredQuotaReservationsForWorker(
   input: ClaimExpiredQuotaReservationsForWorkerInput

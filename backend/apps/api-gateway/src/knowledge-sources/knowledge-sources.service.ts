@@ -6,7 +6,12 @@ import { makeAuditId } from "../identity/backend-ids.js";
 import { IdentityRepository, type IdentityServiceAdminAuditEvent } from "../identity/identity.repository.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 import { KnowledgeSourceRepository } from "./knowledge-source.repository.js";
-import { deriveKnowledgeSourceReadiness, type KnowledgeSourceKind, type KnowledgeSourceRecord } from "./knowledge-source.types.js";
+import {
+  canTransitionKnowledgeSourceStatus,
+  deriveKnowledgeSourceReadiness,
+  type KnowledgeSourceKind,
+  type KnowledgeSourceRecord
+} from "./knowledge-source.types.js";
 import { validateUrlKnowledgeSourceConfig } from "./url-source-config.js";
 import { ingestKnowledgeDocument } from "./document-ingestion.js";
 import { UrlSourcePolicyRepository, type UrlSourcePolicy } from "./url-source-policy.repository.js";
@@ -76,12 +81,34 @@ export class KnowledgeSourcesService {
     const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("enableKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
     if (current.status !== "disabled") return invalid("enableKnowledgeSource", tenantId, "knowledge_source_not_disabled", "Включить можно только отключённый источник.");
+    if (!canTransitionKnowledgeSourceStatus(current.status, "ready")
+      && !canTransitionKnowledgeSourceStatus(current.status, "draft")) {
+      return invalid("enableKnowledgeSource", tenantId, "knowledge_source_transition_invalid", "This source cannot be enabled from its current status.");
+    }
+    if (current.kind === "mcp") {
+      const connectorId = String(current.sourceConfig.connectorId ?? "").trim();
+      const connector = connectorId
+        ? await McpConnectorRepository.default().find(tenantId, connectorId)
+        : undefined;
+      if (!connector || !connector.approvedAt || connector.status !== "enabled") {
+        return invalid("enableKnowledgeSource", tenantId, "mcp_connector_not_ready", "MCP connector must still be approved and enabled.");
+      }
+    }
     const hasIndexedContent = Array.isArray(current.metadata.chunks) && current.metadata.chunks.length > 0;
+    const disabledFromStatus = String(current.metadata.disabledFromStatus ?? "");
+    const wasReady = current.kind === "mcp"
+      || disabledFromStatus === "ready"
+      || current.readiness === "ready"
+      || hasIndexedContent;
+    const status: KnowledgeSourceRecord["status"] = wasReady ? "ready" : "draft";
+    const { disabledFromStatus: _disabledFromStatus, ...metadata } = current.metadata;
     const now = new Date().toISOString();
     const source = await this.repository.save({
       ...current,
       disabledAt: null,
-      status: hasIndexedContent ? "ready" : "draft",
+      metadata,
+      readiness: deriveKnowledgeSourceReadiness(status, current.approvalStatus),
+      status,
       updatedAt: now,
       version: current.version + 1
     });
@@ -213,8 +240,18 @@ export class KnowledgeSourcesService {
   async disable(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
     const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("disableKnowledgeSource", tenantId, "knowledge_source_not_found", "Knowledge source was not found.");
+    if (!canTransitionKnowledgeSourceStatus(current.status, "disabled")) {
+      return invalid("disableKnowledgeSource", tenantId, "knowledge_source_transition_invalid", "This source cannot be disabled from its current status.");
+    }
     const now = new Date().toISOString();
-    const source = await this.repository.save({ ...current, disabledAt: now, status: "disabled", updatedAt: now, version: current.version + 1 });
+    const source = await this.repository.save({
+      ...current,
+      disabledAt: now,
+      metadata: { ...current.metadata, disabledFromStatus: current.status },
+      status: "disabled",
+      updatedAt: now,
+      version: current.version + 1
+    });
     const data: Record<string, unknown> = { source };
     if (current.kind === "url") data.auditEvent = await this.recordUrlAudit("knowledge_source.url.disable", tenantId, source.id, "disabled");
     return envelope("disableKnowledgeSource", tenantId, data);

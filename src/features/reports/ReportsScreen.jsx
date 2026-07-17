@@ -283,7 +283,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
     document.body.append(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     setExportError("");
     onToast(`${job.name}: файл ${job.format} скачивается (${response.data.fileName}).`);
   }

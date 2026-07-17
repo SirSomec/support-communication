@@ -35,9 +35,11 @@ export interface ConversationRecord {
   avatar?: string;
   botHandoff?: {
     aiOutcome?: string;
+    botId?: string;
     citations?: Array<{ sourceId: string; title: string; version?: number }>;
     collectedFields?: Record<string, unknown>;
     goal?: string;
+    nodeId?: string;
     phone?: string;
     queue?: string;
     reason?: string;

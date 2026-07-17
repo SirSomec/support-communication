@@ -6,6 +6,10 @@ import {
   type OpenChannelDeliveryKind,
   type OpenChannelDeliveryRecord
 } from "./open-channel.repository.js";
+import {
+  assertOpenChannelOutboundUrlSafe,
+  type OpenChannelHostnameResolver
+} from "./outbound-url-policy.js";
 
 /**
  * Delivers queued external-integration events (event webhooks, Open Channel
@@ -21,6 +25,7 @@ export interface OpenChannelDeliveryFetch {
     body: string;
     headers: Record<string, string>;
     method: "POST";
+    redirect: "manual";
     signal?: AbortSignal;
   }): Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 }
@@ -29,6 +34,7 @@ export interface OpenChannelDeliveryServiceOptions {
   conversationRepository?: Pick<ConversationRepository, "findConversation" | "saveConversationMutation" | "listConversations">;
   fetcher?: OpenChannelDeliveryFetch;
   repository?: OpenChannelRepository;
+  resolveHostname?: OpenChannelHostnameResolver;
   timeoutMsByKind?: Partial<Record<OpenChannelDeliveryKind, number>>;
 }
 
@@ -49,6 +55,7 @@ export class OpenChannelDeliveryService {
   private readonly conversationRepository?: OpenChannelDeliveryServiceOptions["conversationRepository"];
   private readonly fetcher: OpenChannelDeliveryFetch;
   private readonly repository: OpenChannelRepository;
+  private readonly resolveHostname?: OpenChannelHostnameResolver;
   private readonly timeoutMsByKind: Partial<Record<OpenChannelDeliveryKind, number>>;
   private timer: ReturnType<typeof setInterval> | null = null;
 
@@ -56,6 +63,7 @@ export class OpenChannelDeliveryService {
     this.conversationRepository = options.conversationRepository;
     this.fetcher = options.fetcher ?? (fetch as unknown as OpenChannelDeliveryFetch);
     this.repository = options.repository ?? OpenChannelRepository.default();
+    this.resolveHostname = options.resolveHostname;
     this.timeoutMsByKind = options.timeoutMsByKind ?? {};
   }
 
@@ -112,7 +120,7 @@ export class OpenChannelDeliveryService {
           responseBody: outcome.responseBody,
           status: "delivered",
           statusCode: outcome.statusCode
-        });
+        }, delivery.updatedAt);
         result.delivered += 1;
         if (outcome.responseBody) {
           await this.applyDeliveryResponse(delivery, outcome.responseBody);
@@ -127,7 +135,7 @@ export class OpenChannelDeliveryService {
         responseBody: outcome.responseBody,
         status: exhausted ? "dead_lettered" : "pending",
         statusCode: outcome.statusCode
-      });
+      }, delivery.updatedAt);
       if (exhausted) {
         result.deadLettered += 1;
       } else {
@@ -148,10 +156,12 @@ export class OpenChannelDeliveryService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await this.fetcher(delivery.url, {
+      const safeUrl = await assertOpenChannelOutboundUrlSafe(delivery.url, this.resolveHostname);
+      const response = await this.fetcher(safeUrl, {
         body: JSON.stringify(delivery.body),
         headers: { "content-type": "application/json; charset=utf-8" },
         method: "POST",
+        redirect: "manual",
         signal: controller.signal
       });
       const responseBody = await response.text().catch(() => "");

@@ -54,7 +54,7 @@ describe("topic directory settings contracts", () => {
   it("manages hierarchical topics and preserves archived topics out of active options", async () => {
     const service = new TopicDirectoryService();
 
-    const initial = await service.fetchTopics({ tenantId: "tenant-northstar" });
+    const initial = await service.fetchTopics({}, { tenantId: "tenant-northstar" });
     assert.equal(initial.status, "ok");
     assert.ok(initial.data.directory.length >= 3);
     assert.ok(initial.data.activeOptions.every((option: string) => !option.includes("Смена карты")));
@@ -77,25 +77,25 @@ describe("topic directory settings contracts", () => {
       channels: ["Telegram"],
       required: false,
       routingTarget: "Line 1"
-    });
+    }, { tenantId: "tenant-northstar" });
     assert.equal(updated.status, "ok");
     assert.deepEqual(updated.data.topic.channels, ["Telegram"]);
     assert.equal(updated.data.topic.required, false);
 
-    const usage = await service.fetchTopicUsage(created.data.topic.id);
+    const usage = await service.fetchTopicUsage(created.data.topic.id, { tenantId: "tenant-northstar" });
     assert.equal(usage.status, "ok");
     assert.equal(usage.data.canHardDelete, false);
     assert.ok(usage.data.usage.dialogs >= 0);
 
-    const archived = await service.archiveTopic(created.data.topic.id, { reason: "Duplicate topic" });
+    const archived = await service.archiveTopic(created.data.topic.id, { reason: "Duplicate topic" }, { tenantId: "tenant-northstar" });
     assert.equal(archived.status, "ok");
     assert.equal(archived.data.topic.archived, true);
 
-    const afterArchive = await service.fetchTopics({ tenantId: "tenant-northstar" });
+    const afterArchive = await service.fetchTopics({}, { tenantId: "tenant-northstar" });
     assert.equal(afterArchive.data.activeOptions.includes("Заказ / Перенос доставки"), false);
     assert.ok(afterArchive.data.directory.some((group: Record<string, unknown>) => JSON.stringify(group).includes("Перенос доставки")));
 
-    const restored = await service.restoreTopic(created.data.topic.id, { reason: "Needed for routing" });
+    const restored = await service.restoreTopic(created.data.topic.id, { reason: "Needed for routing" }, { tenantId: "tenant-northstar" });
     assert.equal(restored.status, "ok");
     assert.equal(restored.data.topic.archived, false);
   });
@@ -112,9 +112,43 @@ describe("topic directory settings contracts", () => {
     assert.equal(created.status, "ok");
 
     const second = new TopicDirectoryService();
-    const fetched = await second.fetchTopics({ query: created.data.topic.name, tenantId: "tenant-northstar" });
+    const fetched = await second.fetchTopics({ query: created.data.topic.name }, { tenantId: "tenant-northstar" });
     assert.equal(fetched.status, "ok");
     assert.equal(fetched.data.topics.some((topic: Record<string, unknown>) => topic.id === created.data.topic.id), true);
+  });
+
+  it("scopes every topic read and mutation to the authenticated tenant", async () => {
+    const service = new TopicDirectoryService();
+    const initialVolgaTopics = await service.fetchTopics({}, { tenantId: "tenant-volga" });
+    const created = await service.createTopic({
+      branchName: "Private",
+      groupName: "Tenant Volga",
+      name: `Volga topic ${Date.now()}`
+    }, { tenantId: "tenant-volga" });
+    const topicId = String(created.data.topic.id);
+
+    const northstarList = await service.fetchTopics({ query: String(created.data.topic.name) }, { tenantId: "tenant-northstar" });
+    const crossTenantRead = await service.fetchTopicUsage(topicId, { tenantId: "tenant-northstar" });
+    const crossTenantUpdate = await service.updateTopic(topicId, { name: "Stolen" }, { tenantId: "tenant-northstar" });
+    const crossTenantArchive = await service.archiveTopic(topicId, {}, { tenantId: "tenant-northstar" });
+    const ownerRead = await service.fetchTopicUsage(topicId, { tenantId: "tenant-volga" });
+
+    assert.ok(initialVolgaTopics.data.activeOptions.length > 0);
+    assert.equal(northstarList.data.topics.length, 0);
+    assert.equal(crossTenantRead.status, "not_found");
+    assert.equal(crossTenantUpdate.status, "not_found");
+    assert.equal(crossTenantArchive.status, "not_found");
+    assert.equal(ownerRead.status, "ok");
+    assert.equal(ownerRead.data.topic.name, created.data.topic.name);
+  });
+
+  it("protects the topic controller with auth, permissions and request-derived tenant scope", () => {
+    const source = readFileSync(new URL("../apps/api-gateway/src/workspace/topics.controller.ts", import.meta.url), "utf8");
+    assert.match(source, /@UseGuards\(TenantOperatorOrServiceAdminGuard\)/);
+    assert.match(source, /@RequireTenantOperatorPermission\("settings\.read"\)/);
+    assert.match(source, /@RequireTenantOperatorPermission\("settings\.manage"\)/);
+    assert.match(source, /topicTenantScope\(request\)/);
+    assert.doesNotMatch(source, /@Query\(\) query: \{[^}]*tenantId/);
   });
 });
 
@@ -1627,6 +1661,33 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.deepEqual(auditEvents.map((event) => event.id), [saved.data.auditId]);
     assert.equal(auditEvents[0]?.immutable, true);
     assert.equal(auditEvents[0]?.templateId, "tpl_runtime_audit");
+  });
+
+  it("does not allow one tenant to overwrite a template owned by another tenant", async () => {
+    const repository = WorkspaceRepository.inMemory();
+    const workspace = new WorkspaceService(repository);
+    const ownerSave = await workspace.saveTemplate({
+      channel: "SDK",
+      id: "tpl_cross_tenant_protected",
+      text: "Owner content",
+      title: "Owner template",
+      topic: "Delivery"
+    }, { tenantId: "tenant-volga" });
+    const attack = await workspace.saveTemplate({
+      channel: "Telegram",
+      id: "tpl_cross_tenant_protected",
+      text: "Attacker content",
+      title: "Stolen template",
+      topic: "Other"
+    }, { tenantId: "tenant-northstar" });
+    const persisted = await repository.findTemplate("tpl_cross_tenant_protected", { tenantId: "tenant-volga" });
+
+    assert.equal(ownerSave.status, "ok");
+    assert.equal(attack.status, "not_found");
+    assert.equal(attack.error?.code, "template_not_found");
+    assert.equal(persisted?.tenantId, "tenant-volga");
+    assert.equal(persisted?.title, "Owner template");
+    assert.equal(persisted?.text, "Owner content");
   });
 
   it("wires template controllers to read/write permissions and tenant context", () => {

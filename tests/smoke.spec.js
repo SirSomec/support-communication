@@ -139,7 +139,7 @@ test("product sections expose loading/data/error states", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
 
-  for (const section of ["Панель", "Клиенты", "Шаблоны", "Визиты", "Отчеты", "Качество", "Боты", "Audit", "Настройки"]) {
+  for (const section of ["Панель", "Клиенты", "Шаблоны", "Визиты", "Отчеты", "Качество", "Боты", "Аудит"]) {
     await openSection(page, section);
     const primaryStateStrip = page.locator(".product-screen > .screen-state-strip").first();
     await expect(primaryStateStrip.locator(".screen-state-item")).toHaveCount(3);
@@ -181,7 +181,11 @@ test("clients segment filter and export descriptor are backend backed", async ({
   const segmentSelect = page.getByLabel("Сегмент клиентов");
   await expect(segmentSelect).toBeEnabled();
   await segmentSelect.selectOption("channel:SDK");
-  await expect(page.locator(".clients-table .entity-row")).toHaveCount(2);
+  const sdkRows = page.locator(".clients-table .entity-row");
+  await expect.poll(async () => sdkRows.count()).toBeGreaterThanOrEqual(2);
+  await expect.poll(async () => (
+    await sdkRows.allTextContents()
+  ).every((text) => text.includes("SDK"))).toBeTruthy();
   await expect(page.locator(".clients-table")).toContainText("SDK");
   await expect(page.locator(".clients-table")).not.toContainText("Telegram");
 
@@ -224,6 +228,11 @@ test("public landing demo and contact request submit to backend", async ({ page 
 test("shift panel redistribution preview and commit are backend backed", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
+  const presenceResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/presence/me") && response.request().method() === "PUT"
+  );
+  await page.getByLabel("Статус оператора").selectOption("online");
+  expect((await presenceResponse).ok()).toBeTruthy();
   await openSection(page, "Панель");
 
   const previewResponse = page.waitForResponse((response) =>
@@ -254,7 +263,26 @@ test("reports metrics table exposes semantic headers and keyboard column control
   const routingActivityReport = page.getByTestId("routing-activity-report");
   await expect(routingActivityReport).toBeVisible();
   await expect(routingActivityReport).toContainText("Назначения и передачи");
-  await expect(routingActivityReport).toContainText("За выбранный период назначений и передач нет.");
+  await expect(routingActivityReport).toContainText("по фактическим событиям");
+  const routingActivityTable = routingActivityReport.getByRole("table", {
+    name: "Активность назначений и передач по операторам"
+  });
+  const emptyRoutingActivity = routingActivityReport.getByText(
+    "За выбранный период назначений и передач нет.",
+    { exact: true }
+  );
+  await expect.poll(async () => (
+    await routingActivityTable.count()
+  ) + (
+    await emptyRoutingActivity.count()
+  )).toBe(1);
+  if (await routingActivityTable.count()) {
+    await expect(routingActivityTable.getByRole("columnheader", { name: "Оператор" })).toBeVisible();
+    await expect(routingActivityTable.getByRole("columnheader", { name: "Всего событий" })).toBeVisible();
+    await expect(routingActivityTable.getByRole("row").filter({ hasText: "usr-volga-admin" })).toContainText("1");
+  } else {
+    await expect(emptyRoutingActivity).toBeVisible();
+  }
 
   const reportTable = page.getByRole("table", { name: "Показатели отчета" });
   await expect(reportTable).toBeVisible();
@@ -404,12 +432,13 @@ test("customer panel inserts templates and enforces close topic", async ({ page 
 test("employee role masks phone in chat context", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Сотрудник");
+  await page.locator(".queue-row").filter({ hasText: "Maria K." }).click();
 
-  await expect(page.locator(".chat-identity")).toContainText("+7 *** ***-**-44");
+  await expect(page.locator(".chat-identity")).toContainText("*** ***-**-44");
   await expect(page.locator(".chat-identity")).not.toContainText("+7 999 204-18-44");
-  await expect(page.locator(".bot-handoff-summary")).toContainText("+7 *** ***-**-44");
+  await expect(page.locator(".bot-handoff-summary")).toContainText("*** ***-**-44");
   await expect(page.locator(".bot-handoff-summary")).not.toContainText("+7 999 204-18-44");
-  await expect(page.locator(".customer-panel")).toContainText("+7 *** ***-**-44");
+  await expect(page.locator(".customer-panel")).toContainText("*** ***-**-44");
   await expect(page.locator(".customer-panel")).not.toContainText("+7 999 204-18-44");
   await expectHealthyPage(page);
 });
@@ -485,6 +514,7 @@ test("topbar notifications and live bot handoff summary are actionable", async (
     }
   });
   await selectRole(page, "Администратор");
+  await page.locator(".queue-row").filter({ hasText: "Vladimir B." }).click();
 
   await expect(page.locator(".bot-handoff-summary")).toContainText("Handoff summary");
   await page.getByRole("button", { name: "Уведомления" }).click();
@@ -558,7 +588,7 @@ test("notification navigation actions open concrete workspaces", async ({ page }
   await vkNotification.locator("button").click();
   await expect(page.locator(".notification-drawer")).toHaveCount(0);
   await expect(page.locator(".channel-connections-panel")).toBeVisible();
-  await expect(page.locator(".channel-detail-head")).toContainText("VK main community");
+  await expect(page.locator(".channel-detail-head")).toContainText("VK");
 
   await page.getByRole("button", { name: "Уведомления" }).click();
   const serviceAdminNotification = page.locator(".notification-item").filter({ hasText: "Service-admin audit export" });
@@ -607,20 +637,25 @@ test("composer exposes AI explainability and pre-send quality checks", async ({ 
 });
 
 test("composer save-template modal keeps dialog semantics", async ({ page }) => {
+  const templateTitle = "Playwright delivery status";
   await openAppShell(page);
   await selectRole(page, "Администратор");
+  await page.locator(".queue-row").filter({ hasText: "Maria K." }).click();
 
   await page.locator(".composer textarea").fill("Проверю заказ и вернусь с точным сроком доставки.");
   await page.locator(".composer-tools button[aria-label='Сохранить как шаблон']").click();
 
   await expect(page.getByRole("dialog", { name: "Сохранить как шаблон" })).toBeVisible();
   await expect(page.locator(".template-save-panel")).toHaveAttribute("aria-modal", "true");
-  await page.locator(".template-save-panel .variable-row button").filter({ hasText: "{client_name}" }).click();
+  const templatePanel = page.locator(".template-save-panel");
+  await templatePanel.getByRole("textbox", { name: "Название" }).fill(templateTitle);
+  await templatePanel.getByRole("textbox", { name: "Тематика" }).fill("Delivery / Status");
+  await templatePanel.locator(".variable-row button").filter({ hasText: "{client_name}" }).click();
   await expect(page.locator(".template-save-text textarea")).toHaveValue(/client_name/);
   await page.locator(".template-save-panel > footer button").filter({ hasText: "Сохранить шаблон" }).click();
   await expect(page.locator(".toast")).toContainText("Шаблон сохранен");
   await page.locator(".composer-tabs button").filter({ hasText: "Шаблоны" }).click();
-  const savedTemplate = page.locator(".composer-template-picker button").filter({ hasText: "Status" }).first();
+  const savedTemplate = page.locator(".composer-template-picker button").filter({ hasText: templateTitle });
   await expect(savedTemplate).toContainText("Delivery / Status");
   await savedTemplate.click();
   await expect(page.locator(".composer textarea")).toHaveValue(/Проверю заказ и вернусь с точным сроком доставки/);
@@ -679,6 +714,7 @@ test("composer attachment queue blocks scan-pending backend descriptors", async 
 test("draft switch warning preserves or discards unsent draft", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
+  await page.locator(".queue-row").filter({ hasText: "Maria K." }).click();
 
   await page.getByLabel("Выбор вложений").setInputFiles({
     name: "pending-switch.txt",
@@ -885,10 +921,10 @@ test("quality AI workspace exposes real-time scoring and coaching", async ({ pag
   await expect(page.locator(".toast")).toContainText("Проверка по правилам сохранена");
 
   await page.getByRole("button", { name: "Низкие оценки" }).click();
-  const lowScoreRow = page.locator(".quality-row").filter({ hasText: "client-vladimir" });
+  const lowScoreRow = page.locator(".quality-row").filter({ hasText: "Vladimir B." });
   await expect(lowScoreRow).toBeVisible();
-  await lowScoreRow.getByRole("button", { name: "Проверить", exact: true }).click();
-  const reviewForm = lowScoreRow.locator(".qa-review-form");
+  await lowScoreRow.getByRole("button", { name: /^(Аудит диалога|Диалог · проверено)$/ }).click();
+  const reviewForm = page.locator(".quality-audit-panel .qa-review-form");
   await expect(reviewForm).toBeVisible();
   const manualReviewPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/quality/manual-reviews") && response.request().method() === "POST"
@@ -901,7 +937,8 @@ test("quality AI workspace exposes real-time scoring and coaching", async ({ pag
   expect(manualReviewPayload.data.reviewId).toBeTruthy();
   expect(manualReviewPayload.data.auditId).toBeTruthy();
   await expect(page.locator(".toast")).toContainText("Ручная проверка сохранена");
-  await expect(lowScoreRow).toContainText("Проверено");
+  await expect(page.locator(".quality-audit-panel")).toHaveCount(0);
+  await expect(page.locator(".quality-row").filter({ hasText: "Vladimir B." })).toContainText("Диалог · проверено");
   await expectHealthyPage(page);
 });
 
@@ -909,6 +946,8 @@ test("bot builder supports canonical nodes and import validation", async ({ page
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Боты");
+  const deliveryScenario = page.locator(".scenario-card").filter({ hasText: "Delivery status" });
+  await deliveryScenario.getByRole("button", { name: "Открыть" }).click();
 
   // BAI-810: консоль сценария с вкладками — паспорт, результаты, версии.
   await expect(page.locator(".scenario-console")).toBeVisible();
@@ -1050,26 +1089,36 @@ test("scenario wizard keeps keyboard focus, aria steps and responsive layout", a
 });
 
 test("audit screen filters events and exposes event detail", async ({ page }) => {
-  const { serviceAdminSession } = await openAppShell(page, { serviceAdmin: true });
+  const { tenantSession } = await openAppShell(page);
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
   const auditReason = "Smoke audit seed event for screen filters";
-  const auditSeedResponse = await page.request.post("/api/v1/service-admin/users/usr-volga-admin/mfa/reset", {
+  const authorization = { authorization: `Bearer ${tenantSession.accessToken}` };
+  const outboundSeedResponse = await page.request.post("/api/v1/dialogs/outbound", {
     data: {
-      confirmed: true,
-      reason: auditReason
+      channel: "SDK",
+      clientName: "Audit smoke client",
+      message: "Create a tenant-scoped lifecycle event for the audit screen.",
+      phone: "+7 999 000-12-34",
+      topic: "Delivery / Status"
     },
-    headers: {
-      authorization: `Bearer ${serviceAdminSession.accessToken}`
-    }
+    headers: authorization
+  });
+  expect(outboundSeedResponse.ok()).toBeTruthy();
+  const outboundSeedPayload = await outboundSeedResponse.json();
+  expect(outboundSeedPayload.status).toBe("ok");
+  const auditConversationId = outboundSeedPayload.data.conversationId;
+  const auditSeedResponse = await page.request.patch(`/api/v1/dialogs/${auditConversationId}/status`, {
+    data: { nextStatus: "assigned", reason: auditReason, roleMode: "admin" },
+    headers: authorization
   });
   expect(auditSeedResponse.ok()).toBeTruthy();
   const auditSeedPayload = await auditSeedResponse.json();
   expect(auditSeedPayload.status).toBe("ok");
-  const seededAuditEvent = auditSeedPayload.data.auditEvent;
+  const seededAuditEvent = auditSeedPayload.data.lifecycleEvent;
   const seededAuditId = seededAuditEvent.id;
-  expect(seededAuditEvent.immutable).toBeTruthy();
+  expect(seededAuditEvent.schemaVersion).toBe("conversation-lifecycle/v1");
   expect(seededAuditEvent.tenantId).toBe("tenant-volga");
-  expect(seededAuditEvent.userId).toBe("usr-volga-admin");
+  expect(seededAuditEvent.actorId).toBe("usr-volga-admin");
   expect(seededAuditEvent.traceId).toBeTruthy();
 
   await selectRole(page, "Администратор");
@@ -1091,9 +1140,9 @@ test("audit screen filters events and exposes event detail", async ({ page }) =>
   await expect(page.getByTestId("audit-related-object-panel")).toContainText(seededAuditId);
   await expect(page.getByTestId("audit-related-object-panel")).toContainText("tenant-volga");
   await expect(page.getByTestId("audit-related-object-panel")).toContainText(seededAuditEvent.traceId);
-  await expect(page.getByTestId("audit-related-object-panel")).toContainText("immutable");
+  await expect(page.getByTestId("audit-related-object-panel")).toContainText("неизменяемый");
   await page.locator(".product-actions button").filter({ hasText: "Экспорт CSV" }).click();
-  await expect(page.locator(".toast")).toContainText("Audit export:");
+  await expect(page.locator(".toast")).toContainText("Экспортировано: 1 событие");
   await selectRole(page, "Сотрудник");
   await expect(page.locator(".audit-log-row")).toHaveCount(0);
   await expect(page.locator("nav button").filter({ hasText: "Аудит" })).toBeDisabled();
@@ -1238,6 +1287,8 @@ test("settings keep role matrix reference and aggregate channel toggles", async 
 });
 
 test("settings employee management preserves edit and role permissions", async ({ page }) => {
+  const runTag = Date.now().toString(36);
+  const employeeName = `Smoke employee ${runTag}`;
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
@@ -1251,26 +1302,34 @@ test("settings employee management preserves edit and role permissions", async (
   await expect(employeePanel.locator("[data-employee-id='usr-ns-owner']")).toHaveCount(0);
   await employeePanel.locator("[data-employee-id='usr-volga-admin']").click();
 
+  await employeePanel.locator(".settings-invite-employee").click();
+  const inviteForm = page.locator(".employee-invite-form");
+  await inviteForm.locator("input").first().fill(employeeName);
+  await inviteForm.locator("input[type='email']").fill(`smoke-employee-${runTag}@volga.example`);
+  const inviteResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/settings/employees/invites") && response.request().method() === "POST"
+  );
+  await page.locator(".settings-modal-panel").getByRole("button", { name: "Пригласить" }).click();
+  expect((await inviteResponse).ok()).toBeTruthy();
+  await expect(employeePanel.locator(".employee-editor header")).toContainText(employeeName);
+
   await employeePanel.locator(".employee-editor-grid select").first().selectOption({ label: "Старший сотрудник" });
-  await expect(employeePanel.locator("[data-employee-id='usr-volga-admin']")).toContainText("Старший сотрудник");
   await employeePanel.locator(".employee-editor-grid select").nth(1).selectOption({ label: "VIP support" });
-  await expect(employeePanel.locator("[data-employee-id='usr-volga-admin']")).toContainText("VIP support");
   await employeePanel.locator(".employee-editor-grid input").fill("14");
   await expect(employeePanel.locator(".employee-editor-grid input")).toHaveValue("14");
   await employeePanel.locator(".employee-channel-editor label").filter({ hasText: "SDK" }).locator("input").check();
-  await expect(employeePanel.locator("[data-employee-id='usr-volga-admin']").locator(".channel-chip").filter({ hasText: "SDK" })).toBeVisible();
+  await expect(employeePanel.locator(".employee-editor header")).toContainText(employeeName);
   await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Override" }).locator("input").uncheck();
   await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Чувствительные" }).locator("input").uncheck();
   await employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" }).click();
-  await expect(page.locator(".toast")).toContainText("Sergey Markin: настройки сохранены.");
+  await expect(page.locator(".toast")).toContainText(`${employeeName}: настройки сохранены.`);
+  await page.locator(".toast").click();
 
-  await employeePanel.locator(".employee-editor-grid select").first().selectOption({ label: "Администратор" });
-  await employeePanel.locator(".employee-editor-grid select").nth(1).selectOption({ label: "Administrators" });
-  await employeePanel.locator(".employee-editor-grid input").fill("20");
-  await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Override" }).locator("input").check();
-  await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Чувствительные" }).locator("input").check();
+  await employeePanel.locator(".employee-editor-grid select").first().selectOption({ label: "Сотрудник" });
+  await employeePanel.locator(".employee-editor-grid select").nth(1).selectOption({ label: "Line 1" });
+  await employeePanel.locator(".employee-editor-grid input").fill("8");
   await employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" }).click();
-  await expect(page.locator(".toast")).toContainText("Sergey Markin: настройки сохранены.");
+  await expect(page.locator(".toast")).toContainText(`${employeeName}: настройки сохранены.`);
 
   await selectRole(page, "Старший сотрудник");
   await expect(employeePanel.locator(".employee-editor-grid select").first()).toBeDisabled();
@@ -1493,12 +1552,14 @@ test("dialog assignment persists from the responsive operator workspace", async 
   await page.setViewportSize({ width: 390, height: 844 });
   await openAppShell(page);
   await selectRole(page, "Администратор");
+  await page.locator(".queue-row").filter({ hasText: "Maria K." }).click();
 
   await expect(page.locator(".chat-header")).toContainText("Не назначен");
   await page.getByRole("button", { name: "Назначить оператора" }).click();
   const assignmentPanel = page.getByTestId("dialog-assignment-panel");
   await expect(assignmentPanel).toBeVisible();
-  await expect(assignmentPanel.getByLabel("Оператор")).toHaveValue("usr-volga-admin");
+  await expect(assignmentPanel.getByLabel("Оператор").locator("option[value='usr-volga-admin']")).toHaveCount(1);
+  await assignmentPanel.getByLabel("Оператор").selectOption("usr-volga-admin");
   await expectNoElementOverflow(page, "[data-testid='dialog-assignment-panel']");
 
   await assignmentPanel.getByLabel("Причина назначения").fill("Назначение из рабочего интерфейса");

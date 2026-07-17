@@ -46,7 +46,7 @@ describe("BAI-506 revision-aware retrieval cache", () => {
       tokenBudget: 200
     });
     assert.equal(left, right);
-    assert.match(left, /^kr:v1:tenant-a:a@1,b@2:200:/);
+    assert.match(left, /^kr:v2:tenant-a:a@1,b@2:200:0\.05:/);
     assert.notEqual(
       left,
       buildRetrievalCacheKey({

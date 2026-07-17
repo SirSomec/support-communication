@@ -31,14 +31,20 @@ describe("report and automation idempotency tenant migration", () => {
   it("isolates automation publish replay by tenant", async () => {
     const repository = AutomationRepository.inMemory();
     const service = new AutomationService(repository);
-    const publish = (scenarioId: string, tenantId: string) => service.publishBotScenario({
+    const scenario = (scenarioId: string, tenantId: string) => ({
       channels: ["SDK"],
       flowEdges: [],
       flowNodes: [{ id: "start", type: "message" }],
       id: scenarioId,
       idempotencyKey: "shared-publish-key",
       name: `Bot ${tenantId}`
-    }, { tenantId });
+    });
+    await service.createBotScenario(scenario("bot-volga", "tenant-volga"), { tenantId: "tenant-volga" });
+    await service.createBotScenario(scenario("bot-ladoga", "tenant-ladoga"), { tenantId: "tenant-ladoga" });
+    const publish = (scenarioId: string, tenantId: string) => service.publishBotScenario(
+      scenario(scenarioId, tenantId),
+      { tenantId }
+    );
 
     const volga = await publish("bot-volga", "tenant-volga");
     const ladoga = await publish("bot-ladoga", "tenant-ladoga");

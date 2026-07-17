@@ -30,6 +30,7 @@ export async function uploadComposerAttachment(
   {
     fetchAttachmentStatus = (fileId) => dialogService.fetchAttachmentStatus(fileId),
     finalizeAttachmentUpload = (payload) => dialogService.finalizeAttachmentUpload(payload),
+    onProgress = () => {},
     sleep = delay,
     statusPollAttempts = defaultStatusPollAttempts,
     statusPollDelayMs = defaultStatusPollDelayMs,
@@ -87,6 +88,7 @@ export async function uploadComposerAttachment(
       return nextAttachment;
     }
 
+    onProgress(nextAttachment);
     return pollAttachmentScanStatus(nextAttachment, {
       fetchAttachmentStatus,
       sleep,
@@ -286,14 +288,15 @@ export function useComposerAttachments({ setToast } = {}) {
 
   const startUpload = useCallback(
     async (attachment) => {
-      const nextAttachment = await uploadComposerAttachment(attachment);
-      setAttachments((current) =>
+      const updateAttachment = (nextAttachment) => setAttachments((current) =>
         current.map((currentAttachment) =>
           currentAttachment.id === attachment.id
             ? preserveAttachmentFile({ ...nextAttachment, previewUrl: currentAttachment.previewUrl }, nextAttachment)
             : currentAttachment
         )
       );
+      const nextAttachment = await uploadComposerAttachment(attachment, { onProgress: updateAttachment });
+      updateAttachment(nextAttachment);
 
       if (nextAttachment.status === "error") {
         setToast?.(nextAttachment.error);
@@ -331,10 +334,6 @@ export function useComposerAttachments({ setToast } = {}) {
     },
     [addFiles, setToast]
   );
-
-  const completeAttachment = useCallback(() => {
-    setToast?.("Готовность вложения определяется статусом антивирусной проверки на сервере.");
-  }, [setToast]);
 
   const retryAttachment = useCallback((attachmentId) => {
     const attachment = attachmentsRef.current.find((currentAttachment) => currentAttachment.id === attachmentId);
@@ -384,7 +383,6 @@ export function useComposerAttachments({ setToast } = {}) {
     addFiles,
     attachments,
     clearAttachments,
-    completeAttachment,
     handleAttachFiles,
     hasAttachments: Boolean(attachments.length),
     hasPending: attachments.some((attachment) => attachment.status !== "ready"),

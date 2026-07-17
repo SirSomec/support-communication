@@ -180,6 +180,8 @@ describe("UI mutation guards", () => {
     assert.match(settingsSource, /navigationTarget/);
     assert.match(settingsSource, /focusChannelType/);
     assert.match(channelsSource, /focusChannelType/);
+    assert.match(channelsSource, /consumedFocusRef\.current === focusNavigationKey/);
+    assert.match(channelsSource, /consumedFocusRef\.current = focusNavigationKey/);
   });
 
   it("guards service-admin notification actions before rendering tenant-shell buttons", async () => {
@@ -847,5 +849,24 @@ describe("UI mutation guards", () => {
     assert.doesNotMatch(source, /await integrationService\.rotateApiKey\(keyId\);\s*setRotatedKeyIds/s);
     assert.doesNotMatch(source, /await integrationService\.replayWebhookDelivery\(delivery\);\s*setReplayedDeliveryIds/s);
     assert.doesNotMatch(source, /await integrationService\.revokeSecuritySession\(sessionId\);\s*setRevokedSessionIds/s);
+    assert.match(source, /setBusy\(`rotate:\$\{keyId\}`\)/);
+    assert.match(source, /setBusy\(`replay:\$\{delivery\.id\}`\)/);
+    assert.match(source, /setBusy\(`session:\$\{sessionId\}`\)/);
+  });
+
+  it("blocks duplicate SDK playground submissions while a request is running", () => {
+    const source = readFileSync(new URL("../src/features/settings/SdkConsolePanel.jsx", import.meta.url), "utf8");
+
+    assert.match(source, /const \[sdkPlaygroundRunning, setSdkPlaygroundRunning\] = useState\(false\)/);
+    assert.match(source, /loadingWorkspace \|\| sdkPlaygroundRunning \|\| Boolean\(loadError\)/);
+    assert.match(source, /finally \{\s*setSdkPlaygroundRunning\(false\)/);
+  });
+
+  it("blocks duplicate employee password and MFA resets", () => {
+    const source = readFileSync(new URL("../src/features/settings/EmployeeManagementPanel.jsx", import.meta.url), "utf8");
+
+    assert.match(source, /!canResetEmployeePassword \|\| saving/);
+    assert.match(source, /resetEmployeePassword\([\s\S]*?\.finally\(\(\) => setSaving\(false\)\)/);
+    assert.match(source, /resetEmployeeMfa\([\s\S]*?\.finally\(\(\) => setSaving\(false\)\)/);
   });
 });

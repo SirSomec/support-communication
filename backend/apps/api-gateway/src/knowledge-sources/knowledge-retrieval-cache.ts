@@ -23,6 +23,7 @@ interface RetrievalCacheEntry {
 
 export interface RetrievalCacheKeyInput {
   query: string;
+  scoreThreshold?: number;
   sourceBindings: Array<{ sourceId: string; sourceVersion?: string }>;
   tenantId: string;
   tokenBudget: number;
@@ -110,7 +111,10 @@ export function buildRetrievalCacheKey(input: RetrievalCacheKeyInput): string {
   const normalizedQuery = [...new Set(input.query.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])]
     .sort((left, right) => left.localeCompare(right))
     .join(" ");
-  return `kr:v1:${input.tenantId}:${bindings}:${input.tokenBudget}:${normalizedQuery}`;
+  const scoreThreshold = Number.isFinite(input.scoreThreshold)
+    ? Math.max(0.05, Number(input.scoreThreshold))
+    : 0.05;
+  return `kr:v2:${input.tenantId}:${bindings}:${input.tokenBudget}:${scoreThreshold}:${normalizedQuery}`;
 }
 
 function clone<T>(value: T): T {

@@ -5,6 +5,7 @@ import { createObjectStorageSigner } from "./object-storage.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
 import {
   WorkspaceRepository,
+  TemplateOwnershipConflictError,
   type ClientExportJobRecord,
   type ClientProfileRecord,
   type FileRecord,
@@ -685,17 +686,32 @@ export class WorkspaceService {
     if (!context.tenantId) {
       return tenantContextRequiredEnvelope(TEMPLATE_SERVICE, "saveTemplate");
     }
+    const templateId = template.id ?? `tpl_${randomUUID()}`;
+    const existing = template.id
+      ? await this.workspaceRepository.findTemplate(template.id)
+      : undefined;
+    if (existing && existing.tenantId !== context.tenantId) {
+      return notFoundEnvelope(TEMPLATE_SERVICE, "saveTemplate", "template_not_found", `Template ${templateId} was not found.`, { templateId });
+    }
     const auditId = makeAuditId("template");
-    const saved = await this.workspaceRepository.saveTemplate({
-      ...template,
-      id: template.id ?? `tpl_${randomUUID()}`,
-      scope: "team",
-      tenantId: context.tenantId,
-      updated: new Date().toISOString(),
-      usage: 0,
-      version: template.version ?? 1,
-      auditId
-    });
+    let saved: TemplateRecord;
+    try {
+      saved = await this.workspaceRepository.saveTemplate({
+        ...template,
+        id: templateId,
+        scope: "team",
+        tenantId: context.tenantId,
+        updated: new Date().toISOString(),
+        usage: 0,
+        version: template.version ?? 1,
+        auditId
+      });
+    } catch (error) {
+      if (error instanceof TemplateOwnershipConflictError) {
+        return notFoundEnvelope(TEMPLATE_SERVICE, "saveTemplate", "template_not_found", `Template ${templateId} was not found.`, { templateId });
+      }
+      throw error;
+    }
     const auditEvent: TemplateAuditRecord = await this.workspaceRepository.saveTemplateAuditEvent({
       action: "template.saved",
       id: auditId,

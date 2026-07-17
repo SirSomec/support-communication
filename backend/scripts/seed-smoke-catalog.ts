@@ -12,6 +12,7 @@ import { RoutingRepository } from "../apps/api-gateway/src/routing/routing.repos
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.js";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.js";
 import { ReportRepository } from "../apps/api-gateway/src/reports/report.repository.js";
+import { exportJobFixtures } from "../apps/api-gateway/src/reports/seed-catalog.js";
 import { IntegrationRepository } from "../apps/api-gateway/src/integrations/integration.repository.js";
 import { OperationsRepository } from "../apps/api-gateway/src/operations/operations.repository.js";
 import { PlatformRepository } from "../apps/api-gateway/src/platform/platform.repository.js";
@@ -191,7 +192,7 @@ async function seedRouting(repo: RoutingRepository, state: RoutingState): Promis
   await repo.saveState(state);
 }
 
-async function seedConversation(repo, state) {
+async function seedConversation(repo, state, client) {
   // repo is a ConversationRepository built via ConversationRepository.prisma({ client }).
   // state is the bootstrapConversationState() output. Write in FK/dependency order.
 
@@ -210,6 +211,33 @@ async function seedConversation(repo, state) {
       ? "legacy_unknown"
       : conversation.resolutionOutcome;
     await repo.saveConversation({ ...conversation, messages, resolutionOutcome });
+  }
+
+  // botHandoff is a read model assembled from the immutable lifecycle journal;
+  // it is intentionally not a column on Conversation. Materialise the catalog
+  // handoffs as canonical events so the Prisma-backed smoke app exercises the
+  // same read path as bot-runtime reconciliation.
+  const handoffEvents = (state.conversations ?? [])
+    .filter((conversation: { botHandoff?: unknown }) => conversation.botHandoff)
+    .map((conversation: { botHandoff: Record<string, unknown>; id: string; tenantId: string }) => ({
+      actorId: null,
+      actorName: "Smoke catalog",
+      actorType: "system",
+      conversationId: conversation.id,
+      data: conversation.botHandoff,
+      eventType: "bot.handoff.created",
+      id: `lifecycle_smoke_handoff_${conversation.id}`,
+      ingestedAt: new Date("2024-06-01T00:00:00.000Z"),
+      occurredAt: new Date("2024-06-01T00:00:00.000Z"),
+      reason: "seeded_bot_handoff",
+      schemaVersion: "conversation-lifecycle/v1",
+      source: "smoke-catalog",
+      sourceEventId: `smoke-handoff:${conversation.id}`,
+      tenantId: conversation.tenantId,
+      traceId: `trace-smoke-handoff-${conversation.id}`
+    }));
+  if (handoffEvents.length) {
+    await client.conversationLifecycleEvent.createMany({ data: handoffEvents, skipDuplicates: true });
   }
 
   // 2. Outbox events — must exist before any outbound descriptor that references outboxEventId.
@@ -240,8 +268,8 @@ async function seedConversation(repo, state) {
 
   // NOTE: state.channelCatalog is intentionally NOT persisted — the Prisma adapter
   // has no channel-catalog table/delegate and listChannelCatalog() always returns [].
-  // (state.lifecycleEvents / state.routingAnalyticsRows are absent from the bootstrap
-  // output; there is likewise no standalone public Prisma writer for them.)
+  // (state.routingAnalyticsRows are absent from the bootstrap output; there is
+  // likewise no standalone public Prisma writer for them.)
 }
 
 async function seedAutomation(repo, state) {
@@ -379,8 +407,13 @@ async function seedReports(repo, state) {
     await repo.saveMetricTenantOverride(override);
   }
 
-  // 4. export jobs (root; parent of idempotency keys, file/notification descriptors, retry audit)
-  for (const job of state.exportJobs) {
+  // 4. Export jobs are an explicit part of the isolated browser-test seed. The
+  // production-like report bootstrap is intentionally empty, while the settings
+  // runtime spec needs ready and retryable jobs on every clean database.
+  const exportJobs = state.exportJobs.length > 0
+    ? state.exportJobs
+    : exportJobFixtures.map((job) => ({ ...job, tenantId: "tenant-volga" }));
+  for (const job of exportJobs) {
     await repo.saveExportJobAsync(job);
   }
 
@@ -402,7 +435,7 @@ async function seedReports(repo, state) {
   // 8. export retry audit events: NO standalone writer. The only public prisma path is
   //    saveRetriedExportJobAsync(job, auditEvent), which re-upserts the job (idempotent) then
   //    upserts the audit event. Pair each audit event with the export job whose id === auditEvent.jobId.
-  const jobById = new Map(state.exportJobs.map((job) => [job.id, job]));
+  const jobById = new Map(exportJobs.map((job) => [job.id, job]));
   for (const auditEvent of state.exportRetryAuditEvents) {
     const job = jobById.get(auditEvent.jobId);
     if (!job) {
@@ -721,6 +754,20 @@ async function seedReferencedSupportQueues(client: never, integrationState: neve
   // snapshot, never the normalized table. Create the exact queues the demo channel
   // connections reference (default_team_id null → no Team FK) so integrations can seed.
   const queueClient = client as unknown as {
+    operatorCapacity: {
+      upsert(input: {
+        where: { tenantId_operatorId_channel: { tenantId: string; operatorId: string; channel: string } };
+        create: { channel: string; chatLimit: number; id: string; operatorId: string; overrideAllowed: boolean; tenantId: string; updatedAt: Date };
+        update: { chatLimit: number; overrideAllowed: boolean; updatedAt: Date };
+      }): Promise<unknown>;
+    };
+    queueMembership: {
+      upsert(input: {
+        where: { tenantId_queueId_operatorId: { tenantId: string; queueId: string; operatorId: string } };
+        create: { active: boolean; id: string; operatorId: string; queueId: string; role: string; tenantId: string; updatedAt: Date };
+        update: { active: boolean; role: string; updatedAt: Date };
+      }): Promise<unknown>;
+    };
     supportQueue: {
       upsert(input: {
         where: { tenantId_id: { tenantId: string; id: string } };
@@ -741,6 +788,36 @@ async function seedReferencedSupportQueues(client: never, integrationState: neve
       create: { id, tenantId, name: id, status: "active" },
       update: {}
     });
+    if (tenantId === "tenant-volga") {
+      const operatorId = "usr-volga-admin";
+      const updatedAt = new Date();
+      await queueClient.queueMembership.upsert({
+        where: { tenantId_queueId_operatorId: { tenantId, queueId: id, operatorId } },
+        create: {
+          active: true,
+          id: `qm-smoke-${id}-${operatorId}`,
+          operatorId,
+          queueId: id,
+          role: "primary",
+          tenantId,
+          updatedAt
+        },
+        update: { active: true, role: "primary", updatedAt }
+      });
+      await queueClient.operatorCapacity.upsert({
+        where: { tenantId_operatorId_channel: { tenantId, operatorId, channel: id } },
+        create: {
+          channel: id,
+          chatLimit: 20,
+          id: `capacity-smoke-${id}-${operatorId}`,
+          operatorId,
+          overrideAllowed: true,
+          tenantId,
+          updatedAt
+        },
+        update: { chatLimit: 20, overrideAllowed: true, updatedAt }
+      });
+    }
   }
 }
 
@@ -758,13 +835,13 @@ async function main(): Promise<void> {
   catch (error) { failures.push("workspace: " + describe(error)); console.log("  FAIL workspace"); }
   try { await seedRouting(RoutingRepository.prisma({ client }) as never, seeds.routing as never); console.log("  ok routing"); }
   catch (error) { failures.push("routing: " + describe(error)); console.log("  FAIL routing"); }
-  try { await seedConversation(ConversationRepository.prisma({ client }) as never, seeds.conversation as never); console.log("  ok conversation"); }
+  try { await seedReferencedSupportQueues(client, seeds.integrations as never); } catch (error) { failures.push("support-queues: " + describe(error)); }
+  try { await seedConversation(ConversationRepository.prisma({ client }) as never, seeds.conversation as never, client); console.log("  ok conversation"); }
   catch (error) { failures.push("conversation: " + describe(error)); console.log("  FAIL conversation"); }
   try { await seedAutomation(AutomationRepository.prisma({ client }) as never, seeds.automation as never); console.log("  ok automation"); }
   catch (error) { failures.push("automation: " + describe(error)); console.log("  FAIL automation"); }
   try { await seedReports(ReportRepository.prisma({ client }) as never, seeds.reports as never); console.log("  ok reports"); }
   catch (error) { failures.push("reports: " + describe(error)); console.log("  FAIL reports"); }
-  try { await seedReferencedSupportQueues(client, seeds.integrations as never); } catch (error) { failures.push("support-queues: " + describe(error)); }
   try { await seedIntegrations(IntegrationRepository.prisma({ client }) as never, seeds.integrations as never); console.log("  ok integrations"); }
   catch (error) { failures.push("integrations: " + describe(error)); console.log("  FAIL integrations"); }
   try { await seedOperations(OperationsRepository.prisma({ client }) as never, seeds.operations as never); console.log("  ok operations"); }

@@ -11,10 +11,20 @@ const statePath = resolve(process.env.RUNTIME_WATCHDOG_STATE_FILE || join(root, 
 do {
   const snapshot = collectSnapshot();
   const previous = readState();
+  let notificationDelivered = true;
   if (!previous || previous.status !== snapshot.status || JSON.stringify(previous.reasons) !== JSON.stringify(snapshot.reasons)) {
-    await notify(snapshot, previous?.status);
+    try {
+      await notify(snapshot, previous?.status);
+    } catch (error) {
+      notificationDelivered = false;
+      process.stderr.write(`${JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "runtime.notification_failed",
+        service: "support-communication-watchdog"
+      })}\n`);
+    }
   }
-  writeState(snapshot);
+  if (notificationDelivered) writeState(snapshot);
   if (once) break;
   await new Promise((resolvePromise) => setTimeout(resolvePromise, intervalMs));
 } while (true);
@@ -56,7 +66,12 @@ async function notify(snapshot, previousStatus) {
   process.stdout.write(`${JSON.stringify(event)}\n`);
   const url = String(process.env.RUNTIME_WATCHDOG_WEBHOOK_URL || "").trim();
   if (!url) return;
-  const response = await fetch(url, { body: JSON.stringify(event), headers: { "content-type": "application/json", ...(process.env.RUNTIME_WATCHDOG_WEBHOOK_TOKEN ? { authorization: `Bearer ${process.env.RUNTIME_WATCHDOG_WEBHOOK_TOKEN}` } : {}) }, method: "POST" });
+  const response = await fetch(url, {
+    body: JSON.stringify(event),
+    headers: { "content-type": "application/json", ...(process.env.RUNTIME_WATCHDOG_WEBHOOK_TOKEN ? { authorization: `Bearer ${process.env.RUNTIME_WATCHDOG_WEBHOOK_TOKEN}` } : {}) },
+    method: "POST",
+    signal: AbortSignal.timeout(positive(process.env.RUNTIME_WATCHDOG_WEBHOOK_TIMEOUT_MS, 10_000))
+  });
   if (!response.ok) throw new Error(`runtime_watchdog_notification_failed:${response.status}`);
 }
 

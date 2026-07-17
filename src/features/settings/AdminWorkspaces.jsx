@@ -110,11 +110,12 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode, vi
   );
 
   async function handleRotateApiKey(keyId) {
-    if (!canEditSettings) {
+    if (!canEditSettings || busy) {
       return;
     }
 
-    const result = await submitApiKeyRotation(keyId, integrationService);
+    setBusy(`rotate:${keyId}`);
+    const result = await submitApiKeyRotation(keyId, integrationService).finally(() => setBusy(""));
     if (!result.ok) {
       onToast(result.message);
       return;
@@ -255,11 +256,12 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode, vi
   }
 
   async function handleReplayWebhook(delivery) {
-    if (!canEditSettings) {
+    if (!canEditSettings || busy) {
       return;
     }
 
-    const result = await submitWebhookReplay(delivery, integrationService);
+    setBusy(`replay:${delivery.id}`);
+    const result = await submitWebhookReplay(delivery, integrationService).finally(() => setBusy(""));
     if (!result.ok) {
       onToast(result.message);
       return;
@@ -270,11 +272,12 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode, vi
   }
 
   async function handleRevokeSession(sessionId) {
-    if (!canEditSettings) {
+    if (!canEditSettings || busy) {
       return;
     }
 
-    const result = await submitSecuritySessionRevoke(sessionId, integrationService);
+    setBusy(`session:${sessionId}`);
+    const result = await submitSecuritySessionRevoke(sessionId, integrationService).finally(() => setBusy(""));
     if (!result.ok) {
       onToast(result.message);
       return;
@@ -362,6 +365,7 @@ export function AdminWorkspaces({ access, canEditSettings, onToast, roleMode, vi
           <>
             <SecurityControlsPanel
               activeSecuritySessions={activeSecuritySessions}
+              busy={busy}
               onRevokeSession={handleRevokeSession}
               revokedSessionIds={revokedSessionIds}
               securityAlerts={securityAlerts}

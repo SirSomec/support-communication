@@ -17,7 +17,7 @@ export class RealtimeController {
   @RequireTenantOperatorPermission("realtime.events.read")
   @RequireServiceAdminAction("realtime.events.read")
   @ApiOkResponse({ description: "Realtime event feed envelope for smoke and adapter compatibility" })
-  fetchRealtimeEvents(@Query() filters: { since?: string }, @Req() request: TenantOperatorRequest) {
+  fetchRealtimeEvents(@Query() filters: { limit?: string; since?: string }, @Req() request: TenantOperatorRequest) {
     return this.conversationService.fetchRealtimeEvents(filters, {
       tenantId: request.tenantOperatorContext?.tenantId
     });
@@ -28,7 +28,7 @@ export class RealtimeController {
   @RequireServiceAdminAction("realtime.events.read")
   @ApiOkResponse({ description: "Server-Sent Events stream for persisted realtime events" })
   streamRealtimeEvents(
-    @Query() filters: { since?: string },
+    @Query() filters: { limit?: string; since?: string },
     @Headers("last-event-id") lastEventId?: string,
     @Req() request?: TenantOperatorRequest
   ): Observable<RealtimeSseMessage> {

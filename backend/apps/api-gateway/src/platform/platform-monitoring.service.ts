@@ -415,6 +415,7 @@ export class PlatformMonitoringService {
       acknowledgedAt: new Date().toISOString(),
       auditEvent: auditEvent("platform.alert.acknowledge", component.id, request.reason, request.actor),
       componentId: component.id,
+      idempotencyKey,
       reason: normalizeReason(request.reason),
       statusPageSync: statusPageSync("component-alert", component.id)
     });

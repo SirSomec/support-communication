@@ -67,13 +67,14 @@ describe("backend phase 0 foundation scaffold", () => {
     for (const script of [
       "prisma:validate",
       "prisma:migrate:deploy",
-      "prisma:seed",
       "outbox:worker:once",
       "billing:worker:once"
     ]) {
       assert.match(releaseScript, new RegExp(`script: "${script}"`));
       assert.equal(readme.includes(`npm run ${script}`), true);
     }
+
+    assert.doesNotMatch(releaseScript, /script: "prisma:seed"/);
 
     assert.match(readme, /npm run release:checklist/);
     assert.match(readme, /schema validation/i);
@@ -98,6 +99,13 @@ describe("backend phase 0 foundation scaffold", () => {
         mainSource.indexOf("setupOpenApi(app, config.API_VERSION)"),
       "global prefix is configured before OpenAPI document generation"
     );
+  });
+
+  it("forwards the inbound request id through health and readiness envelopes", () => {
+    const healthController = readFileSync("backend/apps/api-gateway/src/health.controller.ts", "utf8");
+
+    assert.match(healthController, /health\(@Headers\("x-request-id"\) requestId\?: string\)/);
+    assert.match(healthController, /ready\(@Headers\("x-request-id"\) requestId\?: string\)/);
   });
 
   it("documents public API key management endpoints in OpenAPI decorators", () => {

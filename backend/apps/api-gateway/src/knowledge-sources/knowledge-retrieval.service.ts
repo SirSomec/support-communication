@@ -50,8 +50,10 @@ export class KnowledgeRetrievalService {
 
   async retrieve(input: KnowledgeRetrievalInput): Promise<KnowledgeRetrievalResult> {
     const budget = clampInteger(input.tokenBudget, 1_500, 100, 6_000);
+    const scoreThreshold = Math.max(0.05, Number.isFinite(input.scoreThreshold) ? Number(input.scoreThreshold) : 0);
     const cacheKey = buildRetrievalCacheKey({
       query: input.query,
+      scoreThreshold,
       sourceBindings: input.sourceBindings,
       tenantId: input.tenantId,
       tokenBudget: budget
@@ -70,7 +72,6 @@ export class KnowledgeRetrievalService {
     }
 
     const queryTerms = terms(input.query);
-    const scoreThreshold = Math.max(0.05, Number.isFinite(input.scoreThreshold) ? Number(input.scoreThreshold) : 0);
     const candidates: KnowledgeRetrievalPassage[] = [];
     for (const binding of input.sourceBindings) {
       const source = await this.sources.find(input.tenantId, binding.sourceId);

@@ -61,3 +61,21 @@ test("page callbacks fan out to every alias prefix", () => {
     delete globalThis.window;
   }
 });
+
+test("a follow-up conversation resets conversation-scoped rating and accept flags", () => {
+  const conversationState = {
+    conversationId: "appeal-1",
+    lastOperatorMessageId: "msg-9",
+    operatorAccepted: true,
+    ratingSubmitted: true
+  };
+
+  assert.equal(__test__.applyConversationIdentity(conversationState, "appeal-2"), true);
+  assert.deepEqual(conversationState, {
+    conversationId: "appeal-2",
+    lastOperatorMessageId: null,
+    operatorAccepted: false,
+    ratingSubmitted: false
+  });
+  assert.equal(__test__.applyConversationIdentity(conversationState, "appeal-2"), false);
+});

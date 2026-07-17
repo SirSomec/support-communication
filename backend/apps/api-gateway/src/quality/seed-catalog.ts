@@ -125,6 +125,7 @@ export const aiRealtimeChecks = [
 export const aiCoachingQueue = [
   {
     id: "coach-vladimir-next-step",
+    conversationId: "vladimir",
     channel: "Telegram",
     client: "client-vladimir",
     severity: "warn",

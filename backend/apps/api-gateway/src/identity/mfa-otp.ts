@@ -65,7 +65,10 @@ export function createMfaOtpRuntime(options: MfaOtpRuntimeOptions): MfaOtpRuntim
 }
 
 export function createMfaOtpRuntimeFromEnv(source: NodeJS.ProcessEnv = process.env): MfaOtpRuntime {
-  const nodeEnv = String(source.NODE_ENV ?? "test").trim().toLowerCase();
+  const nodeEnv = String(source.NODE_ENV ?? "").trim().toLowerCase();
+  if (!["development", "test", "staging", "production"].includes(nodeEnv)) {
+    throw new Error("NODE_ENV must be explicitly set before creating the MFA runtime.");
+  }
   const localRuntime = nodeEnv === "development" || nodeEnv === "test";
   const deliveryMode = String(source.MFA_OTP_DELIVERY_MODE ?? "").trim().toLowerCase();
   const deterministicDelivery = ["deterministic", "no-op", "noop", "test"].includes(deliveryMode);

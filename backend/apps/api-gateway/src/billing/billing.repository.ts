@@ -439,6 +439,7 @@ export interface BillingRepositoryPort {
   listQuotaReservations(input?: BillingQuotaReservationListInput): MaybePromise<BillingQuotaReservation[]>;
   listTariffs(): MaybePromise<BillingTariff[]>;
   listTenantInvoices(tenantId: string | undefined): MaybePromise<BillingInvoiceState[]>;
+  removeProvisionedTenant(tenantId: string): MaybePromise<void>;
   savePaymentRetrySchedule(schedule: BillingPaymentRetrySchedule): MaybePromise<BillingPaymentRetrySchedule>;
   savePaymentRetryKey(key: BillingPaymentRetryKey): MaybePromise<BillingPaymentRetryKey>;
   savePaymentDunningState(state: BillingPaymentDunningState): MaybePromise<BillingPaymentDunningState>;
@@ -539,6 +540,10 @@ export class BillingRepository implements BillingRepositoryPort {
 
   saveTenant(tenant: BillingTenantState): MaybePromise<BillingTenantState> {
     return this.adapter.saveTenant(tenant);
+  }
+
+  removeProvisionedTenant(tenantId: string): MaybePromise<void> {
+    return this.adapter.removeProvisionedTenant(tenantId);
   }
 
   findTenantSubscription(tenantId: string | undefined): MaybePromise<BillingSubscriptionState | undefined> {
@@ -799,6 +804,7 @@ interface PrismaBillingDelegates {
     }): Promise<PrismaBillingQuotaReservationRow[]>;
     findUnique(input: { where: { id?: string; idempotencyKey?: string } }): Promise<PrismaBillingQuotaReservationRow | null>;
     update(input: { data: PrismaBillingQuotaReservationUpdateInput; where: { id: string } }): Promise<PrismaBillingQuotaReservationRow>;
+    updateMany(input: { data: PrismaBillingQuotaReservationUpdateInput; where: { id: string; lockedAt?: Date | null; status: string } }): Promise<{ count: number }>;
   };
   billingPaymentRetrySchedule: {
     create(input: { data: PrismaBillingPaymentRetryScheduleCreateInput }): Promise<PrismaBillingPaymentRetryScheduleRow>;
@@ -864,6 +870,7 @@ interface PrismaBillingDelegates {
   };
   billingTenantState: {
     create(input: { data: PrismaBillingTenantStateCreateInput }): Promise<PrismaBillingTenantStateRow>;
+    deleteMany(input: { where: { id: string } }): Promise<{ count: number }>;
     findMany(input: { orderBy: { name: "asc" } }): Promise<PrismaBillingTenantStateRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaBillingTenantStateRow | null>;
     update(input: { data: PrismaBillingTenantStateUpdateInput; where: { id: string } }): Promise<PrismaBillingTenantStateRow>;
@@ -1480,6 +1487,13 @@ class PrismaBillingRepository implements BillingRepositoryPort {
     return clone(toBillingTenantState(row));
   }
 
+  async removeProvisionedTenant(tenantId: string): Promise<void> {
+    await this.client.billingTenantState.deleteMany({ where: { id: tenantId } });
+    if (await this.findTenant(tenantId)) {
+      throw new Error(`Billing compensation did not remove tenant ${tenantId}.`);
+    }
+  }
+
   async findTenantSubscription(tenantId: string | undefined): Promise<BillingSubscriptionState | undefined> {
     if (!tenantId) {
       return undefined;
@@ -1659,14 +1673,23 @@ class PrismaBillingRepository implements BillingRepositoryPort {
     const claimed: BillingQuotaReservation[] = [];
 
     for (const row of rows) {
-      const updated = await this.client.billingQuotaReservation.update({
+      const updated = await this.client.billingQuotaReservation.updateMany({
         data: {
           lockedAt: now,
           updatedAt: now
         },
-        where: { id: row.id }
+        where: {
+          id: row.id,
+          lockedAt: row.lockedAt ? toDate(row.lockedAt) : null,
+          status: "reserved"
+        }
       });
-      claimed.push(toBillingQuotaReservation(updated));
+      if (updated.count === 0) continue;
+      claimed.push(toBillingQuotaReservation({
+        ...row,
+        lockedAt: now,
+        updatedAt: now
+      }));
     }
 
     return clone(claimed);
@@ -2002,13 +2025,9 @@ class PrismaBillingRepository implements BillingRepositoryPort {
       }
 
       const currentTenant = toBillingTenantState(tenant);
-      const nextUsage = applyUsageDelta(currentTenant.usage, reservation.resource, reservation.requested);
-      const usedAfter = usageValue(nextUsage, reservation.resource);
-      const updatedTenant = await transaction.billingTenantState.update({
-        data: { usage: nextUsage },
-        where: { id: reservation.tenantId }
-      });
-      const updatedReservation = await transaction.billingQuotaReservation.update({
+      const nextTenant = applyQuotaDelta(currentTenant, reservation.resource, reservation.requested);
+      const usedAfter = quotaUsageValue(nextTenant, reservation.resource);
+      const claimed = await transaction.billingQuotaReservation.updateMany({
         data: {
           auditEvent: input.auditEvent ? { ...input.auditEvent } : null,
           auditEvents: appendBillingAuditEvent(toBillingAuditEvents(reservation.auditEvents), input.auditEvent).map((event) => ({ ...event })),
@@ -2019,8 +2038,23 @@ class PrismaBillingRepository implements BillingRepositoryPort {
           updatedAt: new Date(input.committedAt),
           usedAfter
         },
-        where: { id: input.reservationId }
+        where: { id: input.reservationId, status: "reserved" }
       });
+      if (claimed.count !== 1) {
+        throw new Error(`Quota reservation ${input.reservationId} was not reserved.`);
+      }
+      const updatedTenant = await transaction.billingTenantState.update({
+        data: toPrismaBillingTenantStateUpdateInput({
+          usage: nextTenant.usage,
+          users: nextTenant.users,
+          workspaces: nextTenant.workspaces
+        }),
+        where: { id: reservation.tenantId }
+      });
+      const updatedReservation = await transaction.billingQuotaReservation.findUnique({ where: { id: input.reservationId } });
+      if (!updatedReservation) {
+        throw new Error(`Quota reservation ${input.reservationId} disappeared after commit.`);
+      }
 
       return clone({
         reservation: toBillingQuotaReservation(updatedReservation),
@@ -2030,55 +2064,76 @@ class PrismaBillingRepository implements BillingRepositoryPort {
   }
 
   async releaseQuotaReservation(input: BillingQuotaReservationReleaseInput): Promise<BillingQuotaReservation> {
-    const reservation = await this.client.billingQuotaReservation.findUnique({ where: { id: input.reservationId } });
-    if (!reservation) {
-      throw new Error(`Quota reservation ${input.reservationId} was not found.`);
-    }
-
-    const row = await this.client.billingQuotaReservation.update({
-      data: {
-        auditEvent: input.auditEvent ? { ...input.auditEvent } : null,
-        auditEvents: appendBillingAuditEvent(toBillingAuditEvents(reservation.auditEvents), input.auditEvent).map((event) => ({ ...event })),
-        releaseIdempotencyKey: input.idempotencyKey,
-        releasedAt: new Date(input.releasedAt),
-        status: "released",
-        traceId: input.traceId,
-        updatedAt: new Date(input.releasedAt)
-      },
-      where: { id: input.reservationId }
+    return this.client.$transaction(async (transaction) => {
+      const reservation = await transaction.billingQuotaReservation.findUnique({ where: { id: input.reservationId } });
+      if (!reservation) {
+        throw new Error(`Quota reservation ${input.reservationId} was not found.`);
+      }
+      const released = await transaction.billingQuotaReservation.updateMany({
+        data: {
+          auditEvent: input.auditEvent ? { ...input.auditEvent } : null,
+          auditEvents: appendBillingAuditEvent(toBillingAuditEvents(reservation.auditEvents), input.auditEvent).map((event) => ({ ...event })),
+          releaseIdempotencyKey: input.idempotencyKey,
+          releasedAt: new Date(input.releasedAt),
+          status: "released",
+          traceId: input.traceId,
+          updatedAt: new Date(input.releasedAt)
+        },
+        where: { id: input.reservationId, status: "reserved" }
+      });
+      if (released.count !== 1) {
+        throw new Error(`Quota reservation ${input.reservationId} was not reserved.`);
+      }
+      const row = await transaction.billingQuotaReservation.findUnique({ where: { id: input.reservationId } });
+      if (!row) {
+        throw new Error(`Quota reservation ${input.reservationId} disappeared after release.`);
+      }
+      return clone(toBillingQuotaReservation(row));
     });
-    return clone(toBillingQuotaReservation(row));
   }
 
   async releaseExpiredQuotaReservation(input: BillingExpiredQuotaReservationReleaseInput): Promise<BillingQuotaReservation | undefined> {
-    const row = await this.client.billingQuotaReservation.findUnique({ where: { id: input.reservationId } });
-    if (!row) {
-      return undefined;
-    }
+    return this.client.$transaction(async (transaction) => {
+      const row = await transaction.billingQuotaReservation.findUnique({ where: { id: input.reservationId } });
+      if (!row) {
+        return undefined;
+      }
 
-    const reservation = toBillingQuotaReservation(row);
-    if (isExpiredQuotaReservationReleaseReplay(reservation, input)) {
-      return clone(reservation);
-    }
-    if (!isExpiredQuotaReservationReleaseCandidate(reservation, input)) {
-      return undefined;
-    }
+      const reservation = toBillingQuotaReservation(row);
+      if (isExpiredQuotaReservationReleaseReplay(reservation, input)) {
+        return clone(reservation);
+      }
+      if (!isExpiredQuotaReservationReleaseCandidate(reservation, input)) {
+        return undefined;
+      }
 
-    const updated = await this.client.billingQuotaReservation.update({
-      data: {
-        auditEvent: input.auditEvent ? { ...input.auditEvent } : null,
-        auditEvents: appendBillingAuditEvent(toBillingAuditEvents(row.auditEvents), input.auditEvent).map((event) => ({ ...event })),
-        lockedAt: null,
-        releaseIdempotencyKey: input.idempotencyKey,
-        releasedAt: new Date(input.releasedAt),
-        status: "released",
-        traceId: input.traceId,
-        updatedAt: new Date(input.releasedAt)
-      },
-      where: { id: input.reservationId }
+      const released = await transaction.billingQuotaReservation.updateMany({
+        data: {
+          auditEvent: input.auditEvent ? { ...input.auditEvent } : null,
+          auditEvents: appendBillingAuditEvent(toBillingAuditEvents(row.auditEvents), input.auditEvent).map((event) => ({ ...event })),
+          lockedAt: null,
+          releaseIdempotencyKey: input.idempotencyKey,
+          releasedAt: new Date(input.releasedAt),
+          status: "released",
+          traceId: input.traceId,
+          updatedAt: new Date(input.releasedAt)
+        },
+        where: {
+          id: input.reservationId,
+          lockedAt: new Date(input.lockedAt),
+          status: "reserved"
+        }
+      });
+      const current = await transaction.billingQuotaReservation.findUnique({ where: { id: input.reservationId } });
+      if (released.count !== 1) {
+        const currentReservation = current ? toBillingQuotaReservation(current) : undefined;
+        return currentReservation && isExpiredQuotaReservationReleaseReplay(currentReservation, input)
+          ? clone(currentReservation)
+          : undefined;
+      }
+
+      return current ? clone(toBillingQuotaReservation(current)) : undefined;
     });
-
-    return clone(toBillingQuotaReservation(updated));
   }
 
   async applyProviderBillingSync(input: BillingProviderSyncInput): Promise<{
@@ -2305,6 +2360,14 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
           : [...tenants, nextTenant]
       });
       return clone(nextTenant);
+    },
+
+    removeProvisionedTenant(tenantId: string): void {
+      const state = store.read();
+      store.write({
+        ...state,
+        tenants: (state.tenants ?? []).filter((tenant) => tenant.id !== tenantId)
+      });
     },
 
     findTenantSubscription(tenantId: string | undefined): BillingSubscriptionState | undefined {
@@ -2877,6 +2940,9 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
         if (!existingReservation) {
           throw new Error(`Quota reservation ${input.reservationId} was not found.`);
         }
+        if (existingReservation.status !== "reserved") {
+          throw new Error(`Quota reservation ${input.reservationId} was not reserved.`);
+        }
 
         const currentTenants = state.tenants ?? [];
         const existingTenant = currentTenants.find((tenant) => tenant.id === existingReservation.tenantId);
@@ -2884,8 +2950,7 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
           throw new Error(`Billing tenant ${existingReservation.tenantId} was not found.`);
         }
 
-        const nextUsage = applyUsageDelta(existingTenant.usage, existingReservation.resource, existingReservation.requested);
-        const updatedTenant = { ...existingTenant, usage: nextUsage };
+        const updatedTenant = applyQuotaDelta(existingTenant, existingReservation.resource, existingReservation.requested);
         const updatedReservation: BillingQuotaReservation = {
           ...existingReservation,
           ...(input.auditEvent ? { auditEvent: input.auditEvent } : {}),
@@ -2895,7 +2960,7 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
           status: "committed",
           traceId: input.traceId,
           updatedAt: input.committedAt,
-          usedAfter: usageValue(nextUsage, existingReservation.resource)
+          usedAfter: quotaUsageValue(updatedTenant, existingReservation.resource)
         };
         result = { reservation: updatedReservation, tenant: updatedTenant };
 
@@ -2921,6 +2986,9 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
         const existingReservation = currentReservations.find((reservation) => reservation.id === input.reservationId);
         if (!existingReservation) {
           throw new Error(`Quota reservation ${input.reservationId} was not found.`);
+        }
+        if (existingReservation.status !== "reserved") {
+          throw new Error(`Quota reservation ${input.reservationId} was not reserved.`);
         }
 
         const updatedReservation: BillingQuotaReservation = {
@@ -4358,7 +4426,25 @@ function applyUsageDelta(usage: BillingTenantState["usage"], resource: string, r
   return next;
 }
 
-function usageValue(usage: BillingTenantState["usage"], resource: string): number {
+function applyQuotaDelta(tenant: BillingTenantState, resource: string, requested: number): BillingTenantState {
+  if (resource === "users") {
+    return { ...tenant, users: tenant.users + requested };
+  }
+  if (resource === "workspaces") {
+    return { ...tenant, workspaces: tenant.workspaces + requested };
+  }
+  return { ...tenant, usage: applyUsageDelta(tenant.usage, resource, requested) };
+}
+
+function quotaUsageValue(tenant: BillingTenantState, resource: string): number {
+  if (resource === "users") {
+    return tenant.users;
+  }
+  if (resource === "workspaces") {
+    return tenant.workspaces;
+  }
+
+  const usage = tenant.usage;
   switch (resource) {
     case "ai":
       return usage.aiTokens;

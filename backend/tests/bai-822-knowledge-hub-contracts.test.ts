@@ -8,7 +8,9 @@ import { AgentSessionStateRepository } from "../apps/api-gateway/src/automation/
 import { KnowledgeRetrievalApiService } from "../apps/api-gateway/src/knowledge-sources/knowledge-retrieval-api.service.ts";
 import { KnowledgeRetrievalService } from "../apps/api-gateway/src/knowledge-sources/knowledge-retrieval.service.ts";
 import { KnowledgeSourceRepository } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.repository.ts";
+import type { KnowledgeSourceRecord } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.types.ts";
 import { KnowledgeSourcesService } from "../apps/api-gateway/src/knowledge-sources/knowledge-sources.service.ts";
+import { McpConnectorRepository } from "../apps/api-gateway/src/knowledge-sources/mcp-connector.repository.ts";
 import {
   UnansweredQuestionRepository,
   type PrismaUnansweredQuestionRow,
@@ -47,7 +49,7 @@ function readySource(id: string, tenantId = TENANT) {
   };
 }
 
-function serviceWith(sources: ReturnType<typeof readySource>[], automation = AutomationRepository.inMemory()) {
+function serviceWith(sources: KnowledgeSourceRecord[], automation = AutomationRepository.inMemory()) {
   const repository = KnowledgeSourceRepository.inMemory({ ingestionJobs: [], sources });
   const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), {}, undefined, undefined, automation);
   return { automation, repository, service };
@@ -80,6 +82,45 @@ describe("BAI-822 source manager operations", () => {
     const preview = await service.preview(TENANT, "src-1");
     assert.equal(preview.data.chunkCount, 1);
     assert.equal(String((preview.data.chunks as Array<{ content: string }>)[0]?.content).includes("три рабочих дня"), true);
+  });
+
+  it("restores an approved MCP source to ready after disable and blocks archived resurrection", async () => {
+    McpConnectorRepository.useDefault(McpConnectorRepository.inMemory({
+      connectors: [{
+        allowedHosts: ["mcp.example.test"],
+        approvedAt: "2026-07-14T09:00:00.000Z",
+        approvedBy: "service-admin",
+        createdAt: "2026-07-14T09:00:00.000Z",
+        endpoint: "https://mcp.example.test/rpc",
+        id: "mcp-ready",
+        rateLimitPerMinute: 60,
+        status: "enabled",
+        tenantId: TENANT,
+        tools: [{ mode: "read", name: "search" }],
+        updatedAt: "2026-07-14T09:00:00.000Z"
+      }]
+    }));
+    try {
+      const source: KnowledgeSourceRecord = {
+        ...readySource("src-mcp"),
+        kind: "mcp",
+        metadata: { connectorName: "MCP" },
+        sourceConfig: { connectorId: "mcp-ready", tool: "search" },
+        sourceRef: null
+      };
+      const { repository, service } = serviceWith([source]);
+
+      await service.disable(TENANT, source.id);
+      const enabled = await service.enable(TENANT, source.id);
+      assert.equal((enabled.data.source as { readiness: string }).readiness, "ready");
+      assert.equal((enabled.data.source as { status: string }).status, "ready");
+
+      await repository.save({ ...(await repository.find(TENANT, source.id))!, status: "archived" });
+      const blocked = await service.disable(TENANT, source.id);
+      assert.equal(blocked.error?.code, "knowledge_source_transition_invalid");
+    } finally {
+      McpConnectorRepository.clearDefault();
+    }
   });
 
   it("blocks archive and delete while a scenario is bound, then deletes after unbinding", async () => {

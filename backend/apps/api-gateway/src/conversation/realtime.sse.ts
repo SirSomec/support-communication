@@ -20,11 +20,12 @@ export interface RealtimeSseStreamOptions {
 
 export function createRealtimeSseStream(
   conversationService: ConversationService,
-  filters: { since?: string; tenantId?: string },
+  filters: { limit?: number | string; since?: string; tenantId?: string },
   lastEventId?: string,
   options: RealtimeSseStreamOptions = {}
 ): Observable<RealtimeSseMessage> {
   const eventStream: Observable<RealtimeSseMessage> = from(conversationService.fetchRealtimeEvents({
+    limit: filters.limit,
     since: lastEventId ?? filters.since
   }, {
     tenantId: filters.tenantId

@@ -68,7 +68,12 @@ export class AiBotResponseService {
     private readonly workspace = WorkspaceRepository.default(),
     private readonly environment: NodeJS.ProcessEnv = process.env,
     private readonly usage = AiUsageRepository.default(),
-    private readonly sessions = AgentSessionStateRepository.default()
+    private readonly sessions = AgentSessionStateRepository.default(),
+    private readonly mcpConnectors = new McpReadOnlyConnectorService(
+      new HttpMcpReadOnlyTransport(),
+      8_000,
+      McpConnectorRepository.default()
+    )
   ) {}
 
   async respond(input: AiBotResponseInput): Promise<AiBotResponse> {
@@ -174,8 +179,14 @@ export class AiBotResponseService {
   }
 
   private mcpInvoker(): McpRetrievalInvoker {
-    const service = new McpReadOnlyConnectorService(new HttpMcpReadOnlyTransport(), 8_000, McpConnectorRepository.default());
-    return { invoke: (tenantId, connectorId, toolName, toolInput) => service.invoke(tenantId, connectorId, toolName, toolInput) };
+    return {
+      invoke: (tenantId, connectorId, toolName, toolInput) => this.mcpConnectors.invoke(
+        tenantId,
+        connectorId,
+        toolName,
+        toolInput
+      )
+    };
   }
 }
 
@@ -224,10 +235,6 @@ export function buildAiBotSystemPrompt(input: {
       ? `Approved knowledge:\n${input.knowledge}`
       : "No approved knowledge matched this message. Greet or ask a clarifying question if that fits; otherwise say you cannot confirm the answer and offer a human operator."
   ].filter(Boolean).join("\n\n");
-}
-
-function estimatePromptTokens(message: string, answer: string): number {
-  return Math.max(1, Math.ceil((message.length + answer.length) / 4));
 }
 
 /**

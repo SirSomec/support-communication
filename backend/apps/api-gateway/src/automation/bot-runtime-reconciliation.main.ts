@@ -5,6 +5,7 @@ import { configureConversationRealtimeFanout, configureConversationRepository } 
 import { ConversationService } from "../conversation/conversation.service.js";
 import { configureAutomationRepository } from "./bootstrap.js";
 import { runBotRuntimeReconciliationOnce } from "./bot-runtime-reconciliation.worker.js";
+import { runBotRuntimeRetryOnce } from "./bot-runtime-retry.worker.js";
 
 export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessEnv = process.env, argv: string[] = process.argv): Promise<void> {
   const intervalMs = positive(source.BOT_RUNTIME_RECONCILIATION_INTERVAL_MS, 5_000);
@@ -13,8 +14,9 @@ export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessE
   // Закрытие решённых ботом обращений идёт через штатный сервис диалогов:
   // история, resolutionOutcome, журнал, realtime и CSAT-опрос — как у оператора.
   const conversationService = new ConversationService(conversationRepository, { realtimeFanout });
+  const automationRepository = configureAutomationRepository(source);
   const input = {
-    automationRepository: configureAutomationRepository(source),
+    automationRepository,
     closeConversation: (payload: { conversationId: string; reason: string; resolutionOutcome: string; topic?: string }, scope: { tenantId: string }) =>
       conversationService.transitionConversationStatus({ ...payload, nextStatus: "closed" }, scope),
     conversationRepository,
@@ -25,7 +27,14 @@ export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessE
     retryBackoffMs: positive(source.BOT_RUNTIME_RECONCILIATION_RETRY_MS, 5_000)
   };
   const run = async () => {
-    const result = await runBotRuntimeReconciliationOnce(input);
+    const runtimeRetries = await runBotRuntimeRetryOnce({
+      automationRepository,
+      leaseMs: positive(source.BOT_RUNTIME_RETRY_LEASE_MS, 30_000),
+      limit: positive(source.BOT_RUNTIME_RETRY_LIMIT, 50),
+      maxAttempts: positive(source.BOT_RUNTIME_RECONCILIATION_MAX_ATTEMPTS, 5)
+    });
+    const sideEffects = await runBotRuntimeReconciliationOnce(input);
+    const result = { runtimeRetries, sideEffects };
     writeStructuredLog("info", "Bot runtime reconciliation completed", {
       ...result,
       operation: "bot-runtime.reconcile",

@@ -20,6 +20,12 @@ export class KnowledgeSourcesController {
   @RequireServiceAdminAction("knowledge.write")
   @HttpCode(HttpStatus.OK)
   create(@Body() body: KnowledgeSourceCreateInput, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.create(tenantId(request), body ?? {}); }
+  // Статический сегмент «bulk» объявлен раньше «:sourceId», иначе он матчился бы как sourceId.
+  @Post("bulk/approve")
+  @RequireTenantOperatorPermission("knowledge.write")
+  @RequireServiceAdminAction("knowledge.write")
+  @HttpCode(HttpStatus.OK)
+  approveBulk(@Body() body: { sourceIds?: string[] }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) { return this.service.approveBulk(tenantId(request), body ?? {}); }
   @Post(":sourceId/disable")
   @RequireTenantOperatorPermission("knowledge.write")
   @RequireServiceAdminAction("knowledge.write")

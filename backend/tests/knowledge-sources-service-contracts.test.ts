@@ -45,6 +45,41 @@ describe("knowledge source catalog service", () => {
     assert.equal((approved.data.source as { readiness: string }).readiness, "ready");
   });
 
+  it("bulk-approves only ready pending sources of the tenant and reports skipped ones", async () => {
+    const repository = KnowledgeSourceRepository.inMemory();
+    const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), {}, UrlSourcePolicyRepository.inMemory());
+    const now = "2026-07-17T10:00:00.000Z";
+    const base = {
+      approvalStatus: "pending" as const, approvedAt: null, approvedBy: null, archivedAt: null, contentChecksum: null, createdAt: now,
+      disabledAt: null, failedAt: null, failureCode: null, kind: "document" as const, lastIndexedAt: now, lastIngestedAt: now, metadata: {},
+      owner: "op", readiness: "stale" as const, retentionUntil: null, sourceConfig: {}, sourceRef: null, status: "ready" as const,
+      tenantId: "tenant-volga", title: "Doc", updatedAt: now, version: 1
+    };
+    await repository.save({ ...base, id: "doc-a" });
+    await repository.save({ ...base, id: "doc-b" });
+    await repository.save({ ...base, id: "doc-draft", status: "draft" });
+    await repository.save({ ...base, approvalStatus: "approved", id: "doc-approved" });
+    await repository.save({ ...base, id: "doc-foreign", tenantId: "tenant-ladoga" });
+
+    const empty = await service.approveBulk("tenant-volga", { sourceIds: [] });
+    assert.equal(empty.error?.code, "knowledge_bulk_approve_invalid");
+    const oversized = await service.approveBulk("tenant-volga", { sourceIds: Array.from({ length: 101 }, (_, index) => `doc-${index}`) });
+    assert.equal(oversized.error?.code, "knowledge_bulk_approve_too_many");
+
+    const result = await service.approveBulk("tenant-volga", { sourceIds: ["doc-a", "doc-b", "doc-a", "doc-draft", "doc-approved", "doc-foreign", "missing"] });
+    assert.equal(result.status, "ok");
+    const approved = result.data.approved as Array<{ approvalStatus: string; id: string; readiness: string }>;
+    assert.deepEqual(approved.map((source) => source.id), ["doc-a", "doc-b"]);
+    assert.ok(approved.every((source) => source.approvalStatus === "approved" && source.readiness === "ready"));
+    assert.deepEqual(result.data.skipped, [
+      { code: "knowledge_source_not_ready", sourceId: "doc-draft" },
+      { code: "knowledge_source_already_approved", sourceId: "doc-approved" },
+      { code: "knowledge_source_not_ready", sourceId: "doc-foreign" },
+      { code: "knowledge_source_not_ready", sourceId: "missing" }
+    ]);
+    assert.equal((await repository.find("tenant-ladoga", "doc-foreign"))?.approvalStatus, "pending");
+  });
+
   it("rejects a URL when DNS resolves it to a private address", async () => {
     const repository = KnowledgeSourceRepository.inMemory();
     const service = new KnowledgeSourcesService(repository, WorkspaceRepository.inMemory(), { resolveHostname: async () => [{ address: "127.0.0.1" }] }, UrlSourcePolicyRepository.inMemory());

@@ -49,7 +49,15 @@ const env = {
   DEMO_SERVICE_ADMIN_KEY: process.env.DEMO_SERVICE_ADMIN_KEY ?? "local-dev-service-admin-key",
   JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET ?? "local-dev-access-secret-16",
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET ?? "local-dev-refresh-secret-16",
-  PUBLIC_API_KEY_SECRET: process.env.PUBLIC_API_KEY_SECRET ?? "local-dev-public-api-secret"
+  PUBLIC_API_KEY_SECRET: process.env.PUBLIC_API_KEY_SECRET ?? "local-dev-public-api-secret",
+  // Ужесточение конфига после ревью 2026-07-16: production-like требует канонические
+  // 32-байтовые мастер-ключи и запрещает demo-заголовки сервис-админа. Фронт эти
+  // заголовки не шлёт, а ключи нужны только на время прогона поверх свежесеяной БД.
+  ALLOW_DEMO_SERVICE_ADMIN_HEADERS: "false",
+  PROVIDER_CREDENTIAL_MASTER_KEY: process.env.PROVIDER_CREDENTIAL_MASTER_KEY
+    ?? Buffer.from("playwright-smoke-provider-key-32").toString("base64"),
+  AI_CONNECTIONS_MASTER_KEY: process.env.AI_CONNECTIONS_MASTER_KEY
+    ?? Buffer.from("playwright-smoke-ai-conn-key-32b").toString("base64")
 };
 
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";

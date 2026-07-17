@@ -21,6 +21,7 @@ import { McpConnectorRepository } from "./mcp-connector.repository.js";
 const SERVICE = "knowledgeSourcesService";
 const URL_SOURCE_MAX_BYTES = 1_000_000;
 const URL_SOURCE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const BULK_APPROVE_MAX_SOURCES = 100;
 
 export interface KnowledgeSourceCreateInput {
   kind?: KnowledgeSourceKind;
@@ -295,6 +296,28 @@ export class KnowledgeSourcesService {
     const data: Record<string, unknown> = { source };
     if (current.kind === "url") data.auditEvent = await this.recordUrlAudit("knowledge_source.url.approve", tenantId, source.id, "approved");
     return envelope("approveKnowledgeSource", tenantId, data);
+  }
+
+  /** Массовое одобрение после пакетной загрузки: каждый источник проходит те же проверки, что и одиночный approve. */
+  async approveBulk(tenantId: string, input: { sourceIds?: unknown }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const sourceIds = Array.isArray(input.sourceIds)
+      ? [...new Set(input.sourceIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
+      : [];
+    if (!sourceIds.length) return invalid("approveKnowledgeSourcesBulk", tenantId, "knowledge_bulk_approve_invalid", "Укажите хотя бы один источник для одобрения.");
+    if (sourceIds.length > BULK_APPROVE_MAX_SOURCES) return invalid("approveKnowledgeSourcesBulk", tenantId, "knowledge_bulk_approve_too_many", `За один запрос можно одобрить не больше ${BULK_APPROVE_MAX_SOURCES} источников.`);
+    const approved: KnowledgeSourceRecord[] = [];
+    const skipped: Array<{ code: string; sourceId: string }> = [];
+    for (const sourceId of sourceIds) {
+      const current = await this.repository.find(tenantId, sourceId);
+      if (current?.approvalStatus === "approved") {
+        skipped.push({ code: "knowledge_source_already_approved", sourceId });
+        continue;
+      }
+      const result = await this.approve(tenantId, sourceId);
+      if (result.status === "ok") approved.push(result.data.source as KnowledgeSourceRecord);
+      else skipped.push({ code: result.error?.code ?? "knowledge_source_not_ready", sourceId });
+    }
+    return envelope("approveKnowledgeSourcesBulk", tenantId, { approved, skipped });
   }
 
   async getUrlPolicy(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {

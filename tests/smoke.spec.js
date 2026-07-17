@@ -883,6 +883,62 @@ test("knowledge hub manages URL sources with preview and lifecycle", async ({ pa
   await expectHealthyPage(page);
 });
 
+test("knowledge documents support bulk approval of ready sources", async ({ page }) => {
+  await openAppShell(page);
+  await selectRole(page, "Администратор");
+  await openSection(page, "Знания");
+  await page.locator(".knowledge-tabs button", { hasText: "Документы" }).click();
+
+  // Два источника из выделенной сид-статьи kb-return-policy: её не редактируют
+  // другие смоки, поэтому она стабильно published и создание не гонится.
+  for (let created = 0; created < 2; created += 1) {
+    await page.getByRole("button", { name: "Из статьи" }).click();
+    const articleDialog = page.getByRole("dialog", { name: "Источник из статьи" });
+    await articleDialog.locator("select").selectOption({ label: "Return policy" });
+    const createPromise = page.waitForResponse((response) =>
+      response.url().endsWith("/api/v1/knowledge-sources") && response.request().method() === "POST"
+    );
+    await articleDialog.getByRole("button", { name: "Создать источник" }).click();
+    const createResponse = await createPromise;
+    expect(createResponse.ok()).toBeTruthy();
+    expect((await createResponse.json()).status).toBe("ok");
+  }
+
+  const returnRows = page.locator(".knowledge-source-row").filter({ hasText: "Return policy" });
+  await expect(returnRows).toHaveCount(2);
+
+  // Переиндексация возвращает источники в «ждёт одобрения» — материал для массового одобрения.
+  for (let refreshed = 0; refreshed < 2; refreshed += 1) {
+    const refreshPromise = page.waitForResponse((response) =>
+      response.url().includes("/refresh-document") && response.request().method() === "POST"
+    );
+    await returnRows.nth(refreshed).getByTitle("Обновить и переиндексировать").click();
+    const refreshResponse = await refreshPromise;
+    expect(refreshResponse.ok()).toBeTruthy();
+  }
+  await expect(returnRows.nth(0)).toContainText("ждёт одобрения");
+  await expect(returnRows.nth(1)).toContainText("ждёт одобрения");
+
+  await page.getByRole("button", { name: /Одобрить готовые \(\d+\)/ }).click();
+  const bulkDialog = page.getByRole("dialog", { name: /Одобрить готовые документы/ });
+  await expect(bulkDialog).toContainText("Return policy");
+  const bulkPromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/knowledge-sources/bulk/approve") && response.request().method() === "POST"
+  );
+  await bulkDialog.getByRole("button", { name: /^Одобрить \(\d+\)$/ }).click();
+  const bulkResponse = await bulkPromise;
+  expect(bulkResponse.ok()).toBeTruthy();
+  const bulkPayload = await bulkResponse.json();
+  expect(bulkPayload.status).toBe("ok");
+  expect(bulkPayload.data.approved.length).toBeGreaterThanOrEqual(2);
+
+  await expect(page.locator(".toast")).toContainText(/Одобрено источников: \d+/);
+  await expect(returnRows.nth(0)).toContainText("отвечает клиентам");
+  await expect(returnRows.nth(1)).toContainText("отвечает клиентам");
+  await expect(page.getByRole("button", { name: /Одобрить готовые/ })).toHaveCount(0);
+  await expectHealthyPage(page);
+});
+
 test("quality AI workspace exposes real-time scoring and coaching", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");

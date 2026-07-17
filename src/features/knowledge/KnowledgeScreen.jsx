@@ -20,6 +20,7 @@ import {
 import { createScreenStateItems } from "../../app/screenState.js";
 import { uploadComposerAttachment } from "../../app/useComposerAttachments.js";
 import { buildSourceBotHints } from "./knowledgeSourceHints.js";
+import { selectApprovableSources, summarizeBulkApprove, summarizeBulkUpload } from "./knowledgeBulkModel.js";
 import { collectKnowledgeLoadErrors } from "./knowledgeLoadModel.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
 import { automationService } from "../../services/automationService.js";
@@ -69,6 +70,8 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   const [urlForm, setUrlForm] = useState(null);
   const [articleSourceForm, setArticleSourceForm] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [bulkApproveTarget, setBulkApproveTarget] = useState(null);
   const canWrite = Boolean(access.canManageKnowledge);
   const busy = Boolean(busyAction);
 
@@ -114,6 +117,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   }, []);
 
   const documents = useMemo(() => sources.filter((source) => source.kind === "document"), [sources]);
+  const approvableDocuments = useMemo(() => selectApprovableSources(documents), [documents]);
   const pages = useMemo(() => sources.filter((source) => source.kind === "url" || source.kind === "link"), [sources]);
   const mcpSources = useMemo(() => sources.filter((source) => source.kind === "mcp"), [sources]);
   const approvedMcp = useMemo(() => mcpConnectors.filter((connector) => connector.approvedAt && connector.status === "enabled"), [mcpConnectors]);
@@ -139,43 +143,53 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
     }
   }
 
-  async function handleUploadDocument(file) {
-    if (!file || !canWrite) return;
-    setBusyAction("upload-document");
+  async function uploadSingleDocument(file) {
+    const created = await knowledgeService.createSource({ kind: "document", sourceConfig: { upload: true }, title: file.name });
+    const source = created.data?.source;
+    if (created.status !== "ok" || !source) {
+      return { fileName: file.name, ok: false, reason: created.error?.message ?? "не удалось создать источник" };
+    }
+    // Не переиспользуем createComposerAttachment: он ограничен PDF/картинками
+    // (чат), а воркер знаний извлекает текстовые форматы. Строим объект напрямую.
+    const uploaded = await uploadComposerAttachment(buildKnowledgeUpload(file));
+    if (uploaded.status === "error") {
+      return { fileName: file.name, ok: false, reason: uploaded.error ?? "файл не прошёл антивирусную проверку" };
+    }
+    if (!uploaded.fileId) {
+      return { fileName: file.name, ok: false, reason: "загрузка не вернула идентификатор файла" };
+    }
+    const enqueue = await knowledgeService.enqueueSourceAttachment(source.id, {
+      fileId: uploaded.fileId,
+      idempotencyKey: `ks-upload-${source.id}`
+    });
+    if (enqueue.status !== "ok") {
+      return { fileName: file.name, ok: false, reason: enqueue.error?.message ?? "файл проверен, но индексация не запустилась" };
+    }
+    return { fileName: file.name, ok: true };
+  }
+
+  /** Массовая загрузка: файлы идут последовательно через антивирус и очередь индексации. */
+  async function handleUploadDocuments(fileList) {
+    const files = Array.from(fileList ?? []).filter(Boolean);
+    if (!files.length || !canWrite) return;
+    setBusyAction("upload-documents");
+    const outcomes = [];
     try {
-      const created = await knowledgeService.createSource({ kind: "document", sourceConfig: { upload: true }, title: file.name });
-      const source = created.data?.source;
-      if (created.status !== "ok" || !source) {
-        onToast(created.error?.message ?? "Не удалось создать источник для файла.");
-        return;
+      for (const [index, file] of files.entries()) {
+        setUploadProgress({ done: index, total: files.length });
+        outcomes.push(await uploadSingleDocument(file));
       }
-      onToast("Файл загружается: антивирус → извлечение текста → индексация.");
-      // Не переиспользуем createComposerAttachment: он ограничен PDF/картинками
-      // (чат), а воркер знаний извлекает текстовые форматы. Строим объект напрямую.
-      const knowledgeAttachment = buildKnowledgeUpload(file);
-      const uploaded = await uploadComposerAttachment(knowledgeAttachment);
-      if (uploaded.status === "error") {
-        onToast(uploaded.error ?? "Файл не прошёл антивирусную проверку.");
-        await loadAll({ silent: true });
-        return;
-      }
-      if (!uploaded.fileId) {
-        onToast("Загрузка не вернула идентификатор файла.");
-        return;
-      }
-      const enqueue = await knowledgeService.enqueueSourceAttachment(source.id, {
-        fileId: uploaded.fileId,
-        idempotencyKey: `ks-upload-${source.id}`
-      });
-      if (enqueue.status !== "ok") {
-        onToast(enqueue.error?.message ?? "Файл проверен, но индексация не запустилась.");
-      } else {
-        onToast("Файл в очереди индексации. Когда источник станет «Готов», одобрите его.");
-      }
-      await loadAll({ silent: true });
     } finally {
+      setUploadProgress(null);
       setBusyAction("");
     }
+    onToast(summarizeBulkUpload(outcomes));
+    await loadAll({ silent: true });
+  }
+
+  async function handleBulkApprove(sourcesToApprove) {
+    const response = await runSourceAction("bulk-approve", () => knowledgeService.approveSources(sourcesToApprove.map((source) => source.id)));
+    if (response) onToast(summarizeBulkApprove(response.data));
   }
 
   async function handleCreateUrlSource() {
@@ -371,10 +385,15 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
         <SourceManagerPanel
           actions={
             <>
+              {approvableDocuments.length ? (
+                <button disabled={!canWrite || busy} onClick={() => setBulkApproveTarget(approvableDocuments)} type="button">
+                  <CheckCircle2 size={15} /> Одобрить готовые ({approvableDocuments.length})
+                </button>
+              ) : null}
               <button disabled={!canWrite || busy} onClick={() => setArticleSourceForm({ articleId: "" })} type="button">
                 <Plus size={15} /> Из статьи
               </button>
-              <UploadButton busy={busy} canWrite={canWrite} onUpload={handleUploadDocument} />
+              <UploadButton busy={busy} canWrite={canWrite} onUpload={handleUploadDocuments} progress={uploadProgress} />
             </>
           }
           busyAction={busyAction}
@@ -641,6 +660,27 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
         />
       ) : null}
 
+      {bulkApproveTarget ? (
+        <ConfirmDialog
+          confirmLabel={`Одобрить (${bulkApproveTarget.length})`}
+          description="Бот сможет отвечать клиентам по этим источникам сразу после одобрения."
+          onCancel={() => setBulkApproveTarget(null)}
+          onConfirm={async () => {
+            const targets = bulkApproveTarget;
+            setBulkApproveTarget(null);
+            await handleBulkApprove(targets);
+          }}
+          title={`Одобрить готовые документы (${bulkApproveTarget.length})?`}
+        >
+          <span className="knowledge-bulk-approve-list">
+            {bulkApproveTarget.slice(0, 8).map((source) => (
+              <span key={source.id}>{source.title}</span>
+            ))}
+            {bulkApproveTarget.length > 8 ? <span>и ещё {bulkApproveTarget.length - 8}…</span> : null}
+          </span>
+        </ConfirmDialog>
+      ) : null}
+
       {urlForm ? (
         <ConfirmDialog
           confirmLabel="Добавить"
@@ -814,20 +854,21 @@ function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onApp
   );
 }
 
-function UploadButton({ busy, canWrite, onUpload }) {
+function UploadButton({ busy, canWrite, onUpload, progress }) {
   const inputRef = useRef(null);
   return (
     <>
-      <button disabled={!canWrite || busy} onClick={() => inputRef.current?.click()} title="TXT, Markdown или HTML" type="button">
-        <Upload size={15} /> Загрузить файл
+      <button disabled={!canWrite || busy} onClick={() => inputRef.current?.click()} title="TXT, Markdown или HTML — можно выбрать несколько файлов" type="button">
+        <Upload size={15} /> {progress ? `Загрузка ${Math.min(progress.done + 1, progress.total)}/${progress.total}…` : "Загрузить файлы"}
       </button>
       <input
         accept=".txt,.md,.markdown,.html,.htm,text/plain,text/markdown,text/html"
         hidden
+        multiple
         onChange={(event) => {
-          const file = event.target.files?.[0];
+          const files = Array.from(event.target.files ?? []);
           event.target.value = "";
-          if (file) void onUpload(file);
+          if (files.length) void onUpload(files);
         }}
         ref={inputRef}
         type="file"

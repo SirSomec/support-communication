@@ -132,6 +132,27 @@ const knowledgeFixtures: KnowledgeArticle[] = [
     attachments: [{ id: "att-auth-checklist", name: "auth-checklist.md", type: "MD", size: "24 KB", status: "ready" }],
     versions: [{ id: "kb-auth-v07", label: "v0.7", status: "draft", author: "Oleg N.", updated: "2026-06-22T12:00:00.000Z" }],
     approvalHistory: [{ id: "approval-auth-1", actor: "Oleg N.", action: "created_draft", tone: "info" }]
+  },
+  {
+    // Стабильная опубликованная статья для смоков массового одобрения источников:
+    // другие сценарии её не редактируют, поэтому она всегда published.
+    id: "kb-return-policy",
+    tenantId: "tenant-volga",
+    title: "Return policy",
+    status: "published",
+    category: "Delivery",
+    topics: ["Delivery / Returns"],
+    channels: ["SDK", "Telegram"],
+    visibility: "public",
+    version: "v1.0",
+    updated: "2026-07-01T09:00:00.000Z",
+    owner: "Elena S.",
+    usage: 54,
+    helpfulRate: 91,
+    body: "Returns are accepted within 14 days. Refund is issued to the original payment method after inspection.",
+    attachments: [],
+    versions: [{ id: "kb-return-v10", label: "v1.0", status: "published", author: "Elena S.", updated: "2026-07-01T09:00:00.000Z" }],
+    approvalHistory: [{ id: "approval-return-1", actor: "Elena S.", action: "published", tone: "ok" }]
   }
 ];
 

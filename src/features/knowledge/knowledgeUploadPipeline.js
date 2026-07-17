@@ -22,11 +22,10 @@ export function buildKnowledgeUpload(file) {
 }
 
 export async function uploadKnowledgeDocumentFile(file) {
-  const created = await knowledgeService.createSource({ kind: "document", sourceConfig: { upload: true }, title: file.name });
-  const source = created.data?.source;
-  if (created.status !== "ok" || !source) {
-    return { fileName: file.name, ok: false, reason: created.error?.message ?? "не удалось создать источник" };
-  }
+  // ВАЖНО: сперва грузим и сканируем файл, и только потом создаём источник.
+  // Иначе упавшая загрузка (нет minio, антивирус, сеть) оставляла бы пустой
+  // источник-«черновик» без контента — их накапливалось много при импорте,
+  // а бот молча их не использовал. Нет контента — нет и записи источника.
   // Не переиспользуем createComposerAttachment: он ограничен PDF/картинками
   // (чат), а воркер знаний извлекает текстовые форматы. Строим объект напрямую.
   const uploaded = await uploadComposerAttachment(buildKnowledgeUpload(file));
@@ -36,11 +35,19 @@ export async function uploadKnowledgeDocumentFile(file) {
   if (!uploaded.fileId) {
     return { fileName: file.name, ok: false, reason: "загрузка не вернула идентификатор файла" };
   }
+  const created = await knowledgeService.createSource({ kind: "document", sourceConfig: { upload: true }, title: file.name });
+  const source = created.data?.source;
+  if (created.status !== "ok" || !source) {
+    return { fileName: file.name, ok: false, reason: created.error?.message ?? "не удалось создать источник" };
+  }
   const enqueue = await knowledgeService.enqueueSourceAttachment(source.id, {
     fileId: uploaded.fileId,
     idempotencyKey: `ks-upload-${source.id}`
   });
   if (enqueue.status !== "ok") {
+    // Индексация не запустилась — не оставляем пустой источник висеть в списке.
+    await knowledgeService.archiveSource(source.id).catch(() => {});
+    await knowledgeService.deleteSource(source.id).catch(() => {});
     return { fileName: file.name, ok: false, reason: enqueue.error?.message ?? "файл проверен, но индексация не запустилась" };
   }
   return { fileName: file.name, ok: true };

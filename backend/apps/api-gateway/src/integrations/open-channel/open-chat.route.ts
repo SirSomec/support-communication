@@ -261,6 +261,7 @@ export async function resolveOrCreateOpenChatConversation(input: {
       topic: String(input.sender.intent ?? "").trim() || "Chat API"
     }),
     createMutation: (conversation, eventType = "conversation.created") => openChatConversationMutation(conversation, eventType),
+    providerConversationId: input.clientId,
     tenantId: input.channel.tenantId
   });
 

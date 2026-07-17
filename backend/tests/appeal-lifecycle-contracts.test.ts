@@ -135,6 +135,51 @@ describe("appeal lifecycle contracts", () => {
     assert.equal(assigned.status, "ok");
   });
 
+  it("carries the live provider binding into a follow-up appeal whose parent binding was already released", async () => {
+    const repository = ConversationRepository.inMemory();
+    const anchorId = "tg_binding_anchor";
+
+    // Закрытый appeal с уже снятым binding (releaseProviderBindingForClosedAppeal
+    // отработал при его закрытии) — ровно состояние инцидента 2026-07-17.
+    await repository.saveConversationMutation(appealMutation({
+      channel: "Telegram",
+      clientSince: "2026-07-12",
+      device: "Telegram",
+      entry: "Telegram",
+      id: `${anchorId}_appeal_previous`,
+      initials: "AT",
+      language: "Unknown",
+      messages: [],
+      name: "Appeal Test",
+      phone: "+79990000000",
+      preview: "",
+      previous: [],
+      sla: "Closed",
+      slaTone: "muted",
+      status: "closed",
+      tags: ["telegram", "chat:440785894", `appeal-anchor:${anchorId}`],
+      tenantId: "tenant-volga",
+      time: "now",
+      topic: "Billing",
+      metadata: { anchorId, closedAt: "2026-07-12T10:00:00.000Z" }
+    }));
+
+    const forked = await resolveOrForkAppealConversation({
+      anchorId,
+      conversationRepository: repository,
+      createInitial: () => { throw new Error("fork path must not create the initial conversation"); },
+      createMutation: appealMutation,
+      providerConversationId: "440785894",
+      tenantId: "tenant-volga"
+    });
+
+    assert.ok(forked);
+    assert.equal(forked.forked, true);
+    // Binding из живого входящего события: без него доставка падала в
+    // legacy-фолбэк на телефон и Telegram отвечал 400 на каждый ответ бота.
+    assert.equal(forked.conversation.providerConversationId, "440785894");
+  });
+
   it("marks a follow-up appeal as repeat when topic matches the previous close within 24 hours", async () => {
     const anchorId = "tg_repeat_anchor";
     const closedParent: ConversationRecord = {

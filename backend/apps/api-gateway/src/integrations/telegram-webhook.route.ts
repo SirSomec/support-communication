@@ -258,6 +258,7 @@ export async function resolveOrCreateTelegramConversation(input: {
     }),
     createMutation: (conversation, eventType = "conversation.created") =>
       conversationCreatedMutation(conversation, eventType),
+    providerConversationId: chatId,
     tenantId
   });
 

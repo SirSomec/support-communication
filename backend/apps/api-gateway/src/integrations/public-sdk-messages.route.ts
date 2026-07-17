@@ -133,6 +133,7 @@ export async function resolveOrCreatePublicSdkConversation(
     }),
     createMutation: (conversation, eventType = "conversation.created") =>
       conversationCreatedMutation(conversation, "sdk", eventType),
+    providerConversationId: externalId,
     tenantId: input.tenantId
   });
 

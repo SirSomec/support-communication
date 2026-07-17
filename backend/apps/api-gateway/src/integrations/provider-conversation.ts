@@ -65,6 +65,7 @@ export async function resolveOrCreateProviderConversation(input: ProviderConvers
     }),
     createMutation: (conversation, eventType = "conversation.created") =>
       providerConversationMutation(conversation, input.channel, eventType),
+    providerConversationId,
     tenantId
   });
 

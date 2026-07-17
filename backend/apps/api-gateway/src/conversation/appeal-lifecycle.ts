@@ -24,6 +24,14 @@ export interface ResolveAppealConversationInput {
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   createInitial: () => ConversationRecord;
   createMutation: (conversation: ConversationRecord, eventType?: "conversation.created" | "conversation.updated") => AppealConversationMutation;
+  /**
+   * Живой адрес доставки из входящего события провайдера (tg chat id,
+   * externalId и т.п.). Обязателен для fork-ветки: у закрытого appeal binding
+   * уже снят releaseProviderBindingForClosedAppeal, наследовать нечего — без
+   * этого поля новый тред падал в legacy-фолбэк на телефон и Telegram отвечал
+   * 400 на каждую доставку (инцидент 2026-07-17).
+   */
+  providerConversationId?: string;
   tenantId: string;
 }
 
@@ -130,13 +138,14 @@ export function recordClosedAppealHistory(conversation: ConversationRecord, clos
   };
 }
 
-export function buildFollowUpAppeal(closedConversation: ConversationRecord, anchorId: string): ConversationRecord {
+export function buildFollowUpAppeal(closedConversation: ConversationRecord, anchorId: string, providerConversationId?: string): ConversationRecord {
   const isRepeatAppeal = detectRepeatAppeal(closedConversation);
   const appealId = `${anchorId}_appeal_${createHash("sha256")
     .update(`${closedConversation.tenantId}:${closedConversation.id}:follow-up`)
     .digest("hex")
     .slice(0, 12)}`;
   const baseTags = closedConversation.tags.filter((tag) => tag !== REPEAT_APPEAL_TAG);
+  const inheritedBinding = String(providerConversationId ?? "").trim() || closedConversation.providerConversationId;
 
   return ensureAppealAnchorTag({
     avatar: closedConversation.avatar,
@@ -153,7 +162,7 @@ export function buildFollowUpAppeal(closedConversation: ConversationRecord, anch
     phone: closedConversation.phone,
     preview: "",
     previous: [...closedConversation.previous],
-    ...(closedConversation.providerConversationId ? { providerConversationId: closedConversation.providerConversationId } : {}),
+    ...(inheritedBinding ? { providerConversationId: inheritedBinding } : {}),
     ...(closedConversation.providerUserId ? { providerUserId: closedConversation.providerUserId } : {}),
     ...(closedConversation.queueId ? { queueId: closedConversation.queueId } : {}),
     sla: "Active",
@@ -209,7 +218,7 @@ export async function resolveOrForkAppealConversation(
     );
   }
 
-  const followUp = buildFollowUpAppeal(existing, input.anchorId);
+  const followUp = buildFollowUpAppeal(existing, input.anchorId, input.providerConversationId);
   const mutation = input.createMutation(followUp, "conversation.created");
   const persisted = await input.conversationRepository.saveConversationMutation(mutation);
 

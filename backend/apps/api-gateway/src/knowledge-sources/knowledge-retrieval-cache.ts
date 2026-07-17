@@ -5,6 +5,12 @@ export interface RetrievalCacheMetrics {
 }
 
 export interface RetrievalCacheValue {
+  /** BAI-875: LLM-selector metadata; absent for lexical results. */
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  corpusTruncated?: boolean;
+  fallbackReason?: string;
+  mode?: "lexical" | "llm" | "llm_fallback";
   passages: Array<{
     citation: { endOffset: number; sourceId: string; sourceVersion: number; startOffset: number; title: string };
     content: string;
@@ -22,6 +28,8 @@ interface RetrievalCacheEntry {
 }
 
 export interface RetrievalCacheKeyInput {
+  /** BAI-875: retrieval strategy; llm and lexical results never share a cache entry. */
+  mode?: "lexical" | "llm";
   query: string;
   scoreThreshold?: number;
   sourceBindings: Array<{ sourceId: string; sourceVersion?: string }>;
@@ -114,7 +122,7 @@ export function buildRetrievalCacheKey(input: RetrievalCacheKeyInput): string {
   const scoreThreshold = Number.isFinite(input.scoreThreshold)
     ? Math.max(0.05, Number(input.scoreThreshold))
     : 0.05;
-  return `kr:v2:${input.tenantId}:${bindings}:${input.tokenBudget}:${scoreThreshold}:${normalizedQuery}`;
+  return `kr:v3:${input.tenantId}:${input.mode ?? "lexical"}:${bindings}:${input.tokenBudget}:${scoreThreshold}:${normalizedQuery}`;
 }
 
 function clone<T>(value: T): T {

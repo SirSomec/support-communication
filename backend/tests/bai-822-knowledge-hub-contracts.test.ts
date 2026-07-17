@@ -257,6 +257,7 @@ describe("BAI-826 unanswered questions", () => {
       lastTestedAt: "2026-07-14T09:00:00.000Z",
       limits: {},
       providerType: "openai_compatible" as const,
+      retrievalModel: null,
       secret: { authTag: "dGFn", ciphertext: "c2VjcmV0", iv: "aXY=", keyVersion: "local-v1" },
       status: "ready" as const,
       tenantId: TENANT,

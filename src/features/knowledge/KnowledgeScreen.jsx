@@ -226,12 +226,19 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   async function handlePreviewSearch() {
     if (!previewTarget?.source || !previewTarget.query?.trim()) return;
     const response = await knowledgeService.searchSources({
+      mode: previewTarget.searchMode === "llm" ? "llm" : "lexical",
       query: previewTarget.query.trim(),
       sourceIds: [previewTarget.source.id],
       tokenBudget: 400
     });
     setPreviewTarget((current) => current
-      ? { ...current, results: response.status === "ok" ? normalizeList(response.data?.passages) : [] }
+      ? {
+        ...current,
+        results: response.status === "ok" ? normalizeList(response.data?.passages) : [],
+        resultsMeta: response.status === "ok"
+          ? { cachedTokens: response.data?.cachedTokens, fallbackReason: response.data?.fallbackReason, mode: response.data?.mode }
+          : null
+      }
       : current);
   }
 
@@ -582,6 +589,20 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
                   <Search size={14} /> Найти
                 </button>
               </div>
+              <label className="knowledge-preview-mode">
+                <input
+                  checked={previewTarget.searchMode === "llm"}
+                  onChange={(event) => setPreviewTarget((current) => current ? { ...current, searchMode: event.target.checked ? "llm" : "lexical" } : current)}
+                  type="checkbox"
+                />
+                <span>Умный поиск (ИИ): модель для поиска читает базу — как это будет делать бот</span>
+              </label>
+              {previewTarget.resultsMeta ? (
+                <p className="knowledge-preview-meta">
+                  {previewTarget.resultsMeta.mode === "llm" ? "Нашёл умный поиск (ИИ)" : previewTarget.resultsMeta.mode === "llm_fallback" ? `Умный поиск недоступен (${previewTarget.resultsMeta.fallbackReason ?? "причина неизвестна"}) — показан быстрый` : "Нашёл быстрый поиск (по словам)"}
+                  {Number.isFinite(previewTarget.resultsMeta.cachedTokens) ? ` · из кеша провайдера: ${previewTarget.resultsMeta.cachedTokens} токенов` : ""}
+                </p>
+              ) : null}
               {previewTarget.results ? (
                 previewTarget.results.length ? (
                   <ul className="knowledge-preview-results">

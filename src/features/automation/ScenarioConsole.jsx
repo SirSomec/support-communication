@@ -348,8 +348,25 @@ export function ScenarioConsole({
                 <span>Отвечать только при наличии подтверждающего источника (иначе — передать оператору)</span>
               </label>
               <label>
+                <span>Как бот ищет по знаниям</span>
+                <select disabled={!canManage} onChange={(event) => updateForm({ retrievalMode: event.target.value })} value={form.retrievalMode || "lexical"}>
+                  <option value="lexical">Быстрый — по совпадению слов (бесплатно)</option>
+                  <option value="llm">Умный — модель для поиска читает базу знаний (точнее; тратит токены, база кешируется у провайдера)</option>
+                </select>
+                <small>Умный поиск требует настроенной «модели для поиска знаний» в AI-подключении и включённой функции для организации; иначе бот автоматически ищет быстрым способом.</small>
+              </label>
+              <label>
                 <span>Строгость поиска: минимальное совпадение, % ({form.retrievalScoreThreshold || 0}%)</span>
                 <input disabled={!canManage} max="100" min="0" onChange={(event) => updateForm({ retrievalScoreThreshold: event.target.value })} step="5" type="range" value={form.retrievalScoreThreshold || 0} />
+                <small>Действует для быстрого поиска и как страховка при недоступности умного.</small>
+              </label>
+              <label>
+                <span>Максимальная длина ответа</span>
+                <select disabled={!canManage} onChange={(event) => updateForm({ maxResponseTokens: event.target.value })} value={form.maxResponseTokens || "1000"}>
+                  <option value="500">Короткие ответы (~2 абзаца)</option>
+                  <option value="1000">Обычные ответы (по умолчанию)</option>
+                  <option value="2000">Развёрнутые ответы (инструкции по шагам)</option>
+                </select>
               </label>
               <label>
                 <span>Дополнительные правила поведения (необязательно)</span>
@@ -492,6 +509,7 @@ function buildForm(effective) {
     handoffQueue: String(aiNode?.config?.handoffQueue ?? "1-я линия"),
     language: String(aiNode?.config?.language ?? "ru"),
     matchMode: rule?.matchMode ?? "contains",
+    maxResponseTokens: String(aiNode?.config?.maxResponseTokens ?? 1000),
     maxTurns: String(aiNode?.config?.maxTurns ?? 10),
     name: String(effective?.name ?? ""),
     operatorOnlyTopics: (aiNode?.config?.operatorOnlyTopics ?? []).join(", "),
@@ -499,6 +517,7 @@ function buildForm(effective) {
     priority: String(effective?.priority ?? 0),
     refusalMessage: String(aiNode?.config?.refusalMessage ?? DEFAULT_REFUSAL_MESSAGE),
     requireSource: aiNode?.config?.requireSource !== false,
+    retrievalMode: aiNode?.config?.retrievalMode === "llm" ? "llm" : "lexical",
     retrievalScoreThreshold: String(Math.round(Number(aiNode?.config?.retrievalScoreThreshold ?? 0) * 100)),
     tone: String(aiNode?.config?.tone ?? "neutral"),
     triggerType: rule?.type ?? "new_conversation"
@@ -517,10 +536,12 @@ function collectUpdatePayload(effective, form) {
         fallbackMessage: form.fallbackMessage.trim() || DEFAULT_AI_FALLBACK_MESSAGE,
         handoffQueue: form.handoffQueue.trim() || "1-я линия",
         language: form.language,
+        maxResponseTokens: clampNumber(form.maxResponseTokens, 100, 4000, 1000),
         maxTurns: clampNumber(form.maxTurns, 1, 30, 10),
         operatorOnlyTopics: normalizeTopicList(splitTopics(form.operatorOnlyTopics)),
         refusalMessage: form.refusalMessage.trim() || DEFAULT_REFUSAL_MESSAGE,
         requireSource: form.requireSource !== false,
+        retrievalMode: form.retrievalMode === "llm" ? "llm" : "lexical",
         retrievalScoreThreshold: clampNumber(form.retrievalScoreThreshold, 0, 100, 0) / 100,
         tone: form.tone
       }
@@ -556,6 +577,7 @@ function describePolicy(config) {
   const operatorOnly = normalizeTopicList(config?.operatorOnlyTopics ?? []);
   const parts = [];
   parts.push(config?.requireSource === false ? "может отвечать без источника" : "только по проверенным источникам");
+  if (config?.retrievalMode === "llm") parts.push("умный поиск по знаниям (ИИ)");
   if (blocked.length) parts.push(`не отвечает: ${blocked.slice(0, 3).join(", ")}${blocked.length > 3 ? "…" : ""}`);
   if (operatorOnly.length) parts.push(`сразу оператор: ${operatorOnly.slice(0, 3).join(", ")}${operatorOnly.length > 3 ? "…" : ""}`);
   return parts.join(" · ");

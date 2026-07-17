@@ -2,6 +2,14 @@ import { KnowledgeSourceRepository } from "./knowledge-source.repository.js";
 import { isKnowledgeSourceRetrievalEligible, type KnowledgeSourceRecord } from "./knowledge-source.types.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 import { buildRetrievalCacheKey, KnowledgeRetrievalCache } from "./knowledge-retrieval-cache.js";
+import {
+  buildKnowledgeCorpus,
+  extractKnowledgeSourceText,
+  lexicalRelevance,
+  lexicalTerms,
+  type KnowledgeCorpus,
+  type KnowledgeCorpusEntry
+} from "./knowledge-corpus.js";
 import { recordBotRetrieval } from "../automation/bot-observability.js";
 import type { McpReadOnlyResult } from "./mcp-readonly-connector.service.js";
 
@@ -10,7 +18,21 @@ export interface McpRetrievalInvoker {
   invoke(tenantId: string, connectorId: string, toolName: string, toolInput: Record<string, unknown>): Promise<McpReadOnlyResult>;
 }
 
+/** BAI-874/875: LLM chunk selector. Injected so tests never hit the network; failures fall back to lexical. */
+export interface LlmKnowledgeSearchResult {
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  passages: KnowledgeRetrievalPassage[];
+}
+export interface LlmKnowledgeSearchInvoker {
+  search(input: { corpus: KnowledgeCorpus; query: string; scenarioId?: string; tenantId: string }): Promise<LlmKnowledgeSearchResult>;
+}
+
+export type KnowledgeRetrievalMode = "lexical" | "llm";
+
 export interface KnowledgeRetrievalInput {
+  /** BAI-875: retrieval strategy; "llm" needs an injected selector, otherwise silently stays lexical. */
+  mode?: KnowledgeRetrievalMode;
   query: string;
   scenarioId?: string;
   /** BAI-843: минимальный lexical score фрагмента; ниже него доказательства недостаточны. */
@@ -28,12 +50,19 @@ export interface KnowledgeRetrievalPassage {
 
 export interface KnowledgeRetrievalResult {
   cache: "hit" | "miss";
+  /** BAI-875: provider prompt-cache stats of the LLM selector call (absent for lexical). */
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  corpusTruncated?: boolean;
+  /** BAI-875: set when mode="llm" failed and lexical answered instead. */
+  fallbackReason?: string;
+  mode: "lexical" | "llm" | "llm_fallback";
   passages: KnowledgeRetrievalPassage[];
   tokenBudget: number;
   tokensUsed: number;
 }
 
-/** Tenant- and scenario-bound lexical retrieval with an explicit provider token budget. */
+/** Tenant- and scenario-bound retrieval with an explicit provider token budget: lexical by default, LLM-selector by mode. */
 export class KnowledgeRetrievalService {
   private readonly workspace: WorkspaceRepository;
   private readonly cache: KnowledgeRetrievalCache;
@@ -42,7 +71,9 @@ export class KnowledgeRetrievalService {
     private readonly sources = KnowledgeSourceRepository.default(),
     workspace?: WorkspaceRepository,
     cache?: KnowledgeRetrievalCache,
-    private readonly mcpInvoker?: McpRetrievalInvoker
+    private readonly mcpInvoker?: McpRetrievalInvoker,
+    private readonly llmSearch?: LlmKnowledgeSearchInvoker,
+    private readonly corpusMaxTokens: number | undefined = envCorpusMaxTokens()
   ) {
     this.workspace = workspace ?? WorkspaceRepository.default();
     this.cache = cache ?? KnowledgeRetrievalCache.default();
@@ -51,7 +82,9 @@ export class KnowledgeRetrievalService {
   async retrieve(input: KnowledgeRetrievalInput): Promise<KnowledgeRetrievalResult> {
     const budget = clampInteger(input.tokenBudget, 1_500, 100, 6_000);
     const scoreThreshold = Math.max(0.05, Number.isFinite(input.scoreThreshold) ? Number(input.scoreThreshold) : 0);
+    const mode: KnowledgeRetrievalMode = input.mode === "llm" && this.llmSearch ? "llm" : "lexical";
     const cacheKey = buildRetrievalCacheKey({
+      mode,
       query: input.query,
       scoreThreshold,
       sourceBindings: input.sourceBindings,
@@ -60,9 +93,10 @@ export class KnowledgeRetrievalService {
     });
     const cached = this.cache.get(cacheKey);
     if (cached) {
-      const hit = { cache: "hit" as const, ...cached };
+      const hit = { cache: "hit" as const, ...cached, mode: cached.mode ?? "lexical" };
       recordBotRetrieval({
         cache: "hit",
+        mode: hit.mode,
         passageCount: hit.passages.length,
         scenarioId: input.scenarioId,
         tenantId: input.tenantId,
@@ -71,7 +105,31 @@ export class KnowledgeRetrievalService {
       return hit;
     }
 
-    const queryTerms = terms(input.query);
+    let fallbackReason: string | undefined;
+    if (mode === "llm") {
+      try {
+        const result = await this.llmRetrieve(input, budget);
+        this.cache.set(cacheKey, result, {
+          sourceIds: input.sourceBindings.map((binding) => binding.sourceId),
+          tenantId: input.tenantId
+        });
+        recordBotRetrieval({
+          cache: "miss",
+          mode: "llm",
+          passageCount: result.passages.length,
+          scenarioId: input.scenarioId,
+          tenantId: input.tenantId,
+          topScore: result.passages[0]?.score
+        });
+        return { cache: "miss", ...result, mode: "llm" };
+      } catch (error) {
+        // Любой сбой селектора (нет подключения, бюджет, таймаут, кривой JSON)
+        // не должен ронять бота: молча отвечаем лексикой, причина видна в trace.
+        fallbackReason = error instanceof Error ? error.message : "llm_retrieval_unavailable";
+      }
+    }
+
+    const queryTerms = lexicalTerms(input.query);
     const candidates: KnowledgeRetrievalPassage[] = [];
     for (const binding of input.sourceBindings) {
       const source = await this.sources.find(input.tenantId, binding.sourceId);
@@ -82,9 +140,9 @@ export class KnowledgeRetrievalService {
         if (passage) candidates.push(passage);
         continue;
       }
-      const text = await sourceText(source, this.workspace, input.tenantId);
+      const text = await extractKnowledgeSourceText(source, this.workspace, input.tenantId);
       for (const chunk of chunks(text)) {
-        const score = relevance(queryTerms, chunk.content);
+        const score = lexicalRelevance(queryTerms, chunk.content);
         if (score < scoreThreshold) continue;
         candidates.push({ citation: { endOffset: chunk.endOffset, sourceId: source.id, sourceVersion: source.version, startOffset: chunk.startOffset, title: source.title }, content: chunk.content, score });
       }
@@ -101,10 +159,10 @@ export class KnowledgeRetrievalService {
         const source = await this.sources.find(input.tenantId, binding.sourceId);
         if (!source || !isKnowledgeSourceRetrievalEligible(source)) continue;
         if (binding.sourceVersion && String(source.version) !== binding.sourceVersion) continue;
-        const text = await sourceText(source, this.workspace, input.tenantId);
+        const text = await extractKnowledgeSourceText(source, this.workspace, input.tenantId);
         const [chunk] = chunks(text);
         if (!chunk?.content) continue;
-        const chunkTerms = terms(chunk.content);
+        const chunkTerms = lexicalTerms(chunk.content);
         if (!chunkTerms.some((term) => queryPrefixes.some((prefix) => term.startsWith(prefix)))) continue;
         candidates.push({
           citation: {
@@ -128,19 +186,68 @@ export class KnowledgeRetrievalService {
       passages.push(candidate); tokensUsed += tokens;
       if (passages.length >= 8) break;
     }
-    const result = { passages, tokenBudget: budget, tokensUsed };
+    const result = {
+      ...(fallbackReason ? { fallbackReason, mode: "llm_fallback" as const } : { mode: "lexical" as const }),
+      passages,
+      tokenBudget: budget,
+      tokensUsed
+    };
     this.cache.set(cacheKey, result, {
       sourceIds: input.sourceBindings.map((binding) => binding.sourceId),
       tenantId: input.tenantId
     });
     recordBotRetrieval({
       cache: "miss",
+      mode: result.mode,
       passageCount: passages.length,
       scenarioId: input.scenarioId,
       tenantId: input.tenantId,
       topScore: passages[0]?.score
     });
     return { cache: "miss", ...result };
+  }
+
+  /**
+   * BAI-874/875: LLM-selector strategy. Строит детерминированный корпус из
+   * привязанных источников (MCP-источники остаются живыми вызовами и
+   * добавляются отдельными пассажами) и спрашивает дорогую модель, какие чанки
+   * отвечают на вопрос. Пустой корпус без MCP — валидный «нет знаний», не сбой.
+   */
+  private async llmRetrieve(input: KnowledgeRetrievalInput, budget: number): Promise<Omit<KnowledgeRetrievalResult, "cache">> {
+    const entries: KnowledgeCorpusEntry[] = [];
+    const mcpPassages: KnowledgeRetrievalPassage[] = [];
+    for (const binding of input.sourceBindings) {
+      const source = await this.sources.find(input.tenantId, binding.sourceId);
+      if (!source || !isKnowledgeSourceRetrievalEligible(source)) continue;
+      if (binding.sourceVersion && String(source.version) !== binding.sourceVersion) continue;
+      if (source.kind === "mcp") {
+        const passage = await this.mcpPassage(source, input.query, input.tenantId);
+        if (passage) mcpPassages.push(passage);
+        continue;
+      }
+      const text = await extractKnowledgeSourceText(source, this.workspace, input.tenantId);
+      if (text.trim()) entries.push({ source, text });
+    }
+    const corpus = buildKnowledgeCorpus(entries, { maxTokens: this.corpusMaxTokens, prefilterQuery: input.query });
+    const llm = corpus.chunks.length
+      ? await this.llmSearch!.search({ corpus, query: input.query, scenarioId: input.scenarioId, tenantId: input.tenantId })
+      : { passages: [] as KnowledgeRetrievalPassage[] };
+    const passages: KnowledgeRetrievalPassage[] = []; let tokensUsed = 0;
+    for (const candidate of [...llm.passages, ...mcpPassages]) {
+      const tokens = estimateTokens(candidate.content);
+      if (tokensUsed + tokens > budget) continue;
+      passages.push(candidate); tokensUsed += tokens;
+      if (passages.length >= 8) break;
+    }
+    return {
+      ...(llm.cachedTokens === undefined ? {} : { cachedTokens: llm.cachedTokens }),
+      ...(llm.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: llm.cacheWriteTokens }),
+      ...(corpus.truncated ? { corpusTruncated: true } : {}),
+      mode: "llm",
+      passages,
+      tokenBudget: budget,
+      tokensUsed
+    };
   }
 
   /**
@@ -167,21 +274,6 @@ export class KnowledgeRetrievalService {
   }
 }
 
-async function sourceText(source: KnowledgeSourceRecord, workspace: WorkspaceRepository, tenantId: string): Promise<string> {
-  // Чанки исторически хранились строками; ingestion (BAI-402+) пишет объекты
-  // {content, offsets}. Поддерживаем оба вида — иначе document-источники немы.
-  if (Array.isArray(source.metadata.chunks)) {
-    return source.metadata.chunks
-      .map((item) => typeof item === "string" ? item : String((item as { content?: unknown })?.content ?? ""))
-      .filter(Boolean)
-      .join("\n\n");
-  }
-  if (source.kind === "url") return String(source.metadata.extractedText ?? "");
-  if (!source.sourceRef) return "";
-  const article = await workspace.findKnowledgeArticle(source.sourceRef, { tenantId });
-  return article?.status === "published" ? article.body : "";
-}
-
 function chunks(text: string): Array<{ content: string; endOffset: number; startOffset: number }> {
   const normalized = text.replace(/\s+/g, " ").trim(); const result = [];
   for (let start = 0; start < normalized.length; start += 1_200) {
@@ -189,7 +281,6 @@ function chunks(text: string): Array<{ content: string; endOffset: number; start
   }
   return result;
 }
-function relevance(query: string[], content: string): number { if (!query.length) return 0; const haystack = new Set(terms(content)); return query.filter((term) => haystack.has(term)).length / query.length; }
-function terms(value: string): string[] { return [...new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])].slice(0, 32); }
 function estimateTokens(value: string): number { return Math.max(1, Math.ceil(value.length / 4)); }
+function envCorpusMaxTokens(): number | undefined { const parsed = Number(process.env.RETRIEVAL_CORPUS_MAX_TOKENS); return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined; }
 function clampInteger(value: unknown, fallback: number, min: number, max: number): number { const parsed = Number(value ?? fallback); return Number.isInteger(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback; }

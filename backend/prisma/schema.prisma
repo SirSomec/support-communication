@@ -2155,6 +2155,7 @@ model AiConnection {
   baseUrl               String    @map("base_url")
   chatModel             String    @map("chat_model")
   embeddingModel        String?   @map("embedding_model")
+  retrievalModel        String?   @map("retrieval_model")
   secretCiphertext      String?   @map("secret_ciphertext")
   secretIv              String?   @map("secret_iv")
   secretAuthTag         String?   @map("secret_auth_tag")

@@ -26,16 +26,40 @@ export interface OpenAiCompatibleChatConnection {
   timeoutMs?: number;
 }
 
+/** BAI-871: provider prompt-cache directive (AITunnel/Anthropic style `cache_control`). */
+export interface ChatCompletionCacheControl {
+  ttl?: "1h" | "5m";
+}
+
+/**
+ * BAI-871: one text block of the system message. A block with `cacheControl`
+ * becomes an explicit cache breakpoint — everything up to and including it is
+ * cached by the provider (AITunnel serializes it as `cache_control` on the
+ * content part). Keep cacheable blocks byte-stable between calls.
+ */
+export interface ChatCompletionSystemBlock {
+  cacheControl?: ChatCompletionCacheControl;
+  text: string;
+}
+
 export interface ChatCompletionRequest {
+  /** BAI-871: top-level cache_control — enables automatic caching where supported. */
+  cacheControl?: ChatCompletionCacheControl;
   maxTokens?: number;
   messages: ChatCompletionMessage[];
   /** BAI-851: cache hint sent to providers that support prefix caching; never contains PII. */
   promptCacheKey?: string;
   responseFormat?: "json_object" | "text";
+  /** BAI-871: sticky-routing hint (AITunnel `session_id`, ≤256 chars); never contains PII. */
+  sessionId?: string;
+  /** BAI-871: prepended as one system message made of content blocks with optional cache breakpoints. */
+  systemBlocks?: ChatCompletionSystemBlock[];
   temperature?: number;
 }
 
 export interface ChatCompletionUsage {
+  /** BAI-871: tokens newly written to the provider cache this call (prompt_tokens_details.cache_write_tokens). */
+  cacheWriteTokens?: number;
   cachedTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -140,16 +164,33 @@ export function buildRequestBody(request: ChatCompletionRequest, model: string):
 
 function requestBody(request: ChatCompletionRequest, model: string): Record<string, unknown> {
   if (!Array.isArray(request.messages) || request.messages.length === 0) throw new Error("ai_chat_messages_required");
-  const messages = request.messages.map((message) => {
+  const messages: Array<Record<string, unknown>> = request.messages.map((message) => {
     if (!isRole(message.role) || !message.content.trim()) throw new Error("ai_chat_message_invalid");
     return { content: message.content, role: message.role };
   });
+  if (request.systemBlocks?.length) {
+    const blocks = request.systemBlocks.map((block) => {
+      if (!block.text.trim()) throw new Error("ai_chat_message_invalid");
+      return {
+        type: "text",
+        text: block.text,
+        ...(block.cacheControl ? { cache_control: toCacheControl(block.cacheControl) } : {})
+      };
+    });
+    messages.unshift({ content: blocks, role: "system" });
+  }
   const body: Record<string, unknown> = { messages, model };
   if (request.temperature !== undefined) body.temperature = boundedNumber(request.temperature, 0, 2, "ai_chat_temperature_invalid");
   if (request.maxTokens !== undefined) body.max_tokens = clampInteger(request.maxTokens, 1, 32_768);
   if (request.responseFormat === "json_object") body.response_format = { type: "json_object" };
   if (request.promptCacheKey?.trim()) body.prompt_cache_key = request.promptCacheKey.trim().slice(0, 128);
+  if (request.cacheControl) body.cache_control = toCacheControl(request.cacheControl);
+  if (request.sessionId?.trim()) body.session_id = request.sessionId.trim().slice(0, 256);
   return body;
+}
+
+function toCacheControl(value: ChatCompletionCacheControl): Record<string, unknown> {
+  return { type: "ephemeral", ...(value.ttl ? { ttl: value.ttl } : {}) };
 }
 
 function parseCompletion(value: unknown, configuredModel: string): ChatCompletionResult {
@@ -158,6 +199,7 @@ function parseCompletion(value: unknown, configuredModel: string): ChatCompletio
   const content = messageContent(record(firstChoice.message).content);
   if (!content) throw new AiProviderError("invalid_response", false, "AI provider returned an invalid response.");
   const usage = record(payload.usage);
+  const cacheWriteTokens = nonNegativeInteger(record(usage.prompt_tokens_details).cache_write_tokens);
   const cachedTokens = nonNegativeInteger(record(usage.prompt_tokens_details).cached_tokens);
   const inputTokens = nonNegativeInteger(usage.prompt_tokens);
   const outputTokens = nonNegativeInteger(usage.completion_tokens);
@@ -168,6 +210,7 @@ function parseCompletion(value: unknown, configuredModel: string): ChatCompletio
     providerId: OPENAI_COMPATIBLE_CHAT_PROVIDER_ID,
     providerRequestId: text(payload.id),
     usage: {
+      ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
       ...(cachedTokens === undefined ? {} : { cachedTokens }),
       ...(inputTokens === undefined ? {} : { inputTokens }),
       ...(outputTokens === undefined ? {} : { outputTokens }),

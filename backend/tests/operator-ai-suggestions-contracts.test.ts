@@ -266,6 +266,7 @@ function connection(limits: AiConnectionRecord["limits"]): AiConnectionRecord {
     lastTestedAt: "2026-07-14T09:00:00.000Z",
     limits,
     providerType: "openai_compatible",
+    retrievalModel: null,
     secret,
     status: "ready",
     tenantId: TENANT,

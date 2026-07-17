@@ -76,12 +76,22 @@
 3. При сохранении — снизить priority или pause.
 4. Support-lead контролирует очередь handoff.
 
+### «Умный» LLM-поиск ищет не тем способом или дорого (BAI-873…879)
+
+**Сигнал:** в trace песочницы `retrievalMode: llm_fallback`, либо метрика `bot_retrieval_requests_total{mode="llm_fallback"}` растёт; либо расход дорогой модели выше ожиданий.
+
+1. `fallbackReason` в trace/«Проверить поиск»: `llm_retrieval_connection_not_ready` — у подключения нет «модели для поиска» или capability `retrieval`; `bot_ai_rate_limit_reached`/`monthly_budget` — бюджет; `provider_timeout`/`provider_unavailable` — провайдер; `llm_retrieval_invalid_response` — модель вернула не-JSON (проверить выбор модели).
+2. Fallback безопасен: бот отвечает лексическим поиском, диалоги не падают.
+3. Дорого: смотреть `cache_write_tokens` — постоянные прогревы означают нестабильный корпус (частые переиндексации источников) или превышение потолка `RETRIEVAL_CORPUS_MAX_TOKENS` (60k по умолчанию; `corpusTruncated: true` в результате — корпус фильтруется под вопрос и кеш не переиспользуется).
+4. Отключить: режим «Быстрый» в «Рамках ответов» сценария (мгновенно, через черновик/публикацию) или флаг `ai_llm_retrieval` для tenant (см. Kill switch).
+
 ## Kill switch (кратко)
 
 1. **Сценарий:** Automation → Пауза / архив.  
 2. **AI connection:** Service Admin → Disable connection.  
 3. **Источник:** отключить source / снять approval.  
 4. **Feature flag (пилот):** выключить `ai_agents_v1` (status `off` или убрать tenant из `enabledTenantIds`). Runtime enforce включается опцией `featureFlags` / `BOT_AI_AGENTS_PILOT_ENFORCE=1`.
+5. **LLM-поиск:** выключить флаг `ai_llm_retrieval` — сценарии с режимом «Умный» тихо возвращаются к лексическому поиску без пауз и ошибок.
 
 ## Пилот и расширение (BAI-706)
 

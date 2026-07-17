@@ -140,6 +140,7 @@ function readyConnection(limits: AiConnectionRecord["limits"] = {}): AiConnectio
     lastTestedAt: "2026-07-13T10:00:00.000Z",
     limits,
     providerType: "openai_compatible",
+    retrievalModel: null,
     secret: { authTag: "dGFn", ciphertext: "c2VjcmV0", iv: "aXY=", keyVersion: "local-v1" } as unknown as AiConnectionRecord["secret"],
     status: "ready",
     tenantId: TENANT,

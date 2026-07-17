@@ -16,6 +16,7 @@ export interface AiConnectionWriteInput {
   chatModel?: string;
   embeddingModel?: string | null;
   limits?: { maxConcurrentRuns?: number; monthlyTokenBudget?: number; requestsPerMinute?: number; sandboxMonthlyTokenBudget?: number };
+  retrievalModel?: string | null;
   secret?: string;
 }
 
@@ -49,6 +50,7 @@ export class AiConnectionsService {
         createdAt: now,
         disabledAt: null,
         embeddingModel: normalizedOptional(input.embeddingModel),
+        retrievalModel: normalizedOptional(input.retrievalModel),
         id: `aic_${randomUUID()}`,
         keyVersion: secret.keyVersion,
         lastTestMessage: null,
@@ -61,6 +63,7 @@ export class AiConnectionsService {
         tenantId,
         updatedAt: now
       };
+      record.capabilities = deriveCapabilities(record.capabilities, record);
       const connection = await this.repository.save(record);
       return envelope("createAiConnection", tenantId, { connection: publicConnection(connection), auditEvent: await this.recordAudit("ai.connection.create", tenantId, connection.id, "created") });
     } catch (error) {
@@ -76,12 +79,13 @@ export class AiConnectionsService {
     if (violation) return invalid("updateAiConnection", tenantId, violation);
     try {
       const rotated = input.secret ? this.secretStore().encrypt(input.secret) : existing.secret;
-      const record = await this.repository.save({
+      const merged: AiConnectionRecord = {
         ...existing,
         ...(input.baseUrl ? { baseUrl: normalizeBaseUrl(input.baseUrl) } : {}),
         ...(input.chatModel ? { chatModel: input.chatModel.trim() } : {}),
         ...(input.capabilities ? { capabilities: normalizeCapabilities(input.capabilities) } : {}),
         ...(input.embeddingModel !== undefined ? { embeddingModel: normalizedOptional(input.embeddingModel) } : {}),
+        ...(input.retrievalModel !== undefined ? { retrievalModel: normalizedOptional(input.retrievalModel) } : {}),
         ...(input.limits ? { limits: normalizeLimits(input.limits) } : {}),
         keyVersion: rotated.keyVersion,
         lastTestMessage: input.secret ? null : existing.lastTestMessage,
@@ -90,7 +94,9 @@ export class AiConnectionsService {
         secret: rotated,
         status: input.secret ? "disabled" : existing.status,
         updatedAt: new Date().toISOString()
-      });
+      };
+      merged.capabilities = deriveCapabilities(merged.capabilities, merged);
+      const record = await this.repository.save(merged);
       const action = input.secret ? "ai.connection.rotate" : "ai.connection.update";
       return envelope("updateAiConnection", tenantId, { connection: publicConnection(record), auditEvent: await this.recordAudit(action, tenantId, record.id, input.secret ? "secret_rotated" : "updated") });
     } catch (error) {
@@ -178,6 +184,13 @@ function publicConnection(connection: AiConnectionRecord): Omit<AiConnectionReco
 function normalizeBaseUrl(value: string): string { const url = new URL(value.trim()); if (url.protocol !== "https:" || url.username || url.password) throw new Error("AI provider URL must use HTTPS."); return url.toString().replace(/\/$/, ""); }
 function normalizedOptional(value: unknown): string | null { const normalized = String(value ?? "").trim(); return normalized || null; }
 function normalizeCapabilities(value: AiConnectionCapability[] | undefined): AiConnectionCapability[] { const capabilities = Array.from(new Set(value ?? [])); if (!capabilities.includes("chat_completion")) capabilities.unshift("chat_completion"); return capabilities.filter((item): item is AiConnectionCapability => item === "chat_completion" || item === "embeddings" || item === "retrieval"); }
+/** BAI-870: заполненная модель роли автоматически даёт capability — инвариант держится без чекбоксов в UI. */
+function deriveCapabilities(capabilities: AiConnectionCapability[], models: { embeddingModel: string | null; retrievalModel: string | null }): AiConnectionCapability[] {
+  const derived = new Set(capabilities);
+  if (models.retrievalModel) derived.add("retrieval");
+  if (models.embeddingModel) derived.add("embeddings");
+  return normalizeCapabilities([...derived]);
+}
 function normalizeLimits(value: AiConnectionWriteInput["limits"]): AiConnectionRecord["limits"] { const source = value ?? {}; const limits: AiConnectionRecord["limits"] = {}; for (const key of ["maxConcurrentRuns", "monthlyTokenBudget", "requestsPerMinute", "sandboxMonthlyTokenBudget"] as const) { const parsed = Number(source[key]); if (Number.isInteger(parsed) && parsed > 0) limits[key] = parsed; } return limits; }
 function validateWrite(input: AiConnectionWriteInput, creating: boolean): string | null { if (creating && !input.secret?.trim()) return "API key is required."; if (input.secret !== undefined && !input.secret.trim()) return "API key must not be empty."; if (creating && (!input.baseUrl || !input.chatModel)) return "Provider URL and chat model are required."; try { if (input.baseUrl) normalizeBaseUrl(input.baseUrl); } catch { return "Provider URL must be a valid HTTPS URL."; } return null; }
 function safeMessage(error: unknown): string { if (error instanceof AiProviderError) return error.message; if (error instanceof SecretStoreError) return "Secret storage is unavailable."; return "AI connection could not be completed safely."; }

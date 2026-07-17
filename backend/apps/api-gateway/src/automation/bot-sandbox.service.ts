@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { FeatureFlag } from "../platform/platform.types.js";
 import { AiConnectionRepository } from "../ai-connections/ai-connection.repository.js";
 import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
+import { LlmKnowledgeSearchService } from "../knowledge-sources/llm-knowledge-search.service.js";
+import { normalizeAgentPolicy } from "./agent-policy.js";
 import {
   AutomationRepository,
   createEmptyAutomationState,
@@ -213,6 +215,9 @@ export class BotSandboxService {
       nodeType: result?.step.nodeType ?? executedNode?.type ?? "",
       outcome: failureCode ?? result?.step.outcome ?? "error",
       retrievalCache: retrieval.cache,
+      ...(retrieval.cachedTokens === undefined ? {} : { retrievalCachedTokens: retrieval.cachedTokens }),
+      ...(retrieval.fallbackReason === undefined ? {} : { retrievalFallbackReason: retrieval.fallbackReason }),
+      ...(retrieval.retrievalMode === undefined ? {} : { retrievalMode: retrieval.retrievalMode }),
       retrievalPassages: retrieval.passages,
       retrievalTokensUsed: retrieval.tokensUsed,
       trigger: { ...trigger, forcedStart: trigger.evaluated ? trigger.matched === false : undefined },
@@ -288,9 +293,15 @@ export class BotSandboxService {
     return turn;
   }
 
-  private async traceRetrieval(tenantId: string, scenario: SandboxScenarioConfig, query: string, scenarioId: string) {
+  private async traceRetrieval(tenantId: string, scenario: SandboxScenarioConfig, query: string, scenarioId: string): Promise<SandboxRetrievalTrace> {
     try {
-      const result = await (this.options.retrieval ?? new KnowledgeRetrievalService()).retrieve({
+      // BAI-878: trace повторяет поиск ТЕМ ЖЕ режимом, что и рантайм (песочница
+      // доверяет policy, как runtime без featureFlags) — тогда trace попадает в
+      // 5-минутный кэш реального вызова и не жжёт второй запрос к дорогой модели.
+      const aiNode = scenario.flowNodes.find((node) => node.type === "ai_reply");
+      const policy = normalizeAgentPolicy(aiNode?.config);
+      const result = await (this.options.retrieval ?? new KnowledgeRetrievalService(undefined, undefined, undefined, undefined, new LlmKnowledgeSearchService())).retrieve({
+        mode: policy.retrievalMode,
         query,
         scenarioId,
         sourceBindings: scenario.sourceBindings ?? [],
@@ -299,6 +310,8 @@ export class BotSandboxService {
       });
       return {
         cache: result.cache,
+        ...(result.mode === "lexical" ? {} : { retrievalMode: result.mode, ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}) }),
+        ...(result.cachedTokens === undefined ? {} : { cachedTokens: result.cachedTokens }),
         passages: result.passages.slice(0, 5).map((passage) => ({
           preview: passage.content.slice(0, 200),
           score: passage.score,
@@ -308,7 +321,7 @@ export class BotSandboxService {
         tokensUsed: result.tokensUsed
       };
     } catch {
-      return { cache: "skipped" as const, passages: [], tokensUsed: 0 };
+      return { cache: "skipped", passages: [], tokensUsed: 0 };
     }
   }
 
@@ -418,6 +431,16 @@ export class BotSandboxService {
 }
 
 interface SandboxScenarioConfig extends BotScenario {}
+
+/** BAI-878: retrieval-фрагмент trace песочницы; llm-поля отсутствуют у лексики. */
+interface SandboxRetrievalTrace {
+  cache: "hit" | "miss" | "skipped";
+  cachedTokens?: number;
+  fallbackReason?: string;
+  passages: Array<{ preview: string; score: number; sourceId: string; title: string }>;
+  retrievalMode?: "llm" | "llm_fallback";
+  tokensUsed: number;
+}
 
 interface ResolvedSandboxScenario {
   config: SandboxScenarioConfig;

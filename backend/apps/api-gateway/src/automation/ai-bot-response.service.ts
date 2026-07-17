@@ -3,7 +3,8 @@ import { AiUsageRepository } from "../ai-connections/ai-usage.repository.js";
 import { SecretStore } from "../ai-connections/secret-store.js";
 import { createOpenAiCompatibleChatProvider } from "../ai-connections/openai-compatible-chat.provider.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
-import { KnowledgeRetrievalService, type McpRetrievalInvoker } from "../knowledge-sources/knowledge-retrieval.service.js";
+import { KnowledgeRetrievalService, type KnowledgeRetrievalMode, type LlmKnowledgeSearchInvoker, type McpRetrievalInvoker } from "../knowledge-sources/knowledge-retrieval.service.js";
+import { LlmKnowledgeSearchService } from "../knowledge-sources/llm-knowledge-search.service.js";
 import { UnansweredQuestionRepository } from "../knowledge-sources/unanswered-question.repository.js";
 import { HttpMcpReadOnlyTransport, McpReadOnlyConnectorService } from "../knowledge-sources/mcp-readonly-connector.service.js";
 import { McpConnectorRepository } from "../knowledge-sources/mcp-connector.repository.js";
@@ -18,7 +19,11 @@ export interface AiBotResponseInput {
   behaviorRules?: string;
   conversationId?: string;
   instructions?: string;
+  /** BAI-879: потолок токенов ответа (policy «максимальная длина ответа»); без него — 1000. */
+  maxResponseTokens?: number;
   message: string;
+  /** BAI-875: "llm" = поиск дорогой моделью с fallback в лексику; по умолчанию лексика. */
+  retrievalMode?: KnowledgeRetrievalMode;
   retrievalScoreThreshold?: number;
   scenarioId?: string;
   scenarioRevisionId?: string;
@@ -73,7 +78,8 @@ export class AiBotResponseService {
       new HttpMcpReadOnlyTransport(),
       8_000,
       McpConnectorRepository.default()
-    )
+    ),
+    private readonly llmSearch: LlmKnowledgeSearchInvoker = new LlmKnowledgeSearchService()
   ) {}
 
   async respond(input: AiBotResponseInput): Promise<AiBotResponse> {
@@ -85,8 +91,9 @@ export class AiBotResponseService {
     }
     let release: (() => void) | null = null;
     try {
-      release = await this.usage.reserve({ connectionId: connection.id, maxConcurrentRuns: connection.limits.maxConcurrentRuns, monthlyTokenBudget: connection.limits.monthlyTokenBudget, requestsPerMinute: connection.limits.requestsPerMinute, tenantId: input.tenantId, worstCaseTokens: Math.min(500, connection.limits.monthlyTokenBudget ?? 500) });
-      const materials = await this.materials(input.tenantId, input.sourceBindings, input.message, input.scenarioId, input.retrievalScoreThreshold);
+      const maxResponseTokens = Number.isInteger(input.maxResponseTokens) ? Math.max(100, Math.min(4_000, Number(input.maxResponseTokens))) : 1_000;
+      release = await this.usage.reserve({ connectionId: connection.id, maxConcurrentRuns: connection.limits.maxConcurrentRuns, monthlyTokenBudget: connection.limits.monthlyTokenBudget, requestsPerMinute: connection.limits.requestsPerMinute, tenantId: input.tenantId, worstCaseTokens: Math.min(maxResponseTokens, connection.limits.monthlyTokenBudget ?? maxResponseTokens) });
+      const materials = await this.materials(input.tenantId, input.sourceBindings, input.message, input.scenarioId, input.retrievalScoreThreshold, input.retrievalMode);
       // Пустой retrieval — не повод жёстко эскалировать: приветствия и smalltalk не
       // совпадают со знаниями по лексике. Зовём модель с пустыми знаниями, а её
       // rails решают: поздороваться/уточнить либо честно признать, что ответа нет и
@@ -103,8 +110,10 @@ export class AiBotResponseService {
       const secret = new SecretStore({ keyVersion: this.environment.AI_CONNECTIONS_KEY_VERSION ?? "local-v1", masterKeyBase64: this.environment.AI_CONNECTIONS_MASTER_KEY ?? this.environment.PROVIDER_CREDENTIAL_MASTER_KEY ?? "" }).decrypt(connection.secret);
       const provider = createOpenAiCompatibleChatProvider({ apiKey: secret, baseUrl: connection.baseUrl, maxRetries: 1, model: connection.chatModel, timeoutMs: 12_000 });
       // BAI-851: стабильный ключ префикса (tenant + scenario revision), без PII и user id.
+      // BAI-879: тот же ключ идёт в session_id (sticky routing AITunnel) и включается
+      // top-level cache_control — префикс промпта (policy/rails) кешируется провайдером.
       const promptCacheKey = `bot:${input.tenantId}:${input.scenarioId ?? "none"}:${input.scenarioRevisionId ?? "current"}`;
-      const completion = await provider.complete({ maxTokens: 500, promptCacheKey, temperature: 0.2, messages: [
+      const completion = await provider.complete({ cacheControl: {}, maxTokens: maxResponseTokens, promptCacheKey, sessionId: promptCacheKey, temperature: 0.2, messages: [
         { role: "system", content: buildAiBotSystemPrompt({
           basePrompt: input.basePrompt,
           behaviorRules: input.behaviorRules,
@@ -114,7 +123,7 @@ export class AiBotResponseService {
         }) },
         { role: "user", content: input.message.slice(0, 4_000) }
       ] });
-      const tokens = completion.usage.totalTokens ?? 500;
+      const tokens = completion.usage.totalTokens ?? maxResponseTokens;
       await this.usage.recordUsage(input.tenantId, connection.id, tokens);
       recordBotAiRequest({
         connectionId: connection.id,
@@ -166,8 +175,9 @@ export class AiBotResponseService {
     }
   }
 
-  private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string, scenarioId?: string, scoreThreshold?: number) {
-    const result = await new KnowledgeRetrievalService(this.sources, this.workspace, undefined, this.mcpInvoker()).retrieve({
+  private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string, scenarioId?: string, scoreThreshold?: number, mode?: KnowledgeRetrievalMode) {
+    const result = await new KnowledgeRetrievalService(this.sources, this.workspace, undefined, this.mcpInvoker(), this.llmSearch).retrieve({
+      mode,
       query: question,
       scenarioId,
       scoreThreshold,

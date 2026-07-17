@@ -20,6 +20,8 @@ export interface AiConnectionRecord {
   lastTestedAt: string | null;
   limits: { maxConcurrentRuns?: number; monthlyTokenBudget?: number; requestsPerMinute?: number; sandboxMonthlyTokenBudget?: number };
   providerType: "openai_compatible";
+  /** BAI-870: expensive model used for LLM knowledge search; null = lexical retrieval only. */
+  retrievalModel: string | null;
   secret: SecretEnvelope;
   status: AiConnectionStatus;
   tenantId: string;
@@ -42,6 +44,7 @@ export interface PrismaAiConnectionRow {
   lastTestedAt: Date | null;
   limits: unknown;
   providerType: string;
+  retrievalModel: string | null;
   secretAlgorithm: string | null;
   secretAuthTag: string | null;
   secretCiphertext: string | null;
@@ -66,6 +69,7 @@ export interface PrismaAiConnectionCreateInput {
   lastTestedAt: Date | null;
   limits: AiConnectionRecord["limits"];
   providerType: string;
+  retrievalModel: string | null;
   secretAlgorithm: string;
   secretAuthTag: string;
   secretCiphertext: string;
@@ -199,6 +203,7 @@ function toCreateInput(record: AiConnectionRecord): PrismaAiConnectionCreateInpu
     lastTestedAt: record.lastTestedAt ? new Date(record.lastTestedAt) : null,
     limits: record.limits,
     providerType: record.providerType,
+    retrievalModel: record.retrievalModel,
     secretAlgorithm: record.secret.algorithm,
     secretAuthTag: record.secret.authTag,
     secretCiphertext: record.secret.ciphertext,
@@ -226,6 +231,7 @@ function toRecord(row: PrismaAiConnectionRow): AiConnectionRecord {
     lastTestedAt: row.lastTestedAt ? row.lastTestedAt.toISOString() : null,
     limits: toLimits(row.limits),
     providerType: "openai_compatible",
+    retrievalModel: row.retrievalModel,
     secret: {
       algorithm: (row.secretAlgorithm ?? "aes-256-gcm") as SecretEnvelope["algorithm"],
       authTag: row.secretAuthTag,
@@ -268,6 +274,7 @@ function normalizeRecord(record: AiConnectionRecord): AiConnectionRecord {
     chatModel: String(record.chatModel).trim(),
     keyVersion: String(record.keyVersion).trim(),
     limits: { ...record.limits },
+    retrievalModel: String(record.retrievalModel ?? "").trim() || null,
     tenantId: String(record.tenantId).trim()
   };
 }

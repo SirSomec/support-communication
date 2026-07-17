@@ -53,6 +53,8 @@ export function recordBotTriggerMatch(input: {
 
 export function recordBotRetrieval(input: {
   cache: "hit" | "miss";
+  /** BAI-875: which strategy produced the passages (llm_fallback = llm failed, lexical answered). */
+  mode?: "lexical" | "llm" | "llm_fallback";
   passageCount: number;
   scenarioId?: string;
   tenantId: string;
@@ -60,7 +62,7 @@ export function recordBotRetrieval(input: {
 }): void {
   const labels = baseLabels(input);
   const metrics = botMetrics();
-  metrics.retrievalRequests.inc({ ...labels, cache: input.cache });
+  metrics.retrievalRequests.inc({ ...labels, cache: input.cache, mode: input.mode ?? "lexical" });
   metrics.retrievalPassages.observe(labels, input.passageCount);
   if (typeof input.topScore === "number" && Number.isFinite(input.topScore)) {
     metrics.retrievalTopScore.observe(labels, Math.max(0, Math.min(1, input.topScore)));

@@ -46,7 +46,18 @@ describe("BAI-506 revision-aware retrieval cache", () => {
       tokenBudget: 200
     });
     assert.equal(left, right);
-    assert.match(left, /^kr:v2:tenant-a:a@1,b@2:200:0\.05:/);
+    // BAI-875: ключ v3 включает режим поиска — llm и lexical не делят записи.
+    assert.match(left, /^kr:v3:tenant-a:lexical:a@1,b@2:200:0\.05:/);
+    assert.notEqual(
+      left,
+      buildRetrievalCacheKey({
+        mode: "llm",
+        query: "где мой заказ, пожалуйста?!",
+        sourceBindings: [{ sourceId: "b", sourceVersion: "2" }, { sourceId: "a", sourceVersion: "1" }],
+        tenantId: "tenant-a",
+        tokenBudget: 200
+      })
+    );
     assert.notEqual(
       left,
       buildRetrievalCacheKey({

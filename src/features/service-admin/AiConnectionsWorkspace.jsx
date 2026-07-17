@@ -5,7 +5,7 @@ import { supportAdminService } from "../../services/supportAdminService.js";
 import { tenantService } from "../../services/tenantService.js";
 import { formatDateTime, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
 
-const initialForm = { baseUrl: "", chatModel: "", embeddingModel: "", maxConcurrentRuns: "", monthlyTokenBudget: "", requestsPerMinute: "", secret: "" };
+const initialForm = { baseUrl: "", chatModel: "", embeddingModel: "", maxConcurrentRuns: "", monthlyTokenBudget: "", requestsPerMinute: "", retrievalModel: "", secret: "" };
 
 export function AiConnectionsWorkspace({ onAudit, onToast }) {
   const [tenants, setTenants] = useState([]);
@@ -73,6 +73,7 @@ export function AiConnectionsWorkspace({ onAudit, onToast }) {
       capabilities: ["chat_completion"],
       chatModel: form.chatModel.trim(),
       embeddingModel: form.embeddingModel.trim() || null,
+      retrievalModel: form.retrievalModel.trim() || null,
       limits: { ...(form.maxConcurrentRuns ? { maxConcurrentRuns: Number(form.maxConcurrentRuns) } : {}), ...(form.requestsPerMinute ? { requestsPerMinute: Number(form.requestsPerMinute) } : {}), ...(form.monthlyTokenBudget ? { monthlyTokenBudget: Number(form.monthlyTokenBudget) } : {}) },
       ...(form.secret.trim() ? { secret: form.secret } : {})
     };
@@ -90,7 +91,7 @@ export function AiConnectionsWorkspace({ onAudit, onToast }) {
 
   function editConnection(connection) {
     setEditingId(connection.id); setError("");
-    setForm({ baseUrl: connection.baseUrl ?? "", chatModel: connection.chatModel ?? "", embeddingModel: connection.embeddingModel ?? "", maxConcurrentRuns: connection.limits?.maxConcurrentRuns ?? "", monthlyTokenBudget: connection.limits?.monthlyTokenBudget ?? "", requestsPerMinute: connection.limits?.requestsPerMinute ?? "", secret: "" });
+    setForm({ baseUrl: connection.baseUrl ?? "", chatModel: connection.chatModel ?? "", embeddingModel: connection.embeddingModel ?? "", maxConcurrentRuns: connection.limits?.maxConcurrentRuns ?? "", monthlyTokenBudget: connection.limits?.monthlyTokenBudget ?? "", requestsPerMinute: connection.limits?.requestsPerMinute ?? "", retrievalModel: connection.retrievalModel ?? "", secret: "" });
   }
 
   function cancelEditing() { setEditingId(""); setForm(initialForm); setError(""); }
@@ -135,8 +136,9 @@ export function AiConnectionsWorkspace({ onAudit, onToast }) {
       <form className="service-admin-action-box" onSubmit={saveConnection}>
         <label className="service-admin-reason-field"><span>Тип провайдера</span><select disabled value="openai_compatible"><option value="openai_compatible">OpenAI-совместимый API</option></select><small>Подходит для OpenAI и других сервисов с совместимым Chat Completions API.</small></label>
         <label className="service-admin-reason-field"><span>Адрес API провайдера</span><input onChange={(event) => update("baseUrl", event.target.value)} placeholder="https://api.example.com/v1" value={form.baseUrl} /></label>
-        <label className="service-admin-reason-field"><span>Модель для ответов</span><input onChange={(event) => update("chatModel", event.target.value)} placeholder="Например, gpt-4.1-mini" value={form.chatModel} /></label>
-        <label className="service-admin-reason-field"><span>Модель для поиска (необязательно)</span><input onChange={(event) => update("embeddingModel", event.target.value)} placeholder="Будет нужна при подключении базы знаний" value={form.embeddingModel} /></label>
+        <label className="service-admin-reason-field"><span>Модель для ответов</span><input onChange={(event) => update("chatModel", event.target.value)} placeholder="Недорогая, например gpt-4.1-mini" value={form.chatModel} /><small>Составляет ответы клиентам — подойдёт быстрая недорогая модель.</small></label>
+        <label className="service-admin-reason-field"><span>Модель для поиска знаний (необязательно)</span><input onChange={(event) => update("retrievalModel", event.target.value)} placeholder="Точная, например claude-sonnet-4-5" value={form.retrievalModel} /><small>Ищет ответ по базе знаний. База кешируется у провайдера, поэтому дорогая модель оплачивается со скидкой за кеш.</small></label>
+        <label className="service-admin-reason-field"><span>Модель эмбеддингов (необязательно)</span><input onChange={(event) => update("embeddingModel", event.target.value)} placeholder="Например, text-embedding-3-small" value={form.embeddingModel} /><small>Резерв для векторного поиска — можно оставить пустым.</small></label>
         <label className="service-admin-reason-field"><span>Лимит запросов в минуту (необязательно)</span><input inputMode="numeric" onChange={(event) => update("requestsPerMinute", event.target.value)} value={form.requestsPerMinute} /></label>
         <label className="service-admin-reason-field"><span>Одновременных AI-ответов (необязательно)</span><input inputMode="numeric" min="1" onChange={(event) => update("maxConcurrentRuns", event.target.value)} value={form.maxConcurrentRuns} /></label>
         <label className="service-admin-reason-field"><span>Месячный лимит токенов (необязательно)</span><input inputMode="numeric" onChange={(event) => update("monthlyTokenBudget", event.target.value)} value={form.monthlyTokenBudget} /></label>

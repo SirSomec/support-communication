@@ -13,7 +13,7 @@ import type { BotRuntimeSideEffect, BotRuntimeStateTransition } from "./bot-runt
 import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase } from "./bot-trigger-matcher.js";
 import { AiBotResponseService, extractAiDirectives, type AiBotResponse } from "./ai-bot-response.service.js";
 import { evaluatePostPolicy, evaluatePrePolicy, normalizeAgentPolicy } from "./agent-policy.js";
-import { evaluateAiAgentsRollout } from "./ai-agents-rollout.js";
+import { evaluateAiAgentsRollout, evaluateLlmRetrievalRollout } from "./ai-agents-rollout.js";
 import { recordBotHandoff, recordBotTriggerMatch } from "./bot-observability.js";
 import type { FeatureFlag } from "../platform/platform.types.js";
 
@@ -277,12 +277,19 @@ export class BotRuntimeService {
         }
       }
       try {
+        // BAI-877: «умный» поиск включается политикой сценария И тенант-флагом;
+        // без featureFlags (тесты/песочница) доверяем политике. Неэлигибельность
+        // тихо оставляет лексику — выключение флага мгновенно возвращает старое поведение.
+        const llmRetrievalAllowed = !this.options.featureFlags
+          || evaluateLlmRetrievalRollout({ flags: this.options.featureFlags, tenantId: event.tenantId }).eligible;
         const rawResponse = await (this.options.aiResponder ?? new AiBotResponseService()).respond({
           basePrompt,
           behaviorRules: policy.behaviorRules || undefined,
           conversationId: event.conversationId,
           instructions: typeof node.config?.instructions === "string" ? node.config.instructions : node.title,
+          maxResponseTokens: policy.maxResponseTokens,
           message,
+          retrievalMode: policy.retrievalMode === "llm" && llmRetrievalAllowed ? "llm" : "lexical",
           retrievalScoreThreshold: policy.retrievalScoreThreshold,
           scenarioId: scenarioId ?? event.scenarioId,
           scenarioRevisionId,

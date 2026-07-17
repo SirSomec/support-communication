@@ -67,8 +67,30 @@ export class KnowledgeSourcesService {
     return usage;
   }
 
-  private async boundScenarios(tenantId: string, sourceId: string): Promise<Array<{ enabled: boolean; name: string; scenarioId: string; status: string }>> {
-    return (await this.scenarioUsage(tenantId))[sourceId] ?? [];
+  /**
+   * Отвязать источник от всех сценариев (обычные привязки и черновики).
+   * Удаление/архивация документа не должны блокироваться привязкой к боту —
+   * вместо тупика «сначала отвяжите» просто убираем источник из знаний бота.
+   * Возвращает имена затронутых сценариев для сообщения оператору.
+   */
+  private async unbindSourceEverywhere(tenantId: string, sourceId: string): Promise<string[]> {
+    const state = await this.automationRepository.readStateAsync();
+    const affected: string[] = [];
+    for (const scenario of state.botScenarios) {
+      if (scenario.tenantId !== tenantId || scenario.status === "archived") continue;
+      const bindings = (scenario.sourceBindings ?? []).filter((binding) => binding.sourceId !== sourceId);
+      const draftBindings = scenario.draft?.sourceBindings?.filter((binding) => binding.sourceId !== sourceId);
+      const bindingsChanged = bindings.length !== (scenario.sourceBindings ?? []).length;
+      const draftChanged = scenario.draft?.sourceBindings !== undefined && (draftBindings?.length ?? 0) !== scenario.draft.sourceBindings.length;
+      if (!bindingsChanged && !draftChanged) continue;
+      await this.automationRepository.saveBotScenario({
+        ...scenario,
+        sourceBindings: bindings,
+        ...(scenario.draft ? { draft: { ...scenario.draft, sourceBindings: draftBindings ?? [] } } : {})
+      });
+      affected.push(scenario.name);
+    }
+    return affected;
   }
 
   async update(tenantId: string, sourceId: string, input: { title?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -121,23 +143,20 @@ export class KnowledgeSourcesService {
   async archive(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
     const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("archiveKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
-    const bound = await this.boundScenarios(tenantId, sourceId);
-    if (bound.length) {
-      return invalid("archiveKnowledgeSource", tenantId, "knowledge_source_in_use", `Источник привязан к сценариям: ${bound.map((item) => item.name).join(", ")}. Сначала отвяжите его.`, { scenarios: bound });
-    }
+    // Привязка к боту больше не блокирует архивацию: автоматически отвязываем.
+    const unbound = await this.unbindSourceEverywhere(tenantId, sourceId);
     const now = new Date().toISOString();
     const source = await this.repository.save({ ...current, archivedAt: now, status: "archived", updatedAt: now, version: current.version + 1 });
-    return envelope("archiveKnowledgeSource", tenantId, { source });
+    return envelope("archiveKnowledgeSource", tenantId, { source, unboundScenarios: unbound });
   }
 
   async remove(tenantId: string, sourceId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
     const current = await this.repository.find(tenantId, sourceId);
     if (!current) return invalid("removeKnowledgeSource", tenantId, "knowledge_source_not_found", "Источник знаний не найден.");
     if (current.status !== "archived") return invalid("removeKnowledgeSource", tenantId, "knowledge_source_not_archived", "Сначала переместите источник в архив.");
-    const bound = await this.boundScenarios(tenantId, sourceId);
-    if (bound.length) {
-      return invalid("removeKnowledgeSource", tenantId, "knowledge_source_in_use", `Источник привязан к сценариям: ${bound.map((item) => item.name).join(", ")}.`, { scenarios: bound });
-    }
+    // Страховка: к моменту удаления источник уже отвязан архивацией, но на случай
+    // прямого вызова чистим привязки и здесь — удаление не должно упираться в бота.
+    await this.unbindSourceEverywhere(tenantId, sourceId);
     await this.repository.delete(tenantId, sourceId);
     return envelope("removeKnowledgeSource", tenantId, { deleted: true, sourceId });
   }

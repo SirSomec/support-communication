@@ -123,24 +123,24 @@ describe("BAI-822 source manager operations", () => {
     }
   });
 
-  it("blocks archive and delete while a scenario is bound, then deletes after unbinding", async () => {
+  it("auto-unbinds a source from scenarios on archive and delete instead of blocking", async () => {
     const automation = AutomationRepository.inMemory({
       ...createEmptyAutomationState(),
       botScenarios: [
-        { channels: ["SDK"], flowEdges: [], flowNodes: [{ id: "s", type: "message" }], id: "bot-1", name: "Бот-1", schemaVersion: "bot-flow/v1", sourceBindings: [{ sourceId: "src-1" }], status: "published", tenantId: TENANT }
+        { channels: ["SDK"], flowEdges: [], flowNodes: [{ id: "s", type: "message" }], id: "bot-1", name: "Бот-1", schemaVersion: "bot-flow/v1", sourceBindings: [{ sourceId: "src-1" }, { sourceId: "src-keep" }], draft: { sourceBindings: [{ sourceId: "src-1" }] }, status: "published", tenantId: TENANT }
       ]
     });
-    const { repository, service } = serviceWith([readySource("src-1")], automation);
+    const { repository, service } = serviceWith([readySource("src-1"), readySource("src-keep")], automation);
 
-    const blocked = await service.archive(TENANT, "src-1");
-    assert.equal(blocked.error?.code, "knowledge_source_in_use");
-    assert.equal((blocked.data.scenarios as Array<{ name: string }>)[0]?.name, "Бот-1");
-
-    const scenario = (await automation.readStateAsync()).botScenarios[0]!;
-    await automation.saveBotScenario({ ...scenario, sourceBindings: [] });
-
+    // Привязка к боту больше не блокирует: архивация сразу проходит и отвязывает источник.
     const archived = await service.archive(TENANT, "src-1");
     assert.equal((archived.data.source as { status: string }).status, "archived");
+    assert.deepEqual(archived.data.unboundScenarios, ["Бот-1"]);
+
+    const scenario = (await automation.readStateAsync()).botScenarios[0]!;
+    assert.deepEqual((scenario.sourceBindings ?? []).map((b) => b.sourceId), ["src-keep"]);
+    assert.deepEqual((scenario.draft?.sourceBindings ?? []).map((b) => b.sourceId), []);
+
     const removed = await service.remove(TENANT, "src-1");
     assert.equal(removed.data.deleted, true);
     assert.equal(repository.find(TENANT, "src-1"), undefined);

@@ -48,12 +48,14 @@ export function ScenarioPublishChecklistModal({
   aiReadiness,
   isSaving,
   knowledgeSources,
+  onApproveSources,
   onClose,
   onConfirm,
   sandboxVerified,
   scenario
 }) {
   const checklist = buildPublishChecklist(scenario, { aiReadiness, knowledgeSources, sandboxVerified });
+  const approvableSourceIds = checklist.unavailableSources.filter((item) => item.approvable).map((item) => item.sourceId);
 
   return (
     <Modal
@@ -84,6 +86,25 @@ export function ScenarioPublishChecklistModal({
             </li>
           ))}
         </ul>
+        {checklist.unavailableSources.length ? (
+          <div className="scenario-publish-sources">
+            <p>Бот не сможет отвечать по этим источникам, пока они не готовы и не одобрены:</p>
+            <ul>
+              {checklist.unavailableSources.slice(0, 6).map((item) => (
+                <li key={item.sourceId}>
+                  {item.title}
+                  {item.approvable ? " — готов, ждёт одобрения" : " — не готов (проверьте в разделе «Знания»)"}
+                </li>
+              ))}
+              {checklist.unavailableSources.length > 6 ? <li>и ещё {checklist.unavailableSources.length - 6}…</li> : null}
+            </ul>
+            {approvableSourceIds.length && onApproveSources ? (
+              <button disabled={isSaving} onClick={() => onApproveSources(approvableSourceIds)} type="button">
+                <CheckCircle2 size={15} /> Одобрить готовые ({approvableSourceIds.length})
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <p className="scenario-lifecycle-note">{checklist.retentionNote}</p>
         {!checklist.canPublish ? (
           <p className="scenario-field-error" role="alert">Исправьте обязательные пункты, затем повторите публикацию.</p>

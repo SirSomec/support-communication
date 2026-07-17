@@ -357,7 +357,10 @@ export function buildPublishChecklist(scenario = {}, context = {}) {
   const aiReadiness = context.aiReadiness ?? { status: "not_configured" };
   const channels = Array.isArray(scenario.channels) ? scenario.channels : [];
   const nodes = Array.isArray(scenario.flowNodes) ? scenario.flowNodes : [];
-  const bindings = Array.isArray(scenario.sourceBindings) ? scenario.sourceBindings : [];
+  // Публикуется черновик, поэтому проверяем черновичный набор привязок, если он есть.
+  const bindings = Array.isArray(scenario.draft?.sourceBindings)
+    ? scenario.draft.sourceBindings
+    : Array.isArray(scenario.sourceBindings) ? scenario.sourceBindings : [];
   const rules = Array.isArray(scenario.triggerRules) ? scenario.triggerRules : [];
   const hasAi = nodes.some((node) => node.type === "ai_reply");
   const phraseRule = rules.find((rule) => rule.type === "phrase");
@@ -395,6 +398,28 @@ export function buildPublishChecklist(scenario = {}, context = {}) {
       ok: bindings.length > 0
     });
   }
+  // Гейт публикации на сервере: каждый привязанный источник ready+approved.
+  // Показываем это заранее в чеклисте, а не английской ошибкой после нажатия.
+  const knowledgeSources = Array.isArray(context.knowledgeSources) ? context.knowledgeSources : [];
+  const sourcesById = new Map(knowledgeSources.map((source) => [source.id, source]));
+  const unavailableSources = bindings
+    .map((binding) => ({ binding, source: sourcesById.get(binding?.sourceId) ?? null }))
+    .filter(({ source }) => !source || !(source.status === "ready" && source.readiness === "ready" && source.approvalStatus === "approved"))
+    .map(({ binding, source }) => ({
+      approvable: Boolean(source && source.status === "ready" && source.approvalStatus === "pending"),
+      sourceId: binding?.sourceId ?? "",
+      title: source?.title ?? binding?.sourceId ?? "источник недоступен"
+    }));
+  if (bindings.length) {
+    items.push({
+      blocking: true,
+      id: "sources-ready",
+      label: unavailableSources.length
+        ? `Все привязанные источники готовы и одобрены (не готовы: ${unavailableSources.length})`
+        : "Все привязанные источники готовы и одобрены",
+      ok: unavailableSources.length === 0
+    });
+  }
   items.push({
     blocking: false,
     id: "test",
@@ -405,7 +430,8 @@ export function buildPublishChecklist(scenario = {}, context = {}) {
   return {
     canPublish: items.every((item) => !item.blocking || item.ok),
     items,
-    retentionNote: `Удалённые сценарии хранятся в архиве ${SCENARIO_ARCHIVE_RETENTION_DAYS} дней и остаются доступными для восстановления.`
+    retentionNote: `Удалённые сценарии хранятся в архиве ${SCENARIO_ARCHIVE_RETENTION_DAYS} дней и остаются доступными для восстановления.`,
+    unavailableSources
   };
 }
 

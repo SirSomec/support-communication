@@ -465,17 +465,24 @@ export class AutomationService {
       return publishFailure(tenantId, scenarioId, "trigger_conflict", conflictEnvelope("publishBotScenario", "trigger_conflict", "Another published scenario already owns this keyword phrase and priority.", triggerConflict));
     }
     const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? draftOverlay?.sourceBindings ?? existing.sourceBindings ?? []);
-    let unavailableSourceId: string | undefined;
+    const unavailableSources: Array<{ approvalStatus: string | null; sourceId: string; status: string | null; title: string | null }> = [];
     for (const binding of sourceBindings) {
       const source = await this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
       if (!source || !isKnowledgeSourceRetrievalEligible(source)) {
-        unavailableSourceId = binding.sourceId;
-        break;
+        unavailableSources.push({
+          approvalStatus: source?.approvalStatus ?? null,
+          sourceId: binding.sourceId,
+          status: source?.status ?? null,
+          title: source?.title ?? null
+        });
       }
     }
-    if (unavailableSourceId) {
+    if (unavailableSources.length) {
       recordBotSourceError({ failureCode: "knowledge_source_not_ready", tenantId });
-      return publishFailure(tenantId, scenarioId, "knowledge_source_not_ready", invalidEnvelope("publishBotScenario", "knowledge_source_not_ready", "Every selected knowledge source must be ready and approved before publication.", { scenarioId, sourceId: unavailableSourceId }));
+      const shown = unavailableSources.slice(0, 5).map((item) => item.title ? `«${item.title}»` : item.sourceId).join(", ");
+      const rest = unavailableSources.length - Math.min(unavailableSources.length, 5);
+      const message = `Источники знаний ещё не готовы отвечать: ${shown}${rest > 0 ? ` и ещё ${rest}` : ""}. Одобрите их в разделе «Знания» (или из чеклиста публикации) либо снимите привязку.`;
+      return publishFailure(tenantId, scenarioId, "knowledge_source_not_ready", invalidEnvelope("publishBotScenario", "knowledge_source_not_ready", message, { scenarioId, sourceId: unavailableSources[0]?.sourceId, unavailableSources }));
     }
     const prerequisiteViolations: string[] = [];
     const nodes = validation.payload?.flowNodes ?? [];

@@ -18,7 +18,7 @@ import { createScreenStateItems } from "../../app/screenState.js";
 import { buildBotScenarioUpdatePatch, changeBotScenarioLifecycle, discardBotScenarioDraft, publishBotScenario, rollbackBotScenario, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { automationService } from "../../services/automationService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
-import { summarizeBulkUpload } from "../knowledge/knowledgeBulkModel.js";
+import { summarizeBulkAction, summarizeBulkUpload } from "../knowledge/knowledgeBulkModel.js";
 import { uploadKnowledgeDocumentFiles } from "../knowledge/knowledgeUploadPipeline.js";
 import { ConfirmDialog, MetricTile, ProductScreen, SectionTitle, SegmentedControl } from "../../ui.jsx";
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
@@ -419,6 +419,18 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
   function addArticleKnowledgeSource() {
     setArticleSourceForm({ articleId: "" });
+  }
+
+  /** Одобрение прямо из чеклиста публикации: убирает блокер «источники не готовы» без похода в «Знания». */
+  async function approveSourcesFromChecklist(sourceIds) {
+    if (!canManageAutomation) return onToast(access.reason);
+    setSavingAction("checklist-approve");
+    try {
+      const response = await knowledgeService.bulkSourceAction("approve", sourceIds);
+      if (response.status !== "ok") return onToast(response.error?.message ?? "Не удалось одобрить источники.");
+      onToast(summarizeBulkAction("approve", response.data));
+      await refreshKnowledgeSources();
+    } finally { setSavingAction(""); }
   }
 
   async function submitArticleKnowledgeSource() {
@@ -1121,6 +1133,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
           aiReadiness={aiReadiness}
           isSaving={isSaving}
           knowledgeSources={knowledgeSources}
+          onApproveSources={(sourceIds) => void approveSourcesFromChecklist(sourceIds)}
           onClose={() => setPublishChecklistOpen(false)}
           onConfirm={() => void confirmScenarioPublish()}
           sandboxVerified={sandboxVerifiedScenarioId === selectedScenario.id}

@@ -660,6 +660,10 @@
 .scenario-knowledge-source-hint { color: #9a6b1f; }
 .scenario-knowledge-source-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .scenario-knowledge-source-actions button { display: inline-flex; align-items: center; gap: 6px; }
+.scenario-publish-sources { display: grid; gap: 8px; padding: 10px; border: 1px solid #f2ddb4; border-radius: 8px; background: #fff9ec; font-size: 12.5px; }
+.scenario-publish-sources p { margin: 0; color: #7a5b18; }
+.scenario-publish-sources ul { margin: 0; padding-left: 18px; color: #50627b; display: grid; gap: 3px; }
+.scenario-publish-sources button { justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
 .scenario-knowledge-source-state { display: flex; align-items: center; gap: 8px; padding: 10px; border: 1px solid #d5e4f5; border-radius: 8px; background: var(--surface); color: #50627b; font-size: 12px; line-height: 1.4; }
 .scenario-knowledge-source-state.empty { border-style: dashed; }
 .scenario-knowledge-source-state.error { border-color: #fecaca; background: #fff6f7; color: #b4232c; }

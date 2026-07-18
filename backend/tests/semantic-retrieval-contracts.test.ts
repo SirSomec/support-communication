@@ -142,15 +142,83 @@ describe("SemanticKnowledgeSearchService", () => {
 
     // «куда пропали мои деньги» не делит ни одного слова с чанком о возврате — лексика тут слепа.
     const first = await service.search({ corpus, query: "куда пропали мои деньги", scenarioId: "bot-1", tenantId: TENANT });
-    assert.equal(calls[0]!.length, 3); // запрос + оба чанка
+    // Вопрос уходит отдельным маленьким вызовом, недостающие чанки — следом порцией.
+    assert.deepEqual(calls.map((call) => call.length), [1, 2]);
     assert.equal(first.passages[0]!.citation.sourceId, "src-refund");
     assert.equal(first.passages[0]!.citation.sourceVersion, 2);
     assert.ok(first.passages[0]!.score > (first.passages[1]?.score ?? 0));
     assert.equal((await usage.current(TENANT, "conn-embedding")).usedTokens > 0, true);
 
     const second = await service.search({ corpus, query: "куда пропали мои деньги", tenantId: TENANT });
-    assert.equal(calls[1]!.length, 1); // векторы чанков пришли из кеша — эмбеддится только вопрос
+    assert.deepEqual(calls.map((call) => call.length), [1, 2, 1]); // векторы чанков пришли из кеша — эмбеддится только вопрос
     assert.equal(second.passages[0]!.citation.sourceId, "src-refund");
+  });
+
+  it("keeps warmup progress and usage accounting when a later batch fails", async () => {
+    const corpus = fortyChunkCorpus();
+    const calls: string[][] = [];
+    let failing = true;
+    const factory: SemanticSearchProviderFactory = () => ({
+      model: "text-embedding-test",
+      providerId: "openai-compatible-embedding",
+      async embed(inputs: string[]) {
+        calls.push([...inputs]);
+        // Третий вызов — вторая порция чанков: провайдер «падает» на середине прогрева.
+        if (failing && calls.length === 3) throw new Error("provider_unavailable");
+        return {
+          model: "text-embedding-test",
+          providerId: "openai-compatible-embedding" as const,
+          providerRequestId: null,
+          usage: { totalTokens: inputs.length * 5 },
+          vectors: inputs.map(vectorFor)
+        };
+      }
+    });
+    const usage = AiUsageRepository.inMemory();
+    const service = new SemanticKnowledgeSearchService(
+      AiConnectionRepository.inMemory({ connections: [embeddingConnection()] }),
+      ENVIRONMENT,
+      usage,
+      factory,
+      new EmbeddingVectorCache()
+    );
+
+    await assert.rejects(service.search({ corpus, query: "сроки доставки", tenantId: TENANT }), /provider_unavailable/);
+    // Холодный кеш: вопрос (1), первая порция (32), упавшая вторая (8).
+    assert.deepEqual(calls.map((call) => call.length), [1, 32, 8]);
+    // Оплаченное учтено даже при сбое: вопрос 1×5 + успешная порция 32×5.
+    assert.equal((await usage.current(TENANT, "conn-embedding")).usedTokens, 165);
+
+    failing = false;
+    const result = await service.search({ corpus, query: "сроки доставки", tenantId: TENANT });
+    // Прогресс не выброшен: доэмбеддились только вопрос и 8 недостающих чанков.
+    assert.deepEqual(calls.map((call) => call.length), [1, 32, 8, 1, 8]);
+    assert.ok(result.passages.length > 0);
+  });
+
+  it("pauses cold-cache warmup on the time budget and resumes on the next message", async (t) => {
+    const corpus = fortyChunkCorpus();
+    const calls: string[][] = [];
+    const service = new SemanticKnowledgeSearchService(
+      AiConnectionRepository.inMemory({ connections: [embeddingConnection()] }),
+      ENVIRONMENT,
+      AiUsageRepository.inMemory(),
+      fakeEmbeddingFactory(calls),
+      new EmbeddingVectorCache()
+    );
+
+    // Каждый вызов Date.now() «проматывает» 10 секунд — бюджет прогрева (8с)
+    // исчерпан уже перед второй порцией.
+    let now = 0;
+    t.mock.method(Date, "now", () => { now += 10_000; return now; });
+    await assert.rejects(service.search({ corpus, query: "сроки доставки", tenantId: TENANT }), /semantic_warmup_in_progress/);
+    t.mock.restoreAll();
+    // Первая порция гарантированно уходит даже при нулевом бюджете — прогрев двигается всегда.
+    assert.deepEqual(calls.map((call) => call.length), [1, 32]);
+
+    const result = await service.search({ corpus, query: "сроки доставки", tenantId: TENANT });
+    assert.deepEqual(calls.map((call) => call.length), [1, 32, 1, 8]);
+    assert.ok(result.passages.length > 0);
   });
 
   it("fails loudly when no ready connection has an embedding model (caller falls back)", async () => {
@@ -329,6 +397,14 @@ function makeSemanticRetrieval(invoker: SemanticKnowledgeSearchInvoker, sources:
     undefined,
     invoker
   );
+}
+
+/** 40 уникальных однобайтово-разных чанков: холодный прогрев режется на порции 32 + 8. */
+function fortyChunkCorpus() {
+  return buildKnowledgeCorpus(Array.from({ length: 40 }, (_, index) => ({
+    source: { id: `src-${String(index).padStart(2, "0")}`, title: `Источник ${index}`, version: 1 },
+    text: `Факт номер ${index}: доставка по региону ${index} занимает ${index + 1} дней.`
+  })));
 }
 
 function passageFor(content: string, sourceId: string, score: number): KnowledgeRetrievalPassage {

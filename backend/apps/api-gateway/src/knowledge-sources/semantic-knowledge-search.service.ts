@@ -30,6 +30,15 @@ const LEXICAL_WEIGHT = 0.3;
  * порогам и токен-бюджету делает retrieval-сервис. */
 const MAX_RANKED_PASSAGES = 16;
 const MAX_QUERY_CHARS = 4_000;
+/** Чанки эмбеддятся порциями: ~32×1200 символов держат один HTTP-вызов в
+ * секундах, а успешная порция сразу ложится в кеш — сбой на середине не
+ * выбрасывает уже оплаченные векторы. */
+const EMBED_BATCH_INPUTS = 32;
+/** Потолок времени на прогрев непокешированных чанков в рамках одного
+ * сообщения. Дальше — semantic_warmup_in_progress и фолбэк в лексику;
+ * следующее сообщение продолжит прогрев с места обрыва, поэтому холодный
+ * старт большого корпуса растягивается на пару сообщений, а не вешает бота. */
+const WARMUP_TIME_BUDGET_MS = 8_000;
 
 /**
  * Кеш векторов чанков: ключ — модель + sha256 контента, поэтому изменённый
@@ -118,6 +127,7 @@ export class SemanticKnowledgeSearchService implements SemanticKnowledgeSearchIn
       tenantId: input.tenantId,
       worstCaseTokens
     });
+    let spentTokens = 0;
     try {
       const secret = new SecretStore({
         keyVersion: this.environment.AI_CONNECTIONS_KEY_VERSION ?? "local-v1",
@@ -130,14 +140,37 @@ export class SemanticKnowledgeSearchService implements SemanticKnowledgeSearchIn
         model,
         timeoutMs: 15_000
       });
-      // Один батч: вопрос + недостающие чанки. Вектор вопроса не кешируем —
-      // вопросы уникальны, а результат retrieval и так живёт в 5-минутном кеше.
-      const embedded = await provider.embed([query, ...missing.map((item) => item.chunk.content)]);
-      const queryVector = embedded.vectors[0]!;
-      for (const [index, item] of missing.entries()) {
-        const vector = embedded.vectors[index + 1]!;
-        this.vectors.set(model, item.hash, vector);
-        known.set(item.hash, vector);
+      // Вопрос эмбеддится отдельным маленьким вызовом: он нужен при любом
+      // состоянии кеша, а его вектор не кешируем — вопросы уникальны, и
+      // результат retrieval и так живёт в 5-минутном кеше.
+      const embeddedQuery = await provider.embed([query]);
+      const queryVector = embeddedQuery.vectors[0]!;
+      spentTokens += embeddedQuery.usage.totalTokens ?? estimateCorpusTokens(query);
+      // Недостающие чанки — порциями, каждая успешная порция сразу в кеше.
+      // Бюджет времени проверяется перед каждой порцией кроме первой, чтобы
+      // прогрев гарантированно продвигался даже на медленном провайдере.
+      const warmupStartedAt = Date.now();
+      for (let offset = 0; offset < missing.length; offset += EMBED_BATCH_INPUTS) {
+        if (offset > 0 && Date.now() - warmupStartedAt >= WARMUP_TIME_BUDGET_MS) {
+          writeStructuredLog("warn", "Semantic warmup paused: time budget exhausted", {
+            embeddedInputs: offset,
+            missingInputs: missing.length,
+            model,
+            operation: "semanticKnowledgeSearch",
+            scenarioId: input.scenarioId ?? null,
+            service: "knowledgeRetrievalService",
+            tenantId: input.tenantId
+          });
+          throw new Error("semantic_warmup_in_progress");
+        }
+        const batch = missing.slice(offset, offset + EMBED_BATCH_INPUTS);
+        const embedded = await provider.embed(batch.map((item) => item.chunk.content));
+        spentTokens += embedded.usage.totalTokens ?? batch.reduce((sum, item) => sum + estimateCorpusTokens(item.chunk.content), 0);
+        for (const [index, item] of batch.entries()) {
+          const vector = embedded.vectors[index]!;
+          this.vectors.set(model, item.hash, vector);
+          known.set(item.hash, vector);
+        }
       }
       const queryTerms = lexicalTerms(query);
       const passages: KnowledgeRetrievalPassage[] = input.corpus.chunks
@@ -166,19 +199,28 @@ export class SemanticKnowledgeSearchService implements SemanticKnowledgeSearchIn
         embeddedInputs: missing.length + 1,
         model,
         operation: "semanticKnowledgeSearch",
-        promptSize: embedded.usage.inputTokens ?? null,
+        promptSize: spentTokens,
         scenarioId: input.scenarioId ?? null,
         service: "knowledgeRetrievalService",
         tenantId: input.tenantId,
         topScore: passages[0]?.score ?? null
       });
-      await this.usage.recordUsage(
-        input.tenantId,
-        connection.id,
-        embedded.usage.totalTokens ?? Math.max(1, embedTokens)
-      );
       return { passages };
     } finally {
+      // Учёт в finally: провайдер продал токены и за оборванный прогрев.
+      // Сбой учёта не важнее ответа боту, поэтому не заслоняет исходную ошибку.
+      if (spentTokens > 0) {
+        try {
+          await this.usage.recordUsage(input.tenantId, connection.id, spentTokens);
+        } catch {
+          writeStructuredLog("warn", "Semantic usage record failed", {
+            connectionId: connection.id,
+            operation: "semanticKnowledgeSearch",
+            service: "knowledgeRetrievalService",
+            tenantId: input.tenantId
+          });
+        }
+      }
       release?.();
     }
   }

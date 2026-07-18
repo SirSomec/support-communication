@@ -262,7 +262,8 @@ export class TenantProvisionService {
           id: `usr-${randomUUID()}`,
           inviteStatus: "pending",
           lastActiveAt: new Date().toISOString(),
-          mfa: "disabled",
+          // MFA (email-OTP) обязательна на платформе и включена у всех по умолчанию.
+          mfa: "enabled",
           name: String(employee.name ?? employeeEmail.split("@")[0] ?? "Employee"),
           risk: "low",
           role: String(employee.role ?? "Operator"),

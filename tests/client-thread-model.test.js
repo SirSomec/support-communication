@@ -116,10 +116,12 @@ describe("client thread model", () => {
     assert.equal(separators[1].isCurrent, true);
 
     const messages = timeline.filter((item) => item.kind === "message");
-    // Внутренний комментарий скрыт в режиме "all", каналы наследуются от обращения.
-    assert.equal(messages.length, 3);
+    // Внутренний комментарий виден в режиме "all", каналы наследуются от обращения.
+    assert.equal(messages.length, 4);
     assert.equal(messages[0].message.channel, "Telegram");
     assert.equal(messages[2].message.channel, "SDK");
+    assert.equal(messages[3].message.type, "internal");
+    assert.equal(messages[3].message.channel, "SDK");
   });
 
   it("filters unified timeline by transcript mode and applies topic overrides", () => {

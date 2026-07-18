@@ -13,7 +13,9 @@ export function getVisibleMessages(messages = [], transcriptMode = "all") {
     return items.filter((message) => message?.type === "event");
   }
 
-  return items.filter((message) => message?.type !== "internal" && message?.type !== "event");
+  // Внутренние комментарии остаются в общей ленте (отделяются визуально),
+  // audit-события — только во вкладке Audit.
+  return items.filter((message) => message?.type !== "event");
 }
 
 export function isTranscriptPinnedToBottom(element, thresholdPx = DEFAULT_BOTTOM_THRESHOLD_PX) {

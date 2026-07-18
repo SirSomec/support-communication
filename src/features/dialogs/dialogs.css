@@ -1490,6 +1490,7 @@
 .internal-note {
   display: grid;
   gap: 7px;
+  align-self: flex-end;
   max-width: min(520px, 80%);
   padding: 12px 14px;
   border: 1px solid #f1ca6c;

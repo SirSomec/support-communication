@@ -809,7 +809,7 @@ describe("composer attachment workflow", () => {
 });
 
 describe("dialog transcript behavior", () => {
-  it("keeps audit and internal records out of the client transcript", async () => {
+  it("keeps audit records out of the transcript but shows internal notes inline", async () => {
     const { getVisibleMessages } = await import("../src/features/dialogs/timelineModel.js");
     const messages = [
       { id: "client-1", side: "client", text: "Hello" },
@@ -818,7 +818,7 @@ describe("dialog transcript behavior", () => {
       { id: "agent-1", side: "agent", text: "Answer" }
     ];
 
-    assert.deepEqual(getVisibleMessages(messages, "all").map((message) => message.id), ["client-1", "agent-1"]);
+    assert.deepEqual(getVisibleMessages(messages, "all").map((message) => message.id), ["client-1", "internal-note", "agent-1"]);
     assert.deepEqual(getVisibleMessages(messages, "events").map((message) => message.id), ["topic-event"]);
     assert.deepEqual(getVisibleMessages(messages, "internal").map((message) => message.id), ["internal-note"]);
   });

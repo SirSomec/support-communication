@@ -591,6 +591,7 @@ describe("Prisma-backed workspace repository contracts", () => {
         auditId: "evt_template_prisma",
         channel: "SDK",
         id: "tpl_prisma_delivery",
+        ownerId: null,
         scope: "team",
         text: "We are checking your delivery status.",
         title: "Delivery status",

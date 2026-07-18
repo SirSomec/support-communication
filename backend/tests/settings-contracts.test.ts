@@ -7,6 +7,7 @@ import { SettingsEmployeeService } from "../apps/api-gateway/src/identity/settin
 import { SettingsRulesService } from "../apps/api-gateway/src/identity/settings-rules.service.ts";
 import { SettingsRulesRepository } from "../apps/api-gateway/src/identity/settings-rules.repository.ts";
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.ts";
+import { TeamDirectoryRepository } from "../apps/api-gateway/src/identity/team-directory.repository.ts";
 import { PermissionService } from "../apps/api-gateway/src/identity/permission.service.ts";
 import { permissionRoles, serviceAdminSession } from "../apps/api-gateway/src/identity/seed-catalog.ts";
 import { createSeededIdentityRepository } from "../apps/api-gateway/src/identity/seed.ts";
@@ -82,6 +83,166 @@ describe("settings runtime contracts", () => {
     const afterGroupRestart = new SettingsEmployeeService(repository);
     const persistedGroups = await afterGroupRestart.fetchGroups({ tenantId: "tenant-northstar" });
     assert.ok(persistedGroups.data.groups.some((group) => group.id === createdGroup.data.group.id && group.name === "Payment support"));
+  });
+
+  it("exposes only assignable tenant roles without duplicate display names", async () => {
+    const settings = new SettingsEmployeeService(createSeededIdentityRepository());
+    const roles = await settings.fetchRoles();
+
+    assert.equal(roles.status, "ok");
+    assert.deepEqual(roles.data.roles.map((role) => role.key), ["employee", "senior", "admin"]);
+    const names = roles.data.roles.map((role) => role.name);
+    assert.equal(new Set(names).size, names.length);
+    assert.equal(roles.data.roles.some((role) => role.key === "service_admin"), false);
+  });
+
+  it("refreshes active session permissions immediately after a role change", async () => {
+    const repository = createSeededIdentityRepository();
+    const settings = new SettingsEmployeeService(repository, TeamDirectoryRepository.inMemory());
+    const session = await repository.createTenantOperatorSession({ tenantId: "tenant-northstar", userId: "usr-ns-agent" });
+
+    const before = await repository.findTenantOperatorSessionByAccessToken(session.accessToken);
+    assert.ok(before && !before.permissions.includes("*"));
+
+    const updated = await settings.updateEmployee("usr-ns-agent", { roleKey: "admin" }, { tenantId: "tenant-northstar" });
+    assert.equal(updated.status, "ok");
+
+    const after = await repository.findTenantOperatorSessionByAccessToken(session.accessToken);
+    assert.ok(after);
+    assert.ok(after.permissions.includes("*"));
+  });
+
+  it("deletes an employee and allows re-inviting the same email", async () => {
+    const repository = createSeededIdentityRepository();
+    const settings = new SettingsEmployeeService(repository, TeamDirectoryRepository.inMemory(), undefined, { sendInvite: async () => {} });
+
+    const invited = await settings.inviteEmployee({
+      email: "returning@northstar.example",
+      name: "Returning Employee",
+      roleKey: "employee"
+    }, { tenantId: "tenant-northstar" });
+    assert.equal(invited.status, "ok");
+    const employeeId = invited.data.employee.id;
+
+    const duplicate = await settings.inviteEmployee({
+      email: "returning@northstar.example",
+      name: "Duplicate",
+      roleKey: "employee"
+    }, { tenantId: "tenant-northstar" });
+    assert.equal(duplicate.status, "invalid");
+    assert.equal(duplicate.error?.code, "employee_email_exists");
+
+    const deleted = await settings.deleteEmployee(employeeId, { reason: "cleanup" }, { tenantId: "tenant-northstar" });
+    assert.equal(deleted.status, "ok");
+    assert.equal(deleted.data.deleted, true);
+    assert.equal(await repository.findTenantUser(employeeId), undefined);
+
+    const reinvited = await settings.inviteEmployee({
+      email: "returning@northstar.example",
+      name: "Returning Employee",
+      roleKey: "senior"
+    }, { tenantId: "tenant-northstar" });
+    assert.equal(reinvited.status, "ok");
+    assert.equal(reinvited.data.employee.roleKey, "senior");
+  });
+
+  it("re-invites a deactivated employee with the same email by reusing the account", async () => {
+    const repository = createSeededIdentityRepository();
+    const settings = new SettingsEmployeeService(repository, TeamDirectoryRepository.inMemory(), undefined, { sendInvite: async () => {} });
+
+    const deactivated = await settings.deactivateEmployee("usr-ns-agent", { reason: "offboard" }, { tenantId: "tenant-northstar" });
+    assert.equal(deactivated.status, "ok");
+
+    const reinvited = await settings.inviteEmployee({
+      email: "pavel@northstar.example",
+      name: "Pavel Antonov",
+      roleKey: "employee"
+    }, { tenantId: "tenant-northstar" });
+    assert.equal(reinvited.status, "ok");
+    assert.equal(reinvited.data.employee.id, "usr-ns-agent");
+    assert.equal(reinvited.data.employee.status, "invited");
+  });
+
+  it("protects the last active administrator from deletion", async () => {
+    const repository = createSeededIdentityRepository();
+    const settings = new SettingsEmployeeService(repository, TeamDirectoryRepository.inMemory());
+
+    const denied = await settings.deleteEmployee("usr-ns-owner", {}, { tenantId: "tenant-northstar" });
+    assert.equal(denied.status, "invalid");
+    assert.equal(denied.error?.code, "last_admin_required");
+  });
+
+  it("deletes a group, moves its members and blocks deleting the last group", async () => {
+    const repository = createSeededIdentityRepository();
+    const settings = new SettingsEmployeeService(repository, TeamDirectoryRepository.inMemory());
+    const tenantId = "tenant-northstar";
+
+    await settings.fetchEmployees({ tenantId });
+    const moved = await settings.updateEmployee("usr-ns-agent", { groupId: "group-vip" }, { tenantId });
+    assert.equal(moved.status, "ok");
+
+    const deleted = await settings.deleteGroup("group-vip", {}, { tenantId });
+    assert.equal(deleted.status, "ok");
+    assert.ok(deleted.data.movedEmployeeIds.includes("usr-ns-agent"));
+
+    const workspace = await settings.fetchEmployees({ tenantId });
+    assert.equal(workspace.data.groups.some((group) => group.id === "group-vip"), false);
+    const agent = workspace.data.employees.find((employee) => employee.id === "usr-ns-agent");
+    assert.equal(agent.groupId, deleted.data.fallbackGroupId);
+
+    for (const group of workspace.data.groups) {
+      if (group.id === deleted.data.fallbackGroupId) continue;
+      await settings.deleteGroup(group.id, {}, { tenantId });
+    }
+    const remaining = await settings.fetchGroups({ tenantId });
+    assert.equal(remaining.data.groups.length, 1);
+    const lastDenied = await settings.deleteGroup(remaining.data.groups[0].id, {}, { tenantId });
+    assert.equal(lastDenied.status, "invalid");
+    assert.equal(lastDenied.error?.code, "group_last_remaining");
+  });
+
+  it("moves employees between groups when the group member list changes", async () => {
+    const repository = createSeededIdentityRepository();
+    const settings = new SettingsEmployeeService(repository, TeamDirectoryRepository.inMemory());
+    const tenantId = "tenant-northstar";
+
+    await settings.fetchEmployees({ tenantId });
+    const assigned = await settings.updateGroup("group-vip", { memberIds: ["usr-ns-agent"] }, { tenantId });
+    assert.equal(assigned.status, "ok");
+    assert.deepEqual(assigned.data.group.memberIds, ["usr-ns-agent"]);
+
+    let workspace = await settings.fetchEmployees({ tenantId });
+    let agent = workspace.data.employees.find((employee) => employee.id === "usr-ns-agent");
+    assert.equal(agent.groupId, "group-vip");
+
+    const removed = await settings.updateGroup("group-vip", { memberIds: [] }, { tenantId });
+    assert.equal(removed.status, "ok");
+    workspace = await settings.fetchEmployees({ tenantId });
+    agent = workspace.data.employees.find((employee) => employee.id === "usr-ns-agent");
+    assert.notEqual(agent.groupId, "group-vip");
+    const vip = workspace.data.groups.find((group) => group.id === "group-vip");
+    assert.equal(vip.memberIds.includes("usr-ns-agent"), false);
+  });
+
+  it("reports MFA as enabled by default and pending only after an explicit reset", async () => {
+    const repository = createSeededIdentityRepository();
+    const settings = new SettingsEmployeeService(repository, TeamDirectoryRepository.inMemory(), undefined, { sendInvite: async () => {} });
+    const tenantId = "tenant-northstar";
+
+    const invited = await settings.inviteEmployee({
+      email: "mfa-check@northstar.example",
+      name: "MFA Check",
+      roleKey: "employee"
+    }, { tenantId });
+    assert.equal(invited.data.employee.mfaStatus, "enabled");
+
+    const reset = await settings.resetEmployeeMfa(invited.data.employee.id, {}, { tenantId });
+    assert.equal(reset.data.employee.mfaStatus, "reset_pending");
+
+    const workspace = await settings.fetchEmployees({ tenantId });
+    for (const employee of workspace.data.employees) {
+      assert.ok(["enabled", "reset_pending"].includes(employee.mfaStatus));
+    }
   });
 
   it("manages settings rules with critical confirmation and impact tests", async () => {

@@ -6,7 +6,26 @@ import { Modal, ProductScreen, ScreenStateStrip, SectionTitle, ToolbarSearch } f
 import { insertTemplateVariable, renderTemplatePreview, TEMPLATE_VARIABLES } from "./templateModel.js";
 import "./templates.css";
 
-export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange }) {
+// Область доступа шаблона: канонические ключи бэкенда + русские подписи.
+const SCOPE_OPTIONS = [
+  { value: "personal", label: "Личный" },
+  { value: "team", label: "Командный" },
+  { value: "global", label: "Глобальный" }
+];
+
+function normalizeScope(value) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (["personal", "private", "личный"].includes(raw)) return "personal";
+  if (["global", "глобальный"].includes(raw)) return "global";
+  return "team";
+}
+
+function scopeLabel(value) {
+  const normalized = normalizeScope(value);
+  return SCOPE_OPTIONS.find((option) => option.value === normalized)?.label ?? normalized;
+}
+
+export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange, access }) {
   const [localItems, setLocalItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -16,8 +35,14 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
   const [query, setQuery] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
   const textAreaRef = useRef(null);
+  // Командные и глобальные шаблоны создают и правят только старшие роли;
+  // роль «Сотрудник» работает с личными шаблонами.
+  const canManageShared = Boolean(access?.canManageSharedTemplates);
   const selected = items.find((template) => template.id === selectedId) ?? items[0] ?? null;
+  const selectedScope = selected ? normalizeScope(selected.scope) : "team";
+  const canEditSelected = Boolean(selected) && (canManageShared || selectedScope === "personal");
   const visibleItems = items.filter((template) => `${template.title} ${template.text} ${template.topic}`.toLowerCase().includes(query.toLowerCase()));
+  const scopeOptions = canManageShared ? SCOPE_OPTIONS : SCOPE_OPTIONS.filter((option) => option.value === "personal");
 
   useEffect(() => {
     let ignore = false;
@@ -75,10 +100,19 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
     });
   }
 
+  function extractSavedTemplate(response) {
+    const data = response.data ?? {};
+    if (data.template?.id) {
+      return data.template;
+    }
+    return data.id ? data : null;
+  }
+
   async function createTemplate() {
+    const scope = canManageShared ? "team" : "personal";
     const response = await templateService.saveTemplate({
       title: "Новый шаблон",
-      scope: "Личный",
+      scope,
       channel: "Все",
       topic: "Без группы",
       text: "Введите текст шаблона."
@@ -89,10 +123,10 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
       return;
     }
 
-    const next = response.data?.template ?? {
+    const next = extractSavedTemplate(response) ?? {
       id: `template-${Date.now()}`,
       title: "Новый шаблон",
-      scope: "Личный",
+      scope,
       channel: "Все",
       topic: "Без группы",
       usage: 0,
@@ -102,11 +136,11 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
 
     setItems((current) => [next, ...current]);
     setSelectedId(next.id);
-    onToast("Создан новый личный шаблон.");
+    onToast(scope === "personal" ? "Создан новый личный шаблон." : "Создан новый командный шаблон.");
   }
 
   async function saveSelectedTemplate() {
-    if (!selected) {
+    if (!selected || !canEditSelected) {
       return;
     }
 
@@ -116,6 +150,7 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
       text: selected.text,
       topic: selected.topic,
       channel: selected.channel,
+      scope: normalizeScope(selected.scope),
       version: selected.version
     });
 
@@ -124,7 +159,7 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
       return;
     }
 
-    const saved = response.data?.template ?? selected;
+    const saved = extractSavedTemplate(response) ?? selected;
     setItems((current) => current.map((template) => template.id === selected.id ? { ...template, ...saved, updated: "только что" } : template));
     onToast("Шаблон сохранен.");
   }
@@ -163,7 +198,9 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
   return (
     <ProductScreen
       title="Шаблоны"
-      subtitle="Личные, командные и глобальные ответы с каналами, тематиками и переменными."
+      subtitle={canManageShared
+        ? "Личные, командные и глобальные ответы с каналами, тематиками и переменными."
+        : "Ваши личные шаблоны и командная библиотека. Командные шаблоны меняют старший сотрудник или администратор."}
       onBack={onBack}
       stateItems={createScreenStateItems({
         total: visibleItems.length,
@@ -174,7 +211,7 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
       actions={
         <button className="primary-action" onClick={createTemplate}>
           <Plus size={17} />
-          Новый шаблон
+          {canManageShared ? "Новый шаблон" : "Новый личный шаблон"}
         </button>
       }
     >
@@ -192,7 +229,7 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
               <button className={`template-card ${selected?.id === template.id ? "selected" : ""}`} key={template.id} onClick={() => setSelectedId(template.id)}>
                 <span>
                   <strong>{template.title}</strong>
-                  <small>{template.scope} • {template.channel}</small>
+                  <small>{scopeLabel(template.scope)} • {template.channel}</small>
                 </span>
                 <b>{template.usage}</b>
                 <p>{template.text}</p>
@@ -205,39 +242,52 @@ export function TemplatesScreen({ onBack, onToast, templates, onTemplatesChange 
         <section className="template-editor">
           {selected ? (
             <>
-              <SectionTitle title="Редактор шаблона" action={selected.scope} />
+              <SectionTitle title="Редактор шаблона" action={scopeLabel(selected.scope)} />
+              {!canEditSelected ? (
+                <p className="template-readonly-hint">
+                  Командные и глобальные шаблоны может изменять только старший сотрудник или администратор.
+                  Вы можете создавать и редактировать личные шаблоны.
+                </p>
+              ) : null}
               <div className="form-grid">
                 <label>
                   <span>Название</span>
-                  <input value={selected.title} onChange={(event) => updateSelected("title", event.target.value)} />
+                  <input disabled={!canEditSelected} value={selected.title} onChange={(event) => updateSelected("title", event.target.value)} />
                 </label>
                 <label>
                   <span>Канал</span>
-                  <select value={selected.channel} onChange={(event) => updateSelected("channel", event.target.value)}>
+                  <select disabled={!canEditSelected} value={selected.channel} onChange={(event) => updateSelected("channel", event.target.value)}>
                     {["Все", "SDK", "Telegram", "MAX", "VK"].map((option) => <option key={option}>{option}</option>)}
                   </select>
                 </label>
                 <label>
                   <span>Тематика</span>
-                  <input value={selected.topic} onChange={(event) => updateSelected("topic", event.target.value)} />
+                  <input disabled={!canEditSelected} value={selected.topic} onChange={(event) => updateSelected("topic", event.target.value)} />
                 </label>
                 <label>
                   <span>Доступ</span>
-                  <select value={selected.scope} onChange={(event) => updateSelected("scope", event.target.value)}>
-                    {["Личный", "Командный", "Глобальный"].map((option) => <option key={option}>{option}</option>)}
+                  <select
+                    disabled={!canEditSelected || !canManageShared}
+                    title={canManageShared ? "Кому виден шаблон" : "Роль «Сотрудник» создаёт только личные шаблоны"}
+                    value={selectedScope}
+                    onChange={(event) => updateSelected("scope", event.target.value)}
+                  >
+                    {(canManageShared ? SCOPE_OPTIONS : scopeOptions.concat(SCOPE_OPTIONS.filter((option) => option.value === selectedScope && option.value !== "personal"))).map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
                   </select>
                 </label>
               </div>
               <label className="large-field">
                 <span>Текст ответа</span>
-                <textarea ref={textAreaRef} value={selected.text} onChange={(event) => updateSelected("text", event.target.value)} />
+                <textarea disabled={!canEditSelected} ref={textAreaRef} value={selected.text} onChange={(event) => updateSelected("text", event.target.value)} />
               </label>
               <div className="variable-row">
-                {TEMPLATE_VARIABLES.map((variable) => <button key={variable} onClick={() => addVariable(variable)} type="button">{variable}</button>)}
+                {TEMPLATE_VARIABLES.map((variable) => <button disabled={!canEditSelected} key={variable} onClick={() => addVariable(variable)} type="button">{variable}</button>)}
               </div>
               <footer className="editor-actions">
                 <button onClick={() => setPreviewOpen(true)} type="button"><BookOpen size={17} /> Предпросмотр</button>
-                <button className="primary-action" onClick={saveSelectedTemplate} type="button"><CheckCircle2 size={17} /> Сохранить</button>
+                <button className="primary-action" disabled={!canEditSelected} onClick={saveSelectedTemplate} type="button"><CheckCircle2 size={17} /> Сохранить</button>
               </footer>
             </>
           ) : (

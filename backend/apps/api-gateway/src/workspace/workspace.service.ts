@@ -1314,8 +1314,12 @@ export function normalizeTemplateScope(value: unknown): "personal" | "team" | "g
 }
 
 export function hasSharedTemplateAccess(permissions?: string[]): boolean {
-  const list = Array.isArray(permissions) ? permissions : [];
-  return list.includes("*") || list.includes("templates.manageShared");
+  // Отсутствие списка прав — доверенный внутренний вызов (сиды, воркеры,
+  // тесты): для него сохраняется историческое поведение командных шаблонов.
+  if (permissions === undefined) {
+    return true;
+  }
+  return permissions.includes("*") || permissions.includes("templates.manageShared");
 }
 
 function isTemplateVisibleInContext(template: TemplateRecord, context: WorkspaceRequestContext): boolean {

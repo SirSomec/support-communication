@@ -17,7 +17,11 @@ export function RoleMatrixModal({ onClose }) {
         return;
       }
 
-      setRoles(response.status === "ok" ? (response.data?.roles ?? []).filter(Boolean).map(toRoleRow) : []);
+      // Платформенная роль service_admin не назначается сотрудникам организации —
+      // в справочной матрице она только путает.
+      setRoles(response.status === "ok"
+        ? (response.data?.roles ?? []).filter(Boolean).filter((role) => (role.key ?? role.id) !== "service_admin").map(toRoleRow)
+        : []);
       setLoading(false);
     });
 

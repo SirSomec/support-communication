@@ -114,7 +114,7 @@ function requireS3Configuration(source: ObjectStorageSignerSource): Required<Pic
 }
 
 function assertReportObjectKey(objectKey: string, tenantId?: string): void {
-  const match = /^reports\/([^/]+)\/([^/]+)\/([^/]+\.(?:csv|xlsx))$/.exec(objectKey);
+  const match = /^reports\/([^/]+)\/([^/]+)\/([^/]+\.(?:csv|html|json|txt|xlsx))$/.exec(objectKey);
   if (!match || (tenantId && match[1] !== tenantId)) throw new Error("report_object_key_invalid");
 }
 

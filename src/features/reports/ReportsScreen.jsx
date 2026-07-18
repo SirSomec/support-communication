@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useState } from "react";
 import { CalendarDays, CheckCircle2, ClipboardList, Clock3, Download, Gauge, PlayCircle } from "lucide-react";
+import { statusLabels } from "../../app/dialogModel.js";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { reportService } from "../../services/reportService.js";
 import { ChannelBadge, EntityTable, MetricTile, ProductScreen, ScreenStateStrip, SectionTitle, StatusBadge } from "../../ui.jsx";
@@ -20,6 +21,23 @@ const routingActivityColumns = [
   { id: "transfersTo", label: "Получено" },
   { id: "transferEvents", label: "Передач" },
   { id: "totalEvents", label: "Всего событий" }
+];
+
+const dialogExportFormatOptions = [
+  { label: "Excel (XLSX)", value: "XLSX" },
+  { label: "HTML", value: "HTML" },
+  { label: "JSON", value: "JSON" },
+  { label: "TXT", value: "TXT" }
+];
+
+const dialogExportScoreOptions = [
+  { label: "Все оценки", value: "all" },
+  { label: "5", value: "5" },
+  { label: "4", value: "4" },
+  { label: "3", value: "3" },
+  { label: "2", value: "2" },
+  { label: "1", value: "1" },
+  { label: "Без оценки", value: "none" }
 ];
 
 export function ReportsScreen({ onBack, onToast, access }) {
@@ -49,6 +67,14 @@ export function ReportsScreen({ onBack, onToast, access }) {
     topic: "all"
   });
   const [selectedColumns, setSelectedColumns] = useState([]);
+  const [dialogExportFilters, setDialogExportFilters] = useState({
+    operatorId: "all",
+    score: "all",
+    status: "all",
+    topic: "all"
+  });
+  const [dialogExportFormat, setDialogExportFormat] = useState("XLSX");
+  const [dialogExportBusy, setDialogExportBusy] = useState(false);
   const [exportError, setExportError] = useState("");
   const [exportHistoryOpen, setExportHistoryOpen] = useState(false);
   const [selectedAuditJobId, setSelectedAuditJobId] = useState("");
@@ -229,6 +255,51 @@ export function ReportsScreen({ onBack, onToast, access }) {
     setExportError("");
     setReportExportJobs((current) => [nextJob, ...current]);
     onToast(`Выгрузка XLSX за период "${period}" поставлена в очередь: ${nextJob.backendQueueId ?? nextJob.id}.`);
+  }
+
+  async function handleCreateDialogExport() {
+    if (!access.canExportReports || dialogExportBusy) {
+      return;
+    }
+
+    setDialogExportBusy(true);
+    const response = await reportService.requestReportExport({
+      channel,
+      filters: {
+        ...dialogExportFilters,
+        snapshotAt: reportSnapshotAt,
+        timezoneOffsetMinutes: -new Date().getTimezoneOffset()
+      },
+      format: dialogExportFormat,
+      period,
+      reportType: "dialog_transcripts"
+    });
+    setDialogExportBusy(false);
+
+    if (response.status !== "ok") {
+      const message = response.error?.message ?? "Не удалось сформировать выгрузку диалогов.";
+      setExportError(message);
+      onToast(message);
+      return;
+    }
+
+    const job = response.data.job;
+    setExportError("");
+    setReportExportJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+
+    if (job.statusKey === "ready") {
+      await handleExportDownload(job);
+      return;
+    }
+
+    if (job.statusKey === "error") {
+      const message = job.failureMessage ?? "Экспорт диалогов завершился ошибкой, повторите из списка выгрузок.";
+      setExportError(message);
+      onToast(message);
+      return;
+    }
+
+    onToast(`Выгрузка диалогов (${dialogExportFormat}) поставлена в очередь: ${job.backendQueueId ?? job.id}.`);
   }
 
   function handleOpenExportHistory() {
@@ -651,6 +722,72 @@ export function ReportsScreen({ onBack, onToast, access }) {
         ))}
       </EntityTable>
 
+      <section className="work-panel dialog-export-panel" data-testid="dialog-export-panel">
+        <SectionTitle title="Выгрузка диалогов с перепиской" action="сообщения и комментарии с авторами" />
+        <p className="dialog-export-hint">
+          В файл попадают диалоги, созданные за выбранный период и канал, вместе с сообщениями,
+          внутренними комментариями, их авторами и CSAT-оценкой.
+        </p>
+        <div className="dialog-export-controls">
+          <DialogExportSelect
+            allLabel="Все операторы"
+            label="Оператор"
+            onChange={(value) => setDialogExportFilters((current) => ({ ...current, operatorId: value }))}
+            options={reportFilterOptions.operatorId}
+            value={dialogExportFilters.operatorId}
+          />
+          <DialogExportSelect
+            allLabel="Все тематики"
+            label="Тематика"
+            onChange={(value) => setDialogExportFilters((current) => ({ ...current, topic: value }))}
+            options={reportFilterOptions.topic}
+            value={dialogExportFilters.topic}
+          />
+          <DialogExportSelect
+            allLabel="Все статусы"
+            getOptionLabel={(option) => statusLabels[option] ?? option}
+            label="Статус"
+            onChange={(value) => setDialogExportFilters((current) => ({ ...current, status: value }))}
+            options={reportFilterOptions.status}
+            value={dialogExportFilters.status}
+          />
+          <label>
+            <span>Оценка</span>
+            <select
+              aria-label="Оценка диалога"
+              className="inline-select"
+              onChange={(event) => setDialogExportFilters((current) => ({ ...current, score: event.target.value }))}
+              value={dialogExportFilters.score}
+            >
+              {dialogExportScoreOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Формат</span>
+            <select
+              aria-label="Формат выгрузки диалогов"
+              className="inline-select"
+              data-testid="dialog-export-format"
+              onChange={(event) => setDialogExportFormat(event.target.value)}
+              value={dialogExportFormat}
+            >
+              {dialogExportFormatOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <button
+            className="primary-action"
+            data-testid="dialog-export-run"
+            disabled={!access.canExportReports || dialogExportBusy}
+            onClick={handleCreateDialogExport}
+            title={access.canExportReports ? "Сформировать файл и скачать" : access.reason}
+            type="button"
+          >
+            <Download size={17} />
+            {dialogExportBusy ? "Формируем..." : "Выгрузить диалоги"}
+          </button>
+        </div>
+      </section>
+
       <section className="work-panel export-queue-panel">
         <SectionTitle title="Очередь и история выгрузок" action="каждый экспорт фиксируется в audit" />
         <div className="export-job-list">
@@ -694,6 +831,21 @@ export function ReportsScreen({ onBack, onToast, access }) {
         </div>
       </section>
     </ProductScreen>
+  );
+}
+
+function DialogExportSelect({ allLabel, getOptionLabel, label, onChange, options = [], value }) {
+  const list = Array.isArray(options) ? options : [];
+  const optionLabel = getOptionLabel ?? ((option) => option);
+
+  return (
+    <label>
+      <span>{label}</span>
+      <select aria-label={label} className="inline-select" onChange={(event) => onChange(event.target.value)} value={value}>
+        <option value="all">{allLabel}</option>
+        {list.map((option) => <option key={option} value={option}>{optionLabel(option)}</option>)}
+      </select>
+    </label>
   );
 }
 

@@ -5,15 +5,28 @@ import {
   executeCsvReportExport,
   executeXlsxReportExport,
   reportSnapshotAt,
+  writeReportExportObject,
   type ReportCsvColumn,
   type ReportObjectStorageBody,
   type ReportObjectStorageReader,
   type ReportObjectStorageWriter
 } from "./report-export.worker.js";
+import {
+  buildDialogTranscriptFile,
+  buildDialogTranscriptSnapshot,
+  DIALOG_TRANSCRIPT_COLUMN_IDS,
+  DIALOG_TRANSCRIPT_REPORT_TYPE,
+  dialogTranscriptFiltersFromJob,
+  isDialogTranscriptExportJob,
+  isDialogTranscriptReportType,
+  normalizeDialogTranscriptFormat,
+  type DialogTranscriptFormat
+} from "./report-dialog-transcripts.js";
 import { createSharedReportObjectStorage, type ReportObjectStorageDownloadSigner } from "./report-object-storage.js";
 import type { ReportExportJob } from "./report.types.js";
 import {
   ReportRepository,
+  type ConversationFacetSourceRow,
   type ExportRetryAuditEvent,
   type ReportFileDescriptorRecord,
   type ReportWorkspaceCatalog,
@@ -53,6 +66,7 @@ interface RequestReportExportPayload {
   channel?: string;
   columns?: string[];
   filters?: Record<string, unknown>;
+  format?: string;
   idempotencyKey?: string;
   period?: string;
   reportType?: string;
@@ -283,7 +297,10 @@ export class ReportService {
         ],
         operators: [],
         filterOptions: {
-          ...buildConversationReportFilterOptions(reportSource.sourceRows),
+          ...mergeConversationFacetOptions(
+            buildConversationReportFilterOptions(reportSource.sourceRows),
+            reportSource.facetRows
+          ),
           channels: [...new Set(reportSource.sourceRows.map((row) => row.channel).filter(Boolean))]
             .sort((left, right) => left.localeCompare(right, "ru"))
         },
@@ -311,6 +328,7 @@ export class ReportService {
     filters: ReportWorkspaceFilters,
     snapshotAt = this.now()
   ): Promise<{
+    facetRows: Awaited<ReturnType<ReportRepository["listConversationFacetRowsAsync"]>>;
     filteredRows: Awaited<ReturnType<ReportRepository["listConversationReportSourceRowsAsync"]>>;
     sourceRows: Awaited<ReturnType<ReportRepository["listConversationReportSourceRowsAsync"]>>;
     workspace: LiveReportWorkspace;
@@ -322,14 +340,19 @@ export class ReportService {
       timezoneOffsetMinutes: normalizeTimezoneOffset(filters.timezoneOffsetMinutes)
     };
     const emptyWorkspace = buildLiveReportWorkspace([], options);
-    const sourceRows = await this.reportRepository.listConversationReportSourceRowsAsync({
+    const window = {
       from: new Date(emptyWorkspace.windows.previous.from),
       tenantId,
       to: new Date(emptyWorkspace.windows.current.to)
-    });
+    };
+    const [sourceRows, facetRows] = await Promise.all([
+      this.reportRepository.listConversationReportSourceRowsAsync(window),
+      this.reportRepository.listConversationFacetRowsAsync(window)
+    ]);
 
     const conversations = filterReportConversations(sourceRows, filters);
     return {
+      facetRows,
       filteredRows: conversations,
       sourceRows,
       workspace: buildLiveReportWorkspace(conversations as LiveReportConversation[], options)
@@ -555,7 +578,22 @@ export class ReportService {
     if (!tenantId) {
       return tenantScopeRequiredEnvelope("requestReportExport");
     }
-    const columns = payload.columns ?? [];
+    const dialogTranscriptExport = isDialogTranscriptReportType(payload.reportType);
+    let dialogTranscriptFormat: DialogTranscriptFormat | undefined;
+    if (dialogTranscriptExport) {
+      dialogTranscriptFormat = normalizeDialogTranscriptFormat(payload.format ?? "XLSX");
+      if (!dialogTranscriptFormat) {
+        return invalidEnvelope("requestReportExport", "report_export_format_unsupported", "Dialog transcript export format must be XLSX, HTML, JSON or TXT.", {
+          format: payload.format ?? null,
+          reportType: payload.reportType ?? null
+        });
+      }
+    }
+    const columns = payload.columns?.length
+      ? payload.columns
+      : dialogTranscriptExport
+        ? [...DIALOG_TRANSCRIPT_COLUMN_IDS]
+        : [];
 
     if (!columns.length) {
       return invalidEnvelope("requestReportExport", "report_columns_required", "At least one report column must be selected.", {
@@ -599,8 +637,10 @@ export class ReportService {
       : createdAt;
     const job: ReportExportJob = {
       id: `export-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
-      name: `${payload.reportType ?? "Report"}: ${payload.channel ?? "all"}`,
-      format: "XLSX",
+      name: dialogTranscriptExport
+        ? `Диалоги (переписка): ${payload.channel ?? "Все каналы"}`
+        : `${payload.reportType ?? "Report"}: ${payload.channel ?? "all"}`,
+      format: dialogTranscriptFormat ?? "XLSX",
       period: payload.period ?? "today",
       statusKey: "queued",
       status: "Queued",
@@ -618,6 +658,7 @@ export class ReportService {
         ...clone(payload.filters ?? {}),
         snapshotAt: requestedSnapshotAt,
         channel: payload.channel ?? "Все каналы",
+        ...(dialogTranscriptExport ? { reportKind: DIALOG_TRANSCRIPT_REPORT_TYPE } : {}),
         tenantId
       }
     };
@@ -640,6 +681,9 @@ export class ReportService {
         fingerprint,
         jobId: writeResult.job.id
       });
+      const persistedJob = dialogTranscriptExport && writeResult.status === "created"
+        ? await this.finalizeDialogTranscriptExport(job)
+        : writeResult.job;
       return createEnvelope({
         service: REPORT_SERVICE,
         operation: "requestReportExport",
@@ -648,12 +692,15 @@ export class ReportService {
         data: {
           duplicate: writeResult.status === "duplicate",
           exportReadyEvent: null,
-          job: exportJobPayload(writeResult.job)
+          job: exportJobPayload(persistedJob)
         }
       });
     }
 
     await this.reportRepository.saveExportJobAsync(job);
+    if (dialogTranscriptExport) {
+      await this.finalizeDialogTranscriptExport(job);
+    }
 
     return createEnvelope({
       service: REPORT_SERVICE,
@@ -665,6 +712,71 @@ export class ReportService {
         exportReadyEvent: null,
         job: exportJobPayload(job)
       }
+    });
+  }
+
+  // Выгрузка переписки готовится синхронно в момент запроса: в dev и смоук-стеке
+  // report-export-воркер не запущен, и очередь оставила бы задание висеть в
+  // «queued» навсегда. Ошибка сборки переводит задание в error и остаётся
+  // доступной для Retry.
+  private async finalizeDialogTranscriptExport(job: ReportExportJob): Promise<ReportExportJob> {
+    try {
+      await this.writeDialogTranscriptExportFile(job);
+      job.statusKey = "ready";
+      job.status = "Готово";
+      job.progress = 100;
+      delete job.failureCode;
+      delete job.failureMessage;
+    } catch (error) {
+      job.statusKey = "error";
+      job.status = "Ошибка экспорта";
+      job.progress = 0;
+      job.failureCode = "report_export_materialize_failed";
+      job.failureMessage = error instanceof Error ? error.message : String(error);
+    }
+    await this.reportRepository.saveExportJobAsync(job);
+    return job;
+  }
+
+  private async writeDialogTranscriptExportFile(job: ReportExportJob): Promise<ReportFileDescriptorRecord | undefined> {
+    const format = normalizeDialogTranscriptFormat(job.format);
+    if (!format || !isReportObjectStorageWriter(this.objectStorage)) {
+      return undefined;
+    }
+
+    const tenantId = reportExportTenantId(job);
+    const fileName = reportExportFileName(job);
+    const objectKey = `reports/${tenantId}/${job.id}/${fileName}`;
+    const snapshot = await buildDialogTranscriptSnapshot(this.reportRepository, job);
+    const file = buildDialogTranscriptFile(snapshot.dialogs, format, {
+      filters: dialogTranscriptFiltersFromJob(job),
+      generatedAt: reportSnapshotAt(job)
+    });
+    const object = await writeReportExportObject({
+      body: file.body,
+      contentType: file.contentType,
+      format: format.toLowerCase(),
+      jobId: job.id,
+      metricDefinitionVersion: job.metricDefinitionVersion ?? this.metricDefinitionVersion(),
+      objectKey,
+      storage: this.objectStorage
+    });
+    job.fileName = fileName;
+    job.rows = snapshot.entryCount;
+
+    return this.reportRepository.saveReportFileDescriptorAsync({
+      checksum: object.checksum,
+      contentType: object.contentType,
+      createdAt: object.writtenAt,
+      fileName,
+      format: job.format,
+      id: `file_${job.id}`,
+      jobId: job.id,
+      metricDefinitionVersion: job.metricDefinitionVersion ?? this.metricDefinitionVersion(),
+      objectKey: object.objectKey,
+      sizeBytes: object.sizeBytes,
+      tenantId,
+      writtenAt: object.writtenAt
     });
   }
 
@@ -703,6 +815,9 @@ export class ReportService {
       previousStatusKey
     }));
     await this.reportRepository.deleteReportFileDescriptorAsync(job.id);
+    if (isDialogTranscriptExportJob(job)) {
+      await this.finalizeDialogTranscriptExport(job);
+    }
 
     return createEnvelope({
       service: REPORT_SERVICE,
@@ -881,6 +996,13 @@ export class ReportService {
   }
 
   private async materializeReadyExportFile(job: ReportExportJob): Promise<ReportFileDescriptorRecord | undefined> {
+    // Дозапись файла при скачивании: заявка на выгрузку переписки собирается
+    // своим построителем (проверка стоит первой — формат XLSX у неё пересекается
+    // с метрическим экспортом).
+    if (isDialogTranscriptExportJob(job)) {
+      return this.writeDialogTranscriptExportFile(job);
+    }
+
     if (job.format !== "CSV" && job.format !== "XLSX") {
       return undefined;
     }
@@ -970,6 +1092,45 @@ function apiMeta(extra: Record<string, unknown> = {}): Record<string, unknown> {
     apiVersion: "v1",
     ...extra
   };
+}
+
+// Опции фасетов из lifecycle-событий дополняются значениями из самих диалогов
+// окна: у свежих организаций журнал событий может быть пуст, а фильтры выгрузки
+// переписки должны предлагать реальные статусы, тематики и операторов.
+function mergeConversationFacetOptions(
+  options: ReturnType<typeof buildConversationReportFilterOptions>,
+  facetRows: ConversationFacetSourceRow[]
+): ReturnType<typeof buildConversationReportFilterOptions> {
+  const merged = {
+    operatorId: [...options.operatorId],
+    outcome: [...options.outcome],
+    queueId: [...options.queueId],
+    resolutionOutcome: [...options.resolutionOutcome],
+    status: [...options.status],
+    teamId: [...options.teamId],
+    topic: [...options.topic]
+  };
+  const add = (key: "operatorId" | "status" | "topic", value: string | undefined) => {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return;
+    }
+    const lowered = normalized.toLocaleLowerCase("ru-RU");
+    if (!merged[key].some((item) => item.toLocaleLowerCase("ru-RU") === lowered)) {
+      merged[key].push(normalized);
+    }
+  };
+  for (const row of facetRows) {
+    add("operatorId", row.operatorId);
+    add("status", row.status);
+    add("topic", row.topic);
+  }
+
+  const byRu = (left: string, right: string) => left.localeCompare(right, "ru");
+  merged.operatorId.sort(byRu);
+  merged.status.sort(byRu);
+  merged.topic.sort(byRu);
+  return merged;
 }
 
 function normalizeTimezoneOffset(value: number | string | undefined): number {
@@ -1155,6 +1316,11 @@ function requestFingerprint(payload: RequestReportExportPayload, tenantId: strin
     channel: payload.channel ?? null,
     columns: payload.columns ?? [],
     filters: payload.filters ?? {},
+    // Для метрического экспорта формат в отпечаток не входит — иначе сменились бы
+    // отпечатки уже сохранённых идемпотентных запросов.
+    ...(isDialogTranscriptReportType(payload.reportType)
+      ? { format: normalizeDialogTranscriptFormat(payload.format ?? "XLSX") ?? null }
+      : {}),
     period: payload.period ?? null,
     reportType: payload.reportType ?? null,
     tenantId

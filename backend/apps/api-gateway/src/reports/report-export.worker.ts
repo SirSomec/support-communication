@@ -10,6 +10,13 @@ import {
   filterReportConversations,
   type ConversationReportEventWatermark
 } from "./report-conversation-filters.js";
+import {
+  buildDialogTranscriptFile,
+  buildDialogTranscriptSnapshot,
+  dialogTranscriptFiltersFromJob,
+  isDialogTranscriptExportJob,
+  normalizeDialogTranscriptFormat
+} from "./report-dialog-transcripts.js";
 import type { ReportExportJob } from "./report.types.js";
 
 export interface ReportCsvColumn {
@@ -467,6 +474,50 @@ export async function executeReportExportWorkerOnce(input: ReportExportWorkerOnc
 
   for (const job of claimed) {
     try {
+      // Заявки на выгрузку переписки обычно готовятся синхронно в сервисе; сюда
+      // они попадают только после Retry в окружениях с работающим воркером.
+      if (isDialogTranscriptExportJob(job)) {
+        const format = normalizeDialogTranscriptFormat(job.format);
+        if (!format) {
+          throw new Error(`report_export_format_not_supported:${job.format}`);
+        }
+
+        const tenantId = reportExportTenantId(job);
+        const fileName = reportExportFileName(job);
+        const objectKey = `reports/${tenantId}/${job.id}/${fileName}`;
+        const snapshot = await buildDialogTranscriptSnapshot(input.reportRepository, job);
+        const file = buildDialogTranscriptFile(snapshot.dialogs, format, {
+          filters: dialogTranscriptFiltersFromJob(job),
+          generatedAt: reportSnapshotAt(job)
+        });
+        const object = await writeReportExportObject({
+          body: file.body,
+          contentType: file.contentType,
+          format: format.toLowerCase(),
+          jobId: job.id,
+          metricDefinitionVersion: job.metricDefinitionVersion ?? REPORT_METRIC_DEFINITION_VERSION,
+          objectKey,
+          storage: input.storage
+        });
+        const descriptor = await input.reportRepository.saveReportFileDescriptorAsync(toReportFileDescriptor({
+          descriptor: object,
+          fileName,
+          job,
+          rows: snapshot.entryCount,
+          tenantId
+        }));
+        await input.reportRepository.saveExportJobAsync({
+          ...job,
+          fileName: descriptor.fileName,
+          progress: 100,
+          rows: snapshot.entryCount,
+          status: "Готово",
+          statusKey: "ready"
+        });
+        result.ready += 1;
+        continue;
+      }
+
       if (job.format !== "CSV" && job.format !== "XLSX") {
         throw new Error(`report_export_format_not_supported:${job.format}`);
       }

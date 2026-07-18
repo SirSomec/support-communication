@@ -54,6 +54,7 @@ export class ReportController {
     channel?: string;
     columns?: string[];
     filters?: Record<string, unknown>;
+    format?: string;
     idempotencyKey?: string;
     period?: string;
     reportType?: string;

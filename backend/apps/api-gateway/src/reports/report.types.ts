@@ -8,7 +8,7 @@ export interface ReportExportJob {
   failureMessage?: string;
   fileName?: string;
   filters?: Record<string, unknown>;
-  format: "CSV" | "PDF" | "XLSX";
+  format: "CSV" | "HTML" | "JSON" | "PDF" | "TXT" | "XLSX";
   id: string;
   metricDefinitionVersion?: string;
   name: string;

@@ -190,6 +190,37 @@ export interface ReportWorkspaceCatalog {
   rescueReportRows: unknown[];
 }
 
+export interface ConversationTranscriptSourceRow {
+  channel: string;
+  clientName: string;
+  createdAt: string;
+  id: string;
+  messages: Array<{
+    author?: string;
+    createdAt: string;
+    id: string;
+    side?: string;
+    text: string;
+    time: string;
+    type?: string;
+  }>;
+  operatorId?: string;
+  operatorName?: string;
+  rating?: { createdAt: string; scale: string; score: number | null };
+  resolutionOutcome?: string;
+  status: string;
+  topic: string;
+  updatedAt: string;
+}
+
+export interface ConversationFacetSourceRow {
+  id: string;
+  operatorId?: string;
+  operatorName?: string;
+  status: string;
+  topic: string;
+}
+
 export interface ConversationReportSourceRow {
   channel: string;
   createdAt: string;
@@ -293,12 +324,26 @@ interface PrismaReportDataClient {
         tenantId: string;
       };
     }): Promise<PrismaConversationReportRow[]>;
+    findMany(input: {
+      orderBy: { createdAt: "asc" };
+      select: { id: true; operatorId: true; operatorName: true; status: true; topic: true };
+      where: {
+        createdAt: { gte: Date; lt: Date };
+        tenantId: string;
+      };
+    }): Promise<PrismaConversationFacetRow[]>;
   };
   routingAnalyticsRow?: {
     findMany(input: {
       orderBy: { occurredAt: "asc" };
       where: PrismaRoutingActivityReportWhereInput;
     }): Promise<PrismaRoutingActivityReportRow[]>;
+  };
+  qualityRating?: {
+    findMany(input: {
+      orderBy: { createdAt: "asc" };
+      where: { conversationId: { in: string[] }; tenantId: string };
+    }): Promise<PrismaQualityRatingReportRow[]>;
   };
   metricDefinition: {
     findMany(input: { orderBy: { updatedAt: "desc" }; where?: PrismaMetricDefinitionWhereInput }): Promise<PrismaMetricDefinitionRow[]>;
@@ -421,10 +466,16 @@ interface PrismaConversationReportRow {
   channel: string;
   createdAt: Date;
   id: string;
+  // Prisma include возвращает все скалярные поля модели; name/resolutionOutcome и
+  // author сообщений объявлены опциональными, чтобы не ломать компактные
+  // тестовые фейки, которым они не нужны.
+  name?: string;
   operatorId: string | null;
   operatorName: string | null;
   queueId: string | null;
+  resolutionOutcome?: string | null;
   messages: Array<{
+    author?: string | null;
     createdAt: Date;
     id: string;
     side: string | null;
@@ -437,6 +488,21 @@ interface PrismaConversationReportRow {
   teamId: string | null;
   topic: string;
   updatedAt: Date;
+}
+
+interface PrismaQualityRatingReportRow {
+  conversationId: string;
+  createdAt: Date;
+  scale: string;
+  score: number | null;
+}
+
+interface PrismaConversationFacetRow {
+  id: string;
+  operatorId: string | null;
+  operatorName: string | null;
+  status: string;
+  topic: string;
 }
 
 interface PrismaConversationLifecycleReportRow {
@@ -836,6 +902,97 @@ export class ReportRepository {
       topic: row.topic,
       updatedAt: row.updatedAt.toISOString()
     }));
+  }
+
+  // Лёгкая выборка фасетов диалогов окна (без сообщений): наполняет селекты
+  // фильтров выгрузки переписки даже там, где журнал lifecycle-событий пуст.
+  async listConversationFacetRowsAsync(input: {
+    from: Date;
+    tenantId: string;
+    to: Date;
+  }): Promise<ConversationFacetSourceRow[]> {
+    if (!this.prismaClient?.conversation) {
+      return [];
+    }
+
+    const rows = await this.prismaClient.conversation.findMany({
+      orderBy: { createdAt: "asc" },
+      select: { id: true, operatorId: true, operatorName: true, status: true, topic: true },
+      where: {
+        createdAt: { gte: input.from, lt: input.to },
+        tenantId: input.tenantId
+      }
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      ...(row.operatorId ? { operatorId: row.operatorId } : {}),
+      ...(row.operatorName ? { operatorName: row.operatorName } : {}),
+      status: row.status,
+      topic: row.topic
+    }));
+  }
+
+  // Источник выгрузки переписки: диалоги, созданные в окне периода, вместе со
+  // всеми сообщениями (включая внутренние комментарии) и последней CSAT-оценкой.
+  async listConversationTranscriptSourceRowsAsync(input: {
+    from: Date;
+    tenantId: string;
+    to: Date;
+  }): Promise<ConversationTranscriptSourceRow[]> {
+    if (!this.prismaClient?.conversation) {
+      return [];
+    }
+
+    const rows = await this.prismaClient.conversation.findMany({
+      include: { messages: { orderBy: { createdAt: "asc" } } },
+      orderBy: { createdAt: "asc" },
+      where: {
+        createdAt: { gte: input.from, lt: input.to },
+        tenantId: input.tenantId
+      }
+    });
+    const ratingRows = this.prismaClient.qualityRating && rows.length
+      ? await this.prismaClient.qualityRating.findMany({
+          orderBy: { createdAt: "asc" },
+          where: {
+            conversationId: { in: rows.map((row) => row.id) },
+            tenantId: input.tenantId
+          }
+        })
+      : [];
+    const latestRatingByConversation = new Map<string, PrismaQualityRatingReportRow>();
+    for (const rating of ratingRows) {
+      latestRatingByConversation.set(rating.conversationId, rating);
+    }
+
+    return rows.map((row) => {
+      const rating = latestRatingByConversation.get(row.id);
+      return {
+        channel: row.channel,
+        clientName: row.name ?? "",
+        createdAt: row.createdAt.toISOString(),
+        id: row.id,
+        messages: row.messages.map((message) => ({
+          ...(message.author ? { author: message.author } : {}),
+          createdAt: message.createdAt.toISOString(),
+          id: message.id,
+          ...(message.side ? { side: message.side } : {}),
+          text: message.text,
+          time: message.time,
+          ...(message.type ? { type: message.type } : {})
+        })),
+        ...(row.operatorId ? { operatorId: row.operatorId } : {}),
+        ...(row.operatorName ? { operatorName: row.operatorName } : {}),
+        ...(rating
+          ? { rating: { createdAt: rating.createdAt.toISOString(), scale: rating.scale, score: rating.score } }
+          : {}),
+        ...(row.resolutionOutcome ? { resolutionOutcome: row.resolutionOutcome } : {}),
+        status: row.status,
+        topic: row.topic,
+        updatedAt: row.updatedAt.toISOString()
+      };
+    });
   }
 
   async listRoutingActivityReportSourceRowsAsync(input: RoutingActivityReportSourceFilters): Promise<RoutingActivityReportSourceRow[]> {
@@ -2517,7 +2674,7 @@ function readReportExportJobTenantId(job: ReportExportJob): string | undefined {
 }
 
 function parseReportExportFormat(format: string): ReportExportJob["format"] {
-  if (format === "CSV" || format === "PDF" || format === "XLSX") {
+  if (format === "CSV" || format === "HTML" || format === "JSON" || format === "PDF" || format === "TXT" || format === "XLSX") {
     return format;
   }
 

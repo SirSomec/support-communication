@@ -355,9 +355,10 @@ export function ScenarioConsole({
                 <span>Как бот ищет по знаниям</span>
                 <select disabled={!canManage} onChange={(event) => updateForm({ retrievalMode: event.target.value })} value={form.retrievalMode || "lexical"}>
                   <option value="lexical">Быстрый — по совпадению слов (бесплатно)</option>
+                  <option value="semantic">По смыслу — эмбеддинги находят близкое даже без общих слов (почти бесплатно: база индексируется один раз)</option>
                   <option value="llm">Умный — модель для поиска читает базу знаний (точнее; тратит токены, база кешируется у провайдера)</option>
                 </select>
-                <small>Умный поиск требует настроенной «модели для поиска знаний» в AI-подключении и включённой функции для организации; иначе бот автоматически ищет быстрым способом.</small>
+                <small>Поиску по смыслу нужна «модель эмбеддингов», умному — «модель для поиска знаний» в AI-подключении, и включённая функция для организации; иначе бот автоматически ищет быстрым способом.</small>
               </label>
               <label>
                 <span>Строгость поиска: минимальное совпадение, % ({form.retrievalScoreThreshold || 0}%)</span>
@@ -525,7 +526,7 @@ function buildForm(effective) {
     priority: String(effective?.priority ?? 0),
     refusalMessage: String(aiNode?.config?.refusalMessage ?? DEFAULT_REFUSAL_MESSAGE),
     requireSource: aiNode?.config?.requireSource !== false,
-    retrievalMode: aiNode?.config?.retrievalMode === "llm" ? "llm" : "lexical",
+    retrievalMode: ["llm", "semantic"].includes(aiNode?.config?.retrievalMode) ? aiNode.config.retrievalMode : "lexical",
     retrievalScoreThreshold: String(Math.round(Number(aiNode?.config?.retrievalScoreThreshold ?? 0) * 100)),
     tone: String(aiNode?.config?.tone ?? "neutral"),
     triggerType: rule?.type ?? "new_conversation"
@@ -549,7 +550,7 @@ function collectUpdatePayload(effective, form) {
         operatorOnlyTopics: normalizeTopicList(splitTopics(form.operatorOnlyTopics)),
         refusalMessage: form.refusalMessage.trim() || DEFAULT_REFUSAL_MESSAGE,
         requireSource: form.requireSource !== false,
-        retrievalMode: form.retrievalMode === "llm" ? "llm" : "lexical",
+        retrievalMode: ["llm", "semantic"].includes(form.retrievalMode) ? form.retrievalMode : "lexical",
         retrievalScoreThreshold: clampNumber(form.retrievalScoreThreshold, 0, 100, 0) / 100,
         tone: form.tone
       }
@@ -586,6 +587,7 @@ function describePolicy(config) {
   const parts = [];
   parts.push(config?.requireSource === false ? "может отвечать без источника" : "только по проверенным источникам");
   if (config?.retrievalMode === "llm") parts.push("умный поиск по знаниям (ИИ)");
+  if (config?.retrievalMode === "semantic") parts.push("поиск по смыслу (эмбеддинги)");
   if (blocked.length) parts.push(`не отвечает: ${blocked.slice(0, 3).join(", ")}${blocked.length > 3 ? "…" : ""}`);
   if (operatorOnly.length) parts.push(`сразу оператор: ${operatorOnly.slice(0, 3).join(", ")}${operatorOnly.length > 3 ? "…" : ""}`);
   return parts.join(" · ");

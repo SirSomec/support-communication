@@ -28,7 +28,15 @@ export interface LlmKnowledgeSearchInvoker {
   search(input: { corpus: KnowledgeCorpus; query: string; scenarioId?: string; tenantId: string }): Promise<LlmKnowledgeSearchResult>;
 }
 
-export type KnowledgeRetrievalMode = "lexical" | "llm";
+/** Semantic embedding ranker. Injected so tests never hit the network; failures fall back to lexical. */
+export interface SemanticKnowledgeSearchResult {
+  passages: KnowledgeRetrievalPassage[];
+}
+export interface SemanticKnowledgeSearchInvoker {
+  search(input: { corpus: KnowledgeCorpus; query: string; scenarioId?: string; tenantId: string }): Promise<SemanticKnowledgeSearchResult>;
+}
+
+export type KnowledgeRetrievalMode = "lexical" | "llm" | "semantic";
 
 export interface KnowledgeRetrievalInput {
   /** BAI-875: retrieval strategy; "llm" needs an injected selector, otherwise silently stays lexical. */
@@ -54,15 +62,15 @@ export interface KnowledgeRetrievalResult {
   cachedTokens?: number;
   cacheWriteTokens?: number;
   corpusTruncated?: boolean;
-  /** BAI-875: set when mode="llm" failed and lexical answered instead. */
+  /** BAI-875: set when mode="llm"/"semantic" failed and lexical answered instead. */
   fallbackReason?: string;
-  mode: "lexical" | "llm" | "llm_fallback";
+  mode: "lexical" | "llm" | "llm_fallback" | "semantic" | "semantic_fallback";
   passages: KnowledgeRetrievalPassage[];
   tokenBudget: number;
   tokensUsed: number;
 }
 
-/** Tenant- and scenario-bound retrieval with an explicit provider token budget: lexical by default, LLM-selector by mode. */
+/** Tenant- and scenario-bound retrieval with an explicit provider token budget: lexical by default, embedding ranker or LLM-selector by mode. */
 export class KnowledgeRetrievalService {
   private readonly workspace: WorkspaceRepository;
   private readonly cache: KnowledgeRetrievalCache;
@@ -73,7 +81,8 @@ export class KnowledgeRetrievalService {
     cache?: KnowledgeRetrievalCache,
     private readonly mcpInvoker?: McpRetrievalInvoker,
     private readonly llmSearch?: LlmKnowledgeSearchInvoker,
-    private readonly corpusMaxTokens: number | undefined = envCorpusMaxTokens()
+    private readonly corpusMaxTokens: number | undefined = envCorpusMaxTokens(),
+    private readonly semanticSearch?: SemanticKnowledgeSearchInvoker
   ) {
     this.workspace = workspace ?? WorkspaceRepository.default();
     this.cache = cache ?? KnowledgeRetrievalCache.default();
@@ -82,7 +91,9 @@ export class KnowledgeRetrievalService {
   async retrieve(input: KnowledgeRetrievalInput): Promise<KnowledgeRetrievalResult> {
     const budget = clampInteger(input.tokenBudget, 1_500, 100, 6_000);
     const scoreThreshold = Math.max(0.05, Number.isFinite(input.scoreThreshold) ? Number(input.scoreThreshold) : 0);
-    const mode: KnowledgeRetrievalMode = input.mode === "llm" && this.llmSearch ? "llm" : "lexical";
+    const mode: KnowledgeRetrievalMode = input.mode === "llm" && this.llmSearch
+      ? "llm"
+      : input.mode === "semantic" && this.semanticSearch ? "semantic" : "lexical";
     const cacheKey = buildRetrievalCacheKey({
       mode,
       query: input.query,
@@ -106,6 +117,33 @@ export class KnowledgeRetrievalService {
     }
 
     let fallbackReason: string | undefined;
+    let fallbackMode: "llm_fallback" | "semantic_fallback" | undefined;
+    if (mode === "semantic") {
+      try {
+        const result = await this.semanticRetrieve(input, budget, scoreThreshold);
+        // В отличие от LLM-селектора пустой семантический результат кешируем:
+        // эмбеддинги детерминированы, пустота означает «в знаниях правда нет
+        // близкого по смыслу», и повторный вызов вернул бы то же самое.
+        this.cache.set(cacheKey, result, {
+          sourceIds: input.sourceBindings.map((binding) => binding.sourceId),
+          tenantId: input.tenantId
+        });
+        recordBotRetrieval({
+          cache: "miss",
+          mode: "semantic",
+          passageCount: result.passages.length,
+          scenarioId: input.scenarioId,
+          tenantId: input.tenantId,
+          topScore: result.passages[0]?.score
+        });
+        return { cache: "miss", ...result, mode: "semantic" };
+      } catch (error) {
+        // Сбой эмбеддингов (нет подключения, бюджет, таймаут провайдера) не
+        // должен ронять бота: молча отвечаем лексикой, причина видна в trace.
+        fallbackReason = error instanceof Error ? error.message : "semantic_retrieval_unavailable";
+        fallbackMode = "semantic_fallback";
+      }
+    }
     if (mode === "llm") {
       try {
         const result = await this.llmRetrieve(input, budget);
@@ -130,6 +168,7 @@ export class KnowledgeRetrievalService {
         // Любой сбой селектора (нет подключения, бюджет, таймаут, кривой JSON)
         // не должен ронять бота: молча отвечаем лексикой, причина видна в trace.
         fallbackReason = error instanceof Error ? error.message : "llm_retrieval_unavailable";
+        fallbackMode = "llm_fallback";
       }
     }
 
@@ -191,7 +230,7 @@ export class KnowledgeRetrievalService {
       if (passages.length >= 8) break;
     }
     const result = {
-      ...(fallbackReason ? { fallbackReason, mode: "llm_fallback" as const } : { mode: "lexical" as const }),
+      ...(fallbackReason && fallbackMode ? { fallbackReason, mode: fallbackMode } : { mode: "lexical" as const }),
       passages,
       tokenBudget: budget,
       tokensUsed
@@ -255,6 +294,56 @@ export class KnowledgeRetrievalService {
   }
 
   /**
+   * Семантическая стратегия: эмбеддинг-ранжирование корпуса вместо чтения его
+   * дорогой моделью. Чанки эмбеддятся один раз (кеш по контент-хешу в
+   * SemanticKnowledgeSearchService), на запрос тратится только вектор вопроса.
+   * Отсев здесь агрессивнее лексического: абсолютный порог плюс относительный
+   * (доля от лучшего скора) — боту уходит несколько действительно близких
+   * чанков, а не всё, что формально пролезло в токен-бюджет.
+   */
+  private async semanticRetrieve(input: KnowledgeRetrievalInput, budget: number, scoreThreshold: number): Promise<Omit<KnowledgeRetrievalResult, "cache">> {
+    const entries: KnowledgeCorpusEntry[] = [];
+    const mcpPassages: KnowledgeRetrievalPassage[] = [];
+    for (const binding of input.sourceBindings) {
+      const source = await this.sources.find(input.tenantId, binding.sourceId);
+      if (!source || !isKnowledgeSourceRetrievalEligible(source)) continue;
+      if (binding.sourceVersion && String(source.version) !== binding.sourceVersion) continue;
+      if (source.kind === "mcp") {
+        const passage = await this.mcpPassage(source, input.query, input.tenantId);
+        if (passage) mcpPassages.push(passage);
+        continue;
+      }
+      const text = await extractKnowledgeSourceText(source, this.workspace, input.tenantId);
+      if (text.trim()) entries.push({ source, text });
+    }
+    const corpus = buildKnowledgeCorpus(entries, { maxTokens: this.corpusMaxTokens, prefilterQuery: input.query });
+    const semantic = corpus.chunks.length
+      ? await this.semanticSearch!.search({ corpus, query: input.query, scenarioId: input.scenarioId, tenantId: input.tenantId })
+      : { passages: [] as KnowledgeRetrievalPassage[] };
+    const ranked = [...semantic.passages].sort((a, b) => b.score - a.score || a.citation.sourceId.localeCompare(b.citation.sourceId) || a.citation.startOffset - b.citation.startOffset);
+    // Гибридный скор фонового шума держится ниже ~0.2 даже при частичном
+    // словесном совпадении, поэтому дефолтный порог выше лексического 0.05;
+    // явный policy-threshold может только ужесточить отсев.
+    const minScore = Math.max(SEMANTIC_MIN_SCORE, scoreThreshold);
+    const topScore = ranked[0]?.score ?? 0;
+    const relevant = ranked.filter((passage) => passage.score >= minScore && passage.score >= topScore * SEMANTIC_RELATIVE_CUTOFF);
+    const passages: KnowledgeRetrievalPassage[] = []; let tokensUsed = 0;
+    for (const candidate of [...relevant, ...mcpPassages]) {
+      const tokens = estimateTokens(candidate.content);
+      if (tokensUsed + tokens > budget) continue;
+      passages.push(candidate); tokensUsed += tokens;
+      if (passages.length >= SEMANTIC_MAX_PASSAGES) break;
+    }
+    return {
+      ...(corpus.truncated ? { corpusTruncated: true } : {}),
+      mode: "semantic",
+      passages,
+      tokenBudget: budget,
+      tokensUsed
+    };
+  }
+
+  /**
    * BAI-833: MCP-источник — живой read-only вызов. Ошибка/таймаут даёт пустой
    * результат (отсутствие доказательств → handoff), а не выдуманный ответ.
    */
@@ -277,6 +366,13 @@ export class KnowledgeRetrievalService {
     }
   }
 }
+
+/** Экономия контекста бота: ниже этого гибридного скора чанк — шум, не знание. */
+const SEMANTIC_MIN_SCORE = 0.2;
+/** Чанки заметно слабее лучшего не передаются, даже если проходят абсолютный порог. */
+const SEMANTIC_RELATIVE_CUTOFF = 0.6;
+/** Жёстче лексических 8: семантический топ либо отвечает первыми чанками, либо не отвечает вовсе. */
+const SEMANTIC_MAX_PASSAGES = 6;
 
 function chunks(text: string): Array<{ content: string; endOffset: number; startOffset: number }> {
   const normalized = text.replace(/\s+/g, " ").trim(); const result = [];

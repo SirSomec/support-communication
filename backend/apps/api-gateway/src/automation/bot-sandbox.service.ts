@@ -3,6 +3,7 @@ import type { FeatureFlag } from "../platform/platform.types.js";
 import { AiConnectionRepository } from "../ai-connections/ai-connection.repository.js";
 import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
 import { LlmKnowledgeSearchService } from "../knowledge-sources/llm-knowledge-search.service.js";
+import { SemanticKnowledgeSearchService } from "../knowledge-sources/semantic-knowledge-search.service.js";
 import { normalizeAgentPolicy } from "./agent-policy.js";
 import {
   AutomationRepository,
@@ -300,7 +301,7 @@ export class BotSandboxService {
       // 5-минутный кэш реального вызова и не жжёт второй запрос к дорогой модели.
       const aiNode = scenario.flowNodes.find((node) => node.type === "ai_reply");
       const policy = normalizeAgentPolicy(aiNode?.config);
-      const result = await (this.options.retrieval ?? new KnowledgeRetrievalService(undefined, undefined, undefined, undefined, new LlmKnowledgeSearchService())).retrieve({
+      const result = await (this.options.retrieval ?? new KnowledgeRetrievalService(undefined, undefined, undefined, undefined, new LlmKnowledgeSearchService(), undefined, new SemanticKnowledgeSearchService())).retrieve({
         mode: policy.retrievalMode,
         query,
         scenarioId,
@@ -438,7 +439,7 @@ interface SandboxRetrievalTrace {
   cachedTokens?: number;
   fallbackReason?: string;
   passages: Array<{ preview: string; score: number; sourceId: string; title: string }>;
-  retrievalMode?: "llm" | "llm_fallback";
+  retrievalMode?: "llm" | "llm_fallback" | "semantic" | "semantic_fallback";
   tokensUsed: number;
 }
 

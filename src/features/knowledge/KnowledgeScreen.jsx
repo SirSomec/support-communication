@@ -291,7 +291,7 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
   async function handlePreviewSearch() {
     if (!previewTarget?.source || !previewTarget.query?.trim()) return;
     const response = await knowledgeService.searchSources({
-      mode: previewTarget.searchMode === "llm" ? "llm" : "lexical",
+      mode: ["llm", "semantic"].includes(previewTarget.searchMode) ? previewTarget.searchMode : "lexical",
       query: previewTarget.query.trim(),
       sourceIds: [previewTarget.source.id],
       tokenBudget: 400
@@ -684,16 +684,19 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
                 </button>
               </div>
               <label className="knowledge-preview-mode">
-                <input
-                  checked={previewTarget.searchMode === "llm"}
-                  onChange={(event) => setPreviewTarget((current) => current ? { ...current, searchMode: event.target.checked ? "llm" : "lexical" } : current)}
-                  type="checkbox"
-                />
-                <span>Умный поиск (ИИ): модель для поиска читает базу — как это будет делать бот</span>
+                <span>Способ поиска — как это будет делать бот:</span>
+                <select
+                  onChange={(event) => setPreviewTarget((current) => current ? { ...current, searchMode: event.target.value } : current)}
+                  value={previewTarget.searchMode ?? "lexical"}
+                >
+                  <option value="lexical">Быстрый (по словам)</option>
+                  <option value="semantic">По смыслу (эмбеддинги)</option>
+                  <option value="llm">Умный (ИИ читает базу)</option>
+                </select>
               </label>
               {previewTarget.resultsMeta ? (
                 <p className="knowledge-preview-meta">
-                  {previewTarget.resultsMeta.mode === "llm" ? "Нашёл умный поиск (ИИ)" : previewTarget.resultsMeta.mode === "llm_fallback" ? `Умный поиск недоступен (${previewTarget.resultsMeta.fallbackReason ?? "причина неизвестна"}) — показан быстрый` : "Нашёл быстрый поиск (по словам)"}
+                  {describeSearchResultMode(previewTarget.resultsMeta)}
                   {Number.isFinite(previewTarget.resultsMeta.cachedTokens) ? ` · из кеша провайдера: ${previewTarget.resultsMeta.cachedTokens} токенов` : ""}
                 </p>
               ) : null}
@@ -1010,6 +1013,15 @@ function splitTopicsInput(value) {
 
 function normalizeList(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function describeSearchResultMode(meta) {
+  const reason = meta.fallbackReason ?? "причина неизвестна";
+  if (meta.mode === "llm") return "Нашёл умный поиск (ИИ)";
+  if (meta.mode === "semantic") return "Нашёл поиск по смыслу (эмбеддинги)";
+  if (meta.mode === "llm_fallback") return `Умный поиск недоступен (${reason}) — показан быстрый`;
+  if (meta.mode === "semantic_fallback") return `Поиск по смыслу недоступен (${reason}) — показан быстрый`;
+  return "Нашёл быстрый поиск (по словам)";
 }
 
 function pluralTimes(count) {

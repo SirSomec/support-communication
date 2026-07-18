@@ -5,6 +5,13 @@ import { SectionTitle } from "../../ui.jsx";
 
 let sandboxMessageCounter = 0;
 
+const RETRIEVAL_MODE_LABELS = {
+  llm: "умный поиск (ИИ)",
+  llm_fallback: "умный поиск недоступен — искал быстрый",
+  semantic: "поиск по смыслу (эмбеддинги)",
+  semantic_fallback: "поиск по смыслу недоступен — искал быстрый"
+};
+
 function nextSandboxMessageId() {
   sandboxMessageCounter += 1;
   return `ui_${Date.now()}_${sandboxMessageCounter}`;
@@ -251,6 +258,8 @@ export function ScenarioSandboxChat({
                       {trace.retrievalPassages?.length
                         ? trace.retrievalPassages.map((passage) => `${passage.title} (${Math.round((passage.score ?? 0) * 100)}%)`).join("; ")
                         : trace.aiCalled ? "фрагменты не понадобились" : "не выполнялся"}
+                      {trace.retrievalMode && RETRIEVAL_MODE_LABELS[trace.retrievalMode] ? ` · ${RETRIEVAL_MODE_LABELS[trace.retrievalMode]}` : ""}
+                      {trace.retrievalFallbackReason ? ` (${trace.retrievalFallbackReason})` : ""}
                       {trace.retrievalCache && trace.retrievalCache !== "skipped" ? ` · кэш: ${trace.retrievalCache === "hit" ? "попадание" : "мимо"}` : ""}
                     </dd>
                   </div>

@@ -72,6 +72,36 @@ export function evaluateLlmRetrievalRollout(input: {
   };
 }
 
+export const AI_SEMANTIC_RETRIEVAL_FLAG_KEY = "ai_semantic_retrieval";
+
+/**
+ * Тенант-гейт семантического (embedding) поиска. Как и у ai_llm_retrieval,
+ * отсутствие/выключенность флага не ошибка и не handoff — бот тихо остаётся на
+ * лексическом поиске, поэтому выключение флага мгновенно возвращает старое
+ * поведение.
+ */
+export function evaluateSemanticRetrievalRollout(input: {
+  flags?: FeatureFlag[];
+  planId?: string;
+  tenantId: string;
+}): AiAgentsRolloutEvaluation {
+  const flag = (input.flags ?? featureFlags).find((item) => item.key === AI_SEMANTIC_RETRIEVAL_FLAG_KEY);
+  if (!flag) {
+    return { eligible: false, flagKey: AI_SEMANTIC_RETRIEVAL_FLAG_KEY, killSwitchArmed: true, reason: "flag_missing" };
+  }
+  const evaluation = evaluateFeatureFlagRollout({
+    planId: input.planId,
+    rule: featureFlagToRolloutRule(flag),
+    tenantId: input.tenantId
+  });
+  return {
+    eligible: evaluation.eligible,
+    flagKey: flag.key,
+    killSwitchArmed: Boolean(flag.killSwitch),
+    reason: evaluation.reason
+  };
+}
+
 /** Kill-switch / rollback checklist for AI-agents ops (documented in runbook). */
 export function aiAgentsKillSwitchSteps(): string[] {
   return [

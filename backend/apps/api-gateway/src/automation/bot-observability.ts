@@ -53,8 +53,8 @@ export function recordBotTriggerMatch(input: {
 
 export function recordBotRetrieval(input: {
   cache: "hit" | "miss";
-  /** BAI-875: which strategy produced the passages (llm_fallback = llm failed, lexical answered). */
-  mode?: "lexical" | "llm" | "llm_fallback";
+  /** BAI-875: which strategy produced the passages (*_fallback = strategy failed, lexical answered). */
+  mode?: "lexical" | "llm" | "llm_fallback" | "semantic" | "semantic_fallback";
   passageCount: number;
   scenarioId?: string;
   tenantId: string;

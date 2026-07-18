@@ -10,7 +10,7 @@ export interface RetrievalCacheValue {
   cacheWriteTokens?: number;
   corpusTruncated?: boolean;
   fallbackReason?: string;
-  mode?: "lexical" | "llm" | "llm_fallback";
+  mode?: "lexical" | "llm" | "llm_fallback" | "semantic" | "semantic_fallback";
   passages: Array<{
     citation: { endOffset: number; sourceId: string; sourceVersion: number; startOffset: number; title: string };
     content: string;
@@ -28,8 +28,8 @@ interface RetrievalCacheEntry {
 }
 
 export interface RetrievalCacheKeyInput {
-  /** BAI-875: retrieval strategy; llm and lexical results never share a cache entry. */
-  mode?: "lexical" | "llm";
+  /** BAI-875: retrieval strategy; different strategies never share a cache entry. */
+  mode?: "lexical" | "llm" | "semantic";
   query: string;
   scoreThreshold?: number;
   sourceBindings: Array<{ sourceId: string; sourceVersion?: string }>;

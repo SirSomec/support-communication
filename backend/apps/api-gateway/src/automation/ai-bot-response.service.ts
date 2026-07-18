@@ -3,8 +3,9 @@ import { AiUsageRepository } from "../ai-connections/ai-usage.repository.js";
 import { SecretStore } from "../ai-connections/secret-store.js";
 import { createOpenAiCompatibleChatProvider, usesExplicitPromptCacheBreakpoints } from "../ai-connections/openai-compatible-chat.provider.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
-import { KnowledgeRetrievalService, type KnowledgeRetrievalMode, type LlmKnowledgeSearchInvoker, type McpRetrievalInvoker } from "../knowledge-sources/knowledge-retrieval.service.js";
+import { KnowledgeRetrievalService, type KnowledgeRetrievalMode, type LlmKnowledgeSearchInvoker, type McpRetrievalInvoker, type SemanticKnowledgeSearchInvoker } from "../knowledge-sources/knowledge-retrieval.service.js";
 import { LlmKnowledgeSearchService } from "../knowledge-sources/llm-knowledge-search.service.js";
+import { SemanticKnowledgeSearchService } from "../knowledge-sources/semantic-knowledge-search.service.js";
 import { UnansweredQuestionRepository } from "../knowledge-sources/unanswered-question.repository.js";
 import { HttpMcpReadOnlyTransport, McpReadOnlyConnectorService } from "../knowledge-sources/mcp-readonly-connector.service.js";
 import { McpConnectorRepository } from "../knowledge-sources/mcp-connector.repository.js";
@@ -22,7 +23,7 @@ export interface AiBotResponseInput {
   /** BAI-879: потолок токенов ответа (policy «максимальная длина ответа»); без него — 1000. */
   maxResponseTokens?: number;
   message: string;
-  /** BAI-875: "llm" = поиск дорогой моделью с fallback в лексику; по умолчанию лексика. */
+  /** BAI-875: "llm" = поиск дорогой моделью, "semantic" = эмбеддинг-ранжирование; оба с fallback в лексику, по умолчанию лексика. */
   retrievalMode?: KnowledgeRetrievalMode;
   retrievalScoreThreshold?: number;
   scenarioId?: string;
@@ -79,7 +80,8 @@ export class AiBotResponseService {
       8_000,
       McpConnectorRepository.default()
     ),
-    private readonly llmSearch: LlmKnowledgeSearchInvoker = new LlmKnowledgeSearchService()
+    private readonly llmSearch: LlmKnowledgeSearchInvoker = new LlmKnowledgeSearchService(),
+    private readonly semanticSearch: SemanticKnowledgeSearchInvoker = new SemanticKnowledgeSearchService()
   ) {}
 
   async respond(input: AiBotResponseInput): Promise<AiBotResponse> {
@@ -176,7 +178,7 @@ export class AiBotResponseService {
   }
 
   private async materials(tenantId: string, bindings: KnowledgeSourceBinding[], question: string, scenarioId?: string, scoreThreshold?: number, mode?: KnowledgeRetrievalMode) {
-    const result = await new KnowledgeRetrievalService(this.sources, this.workspace, undefined, this.mcpInvoker(), this.llmSearch).retrieve({
+    const result = await new KnowledgeRetrievalService(this.sources, this.workspace, undefined, this.mcpInvoker(), this.llmSearch, undefined, this.semanticSearch).retrieve({
       mode,
       query: question,
       scenarioId,

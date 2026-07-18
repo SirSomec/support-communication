@@ -228,6 +228,21 @@ export const featureFlags: FeatureFlag[] = [
     updatedAt: "2026-07-17T00:00:00.000Z"
   },
   {
+    id: "flag-ai-semantic-retrieval",
+    key: "ai_semantic_retrieval",
+    name: "AI bot semantic (embedding) knowledge retrieval",
+    status: "off",
+    environment: "production",
+    scope: "tenant",
+    rollout: 0,
+    owner: "AI team",
+    segments: [],
+    enabledTenantIds: [],
+    variants: [{ id: "disabled", weight: 100 }],
+    killSwitch: true,
+    updatedAt: "2026-07-18T00:00:00.000Z"
+  },
+  {
     id: "flag-ai-replies",
     key: "ff-ai-replies",
     name: "AI reply assistant",

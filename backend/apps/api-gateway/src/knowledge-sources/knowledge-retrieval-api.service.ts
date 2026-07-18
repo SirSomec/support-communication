@@ -2,18 +2,19 @@ import { createEnvelope, type BackendEnvelope } from "@support-communication/env
 import { AutomationRepository } from "../automation/automation.repository.js";
 import { KnowledgeRetrievalService, type KnowledgeRetrievalMode } from "./knowledge-retrieval.service.js";
 import { LlmKnowledgeSearchService } from "./llm-knowledge-search.service.js";
+import { SemanticKnowledgeSearchService } from "./semantic-knowledge-search.service.js";
 
 export class KnowledgeRetrievalApiService {
   constructor(
-    // BAI-878: селектор внедрён по умолчанию, чтобы «Проверить поиск» гонял тот же
-    // llm-режим, что и бот; активен только при явном mode="llm" в запросе.
-    private readonly retrieval = new KnowledgeRetrievalService(undefined, undefined, undefined, undefined, new LlmKnowledgeSearchService()),
+    // BAI-878: селекторы внедрены по умолчанию, чтобы «Проверить поиск» гонял те же
+    // llm/semantic-режимы, что и бот; активны только при явном mode в запросе.
+    private readonly retrieval = new KnowledgeRetrievalService(undefined, undefined, undefined, undefined, new LlmKnowledgeSearchService(), undefined, new SemanticKnowledgeSearchService()),
     private readonly automation = AutomationRepository.default()
   ) {}
   async retrieveScenario(input: { mode?: string; query?: string; scenarioId?: string; sourceIds?: string[]; tenantId: string; tokenBudget?: number }): Promise<BackendEnvelope<Record<string, unknown>>> {
     const query = String(input.query ?? "").trim();
     if (!query) return result("invalid", input.tenantId, { passages: [], tokenBudget: 0, tokensUsed: 0 }, "knowledge_retrieval_query_required");
-    const mode: KnowledgeRetrievalMode = input.mode === "llm" ? "llm" : "lexical";
+    const mode: KnowledgeRetrievalMode = input.mode === "llm" ? "llm" : input.mode === "semantic" ? "semantic" : "lexical";
     // BAI-825: раздел «Знания» проверяет поиск по явным источникам без сценария;
     // eligibility (ready + approved + tenant) всё равно применяет retrieval-сервис.
     const explicitSourceIds = Array.isArray(input.sourceIds)

@@ -16,8 +16,8 @@ export interface AgentPolicy {
   operatorOnlyTopics: string[];
   /** Фактический ответ обязан опираться на источник (citations). По умолчанию включено. */
   requireSource: boolean;
-  /** BAI-877: как бот ищет по знаниям — "lexical" (по словам) или "llm" (дорогой моделью с fallback в лексику). */
-  retrievalMode: "lexical" | "llm";
+  /** BAI-877: как бот ищет по знаниям — "lexical" (по словам), "semantic" (по смыслу через эмбеддинги) или "llm" (дорогой моделью); оба умных режима падают в лексику при сбое. */
+  retrievalMode: "lexical" | "llm" | "semantic";
   /** Минимальный лексический score фрагмента, ниже которого он не считается достаточным доказательством. */
   retrievalScoreThreshold: number;
   /** Вежливый отказ, показываемый на запрещённую тему. */
@@ -48,7 +48,7 @@ export function normalizeAgentPolicy(config: BotFlowNode["config"] | undefined):
     operatorOnlyTopics: normalizeTopics(source?.operatorOnlyTopics),
     refusalMessage: String(source?.refusalMessage ?? "").trim() || DEFAULT_REFUSAL,
     requireSource: source?.requireSource === undefined ? true : source.requireSource !== false,
-    retrievalMode: source?.retrievalMode === "llm" ? "llm" : "lexical",
+    retrievalMode: source?.retrievalMode === "llm" ? "llm" : source?.retrievalMode === "semantic" ? "semantic" : "lexical",
     retrievalScoreThreshold: Number.isFinite(threshold) ? Math.max(0, Math.min(1, threshold)) : 0
   };
 }

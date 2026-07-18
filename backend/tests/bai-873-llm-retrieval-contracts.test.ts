@@ -244,7 +244,9 @@ describe("BAI-877 policy fields and tenant rollout", () => {
     const explicit = normalizeAgentPolicy({ maxResponseTokens: 99_999, retrievalMode: "llm" } as never);
     assert.equal(explicit.retrievalMode, "llm");
     assert.equal(explicit.maxResponseTokens, 4_000);
-    assert.equal(normalizeAgentPolicy({ retrievalMode: "semantic" } as never).retrievalMode, "lexical");
+    // "semantic" стал полноценным режимом (см. semantic-retrieval-contracts); мусор по-прежнему в лексику.
+    assert.equal(normalizeAgentPolicy({ retrievalMode: "semantic" } as never).retrievalMode, "semantic");
+    assert.equal(normalizeAgentPolicy({ retrievalMode: "hybrid" } as never).retrievalMode, "lexical");
   });
 
   it("gates llm retrieval by the ai_llm_retrieval tenant flag", () => {

@@ -39,10 +39,10 @@ export interface BotSandboxTurnTrace {
   retrievalCache: "hit" | "miss" | "skipped";
   /** BAI-878: сколько токенов корпуса пришло из кеша провайдера (llm-поиск). */
   retrievalCachedTokens?: number;
-  /** BAI-878: причина отката llm-поиска в лексику (видна админу в trace). */
+  /** BAI-878: причина отката llm/semantic-поиска в лексику (видна админу в trace). */
   retrievalFallbackReason?: string;
   /** BAI-878: каким способом искали знания; отсутствует = лексика. */
-  retrievalMode?: "llm" | "llm_fallback";
+  retrievalMode?: "llm" | "llm_fallback" | "semantic" | "semantic_fallback";
   retrievalPassages: BotSandboxRetrievalPassage[];
   retrievalTokensUsed: number;
   trigger: BotSandboxTriggerTrace;

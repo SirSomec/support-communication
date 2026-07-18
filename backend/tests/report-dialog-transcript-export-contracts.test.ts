@@ -14,6 +14,7 @@ import {
   createDeterministicReportObjectStorageAdapter,
   serializeReportRowsAsXlsx
 } from "../apps/api-gateway/src/reports/report-export.worker.ts";
+import { createS3ReportObjectStorageAdapter } from "../apps/api-gateway/src/reports/report-object-storage.ts";
 import {
   ReportRepository,
   type ConversationTranscriptSourceRow
@@ -385,6 +386,40 @@ describe("dialog transcript export contracts", () => {
     assert.equal(rows[0].messages[0].author, undefined);
     assert.equal(rows[0].messages[1].author, "Мария Орлова");
     assert.equal(rows[0].messages[1].type, "internal");
+  });
+
+  it("signs server-side report uploads against the direct S3 endpoint even when a public upload base is set", async () => {
+    const requests: Array<{ method?: string; url: string }> = [];
+    const fakeFetch = (async (url: unknown, init?: { method?: string }) => {
+      requests.push({ ...(init?.method ? { method: init.method } : {}), url: String(url) });
+      return {
+        arrayBuffer: async () => new ArrayBuffer(0),
+        headers: new Headers(),
+        ok: true,
+        status: 200
+      } as Response;
+    }) as typeof fetch;
+    const storage = createS3ReportObjectStorageAdapter({
+      S3_ACCESS_KEY: "minio",
+      S3_BUCKET: "support-communication-local",
+      S3_ENDPOINT: "http://minio:9000",
+      S3_PUBLIC_UPLOAD_BASE: "/s3",
+      S3_SECRET_KEY: "minio-password"
+    }, { fetch: fakeFetch, now: () => new Date(SNAPSHOT_AT) });
+
+    await storage.putObject({
+      body: "test",
+      contentType: "text/plain; charset=utf-8",
+      metadata: { format: "txt", jobId: "export-s3-check", metricDefinitionVersion: "metrics/v1" },
+      objectKey: "reports/tenant-volga/export-s3-check/export-s3-check.txt"
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, "PUT");
+    assert.ok(
+      requests[0].url.startsWith("http://minio:9000/"),
+      `server-side upload must hit the direct S3 endpoint, got: ${requests[0].url}`
+    );
   });
 
   it("marks failed materializations as retryable errors and recovers on retry", async () => {

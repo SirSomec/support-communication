@@ -66,7 +66,13 @@ export function createS3ReportObjectStorageAdapter(
   source: ObjectStorageSignerSource,
   options: S3ReportObjectStorageAdapterOptions = {}
 ): SharedReportObjectStorage {
-  const signer = options.signer ?? createS3CompatibleObjectStorageSigner(requireS3Configuration(source), { now: options.now });
+  // S3_PUBLIC_UPLOAD_BASE переписывает upload-URL под браузерный nginx-прокси
+  // (/s3); экспорт отчётов кладёт объекты СЕРВЕРОМ, и relative-URL ломает fetch
+  // внутри гейтвея — подписываем строго по прямому S3_ENDPOINT.
+  const signer = options.signer ?? createS3CompatibleObjectStorageSigner(
+    { ...requireS3Configuration(source), S3_PUBLIC_UPLOAD_BASE: undefined },
+    { now: options.now }
+  );
   const request = options.fetch ?? fetch;
   return {
     async getObject(input: ReportObjectStorageGetInput): Promise<ReportObjectStorageGetResult | undefined> {

@@ -1262,6 +1262,13 @@ export class AuthService {
           }
         });
       }
+
+      // Успешный OTP подтверждает второй фактор: статус в карточке сотрудника
+      // снова становится «включена» (в том числе после ручного сброса MFA).
+      if (effectiveTenantUser.mfa !== "enabled") {
+        await this.identityRepository.saveTenantUser({ ...effectiveTenantUser, mfa: "enabled" });
+        effectiveTenantUser.mfa = "enabled";
+      }
     }
 
     const createdSession = await this.identityRepository.createTenantOperatorSession({

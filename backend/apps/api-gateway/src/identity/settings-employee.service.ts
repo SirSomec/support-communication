@@ -112,7 +112,7 @@ export class SettingsEmployeeService {
       const credentials = employee.credentials && typeof employee.credentials === "object"
         ? employee.credentials as { passwordStatus?: unknown }
         : {};
-      return employee.mfaStatus !== "enabled" || credentials.passwordStatus !== "active";
+      return employee.mfaStatus === "reset_pending" || credentials.passwordStatus !== "active";
     }).length;
 
     return createEnvelope({
@@ -149,23 +149,30 @@ export class SettingsEmployeeService {
       return invalidEnvelope("inviteEmployee", "employee_name_email_required", "Employee name and email are required.", { tenantId });
     }
 
-    const existing = await this.identityRepository.findTenantUserByEmail(email);
-    if (existing && existing.tenantId === tenantId) {
+    const existingUsers = await this.identityRepository.findTenantUsersByEmail(email);
+    const existing = existingUsers.find((candidate) => candidate.tenantId === tenantId);
+    // Отключённую учётную запись можно пригласить заново с той же почтой:
+    // запись переиспользуется и возвращается в состояние "invited".
+    if (existing && existing.status !== "deactivated") {
       return invalidEnvelope("inviteEmployee", "employee_email_exists", "Employee email already exists in this tenant.", { tenantId, email });
     }
 
     const roleKey = normalizeRoleKey(payload.roleKey);
-    const groupId = normalizeGroupId(payload.groupId, roleKey);
+    const groupId = this.resolveGroupId(tenantId, payload.groupId, roleKey);
+    if (!groupId) {
+      return invalidEnvelope("inviteEmployee", "group_not_found", "Employee group was not found.", { tenantId, groupId: payload.groupId ?? null });
+    }
     const now = new Date().toISOString();
     const user: IdentityTenantUser = {
-      id: `usr_settings_${randomUUID()}`,
+      id: existing?.id ?? `usr_settings_${randomUUID()}`,
       tenantId,
       name,
       email,
       role: roleNameFromKey(roleKey),
       status: "invited",
-      mfa: "not_configured",
+      mfa: "enabled",
       metadata: {
+        ...(existing?.metadata ?? {}),
         employeeSettings: {
           canOverride: roleKey !== "employee",
           channels: ["SDK", "Telegram"],
@@ -176,11 +183,11 @@ export class SettingsEmployeeService {
         }
       },
       inviteStatus: "pending",
-      lastActiveAt: null,
+      lastActiveAt: existing?.lastActiveAt ?? null,
       sessions: 0,
-      risk: "low",
+      risk: existing?.risk ?? "low",
       device: "Invite pending",
-      supportNotes: "Invited from tenant settings."
+      supportNotes: existing ? "Re-invited from tenant settings." : "Invited from tenant settings."
     };
     const saved = await this.identityRepository.saveTenantUser(user);
     const inviteToken = await this.identityRepository.createInviteToken({
@@ -266,7 +273,14 @@ export class SettingsEmployeeService {
     const nextRoleKey = requestedRoleKey;
     const adminGuard = await this.validateLastActiveAdministrator(user, nextRoleKey, nextStatus, "updateEmployee");
     if (adminGuard) return adminGuard;
-    const nextGroupId = payload.groupId === undefined ? current.groupId : normalizeGroupId(payload.groupId, nextRoleKey);
+    let nextGroupId = current.groupId;
+    if (payload.groupId !== undefined) {
+      const resolvedGroupId = this.resolveGroupId(user.tenantId, payload.groupId, nextRoleKey);
+      if (!resolvedGroupId) {
+        return invalidEnvelope("updateEmployee", "group_not_found", "Employee group was not found.", { employeeId, groupId: payload.groupId ?? null, tenantId: user.tenantId });
+      }
+      nextGroupId = resolvedGroupId;
+    }
     const next: EmployeeSettingsOverlay = {
       ...current,
       canOverride: payload.canOverride ?? current.canOverride,
@@ -286,6 +300,11 @@ export class SettingsEmployeeService {
     this.employeeSettings.set(saved.id, next);
     this.syncGroupMember(next.groupId, saved.id, saved.tenantId);
     await this.persistGroups(saved.tenantId);
+    if (next.roleKey !== current.roleKey) {
+      // Права активных сессий пересчитываются сразу, иначе смена роли
+      // «не работает» до следующего входа сотрудника.
+      await this.identityRepository.refreshTenantOperatorSessionPermissions(saved.id);
+    }
 
     return createEnvelope({
       service: SERVICE,
@@ -309,6 +328,7 @@ export class SettingsEmployeeService {
       return tenantMismatch;
     }
 
+    await this.hydrateGroups(user.tenantId);
     const recoveryToken = await this.identityRepository.createRecoveryToken(user.email);
     const delivery = this.recoveryDelivery ?? createMfaOtpRuntimeFromEnv(process.env, {
       serviceMail: createServiceMailOverrideResolver()
@@ -365,6 +385,7 @@ export class SettingsEmployeeService {
       return tenantMismatch;
     }
 
+    await this.hydrateGroups(user.tenantId);
     const saved = await this.identityRepository.saveTenantUser({ ...user, mfa: "reset_pending" });
     return createEnvelope({
       service: SERVICE,
@@ -388,6 +409,7 @@ export class SettingsEmployeeService {
       return tenantMismatch;
     }
 
+    await this.hydrateGroups(user.tenantId);
     const adminGuard = await this.validateLastActiveAdministrator(user, this.getEmployeeSettings(user).roleKey, "deactivated", "deactivateEmployee");
     if (adminGuard) return adminGuard;
 
@@ -400,6 +422,102 @@ export class SettingsEmployeeService {
       data: {
         auditEvent: this.persistAuditEvent(auditEvent("settings.employee.deactivate", saved.tenantId, saved.id, payload.reason ?? "Employee deactivated")),
         employee: this.toEmployee(saved)
+      }
+    });
+  }
+
+  async deleteEmployee(employeeId: string, payload: { reason?: string } = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const user = await this.identityRepository.findTenantUser(employeeId);
+    if (!user) {
+      return notFoundEnvelope("deleteEmployee", employeeId);
+    }
+    const tenantMismatch = validateEmployeeTenant("deleteEmployee", user, options.tenantId);
+    if (tenantMismatch) {
+      return tenantMismatch;
+    }
+
+    await this.hydrateGroups(user.tenantId);
+    const adminGuard = await this.validateLastActiveAdministrator(user, this.getEmployeeSettings(user).roleKey, "deactivated", "deleteEmployee");
+    if (adminGuard) return adminGuard;
+
+    const deleted = await this.identityRepository.deleteTenantUser(user.id);
+    this.employeeSettings.delete(user.id);
+    this.removeGroupMember(user.id, user.tenantId);
+    await this.persistGroups(user.tenantId);
+
+    return createEnvelope({
+      service: SERVICE,
+      operation: "deleteEmployee",
+      traceId: identityTraceId(SERVICE, "deleteEmployee"),
+      meta: apiMeta({ employeeId: user.id, tenantId: user.tenantId }),
+      data: {
+        auditEvent: this.persistAuditEvent(auditEvent("settings.employee.delete", user.tenantId, user.id, payload.reason ?? "Employee deleted")),
+        deleted: Boolean(deleted),
+        email: user.email,
+        employeeId: user.id
+      }
+    });
+  }
+
+  async resendEmployeeInvite(employeeId: string, payload: { reason?: string } = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const user = await this.identityRepository.findTenantUser(employeeId);
+    if (!user) {
+      return notFoundEnvelope("resendEmployeeInvite", employeeId);
+    }
+    const tenantMismatch = validateEmployeeTenant("resendEmployeeInvite", user, options.tenantId);
+    if (tenantMismatch) {
+      return tenantMismatch;
+    }
+    if (user.status !== "invited") {
+      return invalidEnvelope("resendEmployeeInvite", "employee_not_invited", "Invite can be resent only for employees in invited state.", {
+        employeeId: user.id,
+        status: user.status,
+        tenantId: user.tenantId
+      });
+    }
+
+    await this.hydrateGroups(user.tenantId);
+    const inviteToken = await this.identityRepository.createInviteToken({
+      code: `invite_${randomUUID()}`,
+      email: user.email,
+      tenantId: user.tenantId
+    });
+    let deliveryState = "sent";
+    try {
+      const delivery = this.inviteDelivery ?? createInviteMailDeliveryFromEnv();
+      await delivery.sendInvite({
+        code: inviteToken.code,
+        email: inviteToken.email,
+        expiresAt: inviteToken.expiresAt,
+        inviteeName: user.name,
+        tenantId: inviteToken.tenantId
+      });
+    } catch (error) {
+      deliveryState = "failed";
+      writeStructuredLog("warn", "Invite email delivery failed", {
+        errorName: error instanceof Error ? error.message : typeof error,
+        service: SERVICE,
+        tenantId: user.tenantId
+      });
+    }
+    const saved = await this.identityRepository.saveTenantUser({ ...user, inviteStatus: "pending" });
+
+    return createEnvelope({
+      service: SERVICE,
+      operation: "resendEmployeeInvite",
+      traceId: identityTraceId(SERVICE, "resendEmployeeInvite"),
+      meta: apiMeta({ employeeId: saved.id, tenantId: saved.tenantId }),
+      data: {
+        auditEvent: this.persistAuditEvent(auditEvent("settings.employee.invite_resend", saved.tenantId, saved.id, payload.reason ?? "Invite resent")),
+        employee: this.toEmployee(saved),
+        inviteDescriptor: {
+          code: inviteToken.code,
+          deliveryState,
+          email: inviteToken.email,
+          expiresAt: inviteToken.expiresAt,
+          id: inviteToken.id,
+          tenantId: inviteToken.tenantId
+        }
       }
     });
   }
@@ -466,19 +584,22 @@ export class SettingsEmployeeService {
       return invalidEnvelope("createGroup", "group_name_required", "Group name is required.", { tenantId });
     }
 
-    this.ensureDefaultGroupsForTenant(tenantId);
     const group: EmployeeGroup = {
       channels: normalizeChannels(payload.channels ?? supportedChannels),
       id: `group-${slugify(name)}-${randomUUID().slice(0, 8)}`,
-      memberIds: payload.memberIds ?? [],
+      memberIds: [],
       name,
       scope: String(payload.scope ?? "Tenant support").trim(),
       tenantId,
       updatedAt: new Date().toISOString()
     };
     this.groups.set(groupKey(tenantId, group.id), group);
+    if (payload.memberIds?.length) {
+      await this.applyGroupMembers(tenantId, group.id, payload.memberIds);
+    }
     await this.persistGroups(tenantId);
 
+    const persisted = this.getGroup(tenantId, group.id) ?? group;
     return createEnvelope({
       service: SERVICE,
       operation: "createGroup",
@@ -486,7 +607,7 @@ export class SettingsEmployeeService {
       meta: apiMeta({ groupId: group.id, tenantId }),
       data: {
         auditEvent: this.persistAuditEvent(auditEvent("settings.group.create", tenantId, group.id, "Employee group created")),
-        group
+        group: { ...persisted, channels: [...persisted.channels], memberIds: [...persisted.memberIds] }
       }
     });
   }
@@ -499,7 +620,6 @@ export class SettingsEmployeeService {
 
     await this.hydrateGroups(tenantId);
 
-    this.ensureDefaultGroupsForTenant(tenantId);
     const group = this.groups.get(groupKey(tenantId, groupId));
     if (!group) {
       return createEnvelope({
@@ -516,13 +636,17 @@ export class SettingsEmployeeService {
     const updated: EmployeeGroup = {
       ...group,
       channels: payload.channels ? normalizeChannels(payload.channels) : group.channels,
-      memberIds: payload.memberIds ?? group.memberIds,
+      memberIds: [...group.memberIds],
       name: String(payload.name ?? group.name).trim() || group.name,
       scope: String(payload.scope ?? group.scope).trim() || group.scope,
       updatedAt: new Date().toISOString()
     };
     this.groups.set(groupKey(tenantId, groupId), updated);
+    if (payload.memberIds !== undefined) {
+      await this.applyGroupMembers(tenantId, groupId, payload.memberIds);
+    }
     await this.persistGroups(tenantId);
+    const persisted = this.getGroup(tenantId, groupId) ?? updated;
 
     return createEnvelope({
       service: SERVICE,
@@ -531,9 +655,111 @@ export class SettingsEmployeeService {
       meta: apiMeta({ groupId, tenantId }),
       data: {
         auditEvent: this.persistAuditEvent(auditEvent("settings.group.update", tenantId, groupId, "Employee group updated")),
-        group: updated
+        group: { ...persisted, channels: [...persisted.channels], memberIds: [...persisted.memberIds] }
       }
     });
+  }
+
+  async deleteGroup(groupId: string, payload: GroupMutationPayload & { reason?: string } = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = normalizeTenantId(payload.tenantId ?? options.tenantId);
+    if (!tenantId) {
+      return tenantContextRequiredEnvelope("deleteGroup", { groupId });
+    }
+
+    await this.hydrateGroups(tenantId);
+    const group = this.groups.get(groupKey(tenantId, groupId));
+    if (!group) {
+      return createEnvelope({
+        service: SERVICE,
+        operation: "deleteGroup",
+        traceId: identityTraceId(SERVICE, "deleteGroup"),
+        status: "not_found",
+        meta: apiMeta({ groupId, tenantId }),
+        data: { groupId, tenantId },
+        error: { code: "group_not_found", message: `Group ${groupId} was not found.` }
+      });
+    }
+
+    const remaining = this.listGroups(tenantId).filter((item) => item.id !== groupId);
+    if (!remaining.length) {
+      return invalidEnvelope("deleteGroup", "group_last_remaining", "At least one employee group must remain.", { groupId, tenantId });
+    }
+    const fallbackGroupId = remaining.some((item) => item.id === "group-line-1") ? "group-line-1" : remaining[0].id;
+
+    // Сотрудники удаляемой группы переводятся в фолбэк-группу, чтобы каждый
+    // сотрудник всегда оставался ровно в одной группе.
+    const users = await this.identityRepository.findTenantUsers(tenantId);
+    const movedEmployeeIds: string[] = [];
+    for (const user of users) {
+      const settings = this.getEmployeeSettings(user);
+      if (settings.groupId !== groupId) {
+        continue;
+      }
+      const next: EmployeeSettingsOverlay = { ...settings, groupId: fallbackGroupId };
+      await this.identityRepository.saveTenantUser({
+        ...user,
+        metadata: { ...(user.metadata ?? {}), employeeSettings: next }
+      });
+      this.employeeSettings.set(user.id, next);
+      this.syncGroupMember(fallbackGroupId, user.id, tenantId);
+      movedEmployeeIds.push(user.id);
+    }
+
+    this.groups.delete(groupKey(tenantId, groupId));
+    await this.teamDirectoryRepository.deleteTeam(tenantId, groupId);
+    await this.persistGroups(tenantId);
+
+    return createEnvelope({
+      service: SERVICE,
+      operation: "deleteGroup",
+      traceId: identityTraceId(SERVICE, "deleteGroup"),
+      meta: apiMeta({ groupId, tenantId }),
+      data: {
+        auditEvent: this.persistAuditEvent(auditEvent("settings.group.delete", tenantId, groupId, payload.reason ?? "Employee group deleted")),
+        fallbackGroupId,
+        groupId,
+        movedEmployeeIds
+      }
+    });
+  }
+
+  // Приводит состав группы к заданному списку: добавленные сотрудники
+  // закрепляются за группой, исключённые переезжают в фолбэк-группу.
+  private async applyGroupMembers(tenantId: string, groupId: string, requestedMemberIds: string[]): Promise<void> {
+    const group = this.groups.get(groupKey(tenantId, groupId));
+    if (!group) {
+      return;
+    }
+
+    const users = await this.identityRepository.findTenantUsers(tenantId);
+    const usersById = new Map(users.map((user) => [user.id, user]));
+    const nextMemberIds = Array.from(new Set(requestedMemberIds.map(String).filter((id) => usersById.has(id))));
+    const previousMemberIds = users
+      .filter((user) => this.getEmployeeSettings(user).groupId === groupId)
+      .map((user) => user.id);
+    const removed = previousMemberIds.filter((id) => !nextMemberIds.includes(id));
+    const added = nextMemberIds.filter((id) => !previousMemberIds.includes(id));
+    const fallback = this.listGroups(tenantId).find((item) => item.id !== groupId);
+    const fallbackGroupId = fallback?.id ?? groupId;
+
+    for (const employeeId of [...added, ...removed]) {
+      const user = usersById.get(employeeId);
+      if (!user) {
+        continue;
+      }
+      const targetGroupId = added.includes(employeeId) ? groupId : fallbackGroupId;
+      const settings = this.getEmployeeSettings(user);
+      if (settings.groupId === targetGroupId) {
+        continue;
+      }
+      const next: EmployeeSettingsOverlay = { ...settings, groupId: targetGroupId };
+      await this.identityRepository.saveTenantUser({
+        ...user,
+        metadata: { ...(user.metadata ?? {}), employeeSettings: next }
+      });
+      this.employeeSettings.set(user.id, next);
+      this.syncGroupMember(targetGroupId, user.id, tenantId);
+    }
   }
 
   private toEmployee(user: IdentityTenantUser): Record<string, unknown> {
@@ -557,7 +783,7 @@ export class SettingsEmployeeService {
       sensitiveData: settings.sensitiveData,
       credentials: { passwordStatus: passwordStatusFromUser(user) },
       passwordStatus: passwordStatusFromUser(user),
-      mfaStatus: user.mfa,
+      mfaStatus: normalizeMfaStatus(user.mfa),
       inviteStatus: user.inviteStatus,
       lastLogin: user.lastActiveAt ?? "Never",
       lastActiveAt: user.lastActiveAt,
@@ -580,7 +806,7 @@ export class SettingsEmployeeService {
       canOverride: roleKey !== "employee",
       channels: roleKey === "admin" ? supportedChannels : roleKey === "senior" ? ["SDK", "Telegram", "VK"] : ["SDK", "Telegram"],
       chatLimit: roleKey === "admin" ? 20 : roleKey === "senior" ? 14 : 8,
-      groupId: normalizeGroupId(undefined, roleKey),
+      groupId: this.resolveGroupId(user.tenantId, undefined, roleKey) ?? normalizeGroupId(undefined, roleKey),
       roleKey,
       sensitiveData: roleKey !== "employee"
     };
@@ -590,7 +816,6 @@ export class SettingsEmployeeService {
   }
 
   private listGroups(tenantId: string): EmployeeGroup[] {
-    this.ensureDefaultGroupsForTenant(tenantId);
     return Array.from(this.groups.values()).map((group) => ({
       ...group,
       channels: [...group.channels],
@@ -599,7 +824,6 @@ export class SettingsEmployeeService {
   }
 
   private getGroup(tenantId: string, groupId: string): EmployeeGroup | undefined {
-    this.ensureDefaultGroupsForTenant(tenantId);
     return this.groups.get(groupKey(tenantId, groupId));
   }
 
@@ -617,17 +841,54 @@ export class SettingsEmployeeService {
     }
   }
 
+  // Сотрудник состоит ровно в одной группе: добавление в целевую группу
+  // одновременно убирает его из всех остальных групп тенанта.
   private syncGroupMember(groupId: string, employeeId: string, tenantId: string): void {
-    const group = this.getGroup(tenantId, groupId);
-    if (!group || group.memberIds.includes(employeeId)) {
-      return;
+    for (const [key, group] of this.groups) {
+      if (group.tenantId !== tenantId) {
+        continue;
+      }
+      const isTarget = group.id === groupId;
+      const isMember = group.memberIds.includes(employeeId);
+      if (isTarget && !isMember) {
+        this.groups.set(key, {
+          ...group,
+          memberIds: [...group.memberIds, employeeId],
+          updatedAt: new Date().toISOString()
+        });
+      } else if (!isTarget && isMember) {
+        this.groups.set(key, {
+          ...group,
+          memberIds: group.memberIds.filter((memberId) => memberId !== employeeId),
+          updatedAt: new Date().toISOString()
+        });
+      }
     }
+  }
 
-    this.groups.set(groupKey(group.tenantId, groupId), {
-      ...group,
-      memberIds: [...group.memberIds, employeeId],
-      updatedAt: new Date().toISOString()
-    });
+  private removeGroupMember(employeeId: string, tenantId: string): void {
+    for (const [key, group] of this.groups) {
+      if (group.tenantId !== tenantId || !group.memberIds.includes(employeeId)) {
+        continue;
+      }
+      this.groups.set(key, {
+        ...group,
+        memberIds: group.memberIds.filter((memberId) => memberId !== employeeId),
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  private resolveGroupId(tenantId: string, requested: unknown, roleKey: string): string | null {
+    const raw = String(requested ?? "").trim();
+    if (raw) {
+      return this.groups.has(groupKey(tenantId, raw)) ? raw : null;
+    }
+    const fallback = normalizeGroupId(undefined, roleKey);
+    if (this.groups.has(groupKey(tenantId, fallback))) {
+      return fallback;
+    }
+    return this.listGroups(tenantId)[0]?.id ?? null;
   }
 
   private async hydrateGroups(tenantId: string): Promise<void> {
@@ -648,7 +909,11 @@ export class SettingsEmployeeService {
       }
     }
     this.hydratedGroupTenants.add(tenantId);
-    this.ensureDefaultGroupsForTenant(tenantId);
+    // Стартовые группы создаются только для тенанта без единой группы —
+    // иначе удалённые группы «воскресали» бы после перезапуска сервиса.
+    if (!this.listGroups(tenantId).length) {
+      this.ensureDefaultGroupsForTenant(tenantId);
+    }
   }
 
   private async persistGroups(tenantId: string): Promise<void> {
@@ -675,15 +940,22 @@ export class SettingsEmployeeService {
     return event;
   }
 
+  // Тенанту показываются только назначаемые роли: платформенная роль
+  // service_admin в этот список не попадает (раньше она отображалась вторым
+  // «Сотрудником» и ломала смену ролей).
   private async buildRoleReadModel() {
     const permissionRoles = await this.identityRepository.listPermissionRoles();
-    return permissionRoles.map((role) => ({
-      key: role.key,
-      name: roleNameFromKey(role.key),
-      description: role.description,
-      actions: role.actions,
-      groupIds: role.groupIds
-    }));
+    const order = new Map(assignableRoleKeys.map((key, index) => [key, index]));
+    return permissionRoles
+      .filter((role) => order.has(role.key))
+      .sort((left, right) => (order.get(left.key) ?? 0) - (order.get(right.key) ?? 0))
+      .map((role) => ({
+        key: role.key,
+        name: roleNameFromKey(role.key),
+        description: roleDescriptionFromKey(role.key),
+        actions: role.actions,
+        groupIds: role.groupIds
+      }));
   }
 }
 
@@ -811,10 +1083,19 @@ function normalizeEmployeeStatus(value: unknown): string | null {
   return ["active", "blocked", "deactivated", "inactive", "invited"].includes(status) ? status : null;
 }
 
+const assignableRoleKeys = ["employee", "senior", "admin"];
+
 function roleNameFromKey(roleKey: string): string {
   if (roleKey === "admin") return "Администратор";
   if (roleKey === "senior") return "Старший сотрудник";
+  if (roleKey === "service_admin") return "Администратор сервиса";
   return "Сотрудник";
+}
+
+function roleDescriptionFromKey(roleKey: string): string {
+  if (roleKey === "admin") return "Полный доступ: настройки, команда, отчёты и интеграции.";
+  if (roleKey === "senior") return "Диалоги, панель контроля, отчёты, качество и командные шаблоны.";
+  return "Диалоги, клиенты и личные шаблоны ответов.";
 }
 
 function normalizeGroupId(value: unknown, roleKey: string): string {
@@ -847,11 +1128,19 @@ function passwordStatusFromUser(user: IdentityTenantUser): string {
   return "active";
 }
 
+// MFA на платформе — это обязательный одноразовый код на почту при входе.
+// Он включён для всех сотрудников по умолчанию; отдельного состояния
+// «не настроена» больше нет, единственное исключение — ожидание повторного
+// входа после сброса администратором.
+function normalizeMfaStatus(value: string): string {
+  return value === "reset_pending" ? "reset_pending" : "enabled";
+}
+
 function buildExceptions(user: IdentityTenantUser, settings: EmployeeSettingsOverlay): string[] {
   const exceptions: string[] = [];
-  if (user.mfa !== "enabled") exceptions.push("MFA requires attention");
-  if (!settings.sensitiveData) exceptions.push("Sensitive data masked");
-  if (settings.canOverride) exceptions.push("Queue override allowed");
+  if (normalizeMfaStatus(user.mfa) === "reset_pending") exceptions.push("MFA сброшена — подтвердится при следующем входе");
+  if (!settings.sensitiveData) exceptions.push("Персональные данные клиентов скрыты");
+  if (settings.canOverride) exceptions.push("Разрешено назначение сверх лимита чатов");
   return exceptions;
 }
 

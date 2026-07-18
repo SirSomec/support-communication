@@ -273,6 +273,7 @@ export function LandingPage({
           <a href="#ai-agent">ИИ-бот</a>
           <a href="#channels">Каналы</a>
           <a href="#tariffs">Тарифы</a>
+          <a href="#/docs">Документация API</a>
           <a href="#faq">FAQ</a>
         </nav>
         <div className="public-nav-actions">
@@ -550,7 +551,7 @@ export function LandingPage({
           </div>
           <div className="public-footer-column">
             <strong>Ресурсы</strong>
-            <span>Документация</span>
+            <a href="#/docs">Документация API</a>
             <span>Руководство по ИИ</span>
             <span>Безопасность</span>
           </div>

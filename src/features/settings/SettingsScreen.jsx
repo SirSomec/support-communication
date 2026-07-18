@@ -4,6 +4,7 @@ import { AdminWorkspaces } from "./AdminWorkspaces.jsx";
 import { ChannelConnectionsPanel } from "./ChannelConnectionsPanel.jsx";
 import { EmployeeManagementPanel } from "./EmployeeManagementPanel.jsx";
 import { ExternalAppPanel } from "./ExternalAppPanel.jsx";
+import { GroupManagementPanel } from "./GroupManagementPanel.jsx";
 import { RulesPanel } from "./RulesPanel.jsx";
 import { SettingsShell, settingsTabIds } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
@@ -21,6 +22,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
   const [connectionSummary, setConnectionSummary] = useState(null);
   const [externalSummary, setExternalSummary] = useState({ active: 0, total: 0 });
   const [employeeSummary, setEmployeeSummary] = useState({ total: 0 });
+  const [groupSummary, setGroupSummary] = useState({ total: 0 });
   const [topicTotals, setTopicTotals] = useState({ active: 0, archived: 0, total: 0 });
   const [rulesSummary, setRulesSummary] = useState({ active: 0 });
   const [loadError, setLoadError] = useState("");
@@ -59,6 +61,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
       }
 
       setEmployeeSummary({ total: employees.data?.employees?.length ?? 0 });
+      setGroupSummary({ total: employees.data?.groups?.length ?? 0 });
       setTopicTotals(topics.data?.totals ?? { active: 0, archived: 0, total: 0 });
       setRulesSummary({ active: rules.data?.totals?.active ?? 0 });
     }
@@ -108,6 +111,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
         : "загрузка...",
     external: externalSummary.total ? `${externalSummary.active} из ${externalSummary.total} активны` : "нет подключений",
     employees: `${employeeSummary.total} сотрудников`,
+    groups: `${groupSummary.total} групп`,
     topics: `${topicTotals.active} активных / ${topicTotals.archived} архив`,
     rules: `${rulesSummary.active} активных правил`
   };
@@ -190,8 +194,18 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
             access={access}
             canEditSettings={canEditSettings}
             canResetEmployeePassword={access.canResetPasswords}
+            onOpenGroups={() => setActiveTab("groups")}
             onToast={onToast}
             roleMode={roleMode}
+          />
+        ) : null}
+
+        {activeTab === "groups" ? (
+          <GroupManagementPanel
+            access={access}
+            canEditSettings={canEditSettings}
+            onSummaryChange={setGroupSummary}
+            onToast={onToast}
           />
         ) : null}
 

@@ -11,6 +11,7 @@ export interface TeamDirectoryRecord {
 
 interface TeamDirectoryPrismaClient {
   team: {
+    deleteMany(input: { where: { id: string; tenantId: string } }): Promise<{ count: number }>;
     findMany(input: { include: { memberships: { where: { active: true } } }; orderBy: { name: "asc" }; where: { tenantId: string } }): Promise<Array<Record<string, any>>>;
     upsert(input: { create: Record<string, unknown>; update: Record<string, unknown>; where: { tenantId_id: { id: string; tenantId: string } } }): Promise<unknown>;
   };
@@ -23,6 +24,7 @@ interface TeamDirectoryPrismaClient {
 }
 
 interface TeamDirectoryAdapter {
+  deleteTeam(tenantId: string, teamId: string): Promise<boolean>;
   findActiveTeamId(tenantId: string, operatorId: string): Promise<string | undefined>;
   listTeams(tenantId: string): Promise<TeamDirectoryRecord[]>;
   saveTeam(team: TeamDirectoryRecord): Promise<TeamDirectoryRecord>;
@@ -45,6 +47,9 @@ export class TeamDirectoryRepository {
   static inMemory(): TeamDirectoryRepository {
     const teams = new Map<string, TeamDirectoryRecord>();
     return new TeamDirectoryRepository({
+      async deleteTeam(tenantId, teamId) {
+        return teams.delete(key(tenantId, teamId));
+      },
       async findActiveTeamId(tenantId, operatorId) {
         return [...teams.values()].find((team) => team.tenantId === tenantId && team.memberIds.includes(operatorId))?.id;
       },
@@ -60,6 +65,15 @@ export class TeamDirectoryRepository {
 
   static prisma(client: TeamDirectoryPrismaClient): TeamDirectoryRepository {
     return new TeamDirectoryRepository({
+      async deleteTeam(tenantId, teamId) {
+        let removed = false;
+        await client.$transaction(async (transaction) => {
+          await transaction.teamMembership.deleteMany({ where: { teamId, tenantId } });
+          const result = await transaction.team.deleteMany({ where: { id: teamId, tenantId } });
+          removed = result.count > 0;
+        });
+        return removed;
+      },
       async findActiveTeamId(tenantId, operatorId) {
         const membership = await client.teamMembership.findFirst({
           orderBy: { createdAt: "asc" },
@@ -124,6 +138,10 @@ export class TeamDirectoryRepository {
         return clone(team);
       }
     });
+  }
+
+  deleteTeam(tenantId: string, teamId: string): Promise<boolean> {
+    return this.adapter.deleteTeam(tenantId, teamId);
   }
 
   listTeams(tenantId: string): Promise<TeamDirectoryRecord[]> {

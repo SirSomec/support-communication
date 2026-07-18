@@ -87,6 +87,8 @@ export interface WorkspaceServiceOptions {
 }
 
 export interface WorkspaceRequestContext {
+  operatorId?: string;
+  permissions?: string[];
   tenantId?: string;
 }
 
@@ -685,22 +687,26 @@ export class WorkspaceService {
 
   async fetchTemplates(filters: { operatorId?: string } = {}, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const templates = await this.listTemplates(context);
+    // Личные шаблоны видит владелец; командные и глобальные — вся команда.
+    // Старшие роли видят и чужие личные шаблоны, чтобы ими можно было управлять.
+    const visible = templates.filter((template) => isTemplateVisibleInContext(template, context));
 
     return createEnvelope({
       service: TEMPLATE_SERVICE,
       operation: "fetchTemplates",
       traceId: workspaceTraceId(TEMPLATE_SERVICE, "fetchTemplates"),
       partial: true,
-      meta: apiMeta({ operatorId: filters.operatorId ?? "current" }),
+      meta: apiMeta({ operatorId: filters.operatorId ?? context.operatorId ?? "current" }),
       data: {
-        operatorId: filters.operatorId ?? "current",
-        items: templates,
+        operatorId: filters.operatorId ?? context.operatorId ?? "current",
+        canManageShared: hasSharedTemplateAccess(context.permissions),
+        items: visible,
         source: "operator_template_library"
       }
     });
   }
 
-  async saveTemplate(template: { channel: string; id?: string; text: string; title: string; topic: string; version?: number }, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+  async saveTemplate(template: { channel: string; id?: string; scope?: string; text: string; title: string; topic: string; version?: number }, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     if (!context.tenantId) {
       return tenantContextRequiredEnvelope(TEMPLATE_SERVICE, "saveTemplate");
     }
@@ -711,13 +717,42 @@ export class WorkspaceService {
     if (existing && existing.tenantId !== context.tenantId) {
       return notFoundEnvelope(TEMPLATE_SERVICE, "saveTemplate", "template_not_found", `Template ${templateId} was not found.`, { templateId });
     }
+
+    const canManageShared = hasSharedTemplateAccess(context.permissions);
+    const existingScope = existing ? normalizeTemplateScope(existing.scope) ?? "team" : undefined;
+    // Право на редактирование существующего шаблона: командные и глобальные
+    // меняют только старшие роли, личные — владелец или старшая роль.
+    if (existing) {
+      const ownsPersonal = existingScope === "personal"
+        && (!existing.ownerId || existing.ownerId === context.operatorId);
+      if (!canManageShared && !(existingScope === "personal" && ownsPersonal)) {
+        return deniedEnvelope(TEMPLATE_SERVICE, "saveTemplate", "template_scope_forbidden", "Only senior staff can manage shared templates.", { scope: existingScope, templateId });
+      }
+    }
+
+    const requestedScope = normalizeTemplateScope(template.scope);
+    const scope = requestedScope
+      ?? existingScope
+      ?? (canManageShared ? "team" : "personal");
+    if (scope !== "personal" && !canManageShared) {
+      return deniedEnvelope(TEMPLATE_SERVICE, "saveTemplate", "template_scope_forbidden", "Only senior staff can create shared templates.", { scope, templateId });
+    }
+    const ownerId = scope === "personal" ? (existing?.ownerId ?? context.operatorId ?? null) : null;
+    if (scope === "personal" && !ownerId) {
+      return invalidEnvelope(TEMPLATE_SERVICE, "saveTemplate", "template_owner_required", "Personal templates require an operator context.", { templateId });
+    }
+
     const auditId = makeAuditId("template");
     let saved: TemplateRecord;
     try {
       saved = await this.workspaceRepository.saveTemplate({
-        ...template,
+        channel: template.channel,
+        text: template.text,
+        title: template.title,
+        topic: template.topic,
         id: templateId,
-        scope: "team",
+        ownerId,
+        scope,
         tenantId: context.tenantId,
         updated: new Date().toISOString(),
         usage: 0,
@@ -1266,6 +1301,31 @@ function auditEvent(scope: string, action: string, reason?: string): Record<stri
     immutable: true,
     reason
   };
+}
+
+// Область доступа шаблона хранится в канонических ключах personal/team/global;
+// русские подписи из UI принимаются как алиасы.
+export function normalizeTemplateScope(value: unknown): "personal" | "team" | "global" | undefined {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (["personal", "private", "личный"].includes(raw)) return "personal";
+  if (["team", "shared", "командный"].includes(raw)) return "team";
+  if (["global", "глобальный"].includes(raw)) return "global";
+  return undefined;
+}
+
+export function hasSharedTemplateAccess(permissions?: string[]): boolean {
+  const list = Array.isArray(permissions) ? permissions : [];
+  return list.includes("*") || list.includes("templates.manageShared");
+}
+
+function isTemplateVisibleInContext(template: TemplateRecord, context: WorkspaceRequestContext): boolean {
+  if (normalizeTemplateScope(template.scope) !== "personal") {
+    return true;
+  }
+  if (!template.ownerId) {
+    return true;
+  }
+  return template.ownerId === context.operatorId || hasSharedTemplateAccess(context.permissions);
 }
 
 function buildMergeGraph(items: ClientProfileRecord[]): Array<{ candidateIds: string[]; profileId: string }> {

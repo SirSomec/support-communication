@@ -1,12 +1,35 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { KeyRound, RefreshCcw, ShieldCheck, Smartphone, UserPlus, UsersRound } from "lucide-react";
+import { Copy, KeyRound, MailPlus, RefreshCcw, ShieldCheck, Smartphone, Trash2, UserPlus, UserX, UsersRound } from "lucide-react";
 import { ChannelBadge, ChannelList, ToolbarSearch } from "../../ui.jsx";
 import { FieldHint, InlineHint, SettingsModal, SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import { RoleMatrixModal } from "./RoleMatrixModal.jsx";
 import { settingsService } from "../../services/settingsService.js";
 
-export function EmployeeManagementPanel({ access, canEditSettings, canResetEmployeePassword, onToast, roleMode }) {
+const STATUS_LABELS = {
+  active: "Активен",
+  blocked: "Заблокирован",
+  deactivated: "Отключён",
+  inactive: "Неактивен",
+  invited: "Приглашён"
+};
+
+const MFA_LABELS = {
+  enabled: "Включена — код на почту при входе",
+  reset_pending: "Сброшена — подтвердится при следующем входе"
+};
+
+const PASSWORD_LABELS = {
+  active: "Задан",
+  invite_pending: "Ожидает принятия приглашения",
+  reset_sent: "Отправлена ссылка для смены"
+};
+
+// Поля карточки, которые редактируются и сохраняются кнопкой «Сохранить».
+const EDITABLE_FIELDS = ["canOverride", "channels", "chatLimit", "groupId", "roleKey", "sensitiveData"];
+
+export function EmployeeManagementPanel({ access, canEditSettings, canResetEmployeePassword, onOpenGroups, onToast, roleMode }) {
   const [employees, setEmployees] = useState([]);
+  const [baseline, setBaseline] = useState({});
   const [groups, setGroups] = useState([]);
   const [roles, setRoles] = useState([]);
   const [supportedChannels, setSupportedChannels] = useState([]);
@@ -19,16 +42,25 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [inviteDraft, setInviteDraft] = useState({ email: "", name: "", roleKey: "employee", groupId: "group-line-1" });
-  const [groupDraft, setGroupDraft] = useState({ channels: ["SDK"], groupId: "", name: "", scope: "" });
+  const [inviteDraft, setInviteDraft] = useState({ email: "", name: "", roleKey: "employee", groupId: "" });
   const [inviteError, setInviteError] = useState("");
-  const [groupError, setGroupError] = useState("");
+  const [inviteResult, setInviteResult] = useState(null);
   const [isInviteOpen, setInviteOpen] = useState(false);
-  const [isGroupsOpen, setGroupsOpen] = useState(false);
   const [isRoleMatrixOpen, setRoleMatrixOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
 
   const canEditEmployeeDirectory = canEditSettings && !error;
   const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId) ?? employees[0] ?? null;
+  const selectedIsDirty = useMemo(() => {
+    if (!selectedEmployee) {
+      return false;
+    }
+    const base = baseline[selectedEmployee.id];
+    if (!base) {
+      return false;
+    }
+    return EDITABLE_FIELDS.some((field) => JSON.stringify(selectedEmployee[field]) !== JSON.stringify(base[field]));
+  }, [baseline, selectedEmployee]);
 
   useEffect(() => {
     let ignore = false;
@@ -54,6 +86,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
 
       const nextEmployees = normalizeEmployees(response.data?.employees ?? [], response.data?.roles ?? [], response.data?.groups ?? []);
       setEmployees(nextEmployees);
+      setBaseline(buildBaseline(nextEmployees));
       setGroups(response.data?.groups ?? []);
       setRoles(response.data?.roles ?? []);
       setSupportedChannels(response.data?.supportedChannels ?? []);
@@ -86,6 +119,11 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
         ...employee.channels
       ].join(" ").toLowerCase().includes(query));
   }, [channelFilter, employeeQuery, employees, groupFilter, roleFilter, statusFilter]);
+
+  function applySavedEmployee(saved) {
+    setEmployees((current) => current.map((employee) => employee.id === saved.id ? saved : employee));
+    setBaseline((current) => ({ ...current, [saved.id]: snapshotEmployee(saved) }));
+  }
 
   function patchSelectedEmployee(patch) {
     if (!selectedEmployee || !canEditEmployeeDirectory) {
@@ -129,8 +167,8 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
       return;
     }
 
-    const saved = normalizeEmployee(response.data?.employee);
-    setEmployees((current) => current.map((employee) => employee.id === saved.id ? saved : employee));
+    const saved = normalizeEmployee(response.data?.employee, roles, groups);
+    applySavedEmployee(saved);
     onToast(`${saved.employee}: настройки сохранены. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
   }
 
@@ -150,8 +188,8 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
       return;
     }
 
-    const saved = normalizeEmployee(response.data?.employee);
-    setEmployees((current) => current.map((employee) => employee.id === saved.id ? saved : employee));
+    const saved = normalizeEmployee(response.data?.employee, roles, groups);
+    applySavedEmployee(saved);
     onToast(`${saved.employee}: ссылка для смены пароля отправлена. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
   }
 
@@ -171,9 +209,87 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
       return;
     }
 
-    const saved = normalizeEmployee(response.data?.employee);
-    setEmployees((current) => current.map((employee) => employee.id === saved.id ? saved : employee));
-    onToast(`${saved.employee}: MFA переведена в сброс. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
+    const saved = normalizeEmployee(response.data?.employee, roles, groups);
+    applySavedEmployee(saved);
+    onToast(`${saved.employee}: MFA сброшена — подтвердится при следующем входе. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
+  }
+
+  async function handleDeactivateEmployee() {
+    const target = confirmAction?.employee;
+    setConfirmAction(null);
+    if (!target || !canEditEmployeeDirectory || saving) {
+      return;
+    }
+
+    setSaving(true);
+    const response = await settingsService.deactivateEmployee({
+      employeeId: target.id,
+      reason: "Deactivated from employee settings"
+    }).finally(() => setSaving(false));
+
+    if (response.status !== "ok") {
+      setError(response.error?.message ?? "Не удалось отключить сотрудника.");
+      return;
+    }
+
+    const saved = normalizeEmployee(response.data?.employee, roles, groups);
+    applySavedEmployee(saved);
+    onToast(`${saved.employee}: доступ отключён. Пригласить заново можно с той же почтой. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
+  }
+
+  async function handleDeleteEmployee() {
+    const target = confirmAction?.employee;
+    setConfirmAction(null);
+    if (!target || !canEditEmployeeDirectory || saving) {
+      return;
+    }
+
+    setSaving(true);
+    const response = await settingsService.deleteEmployee({
+      employeeId: target.id,
+      reason: "Deleted from employee settings"
+    }).finally(() => setSaving(false));
+
+    if (response.status !== "ok") {
+      setError(response.error?.message ?? "Не удалось удалить сотрудника.");
+      return;
+    }
+
+    setEmployees((current) => current.filter((employee) => employee.id !== target.id));
+    setBaseline((current) => {
+      const next = { ...current };
+      delete next[target.id];
+      return next;
+    });
+    setSelectedEmployeeId((current) => current === target.id ? "" : current);
+    onToast(`${target.employee}: учётная запись удалена. Почту ${target.email} можно использовать для нового приглашения. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
+  }
+
+  async function handleResendInvite() {
+    if (!selectedEmployee || !canEditEmployeeDirectory || saving) {
+      return;
+    }
+
+    setSaving(true);
+    const response = await settingsService.resendEmployeeInvite({
+      employeeId: selectedEmployee.id,
+      reason: "Invite resent from employee settings"
+    }).finally(() => setSaving(false));
+
+    if (response.status !== "ok") {
+      setError(response.error?.message ?? "Не удалось отправить приглашение повторно.");
+      return;
+    }
+
+    const saved = normalizeEmployee(response.data?.employee, roles, groups);
+    applySavedEmployee(saved);
+    setInviteResult({
+      code: response.data?.inviteDescriptor?.code ?? "",
+      deliveryState: response.data?.inviteDescriptor?.deliveryState ?? "sent",
+      email: saved.email,
+      employee: saved.employee
+    });
+    onToast(`${saved.employee}: приглашение отправлено повторно.`);
   }
 
   async function handleInviteEmployee(event) {
@@ -184,7 +300,10 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
 
     setSaving(true);
     setInviteError("");
-    const response = await settingsService.inviteEmployee(inviteDraft);
+    const response = await settingsService.inviteEmployee({
+      ...inviteDraft,
+      groupId: inviteDraft.groupId || groups[0]?.id || ""
+    });
     setSaving(false);
 
     if (response.status !== "ok") {
@@ -192,52 +311,32 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
       return;
     }
 
-    const invited = normalizeEmployee(response.data?.employee);
-    setEmployees((current) => [invited, ...current]);
+    const invited = normalizeEmployee(response.data?.employee, roles, groups);
+    setEmployees((current) => [invited, ...current.filter((employee) => employee.id !== invited.id)]);
+    setBaseline((current) => ({ ...current, [invited.id]: snapshotEmployee(invited) }));
     setSelectedEmployeeId(invited.id);
-    setInviteDraft({ email: "", name: "", roleKey: "employee", groupId: "group-line-1" });
+    setInviteDraft({ email: "", name: "", roleKey: "employee", groupId: "" });
     setInviteOpen(false);
+    setInviteResult({
+      code: response.data?.inviteDescriptor?.code ?? "",
+      deliveryState: response.data?.inviteDescriptor?.deliveryState ?? "sent",
+      email: invited.email,
+      employee: invited.employee
+    });
     const inviteDeliveryFailed = response.data?.inviteDescriptor?.deliveryState === "failed";
     const deliveryNote = inviteDeliveryFailed
-      ? "приглашение создано, но письмо не ушло — проверьте служебную почту в настройках"
+      ? "приглашение создано, но письмо не ушло — передайте код вручную"
       : "приглашение отправлено";
     onToast(`${invited.employee}: ${deliveryNote}. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
   }
 
-  async function handleSaveGroup(event) {
-    event.preventDefault();
-    if (!canEditEmployeeDirectory) {
-      return;
+  async function copyInviteCode(code) {
+    try {
+      await navigator.clipboard.writeText(code);
+      onToast("Код приглашения скопирован.");
+    } catch {
+      onToast("Не удалось скопировать код — выделите его вручную.");
     }
-
-    const payload = {
-      channels: groupDraft.channels,
-      name: groupDraft.name.trim(),
-      scope: groupDraft.scope.trim()
-    };
-    if (!payload.name || !payload.scope) {
-      setGroupError("Укажите название и область ответственности группы.");
-      return;
-    }
-
-    setSaving(true);
-    setGroupError("");
-    const response = groupDraft.groupId
-      ? await settingsService.updateGroup({ groupId: groupDraft.groupId, ...payload })
-      : await settingsService.createGroup(payload);
-    setSaving(false);
-
-    if (response.status !== "ok") {
-      setGroupError(response.error?.message ?? "Не удалось сохранить группу.");
-      return;
-    }
-
-    const savedGroup = response.data?.group;
-    setGroups((current) => groupDraft.groupId
-      ? current.map((group) => group.id === savedGroup.id ? savedGroup : group)
-      : [...current, savedGroup]);
-    setGroupDraft({ channels: ["SDK"], groupId: "", name: "", scope: "" });
-    onToast(`${savedGroup.name}: группа сохранена. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
   }
 
   function openInviteModal() {
@@ -248,24 +347,6 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
 
     setInviteError("");
     setInviteOpen(true);
-  }
-
-  function editGroup(group) {
-    setGroupDraft({
-      channels: group.channels?.length ? group.channels : ["SDK"],
-      groupId: group.id,
-      name: group.name,
-      scope: group.scope
-    });
-  }
-
-  function toggleGroupChannel(channelName) {
-    setGroupDraft((current) => ({
-      ...current,
-      channels: current.channels.includes(channelName)
-        ? current.channels.filter((channel) => channel !== channelName)
-        : [...current.channels, channelName]
-    }));
   }
 
   return (
@@ -280,7 +361,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
               <ShieldCheck size={16} />
               Права ролей
             </button>
-            <button className="settings-ghost-action" onClick={() => setGroupsOpen(true)} title="Группы сотрудников и их каналы" type="button">
+            <button className="settings-ghost-action" onClick={() => onOpenGroups?.()} title="Перейти к управлению группами" type="button">
               <UsersRound size={16} />
               Группы
             </button>
@@ -343,7 +424,10 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                 type="button"
               >
                 <strong>{employee.employee}</strong>
-                <span>{employee.role} · {employee.group} · {employee.status}</span>
+                <span>
+                  {employee.role} · {employee.group}
+                  <em className={`employee-status-badge status-${employee.status}`}>{statusLabel(employee.status)}</em>
+                </span>
                 <ChannelList channels={employee.channels} />
               </button>
             ))}
@@ -359,7 +443,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
               <header>
                 <div>
                   <strong>{selectedEmployee.employee}</strong>
-                  <span>{selectedEmployee.role} · {selectedEmployee.lastLogin}</span>
+                  <span>{selectedEmployee.email} · {statusLabel(selectedEmployee.status)} · вход: {formatLastLogin(selectedEmployee.lastLogin)}</span>
                 </div>
                 <button
                   disabled={!canResetEmployeePassword || saving}
@@ -373,7 +457,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                 <button
                   disabled={!canResetEmployeePassword || saving}
                   onClick={handleMfaReset}
-                  title={canResetEmployeePassword ? "Сбросить второй фактор — сотрудник настроит его заново" : access.reason}
+                  title={canResetEmployeePassword ? "Сбросить второй фактор — подтвердится при следующем входе сотрудника" : access.reason}
                   type="button"
                 >
                   <Smartphone size={16} />
@@ -381,12 +465,30 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                 </button>
               </header>
               <div className="employee-editor-body settings-scroll">
+                {selectedEmployee.status === "invited" ? (
+                  <InlineHint>
+                    Сотрудник ещё не принял приглашение и не может войти в систему. Если письмо не дошло —
+                    отправьте приглашение повторно или передайте код вручную.
+                  </InlineHint>
+                ) : null}
+                {selectedEmployee.status === "deactivated" ? (
+                  <InlineHint>
+                    Доступ отключён: сотрудник не может войти. Можно пригласить его заново с той же почтой
+                    через кнопку «Пригласить» или удалить учётную запись насовсем.
+                  </InlineHint>
+                ) : null}
                 <div className="employee-editor-grid">
                   <label>
                     <span>Роль</span>
-                    <select disabled={!canEditEmployeeDirectory} value={selectedEmployee.roleKey} onChange={(event) => patchSelectedEmployee({ roleKey: event.target.value, role: roleName(roles, event.target.value) })} title={canEditEmployeeDirectory ? "Изменить роль" : access.reason}>
+                    <select
+                      disabled={!canEditEmployeeDirectory}
+                      value={selectedEmployee.roleKey}
+                      onChange={(event) => patchSelectedEmployee({ roleKey: event.target.value, role: roleName(roles, event.target.value) })}
+                      title={roleDescription(roles, selectedEmployee.roleKey) || (canEditEmployeeDirectory ? "Изменить роль" : access.reason)}
+                    >
                       {roles.map((role) => <option value={role.key} key={role.key}>{role.name}</option>)}
                     </select>
+                    <FieldHint>{roleDescription(roles, selectedEmployee.roleKey)}</FieldHint>
                   </label>
                   <label>
                     <span>Группа</span>
@@ -400,11 +502,11 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                   </label>
                   <div>
                     <span>Пароль</span>
-                    <strong>{selectedEmployee.passwordStatus}</strong>
+                    <strong>{passwordLabel(selectedEmployee.passwordStatus)}</strong>
                   </div>
                   <div>
                     <span>MFA</span>
-                    <strong>{selectedEmployee.mfaStatus}</strong>
+                    <strong>{mfaLabel(selectedEmployee.mfaStatus)}</strong>
                   </div>
                 </div>
                 <div className="employee-channel-editor" aria-label="Каналы сотрудника">
@@ -430,10 +532,13 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                       checked={selectedEmployee.canOverride}
                       disabled={!canEditEmployeeDirectory}
                       onChange={(event) => patchSelectedEmployee({ canOverride: event.target.checked })}
-                      title={canEditEmployeeDirectory ? "Может брать диалоги вне очереди" : access.reason}
+                      title="Разрешает назначать сотруднику диалоги даже при заполненном лимите одновременных чатов"
                       type="checkbox"
                     />
-                    <span>Override очереди</span>
+                    <span className="employee-toggle-text">
+                      Назначение сверх лимита
+                      <small>Диалог можно назначить вручную, даже если лимит чатов уже заполнен</small>
+                    </span>
                   </label>
                   <label>
                     <input
@@ -443,17 +548,61 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                       title={canEditEmployeeDirectory ? "Видит телефоны и персональные данные клиентов" : access.reason}
                       type="checkbox"
                     />
-                    <span>Чувствительные данные</span>
+                    <span className="employee-toggle-text">
+                      Чувствительные данные
+                      <small>Видит телефоны и персональные данные клиентов без маскировки</small>
+                    </span>
                   </label>
+                </div>
+                <div className="employee-danger-zone" aria-label="Управление учетной записью">
+                  {selectedEmployee.status === "invited" ? (
+                    <button
+                      disabled={!canEditEmployeeDirectory || saving}
+                      onClick={handleResendInvite}
+                      title="Создать новый код и отправить письмо-приглашение ещё раз"
+                      type="button"
+                    >
+                      <MailPlus size={16} />
+                      Отправить приглашение снова
+                    </button>
+                  ) : null}
+                  {selectedEmployee.status !== "deactivated" ? (
+                    <button
+                      className="settings-danger-action"
+                      disabled={!canEditEmployeeDirectory || saving}
+                      onClick={() => setConfirmAction({ employee: selectedEmployee, type: "deactivate" })}
+                      title="Сотрудник потеряет доступ, но учётная запись и история сохранятся"
+                      type="button"
+                    >
+                      <UserX size={16} />
+                      Отключить доступ
+                    </button>
+                  ) : null}
+                  <button
+                    className="settings-danger-action"
+                    disabled={!canEditEmployeeDirectory || saving}
+                    onClick={() => setConfirmAction({ employee: selectedEmployee, type: "delete" })}
+                    title="Удалить учётную запись насовсем — почту можно будет использовать для нового приглашения"
+                    type="button"
+                  >
+                    <Trash2 size={16} />
+                    Удалить учётную запись
+                  </button>
                 </div>
                 {error ? <div className="employee-error">{error}</div> : null}
               </div>
               <footer>
-                <span>{canEditEmployeeDirectory ? "Изменения сохраняются в backend и попадают в audit." : `${roleMode}: можно смотреть карточку сотрудника${canResetEmployeePassword ? " и сбрасывать пароль/MFA." : "."}`}</span>
+                <span>
+                  {canEditEmployeeDirectory
+                    ? selectedIsDirty
+                      ? "Есть несохранённые изменения — нажмите «Сохранить»."
+                      : "Изменения сохраняются в backend и попадают в audit."
+                    : `${roleMode}: можно смотреть карточку сотрудника${canResetEmployeePassword ? " и сбрасывать пароль/MFA." : "."}`}
+                </span>
                 <button
-                  disabled={!canEditEmployeeDirectory || saving}
+                  disabled={!canEditEmployeeDirectory || saving || !selectedIsDirty}
                   onClick={handleSaveEmployee}
-                  title={canEditEmployeeDirectory ? "Сохранить сотрудника" : access.reason}
+                  title={canEditEmployeeDirectory ? (selectedIsDirty ? "Сохранить сотрудника" : "Нет изменений для сохранения") : access.reason}
                   type="button"
                 >
                   {saving ? <RefreshCcw size={16} /> : <ShieldCheck size={16} />}
@@ -490,7 +639,10 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
           titleId="employee-invite-title"
         >
           <form className="employee-invite-form settings-form" id="employee-invite-form" onSubmit={handleInviteEmployee}>
-            <InlineHint>Сотрудник получит письмо со ссылкой: задаст пароль и сразу попадет в рабочее пространство.</InlineHint>
+            <InlineHint>
+              Сотрудник получит письмо с кодом приглашения: задаст пароль и сразу попадёт в рабочее пространство.
+              Если учётная запись с этой почтой была отключена, приглашение активирует её заново.
+            </InlineHint>
             <div className="settings-form-grid">
               <label>
                 <span>Имя</span>
@@ -521,13 +673,13 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                 >
                   {roles.map((role) => <option value={role.key} key={role.key}>{role.name}</option>)}
                 </select>
-                <FieldHint>Определяет доступы. Можно изменить позже.</FieldHint>
+                <FieldHint>{roleDescription(roles, inviteDraft.roleKey) || "Определяет доступы. Можно изменить позже."}</FieldHint>
               </label>
               <label>
                 <span>Группа</span>
                 <select
                   disabled={!canEditEmployeeDirectory}
-                  value={inviteDraft.groupId}
+                  value={inviteDraft.groupId || groups[0]?.id || ""}
                   onChange={(event) => setInviteDraft((current) => ({ ...current, groupId: event.target.value }))}
                 >
                   {groups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
@@ -540,56 +692,58 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
         </SettingsModal>
       ) : null}
 
-      {isGroupsOpen ? (
+      {inviteResult ? (
         <SettingsModal
           eyebrow="Сотрудники и роли"
-          onClose={() => setGroupsOpen(false)}
-          size="wide"
-          title="Группы сотрудников"
-          titleId="employee-groups-title"
+          footer={
+            <button className="primary-action" onClick={() => setInviteResult(null)} type="button">Готово</button>
+          }
+          onClose={() => setInviteResult(null)}
+          title="Приглашение создано"
+          titleId="employee-invite-result-title"
         >
-          <InlineHint>Группа объединяет сотрудников по зоне ответственности и набору каналов. Выберите группу, чтобы отредактировать ее.</InlineHint>
-          <div className="employee-group-strip" aria-label="Группы сотрудников">
-            {groups.map((group) => (
-              <button className={groupDraft.groupId === group.id ? "selected" : ""} key={group.id} onClick={() => editGroup(group)} type="button">
-                <strong>{group.name}</strong>
-                <span>{group.memberIds?.length ?? 0} сотрудников · {group.scope}</span>
+          <InlineHint>
+            {inviteResult.deliveryState === "failed"
+              ? `Письмо на ${inviteResult.email} не отправилось — передайте сотруднику код вручную. Он вводится на странице входа во вкладке «Invite».`
+              : `Письмо с кодом отправлено на ${inviteResult.email}. Код можно передать и вручную — он вводится на странице входа во вкладке «Invite».`}
+          </InlineHint>
+          <div className="employee-invite-code" aria-label="Код приглашения">
+            <code>{inviteResult.code || "код недоступен"}</code>
+            {inviteResult.code ? (
+              <button onClick={() => copyInviteCode(inviteResult.code)} title="Скопировать код приглашения" type="button">
+                <Copy size={15} />
+                Скопировать
               </button>
-            ))}
-            {!groups.length ? <div className="employee-empty">Групп пока нет — создайте первую ниже.</div> : null}
+            ) : null}
           </div>
-          <form className="employee-group-editor settings-form" onSubmit={handleSaveGroup}>
-            <strong>{groupDraft.groupId ? "Редактирование группы" : "Новая группа"}</strong>
-            <div className="settings-form-grid">
-              <label>
-                <span>Группа</span>
-                <input disabled={!canEditEmployeeDirectory || saving} placeholder="VIP support" value={groupDraft.name} onChange={(event) => setGroupDraft((current) => ({ ...current, name: event.target.value }))} />
-              </label>
-              <label>
-                <span>Область ответственности</span>
-                <input disabled={!canEditEmployeeDirectory || saving} placeholder="Ключевые клиенты и эскалации" value={groupDraft.scope} onChange={(event) => setGroupDraft((current) => ({ ...current, scope: event.target.value }))} />
-              </label>
-            </div>
-            <div className="employee-group-channel-picker" aria-label="Каналы группы">
-              {supportedChannels.map((channelName) => (
-                <label key={channelName}>
-                  <input checked={groupDraft.channels.includes(channelName)} disabled={!canEditEmployeeDirectory || saving} onChange={() => toggleGroupChannel(channelName)} type="checkbox" />
-                  <ChannelBadge channel={channelName} />
-                </label>
-              ))}
-            </div>
-            {groupError ? <div className="settings-form-error" role="alert">{groupError}</div> : null}
-            <div className="settings-form-actions">
-              {groupDraft.groupId ? (
-                <button onClick={() => setGroupDraft({ channels: ["SDK"], groupId: "", name: "", scope: "" })} type="button">
-                  Новая группа
-                </button>
-              ) : null}
-              <button className="primary-action" disabled={!canEditEmployeeDirectory || saving} type="submit">
-                {groupDraft.groupId ? "Сохранить группу" : "Создать группу"}
+        </SettingsModal>
+      ) : null}
+
+      {confirmAction ? (
+        <SettingsModal
+          eyebrow="Сотрудники и роли"
+          footer={
+            <>
+              <button onClick={() => setConfirmAction(null)} type="button">Отмена</button>
+              <button
+                className="primary-action settings-danger-action"
+                onClick={confirmAction.type === "delete" ? handleDeleteEmployee : handleDeactivateEmployee}
+                type="button"
+              >
+                {confirmAction.type === "delete" ? <Trash2 size={16} /> : <UserX size={16} />}
+                {confirmAction.type === "delete" ? "Удалить" : "Отключить"}
               </button>
-            </div>
-          </form>
+            </>
+          }
+          onClose={() => setConfirmAction(null)}
+          title={confirmAction.type === "delete" ? "Удалить учётную запись?" : "Отключить доступ?"}
+          titleId="employee-confirm-title"
+        >
+          <InlineHint>
+            {confirmAction.type === "delete"
+              ? `Учётная запись «${confirmAction.employee.employee}» (${confirmAction.employee.email}) будет удалена насовсем: активные сессии завершатся, а почту можно будет использовать для нового приглашения. Действие нельзя отменить.`
+              : `Сотрудник «${confirmAction.employee.employee}» потеряет доступ к рабочему пространству, но учётная запись и история сохранятся. Позже его можно пригласить заново с той же почтой.`}
+          </InlineHint>
         </SettingsModal>
       ) : null}
 
@@ -621,16 +775,51 @@ function normalizeEmployee(employee, roles = [], groups = []) {
     canOverride: Boolean(employee.canOverride),
     sensitiveData: Boolean(employee.sensitiveData),
     passwordStatus: employee.passwordStatus ?? employee.credentials?.passwordStatus ?? "active",
-    mfaStatus: employee.mfaStatus ?? "unknown",
+    mfaStatus: employee.mfaStatus ?? "enabled",
     lastLogin: employee.lastLogin ?? employee.lastActiveAt ?? "Never",
     exceptions: Array.isArray(employee.exceptions) ? employee.exceptions : []
   };
+}
+
+function snapshotEmployee(employee) {
+  return Object.fromEntries(EDITABLE_FIELDS.map((field) => [field, employee[field]]));
+}
+
+function buildBaseline(employees) {
+  return Object.fromEntries(employees.map((employee) => [employee.id, snapshotEmployee(employee)]));
 }
 
 function roleName(roles, roleKey) {
   return roles.find((role) => role.key === roleKey)?.name ?? roleKey;
 }
 
+function roleDescription(roles, roleKey) {
+  return roles.find((role) => role.key === roleKey)?.description ?? "";
+}
+
 function groupName(groups, groupId) {
   return groups.find((group) => group.id === groupId)?.name ?? groupId;
+}
+
+function statusLabel(status) {
+  return STATUS_LABELS[status] ?? status;
+}
+
+function mfaLabel(mfaStatus) {
+  return MFA_LABELS[mfaStatus] ?? MFA_LABELS.enabled;
+}
+
+function passwordLabel(passwordStatus) {
+  return PASSWORD_LABELS[passwordStatus] ?? passwordStatus;
+}
+
+function formatLastLogin(value) {
+  if (!value || value === "Never") {
+    return "ещё не входил";
+  }
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    return String(value);
+  }
+  return new Date(parsed).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }

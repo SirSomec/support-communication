@@ -301,6 +301,7 @@ export const permissionRoles = [
       "routing.redistribute",
       "templates.read",
       "templates.write",
+      "templates.manageShared",
       "clients.read",
       "clients.merge",
       "visitors.read",

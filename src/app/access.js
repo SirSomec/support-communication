@@ -13,6 +13,7 @@ export const ACTION_TO_SECTION = {
   "clients.merge": "clients",
   "templates.read": "templates",
   "templates.write": "templates",
+  "templates.manageShared": "templates",
   "visitors.read": "visitors",
   "automation.proactive.read": "visitors",
   "reports.read": "reports",
@@ -103,6 +104,7 @@ export function buildAccessProfile(permissions = [], permissionModel = null) {
   const canReviewQuality = hasWildcard || normalized.includes("quality.manual-reviews.write");
   const canScoreQuality = hasWildcard || normalized.includes("quality.scoring-audits.write");
   const canManageKnowledge = hasWildcard || normalized.includes("knowledge.write");
+  const canManageSharedTemplates = hasWildcard || normalized.includes("templates.manageShared");
 
   let reason = "Доступ ограничен политикой организации";
   if (hasWildcard) {
@@ -125,6 +127,7 @@ export function buildAccessProfile(permissions = [], permissionModel = null) {
     canReviewQuality,
     canScoreQuality,
     canManageKnowledge,
+    canManageSharedTemplates,
     canExportReports,
     canRedistribute,
     canServiceAdmin: false,
@@ -156,6 +159,7 @@ function fallbackActionsForRoleMode(roleMode) {
       "clients.read",
       "templates.read",
       "templates.write",
+      "templates.manageShared",
       "visitors.read",
       "reports.read",
       "reports.export",

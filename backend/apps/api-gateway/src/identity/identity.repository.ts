@@ -527,10 +527,12 @@ export interface IdentityRepositoryPort {
   findServiceAdminSessionByAccessToken(accessToken: string): MaybePromise<StoredServiceAdminSession | undefined>;
   findTenant(tenantId: string): MaybePromise<IdentityTenant | undefined>;
   findTenantAuditEvents(tenantId: string): MaybePromise<IdentityTenantAuditEvent[]>;
+  deleteTenantUser(userId: string): MaybePromise<IdentityTenantUser | undefined>;
   findTenantUser(userId: string | undefined): MaybePromise<IdentityTenantUser | undefined>;
   findTenantUserByEmail(email: string): MaybePromise<IdentityTenantUser | undefined>;
   findTenantUsersByEmail(email: string): MaybePromise<IdentityTenantUser[]>;
   findTenantUsers(tenantId: string): MaybePromise<IdentityTenantUser[]>;
+  refreshTenantOperatorSessionPermissions(userId: string): MaybePromise<number>;
   findTenantOperatorSession(sessionId: string | undefined): MaybePromise<StoredTenantOperatorSession | undefined>;
   findTenantOperatorSessionByAccessToken(accessToken: string): MaybePromise<{
     permissions: string[];
@@ -756,6 +758,14 @@ export class IdentityRepository implements IdentityRepositoryPort {
 
   findTenantUserByEmail(email: string): MaybePromise<IdentityTenantUser | undefined> {
     return this.adapter.findTenantUserByEmail(email);
+  }
+
+  deleteTenantUser(userId: string): MaybePromise<IdentityTenantUser | undefined> {
+    return this.adapter.deleteTenantUser(userId);
+  }
+
+  refreshTenantOperatorSessionPermissions(userId: string): MaybePromise<number> {
+    return this.adapter.refreshTenantOperatorSessionPermissions(userId);
   }
 
   findTenantUsersByEmail(email: string): MaybePromise<IdentityTenantUser[]> {
@@ -1143,7 +1153,7 @@ interface PrismaIdentityDelegates {
     findMany(input: { orderBy: { at: "desc" }; where: { subjectId: string } }): Promise<PrismaCredentialAuditEventRow[]>;
   };
   passwordCredential: {
-    deleteMany(input: { where: { subjectId: { in: string[] } } }): Promise<{ count: number }>;
+    deleteMany(input: { where: { email?: string; subjectId?: { in: string[] } } }): Promise<{ count: number }>;
     findUnique(input: { where: { email: string } }): Promise<PrismaPasswordCredentialRow | null>;
     upsert(input: {
       create: PrismaPasswordCredentialCreateInput;
@@ -1189,7 +1199,10 @@ interface PrismaIdentityDelegates {
     findMany(input: { where: { adminEmail: string; revokedAt?: null } }): Promise<PrismaServiceAdminSessionRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaServiceAdminSessionRow | null>;
     update(input: { data: { expiresAt?: Date; revokedAt?: Date }; where: { id: string } }): Promise<PrismaServiceAdminSessionRow>;
-    updateMany(input: { data: { revokedAt: Date }; where: { id: { in: string[] }; revokedAt: null } }): Promise<{ count: number }>;
+    updateMany(input: {
+      data: { allowedActions?: string[]; revokedAt?: Date; role?: string };
+      where: { adminId?: string; id?: { in: string[] } | { startsWith: string }; revokedAt: null };
+    }): Promise<{ count: number }>;
   };
   serviceAdminTokenPair: {
     create(input: { data: PrismaServiceAdminTokenPairCreateInput }): Promise<PrismaServiceAdminTokenPairRow>;
@@ -1237,6 +1250,7 @@ interface PrismaIdentityDelegates {
   };
   tenantUser: {
     create(input: { data: PrismaTenantUserCreateInput }): Promise<PrismaTenantUserRow>;
+    deleteMany(input: { where: { id: string } }): Promise<{ count: number }>;
     findFirst(input: { where: { email: string } }): Promise<PrismaTenantUserRow | null>;
     findUnique(input: { where: { id: string } }): Promise<PrismaTenantUserRow | null>;
     findMany(input: {
@@ -2011,6 +2025,45 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
         data: toPrismaTenantUserCreateInput(user)
       });
     return clone(toTenantUser(row));
+  }
+
+  async deleteTenantUser(userId: string): Promise<IdentityTenantUser | undefined> {
+    const row = await this.client.tenantUser.findUnique({ where: { id: userId } });
+    if (!row) {
+      return undefined;
+    }
+
+    const user = toTenantUser(row);
+    const sameEmailUsers = await this.findTenantUsersByEmail(user.email);
+    const emailSharedElsewhere = sameEmailUsers.some((candidate) => candidate.id !== user.id);
+    await this.client.$transaction(async (transaction) => {
+      await transaction.serviceAdminSession.updateMany({
+        data: { revokedAt: new Date() },
+        where: { adminId: user.id, revokedAt: null }
+      });
+      if (!emailSharedElsewhere) {
+        // Учётные данные глобальны по email: чистим их только когда адрес больше
+        // не используется ни в одном тенанте.
+        await transaction.passwordCredential.deleteMany({ where: { email: normalizeEmail(user.email) } });
+      }
+      await transaction.tenantUser.deleteMany({ where: { id: user.id } });
+    });
+    return clone(user);
+  }
+
+  async refreshTenantOperatorSessionPermissions(userId: string): Promise<number> {
+    const user = await this.findTenantUser(userId);
+    if (!user) {
+      return 0;
+    }
+
+    const permissionRoles = await this.listPermissionRoles();
+    const permissions = resolveTenantOperatorPermissions(user.role, permissionRoles);
+    const result = await this.client.serviceAdminSession.updateMany({
+      data: { allowedActions: permissions, role: user.role },
+      where: { adminId: user.id, id: { startsWith: "top-session" }, revokedAt: null }
+    });
+    return result.count;
   }
 
   async findTenantAuditEvents(tenantId: string): Promise<IdentityTenantAuditEvent[]> {
@@ -3402,6 +3455,57 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       });
 
       return clone(user);
+    },
+
+    deleteTenantUser(userId: string): IdentityTenantUser | undefined {
+      const state = store.read();
+      const user = (state.tenantUsers ?? []).find((item) => item.id === userId);
+      if (!user) {
+        return undefined;
+      }
+
+      const normalizedEmail = normalizeEmail(user.email);
+      const emailSharedElsewhere = (state.tenantUsers ?? []).some((item) =>
+        item.id !== userId && normalizeEmail(item.email) === normalizedEmail
+      );
+      const revokedAt = new Date().toISOString();
+      store.update((current) => ({
+        ...current,
+        passwordCredentials: emailSharedElsewhere
+          ? current.passwordCredentials
+          : (current.passwordCredentials ?? []).filter((credential) => normalizeEmail(credential.email) !== normalizedEmail),
+        serviceAdminSessions: (current.serviceAdminSessions ?? []).map((session) =>
+          session.adminId === userId && !session.revokedAt ? { ...session, revokedAt } : session
+        ),
+        tenantUsers: (current.tenantUsers ?? []).filter((item) => item.id !== userId)
+      }));
+      return clone(user);
+    },
+
+    refreshTenantOperatorSessionPermissions(userId: string): number {
+      const state = store.read();
+      const user = (state.tenantUsers ?? []).find((item) => item.id === userId);
+      if (!user) {
+        return 0;
+      }
+
+      const storedPermissionRoles = state.permissionRoles;
+      const permissions = resolveTenantOperatorPermissions(
+        user.role,
+        storedPermissionRoles?.length ? storedPermissionRoles : identityPermissionRoleCatalog
+      );
+      let updated = 0;
+      store.update((current) => ({
+        ...current,
+        serviceAdminSessions: (current.serviceAdminSessions ?? []).map((session) => {
+          if (session.adminId !== userId || session.revokedAt || !session.id.startsWith("top-session")) {
+            return session;
+          }
+          updated += 1;
+          return { ...session, allowedActions: [...permissions], role: user.role };
+        })
+      }));
+      return updated;
     },
 
     listServiceAdminAuditEvents(): IdentityServiceAdminAuditEvent[] {

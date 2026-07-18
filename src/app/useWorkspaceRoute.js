@@ -4,6 +4,7 @@ import { legacyServiceAdminHashToPath } from "../service-admin/serviceAdminPath.
 const routeByHash = {
   "#/app": { namespace: "app", view: "dialogs" },
   "#/landing": { namespace: "public", view: "landing" },
+  "#/docs": { namespace: "public", view: "docs" },
   "#/login": { namespace: "auth", view: "login" },
   "#/auth": { namespace: "auth", view: "login" },
   "#/onboarding": { namespace: "onboarding", view: "organization" }
@@ -15,7 +16,8 @@ const hashByPathPattern = [
   [/^\/(auth|login)(\/|$)/, "#/login"],
   [/^\/app(\/|$)/, "#/app"],
   [/^\/onboarding(\/|$)/, "#/onboarding"],
-  [/^\/landing(\/|$)/, "#/landing"]
+  [/^\/landing(\/|$)/, "#/landing"],
+  [/^\/docs(\/|$)/, "#/docs"]
 ];
 
 // Прямые URL вида /auth/login приводим к hash-роуту до первого рендера,
@@ -114,7 +116,7 @@ function parseCurrentRoute() {
 
 function hashForRoute(route) {
   if (route.namespace === "public") {
-    return "#/landing";
+    return route.view === "docs" ? "#/docs" : "#/landing";
   }
 
   if (route.namespace === "auth") {

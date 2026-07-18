@@ -39,6 +39,7 @@ function normalizeTemplatePayload(template) {
     text: template.text ?? template.body,
     topic: template.topic,
     channel: template.channel,
+    scope: template.scope,
     version: template.version
   });
 }

@@ -1238,6 +1238,110 @@
   padding: 0 14px 12px;
 }
 
+.employee-permission-toggles label {
+  align-items: flex-start;
+}
+
+.employee-toggle-text {
+  display: grid;
+  gap: 1px;
+}
+
+.employee-toggle-text small {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+/* Статусные бейджи в списке сотрудников */
+.employee-status-badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+  background: #eef2f8;
+  color: #47536b;
+}
+
+.employee-status-badge.status-active {
+  background: #e7f6ec;
+  color: #1a7f37;
+}
+
+.employee-status-badge.status-invited {
+  background: #fff4e0;
+  color: #9a6b00;
+}
+
+.employee-status-badge.status-blocked,
+.employee-status-badge.status-deactivated {
+  background: #fdecea;
+  color: #b3261e;
+}
+
+/* Управление учётной записью (опасные действия) */
+.employee-danger-zone {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 14px 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.employee-danger-zone button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.employee-danger-zone button.settings-danger-action {
+  border-color: #f3c6c2;
+  color: #b3261e;
+}
+
+.employee-danger-zone button.settings-danger-action:hover {
+  background: #fdecea;
+}
+
+/* Код приглашения */
+.employee-invite-code {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #f8fafd;
+}
+
+.employee-invite-code code {
+  flex: 1;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.employee-invite-code button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12.5px;
+}
+
 /* Группы (модальное окно) */
 .employee-group-strip {
   display: flex;
@@ -1278,6 +1382,74 @@
   gap: 6px;
   align-items: center;
   min-height: 30px;
+}
+
+/* Вкладка «Группы»: состав и опасные действия */
+.group-management-panel .employee-group-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.group-member-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.group-member-list {
+  display: grid;
+  gap: 2px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.group-member-list label {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 34px;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.group-member-list label:hover {
+  background: #f3f6fb;
+}
+
+.group-member-name {
+  font-weight: 600;
+}
+
+.group-member-meta {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.settings-danger-action {
+  color: #b3261e;
+}
+
+.settings-danger-action:hover {
+  background: #fdecea;
+}
+
+button.primary-action.settings-danger-action {
+  background: #b3261e;
+  border-color: #b3261e;
+  color: #fff;
+}
+
+button.primary-action.settings-danger-action:hover {
+  background: #93201a;
 }
 
 /* Матрица ролей (модальное окно) */

@@ -1,5 +1,5 @@
 import React from "react";
-import { Cable, ListChecks, PlugZap, ShieldCheck, Tags, TerminalSquare, UsersRound, Webhook } from "lucide-react";
+import { Cable, ListChecks, PlugZap, ShieldCheck, Tags, TerminalSquare, Users, UsersRound, Webhook } from "lucide-react";
 
 // Навигация настроек: вертикальные группы разделов-экранов.
 // Идентификаторы вкладок стабильны (settings-tab-*), на них опираются
@@ -19,7 +19,8 @@ const navGroups = [
     id: "team",
     label: "Команда",
     items: [
-      { id: "employees", label: "Сотрудники и роли", hint: "Доступы, группы и лимиты", icon: UsersRound },
+      { id: "employees", label: "Сотрудники и роли", hint: "Доступы, роли и лимиты", icon: UsersRound },
+      { id: "groups", label: "Группы", hint: "Состав команд и каналы", icon: Users },
       { id: "topics", label: "Тематики", hint: "Классификация и маршрутизация", icon: Tags }
     ]
   },

@@ -24,15 +24,22 @@ export class TemplatesController {
   @RequireServiceAdminAction("templates.write")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "Saved template envelope with version and audit metadata" })
-  saveTemplate(@Body() payload: { channel: string; id?: string; text: string; title: string; topic: string; version?: number }, @Req() request: TenantOperatorRequest & ServiceAdminRequest): Promise<unknown> {
+  saveTemplate(@Body() payload: { channel: string; id?: string; scope?: string; text: string; title: string; topic: string; version?: number }, @Req() request: TenantOperatorRequest & ServiceAdminRequest): Promise<unknown> {
     return this.workspaceService.saveTemplate(payload, tenantContextFromServiceAdminRequest(request));
   }
 }
 
 function tenantContextFromServiceAdminRequest(request: TenantOperatorRequest & ServiceAdminRequest): WorkspaceRequestContext {
   if (request.tenantOperatorContext?.tenantId) {
-    return { tenantId: request.tenantOperatorContext.tenantId };
+    return {
+      operatorId: request.tenantOperatorContext.userId,
+      permissions: request.tenantOperatorContext.permissions,
+      tenantId: request.tenantOperatorContext.tenantId
+    };
   }
 
-  return request.serviceAdminContext?.currentTenantId ? { tenantId: request.serviceAdminContext.currentTenantId } : {};
+  // Service-admin работает с библиотекой тенанта целиком, включая личные шаблоны.
+  return request.serviceAdminContext?.currentTenantId
+    ? { permissions: ["*"], tenantId: request.serviceAdminContext.currentTenantId }
+    : {};
 }

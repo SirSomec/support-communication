@@ -35,7 +35,8 @@ export const identityPermissionRoleCatalog: IdentityPermissionRole[] = [
     actions: [
       "dialogs.read", "dialogs.manage", "panel.read", "routing.read", "routing.redistribute",
       "presence.read", "presence.write",
-      "templates.read", "templates.write", "clients.read", "clients.merge", "visitors.read",
+      "templates.read", "templates.write", "templates.manageShared",
+      "clients.read", "clients.merge", "visitors.read",
       "automation.proactive.read", "reports.read", "reports.export", "quality.read",
       "quality.scoring-audits.write", "quality.ratings.write", "quality.manual-reviews.write",
       "knowledge.read", "automation.read", "permissions.read", "notifications.read",

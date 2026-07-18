@@ -72,6 +72,32 @@ export const settingsService = {
     });
   },
 
+  async deleteEmployee({ employeeId, ...payload } = {}) {
+    if (!hasRouteId(employeeId)) {
+      return missingIdEnvelope("deleteEmployee", "Employee id is required.");
+    }
+
+    return apiRequest(`/settings/employees/${encodeURIComponent(employeeId)}`, {
+      body: payload,
+      method: "DELETE",
+      operation: "deleteEmployee",
+      service: SERVICE
+    });
+  },
+
+  async resendEmployeeInvite({ employeeId, ...payload } = {}) {
+    if (!hasRouteId(employeeId)) {
+      return missingIdEnvelope("resendEmployeeInvite", "Employee id is required.");
+    }
+
+    return apiRequest(`/settings/employees/${encodeURIComponent(employeeId)}/invite-resend`, {
+      body: payload,
+      method: "POST",
+      operation: "resendEmployeeInvite",
+      service: SERVICE
+    });
+  },
+
   async fetchRoles() {
     return apiRequest("/settings/roles", {
       operation: "fetchRoles",
@@ -104,6 +130,19 @@ export const settingsService = {
       body: payload,
       method: "PATCH",
       operation: "updateGroup",
+      service: SERVICE
+    });
+  },
+
+  async deleteGroup({ groupId, ...payload } = {}) {
+    if (!hasRouteId(groupId)) {
+      return missingIdEnvelope("deleteGroup", "Group id is required.");
+    }
+
+    return apiRequest(`/settings/groups/${encodeURIComponent(groupId)}`, {
+      body: payload,
+      method: "DELETE",
+      operation: "deleteGroup",
       service: SERVICE
     });
   },
@@ -220,10 +259,13 @@ export const settingsService = {
         "resetEmployeePassword",
         "resetEmployeeMfa",
         "deactivateEmployee",
+        "deleteEmployee",
+        "resendEmployeeInvite",
         "fetchRoles",
         "fetchGroups",
         "createGroup",
         "updateGroup",
+        "deleteGroup",
         "fetchTopics",
         "createTopic",
         "updateTopic",

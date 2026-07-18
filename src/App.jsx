@@ -35,6 +35,7 @@ import { ScreenStateStrip, Skeleton, Toast, WorkspaceState } from "./ui.jsx";
 const ROLE_SWITCHER_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROLE_SWITCHER === "true";
 const SERVICE_ADMIN_UNAVAILABLE_MESSAGE = "Откройте /service-admin — этот раздел недоступен из рабочего места организации.";
 const LandingPage = lazy(() => import("./features/public/index.js"));
+const ApiDocsPage = lazy(() => import("./features/public/ApiDocsPage.jsx"));
 const AuthPage = lazy(() => import("./features/auth/index.js"));
 const OrganizationOnboarding = lazy(() => import("./features/onboarding/index.js"));
 
@@ -432,14 +433,18 @@ function App() {
 
   if (route.namespace === "public") {
     return (
-      <div data-testid="route-public-landing">
+      <div data-testid={route.view === "docs" ? "route-public-docs" : "route-public-landing"}>
         <Suspense fallback={<RouteLoading label="Загрузка публичного контура" />}>
-          <LandingPage
-            demoRequestEnabled
-            onNavigateAuth={routeActions.openAuth}
-            onRequestDemo={handlePublicDemoRequest}
-            onStartTrial={routeActions.openOnboarding}
-          />
+          {route.view === "docs" ? (
+            <ApiDocsPage />
+          ) : (
+            <LandingPage
+              demoRequestEnabled
+              onNavigateAuth={routeActions.openAuth}
+              onRequestDemo={handlePublicDemoRequest}
+              onStartTrial={routeActions.openOnboarding}
+            />
+          )}
         </Suspense>
         {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
       </div>

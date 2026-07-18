@@ -91,6 +91,7 @@ export interface TemplateRecord {
   auditId?: string;
   channel: string;
   id: string;
+  ownerId?: string | null;
   scope: string;
   tenantId: string;
   text: string;
@@ -782,6 +783,7 @@ interface PrismaTemplateRecordCreateInput {
   auditId: string | null;
   channel: string;
   id: string;
+  ownerId: string | null;
   scope: string;
   tenantId: string;
   text: string;
@@ -2594,6 +2596,7 @@ function toPrismaTemplateRecordCreateInput(template: TemplateRecord): PrismaTemp
     auditId: template.auditId ?? null,
     channel: template.channel,
     id: template.id,
+    ownerId: template.ownerId ?? null,
     scope: template.scope,
     tenantId: requireWorkspaceTenantId(template.tenantId),
     text: template.text,
@@ -2609,6 +2612,7 @@ function toPrismaTemplateRecordUpdateInput(template: PrismaTemplateRecordCreateI
   return {
     auditId: template.auditId,
     channel: template.channel,
+    ownerId: template.ownerId,
     scope: template.scope,
     tenantId: template.tenantId,
     text: template.text,
@@ -2625,6 +2629,7 @@ function toTemplateRecord(row: PrismaTemplateRecordRow): TemplateRecord {
     ...(row.auditId !== null ? { auditId: row.auditId } : {}),
     channel: row.channel,
     id: row.id,
+    ownerId: row.ownerId ?? null,
     scope: row.scope,
     tenantId: row.tenantId,
     text: row.text,

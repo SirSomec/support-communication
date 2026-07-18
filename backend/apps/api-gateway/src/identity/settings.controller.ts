@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
 import { TenantOperatorOrServiceAdminGuard } from "../conversation/tenant-operator-or-service-admin.guard.js";
 import { SettingsEmployeeService } from "./settings-employee.service.js";
@@ -85,6 +85,28 @@ export class SettingsController {
     return this.settingsEmployeeService.deactivateEmployee(employeeId, payload, { tenantId: tenantIdFromRequest(request) });
   }
 
+  @Delete("employees/:employeeId")
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "deleteSettingsEmployee", summary: "Delete tenant employee account" })
+  @ApiParam({ name: "employeeId", description: "Employee identifier" })
+  @ApiOkResponse({ description: "Employee deletion envelope" })
+  deleteEmployee(@Param("employeeId") employeeId: string, @Req() request: SettingsRequest, @Body() payload: { reason?: string } = {}) {
+    return this.settingsEmployeeService.deleteEmployee(employeeId, payload, { tenantId: tenantIdFromRequest(request) });
+  }
+
+  @Post("employees/:employeeId/invite-resend")
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "resendSettingsEmployeeInvite", summary: "Resend employee invite email" })
+  @ApiParam({ name: "employeeId", description: "Employee identifier" })
+  @ApiOkResponse({ description: "Invite resend envelope" })
+  resendEmployeeInvite(@Param("employeeId") employeeId: string, @Req() request: SettingsRequest, @Body() payload: { reason?: string } = {}) {
+    return this.settingsEmployeeService.resendEmployeeInvite(employeeId, payload, { tenantId: tenantIdFromRequest(request) });
+  }
+
   @Get("roles")
   @RequireTenantOperatorPermission("settings.read")
   @RequireServiceAdminAction("settings.read")
@@ -121,6 +143,17 @@ export class SettingsController {
   @ApiOkResponse({ description: "Updated employee group envelope" })
   updateGroup(@Param("groupId") groupId: string, @Body() payload: { channels?: string[]; memberIds?: string[]; name?: string; scope?: string }, @Req() request: SettingsRequest) {
     return this.settingsEmployeeService.updateGroup(groupId, payload, { tenantId: tenantIdFromRequest(request) });
+  }
+
+  @Delete("groups/:groupId")
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "deleteSettingsGroup", summary: "Delete tenant employee group" })
+  @ApiParam({ name: "groupId", description: "Group identifier" })
+  @ApiOkResponse({ description: "Employee group deletion envelope" })
+  deleteGroup(@Param("groupId") groupId: string, @Req() request: SettingsRequest, @Body() payload: { reason?: string } = {}) {
+    return this.settingsEmployeeService.deleteGroup(groupId, payload, { tenantId: tenantIdFromRequest(request) });
   }
 
   @Get("rules")

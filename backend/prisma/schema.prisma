@@ -995,6 +995,7 @@ model TemplateRecord {
   id        String   @id
   tenantId  String   @map("tenant_id")
   auditId   String?  @map("audit_id")
+  ownerId   String?  @map("owner_id")
   channel   String
   scope     String
   title     String
@@ -1009,6 +1010,7 @@ model TemplateRecord {
 
   @@index([tenantId, scope, updatedAt], map: "template_records_tenant_scope_updated_at_idx")
   @@index([tenantId, channel, topic], map: "template_records_tenant_channel_topic_idx")
+  @@index([tenantId, ownerId], map: "template_records_tenant_owner_idx")
   @@map("template_records")
 }
 

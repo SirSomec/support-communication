@@ -85,7 +85,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
     operatorIds: [],
     scores: [],
     statuses: [],
-    topic: "all"
+    topics: []
   });
   const [dialogExportFormat, setDialogExportFormat] = useState("XLSX");
   const [dialogExportPeriod, setDialogExportPeriod] = useState("30 дней");
@@ -799,12 +799,12 @@ export function ReportsScreen({ onBack, onToast, access }) {
             options={(reportFilterOptions.operators ?? []).map((operator) => ({ label: operator.name, value: operator.id }))}
             selected={dialogExportFilters.operatorIds}
           />
-          <DialogExportSelect
+          <MultiSelectDropdown
             allLabel="Все тематики"
-            label="Тематика"
-            onChange={(value) => setDialogExportFilters((current) => ({ ...current, topic: value }))}
-            options={reportFilterOptions.topic}
-            value={dialogExportFilters.topic}
+            label="Тематики"
+            onChange={(values) => setDialogExportFilters((current) => ({ ...current, topics: values }))}
+            options={(reportFilterOptions.topic ?? []).map((topic) => ({ label: topic, value: topic }))}
+            selected={dialogExportFilters.topics}
           />
           <MultiSelectDropdown
             allLabel="Все статусы"
@@ -892,20 +892,6 @@ export function ReportsScreen({ onBack, onToast, access }) {
   );
 }
 
-function DialogExportSelect({ allLabel, label, onChange, options = [], value }) {
-  const list = Array.isArray(options) ? options : [];
-
-  return (
-    <label>
-      <span>{label}</span>
-      <select aria-label={label} className="inline-select" onChange={(event) => onChange(event.target.value)} value={value}>
-        <option value="all">{allLabel}</option>
-        {list.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select>
-    </label>
-  );
-}
-
 // Компактный мультивыбор для панели выгрузки: пустой выбор трактуется как
 // «все значения», список закрывается по клику вне поповера.
 function MultiSelectDropdown({ allLabel, label, onChange, options = [], selected = [] }) {
@@ -954,13 +940,13 @@ function MultiSelectDropdown({ allLabel, label, onChange, options = [], selected
       {open ? (
         <div aria-label={label} className="multi-select-popover" role="listbox">
           <label className="multi-select-option">
-            <input checked={!selected.length} onChange={() => onChange([])} type="checkbox" />
             <span>{allLabel}</span>
+            <input checked={!selected.length} onChange={() => onChange([])} type="checkbox" />
           </label>
           {list.map((option) => (
             <label className="multi-select-option" key={option.value}>
-              <input checked={selectedSet.has(option.value)} onChange={() => toggleValue(option.value)} type="checkbox" />
               <span>{option.label}</span>
+              <input checked={selectedSet.has(option.value)} onChange={() => toggleValue(option.value)} type="checkbox" />
             </label>
           ))}
           {!list.length ? <p className="multi-select-empty">За период значений нет</p> : null}

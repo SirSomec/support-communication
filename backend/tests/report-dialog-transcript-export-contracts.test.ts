@@ -138,7 +138,11 @@ describe("dialog transcript export contracts", () => {
       buildDialogTranscriptDialogs(rows, { operatorIds: ["operator-maria", "operator-ivan"] }).map((dialog) => dialog.id),
       ["dlg-anna", "dlg-petr"]
     );
-    assert.deepEqual(buildDialogTranscriptDialogs(rows, { topic: "возвраты" }).map((dialog) => dialog.id), ["dlg-olga"]);
+    assert.deepEqual(buildDialogTranscriptDialogs(rows, { topics: ["возвраты"] }).map((dialog) => dialog.id), ["dlg-olga"]);
+    assert.deepEqual(
+      buildDialogTranscriptDialogs(rows, { topics: ["Возвраты", "Авторизация / Код"] }).map((dialog) => dialog.id),
+      ["dlg-petr", "dlg-olga"]
+    );
     assert.deepEqual(buildDialogTranscriptDialogs(rows, { statuses: ["active"] }).map((dialog) => dialog.id), ["dlg-petr"]);
     assert.deepEqual(
       buildDialogTranscriptDialogs(rows, { statuses: ["active", "closed"] }).map((dialog) => dialog.id),
@@ -152,7 +156,7 @@ describe("dialog transcript export contracts", () => {
       ["dlg-anna", "dlg-petr"]
     );
     assert.deepEqual(
-      buildDialogTranscriptDialogs(rows, { operatorIds: ["all"], scores: ["all"], statuses: ["Все статусы"], topic: "all" }).map((dialog) => dialog.id),
+      buildDialogTranscriptDialogs(rows, { operatorIds: ["all"], scores: ["all"], statuses: ["Все статусы"], topics: ["all"] }).map((dialog) => dialog.id),
       ["dlg-anna", "dlg-petr", "dlg-olga"]
     );
     assert.deepEqual(buildDialogTranscriptDialogs(rows, { operatorIds: ["operator-maria"], scores: ["none"] }), []);
@@ -160,12 +164,12 @@ describe("dialog transcript export contracts", () => {
 
   it("parses both plural and legacy single-value job filters", () => {
     assert.deepEqual(
-      dialogTranscriptFiltersFromJob({ filters: { operatorIds: ["op-1", "op-2"], scores: ["5", "none"], statuses: ["active"], topic: "Возвраты" } }),
-      { operatorIds: ["op-1", "op-2"], scores: ["5", "none"], statuses: ["active"], topic: "Возвраты" }
+      dialogTranscriptFiltersFromJob({ filters: { operatorIds: ["op-1", "op-2"], scores: ["5", "none"], statuses: ["active"], topics: ["Возвраты", "Оплата"] } }),
+      { operatorIds: ["op-1", "op-2"], scores: ["5", "none"], statuses: ["active"], topics: ["Возвраты", "Оплата"] }
     );
     assert.deepEqual(
-      dialogTranscriptFiltersFromJob({ filters: { operatorId: "op-legacy", score: "3", status: "closed" } }),
-      { operatorIds: ["op-legacy"], scores: ["3"], statuses: ["closed"] }
+      dialogTranscriptFiltersFromJob({ filters: { operatorId: "op-legacy", score: "3", status: "closed", topic: "Возвраты" } }),
+      { operatorIds: ["op-legacy"], scores: ["3"], statuses: ["closed"], topics: ["Возвраты"] }
     );
     assert.deepEqual(dialogTranscriptFiltersFromJob({ filters: {} }), {});
   });
@@ -212,7 +216,7 @@ describe("dialog transcript export contracts", () => {
       operators: ["operator-maria", "operator-ivan"],
       scores: ["5", "none"],
       statuses: "all",
-      topic: "all"
+      topics: "all"
     });
     const anna = payload.dialogs[0];
     assert.equal(anna.client, "Анна Смирнова");

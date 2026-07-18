@@ -9,23 +9,27 @@ describe("dialog transcript export UI contracts", () => {
     assert.match(source, /reportType: "dialog_transcripts"/);
     assert.match(source, /format: dialogExportFormat/);
     assert.match(source, /requestReportExport\(\{[\s\S]*?\.\.\.dialogExportFilters/);
-    for (const dimension of ["operatorIds", "scores", "statuses"]) {
+    for (const dimension of ["operatorIds", "scores", "statuses", "topics"]) {
       assert.match(
         source,
         new RegExp(`current, ${dimension}: values`),
         `dialog export must collect multi-value ${dimension}`
       );
     }
-    assert.match(source, /current, topic: value/);
   });
 
-  it("lets the user pick several operators, statuses and scores at once", () => {
+  it("lets the user pick several operators, topics, statuses and scores at once", () => {
     assert.match(source, /function MultiSelectDropdown/);
     const multiSelectUsages = source.match(/<MultiSelectDropdown/g) ?? [];
-    assert.equal(multiSelectUsages.length, 3, "operators, statuses and scores must be multi-selects");
+    assert.equal(multiSelectUsages.length, 4, "operators, topics, statuses and scores must be multi-selects");
     assert.match(source, /label: operator\.name, value: operator\.id/, "operator options must show names, not ids");
     assert.match(source, /statusLabels\[status\] \?\? status/, "status options must show human labels");
     assert.match(source, /value: "none"/, "unrated dialogs must be selectable");
+    assert.match(
+      source,
+      /<span>\{option\.label\}<\/span>\s*<input/,
+      "the option checkbox must be rendered to the right of its label"
+    );
   });
 
   it("offers its own export period including a custom date range", () => {

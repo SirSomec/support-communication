@@ -38,7 +38,7 @@ export interface DialogTranscriptFilters {
   operatorIds?: string[];
   scores?: string[];
   statuses?: string[];
-  topic?: string;
+  topics?: string[];
 }
 
 export interface DialogTranscriptDateRange {
@@ -135,12 +135,12 @@ export function dialogTranscriptFiltersFromJob(job: Pick<ReportExportJob, "filte
   const operatorIds = stringListFilter(job.filters?.operatorIds, job.filters?.operatorId);
   const scores = stringListFilter(job.filters?.scores, job.filters?.score);
   const statuses = stringListFilter(job.filters?.statuses, job.filters?.status);
-  const topic = stringFilter(job.filters?.topic);
+  const topics = stringListFilter(job.filters?.topics, job.filters?.topic);
   return {
     ...(operatorIds ? { operatorIds } : {}),
     ...(scores ? { scores } : {}),
     ...(statuses ? { statuses } : {}),
-    ...(topic ? { topic } : {})
+    ...(topics ? { topics } : {})
   };
 }
 
@@ -173,7 +173,7 @@ export function buildDialogTranscriptDialogs(
   filters: DialogTranscriptFilters = {}
 ): DialogTranscriptDialog[] {
   const operators = normalizeFacetFilterList(filters.operatorIds);
-  const topic = normalizeFacetFilter(filters.topic);
+  const topics = normalizeFacetFilterList(filters.topics);
   const statuses = normalizeFacetFilterList(filters.statuses);
   const scores = normalizeScoreFilterList(filters.scores);
 
@@ -182,7 +182,7 @@ export function buildDialogTranscriptDialogs(
       if (operators && !operators.has(facetValue(row.operatorId)) && !operators.has(facetValue(row.operatorName))) {
         return false;
       }
-      if (topic && !equalsFacet(row.topic, topic)) {
+      if (topics && !topics.has(facetValue(row.topic))) {
         return false;
       }
       if (statuses && !statuses.has(facetValue(row.status))) {
@@ -498,7 +498,7 @@ function exportedFilters(filters: DialogTranscriptFilters = {}): Record<string, 
     operators: cleanedFilterList(filters.operatorIds) ?? "all",
     scores: cleanedFilterList(filters.scores) ?? "all",
     statuses: cleanedFilterList(filters.statuses) ?? "all",
-    topic: filters.topic?.trim() || "all"
+    topics: cleanedFilterList(filters.topics) ?? "all"
   };
 }
 
@@ -506,10 +506,10 @@ function filtersSummary(filters: DialogTranscriptFilters = {}): string {
   const operators = cleanedFilterList(filters.operatorIds);
   const statuses = cleanedFilterList(filters.statuses);
   const scores = cleanedFilterList(filters.scores);
-  const topic = filters.topic?.trim();
+  const topics = cleanedFilterList(filters.topics);
   return [
     `оператор — ${operators ? operators.join(", ") : "все"}`,
-    `тематика — ${topic && topic !== "all" && !topic.startsWith("Все ") ? topic : "все"}`,
+    `тематика — ${topics ? topics.join(", ") : "все"}`,
     `статус — ${statuses ? statuses.map(dialogStatusLabel).join(", ") : "все"}`,
     `оценка — ${scores ? scores.map((score) => score === "none" ? "без оценки" : score).join(", ") : "все"}`
   ].join(", ");
@@ -568,9 +568,6 @@ function facetValue(value: string | undefined): string {
   return (value ?? "").trim().toLocaleLowerCase("ru-RU");
 }
 
-function equalsFacet(value: string | undefined, filter: string): boolean {
-  return facetValue(value) === filter;
-}
 
 function normalizeScoreFilter(value: string | undefined): "none" | number | undefined {
   const normalized = value?.trim().toLowerCase();
@@ -613,9 +610,6 @@ function formatTranscriptTimestamp(value: string): string {
   return `${pad(parsed.getUTCDate())}.${pad(parsed.getUTCMonth() + 1)}.${parsed.getUTCFullYear()} ${pad(parsed.getUTCHours())}:${pad(parsed.getUTCMinutes())} UTC`;
 }
 
-function stringFilter(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
 
 function escapeHtml(value: string): string {
   return value

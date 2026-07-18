@@ -495,6 +495,189 @@ describe("telegram polling ingress contracts", () => {
     assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-rating"))?.pollingOffset, 121);
   });
 
+  it("hides the survey after a rating, collects the next message as feedback and only then forks a new appeal", async () => {
+    const now = new Date().toISOString();
+    const integrationRepository = IntegrationRepository.inMemory({
+      ...emptyIntegrationState(),
+      telegramConnections: [{
+        botId: "123456",
+        botToken: "123456:support_bot_token",
+        botUsername: "support_bot",
+        createdAt: now,
+        pollingOffset: 500,
+        status: "active" as const,
+        tenantId: "tenant-feedback",
+        tokenPreview: "123456:****",
+        updatedAt: now,
+        webhookSecret: "tg_wh_feedback"
+      }]
+    });
+    const conversationRepository = ConversationRepository.inMemory();
+    const conversation = await resolveOrCreateTelegramConversation({
+      botId: "123456",
+      chatId: "445566",
+      conversationRepository,
+      displayName: "Feedback Client",
+      tenantId: "tenant-feedback"
+    });
+    assert.ok(conversation);
+    await conversationRepository.saveConversation({ ...conversation!, operatorId: "operator-1", status: "closed" });
+
+    const updatesQueue: Array<Array<Record<string, unknown>>> = [
+      [{
+        callback_query: { data: "quality:csat:5", id: "cbq-501", message: { chat: { id: 445566 }, message_id: 901 } },
+        update_id: 501
+      }],
+      [{
+        message: { chat: { id: 445566 }, from: { first_name: "Feedback" }, message_id: 902, text: "Спасибо, оператор очень помог" },
+        update_id: 502
+      }],
+      [{
+        message: { chat: { id: 445566 }, from: { first_name: "Feedback" }, message_id: 903, text: "У меня новый вопрос" },
+        update_id: 503
+      }]
+    ];
+    const requestedUrls: string[] = [];
+    const fetcher = async (input: string) => {
+      requestedUrls.push(input);
+      if (input.includes("/getUpdates")) {
+        const batch = updatesQueue.shift() ?? [];
+        return { json: async () => ({ ok: true, result: batch }), ok: true, status: 200 };
+      }
+      return { json: async () => ({ ok: true, result: true }), ok: true, status: 200 };
+    };
+    const pollInput = {
+      conversationRepository,
+      conversationService: new ConversationService(conversationRepository),
+      fetcher,
+      integrationRepository,
+      offsets: new Map<string, number>(),
+      recordQualityRating: async () => ({ data: { ratingId: "rating-501" }, error: null, meta: {}, operation: "recordClientQualityRating", service: "qualityService", status: "ok", traceId: "trace-rating" } as any)
+    };
+
+    // 1. Оценка: опрос скрывается, клиенту предлагают оставить комментарий.
+    const ratingPoll = await pollTelegramUpdatesOnce(pollInput);
+    assert.equal(ratingPoll.accepted, 1);
+    assert.ok(
+      requestedUrls.some((url) => url.includes("/deleteMessage") && url.includes("chat_id=445566") && url.includes("message_id=901")),
+      "the survey message must be hidden after the rating"
+    );
+    const promptUrl = requestedUrls.find((url) => url.includes("/sendMessage"));
+    assert.ok(promptUrl, "the feedback prompt must be sent");
+    assert.ok(decodeURIComponent(promptUrl!).includes("quality:feedback:new_appeal"), "the prompt must offer a new appeal button");
+    const awaiting = await conversationRepository.findConversation(conversation!.id);
+    assert.equal(awaiting?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal(awaiting?.metadata?.csatFeedback?.ratingId, "rating-501");
+
+    // 2. Следующее сообщение — отзыв: остается в закрытом обращении, без форка.
+    requestedUrls.length = 0;
+    const feedbackPoll = await pollTelegramUpdatesOnce(pollInput);
+    assert.equal(feedbackPoll.accepted, 1);
+    const appeals = await conversationRepository.listConversations({ tenantId: "tenant-feedback" });
+    assert.equal(appeals.length, 1, "a feedback message must not fork a follow-up appeal");
+    const rated = await conversationRepository.findConversation(conversation!.id);
+    assert.equal(rated?.status, "closed");
+    const feedbackMessage = rated?.messages.at(-1);
+    assert.equal(feedbackMessage?.type, "csat_feedback");
+    assert.equal(feedbackMessage?.side, "client");
+    assert.equal(feedbackMessage?.text, "Спасибо, оператор очень помог");
+    assert.equal(rated?.preview, "Отзыв: Спасибо, оператор очень помог");
+    assert.equal(rated?.metadata?.csatFeedback?.state, "received");
+    assert.ok(
+      // URLSearchParams кодирует пробелы как "+": сверяем по слову без пробелов.
+      requestedUrls.some((url) => url.includes("/sendMessage") && decodeURIComponent(url).includes("отзыв")),
+      "the client must receive a feedback acknowledgement"
+    );
+
+    // 3. Отзыв уже получен: новое сообщение открывает новое обращение.
+    const followUpPoll = await pollTelegramUpdatesOnce(pollInput);
+    assert.equal(followUpPoll.accepted, 1);
+    const afterFollowUp = await conversationRepository.listConversations({ tenantId: "tenant-feedback" });
+    assert.equal(afterFollowUp.length, 2, "a message after the feedback must open a new appeal");
+    const followUp = afterFollowUp.find((item) => item.id !== conversation!.id);
+    assert.equal(followUp?.status, "new");
+    assert.equal(followUp?.messages.at(-1)?.text, "У меня новый вопрос");
+  });
+
+  it("declines the feedback prompt via the new appeal button and forks the next message", async () => {
+    const now = new Date().toISOString();
+    const integrationRepository = IntegrationRepository.inMemory({
+      ...emptyIntegrationState(),
+      telegramConnections: [{
+        botId: "123456",
+        botToken: "123456:support_bot_token",
+        botUsername: "support_bot",
+        createdAt: now,
+        pollingOffset: 600,
+        status: "active" as const,
+        tenantId: "tenant-feedback-decline",
+        tokenPreview: "123456:****",
+        updatedAt: now,
+        webhookSecret: "tg_wh_feedback_decline"
+      }]
+    });
+    const conversationRepository = ConversationRepository.inMemory();
+    const conversation = await resolveOrCreateTelegramConversation({
+      botId: "123456",
+      chatId: "556677",
+      conversationRepository,
+      displayName: "Decline Client",
+      tenantId: "tenant-feedback-decline"
+    });
+    assert.ok(conversation);
+    await conversationRepository.saveConversation({ ...conversation!, operatorId: "operator-1", status: "closed" });
+
+    const updatesQueue: Array<Array<Record<string, unknown>>> = [
+      [{
+        callback_query: { data: "quality:csat:2", id: "cbq-601", message: { chat: { id: 556677 }, message_id: 911 } },
+        update_id: 601
+      }],
+      [{
+        callback_query: { data: "quality:feedback:new_appeal", id: "cbq-602", message: { chat: { id: 556677 }, message_id: 912 } },
+        update_id: 602
+      }],
+      [{
+        message: { chat: { id: 556677 }, from: { first_name: "Decline" }, message_id: 913, text: "Другая проблема" },
+        update_id: 603
+      }]
+    ];
+    const requestedUrls: string[] = [];
+    const fetcher = async (input: string) => {
+      requestedUrls.push(input);
+      if (input.includes("/getUpdates")) {
+        const batch = updatesQueue.shift() ?? [];
+        return { json: async () => ({ ok: true, result: batch }), ok: true, status: 200 };
+      }
+      return { json: async () => ({ ok: true, result: true }), ok: true, status: 200 };
+    };
+    const pollInput = {
+      conversationRepository,
+      conversationService: new ConversationService(conversationRepository),
+      fetcher,
+      integrationRepository,
+      offsets: new Map<string, number>(),
+      recordQualityRating: async () => ({ data: { ratingId: "rating-601" }, error: null, meta: {}, operation: "recordClientQualityRating", service: "qualityService", status: "ok", traceId: "trace-rating" } as any)
+    };
+
+    await pollTelegramUpdatesOnce(pollInput);
+    assert.equal((await conversationRepository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
+
+    // «Новое обращение»: ожидание снято, промпт скрыт, callback подтвержден.
+    requestedUrls.length = 0;
+    const declinePoll = await pollTelegramUpdatesOnce(pollInput);
+    assert.equal(declinePoll.accepted, 1);
+    assert.equal((await conversationRepository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "declined");
+    assert.ok(requestedUrls.some((url) => url.includes("/deleteMessage") && url.includes("message_id=912")), "the feedback prompt must be hidden");
+    assert.ok(requestedUrls.some((url) => url.includes("/answerCallbackQuery") && url.includes("callback_query_id=cbq-602")));
+    assert.equal((await integrationRepository.findTelegramConnectionByTenantIdAsync("tenant-feedback-decline"))?.pollingOffset, 603);
+
+    const followUpPoll = await pollTelegramUpdatesOnce(pollInput);
+    assert.equal(followUpPoll.accepted, 1);
+    const appeals = await conversationRepository.listConversations({ tenantId: "tenant-feedback-decline" });
+    assert.equal(appeals.length, 2, "a message after the declined feedback must open a new appeal");
+    assert.equal(appeals.find((item) => item.id !== conversation!.id)?.messages.at(-1)?.text, "Другая проблема");
+  });
+
   it("attaches a rating to the latest closed appeal and its closing operator when the dialog was never assigned", async () => {
     const now = new Date();
     const integrationRepository = IntegrationRepository.inMemory({

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isAwaitingCsatFeedback } from "../quality/csat-feedback.js";
 import type { ConversationLifecycleEvent, ConversationRepository, RealtimeEvent } from "./conversation.repository.js";
 import type { ConversationRecord } from "./conversation.types.js";
 
@@ -32,11 +33,18 @@ export interface ResolveAppealConversationInput {
    * 400 на каждую доставку (инцидент 2026-07-17).
    */
   providerConversationId?: string;
+  /**
+   * Перехват CSAT-отзыва: если последнее обращение закрыто и ждет комментарий
+   * к оценке, входящее сообщение принадлежит ему (как отзыв), а не новому
+   * обращению — fork не выполняется, а результат помечается флагом.
+   */
+  interceptCsatFeedback?: boolean;
   tenantId: string;
 }
 
 export interface ResolveAppealConversationResult {
   conversation: ConversationRecord;
+  csatFeedbackAwaiting?: boolean;
   forked: boolean;
   isRepeatAppeal?: boolean;
 }
@@ -209,6 +217,10 @@ export async function resolveOrForkAppealConversation(
 
   if (existing.status !== "closed") {
     return { conversation: existing, forked: false };
+  }
+
+  if (input.interceptCsatFeedback && isAwaitingCsatFeedback(existing)) {
+    return { conversation: existing, csatFeedbackAwaiting: true, forked: false };
   }
 
   const closedParent = releaseProviderBindingForClosedAppeal(existing);

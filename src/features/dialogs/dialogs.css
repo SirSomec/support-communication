@@ -1514,6 +1514,34 @@
   font-size: 12px;
 }
 
+.csat-feedback-note {
+  display: grid;
+  gap: 7px;
+  max-width: min(520px, 80%);
+  padding: 12px 14px;
+  border: 1px solid #7cc2f1;
+  border-radius: 7px;
+  background: #eef7fe;
+  color: #16324a;
+}
+
+.csat-feedback-note strong {
+  font-size: 13px;
+}
+
+.csat-feedback-note p {
+  margin: 0;
+}
+
+.csat-feedback-note footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: center;
+  color: #4a708e;
+  font-size: 12px;
+}
+
 .audit-event-card {
   display: grid;
   gap: 7px;

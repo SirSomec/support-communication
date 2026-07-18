@@ -60,6 +60,28 @@
         "5178"
       ],
       "port": 5178
+    },
+    {
+      "name": "stub-api-gateway-csat",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "tests/playwright-api-gateway-csat-alt.mjs"
+      ],
+      "port": 4190
+    },
+    {
+      "name": "frontend-dev-stub-csat",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--mode",
+        "stub-alt",
+        "--port",
+        "5183"
+      ],
+      "port": 5183
     }
   ]
 }

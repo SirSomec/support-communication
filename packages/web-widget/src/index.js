@@ -42,6 +42,9 @@ const state = {
   panelOpen: false,
   initialized: false,
   ratingSubmitted: false,
+  // После оценки закрытый диалог ждет комментарий: следующее сообщение уйдет
+  // как отзыв (без нового обращения), пока клиент не нажмет «Новое обращение».
+  feedbackPending: false,
   // Page API (sw_api) state.
   agentsOnline: null,
   agentsStatusTimer: null,
@@ -64,6 +67,7 @@ let inputEl = null;
 let sendBtn = null;
 let toggleBtn = null;
 let ratingEl = null;
+let feedbackEl = null;
 let invitationEl = null;
 
 export function init(options = {}) {
@@ -432,6 +436,37 @@ async function sendQualityRating(score) {
   state.ratingSubmitted = true;
   if (ratingEl) ratingEl.hidden = true;
   appendSystemMessage("Спасибо, оценка сохранена.");
+  if (data.feedback?.offered) {
+    showFeedbackPrompt();
+  }
+}
+
+function showFeedbackPrompt() {
+  state.feedbackPending = true;
+  if (feedbackEl) feedbackEl.hidden = false;
+}
+
+function hideFeedbackPrompt() {
+  state.feedbackPending = false;
+  if (feedbackEl) feedbackEl.hidden = true;
+}
+
+// «Новое обращение»: клиент не хочет оставлять отзыв — снимаем ожидание на
+// сервере, чтобы следующее сообщение открыло новое обращение.
+async function declineFeedbackPrompt(button) {
+  if (button) button.disabled = true;
+  try {
+    await apiRequest("POST", `/public/sdk/conversations/${encodeURIComponent(state.conversationId)}/csat-feedback/decline`, {
+      body: { visitorSessionToken: state.visitorSessionToken }
+    });
+    hideFeedbackPrompt();
+    appendSystemMessage("Напишите сообщение — и мы откроем новое обращение.");
+    if (inputEl) inputEl.focus();
+  } catch (error) {
+    appendSystemMessage(`Не удалось отключить отзыв: ${error.message}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function startPolling() {
@@ -543,8 +578,10 @@ function destroy() {
   sendBtn = null;
   toggleBtn = null;
   ratingEl = null;
+  feedbackEl = null;
   invitationEl = null;
   state.currentInvitation = null;
+  state.feedbackPending = false;
   state.initialized = false;
   callPageCallback("onWidgetDestroy");
 }
@@ -700,6 +737,7 @@ function stopAgentsStatusPolling() {
 function setConversationId(conversationId) {
   const changed = applyConversationIdentity(state, conversationId);
   if (changed && ratingEl) ratingEl.hidden = true;
+  if (changed && feedbackEl) feedbackEl.hidden = true;
   return changed;
 }
 
@@ -710,6 +748,7 @@ function applyConversationIdentity(target, conversationId) {
   target.lastOperatorMessageId = null;
   target.operatorAccepted = false;
   target.ratingSubmitted = false;
+  target.feedbackPending = false;
   return true;
 }
 
@@ -748,6 +787,8 @@ function createPageApi() {
       state.firstMessageSent = false;
       state.operatorAccepted = false;
       state.ratingSubmitted = false;
+      state.feedbackPending = false;
+      if (feedbackEl) feedbackEl.hidden = true;
       state.contactInfo = {};
       state.userToken = "";
       if (messagesEl) {
@@ -975,6 +1016,16 @@ function renderShell() {
     ratingButtons.appendChild(button);
   }
   rating.append(ratingLabel, ratingButtons);
+  const feedback = document.createElement("div");
+  feedback.className = "sw-feedback";
+  feedback.hidden = true;
+  const feedbackLabel = document.createElement("span");
+  feedbackLabel.textContent = "Хотите оставить отзыв? Напишите его сообщением — мы передадим команде.";
+  const feedbackNewAppeal = document.createElement("button");
+  feedbackNewAppeal.type = "button";
+  feedbackNewAppeal.className = "sw-feedback__new-appeal";
+  feedbackNewAppeal.textContent = "Новое обращение";
+  feedback.append(feedbackLabel, feedbackNewAppeal);
   const composer = document.createElement("form");
   composer.className = "sw-composer";
   const textarea = document.createElement("textarea");
@@ -987,7 +1038,7 @@ function renderShell() {
   send.className = "sw-send";
   send.textContent = "Отправить";
   composer.append(textarea, send);
-  panel.append(header, messages, rating, composer);
+  panel.append(header, messages, rating, feedback, composer);
   rootEl.append(toggle, panel);
 
   document.body.appendChild(rootEl);
@@ -997,8 +1048,12 @@ function renderShell() {
   inputEl = rootEl.querySelector(".sw-input");
   sendBtn = rootEl.querySelector(".sw-send");
   ratingEl = rootEl.querySelector(".sw-rating");
+  feedbackEl = rootEl.querySelector(".sw-feedback");
   const closeBtn = rootEl.querySelector(".sw-close");
   const form = rootEl.querySelector(".sw-composer");
+  feedbackEl.querySelector(".sw-feedback__new-appeal").addEventListener("click", (event) => {
+    void declineFeedbackPrompt(event.currentTarget);
+  });
 
   toggleBtn.addEventListener("click", () => {
     if (state.panelOpen) {
@@ -1033,8 +1088,15 @@ function renderShell() {
     inputEl.value = "";
 
     try {
-      await sendVisitorMessage(text);
-      await pollOperatorReplies();
+      const data = await sendVisitorMessage(text);
+      if (data.recordedAsFeedback) {
+        // Сообщение сохранено как отзыв к оценке: операторского ответа не
+        // будет, подтверждаем сразу и возвращаем композер в обычный режим.
+        hideFeedbackPrompt();
+        appendSystemMessage(String(data.feedbackAck ?? "").trim() || "Спасибо за отзыв!");
+      } else {
+        await pollOperatorReplies();
+      }
     } catch (error) {
       appendSystemMessage(`Ошибка отправки: ${error.message}`);
     } finally {
@@ -1274,6 +1336,27 @@ function injectStyles() {
       color: #92400e;
       font-size: 12px;
     }
+    .support-widget .sw-feedback {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px;
+      border-top: 1px solid #e2e8f0;
+      background: #f0f9ff;
+      font-size: 13px;
+      color: #1e3a5f;
+    }
+    .support-widget .sw-feedback[hidden] { display: none; }
+    .support-widget .sw-feedback span { flex: 1; line-height: 1.35; }
+    .support-widget .sw-feedback .sw-feedback__new-appeal {
+      flex-shrink: 0;
+      border: 1px solid #b8c4d4;
+      border-radius: 6px;
+      background: #fff;
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+    .support-widget .sw-feedback .sw-feedback__new-appeal:disabled { opacity: 0.6; cursor: default; }
     .support-widget .sw-composer {
       display: flex;
       gap: 8px;

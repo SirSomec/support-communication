@@ -114,10 +114,11 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.equal(conversations.length, 1);
     assert.equal(detail?.id, "maria");
     assert.equal(detail?.name, "Maria K.");
-    assert.equal(detail?.messages.length, 2);
+    assert.equal(detail?.messages.length, 3);
     assert.equal(detail?.messages[0].text, "Where is my order?");
     assert.equal(detail?.messages[0].createdAt, "2026-06-28T10:00:00.000Z");
     assert.equal(detail?.messages[1].type, "internal");
+    assert.equal(detail?.messages[2].type, "csat_feedback");
     assert.deepEqual(client.calls.conversationFindMany, [{
       include: { messages: { orderBy: { createdAt: "desc" }, take: 50 } },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -155,15 +156,15 @@ describe("Prisma-backed conversation repository contracts", () => {
     assert.equal(saved.messages.some((message) => message.id === "msg_agent_prisma"), true);
     assert.equal(client.calls.conversationUpserts.length, 1);
     assert.equal(client.calls.conversationMessageCreateMany.length, 1);
-    assert.equal(client.calls.conversationMessageCreateMany[0].data.length, 3);
+    assert.equal(client.calls.conversationMessageCreateMany[0].data.length, 4);
     assert.equal(client.calls.conversationMessageCreateMany[0].skipDuplicates, true);
-    assert.equal(client.calls.conversationMessageCreateMany[0].data[2].id, "msg_agent_prisma");
+    assert.equal(client.calls.conversationMessageCreateMany[0].data[3].id, "msg_agent_prisma");
     assert.equal(client.calls.conversationMessageCreateMany[0].data.every((message) => message.createdAt instanceof Date), true);
     assert.equal(client.calls.conversationMessageCreateMany[0].data[0].createdAt.toISOString(), "2026-06-28T10:00:00.000Z");
     assert.equal(client.calls.conversationMessageCreateMany[0].data[1].createdAt.toISOString(), "2026-06-28T10:01:00.000Z");
 
     const refetched = await repository.findConversation("maria");
-    assert.deepEqual(refetched?.messages.map((message) => message.id), ["msg_1", "msg_2", "msg_agent_prisma"]);
+    assert.deepEqual(refetched?.messages.map((message) => message.id), ["msg_1", "msg_2", "msg_3", "msg_agent_prisma"]);
   });
 
   it("does not lose messages when two stale conversation snapshots are saved", async () => {
@@ -197,7 +198,7 @@ describe("Prisma-backed conversation repository contracts", () => {
     const persisted = await repository.findConversation("maria");
     assert.deepEqual(
       persisted?.messages.map((message) => message.id),
-      ["msg_1", "msg_2", "msg_concurrent_a", "msg_concurrent_b"]
+      ["msg_1", "msg_2", "msg_3", "msg_concurrent_a", "msg_concurrent_b"]
     );
   });
 
@@ -651,6 +652,19 @@ function createFakePrismaConversationClient(options: { inboundCreateUniqueRace?:
           text: "Check courier service before final reply.",
           time: "11:25",
           type: "internal"
+        },
+        {
+          attachments: null,
+          author: null,
+          conversationId: "maria",
+          createdAt: new Date("2026-06-28T10:01:30.000Z"),
+          id: "msg_3",
+          side: "client",
+          text: "Спасибо, все решили!",
+          time: "11:26",
+          // Отзыв к CSAT-оценке: тип обязан пережить чтение из Prisma,
+          // иначе окно чата покажет отзыв обычной репликой.
+          type: "csat_feedback"
         }
       ],
       name: "Maria K.",

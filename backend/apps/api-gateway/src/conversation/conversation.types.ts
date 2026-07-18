@@ -6,12 +6,21 @@ export interface ConversationMessage {
   side?: "agent" | "client";
   text: string;
   time: string;
-  type?: "event" | "internal";
+  type?: "event" | "internal" | "csat_feedback";
+}
+
+// Комментарий к CSAT-оценке: после оценки закрытое обращение ждет отзыв
+// клиента, и его следующее сообщение не открывает новое обращение.
+export interface ConversationCsatFeedbackState {
+  offeredAt: string;
+  ratingId: string;
+  state: "awaiting" | "received" | "declined";
 }
 
 export interface ConversationAppealMetadata {
   anchorId?: string;
   closedAt?: string;
+  csatFeedback?: ConversationCsatFeedbackState;
   isRepeatAppeal?: boolean;
   parentConversationId?: string;
 }

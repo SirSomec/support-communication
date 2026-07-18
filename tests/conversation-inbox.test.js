@@ -114,6 +114,19 @@ describe("conversationApiMapper", () => {
     assert.equal(mapped.createdAt, "2026-07-02T12:00:00.000");
   });
 
+  it("keeps the csat feedback message type for the review card in the chat window", () => {
+    const mapped = mapApiMessage({
+      id: "m-feedback",
+      side: "client",
+      text: "Спасибо, все отлично",
+      time: "now",
+      type: "csat_feedback"
+    });
+
+    assert.equal(mapped.type, "csat_feedback");
+    assert.equal(mapped.side, "client");
+  });
+
   it("uses the immutable lifecycle journal instead of legacy event placeholders", () => {
     const mapped = mapApiConversation({
       id: "conv-journal",

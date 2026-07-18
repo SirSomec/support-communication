@@ -13,6 +13,7 @@ import {
 } from "./public-api-auth.js";
 import { identifyPublicClientFromRoute } from "./public-api.route.js";
 import {
+  handlePublicSdkCsatFeedbackDeclineFromRoute,
   handlePublicSdkMessageIngressFromRoute,
   handlePublicSdkMessagesPollFromRoute,
   handlePublicSdkQualityRatingFromRoute,
@@ -255,6 +256,28 @@ export class PublicApiController {
       environment,
       lookup: this.lookup,
       recordQualityRating: (rating, context) => this.qualityService.recordClientQualityRating(rating, context)
+    });
+  }
+
+  @Post("sdk/conversations/:conversationId/csat-feedback/decline")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "declinePublicSdkCsatFeedback", summary: "Skip the CSAT feedback comment and unlock a new appeal" })
+  @ApiParam({ name: "conversationId", description: "SDK conversation identifier" })
+  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
+  @ApiOkResponse({ description: "Public SDK CSAT feedback decline envelope" })
+  declinePublicSdkCsatFeedback(
+    @Headers("authorization") authorization: string | undefined,
+    @Param("conversationId") conversationId: string,
+    @Query("environment") environment: PublicApiEnvironment = "production",
+    @Body() payload: { visitorSessionToken?: string } = {}
+  ) {
+    return handlePublicSdkCsatFeedbackDeclineFromRoute({
+      authorization,
+      body: payload,
+      conversationId,
+      conversationRepository: this.conversationRepository,
+      environment,
+      lookup: this.lookup
     });
   }
 

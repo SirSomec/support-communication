@@ -1856,7 +1856,7 @@ function messageSideFromRow(side: string | null): ConversationMessage["side"] | 
 }
 
 function messageTypeFromRow(type: string | null): ConversationMessage["type"] | undefined {
-  return type === "event" || type === "internal" ? type : undefined;
+  return type === "event" || type === "internal" || type === "csat_feedback" ? type : undefined;
 }
 
 function makePersistenceId(scope: string, ...parts: string[]): string {
@@ -1921,8 +1921,30 @@ function appealMetadataFromJson(value: unknown): ConversationAppealMetadata | un
   if (typeof record.isRepeatAppeal === "boolean") {
     metadata.isRepeatAppeal = record.isRepeatAppeal;
   }
+  const csatFeedback = csatFeedbackStateFromJson(record.csatFeedback);
+  if (csatFeedback) {
+    metadata.csatFeedback = csatFeedback;
+  }
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function csatFeedbackStateFromJson(value: unknown): ConversationAppealMetadata["csatFeedback"] | undefined {
+  const record = recordFromJson(value);
+  if (!record) {
+    return undefined;
+  }
+
+  const state = String(record.state ?? "").trim();
+  if (state !== "awaiting" && state !== "received" && state !== "declined") {
+    return undefined;
+  }
+
+  return {
+    offeredAt: String(record.offeredAt ?? "").trim(),
+    ratingId: String(record.ratingId ?? "").trim(),
+    state
+  };
 }
 
 function lifecycleEventIdentityMatches(left: ConversationLifecycleEvent, right: ConversationLifecycleEvent): boolean {

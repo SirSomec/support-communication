@@ -13,6 +13,13 @@ import {
   type AppealConversationMutation
 } from "../conversation/appeal-lifecycle.js";
 import {
+  CSAT_FEEDBACK_ACK_TEXT,
+  conversationCsatFeedback,
+  csatFeedbackConversationMutation,
+  isAwaitingCsatFeedback,
+  withCsatFeedback
+} from "../quality/csat-feedback.js";
+import {
   resolvePublicApiRequest,
   type PublicApiEnvironment,
   type PublicApiKeyLookup
@@ -68,7 +75,7 @@ export interface PublicSdkRatingRouteInput {
   authorization?: string;
   body: { idempotencyKey?: string; scale?: "CSAT" | "CSI"; score?: number; visitorSessionToken?: string };
   conversationId: string;
-  conversationRepository: Pick<ConversationRepository, "findConversation">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
   environment: PublicApiEnvironment;
   lookup: PublicApiKeyLookup;
   recordQualityRating: (payload: {
@@ -77,14 +84,38 @@ export interface PublicSdkRatingRouteInput {
   }, context: { actorId?: string; actorType?: "client"; tenantId?: string }) => Promise<BackendEnvelope<Record<string, unknown>>>;
 }
 
+export interface PublicSdkCsatFeedbackDeclineRouteInput {
+  authorization?: string;
+  body: { visitorSessionToken?: string };
+  conversationId: string;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
+  environment: PublicApiEnvironment;
+  lookup: PublicApiKeyLookup;
+}
+
+export interface PublicSdkInboundConversationResolution {
+  conversation: ConversationRecord | null;
+  // Последнее обращение закрыто и ждет комментарий к CSAT-оценке: входящее
+  // сообщение — отзыв, новое обращение не открывается.
+  csatFeedbackAwaiting: boolean;
+}
+
 export async function resolveOrCreatePublicSdkConversation(
   input: PublicSdkConversationIdentityInput & {
     conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   }
 ): Promise<ConversationRecord | null> {
+  return (await resolvePublicSdkInboundConversation(input)).conversation;
+}
+
+export async function resolvePublicSdkInboundConversation(
+  input: PublicSdkConversationIdentityInput & {
+    conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
+  }
+): Promise<PublicSdkInboundConversationResolution> {
   const externalId = String(input.externalId ?? "").trim();
   if (!externalId) {
-    return null;
+    return { conversation: null, csatFeedbackAwaiting: false };
   }
 
   const requestedConversationId = String(input.conversationId ?? "").trim();
@@ -94,7 +125,7 @@ export async function resolveOrCreatePublicSdkConversation(
       resolveConversationTenantId(requestedConversation) !== input.tenantId
       || String(requestedConversation.providerConversationId ?? "").trim() !== externalId
     )) {
-      return null;
+      return { conversation: null, csatFeedbackAwaiting: false };
     }
   }
   const anchorId = `sdk_${createHash("sha256")
@@ -105,6 +136,7 @@ export async function resolveOrCreatePublicSdkConversation(
   const resolved = await resolveOrForkAppealConversation({
     anchorId,
     conversationRepository: input.conversationRepository,
+    interceptCsatFeedback: true,
     createInitial: () => ({
       channel: "SDK",
       clientSince: new Date().toISOString().slice(0, 10),
@@ -137,7 +169,10 @@ export async function resolveOrCreatePublicSdkConversation(
     tenantId: input.tenantId
   });
 
-  return resolved?.conversation ?? null;
+  return {
+    conversation: resolved?.conversation ?? null,
+    csatFeedbackAwaiting: Boolean(resolved?.csatFeedbackAwaiting)
+  };
 }
 
 function conversationCreatedMutation(
@@ -220,7 +255,7 @@ export async function handlePublicSdkMessageIngressFromRoute(
     );
   }
 
-  const conversation = await resolveOrCreatePublicSdkConversation({
+  const resolved = await resolvePublicSdkInboundConversation({
     conversationId: input.body.conversationId,
     conversationRepository: input.conversationRepository,
     externalId: input.body.externalId,
@@ -228,6 +263,7 @@ export async function handlePublicSdkMessageIngressFromRoute(
     queueId,
     tenantId: auth.context.tenantId
   });
+  const conversation = resolved.conversation;
   if (!conversation) {
     return deniedEnvelope(
       "sendPublicSdkMessage",
@@ -237,24 +273,28 @@ export async function handlePublicSdkMessageIngressFromRoute(
     );
   }
   const isNewConversation = conversation.messages.length === 0;
+  const csatFeedback = resolved.csatFeedbackAwaiting;
 
   const eventId = `sdk_evt_${randomUUID()}`;
   const normalized = await input.conversationService.normalizeInboundEvent("sdk", {
     conversationId: conversation.id,
+    csatFeedback,
     eventId,
     text
   });
   const normalizedMessage = normalized.data?.message as Record<string, unknown> | null | undefined;
   const messageId = normalizedMessage?.id ? String(normalizedMessage.id) : null;
-  const proactiveConversion = normalized.status === "ok" && input.recordProactiveConversion
+  // Отзыв к CSAT-оценке не конвертирует проактивные показы, не будит бота и
+  // не назначает оператора: обращение остается закрытым.
+  const proactiveConversion = normalized.status === "ok" && !csatFeedback && input.recordProactiveConversion
     ? await input.recordProactiveConversion.recordMessageConversion({ conversationId: conversation.id, messageId,
       occurredAt: new Date().toISOString(), tenantId: auth.context.tenantId })
     : null;
-  const botRuntime = normalized.status === "ok" && input.runBotRuntime
+  const botRuntime = normalized.status === "ok" && !csatFeedback && input.runBotRuntime
     ? await tryBotRuntime(input.runBotRuntime, { channel: "SDK", conversationId: conversation.id, eventId, payload: { isNewConversation, text }, tenantId: auth.context.tenantId, traceId: normalized.traceId })
     : null;
   const needsOperator = !botRuntime || ["handoff", "dead_lettered"].includes(String(botRuntime.instance?.status ?? ""));
-  const autoAssignment = normalized.status === "ok" && needsOperator && input.autoAssignConversation
+  const autoAssignment = normalized.status === "ok" && !csatFeedback && needsOperator && input.autoAssignConversation
     ? await tryAutoAssignment(input.autoAssignConversation, conversation.id, auth.context.tenantId)
     : null;
 
@@ -278,6 +318,7 @@ export async function handlePublicSdkMessageIngressFromRoute(
       messageId,
       proactiveConversion: proactiveConversion ? { exposureId: proactiveConversion.exposureId, ruleId: proactiveConversion.ruleId,
         variant: proactiveConversion.variant } : null,
+      ...(csatFeedback ? { recordedAsFeedback: normalized.status === "ok", feedbackAck: CSAT_FEEDBACK_ACK_TEXT } : {}),
       visitorSessionToken: createVisitorSessionToken({
         conversationId: conversation.id,
         tenantId: auth.context.tenantId
@@ -425,6 +466,24 @@ export async function handlePublicSdkQualityRatingFromRoute(
     topic: conversation.topic
   }, { actorId: clientId, actorType: "client", tenantId: auth.context.tenantId });
 
+  // Оценка принята по закрытому обращению: блок оценки в виджете скрывается,
+  // а следующее сообщение клиента станет отзывом, не открывая новое обращение.
+  let feedbackOffered = false;
+  if (recorded.status === "ok" && conversation.status === "closed") {
+    const current = conversationCsatFeedback(conversation);
+    const alreadyAwaiting = isAwaitingCsatFeedback(conversation);
+    const ratingId = String(recorded.data?.ratingId ?? "") || `sdk:${conversationId}:${idempotencyKey}`;
+    const updated = withCsatFeedback(conversation, {
+      offeredAt: alreadyAwaiting && current ? current.offeredAt : new Date().toISOString(),
+      ratingId,
+      state: "awaiting"
+    });
+    await input.conversationRepository.saveConversationMutation(
+      csatFeedbackConversationMutation(updated, "quality.feedback.offered", { ratingId })
+    );
+    feedbackOffered = true;
+  }
+
   return createEnvelope({
     service: INTEGRATION_SERVICE,
     operation: "recordPublicSdkQualityRating",
@@ -433,9 +492,66 @@ export async function handlePublicSdkQualityRatingFromRoute(
     data: {
       accepted: recorded.status === "ok",
       conversationId,
+      feedback: { offered: feedbackOffered },
       ratingId: recorded.data?.ratingId ?? null
     },
     ...(recorded.error ? { error: recorded.error } : {})
+  });
+}
+
+// Клиент не хочет оставлять отзыв («Новое обращение» в виджете): снимаем
+// ожидание комментария — следующее сообщение снова откроет новое обращение.
+export async function handlePublicSdkCsatFeedbackDeclineFromRoute(
+  input: PublicSdkCsatFeedbackDeclineRouteInput
+): Promise<BackendEnvelope<Record<string, unknown>>> {
+  const auth = await resolvePublicApiRequest({
+    authorization: input.authorization,
+    environment: input.environment,
+    lookup: input.lookup,
+    requiredScope: "conversations:write"
+  });
+  if (!auth.allowed) {
+    return deniedEnvelope("declinePublicSdkCsatFeedback", auth.code, publicApiAuthMessage(auth.code), {
+      conversationId: input.conversationId, declined: false
+    });
+  }
+
+  const conversationId = String(input.conversationId ?? "").trim();
+  const conversation = await input.conversationRepository.findConversation(conversationId);
+  if (!conversation || resolveConversationTenantId(conversation) !== auth.context.tenantId) {
+    return notFoundEnvelope("declinePublicSdkCsatFeedback", "conversation_not_found", `Conversation ${conversationId} was not found.`, {
+      conversationId, declined: false
+    });
+  }
+
+  const tokenValidation = validateVisitorSessionToken(input.body.visitorSessionToken, {
+    conversationId,
+    tenantId: auth.context.tenantId
+  });
+  if (!tokenValidation.valid) {
+    return deniedEnvelope("declinePublicSdkCsatFeedback", tokenValidation.code,
+      "visitorSessionToken is invalid for this conversation or has expired.", { conversationId, declined: false });
+  }
+
+  let declined = false;
+  if (isAwaitingCsatFeedback(conversation)) {
+    const current = conversationCsatFeedback(conversation);
+    const updated = withCsatFeedback(conversation, {
+      offeredAt: current?.offeredAt ?? new Date().toISOString(),
+      ratingId: current?.ratingId ?? "",
+      state: "declined"
+    });
+    await input.conversationRepository.saveConversationMutation(
+      csatFeedbackConversationMutation(updated, "quality.feedback.declined", { ratingId: current?.ratingId ?? null })
+    );
+    declined = true;
+  }
+
+  return createEnvelope({
+    service: INTEGRATION_SERVICE,
+    operation: "declinePublicSdkCsatFeedback",
+    meta: { source: "api", apiVersion: "v1", channel: "sdk", conversationId },
+    data: { conversationId, declined }
   });
 }
 

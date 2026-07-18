@@ -123,6 +123,23 @@ function MessageBubble({ message, now, onSaveTemplate }) {
     return <AuditEventCard displayTime={displayTime} message={message} />;
   }
 
+  // Комментарий клиента к CSAT-оценке: не диалоговая реплика, а отзыв
+  // к закрытому обращению — выделяется отдельной карточкой.
+  if (message.type === "csat_feedback") {
+    return (
+      <article className="csat-feedback-note">
+        <strong>Отзыв клиента</strong>
+        <p>{message.text}</p>
+        <footer>
+          {message.channel ? (
+            <span className="message-channel" title={`Канал сообщения: ${message.channel}`}>{message.channel}</span>
+          ) : null}
+          <time>{displayTime}</time>
+        </footer>
+      </article>
+    );
+  }
+
   if (message.type === "internal") {
     return (
       <article className="internal-note">

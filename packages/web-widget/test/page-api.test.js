@@ -54,6 +54,20 @@ test("offline message requires text", () => {
   assert.deepEqual(api.sendOfflineMessage({ name: "A" }), { result: "fail", error: "message_required" });
 });
 
+test("switching to a forked appeal resets the rating and feedback prompt state", () => {
+  const target = {
+    conversationId: "conv-closed",
+    lastOperatorMessageId: "m1",
+    operatorAccepted: true,
+    ratingSubmitted: true,
+    feedbackPending: true
+  };
+  assert.equal(__test__.applyConversationIdentity(target, "conv-new"), true);
+  assert.equal(target.ratingSubmitted, false);
+  assert.equal(target.feedbackPending, false);
+  assert.equal(target.lastOperatorMessageId, null);
+});
+
 test("local invitations are recognised by their exposure prefix", () => {
   assert.equal(__test__.isLocalInvitation({ exposureId: "local-x" }), true);
   assert.equal(__test__.isLocalInvitation({ exposureId: "exposure-1" }), false);
@@ -116,6 +130,7 @@ test("a follow-up conversation resets conversation-scoped rating and accept flag
   assert.equal(__test__.applyConversationIdentity(conversationState, "appeal-2"), true);
   assert.deepEqual(conversationState, {
     conversationId: "appeal-2",
+    feedbackPending: false,
     lastOperatorMessageId: null,
     operatorAccepted: false,
     ratingSubmitted: false

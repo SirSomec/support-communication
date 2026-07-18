@@ -5,8 +5,14 @@ import type { ConversationService } from "../conversation/conversation.service.j
 import type { ChannelConnectionStoredRecord, TelegramConnectionStoredRecord } from "./integration.repository.js";
 import type { TelegramHttpFetch } from "./telegram-channel-connection.js";
 import {
+  acknowledgeTelegramCsatFeedback,
+  declineTelegramCsatFeedback,
+  offerTelegramCsatFeedbackAfterRating
+} from "./telegram-csat-feedback.js";
+import {
+  parseTelegramCsatFeedbackDecline,
   parseTelegramQualityRating,
-  resolveOrCreateTelegramConversation,
+  resolveTelegramInboundConversation,
   resolveTelegramRatedTarget,
   telegramRoutingQueueId,
   telegramTenantEventId
@@ -192,6 +198,34 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
         continue;
       }
 
+      const feedbackDecline = parseTelegramCsatFeedbackDecline(update as unknown as Record<string, unknown>);
+      if (feedbackDecline) {
+        // «Новое обращение» под промптом отзыва: снять ожидание и скрыть промпт.
+        const target = await resolveTelegramRatedTarget(input.conversationRepository, {
+          botId: connection.botId ?? undefined,
+          chatId: feedbackDecline.chatId,
+          tenantId: connection.tenantId
+        });
+        if (target) {
+          await declineTelegramCsatFeedback({
+            api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher },
+            callbackQueryId: feedbackDecline.callbackQueryId,
+            chatId: feedbackDecline.chatId,
+            conversation: target.conversation,
+            conversationRepository: input.conversationRepository,
+            promptMessageId: feedbackDecline.messageId
+          });
+          result.accepted += 1;
+        } else {
+          result.failed += 1;
+        }
+        const declineUpdateId = Number(update.update_id);
+        if (Number.isFinite(declineUpdateId)) {
+          await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, declineUpdateId + 1);
+        }
+        continue;
+      }
+
       const parsed = parseTelegramPollingUpdate(update);
       if (!parsed) {
         const ignoredUpdateId = Number(update.update_id);
@@ -201,7 +235,7 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
         continue;
       }
 
-      const conversation = await resolveOrCreateTelegramConversation({
+      const resolved = await resolveTelegramInboundConversation({
         botId: connection.botId ?? undefined,
         chatId: parsed.chatId,
         conversationRepository: input.conversationRepository,
@@ -210,6 +244,7 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
         tenantId: connection.tenantId,
         username: parsed.username
       });
+      const conversation = resolved.conversation;
 
       if (!conversation) {
         result.failed += 1;
@@ -219,6 +254,7 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
 
       const normalized = await input.conversationService.normalizeInboundEvent("telegram", {
         conversationId: conversation.id,
+        csatFeedback: resolved.csatFeedbackAwaiting,
         eventId: telegramTenantEventId(connection.tenantId, connection.botId ?? undefined, parsed.eventId),
         text: parsed.text
       });
@@ -229,6 +265,20 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
         result.accepted += 1;
       } else {
         result.failed += 1;
+        continue;
+      }
+
+      // Отзыв к CSAT-оценке: подтверждаем клиенту и не запускаем бота с
+      // автоназначением — обращение остается закрытым.
+      if (resolved.csatFeedbackAwaiting) {
+        if (!normalized.data?.duplicate) {
+          await acknowledgeTelegramCsatFeedback({
+            api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher },
+            chatId: parsed.chatId,
+            conversationId: conversation.id
+          });
+        }
+        await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, parsed.updateId + 1);
         continue;
       }
 
@@ -288,7 +338,7 @@ function positiveBackoff(value: number | undefined, fallback: number): number {
 async function recordPolledQualityRating(input: {
   apiBaseUrl?: string;
   connection: TelegramConnectionStoredRecord;
-  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "listLifecycleEvents">;
+  conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "listLifecycleEvents" | "saveConversationMutation">;
   fetcher: TelegramHttpFetch;
   rating: NonNullable<ReturnType<typeof parseTelegramQualityRating>>;
   recordQualityRating?: TelegramPollingInput["recordQualityRating"];
@@ -321,6 +371,15 @@ async function recordPolledQualityRating(input: {
     if (!recorded) {
       throw new Error(String(response.error?.code ?? "telegram_quality_rating_rejected"));
     }
+    // Оценка записана: скрываем сообщение опроса и предлагаем комментарий.
+    await offerTelegramCsatFeedbackAfterRating({
+      api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher: input.fetcher },
+      chatId: rating.chatId,
+      conversation: target.conversation,
+      conversationRepository: input.conversationRepository,
+      ratingId: String(response.data?.ratingId ?? "") || `telegram:${rating.callbackQueryId}`,
+      surveyMessageId: rating.messageId
+    });
   } catch (error) {
     writeStructuredLog("warn", "Telegram quality rating ingestion failed", {
       callbackQueryId: rating.callbackQueryId,

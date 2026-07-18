@@ -36,7 +36,8 @@ export class TelegramWebhookController {
       headers,
       integrationRepository: this.integrationRepository,
       recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context),
-      runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event)
+      runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event),
+      telegramApi: { apiBaseUrl: String(process.env.TELEGRAM_API_BASE_URL ?? "").trim() || undefined }
     });
   }
 }

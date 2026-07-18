@@ -27,6 +27,7 @@ import { WorkspaceRepository, type FileRecord } from "../workspace/workspace.rep
 import { IdentityRepository } from "../identity/identity.repository.js";
 import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
 import { AutomationRepository } from "../automation/automation.repository.js";
+import { conversationCsatFeedback } from "../quality/csat-feedback.js";
 import { QualityRepository } from "../quality/quality.repository.js";
 
 const DIALOG_SERVICE = "dialogService";
@@ -217,6 +218,9 @@ interface OutboundPayload {
 interface InboundPayload {
   attachments?: Array<Record<string, unknown>>;
   conversationId?: string;
+  // Сообщение — комментарий к CSAT-оценке закрытого обращения: сохраняется
+  // как отзыв в этом же диалоге и не открывает новое обращение.
+  csatFeedback?: boolean;
   eventId?: string;
   text?: string;
 }
@@ -1775,28 +1779,45 @@ export class ConversationService {
       });
     }
 
+    const csatFeedback = payload.csatFeedback === true;
+    const feedbackState = csatFeedback ? conversationCsatFeedback(conversation) : null;
     const message: ConversationMessage = {
       createdAt: new Date().toISOString(),
-      id: makeMessageId("client"),
+      id: makeMessageId(csatFeedback ? "feedback" : "client"),
       side: "client",
       text: text || "Attachment received",
+      ...(csatFeedback ? { type: "csat_feedback" as const } : {}),
       ...(attachments.length ? { attachments: clone(attachments) } : {}),
       time: NOW_LABEL
     };
     conversation.messages.push(message);
-    conversation.preview = message.text;
+    conversation.preview = csatFeedback ? `Отзыв: ${message.text}` : message.text;
     conversation.time = NOW_LABEL;
+    if (csatFeedback) {
+      // Отзыв получен: закрытое обращение перестает ждать комментарий,
+      // следующее сообщение клиента снова откроет новое обращение.
+      conversation.metadata = {
+        ...(conversation.metadata ?? {}),
+        csatFeedback: {
+          offeredAt: feedbackState?.offeredAt ?? new Date().toISOString(),
+          ratingId: feedbackState?.ratingId ?? "",
+          state: "received"
+        }
+      };
+    }
     const event = this.createRealtimeEvent("message.created", "conversation", conversation.id, {
       channel,
+      ...(csatFeedback ? { csatFeedback: true } : {}),
       eventId,
       messageId: message.id
     }, tenantId);
     const receivedAt = new Date().toISOString();
     const persisted = await this.conversationRepository.recordInboundMessage({
       conversation,
-      lifecycleEvent: this.createLifecycleEvent("message.received", conversation, event, { actorType: "client", tenantId }, {
+      lifecycleEvent: this.createLifecycleEvent(csatFeedback ? "quality.feedback.received" : "message.received", conversation, event, { actorType: "client", tenantId }, {
         channel,
-        messageId: String(message.id)
+        messageId: String(message.id),
+        ...(feedbackState?.ratingId ? { ratingId: feedbackState.ratingId } : {})
       }),
       realtimeEvent: event,
       inboundEvent: {

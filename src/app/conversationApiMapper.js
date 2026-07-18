@@ -136,7 +136,7 @@ export function mapApiMessage(input) {
     mapped.side = input.side;
   }
 
-  if (input?.type === "event" || input?.type === "internal") {
+  if (input?.type === "event" || input?.type === "internal" || input?.type === "csat_feedback") {
     mapped.type = input.type;
   }
 

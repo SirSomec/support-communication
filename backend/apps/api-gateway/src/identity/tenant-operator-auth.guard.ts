@@ -23,13 +23,20 @@ export class TenantOperatorAuthGuard implements CanActivate {
       throw new UnauthorizedException("Bearer tenant operator session is required.");
     }
 
-    const resolved = await IdentityRepository.default().findTenantOperatorSessionByAccessToken(bearerToken);
+    const repository = IdentityRepository.default();
+    const resolved = await repository.findTenantOperatorSessionByAccessToken(bearerToken);
     if (!resolved) {
       throw new UnauthorizedException("Tenant operator session is invalid or expired.");
     }
 
     if (requiredAction && !hasPermission(resolved.permissions, requiredAction)) {
       throw new ForbiddenException(`Tenant operator permission ${requiredAction} is required.`);
+    }
+
+    try {
+      await repository.touchServiceAdminSessionActivity({ accessToken: bearerToken });
+    } catch {
+      // Продление сессии best-effort: сбой записи не должен валить авторизованный запрос.
     }
 
     request.tenantOperatorContext = {

@@ -64,6 +64,12 @@ export class ServiceAdminSessionGuard implements CanActivate {
         throw new ForbiddenException(message);
       }
 
+      try {
+        await repository.touchServiceAdminSessionActivity({ accessToken: bearerToken });
+      } catch {
+        // Продление сессии best-effort: сбой записи не должен валить авторизованный запрос.
+      }
+
       const contextRoles = resolvedSession ? [(resolvedSession as StoredServiceAdminSession).role] : [];
 
       request.serviceAdminContext = {

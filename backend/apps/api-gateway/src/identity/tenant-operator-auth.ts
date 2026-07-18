@@ -5,6 +5,10 @@ import type { IdentityPermissionRole } from "./identity.repository.js";
 
 export const TENANT_OPERATOR_PERMISSION_KEY = "tenantOperatorPermission";
 
+// Пользовательская сессия (оператор и service-admin) живёт 12 часов после последней
+// активности: гварды продлевают expiresAt при каждом аутентифицированном запросе.
+export const SESSION_IDLE_TTL_MINUTES = 12 * 60;
+
 export interface TenantOperatorContext {
   permissions: string[];
   sessionId: string;
@@ -36,7 +40,7 @@ export function createTenantOperatorSessionTokens({
   hashToken,
   sessionId,
   subjectId,
-  ttlMinutes = 60,
+  ttlMinutes = SESSION_IDLE_TTL_MINUTES,
   refreshTtlMinutes = 60 * 24 * 14
 }: {
   hashToken: (token: string) => string;

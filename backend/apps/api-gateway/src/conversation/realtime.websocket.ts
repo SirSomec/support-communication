@@ -93,6 +93,7 @@ export async function authorizeRealtimeSocket(headers: IncomingHttpHeaders, conf
   const authorization = readHeader(headers, "authorization");
   if (/^Bearer\s+/i.test(authorization)) {
     let serviceAdminTenantId: string | undefined;
+    let resolvedAccessToken: string | undefined;
     const decision = await resolveServiceAdminContextAsync({
       headers,
       requiredAction: realtimeReadAction,
@@ -102,9 +103,18 @@ export async function authorizeRealtimeSocket(headers: IncomingHttpHeaders, conf
           return undefined;
         }
         serviceAdminTenantId = session?.currentTenantId || undefined;
+        resolvedAccessToken = token;
         return session;
       }
     });
+
+    if (decision.allowed && resolvedAccessToken) {
+      try {
+        await IdentityRepository.default().touchServiceAdminSessionActivity({ accessToken: resolvedAccessToken });
+      } catch {
+        // Продление сессии best-effort: сбой записи не должен рвать realtime-подключение.
+      }
+    }
 
     return decision.allowed
       ? { allowed: true, ...(serviceAdminTenantId ? { tenantId: serviceAdminTenantId } : {}) }

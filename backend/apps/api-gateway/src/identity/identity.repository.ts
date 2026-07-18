@@ -18,7 +18,7 @@ import type {
   IdentityTenantAuditEvent,
   IdentityTenantUser
 } from "./identity.types.js";
-import { createTenantOperatorSessionTokens, resolveTenantOperatorPermissions } from "./tenant-operator-auth.js";
+import { createTenantOperatorSessionTokens, resolveTenantOperatorPermissions, SESSION_IDLE_TTL_MINUTES } from "./tenant-operator-auth.js";
 
 export type {
   IdentityPermissionRole,
@@ -539,6 +539,7 @@ export interface IdentityRepositoryPort {
   } | undefined>;
   getActiveRbacPolicyVersion(): MaybePromise<IdentityRbacPolicyVersion | undefined>;
   getPasswordPolicy(scope: string): MaybePromise<IdentityPasswordPolicy | undefined>;
+  touchServiceAdminSessionActivity(input: TouchServiceAdminSessionActivityInput): MaybePromise<void>;
   listCredentialAuditEvents(subjectId: string): MaybePromise<IdentityCredentialAuditEvent[]>;
   listPermissionDenialEvents(input?: ListPermissionDenialEventsInput): MaybePromise<IdentityPermissionDenialEvent[]>;
   listServiceAdminAuditEvents(): MaybePromise<IdentityServiceAdminAuditEvent[]>;
@@ -596,6 +597,14 @@ interface CreateServiceAdminSessionInput {
   tenantScope?: string;
   ttlMinutes?: number;
 }
+
+interface TouchServiceAdminSessionActivityInput {
+  accessToken: string;
+  now?: Date;
+}
+
+// Продлеваем не чаще раза в 5 минут на сессию, чтобы не писать в БД на каждый запрос.
+const SESSION_ACTIVITY_EXTEND_THROTTLE_MS = 5 * 60 * 1000;
 
 interface CreateServiceAdminTokenPairInput {
   accessTokenExpiresAt: string;
@@ -1024,6 +1033,10 @@ export class IdentityRepository implements IdentityRepositoryPort {
     return this.adapter.findTenantOperatorSessionByAccessToken(accessToken);
   }
 
+  touchServiceAdminSessionActivity(input: TouchServiceAdminSessionActivityInput): MaybePromise<void> {
+    return this.adapter.touchServiceAdminSessionActivity(input);
+  }
+
   revokeServiceAdminSession(sessionId: string | undefined): MaybePromise<StoredServiceAdminSession | undefined> {
     return this.adapter.revokeServiceAdminSession(sessionId);
   }
@@ -1175,7 +1188,7 @@ interface PrismaIdentityDelegates {
     deleteMany(input: { where: { tenantScope: string } }): Promise<{ count: number }>;
     findMany(input: { where: { adminEmail: string; revokedAt?: null } }): Promise<PrismaServiceAdminSessionRow[]>;
     findUnique(input: { where: { id: string } }): Promise<PrismaServiceAdminSessionRow | null>;
-    update(input: { data: { revokedAt: Date }; where: { id: string } }): Promise<PrismaServiceAdminSessionRow>;
+    update(input: { data: { expiresAt?: Date; revokedAt?: Date }; where: { id: string } }): Promise<PrismaServiceAdminSessionRow>;
     updateMany(input: { data: { revokedAt: Date }; where: { id: { in: string[] }; revokedAt: null } }): Promise<{ count: number }>;
   };
   serviceAdminTokenPair: {
@@ -1646,6 +1659,7 @@ interface PrismaServiceAdminTokenPairCreateInput {
 }
 
 interface PrismaServiceAdminTokenPairUpdateInput {
+  accessTokenExpiresAt?: Date;
   revokedAt?: Date;
   rotatedAt?: Date;
 }
@@ -2942,7 +2956,7 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
         authState: "mfa_verified",
         availableOrganizations: resolved.availableOrganizations,
         currentTenantId: resolved.currentTenantId,
-        expiresAt: addMinutes(now, input.ttlMinutes ?? 240),
+        expiresAt: addMinutes(now, input.ttlMinutes ?? SESSION_IDLE_TTL_MINUTES),
         id: `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
         mfaVerifiedAt: input.mfaVerified === false ? null : now,
         revokedAt: null,
@@ -2972,7 +2986,7 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
       role: user.role,
       sessionIdPrefix: "top-session",
       tenantScope: user.tenantId,
-      ttlMinutes: 60
+      ttlMinutes: SESSION_IDLE_TTL_MINUTES
     });
     const tokenPair = createTenantOperatorSessionTokens({
       hashToken: hashServiceAdminToken,
@@ -3090,6 +3104,34 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
       session: toTenantOperatorSession(session),
       user
     };
+  }
+
+  async touchServiceAdminSessionActivity({ accessToken, now = new Date() }: TouchServiceAdminSessionActivityInput): Promise<void> {
+    const newExpiresAt = addMinutes(now, SESSION_IDLE_TTL_MINUTES);
+    const tokenPair = await this.client.serviceAdminTokenPair.findFirst({
+      orderBy: { issuedAt: "desc" },
+      where: {
+        accessTokenExpiresAt: { gt: now },
+        accessTokenHash: hashServiceAdminToken(accessToken),
+        revokedAt: null,
+        rotatedAt: null
+      }
+    });
+    if (!tokenPair || Date.parse(toIso(tokenPair.accessTokenExpiresAt)) >= newExpiresAt.getTime() - SESSION_ACTIVITY_EXTEND_THROTTLE_MS) {
+      return;
+    }
+
+    await this.client.serviceAdminTokenPair.update({
+      data: { accessTokenExpiresAt: newExpiresAt },
+      where: { id: tokenPair.id }
+    });
+    const session = await this.client.serviceAdminSession.findUnique({ where: { id: tokenPair.sessionId } });
+    if (session && !session.revokedAt && Date.parse(toIso(session.expiresAt)) < newExpiresAt.getTime()) {
+      await this.client.serviceAdminSession.update({
+        data: { expiresAt: newExpiresAt },
+        where: { id: session.id }
+      });
+    }
   }
 
   async revokeServiceAdminSession(sessionId: string | undefined): Promise<StoredServiceAdminSession | undefined> {
@@ -3816,7 +3858,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         role: user.role,
         tenantScope: user.tenantId,
         id: `top-session_${randomUUID()}`,
-        expiresAt: addMinutes(now, 60).toISOString(),
+        expiresAt: addMinutes(now, SESSION_IDLE_TTL_MINUTES).toISOString(),
         mfaVerifiedAt: now.toISOString(),
         revokedAt: null
       };
@@ -4403,7 +4445,7 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         role: resolved.role,
         tenantScope: resolved.tenantScope,
         id: `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
-        expiresAt: addMinutes(now, input.ttlMinutes ?? 240).toISOString(),
+        expiresAt: addMinutes(now, input.ttlMinutes ?? SESSION_IDLE_TTL_MINUTES).toISOString(),
         mfaVerifiedAt: input.mfaVerified === false ? null : now.toISOString(),
         revokedAt: null
       };
@@ -4530,6 +4572,37 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         session: toTenantOperatorSession(session),
         user
       });
+    },
+
+    touchServiceAdminSessionActivity({ accessToken, now = new Date() }: TouchServiceAdminSessionActivityInput): void {
+      const tokenHash = hashServiceAdminToken(accessToken);
+      const nowMs = now.getTime();
+      const newExpiresAt = addMinutes(now, SESSION_IDLE_TTL_MINUTES);
+      const newExpiresAtMs = newExpiresAt.getTime();
+      const tokenPair = (store.read().serviceAdminTokenPairs ?? []).find((item) => (
+        item.accessTokenHash === tokenHash
+        && !item.revokedAt
+        && !item.rotatedAt
+        && Number.isFinite(Date.parse(item.accessTokenExpiresAt))
+        && Date.parse(item.accessTokenExpiresAt) > nowMs
+      ));
+      if (!tokenPair || Date.parse(tokenPair.accessTokenExpiresAt) >= newExpiresAtMs - SESSION_ACTIVITY_EXTEND_THROTTLE_MS) {
+        return;
+      }
+
+      store.update((state) => ({
+        ...state,
+        serviceAdminSessions: state.serviceAdminSessions.map((session) => (
+          session.id === tokenPair.sessionId
+            && !session.revokedAt
+            && Date.parse(session.expiresAt) < newExpiresAtMs
+            ? { ...session, expiresAt: newExpiresAt.toISOString() }
+            : session
+        )),
+        serviceAdminTokenPairs: (state.serviceAdminTokenPairs ?? []).map((item) => (
+          item.id === tokenPair.id ? { ...item, accessTokenExpiresAt: newExpiresAt.toISOString() } : item
+        ))
+      }));
     },
 
     revokeServiceAdminSession(sessionId: string | undefined): StoredServiceAdminSession | undefined {

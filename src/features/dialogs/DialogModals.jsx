@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { BookOpen, PhoneCall, Send, Smartphone } from "lucide-react";
 import { Modal } from "../../ui.jsx";
+import { TopicCombobox } from "./TopicCombobox.jsx";
 import "./dialog-modals.css";
 
 export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToast, topicOptions = [] }) {
@@ -94,13 +95,10 @@ export function OutboundDialogLauncher({ conversations, onClose, onCreate, onToa
             {["SDK", "Telegram", "MAX", "VK"].map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>
-        <label>
+        <div className="outbound-field">
           <span>Тематика</span>
-          <select value={topic} onChange={(event) => setTopic(event.target.value)}>
-            <option value="">Не выбрана</option>
-            {topicOptions.map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </label>
+          <TopicCombobox onChange={setTopic} options={topicOptions} value={topic} />
+        </div>
       </div>
 
       <label className="outbound-message">

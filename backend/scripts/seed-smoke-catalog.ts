@@ -8,6 +8,7 @@ import { createLocalDevelopmentRepositorySeeds } from "../apps/api-gateway/src/r
 import { IdentityRepository } from "../apps/api-gateway/src/identity/identity.repository.js";
 import { BillingRepository } from "../apps/api-gateway/src/billing/billing.repository.js";
 import { WorkspaceRepository } from "../apps/api-gateway/src/workspace/workspace.repository.js";
+import { TopicDirectoryRepository, seedTopicDirectoryRecords } from "../apps/api-gateway/src/workspace/topic-directory.repository.js";
 import { RoutingRepository } from "../apps/api-gateway/src/routing/routing.repository.js";
 import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.js";
 import { AutomationRepository } from "../apps/api-gateway/src/automation/automation.repository.js";
@@ -171,6 +172,17 @@ async function seedWorkspace(repo, state) {
   }
   for (const idempotency of state.fileScanResultIdempotency) {
     await repo.saveFileScanResultIdempotency(idempotency);
+  }
+}
+
+async function seedWorkspaceTopics(client: never): Promise<void> {
+  // workspace_topics появились миграцией 202607170001, а prisma-only рантайм
+  // читает справочник тематик только из Postgres (без inMemory-фолбэка).
+  // Пустая таблица оставляла смок-оболочку без activeOptions: селекторы тематики
+  // в диалогах и фильтрах были пустыми. Сеем тот же каталог, что и inMemory-сид.
+  const repo = TopicDirectoryRepository.prisma(client);
+  for (const topic of seedTopicDirectoryRecords()) {
+    await repo.saveTopic(topic);
   }
 }
 
@@ -833,6 +845,8 @@ async function main(): Promise<void> {
   };
   try { await seedWorkspace(WorkspaceRepository.prisma({ client }) as never, seeds.workspace as never); console.log("  ok workspace"); }
   catch (error) { failures.push("workspace: " + describe(error)); console.log("  FAIL workspace"); }
+  try { await seedWorkspaceTopics(client); console.log("  ok workspace-topics"); }
+  catch (error) { failures.push("workspace-topics: " + describe(error)); console.log("  FAIL workspace-topics"); }
   try { await seedRouting(RoutingRepository.prisma({ client }) as never, seeds.routing as never); console.log("  ok routing"); }
   catch (error) { failures.push("routing: " + describe(error)); console.log("  FAIL routing"); }
   try { await seedReferencedSupportQueues(client, seeds.integrations as never); } catch (error) { failures.push("support-queues: " + describe(error)); }

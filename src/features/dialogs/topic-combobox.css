@@ -1,0 +1,115 @@
+.topic-combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.topic-combobox-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.topic-combobox .topic-combobox-input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 52px 0 10px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  outline: none;
+}
+
+.topic-combobox .topic-combobox-input:focus {
+  border-color: #a8cbff;
+  color: var(--text);
+}
+
+.topic-combobox.is-disabled .topic-combobox-input {
+  background: #f4f6f9;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.topic-combobox-clear,
+.topic-combobox-toggle {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.topic-combobox-clear {
+  right: 28px;
+}
+
+.topic-combobox-toggle {
+  right: 4px;
+}
+
+.topic-combobox-clear:hover,
+.topic-combobox-toggle:hover {
+  background: #f7fbff;
+  color: var(--text-secondary);
+}
+
+.topic-combobox.is-disabled .topic-combobox-toggle {
+  cursor: not-allowed;
+}
+
+.topic-combobox-list {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(340px, 80vw);
+  max-height: 244px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(10 28 54 / 16%);
+}
+
+.topic-combobox-option {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.topic-combobox-option.is-active {
+  background: #eef6ff;
+}
+
+.topic-combobox-option.is-selected {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.topic-combobox-option mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: #dcecff;
+  color: inherit;
+}
+
+.topic-combobox-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}

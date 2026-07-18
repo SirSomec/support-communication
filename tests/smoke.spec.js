@@ -417,7 +417,11 @@ test("customer panel inserts templates and enforces close topic", async ({ page 
   await expect(page.locator(".customer-panel")).toContainText("Для закрытия укажите тематику");
   await expect(page.locator(".customer-panel .close-button")).toBeDisabled();
 
-  await page.locator('.customer-panel .close-topic:has(span:text-is("Тематика")) select').selectOption({ label: "Товар / Несоответствие" });
+  const closeTopicInput = page.locator('.customer-panel .close-topic:has(span:text-is("Тематика")) input');
+  await closeTopicInput.fill("несоотв");
+  await expect(page.locator(".topic-combobox-option")).toHaveCount(1);
+  await page.locator(".topic-combobox-option").filter({ hasText: "Товар / Несоответствие" }).click();
+  await expect(closeTopicInput).toHaveValue("Товар / Несоответствие");
   await expect(page.locator(".customer-panel .close-button")).toBeEnabled();
   await expect(page.locator(".bot-handoff-summary")).toContainText("Товар / Несоответствие");
 
@@ -451,9 +455,11 @@ test("outbound SDK dialog can be created from quick actions", async ({ page }) =
   await expect(page.getByRole("dialog", { name: "Новый исходящий диалог" })).toBeVisible();
   await expect(page.locator(".outbound-panel")).toHaveAttribute("aria-modal", "true");
 
-  const topicSelect = page.locator(".outbound-grid select").nth(1);
-  await expect.poll(async () => topicSelect.locator("option").count()).toBeGreaterThan(1);
-  await topicSelect.selectOption({ index: 1 });
+  const outboundTopicInput = page.locator('.outbound-grid .outbound-field:has(span:text-is("Тематика")) input');
+  await expect(outboundTopicInput).not.toHaveValue("");
+  await outboundTopicInput.fill("возврат");
+  await page.locator(".topic-combobox-option").filter({ hasText: "Оплата / Возврат" }).click();
+  await expect(outboundTopicInput).toHaveValue("Оплата / Возврат");
   await page.locator(".outbound-grid input").first().fill("+7 999 777-66-55");
   await page.locator(".outbound-grid input").nth(1).fill("Тестовый клиент");
   await page.locator(".outbound-message textarea").fill("Здравствуйте! Проверяем исходящий SDK диалог.");

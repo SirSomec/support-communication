@@ -4,6 +4,7 @@ import { maskPhone, resolutionOutcomeLabels, statusLabels } from "../../app/dial
 import { Avatar } from "./Avatar.jsx";
 import { DialogActionMenu } from "./DialogActionMenu.jsx";
 import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
+import { TopicCombobox } from "./TopicCombobox.jsx";
 
 export function ChatHeader({
   access,
@@ -232,15 +233,10 @@ export function ChatHeader({
           </div>
         </div>
       ) : null}
-      <label className="topic-select">
+      <div className="topic-select">
         <span>Тематика:</span>
-        <select value={topic} onChange={(event) => onTopic(event.target.value)}>
-          <option value="">Не выбрана</option>
-          {topicOptions.map((option) => (
-            <option value={option} key={option}>{option}</option>
-          ))}
-        </select>
-      </label>
+        <TopicCombobox onChange={onTopic} options={topicOptions} value={topic} />
+      </div>
     </header>
   );
 }

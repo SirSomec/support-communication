@@ -69,6 +69,7 @@
 }
 
 .outbound-grid label,
+.outbound-field,
 .outbound-message {
   display: grid;
   gap: 6px;

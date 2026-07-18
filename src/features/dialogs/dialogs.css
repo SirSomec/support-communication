@@ -888,7 +888,7 @@
 .topic-select {
   display: inline-grid;
   grid-area: topic;
-  grid-template-columns: auto minmax(200px, max-content);
+  grid-template-columns: auto minmax(220px, 280px);
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -905,7 +905,6 @@
 }
 
 .status-select-inline select,
-.topic-select select,
 .close-topic select {
   max-width: 100%;
   height: 34px;

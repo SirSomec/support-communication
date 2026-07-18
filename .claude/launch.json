@@ -82,6 +82,28 @@
         "5183"
       ],
       "port": 5183
+    },
+    {
+      "name": "stub-api-gateway-topics",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "tests/playwright-api-gateway-topics-alt.mjs"
+      ],
+      "port": 4195
+    },
+    {
+      "name": "frontend-dev-stub-topics",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--mode",
+        "stub-topics",
+        "--port",
+        "5196"
+      ],
+      "port": 5196
     }
   ]
 }

@@ -13,6 +13,7 @@ import {
 import { ClientArchiveDetailModal, ClientDialogsListModal } from "./ClientHistoryModals.jsx";
 import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 import { TagManagerModal } from "./TagManagerModal.jsx";
+import { TopicCombobox } from "./TopicCombobox.jsx";
 import { getVisibleTags } from "./tagSuggestionModel.js";
 
 export function CustomerPanel({
@@ -397,15 +398,10 @@ export function CustomerPanel({
       </PanelSection>
 
       <PanelSection title="Закрытие диалога">
-        <label className="close-topic">
+        <div className="close-topic">
           <span>Тематика</span>
-          <select value={topic} onChange={(event) => onTopic(event.target.value)} disabled={isClosed}>
-            <option value="">Не выбрана</option>
-            {topicOptions.map((option) => (
-              <option value={option} key={option}>{option}</option>
-            ))}
-          </select>
-        </label>
+          <TopicCombobox disabled={isClosed} onChange={onTopic} options={topicOptions} value={topic} />
+        </div>
         {!isClosed ? (
           <label className="close-topic">
             <span>Результат</span>

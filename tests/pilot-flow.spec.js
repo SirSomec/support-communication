@@ -101,9 +101,8 @@ test("outbound quick action creates backend descriptor and visible queued dialog
   const clientName = `Outbound Client ${runId}`;
   await page.locator(".quick-action").click();
   await expect(page.locator(".outbound-panel")).toBeVisible();
-  const topicSelect = page.locator(".outbound-grid select").nth(1);
-  await expect.poll(async () => topicSelect.locator("option").count()).toBeGreaterThan(1);
-  await topicSelect.selectOption({ index: 1 });
+  const topicField = page.locator('.outbound-grid .outbound-field:has(span:text-is("Тематика")) input');
+  await expect(topicField).not.toHaveValue("");
   await page.locator(".outbound-grid input").first().fill(phone);
   await page.locator(".outbound-grid input").nth(1).fill(clientName);
   await page.locator(".outbound-message textarea").fill("Queue this outbound SDK dialog through the backend.");

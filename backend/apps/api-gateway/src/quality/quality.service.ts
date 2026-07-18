@@ -18,6 +18,7 @@ import {
   type QualityRatingRecord,
   type QualityRepositoryPort
 } from "./quality.repository.js";
+import { AI_CLOSED_CONVERSATION_OPERATOR } from "./quality.types.js";
 
 const QUALITY_SERVICE = "qualityService";
 
@@ -616,7 +617,8 @@ function mergeQualityScores(
     client: directory?.conversationNameById.get(rating.conversationId) || rating.clientId || rating.conversationId,
     id: rating.ratingId,
     manualReviewId: latestReviewByConversation.get(rating.conversationId)?.reviewId ?? null,
-    operatorName: directory?.operatorNameById.get(rating.operator) || null,
+    operatorName: directory?.operatorNameById.get(rating.operator)
+      || (rating.operator === AI_CLOSED_CONVERSATION_OPERATOR ? "AI-бот" : null),
     status: rating.score !== null && rating.score < 4 ? "Low score" : "Rated"
   }));
   const persistedIds = new Set(persisted.map((item) => item.id));

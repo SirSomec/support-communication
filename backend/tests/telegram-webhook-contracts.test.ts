@@ -280,6 +280,63 @@ describe("telegram webhook ingress contracts", () => {
     assert.equal(botRuns, 1, "a regular follow-up message must reach the bot runtime again");
   });
 
+  it("accepts a rating and collects feedback when the appeal was closed by the bot without an operator", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+    const integrationRepository = IntegrationRepository.inMemory(seedTelegramIntegrationState());
+    const config = loadTelegramWebhookConfig({ TELEGRAM_WEBHOOK_ENABLED: "true" });
+    const conversation = await resolveOrCreateTelegramConversation({
+      botId: "123456789",
+      chatId: "445600",
+      conversationRepository: repository,
+      displayName: "Bot Closed Client",
+      tenantId: TENANT_ID
+    });
+    assert.ok(conversation);
+    // Закрытие ботом ([[RESOLVED]]): статус closed, operatorId нет, операторных
+    // lifecycle-событий тоже нет — только системное закрытие.
+    await repository.saveConversation({ ...conversation!, status: "closed" });
+
+    const telegramCalls: string[] = [];
+    const ratings: Array<Record<string, unknown>> = [];
+    const input = (body: Record<string, unknown>) => ({
+      body,
+      conversationRepository: repository,
+      conversationService: conversations,
+      headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+      integrationRepository,
+      recordQualityRating: async (payload: Record<string, unknown>) => {
+        ratings.push(payload);
+        return { data: { ratingId: "rating-bot-1" }, error: null, meta: {}, operation: "record", service: "quality", status: "ok", traceId: "trace-rating" } as any;
+      },
+      telegramApi: {
+        fetcher: async (url: string) => {
+          telegramCalls.push(url);
+          return { json: async () => ({ ok: true, result: true }), ok: true, status: 200 };
+        }
+      }
+    });
+
+    const rated = await handleTelegramWebhookFromRoute(input({
+      callback_query: { data: "quality:csat:4", id: "callback-bot-1", message: { chat: { id: 445600 }, message_id: 831 } },
+      update_id: 9090
+    }), config);
+    assert.equal(rated.status, "ok", "a bot-closed appeal must still accept the rating");
+    assert.equal(rated.data.feedbackPromptOffered, true);
+    assert.equal(ratings[0]?.operator, "ai-bot", "the rating is credited to the bot, not rejected");
+    assert.ok(telegramCalls.some((url) => url.includes("/deleteMessage") && url.includes("message_id=831")), "the survey must be hidden");
+    assert.equal((await repository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
+
+    const feedback = await handleTelegramWebhookFromRoute(input({
+      message: { chat: { id: 445600 }, from: { first_name: "Bot Closed" }, message_id: 832, text: "Бот ответил быстро и по делу" },
+      update_id: 9091
+    }), config);
+    assert.equal(feedback.status, "ok");
+    assert.equal(feedback.data.recordedAsFeedback, true);
+    assert.equal(feedback.data.conversationId, conversation!.id);
+    assert.equal((await repository.findConversation(conversation!.id))?.messages.at(-1)?.type, "csat_feedback");
+  });
+
   it("expires a stale feedback window so a late message opens a new appeal", async () => {
     const repository = ConversationRepository.inMemory();
     const conversations = new ConversationService(repository);

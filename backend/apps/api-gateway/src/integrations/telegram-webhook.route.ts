@@ -14,6 +14,7 @@ import {
   type AppealConversationMutation
 } from "../conversation/appeal-lifecycle.js";
 import { CSAT_FEEDBACK_NEW_APPEAL_CALLBACK } from "../quality/csat-feedback.js";
+import { AI_CLOSED_CONVERSATION_OPERATOR } from "../quality/quality.types.js";
 import type { ChannelConnectionStoredRecord, TelegramConnectionStoredRecord } from "./integration.repository.js";
 import { resolveConnectionRoutingQueue } from "./routing-queue.js";
 import { resolveTelegramTenantByWebhookSecret, type TelegramHttpFetch } from "./telegram-channel-connection.js";
@@ -545,7 +546,19 @@ async function resolveRatedOperator(
   const latestOperatorEvent = [...events]
     .sort((left, right) => Date.parse(String(right.occurredAt ?? "")) - Date.parse(String(left.occurredAt ?? "")))
     .find((event) => event.actorType === "operator" && event.actorId?.trim());
-  return latestOperatorEvent?.actorId?.trim() ?? null;
+  if (latestOperatorEvent?.actorId?.trim()) {
+    return latestOperatorEvent.actorId.trim();
+  }
+
+  // Обращение закрыто без операторного следа — его решил и закрыл бот
+  // ([[RESOLVED]] AI-агента идет через штатный transition с actorType system).
+  // Оценка и CSAT-комментарий должны работать и здесь: балл засчитывается
+  // автоматике, а не отбрасывается как «неразрешимый».
+  if (conversation.status === "closed") {
+    return AI_CLOSED_CONVERSATION_OPERATOR;
+  }
+
+  return null;
 }
 
 function conversationSortTimestamp(conversation: ConversationRecord): number {

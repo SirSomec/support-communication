@@ -678,6 +678,66 @@ describe("telegram polling ingress contracts", () => {
     assert.equal(appeals.find((item) => item.id !== conversation!.id)?.messages.at(-1)?.text, "Другая проблема");
   });
 
+  it("credits a rating to the bot when the appeal was closed without any operator trace", async () => {
+    const now = new Date().toISOString();
+    const integrationRepository = IntegrationRepository.inMemory({
+      ...emptyIntegrationState(),
+      telegramConnections: [{
+        botId: "123456",
+        botToken: "123456:support_bot_token",
+        botUsername: "support_bot",
+        createdAt: now,
+        pollingOffset: 700,
+        status: "active" as const,
+        tenantId: "tenant-bot-closed",
+        tokenPreview: "123456:****",
+        updatedAt: now,
+        webhookSecret: "tg_wh_bot_closed"
+      }]
+    });
+    const conversationRepository = ConversationRepository.inMemory();
+    const conversation = await resolveOrCreateTelegramConversation({
+      botId: "123456",
+      chatId: "667788",
+      conversationRepository,
+      displayName: "Bot Closed Client",
+      tenantId: "tenant-bot-closed"
+    });
+    assert.ok(conversation);
+    // Диалог решил и закрыл бот: operatorId пуст, операторных событий нет.
+    await conversationRepository.saveConversation({ ...conversation!, status: "closed" });
+
+    const ratings: Array<Record<string, unknown>> = [];
+    const result = await pollTelegramUpdatesOnce({
+      conversationRepository,
+      conversationService: new ConversationService(conversationRepository),
+      fetcher: async (input: string) => ({
+        json: async () => input.includes("/getUpdates")
+          ? {
+              ok: true,
+              result: [{
+                callback_query: { data: "quality:csat:5", id: "cbq-701", message: { chat: { id: 667788 }, message_id: 921 } },
+                update_id: 701
+              }]
+            }
+          : { ok: true, result: true },
+        ok: true,
+        status: 200
+      }),
+      integrationRepository,
+      offsets: new Map(),
+      recordQualityRating: async (payload) => {
+        ratings.push(payload);
+        return { data: { ratingId: "rating-701" }, error: null, meta: {}, operation: "recordClientQualityRating", service: "qualityService", status: "ok", traceId: "trace-rating" } as any;
+      }
+    });
+
+    assert.equal(result.accepted, 1, "a bot-closed appeal must still accept the rating");
+    assert.equal(result.failed, 0);
+    assert.equal(ratings[0]?.operator, "ai-bot");
+    assert.equal((await conversationRepository.findConversation(conversation!.id))?.metadata?.csatFeedback?.state, "awaiting");
+  });
+
   it("attaches a rating to the latest closed appeal and its closing operator when the dialog was never assigned", async () => {
     const now = new Date();
     const integrationRepository = IntegrationRepository.inMemory({

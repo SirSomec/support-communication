@@ -19,6 +19,7 @@ import {
   isAwaitingCsatFeedback,
   withCsatFeedback
 } from "../quality/csat-feedback.js";
+import { AI_CLOSED_CONVERSATION_OPERATOR } from "../quality/quality.types.js";
 import {
   resolvePublicApiRequest,
   type PublicApiEnvironment,
@@ -448,7 +449,10 @@ export async function handlePublicSdkQualityRatingFromRoute(
       "idempotencyKey is required and must not exceed 200 characters.", { accepted: false, conversationId });
   }
 
-  const operator = String(conversation.operatorId ?? "").trim();
+  // Обращение, закрытое ботом ([[RESOLVED]] AI-агента), оператора не имеет:
+  // оценка засчитывается автоматике, чтобы CSAT и комментарий работали.
+  const operator = String(conversation.operatorId ?? "").trim()
+    || (conversation.status === "closed" ? AI_CLOSED_CONVERSATION_OPERATOR : "");
   if (!operator) {
     return invalidEnvelope("recordPublicSdkQualityRating", "quality_rating_operator_unresolved",
       "The conversation does not have an assigned operator.", { accepted: false, conversationId });

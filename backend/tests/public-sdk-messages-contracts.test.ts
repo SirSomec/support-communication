@@ -367,6 +367,40 @@ describe("public sdk message ingress and widget poll contracts", () => {
     assert.equal((await conversations.listConversations({ tenantId: TENANT_ID })).length, 2);
   });
 
+  it("accepts a widget rating and feedback for an appeal closed by the bot without an operator", async () => {
+    const { baseUrl } = await createTestApiApp(apps);
+    const send = await publicPost(baseUrl, "/public/sdk/messages", {
+      externalId: "visitor-bot-closed",
+      text: "Вопрос к боту"
+    });
+    const conversationId = String(send.data.conversationId);
+    const conversations = ConversationRepository.default();
+    const conversation = await conversations.findConversation(conversationId);
+    assert.ok(conversation);
+    // Закрытие ботом: статус closed, operatorId не назначен.
+    await conversations.saveConversation({ ...conversation, status: "closed" });
+
+    const rated = await publicPost(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/ratings`, {
+      idempotencyKey: "widget-bot-closed-001",
+      scale: "CSAT",
+      score: 5,
+      visitorSessionToken: String(send.data.visitorSessionToken)
+    });
+    assert.equal(rated.status, "ok", "a bot-closed appeal must still accept the rating");
+    assert.deepEqual(rated.data.feedback, { offered: true });
+    const ratings = await QualityRepository.default().listQualityRatings({ tenantId: TENANT_ID });
+    assert.equal(ratings[0]?.operator, "ai-bot", "the rating is credited to the bot");
+
+    const feedback = await publicPost(baseUrl, "/public/sdk/messages", {
+      conversationId,
+      externalId: "visitor-bot-closed",
+      text: "Бот молодец, все решил сам"
+    });
+    assert.equal(feedback.data.recordedAsFeedback, true);
+    assert.equal(feedback.data.conversationId, conversationId);
+    assert.equal((await conversations.findConversation(conversationId))?.messages.at(-1)?.type, "csat_feedback");
+  });
+
   it("lets the client skip the feedback comment and start a new appeal instead", async () => {
     const { baseUrl } = await createTestApiApp(apps);
     const send = await publicPost(baseUrl, "/public/sdk/messages", {

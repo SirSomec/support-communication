@@ -441,6 +441,74 @@ describe("phase 4 routing, SLA and rescue backend contracts", () => {
     assert.equal(candidates[1].availableCapacity, 5);
   });
 
+  // Ротация: при полностью равной загрузке диалог не должен каждый раз
+  // уходить первому оператору списка — приоритет у никогда не получавших
+  // назначений, затем у тех, чье последнее назначение старее.
+  it("rotates equally loaded candidates toward the operator idle the longest", async () => {
+    const rotationOperator = (id: string): (typeof routingOperatorFixtures)[number] => ({
+      id,
+      name: id,
+      status: "online",
+      chats: 0,
+      limit: 10,
+      avgFirstResponseSeconds: 60,
+      slaPercent: 95,
+      rescueActive: 0,
+      channels: ["VK"],
+      tenantId: VOLGA_CONTEXT.tenantId
+    });
+    const repository = RoutingRepository.inMemory({
+      conversations: [{
+        id: "rotation-dialog",
+        client: "Rotation Client",
+        channel: "VK",
+        status: "queued",
+        slaTone: "ok",
+        tenantId: VOLGA_CONTEXT.tenantId
+      }],
+      jobs: [],
+      operatorCapacities: [],
+      operators: [rotationOperator("op-recent"), rotationOperator("op-stale"), rotationOperator("op-fresh")],
+      queueMemberships: [],
+      queues: [{ channel: "VK", active: 0, waiting: 1, overdue: 0, limit: 8, health: 100, tenantId: VOLGA_CONTEXT.tenantId }],
+      rescueReportRows: [],
+      routingRules: []
+    });
+    await repository.saveRoutingAnalyticsRow({
+      channel: "VK",
+      conversationId: "rotation-earlier-dialog",
+      eventKind: "assignment",
+      fromOperatorId: null,
+      id: "analytics_rotation_recent",
+      occurredAt: "2026-07-18T12:00:00.000Z",
+      source: "api",
+      tenantId: VOLGA_CONTEXT.tenantId,
+      toOperatorId: "op-recent"
+    });
+    await repository.saveRoutingAnalyticsRow({
+      channel: "VK",
+      conversationId: "rotation-oldest-dialog",
+      eventKind: "assignment",
+      fromOperatorId: null,
+      id: "analytics_rotation_stale",
+      occurredAt: "2026-07-18T10:00:00.000Z",
+      source: "api",
+      tenantId: VOLGA_CONTEXT.tenantId,
+      toOperatorId: "op-stale"
+    });
+    const routing = new RoutingService(repository);
+
+    const simulation = await routing.simulateAssignment({ conversationId: "rotation-dialog" }, VOLGA_CONTEXT);
+
+    assert.equal(simulation.status, "ok");
+    const candidates = simulation.data.candidates as Array<Record<string, unknown>>;
+    assert.deepEqual(candidates.map((candidate) => candidate.operatorId), ["op-fresh", "op-stale", "op-recent"]);
+    assert.equal(candidates[0].lastAssignedAt, null);
+    assert.ok((candidates[0].explain as string[]).includes("rotation:never_assigned"));
+    assert.equal(candidates[1].lastAssignedAt, "2026-07-18T10:00:00.000Z");
+    assert.ok((candidates[2].explain as string[]).includes("rotation:last_assigned:2026-07-18T12:00:00.000Z"));
+  });
+
   it("exposes assignment simulation through the routing controller route", async () => {
     const routing = new RoutingService();
     const controllerSource = readFileSync(new URL("../apps/api-gateway/src/routing/routing.controller.ts", import.meta.url), "utf8");

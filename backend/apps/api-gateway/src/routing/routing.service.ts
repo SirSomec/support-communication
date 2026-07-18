@@ -1091,9 +1091,10 @@ export class RoutingService {
       .filter((conversation) => selectedQueues.has(conversation.channel))
       .filter((conversation) => conversation.status === "queued")
       .sort(compareRedistributionConversations);
+    const lastAssignedAtByOperator = await this.readLastAssignedAtByOperator(tenantId);
 
     for (const conversation of queuedConversations) {
-      const candidates = await this.buildAssignmentCandidates(conversation, tenantId, plannedOperatorLoad);
+      const candidates = await this.buildAssignmentCandidates(conversation, tenantId, plannedOperatorLoad, lastAssignedAtByOperator);
       const candidate = candidates.find((item) => item.recommendation === "eligible");
       if (!candidate) {
         capacityConflicts.push({
@@ -1141,11 +1142,13 @@ export class RoutingService {
   private async buildAssignmentCandidates(
     conversation: RoutingConversation,
     tenantId: string,
-    plannedOperatorLoad: Map<string, number> = new Map()
+    plannedOperatorLoad: Map<string, number> = new Map(),
+    lastAssignedAtByOperator?: Map<string, string>
   ): Promise<Array<Record<string, unknown>>> {
     const memberships = await this.listActiveQueueMemberships(conversation.channel, tenantId);
     const capacities = await this.listOperatorCapacities(conversation.channel, tenantId);
     const presenceByOperator = await this.listOperatorPresence(tenantId);
+    const lastAssignments = lastAssignedAtByOperator ?? await this.readLastAssignedAtByOperator(tenantId);
     return this.operators
       .filter((operator) => this.operatorBelongsToTenant(operator, tenantId))
       .map((operator) => withOperatorPresence(operator, presenceByOperator.get(operator.id)))
@@ -1157,11 +1160,13 @@ export class RoutingService {
         const channelAccess = this.operatorCanAccessChannel(operator, conversation.channel, memberships);
         const availableCapacity = Math.max(0, chatLimit - plannedChats);
         const online = operatorAcceptsAutoAssignment(operator);
+        const lastAssignedAt = lastAssignments.get(operator.id) ?? null;
         const explain = [
           channelAccess ? "channel_access:granted" : "channel_access:denied",
           `status:${operator.status}`,
           `presence:${operator.presenceSource ?? operator.availability?.source ?? "routing_store"}`,
-          availableCapacity > 0 ? "capacity:available" : "capacity:full"
+          availableCapacity > 0 ? "capacity:available" : "capacity:full",
+          lastAssignedAt ? `rotation:last_assigned:${lastAssignedAt}` : "rotation:never_assigned"
         ];
 
         return {
@@ -1172,12 +1177,38 @@ export class RoutingService {
           availableCapacity,
           channelAccess,
           explain,
+          lastAssignedAt,
           loadRatio: chatLimit > 0 ? Number((plannedChats / chatLimit).toFixed(2)) : 1,
           queueMembership: hasMembershipChannelAccess(memberships, operator.id, conversation.channel),
           queueMembershipRole: queueMembership?.role ?? null,
           recommendation: channelAccess && online && availableCapacity > 0 ? "eligible" : "blocked"
         };
       }).sort(compareAssignmentCandidates);
+  }
+
+  /**
+   * Время последнего назначения (assignment/transfer) по операторам из
+   * routing analytics. Нужно для ротации: при полностью равной загрузке
+   * диалог получает оператор, дольше всех не получавший обращений, — иначе
+   * при низком потоке все обращения уходили бы первому по списку.
+   */
+  private async readLastAssignedAtByOperator(tenantId: string): Promise<Map<string, string>> {
+    const rows = await this.routingRepository.listRoutingAnalyticsRows({ tenantId });
+    const lastAssignedAt = new Map<string, string>();
+    for (const row of rows) {
+      if (row.eventKind !== "assignment" && row.eventKind !== "transfer") {
+        continue;
+      }
+      const operatorId = String(row.toOperatorId ?? "").trim();
+      if (!operatorId) {
+        continue;
+      }
+      const current = lastAssignedAt.get(operatorId);
+      if (!current || row.occurredAt > current) {
+        lastAssignedAt.set(operatorId, row.occurredAt);
+      }
+    }
+    return lastAssignedAt;
   }
 
   private async returnConversationToQueue(
@@ -1765,6 +1796,21 @@ function compareAssignmentCandidates(left: Record<string, unknown>, right: Recor
   const rightAvailableCapacity = Number(right.availableCapacity ?? 0);
   if (leftAvailableCapacity !== rightAvailableCapacity) {
     return rightAvailableCapacity - leftAvailableCapacity;
+  }
+
+  // Ротация при полном равенстве нагрузки: сперва никогда не получавшие
+  // диалогов, затем те, чье последнее назначение старее (ISO-строки
+  // сравниваются лексикографически).
+  const leftLastAssignedAt = typeof left.lastAssignedAt === "string" ? left.lastAssignedAt : null;
+  const rightLastAssignedAt = typeof right.lastAssignedAt === "string" ? right.lastAssignedAt : null;
+  if (leftLastAssignedAt !== rightLastAssignedAt) {
+    if (leftLastAssignedAt === null) {
+      return -1;
+    }
+    if (rightLastAssignedAt === null) {
+      return 1;
+    }
+    return leftLastAssignedAt < rightLastAssignedAt ? -1 : 1;
   }
 
   return Number(left.chats ?? 0) - Number(right.chats ?? 0);

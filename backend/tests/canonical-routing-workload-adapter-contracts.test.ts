@@ -156,6 +156,40 @@ describe("canonical routing workload adapter contracts", () => {
   // Повторное обращение (форк со статусом new): канонический маппер считает его
   // «queued», но запись остается new и не видна в «Ожидают» — guard обязан
   // смотреть на persistedStatus и переводить диалог в настоящий queued.
+  // Ротация автоназначения: оператор, только что обработавший диалог, не
+  // должен получать следующее обращение, пока есть такой же свободный
+  // коллега, который дольше не получал назначений.
+  it("auto-assigns the next dialog to the operator idle the longest when loads are equal", async () => {
+    const first = conversation({ id: "conversation-first", operatorId: undefined, status: "queued" });
+    const second = conversation({ id: "conversation-second", operatorId: undefined, status: "queued" });
+    const conversations = [first, second];
+    const adapter = workloadAdapter({
+      conversations,
+      queues: [queue()],
+      // Канал команды совпадает с очередью диалога: оба оператора eligible.
+      teams: [team({ channels: ["queue-support"], memberIds: ["operator-a", "operator-b"] })],
+      users: [user(), user({ email: "operator-b@example.test", id: "operator-b", name: "Operator B" })]
+    });
+    const routingRepository = RoutingRepository.inMemory();
+    const canonicalConversations = new CanonicalRoutingConversationRepository({
+      listConversations: async () => conversations
+    } as unknown as ConversationRepository);
+    const service = new RoutingService(routingRepository, adapter, canonicalConversations);
+
+    const initial = await service.autoAssignConversation("conversation-first", { tenantId: "tenant-a" });
+    assert.equal(initial.status, "ok");
+    assert.equal((initial.data?.assignment as { targetOperatorId?: string } | undefined)?.targetOperatorId, "operator-a");
+
+    // Оператор A обработал диалог до прихода следующего обращения: загрузка
+    // операторов снова равна (0 и 0), но история назначений уже различает их.
+    first.status = "closed";
+    first.operatorId = "operator-a";
+
+    const next = await service.autoAssignConversation("conversation-second", { tenantId: "tenant-a" });
+    assert.equal(next.status, "ok");
+    assert.equal((next.data?.assignment as { targetOperatorId?: string } | undefined)?.targetOperatorId, "operator-b");
+  });
+
   it("queues a repeat-appeal fork (record status new) when the bot hands off without operators", async () => {
     const repeatAppeal = conversation({ id: "conversation-repeat", operatorId: undefined, status: "new" });
     const adapter = workloadAdapter({

@@ -10,3 +10,5 @@ playwright-report/
 backend/.runtime/
 .runtime/
 .worktrees/
+.claude/*
+!.claude/launch.json

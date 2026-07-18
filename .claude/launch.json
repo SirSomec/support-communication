@@ -1,0 +1,65 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 5173,
+      "autoPort": true
+    },
+    {
+      "name": "frontend-dev-stub",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--mode",
+        "stub",
+        "--port",
+        "5174"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "stub-api-gateway",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "tests/playwright-api-gateway.mjs"
+      ],
+      "port": 4100
+    },
+    {
+      "name": "widget-demo",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "packages/web-widget",
+        "--port",
+        "5199",
+        "--host",
+        "127.0.0.1",
+        "--strictPort"
+      ],
+      "port": 5199
+    },
+    {
+      "name": "frontend-dev-stub-alt",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--mode",
+        "stub",
+        "--port",
+        "5178"
+      ],
+      "port": 5178
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
@@ -20,6 +20,7 @@ import { getPreSendQualityChecks } from "../../app/aiQualityModel.js";
 import { attachmentStatusLabels } from "../../app/dialogModel.js";
 import { AiComposerPanel } from "./AiComposerPanel.jsx";
 import { AttachmentPreview } from "./AttachmentPreview.jsx";
+import { suggestTemplates } from "./templateSuggestModel.js";
 import "./dialog-composer.css";
 
 export function Composer({
@@ -44,9 +45,15 @@ export function Composer({
 }) {
   const primaryTemplate = templates[0];
   const fileInputRef = useRef(null);
+  const draftBoxRef = useRef(null);
   const qualityBarRef = useRef(null);
   const qualityPopoverRef = useRef(null);
   const [isTemplatePickerOpen, setTemplatePickerOpen] = useState(false);
+  // Автоподсказка шаблонов по первым введенным символам: Enter предзаполняет
+  // окно ввода активной подсказкой, повторный Enter отправляет сообщение в чат.
+  const [isSuggestDismissed, setSuggestDismissed] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
+  const [suggestPosition, setSuggestPosition] = useState(null);
   // Детали pre-send check живут в поповере-оверлее (портал в body):
   // раскрытие не меняет высоту композера и не вызывает его скролл.
   const [isQualityOpen, setQualityOpen] = useState(false);
@@ -92,6 +99,85 @@ export function Composer({
   }, [isQualityOpen]);
   const blockingAttachment = attachments.find((attachment) => attachment.status !== "ready");
   const sendDisabled = disabled || Boolean(blockingAttachment);
+  const templateSuggestions = useMemo(
+    () => (disabled ? [] : suggestTemplates(templates, draft)),
+    [disabled, templates, draft]
+  );
+  const isSuggestOpen = !isSuggestDismissed && !isTemplatePickerOpen && templateSuggestions.length > 0;
+  const activeSuggestionIndex = Math.min(activeSuggestion, templateSuggestions.length - 1);
+
+  // Дропдаун подсказок — тоже портал-оверлей (см. pre-send-popover): overflow
+  // композера клипал бы absolute-элемент, а рост в потоке дергал бы поле при печати.
+  useLayoutEffect(() => {
+    if (!isSuggestOpen) {
+      return undefined;
+    }
+
+    function placeSuggestPopover() {
+      const rect = draftBoxRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      setSuggestPosition({
+        left: rect.left,
+        width: rect.width,
+        bottom: window.innerHeight - rect.top + 6
+      });
+    }
+
+    placeSuggestPopover();
+    window.addEventListener("resize", placeSuggestPopover);
+    document.addEventListener("scroll", placeSuggestPopover, true);
+    return () => {
+      window.removeEventListener("resize", placeSuggestPopover);
+      document.removeEventListener("scroll", placeSuggestPopover, true);
+    };
+  }, [isSuggestOpen]);
+
+  function updateDraft(value) {
+    setSuggestDismissed(false);
+    setActiveSuggestion(0);
+    setDraft(value);
+  }
+
+  function applySuggestion(template) {
+    setDraft(template.text);
+    // После подстановки Enter должен отправлять, даже если текст шаблона —
+    // префикс другого шаблона; до следующего ввода подсказки не показываем.
+    setSuggestDismissed(true);
+  }
+
+  function handleDraftKeyDown(event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (isSuggestOpen) {
+        applySuggestion(templateSuggestions[activeSuggestionIndex]);
+        return;
+      }
+      if (!sendDisabled) {
+        onSend();
+      }
+      return;
+    }
+    if (!isSuggestOpen) {
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const shift = event.key === "ArrowDown" ? 1 : -1;
+      setActiveSuggestion((templateSuggestions.length + activeSuggestionIndex + shift) % templateSuggestions.length);
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      applySuggestion(templateSuggestions[activeSuggestionIndex]);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setSuggestDismissed(true);
+    }
+  }
   const attachmentReason = blockingAttachment
     ? blockingAttachment.status === "uploading"
       ? "Дождитесь завершения загрузки вложений."
@@ -149,12 +235,50 @@ export function Composer({
           </div>
         ) : null}
         <AiComposerPanel suggestions={inlineAiSuggestions} disabled={disabled} onAction={onAiSuggestionAction} />
-        <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={disabled ? "Диалог закрыт" : mode === "internal" ? "Текст увидят только сотрудники..." : "Введите сообщение..."}
-          disabled={disabled}
-        />
+        <div className="composer-draft" ref={draftBoxRef}>
+          <textarea
+            value={draft}
+            onChange={(event) => updateDraft(event.target.value)}
+            onKeyDown={handleDraftKeyDown}
+            onBlur={() => setSuggestDismissed(true)}
+            placeholder={disabled ? "Диалог закрыт" : mode === "internal" ? "Текст увидят только сотрудники..." : "Введите сообщение..."}
+            disabled={disabled}
+            aria-autocomplete="list"
+            aria-expanded={isSuggestOpen}
+            aria-controls={isSuggestOpen ? "composer-template-suggest" : undefined}
+          />
+          {isSuggestOpen && suggestPosition ? createPortal(
+            <div
+              className="composer-suggest"
+              id="composer-template-suggest"
+              role="listbox"
+              aria-label="Подсказки шаблонов"
+              style={{
+                left: `${suggestPosition.left}px`,
+                width: `${suggestPosition.width}px`,
+                bottom: `${suggestPosition.bottom}px`
+              }}
+            >
+              {templateSuggestions.map((template, index) => (
+                <button
+                  aria-selected={index === activeSuggestionIndex}
+                  className={index === activeSuggestionIndex ? "active" : ""}
+                  key={template.id}
+                  onClick={() => applySuggestion(template)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveSuggestion(index)}
+                  role="option"
+                  type="button"
+                >
+                  <strong>{template.title}</strong>
+                  <span>{template.text}</span>
+                </button>
+              ))}
+              <p className="composer-suggest-hint">↵ — подставить шаблон, повторный ↵ — отправить в чат · Esc — скрыть</p>
+            </div>,
+            document.body
+          ) : null}
+        </div>
         <input
           accept=".pdf,.png,.jpg,.jpeg,.webp"
           aria-label="Выбор вложений"

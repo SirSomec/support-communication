@@ -202,6 +202,10 @@
   overflow-wrap: anywhere;
 }
 
+.composer-draft {
+  margin: 0 12px;
+}
+
 .composer textarea {
   display: block;
   width: calc(100% - 24px);
@@ -213,6 +217,64 @@
   padding: 12px;
   color: var(--text);
   outline: none;
+}
+
+.composer-draft textarea {
+  width: 100%;
+  margin: 0;
+}
+
+/* Подсказки шаблонов по первым введенным символам — портал-оверлей над полем
+   ввода (left/width/bottom задаются инлайн от обертки поля, как pre-send-popover). */
+.composer-suggest {
+  position: fixed;
+  z-index: 39;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 18px 44px rgba(22, 35, 58, 0.24);
+}
+
+.composer-suggest button {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: #24334c;
+  text-align: left;
+}
+
+.composer-suggest button.active {
+  background: #eaf2fe;
+}
+
+.composer-suggest button strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-suggest button span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-suggest-hint {
+  margin: 0;
+  padding: 4px 8px 2px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .composer textarea:focus {

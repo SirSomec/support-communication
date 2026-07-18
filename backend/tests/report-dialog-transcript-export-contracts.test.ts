@@ -5,6 +5,8 @@ import {
   countDialogTranscriptEntries,
   DIALOG_TRANSCRIPT_COLUMN_IDS,
   DIALOG_TRANSCRIPT_REPORT_TYPE,
+  dialogTranscriptDateRange,
+  dialogTranscriptFiltersFromJob,
   dialogTranscriptXlsxInput,
   serializeDialogTranscriptsAsHtml,
   serializeDialogTranscriptsAsJson,
@@ -127,26 +129,50 @@ describe("dialog transcript export contracts", () => {
     assert.equal(petr.entries[1].author, "Иван Петров");
   });
 
-  it("filters dialogs by operator, topic, status and rating score", () => {
+  it("filters dialogs by operators, topic, statuses and rating scores including multi-value picks", () => {
     const rows = transcriptFixtureRows();
 
-    assert.deepEqual(buildDialogTranscriptDialogs(rows, { operatorId: "operator-maria" }).map((dialog) => dialog.id), ["dlg-anna"]);
-    assert.deepEqual(buildDialogTranscriptDialogs(rows, { operatorId: "Иван Петров" }).map((dialog) => dialog.id), ["dlg-petr"]);
-    assert.deepEqual(buildDialogTranscriptDialogs(rows, { topic: "возвраты" }).map((dialog) => dialog.id), ["dlg-olga"]);
-    assert.deepEqual(buildDialogTranscriptDialogs(rows, { status: "active" }).map((dialog) => dialog.id), ["dlg-petr"]);
-    assert.deepEqual(buildDialogTranscriptDialogs(rows, { score: "5" }).map((dialog) => dialog.id), ["dlg-anna"]);
-    assert.deepEqual(buildDialogTranscriptDialogs(rows, { score: "2" }).map((dialog) => dialog.id), ["dlg-olga"]);
-    assert.deepEqual(buildDialogTranscriptDialogs(rows, { score: "none" }).map((dialog) => dialog.id), ["dlg-petr"]);
+    assert.deepEqual(buildDialogTranscriptDialogs(rows, { operatorIds: ["operator-maria"] }).map((dialog) => dialog.id), ["dlg-anna"]);
+    assert.deepEqual(buildDialogTranscriptDialogs(rows, { operatorIds: ["Иван Петров"] }).map((dialog) => dialog.id), ["dlg-petr"]);
     assert.deepEqual(
-      buildDialogTranscriptDialogs(rows, { operatorId: "all", score: "all", status: "Все статусы", topic: "all" }).map((dialog) => dialog.id),
+      buildDialogTranscriptDialogs(rows, { operatorIds: ["operator-maria", "operator-ivan"] }).map((dialog) => dialog.id),
+      ["dlg-anna", "dlg-petr"]
+    );
+    assert.deepEqual(buildDialogTranscriptDialogs(rows, { topic: "возвраты" }).map((dialog) => dialog.id), ["dlg-olga"]);
+    assert.deepEqual(buildDialogTranscriptDialogs(rows, { statuses: ["active"] }).map((dialog) => dialog.id), ["dlg-petr"]);
+    assert.deepEqual(
+      buildDialogTranscriptDialogs(rows, { statuses: ["active", "closed"] }).map((dialog) => dialog.id),
+      ["dlg-anna", "dlg-petr"]
+    );
+    assert.deepEqual(buildDialogTranscriptDialogs(rows, { scores: ["5"] }).map((dialog) => dialog.id), ["dlg-anna"]);
+    assert.deepEqual(buildDialogTranscriptDialogs(rows, { scores: ["2"] }).map((dialog) => dialog.id), ["dlg-olga"]);
+    assert.deepEqual(buildDialogTranscriptDialogs(rows, { scores: ["none"] }).map((dialog) => dialog.id), ["dlg-petr"]);
+    assert.deepEqual(
+      buildDialogTranscriptDialogs(rows, { scores: ["5", "none"] }).map((dialog) => dialog.id),
+      ["dlg-anna", "dlg-petr"]
+    );
+    assert.deepEqual(
+      buildDialogTranscriptDialogs(rows, { operatorIds: ["all"], scores: ["all"], statuses: ["Все статусы"], topic: "all" }).map((dialog) => dialog.id),
       ["dlg-anna", "dlg-petr", "dlg-olga"]
     );
-    assert.deepEqual(buildDialogTranscriptDialogs(rows, { operatorId: "operator-maria", score: "none" }), []);
+    assert.deepEqual(buildDialogTranscriptDialogs(rows, { operatorIds: ["operator-maria"], scores: ["none"] }), []);
+  });
+
+  it("parses both plural and legacy single-value job filters", () => {
+    assert.deepEqual(
+      dialogTranscriptFiltersFromJob({ filters: { operatorIds: ["op-1", "op-2"], scores: ["5", "none"], statuses: ["active"], topic: "Возвраты" } }),
+      { operatorIds: ["op-1", "op-2"], scores: ["5", "none"], statuses: ["active"], topic: "Возвраты" }
+    );
+    assert.deepEqual(
+      dialogTranscriptFiltersFromJob({ filters: { operatorId: "op-legacy", score: "3", status: "closed" } }),
+      { operatorIds: ["op-legacy"], scores: ["3"], statuses: ["closed"] }
+    );
+    assert.deepEqual(dialogTranscriptFiltersFromJob({ filters: {} }), {});
   });
 
   it("serializes transcripts to TXT with dialog headers and attributed lines", () => {
     const text = serializeDialogTranscriptsAsTxt(buildDialogTranscriptDialogs(transcriptFixtureRows()), {
-      filters: { score: "all" },
+      filters: { scores: ["all"] },
       generatedAt: new Date(SNAPSHOT_AT)
     });
 
@@ -175,14 +201,19 @@ describe("dialog transcript export contracts", () => {
 
   it("serializes transcripts to JSON with split messages, comments and feedback", () => {
     const payload = JSON.parse(serializeDialogTranscriptsAsJson(buildDialogTranscriptDialogs(transcriptFixtureRows()), {
-      filters: { operatorId: "operator-maria", score: "5" },
+      filters: { operatorIds: ["operator-maria", "operator-ivan"], scores: ["5", "none"] },
       generatedAt: new Date(SNAPSHOT_AT)
     })) as Record<string, any>;
 
     assert.equal(payload.reportType, DIALOG_TRANSCRIPT_REPORT_TYPE);
     assert.equal(payload.dialogCount, 3);
     assert.equal(payload.entryCount, 7);
-    assert.deepEqual(payload.filters, { operator: "operator-maria", score: "5", status: "all", topic: "all" });
+    assert.deepEqual(payload.filters, {
+      operators: ["operator-maria", "operator-ivan"],
+      scores: ["5", "none"],
+      statuses: "all",
+      topic: "all"
+    });
     const anna = payload.dialogs[0];
     assert.equal(anna.client, "Анна Смирнова");
     assert.deepEqual(anna.status, { key: "closed", label: "Закрыто" });
@@ -295,6 +326,59 @@ describe("dialog transcript export contracts", () => {
     const payload = JSON.parse((download.data.body as Buffer).toString("utf8")) as Record<string, any>;
     assert.equal(payload.dialogCount, 1);
     assert.deepEqual(payload.dialogs.map((dialog: Record<string, unknown>) => dialog.id), ["dlg-anna"]);
+  });
+
+  it("applies multi-value filters and a custom date range end to end", async () => {
+    const { calls, service } = createTranscriptReportService();
+
+    const requested = await service.requestReportExport({
+      filters: {
+        dateFrom: "2026-07-10",
+        dateTo: "2026-07-18",
+        operatorIds: ["operator-maria", "operator-ivan"],
+        scores: ["5", "none"],
+        snapshotAt: SNAPSHOT_AT,
+        statuses: ["active", "closed"],
+        timezoneOffsetMinutes: 180
+      },
+      format: "JSON",
+      period: "2026-07-10 — 2026-07-18",
+      reportType: DIALOG_TRANSCRIPT_REPORT_TYPE
+    }, { tenantId: "tenant-volga" });
+    assert.equal(requested.status, "ok");
+    const job = requested.data.job as Record<string, any>;
+    assert.equal(job.statusKey, "ready");
+
+    // Окно диапазона: локальные даты UTC+3 → 2026-07-09T21:00Z..2026-07-18T21:00Z,
+    // верхняя граница клампится снапшотом 10:00Z.
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].from.toISOString(), "2026-07-09T21:00:00.000Z");
+    assert.equal(calls[0].to.toISOString(), SNAPSHOT_AT);
+
+    const download = await service.getExportFileDownload(job.id, { canDownload: true, tenantId: "tenant-volga" });
+    const payload = JSON.parse((download.data.body as Buffer).toString("utf8")) as Record<string, any>;
+    // Оба оператора прошли по мультивыбору, dlg-olga отсечён (нет оператора и оценка 2).
+    assert.deepEqual(payload.dialogs.map((dialog: Record<string, unknown>) => dialog.id), ["dlg-anna", "dlg-petr"]);
+    assert.deepEqual(payload.filters.operators, ["operator-maria", "operator-ivan"]);
+    assert.deepEqual(payload.filters.scores, ["5", "none"]);
+  });
+
+  it("rejects an invalid custom date range before creating a job", async () => {
+    const { repository, service } = createTranscriptReportService();
+
+    const requested = await service.requestReportExport({
+      filters: { dateFrom: "2026-07-18", dateTo: "2026-07-10" },
+      format: "TXT",
+      reportType: DIALOG_TRANSCRIPT_REPORT_TYPE
+    }, { tenantId: "tenant-volga" });
+
+    assert.equal(requested.status, "invalid");
+    assert.equal(requested.error?.code, "report_export_period_invalid");
+    assert.deepEqual(await repository.listExportJobsAsync({ tenantId: "tenant-volga" }), []);
+
+    assert.equal(dialogTranscriptDateRange({ dateFrom: "2026-07-01", dateTo: "2026-07-02", timezoneOffsetMinutes: 0 }) === "invalid", false);
+    assert.equal(dialogTranscriptDateRange({ dateFrom: "07/01/2026", dateTo: "2026-07-02" }), "invalid");
+    assert.equal(dialogTranscriptDateRange({}), undefined);
   });
 
   it("rejects unsupported dialog transcript formats", async () => {

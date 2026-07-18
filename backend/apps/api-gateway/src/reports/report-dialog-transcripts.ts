@@ -35,10 +35,15 @@ export interface DialogTranscriptDialog {
 }
 
 export interface DialogTranscriptFilters {
-  operatorId?: string;
-  score?: string;
-  status?: string;
+  operatorIds?: string[];
+  scores?: string[];
+  statuses?: string[];
   topic?: string;
+}
+
+export interface DialogTranscriptDateRange {
+  from: Date;
+  to: Date;
 }
 
 export interface DialogTranscriptFile {
@@ -123,36 +128,68 @@ export function dialogStatusLabel(status: string): string {
   return DIALOG_STATUS_LABELS[status.trim().toLowerCase()] ?? status;
 }
 
+// Фильтры читаются и в новом множественном формате (operatorIds/statuses/
+// scores), и в одиночном legacy-формате старых заданий (operatorId/status/
+// score) — retry и дозапись файла по ним продолжают работать.
 export function dialogTranscriptFiltersFromJob(job: Pick<ReportExportJob, "filters">): DialogTranscriptFilters {
+  const operatorIds = stringListFilter(job.filters?.operatorIds, job.filters?.operatorId);
+  const scores = stringListFilter(job.filters?.scores, job.filters?.score);
+  const statuses = stringListFilter(job.filters?.statuses, job.filters?.status);
+  const topic = stringFilter(job.filters?.topic);
   return {
-    operatorId: stringFilter(job.filters?.operatorId),
-    score: stringFilter(job.filters?.score),
-    status: stringFilter(job.filters?.status),
-    topic: stringFilter(job.filters?.topic)
+    ...(operatorIds ? { operatorIds } : {}),
+    ...(scores ? { scores } : {}),
+    ...(statuses ? { statuses } : {}),
+    ...(topic ? { topic } : {})
   };
+}
+
+// Произвольный период выгрузки: даты локального дня пользователя (yyyy-mm-dd)
+// превращаются в UTC-окно с учётом timezoneOffsetMinutes. Невалидная пара —
+// undefined, вызывающая сторона решает, ошибка это или отсутствие диапазона.
+export function dialogTranscriptDateRange(filters: Record<string, unknown> | undefined): DialogTranscriptDateRange | "invalid" | undefined {
+  const fromRaw = typeof filters?.dateFrom === "string" ? filters.dateFrom.trim() : "";
+  const toRaw = typeof filters?.dateTo === "string" ? filters.dateTo.trim() : "";
+  if (!fromRaw && !toRaw) {
+    return undefined;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fromRaw) || !/^\d{4}-\d{2}-\d{2}$/.test(toRaw)) {
+    return "invalid";
+  }
+
+  const offsetMs = transcriptTimezoneOffset(filters?.timezoneOffsetMinutes) * 60_000;
+  const fromMs = Date.parse(`${fromRaw}T00:00:00.000Z`) - offsetMs;
+  const toMs = Date.parse(`${toRaw}T00:00:00.000Z`) - offsetMs + 24 * 60 * 60_000;
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) {
+    return "invalid";
+  }
+
+  return { from: new Date(fromMs), to: new Date(toMs) };
 }
 
 export function buildDialogTranscriptDialogs(
   rows: readonly ConversationTranscriptSourceRow[],
   filters: DialogTranscriptFilters = {}
 ): DialogTranscriptDialog[] {
-  const operator = normalizeFacetFilter(filters.operatorId);
+  const operators = normalizeFacetFilterList(filters.operatorIds);
   const topic = normalizeFacetFilter(filters.topic);
-  const status = normalizeFacetFilter(filters.status);
-  const score = normalizeScoreFilter(filters.score);
+  const statuses = normalizeFacetFilterList(filters.statuses);
+  const scores = normalizeScoreFilterList(filters.scores);
 
   return rows
     .filter((row) => {
-      if (operator && !equalsFacet(row.operatorId, operator) && !equalsFacet(row.operatorName, operator)) {
+      if (operators && !operators.has(facetValue(row.operatorId)) && !operators.has(facetValue(row.operatorName))) {
         return false;
       }
       if (topic && !equalsFacet(row.topic, topic)) {
         return false;
       }
-      if (status && !equalsFacet(row.status, status)) {
+      if (statuses && !statuses.has(facetValue(row.status))) {
         return false;
       }
-      return matchesScoreFilter(row.rating?.score ?? null, score);
+      const score = row.rating?.score ?? null;
+      return !scores || scores.some((filter) => matchesScoreFilter(score, filter));
     })
     .map((row) => ({
       channel: row.channel,
@@ -184,13 +221,25 @@ export async function buildDialogTranscriptSnapshot(
   }
 
   const snapshotAt = reportSnapshotAt(job);
-  const workspace = buildLiveReportWorkspace([], {
-    now: snapshotAt,
-    period: job.period as LiveReportWorkspaceOptions["period"],
-    timezoneOffsetMinutes: transcriptTimezoneOffset(job.filters?.timezoneOffsetMinutes)
-  });
-  const from = new Date(workspace.windows.current.from);
-  const to = new Date(Math.min(new Date(workspace.windows.current.to).getTime(), snapshotAt.getTime()));
+  const range = dialogTranscriptDateRange(job.filters);
+  if (range === "invalid") {
+    throw new Error("report_export_period_invalid");
+  }
+
+  let from: Date;
+  let to: Date;
+  if (range) {
+    from = range.from;
+    to = new Date(Math.min(range.to.getTime(), snapshotAt.getTime()));
+  } else {
+    const workspace = buildLiveReportWorkspace([], {
+      now: snapshotAt,
+      period: job.period as LiveReportWorkspaceOptions["period"],
+      timezoneOffsetMinutes: transcriptTimezoneOffset(job.filters?.timezoneOffsetMinutes)
+    });
+    from = new Date(workspace.windows.current.from);
+    to = new Date(Math.min(new Date(workspace.windows.current.to).getTime(), snapshotAt.getTime()));
+  }
   const rows = await repository.listConversationTranscriptSourceRowsAsync({ from, tenantId, to });
   const dialogs = buildDialogTranscriptDialogs(rows, dialogTranscriptFiltersFromJob(job));
 
@@ -444,24 +493,33 @@ function jsonEntry(entry: DialogTranscriptEntry): Record<string, unknown> {
   };
 }
 
-function exportedFilters(filters: DialogTranscriptFilters = {}): Record<string, string> {
+function exportedFilters(filters: DialogTranscriptFilters = {}): Record<string, unknown> {
   return {
-    operator: filters.operatorId?.trim() || "all",
-    score: filters.score?.trim() || "all",
-    status: filters.status?.trim() || "all",
+    operators: cleanedFilterList(filters.operatorIds) ?? "all",
+    scores: cleanedFilterList(filters.scores) ?? "all",
+    statuses: cleanedFilterList(filters.statuses) ?? "all",
     topic: filters.topic?.trim() || "all"
   };
 }
 
 function filtersSummary(filters: DialogTranscriptFilters = {}): string {
-  const exported = exportedFilters(filters);
-  const scoreLabel = exported.score === "none" ? "без оценки" : exported.score;
+  const operators = cleanedFilterList(filters.operatorIds);
+  const statuses = cleanedFilterList(filters.statuses);
+  const scores = cleanedFilterList(filters.scores);
+  const topic = filters.topic?.trim();
   return [
-    `оператор — ${exported.operator === "all" ? "все" : exported.operator}`,
-    `тематика — ${exported.topic === "all" ? "все" : exported.topic}`,
-    `статус — ${exported.status === "all" ? "все" : dialogStatusLabel(exported.status)}`,
-    `оценка — ${exported.score === "all" ? "все" : scoreLabel}`
+    `оператор — ${operators ? operators.join(", ") : "все"}`,
+    `тематика — ${topic && topic !== "all" && !topic.startsWith("Все ") ? topic : "все"}`,
+    `статус — ${statuses ? statuses.map(dialogStatusLabel).join(", ") : "все"}`,
+    `оценка — ${scores ? scores.map((score) => score === "none" ? "без оценки" : score).join(", ") : "все"}`
   ].join(", ");
+}
+
+function cleanedFilterList(values?: string[]): string[] | undefined {
+  const cleaned = (values ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value && value.toLowerCase() !== "all" && !value.startsWith("Все "));
+  return cleaned.length ? cleaned : undefined;
 }
 
 function ratingSummary(dialog: DialogTranscriptDialog): string {
@@ -483,8 +541,35 @@ function normalizeFacetFilter(value: string | undefined): string | undefined {
     : normalized.toLocaleLowerCase("ru-RU");
 }
 
+function normalizeFacetFilterList(values: string[] | undefined): Set<string> | undefined {
+  const normalized = (values ?? [])
+    .map((value) => normalizeFacetFilter(value))
+    .filter((value): value is string => Boolean(value));
+  return normalized.length ? new Set(normalized) : undefined;
+}
+
+function normalizeScoreFilterList(values: string[] | undefined): Array<"none" | number> | undefined {
+  const normalized = (values ?? [])
+    .map((value) => normalizeScoreFilter(value))
+    .filter((value): value is "none" | number => value !== undefined);
+  return normalized.length ? normalized : undefined;
+}
+
+function stringListFilter(plural: unknown, single: unknown): string[] | undefined {
+  const list = Array.isArray(plural)
+    ? plural.filter((value): value is string => typeof value === "string")
+    : typeof single === "string" && single
+      ? [single]
+      : [];
+  return list.length ? list : undefined;
+}
+
+function facetValue(value: string | undefined): string {
+  return (value ?? "").trim().toLocaleLowerCase("ru-RU");
+}
+
 function equalsFacet(value: string | undefined, filter: string): boolean {
-  return (value ?? "").trim().toLocaleLowerCase("ru-RU") === filter;
+  return facetValue(value) === filter;
 }
 
 function normalizeScoreFilter(value: string | undefined): "none" | number | undefined {

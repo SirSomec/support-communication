@@ -16,6 +16,7 @@ import {
   buildDialogTranscriptSnapshot,
   DIALOG_TRANSCRIPT_COLUMN_IDS,
   DIALOG_TRANSCRIPT_REPORT_TYPE,
+  dialogTranscriptDateRange,
   dialogTranscriptFiltersFromJob,
   isDialogTranscriptExportJob,
   isDialogTranscriptReportType,
@@ -297,10 +298,16 @@ export class ReportService {
         ],
         operators: [],
         filterOptions: {
-          ...mergeConversationFacetOptions(
-            buildConversationReportFilterOptions(reportSource.sourceRows),
-            reportSource.facetRows
-          ),
+          ...(() => {
+            const merged = mergeConversationFacetOptions(
+              buildConversationReportFilterOptions(reportSource.sourceRows),
+              reportSource.facetRows
+            );
+            return {
+              ...merged,
+              operators: buildOperatorOptions(reportSource.facetRows, merged.operatorId)
+            };
+          })(),
           channels: [...new Set(reportSource.sourceRows.map((row) => row.channel).filter(Boolean))]
             .sort((left, right) => left.localeCompare(right, "ru"))
         },
@@ -586,6 +593,12 @@ export class ReportService {
         return invalidEnvelope("requestReportExport", "report_export_format_unsupported", "Dialog transcript export format must be XLSX, HTML, JSON or TXT.", {
           format: payload.format ?? null,
           reportType: payload.reportType ?? null
+        });
+      }
+      if (dialogTranscriptDateRange(payload.filters) === "invalid") {
+        return invalidEnvelope("requestReportExport", "report_export_period_invalid", "Dialog transcript export period range must be a valid dateFrom..dateTo pair.", {
+          dateFrom: payload.filters?.dateFrom ?? null,
+          dateTo: payload.filters?.dateTo ?? null
         });
       }
     }
@@ -1131,6 +1144,34 @@ function mergeConversationFacetOptions(
   merged.status.sort(byRu);
   merged.topic.sort(byRu);
   return merged;
+}
+
+// Пары {id, name} для мультиселекта операторов в выгрузке переписки: имена
+// берём из диалогов окна, id без имени (например, только из lifecycle-событий)
+// показываем как есть.
+function buildOperatorOptions(
+  facetRows: ConversationFacetSourceRow[],
+  operatorIds: string[]
+): Array<{ id: string; name: string }> {
+  const nameById = new Map<string, string>();
+  for (const row of facetRows) {
+    if (!row.operatorId) {
+      continue;
+    }
+    const name = row.operatorName?.trim();
+    if (!nameById.has(row.operatorId) || (name && nameById.get(row.operatorId) === row.operatorId)) {
+      nameById.set(row.operatorId, name || row.operatorId);
+    }
+  }
+  for (const id of operatorIds) {
+    if (!nameById.has(id)) {
+      nameById.set(id, id);
+    }
+  }
+
+  return [...nameById.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((left, right) => left.name.localeCompare(right.name, "ru"));
 }
 
 function normalizeTimezoneOffset(value: number | string | undefined): number {

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { CalendarDays, CheckCircle2, ClipboardList, Clock3, Download, Gauge, PlayCircle } from "lucide-react";
 import { statusLabels } from "../../app/dialogModel.js";
 import { createScreenStateItems } from "../../app/screenState.js";
@@ -31,7 +31,6 @@ const dialogExportFormatOptions = [
 ];
 
 const dialogExportScoreOptions = [
-  { label: "Все оценки", value: "all" },
   { label: "5", value: "5" },
   { label: "4", value: "4" },
   { label: "3", value: "3" },
@@ -39,6 +38,21 @@ const dialogExportScoreOptions = [
   { label: "1", value: "1" },
   { label: "Без оценки", value: "none" }
 ];
+
+const dialogExportPeriodOptions = [
+  { label: "Сегодня", value: "Сегодня" },
+  { label: "Вчера", value: "Вчера" },
+  { label: "7 дней", value: "7 дней" },
+  { label: "30 дней", value: "30 дней" },
+  { label: "Произвольный период", value: "range" }
+];
+
+function localDateInputValue(daysAgo = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
 
 export function ReportsScreen({ onBack, onToast, access }) {
   const [period, setPeriod] = useState("Сегодня");
@@ -68,12 +82,14 @@ export function ReportsScreen({ onBack, onToast, access }) {
   });
   const [selectedColumns, setSelectedColumns] = useState([]);
   const [dialogExportFilters, setDialogExportFilters] = useState({
-    operatorId: "all",
-    score: "all",
-    status: "all",
+    operatorIds: [],
+    scores: [],
+    statuses: [],
     topic: "all"
   });
   const [dialogExportFormat, setDialogExportFormat] = useState("XLSX");
+  const [dialogExportPeriod, setDialogExportPeriod] = useState("30 дней");
+  const [dialogExportRange, setDialogExportRange] = useState({ from: localDateInputValue(6), to: localDateInputValue(0) });
   const [dialogExportBusy, setDialogExportBusy] = useState(false);
   const [exportError, setExportError] = useState("");
   const [exportHistoryOpen, setExportHistoryOpen] = useState(false);
@@ -262,16 +278,25 @@ export function ReportsScreen({ onBack, onToast, access }) {
       return;
     }
 
+    const customRange = dialogExportPeriod === "range";
+    if (customRange && (!dialogExportRange.from || !dialogExportRange.to || dialogExportRange.from > dialogExportRange.to)) {
+      const message = "Укажите корректный период выгрузки: дата начала не позже даты окончания.";
+      setExportError(message);
+      onToast(message);
+      return;
+    }
+
     setDialogExportBusy(true);
     const response = await reportService.requestReportExport({
       channel,
       filters: {
         ...dialogExportFilters,
+        ...(customRange ? { dateFrom: dialogExportRange.from, dateTo: dialogExportRange.to } : {}),
         snapshotAt: reportSnapshotAt,
         timezoneOffsetMinutes: -new Date().getTimezoneOffset()
       },
       format: dialogExportFormat,
-      period,
+      period: customRange ? `${dialogExportRange.from} — ${dialogExportRange.to}` : dialogExportPeriod,
       reportType: "dialog_transcripts"
     });
     setDialogExportBusy(false);
@@ -726,15 +751,53 @@ export function ReportsScreen({ onBack, onToast, access }) {
         <SectionTitle title="Выгрузка диалогов с перепиской" action="сообщения и комментарии с авторами" />
         <p className="dialog-export-hint">
           В файл попадают диалоги, созданные за выбранный период и канал, вместе с сообщениями,
-          внутренними комментариями, их авторами и CSAT-оценкой.
+          внутренними комментариями, их авторами и CSAT-оценкой. Пустой фильтр означает «все значения».
         </p>
         <div className="dialog-export-controls">
-          <DialogExportSelect
+          <label>
+            <span>Период</span>
+            <select
+              aria-label="Период выгрузки диалогов"
+              className="inline-select"
+              data-testid="dialog-export-period"
+              onChange={(event) => setDialogExportPeriod(event.target.value)}
+              value={dialogExportPeriod}
+            >
+              {dialogExportPeriodOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          {dialogExportPeriod === "range" ? (
+            <>
+              <label>
+                <span>С даты</span>
+                <input
+                  aria-label="Начало периода выгрузки"
+                  className="inline-select"
+                  max={dialogExportRange.to || undefined}
+                  onChange={(event) => setDialogExportRange((current) => ({ ...current, from: event.target.value }))}
+                  type="date"
+                  value={dialogExportRange.from}
+                />
+              </label>
+              <label>
+                <span>По дату</span>
+                <input
+                  aria-label="Конец периода выгрузки"
+                  className="inline-select"
+                  min={dialogExportRange.from || undefined}
+                  onChange={(event) => setDialogExportRange((current) => ({ ...current, to: event.target.value }))}
+                  type="date"
+                  value={dialogExportRange.to}
+                />
+              </label>
+            </>
+          ) : null}
+          <MultiSelectDropdown
             allLabel="Все операторы"
-            label="Оператор"
-            onChange={(value) => setDialogExportFilters((current) => ({ ...current, operatorId: value }))}
-            options={reportFilterOptions.operatorId}
-            value={dialogExportFilters.operatorId}
+            label="Операторы"
+            onChange={(values) => setDialogExportFilters((current) => ({ ...current, operatorIds: values }))}
+            options={(reportFilterOptions.operators ?? []).map((operator) => ({ label: operator.name, value: operator.id }))}
+            selected={dialogExportFilters.operatorIds}
           />
           <DialogExportSelect
             allLabel="Все тематики"
@@ -743,25 +806,20 @@ export function ReportsScreen({ onBack, onToast, access }) {
             options={reportFilterOptions.topic}
             value={dialogExportFilters.topic}
           />
-          <DialogExportSelect
+          <MultiSelectDropdown
             allLabel="Все статусы"
-            getOptionLabel={(option) => statusLabels[option] ?? option}
-            label="Статус"
-            onChange={(value) => setDialogExportFilters((current) => ({ ...current, status: value }))}
-            options={reportFilterOptions.status}
-            value={dialogExportFilters.status}
+            label="Статусы"
+            onChange={(values) => setDialogExportFilters((current) => ({ ...current, statuses: values }))}
+            options={(reportFilterOptions.status ?? []).map((status) => ({ label: statusLabels[status] ?? status, value: status }))}
+            selected={dialogExportFilters.statuses}
           />
-          <label>
-            <span>Оценка</span>
-            <select
-              aria-label="Оценка диалога"
-              className="inline-select"
-              onChange={(event) => setDialogExportFilters((current) => ({ ...current, score: event.target.value }))}
-              value={dialogExportFilters.score}
-            >
-              {dialogExportScoreOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
+          <MultiSelectDropdown
+            allLabel="Все оценки"
+            label="Оценки"
+            onChange={(values) => setDialogExportFilters((current) => ({ ...current, scores: values }))}
+            options={dialogExportScoreOptions}
+            selected={dialogExportFilters.scores}
+          />
           <label>
             <span>Формат</span>
             <select
@@ -834,18 +892,81 @@ export function ReportsScreen({ onBack, onToast, access }) {
   );
 }
 
-function DialogExportSelect({ allLabel, getOptionLabel, label, onChange, options = [], value }) {
+function DialogExportSelect({ allLabel, label, onChange, options = [], value }) {
   const list = Array.isArray(options) ? options : [];
-  const optionLabel = getOptionLabel ?? ((option) => option);
 
   return (
     <label>
       <span>{label}</span>
       <select aria-label={label} className="inline-select" onChange={(event) => onChange(event.target.value)} value={value}>
         <option value="all">{allLabel}</option>
-        {list.map((option) => <option key={option} value={option}>{optionLabel(option)}</option>)}
+        {list.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
     </label>
+  );
+}
+
+// Компактный мультивыбор для панели выгрузки: пустой выбор трактуется как
+// «все значения», список закрывается по клику вне поповера.
+function MultiSelectDropdown({ allLabel, label, onChange, options = [], selected = [] }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    function handlePointerDown(event) {
+      if (rootRef.current && !rootRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
+  const list = Array.isArray(options) ? options : [];
+  const selectedSet = new Set(selected);
+  const summary = !selected.length
+    ? allLabel
+    : selected.length === 1
+      ? (list.find((option) => option.value === selected[0])?.label ?? selected[0])
+      : `Выбрано: ${selected.length}`;
+
+  function toggleValue(value) {
+    onChange(selectedSet.has(value) ? selected.filter((item) => item !== value) : [...selected, value]);
+  }
+
+  return (
+    <div className="multi-select" ref={rootRef}>
+      <span>{label}</span>
+      <button
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={label}
+        className="inline-select multi-select-trigger"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        {summary}
+      </button>
+      {open ? (
+        <div aria-label={label} className="multi-select-popover" role="listbox">
+          <label className="multi-select-option">
+            <input checked={!selected.length} onChange={() => onChange([])} type="checkbox" />
+            <span>{allLabel}</span>
+          </label>
+          {list.map((option) => (
+            <label className="multi-select-option" key={option.value}>
+              <input checked={selectedSet.has(option.value)} onChange={() => toggleValue(option.value)} type="checkbox" />
+              <span>{option.label}</span>
+            </label>
+          ))}
+          {!list.length ? <p className="multi-select-empty">За период значений нет</p> : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

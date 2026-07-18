@@ -38,6 +38,69 @@
   margin-left: auto;
 }
 
+.multi-select {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  min-width: 170px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.multi-select-trigger {
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.multi-select-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  min-width: 220px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(23, 35, 58, 0.16);
+}
+
+.multi-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  color: #17233a;
+  font-size: 12.5px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.multi-select-option:hover {
+  background: #f2f5fa;
+}
+
+.multi-select-option input {
+  margin: 0;
+}
+
+.multi-select-empty {
+  margin: 0;
+  padding: 6px 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .routing-activity-controls {
   display: flex;
   flex-wrap: wrap;

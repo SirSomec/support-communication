@@ -3255,13 +3255,13 @@ model OpenChannelPumpCursor {
   @@map("open_channel_pump_cursors")
 }
 
-// Служебная почта воркспейса: SMTP-подключение для сервисных рассылок
-// (2FA-коды, восстановление пароля, приглашения сотрудников). Одна запись на
-// тенант; пароль хранится только в зашифрованном виде (AES-256-GCM, схема
-// колонок как у ai_connections). Standalone-таблица без FK на tenants —
-// по конвенции ai_connections / knowledge_sources.
-model WorkspaceMailSettings {
-  tenantId              String    @id @map("tenant_id")
+// Служебная почта сервиса: единое SMTP-подключение для сервисных рассылок
+// всей платформы (2FA-коды, восстановление пароля, приглашения сотрудников).
+// Singleton-строка (id = "service"), настраивается только администратором
+// сервиса; пароль хранится в зашифрованном виде (AES-256-GCM, схема колонок
+// как у ai_connections).
+model ServiceMailSettings {
+  id                    String    @id
   enabled               Boolean   @default(false)
   host                  String
   port                  Int       @default(587)
@@ -3284,5 +3284,5 @@ model WorkspaceMailSettings {
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  @@map("workspace_mail_settings")
+  @@map("service_mail_settings")
 }

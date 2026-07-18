@@ -1,6 +1,6 @@
-// Модель формы «Служебная почта»: нормализация значений, валидация и сборка
-// payload для PUT /workspace/mail-settings. Пароль в форме всегда пустой —
-// сервер отдаёт только признак passwordConfigured.
+// Модель формы «Служебная почта» админ-панели сервиса: нормализация значений,
+// валидация и сборка payload для PUT /service-admin/mail-settings. Пароль в
+// форме всегда пустой — сервер отдаёт только признак passwordConfigured.
 
 export const mailEncryptionOptions = [
   { value: "starttls", label: "STARTTLS (обычно порт 587)" },
@@ -115,6 +115,56 @@ export function describeMailTestState(settings) {
     return `Последняя проверка не прошла${reason}: ${testedAt}.`;
   }
   return `Последняя проверка: ${testedAt}.`;
+}
+
+/** Человеческая расшифровка диагноза тестовой отправки с подсказкой, что чинить. */
+export function describeMailTestDiagnostic(code) {
+  switch (code) {
+    case "smtp_timeout":
+      return "Сервер не ответил за отведённое время. Чаще всего это неверный порт: для SSL/TLS обычно 465, для STARTTLS — 587.";
+    case "smtp_connection_refused":
+      return "Соединение отклонено — на этом порту никто не слушает. Проверьте порт: SSL/TLS — 465, STARTTLS — 587.";
+    case "smtp_host_not_found":
+      return "Хост не найден. Проверьте адрес SMTP-сервера.";
+    case "smtp_network_unreachable":
+      return "Сервер недоступен по сети. Проверьте адрес и доступ в интернет с сервера платформы.";
+    case "smtp_auth_failed":
+      return "Сервер отклонил логин или пароль. Для Яндекса, Mail.ru и Google обычно нужен отдельный «пароль приложения», а не пароль аккаунта.";
+    case "smtp_sender_rejected":
+      return "Сервер отклонил адрес отправителя — обычно он должен совпадать с ящиком, под которым выполняется вход.";
+    case "smtp_recipient_rejected":
+      return "Сервер отклонил адрес получателя тестового письма.";
+    case "smtp_tls_certificate_invalid":
+      return "Сертификат сервера не прошёл проверку. Проверьте хост; отключать проверку сертификата стоит только для доверенного внутреннего сервера.";
+    case "smtp_tls_failed":
+      return "Не удалось установить защищённое соединение. Проверьте соответствие шифрования и порта: SSL/TLS — 465, STARTTLS — 587.";
+    case "smtp_connection_closed":
+      return "Сервер разорвал соединение. Частая причина — обычное подключение к SSL-порту: проверьте режим шифрования.";
+    case "smtp_unexpected_response":
+      return "Сервер ответил неожиданным кодом. Проверьте режим шифрования и порт.";
+    case "secret_storage_unavailable":
+      return "Хранилище секретов недоступно: на сервере не задан мастер-ключ шифрования паролей.";
+    case "smtp_unavailable":
+      return "Не удалось связаться с SMTP-сервером. Проверьте хост, порт и режим шифрования.";
+    default:
+      return code ? `Код ошибки: ${code}.` : "";
+  }
+}
+
+const STANDARD_MAIL_PORTS = new Set(["", "25", "465", "587", "1025", "2525"]);
+
+/**
+ * Смена шифрования подставляет стандартный порт (SSL — 465, STARTTLS — 587),
+ * если текущий порт стандартный или пустой; нестандартный порт не трогаем.
+ */
+export function applyEncryptionChange(form, encryption) {
+  const next = { ...form, encryption };
+  const currentPort = String(form.port ?? "").trim();
+  const suggested = encryption === "ssl" ? "465" : encryption === "starttls" ? "587" : "";
+  if (suggested && suggested !== currentPort && STANDARD_MAIL_PORTS.has(currentPort)) {
+    next.port = suggested;
+  }
+  return next;
 }
 
 export function describeMailDeliverySource(settings, environmentFallback) {

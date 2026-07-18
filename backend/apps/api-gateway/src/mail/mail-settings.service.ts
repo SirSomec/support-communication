@@ -4,23 +4,24 @@ import { writeStructuredLog } from "@support-communication/observability";
 import { SecretStoreError } from "../ai-connections/secret-store.js";
 import { makeAuditId } from "../identity/backend-ids.js";
 import { apiMeta, identityTraceId } from "../identity/identity-meta.js";
-import { MailSettingsRepository, type MailEncryption, type WorkspaceMailSettingsRecord } from "./mail-settings.repository.js";
 import {
+  MailSettingsRepository,
+  SERVICE_MAIL_SETTINGS_ID,
+  type MailEncryption,
+  type ServiceMailSettingsRecord
+} from "./mail-settings.repository.js";
+import {
+  SMTP_TRANSPORT_ERROR_CODES,
   composeMailMessage,
   sendSmtpMail,
   smtpMailAddress,
   smtpMailHost,
   type SmtpTransportConfig
 } from "./smtp-transport.js";
-import { loadEnvironmentTransportConfig, mailSecretStore, transportConfigFromSettings } from "./workspace-mailer.js";
+import { loadEnvironmentTransportConfig, mailSecretStore, transportConfigFromSettings } from "./service-mailer.js";
 
 const SERVICE = "mailSettingsService";
-const SMTP_DIAGNOSTIC_CODES = new Set([
-  "smtp_timeout",
-  "smtp_connection_closed",
-  "smtp_unexpected_response",
-  "smtp_response_too_large"
-]);
+const SMTP_DIAGNOSTIC_CODES = new Set<string>(SMTP_TRANSPORT_ERROR_CODES);
 
 export interface MailSettingsWriteInput {
   enabled?: boolean;
@@ -39,6 +40,10 @@ export interface MailSettingsWriteInput {
 
 export type MailTestTransport = (config: SmtpTransportConfig, mail: { message: string; to: string }) => Promise<string>;
 
+/**
+ * Единые настройки служебной почты сервиса (singleton). Управляются только
+ * администратором сервиса; рассылки всех воркспейсов идут через них.
+ */
 export class MailSettingsService {
   constructor(
     private readonly repository = MailSettingsRepository.default(),
@@ -46,13 +51,13 @@ export class MailSettingsService {
     private readonly testTransport: MailTestTransport = sendSmtpMail
   ) {}
 
-  async fetch(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const record = await this.repository.find(tenantId);
+  async fetch(): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const record = await this.repository.find();
     return createEnvelope({
       service: SERVICE,
       operation: "fetchMailSettings",
       traceId: identityTraceId(SERVICE, "fetchMailSettings"),
-      meta: apiMeta({ tenantId }),
+      meta: apiMeta({ scope: SERVICE_MAIL_SETTINGS_ID }),
       data: {
         environmentFallback: this.environmentFallback(),
         settings: record ? maskSettings(record) : null
@@ -60,8 +65,8 @@ export class MailSettingsService {
     });
   }
 
-  async save(tenantId: string, input: MailSettingsWriteInput = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const existing = await this.repository.find(tenantId);
+  async save(input: MailSettingsWriteInput = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const existing = await this.repository.find();
 
     let host: string;
     let fromAddress: string;
@@ -72,20 +77,20 @@ export class MailSettingsService {
       const replyToRaw = String(input.replyTo ?? "").trim();
       replyTo = replyToRaw ? smtpMailAddress(replyToRaw, "mail_settings_reply_to_invalid") : null;
     } catch (error) {
-      return this.invalid("saveMailSettings", tenantId, errorCode(error), validationMessage(errorCode(error)));
+      return this.invalid("saveMailSettings", errorCode(error), validationMessage(errorCode(error)));
     }
 
     const port = parsePort(input.port);
     if (port === null) {
-      return this.invalid("saveMailSettings", tenantId, "mail_settings_port_invalid", validationMessage("mail_settings_port_invalid"));
+      return this.invalid("saveMailSettings", "mail_settings_port_invalid", validationMessage("mail_settings_port_invalid"));
     }
     const timeoutMs = parseTimeout(input.timeoutMs, existing?.timeoutMs ?? 10_000);
     if (timeoutMs === null) {
-      return this.invalid("saveMailSettings", tenantId, "mail_settings_timeout_invalid", validationMessage("mail_settings_timeout_invalid"));
+      return this.invalid("saveMailSettings", "mail_settings_timeout_invalid", validationMessage("mail_settings_timeout_invalid"));
     }
     const encryption = parseEncryption(input.encryption);
     if (!encryption) {
-      return this.invalid("saveMailSettings", tenantId, "mail_settings_encryption_invalid", validationMessage("mail_settings_encryption_invalid"));
+      return this.invalid("saveMailSettings", "mail_settings_encryption_invalid", validationMessage("mail_settings_encryption_invalid"));
     }
 
     const username = String(input.username ?? "").trim().slice(0, 254) || null;
@@ -98,8 +103,8 @@ export class MailSettingsService {
         try {
           secret = mailSecretStore(this.environment).encrypt(password);
         } catch (error) {
-          this.logFailure("saveMailSettings", tenantId, error);
-          return this.invalid("saveMailSettings", tenantId, "mail_settings_secret_unavailable", "Secret storage is unavailable.");
+          this.logFailure("saveMailSettings", error);
+          return this.invalid("saveMailSettings", "mail_settings_secret_unavailable", "Secret storage is unavailable.");
         }
       }
     }
@@ -107,7 +112,7 @@ export class MailSettingsService {
       secret = null;
     }
     if (username && !secret) {
-      return this.invalid("saveMailSettings", tenantId, "mail_settings_auth_incomplete", validationMessage("mail_settings_auth_incomplete"));
+      return this.invalid("saveMailSettings", "mail_settings_auth_incomplete", validationMessage("mail_settings_auth_incomplete"));
     }
 
     const now = new Date().toISOString();
@@ -119,7 +124,7 @@ export class MailSettingsService {
       || existing.secret !== secret
       || existing.tlsRejectUnauthorized !== Boolean(input.tlsRejectUnauthorized ?? existing.tlsRejectUnauthorized);
 
-    const record: WorkspaceMailSettingsRecord = {
+    const record: ServiceMailSettingsRecord = {
       createdAt: existing?.createdAt ?? now,
       enabled: Boolean(input.enabled ?? existing?.enabled ?? false),
       encryption,
@@ -133,7 +138,6 @@ export class MailSettingsService {
       port,
       replyTo,
       secret,
-      tenantId,
       timeoutMs,
       tlsRejectUnauthorized: Boolean(input.tlsRejectUnauthorized ?? existing?.tlsRejectUnauthorized ?? true),
       updatedAt: now,
@@ -146,30 +150,30 @@ export class MailSettingsService {
         service: SERVICE,
         operation: "saveMailSettings",
         traceId: identityTraceId(SERVICE, "saveMailSettings"),
-        meta: apiMeta({ tenantId }),
+        meta: apiMeta({ scope: SERVICE_MAIL_SETTINGS_ID }),
         data: {
-          auditEvent: auditEvent("settings.mail.update", tenantId, input.password !== undefined ? "password_rotated" : "updated"),
+          auditEvent: auditEvent("service.mail.update", input.password !== undefined ? "password_rotated" : "updated"),
           environmentFallback: this.environmentFallback(),
           settings: maskSettings(saved)
         }
       });
     } catch (error) {
-      this.logFailure("saveMailSettings", tenantId, error);
-      return this.invalid("saveMailSettings", tenantId, "mail_settings_save_failed", "Mail settings could not be saved safely.");
+      this.logFailure("saveMailSettings", error);
+      return this.invalid("saveMailSettings", "mail_settings_save_failed", "Mail settings could not be saved safely.");
     }
   }
 
-  async sendTest(tenantId: string, payload: { recipient?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const record = await this.repository.find(tenantId);
+  async sendTest(payload: { recipient?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const record = await this.repository.find();
     if (!record) {
-      return this.invalid("testMailSettings", tenantId, "mail_settings_not_configured", "Save mail settings before sending a test email.");
+      return this.invalid("testMailSettings", "mail_settings_not_configured", "Save mail settings before sending a test email.");
     }
 
     let recipient: string;
     try {
       recipient = smtpMailAddress(String(payload.recipient ?? ""), "mail_settings_recipient_invalid");
-    } catch (error) {
-      return this.invalid("testMailSettings", tenantId, errorCode(error), validationMessage("mail_settings_recipient_invalid"));
+    } catch {
+      return this.invalid("testMailSettings", "mail_settings_recipient_invalid", validationMessage("mail_settings_recipient_invalid"));
     }
 
     const traceId = `trc_mail_settings_test_${randomUUID()}`;
@@ -181,13 +185,13 @@ export class MailSettingsService {
     } catch (error) {
       const diagnostic = error instanceof SecretStoreError ? "secret_storage_unavailable" : errorCode(error);
       const saved = await this.repository.save({ ...record, lastTestMessage: diagnostic, lastTestStatus: "failed", lastTestedAt: now, updatedAt: now });
-      this.logFailure("testMailSettings", tenantId, error);
-      return this.testFailedEnvelope(tenantId, saved, diagnostic, traceId);
+      this.logFailure("testMailSettings", error);
+      return this.testFailedEnvelope(saved, diagnostic, traceId);
     }
 
     const message = composeMailMessage(config, {
       bodyLines: [
-        "Это тестовое письмо служебной почты рабочего пространства поддержки.",
+        "Это тестовое письмо служебной почты сервиса поддержки.",
         "",
         `SMTP-сервер: ${config.host}:${config.port}`,
         `Отправитель: ${config.from}`,
@@ -206,9 +210,9 @@ export class MailSettingsService {
         service: SERVICE,
         operation: "testMailSettings",
         traceId,
-        meta: apiMeta({ tenantId }),
+        meta: apiMeta({ scope: SERVICE_MAIL_SETTINGS_ID }),
         data: {
-          auditEvent: auditEvent("settings.mail.test", tenantId, "passed"),
+          auditEvent: auditEvent("service.mail.test", "passed"),
           settings: maskSettings(saved),
           test: { diagnostic: { code: "ok", traceId }, status: "passed" }
         }
@@ -217,14 +221,13 @@ export class MailSettingsService {
       const rawCode = errorCode(error);
       const diagnostic = SMTP_DIAGNOSTIC_CODES.has(rawCode) ? rawCode : "smtp_unavailable";
       const saved = await this.repository.save({ ...record, lastTestMessage: diagnostic, lastTestStatus: "failed", lastTestedAt: now, updatedAt: now });
-      this.logFailure("testMailSettings", tenantId, error);
-      return this.testFailedEnvelope(tenantId, saved, diagnostic, traceId);
+      this.logFailure("testMailSettings", error);
+      return this.testFailedEnvelope(saved, diagnostic, traceId);
     }
   }
 
   private testFailedEnvelope(
-    tenantId: string,
-    record: WorkspaceMailSettingsRecord,
+    record: ServiceMailSettingsRecord,
     diagnostic: string,
     traceId: string
   ): BackendEnvelope<Record<string, unknown>> {
@@ -233,9 +236,9 @@ export class MailSettingsService {
       operation: "testMailSettings",
       traceId,
       status: "invalid",
-      meta: apiMeta({ tenantId }),
+      meta: apiMeta({ scope: SERVICE_MAIL_SETTINGS_ID }),
       data: {
-        auditEvent: auditEvent("settings.mail.test", tenantId, diagnostic),
+        auditEvent: auditEvent("service.mail.test", diagnostic),
         settings: maskSettings(record),
         test: { diagnostic: { code: diagnostic, traceId }, status: "failed" }
       },
@@ -254,19 +257,19 @@ export class MailSettingsService {
     }
   }
 
-  private invalid(operation: string, tenantId: string, code: string, message: string): BackendEnvelope<Record<string, unknown>> {
+  private invalid(operation: string, code: string, message: string): BackendEnvelope<Record<string, unknown>> {
     return createEnvelope({
       service: SERVICE,
       operation,
       traceId: identityTraceId(SERVICE, operation),
       status: "invalid",
-      meta: apiMeta({ tenantId }),
-      data: { tenantId },
+      meta: apiMeta({ scope: SERVICE_MAIL_SETTINGS_ID }),
+      data: { scope: SERVICE_MAIL_SETTINGS_ID },
       error: { code, message }
     });
   }
 
-  private logFailure(operation: string, tenantId: string, error: unknown): void {
+  private logFailure(operation: string, error: unknown): void {
     // В лог только имя/код ошибки: message может содержать аргументы запроса
     // с шифртекстом секрета или ответ SMTP-сервера.
     const code = (error as { code?: unknown } | null)?.code;
@@ -274,14 +277,13 @@ export class MailSettingsService {
       errorCode: typeof code === "string" || typeof code === "number" ? String(code) : null,
       errorName: error instanceof Error ? error.name : typeof error,
       operation,
-      service: SERVICE,
-      tenantId
+      service: SERVICE
     });
   }
 }
 
 /** Публичное представление настроек: без секрета, с признаком его наличия. */
-function maskSettings(record: WorkspaceMailSettingsRecord): Record<string, unknown> {
+function maskSettings(record: ServiceMailSettingsRecord): Record<string, unknown> {
   return {
     enabled: record.enabled,
     encryption: record.encryption,
@@ -294,7 +296,6 @@ function maskSettings(record: WorkspaceMailSettingsRecord): Record<string, unkno
     passwordConfigured: Boolean(record.secret),
     port: record.port,
     replyTo: record.replyTo,
-    tenantId: record.tenantId,
     timeoutMs: record.timeoutMs,
     tlsRejectUnauthorized: record.tlsRejectUnauthorized,
     updatedAt: record.updatedAt,
@@ -302,7 +303,7 @@ function maskSettings(record: WorkspaceMailSettingsRecord): Record<string, unkno
   };
 }
 
-function auditEvent(action: string, tenantId: string, reason: string) {
+function auditEvent(action: string, reason: string) {
   return {
     action,
     at: new Date().toISOString(),
@@ -310,8 +311,7 @@ function auditEvent(action: string, tenantId: string, reason: string) {
     immutable: true,
     reason,
     result: "ok",
-    targetId: tenantId,
-    tenantId
+    targetId: SERVICE_MAIL_SETTINGS_ID
   };
 }
 

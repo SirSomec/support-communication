@@ -6,7 +6,10 @@ type MaybePromise<T> = Promise<T> | T;
 export type MailEncryption = "none" | "ssl" | "starttls";
 export type MailTestStatus = "failed" | "passed" | null;
 
-export interface WorkspaceMailSettingsRecord {
+/** Singleton-идентификатор: у сервиса ровно одно SMTP-подключение. */
+export const SERVICE_MAIL_SETTINGS_ID = "service";
+
+export interface ServiceMailSettingsRecord {
   createdAt: string;
   enabled: boolean;
   encryption: MailEncryption;
@@ -21,22 +24,22 @@ export interface WorkspaceMailSettingsRecord {
   replyTo: string | null;
   /** Зашифрованный SMTP-пароль; null — подключение без аутентификации. */
   secret: SecretEnvelope | null;
-  tenantId: string;
   timeoutMs: number;
   tlsRejectUnauthorized: boolean;
   updatedAt: string;
   username: string | null;
 }
 
-interface WorkspaceMailSettingsState { settings: WorkspaceMailSettingsRecord[]; }
+interface ServiceMailSettingsState { settings: ServiceMailSettingsRecord | null; }
 
-export interface PrismaWorkspaceMailSettingsRow {
+export interface PrismaServiceMailSettingsRow {
   createdAt: Date;
   enabled: boolean;
   encryption: string;
   fromAddress: string;
   fromName: string | null;
   host: string;
+  id: string;
   keyVersion: string | null;
   lastTestMessage: string | null;
   lastTestStatus: string | null;
@@ -48,20 +51,20 @@ export interface PrismaWorkspaceMailSettingsRow {
   secretCiphertext: string | null;
   secretEnvelopeVersion: number | null;
   secretIv: string | null;
-  tenantId: string;
   timeoutMs: number;
   tlsRejectUnauthorized: boolean;
   updatedAt: Date;
   username: string | null;
 }
 
-export interface PrismaWorkspaceMailSettingsWriteInput {
+export interface PrismaServiceMailSettingsWriteInput {
   createdAt: Date;
   enabled: boolean;
   encryption: string;
   fromAddress: string;
   fromName: string | null;
   host: string;
+  id: string;
   keyVersion: string | null;
   lastTestMessage: string | null;
   lastTestStatus: string | null;
@@ -73,21 +76,20 @@ export interface PrismaWorkspaceMailSettingsWriteInput {
   secretCiphertext: string | null;
   secretEnvelopeVersion: number | null;
   secretIv: string | null;
-  tenantId: string;
   timeoutMs: number;
   tlsRejectUnauthorized: boolean;
   updatedAt: Date;
   username: string | null;
 }
 
-export interface WorkspaceMailSettingsPrismaClient {
-  workspaceMailSettings: {
-    findUnique(input: { where: { tenantId: string } }): MaybePromise<PrismaWorkspaceMailSettingsRow | null>;
+export interface ServiceMailSettingsPrismaClient {
+  serviceMailSettings: {
+    findUnique(input: { where: { id: string } }): MaybePromise<PrismaServiceMailSettingsRow | null>;
     upsert(input: {
-      create: PrismaWorkspaceMailSettingsWriteInput;
-      update: Omit<PrismaWorkspaceMailSettingsWriteInput, "createdAt" | "tenantId">;
-      where: { tenantId: string };
-    }): MaybePromise<PrismaWorkspaceMailSettingsRow>;
+      create: PrismaServiceMailSettingsWriteInput;
+      update: Omit<PrismaServiceMailSettingsWriteInput, "createdAt" | "id">;
+      where: { id: string };
+    }): MaybePromise<PrismaServiceMailSettingsRow>;
   };
 }
 
@@ -95,61 +97,53 @@ let defaultRepository: MailSettingsRepository | null = null;
 
 export class MailSettingsRepository {
   constructor(
-    private readonly store: DurableStore<WorkspaceMailSettingsState>,
-    private readonly prismaClient?: WorkspaceMailSettingsPrismaClient
+    private readonly store: DurableStore<ServiceMailSettingsState>,
+    private readonly prismaClient?: ServiceMailSettingsPrismaClient
   ) {}
 
   static default(): MailSettingsRepository {
     if (!defaultRepository) {
       // Prisma-only рантайм: дефолтный репозиторий всегда персистится в Postgres.
-      defaultRepository = MailSettingsRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as WorkspaceMailSettingsPrismaClient });
+      defaultRepository = MailSettingsRepository.prisma({ client: createPrismaClient({ datasourceUrl: process.env.DATABASE_URL }) as ServiceMailSettingsPrismaClient });
     }
     return defaultRepository;
   }
 
   static clearDefault(): void { defaultRepository = null; }
-  static inMemory(seed: WorkspaceMailSettingsState = { settings: [] }): MailSettingsRepository {
+  static inMemory(seed: ServiceMailSettingsState = { settings: null }): MailSettingsRepository {
     return new MailSettingsRepository(new InMemoryStore(normalizeState(seed)));
   }
-  static prisma({ client }: { client: WorkspaceMailSettingsPrismaClient }): MailSettingsRepository {
-    return new MailSettingsRepository(new InMemoryStore({ settings: [] }), client);
+  static prisma({ client }: { client: ServiceMailSettingsPrismaClient }): MailSettingsRepository {
+    return new MailSettingsRepository(new InMemoryStore({ settings: null }), client);
   }
   static useDefault(repository: MailSettingsRepository): void { defaultRepository = repository; }
 
-  find(tenantId: string): MaybePromise<WorkspaceMailSettingsRecord | undefined> {
+  find(): MaybePromise<ServiceMailSettingsRecord | undefined> {
     if (this.prismaClient) {
-      return Promise.resolve(this.prismaClient.workspaceMailSettings.findUnique({ where: { tenantId } }))
+      return Promise.resolve(this.prismaClient.serviceMailSettings.findUnique({ where: { id: SERVICE_MAIL_SETTINGS_ID } }))
         .then((row) => row ? toRecord(row) : undefined);
     }
-    const record = this.store.read().settings.find((item) => item.tenantId === tenantId);
+    const record = this.store.read().settings;
     return record ? clone(record) : undefined;
   }
 
-  save(record: WorkspaceMailSettingsRecord): MaybePromise<WorkspaceMailSettingsRecord> {
+  save(record: ServiceMailSettingsRecord): MaybePromise<ServiceMailSettingsRecord> {
     const normalized = normalizeRecord(record);
     if (this.prismaClient) {
       const create = toWriteInput(normalized);
-      const { createdAt: _createdAt, tenantId: _tenantId, ...update } = create;
-      return Promise.resolve(this.prismaClient.workspaceMailSettings.upsert({
+      const { createdAt: _createdAt, id: _id, ...update } = create;
+      return Promise.resolve(this.prismaClient.serviceMailSettings.upsert({
         create,
         update,
-        where: { tenantId: normalized.tenantId }
+        where: { id: SERVICE_MAIL_SETTINGS_ID }
       })).then(toRecord);
     }
-    this.store.update((state) => {
-      const current = normalizeState(state);
-      const exists = current.settings.some((item) => item.tenantId === normalized.tenantId);
-      return {
-        settings: exists
-          ? current.settings.map((item) => item.tenantId === normalized.tenantId ? normalized : item)
-          : [...current.settings, normalized]
-      };
-    });
+    this.store.update(() => ({ settings: normalized }));
     return clone(normalized);
   }
 }
 
-function toWriteInput(record: WorkspaceMailSettingsRecord): PrismaWorkspaceMailSettingsWriteInput {
+function toWriteInput(record: ServiceMailSettingsRecord): PrismaServiceMailSettingsWriteInput {
   return {
     createdAt: new Date(record.createdAt),
     enabled: record.enabled,
@@ -157,6 +151,7 @@ function toWriteInput(record: WorkspaceMailSettingsRecord): PrismaWorkspaceMailS
     fromAddress: record.fromAddress,
     fromName: record.fromName,
     host: record.host,
+    id: SERVICE_MAIL_SETTINGS_ID,
     keyVersion: record.secret ? record.keyVersion : null,
     lastTestMessage: record.lastTestMessage,
     lastTestStatus: record.lastTestStatus,
@@ -168,7 +163,6 @@ function toWriteInput(record: WorkspaceMailSettingsRecord): PrismaWorkspaceMailS
     secretCiphertext: record.secret?.ciphertext ?? null,
     secretEnvelopeVersion: record.secret?.envelopeVersion ?? null,
     secretIv: record.secret?.iv ?? null,
-    tenantId: record.tenantId,
     timeoutMs: record.timeoutMs,
     tlsRejectUnauthorized: record.tlsRejectUnauthorized,
     updatedAt: new Date(record.updatedAt),
@@ -176,7 +170,7 @@ function toWriteInput(record: WorkspaceMailSettingsRecord): PrismaWorkspaceMailS
   };
 }
 
-function toRecord(row: PrismaWorkspaceMailSettingsRow): WorkspaceMailSettingsRecord {
+function toRecord(row: PrismaServiceMailSettingsRow): ServiceMailSettingsRecord {
   const hasSecret = Boolean(row.secretCiphertext && row.secretIv && row.secretAuthTag);
   return normalizeRecord({
     createdAt: row.createdAt.toISOString(),
@@ -201,7 +195,6 @@ function toRecord(row: PrismaWorkspaceMailSettingsRow): WorkspaceMailSettingsRec
         keyVersion: String(row.keyVersion ?? "")
       }
       : null,
-    tenantId: row.tenantId,
     timeoutMs: row.timeoutMs,
     tlsRejectUnauthorized: row.tlsRejectUnauthorized,
     updatedAt: row.updatedAt.toISOString(),
@@ -213,14 +206,13 @@ function toEncryption(value: string): MailEncryption {
   return value === "none" || value === "ssl" || value === "starttls" ? value : "starttls";
 }
 
-function normalizeState(input: Partial<WorkspaceMailSettingsState>): WorkspaceMailSettingsState {
-  return { settings: (input.settings ?? []).map(normalizeRecord) };
+function normalizeState(input: Partial<ServiceMailSettingsState>): ServiceMailSettingsState {
+  return { settings: input.settings ? normalizeRecord(input.settings) : null };
 }
 
-function normalizeRecord(record: WorkspaceMailSettingsRecord): WorkspaceMailSettingsRecord {
-  if (!String(record.tenantId ?? "").trim()) throw new Error("workspace_mail_settings_tenant_required");
+function normalizeRecord(record: ServiceMailSettingsRecord): ServiceMailSettingsRecord {
   if (record.secret && (!record.secret.ciphertext || !record.secret.iv || !record.secret.authTag)) {
-    throw new Error("workspace_mail_settings_secret_invalid");
+    throw new Error("service_mail_settings_secret_invalid");
   }
   return {
     ...clone(record),
@@ -228,7 +220,6 @@ function normalizeRecord(record: WorkspaceMailSettingsRecord): WorkspaceMailSett
     fromAddress: String(record.fromAddress).trim(),
     host: String(record.host).trim(),
     keyVersion: record.secret ? String(record.keyVersion ?? record.secret.keyVersion).trim() || null : null,
-    tenantId: String(record.tenantId).trim(),
     username: String(record.username ?? "").trim() || null
   };
 }

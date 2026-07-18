@@ -1,8 +1,6 @@
 import { Module } from "@nestjs/common";
 import { BillingModule } from "../billing/billing.module.js";
 import { BillingService } from "../billing/billing.service.js";
-import { MailSettingsController } from "../mail/mail-settings.controller.js";
-import { MailSettingsService } from "../mail/mail-settings.service.js";
 import { ClientsController } from "./clients.controller.js";
 import { FileScanCallbackController, FilesController } from "./files.controller.js";
 import { KnowledgeController } from "./knowledge.controller.js";
@@ -14,9 +12,8 @@ import { WorkspaceService } from "./workspace.service.js";
 
 @Module({
   imports: [BillingModule],
-  controllers: [ClientsController, FilesController, FileScanCallbackController, KnowledgeController, MailSettingsController, TemplatesController, TopicsController],
+  controllers: [ClientsController, FilesController, FileScanCallbackController, KnowledgeController, TemplatesController, TopicsController],
   providers: [
-    MailSettingsService,
     TopicDirectoryService,
     {
       provide: WorkspaceService,

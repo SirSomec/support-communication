@@ -21,7 +21,7 @@ import {
   tenantMembershipsFromUsers
 } from "./identity-auth-flow.repository.js";
 import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
-import { createWorkspaceMailOverrideResolver } from "../mail/workspace-mailer.js";
+import { createServiceMailOverrideResolver } from "../mail/service-mailer.js";
 
 const SERVICE = "authService";
 
@@ -206,19 +206,44 @@ export interface TenantOperatorLogoutData {
 }
 
 export class AuthService {
+  private readonly identityRepository: IdentityRepository;
+  private readonly mfaOtp: MfaOtpRuntime;
+  private readonly defaultRuntimeWiring: boolean;
+  private serviceAdminMfaOtpOverride?: MfaOtpRuntime;
+
   constructor(
-    private readonly identityRepository = IdentityRepository.default(),
-    // Резолвер направляет MFA-коды и письма восстановления через служебную
-    // почту воркспейса адресата (если настроена в админке); тенант ищется по
-    // email, при отсутствии или неоднозначности остаётся env-SMTP.
-    private readonly mfaOtp = createMfaOtpRuntimeFromEnv(process.env, {
-      workspaceMail: createWorkspaceMailOverrideResolver({
-        findTenantIdsByEmail: async (email) =>
-          (await Promise.resolve(identityRepository.findTenantUsersByEmail(email)))
-            .map((user) => user.tenantId)
-      })
-    })
-  ) {}
+    identityRepository = IdentityRepository.default(),
+    mfaOtp?: MfaOtpRuntime,
+    serviceAdminMfaOtp?: MfaOtpRuntime
+  ) {
+    this.identityRepository = identityRepository;
+    this.defaultRuntimeWiring = !mfaOtp;
+    // MFA-коды и письма восстановления идут через служебную почту сервиса,
+    // если администратор сервиса настроил её в админ-панели; иначе env-SMTP.
+    this.mfaOtp = mfaOtp ?? createMfaOtpRuntimeFromEnv(process.env, {
+      serviceMail: createServiceMailOverrideResolver()
+    });
+    this.serviceAdminMfaOtpOverride = serviceAdminMfaOtp;
+  }
+
+  /**
+   * ВРЕМЕННО (2026-07-18): MFA-письма администратора сервиса всегда уходят
+   * через env-SMTP (в пилоте — mailpit), минуя настройки служебной почты.
+   * Пилотная учётка сервис-админа живёт на вымышленном адресе, и реальная
+   * почта сделала бы вход в админ-панель невозможным. Обход действует только
+   * при дефолтной проводке: инжектированный в тестах runtime уважается.
+   * Убрать вместе с переводом сервис-админов на настоящие адреса.
+   */
+  private serviceAdminMfaOtp(): MfaOtpRuntime {
+    if (this.serviceAdminMfaOtpOverride) {
+      return this.serviceAdminMfaOtpOverride;
+    }
+    if (!this.defaultRuntimeWiring) {
+      return this.mfaOtp;
+    }
+    this.serviceAdminMfaOtpOverride = createMfaOtpRuntimeFromEnv();
+    return this.serviceAdminMfaOtpOverride;
+  }
 
   async getAuthState(context: { sessionId?: string } = {}): Promise<BackendEnvelope<AuthStateData>> {
     if (context.sessionId) {
@@ -369,7 +394,7 @@ export class AuthService {
     }
 
     if (!otp) {
-      const challenge = await this.createAndDeliverMfaChallenge(loginEmail);
+      const challenge = await this.createAndDeliverMfaChallenge(loginEmail, this.serviceAdminMfaOtp());
 
       return createEnvelope({
         service: SERVICE,
@@ -390,7 +415,7 @@ export class AuthService {
     const challenge = await this.identityRepository.consumeMfaChallenge({
       challengeId: mfaChallengeId,
       email: loginEmail,
-      otpHash: this.mfaOtp.hash(loginEmail, otp)
+      otpHash: this.serviceAdminMfaOtp().hash(loginEmail, otp)
     });
 
     if (!challenge.valid) {
@@ -1288,13 +1313,13 @@ export class AuthService {
     }
   }
 
-  private async createAndDeliverMfaChallenge(email: string) {
-    const issued = this.mfaOtp.issue(email);
+  private async createAndDeliverMfaChallenge(email: string, runtime: MfaOtpRuntime = this.mfaOtp) {
+    const issued = runtime.issue(email);
     const challenge = await this.identityRepository.createMfaChallenge({
       email,
       otpHash: issued.otpHash
     });
-    await this.mfaOtp.deliver({
+    await runtime.deliver({
       challengeId: challenge.id,
       email: challenge.email,
       expiresAt: challenge.expiresAt,

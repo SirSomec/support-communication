@@ -4,7 +4,6 @@ import { AdminWorkspaces } from "./AdminWorkspaces.jsx";
 import { ChannelConnectionsPanel } from "./ChannelConnectionsPanel.jsx";
 import { EmployeeManagementPanel } from "./EmployeeManagementPanel.jsx";
 import { ExternalAppPanel } from "./ExternalAppPanel.jsx";
-import { MailSettingsPanel } from "./MailSettingsPanel.jsx";
 import { RulesPanel } from "./RulesPanel.jsx";
 import { SettingsShell, settingsTabIds } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
@@ -209,13 +208,6 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
         {activeTab === "rules" ? (
           <RulesPanel
             access={access}
-            canEditSettings={canEditSettings}
-            onToast={onToast}
-          />
-        ) : null}
-
-        {activeTab === "mail" ? (
-          <MailSettingsPanel
             canEditSettings={canEditSettings}
             onToast={onToast}
           />

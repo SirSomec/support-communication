@@ -8,8 +8,8 @@ import { MailSettingsRepository } from "../apps/api-gateway/src/mail/mail-settin
 import { MailSettingsService } from "../apps/api-gateway/src/mail/mail-settings.service.ts";
 import {
   createInviteMailDeliveryFromEnv,
-  createWorkspaceMailOverrideResolver
-} from "../apps/api-gateway/src/mail/workspace-mailer.ts";
+  createServiceMailOverrideResolver
+} from "../apps/api-gateway/src/mail/service-mailer.ts";
 
 const MASTER_KEY = Buffer.alloc(32, 7).toString("base64");
 const secureEnvironment: NodeJS.ProcessEnv = {
@@ -21,7 +21,7 @@ const secureEnvironment: NodeJS.ProcessEnv = {
 const validSettingsInput = {
   enabled: true,
   encryption: "none",
-  fromAddress: "noreply@volga.example",
+  fromAddress: "noreply@service.example",
   fromName: "Служба поддержки",
   host: "127.0.0.1",
   password: "smtp-secret-password",
@@ -29,12 +29,12 @@ const validSettingsInput = {
   username: "smtp-user"
 };
 
-describe("workspace mail settings contracts", () => {
-  it("saves settings with an encrypted password and never returns the secret", async () => {
+describe("service mail settings contracts", () => {
+  it("saves the singleton settings with an encrypted password and never returns the secret", async () => {
     const repository = MailSettingsRepository.inMemory();
     const service = new MailSettingsService(repository, secureEnvironment);
 
-    const saved = await service.save("tenant-volga", validSettingsInput);
+    const saved = await service.save(validSettingsInput);
     assert.equal(saved.status, "ok");
     const settings = saved.data.settings as Record<string, unknown>;
     assert.equal(settings.passwordConfigured, true);
@@ -42,12 +42,12 @@ describe("workspace mail settings contracts", () => {
     assert.equal(settings.username, "smtp-user");
     assert.doesNotMatch(JSON.stringify(saved), /smtp-secret-password/);
 
-    const stored = await repository.find("tenant-volga");
+    const stored = await repository.find();
     assert.ok(stored?.secret);
     assert.notEqual(stored?.secret?.ciphertext, "smtp-secret-password");
     assert.doesNotMatch(JSON.stringify(stored?.secret ?? {}), /smtp-secret-password/);
 
-    const fetched = await service.fetch("tenant-volga");
+    const fetched = await service.fetch();
     assert.equal(fetched.status, "ok");
     assert.doesNotMatch(JSON.stringify(fetched), /smtp-secret-password/);
     assert.equal((fetched.data.settings as Record<string, unknown>).passwordConfigured, true);
@@ -56,36 +56,36 @@ describe("workspace mail settings contracts", () => {
   it("keeps the stored password when the field is omitted and clears it with the username", async () => {
     const repository = MailSettingsRepository.inMemory();
     const service = new MailSettingsService(repository, secureEnvironment);
-    await service.save("tenant-volga", validSettingsInput);
+    await service.save(validSettingsInput);
 
-    const withoutPassword = await service.save("tenant-volga", { ...validSettingsInput, password: undefined });
+    const withoutPassword = await service.save({ ...validSettingsInput, password: undefined });
     assert.equal(withoutPassword.status, "ok");
     assert.equal((withoutPassword.data.settings as Record<string, unknown>).passwordConfigured, true);
 
-    const withoutAuth = await service.save("tenant-volga", {
+    const withoutAuth = await service.save({
       ...validSettingsInput,
       password: undefined,
       username: ""
     });
     assert.equal(withoutAuth.status, "ok");
     assert.equal((withoutAuth.data.settings as Record<string, unknown>).passwordConfigured, false);
-    assert.equal((await repository.find("tenant-volga"))?.secret, null);
+    assert.equal((await repository.find())?.secret, null);
   });
 
   it("rejects invalid payloads with specific error codes", async () => {
     const service = new MailSettingsService(MailSettingsRepository.inMemory(), secureEnvironment);
 
-    const badHost = await service.save("tenant-volga", { ...validSettingsInput, host: "bad host\r\n" });
+    const badHost = await service.save({ ...validSettingsInput, host: "bad host\r\n" });
     assert.equal(badHost.status, "invalid");
     assert.equal(badHost.error?.code, "mail_settings_host_invalid");
 
-    const badPort = await service.save("tenant-volga", { ...validSettingsInput, port: 70_000 });
+    const badPort = await service.save({ ...validSettingsInput, port: 70_000 });
     assert.equal(badPort.error?.code, "mail_settings_port_invalid");
 
-    const badFrom = await service.save("tenant-volga", { ...validSettingsInput, fromAddress: "not-an-email" });
+    const badFrom = await service.save({ ...validSettingsInput, fromAddress: "not-an-email" });
     assert.equal(badFrom.error?.code, "mail_settings_from_invalid");
 
-    const authIncomplete = await service.save("tenant-volga", {
+    const authIncomplete = await service.save({
       ...validSettingsInput,
       password: "",
       username: "smtp-user"
@@ -95,7 +95,7 @@ describe("workspace mail settings contracts", () => {
 
   it("reports secret storage unavailability without leaking the password", async () => {
     const service = new MailSettingsService(MailSettingsRepository.inMemory(), { NODE_ENV: "test" });
-    const result = await service.save("tenant-volga", validSettingsInput);
+    const result = await service.save(validSettingsInput);
 
     assert.equal(result.status, "invalid");
     assert.equal(result.error?.code, "mail_settings_secret_unavailable");
@@ -110,91 +110,115 @@ describe("workspace mail settings contracts", () => {
       sentMessages.push(mail);
       return "fake-queued-id";
     });
-    await service.save("tenant-volga", validSettingsInput);
+    await service.save(validSettingsInput);
 
-    const passed = await service.sendTest("tenant-volga", { recipient: "admin@volga.example" });
+    const passed = await service.sendTest({ recipient: "admin@service.example" });
     assert.equal(passed.status, "ok");
     assert.equal((passed.data.test as Record<string, Record<string, unknown>>).diagnostic.code, "ok");
     assert.equal(sentMessages.length, 1);
-    assert.equal(sentMessages[0]?.to, "admin@volga.example");
+    assert.equal(sentMessages[0]?.to, "admin@service.example");
     assert.match(sentMessages[0]?.message ?? "", /=\?UTF-8\?B\?/);
-    assert.match(sentMessages[0]?.message ?? "", /From: =\?UTF-8\?B\?[^\r\n]+ <noreply@volga\.example>/);
-    const settingsAfterPass = (passed.data.settings as Record<string, unknown>);
-    assert.equal(settingsAfterPass.lastTestStatus, "passed");
+    assert.match(sentMessages[0]?.message ?? "", /From: =\?UTF-8\?B\?[^\r\n]+ <noreply@service\.example>/);
+    assert.equal((passed.data.settings as Record<string, unknown>).lastTestStatus, "passed");
 
     const failingService = new MailSettingsService(repository, secureEnvironment, async () => {
       throw new Error("smtp_timeout");
     });
-    const failed = await failingService.sendTest("tenant-volga", { recipient: "admin@volga.example" });
+    const failed = await failingService.sendTest({ recipient: "admin@service.example" });
     assert.equal(failed.status, "invalid");
     assert.equal(failed.error?.code, "mail_settings_test_failed");
     assert.equal((failed.data.test as Record<string, Record<string, unknown>>).diagnostic.code, "smtp_timeout");
     assert.equal((failed.data.settings as Record<string, unknown>).lastTestStatus, "failed");
   });
 
+  it("maps transport failures to actionable diagnostics", async () => {
+    const repository = MailSettingsRepository.inMemory();
+    // Реальный транспорт (без инжекта): проверяем сетевую диагностику целиком.
+    const service = new MailSettingsService(repository, secureEnvironment);
+
+    // Закрытый порт → smtp_connection_refused (порт получаем и освобождаем).
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const { port: closedPort } = probe.address() as AddressInfo;
+    await new Promise<void>((resolve, reject) => probe.close((error) => error ? reject(error) : resolve()));
+
+    await service.save({ ...validSettingsInput, password: undefined, port: closedPort, username: "" });
+    const refused = await service.sendTest({ recipient: "admin@service.example" });
+    assert.equal(refused.status, "invalid");
+    assert.equal((refused.data.test as Record<string, Record<string, unknown>>).diagnostic.code, "smtp_connection_refused");
+
+    // Ответ 535 на AUTH → smtp_auth_failed.
+    const authServer = createServer((socket) => {
+      socket.setEncoding("utf8");
+      socket.write("220 auth-contract SMTP\r\n");
+      socket.on("data", (chunk) => {
+        const line = String(chunk);
+        if (line.startsWith("EHLO")) {
+          socket.write("250 auth-contract\r\n");
+        } else if (line.startsWith("AUTH PLAIN")) {
+          socket.write("535 5.7.8 authentication failed\r\n");
+        } else {
+          socket.write("250 ok\r\n");
+        }
+      });
+    });
+    await new Promise<void>((resolve) => authServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port: authPort } = authServer.address() as AddressInfo;
+      await service.save({ ...validSettingsInput, port: authPort });
+      const denied = await service.sendTest({ recipient: "admin@service.example" });
+      assert.equal(denied.status, "invalid");
+      assert.equal((denied.data.test as Record<string, Record<string, unknown>>).diagnostic.code, "smtp_auth_failed");
+      assert.equal((denied.data.settings as Record<string, unknown>).lastTestMessage, "smtp_auth_failed");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        authServer.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
   it("requires saved settings and a valid recipient before testing", async () => {
     const service = new MailSettingsService(MailSettingsRepository.inMemory(), secureEnvironment);
 
-    const notConfigured = await service.sendTest("tenant-volga", { recipient: "admin@volga.example" });
+    const notConfigured = await service.sendTest({ recipient: "admin@service.example" });
     assert.equal(notConfigured.error?.code, "mail_settings_not_configured");
 
-    await service.save("tenant-volga", validSettingsInput);
-    const badRecipient = await service.sendTest("tenant-volga", { recipient: "broken" });
+    await service.save(validSettingsInput);
+    const badRecipient = await service.sendTest({ recipient: "broken" });
     assert.equal(badRecipient.error?.code, "mail_settings_recipient_invalid");
   });
 });
 
-describe("workspace mail override resolver contracts", () => {
-  it("resolves the workspace transport for an enabled tenant and stays null otherwise", async () => {
+describe("service mail override resolver contracts", () => {
+  it("resolves the configured transport only while settings are enabled", async () => {
     const repository = MailSettingsRepository.inMemory();
     const service = new MailSettingsService(repository, secureEnvironment);
-    await service.save("tenant-volga", validSettingsInput);
-    const resolver = createWorkspaceMailOverrideResolver({
+    const resolver = createServiceMailOverrideResolver({
       environment: secureEnvironment,
       repository: () => repository
     });
 
-    const override = await resolver({ email: "operator@volga.example", tenantId: "tenant-volga" });
+    assert.equal(await resolver(), null);
+
+    await service.save(validSettingsInput);
+    const override = await resolver();
     assert.ok(override);
-    assert.equal(override?.from, "noreply@volga.example");
+    assert.equal(override?.from, "noreply@service.example");
 
-    assert.equal(await resolver({ email: "operator@volga.example", tenantId: "tenant-unknown" }), null);
-
-    await service.save("tenant-volga", { ...validSettingsInput, enabled: false, password: undefined });
-    assert.equal(await resolver({ email: "operator@volga.example", tenantId: "tenant-volga" }), null);
-  });
-
-  it("resolves tenants by email and treats multi-tenant matches as ambiguous", async () => {
-    const repository = MailSettingsRepository.inMemory();
-    const service = new MailSettingsService(repository, secureEnvironment);
-    await service.save("tenant-volga", validSettingsInput);
-    await service.save("tenant-neva", { ...validSettingsInput, fromAddress: "noreply@neva.example" });
-
-    const singleTenant = createWorkspaceMailOverrideResolver({
-      environment: secureEnvironment,
-      findTenantIdsByEmail: () => ["tenant-volga"],
-      repository: () => repository
-    });
-    assert.equal((await singleTenant({ email: "operator@volga.example" }))?.from, "noreply@volga.example");
-
-    const ambiguous = createWorkspaceMailOverrideResolver({
-      environment: secureEnvironment,
-      findTenantIdsByEmail: () => ["tenant-volga", "tenant-neva"],
-      repository: () => repository
-    });
-    assert.equal(await ambiguous({ email: "operator@both.example" }), null);
+    await service.save({ ...validSettingsInput, enabled: false, password: undefined });
+    assert.equal(await resolver(), null);
   });
 
   it("falls back to null when the secret cannot be decrypted", async () => {
     const repository = MailSettingsRepository.inMemory();
     const service = new MailSettingsService(repository, secureEnvironment);
-    await service.save("tenant-volga", validSettingsInput);
+    await service.save(validSettingsInput);
 
-    const resolver = createWorkspaceMailOverrideResolver({
+    const resolver = createServiceMailOverrideResolver({
       environment: { NODE_ENV: "test" },
       repository: () => repository
     });
-    assert.equal(await resolver({ email: "operator@volga.example", tenantId: "tenant-volga" }), null);
+    assert.equal(await resolver(), null);
   });
 });
 
@@ -224,7 +248,7 @@ describe("invite mail delivery contracts", () => {
     );
   });
 
-  it("delivers the invite email through workspace SMTP settings", async () => {
+  it("delivers the invite email through the service SMTP settings", async () => {
     const messages: string[] = [];
     const server = createServer((socket) => {
       let buffer = "";
@@ -274,7 +298,7 @@ describe("invite mail delivery contracts", () => {
       const { port } = server.address() as AddressInfo;
       const repository = MailSettingsRepository.inMemory();
       const settingsService = new MailSettingsService(repository, secureEnvironment);
-      await settingsService.save("tenant-volga", { ...validSettingsInput, port });
+      await settingsService.save({ ...validSettingsInput, port });
 
       const delivery = createInviteMailDeliveryFromEnv(
         { ...secureEnvironment, NODE_ENV: "staging", SERVICE_MAIL_DELIVERY_MODE: "smtp" },
@@ -288,7 +312,7 @@ describe("invite mail delivery contracts", () => {
       assert.match(message, /Subject: =\?UTF-8\?B\?/);
       assert.match(message, /invite_12345678-1234-1234-1234-123456789abc/);
       assert.match(message, /To: employee@volga\.example/);
-      assert.match(message, /From: =\?UTF-8\?B\?[^\r\n]+ <noreply@volga\.example>/);
+      assert.match(message, /From: =\?UTF-8\?B\?[^\r\n]+ <noreply@service\.example>/);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());

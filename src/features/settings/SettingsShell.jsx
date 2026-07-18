@@ -1,5 +1,5 @@
 import React from "react";
-import { Cable, ListChecks, Mail, PlugZap, ShieldCheck, Tags, TerminalSquare, UsersRound, Webhook } from "lucide-react";
+import { Cable, ListChecks, PlugZap, ShieldCheck, Tags, TerminalSquare, UsersRound, Webhook } from "lucide-react";
 
 // Навигация настроек: вертикальные группы разделов-экранов.
 // Идентификаторы вкладок стабильны (settings-tab-*), на них опираются
@@ -28,7 +28,6 @@ const navGroups = [
     label: "Контроль",
     items: [
       { id: "rules", label: "Правила", hint: "Ограничения обработки обращений", icon: ListChecks },
-      { id: "mail", label: "Служебная почта", hint: "SMTP для 2FA, восстановления и приглашений", icon: Mail },
       { id: "security", label: "Безопасность", hint: "Сессии, 2FA и диагностика", icon: ShieldCheck }
     ]
   }

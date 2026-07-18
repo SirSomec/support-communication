@@ -8,9 +8,9 @@ import { TeamDirectoryRepository } from "./team-directory.repository.js";
 import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
 import {
   createInviteMailDeliveryFromEnv,
-  createWorkspaceMailOverrideResolver,
+  createServiceMailOverrideResolver,
   type InviteMailDelivery
-} from "../mail/workspace-mailer.js";
+} from "../mail/service-mailer.js";
 
 const SERVICE = "settingsService";
 const supportedChannels = ["SDK", "Telegram", "MAX", "VK"];
@@ -311,14 +311,13 @@ export class SettingsEmployeeService {
 
     const recoveryToken = await this.identityRepository.createRecoveryToken(user.email);
     const delivery = this.recoveryDelivery ?? createMfaOtpRuntimeFromEnv(process.env, {
-      workspaceMail: createWorkspaceMailOverrideResolver()
+      serviceMail: createServiceMailOverrideResolver()
     });
     const delivered = await delivery.deliverRecovery({
       email: user.email,
       expiresAt: recoveryToken.expiresAt,
       recoveryToken: recoveryToken.token,
-      requestId: recoveryToken.id,
-      tenantId: user.tenantId
+      requestId: recoveryToken.id
     });
     const requestedAt = new Date().toISOString();
     const saved = await this.identityRepository.saveTenantUser({

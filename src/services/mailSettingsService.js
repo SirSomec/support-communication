@@ -2,16 +2,21 @@ import { apiRequest } from "./apiClient.js";
 
 const SERVICE = "mailSettingsService";
 
+// Служебная почта — платформенная настройка: доступна только администратору
+// сервиса (authMode service-admin), распространяется на рассылки всех
+// воркспейсов.
 export const mailSettingsService = {
   async fetchMailSettings() {
-    return apiRequest("/workspace/mail-settings", {
+    return apiRequest("/service-admin/mail-settings", {
+      authMode: "service-admin",
       operation: "fetchMailSettings",
       service: SERVICE
     });
   },
 
   async saveMailSettings(payload = {}) {
-    return apiRequest("/workspace/mail-settings", {
+    return apiRequest("/service-admin/mail-settings", {
+      authMode: "service-admin",
       body: payload,
       method: "PUT",
       operation: "saveMailSettings",
@@ -20,7 +25,8 @@ export const mailSettingsService = {
   },
 
   async sendTestEmail(payload = {}) {
-    return apiRequest("/workspace/mail-settings/test", {
+    return apiRequest("/service-admin/mail-settings/test", {
+      authMode: "service-admin",
       body: payload,
       method: "POST",
       operation: "testMailSettings",

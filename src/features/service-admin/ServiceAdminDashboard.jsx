@@ -34,6 +34,7 @@ import { ServiceAdminAuditStream } from "./ServiceAdminAuditStream.jsx";
 import { ServiceUserSupportWorkspace } from "./ServiceUserSupportWorkspace.jsx";
 import { TenantManagementWorkspace } from "./TenantManagementWorkspace.jsx";
 import { AiConnectionsWorkspace } from "./AiConnectionsWorkspace.jsx";
+import { MailSettingsWorkspace } from "./MailSettingsWorkspace.jsx";
 import {
   envelopeToAuditEntry,
   formatAction,
@@ -53,6 +54,7 @@ const workspaceOptions = [
   { label: "Инциденты", value: "incidents" },
   { label: "Флаги", value: "flags" },
   { label: "AI", value: "ai" },
+  { label: "Почта", value: "mail" },
   { label: "Аудит", value: "audit" }
 ];
 
@@ -314,6 +316,7 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
         {activeWorkspace === "incidents" ? <IncidentMonitoringWorkspace onAudit={recordEnvelope} /> : null}
         {activeWorkspace === "flags" ? <FeatureFlagWorkspace onAudit={recordEnvelope} /> : null}
         {activeWorkspace === "ai" ? <AiConnectionsWorkspace onAudit={recordEnvelope} onToast={onToast} /> : null}
+        {activeWorkspace === "mail" ? <MailSettingsWorkspace onAudit={recordEnvelope} onToast={onToast} /> : null}
         {activeWorkspace === "audit" ? <ServiceAdminAuditStream events={auditEvents} /> : null}
       </section>
     </ProductScreen>

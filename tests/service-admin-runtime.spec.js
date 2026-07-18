@@ -218,3 +218,32 @@ test("service-admin runtime covers incidents and audit export", async ({ page, r
   await page.locator(".service-admin-tabs button").filter({ hasText: "Аудит" }).click();
   await expect(page.locator(".audit-workspace")).toBeVisible();
 });
+
+test("service admin mail settings save through backend and stay masked", async ({ page, request }) => {
+  const session = await loginServiceAdmin(request);
+  await openServiceAdmin(page, session);
+  await page.locator(".service-admin-tabs button").filter({ hasText: "Почта" }).click();
+
+  const workspace = page.locator(".mail-settings-workspace");
+  await expect(workspace).toBeVisible();
+
+  await workspace.getByPlaceholder("smtp.company.ru").fill("127.0.0.1");
+  await workspace.getByPlaceholder("587").fill("2525");
+  await workspace.locator("select").selectOption("none");
+  await workspace.getByPlaceholder("noreply@company.ru").fill("noreply@service.example");
+
+  const saveResponsePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/service-admin/mail-settings") && response.request().method() === "PUT"
+  );
+  await workspace.locator(".mail-settings-save").click();
+  const saveResponse = await saveResponsePromise;
+  expect(saveResponse.ok()).toBeTruthy();
+  const savePayload = await saveResponse.json();
+  expect(savePayload.status).toBe("ok");
+  expect(savePayload.data.settings).toMatchObject({
+    host: "127.0.0.1",
+    passwordConfigured: false,
+    port: 2525
+  });
+  await expect(workspace.getByPlaceholder("smtp.company.ru")).toHaveValue("127.0.0.1");
+});

@@ -124,9 +124,14 @@ describe("service admin bootstrap contracts", () => {
     const repository = IdentityRepository.inMemory();
     const bootstrapped = await bootstrapServiceAdminFromEnv(bootstrapEnvironment(), repository);
 
+    // Основной runtime (тенантские рассылки, настройки служебной почты) не
+    // должен участвовать в сервис-админском логине: временный обход шлёт MFA
+    // администратора сервиса только через env-runtime.
+    const tenantDeliveries: string[] = [];
     const mfaRuntime = createMfaOtpRuntime({
       delivery: {
-        async send() {
+        async send(input) {
+          tenantDeliveries.push(input.email);
           return { providerMessageId: "test-bootstrap-delivery" };
         },
         async sendRecovery() {
@@ -136,7 +141,18 @@ describe("service admin bootstrap contracts", () => {
       generateOtp: () => "123456",
       hashKey: "bootstrap-contract-hash-key"
     });
-    const authService = new AuthService(repository, mfaRuntime);
+    const serviceAdminDeliveries: string[] = [];
+    const serviceAdminRuntime = createMfaOtpRuntime({
+      delivery: {
+        async send(input) {
+          serviceAdminDeliveries.push(input.email);
+          return { providerMessageId: "test-bootstrap-admin-delivery" };
+        }
+      },
+      generateOtp: () => "123456",
+      hashKey: "bootstrap-contract-hash-key"
+    });
+    const authService = new AuthService(repository, mfaRuntime, serviceAdminRuntime);
 
     const passwordStep = await authService.login({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
     assert.equal(passwordStep.status, "ok");
@@ -158,6 +174,11 @@ describe("service admin bootstrap contracts", () => {
     const session = (otpStep.data as Record<string, Record<string, unknown>>).session;
     assert.equal(session.adminId, bootstrapped.subjectId);
     assert.equal(session.adminEmail, ADMIN_EMAIL);
+
+    // Временный обход: MFA-письмо сервис-админа ушло через выделенный
+    // env-runtime, основной runtime не задействован.
+    assert.deepEqual(serviceAdminDeliveries, [ADMIN_EMAIL]);
+    assert.deepEqual(tenantDeliveries, []);
 
     const wrongPassword = await authService.login({ email: ADMIN_EMAIL, password: "Wrong-Password-2026!" });
     assert.equal(wrongPassword.status, "denied");

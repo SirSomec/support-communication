@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { writeStructuredLog } from "@support-communication/observability";
 import { SecretStore, SecretStoreError } from "../ai-connections/secret-store.js";
-import { MailSettingsRepository, type WorkspaceMailSettingsRecord } from "./mail-settings.repository.js";
+import { MailSettingsRepository, type ServiceMailSettingsRecord } from "./mail-settings.repository.js";
 import {
   composeMailMessage,
   sendSmtpMail,
@@ -10,15 +10,15 @@ import {
   type SmtpTransportConfig
 } from "./smtp-transport.js";
 
-// Маршрутизация служебных рассылок: если у тенанта в админке настроена и
-// включена служебная почта — письма уходят через неё; иначе действует
-// env-фолбэк (MAIL_*), на котором живут pilot/staging (mailpit) и сервис-админы
-// без тенантного контекста.
+// Маршрутизация служебных рассылок всего сервиса: если администратор сервиса
+// настроил и включил служебную почту в админ-панели — письма уходят через неё;
+// иначе действует env-фолбэк (MAIL_*), на котором живут pilot/staging (mailpit).
+// Конфигурация одна на всю платформу — воркспейсы её не переопределяют.
 
 const DEFAULT_MAIL_TIMEOUT_MS = 10_000;
 const MAX_MAIL_TIMEOUT_MS = 120_000;
 
-/** Секрет-хранилище паролей служебной почты: свой ключ, затем общие мастер-ключи. */
+/** Секрет-хранилище пароля служебной почты: свой ключ, затем общие мастер-ключи. */
 export function mailSecretStore(environment: NodeJS.ProcessEnv = process.env): SecretStore {
   return new SecretStore({
     keyVersion: environment.MAIL_SETTINGS_KEY_VERSION
@@ -32,17 +32,17 @@ export function mailSecretStore(environment: NodeJS.ProcessEnv = process.env): S
 }
 
 /**
- * Собирает SMTP-конфиг из настроек воркспейса. Бросает SecretStoreError, если
+ * Собирает SMTP-конфиг из настроек сервиса. Бросает SecretStoreError, если
  * пароль сохранён, но мастер-ключ недоступен или не расшифровывает секрет.
  */
 export function transportConfigFromSettings(
-  record: WorkspaceMailSettingsRecord,
+  record: ServiceMailSettingsRecord,
   environment: NodeJS.ProcessEnv = process.env
 ): SmtpTransportConfig {
   let auth: SmtpTransportConfig["auth"];
   if (record.username) {
     if (!record.secret) {
-      throw new Error("workspace_mail_settings_auth_incomplete");
+      throw new Error("service_mail_settings_auth_incomplete");
     }
     auth = {
       password: mailSecretStore(environment).decrypt(record.secret),
@@ -91,29 +91,26 @@ export function loadEnvironmentTransportConfig(source: NodeJS.ProcessEnv = proce
 }
 
 /**
- * Готовый к отправке транспорт тенанта: настройки воркспейса, если включены,
- * иначе env-фолбэк, иначе null. Ошибки секрет-хранилища переводят на env-фолбэк
- * с warn-логом — служебные письма важнее строгости.
+ * Готовый к отправке транспорт сервиса: настройки из админ-панели, если
+ * включены, иначе env-фолбэк, иначе null. Ошибки секрет-хранилища переводят
+ * на env-фолбэк с warn-логом — служебные письма важнее строгости.
  */
-export async function resolveTenantTransportConfig(
-  tenantId: string | undefined,
+export async function resolveServiceTransportConfig(
   options: {
     environment?: NodeJS.ProcessEnv;
     repository?: () => MailSettingsRepository;
   } = {}
-): Promise<{ config: SmtpTransportConfig; source: "environment" | "workspace" } | null> {
+): Promise<{ config: SmtpTransportConfig; source: "environment" | "settings" } | null> {
   const environment = options.environment ?? process.env;
   const repositoryFactory = options.repository ?? (() => MailSettingsRepository.default());
 
-  if (tenantId) {
-    try {
-      const record = await repositoryFactory().find(tenantId);
-      if (record?.enabled) {
-        return { config: transportConfigFromSettings(record, environment), source: "workspace" };
-      }
-    } catch (error) {
-      logMailFallback("workspace mail settings unavailable", tenantId, error);
+  try {
+    const record = await repositoryFactory().find();
+    if (record?.enabled) {
+      return { config: transportConfigFromSettings(record, environment), source: "settings" };
     }
+  } catch (error) {
+    logMailFallback("service mail settings unavailable", error);
   }
 
   const environmentConfig = loadEnvironmentTransportConfig(environment);
@@ -122,59 +119,38 @@ export async function resolveTenantTransportConfig(
 
 // --- Override-резолвер для доставки MFA-кодов и восстановления пароля ---
 
-export interface WorkspaceMailOverride {
+export interface ServiceMailOverride {
   from: string;
   send(to: string, message: string): Promise<string>;
 }
 
-export type WorkspaceMailOverrideResolver = (recipient: {
-  email: string;
-  tenantId?: string;
-}) => Promise<WorkspaceMailOverride | null>;
+export type ServiceMailOverrideResolver = () => Promise<ServiceMailOverride | null>;
 
 /**
- * Резолвер «через какую почту слать письмо этому адресату». Если tenantId не
- * передан (self-service вход/восстановление), тенант ищется по email; когда
- * email принадлежит нескольким тенантам с включённой почтой — неоднозначность,
- * возвращаем null (env-фолбэк). Любая ошибка тоже даёт null: рассылка кода
- * важнее источника отправки.
+ * Резолвер «слать ли через настройки из админ-панели». Возвращает null, если
+ * настройки не заведены/выключены или недоступны — тогда остаётся env-SMTP:
+ * доставка кода важнее источника отправки.
  */
-export function createWorkspaceMailOverrideResolver(options: {
+export function createServiceMailOverrideResolver(options: {
   environment?: NodeJS.ProcessEnv;
-  findTenantIdsByEmail?: (email: string) => Promise<string[]> | string[];
   repository?: () => MailSettingsRepository;
-} = {}): WorkspaceMailOverrideResolver {
+} = {}): ServiceMailOverrideResolver {
   const environment = options.environment ?? process.env;
   const repositoryFactory = options.repository ?? (() => MailSettingsRepository.default());
 
-  return async ({ email, tenantId }) => {
+  return async () => {
     try {
-      const candidates = tenantId
-        ? [tenantId]
-        : Array.from(new Set(await Promise.resolve(options.findTenantIdsByEmail?.(email) ?? []))).filter(Boolean);
-      if (!candidates.length) {
+      const record = await repositoryFactory().find();
+      if (!record?.enabled) {
         return null;
       }
-
-      const repository = repositoryFactory();
-      const configs: SmtpTransportConfig[] = [];
-      for (const candidate of candidates) {
-        const record = await repository.find(candidate);
-        if (record?.enabled) {
-          configs.push(transportConfigFromSettings(record, environment));
-        }
-      }
-      if (configs.length !== 1) {
-        return null;
-      }
-
-      const config = configs[0]!;
+      const config = transportConfigFromSettings(record, environment);
       return {
         from: config.from,
         send: (to, message) => sendSmtpMail(config, { message, to })
       };
     } catch (error) {
-      logMailFallback("workspace mail override unavailable", tenantId ?? null, error);
+      logMailFallback("service mail override unavailable", error);
       return null;
     }
   };
@@ -216,7 +192,7 @@ export function createInviteMailDeliveryFromEnv(
     return {
       async sendInvite(input) {
         const normalized = normalizeInviteInput(input);
-        const resolved = await resolveTenantTransportConfig(normalized.tenantId, {
+        const resolved = await resolveServiceTransportConfig({
           environment: source,
           repository: options.repository
         });
@@ -324,14 +300,13 @@ export function applicationBaseUrl(source: NodeJS.ProcessEnv = process.env): str
   }
 }
 
-function logMailFallback(reason: string, tenantId: string | null, error: unknown): void {
+function logMailFallback(reason: string, error: unknown): void {
   // Секреты и содержимое писем в лог не попадают — только имя/код ошибки.
   const code = (error as { code?: unknown } | null)?.code;
   writeStructuredLog("warn", `Service mail fallback: ${reason}`, {
     errorCode: typeof code === "string" || typeof code === "number" ? String(code) : null,
     errorName: error instanceof SecretStoreError ? "SecretStoreError" : error instanceof Error ? error.name : typeof error,
-    service: "workspaceMailer",
-    tenantId
+    service: "serviceMailer"
   });
 }
 

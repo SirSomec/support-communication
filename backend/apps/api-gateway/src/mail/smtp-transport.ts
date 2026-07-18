@@ -23,12 +23,40 @@ export interface SmtpTransportConfig {
 
 const MAX_SMTP_RESPONSE_LINE_BYTES = 8_192;
 
+/**
+ * Все коды ошибок транспорта. Диагностика различает сетевой уровень (DNS,
+ * закрытый порт, TLS-сертификат) и SMTP-уровень (логин, отправитель,
+ * получатель) — по коду админ должен понять, какое поле настроек чинить.
+ */
 export const SMTP_TRANSPORT_ERROR_CODES = [
   "smtp_timeout",
   "smtp_connection_closed",
   "smtp_unexpected_response",
-  "smtp_response_too_large"
+  "smtp_response_too_large",
+  "smtp_host_not_found",
+  "smtp_connection_refused",
+  "smtp_network_unreachable",
+  "smtp_tls_certificate_invalid",
+  "smtp_tls_failed",
+  "smtp_auth_failed",
+  "smtp_sender_rejected",
+  "smtp_recipient_rejected",
+  "smtp_unavailable"
 ] as const;
+
+const KNOWN_TRANSPORT_CODES = new Set<string>(SMTP_TRANSPORT_ERROR_CODES);
+const TLS_CERTIFICATE_ERROR_CODES = new Set([
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
+  "CERT_SIGNATURE_FAILURE",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "HOSTNAME_MISMATCH"
+]);
 
 interface SmtpLineReader {
   detach(): void;
@@ -56,7 +84,7 @@ export function sendSmtpMail(config: SmtpTransportConfig, mail: { message: strin
       if (error) {
         activeReader?.rejectPending(error);
         activeSocket?.destroy();
-        reject(error);
+        reject(normalizeTransportError(error));
         return;
       }
       activeSocket?.end();
@@ -101,10 +129,13 @@ export function sendSmtpMail(config: SmtpTransportConfig, mail: { message: strin
           return;
         }
         if (config.auth) {
-          await writeSmtpCommand(socket, reader.readLine, `AUTH PLAIN ${encodeSmtpPlainAuth(config.auth)}`, 235);
+          await writeSmtpCommand(socket, reader.readLine, `AUTH PLAIN ${encodeSmtpPlainAuth(config.auth)}`, 235)
+            .catch((error) => { throw refineStepError(error, "smtp_auth_failed"); });
         }
-        await writeSmtpCommand(socket, reader.readLine, `MAIL FROM:<${config.from}>`, 250);
-        await writeSmtpCommand(socket, reader.readLine, `RCPT TO:<${mail.to}>`, 250);
+        await writeSmtpCommand(socket, reader.readLine, `MAIL FROM:<${config.from}>`, 250)
+          .catch((error) => { throw refineStepError(error, "smtp_sender_rejected"); });
+        await writeSmtpCommand(socket, reader.readLine, `RCPT TO:<${mail.to}>`, 250)
+          .catch((error) => { throw refineStepError(error, "smtp_recipient_rejected"); });
         await writeSmtpCommand(socket, reader.readLine, "DATA", 354);
         const response = await writeSmtpCommand(socket, reader.readLine, `${dotStuff(mail.message)}\r\n.`, 250);
         await writeSmtpCommand(socket, reader.readLine, "QUIT", 221);
@@ -293,4 +324,47 @@ function dotStuff(message: string): string {
 function parseSmtpQueuedId(response: string): string {
   const match = response.match(/\b(?:queued as|id)\s+([a-z0-9._-]{1,120})/i);
   return match?.[1] ?? "";
+}
+
+/**
+ * Приводит сырые сокетные/TLS-ошибки к стабильным smtp_*-кодам. Текст исходной
+ * ошибки наружу не выходит: он может содержать адреса и ответы сервера.
+ */
+function normalizeTransportError(error: unknown): Error {
+  if (error instanceof Error) {
+    if (KNOWN_TRANSPORT_CODES.has(error.message)) {
+      return error;
+    }
+    const code = String((error as NodeJS.ErrnoException).code ?? "");
+    if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+      return new Error("smtp_host_not_found");
+    }
+    if (code === "ECONNREFUSED") {
+      return new Error("smtp_connection_refused");
+    }
+    if (code === "ETIMEDOUT" || code === "EHOSTUNREACH" || code === "ENETUNREACH") {
+      return new Error("smtp_network_unreachable");
+    }
+    if (code === "ECONNRESET" || code === "EPIPE") {
+      return new Error("smtp_connection_closed");
+    }
+    if (TLS_CERTIFICATE_ERROR_CODES.has(code)) {
+      return new Error("smtp_tls_certificate_invalid");
+    }
+    if (code.startsWith("ERR_SSL") || code.startsWith("ERR_TLS") || /\bssl|tls|handshake\b/i.test(error.message)) {
+      return new Error("smtp_tls_failed");
+    }
+  }
+  return new Error("smtp_unavailable");
+}
+
+/**
+ * Уточняет smtp_unexpected_response до кода конкретного шага диалога
+ * (AUTH/MAIL FROM/RCPT TO); сетевые ошибки проходят без изменений.
+ */
+function refineStepError(error: unknown, stepCode: string): unknown {
+  if (error instanceof Error && error.message === "smtp_unexpected_response") {
+    return new Error(stepCode);
+  }
+  return error;
 }

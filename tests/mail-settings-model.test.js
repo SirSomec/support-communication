@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  applyEncryptionChange,
   buildMailSettingsPayload,
   describeMailDeliverySource,
+  describeMailTestDiagnostic,
   describeMailTestState,
   emptyMailSettingsForm,
   mailEncryptionOptions,
   mailSettingsFormFromResponse,
   validateMailSettingsForm
-} from "../src/features/settings/mailSettingsModel.js";
+} from "../src/features/service-admin/mailSettingsModel.js";
 
 describe("mail settings form model", () => {
   it("maps masked server settings into form values with an always-empty password", () => {
@@ -100,6 +102,26 @@ describe("mail settings form model", () => {
     });
     assert.equal(withPassword.password, "new-secret");
     assert.equal(withPassword.username, "login");
+  });
+
+  it("maps transport diagnostics to actionable Russian hints", () => {
+    assert.match(describeMailTestDiagnostic("smtp_timeout"), /465/);
+    assert.match(describeMailTestDiagnostic("smtp_connection_refused"), /порт/i);
+    assert.match(describeMailTestDiagnostic("smtp_auth_failed"), /пароль приложения/);
+    assert.match(describeMailTestDiagnostic("smtp_tls_failed"), /шифрован/i);
+    assert.match(describeMailTestDiagnostic("smtp_host_not_found"), /адрес/i);
+    assert.match(describeMailTestDiagnostic("unknown_code"), /unknown_code/);
+    assert.equal(describeMailTestDiagnostic(undefined), "");
+  });
+
+  it("suggests the standard port when encryption changes", () => {
+    const base = { ...emptyMailSettingsForm, port: "1025" };
+    assert.equal(applyEncryptionChange(base, "ssl").port, "465");
+    assert.equal(applyEncryptionChange(base, "ssl").encryption, "ssl");
+    assert.equal(applyEncryptionChange(base, "starttls").port, "587");
+    assert.equal(applyEncryptionChange(base, "none").port, "1025");
+    assert.equal(applyEncryptionChange({ ...base, port: "2626" }, "ssl").port, "2626");
+    assert.equal(applyEncryptionChange({ ...base, port: "" }, "starttls").port, "587");
   });
 
   it("describes test state and delivery source in Russian", () => {

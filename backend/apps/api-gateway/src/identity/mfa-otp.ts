@@ -16,14 +16,12 @@ export interface MfaOtpRuntime {
     email: string;
     expiresAt: string;
     otp: string;
-    tenantId?: string;
   }): Promise<{ providerMessageId: string }>;
   deliverRecovery(input: {
     email: string;
     expiresAt: string;
     recoveryToken: string;
     requestId: string;
-    tenantId?: string;
   }): Promise<{ providerMessageId: string }>;
   hash(email: string, otp: string): string;
   issue(email: string): MfaOtpIssue;

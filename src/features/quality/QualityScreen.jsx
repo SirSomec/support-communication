@@ -5,7 +5,7 @@ import { mapApiConversation } from "../../app/conversationApiMapper.js";
 import { scoreAiSuggestionBatch, submitManualQaReview } from "../../app/qualityAiActions.js";
 import { dialogService } from "../../services/dialogService.js";
 import { qualityService } from "../../services/qualityService.js";
-import { ChannelBadge, MetricTile, Modal, ProductScreen, ScreenStateStrip, SectionTitle } from "../../ui.jsx";
+import { ChannelBadge, MetricTile, Modal, ProductScreen, ScreenStateStrip, SectionTitle, ToolbarSearch } from "../../ui.jsx";
 import { AiQualityWorkspace } from "./AiQualityWorkspace.jsx";
 
 export function QualityScreen({ access, onBack, onToast, operator }) {
@@ -18,6 +18,13 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
   const [aiEffectivenessMetrics, setAiEffectivenessMetrics] = useState([]);
   const [knowledgeArticles, setKnowledgeArticles] = useState([]);
   const [showLowScoresOnly, setShowLowScoresOnly] = useState(false);
+  const [scoreQuery, setScoreQuery] = useState("");
+  const [scoreChannelFilter, setScoreChannelFilter] = useState("all");
+  const [scoreScaleFilter, setScoreScaleFilter] = useState("all");
+  const [scoreOperatorFilter, setScoreOperatorFilter] = useState("all");
+  const [scoreReviewFilter, setScoreReviewFilter] = useState("all");
+  const [scoreSort, setScoreSort] = useState("newest");
+  const [scorePage, setScorePage] = useState(1);
   const [reviewingScoreId, setReviewingScoreId] = useState("");
   const [reviewDraft, setReviewDraft] = useState(null);
   const [audit, setAudit] = useState(null);
@@ -81,8 +88,46 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
     };
   }, []);
 
+  useEffect(() => {
+    setScorePage(1);
+  }, [scoreQuery, scoreChannelFilter, scoreScaleFilter, scoreOperatorFilter, scoreReviewFilter, scoreSort, showLowScoresOnly]);
+
   const lowScores = qualityScores.filter((item) => Number(item.score) < 4 || String(item.status ?? "").includes("Низкая"));
-  const visibleQualityScores = showLowScoresOnly ? lowScores : qualityScores;
+  const scoreChannelOptions = collectQualityScoreOptions(qualityScores, (score) => score.channel);
+  const scoreScaleOptions = collectQualityScoreOptions(qualityScores, (score) => score.scale);
+  const scoreOperatorOptions = collectQualityOperatorOptions(qualityScores);
+  const normalizedScoreQuery = scoreQuery.trim().toLowerCase();
+  const visibleQualityScores = (showLowScoresOnly ? lowScores : qualityScores)
+    .filter((score) => {
+      if (scoreChannelFilter !== "all" && String(score.channel ?? "") !== scoreChannelFilter) {
+        return false;
+      }
+      if (scoreScaleFilter !== "all" && String(score.scale ?? "") !== scoreScaleFilter) {
+        return false;
+      }
+      if (scoreOperatorFilter !== "all" && String(score.operator ?? "") !== scoreOperatorFilter) {
+        return false;
+      }
+      if (scoreReviewFilter === "reviewed" && !manualReviewIds[score.id]) {
+        return false;
+      }
+      if (scoreReviewFilter === "unreviewed" && manualReviewIds[score.id]) {
+        return false;
+      }
+      if (!normalizedScoreQuery) {
+        return true;
+      }
+      return [score.client, score.comment, score.topic, score.operatorName, score.operator, score.channel, score.conversationId]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedScoreQuery);
+    })
+    .sort((left, right) => compareQualityScores(left, right, scoreSort));
+  const scoreTotalPages = Math.max(1, Math.ceil(visibleQualityScores.length / QUALITY_SCORE_PAGE_SIZE));
+  const scoreCurrentPage = Math.min(scorePage, scoreTotalPages);
+  const pagedQualityScores = visibleQualityScores.slice((scoreCurrentPage - 1) * QUALITY_SCORE_PAGE_SIZE, scoreCurrentPage * QUALITY_SCORE_PAGE_SIZE);
+  const scoreRangeStart = visibleQualityScores.length ? (scoreCurrentPage - 1) * QUALITY_SCORE_PAGE_SIZE + 1 : 0;
+  const scoreRangeEnd = Math.min(scoreCurrentPage * QUALITY_SCORE_PAGE_SIZE, visibleQualityScores.length);
   const averageCsat = qualityScores.length
     ? Math.round(
       qualityScores
@@ -259,9 +304,44 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
 
       <div className="quality-layout">
         <section className="work-panel">
-          <SectionTitle title="Оценки и ручной QA" action="после закрытия и выборочная проверка" />
+          <SectionTitle title="Оценки и ручной QA" action={`${visibleQualityScores.length} из ${qualityScores.length}`} />
+          <div className="quality-list-toolbar">
+            <ToolbarSearch
+              ariaLabel="Поиск по оценкам"
+              iconSize={16}
+              placeholder="Клиент, тематика, оператор"
+              value={scoreQuery}
+              onChange={setScoreQuery}
+            />
+            <select aria-label="Канал оценки" className="inline-select" value={scoreChannelFilter} onChange={(event) => setScoreChannelFilter(event.target.value)}>
+              <option value="all">Все каналы</option>
+              {scoreChannelOptions.map((channel) => <option key={channel} value={channel}>{channel}</option>)}
+            </select>
+            <select aria-label="Шкала оценки" className="inline-select" value={scoreScaleFilter} onChange={(event) => setScoreScaleFilter(event.target.value)}>
+              <option value="all">Все шкалы</option>
+              {scoreScaleOptions.map((scale) => <option key={scale} value={scale}>{scale}</option>)}
+            </select>
+            <select aria-label="Оператор оценки" className="inline-select" value={scoreOperatorFilter} onChange={(event) => setScoreOperatorFilter(event.target.value)}>
+              <option value="all">Все операторы</option>
+              {scoreOperatorOptions.map((operator) => <option key={operator.value} value={operator.value}>{operator.label}</option>)}
+            </select>
+            <select aria-label="Статус ручной проверки" className="inline-select" value={scoreReviewFilter} onChange={(event) => setScoreReviewFilter(event.target.value)}>
+              <option value="all">Проверка: все</option>
+              <option value="reviewed">Проверенные</option>
+              <option value="unreviewed">Без проверки</option>
+            </select>
+            <select aria-label="Сортировка оценок" className="inline-select" value={scoreSort} onChange={(event) => setScoreSort(event.target.value)}>
+              {QUALITY_SCORE_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </div>
           <div className="quality-list">
-            {visibleQualityScores.map((score) => (
+            {!visibleQualityScores.length ? (
+              <div className="entity-empty">
+                <strong>Оценок не найдено</strong>
+                <span>Измените фильтры, сортировку или поиск.</span>
+              </div>
+            ) : null}
+            {pagedQualityScores.map((score) => (
               <article className={`quality-row ${Number(score.score) < 4 ? "danger" : ""}`} key={score.id}>
                 <header>
                   <strong>{score.client}</strong>
@@ -283,6 +363,19 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
               </article>
             ))}
           </div>
+          {visibleQualityScores.length > QUALITY_SCORE_PAGE_SIZE ? (
+            <footer className="quality-pagination">
+              <button disabled={scoreCurrentPage <= 1} onClick={() => setScorePage(scoreCurrentPage - 1)} type="button">
+                Назад
+              </button>
+              <span>
+                Страница {scoreCurrentPage} из {scoreTotalPages} · записи {scoreRangeStart}–{scoreRangeEnd} из {visibleQualityScores.length}
+              </span>
+              <button disabled={scoreCurrentPage >= scoreTotalPages} onClick={() => setScorePage(scoreCurrentPage + 1)} type="button">
+                Вперед
+              </button>
+            </footer>
+          ) : null}
         </section>
 
         <section className="work-panel">
@@ -399,6 +492,64 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
 
 function resolveManualQaReviewer(operator) {
   return String(operator?.id ?? operator?.email ?? operator?.name ?? "senior-qa").trim() || "senior-qa";
+}
+
+const QUALITY_SCORE_PAGE_SIZE = 10;
+
+const QUALITY_SCORE_SORT_OPTIONS = [
+  { label: "Сначала новые", value: "newest" },
+  { label: "Сначала старые", value: "oldest" },
+  { label: "Низкие оценки сначала", value: "score-asc" },
+  { label: "Высокие оценки сначала", value: "score-desc" },
+  { label: "Клиент А–Я", value: "client" }
+];
+
+function collectQualityScoreOptions(scores, readValue) {
+  return [...new Set(scores.map((score) => String(readValue(score) ?? "").trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, "ru"));
+}
+
+function collectQualityOperatorOptions(scores) {
+  const labels = new Map();
+  for (const score of scores) {
+    const value = String(score.operator ?? "").trim();
+    if (!value) {
+      continue;
+    }
+    const label = String(score.operatorName ?? "").trim() || value;
+    if (!labels.has(value) || labels.get(value) === value) {
+      labels.set(value, label);
+    }
+  }
+  return [...labels.entries()]
+    .map(([value, label]) => ({ label, value }))
+    .sort((left, right) => left.label.localeCompare(right.label, "ru"));
+}
+
+function qualityScoreTime(score) {
+  const time = Date.parse(String(score?.createdAt ?? ""));
+  return Number.isFinite(time) ? time : 0;
+}
+
+function qualityScoreValue(score) {
+  const value = Number(score?.score);
+  return Number.isFinite(value) ? value : -1;
+}
+
+function compareQualityScores(left, right, sort) {
+  if (sort === "oldest") {
+    return qualityScoreTime(left) - qualityScoreTime(right);
+  }
+  if (sort === "score-asc") {
+    return qualityScoreValue(left) - qualityScoreValue(right);
+  }
+  if (sort === "score-desc") {
+    return qualityScoreValue(right) - qualityScoreValue(left);
+  }
+  if (sort === "client") {
+    return String(left?.client ?? "").localeCompare(String(right?.client ?? ""), "ru");
+  }
+  return qualityScoreTime(right) - qualityScoreTime(left);
 }
 
 const QA_CRITERIA = [

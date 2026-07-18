@@ -584,6 +584,37 @@ textarea:focus-visible {
   color: #46546b;
 }
 
+.quality-list-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.quality-list-toolbar .toolbar-search {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.quality-list-toolbar .inline-select {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.quality-pagination {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.quality-pagination span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .audit-toolbar .toolbar-search {
   flex: 1 1 320px;
 }

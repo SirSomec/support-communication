@@ -42,6 +42,8 @@ export async function bootstrap(): Promise<void> {
     : (await import("./runtime/local-development-seed.js")).createPrismaCatalogFallbackSeeds();
   configureAutomationRepository(config, { seed: localSeeds.automation });
   configureIdentityRepository(config, { seed: localSeeds.identity });
+  // Первичный сервис-админ из env (create-if-absent); мисконфигурация роняет старт.
+  await (await import("./identity/service-admin-bootstrap.js")).bootstrapServiceAdminFromEnv();
   configureBillingRepository(config, { seed: localSeeds.billing });
   const conversationRepository = configureConversationRepository(config, { seed: localSeeds.conversation });
   configureConversationRealtimeFanout(config);

@@ -3254,3 +3254,35 @@ model OpenChannelPumpCursor {
 
   @@map("open_channel_pump_cursors")
 }
+
+// Служебная почта воркспейса: SMTP-подключение для сервисных рассылок
+// (2FA-коды, восстановление пароля, приглашения сотрудников). Одна запись на
+// тенант; пароль хранится только в зашифрованном виде (AES-256-GCM, схема
+// колонок как у ai_connections). Standalone-таблица без FK на tenants —
+// по конвенции ai_connections / knowledge_sources.
+model WorkspaceMailSettings {
+  tenantId              String    @id @map("tenant_id")
+  enabled               Boolean   @default(false)
+  host                  String
+  port                  Int       @default(587)
+  encryption            String    @default("starttls")
+  username              String?
+  secretCiphertext      String?   @map("secret_ciphertext")
+  secretIv              String?   @map("secret_iv")
+  secretAuthTag         String?   @map("secret_auth_tag")
+  secretAlgorithm       String?   @map("secret_algorithm")
+  secretEnvelopeVersion Int?      @map("secret_envelope_version")
+  keyVersion            String?   @map("key_version")
+  fromAddress           String    @map("from_address")
+  fromName              String?   @map("from_name")
+  replyTo               String?   @map("reply_to")
+  timeoutMs             Int       @default(10000) @map("timeout_ms")
+  tlsRejectUnauthorized Boolean   @default(true) @map("tls_reject_unauthorized")
+  lastTestedAt          DateTime? @map("last_tested_at") @db.Timestamptz(3)
+  lastTestStatus        String?   @map("last_test_status")
+  lastTestMessage       String?   @map("last_test_message")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("workspace_mail_settings")
+}

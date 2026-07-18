@@ -10,6 +10,7 @@ export { featureFlagService } from "./featureFlagService.js";
 export { incidentService } from "./incidentService.js";
 export { integrationService } from "./integrationService.js";
 export { knowledgeService } from "./knowledgeService.js";
+export { mailSettingsService } from "./mailSettingsService.js";
 export { notificationService } from "./notificationService.js";
 export { operationsService } from "./operationsService.js";
 export { permissionService } from "./permissionService.js";

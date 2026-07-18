@@ -197,7 +197,11 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
     setSelectedEmployeeId(invited.id);
     setInviteDraft({ email: "", name: "", roleKey: "employee", groupId: "group-line-1" });
     setInviteOpen(false);
-    onToast(`${invited.employee}: приглашение отправлено. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
+    const inviteDeliveryFailed = response.data?.inviteDescriptor?.deliveryState === "failed";
+    const deliveryNote = inviteDeliveryFailed
+      ? "приглашение создано, но письмо не ушло — проверьте служебную почту в настройках"
+      : "приглашение отправлено";
+    onToast(`${invited.employee}: ${deliveryNote}. Audit ${response.data?.auditEvent?.id ?? response.traceId}`);
   }
 
   async function handleSaveGroup(event) {

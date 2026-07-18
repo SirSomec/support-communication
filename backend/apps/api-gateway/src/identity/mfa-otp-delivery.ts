@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { connect, isIP, type Socket } from "node:net";
 import { connect as connectTls } from "node:tls";
+import type { WorkspaceMailOverrideResolver } from "../mail/workspace-mailer.js";
 
 export interface MfaOtpDeliveryPort {
   send(input: {
@@ -8,13 +9,24 @@ export interface MfaOtpDeliveryPort {
     email: string;
     expiresAt: string;
     otp: string;
+    tenantId?: string;
   }): Promise<{ providerMessageId: string }>;
   sendRecovery?(input: {
     email: string;
     expiresAt: string;
     recoveryToken: string;
     requestId: string;
+    tenantId?: string;
   }): Promise<{ providerMessageId: string }>;
+}
+
+export interface MfaOtpDeliveryOptions {
+  /**
+   * Резолвер служебной почты воркспейса: если настроена и включена — письмо
+   * уходит через неё, иначе через env-конфиг (MFA_OTP_SMTP_* / MAIL_*).
+   * Используется только в smtp-режиме.
+   */
+  workspaceMail?: WorkspaceMailOverrideResolver;
 }
 
 interface SmtpConfig {
@@ -35,6 +47,7 @@ interface NormalizedDeliveryInput {
   email: string;
   expiresAt: string;
   otp: string;
+  tenantId?: string;
 }
 
 interface NormalizedRecoveryDeliveryInput {
@@ -42,6 +55,7 @@ interface NormalizedRecoveryDeliveryInput {
   expiresAt: string;
   recoveryToken: string;
   requestId: string;
+  tenantId?: string;
 }
 
 const DEFAULT_SMTP_PORT = 1025;
@@ -50,7 +64,8 @@ const MAX_SMTP_TIMEOUT_MS = 120_000;
 const MAX_SMTP_RESPONSE_LINE_BYTES = 8_192;
 
 export function createMfaOtpDeliveryFromEnv(
-  source: NodeJS.ProcessEnv = process.env
+  source: NodeJS.ProcessEnv = process.env,
+  options: MfaOtpDeliveryOptions = {}
 ): MfaOtpDeliveryPort {
   const nodeEnv = normalizeNodeEnv(source.NODE_ENV);
   const configuredMode = optionalString(source.MFA_OTP_DELIVERY_MODE).toLowerCase();
@@ -61,7 +76,7 @@ export function createMfaOtpDeliveryFromEnv(
 
   const mode = configuredMode || defaultDeliveryMode(nodeEnv, source);
   if (mode === "smtp") {
-    return createSmtpDelivery(loadSmtpConfig(source));
+    return createSmtpDelivery(loadSmtpConfig(source), options.workspaceMail);
   }
 
   if ((nodeEnv === "test" || nodeEnv === "development") && isDeterministicMode(mode)) {
@@ -94,18 +109,34 @@ function createDeterministicDelivery(): MfaOtpDeliveryPort {
   };
 }
 
-function createSmtpDelivery(config: SmtpConfig): MfaOtpDeliveryPort {
+function createSmtpDelivery(config: SmtpConfig, workspaceMail?: WorkspaceMailOverrideResolver): MfaOtpDeliveryPort {
+  // Резолвер сам никогда не бросает, но подстрахуемся: сбой выбора источника
+  // не должен ронять доставку кода — env-конфиг остаётся рабочим путём.
+  const resolveOverride = async (recipient: { email: string; tenantId?: string }) => {
+    if (!workspaceMail) {
+      return null;
+    }
+    try {
+      return await workspaceMail(recipient);
+    } catch {
+      return null;
+    }
+  };
+
   return {
     async send(input) {
       const normalized = normalizeDeliveryInput(input);
-      const message = buildOtpEmail(config.from, normalized);
+      const override = await resolveOverride({ email: normalized.email, tenantId: normalized.tenantId });
+      const message = buildOtpEmail(override?.from ?? config.from, normalized);
 
       try {
-        const queuedId = await sendSmtpMessage({
-          ...config,
-          message,
-          to: normalized.email
-        });
+        const queuedId = override
+          ? await override.send(normalized.email, message)
+          : await sendSmtpMessage({
+            ...config,
+            message,
+            to: normalized.email
+          });
         const fallbackId = createHash("sha256")
           .update(`${normalized.challengeId}:${normalized.email}:${normalized.expiresAt}`)
           .digest("hex")
@@ -119,14 +150,17 @@ function createSmtpDelivery(config: SmtpConfig): MfaOtpDeliveryPort {
     },
     async sendRecovery(input) {
       const normalized = normalizeRecoveryDeliveryInput(input);
-      const message = buildRecoveryEmail(config.from, normalized);
+      const override = await resolveOverride({ email: normalized.email, tenantId: normalized.tenantId });
+      const message = buildRecoveryEmail(override?.from ?? config.from, normalized);
 
       try {
-        const queuedId = await sendSmtpMessage({
-          ...config,
-          message,
-          to: normalized.email
-        });
+        const queuedId = override
+          ? await override.send(normalized.email, message)
+          : await sendSmtpMessage({
+            ...config,
+            message,
+            to: normalized.email
+          });
         const fallbackId = createHash("sha256")
           .update(`${normalized.requestId}:${normalized.email}:${normalized.expiresAt}`)
           .digest("hex")
@@ -190,6 +224,7 @@ function normalizeDeliveryInput(input: {
   email: string;
   expiresAt: string;
   otp: string;
+  tenantId?: string;
 }): NormalizedDeliveryInput {
   const challengeId = String(input.challengeId ?? "").trim();
   const otp = String(input.otp ?? "").trim();
@@ -209,7 +244,8 @@ function normalizeDeliveryInput(input: {
     challengeId,
     email: smtpAddress(String(input.email ?? ""), "mfa_otp_delivery_input_invalid"),
     expiresAt: new Date(expiresAtMs).toISOString(),
-    otp
+    otp,
+    tenantId: normalizeOptionalTenantId(input.tenantId)
   };
 }
 
@@ -218,6 +254,7 @@ function normalizeRecoveryDeliveryInput(input: {
   expiresAt: string;
   recoveryToken: string;
   requestId: string;
+  tenantId?: string;
 }): NormalizedRecoveryDeliveryInput {
   const requestId = String(input.requestId ?? "").trim();
   const recoveryToken = String(input.recoveryToken ?? "").trim();
@@ -237,8 +274,15 @@ function normalizeRecoveryDeliveryInput(input: {
     email: smtpAddress(String(input.email ?? ""), "password_recovery_delivery_input_invalid"),
     expiresAt: new Date(expiresAtMs).toISOString(),
     recoveryToken,
-    requestId
+    requestId,
+    tenantId: normalizeOptionalTenantId(input.tenantId)
   };
+}
+
+/** Подсказка резолверу источника отправки; невалидное значение просто игнорируется. */
+function normalizeOptionalTenantId(value: unknown): string | undefined {
+  const normalized = String(value ?? "").trim();
+  return normalized && normalized.length <= 200 ? normalized : undefined;
 }
 
 function buildOtpEmail(from: string, input: NormalizedDeliveryInput): string {

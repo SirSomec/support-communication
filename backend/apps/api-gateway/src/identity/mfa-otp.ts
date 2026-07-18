@@ -1,6 +1,7 @@
 import { createHmac, randomInt } from "node:crypto";
 import {
   createMfaOtpDeliveryFromEnv,
+  type MfaOtpDeliveryOptions,
   type MfaOtpDeliveryPort
 } from "./mfa-otp-delivery.js";
 
@@ -15,12 +16,14 @@ export interface MfaOtpRuntime {
     email: string;
     expiresAt: string;
     otp: string;
+    tenantId?: string;
   }): Promise<{ providerMessageId: string }>;
   deliverRecovery(input: {
     email: string;
     expiresAt: string;
     recoveryToken: string;
     requestId: string;
+    tenantId?: string;
   }): Promise<{ providerMessageId: string }>;
   hash(email: string, otp: string): string;
   issue(email: string): MfaOtpIssue;
@@ -64,7 +67,10 @@ export function createMfaOtpRuntime(options: MfaOtpRuntimeOptions): MfaOtpRuntim
   };
 }
 
-export function createMfaOtpRuntimeFromEnv(source: NodeJS.ProcessEnv = process.env): MfaOtpRuntime {
+export function createMfaOtpRuntimeFromEnv(
+  source: NodeJS.ProcessEnv = process.env,
+  deliveryOptions: MfaOtpDeliveryOptions = {}
+): MfaOtpRuntime {
   const nodeEnv = String(source.NODE_ENV ?? "").trim().toLowerCase();
   if (!["development", "test", "staging", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be explicitly set before creating the MFA runtime.");
@@ -80,7 +86,7 @@ export function createMfaOtpRuntimeFromEnv(source: NodeJS.ProcessEnv = process.e
   }
 
   return createMfaOtpRuntime({
-    delivery: createMfaOtpDeliveryFromEnv(source),
+    delivery: createMfaOtpDeliveryFromEnv(source, deliveryOptions),
     generateOtp: nodeEnv === "test" || localRuntime && deterministicDelivery ? () => "123456" : undefined,
     hashKey
   });

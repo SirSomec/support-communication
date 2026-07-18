@@ -1,10 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
+import { writeStructuredLog } from "@support-communication/observability";
 import { makeAuditId } from "./backend-ids.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
 import { IdentityRepository, type IdentityTenantUser } from "./identity.repository.js";
 import { TeamDirectoryRepository } from "./team-directory.repository.js";
 import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
+import {
+  createInviteMailDeliveryFromEnv,
+  createWorkspaceMailOverrideResolver,
+  type InviteMailDelivery
+} from "../mail/workspace-mailer.js";
 
 const SERVICE = "settingsService";
 const supportedChannels = ["SDK", "Telegram", "MAX", "VK"];
@@ -67,7 +73,8 @@ export class SettingsEmployeeService {
   constructor(
     private readonly identityRepository = IdentityRepository.default(),
     private readonly teamDirectoryRepository = TeamDirectoryRepository.default(),
-    private readonly recoveryDelivery?: Pick<MfaOtpRuntime, "deliverRecovery">
+    private readonly recoveryDelivery?: Pick<MfaOtpRuntime, "deliverRecovery">,
+    private readonly inviteDelivery?: InviteMailDelivery
   ) {}
 
   listSettingsAuditEvents() {
@@ -181,6 +188,29 @@ export class SettingsEmployeeService {
       email,
       tenantId
     });
+
+    // Письмо-приглашение уходит через служебную почту воркспейса (env-фолбэк —
+    // внутри доставки). Сбой отправки не отменяет приглашение: код остаётся
+    // валидным, а состояние доставки видно администратору в ответе.
+    let deliveryState = "sent";
+    try {
+      const delivery = this.inviteDelivery ?? createInviteMailDeliveryFromEnv();
+      await delivery.sendInvite({
+        code: inviteToken.code,
+        email: inviteToken.email,
+        expiresAt: inviteToken.expiresAt,
+        inviteeName: name,
+        tenantId: inviteToken.tenantId
+      });
+    } catch (error) {
+      deliveryState = "failed";
+      writeStructuredLog("warn", "Invite email delivery failed", {
+        errorName: error instanceof Error ? error.message : typeof error,
+        service: SERVICE,
+        tenantId
+      });
+    }
+
     this.employeeSettings.set(saved.id, {
       canOverride: roleKey !== "employee",
       channels: ["SDK", "Telegram"],
@@ -202,7 +232,7 @@ export class SettingsEmployeeService {
         employee: this.toEmployee(saved),
         inviteDescriptor: {
           code: inviteToken.code,
-          deliveryState: "queued",
+          deliveryState,
           email: inviteToken.email,
           expiresAt: inviteToken.expiresAt,
           id: inviteToken.id,
@@ -280,12 +310,15 @@ export class SettingsEmployeeService {
     }
 
     const recoveryToken = await this.identityRepository.createRecoveryToken(user.email);
-    const delivery = this.recoveryDelivery ?? createMfaOtpRuntimeFromEnv();
+    const delivery = this.recoveryDelivery ?? createMfaOtpRuntimeFromEnv(process.env, {
+      workspaceMail: createWorkspaceMailOverrideResolver()
+    });
     const delivered = await delivery.deliverRecovery({
       email: user.email,
       expiresAt: recoveryToken.expiresAt,
       recoveryToken: recoveryToken.token,
-      requestId: recoveryToken.id
+      requestId: recoveryToken.id,
+      tenantId: user.tenantId
     });
     const requestedAt = new Date().toISOString();
     const saved = await this.identityRepository.saveTenantUser({

@@ -21,6 +21,7 @@ import {
   tenantMembershipsFromUsers
 } from "./identity-auth-flow.repository.js";
 import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
+import { createWorkspaceMailOverrideResolver } from "../mail/workspace-mailer.js";
 
 const SERVICE = "authService";
 
@@ -207,7 +208,16 @@ export interface TenantOperatorLogoutData {
 export class AuthService {
   constructor(
     private readonly identityRepository = IdentityRepository.default(),
-    private readonly mfaOtp = createMfaOtpRuntimeFromEnv()
+    // Резолвер направляет MFA-коды и письма восстановления через служебную
+    // почту воркспейса адресата (если настроена в админке); тенант ищется по
+    // email, при отсутствии или неоднозначности остаётся env-SMTP.
+    private readonly mfaOtp = createMfaOtpRuntimeFromEnv(process.env, {
+      workspaceMail: createWorkspaceMailOverrideResolver({
+        findTenantIdsByEmail: async (email) =>
+          (await Promise.resolve(identityRepository.findTenantUsersByEmail(email)))
+            .map((user) => user.tenantId)
+      })
+    })
   ) {}
 
   async getAuthState(context: { sessionId?: string } = {}): Promise<BackendEnvelope<AuthStateData>> {

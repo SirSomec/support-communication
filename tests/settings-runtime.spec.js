@@ -210,6 +210,49 @@ test("settings runtime invite can be accepted and employee receives restricted w
   await expect(page.locator(".quick-action")).toBeDisabled();
 });
 
+test("settings runtime mail settings save through backend and stay masked", async ({ page, request }) => {
+  const session = await loginTenantOperator(request);
+  await openAppShell(page, session);
+  await page.locator(".role-switcher select").selectOption({ label: "Администратор" });
+  await openSection(page, "Настройки");
+  await openSettingsTab(page, "mail");
+
+  const panel = page.locator(".mail-settings-panel");
+  await expect(panel).toBeVisible();
+
+  await panel.getByPlaceholder("smtp.company.ru").fill("127.0.0.1");
+  await panel.getByPlaceholder("587").fill("2525");
+  await panel.locator("select").selectOption("none");
+  await panel.getByPlaceholder("noreply@company.ru").fill("noreply@volga.example");
+
+  const saveResponsePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/workspace/mail-settings") && response.request().method() === "PUT"
+  );
+  await panel.locator(".mail-settings-save").click();
+  const saveResponse = await saveResponsePromise;
+  expect(saveResponse.ok()).toBeTruthy();
+  const savePayload = await saveResponse.json();
+  expect(savePayload.status).toBe("ok");
+  expect(savePayload.data.settings).toMatchObject({
+    host: "127.0.0.1",
+    passwordConfigured: false,
+    port: 2525
+  });
+
+  // Перемонтируем вкладку: GET обязан вернуть сохранённые настройки без секретов.
+  await openSettingsTab(page, "rules");
+  const fetchResponsePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/workspace/mail-settings") && response.request().method() === "GET"
+  );
+  await openSettingsTab(page, "mail");
+  const fetchResponse = await fetchResponsePromise;
+  const fetchPayload = await fetchResponse.json();
+  expect(fetchPayload.status).toBe("ok");
+  expect(fetchPayload.data.settings.host).toBe("127.0.0.1");
+  expect(fetchPayload.data.settings.passwordConfigured).toBe(false);
+  await expect(page.locator(".mail-settings-panel").getByPlaceholder("smtp.company.ru")).toHaveValue("127.0.0.1");
+});
+
 test("settings runtime topic directory and rule test stay backend-backed", async ({ page, request }) => {
   const session = await loginTenantOperator(request);
   await openAppShell(page, session);

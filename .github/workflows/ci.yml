@@ -80,7 +80,7 @@ jobs:
           SMOKE_DATABASE_NAME: support_communication_smoke_ci_${{ github.run_id }}_${{ github.run_attempt }}
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: playwright-report/

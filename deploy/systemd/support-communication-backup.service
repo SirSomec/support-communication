@@ -1,0 +1,21 @@
+[Unit]
+Description=Support Communication production backup
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=support-communication
+Group=support-communication
+WorkingDirectory=/opt/support-communication
+EnvironmentFile=/etc/support-communication/production.env
+Environment=PRODUCTION_BACKUP_ROOT=/var/backups/support-communication
+ExecStart=/usr/bin/node scripts/production-backup.mjs
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/support-communication
+
+[Install]
+WantedBy=multi-user.target

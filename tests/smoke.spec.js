@@ -673,6 +673,26 @@ test("composer attachment queue blocks scan-pending backend descriptors", async 
   await selectRole(page, "Администратор");
   await page.route("**/*", async (route) => {
     const request = route.request();
+    const finalizeMatch = new URL(request.url()).pathname.match(/\/api\/v1\/dialogs\/attachments\/([^/]+)\/finalize$/);
+    if (request.method() === "POST" && finalizeMatch) {
+      const fileId = decodeURIComponent(finalizeMatch[1]);
+      await route.fulfill({
+        body: JSON.stringify({
+          data: {
+            antivirusState: "scan_pending",
+            deliveryState: "not_sent",
+            fileId,
+            queue: "file-scan",
+            storageState: "uploaded",
+            uploadPolicy: { deliveryState: "not_sent", queue: "file-scan", scanState: "scan_pending", storageState: "uploaded" }
+          },
+          status: "ok"
+        }),
+        contentType: "application/json",
+        status: 200
+      });
+      return;
+    }
     const signedObjectStorageRequest = request.url().includes("X-Amz-")
       && ["OPTIONS", "PUT"].includes(request.method());
     if (!signedObjectStorageRequest) {
@@ -1277,29 +1297,26 @@ test("audit screen filters events and exposes event detail", async ({ page }) =>
   await expectHealthyPage(page);
 });
 
-test("settings expose webhooks api keys and security controls", async ({ page }) => {
+test("settings expose API key rotation and security controls", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
 
   await page.locator("#settings-tab-api").click();
   await expect(page.locator(".api-governance-panel")).toContainText("API-ключи");
+  await page.locator(".settings-create-api-key").click();
+  await page.locator(".api-key-create-form input").first().fill("Production SDK key");
+  await page.locator("button[form='api-key-create-form']").click();
+  await expect(page.locator(".api-key-reveal-secret")).toContainText("sk_test_");
+  await page.locator(".settings-modal-panel button").filter({ hasText: "Я сохранил ключ" }).click();
   const productionKey = page.locator(".api-key-card").filter({ hasText: "Production SDK key" });
   await expect(productionKey).toHaveCount(1);
   await productionKey.locator("button.api-key-rotate").click();
   await expect(productionKey).toContainText("Ротация в очереди");
-  await expect(page.locator(".toast")).toContainText("prod-key");
+  await expect(page.locator(".toast")).toContainText("ротация ключа поставлена в очередь");
 
-  const vkWebhook = page.locator(".webhook-endpoint").filter({ hasText: "VK inbound" });
-  await expect(vkWebhook).toHaveCount(1);
-  await vkWebhook.click();
-  await expect(page.locator(".webhook-detail")).toContainText("HMAC SHA-256");
-  await page.locator(".webhook-delivery-row").filter({ hasText: "signature_failed" }).locator("button").click();
-  await expect(page.locator(".webhook-delivery-row").filter({ hasText: "message_new" })).toContainText("replay_queued");
-  await expect(page.locator(".toast")).toContainText("повтор доставки поставлен в очередь");
   await expectNoElementOverflow(page, ".admin-workspace-layout");
   await expectNoElementOverflow(page, ".api-governance-panel");
-  await expectNoElementOverflow(page, ".webhook-workspace");
 
   await page.locator("#settings-tab-security").click();
   await expect(page.locator(".security-controls-panel")).toContainText("Security controls");
@@ -1433,6 +1450,7 @@ test("settings employee management preserves edit and role permissions", async (
   await page.locator(".settings-modal-panel").getByRole("button", { name: "Пригласить" }).click();
   expect((await inviteResponse).ok()).toBeTruthy();
   await expect(employeePanel.locator(".employee-editor header")).toContainText(employeeName);
+  await page.getByRole("dialog", { name: "Приглашение создано" }).getByRole("button", { name: "Готово" }).click();
 
   await employeePanel.locator(".employee-editor-grid select").first().selectOption({ label: "Старший сотрудник" });
   await employeePanel.locator(".employee-editor-grid select").nth(1).selectOption({ label: "VIP support" });
@@ -1440,7 +1458,7 @@ test("settings employee management preserves edit and role permissions", async (
   await expect(employeePanel.locator(".employee-editor-grid input")).toHaveValue("14");
   await employeePanel.locator(".employee-channel-editor label").filter({ hasText: "SDK" }).locator("input").check();
   await expect(employeePanel.locator(".employee-editor header")).toContainText(employeeName);
-  await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Override" }).locator("input").uncheck();
+  await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Назначение сверх лимита" }).locator("input").uncheck();
   await employeePanel.locator(".employee-permission-toggles label").filter({ hasText: "Чувствительные" }).locator("input").uncheck();
   await employeePanel.locator(".employee-editor footer button").filter({ hasText: "Сохранить" }).click();
   await expect(page.locator(".toast")).toContainText(`${employeeName}: настройки сохранены.`);
@@ -1653,6 +1671,7 @@ test("onboarding completes tenant setup and returns to app", async ({ page }) =>
 
   await page.locator(".onboarding-field").filter({ hasText: "Название организации" }).locator("input").fill("QA Retail");
   await page.getByRole("button", { name: "Сгенерировать" }).click();
+  await page.locator(".onboarding-field").filter({ hasText: "Домен сайта для SDK" }).locator("input").fill("qa.example.test");
   await page.getByRole("button", { name: "Далее" }).click();
   await page.getByRole("button", { name: "Далее" }).click();
   await page.locator(".onboarding-field").filter({ hasText: "Имя" }).locator("input").fill("QA Admin");

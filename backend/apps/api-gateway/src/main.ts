@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { NestFactory } from "@nestjs/core";
-import { loadBackendConfig } from "@support-communication/config";
+import { loadBackendConfig, parseAllowedOrigins } from "@support-communication/config";
 import { writeStructuredLog } from "@support-communication/observability";
 import { AppModule } from "./app.module.js";
 import { configureAutomationRepository } from "./automation/bootstrap.js";
@@ -65,9 +65,22 @@ export async function bootstrap(): Promise<void> {
     bufferLogs: true
   });
 
+  app.enableShutdownHooks();
   app.setGlobalPrefix(`api/${config.API_VERSION}`);
   app.useGlobalFilters(new EnvelopeHttpExceptionFilter());
-  setupOpenApi(app, config.API_VERSION);
+  const allowedOrigins = parseAllowedOrigins(config.CORS_ALLOWED_ORIGINS);
+  if (allowedOrigins.length) {
+    app.enableCors({
+      allowedHeaders: ["authorization", "content-type", "idempotency-key", "x-idempotency-key", "x-request-id"],
+      credentials: false,
+      exposedHeaders: ["x-request-id"],
+      methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      origin: allowedOrigins
+    });
+  }
+  if (config.NODE_ENV !== "production" || config.OPENAPI_ENABLED === "true") {
+    setupOpenApi(app, config.API_VERSION);
+  }
   const httpServer = app.getHttpServer() as Server;
   installHttpSocketErrorGuard(httpServer);
   installRealtimeWebSocketReplay(httpServer, {

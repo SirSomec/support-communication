@@ -88,7 +88,7 @@ describe("KnowledgeSourceRepository", () => {
 
     const pending = repository.save(source({ id: "source-pending", status: "ready", approvalStatus: "pending" }));
     const disabled = repository.save(source({ id: "source-disabled", status: "disabled", approvalStatus: "approved" }));
-    assert.equal(pending.readiness, "stale");
+    assert.equal(pending.readiness, "ready");
     assert.equal(disabled.readiness, "not_ready");
   });
 

@@ -34,13 +34,14 @@ describe("Playwright runtime configuration", () => {
     assert.doesNotMatch(pilotFlow, /function isUrlReachable/);
   });
 
-  it("fails settings smoke when required API fixtures are missing", () => {
+  it("creates mutable settings records through the API before exercising lifecycle actions", () => {
     const smoke = readFileSync(new URL("./smoke.spec.js", import.meta.url), "utf8");
 
+    assert.match(smoke, /\.settings-create-api-key/);
+    assert.match(smoke, /\.fill\("Production SDK key"\)/);
     assert.match(smoke, /expect\(productionKey\)\.toHaveCount\(1\)/);
-    assert.match(smoke, /expect\(vkWebhook\)\.toHaveCount\(1\)/);
     assert.doesNotMatch(smoke, /if \(await productionKey\.count\(\)\)/);
-    assert.doesNotMatch(smoke, /if \(await vkWebhook\.count\(\)\)/);
+    assert.doesNotMatch(smoke, /hasText:\s*"VK inbound"/);
   });
 
   it("isolates runtime state for browser tests through the dedicated smoke database", () => {

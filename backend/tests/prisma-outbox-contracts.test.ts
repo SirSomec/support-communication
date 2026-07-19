@@ -2679,6 +2679,7 @@ describe("Prisma database and transactional outbox contracts", () => {
     assert.deepEqual(descriptor, {
       channel: "WHATSAPP",
       conversationId: "conv_prisma_descriptor",
+      deliveryState: null,
       id: "descriptor_prisma_001",
       idempotencyKey: "delivery-key-001",
       kind: "message_delivery",

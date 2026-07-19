@@ -62,7 +62,7 @@ describe("URL knowledge source refresh contracts", () => {
     }
   });
 
-  it("refresh worker processes only due enabled URL sources and leaves them pending approval", async () => {
+  it("refresh worker processes only due enabled URL sources without restoring the retired approval gate", async () => {
     const subject = service({ fetch: async () => new Response("Delivery FAQ", { headers: { "content-type": "text/plain" }, status: 200 }), resolveHostname: async () => [{ address: "8.8.8.8" }] });
     const created = await subject.service.create("tenant-volga", { kind: "url", sourceConfig: { url: "https://docs.example.test/faq" }, title: "Docs" });
     const id = String((created.data.source as { id: string }).id);
@@ -73,8 +73,8 @@ describe("URL knowledge source refresh contracts", () => {
     const refreshed = subject.repository.find("tenant-volga", id)!;
     assert.deepEqual(result, { failed: 0, refreshed: 1 });
     assert.equal(refreshed.status, "ready");
-    assert.equal(refreshed.approvalStatus, "pending");
-    assert.equal(refreshed.readiness, "stale");
+    assert.equal(refreshed.approvalStatus, "approved");
+    assert.equal(refreshed.readiness, "ready");
   });
 });
 

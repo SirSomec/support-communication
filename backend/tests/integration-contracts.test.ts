@@ -336,6 +336,12 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(created.data.key.name, "CRM key");
     assert.equal(created.data.key.env, "stage");
     assert.equal(created.data.key.status, "Active");
+
+    const rotated = await integrations.rotateApiKey(created.data.key.id);
+    assert.equal(rotated.status, "ok");
+    assert.equal(rotated.data.keyId, created.data.key.id);
+    assert.equal(rotated.data.environment, "stage");
+    assert.equal(rotated.data.status, "rotation_queued");
     assert.ok(created.data.key.keyPreview.includes("****"));
     assert.match(created.data.auditId, /^evt_key_/);
 

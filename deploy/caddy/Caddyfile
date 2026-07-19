@@ -1,0 +1,43 @@
+{
+	email {$ACME_EMAIL}
+	admin off
+	servers {
+		max_header_size 64KB
+		timeouts {
+			read_header 10s
+			read_body 60s
+			write 120s
+			idle 2m
+		}
+	}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	request_body {
+		max_size 64MB
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; manifest-src 'self'; worker-src 'self' blob:"
+	}
+
+	@metrics path /api/v1/metrics
+	respond @metrics 404
+
+	@api path /api/*
+	reverse_proxy @api api-gateway:4100
+
+	reverse_proxy frontend:8080
+
+	log {
+		output stdout
+		format json
+	}
+}

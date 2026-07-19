@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createTestEnv } from "../packages/testing/src/index.ts";
-import { assertCredentialMasterKeySafety, loadBackendConfig } from "../packages/config/src/index.ts";
+import { assertCredentialMasterKeySafety, loadBackendConfig, parseAllowedOrigins } from "../packages/config/src/index.ts";
 import { createEnvelope } from "../packages/envelope/src/index.ts";
 import { buildHealthEnvelope, buildReadinessEnvelope } from "../apps/api-gateway/src/health.response.ts";
 import { createRequestTraceId, shouldWriteStructuredLog } from "../packages/observability/src/index.ts";
@@ -83,6 +83,15 @@ describe("phase 0 shared backend foundation", () => {
     assert.equal(loadBackendConfig(createTestEnv({ BROWSER_PUSH_PUBLIC_KEY: "" })).BROWSER_PUSH_PUBLIC_KEY, undefined);
   });
 
+  it("normalizes an explicit CORS origin allowlist and rejects paths or unsafe schemes", () => {
+    assert.deepEqual(
+      parseAllowedOrigins("https://widget.example.test, https://admin.example.test,https://widget.example.test"),
+      ["https://widget.example.test", "https://admin.example.test"]
+    );
+    assert.throws(() => parseAllowedOrigins("https://widget.example.test/path"), /Invalid CORS origin/);
+    assert.throws(() => parseAllowedOrigins("javascript:alert(1)"), /Invalid CORS origin/);
+  });
+
   it("rejects the local development seed outside the local runtime", () => {
     const productionEnv = createTestEnv({
       AI_CONNECTIONS_MASTER_KEY: aiConnectionsMasterKey,
@@ -91,7 +100,11 @@ describe("phase 0 shared backend foundation", () => {
       JWT_REFRESH_SECRET: "prod-refresh-secret-16",
       NODE_ENV: "production",
       PROVIDER_CREDENTIAL_MASTER_KEY: providerCredentialMasterKey,
-      PUBLIC_API_KEY_SECRET: "prod-public-api-secret"
+      PUBLIC_API_KEY_SECRET: "prod-public-api-secret",
+      DATABASE_URL: "postgresql://runtime:strong-password@db.example.test:5432/support_communication",
+      S3_ACCESS_KEY: "production-s3-access",
+      S3_ENDPOINT: "https://s3.example.test",
+      S3_SECRET_KEY: "production-s3-secret"
     });
 
     assert.equal(loadBackendConfig(productionEnv).NODE_ENV, "production");
@@ -160,6 +173,27 @@ describe("phase 0 shared backend foundation", () => {
 
     assert.equal(config.NODE_ENV, "staging");
     assert.equal(config.DEMO_SERVICE_ADMIN_KEY, "staging-service-admin-key");
+  });
+
+  it("rejects known local credentials in the production profile", () => {
+    const productionEnv = createTestEnv({
+      AI_CONNECTIONS_MASTER_KEY: aiConnectionsMasterKey,
+      DEMO_SERVICE_ADMIN_KEY: "production-service-admin-key-strong",
+      JWT_ACCESS_SECRET: "production-access-secret-strong",
+      JWT_REFRESH_SECRET: "production-refresh-secret-strong",
+      NODE_ENV: "production",
+      PROVIDER_CREDENTIAL_MASTER_KEY: providerCredentialMasterKey,
+      PUBLIC_API_KEY_SECRET: "production-public-api-secret-strong",
+      DATABASE_URL: "postgresql://runtime:strong-password@db.example.test:5432/support_communication",
+      S3_ACCESS_KEY: "production-s3-access",
+      S3_ENDPOINT: "https://s3.example.test",
+      S3_SECRET_KEY: "production-s3-secret"
+    });
+
+    assert.doesNotThrow(() => loadBackendConfig(productionEnv));
+    assert.throws(() => loadBackendConfig({ ...productionEnv, JWT_ACCESS_SECRET: "local-dev-access-secret-16" }), /placeholder value/);
+    assert.throws(() => loadBackendConfig({ ...productionEnv, DATABASE_URL: "postgresql://support:support@db:5432/support" }), /Default local PostgreSQL credentials/);
+    assert.throws(() => loadBackendConfig({ ...productionEnv, S3_ACCESS_KEY: "minio", S3_SECRET_KEY: "minio-password" }), /Default local MinIO credentials/);
   });
 
   it("fails closed on missing, malformed, or known credential master keys outside local", () => {

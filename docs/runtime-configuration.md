@@ -120,6 +120,15 @@ The release gate generates ephemeral keys for its own local run. A direct `docke
 - `NODE_ENV=production`
 - demo header auth disabled
 
+Production HTTP security defaults:
+
+- `AUTH_RATE_LIMIT_ENABLED=true` enables Redis-backed limits for login, invitation, recovery, OIDC and SAML entry points. Staging and production fail closed if Redis is unavailable.
+- `CORS_ALLOWED_ORIGINS` is a comma-separated list of exact HTTP(S) origins; an empty value keeps the API same-origin only.
+- `OPENAPI_ENABLED` defaults to disabled in the production compose manifest. Enable it only behind a separate access control boundary.
+- `TRUST_PROXY_HEADERS=true` is safe only when the API is reachable exclusively through the controlled edge proxy.
+- Run `npm run production:config:check -- deploy/env/production.env` before migrations and every production rollout.
+- See `docs/production-runbook.md` for the complete server procedure, first-admin bootstrap, backups and rollback.
+
 Recommended verification before release:
 
 ```bash
@@ -192,7 +201,7 @@ Local bootstrap helpers live under `backend/scripts/`.
 - Billing sync worker command: `cd backend && npm run billing:worker:once`
 - Billing sync long-running command: `cd backend && npm run start:outbox-worker -- --billing-sync`
 - Compose service: `billing-sync-worker`
-- Production-like compose runs both workers against `DATABASE_URL=postgresql://support:support@postgres:5432/support_communication`.
+- Production-like compose runs both workers against `DATABASE_URL=postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30`.
 - File scan API callback smoke: `cd backend && npm run file-scan:api-callback-smoke` skips unless `FILE_SCAN_API_CALLBACK_SMOKE_ENABLED=true`. Root `npm run release:gate` runs it only after the production-like Prisma compose API is ready, seeds one Prisma-backed file scan job, logs in as service-admin, runs the scanner worker once, posts the scan result through the live `/files/:fileId/scan-result` API route, and verifies Prisma outbox, file scan state and idempotency persistence.
 - External scanner smoke: `cd backend && npm run file-scan:external-scanner-smoke` skips unless `FILE_SCAN_EXTERNAL_SCANNER_SMOKE_ENABLED=true`. Root `npm run release:gate` includes it after production-like API readiness with the host API and PostgreSQL URLs; set `OUTBOX_SCANNER_URL` to a real scanner endpoint to verify HTTP scanner dispatch plus the live `/files/:fileId/scan-result` callback path. Optional `FILE_SCAN_EXTERNAL_SCANNER_EXPECTED_SCANNER` pins the expected scanner name returned by the provider.
 - `outbox-worker` is scoped to the `message-delivery` queue; `billing-sync-worker` is scoped to the `billing-sync` queue.

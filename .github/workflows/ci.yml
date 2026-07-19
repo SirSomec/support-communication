@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -34,6 +34,8 @@ jobs:
       - run: npm run test:unit
       - run: npm run typecheck
         working-directory: backend
+      - run: npm run security:audit
+        working-directory: backend
       - run: npm test
         working-directory: backend
       - run: npm run tenant-isolation:verify
@@ -46,6 +48,8 @@ jobs:
         working-directory: packages/web-widget
       - run: npm run build
         working-directory: packages/web-widget
+      - name: Validate production deployment schema
+        run: npm run production:config:check -- --schema-only deploy/env/production.env.example
 
   e2e:
     name: Playwright (isolated smoke database)
@@ -53,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22

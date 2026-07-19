@@ -20,9 +20,9 @@ describe("Playwright runtime data source", () => {
     assert.doesNotMatch(seed, /\.playwright-runtime/);
   });
 
-  it("fails closed when named settings records are absent from the seeded database", () => {
+  it("does not depend on mutable named settings records from the seed", () => {
     const smoke = readFileSync(new URL("./smoke.spec.js", import.meta.url), "utf8");
-    assert.match(smoke, /hasText:\s*"Production SDK key"[\s\S]*?toHaveCount\(1\)/);
-    assert.match(smoke, /hasText:\s*"VK inbound"[\s\S]*?toHaveCount\(1\)/);
+    assert.match(smoke, /\.settings-create-api-key[\s\S]*?\.fill\("Production SDK key"\)[\s\S]*?toHaveCount\(1\)/);
+    assert.doesNotMatch(smoke, /hasText:\s*"VK inbound"/);
   });
 });

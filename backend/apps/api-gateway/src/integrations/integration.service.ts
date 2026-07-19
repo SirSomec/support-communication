@@ -608,41 +608,49 @@ export class IntegrationService {
   }
 
   async rotateApiKey(keyId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
-    const key = this.findApiKey(keyId);
+    const fixtureKey = this.findApiKey(keyId);
+    const storedKey = fixtureKey
+      ? undefined
+      : (await this.integrationRepository.listPublicApiKeyRecords()).find((key) => key.keyId === keyId);
 
-    if (!key) {
+    if (!fixtureKey && !storedKey) {
       return notFoundEnvelope("rotateApiKey", "api_key_not_found", `API key ${keyId} was not found.`, { keyId });
     }
 
+    const environment = fixtureKey?.env ?? storedKey!.environment;
+    const keyPreview = fixtureKey?.keyPreview ?? storedKey!.keyPreview;
+
     const rotation = {
       auditId: makeAuditId("key"),
-      environment: key.env,
+      environment,
       keyId,
       rawKeyShownOnce: false as const,
       requires2fa: true as const,
       rotationId: makeQueueId("key_rotation"),
       status: "rotation_queued"
     };
-    await this.integrationRepository.ensurePublicApiKeyReference({
-      createdAt: fixtureKeyCreatedAt(key),
-      environment: key.env,
-      keyId,
-      keyPreview: key.keyPreview,
-      name: key.name,
-      owner: key.owner,
-      scopes: key.scopes,
-      status: fixtureKeyStatus(key),
-      tenantId: DEFAULT_FIXTURE_TENANT_ID
-    });
+    if (fixtureKey) {
+      await this.integrationRepository.ensurePublicApiKeyReference({
+        createdAt: fixtureKeyCreatedAt(fixtureKey),
+        environment: fixtureKey.env,
+        keyId,
+        keyPreview: fixtureKey.keyPreview,
+        name: fixtureKey.name,
+        owner: fixtureKey.owner,
+        scopes: fixtureKey.scopes,
+        status: fixtureKeyStatus(fixtureKey),
+        tenantId: DEFAULT_FIXTURE_TENANT_ID
+      });
+    }
     await this.integrationRepository.saveApiKeyRotationJobAsync(rotation);
     await this.integrationRepository.saveApiKeyRotationAuditEvent({
       action: "public_api_key.rotation_queued",
       at: new Date().toISOString(),
       auditId: rotation.auditId,
-      environment: key.env,
+      environment,
       immutable: true,
       keyId,
-      keyPreview: key.keyPreview,
+      keyPreview,
       rotationId: rotation.rotationId,
       status: rotation.status
     });

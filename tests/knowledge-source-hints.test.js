@@ -13,10 +13,10 @@ function source(overrides = {}) {
 }
 
 describe("knowledge source bot hints", () => {
-  it("mirrors the server retrieval eligibility triple", () => {
+  it("mirrors the server readiness-only retrieval eligibility rule", () => {
     assert.equal(isSourceBotEligible(source()), true);
-    assert.equal(isSourceBotEligible(source({ approvalStatus: "pending" })), false);
-    assert.equal(isSourceBotEligible(source({ readiness: "not_ready" })), false);
+    assert.equal(isSourceBotEligible(source({ approvalStatus: "pending" })), true);
+    assert.equal(isSourceBotEligible(source({ readiness: "not_ready" })), true);
     assert.equal(isSourceBotEligible(source({ status: "draft" })), false);
   });
 
@@ -26,10 +26,10 @@ describe("knowledge source bot hints", () => {
     assert.equal(hints[0].tone, "ok");
   });
 
-  it("asks for approval when content is ready but pending", () => {
+  it("does not gate ready content on the retired approval state", () => {
     const hints = buildSourceBotHints(source({ approvalStatus: "pending" }), [activeScenario]);
-    assert.deepEqual(hints.map((hint) => hint.id), ["approval-pending"]);
-    assert.match(hints[0].title, /одобрите/);
+    assert.deepEqual(hints.map((hint) => hint.id), ["eligible"]);
+    assert.equal(hints[0].tone, "ok");
   });
 
   it("explains a draft source is not used by the bot yet", () => {

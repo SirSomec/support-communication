@@ -1,0 +1,387 @@
+name: support-communication-production
+
+x-runtime-environment: &runtime-environment
+  NODE_ENV: production
+  RUNTIME_PROFILE: production-like
+  LOCAL_DEVELOPMENT_SEED_ENABLED: "false"
+  API_VERSION: v1
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+  S3_ENDPOINT: ${S3_ENDPOINT:?S3_ENDPOINT is required}
+  S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+  S3_PUBLIC_UPLOAD_BASE: ${S3_PUBLIC_UPLOAD_BASE:-}
+  MAIL_HOST: ${MAIL_HOST:?MAIL_HOST is required}
+  MAIL_PORT: ${MAIL_PORT:-587}
+  MAIL_USERNAME: ${MAIL_USERNAME:-}
+  MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+  MAIL_FROM: ${MAIL_FROM:?MAIL_FROM is required}
+  MFA_OTP_DELIVERY_MODE: smtp
+  MFA_OTP_SMTP_FROM: ${MFA_OTP_SMTP_FROM:?MFA_OTP_SMTP_FROM is required}
+  MFA_OTP_SMTP_HOST: ${MAIL_HOST:?MAIL_HOST is required}
+  MFA_OTP_SMTP_PORT: ${MAIL_PORT:-587}
+  MFA_OTP_SMTP_USERNAME: ${MAIL_USERNAME:-}
+  MFA_OTP_SMTP_PASSWORD: ${MAIL_PASSWORD:-}
+  MFA_OTP_SMTP_SECURE: ${MAIL_SECURE:-false}
+  MFA_OTP_SMTP_TLS_REJECT_UNAUTHORIZED: "true"
+  DEMO_SERVICE_ADMIN_KEY: ${DEMO_SERVICE_ADMIN_KEY:?DEMO_SERVICE_ADMIN_KEY is required}
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+  PUBLIC_API_KEY_SECRET: ${PUBLIC_API_KEY_SECRET:?PUBLIC_API_KEY_SECRET is required}
+  PROVIDER_CREDENTIAL_MASTER_KEY: ${PROVIDER_CREDENTIAL_MASTER_KEY:?PROVIDER_CREDENTIAL_MASTER_KEY is required}
+  PROVIDER_CREDENTIAL_KEY_VERSION: ${PROVIDER_CREDENTIAL_KEY_VERSION:-v1}
+  AI_CONNECTIONS_MASTER_KEY: ${AI_CONNECTIONS_MASTER_KEY:?AI_CONNECTIONS_MASTER_KEY is required}
+  AI_CONNECTIONS_KEY_VERSION: ${AI_CONNECTIONS_KEY_VERSION:-v1}
+  FILE_SCAN_CALLBACK_TOKEN: ${FILE_SCAN_CALLBACK_TOKEN:?FILE_SCAN_CALLBACK_TOKEN is required}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+  OPENAPI_ENABLED: "false"
+  AUTH_RATE_LIMIT_ENABLED: "true"
+  TRUST_PROXY_HEADERS: "true"
+  PUBLIC_WEBHOOK_BASE_URL: https://${APP_DOMAIN:?APP_DOMAIN is required}
+  REALTIME_REDIS_FANOUT_ENABLED: "true"
+  REALTIME_REDIS_CHANNEL: ${REALTIME_REDIS_CHANNEL:-support:realtime}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  WORKER_HEALTH_PORT: 4110
+  WORKER_HEARTBEAT_INTERVAL_MS: 5000
+  WORKER_HEARTBEAT_STALE_AFTER_MS: 15000
+  WORKER_DRAIN_TIMEOUT_MS: 40000
+
+x-runtime-service: &runtime-service
+  image: ${API_IMAGE:?API_IMAGE is required}
+  pull_policy: always
+  restart: unless-stopped
+  user: "1000:1000"
+  read_only: true
+  tmpfs:
+    - /tmp:uid=1000,gid=1000,mode=1770
+    - /app/backend/.runtime:uid=1000,gid=1000,mode=0700
+  cap_drop: ["ALL"]
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 45s
+  networks: [backend]
+  mem_limit: 768m
+  cpus: 1.0
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4110/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 15s
+    timeout: 5s
+    retries: 6
+    start_period: 15s
+
+services:
+  edge:
+    image: caddy:2.8-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+      APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
+    pull_policy: always
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=1770
+      - /var/cache/nginx:uid=101,gid=101,mode=0750
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    networks: [edge]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
+    cpus: 0.5
+
+  api-gateway:
+    <<: *runtime-service
+    environment:
+      <<: *runtime-environment
+      PORT: 4100
+      SERVICE_NAME: api-gateway
+      BOOTSTRAP_SERVICE_ADMIN_EMAIL: ${BOOTSTRAP_SERVICE_ADMIN_EMAIL:-}
+      BOOTSTRAP_SERVICE_ADMIN_PASSWORD: ${BOOTSTRAP_SERVICE_ADMIN_PASSWORD:-}
+      REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
+      REPORT_EXPORT_OBJECT_ROOT: /tmp/report-exports
+      BROWSER_PUSH_ENABLED: ${BROWSER_PUSH_ENABLED:-false}
+      BROWSER_PUSH_PUBLIC_KEY: ${BROWSER_PUSH_PUBLIC_KEY:-}
+      BROWSER_PUSH_PRIVATE_KEY: ${BROWSER_PUSH_PRIVATE_KEY:-}
+      BROWSER_PUSH_SUBJECT: ${BROWSER_PUSH_SUBJECT:-}
+    networks: [edge, backend]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/api/v1/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+  migrate:
+    image: ${MIGRATION_IMAGE:?MIGRATION_IMAGE is required}
+    pull_policy: always
+    profiles: ["release"]
+    restart: "no"
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1770
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      NODE_ENV: production
+    networks: [backend]
+
+  notification-delivery-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/notifications/notification-delivery.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: notification-delivery-worker
+      NOTIFICATION_DELIVERY_PROVIDER_MODE: ${NOTIFICATION_DELIVERY_PROVIDER_MODE:-disabled}
+      BROWSER_PUSH_ENABLED: ${BROWSER_PUSH_ENABLED:-false}
+      BROWSER_PUSH_PUBLIC_KEY: ${BROWSER_PUSH_PUBLIC_KEY:-}
+      BROWSER_PUSH_PRIVATE_KEY: ${BROWSER_PUSH_PRIVATE_KEY:-}
+      BROWSER_PUSH_SUBJECT: ${BROWSER_PUSH_SUBJECT:-}
+
+  lead-notification-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/integrations/public-demo-request-notification.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: lead-notification-worker
+      PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE: smtp
+      PUBLIC_DEMO_NOTIFICATION_SMTP_HOST: ${MAIL_HOST:?MAIL_HOST is required}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_PORT: ${MAIL_PORT:-587}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_FROM: ${MAIL_FROM:?MAIL_FROM is required}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_TO: ${PUBLIC_DEMO_NOTIFICATION_SMTP_TO:?PUBLIC_DEMO_NOTIFICATION_SMTP_TO is required}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_USERNAME: ${MAIL_USERNAME:-}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_PASSWORD: ${MAIL_PASSWORD:-}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_SECURE: ${MAIL_SECURE:-false}
+      PUBLIC_DEMO_NOTIFICATION_SMTP_TLS_REJECT_UNAUTHORIZED: "true"
+
+  webhook-delivery-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/integrations/webhook-delivery.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: webhook-delivery-worker
+      WEBHOOK_DELIVERY_PROVIDER_MODE: http
+      WEBHOOK_DELIVERY_SIGNING_SECRET: ${WEBHOOK_DELIVERY_SIGNING_SECRET:?WEBHOOK_DELIVERY_SIGNING_SECRET is required}
+
+  telegram-polling-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/integrations/telegram-polling.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: telegram-polling-worker
+      TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-false}
+      TELEGRAM_POLLING_INTERVAL_MS: ${TELEGRAM_POLLING_INTERVAL_MS:-5000}
+
+  proactive-delivery-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/automation/proactive-delivery.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: proactive-delivery-worker
+
+  bot-runtime-reconciliation-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/automation/bot-runtime-reconciliation.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: bot-runtime-reconciliation-worker
+
+  knowledge-document-ingestion-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/knowledge-sources/document-ingestion.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: knowledge-document-ingestion-worker
+
+  url-source-refresh-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/knowledge-sources/url-source-refresh.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: url-source-refresh-worker
+
+  report-digest-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/reports/report-digest.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: report-digest-worker
+      REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
+
+  report-export-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/reports/report-export.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: report-export-worker
+      REPORT_EXPORT_OBJECT_STORAGE_MODE: s3
+      REPORT_EXPORT_OBJECT_ROOT: /tmp/report-exports
+
+  quota-expiration-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/billing/quota-expiration.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: quota-expiration-worker
+
+  sla-timer-worker:
+    <<: *runtime-service
+    command: ["node", "apps/api-gateway/dist/routing/sla-timer.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: sla-timer-worker
+      SLA_TIMER_WORKER_HEALTH_PORT: 4110
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4110/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+  rescue-return-worker:
+    <<: *runtime-service
+    command: ["node", "apps/api-gateway/dist/routing/rescue-return.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: rescue-return-worker
+      RESCUE_RETURN_WORKER_HEALTH_PORT: 4110
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4110/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+  outbox-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/outbox-worker/dist/main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: outbox-worker
+      OUTBOX_QUEUE: message-delivery
+      OUTBOX_TELEGRAM_ENABLED: ${OUTBOX_TELEGRAM_ENABLED:-true}
+      OUTBOX_VK_ENABLED: ${OUTBOX_VK_ENABLED:-true}
+      OUTBOX_MAX_ENABLED: ${OUTBOX_MAX_ENABLED:-true}
+
+  identity-events-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/outbox-worker/dist/main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: identity-events-worker
+      OUTBOX_QUEUE: identity-events
+
+  billing-sync-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/outbox-worker/dist/main.js", "--billing-sync"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: billing-sync-worker
+      BILLING_SYNC_WORKER: "true"
+      BILLING_SYNC_PROVIDER_MODE: ${BILLING_SYNC_PROVIDER_MODE:-disabled}
+      BILLING_SYNC_PROVIDER_URL: ${BILLING_SYNC_PROVIDER_URL:-}
+      OUTBOX_QUEUE: billing-sync
+
+  file-scan-scanner-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/outbox-worker/dist/main.js", "--file-scan-scanner"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: file-scan-scanner-worker
+      OUTBOX_FILE_SCAN_SCANNER_WORKER: "true"
+      OUTBOX_QUEUE: file-scan
+      OUTBOX_SCANNER_ENABLED: "true"
+      OUTBOX_SCANNER_PROVIDER_MODE: http
+      OUTBOX_SCANNER_URL: http://clamav-scanner:4120/scan
+      OUTBOX_SCANNER_BEARER_TOKEN: ${OUTBOX_SCANNER_BEARER_TOKEN:?OUTBOX_SCANNER_BEARER_TOKEN is required}
+      OUTBOX_FILE_SCAN_RESULT_BASE_URL: http://api-gateway:4100/api/v1
+      OUTBOX_FILE_SCAN_RESULT_BEARER_TOKEN: ${FILE_SCAN_CALLBACK_TOKEN:?FILE_SCAN_CALLBACK_TOKEN is required}
+    depends_on:
+      clamav-scanner:
+        condition: service_healthy
+
+  clamav-scanner:
+    <<: *runtime-service
+    command: ["node", "apps/outbox-worker/dist/clamav-scanner.main.js"]
+    environment:
+      NODE_ENV: production
+      SERVICE_NAME: clamav-scanner
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      CLAMAV_SCANNER_HTTP_PORT: 4120
+      CLAMAV_MAX_FILE_BYTES: ${CLAMAV_MAX_FILE_BYTES:-20971520}
+      CLAMAV_SCANNER_BEARER_TOKEN: ${OUTBOX_SCANNER_BEARER_TOKEN:?OUTBOX_SCANNER_BEARER_TOKEN is required}
+      CLAMAV_ALLOWED_DOWNLOAD_ORIGINS: ${CLAMAV_ALLOWED_DOWNLOAD_ORIGINS:?CLAMAV_ALLOWED_DOWNLOAD_ORIGINS is required}
+    depends_on:
+      clamav:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4120/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  clamav:
+    image: clamav/clamav:1.4@sha256:e7ead98e7e07231b151bce988e0cfb0a3b46e6e7046d9dd44fd838c0df724a03
+    restart: unless-stopped
+    volumes:
+      - clamav-data:/var/lib/clamav
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "printf 'zPING\\0' | nc -w 2 127.0.0.1 3310 | grep -q PONG"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+networks:
+  edge:
+  backend:
+
+volumes:
+  caddy-data:
+  caddy-config:
+  clamav-data:

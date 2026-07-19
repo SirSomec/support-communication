@@ -189,7 +189,7 @@ describe("product release gate", () => {
 
     assert.equal(workerEnv.NODE_ENV, "staging");
     assert.equal(workerEnv.RUNTIME_PROFILE, "production-like");
-    assert.equal(workerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
+    assert.equal(workerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30");
     assert.equal(workerEnv.LOCAL_DEVELOPMENT_SEED_ENABLED, undefined);
     assert.equal(workerEnv.NOTIFICATION_REPOSITORY, undefined);
     assert.equal(workerEnv.BROWSER_PUSH_ENABLED, "false");
@@ -205,7 +205,7 @@ describe("product release gate", () => {
     const leadWorkerEnv = config.services["lead-notification-worker"].environment;
     assert.equal(leadWorkerEnv.NODE_ENV, "staging");
     assert.equal(leadWorkerEnv.RUNTIME_PROFILE, "production-like");
-    assert.equal(leadWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
+    assert.equal(leadWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30");
     assert.equal(leadWorkerEnv.INTEGRATION_REPOSITORY, undefined);
     assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_PROVIDER_MODE, "smtp");
     assert.equal(leadWorkerEnv.PUBLIC_DEMO_NOTIFICATION_SMTP_FROM, "noreply@support-communication.local");
@@ -257,7 +257,7 @@ describe("product release gate", () => {
     const outboxWorkerEnv = outboxWorker.environment;
     assert.equal(outboxWorkerEnv.NODE_ENV, "staging");
     assert.equal(outboxWorkerEnv.RUNTIME_PROFILE, "production-like");
-    assert.equal(outboxWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
+    assert.equal(outboxWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30");
     assert.equal(outboxWorkerEnv.SERVICE_NAME, "outbox-worker");
     assert.equal(outboxWorkerEnv.OUTBOX_QUEUE, "message-delivery");
     assert.equal(outboxWorkerEnv.OUTBOX_BATCH_SIZE, "50");
@@ -270,7 +270,7 @@ describe("product release gate", () => {
     const billingSyncWorkerEnv = billingSyncWorker.environment;
     assert.equal(billingSyncWorkerEnv.NODE_ENV, "staging");
     assert.equal(billingSyncWorkerEnv.RUNTIME_PROFILE, "production-like");
-    assert.equal(billingSyncWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
+    assert.equal(billingSyncWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30");
     assert.equal(billingSyncWorkerEnv.SERVICE_NAME, "billing-sync-worker");
     assert.equal(billingSyncWorkerEnv.BILLING_SYNC_WORKER, "true");
     assert.equal(billingSyncWorkerEnv.OUTBOX_QUEUE, "billing-sync");
@@ -286,7 +286,7 @@ describe("product release gate", () => {
     const proactiveDeliveryWorkerEnv = proactiveDeliveryWorker.environment;
     assert.equal(proactiveDeliveryWorkerEnv.NODE_ENV, "staging");
     assert.equal(proactiveDeliveryWorkerEnv.RUNTIME_PROFILE, "production-like");
-    assert.equal(proactiveDeliveryWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
+    assert.equal(proactiveDeliveryWorkerEnv.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30");
     assert.equal(proactiveDeliveryWorkerEnv.AUTOMATION_REPOSITORY, undefined);
     assert.equal(proactiveDeliveryWorkerEnv.CONVERSATION_REPOSITORY, undefined);
     assert.equal(proactiveDeliveryWorkerEnv.PROACTIVE_DELIVERY_LIMIT, "50");
@@ -495,7 +495,7 @@ describe("product release gate", () => {
     ]);
     assert.equal(worker.environment.NODE_ENV, "staging");
     assert.equal(worker.environment.RUNTIME_PROFILE, "production-like");
-    assert.equal(worker.environment.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication");
+    assert.equal(worker.environment.DATABASE_URL, "postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30");
     assert.equal(worker.environment.OUTBOX_FILE_SCAN_SCANNER_WORKER, "true");
     assert.equal(worker.environment.OUTBOX_SCANNER_ENABLED, "true");
     assert.equal(worker.environment.OUTBOX_SCANNER_BEARER_TOKEN, "release-gate-scanner-token");

@@ -14,6 +14,7 @@ import {
   parseTelegramQualityRating,
   resolveTelegramInboundConversation,
   resolveTelegramRatedTarget,
+  telegramMessageAttachments,
   telegramRoutingQueueId,
   telegramTenantEventId
 } from "./telegram-webhook.route.js";
@@ -85,10 +86,14 @@ interface TelegramUpdatePayload {
 }
 
 interface TelegramMessagePayload {
+  animation?: TelegramMediaPayload;
+  audio?: TelegramMediaPayload;
+  caption?: string;
   chat?: {
     id?: number | string;
     type?: string;
   };
+  document?: TelegramMediaPayload;
   from?: {
     first_name?: string;
     id?: number | string;
@@ -96,7 +101,21 @@ interface TelegramMessagePayload {
     username?: string;
   };
   message_id?: number | string;
+  photo?: TelegramMediaPayload[];
+  sticker?: TelegramMediaPayload;
   text?: string;
+  video?: TelegramMediaPayload;
+  voice?: TelegramMediaPayload;
+}
+
+interface TelegramMediaPayload {
+  file_id?: string;
+  file_name?: string;
+  file_size?: number;
+  file_unique_id?: string;
+  height?: number;
+  mime_type?: string;
+  width?: number;
 }
 
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -253,6 +272,7 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
       const isNewConversation = conversation.messages.length === 0;
 
       const normalized = await input.conversationService.normalizeInboundEvent("telegram", {
+        attachments: parsed.attachments,
         conversationId: conversation.id,
         csatFeedback: resolved.csatFeedbackAwaiting,
         eventId: telegramTenantEventId(connection.tenantId, connection.botId ?? undefined, parsed.eventId),
@@ -501,9 +521,10 @@ function parseTelegramPollingUpdate(update: TelegramUpdatePayload) {
     return null;
   }
 
-  const text = String(message.text ?? "").trim();
+  const attachments = telegramMessageAttachments(message as Record<string, unknown>);
+  const text = String(message.text ?? message.caption ?? "").trim();
   const chatId = String(message.chat?.id ?? "").trim();
-  if (!text || !chatId) {
+  if ((!text && !attachments.length) || !chatId) {
     return null;
   }
 
@@ -518,6 +539,7 @@ function parseTelegramPollingUpdate(update: TelegramUpdatePayload) {
     displayName,
     eventId: `telegram:${updateId}:${messageId || "message"}`,
     messageId,
+    attachments,
     text,
     updateId,
     username: username || undefined

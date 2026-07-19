@@ -148,10 +148,55 @@ export function mapApiMessage(input) {
   }
 
   if (Array.isArray(input?.attachments)) {
-    mapped.attachments = input.attachments;
+    mapped.attachments = input.attachments.map(normalizeAttachment);
   }
 
   return mapped;
+}
+
+export function normalizeAttachment(input, index = 0) {
+  const attachment = isRecord(input) ? input : {};
+  const fileName = nonEmptyString(attachment.fileName, nonEmptyString(attachment.name, nonEmptyString(attachment.title, "Вложение")));
+  const type = nonEmptyString(attachment.mimeType, nonEmptyString(attachment.type, "Файл"));
+  const sizeBytes = Number(attachment.sizeBytes ?? attachment.size);
+  const downloadUrl = safeHttpUrl(attachment.download?.url)
+    || safeHttpUrl(attachment.file)
+    || safeHttpUrl(attachment.url);
+  const thumbnailUrl = safeHttpUrl(attachment.thumb);
+  const previewUrl = isImageAttachment(type, fileName)
+    ? thumbnailUrl || downloadUrl
+    : thumbnailUrl;
+
+  return {
+    ...attachment,
+    id: nonEmptyString(attachment.id, nonEmptyString(attachment.fileId, nonEmptyString(attachment.providerFileUniqueId, `attachment-${index}`))),
+    name: fileName,
+    size: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? formatAttachmentSize(sizeBytes) : "",
+    type,
+    ...(downloadUrl ? { downloadUrl } : {}),
+    ...(previewUrl ? { previewUrl } : {})
+  };
+}
+
+function safeHttpUrl(value) {
+  const url = nonEmptyString(value);
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function isImageAttachment(type, fileName) {
+  return /^image\//i.test(type) || /^(image|photo|sticker)$/i.test(type) || /\.(avif|gif|jpe?g|png|webp)$/i.test(fileName);
+}
+
+function formatAttachmentSize(bytes) {
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
 function mapMessages(messages) {

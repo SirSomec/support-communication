@@ -76,6 +76,42 @@ describe("telegram webhook ingress contracts", () => {
     assert.equal(conversation?.messages.at(-1)?.text, "Здравствуйте, где мой заказ?");
   });
 
+  it("accepts a photo-only update and persists its attachment metadata", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+    const integrationRepository = IntegrationRepository.inMemory(seedTelegramIntegrationState());
+    const response = await handleTelegramWebhookFromRoute({
+      body: {
+        message: {
+          chat: { id: 345678, type: "private" },
+          from: { first_name: "Photo", id: 9 },
+          message_id: 11,
+          photo: [{ file_id: "small", file_size: 100 }, { file_id: "large", file_size: 2048, file_unique_id: "photo-unique", height: 900, width: 1200 }]
+        },
+        update_id: 9011
+      },
+      conversationRepository: repository,
+      conversationService: conversations,
+      headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+      integrationRepository
+    }, loadTelegramWebhookConfig({ TELEGRAM_WEBHOOK_ENABLED: "true" }));
+
+    assert.equal(response.status, "ok");
+    const conversation = await repository.findConversation(telegramConversationId(TENANT_ID, "123456789", "345678"));
+    const attachment = conversation?.messages.at(-1)?.attachments?.[0];
+    assert.equal(conversation?.messages.at(-1)?.text, "Attachment received");
+    assert.deepEqual(attachment, {
+      fileName: "photo.jpg",
+      height: 900,
+      mimeType: "image/jpeg",
+      providerFileId: "large",
+      providerFileUniqueId: "photo-unique",
+      sizeBytes: 2048,
+      type: "image",
+      width: 1200
+    });
+  });
+
   it("rejects telegram webhook when secret token is invalid", async () => {
     const { baseUrl } = await createTestApiApp(apps);
 

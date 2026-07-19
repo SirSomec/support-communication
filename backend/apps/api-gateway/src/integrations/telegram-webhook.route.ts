@@ -194,6 +194,7 @@ export async function handleTelegramWebhookFromRoute(
   const isNewConversation = conversation.messages.length === 0;
 
   const normalized = await input.conversationService.normalizeInboundEvent("telegram", {
+    attachments: parsed.attachments,
     conversationId: conversation.id,
     csatFeedback: resolved.csatFeedbackAwaiting,
     eventId: telegramTenantEventId(tenantId, tenantConnection?.botId ?? undefined, parsed.eventId),
@@ -473,8 +474,9 @@ function parseTelegramUpdate(body: Record<string, unknown>) {
     return null;
   }
 
-  const text = String(message.text ?? "").trim();
-  if (!text) {
+  const attachments = telegramMessageAttachments(message);
+  const text = String(message.text ?? message.caption ?? "").trim();
+  if (!text && !attachments.length) {
     return null;
   }
 
@@ -497,10 +499,67 @@ function parseTelegramUpdate(body: Record<string, unknown>) {
     displayName,
     eventId: `telegram:${updateId}:${messageId || "message"}`,
     messageId,
+    attachments,
     text,
     updateId,
     username: username || undefined
   };
+}
+
+/** Maps Telegram media to safe metadata. File identifiers remain server-side. */
+export function telegramMessageAttachments(message: Record<string, unknown>): Array<Record<string, unknown>> {
+  const document = objectRecord(message.document);
+  if (document) return [telegramAttachment(document, { fallbackName: "document", mimeType: stringValue(document.mime_type), type: "document" })];
+
+  const photo = Array.isArray(message.photo)
+    ? message.photo.filter((item): item is Record<string, unknown> => Boolean(objectRecord(item))).at(-1)
+    : undefined;
+  if (photo) return [telegramAttachment(photo, { fallbackName: "photo.jpg", mimeType: "image/jpeg", type: "image" })];
+
+  const media = [
+    ["video", "video", "video"],
+    ["animation", "animation", "video"],
+    ["audio", "audio", "audio"],
+    ["voice", "voice", "audio"],
+    ["sticker", "sticker.webp", "image"]
+  ] as const;
+  for (const [field, fallbackName, type] of media) {
+    const value = objectRecord(message[field]);
+    if (value) return [telegramAttachment(value, { fallbackName, mimeType: stringValue(value.mime_type), type })];
+  }
+  return [];
+}
+
+function telegramAttachment(value: Record<string, unknown>, defaults: { fallbackName: string; mimeType?: string; type: string }): Record<string, unknown> {
+  const fileId = stringValue(value.file_id);
+  const fileName = stringValue(value.file_name) || defaults.fallbackName;
+  const sizeBytes = finiteNonNegativeNumber(value.file_size);
+  const width = finiteNonNegativeNumber(value.width);
+  const height = finiteNonNegativeNumber(value.height);
+  const uniqueId = stringValue(value.file_unique_id);
+  return {
+    ...(fileId ? { providerFileId: fileId } : {}),
+    ...(uniqueId ? { providerFileUniqueId: uniqueId } : {}),
+    ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+    ...(width !== undefined ? { width } : {}),
+    ...(height !== undefined ? { height } : {}),
+    fileName,
+    mimeType: defaults.mimeType || undefined,
+    type: defaults.type
+  };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function finiteNonNegativeNumber(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
 }
 
 export interface TelegramRatedTarget {

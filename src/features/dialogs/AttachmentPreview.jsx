@@ -2,8 +2,8 @@ import React from "react";
 import { FileText } from "lucide-react";
 
 export function AttachmentPreview({ attachment, compact = false }) {
-  return (
-    <span className={`attachment-preview ${compact ? "compact" : ""}`}>
+  const body = (
+    <>
       <span className="attachment-thumb">
         {attachment.previewUrl ? (
           <img alt={`Превью ${attachment.name}`} src={attachment.previewUrl} />
@@ -15,6 +15,12 @@ export function AttachmentPreview({ attachment, compact = false }) {
         <strong>{attachment.name}</strong>
         <small>{attachment.type} · {attachment.size}</small>
       </span>
-    </span>
+    </>
   );
+  const className = `attachment-preview ${compact ? "compact" : ""}`;
+  return attachment.downloadUrl ? (
+    <a className={className} href={attachment.downloadUrl} rel="noopener noreferrer" target="_blank">
+      {body}
+    </a>
+  ) : <span className={className}>{body}</span>;
 }

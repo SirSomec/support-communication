@@ -96,6 +96,34 @@ describe("conversationApiMapper", () => {
     assert.equal(mapped[0].status, "active");
   });
 
+  it("normalizes inbound file metadata and accepts only safe attachment URLs", () => {
+    const message = mapApiMessage({
+      attachments: [
+        { file: "https://files.example.test/photo.png", fileName: "photo.png", mimeType: "image/png", sizeBytes: 2048 },
+        { file: "javascript:alert(1)", fileName: "unsafe.pdf", sizeBytes: 7, type: "document" }
+      ],
+      id: "m-attachment",
+      side: "client",
+      text: "Attachment received",
+      time: "now"
+    });
+
+    assert.deepEqual(message.attachments[0], {
+      downloadUrl: "https://files.example.test/photo.png",
+      file: "https://files.example.test/photo.png",
+      fileName: "photo.png",
+      id: "attachment-0",
+      mimeType: "image/png",
+      name: "photo.png",
+      previewUrl: "https://files.example.test/photo.png",
+      size: "2.0 КБ",
+      sizeBytes: 2048,
+      type: "image/png"
+    });
+    assert.equal(message.attachments[1].downloadUrl, undefined);
+    assert.equal(message.attachments[1].name, "unsafe.pdf");
+  });
+
   it("restores persisted Rescue state after an inbox refresh", () => {
     const rescueState = { state: "active", startedAt: 1000, deadlineAt: 241000, durationSeconds: 240 };
     const mapped = mapApiConversation({ id: "conv-rescue", rescueState });

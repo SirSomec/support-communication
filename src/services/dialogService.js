@@ -1,4 +1,4 @@
-import { apiRequest, createApiErrorEnvelope } from "./apiClient.js";
+import { apiDownload, apiRequest, createApiErrorEnvelope } from "./apiClient.js";
 
 const SERVICE = "dialogService";
 
@@ -112,6 +112,14 @@ export const dialogService = {
     });
   },
 
+  async downloadInboundAttachment({ attachmentId, conversationId, messageId } = {}) {
+    if (!hasRouteId(conversationId) || !hasRouteId(messageId) || !hasRouteId(attachmentId)) return missingIdEnvelope("downloadInboundAttachment", "Attachment reference is required.");
+    return apiDownload(`/dialogs/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/download`, {
+      operation: "downloadInboundAttachment",
+      service: SERVICE
+    });
+  },
+
   async createOutboundConversationRequest(payload) {
     return apiRequest("/dialogs/outbound", {
       body: payload,
@@ -148,6 +156,7 @@ export const dialogService = {
         "uploadAttachment",
         "finalizeAttachmentUpload",
         "fetchAttachmentUploadStatus",
+        "downloadInboundAttachment",
         "createOutboundConversationRequest"
       ],
       traceId: `trc_${SERVICE}_ready`,

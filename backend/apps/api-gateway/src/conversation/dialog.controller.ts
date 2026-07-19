@@ -1,15 +1,22 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Param, Patch, Post, Query, Req, Res, StreamableFile, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
 import { RequireTenantOperatorPermission, type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
 import { ConversationService } from "./conversation.service.js";
 import { OperatorAiSuggestionService } from "./operator-ai-suggestion.service.js";
 import { TenantOperatorOrServiceAdminGuard } from "./tenant-operator-or-service-admin.guard.js";
+import { ConversationRepository } from "./conversation.repository.js";
+import { IntegrationRepository } from "../integrations/integration.repository.js";
+
+const MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const TELEGRAM_ATTACHMENT_TIMEOUT_MS = 30_000;
 
 @ApiTags("dialogs")
 @UseGuards(TenantOperatorOrServiceAdminGuard)
 @Controller("dialogs")
 export class DialogController {
+  private readonly conversationRepository = ConversationRepository.default();
+  private readonly integrationRepository = IntegrationRepository.default();
   constructor(
     private readonly conversationService: ConversationService,
     private readonly operatorAiSuggestionService: OperatorAiSuggestionService
@@ -97,6 +104,52 @@ export class DialogController {
   @ApiOkResponse({ description: "Dialog detail envelope" })
   fetchDialogDetail(@Param("conversationId") conversationId: string, @Req() request: TenantOperatorRequest & ServiceAdminRequest) {
     return this.conversationService.fetchDialogDetail(conversationId, dialogContextFromRequest(request));
+  }
+
+  @Get(":conversationId/messages/:messageId/attachments/:attachmentId/download")
+  @RequireTenantOperatorPermission("dialogs.read")
+  @RequireServiceAdminAction("dialogs.read")
+  async downloadInboundTelegramAttachment(
+    @Param("conversationId") conversationId: string,
+    @Param("messageId") messageId: string,
+    @Param("attachmentId") attachmentId: string,
+    @Req() request: TenantOperatorRequest & ServiceAdminRequest,
+    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): void }
+  ): Promise<StreamableFile> {
+    const scope = dialogContextFromRequest(request);
+    const conversation = await this.conversationRepository.findConversation(conversationId);
+    if (!conversation || !scope.tenantId || conversation.tenantId !== scope.tenantId || conversation.channel.toLowerCase() !== "telegram") throw new NotFoundException("Attachment was not found.");
+    const message = conversation.messages.find((item) => String(item.id) === String(messageId));
+    const attachments = message?.attachments ?? [];
+    const index = /^index-(\d+)$/.exec(String(attachmentId))?.[1];
+    const attachment = index === undefined ? attachments.find((item) => String(item.providerFileUniqueId ?? "") === String(attachmentId)) : attachments[Number(index)];
+    const fileId = String(attachment?.providerFileId ?? "").trim();
+    if (!fileId) throw new NotFoundException("Attachment was not found.");
+    const botId = conversation.tags.find((tag) => tag.startsWith("bot:"))?.slice(4);
+    const candidates = (await this.integrationRepository.listTelegramConnectionsAsync()).filter((item) => item.tenantId === scope.tenantId && item.status === "active");
+    const connection = botId ? candidates.find((item) => item.botId === botId) : candidates.length === 1 ? candidates[0] : undefined;
+    if (!connection?.botToken) throw new NotFoundException("Telegram attachment access is unavailable.");
+    const apiBase = String(process.env.TELEGRAM_API_BASE_URL ?? "https://api.telegram.org").replace(/\/+$/, "");
+    const descriptorResponse = await fetch(`${apiBase}/bot${connection.botToken}/getFile?file_id=${encodeURIComponent(fileId)}`, {
+      signal: AbortSignal.timeout(TELEGRAM_ATTACHMENT_TIMEOUT_MS)
+    });
+    const descriptor = await descriptorResponse.json() as { ok?: boolean; result?: { file_path?: string } };
+    const filePath = String(descriptor.result?.file_path ?? "").trim();
+    if (!descriptorResponse.ok || !descriptor.ok || !filePath || filePath.includes("..")) throw new NotFoundException("Telegram attachment is no longer available.");
+    const fileResponse = await fetch(`${apiBase}/file/bot${connection.botToken}/${filePath}`, {
+      signal: AbortSignal.timeout(TELEGRAM_ATTACHMENT_TIMEOUT_MS)
+    });
+    if (!fileResponse.ok) throw new NotFoundException("Telegram attachment is no longer available.");
+    const contentLength = Number(fileResponse.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_INBOUND_ATTACHMENT_BYTES) {
+      throw new NotFoundException("Attachment exceeds the download limit.");
+    }
+    const body = Buffer.from(await fileResponse.arrayBuffer());
+    if (body.byteLength > MAX_INBOUND_ATTACHMENT_BYTES) throw new NotFoundException("Attachment exceeds the download limit.");
+    const fileName = safeAttachmentFileName(String(attachment?.fileName ?? "attachment"));
+    response.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    response.setHeader("Content-Type", String(attachment?.mimeType ?? fileResponse.headers.get("content-type") ?? "application/octet-stream"));
+    return new StreamableFile(body);
   }
 
   @Patch(":conversationId/assignment")
@@ -191,6 +244,7 @@ function dialogContextFromRequest(request: TenantOperatorRequest & ServiceAdminR
       tenantId
     };
   }
+
   if (request.serviceAdminContext?.currentTenantId) {
     return {
       actorId: request.serviceAdminContext.actor.id,
@@ -205,4 +259,8 @@ function dialogContextFromRequest(request: TenantOperatorRequest & ServiceAdminR
 
 function canViewSensitiveFields(permissions: string[]): boolean {
   return permissions.includes("*") || permissions.includes("dialogs.manage") || permissions.includes("clients.merge");
+}
+
+function safeAttachmentFileName(value: string): string {
+  return value.replace(/[\\/:*?"<>|\r\n]+/g, "_").trim() || "attachment";
 }

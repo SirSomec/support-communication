@@ -1,7 +1,7 @@
 import React from "react";
 import { FileText } from "lucide-react";
 
-export function AttachmentPreview({ attachment, compact = false }) {
+export function AttachmentPreview({ attachment, compact = false, onOpen }) {
   const body = (
     <>
       <span className="attachment-thumb">
@@ -18,9 +18,8 @@ export function AttachmentPreview({ attachment, compact = false }) {
     </>
   );
   const className = `attachment-preview ${compact ? "compact" : ""}`;
-  return attachment.downloadUrl ? (
-    <a className={className} href={attachment.downloadUrl} rel="noopener noreferrer" target="_blank">
-      {body}
-    </a>
-  ) : <span className={className}>{body}</span>;
+  if ((attachment.downloadUrl || attachment.downloadPath) && onOpen) {
+    return <button className={className} onClick={() => onOpen?.(attachment)} type="button">{body}</button>;
+  }
+  return <span className={className}>{body}</span>;
 }

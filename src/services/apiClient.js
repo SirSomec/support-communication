@@ -144,6 +144,48 @@ export async function apiRequest(path, { authMode = "auto", body, headers = {}, 
   }
 }
 
+export async function apiDownload(path, { authMode = "auto", operation = "download", service = "apiClient", signal, timeoutMs } = {}) {
+  const headers = {};
+  const token = authMode === "service-admin" ? getServiceAdminAccessToken() : authMode === "public" ? "" : getTenantAccessToken();
+  if (token) headers.authorization = `Bearer ${token}`;
+  if (!token && authMode !== "public") {
+    return createApiErrorEnvelope({ code: "session_required", message: "Сессия оператора не найдена.", operation, service });
+  }
+  const abortContext = createRequestAbortContext({ signal, timeoutMs });
+  try {
+    const response = await fetch(buildApiUrl(path), { headers, signal: abortContext.signal });
+    if (!response.ok) {
+      return createApiErrorEnvelope({ code: `http_${response.status}`, message: response.statusText || "Не удалось загрузить вложение.", operation, service });
+    }
+    return {
+      data: {
+        body: await response.blob(),
+        contentType: response.headers.get("content-type") || "application/octet-stream",
+        fileName: parseContentDispositionFileName(response.headers.get("content-disposition"))
+      },
+      error: null,
+      operation,
+      service,
+      status: "ok"
+    };
+  } catch (error) {
+    return createApiErrorEnvelope({
+      code: abortContext.reason === "timeout" ? "request_timeout" : "network_error",
+      message: "Не удалось загрузить вложение. Попробуйте ещё раз.",
+      operation,
+      service
+    });
+  } finally {
+    abortContext.cleanup();
+  }
+}
+
+function parseContentDispositionFileName(value) {
+  const match = /filename\*?=(?:UTF-8''|\")?([^;\"]+)/i.exec(String(value ?? ""));
+  if (!match) return "";
+  try { return decodeURIComponent(match[1].trim()); } catch { return match[1].trim(); }
+}
+
 function createRequestAbortContext({ signal, timeoutMs }) {
   const controller = new AbortController();
   const configuredTimeout = Number(timeoutMs ?? getRuntimeConfigValue("timeoutMs", "VITE_API_TIMEOUT_MS", DEFAULT_API_TIMEOUT_MS));

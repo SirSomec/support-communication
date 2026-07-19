@@ -124,6 +124,23 @@ describe("conversationApiMapper", () => {
     assert.equal(message.attachments[1].name, "unsafe.pdf");
   });
 
+  it("builds a protected download route for an inbound Telegram attachment", () => {
+    const mapped = mapApiConversation({
+      channel: "telegram",
+      id: "conv-telegram-file",
+      messages: [{
+        attachments: [{ fileName: "photo.jpg", mimeType: "image/jpeg", providerFileId: "telegram-file", providerFileUniqueId: "telegram-file-unique" }],
+        id: "message-telegram-file",
+        side: "client",
+        text: ""
+      }]
+    });
+
+    assert.equal(mapped.messages[0].attachments[0].attachmentId, "telegram-file-unique");
+    assert.equal(mapped.messages[0].attachments[0].downloadPath, "/dialogs/conv-telegram-file/messages/message-telegram-file/attachments/telegram-file-unique/download");
+    assert.equal(mapped.messages[0].attachments[0].messageId, "message-telegram-file");
+  });
+
   it("restores persisted Rescue state after an inbox refresh", () => {
     const rescueState = { state: "active", startedAt: 1000, deadlineAt: 241000, durationSeconds: 240 };
     const mapped = mapApiConversation({ id: "conv-rescue", rescueState });
@@ -263,6 +280,15 @@ describe("useConversationInbox", () => {
     assert.equal(shouldOpenRealtimeEventSource({ eventSourceAvailable: true, queryTokenEnabled: true, token: "token" }), true);
     assert.equal(shouldOpenRealtimeEventSource({ eventSourceAvailable: false, queryTokenEnabled: true, token: "token" }), false);
     assert.equal(shouldOpenRealtimeEventSource({ eventSourceAvailable: true, queryTokenEnabled: true, token: "" }), false);
+  });
+
+  it("refreshes a dialog for new conversations as well as messages and updates", async () => {
+    const { shouldRefreshConversationForRealtimeEvent } = await import("../src/app/useConversationInbox.js");
+
+    assert.equal(shouldRefreshConversationForRealtimeEvent("conversation.created"), true);
+    assert.equal(shouldRefreshConversationForRealtimeEvent("message.created"), true);
+    assert.equal(shouldRefreshConversationForRealtimeEvent("conversation.updated"), true);
+    assert.equal(shouldRefreshConversationForRealtimeEvent("routing.assignment.updated"), false);
   });
 });
 

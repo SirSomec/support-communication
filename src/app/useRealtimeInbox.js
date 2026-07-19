@@ -29,15 +29,8 @@ export function useRealtimeInbox({ enabled, onEvent }) {
     let pollTimer = null;
     let polling = false;
     let source = null;
-    let sseConnected = false;
-
     const pollReplay = async () => {
       if (disposed || polling) {
-        return;
-      }
-
-      if (sseConnected) {
-        pollTimer = window.setTimeout(pollReplay, REPLAY_POLL_INTERVAL_MS);
         return;
       }
 
@@ -82,11 +75,7 @@ export function useRealtimeInbox({ enabled, onEvent }) {
       source.addEventListener("message.created", handleEvent);
       source.addEventListener("conversation.updated", handleEvent);
       source.addEventListener("operator.presence.updated", handleEvent);
-      source.onopen = () => {
-        sseConnected = true;
-      };
       source.onerror = () => {
-        sseConnected = false;
         if (disposed) {
           return;
         }

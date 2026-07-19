@@ -14,7 +14,10 @@ export function mapApiConversation(input) {
   const channel = nonEmptyString(input?.channel, "SDK");
   const status = nonEmptyString(input?.status, "active");
   const statusMeta = getStatusMeta(status);
-  const messages = mapConversationTimeline(input?.messages, input?.lifecycleEvents);
+  const messages = mapConversationTimeline(input?.messages, input?.lifecycleEvents, {
+    channel,
+    conversationId: nonEmptyString(input?.id)
+  });
   const previewFallback = messages.at(-1)?.text ?? "";
 
   const mapped = {
@@ -120,7 +123,7 @@ export function mapLifecycleEvent(input) {
   };
 }
 
-export function mapApiMessage(input) {
+export function mapApiMessage(input, attachmentContext = {}) {
   const mapped = {
     id: input?.id ?? `msg-${Date.now()}`,
     text: nonEmptyString(input?.text),
@@ -148,13 +151,16 @@ export function mapApiMessage(input) {
   }
 
   if (Array.isArray(input?.attachments)) {
-    mapped.attachments = input.attachments.map(normalizeAttachment);
+    mapped.attachments = input.attachments.map((attachment, index) => normalizeAttachment(attachment, index, {
+      ...attachmentContext,
+      messageId: nonEmptyString(input?.id)
+    }));
   }
 
   return mapped;
 }
 
-export function normalizeAttachment(input, index = 0) {
+export function normalizeAttachment(input, index = 0, context = {}) {
   const attachment = isRecord(input) ? input : {};
   const fileName = nonEmptyString(attachment.fileName, nonEmptyString(attachment.name, nonEmptyString(attachment.title, "Вложение")));
   const type = nonEmptyString(attachment.mimeType, nonEmptyString(attachment.type, "Файл"));
@@ -167,13 +173,22 @@ export function normalizeAttachment(input, index = 0) {
     ? thumbnailUrl || downloadUrl
     : thumbnailUrl;
 
+  const providerAttachmentId = nonEmptyString(attachment.providerFileUniqueId, `index-${index}`);
+  const telegramDownloadPath = String(context.channel).toLowerCase() === "telegram"
+    && attachment.providerFileId && context.conversationId && context.messageId
+    ? `/dialogs/${encodeURIComponent(context.conversationId)}/messages/${encodeURIComponent(context.messageId)}/attachments/${encodeURIComponent(providerAttachmentId)}/download`
+    : "";
+
   return {
     ...attachment,
     id: nonEmptyString(attachment.id, nonEmptyString(attachment.fileId, nonEmptyString(attachment.providerFileUniqueId, `attachment-${index}`))),
+    ...(context.conversationId && context.messageId ? { messageId: context.messageId } : {}),
+    ...(attachment.providerFileId ? { attachmentId: providerAttachmentId } : {}),
     name: fileName,
     size: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? formatAttachmentSize(sizeBytes) : "",
     type,
     ...(downloadUrl ? { downloadUrl } : {}),
+    ...(telegramDownloadPath ? { downloadPath: telegramDownloadPath } : {}),
     ...(previewUrl ? { previewUrl } : {})
   };
 }
@@ -199,16 +214,16 @@ function formatAttachmentSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
-function mapMessages(messages) {
+function mapMessages(messages, attachmentContext) {
   if (!Array.isArray(messages)) {
     return [];
   }
 
-  return messages.map((message) => mapApiMessage(message));
+  return messages.map((message) => mapApiMessage(message, attachmentContext));
 }
 
-function mapConversationTimeline(messages, lifecycleEvents) {
-  const mappedMessages = mapMessages(messages);
+function mapConversationTimeline(messages, lifecycleEvents, attachmentContext) {
+  const mappedMessages = mapMessages(messages, attachmentContext);
   if (!Array.isArray(lifecycleEvents) || lifecycleEvents.length === 0) {
     return mappedMessages;
   }

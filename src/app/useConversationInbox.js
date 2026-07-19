@@ -21,6 +21,7 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
   const [pagination, setPagination] = useState(() => normalizeConversationPagination(null));
   const detailInFlightRef = useRef(new Set());
   const detailDebounceRef = useRef(new Map());
+  const detailRefreshRequestedRef = useRef(new Set());
   const inboxRequestRef = useRef(0);
   const processedRealtimeEventIdsRef = useRef(new Set());
   const onPresenceEventRef = useRef(onPresenceEvent);
@@ -381,6 +382,9 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
     }
 
     if (!options.force && detailInFlightRef.current.has(normalizedId)) {
+      // Новое сообщение могло прийти во время текущей загрузки деталей.
+      // Не теряем событие: повторим запрос сразу после завершения текущего.
+      detailRefreshRequestedRef.current.add(normalizedId);
       return { ok: false, skipped: true };
     }
 
@@ -417,6 +421,9 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
       return { ok: true, response };
     } finally {
       detailInFlightRef.current.delete(normalizedId);
+      if (detailRefreshRequestedRef.current.delete(normalizedId)) {
+        void loadConversationDetail(normalizedId);
+      }
     }
   }, [sessionActive]);
 
@@ -447,12 +454,13 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
     }
     detailDebounceRef.current.clear();
     detailInFlightRef.current.clear();
+    detailRefreshRequestedRef.current.clear();
     processedRealtimeEventIdsRef.current.clear();
   }, []);
 
   const handleRealtimeEvent = useCallback((event) => {
     const isPresenceEvent = event.eventName === "operator.presence.updated";
-    if (!isPresenceEvent && event.eventName !== "message.created" && event.eventName !== "conversation.updated") {
+    if (!isPresenceEvent && !shouldRefreshConversationForRealtimeEvent(event.eventName)) {
       return;
     }
 
@@ -520,6 +528,10 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
     refreshing,
     topics
   ]);
+}
+
+export function shouldRefreshConversationForRealtimeEvent(eventName) {
+  return ["conversation.created", "conversation.updated", "message.created"].includes(String(eventName ?? ""));
 }
 
 export async function fetchConversationDetailWithRetry(conversationId, options = {}) {

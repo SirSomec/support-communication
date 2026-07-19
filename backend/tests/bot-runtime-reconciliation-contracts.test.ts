@@ -242,4 +242,25 @@ describe("bot runtime side-effect reconciliation", () => {
     const events = await conversationRepository.listLifecycleEvents({ conversationId: "conv-1", tenantId: "tenant-1" });
     assert.equal(events.filter((event) => event.eventType === "bot.handoff.created").length, 1);
   });
+
+  it("resolves a configured handoff queue name to its canonical queue id", async () => {
+    const automationRepository = automation("handoff");
+    const conversationRepository = conversations();
+    await createStep(automationRepository);
+
+    const result = await runBotRuntimeReconciliationOnce({
+      automationRepository,
+      conversationRepository,
+      now: "2026-07-11T11:00:01.000Z",
+      resolveQueueId: async (tenantId, queueReference) => {
+        assert.equal(tenantId, "tenant-1");
+        assert.equal(queueReference, "queue-priority");
+        return "queue-canonical-priority";
+      }
+    });
+
+    assert.equal(result.delivered, 1);
+    const conversation = await conversationRepository.findConversation("conv-1");
+    assert.equal(conversation?.queueId, "queue-canonical-priority");
+  });
 });

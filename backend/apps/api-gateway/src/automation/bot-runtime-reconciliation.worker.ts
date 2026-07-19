@@ -38,6 +38,7 @@ export interface BotRuntimeReconciliationWorkerInput {
   maxAttempts?: number;
   now?: string;
   realtimeFanout?: Pick<RealtimeFanoutAdapter, "publish">;
+  resolveQueueId?: (tenantId: string, queueReference: string) => Promise<string | undefined>;
   retryBackoffMs?: number;
 }
 
@@ -215,7 +216,14 @@ async function reconcileEffect(
     }
     const traceId = String(descriptor.traceId ?? `bot-runtime-${effect.id}`);
     const summary = (descriptor.summary ?? {}) as Record<string, unknown>;
-    const queueId = String(summary.queue ?? "").trim() || conversation.queueId;
+    const requestedQueue = String(summary.queue ?? "").trim();
+    const resolvedQueueId = requestedQueue && input.resolveQueueId
+      ? await input.resolveQueueId(effect.tenantId, requestedQueue)
+      : undefined;
+    // Runtime scenarios store a human-readable queue name; persistence requires
+    // the canonical queue id. When that name is stale, preserve the inbound
+    // routing queue instead of retrying an invalid foreign key indefinitely.
+    const queueId = resolvedQueueId ?? (input.resolveQueueId ? conversation.queueId : requestedQueue || conversation.queueId);
     if (!queueId) throw new Error("bot_runtime_handoff_canonical_queue_required");
 
     const updated = { ...conversation, operatorId: undefined, operatorName: undefined, queueId, status: "queued", updatedAt: now };

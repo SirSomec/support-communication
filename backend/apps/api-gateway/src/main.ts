@@ -73,7 +73,7 @@ export async function bootstrap(): Promise<void> {
     app.enableCors({
       allowedHeaders: ["authorization", "content-type", "idempotency-key", "x-idempotency-key", "x-request-id"],
       credentials: false,
-      exposedHeaders: ["x-request-id"],
+      exposedHeaders: ["x-request-id", "content-disposition"],
       methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       origin: allowedOrigins
     });

@@ -6,6 +6,7 @@ import { ConversationService } from "../conversation/conversation.service.js";
 import { configureAutomationRepository } from "./bootstrap.js";
 import { runBotRuntimeReconciliationOnce } from "./bot-runtime-reconciliation.worker.js";
 import { runBotRuntimeRetryOnce } from "./bot-runtime-retry.worker.js";
+import { QueueDirectoryRepository } from "../routing/queue-directory.repository.js";
 
 export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessEnv = process.env, argv: string[] = process.argv): Promise<void> {
   const intervalMs = positive(source.BOT_RUNTIME_RECONCILIATION_INTERVAL_MS, 5_000);
@@ -15,6 +16,7 @@ export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessE
   // история, resolutionOutcome, журнал, realtime и CSAT-опрос — как у оператора.
   const conversationService = new ConversationService(conversationRepository, { realtimeFanout });
   const automationRepository = configureAutomationRepository(source);
+  const queueDirectoryRepository = new QueueDirectoryRepository();
   const input = {
     automationRepository,
     closeConversation: (payload: { conversationId: string; reason: string; resolutionOutcome: string; topic?: string }, scope: { tenantId: string }) =>
@@ -24,6 +26,12 @@ export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessE
     limit: positive(source.BOT_RUNTIME_RECONCILIATION_LIMIT, 50),
     maxAttempts: positive(source.BOT_RUNTIME_RECONCILIATION_MAX_ATTEMPTS, 5),
     realtimeFanout,
+    resolveQueueId: async (tenantId: string, queueReference: string) => {
+      const normalized = queueReference.trim();
+      if (!normalized) return undefined;
+      const queues = await queueDirectoryRepository.listQueues(tenantId, "active");
+      return queues.find((queue) => queue.id === normalized || queue.name.trim().toLocaleLowerCase("ru") === normalized.toLocaleLowerCase("ru"))?.id;
+    },
     retryBackoffMs: positive(source.BOT_RUNTIME_RECONCILIATION_RETRY_MS, 5_000)
   };
   const run = async () => {

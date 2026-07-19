@@ -12,7 +12,7 @@ import {
 const MESSAGE_TIME_TICK_MS = 1000;
 const APPEAL_HIGHLIGHT_MS = 2200;
 
-export function AuditTimeline({ appealScrollTarget, conversationId, onSaveTemplate, timeline = [] }) {
+export function AuditTimeline({ appealScrollTarget, conversationId, onOpenAttachment, onSaveTemplate, timeline = [] }) {
   const transcriptRef = useRef(null);
   const pinnedToBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
@@ -88,7 +88,7 @@ export function AuditTimeline({ appealScrollTarget, conversationId, onSaveTempla
       {timeline.map((item) => item.kind === "appeal" ? (
         <AppealDivider highlighted={item.conversationId === highlightedAppealId} item={item} key={item.key} />
       ) : (
-        <MessageBubble key={item.key} message={item.message} now={timeNow} onSaveTemplate={onSaveTemplate} />
+        <MessageBubble key={item.key} message={item.message} now={timeNow} onOpenAttachment={onOpenAttachment} onSaveTemplate={onSaveTemplate} />
       ))}
       {!messageItems.length ? <div className="empty-transcript">Нет записей для выбранного фильтра</div> : null}
     </div>
@@ -116,7 +116,7 @@ function AppealDivider({ highlighted, item }) {
   );
 }
 
-function MessageBubble({ message, now, onSaveTemplate }) {
+function MessageBubble({ message, now, onOpenAttachment, onSaveTemplate }) {
   const displayTime = formatMessageTime(message, { now });
 
   if (message.type === "event") {
@@ -148,7 +148,7 @@ function MessageBubble({ message, now, onSaveTemplate }) {
         {message.attachments?.length ? (
           <div className="message-attachments">
             {message.attachments.map((attachment) => (
-              <AttachmentPreview attachment={attachment} compact key={attachment.id} />
+              <AttachmentPreview attachment={attachment} compact key={attachment.id} onOpen={onOpenAttachment} />
             ))}
           </div>
         ) : null}
@@ -168,7 +168,7 @@ function MessageBubble({ message, now, onSaveTemplate }) {
       {message.attachments?.length ? (
         <div className="message-attachments">
           {message.attachments.map((attachment) => (
-            <AttachmentPreview attachment={attachment} compact key={attachment.id} />
+            <AttachmentPreview attachment={attachment} compact key={attachment.id} onOpen={onOpenAttachment} />
           ))}
         </div>
       ) : null}

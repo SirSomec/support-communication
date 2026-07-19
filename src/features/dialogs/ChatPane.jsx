@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getRescueRemainingSeconds } from "../../app/dialogModel.js";
 import { dialogService } from "../../services/dialogService.js";
 import { AiAssistModal } from "./AiAssistModal.jsx";
+import { AttachmentViewerModal } from "./AttachmentViewerModal.jsx";
 import { AuditTimeline } from "./AuditTimeline.jsx";
 import { BotHandoffSummary } from "./BotHandoffSummary.jsx";
 import { ChatHeader } from "./ChatHeader.jsx";
@@ -46,6 +47,7 @@ export function ChatPane({
   const [rescueNow, setRescueNow] = useState(Date.now());
   // null — модалка закрыта; иначе { loading, error, data } текущего запроса ИИ-подсказки.
   const [aiAssist, setAiAssist] = useState(null);
+  const [attachmentViewer, setAttachmentViewer] = useState(null);
   const aiAssistRequestRef = useRef({ conversationId: conversation.id, replyChannel, sequence: 0 });
   if (aiAssistRequestRef.current.conversationId !== conversation.id
     || aiAssistRequestRef.current.replyChannel !== replyChannel) {
@@ -77,7 +79,48 @@ export function ChatPane({
   // Смена диалога закрывает модалку: подсказки другого клиента не должны пережить переключение.
   useEffect(() => {
     setAiAssist(null);
+    closeAttachmentViewer();
   }, [conversation.id, replyChannel]);
+
+  useEffect(() => () => {
+    if (attachmentViewer?.objectUrl) URL.revokeObjectURL(attachmentViewer.objectUrl);
+  }, [attachmentViewer?.objectUrl]);
+
+  function closeAttachmentViewer() {
+    setAttachmentViewer((current) => {
+      if (current?.objectUrl) URL.revokeObjectURL(current.objectUrl);
+      return null;
+    });
+  }
+
+  async function openAttachment(attachment) {
+    if (attachment.downloadUrl) {
+      setAttachmentViewer({ attachment, sourceUrl: attachment.downloadUrl });
+      return;
+    }
+    if (!attachment.downloadPath) return;
+    setAttachmentViewer({ attachment, loading: true });
+    const response = await dialogService.downloadInboundAttachment({
+      attachmentId: attachment.attachmentId || attachment.providerFileUniqueId || attachment.id,
+      conversationId: conversation.id,
+      messageId: attachment.messageId
+    });
+    if (response.status !== "ok") {
+      setAttachmentViewer({ attachment, error: response.error?.message ?? "Не удалось загрузить вложение." });
+      return;
+    }
+    const objectUrl = URL.createObjectURL(response.data.body);
+    setAttachmentViewer({ attachment: { ...attachment, name: response.data.fileName || attachment.name, type: response.data.contentType || attachment.type }, objectUrl, sourceUrl: objectUrl });
+  }
+
+  function downloadAttachment() {
+    if (!attachmentViewer?.sourceUrl) return;
+    const link = document.createElement("a");
+    link.href = attachmentViewer.sourceUrl;
+    link.download = attachmentViewer.attachment?.name || "attachment";
+    link.rel = "noopener";
+    link.click();
+  }
 
   async function requestAiAssist() {
     const targetConversationId = resolveThreadSendTarget(conversation, replyChannel) ?? conversation.id;
@@ -162,6 +205,7 @@ export function ChatPane({
       <AuditTimeline
         appealScrollTarget={appealScrollTarget}
         conversationId={conversation.id}
+        onOpenAttachment={openAttachment}
         onSaveTemplate={onSaveTemplate}
         timeline={timeline}
       />
@@ -199,6 +243,7 @@ export function ChatPane({
           suggestions={aiAssist.data?.suggestions ?? []}
         />
       ) : null}
+      {attachmentViewer ? <AttachmentViewerModal attachment={attachmentViewer.attachment} error={attachmentViewer.error} loading={attachmentViewer.loading} onClose={closeAttachmentViewer} onDownload={downloadAttachment} sourceUrl={attachmentViewer.sourceUrl} /> : null}
     </section>
   );
 }

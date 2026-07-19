@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "dependencies": {
-    "@prisma/client": "^6.19.1",
+    "@prisma/client": "^7.8.0",
     "@support-communication/events": "0.1.0",
     "@support-communication/redaction": "0.1.0"
   }

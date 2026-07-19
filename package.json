@@ -65,7 +65,7 @@
     "widget:preview:e2e": "npm run widget:build && npm run preview --prefix packages/web-widget"
   },
   "dependencies": {
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.25.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

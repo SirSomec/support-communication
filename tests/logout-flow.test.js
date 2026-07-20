@@ -14,6 +14,17 @@ describe("authenticated logout flows", () => {
     assert.match(shell, /onClick=\{onLogout\}[\s\S]*Выйти/);
   });
 
+  it("keeps presence online until the last operator tab closes, then requests a conditional disconnect", () => {
+    const presenceHook = readFileSync("src/app/useOperatorPresence.js", "utf8");
+    const presenceService = readFileSync("src/services/presenceService.js", "utf8");
+
+    assert.match(presenceHook, /sc_operator_presence_tabs:/);
+    assert.match(presenceHook, /window\.addEventListener\("pagehide", handlePageHide\)/);
+    assert.match(presenceHook, /isLastOpenTab/);
+    assert.match(presenceHook, /markMyPresenceUnavailableIfOnline\(\{ keepalive: true \}\)/);
+    assert.match(presenceService, /\/presence\/me\/disconnect/);
+  });
+
   it("revokes the service-admin session before returning to login", () => {
     const app = readFileSync("src/service-admin/ServiceAdminApp.jsx", "utf8");
     const revoke = app.indexOf("await authService.logout");

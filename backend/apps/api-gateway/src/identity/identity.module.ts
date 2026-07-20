@@ -13,11 +13,23 @@ import { TenantProvisionController } from "./tenant-provision.controller.js";
 import { TenantProvisionService } from "./tenant-provision.service.js";
 import { TenantService } from "./tenant.service.js";
 import { TenantOperatorAuthGuard } from "./tenant-operator-auth.guard.js";
+import { PresenceModule } from "../presence/presence.module.js";
+import { OperatorPresenceService } from "../presence/presence.service.js";
 
 @Module({
+  imports: [PresenceModule],
   controllers: [AuthController, PermissionController, SettingsController, TenantController, TenantProvisionController],
   providers: [
-    AuthService,
+    {
+      provide: AuthService,
+      inject: [OperatorPresenceService],
+      useFactory: (operatorPresenceService: OperatorPresenceService) => new AuthService(
+        undefined,
+        undefined,
+        undefined,
+        operatorPresenceService
+      )
+    },
     TenantOperatorOrServiceAdminGuard,
     ServiceAdminSessionGuard,
     TenantOperatorAuthGuard,

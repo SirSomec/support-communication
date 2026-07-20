@@ -22,6 +22,7 @@ import {
 } from "./identity-auth-flow.repository.js";
 import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
 import { createServiceMailOverrideResolver } from "../mail/service-mailer.js";
+import { type OperatorPresenceService } from "../presence/presence.service.js";
 
 const SERVICE = "authService";
 
@@ -76,6 +77,8 @@ interface TenantOperatorLoginContext {
 
 interface TenantOperatorSessionContext {
   sessionId?: string;
+  tenantId?: string;
+  userId?: string;
 }
 
 interface AcceptInvitePayload {
@@ -214,7 +217,8 @@ export class AuthService {
   constructor(
     identityRepository = IdentityRepository.default(),
     mfaOtp?: MfaOtpRuntime,
-    serviceAdminMfaOtp?: MfaOtpRuntime
+    serviceAdminMfaOtp?: MfaOtpRuntime,
+    private readonly operatorPresenceService?: Pick<OperatorPresenceService, "markMyPresenceUnavailableIfOnline">
   ) {
     this.identityRepository = identityRepository;
     this.defaultRuntimeWiring = !mfaOtp;
@@ -1388,8 +1392,15 @@ export class AuthService {
     });
   }
 
-  async logoutTenantOperator({ sessionId }: TenantOperatorSessionContext = {}): Promise<BackendEnvelope<TenantOperatorLogoutData>> {
+  async logoutTenantOperator({ sessionId, tenantId, userId }: TenantOperatorSessionContext = {}): Promise<BackendEnvelope<TenantOperatorLogoutData>> {
     const traceId = identityTraceId(SERVICE, "logoutTenantOperator");
+    if (tenantId && userId) {
+      await this.operatorPresenceService?.markMyPresenceUnavailableIfOnline({
+        actorId: userId,
+        actorType: "operator",
+        tenantId
+      });
+    }
     const revoked = await this.identityRepository.revokeTenantOperatorSession({ sessionId });
 
     return createEnvelope({

@@ -25,6 +25,17 @@ export interface OperatorPresenceSetStatusResult {
   previous: OperatorPresenceCurrentRecord | null;
 }
 
+export interface OperatorPresenceSetStatusIfCurrentInput extends OperatorPresenceSetStatusInput {
+  expectedStatus: OperatorPresenceStatus;
+}
+
+export interface OperatorPresenceSetStatusIfCurrentResult {
+  changed: boolean;
+  conditionMatched: boolean;
+  current: OperatorPresenceCurrentRecord | null;
+  previous: OperatorPresenceCurrentRecord | null;
+}
+
 export interface OperatorPresenceRange {
   from: Date;
   to: Date;
@@ -35,6 +46,7 @@ export interface OperatorPresenceRepositoryPort {
   listCurrent(tenantId: string): Promise<OperatorPresenceCurrentRecord[]>;
   listIntervalsInRange(tenantId: string, range: OperatorPresenceRange): Promise<OperatorPresenceIntervalRecord[]>;
   setStatus(input: OperatorPresenceSetStatusInput): Promise<OperatorPresenceSetStatusResult>;
+  setStatusIfCurrent(input: OperatorPresenceSetStatusIfCurrentInput): Promise<OperatorPresenceSetStatusIfCurrentResult>;
 }
 
 interface PrismaOperatorPresenceIntervalRow {
@@ -110,6 +122,15 @@ export class OperatorPresenceRepository implements OperatorPresenceRepositoryPor
     }
     return this.adapter.setStatus(input);
   }
+
+  setStatusIfCurrent(input: OperatorPresenceSetStatusIfCurrentInput): Promise<OperatorPresenceSetStatusIfCurrentResult> {
+    requireId(input.tenantId, "tenantId");
+    requireId(input.operatorId, "operatorId");
+    if (!isOperatorPresenceStatus(input.status) || !isOperatorPresenceStatus(input.expectedStatus)) {
+      throw new TypeError("Unsupported operator presence status.");
+    }
+    return this.adapter.setStatusIfCurrent(input);
+  }
 }
 
 function createStoreAdapter(store: DurableStore<OperatorPresenceState>): OperatorPresenceRepositoryPort {
@@ -153,6 +174,45 @@ function createStoreAdapter(store: DurableStore<OperatorPresenceState>): Operato
           changed: true,
           current: toCurrentRecord(nextInterval),
           previous: open ? toCurrentRecord(open) : null
+        };
+        return { intervals: [...intervals, nextInterval] };
+      });
+      return result!;
+    },
+    async setStatusIfCurrent(input) {
+      const at = (input.at ?? new Date()).toISOString();
+      let result: OperatorPresenceSetStatusIfCurrentResult | null = null;
+      store.update((state) => {
+        const open = findOpenInterval(state.intervals, input.tenantId, input.operatorId);
+        if (!open || open.status !== input.expectedStatus) {
+          result = {
+            changed: false,
+            conditionMatched: false,
+            current: open ? toCurrentRecord(open) : null,
+            previous: open ? toCurrentRecord(open) : null
+          };
+          return state;
+        }
+
+        const nextInterval: OperatorPresenceIntervalRecord = {
+          changedBy: input.changedBy ?? null,
+          endedAt: null,
+          id: `opi_${randomUUID()}`,
+          operatorId: input.operatorId,
+          startedAt: at,
+          status: input.status,
+          tenantId: input.tenantId
+        };
+        const intervals = state.intervals.map((interval) =>
+          interval.tenantId === input.tenantId && interval.operatorId === input.operatorId && interval.endedAt === null
+            ? { ...interval, endedAt: at }
+            : interval
+        );
+        result = {
+          changed: true,
+          conditionMatched: true,
+          current: toCurrentRecord(nextInterval),
+          previous: toCurrentRecord(open)
         };
         return { intervals: [...intervals, nextInterval] };
       });
@@ -227,6 +287,52 @@ function createPrismaAdapter(client: PrismaOperatorPresenceClient): OperatorPres
           changed: true,
           current: toCurrentRecord(fromPrismaRow(created)),
           previous: open ? toCurrentRecord(open) : null
+        };
+      });
+    },
+    async setStatusIfCurrent(input) {
+      const at = input.at ?? new Date();
+      return client.$transaction(async (transaction) => {
+        if (!transaction.$queryRawUnsafe) {
+          throw new Error("operator_presence_advisory_lock_unavailable");
+        }
+        await transaction.$queryRawUnsafe(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text",
+          `${input.tenantId}:${input.operatorId}`
+        );
+        const openRows = await transaction.operatorPresenceInterval.findMany({
+          orderBy: [{ startedAt: "desc" }],
+          where: { endedAt: null, operatorId: input.operatorId, tenantId: input.tenantId }
+        });
+        const open = openRows.length ? fromPrismaRow(openRows[0]) : null;
+        if (!open || open.status !== input.expectedStatus) {
+          return {
+            changed: false,
+            conditionMatched: false,
+            current: open ? toCurrentRecord(open) : null,
+            previous: open ? toCurrentRecord(open) : null
+          };
+        }
+        await transaction.operatorPresenceInterval.updateMany({
+          data: { endedAt: at, updatedAt: at },
+          where: { endedAt: null, operatorId: input.operatorId, tenantId: input.tenantId }
+        });
+        const created = await transaction.operatorPresenceInterval.create({
+          data: {
+            changedBy: input.changedBy ?? null,
+            endedAt: null,
+            id: `opi_${randomUUID()}`,
+            operatorId: input.operatorId,
+            startedAt: at,
+            status: input.status,
+            tenantId: input.tenantId
+          }
+        });
+        return {
+          changed: true,
+          conditionMatched: true,
+          current: toCurrentRecord(fromPrismaRow(created)),
+          previous: toCurrentRecord(open)
         };
       });
     }

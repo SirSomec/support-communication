@@ -1302,7 +1302,8 @@ test("settings expose API key rotation and security controls", async ({ page }) 
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
 
-  await page.locator("#settings-tab-api").click();
+  await page.locator(".integration-view-switch button").filter({ hasText: "Каталог" }).click();
+  await page.locator(".integration-catalog-row").filter({ hasText: "API и webhooks" }).getByRole("button", { name: "Открыть" }).click();
   await expect(page.locator(".api-governance-panel")).toContainText("API-ключи");
   await page.locator(".settings-create-api-key").click();
   await page.locator(".api-key-create-form input").first().fill("Production SDK key");
@@ -1354,7 +1355,8 @@ test("settings manage api keys and webhook endpoints lifecycle", async ({ page }
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
-  await page.locator("#settings-tab-api").click();
+  await page.locator(".integration-view-switch button").filter({ hasText: "Каталог" }).click();
+  await page.locator(".integration-catalog-row").filter({ hasText: "API и webhooks" }).getByRole("button", { name: "Открыть" }).click();
 
   // Ключ: создание с одноразовым показом секрета, затем отзыв.
   await page.locator(".settings-create-api-key").click();
@@ -1404,6 +1406,7 @@ test("settings keep role matrix reference and aggregate channel toggles", async 
   await expect(page.locator(".role-table")).toHaveCount(0);
 
   await page.locator("#settings-tab-connections").click();
+  await page.locator(".integration-manage-channels").click();
   const telegramChannel = page.locator(".channel-settings article").filter({ hasText: "Telegram" });
   await expect(telegramChannel).toContainText("лимит");
 
@@ -1486,6 +1489,8 @@ test("settings channel connections create multiple Telegram and MAX instances", 
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
 
+  await page.locator(".integration-manage-channels").click();
+
   const channelPanel = page.locator(".channel-connections-panel");
   const runId = Date.now().toString(36);
   const telegramName = `Telegram QA bot ${runId}`;
@@ -1555,7 +1560,8 @@ test("settings sdk console keeps payload preview run states and permissions", as
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
-  await page.locator("#settings-tab-sdk").click();
+  await page.locator(".integration-view-switch button").filter({ hasText: "Каталог" }).click();
+  await page.locator(".integration-catalog-row").filter({ hasText: "Виджет и SDK" }).getByRole("button", { name: "Открыть" }).click();
 
   const sdkPanel = page.locator(".sdk-console");
   await sdkPanel.locator(".sdk-code button").filter({ hasText: "Копировать" }).click();

@@ -41,7 +41,7 @@ export function buildApiUrl(path, query = {}) {
   return baseUrl ? url.toString() : `${url.pathname}${url.search}`;
 }
 
-export async function apiRequest(path, { authMode = "auto", body, headers = {}, method = "GET", operation, query, service, signal, timeoutMs } = {}) {
+export async function apiRequest(path, { authMode = "auto", body, headers = {}, keepalive = false, method = "GET", operation, query, service, signal, timeoutMs } = {}) {
   const requestHeaders = {
     accept: "application/json",
     ...headers
@@ -71,6 +71,7 @@ export async function apiRequest(path, { authMode = "auto", body, headers = {}, 
   const abortContext = createRequestAbortContext({ signal, timeoutMs });
   const requestInit = {
     headers: requestHeaders,
+    keepalive,
     method,
     signal: abortContext.signal
   };

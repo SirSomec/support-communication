@@ -65,7 +65,8 @@ function App() {
   const operatorPresence = useOperatorPresence({
     enabled: tenantSession.authenticated,
     operatorId: tenantSession.operator?.id ?? "",
-    onToast: setToast
+    onToast: setToast,
+    tenantId: tenantSession.tenantId ?? ""
   });
   const {
     appendMessage,

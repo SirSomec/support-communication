@@ -70,41 +70,52 @@ test("settings runtime loads channel connections from API", async ({ page, reque
   await page.locator(".role-switcher select").selectOption({ label: "Администратор" });
   await openSection(page, "Настройки");
 
-  const channelPanel = page.locator(".channel-connections-panel");
-  await expect(channelPanel).toBeVisible();
+  const integrationCenter = page.locator(".integration-center");
+  await expect(integrationCenter).toBeVisible();
   if (channelsPayload.data.connections.length === 0) {
-    await expect(channelPanel.locator(".channel-log-empty")).toBeVisible();
+    await expect(integrationCenter).toContainText("Подключений пока нет");
   } else {
-    await expect(channelPanel.locator(".connection-row.connection-picker").first()).toBeVisible();
+    await expect(integrationCenter.locator(".integration-connection-row").first()).toBeVisible();
   }
 });
 
-test("settings runtime creates telegram and max channels independently", async ({ page, request }) => {
+test("integration center wizard creates and checks telegram and max channels", async ({ page, request }) => {
   const session = await loginTenantOperator(request);
   await openAppShell(page, session);
   await page.locator(".role-switcher select").selectOption({ label: "Администратор" });
   await openSection(page, "Настройки");
 
-  const channelPanel = page.locator(".channel-connections-panel");
   const runId = Date.now().toString(36);
   const telegramName = `Runtime Telegram ${runId}`;
   const maxName = `Runtime MAX ${runId}`;
-  const createModal = page.locator(".settings-modal-panel");
-  const createForm = page.locator(".channel-create-form");
 
-  await channelPanel.locator(".settings-create-connection").click();
-  await createForm.locator("select").first().selectOption("telegram");
-  await createForm.locator("input").nth(0).fill(telegramName);
-  await createForm.locator("input[type='password']").fill("123:qa-telegram-token");
-  await createModal.getByRole("button", { name: "Создать" }).click();
-  await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName })).toBeVisible();
+  await page.locator(".integration-view-switch button").filter({ hasText: "Каталог" }).click();
 
-  await channelPanel.locator(".settings-create-connection").click();
-  await createForm.locator("select").first().selectOption("max");
-  await createForm.locator("input").nth(0).fill(maxName);
-  await createForm.locator("input[type='password']").fill("runtime-max-token");
-  await createModal.getByRole("button", { name: "Создать" }).click();
-  await expect(channelPanel.locator(".connection-row.connection-picker").filter({ hasText: maxName })).toBeVisible();
+  const telegramCard = page.locator(".integration-catalog-row").filter({ hasText: "Telegram" });
+  await telegramCard.getByRole("button").click();
+  const telegramWizard = page.getByRole("dialog", { name: "Подключить Telegram" });
+  await telegramWizard.getByRole("button", { name: "Продолжить" }).click();
+  await telegramWizard.getByLabel("Название подключения").fill(telegramName);
+  await telegramWizard.getByLabel("Токен бота").fill("123:qa-telegram-token");
+  await telegramWizard.getByRole("button", { name: "Продолжить" }).click();
+  await expect(telegramWizard.getByLabel("Очередь для новых обращений")).toBeEnabled();
+  await telegramWizard.getByRole("button", { name: "Подключить" }).click();
+  await expect(page.getByRole("dialog", { name: "Telegram подключён" })).toContainText("Подключение готово");
+  await page.getByRole("dialog", { name: "Telegram подключён" }).getByRole("button", { name: "Запустить тест" }).click();
+  await expect(page.getByRole("dialog", { name: "Telegram подключён" })).toContainText("Проверка пройдена");
+  await page.getByRole("dialog", { name: "Telegram подключён" }).getByRole("button", { name: "Готово" }).click();
+
+  const maxCard = page.locator(".integration-catalog-row").filter({ hasText: "MAX" });
+  await maxCard.getByRole("button").click();
+  const maxWizard = page.getByRole("dialog", { name: "Подключить MAX" });
+  await maxWizard.getByRole("button", { name: "Продолжить" }).click();
+  await maxWizard.getByLabel("Название подключения").fill(maxName);
+  await maxWizard.getByLabel("Токен доступа").fill("runtime-max-token");
+  await maxWizard.getByRole("button", { name: "Продолжить" }).click();
+  await expect(maxWizard.getByLabel("Очередь для новых обращений")).toBeEnabled();
+  await maxWizard.getByRole("button", { name: "Подключить" }).click();
+  await expect(page.getByRole("dialog", { name: "MAX подключён" })).toContainText("Подключение готово");
+  await page.getByRole("dialog", { name: "MAX подключён" }).getByRole("button", { name: "Готово" }).click();
 
   const channelsResponse = await request.get("/api/v1/integrations/channels", {
     headers: { authorization: `Bearer ${session.accessToken}` }
@@ -113,10 +124,7 @@ test("settings runtime creates telegram and max channels independently", async (
   const names = channelsPayload.data.connections.map((connection) => connection.name);
   expect(names).toEqual(expect.arrayContaining([telegramName, maxName]));
 
-  await channelPanel.locator(".connection-row.connection-picker").filter({ hasText: telegramName }).click();
-  await channelPanel.locator(".channel-detail-tabs button").filter({ hasText: "Тест" }).click();
-  await channelPanel.locator(".channel-test-grid button").filter({ hasText: "Запустить" }).click();
-  await expect(channelPanel.locator(".channel-test-result")).toContainText("accepted_to_queue");
+  await expect(page.locator(".integration-center")).toContainText(telegramName);
 });
 
 test("settings runtime exposes employees roles and rules from backend", async ({ page, request }) => {

@@ -45,7 +45,11 @@ export class AuthController {
   @UseGuards(TenantOperatorAuthGuard)
   @ApiOkResponse({ description: "Tenant operator logout envelope" })
   tenantLogout(@Req() request: TenantOperatorRequest) {
-    return this.authService.logoutTenantOperator({ sessionId: request.tenantOperatorContext?.sessionId });
+    return this.authService.logoutTenantOperator({
+      sessionId: request.tenantOperatorContext?.sessionId,
+      tenantId: request.tenantOperatorContext?.tenantId,
+      userId: request.tenantOperatorContext?.userId
+    });
   }
 
   @Post("tenant/select")

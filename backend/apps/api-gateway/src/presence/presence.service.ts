@@ -10,6 +10,7 @@ import { OperatorPresenceRepository, type OperatorPresenceRepositoryPort } from 
 import {
   isOperatorPresenceStatus,
   OPERATOR_PRESENCE_STATUSES,
+  presenceAcceptsAutoAssignment,
   type OperatorPresenceCurrentRecord,
   type OperatorPresenceStatus
 } from "./operator-presence.types.js";
@@ -26,6 +27,11 @@ export interface PresenceRequestContext {
 }
 
 export interface PresenceServiceOptions {
+  /**
+   * Drains queued dialogs after an operator becomes available. Routing remains
+   * responsible for candidate selection and capacity checks.
+   */
+  autoAssignQueuedConversations?: (tenantId: string) => Promise<void>;
   conversationRepository?: Pick<ConversationRepository, "appendRealtimeEvent">;
   identityRepository?: Pick<IdentityRepositoryPort, "findTenantUsers">;
   presenceRepository?: OperatorPresenceRepositoryPort;
@@ -35,12 +41,14 @@ export interface PresenceServiceOptions {
 let defaultRealtimeFanout: RealtimeFanoutAdapter = createDisabledRealtimeFanoutAdapter("presence_realtime_fanout_not_configured");
 
 export class OperatorPresenceService {
+  private readonly autoAssignQueuedConversations?: (tenantId: string) => Promise<void>;
   private readonly conversationRepository: Pick<ConversationRepository, "appendRealtimeEvent">;
   private readonly identityRepository: Pick<IdentityRepositoryPort, "findTenantUsers">;
   private readonly presenceRepository: OperatorPresenceRepositoryPort;
   private readonly realtimeFanout: RealtimeFanoutAdapter;
 
   constructor(options: PresenceServiceOptions = {}) {
+    this.autoAssignQueuedConversations = options.autoAssignQueuedConversations;
     this.conversationRepository = options.conversationRepository ?? ConversationRepository.default();
     this.identityRepository = options.identityRepository ?? IdentityRepository.default();
     this.presenceRepository = options.presenceRepository ?? OperatorPresenceRepository.default();
@@ -92,6 +100,7 @@ export class OperatorPresenceService {
     });
 
     let realtimeEvent: RealtimeEvent | null = null;
+    let autoAssignmentTriggered = false;
     if (result.changed) {
       const operatorName = await this.resolveOperatorName(scope.tenantId, scope.operatorId);
       realtimeEvent = await this.publishPresenceUpdate({
@@ -102,6 +111,20 @@ export class OperatorPresenceService {
         status: result.current.status,
         tenantId: scope.tenantId
       });
+
+      // A dialog may have reached a queue while every operator was offline.
+      // Presence changes are the next reliable signal that it can be assigned;
+      // without this retry, such dialogs remain queued until the client sends
+      // another message.
+      if (presenceAcceptsAutoAssignment(result.current.status)
+        && !presenceAcceptsAutoAssignment(result.previous?.status ?? "offline")) {
+        autoAssignmentTriggered = true;
+        try {
+          await this.autoAssignQueuedConversations?.(scope.tenantId);
+        } catch {
+          // Presence must remain saved even if queue draining is temporarily unavailable.
+        }
+      }
     }
 
     return createEnvelope({
@@ -111,10 +134,55 @@ export class OperatorPresenceService {
       meta: { changed: result.changed, operatorId: scope.operatorId },
       data: {
         changed: result.changed,
+        autoAssignmentTriggered,
         presence: presenceView(result.current),
         previousStatus: result.previous?.status ?? null,
         realtimeEvent,
         statuses: OPERATOR_PRESENCE_STATUSES
+      }
+    });
+  }
+
+  /**
+   * Used when an operator leaves the workplace. This is deliberately a
+   * compare-and-set: a stale browser tab must not overwrite a status the
+   * operator selected later in another tab or device.
+   */
+  async markMyPresenceUnavailableIfOnline(context: PresenceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const scope = requireOperatorScope("markMyPresenceUnavailableIfOnline", context);
+    if ("error" in scope) return scope.error;
+
+    const result = await this.presenceRepository.setStatusIfCurrent({
+      changedBy: scope.operatorId,
+      expectedStatus: "online",
+      operatorId: scope.operatorId,
+      status: "unavailable",
+      tenantId: scope.tenantId
+    });
+
+    let realtimeEvent: RealtimeEvent | null = null;
+    if (result.changed && result.current) {
+      realtimeEvent = await this.publishPresenceUpdate({
+        operatorId: scope.operatorId,
+        operatorName: await this.resolveOperatorName(scope.tenantId, scope.operatorId),
+        previousStatus: result.previous?.status ?? null,
+        since: result.current.since,
+        status: result.current.status,
+        tenantId: scope.tenantId
+      });
+    }
+
+    return createEnvelope({
+      service: PRESENCE_SERVICE,
+      operation: "markMyPresenceUnavailableIfOnline",
+      traceId: presenceTraceId("markMyPresenceUnavailableIfOnline"),
+      meta: { changed: result.changed, operatorId: scope.operatorId },
+      data: {
+        changed: result.changed,
+        presence: result.current ? presenceView(result.current) : null,
+        previousStatus: result.previous?.status ?? null,
+        realtimeEvent,
+        skipped: !result.conditionMatched
       }
     });
   }

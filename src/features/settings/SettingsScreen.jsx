@@ -5,6 +5,7 @@ import { ChannelConnectionsPanel } from "./ChannelConnectionsPanel.jsx";
 import { EmployeeManagementPanel } from "./EmployeeManagementPanel.jsx";
 import { ExternalAppPanel } from "./ExternalAppPanel.jsx";
 import { GroupManagementPanel } from "./GroupManagementPanel.jsx";
+import { IntegrationCenterPanel } from "./IntegrationCenterPanel.jsx";
 import { RulesPanel } from "./RulesPanel.jsx";
 import { SettingsShell, settingsTabIds } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
@@ -19,6 +20,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
   const appliedNavigationKeyRef = useRef(requestedTab ? requestedNavigationKey : "");
   const connectionSummaryLoadedRef = useRef(false);
   const [activeTab, setActiveTab] = useState(requestedTab || "connections");
+  const [integrationWorkspace, setIntegrationWorkspace] = useState(() => navigationTarget?.channelType || navigationTarget?.connectionId ? "channels" : "center");
   const [connectionSummary, setConnectionSummary] = useState(null);
   const [externalSummary, setExternalSummary] = useState({ active: 0, total: 0 });
   const [employeeSummary, setEmployeeSummary] = useState({ total: 0 });
@@ -27,6 +29,13 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
   const [rulesSummary, setRulesSummary] = useState({ active: 0 });
   const [loadError, setLoadError] = useState("");
   const canEditSettings = access.canManageSettings && !loadError;
+
+  function handleSettingsTabChange(tab) {
+    setActiveTab(tab);
+    if (tab === "connections") {
+      setIntegrationWorkspace("center");
+    }
+  }
 
   useEffect(() => {
     if (!requestedTab) {
@@ -38,6 +47,9 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
     if (requestedNavigationKey !== appliedNavigationKeyRef.current) {
       appliedNavigationKeyRef.current = requestedNavigationKey;
       setActiveTab(requestedTab);
+      if (requestedTab === "connections") {
+        setIntegrationWorkspace(navigationTarget?.channelType || navigationTarget?.connectionId ? "channels" : "center");
+      }
     }
   }, [hasNavigationTarget, requestedNavigationKey, requestedTab]);
 
@@ -140,42 +152,18 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
         ) : null}
       </header>
 
-      <SettingsShell activeTab={activeTab} onTabChange={setActiveTab} summaries={summaries}>
+      <SettingsShell activeTab={activeTab} onTabChange={handleSettingsTabChange} summaries={summaries}>
         {activeTab === "connections" ? (
-          <ChannelConnectionsPanel
+          <IntegrationWorkspace
             access={access}
             canEditSettings={canEditSettings}
             focusChannelType={navigationTarget?.tab === "connections" ? navigationTarget.channelType : ""}
             focusConnectionId={navigationTarget?.tab === "connections" ? navigationTarget.connectionId : ""}
             onSummaryChange={handleConnectionSummaryChange}
             onToast={onToast}
-          />
-        ) : null}
-
-        {activeTab === "external" ? (
-          <ExternalAppPanel
-            access={access}
-            canEditSettings={canEditSettings}
-            onSummaryChange={setExternalSummary}
-            onToast={onToast}
-          />
-        ) : null}
-
-        {activeTab === "sdk" ? (
-          <SdkConsolePanel
-            access={access}
-            canEditSettings={canEditSettings}
-            onToast={onToast}
-          />
-        ) : null}
-
-        {activeTab === "api" ? (
-          <AdminWorkspaces
-            access={access}
-            canEditSettings={canEditSettings}
-            onToast={onToast}
+            onWorkspaceChange={setIntegrationWorkspace}
             roleMode={roleMode}
-            view="api"
+            workspace={integrationWorkspace}
           />
         ) : null}
 
@@ -231,8 +219,92 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
   );
 }
 
+function IntegrationWorkspace({
+  access,
+  canEditSettings,
+  focusChannelType,
+  focusConnectionId,
+  onSummaryChange,
+  onToast,
+  onWorkspaceChange,
+  roleMode,
+  workspace
+}) {
+  if (workspace === "center") {
+    return (
+      <IntegrationCenterPanel
+        access={access}
+        canEditSettings={canEditSettings}
+        onManage={onWorkspaceChange}
+        onSummaryChange={onSummaryChange}
+        onToast={onToast}
+      />
+    );
+  }
+
+  const titles = {
+    api: "API и webhooks",
+    channels: "Управление каналами",
+    external: "Внешнее приложение",
+    sdk: "Виджет и SDK"
+  };
+
+  return (
+    <section className="integration-workspace-detail" aria-label={titles[workspace] ?? "Интеграции"}>
+      <header>
+        <button className="back-link" onClick={() => onWorkspaceChange("center")} type="button">
+          <ChevronLeft size={18} /> Центр интеграций
+        </button>
+        <div>
+          <h2>{titles[workspace] ?? "Интеграции"}</h2>
+          <p>Расширенные параметры доступны здесь, но начать новое подключение можно в Центре интеграций.</p>
+        </div>
+      </header>
+      <div className="integration-workspace-body">
+        {workspace === "channels" ? (
+          <ChannelConnectionsPanel
+            access={access}
+            canEditSettings={canEditSettings}
+            focusChannelType={focusChannelType}
+            focusConnectionId={focusConnectionId}
+            onSummaryChange={onSummaryChange}
+            onToast={onToast}
+          />
+        ) : null}
+        {workspace === "external" ? (
+          <ExternalAppPanel
+            access={access}
+            canEditSettings={canEditSettings}
+            onSummaryChange={() => {}}
+            onToast={onToast}
+          />
+        ) : null}
+        {workspace === "sdk" ? (
+          <SdkConsolePanel
+            access={access}
+            canEditSettings={canEditSettings}
+            onToast={onToast}
+          />
+        ) : null}
+        {workspace === "api" ? (
+          <AdminWorkspaces
+            access={access}
+            canEditSettings={canEditSettings}
+            onToast={onToast}
+            roleMode={roleMode}
+            view="api"
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function resolveSettingsNavigationTab(navigationTarget) {
   const tab = typeof navigationTarget?.tab === "string" ? navigationTarget.tab : "";
+  if (["external", "sdk", "api"].includes(tab)) {
+    return "connections";
+  }
   return settingsTabIds.includes(tab) ? tab : "";
 }
 

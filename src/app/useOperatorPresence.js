@@ -3,8 +3,10 @@ import { presenceService } from "../services/presenceService.js";
 import { isPresenceStatus, presenceStatusLabel } from "./presenceModel.js";
 
 export const PRESENCE_REALTIME_EVENT = "operator.presence.updated";
+const TAB_HEARTBEAT_MS = 15_000;
+const TAB_STALE_AFTER_MS = TAB_HEARTBEAT_MS * 3;
 
-export function useOperatorPresence({ enabled = false, operatorId = "", onToast } = {}) {
+export function useOperatorPresence({ enabled = false, operatorId = "", onToast, tenantId = "" } = {}) {
   const [presence, setPresence] = useState(null);
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(false);
@@ -46,6 +48,36 @@ export function useOperatorPresence({ enabled = false, operatorId = "", onToast 
       ignore = true;
     };
   }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled || !operatorId || !tenantId || typeof window === "undefined") {
+      return undefined;
+    }
+
+    const registryKey = `sc_operator_presence_tabs:${tenantId}:${operatorId}`;
+    const tabId = createTabId();
+    const registerTab = () => updateTabRegistry(registryKey, tabId, true);
+    const unregisterTab = () => updateTabRegistry(registryKey, tabId, false);
+    const handlePageHide = (event) => {
+      const isLastOpenTab = unregisterTab();
+      if (!event.persisted && isLastOpenTab) {
+        void presenceService.markMyPresenceUnavailableIfOnline({ keepalive: true });
+      }
+    };
+    const handlePageShow = () => registerTab();
+
+    registerTab();
+    const heartbeat = window.setInterval(registerTab, TAB_HEARTBEAT_MS);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
+
+    return () => {
+      window.clearInterval(heartbeat);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
+      unregisterTab();
+    };
+  }, [enabled, operatorId, tenantId]);
 
   const changeStatus = useCallback(async (status) => {
     if (!isPresenceStatus(status)) {
@@ -89,4 +121,41 @@ export function useOperatorPresence({ enabled = false, operatorId = "", onToast 
     presence,
     presenceVersion
   };
+}
+
+function createTabId() {
+  return typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function updateTabRegistry(key, tabId, connected) {
+  try {
+    const now = Date.now();
+    const tabs = readTabRegistry(key, now);
+    if (connected) {
+      tabs[tabId] = now;
+    } else {
+      delete tabs[tabId];
+    }
+    window.localStorage.setItem(key, JSON.stringify(tabs));
+    return !connected && Object.keys(tabs).length === 0;
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
+    // In that case we fail safe for the operator: do not infer that this is
+    // the last tab and accidentally change a status selected elsewhere.
+    return false;
+  }
+}
+
+function readTabRegistry(key, now) {
+  const raw = window.localStorage.getItem(key);
+  const parsed = raw ? JSON.parse(raw) : {};
+  const tabs = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  for (const [tabId, lastSeenAt] of Object.entries(tabs)) {
+    if (!Number.isFinite(lastSeenAt) || now - lastSeenAt > TAB_STALE_AFTER_MS) {
+      delete tabs[tabId];
+    }
+  }
+  return tabs;
 }

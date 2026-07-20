@@ -118,11 +118,43 @@ describe("canonical routing workload adapter contracts", () => {
 
   // Возврат бота в очередь без свободных операторов: диалог обязан получить
   // статус queued (вкладка «Ожидают»), а не остаться «в работе».
+  it("makes a default-team member eligible for its canonical queue", async () => {
+    const queued = conversation({ id: "queued-team-member", operatorId: undefined, status: "queued" });
+    const adapter = workloadAdapter({
+      conversations: [queued],
+      queues: [queue({ memberIds: ["removed-operator"] })],
+      // The transport channel deliberately differs from the queue id. The
+      // operator is eligible through queue.defaultTeamId, not a direct queue
+      // membership record.
+      teams: [team({ channels: ["telegram"], memberIds: ["operator-a"] })],
+      users: [user()]
+    });
+    const canonicalConversations = new CanonicalRoutingConversationRepository({
+      listConversations: async () => [queued]
+    } as unknown as ConversationRepository);
+    const service = new RoutingService(
+      RoutingRepository.inMemory(),
+      adapter,
+      canonicalConversations,
+      undefined,
+      {
+        findCurrent: async () => ({ changedBy: null, operatorId: "operator-a", since: "2026-07-19T12:00:00.000Z", status: "online", tenantId: "tenant-a" }),
+        listCurrent: async () => [{ changedBy: null, operatorId: "operator-a", since: "2026-07-19T12:00:00.000Z", status: "online", tenantId: "tenant-a" }]
+      }
+    );
+
+    const response = await service.simulateAssignment({ conversationId: queued.id }, { tenantId: "tenant-a" });
+    const candidate = response.data?.candidates?.[0] as Record<string, unknown> | undefined;
+    assert.equal(candidate?.operatorId, "operator-a");
+    assert.equal(candidate?.channelAccess, true);
+    assert.equal(candidate?.recommendation, "eligible");
+  });
+
   it("returns an unassigned dialog to the waiting queue when auto-assignment finds no eligible operator", async () => {
     const botDialog = conversation({ id: "conversation-bot", operatorId: undefined, status: "active" });
     const adapter = workloadAdapter({
       conversations: [botDialog],
-      queues: [queue()],
+      queues: [queue({ defaultTeam: null, defaultTeamId: null })],
       teams: [team()],
       // Канал оператора (telegram) не совпадает с очередью диалога
       // (queue-support) -> channel_access:denied -> кандидат blocked.
@@ -194,7 +226,7 @@ describe("canonical routing workload adapter contracts", () => {
     const repeatAppeal = conversation({ id: "conversation-repeat", operatorId: undefined, status: "new" });
     const adapter = workloadAdapter({
       conversations: [repeatAppeal],
-      queues: [queue()],
+      queues: [queue({ defaultTeam: null, defaultTeamId: null })],
       teams: [team()],
       users: [user()]
     });

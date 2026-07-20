@@ -215,6 +215,52 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
       assert.equal(sinks.appended.length, 1);
     });
 
+    it("retries queued-dialog routing when an operator becomes online", async () => {
+      const routedTenants: string[] = [];
+      const service = new OperatorPresenceService({
+        autoAssignQueuedConversations: async (tenantId) => { routedTenants.push(tenantId); },
+        conversationRepository: createRealtimeSinks().conversationRepository,
+        identityRepository: createIdentityStub([{ id: "operator-anna", name: "Anna R." }]),
+        presenceRepository: OperatorPresenceRepository.inMemory(),
+        realtimeFanout: createRealtimeSinks().realtimeFanout
+      });
+
+      const online = await service.setMyPresence({ status: "online" }, operatorContext("operator-anna"));
+      assert.equal(online.status, "ok");
+      assert.equal(online.data.autoAssignmentTriggered, true);
+      assert.deepEqual(routedTenants, [TENANT]);
+
+      const repeated = await service.setMyPresence({ status: "online" }, operatorContext("operator-anna"));
+      assert.equal(repeated.data.autoAssignmentTriggered, false);
+      assert.deepEqual(routedTenants, [TENANT]);
+    });
+
+    it("marks an operator unavailable on disconnect only when their current status is online", async () => {
+      const sinks = createRealtimeSinks();
+      const service = new OperatorPresenceService({
+        conversationRepository: sinks.conversationRepository,
+        identityRepository: createIdentityStub([{ id: "operator-anna", name: "Anna R." }]),
+        presenceRepository: OperatorPresenceRepository.inMemory(),
+        realtimeFanout: sinks.realtimeFanout
+      });
+
+      await service.setMyPresence({ status: "online" }, operatorContext("operator-anna"));
+      const disconnected = await service.markMyPresenceUnavailableIfOnline(operatorContext("operator-anna"));
+
+      assert.equal(disconnected.status, "ok");
+      assert.equal(disconnected.data.changed, true);
+      assert.equal((disconnected.data.presence as { status: string }).status, "unavailable");
+      assert.equal(disconnected.data.previousStatus, "online");
+
+      await service.setMyPresence({ status: "break" }, operatorContext("operator-anna"));
+      const preserved = await service.markMyPresenceUnavailableIfOnline(operatorContext("operator-anna"));
+
+      assert.equal(preserved.status, "ok");
+      assert.equal(preserved.data.changed, false);
+      assert.equal(preserved.data.skipped, true);
+      assert.equal((preserved.data.presence as { status: string }).status, "break");
+    });
+
     it("rejects unsupported statuses and non-operator actors", async () => {
       const service = new OperatorPresenceService({
         conversationRepository: createRealtimeSinks().conversationRepository,

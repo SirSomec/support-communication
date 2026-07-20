@@ -19,6 +19,15 @@ export const presenceService = {
     });
   },
 
+  async markMyPresenceUnavailableIfOnline({ keepalive = false } = {}) {
+    return apiRequest("/presence/me/disconnect", {
+      keepalive,
+      method: "POST",
+      operation: "markMyPresenceUnavailableIfOnline",
+      service: SERVICE
+    });
+  },
+
   async fetchTeamPresence(filters = {}) {
     return apiRequest("/presence/team", {
       operation: "fetchTeamPresence",
@@ -31,7 +40,7 @@ export const presenceService = {
     return {
       id: SERVICE,
       status: "ready",
-      operations: ["fetchMyPresence", "setMyPresence", "fetchTeamPresence"],
+      operations: ["fetchMyPresence", "setMyPresence", "markMyPresenceUnavailableIfOnline", "fetchTeamPresence"],
       traceId: `trc_${SERVICE}_ready`,
       states: ["loading", "empty", "error", "partial"],
       note: "Connected to API Gateway routes."

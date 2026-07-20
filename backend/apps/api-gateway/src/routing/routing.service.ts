@@ -142,6 +142,9 @@ export class RoutingService {
     const routingPolicy = await this.resolveRoutingPolicy(channel, tenantId);
     const routingAnalyticsRows = await this.routingRepository.listRoutingAnalyticsRows({ tenantId });
     const visibleQueueIds = new Set(queues.map((queue) => queue.channel));
+    const canonicalQueueIdsByOperator = canonical
+      ? new Map(canonical.operators.map((operator) => [operator.id, new Set(operator.queueIds)]))
+      : null;
     const presenceByOperator = await this.listOperatorPresence(tenantId);
     const operatorSource = (canonical
       ? canonical.operators.filter((operator) => !channel || operator.queueIds.some((queueId) => visibleQueueIds.has(queueId)))
@@ -154,7 +157,9 @@ export class RoutingService {
         operator,
         channel,
         findCapacityForOperator(capacities, operator.id, channel),
-        hasMembershipChannelAccess(memberships, operator.id, channel)
+        canonical
+          ? Array.from(canonicalQueueIdsByOperator?.get(operator.id) ?? []).some((queueId) => visibleQueueIds.has(queueId))
+          : hasMembershipChannelAccess(memberships, operator.id, channel)
       ));
 
     return createEnvelope({
@@ -1149,15 +1154,27 @@ export class RoutingService {
     const capacities = await this.listOperatorCapacities(conversation.channel, tenantId);
     const presenceByOperator = await this.listOperatorPresence(tenantId);
     const lastAssignments = lastAssignedAtByOperator ?? await this.readLastAssignedAtByOperator(tenantId);
-    return this.operators
-      .filter((operator) => this.operatorBelongsToTenant(operator, tenantId))
+    const canonical = this.canonicalWorkload ? await this.canonicalWorkload.readWorkload(tenantId) : null;
+    const canonicalQueueIdsByOperator = canonical
+      ? new Map(canonical.operators.map((operator) => [operator.id, new Set(operator.queueIds)]))
+      : null;
+    const operators = canonical
+      ? canonical.operators
+      : this.operators.filter((operator) => this.operatorBelongsToTenant(operator, tenantId));
+
+    return operators
       .map((operator) => withOperatorPresence(operator, presenceByOperator.get(operator.id)))
       .map((operator) => {
         const capacity = findCapacityForOperator(capacities, operator.id, conversation.channel);
         const queueMembership = findMembershipForOperator(memberships, operator.id, conversation.channel);
         const chatLimit = capacity?.chatLimit ?? operator.limit;
         const plannedChats = operator.chats + (plannedOperatorLoad.get(operator.id) ?? 0);
-        const channelAccess = this.operatorCanAccessChannel(operator, conversation.channel, memberships);
+        // Canonical queues can inherit all members of their default team. A
+        // direct QueueMembership record is therefore not the complete source
+        // of truth for eligibility (and may contain an obsolete user id).
+        const channelAccess = canonical
+          ? canonicalQueueIdsByOperator?.get(operator.id)?.has(conversation.channel) === true
+          : this.operatorCanAccessChannel(operator, conversation.channel, memberships);
         const availableCapacity = Math.max(0, chatLimit - plannedChats);
         const online = operatorAcceptsAutoAssignment(operator);
         const lastAssignedAt = lastAssignments.get(operator.id) ?? null;
@@ -1179,7 +1196,9 @@ export class RoutingService {
           explain,
           lastAssignedAt,
           loadRatio: chatLimit > 0 ? Number((plannedChats / chatLimit).toFixed(2)) : 1,
-          queueMembership: hasMembershipChannelAccess(memberships, operator.id, conversation.channel),
+          queueMembership: canonical
+            ? canonicalQueueIdsByOperator?.get(operator.id)?.has(conversation.channel) === true
+            : hasMembershipChannelAccess(memberships, operator.id, conversation.channel),
           queueMembershipRole: queueMembership?.role ?? null,
           recommendation: channelAccess && online && availableCapacity > 0 ? "eligible" : "blocked"
         };
@@ -1363,6 +1382,13 @@ export class RoutingService {
   }
 
   private async operatorHasChannelAccess(operator: RoutingOperator, channel: string, tenantId: string): Promise<boolean> {
+    if (this.canonicalWorkload) {
+      const canonical = await this.canonicalWorkload.readWorkload(tenantId);
+      const canonicalOperator = canonical.operators.find((candidate) => candidate.id === operator.id);
+      if (canonicalOperator) {
+        return canonicalOperator.queueIds.includes(channel);
+      }
+    }
     const memberships = await this.listActiveQueueMemberships(channel, tenantId);
     return this.operatorCanAccessChannel(operator, channel, memberships);
   }

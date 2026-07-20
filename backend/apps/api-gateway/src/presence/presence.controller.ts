@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Put, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { TenantOperatorOrServiceAdminGuard } from "../conversation/tenant-operator-or-service-admin.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
@@ -26,6 +26,14 @@ export class PresenceController {
   @ApiOkResponse({ description: "Operator presence transition envelope with realtime event descriptor" })
   setMyPresence(@Body() payload: { status?: string }, @Req() request: TenantOperatorRequest & ServiceAdminRequest) {
     return this.presenceService.setMyPresence(payload, presenceContextFromRequest(request));
+  }
+
+  @Post("me/disconnect")
+  @RequireTenantOperatorPermission("presence.write")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Marks the current operator unavailable only when their current status is online" })
+  disconnectMyPresence(@Req() request: TenantOperatorRequest) {
+    return this.presenceService.markMyPresenceUnavailableIfOnline(presenceContextFromRequest(request));
   }
 
   @Get("team")

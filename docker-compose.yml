@@ -1,5 +1,6 @@
 services:
   frontend:
+    restart: always
     build:
       context: .
       target: frontend
@@ -10,6 +11,7 @@ services:
       - "8080:80"
 
   api-gateway:
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -39,6 +41,9 @@ services:
       REDIS_URL: redis://redis:6379
       REALTIME_REDIS_FANOUT_ENABLED: ${REALTIME_REDIS_FANOUT_ENABLED:-true}
       REALTIME_REDIS_CHANNEL: ${REALTIME_REDIS_CHANNEL:-support:realtime}
+      # The local Chat API callback is intentionally origin-scoped; private
+      # network callbacks remain blocked everywhere else.
+      OPEN_CHANNEL_OUTBOUND_TRUSTED_ORIGINS: ${OPEN_CHANNEL_OUTBOUND_TRUSTED_ORIGINS:-http://host.docker.internal:8081}
       # Presigned URL host must be reachable both from the host browser
       # (attachment PUT/GET) and from containers (clamav-scanner download).
       # kubernetes.docker.internal maps to 127.0.0.1 in the Docker Desktop
@@ -126,7 +131,7 @@ services:
     restart: "no"
 
   notification-delivery-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -154,7 +159,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   lead-notification-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -184,7 +189,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   webhook-delivery-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -210,7 +215,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   telegram-polling-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -240,7 +245,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   proactive-delivery-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -263,7 +268,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   bot-runtime-reconciliation-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -292,7 +297,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   knowledge-document-ingestion-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -319,7 +324,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   url-source-refresh-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -339,7 +344,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   report-digest-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -366,7 +371,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   report-export-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -397,7 +402,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   quota-expiration-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -440,7 +445,7 @@ services:
       SLA_TIMER_WORKER_RETRY_BACKOFF_MS: 60000
     volumes:
       - api-gateway-runtime:/app/backend/.runtime
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4110/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -470,7 +475,7 @@ services:
       RESCUE_RETURN_WORKER_RETRY_BACKOFF_MS: 60000
     volumes:
       - api-gateway-runtime:/app/backend/.runtime
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4110/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -479,7 +484,7 @@ services:
       start_period: 15s
 
   outbox-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -520,7 +525,7 @@ services:
       - api-gateway-runtime:/app/backend/.runtime
 
   identity-events-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -544,7 +549,7 @@ services:
       OUTBOX_RETRY_BACKOFF_MS: 60000
 
   billing-sync-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -569,7 +574,7 @@ services:
       OUTBOX_RETRY_BACKOFF_MS: 60000
 
   file-scan-scanner-worker:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -599,6 +604,7 @@ services:
       OUTBOX_BATCH_SIZE: 50
 
   clamav-scanner:
+    restart: always
     build:
       context: .
       target: api-gateway
@@ -625,6 +631,7 @@ services:
       start_period: 10s
 
   clamav:
+    restart: always
     image: clamav/clamav:1.4
     volumes:
       - clamav-data:/var/lib/clamav
@@ -636,6 +643,7 @@ services:
       start_period: 60s
 
   postgres:
+    restart: always
     image: postgres:16-alpine
     # max_connections поднят со 100: у гейтвея ~20 PrismaClient-ов (по клиенту на
     # домен), у каждого пул до cpus*2+1 — дефолтного лимита не хватало, стек
@@ -656,6 +664,7 @@ services:
       retries: 5
 
   redis:
+    restart: always
     image: redis:7-alpine
     ports:
       - "56379:6379"
@@ -668,6 +677,7 @@ services:
       retries: 5
 
   minio:
+    restart: always
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     command: server /data --console-address ":9001"
     environment:
@@ -695,6 +705,7 @@ services:
       && mc mb --ignore-existing local/support-communication-local"
 
   mailpit:
+    restart: always
     image: axllent/mailpit:v1.22
     ports:
       - "11025:1025"

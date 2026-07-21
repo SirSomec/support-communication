@@ -161,7 +161,7 @@ export function BillingTariffWorkspace({ onAudit }) {
               <WalletCards size={18} />
               <strong>{tariff.name}</strong>
               <span>{formatCurrency(tariff.priceMonthly)}</span>
-              <small>{tariff.includedUsers} пользователей - {tariff.workspaceLimit} пространств</small>
+              <small>до {tariff.includedUsers} пользователей · до {tariff.workspaceLimit} каналов</small>
             </button>
           ))}
         </div>

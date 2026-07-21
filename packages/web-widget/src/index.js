@@ -58,7 +58,8 @@ const state = {
   unreadCount: 0,
   userToken: "",
   utm: null,
-  visitorNumber: null
+  visitorNumber: null,
+  pendingFiles: []
 };
 
 let rootEl = null;
@@ -69,6 +70,26 @@ let toggleBtn = null;
 let ratingEl = null;
 let feedbackEl = null;
 let invitationEl = null;
+
+function createWidgetIcon(paths, label) {
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("aria-hidden", label ? "false" : "true");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("width", "20");
+  icon.setAttribute("height", "20");
+  icon.setAttribute("fill", "none");
+  icon.setAttribute("stroke", "currentColor");
+  icon.setAttribute("stroke-width", "2");
+  icon.setAttribute("stroke-linecap", "round");
+  icon.setAttribute("stroke-linejoin", "round");
+  if (label) icon.setAttribute("aria-label", label);
+  for (const d of paths) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    icon.appendChild(path);
+  }
+  return icon;
+}
 
 export function init(options = {}) {
   const apiBase = String(options.apiBase ?? "").trim().replace(/\/+$/, "");
@@ -156,13 +177,14 @@ async function apiRequest(method, path, { body, query } = {}) {
   return envelope.data ?? {};
 }
 
-async function sendVisitorMessage(text) {
+async function sendVisitorMessage(text, attachments = []) {
   const data = await apiRequest("POST", "/public/sdk/messages", {
     body: {
       conversationId: state.conversationId,
       externalId: state.externalId,
       pageUrl: state.pageUrlOverride ?? (typeof window !== "undefined" ? window.location.href : undefined),
-      text
+      text,
+      ...(attachments.length ? { attachments } : {})
     }
   });
 
@@ -181,6 +203,20 @@ async function sendVisitorMessage(text) {
   }
 
   return data;
+}
+
+async function uploadVisitorFile(file) {
+  if (!(file instanceof File) || file.size <= 0) throw new Error("Выберите непустой файл.");
+  const descriptor = await apiRequest("POST", "/public/sdk/uploads", {
+    body: { fileName: file.name, mimeType: file.type || "application/octet-stream", sizeBytes: file.size }
+  });
+  const upload = descriptor.signedUpload;
+  if (!descriptor.fileId || !upload?.url || upload.method !== "PUT") throw new Error("Сервер не выдал URL для загрузки файла.");
+  const response = await fetch(upload.url, { method: upload.method, headers: upload.headers ?? {}, body: file });
+  if (!response.ok) throw new Error(`Не удалось загрузить файл (${response.status}).`);
+  const finalized = await apiRequest("POST", `/public/sdk/uploads/${encodeURIComponent(descriptor.fileId)}/finalize`, { body: {} });
+  if (finalized.storageState !== "uploaded") throw new Error("Сервер не подтвердил загрузку файла.");
+  return { fileId: descriptor.fileId, fileName: descriptor.fileName ?? file.name, mimeType: descriptor.mimeType ?? file.type, sizeBytes: descriptor.sizeBytes ?? file.size };
 }
 
 async function pollOperatorReplies() {
@@ -540,6 +576,7 @@ function open() {
   if (rootEl) {
     rootEl.classList.add("sw-open");
   }
+  toggleBtn?.setAttribute("aria-expanded", "true");
   if (inputEl) {
     inputEl.focus();
   }
@@ -553,6 +590,7 @@ function close() {
   if (rootEl) {
     rootEl.classList.remove("sw-open");
   }
+  toggleBtn?.setAttribute("aria-expanded", "false");
   callPageCallback("onClose");
   callPageCallback("onChangeState", "label");
   callPageCallback("onResizeCallback");
@@ -983,20 +1021,30 @@ function renderShell() {
   toggle.type = "button";
   toggle.className = "sw-toggle";
   toggle.setAttribute("aria-label", "Открыть чат поддержки");
-  toggle.textContent = "💬";
+  toggle.setAttribute("aria-controls", "support-widget-panel");
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.replaceChildren(createWidgetIcon(["M21 11.5a8.4 8.4 0 0 1-8.7 8.4 9.5 9.5 0 0 1-4.5-1.1L3 20l1.2-4.2A8.1 8.1 0 0 1 3 11.5 8.4 8.4 0 0 1 11.7 3 8.4 8.4 0 0 1 21 11.5Z"]));
   const panel = document.createElement("section");
   panel.className = "sw-panel";
+  panel.id = "support-widget-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "false");
   panel.setAttribute("aria-label", "Чат поддержки");
   const header = document.createElement("header");
   header.className = "sw-header";
+  const headerCopy = document.createElement("div");
+  headerCopy.className = "sw-header-copy";
   const title = document.createElement("strong");
   title.textContent = "Поддержка";
+  const subtitle = document.createElement("small");
+  subtitle.textContent = "Обычно отвечаем в течение нескольких минут";
+  headerCopy.append(title, subtitle);
   const close = document.createElement("button");
   close.type = "button";
   close.className = "sw-close";
   close.setAttribute("aria-label", "Закрыть");
-  close.textContent = "×";
-  header.append(title, close);
+  close.replaceChildren(createWidgetIcon(["M6 6l12 12", "M18 6 6 18"]));
+  header.append(headerCopy, close);
   const messages = document.createElement("div");
   messages.className = "sw-messages";
   messages.setAttribute("role", "log");
@@ -1032,12 +1080,24 @@ function renderShell() {
   textarea.className = "sw-input";
   textarea.rows = 2;
   textarea.placeholder = "Напишите сообщение…";
-  textarea.required = true;
+  textarea.required = false;
+  const fileInput = document.createElement("input");
+  fileInput.className = "sw-file-input";
+  fileInput.type = "file";
+  fileInput.setAttribute("aria-label", "Прикрепить файл");
+  const attach = document.createElement("button");
+  attach.type = "button";
+  attach.className = "sw-attach";
+  attach.setAttribute("aria-label", "Прикрепить файл");
+  attach.replaceChildren(createWidgetIcon(["m21.4 11.6-8.8 8.8a6 6 0 0 1-8.5-8.5l8.8-8.8a4 4 0 0 1 5.7 5.7l-8.8 8.8a2 2 0 0 1-2.8-2.8l8.1-8.1"]));
   const send = document.createElement("button");
   send.type = "submit";
   send.className = "sw-send";
-  send.textContent = "Отправить";
-  composer.append(textarea, send);
+  send.setAttribute("aria-label", "Отправить сообщение");
+  send.replaceChildren(createWidgetIcon(["m22 2-7 20-4-9-9-4Z", "m22 2-11 11"]));
+  const pendingFiles = document.createElement("div");
+  pendingFiles.className = "sw-pending-files";
+  composer.append(pendingFiles, fileInput, attach, textarea, send);
   panel.append(header, messages, rating, feedback, composer);
   rootEl.append(toggle, panel);
 
@@ -1051,6 +1111,8 @@ function renderShell() {
   feedbackEl = rootEl.querySelector(".sw-feedback");
   const closeBtn = rootEl.querySelector(".sw-close");
   const form = rootEl.querySelector(".sw-composer");
+  const filePicker = rootEl.querySelector(".sw-file-input");
+  const attachBtn = rootEl.querySelector(".sw-attach");
   feedbackEl.querySelector(".sw-feedback__new-appeal").addEventListener("click", (event) => {
     void declineFeedbackPrompt(event.currentTarget);
   });
@@ -1063,6 +1125,27 @@ function renderShell() {
     }
   });
   closeBtn.addEventListener("click", close);
+  attachBtn.addEventListener("click", () => filePicker.click());
+  filePicker.addEventListener("change", () => {
+    state.pendingFiles = [...filePicker.files];
+    pendingFiles.replaceChildren(...state.pendingFiles.map((file) => {
+      const chip = document.createElement("span");
+      chip.className = "sw-pending-file";
+      const name = document.createElement("span");
+      name.textContent = file.name;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `Удалить файл ${file.name}`);
+      remove.replaceChildren(createWidgetIcon(["M6 6l12 12", "M18 6 6 18"]));
+      remove.addEventListener("click", () => {
+        state.pendingFiles = state.pendingFiles.filter((item) => item !== file);
+        chip.remove();
+        if (!state.pendingFiles.length) filePicker.value = "";
+      });
+      chip.append(createWidgetIcon(["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z", "M14 2v6h6"]), name, remove);
+      return chip;
+    }));
+  });
   ratingEl.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-score]");
     if (!button || state.ratingSubmitted) return;
@@ -1079,16 +1162,22 @@ function renderShell() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const text = inputEl.value.trim();
-    if (!text || sendBtn.disabled) {
+    const selectedFiles = state.pendingFiles;
+    if ((!text && !selectedFiles.length) || sendBtn.disabled) {
       return;
     }
 
     sendBtn.disabled = true;
-    appendMessage("visitor", text);
-    inputEl.value = "";
+    const attachments = [];
 
     try {
-      const data = await sendVisitorMessage(text);
+      for (const file of selectedFiles) attachments.push(await uploadVisitorFile(file));
+      appendMessage("visitor", text || "Файл", undefined, attachments);
+      inputEl.value = "";
+      filePicker.value = "";
+      state.pendingFiles = [];
+      pendingFiles.replaceChildren();
+      const data = await sendVisitorMessage(text, attachments);
       if (data.recordedAsFeedback) {
         // Сообщение сохранено как отзыв к оценке: операторского ответа не
         // будет, подтверждаем сразу и возвращаем композер в обычный режим.
@@ -1107,7 +1196,7 @@ function renderShell() {
 }
 
 function appendMessage(role, text, id, attachments) {
-  const files = downloadableAttachments(attachments);
+  const files = Array.isArray(attachments) ? attachments : [];
   if (!messagesEl || (!text && !files.length)) {
     return;
   }
@@ -1148,11 +1237,14 @@ function renderAttachmentList(files) {
   const list = document.createElement("div");
   list.className = "sw-attachments";
   for (const file of files) {
-    const link = document.createElement("a");
+    const url = String(file?.download?.url ?? "").trim();
+    const link = document.createElement(url ? "a" : "span");
     link.className = "sw-attachment";
-    link.href = String(file.download.url);
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
+    if (url) {
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
     const name = String(file.fileName ?? "").trim() || "Файл";
     const size = formatAttachmentSize(file.sizeBytes);
     link.textContent = size ? `${name} (${size})` : name;
@@ -1209,16 +1301,19 @@ function injectStyles() {
       color: #0f172a;
     }
     .support-widget .sw-toggle {
-      width: 56px;
-      height: 56px;
+      display: inline-grid;
+      width: 60px;
+      height: 60px;
+      place-items: center;
       border: none;
       border-radius: 999px;
       background: #2563eb;
       color: #fff;
-      font-size: 24px;
       cursor: pointer;
       box-shadow: 0 8px 24px rgba(37, 99, 235, 0.35);
+      transition: transform .18s ease, box-shadow .18s ease;
     }
+    .support-widget .sw-toggle:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(37, 99, 235, .4); }
     .support-widget .sw-panel {
       display: none;
       position: absolute;
@@ -1240,17 +1335,23 @@ function injectStyles() {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 14px;
-      background: #f8fafc;
-      border-bottom: 1px solid #e2e8f0;
+      padding: 15px 16px;
+      background: #2563eb;
+      color: #fff;
     }
+    .support-widget .sw-header-copy { display: grid; gap: 3px; }
+    .support-widget .sw-header-copy strong { font-size: 15px; line-height: 1.2; }
+    .support-widget .sw-header-copy small { font-size: 11px; line-height: 1.3; opacity: .85; }
     .support-widget .sw-close {
-      border: none;
-      background: transparent;
-      font-size: 22px;
-      line-height: 1;
+      display: inline-grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border: 1px solid rgba(255,255,255,.35);
+      border-radius: 9px;
+      background: rgba(255,255,255,.12);
       cursor: pointer;
-      color: #64748b;
+      color: #fff;
     }
     .support-widget .sw-messages {
       flex: 1;
@@ -1357,34 +1458,52 @@ function injectStyles() {
       cursor: pointer;
     }
     .support-widget .sw-feedback .sw-feedback__new-appeal:disabled { opacity: 0.6; cursor: default; }
-    .support-widget .sw-composer {
-      display: flex;
-      gap: 8px;
-      padding: 10px;
-      border-top: 1px solid #e2e8f0;
+    .support-widget .sw-composer { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; gap: 8px; padding: 12px; border-top: 1px solid #e2e8f0; background: #fff; }
+    .support-widget .sw-pending-files { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+    .support-widget .sw-pending-file { display: inline-flex; min-width: 0; max-width: 100%; align-items: center; gap: 6px; padding: 6px 7px; border: 1px solid #c7d8f8; border-radius: 8px; background: #f5f9ff; color: #25466d; font-size: 12px; }
+    .support-widget .sw-pending-file > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .support-widget .sw-pending-file button { display: inline-grid; width: 20px; height: 20px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #5b7190; cursor: pointer; }
+    .support-widget .sw-pending-file svg { width: 14px; height: 14px; }
+    .support-widget .sw-file-input { display: none; }
+    .support-widget .sw-attach {
+      flex: 0 0 auto;
+      width: 42px;
+      height: 42px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid #9dbdf4;
+      border-radius: 10px;
       background: #fff;
+      color: #2563eb;
+      cursor: pointer;
     }
     .support-widget .sw-input {
       flex: 1;
       resize: none;
       border: 1px solid #cbd5e1;
+      min-height: 42px;
       border-radius: 10px;
-      padding: 8px 10px;
+      padding: 10px 11px;
       font: inherit;
     }
     .support-widget .sw-send {
+      display: inline-grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
       border: none;
-      border-radius: 10px;
+      border-radius: 50%;
       background: #2563eb;
       color: #fff;
-      padding: 0 14px;
-      font-weight: 600;
       cursor: pointer;
     }
     .support-widget .sw-send:disabled {
       opacity: 0.6;
       cursor: not-allowed;
     }
+    .support-widget button:focus-visible, .support-widget textarea:focus-visible, .support-widget a:focus-visible { outline: 3px solid rgba(59,130,246,.42); outline-offset: 2px; }
+    @media (max-width: 480px) { .support-widget { right: 12px; bottom: 12px; } .support-widget .sw-panel { width: calc(100vw - 24px); height: min(560px, calc(100vh - 92px)); bottom: 72px; } }
+    @media (prefers-reduced-motion: reduce) { .support-widget .sw-toggle { transition: none; } }
   `;
   document.head.appendChild(style);
 }

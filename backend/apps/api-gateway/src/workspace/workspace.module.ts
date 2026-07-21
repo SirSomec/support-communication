@@ -22,6 +22,7 @@ import { WorkspaceService } from "./workspace.service.js";
         fileUploadQuota: createBillingFileUploadQuotaChecker(billingService)
       })
     }
-  ]
+  ],
+  exports: [WorkspaceService]
 })
 export class WorkspaceModule {}

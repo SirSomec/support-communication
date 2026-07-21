@@ -60,7 +60,12 @@ function App() {
     transcriptMode
   } = useComposerState();
   const tenantSession = useTenantSessionState({
-    enabled: typeof window !== "undefined" && (window.location.hash === "#/app" || window.location.hash.startsWith("#/app"))
+    enabled: typeof window !== "undefined" && (
+      window.location.hash === "#/app"
+      || window.location.hash.startsWith("#/app")
+      || window.location.hash === "#/login"
+      || window.location.hash === "#/auth"
+    )
   });
   const operatorPresence = useOperatorPresence({
     enabled: tenantSession.authenticated,

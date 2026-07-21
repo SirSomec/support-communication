@@ -35,6 +35,7 @@ export function ScenarioConsole({
   access,
   aiReadiness,
   aiUsage,
+  channelOptions = ["SDK", "Telegram", "MAX", "VK", "CHATAPI"],
   activeTab,
   canManage,
   isSaving,
@@ -226,7 +227,10 @@ export function ScenarioConsole({
           <fieldset className="scenario-settings-channels">
             <legend>Каналы запуска</legend>
             <div>
-              {["SDK", "Telegram", "MAX", "VK"].map((channel) => (
+              {channelOptions.map((option) => {
+                const channel = typeof option === "string" ? option : option.id;
+                const label = typeof option === "string" ? option : option.label;
+                return (
                 <button
                   aria-pressed={form.channels.includes(channel)}
                   className={form.channels.includes(channel) ? "active" : ""}
@@ -239,9 +243,10 @@ export function ScenarioConsole({
                   })}
                   type="button"
                 >
-                  {channel}
+                  {label}
                 </button>
-              ))}
+                );
+              })}
             </div>
           </fieldset>
 

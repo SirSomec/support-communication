@@ -1,11 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { PlayCircle, Zap } from "lucide-react";
+import { CheckCircle2, Code2, Copy, FileText, Globe2, MessageCircle, Paperclip, PlayCircle, Send, Smartphone, X, Zap } from "lucide-react";
 import { SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import { copyTextToClipboard } from "../../services/clipboardService.js";
 import { dialogService } from "../../services/dialogService.js";
 import { integrationService } from "../../services/integrationService.js";
 
 const sdkSnippet = `SupportSDK.init({ appId: "gig-app", channels: ["SDK", "Telegram", "MAX", "VK"] })`;
+function widgetSnippet({ apiBase, environment, publicKey }) {
+  return `<script src="https://cdn.example.com/support-widget.js"></script>\n<script>\n  SupportWidget.init({\n    apiBase: "${apiBase}",\n    publicKey: "${publicKey}",\n    environment: "${environment}"\n  });\n</script>`;
+}
+
+function defaultWidgetApiBase() {
+  if (typeof window === "undefined") return "https://support.example.com/api/v1";
+  return `${window.location.origin}/api/v1`;
+}
 
 const defaultSdkEvents = [
   ["identifyUser", "Передает телефон, устройство и ID гигера"],
@@ -60,6 +68,15 @@ function getSdkPlaygroundSuccessEvidence(serviceResponse, eventName) {
 }
 
 export function SdkConsolePanel({ access, canEditSettings, onToast }) {
+  const [view, setView] = useState("start");
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [widgetCheckState, setWidgetCheckState] = useState("");
+  const [widgetApiBase, setWidgetApiBase] = useState(defaultWidgetApiBase);
+  const [widgetEnvironment, setWidgetEnvironment] = useState("production");
+  const [widgetPublicKey, setWidgetPublicKey] = useState("");
+  const [widgetKeyBusy, setWidgetKeyBusy] = useState(false);
+  const [widgetKeyError, setWidgetKeyError] = useState("");
+  const [widgetPreviewOpen, setWidgetPreviewOpen] = useState(true);
   const [sdkEvents, setSdkEvents] = useState(defaultSdkEvents);
   const [sdkChannelConnections, setSdkChannelConnections] = useState([]);
   const [loadError, setLoadError] = useState("");
@@ -257,28 +274,90 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
     }
   }
 
-  async function handleCopySdkSnippet() {
+  async function handleCopySnippet(snippet, label) {
     if (!canEditSettings) {
       onToast(access.reason);
       return;
     }
 
-    const result = await copyTextToClipboard(sdkSnippet);
-    onToast(result.ok ? "SDK snippet скопирован." : result.message);
+    const result = await copyTextToClipboard(snippet);
+    onToast(result.ok ? `${label} скопирован.` : result.message);
+  }
+
+  async function handleCreateWidgetKey() {
+    if (!canEditSettings || widgetKeyBusy) return;
+    setWidgetKeyBusy(true);
+    setWidgetKeyError("");
+    const response = await integrationService.createApiKey({
+      environment: widgetEnvironment,
+      name: `Виджет сайта (${widgetEnvironment})`,
+      scopes: ["clients:identify", "conversations:write"]
+    });
+    setWidgetKeyBusy(false);
+    if (response.status !== "ok" || !response.data?.rawKey || response.data?.rawKeyShownOnce !== true) {
+      setWidgetKeyError(response.error?.message ?? "Не удалось создать публичный ключ виджета.");
+      return;
+    }
+    setWidgetPublicKey(response.data.rawKey);
+    onToast("Публичный ключ виджета создан. Скопируйте код сейчас: ключ показывается один раз.");
   }
 
   return (
-    <section className="settings-section sdk-console">
+    <section className="settings-section sdk-console" aria-labelledby="widget-sdk-title">
       <SettingsSectionHeader
-        title="SDK-консоль"
+        title="Чат на сайте или в приложении"
         meta={loadError ? "backend error" : "тестовый стенд"}
-        hint="Инструмент разработчика: сниппет для установки SDK, playground для проверки событий и справочник точек входа."
+        hint="Добавьте чат на сайт по готовой инструкции или откройте инструменты для мобильного приложения и разработчиков."
       />
       {loadError ? <div className="entity-empty"><strong>{loadError}</strong></div> : null}
+      {view === "start" ? (
+        <WidgetStartView
+          canEditSettings={canEditSettings}
+          onOpenApi={() => onToast("Настройки API и webhooks доступны в разделе «API и webhooks».")}
+          onOpenSdk={() => setView("sdk")}
+          onOpenWidget={() => setView("widget")}
+        />
+      ) : null}
+      {view === "widget" ? (
+        <WidgetSetupView
+          canEditSettings={canEditSettings}
+          checkState={widgetCheckState}
+          onBack={() => setView("start")}
+          onCheck={() => setWidgetCheckState(websiteUrl.trim() ? "ready" : "url-required")}
+          onCopy={() => void handleCopySnippet(widgetSnippet({
+            apiBase: widgetApiBase,
+            environment: widgetEnvironment,
+            publicKey: widgetPublicKey
+          }), "Код виджета")}
+          onCreateKey={() => void handleCreateWidgetKey()}
+          onEnvironmentChange={setWidgetEnvironment}
+          onApiBaseChange={setWidgetApiBase}
+          publicKey={widgetPublicKey}
+          keyBusy={widgetKeyBusy}
+          keyError={widgetKeyError}
+          apiBase={widgetApiBase}
+          environment={widgetEnvironment}
+          previewOpen={widgetPreviewOpen}
+          onPreviewToggle={() => setWidgetPreviewOpen((current) => !current)}
+          onUrlChange={(value) => {
+            setWebsiteUrl(value);
+            setWidgetCheckState("");
+          }}
+          url={websiteUrl}
+        />
+      ) : null}
+      {view === "sdk" ? (
       <div className="settings-card sdk-console-body settings-scroll">
+        <div className="sdk-developer-header">
+          <div>
+            <h3>Для разработчика</h3>
+            <p>Ключ и события для мобильного приложения. Расширенная проверка доступна ниже.</p>
+          </div>
+          <button onClick={() => setView("start")} type="button">К выбору способа</button>
+        </div>
       <div className="sdk-code">
         <code>{sdkSnippet}</code>
-        <button disabled={!canEditSettings} onClick={() => void handleCopySdkSnippet()} title={canEditSettings ? "Копировать SDK snippet" : access.reason} type="button">Копировать</button>
+        <button disabled={!canEditSettings} onClick={() => void handleCopySnippet(sdkSnippet, "SDK snippet")} title={canEditSettings ? "Копировать SDK snippet" : access.reason} type="button">Копировать</button>
       </div>
       <div className="sdk-playground">
         <div className="section-title compact-title">
@@ -349,6 +428,117 @@ export function SdkConsolePanel({ access, canEditSettings, onToast }) {
           </div>
         ))}
       </div>
+      </div>
+      ) : null}
+    </section>
+  );
+}
+
+function WidgetStartView({ canEditSettings, onOpenApi, onOpenSdk, onOpenWidget }) {
+  return (
+    <div className="widget-start">
+      <div className="widget-choice-grid">
+        <article className="widget-choice primary">
+          <span className="widget-choice-icon"><Globe2 size={25} /></span>
+          <div>
+            <h3>Добавить чат на сайт</h3>
+            <p>Скопируйте готовый код и вставьте его на сайт. Специальные знания не нужны.</p>
+          </div>
+          <button className="primary-action" disabled={!canEditSettings} onClick={onOpenWidget} type="button">Настроить виджет</button>
+        </article>
+        <article className="widget-choice">
+          <span className="widget-choice-icon"><Smartphone size={25} /></span>
+          <div>
+            <h3>Добавить чат в мобильное приложение</h3>
+            <p>Инструкция, ключ проекта и события для разработчика приложения.</p>
+          </div>
+          <button disabled={!canEditSettings} onClick={onOpenSdk} type="button">Открыть SDK</button>
+        </article>
+      </div>
+      <button className="widget-api-link" disabled={!canEditSettings} onClick={onOpenApi} type="button">
+        <Code2 size={20} />
+        <span><strong>Настроить нестандартное подключение</strong><small>API и webhooks для связи с вашей системой</small></span>
+      </button>
+      <ol className="widget-steps" aria-label="Как установить виджет">
+        <li><b>1</b><span>Настройте виджет</span></li>
+        <li><b>2</b><span>Скопируйте код</span></li>
+        <li><b>3</b><span>Проверьте на сайте</span></li>
+      </ol>
+    </div>
+  );
+}
+
+function WidgetSetupView({ apiBase, canEditSettings, checkState, environment, keyBusy, keyError, onApiBaseChange, onBack, onCheck, onCopy, onCreateKey, onEnvironmentChange, onPreviewToggle, onUrlChange, previewOpen, publicKey, url }) {
+  return (
+    <div className="widget-setup settings-card">
+      <div className="widget-setup-heading">
+        <div>
+          <h3>Добавьте чат на сайт</h3>
+          <p>Выполните шаги ниже или передайте их тому, кто редактирует ваш сайт.</p>
+        </div>
+        <button onClick={onBack} type="button">К выбору способа</button>
+      </div>
+      <ol className="widget-install-list">
+        <li>
+          <b>1</b>
+          <div className="widget-key-setup">
+            <strong>Создайте публичный ключ виджета</strong>
+            <small>Это ключ для браузера, а не серверный секрет. Он показывается только один раз и понадобится в коде ниже.</small>
+            <div className="widget-key-fields">
+              <label><span>Окружение</span><select disabled={!canEditSettings || keyBusy} onChange={(event) => onEnvironmentChange(event.target.value)} value={environment}><option value="production">production</option><option value="stage">stage</option></select></label>
+              <label><span>Адрес API</span><input disabled={!canEditSettings || keyBusy} onChange={(event) => onApiBaseChange(event.target.value)} value={apiBase} /></label>
+            </div>
+            {publicKey ? <code className="widget-public-key">{publicKey}</code> : null}
+            {keyError ? <em role="alert">{keyError}</em> : null}
+          </div>
+          <button className="primary-outline" disabled={!canEditSettings || keyBusy} onClick={onCreateKey} type="button">{keyBusy ? "Создаём…" : "Создать ключ"}</button>
+        </li>
+        <li>
+          <b>2</b>
+          <div><strong>Скопируйте код и вставьте его на сайт</strong><small>Разместите его перед закрывающим тегом <code>&lt;/body&gt;</code>.</small></div>
+          <button className="primary-outline" disabled={!canEditSettings || !publicKey} onClick={onCopy} type="button"><Copy size={16} /> Скопировать код</button>
+        </li>
+        <li>
+          <b>3</b>
+          <div className="widget-check"><strong>Проверьте установку</strong><small>Укажите адрес страницы, где установлен виджет.</small><input aria-label="Адрес сайта" onChange={(event) => onUrlChange(event.target.value)} placeholder="https://example.ru" type="url" value={url} />
+            {checkState === "url-required" ? <em role="alert">Введите адрес сайта, чтобы продолжить.</em> : null}
+            {checkState === "ready" ? <em className="success"><CheckCircle2 size={15} /> Откройте эту страницу в браузере и отправьте тестовое сообщение.</em> : null}
+          </div>
+          <button disabled={!canEditSettings} onClick={onCheck} type="button">Проверить</button>
+        </li>
+      </ol>
+      <WidgetPreview environment={environment} hasPublicKey={Boolean(publicKey)} onToggle={onPreviewToggle} open={previewOpen} />
+    </div>
+  );
+}
+
+function WidgetPreview({ environment, hasPublicKey, onToggle, open }) {
+  return (
+    <section className="widget-preview" aria-label="Предпросмотр виджета">
+      <header>
+        <div><h4>Предпросмотр на сайте</h4><p>Интерактивный макет: обращения не отправляются.</p></div>
+        <span className={hasPublicKey ? "ready" : "waiting"}>{hasPublicKey ? `${environment}: ключ готов` : "Создайте ключ для установки"}</span>
+      </header>
+      <div className="widget-preview-canvas">
+        <span className="widget-preview-page-title">Ваша страница сайта</span>
+        {open ? (
+          <div className="widget-preview-chat">
+            <div className="widget-preview-chat-head">
+              <span><strong>Поддержка</strong><small>Обычно отвечаем в течение нескольких минут</small></span>
+              <button aria-label="Свернуть предпросмотр" onClick={onToggle} type="button"><X size={18} strokeWidth={2.4} /></button>
+            </div>
+            <div className="widget-preview-conversation">
+              <div className="widget-preview-message">Здравствуйте! Чем можем помочь?</div>
+            </div>
+            <div className="widget-preview-file"><FileText aria-hidden="true" size={14} /><span>example.pdf</span><X aria-hidden="true" size={14} /></div>
+            <div className="widget-preview-input">
+              <button aria-label="Прикрепить файл в предпросмотре" type="button"><Paperclip size={17} /></button>
+              <span>Напишите сообщение…</span>
+              <button aria-label="Отправить сообщение из предпросмотра" type="button"><Send size={16} /></button>
+            </div>
+          </div>
+        ) : null}
+        <button aria-label={open ? "Свернуть предпросмотр" : "Открыть предпросмотр"} className="widget-preview-toggle" onClick={onToggle} type="button"><MessageCircle size={23} /></button>
       </div>
     </section>
   );

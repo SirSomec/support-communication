@@ -20,11 +20,10 @@ describe("VK and MAX provider webhooks", () => {
       secret: "vk-secret",
       type: "message_new"
     };
-    const first = await receive(runtime, "VK", body) as Record<string, any>;
-    const replay = await receive(runtime, "VK", body) as Record<string, any>;
-    assert.equal(first.status, "ok");
-    assert.equal(first.data.duplicate, false);
-    assert.equal(replay.data.duplicate, true);
+    const first = await receive(runtime, "VK", body);
+    const replay = await receive(runtime, "VK", body);
+    assert.equal(first, "ok");
+    assert.equal(replay, "ok");
     assert.equal((await runtime.conversations.listConversations({ tenantId: "tenant-a" })).length, 1);
   });
 

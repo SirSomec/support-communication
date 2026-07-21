@@ -246,7 +246,7 @@ function IntegrationWorkspace({
     api: "API и webhooks",
     channels: "Управление каналами",
     external: "Внешнее приложение",
-    sdk: "Виджет и SDK"
+    sdk: "Чат на сайте или в приложении"
   };
 
   return (

@@ -474,7 +474,7 @@ export function LandingPage({
                   {isFeatured ? <span className="public-tariff-flag">популярный</span> : <span>в месяц</span>}
                 </header>
                 <div className="public-price">{isEnterprise ? "Индивидуально" : formatTariffPrice(tariff.priceMonthly)}</div>
-                <p>{tariff.includedUsers} пользователей · {tariff.workspaceLimit} рабочих пространств</p>
+                <p>до {tariff.includedUsers} пользователей · до {tariff.workspaceLimit} каналов</p>
                 <ul>
                   {(tariff.features ?? []).map((feature) => (
                     <li key={feature}><CheckCircle2 size={15} /> {tariffFeatureLabels[feature] ?? feature}</li>

@@ -34,7 +34,7 @@ import { ScenarioKnowledgeSourceActions } from "./ScenarioKnowledgeSourceActions
 import { ScenarioKnowledgeSourceSelector } from "./ScenarioKnowledgeSourceSelector.jsx";
 import { StatusBadge } from "../../ui.jsx";
 
-const channelOptions = ["SDK", "Telegram", "MAX", "VK"];
+const defaultChannelOptions = ["SDK", "Telegram", "MAX", "VK", "CHATAPI"];
 const MAX_TRIGGER_PHRASES = 12;
 const MAX_TRIGGER_PHRASE_LENGTH = 120;
 const keywordMatchModes = [
@@ -58,7 +58,8 @@ export function ScenarioCreationWizard({
   onClose,
   onCreate,
   onOpenAiConnections,
-  onUploadKnowledgeFiles
+  onUploadKnowledgeFiles,
+  channelOptions = defaultChannelOptions
 }) {
   const restored = useMemo(() => loadWizardDraft(), []);
   const [step, setStep] = useState(restored?.step ?? 0);
@@ -377,7 +378,7 @@ export function ScenarioCreationWizard({
               {form.trigger === "always_except" && phraseError ? <small className="scenario-field-error" role="alert">{phraseError}</small> : null}
             </fieldset>
           ) : null}
-          <fieldset className="scenario-channel-picker"><legend>Каналы запуска</legend><p>Клиент увидит один и тот же первый ответ в выбранных каналах.</p><div>{channelOptions.map((channel) => <button aria-pressed={form.channels.includes(channel)} className={form.channels.includes(channel) ? "selected" : ""} key={channel} onClick={() => toggleChannel(channel)} type="button">{channel}</button>)}</div>{form.channels.length === 0 ? <small className="scenario-field-error" role="alert">Выберите хотя бы один канал.</small> : null}</fieldset>
+          <fieldset className="scenario-channel-picker"><legend>Каналы запуска</legend><p>Клиент увидит один и тот же первый ответ в выбранных каналах.</p><div>{channelOptions.map((option) => { const channel = typeof option === "string" ? option : option.id; const label = typeof option === "string" ? option : option.label; return <button aria-pressed={form.channels.includes(channel)} className={form.channels.includes(channel) ? "selected" : ""} key={channel} onClick={() => toggleChannel(channel)} type="button">{label}</button>; })}</div>{form.channels.length === 0 ? <small className="scenario-field-error" role="alert">Выберите хотя бы один канал.</small> : null}</fieldset>
           <ClientPreview lines={clientPreview.clientSees.slice(0, 2)} />
         </section>
       ) : null}

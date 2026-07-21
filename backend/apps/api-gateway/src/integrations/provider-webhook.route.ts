@@ -52,7 +52,7 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
   const receipt = parseProviderReceipt(input.channel, input.body);
   if (receipt && input.providerMessageBindings) {
     const binding = await input.providerMessageBindings.find(credential.tenantId, connection.id, receipt.providerMessageId);
-    if (!binding) return accepted({ ignored: true, reason: "provider_message_binding_not_found", tenantId: credential.tenantId });
+    if (!binding) return accepted(input.channel, { ignored: true, reason: "provider_message_binding_not_found", tenantId: credential.tenantId });
     const recorded = await input.conversationService.recordDeliveryReceipt(provider, {
       conversationId: binding.conversationId,
       idempotencyKey: `${provider}:${receipt.providerEventId}`,
@@ -64,11 +64,11 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
       tenantId: credential.tenantId
     }, { tenantId: credential.tenantId });
     if (recorded.status === "ok") await input.providerMessageBindings.advance(binding, receipt.status);
-    return accepted({ conversationId: binding.conversationId, duplicate: Boolean(recorded.data?.duplicate), messageId: binding.internalMessageId, status: receipt.status, tenantId: credential.tenantId });
+    return accepted(input.channel, { conversationId: binding.conversationId, duplicate: Boolean(recorded.data?.duplicate), messageId: binding.internalMessageId, status: receipt.status, tenantId: credential.tenantId });
   }
 
   const event = input.channel === "VK" ? parseVkMessage(input.body) : parseMaxMessage(input.body);
-  if (!event) return accepted({ ignored: true, tenantId: credential.tenantId });
+  if (!event) return accepted(input.channel, { ignored: true, tenantId: credential.tenantId });
   const conversation = await resolveOrCreateProviderConversation({
     channel: input.channel,
     channelConnectionId: connection.id,
@@ -86,7 +86,7 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
     eventId: `${credential.tenantId}:${connection.id}:${event.eventId}`,
     text: event.text
   });
-  return accepted({
+  return accepted(input.channel, {
     conversationId: conversation.id,
     duplicate: Boolean(normalized.data?.duplicate),
     messageId: record(normalized.data?.message)?.id ?? null,
@@ -179,7 +179,11 @@ function safeEqual(left: string, right: string): boolean {
   return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
 
-function accepted(data: Record<string, unknown>) {
+function accepted(channel: "MAX" | "VK", data: Record<string, unknown>) {
+  // VK Callback API acknowledges every accepted notification with the literal
+  // `ok`; only the `confirmation` notification above returns its confirmation
+  // code. Returning a JSON payload makes VK retry an already handled event.
+  if (channel === "VK") return "ok";
   return createEnvelope({ service: "integrationService", operation: "receiveProviderWebhook", data, meta: { source: "provider-webhook" } });
 }
 

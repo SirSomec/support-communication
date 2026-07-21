@@ -51,7 +51,7 @@ x-runtime-environment: &runtime-environment
 x-runtime-service: &runtime-service
   image: ${API_IMAGE:?API_IMAGE is required}
   pull_policy: always
-  restart: unless-stopped
+  restart: always
   user: "1000:1000"
   read_only: true
   tmpfs:
@@ -79,7 +79,7 @@ x-runtime-service: &runtime-service
 services:
   edge:
     image: caddy:2.8-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
-    restart: unless-stopped
+    restart: always
     environment:
       ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
       APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN is required}
@@ -110,7 +110,7 @@ services:
   frontend:
     image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
     pull_policy: always
-    restart: unless-stopped
+    restart: always
     read_only: true
     tmpfs:
       - /tmp:uid=101,gid=101,mode=1770
@@ -361,7 +361,7 @@ services:
 
   clamav:
     image: clamav/clamav:1.4@sha256:e7ead98e7e07231b151bce988e0cfb0a3b46e6e7046d9dd44fd838c0df724a03
-    restart: unless-stopped
+    restart: always
     volumes:
       - clamav-data:/var/lib/clamav
     networks: [backend]

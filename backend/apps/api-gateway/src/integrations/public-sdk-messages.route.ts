@@ -42,6 +42,7 @@ export interface PublicSdkMessageRouteInput {
   autoAssignConversation?: (conversationId: string, tenantId: string) => Promise<BackendEnvelope<Record<string, unknown>>>;
   authorization?: string;
   body: {
+    attachments?: Array<Record<string, unknown>>;
     conversationId?: string;
     externalId?: string;
     pageUrl?: string;
@@ -238,8 +239,9 @@ export async function handlePublicSdkMessageIngressFromRoute(
   }
 
   const text = String(input.body.text ?? "").trim();
-  if (!text) {
-    return invalidEnvelope("sendPublicSdkMessage", "message_content_required", "Inbound message text is required.", {
+  const attachments = normalizePublicSdkAttachments(input.body.attachments);
+  if (!text && !attachments.length) {
+    return invalidEnvelope("sendPublicSdkMessage", "message_content_required", "Inbound message text or attachment is required.", {
       conversationId: input.body.conversationId ?? null
     });
   }
@@ -281,7 +283,8 @@ export async function handlePublicSdkMessageIngressFromRoute(
     conversationId: conversation.id,
     csatFeedback,
     eventId,
-    text
+    text,
+    attachments
   });
   const normalizedMessage = normalized.data?.message as Record<string, unknown> | null | undefined;
   const messageId = normalizedMessage?.id ? String(normalizedMessage.id) : null;
@@ -292,7 +295,7 @@ export async function handlePublicSdkMessageIngressFromRoute(
       occurredAt: new Date().toISOString(), tenantId: auth.context.tenantId })
     : null;
   const botRuntime = normalized.status === "ok" && !csatFeedback && input.runBotRuntime
-    ? await tryBotRuntime(input.runBotRuntime, { channel: "SDK", conversationId: conversation.id, eventId, payload: { isNewConversation, text }, tenantId: auth.context.tenantId, traceId: normalized.traceId })
+    ? await tryBotRuntime(input.runBotRuntime, { channel: "SDK", conversationId: conversation.id, eventId, payload: { attachments, isNewConversation, text }, tenantId: auth.context.tenantId, traceId: normalized.traceId })
     : null;
   const needsOperator = !botRuntime || ["handoff", "dead_lettered"].includes(String(botRuntime.instance?.status ?? ""));
   const autoAssignment = normalized.status === "ok" && !csatFeedback && needsOperator && input.autoAssignConversation
@@ -333,6 +336,25 @@ export async function handlePublicSdkMessageIngressFromRoute(
             message: String(normalized.error?.message ?? "SDK message request was rejected.")
           }
         })
+  });
+}
+
+function normalizePublicSdkAttachments(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const fileId = String(item.fileId ?? "").trim();
+    const fileName = String(item.fileName ?? "").trim();
+    if (!fileId || !fileName) return [];
+    const sizeBytes = Number(item.sizeBytes ?? 0);
+    return [{
+      id: fileId,
+      fileId,
+      fileName: fileName.slice(0, 255),
+      mimeType: String(item.mimeType ?? "application/octet-stream").slice(0, 255),
+      status: "scan_pending",
+      ...(Number.isFinite(sizeBytes) && sizeBytes >= 0 ? { sizeBytes } : {})
+    }];
   });
 }
 

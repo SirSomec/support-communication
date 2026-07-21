@@ -23,10 +23,11 @@ async function openSdkConsole(page) {
   await page.locator(".role-switcher select").selectOption({ label: "Администратор" });
   await page.locator("nav button").filter({ hasText: "Настройки" }).click();
   await page.locator(".integration-view-switch button").filter({ hasText: "Каталог" }).click();
-  await page.locator(".integration-catalog-row").filter({ hasText: "Виджет и SDK" }).getByRole("button", { name: "Открыть" }).click();
+  await page.locator(".integration-catalog-row").filter({ hasText: "Чат на сайте или в приложении" }).getByRole("button", { name: "Открыть" }).click();
 
   const panel = page.locator(".sdk-console");
   await expect(panel).toBeVisible();
+  await panel.getByRole("button", { name: "Открыть SDK" }).click();
   return panel;
 }
 

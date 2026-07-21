@@ -44,6 +44,10 @@ export function useWorkspaceRoute({
     && sessionHydrated
     && !tenantSession.loading
     && !tenantSession.authenticated;
+  const shouldRedirectAuthenticatedTenant = route.namespace === "auth"
+    && sessionHydrated
+    && !tenantSession.loading
+    && tenantSession.authenticated;
 
   useEffect(() => {
     function handleHashChange() {
@@ -68,6 +72,15 @@ export function useWorkspaceRoute({
       }
     }
   }, [isAppDenied, onDenied, sessionHydrated, tenantSession.denialReason, tenantSession.loading]);
+
+  useEffect(() => {
+    if (!shouldRedirectAuthenticatedTenant) {
+      return;
+    }
+
+    setRoute({ namespace: "app", view: "dialogs" });
+    window.history.replaceState(null, "", "#/app");
+  }, [shouldRedirectAuthenticatedTenant]);
 
   const navigate = useCallback((namespace, view = namespace) => {
     const nextRoute = { namespace, view };

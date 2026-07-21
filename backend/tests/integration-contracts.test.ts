@@ -226,6 +226,7 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     });
     let telegramGetMeUrl = "";
     const integrations = new IntegrationService(repository, {
+      maxFetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true }) }),
       providerCredentialCrypto,
       telegramFetch: async (input) => {
         telegramGetMeUrl = input;
@@ -237,6 +238,8 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
       }
     });
     const tenantId = "tenant-token-only";
+    const priorPublicWebhookBaseUrl = process.env.PUBLIC_WEBHOOK_BASE_URL;
+    process.env.PUBLIC_WEBHOOK_BASE_URL = "https://support.example.test";
 
     const telegram = await integrations.createChannelConnection(tenantId, {
       credentials: { token: "123:telegramToken_123" },
@@ -262,6 +265,8 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     const maxCredential = repository.findProviderConnectionCredential(tenantId, String(max.data.connection.id));
     assert.equal(maxCredential?.provider, "max");
     assert.equal(providerCredentialCrypto.decrypt(JSON.parse(String(maxCredential?.accessTokenEncrypted))), "max-token");
+    if (priorPublicWebhookBaseUrl === undefined) delete process.env.PUBLIC_WEBHOOK_BASE_URL;
+    else process.env.PUBLIC_WEBHOOK_BASE_URL = priorPublicWebhookBaseUrl;
   });
 
   it("queues API key rotation without returning raw key material", async () => {

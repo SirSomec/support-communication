@@ -6,10 +6,12 @@ import { ProactiveExposureRepository } from "../automation/proactive-exposure.re
 import { ConversationService } from "../conversation/conversation.service.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { QualityService } from "../quality/quality.service.js";
+import { WorkspaceService } from "../workspace/workspace.service.js";
 import { IntegrationRepository } from "./integration.repository.js";
 import {
   type PublicApiEnvironment,
-  type PublicApiKeyLookup
+  type PublicApiKeyLookup,
+  resolvePublicApiRequest
 } from "./public-api-auth.js";
 import { identifyPublicClientFromRoute } from "./public-api.route.js";
 import {
@@ -39,8 +41,36 @@ export class PublicApiController {
     private readonly conversationService: ConversationService = new ConversationService(),
     private readonly routingService: RoutingService = new RoutingService(),
     private readonly qualityService: QualityService = new QualityService(),
-    private readonly automationService: AutomationService = new AutomationService()
+    private readonly automationService: AutomationService = new AutomationService(),
+    private readonly workspaceService: WorkspaceService = new WorkspaceService()
   ) {}
+
+  @Post("sdk/uploads")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "createPublicSdkUpload", summary: "Create a one-time upload descriptor for a public SDK attachment" })
+  createPublicSdkUpload(
+    @Headers("authorization") authorization: string | undefined,
+    @Query("environment") environment: PublicApiEnvironment = "production",
+    @Body() payload: { fileName?: string; mimeType?: string; sizeBytes?: number } = {}
+  ) {
+    return this.withPublicSdkWriteAccess(authorization, environment, (tenantId) =>
+      this.workspaceService.createUploadDescriptor({ channel: "SDK", fileName: String(payload.fileName ?? ""), mimeType: payload.mimeType, sizeBytes: payload.sizeBytes }, { tenantId })
+    );
+  }
+
+  @Post("sdk/uploads/:fileId/finalize")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ operationId: "finalizePublicSdkUpload", summary: "Finalize a public SDK attachment upload before sending it in a conversation" })
+  finalizePublicSdkUpload(
+    @Headers("authorization") authorization: string | undefined,
+    @Param("fileId") fileId: string,
+    @Query("environment") environment: PublicApiEnvironment = "production",
+    @Body() payload: { checksum?: string } = {}
+  ) {
+    return this.withPublicSdkWriteAccess(authorization, environment, (tenantId) =>
+      this.workspaceService.finalizeUpload({ ...payload, fileId }, { tenantId })
+    );
+  }
 
   @Post("sdk/presence/heartbeat")
   @HttpCode(HttpStatus.OK)
@@ -286,6 +316,18 @@ export class PublicApiController {
     const connection = await this.integrationRepository.findChannelConnectionAsync(tenantId, channelConnectionId);
     if (!connection || connection.type.toLowerCase() !== "sdk" || connection.status.toLowerCase() !== "active") return undefined;
     return connection.routingQueueId || undefined;
+  }
+
+  private async withPublicSdkWriteAccess(
+    authorization: string | undefined,
+    environment: PublicApiEnvironment,
+    action: (tenantId: string) => Promise<unknown>
+  ) {
+    const auth = await resolvePublicApiRequest({ authorization, environment, lookup: this.lookup, requiredScope: "conversations:write" });
+    if (!auth.allowed) {
+      return { status: "denied", data: {}, error: { code: auth.code, message: "Public API key is not allowed to upload SDK attachments." } };
+    }
+    return action(auth.context.tenantId);
   }
 
   @Get("sdk/conversations/:conversationId/messages")

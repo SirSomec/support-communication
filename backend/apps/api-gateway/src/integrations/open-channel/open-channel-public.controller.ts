@@ -4,6 +4,7 @@ import { ConversationRepository } from "../../conversation/conversation.reposito
 import { ConversationService } from "../../conversation/conversation.service.js";
 import { RoutingService } from "../../routing/routing.service.js";
 import { QualityService } from "../../quality/quality.service.js";
+import { AutomationService } from "../../automation/automation.service.js";
 import { IdentityRepository } from "../../identity/identity.repository.js";
 import { OpenChannelRepository } from "./open-channel.repository.js";
 import { OpenChannelDeliveryService } from "./open-channel-delivery.service.js";
@@ -34,7 +35,8 @@ export class OpenChannelPublicController {
   constructor(
     private readonly conversationService: ConversationService = new ConversationService(),
     private readonly routingService: RoutingService = new RoutingService(),
-    private readonly qualityService: QualityService = new QualityService()
+    private readonly qualityService: QualityService = new QualityService(),
+    private readonly automationService: AutomationService = new AutomationService()
   ) {}
 
   @Post("open-channel/:channelToken")
@@ -56,6 +58,7 @@ export class OpenChannelPublicController {
       conversationRepository: this.conversationRepository,
       conversationService: this.conversationService,
       recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context),
+      runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event),
       repository: this.repository
     });
     respond(response, result);

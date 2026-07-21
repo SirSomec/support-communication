@@ -1555,15 +1555,30 @@ test("settings channel connections create multiple Telegram and MAX instances", 
   await expectHealthyPage(page);
 });
 
-test("settings sdk console keeps payload preview run states and permissions", async ({ page }) => {
+test("website widget setup separates the simple path from SDK tools", async ({ page }) => {
   await openAppShell(page);
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
   await selectRole(page, "Администратор");
   await openSection(page, "Настройки");
   await page.locator(".integration-view-switch button").filter({ hasText: "Каталог" }).click();
-  await page.locator(".integration-catalog-row").filter({ hasText: "Виджет и SDK" }).getByRole("button", { name: "Открыть" }).click();
+  await page.locator(".integration-catalog-row").filter({ hasText: "Чат на сайте или в приложении" }).getByRole("button", { name: "Открыть" }).click();
 
   const sdkPanel = page.locator(".sdk-console");
+  await expect(sdkPanel).toContainText("Добавить чат на сайт");
+  await sdkPanel.getByRole("button", { name: "Настроить виджет" }).click();
+  await expect(sdkPanel.locator(".widget-preview-chat")).toBeVisible();
+  await sdkPanel.locator(".widget-preview-toggle").click();
+  await expect(sdkPanel.locator(".widget-preview-chat")).toHaveCount(0);
+  await sdkPanel.locator(".widget-preview-toggle").click();
+  await sdkPanel.getByRole("button", { name: "Создать ключ" }).click();
+  await expect(sdkPanel.locator(".widget-public-key")).toContainText("sk_live_");
+  await sdkPanel.getByRole("button", { name: "Скопировать код" }).click();
+  await expect.poll(async () => page.evaluate(() => navigator.clipboard.readText())).toContain("publicKey");
+  await sdkPanel.getByLabel("Адрес сайта").fill("https://example.ru");
+  await sdkPanel.getByRole("button", { name: "Проверить" }).click();
+  await expect(sdkPanel.locator(".widget-check")).toContainText("Откройте эту страницу в браузере");
+  await sdkPanel.getByRole("button", { name: "К выбору способа" }).click();
+  await sdkPanel.getByRole("button", { name: "Открыть SDK" }).click();
   await sdkPanel.locator(".sdk-code button").filter({ hasText: "Копировать" }).click();
   await expect.poll(async () => page.evaluate(() => navigator.clipboard.readText())).toContain("SupportSDK.init");
   await expect(page.locator(".toast")).toContainText("SDK snippet скопирован");

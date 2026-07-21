@@ -153,6 +153,33 @@ describe("open channel chat ingress", () => {
     assert.equal(status.body, "1");
   });
 
+  it("acknowledges a chat message without waiting for bot generation", async () => {
+    const runtime = openChannelRuntime();
+    let botRuns = 0;
+    let resolveBot!: () => void;
+    const slowBot = new Promise<{ instance: { status: string } }>((resolve) => {
+      resolveBot = () => resolve({ instance: { status: "active" } });
+    });
+
+    const result = await handleOpenChatInbound({
+      body: { sender: { id: "client-async" }, message: { type: "text", id: "async-1", text: "Hello" } },
+      channelToken: CHANNEL_TOKEN,
+      conversationRepository: runtime.conversations,
+      conversationService: runtime.service,
+      repository: runtime.repository,
+      runBotRuntime: async () => {
+        botRuns += 1;
+        return slowBot;
+      }
+    });
+
+    assert.equal(result.statusCode, 200);
+    assert.deepEqual((result.body as Record<string, unknown>).botRuntime, { outcome: null, status: "queued" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(botRuns, 1);
+    resolveBot();
+  });
+
   it("rejects unknown channel tokens with a plain 404", async () => {
     const runtime = openChannelRuntime();
     const denied = await receiveChatEvent(runtime, { sender: { id: "x" }, message: { type: "text", text: "hi" } }, "missing-token");

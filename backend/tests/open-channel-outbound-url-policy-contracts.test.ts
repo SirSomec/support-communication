@@ -35,4 +35,16 @@ describe("Open Channel outbound URL policy", () => {
     );
     assert.equal(url, "https://webhook.example/hook");
   });
+
+  it("allows only an explicitly trusted local callback origin", async () => {
+    const options = { trustedOrigins: ["http://host.docker.internal:8081"] };
+    assert.equal(
+      normalizeOpenChannelOutboundUrl("http://host.docker.internal:8081/hooks/jivo-chat", options),
+      "http://host.docker.internal:8081/hooks/jivo-chat"
+    );
+    await assert.rejects(
+      () => assertOpenChannelOutboundUrlSafe("http://host.docker.internal:8082/hooks/jivo-chat", async () => [{ address: "192.168.1.2" }], options),
+      /open_channel_outbound_url_forbidden/
+    );
+  });
 });

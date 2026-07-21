@@ -75,6 +75,7 @@ export interface OpenChatRouteResult {
 export interface OpenChatInboundInput {
   body: OpenChatEvent;
   botBridge?: Pick<ExternalBotBridge, "forwardClientMessage">;
+  runBotRuntime?: (event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string }) => Promise<{ instance?: { status?: string }; outcome?: string }>;
   channelToken: string;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent" | "transitionConversationStatus">;
@@ -165,6 +166,7 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
   }
 
   const eventId = String(message.id ?? "").trim() || contentEventId(channel.id, clientId, type, message);
+  const isNewConversation = conversation.messages.length === 0;
   const normalized = await input.conversationService.normalizeInboundEvent("chat-api", {
     attachments: openChatMessageAttachments(type, message),
     conversationId: conversation.id,
@@ -175,7 +177,28 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
     return plain(400, String(normalized.error?.code ?? "message_rejected"));
   }
 
-  if (input.botBridge) {
+  const runtimeEventId = `${channel.tenantId}:${channel.id}:${eventId}`;
+  const botRuntimeEvent = {
+      channel: OPEN_CHAT_CHANNEL,
+      conversationId: conversation.id,
+      eventId: runtimeEventId,
+      payload: { isNewConversation, text },
+      tenantId: channel.tenantId,
+      traceId: getCurrentTraceId() ?? createRequestTraceId("open-chat")
+    };
+  const botRuntimeQueued = Boolean(input.runBotRuntime);
+
+  // Chat API clients have a short request timeout.  Bot generation may take
+  // several seconds, so it must not delay the acknowledgement of a valid
+  // inbound event.  The runtime persists its side effects independently and
+  // reconciliation delivers the resulting reply to the channel callback.
+  if (input.runBotRuntime) {
+    void Promise.resolve()
+      .then(() => input.runBotRuntime!(botRuntimeEvent))
+      .catch(() => undefined);
+  }
+
+  if (!botRuntimeQueued && input.botBridge) {
     await input.botBridge.forwardClientMessage({
       channel: OPEN_CHAT_CHANNEL,
       clientId,
@@ -187,7 +210,10 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
     }).catch(() => undefined);
   }
 
-  return okJson({ duplicate: normalized.data?.duplicate === true });
+  return okJson({
+    botRuntime: botRuntimeQueued ? { outcome: null, status: "queued" } : null,
+    duplicate: normalized.data?.duplicate === true
+  });
 }
 
 export async function handleOpenChatStatus(input: {

@@ -23,6 +23,7 @@ import {
 } from "./telegram-channel-connection.js";
 import { QueueDirectoryRepository } from "../routing/queue-directory.repository.js";
 import { ProviderConnectionCrypto } from "./provider-connection-crypto.js";
+import { subscribeMaxWebhook, type MaxHttpFetch } from "./max-subscription.js";
 
 const INTEGRATION_SERVICE = "integrationService";
 const DEFAULT_FIXTURE_TENANT_ID = "tenant-volga";
@@ -75,6 +76,8 @@ interface WebhookEndpointMutationPayload {
 }
 
 interface IntegrationServiceOptions {
+  maxApiBaseUrl?: string;
+  maxFetch?: MaxHttpFetch;
   providerCredentialCrypto?: ProviderConnectionCrypto;
   queueDirectoryRepository?: Pick<QueueDirectoryRepository, "findQueue">;
   telegramFetch?: TelegramHttpFetch;
@@ -301,6 +304,20 @@ export class IntegrationService {
       const token = extractCredentialMaterial(payload.credentials);
       const crypto = providerCrypto!;
       webhookSecret = randomUUID();
+      if (type === "max") {
+        try {
+          await subscribeMaxWebhook({
+            accessToken: token,
+            apiBaseUrl: this.options.maxApiBaseUrl ?? process.env.MAX_API_BASE_URL,
+            fetcher: this.options.maxFetch,
+            secret: webhookSecret,
+            webhookUrl: connection.webhookUrl
+          });
+        } catch (error) {
+          const code = error instanceof Error ? error.message : "max_subscription_failed";
+          return invalidEnvelope("createChannelConnection", code, "MAX webhook subscription could not be configured.", { type });
+        }
+      }
       providerCredential = await this.integrationRepository.saveProviderConnectionCredentialAsync({
         accessTokenEncrypted: JSON.stringify(crypto.encrypt(token)),
         apiVersion: type === "vk" ? String(payload.credentials?.apiVersion ?? "5.199") : null,
@@ -1527,6 +1544,10 @@ function extractCredentialMaterial(credentials?: Record<string, unknown>): strin
     return "";
   }
 
+  for (const key of ["accessToken", "access_token", "token", "botToken", "bot_token", "apiToken", "api_token"]) {
+    const value = String(credentials[key] ?? "").trim();
+    if (value) return value;
+  }
   return Object.values(credentials)
     .map((value) => String(value ?? "").trim())
     .find(Boolean) ?? "";

@@ -111,10 +111,10 @@ export class IntegrationController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     operationId: "deleteChannelConnection",
-    summary: "Disable a tenant channel connection instance"
+    summary: "Permanently delete a tenant channel connection instance"
   })
   @ApiParam({ name: "connectionId", description: "Channel connection identifier" })
-  @ApiOkResponse({ description: "Disabled channel connection envelope" })
+  @ApiOkResponse({ description: "Deleted channel connection envelope" })
   deleteChannelConnection(
     @Req() request: TenantOperatorRequest,
     @Param("connectionId") connectionId: string,

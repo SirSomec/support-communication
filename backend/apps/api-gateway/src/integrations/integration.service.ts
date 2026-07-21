@@ -493,25 +493,25 @@ export class IntegrationService {
       });
     }
 
-    const now = new Date().toISOString();
-    connection.status = "disabled";
-    connection.lastSyncAt = now;
-    connection.updatedAt = now;
-    const saved = await this.integrationRepository.saveChannelConnectionAsync(connection);
-    await this.recordChannelConnectionEvent(saved.tenantId, saved.id, "channel.connection.disabled", "warn", payload.reason ?? `${saved.name} disabled`);
-    const auditEvent = await this.persistChannelConnectionAuditEvent("channel.connection.disable", saved, payload.reason ?? "Channel connection disabled");
+    const removed = await this.integrationRepository.deleteChannelConnectionAsync(normalizedTenantId, connection.id);
+    if (!removed) {
+      return notFoundEnvelope("deleteChannelConnection", "channel_connection_not_found", `Channel connection ${connectionId} was not found.`, {
+        connectionId
+      });
+    }
+    const auditEvent = await this.persistChannelConnectionAuditEvent("channel.connection.delete", connection, payload.reason ?? "Channel connection deleted");
 
     return createEnvelope({
       service: INTEGRATION_SERVICE,
       operation: "deleteChannelConnection",
       traceId: integrationTraceId("deleteChannelConnection"),
-      meta: apiMeta({ connectionId: saved.id, tenantId: normalizedTenantId, type: saved.type }),
+      meta: apiMeta({ connectionId: connection.id, tenantId: normalizedTenantId, type: connection.type }),
       data: {
         auditEvent,
         auditId: auditEvent.id,
-        connectionId: saved.id,
+        connectionId: connection.id,
         reason: payload.reason ?? null,
-        status: saved.status
+        removed: true
       }
     });
   }

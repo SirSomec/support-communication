@@ -159,7 +159,10 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     const deleted = await integrations.deleteChannelConnection(tenantId, connectionId, { reason: "retired bot" });
     assert.equal(deleted.status, "ok");
     assert.equal(deleted.data.connectionId, connectionId);
-    assert.equal(deleted.data.status, "disabled");
+    assert.equal(deleted.data.removed, true);
+    const afterDelete = await integrations.fetchChannelConnections(tenantId, { type: "telegram" });
+    assert.equal((afterDelete.data.connections as Array<Record<string, unknown>>).some((connection) => connection.id === connectionId), false);
+    assert.equal(repository.readState().telegramConnections.some((connection) => connection.channelConnectionId === connectionId), false);
     assert.equal(integrations.listChannelConnectionAuditEvents().some((event) => event.id === deleted.data.auditId), true);
   });
 

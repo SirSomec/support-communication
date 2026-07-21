@@ -30,6 +30,7 @@ services:
         condition: service_completed_successfully
     environment:
       NODE_ENV: staging
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/russian-trusted-ca.pem
       RUNTIME_PROFILE: production-like
       LOCAL_DEVELOPMENT_SEED_ENABLED: "false"
       PORT: 4100
@@ -101,6 +102,7 @@ services:
       - "4101:4100"
     volumes:
       - api-gateway-runtime:/app/backend/.runtime
+      - ./backend/docker/certs/russian-trusted-root-ca.pem:/etc/ssl/certs/russian-trusted-ca.pem:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/api/v1/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -494,6 +496,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: staging
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/russian-trusted-ca.pem
       RUNTIME_PROFILE: production-like
       SERVICE_NAME: outbox-worker
       # connection_limit ограничивает пул каждого PrismaClient (дефолт cpus*2+1
@@ -523,6 +526,7 @@ services:
       - "kubernetes.docker.internal:host-gateway"
     volumes:
       - api-gateway-runtime:/app/backend/.runtime
+      - ./backend/docker/certs/russian-trusted-root-ca.pem:/etc/ssl/certs/russian-trusted-ca.pem:ro
 
   identity-events-worker:
     restart: always

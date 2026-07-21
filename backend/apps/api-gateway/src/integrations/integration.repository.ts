@@ -422,6 +422,7 @@ type MaybePromise<T> = T | Promise<T>;
 export interface PrismaIntegrationClient {
   $queryRawUnsafe?<T = unknown>(query: string, ...values: unknown[]): MaybePromise<T>;
   channelConnection: {
+    delete(input: { where: { id: string } }): MaybePromise<PrismaChannelConnectionRow>;
     findMany(input: { orderBy?: { createdAt: "asc" | "desc" }; where?: PrismaChannelConnectionWhereInput }): MaybePromise<PrismaChannelConnectionRow[]>;
     findUnique(input: { where: { id: string } }): MaybePromise<PrismaChannelConnectionRow | null>;
     upsert(input: {
@@ -449,6 +450,7 @@ export interface PrismaIntegrationClient {
   publicApiKey: {
     create(input: { data: PrismaPublicApiKeyCreateInput }): MaybePromise<PrismaPublicApiKeyRow>;
     deleteMany(input: { where: { tenantId: string } }): MaybePromise<{ count: number }>;
+    updateMany(input: { data: { channelConnectionId: null; updatedAt: Date }; where: { channelConnectionId: string; tenantId: string } }): MaybePromise<{ count: number }>;
     findMany(input: { orderBy?: { createdAt: "asc" | "desc" }; where?: PrismaPublicApiKeyWhereInput }): MaybePromise<PrismaPublicApiKeyRow[]>;
     findUnique(input: { where: { keyId: string } }): MaybePromise<PrismaPublicApiKeyRow | null>;
     upsert(input: {
@@ -456,6 +458,9 @@ export interface PrismaIntegrationClient {
       update: PrismaPublicApiKeyReferenceUpdateInput | PrismaPublicApiKeyUpdateInput;
       where: { keyId: string };
     }): MaybePromise<PrismaPublicApiKeyRow>;
+  };
+  conversation: {
+    updateMany(input: { data: { channelConnectionId: null; updatedAt: Date }; where: { channelConnectionId: string; tenantId: string } }): MaybePromise<{ count: number }>;
   };
   publicApiKeyRevealState: {
     findMany(input: { orderBy?: { createdAt: "asc" | "desc" } }): MaybePromise<PrismaPublicApiKeyRevealStateRow[]>;
@@ -2402,6 +2407,69 @@ export class IntegrationRepository {
     return toChannelConnection(row);
   }
 
+  /**
+   * Removes the connection configuration and all configuration records that
+   * cascade from it (credentials, Telegram state, provider bindings). Historic
+   * conversations and reusable API keys are deliberately retained, but no
+   * longer point at the removed connection.
+   */
+  async deleteChannelConnectionAsync(tenantId: string, connectionId: string): Promise<boolean> {
+    const normalizedTenantId = String(tenantId ?? "").trim();
+    const normalizedConnectionId = String(connectionId ?? "").trim();
+    if (!normalizedTenantId || !normalizedConnectionId) return false;
+
+    if (!this.prismaClient) {
+      let removed = false;
+      this.store.update((state) => {
+        const current = normalizeState(state);
+        const exists = current.channelConnections.some((connection) =>
+          connection.tenantId === normalizedTenantId && connection.id === normalizedConnectionId
+        );
+        if (!exists) return current;
+        removed = true;
+        return {
+          ...current,
+          channelConnectionEvents: current.channelConnectionEvents.filter((event) =>
+            event.tenantId !== normalizedTenantId || event.connectionId !== normalizedConnectionId
+          ),
+          channelConnections: current.channelConnections.filter((connection) =>
+            connection.tenantId !== normalizedTenantId || connection.id !== normalizedConnectionId
+          ),
+          providerConnectionCredentials: (current.providerConnectionCredentials ?? []).filter((credential) =>
+            credential.tenantId !== normalizedTenantId || credential.channelConnectionId !== normalizedConnectionId
+          ),
+          publicApiKeys: current.publicApiKeys.map((key) =>
+            key.tenantId === normalizedTenantId && key.channelConnectionId === normalizedConnectionId
+              ? { ...key, channelConnectionId: null }
+              : key
+          ),
+          sdkVisitorPresenceSessions: current.sdkVisitorPresenceSessions.filter((session) =>
+            session.tenantId !== normalizedTenantId || session.channelConnectionId !== normalizedConnectionId
+          ),
+          telegramConnections: current.telegramConnections.filter((connection) =>
+            connection.tenantId !== normalizedTenantId || connection.channelConnectionId !== normalizedConnectionId
+          )
+        };
+      });
+      return removed;
+    }
+
+    const existing = await this.prismaClient.channelConnection.findUnique({ where: { id: normalizedConnectionId } });
+    if (!existing || existing.tenantId !== normalizedTenantId) return false;
+
+    const now = new Date();
+    await this.prismaClient.publicApiKey.updateMany({
+      data: { channelConnectionId: null, updatedAt: now },
+      where: { channelConnectionId: normalizedConnectionId, tenantId: normalizedTenantId }
+    });
+    await this.prismaClient.conversation.updateMany({
+      data: { channelConnectionId: null, updatedAt: now },
+      where: { channelConnectionId: normalizedConnectionId, tenantId: normalizedTenantId }
+    });
+    await this.prismaClient.channelConnection.delete({ where: { id: normalizedConnectionId } });
+    return true;
+  }
+
   listChannelConnectionEvents(tenantId: string, connectionId: string): ChannelConnectionEventRecord[] {
     this.assertSyncRuntimeAvailable();
     const normalizedTenantId = String(tenantId ?? "").trim();
@@ -3189,8 +3257,12 @@ function assertCompletePrismaIntegrationClient(client: PrismaIntegrationClient):
     throw new Error("prisma_integration_api_key_rotation_job_delegate_required");
   }
 
-  if (!client.publicApiKey?.create || !client.publicApiKey.findMany || !client.publicApiKey.findUnique || !client.publicApiKey.upsert) {
+  if (!client.publicApiKey?.create || !client.publicApiKey.findMany || !client.publicApiKey.findUnique || !client.publicApiKey.updateMany || !client.publicApiKey.upsert) {
     throw new Error("prisma_integration_public_api_key_delegate_required");
+  }
+
+  if (!client.channelConnection?.delete || !client.conversation?.updateMany) {
+    throw new Error("prisma_integration_channel_connection_delete_delegate_required");
   }
 
   if (

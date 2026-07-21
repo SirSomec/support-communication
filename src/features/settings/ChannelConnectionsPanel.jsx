@@ -61,7 +61,7 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     recipient: "+7 999 000-00-00"
   });
   const [testResult, setTestResult] = useState(null);
-  const [connectionToDisable, setConnectionToDisable] = useState(null);
+  const [connectionToDelete, setConnectionToDelete] = useState(null);
   const normalizedFocusChannelType = typeof focusChannelType === "string" ? focusChannelType.trim() : "";
   const normalizedFocusConnectionId = typeof focusConnectionId === "string" ? focusConnectionId.trim() : "";
   const focusNavigationKey = [normalizedFocusChannelType, normalizedFocusConnectionId].filter(Boolean).join(":");
@@ -318,17 +318,17 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     onToast?.(`${response.data.connection.name}: изменения сохранены. Аудит ${response.data.auditId}.`);
   }
 
-  function disableConnection(connection) {
+  function deleteConnection(connection) {
     if (!connection || !canMutateConnections) {
       return;
     }
 
-    setConnectionToDisable(connection);
+    setConnectionToDelete(connection);
   }
 
-  async function confirmDisableConnection() {
-    const connection = connectionToDisable;
-    setConnectionToDisable(null);
+  async function confirmDeleteConnection() {
+    const connection = connectionToDelete;
+    setConnectionToDelete(null);
     if (!connection) {
       return;
     }
@@ -337,18 +337,17 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
     setError("");
     const response = await integrationService.deleteChannelConnection({
       connectionId: connection.id,
-      reason: "Disabled from settings"
+      reason: "Deleted from settings"
     });
     setBusy("");
 
     if (response.status !== "ok") {
-      setError(response.error?.message ?? "Не удалось отключить подключение.");
+      setError(response.error?.message ?? "Не удалось удалить подключение.");
       return;
     }
 
     await loadConnections();
-    await loadEvents(connection.id);
-    onToast?.(`${connection.name}: подключение отключено. Аудит ${response.data.auditId}.`);
+    onToast?.(`${connection.name}: подключение удалено. Аудит ${response.data.auditId}.`);
   }
 
   async function runConnectionTest(connection) {
@@ -564,9 +563,9 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
                       <PauseCircle size={16} />
                       Пауза
                     </button>
-                    <button className="danger" disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => disableConnection(selectedConnection)} title="Полностью отключить прием по этому подключению" type="button">
+                    <button className="danger" disabled={!canMutateConnections || busy === selectedConnection.id} onClick={() => deleteConnection(selectedConnection)} title="Навсегда удалить настройки и секреты этого подключения" type="button">
                       <Trash2 size={16} />
-                      Отключить
+                      Удалить
                     </button>
                   </div>
                 </div>
@@ -786,15 +785,15 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
         </SettingsModal>
       ) : null}
 
-      {connectionToDisable ? (
+      {connectionToDelete ? (
         <ConfirmDialog
-          confirmLabel="Отключить"
+          confirmLabel="Удалить"
           danger
-          description={`Отключить ${connectionToDisable.name}? Входящие события перестанут приниматься этим инстансом.`}
+          description={`Удалить ${connectionToDelete.name} навсегда? Секреты и настройки канала будут стёрты. История диалогов сохранится, но будет отвязана от канала.`}
           eyebrow="Подключение канала"
-          onCancel={() => setConnectionToDisable(null)}
-          onConfirm={confirmDisableConnection}
-          title="Отключить подключение?"
+          onCancel={() => setConnectionToDelete(null)}
+          onConfirm={confirmDeleteConnection}
+          title="Удалить подключение?"
         />
       ) : null}
     </section>

@@ -79,7 +79,7 @@ export async function bootstrap(): Promise<void> {
     });
   }
   if (config.NODE_ENV !== "production" || config.OPENAPI_ENABLED === "true") {
-    setupOpenApi(app, config.API_VERSION);
+    setupOpenApi(app, config.API_VERSION, { clientOnly: config.NODE_ENV === "production" });
   }
   const httpServer = app.getHttpServer() as Server;
   installHttpSocketErrorGuard(httpServer);

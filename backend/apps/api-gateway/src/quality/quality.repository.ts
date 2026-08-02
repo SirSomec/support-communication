@@ -95,6 +95,7 @@ export interface QualityWorkspaceSnapshot {
   aiSuggestions: Array<Record<string, unknown>>;
   knowledgeArticles: Array<Record<string, unknown>>;
   qualityMetrics: Array<Record<string, unknown>>;
+  tenantId?: string | null;
 }
 
 export interface QualityState {
@@ -115,7 +116,7 @@ export interface QualityRepositoryPort {
   listAiScoringAudits(filter?: AiScoringAuditFilter): MaybePromise<AiScoringAuditRecord[]>;
   listManualQaReviews(filter?: ManualQaReviewFilter): MaybePromise<ManualQaReviewRecord[]>;
   listQualityRatings(filter?: QualityRatingFilter): MaybePromise<QualityRatingRecord[]>;
-  readWorkspace(): MaybePromise<QualityWorkspaceSnapshot>;
+  readWorkspace(filter?: { tenantId?: string }): MaybePromise<QualityWorkspaceSnapshot>;
   saveAiScoringAudit(record: AiScoringAuditRecord, lifecycleEvent?: ConversationLifecycleEvent): MaybePromise<AiScoringAuditRecord>;
   saveManualQaReview(record: ManualQaReviewRecord, lifecycleEvent?: ConversationLifecycleEvent): MaybePromise<ManualQaReviewRecord>;
   saveQualityRating(record: QualityRatingRecord, lifecycleEvent?: ConversationLifecycleEvent): MaybePromise<QualityRatingRecord>;
@@ -313,8 +314,13 @@ export class QualityRepository {
     return clone(normalizeState(this.store.read()));
   }
 
-  readWorkspace(): QualityWorkspaceSnapshot {
-    return clone(this.readState().workspace);
+  readWorkspace(filter: { tenantId?: string } = {}): QualityWorkspaceSnapshot {
+    const workspace = this.readState().workspace;
+    if (filter.tenantId && workspace.tenantId !== filter.tenantId) {
+      return emptyQualityWorkspace();
+    }
+
+    return clone(workspace);
   }
 
   listQualityRatings(filter: QualityRatingFilter = {}): QualityRatingRecord[] {
@@ -511,8 +517,8 @@ export class PrismaQualityRepository {
     return this.fallback.readState();
   }
 
-  readWorkspace(): QualityWorkspaceSnapshot {
-    return this.fallback.readWorkspace();
+  readWorkspace(filter: { tenantId?: string } = {}): QualityWorkspaceSnapshot {
+    return this.fallback.readWorkspace(filter);
   }
 
   async listQualityRatings(filter: QualityRatingFilter = {}): Promise<QualityRatingRecord[]> {
@@ -836,7 +842,8 @@ function emptyQualityWorkspace(): QualityWorkspaceSnapshot {
     aiRealtimeChecks: [],
     aiSuggestions: [],
     knowledgeArticles: [],
-    qualityMetrics: []
+    qualityMetrics: [],
+    tenantId: null
   };
 }
 

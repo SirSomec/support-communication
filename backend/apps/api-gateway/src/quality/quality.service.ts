@@ -104,7 +104,7 @@ export class QualityService {
     }
 
     const [workspace, ratings, manualQaReviews, aiScoringAudits, aiSuggestionDecisions, directory] = await Promise.all([
-      Promise.resolve(this.qualityRepository.readWorkspace()),
+      Promise.resolve(this.qualityRepository.readWorkspace({ tenantId })),
       Promise.resolve(this.qualityRepository.listQualityRatings({ tenantId })),
       Promise.resolve(this.qualityRepository.listManualQaReviews({ tenantId })),
       Promise.resolve(this.qualityRepository.listAiScoringAudits({ tenantId })),
@@ -112,6 +112,7 @@ export class QualityService {
       this.loadQualityDirectory(tenantId)
     ]);
     const qualityScores = mergeQualityScores(workspace.qualityMetrics, ratings, manualQaReviews, directory);
+    const summary = buildQualitySummary(qualityScores, manualQaReviews, aiScoringAudits);
 
     return createEnvelope({
       service: QUALITY_SERVICE,
@@ -140,6 +141,7 @@ export class QualityService {
         manualQaReviews: clone(manualQaReviews),
         qualityMetrics: clone(qualityScores),
         qualityScores: clone(qualityScores),
+        summary,
         tenantId
       }
     });
@@ -593,6 +595,44 @@ function buildAiEffectiveness(decisions: AiSuggestionDecisionRecord[]): Array<Re
     { id: "edited-rate", label: "Edited before send", value: percent(counts.edit), detail: detail(counts.edit), edited: counts.edit, editRate: rate(counts.edit), total },
     { id: "rejected-rate", label: "Rejected by operator", value: percent(counts.reject), detail: detail(counts.reject), rejected: counts.reject, rejectionRate: rate(counts.reject), total }
   ];
+}
+
+function buildQualitySummary(
+  qualityScores: Array<Record<string, unknown>>,
+  reviews: ManualQaReviewRecord[],
+  aiScoringAudits: AiScoringAuditRecord[]
+): Record<string, unknown> {
+  const csatScores = qualityScores.filter((item) => item.scale === "CSAT" && Number.isFinite(Number(item.score)));
+  const ratedConversationIds = new Set(qualityScores.map((item) => String(item.conversationId ?? "")).filter(Boolean));
+  const reviewedConversationIds = new Set(reviews.map((review) => review.conversationId));
+  const reviewedRatings = [...ratedConversationIds].filter((conversationId) => reviewedConversationIds.has(conversationId)).length;
+  const activityTimes = [
+    ...qualityScores.map((item) => String(item.createdAt ?? "")),
+    ...reviews.map((review) => review.createdAt),
+    ...aiScoringAudits.map((audit) => audit.updatedAt ?? audit.createdAt)
+  ].map(Date.parse).filter(Number.isFinite);
+
+  return {
+    aiAuditCount: aiScoringAudits.length,
+    averageCsat: csatScores.length
+      ? Math.round(csatScores.reduce((sum, item) => sum + Number(item.score), 0) / csatScores.length * 20)
+      : null,
+    failedAiAuditCount: aiScoringAudits.filter((audit) => audit.status === "failed").length,
+    lastActivityAt: activityTimes.length ? new Date(Math.max(...activityTimes)).toISOString() : null,
+    lowScoreCount: qualityScores.filter(isLowQualityScore).length,
+    manualReviewCount: reviews.length,
+    qaCoverage: ratedConversationIds.size ? Math.round(reviewedRatings / ratedConversationIds.size * 100) : null,
+    ratingCount: qualityScores.length,
+    reviewedRatingCount: reviewedRatings
+  };
+}
+
+function isLowQualityScore(item: Record<string, unknown>): boolean {
+  const score = Number(item.score);
+  if (!Number.isFinite(score)) {
+    return false;
+  }
+  return item.scale === "QA" ? score < 80 : score < 4;
 }
 
 interface QualityDirectory {

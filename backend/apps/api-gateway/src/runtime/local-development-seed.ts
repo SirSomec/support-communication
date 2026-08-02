@@ -52,6 +52,7 @@ export function createLocalDevelopmentRepositorySeeds(): LocalDevelopmentReposit
 }
 
 export function createPrismaCatalogFallbackSeeds(): LocalDevelopmentRepositorySeeds {
-  // Prisma-only runtime: the quality read model keeps its in-memory catalog fallback seeded.
-  return { quality: bootstrapQualityState() };
+  // Prisma is the source of truth in runtime profiles. Catalog fixtures must never
+  // leak into a newly provisioned tenant through an unscoped in-memory fallback.
+  return {};
 }

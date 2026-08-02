@@ -27,7 +27,8 @@ export function bootstrapQualityState(base?: Partial<QualityState>): QualityStat
       aiRealtimeChecks: clone(aiRealtimeChecks),
       aiSuggestions: clone(aiSuggestions),
       knowledgeArticles: clone(knowledgeArticles),
-      qualityMetrics: clone(qualityMetrics) as unknown as QualityState["workspace"]["qualityMetrics"]
+      qualityMetrics: clone(qualityMetrics) as unknown as QualityState["workspace"]["qualityMetrics"],
+      tenantId: qualityRatings[0]?.tenantId ?? null
     }
   };
 }

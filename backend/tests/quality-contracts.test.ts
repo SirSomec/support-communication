@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { QualityRepository } from "../apps/api-gateway/src/quality/quality.repository.ts";
 import { QualityService } from "../apps/api-gateway/src/quality/quality.service.ts";
 import { bootstrapQualityState } from "../apps/api-gateway/src/quality/seed.ts";
+import { createPrismaCatalogFallbackSeeds } from "../apps/api-gateway/src/runtime/local-development-seed.ts";
 
 describe("quality workspace contracts", () => {
   it("starts empty unless a quality seed is explicitly injected", () => {
@@ -15,6 +16,14 @@ describe("quality workspace contracts", () => {
     assert.deepEqual(empty.aiScoringAudits, []);
     assert.deepEqual(empty.workspace.qualityMetrics, []);
     assert.ok(seeded.workspace.qualityMetrics.length > 0);
+  });
+
+  it("keeps catalog fixtures out of Prisma runtime fallbacks and tenant-scopes explicit seeds", () => {
+    assert.deepEqual(createPrismaCatalogFallbackSeeds(), {});
+
+    const repository = QualityRepository.inMemory(bootstrapQualityState());
+    assert.ok(repository.readWorkspace({ tenantId: "tenant-volga" }).qualityMetrics.length > 0);
+    assert.deepEqual(repository.readWorkspace({ tenantId: "tenant-new" }).qualityMetrics, []);
   });
 
   it("requires write permissions for durable quality mutations", () => {
@@ -96,6 +105,7 @@ describe("quality workspace contracts", () => {
     assert.equal(workspace.data.tenantId, "tenant-volga");
     assert.ok(Array.isArray(workspace.data.qualityScores));
     assert.ok(Array.isArray(workspace.data.aiSuggestions));
+    assert.equal(workspace.data.summary.ratingCount, 0);
   });
 
   it("persists ratings, manual reviews and scoring audits into the reloaded workspace", async () => {
@@ -222,7 +232,8 @@ describe("quality workspace contracts", () => {
         aiRealtimeChecks: [],
         aiSuggestions: [],
         knowledgeArticles: [],
-        qualityMetrics: [{ id: "base-score", conversationId: "base-conversation", score: 2 }]
+        qualityMetrics: [{ id: "base-score", conversationId: "base-conversation", score: 2 }],
+        tenantId
       }
     });
     const quality = new QualityService(repository);

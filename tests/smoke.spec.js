@@ -1030,47 +1030,21 @@ test("scenario wizard knowledge step offers files, articles and urls", async ({ 
   await expectHealthyPage(page);
 });
 
-test("quality AI workspace exposes real-time scoring and coaching", async ({ page }) => {
+test("quality workspace uses tenant data and completes manual QA", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Качество");
 
-  await expect(page.locator(".ai-quality-workspace")).toContainText("Проверка текста");
-  await expect(page.locator(".ai-quality-workspace")).toContainText("Risky wording");
-  await expect(page.locator(".ai-effectiveness-grid")).toContainText("Accepted without edits");
+  await expect(page.getByTestId("quality-workspace")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Оценки и ручной QA" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Автоматическая проверка" })).toBeVisible();
+  await expect(page.locator(".ai-quality-workspace")).toHaveCount(0);
+  await expect(page.getByText("Risky wording")).toHaveCount(0);
 
-  await expect(page.locator(".ai-coaching-list")).toContainText("missing_next_step");
-
-  const draftScorePromise = page.waitForResponse((response) =>
-    response.url().includes("/api/v1/quality/draft-score") && response.request().method() === "POST"
-  );
-  await page.locator(".ai-coaching-card button").filter({ hasText: "Проверить черновик" }).click();
-  const draftScoreResponse = await draftScorePromise;
-  expect(draftScoreResponse.ok()).toBeTruthy();
-  const draftScorePayload = await draftScoreResponse.json();
-  expect(draftScorePayload.status).toBe("ok");
-  expect(draftScorePayload.data.score).toBeGreaterThan(0);
-  expect(draftScorePayload.data.telemetry.auditId).toBeTruthy();
-  const scoredCard = page.locator(".ai-coaching-card").filter({ hasText: "missing_next_step" });
-  await expect(scoredCard).toContainText(`${draftScorePayload.data.score}/100`);
-  await expect(scoredCard).toContainText(draftScorePayload.data.telemetry.auditId);
-  await expect(page.locator(".toast")).toContainText("Проверка по правилам: missing_next_step");
-
-  const batchScorePromise = page.waitForResponse((response) =>
-    response.url().includes("/api/v1/quality/draft-scores") && response.request().method() === "POST"
-  );
-  await page.getByRole("button", { name: "Проверить текст" }).click();
-  const batchScoreResponse = await batchScorePromise;
-  expect(batchScoreResponse.ok()).toBeTruthy();
-  const batchScorePayload = await batchScoreResponse.json();
-  expect(batchScorePayload.status).toBe("ok");
-  expect(batchScorePayload.data.telemetry.auditId).toBeTruthy();
-  await expect(page.locator(".toast")).toContainText("Проверка по правилам сохранена");
-
-  await page.getByRole("button", { name: "Низкие оценки" }).click();
+  await page.getByLabel("Статус проверки").selectOption("attention");
   const lowScoreRow = page.locator(".quality-row").filter({ hasText: "Vladimir B." });
   await expect(lowScoreRow).toBeVisible();
-  await lowScoreRow.getByRole("button", { name: /^(Аудит диалога|Диалог · проверено)$/ }).click();
+  await lowScoreRow.getByRole("button", { name: "Проверить" }).click();
   const reviewForm = page.locator(".quality-audit-panel .qa-review-form");
   await expect(reviewForm).toBeVisible();
   const manualReviewPromise = page.waitForResponse((response) =>
@@ -1085,7 +1059,7 @@ test("quality AI workspace exposes real-time scoring and coaching", async ({ pag
   expect(manualReviewPayload.data.auditId).toBeTruthy();
   await expect(page.locator(".toast")).toContainText("Ручная проверка сохранена");
   await expect(page.locator(".quality-audit-panel")).toHaveCount(0);
-  await expect(page.locator(".quality-row").filter({ hasText: "Vladimir B." })).toContainText("Диалог · проверено");
+  await expect(page.locator(".quality-row").filter({ hasText: "Vladimir B." })).toContainText("Проверено");
   await expectHealthyPage(page);
 });
 

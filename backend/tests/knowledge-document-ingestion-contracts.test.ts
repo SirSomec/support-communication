@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { ingestKnowledgeDocument } from "../apps/api-gateway/src/knowledge-sources/document-ingestion.ts";
 import { KnowledgeSourceRepository } from "../apps/api-gateway/src/knowledge-sources/knowledge-source.repository.ts";
 import { KnowledgeSourcesService } from "../apps/api-gateway/src/knowledge-sources/knowledge-sources.service.ts";
-import { processOneKnowledgeDocumentIngestion } from "../apps/api-gateway/src/knowledge-sources/document-ingestion.worker.ts";
+import { extractKnowledgeDocumentText, processOneKnowledgeDocumentIngestion } from "../apps/api-gateway/src/knowledge-sources/document-ingestion.worker.ts";
 import { WorkspaceRepository } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 
 describe("knowledge document ingestion", () => {
@@ -11,6 +11,20 @@ describe("knowledge document ingestion", () => {
     const ingested = ingestKnowledgeDocument("Доставка занимает два дня. ".repeat(200), { chunkChars: 400 });
     assert.ok(ingested); assert.equal(ingested?.language, "ru"); assert.match(ingested?.checksum ?? "", /^[a-f0-9]{64}$/);
     assert.ok((ingested?.chunks.length ?? 0) > 1); assert.ok((ingested?.chunks ?? []).every((chunk) => chunk.content.length <= 400));
+  });
+
+  it("extracts PDF and DOCX text through bounded server-side tools", async () => {
+    const calls: Array<{ args: string[]; command: string }> = [];
+    const runCommand = async (command: string, args: string[]) => {
+      calls.push({ args, command });
+      return command === "pdftotext" ? "PDF policy text" : "<w:document><w:body><w:p><w:r><w:t>DOCX policy</w:t></w:r></w:p></w:body></w:document>";
+    };
+    const pdf = await extractKnowledgeDocumentText({ bytes: new Uint8Array([1]), fileName: "policy.pdf", mimeType: "application/pdf" }, { runCommand });
+    const docx = await extractKnowledgeDocumentText({ bytes: new Uint8Array([2]), fileName: "policy.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }, { runCommand });
+    assert.equal(pdf, "PDF policy text");
+    assert.match(docx, /DOCX policy/);
+    assert.deepEqual(calls.map((call) => call.command), ["pdftotext", "unzip"]);
+    assert.equal(calls[0]?.args.includes("-enc"), true);
   });
 
   it("binds a document source to its published article version and refresh requires a published version", async () => {

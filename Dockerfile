@@ -45,7 +45,8 @@ CMD ["node", "scripts/run-prisma.mjs", "prisma", "migrate", "deploy", "--schema"
 
 FROM backend-build AS api-gateway
 
-RUN npm prune --omit=dev \
+RUN apk add --no-cache poppler-utils \
+  && npm prune --omit=dev \
   && mkdir -p /app/backend/.runtime \
   && chown node:node /app/backend/.runtime
 

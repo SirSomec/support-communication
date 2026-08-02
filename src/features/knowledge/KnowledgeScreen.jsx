@@ -988,7 +988,7 @@ function UploadButton({ busy, canWrite, onUpload, progress }) {
   const inputRef = useRef(null);
   return (
     <>
-      <button disabled={!canWrite || busy} onClick={() => inputRef.current?.click()} title="TXT, Markdown или HTML — можно выбрать несколько файлов" type="button">
+      <button disabled={!canWrite || busy} onClick={() => inputRef.current?.click()} title="PDF, DOCX, TXT, Markdown или HTML — можно выбрать несколько файлов" type="button">
         <Upload size={15} /> {progress ? `Загрузка ${Math.min(progress.done + 1, progress.total)}/${progress.total}…` : "Загрузить файлы"}
       </button>
       <input

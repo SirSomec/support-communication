@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { uploadKnowledgeDocumentFiles } from "../src/features/knowledge/knowledgeUploadPipeline.js";
+import { buildKnowledgeUpload, uploadKnowledgeDocumentFiles } from "../src/features/knowledge/knowledgeUploadPipeline.js";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("knowledge upload pipeline batching", () => {
+  it("preserves PDF and DOCX types when a browser omits file.type", () => {
+    assert.equal(buildKnowledgeUpload({ lastModified: 1, name: "policy.pdf", size: 1, type: "" }).mimeType, "application/pdf");
+    assert.equal(buildKnowledgeUpload({ lastModified: 2, name: "policy.docx", size: 1, type: "" }).mimeType, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  });
+
   it("runs at most `concurrency` uploads at once and keeps outcome order", async () => {
     const files = Array.from({ length: 7 }, (_, index) => ({ name: `f${index}.md` }));
     let running = 0;

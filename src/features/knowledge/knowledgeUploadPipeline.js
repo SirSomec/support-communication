@@ -4,7 +4,7 @@ import { knowledgeService } from "../../services/knowledgeService.js";
 // Общий конвейер загрузки файлов знаний: создание источника → антивирус →
 // очередь индексации. Используется в разделе «Знания» и в настройках бота.
 
-export const KNOWLEDGE_UPLOAD_ACCEPT = ".txt,.md,.markdown,.html,.htm,text/plain,text/markdown,text/html";
+export const KNOWLEDGE_UPLOAD_ACCEPT = ".txt,.md,.markdown,.html,.htm,.pdf,.docx,text/plain,text/markdown,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export function buildKnowledgeUpload(file) {
   const id = `ks-doc-${file.name}-${file.lastModified}-${Date.now()}`;
@@ -12,13 +12,24 @@ export function buildKnowledgeUpload(file) {
     channel: "SDK",
     id,
     idempotencyKey: `knowledge-upload:${id}`,
-    mimeType: file.type || "text/plain",
+    mimeType: knowledgeDocumentMimeType(file),
     name: file.name,
     sizeBytes: file.size,
     status: "uploading"
   };
   Object.defineProperty(attachment, "file", { enumerable: false, value: file, writable: false });
   return attachment;
+}
+
+function knowledgeDocumentMimeType(file) {
+  const mimeType = String(file?.type ?? "").trim().toLowerCase();
+  if (mimeType) return mimeType;
+  const extension = String(file?.name ?? "").trim().toLowerCase().split(".").at(-1);
+  if (extension === "pdf") return "application/pdf";
+  if (extension === "docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (["md", "markdown"].includes(extension)) return "text/markdown";
+  if (["html", "htm"].includes(extension)) return "text/html";
+  return "text/plain";
 }
 
 export async function uploadKnowledgeDocumentFile(file) {

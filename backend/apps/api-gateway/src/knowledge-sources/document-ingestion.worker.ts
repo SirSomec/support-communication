@@ -1,9 +1,15 @@
+import { execFile as execFileCallback } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { KnowledgeSourceRepository } from "./knowledge-source.repository.js";
 import { ingestKnowledgeDocument } from "./document-ingestion.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
 
 const KNOWLEDGE_INGESTION_FAILURE_CODES = new Set([
   "knowledge_attachment_scan_required",
+  "knowledge_document_extract_failed",
   "knowledge_document_mime_unsupported",
   "knowledge_document_text_required",
   "knowledge_document_too_large"
@@ -47,10 +53,58 @@ export async function processOneKnowledgeDocumentIngestion(input: {
   }
 }
 
+const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const execFile = promisify(execFileCallback);
+
 const plainTextExtractor: KnowledgeDocumentExtractor = {
-  async extract({ bytes, mimeType }): Promise<string> {
-    if (!["text/plain", "text/markdown", "text/html"].includes(mimeType.toLowerCase())) throw new Error("knowledge_document_mime_unsupported");
-    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-    return mimeType.toLowerCase() === "text/html" ? text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]*>/g, " ") : text;
-  }
+  async extract(input): Promise<string> { return extractKnowledgeDocumentText(input); }
 };
+
+export async function extractKnowledgeDocumentText(
+  input: { bytes: Uint8Array; fileName: string; mimeType: string },
+  options: { runCommand?: (command: string, args: string[]) => Promise<string> } = {}
+): Promise<string> {
+  const mimeType = input.mimeType.toLowerCase();
+  if (["text/plain", "text/markdown"].includes(mimeType)) return new TextDecoder("utf-8", { fatal: false }).decode(input.bytes);
+  if (mimeType === "text/html") return stripMarkup(new TextDecoder("utf-8", { fatal: false }).decode(input.bytes));
+  if (mimeType === "application/pdf") return extractWithCommand(input.bytes, ".pdf", "pdftotext", ["-enc", "UTF-8", "-nopgbrk", "{file}", "-"], options.runCommand);
+  if (mimeType === DOCX_MIME_TYPE) {
+    const xml = await extractWithCommand(input.bytes, ".docx", "unzip", ["-p", "{file}", "word/document.xml"], options.runCommand);
+    return decodeWordDocumentXml(xml);
+  }
+  throw new Error("knowledge_document_mime_unsupported");
+}
+
+async function extractWithCommand(bytes: Uint8Array, extension: string, command: string, args: string[], runCommand?: (command: string, args: string[]) => Promise<string>): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "support-knowledge-"));
+  const filePath = join(directory, `document${extension}`);
+  try {
+    await writeFile(filePath, bytes);
+    const output = await (runCommand ?? runExtractionCommand)(command, args.map((arg) => arg === "{file}" ? filePath : arg));
+    return output;
+  } catch {
+    throw new Error("knowledge_document_extract_failed");
+  } finally {
+    await rm(directory, { force: true, recursive: true }).catch(() => undefined);
+  }
+}
+
+async function runExtractionCommand(command: string, args: string[]): Promise<string> {
+  const result = await execFile(command, args, { encoding: "utf8", maxBuffer: 1_000_000, timeout: 10_000 });
+  return result.stdout;
+}
+
+function stripMarkup(value: string): string {
+  return value.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]*>/g, " ");
+}
+
+function decodeWordDocumentXml(value: string): string {
+  return decodeXmlEntities(value
+    .replace(/<w:tab\b[^>]*\/>/gi, " ")
+    .replace(/<w:br\b[^>]*\/>|<\/w:p>/gi, "\n")
+    .replace(/<[^>]*>/g, " "));
+}
+
+function decodeXmlEntities(value: string): string {
+  return value.replace(/&(amp|apos|gt|lt|quot);/g, (_match, entity: string) => ({ amp: "&", apos: "'", gt: ">", lt: "<", quot: "\"" })[entity] ?? " ");
+}

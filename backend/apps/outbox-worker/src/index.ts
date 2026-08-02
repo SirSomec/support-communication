@@ -2082,7 +2082,13 @@ async function postOfficialProviderRequest(input: {
   const payload = await response.text();
   try {
     const parsed = JSON.parse(payload) as Record<string, unknown>;
-    if (parsed.error || parsed.success === false) throw new Error(`${input.errorPrefix}_provider_rejected`);
+    if (parsed.error || parsed.success === false) {
+      // Provider error codes are safe operational diagnostics; deliberately do
+      // not retain their free-form text, which can echo request data.
+      const error = objectValue(parsed.error);
+      const code = String(error?.error_code ?? parsed.code ?? "unknown").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) || "unknown";
+      throw new Error(`${input.errorPrefix}_provider_rejected:${code}`);
+    }
     return parsed;
   } catch (error) {
     if (error instanceof Error && error.message === `${input.errorPrefix}_provider_rejected`) throw error;

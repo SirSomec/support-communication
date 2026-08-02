@@ -1566,7 +1566,9 @@ function vkInlineKeyboard(replyMarkup: Record<string, unknown> | undefined): Rec
     .map((item) => ({
       action: {
         label: String(item.text ?? "").trim(),
-        payload: String(item.callback_data ?? "").trim(),
+        // VK Callback API requires a JSON value in callback payload, unlike
+        // Telegram where an arbitrary short string is accepted.
+        payload: JSON.stringify({ callback: String(item.callback_data ?? "").trim() }),
         type: "callback"
       },
       color: "primary"

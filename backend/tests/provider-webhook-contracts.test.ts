@@ -139,7 +139,7 @@ describe("VK and MAX provider webhooks", () => {
     runtime.sendVkMessage = async (input: Record<string, unknown>) => { messages.push(input); return true; };
 
     const rated = await receive(runtime, "VK", {
-      event_id: "vk-csat-event", object: { event_id: "vk-callback-1", peer_id: 701, payload: "quality:csat:4", user_id: 77 }, secret: "vk-secret", type: "message_event"
+      event_id: "vk-csat-event", object: { event_id: "vk-callback-1", peer_id: 701, payload: JSON.stringify({ callback: "quality:csat:4" }), user_id: 77 }, secret: "vk-secret", type: "message_event"
     });
     assert.equal(rated, "ok");
     assert.deepEqual(runtime.ratings[0], {

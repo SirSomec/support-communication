@@ -32,7 +32,7 @@ describe("official VK/MAX outbound connectors", () => {
     assert.equal(form.get("message"), "Operator reply");
     assert.equal(form.get("v"), "5.199");
     assert.deepEqual(JSON.parse(String(form.get("keyboard"))), {
-      buttons: [[{ action: { label: "5", payload: "quality:csat:5", type: "callback" }, color: "primary" }]],
+      buttons: [[{ action: { label: "5", payload: "{\"callback\":\"quality:csat:5\"}", type: "callback" }, color: "primary" }]],
       inline: true
     });
   });

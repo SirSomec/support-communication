@@ -195,7 +195,7 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
             answered = await (input.sendVkMessage ?? sendVkMessage)({
               accessToken,
               apiVersion: credential.apiVersion,
-              keyboard: { buttons: [[{ action: { label: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT, payload: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK, type: "callback" }, color: "primary" }]], inline: true },
+              keyboard: { buttons: [[{ action: { label: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT, payload: JSON.stringify({ callback: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK }), type: "callback" }, color: "primary" }]], inline: true },
               peerId: rating.providerConversationId,
               text: promptText
             });
@@ -403,7 +403,7 @@ function parseVkQualityRating(body: Record<string, unknown>): {
 } | null {
   if (value(body.type) !== "message_event") return null;
   const event = record(body.object) ?? body;
-  const match = /^quality:csat:([1-5])$/i.exec(value(event.payload));
+  const match = /^quality:csat:([1-5])$/i.exec(vkCallbackPayload(event.payload));
   const providerConversationId = value(event.peer_id);
   const providerUserId = value(event.user_id);
   const callbackId = value(event.event_id);
@@ -416,9 +416,19 @@ function parseVkCsatFeedbackDecline(body: Record<string, unknown>): { callbackId
   const event = record(body.object) ?? body;
   const providerConversationId = value(event.peer_id);
   const callbackId = value(event.event_id);
-  return value(event.payload) === CSAT_FEEDBACK_NEW_APPEAL_CALLBACK && providerConversationId && callbackId
+  return vkCallbackPayload(event.payload) === CSAT_FEEDBACK_NEW_APPEAL_CALLBACK && providerConversationId && callbackId
     ? { callbackId, providerConversationId }
     : null;
+}
+
+function vkCallbackPayload(input: unknown): string {
+  const raw = value(input);
+  try {
+    const parsed = record(JSON.parse(raw));
+    return value(parsed?.callback ?? parsed?.payload) || raw;
+  } catch {
+    return raw;
+  }
 }
 
 async function resolveRatedConversation(

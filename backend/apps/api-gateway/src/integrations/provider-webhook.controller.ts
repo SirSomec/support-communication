@@ -26,13 +26,13 @@ export class ProviderWebhookController {
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "VK Callback API ingress" })
   receiveVk(@Param("connectionId") connectionId: string, @Body() body: Record<string, unknown>, @Headers() headers: Record<string, string | undefined>) {
-    return handleProviderWebhookFromRoute({ body, channel: "VK", channelConnectionId: connectionId, conversationRepository: this.conversations, conversationService: this.conversationService, headers, integrationRepository: this.integrations, providerMessageBindings: this.providerMessageBindings, recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context), resolveVkUserProfile: fetchVkUserProfile, runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event) });
+    return handleProviderWebhookFromRoute({ body, channel: "VK", channelConnectionId: connectionId, conversationRepository: this.conversations, conversationService: this.conversationService, headers, integrationRepository: this.integrations, phoneCollectionEnabled: process.env.PROVIDER_PHONE_COLLECTION_ENABLED !== "false", providerMessageBindings: this.providerMessageBindings, recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context), resolveVkUserProfile: fetchVkUserProfile, runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event) });
   }
 
   @Post("max/:connectionId")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "MAX Bot API ingress" })
   receiveMax(@Param("connectionId") connectionId: string, @Body() body: Record<string, unknown>, @Headers() headers: Record<string, string | undefined>) {
-    return handleProviderWebhookFromRoute({ body, channel: "MAX", channelConnectionId: connectionId, conversationRepository: this.conversations, conversationService: this.conversationService, headers, integrationRepository: this.integrations, providerMessageBindings: this.providerMessageBindings, recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context), runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event) });
+    return handleProviderWebhookFromRoute({ body, channel: "MAX", channelConnectionId: connectionId, conversationRepository: this.conversations, conversationService: this.conversationService, headers, integrationRepository: this.integrations, phoneCollectionEnabled: process.env.PROVIDER_PHONE_COLLECTION_ENABLED !== "false", providerMessageBindings: this.providerMessageBindings, recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context), runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event) });
   }
 }

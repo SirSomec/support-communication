@@ -28,6 +28,7 @@ export interface ProviderWebhookRouteInput {
   headers?: Record<string, string | undefined>;
   integrationRepository: Pick<IntegrationRepository, "findChannelConnectionAsync" | "findProviderConnectionCredentialByConnectionIdAsync">;
   providerMessageBindings?: Pick<ProviderMessageBindingRepository, "advance" | "find">;
+  phoneCollectionEnabled?: boolean;
   answerMaxCallback?: (input: { accessToken: string; callbackId: string; message: Record<string, unknown> }) => Promise<boolean>;
   answerVkMessageEvent?: (input: { accessToken: string; apiVersion: string | null; eventId: string; peerId: string; text: string; userId: string }) => Promise<boolean>;
   sendVkMessage?: (input: { accessToken: string; apiVersion: string | null; keyboard?: Record<string, unknown>; peerId: string; text: string }) => Promise<boolean>;
@@ -288,7 +289,7 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
     text: event.text,
     csatFeedback: resolved.csatFeedbackAwaiting
   });
-  const botRuntime = normalized.status === "ok" && !resolved.csatFeedbackAwaiting && input.runBotRuntime
+  const botRuntime = normalized.status === "ok" && !resolved.csatFeedbackAwaiting && !event.phoneShared && input.runBotRuntime
     ? await tryBotRuntime(input.runBotRuntime, {
         channel: input.channel,
         conversationId: conversation.id,
@@ -298,11 +299,24 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
         traceId: normalized.traceId
       })
     : null;
+  const phoneCollection = input.phoneCollectionEnabled === true
+    && normalized.status === "ok"
+    && !normalized.data?.duplicate
+    && !resolved.csatFeedbackAwaiting
+    && !event.phoneShared
+    && !conversation.phone.trim()
+    ? await input.conversationService.appendMessage({
+        conversationId: conversation.id,
+        idempotencyKey: `phone:request:${input.channel.toLowerCase()}:${conversation.id}`,
+        text: "Чтобы мы могли найти обращения в других каналах, напишите, пожалуйста, номер телефона."
+      }, { tenantId: credential.tenantId })
+    : null;
   return accepted(input.channel, {
     botRuntime: botRuntime ? { outcome: botRuntime.outcome ?? null, status: botRuntime.instance?.status ?? null } : null,
     conversationId: conversation.id,
     duplicate: Boolean(normalized.data?.duplicate),
     messageId: record(normalized.data?.message)?.id ?? null,
+    phoneCollectionRequested: phoneCollection?.status === "ok" && !phoneCollection.data?.duplicate,
     recordedAsFeedback: resolved.csatFeedbackAwaiting,
     tenantId: credential.tenantId
   });
@@ -313,6 +327,7 @@ interface ProviderInboundMessage {
   displayName: string;
   eventId: string;
   phone?: string;
+  phoneShared: boolean;
   providerConversationId: string;
   providerUserId: string;
   text: string;
@@ -346,14 +361,17 @@ function parseVkMessage(body: Record<string, unknown>): ProviderInboundMessage |
   const userId = value(message?.from_id);
   const eventId = value(body.event_id) || value(message?.id);
   if (!peerId || !userId || !eventId) return null;
+  const text = value(message?.text);
+  const phoneFromText = phoneFromMessageText(text);
   return {
     attachments: normalizeAttachments(message?.attachments),
     displayName: `VK ${userId}`,
     eventId,
-    phone: value(message?.phone),
+    phone: value(message?.phone) || phoneFromText,
+    phoneShared: Boolean(phoneFromText),
     providerConversationId: peerId,
     providerUserId: userId,
-    text: value(message?.text)
+    text
   };
 }
 
@@ -367,14 +385,17 @@ function parseMaxMessage(body: Record<string, unknown>): ProviderInboundMessage 
   const userId = value(sender?.user_id);
   const eventId = value(messageBody?.mid) || value(body.timestamp);
   if (!chatId || !userId || !eventId) return null;
+  const text = value(messageBody?.text);
+  const phoneFromText = phoneFromMessageText(text);
   return {
     attachments: normalizeAttachments(messageBody?.attachments),
     displayName: value(sender?.name) || `MAX ${userId}`,
     eventId,
-    phone: value(sender?.phone),
+    phone: value(sender?.phone) || phoneFromText,
+    phoneShared: Boolean(phoneFromText),
     providerConversationId: chatId,
     providerUserId: userId,
-    text: value(messageBody?.text)
+    text
   };
 }
 
@@ -388,6 +409,14 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function value(input: unknown): string {
   return input === undefined || input === null ? "" : String(input).trim();
+}
+
+function phoneFromMessageText(text: string): string {
+  const candidate = String(text ?? "").trim();
+  const match = /^(?:(?:мой\s+)?(?:номер|телефон|phone)\s*[:\-]?\s*)?([+\d][\d\s().-]{4,24})$/iu.exec(candidate);
+  if (!match) return "";
+  const phone = String(match[1] ?? "").trim();
+  return /^[+\d][\d\s().-]{4,24}$/.test(phone) ? phone : "";
 }
 
 function safeEqual(left: string, right: string): boolean {

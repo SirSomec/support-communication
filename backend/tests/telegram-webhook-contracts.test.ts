@@ -20,6 +20,9 @@ import { ConversationService } from "../apps/api-gateway/dist/conversation/conve
 const TENANT_ID = "tenant-pilot-001";
 const WEBHOOK_SECRET = "pilot-telegram-secret-token";
 
+// HTTP contract tests do not contact third-party APIs.
+process.env.TELEGRAM_PHONE_COLLECTION_ENABLED = "false";
+
 @Module({
   imports: [IdentityModule, ConversationModule, IntegrationModule]
 })
@@ -240,6 +243,74 @@ describe("telegram webhook ingress contracts", () => {
     assert.equal(response.status, "ok");
     const conversation = await repository.findConversation(telegramConversationId(TENANT_ID, "123456789", "55667790"));
     assert.equal(conversation?.phone, "");
+  });
+
+  it("requests a phone with Telegram's contact button and accepts a contact-only reply", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+    const integrationRepository = IntegrationRepository.inMemory(seedTelegramIntegrationState());
+    const telegramCalls: string[] = [];
+    const telegramApi = {
+      fetcher: async (url: string) => {
+        telegramCalls.push(url);
+        return { ok: true, status: 200 };
+      }
+    };
+    let botRuns = 0;
+    const config = loadTelegramWebhookConfig({ TELEGRAM_WEBHOOK_ENABLED: "true" });
+
+    const first = await handleTelegramWebhookFromRoute({
+      body: {
+        message: {
+          chat: { id: 55667791, type: "private" },
+          from: { first_name: "Pavel", id: 321 },
+          message_id: 1,
+          text: "Нужна помощь"
+        },
+        update_id: 9013
+      },
+      conversationRepository: repository,
+      conversationService: conversations,
+      headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+      integrationRepository,
+      phoneCollectionEnabled: true,
+      runBotRuntime: async () => {
+        botRuns += 1;
+        return { instance: { status: "active" }, outcome: "replied" };
+      },
+      telegramApi
+    }, config);
+
+    assert.equal(first.data.phoneCollectionRequested, true);
+    assert.equal(botRuns, 1);
+    assert.ok(decodeURIComponent(telegramCalls[0] ?? "").includes('"request_contact":true'));
+
+    const collected = await handleTelegramWebhookFromRoute({
+      body: {
+        message: {
+          chat: { id: 55667791, type: "private" },
+          contact: { phone_number: "+7 999 555-66-77", user_id: 321 },
+          from: { first_name: "Pavel", id: 321 },
+          message_id: 2
+        },
+        update_id: 9014
+      },
+      conversationRepository: repository,
+      conversationService: conversations,
+      headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+      integrationRepository,
+      runBotRuntime: async () => {
+        botRuns += 1;
+        return { instance: { status: "active" }, outcome: "replied" };
+      },
+      telegramApi
+    }, config);
+
+    assert.equal(collected.data.phoneCollected, true);
+    assert.equal(botRuns, 1);
+    const conversation = await repository.findConversation(telegramConversationId(TENANT_ID, "123456789", "55667791"));
+    assert.equal(conversation?.phone, "+7 999 555-66-77");
+    assert.ok(decodeURIComponent(telegramCalls.at(-1) ?? "").includes('"remove_keyboard":true'));
   });
 
   it("accepts an idempotent CSAT callback only for the canonical assigned conversation", async () => {

@@ -98,6 +98,35 @@ describe("VK and MAX provider webhooks", () => {
     ]);
   });
 
+  it("asks for a phone in VK and MAX, then saves a phone sent as text without rerunning the bot", async () => {
+    for (const channel of ["MAX", "VK"] as const) {
+      const runtime = channel === "MAX"
+        ? providerRuntime("max", "conn-max", "max-secret")
+        : providerRuntime("vk", "conn-vk", "vk-secret", "vk-confirm");
+      runtime.phoneCollectionEnabled = true;
+      const botEvents: Array<Record<string, unknown>> = [];
+      runtime.runBotRuntime = async (event: Record<string, unknown>) => {
+        botEvents.push(event);
+        return { instance: { status: "active" }, outcome: "replied" };
+      };
+      const headers = channel === "MAX" ? { "x-max-bot-api-secret": "max-secret" } : {};
+      const first = channel === "MAX"
+        ? { message: { body: { mid: "max-phone-1", text: "Help" }, recipient: { chat_id: 888 }, sender: { user_id: 91 } }, update_type: "message_created" }
+        : { event_id: "vk-phone-1", object: { message: { from_id: 77, id: 1, peer_id: 888, text: "Help" } }, secret: "vk-secret", type: "message_new" };
+      await receive(runtime, channel, first, headers);
+      const conversation = (await runtime.conversations.listConversations({ tenantId: "tenant-a" }))[0];
+      assert.ok(conversation.messages.some((message: { text: string }) => message.text.includes("номер телефона")));
+
+      const phoneReply = channel === "MAX"
+        ? { message: { body: { mid: "max-phone-2", text: "+7 999 555-66-77" }, recipient: { chat_id: 888 }, sender: { user_id: 91 } }, update_type: "message_created" }
+        : { event_id: "vk-phone-2", object: { message: { from_id: 77, id: 2, peer_id: 888, text: "Телефон: +7 999 555-66-77" } }, secret: "vk-secret", type: "message_new" };
+      await receive(runtime, channel, phoneReply, headers);
+
+      assert.equal((await runtime.conversations.findConversation(conversation.id))?.phone, "+7 999 555-66-77");
+      assert.equal(botEvents.length, 1);
+    }
+  });
+
   it("records a MAX CSAT callback and treats the next message as feedback", async () => {
     const runtime = providerRuntime("max", "conn-max", "max-secret");
     const first = await receive(runtime, "MAX", {
@@ -189,7 +218,7 @@ function providerRuntime(provider: "max" | "vk", connectionId: string, secret: s
     webhookSecretEncrypted: JSON.stringify(crypto.encrypt(secret))
   };
   integrations.saveProviderConnectionCredential(credential);
-  const runtime: any = { answerMaxCallback: async () => true, answerVkMessageEvent: async () => true, binding: null, conversations, integrations, ratings: [], recordQualityRating: undefined, resolveVkUserProfile: undefined, runBotRuntime: undefined, sendVkMessage: undefined, service: new ConversationService(conversations) };
+  const runtime: any = { answerMaxCallback: async () => true, answerVkMessageEvent: async () => true, binding: null, conversations, integrations, phoneCollectionEnabled: false, ratings: [], recordQualityRating: undefined, resolveVkUserProfile: undefined, runBotRuntime: undefined, sendVkMessage: undefined, service: new ConversationService(conversations) };
   runtime.providerMessageBindings = {
     find: async (_tenantId: string, _connectionId: string, providerMessageId: string) => runtime.binding?.providerMessageId === providerMessageId ? runtime.binding : null,
     advance: async (binding: Record<string, any>, status: string) => {
@@ -206,6 +235,6 @@ function receive(runtime: ReturnType<typeof providerRuntime>, channel: "MAX" | "
     body, channel, channelConnectionId: channel === "VK" ? "conn-vk" : "conn-max",
     conversationRepository: runtime.conversations, conversationService: runtime.service,
     headers, integrationRepository: runtime.integrations, providerMessageBindings: runtime.providerMessageBindings,
-    answerMaxCallback: runtime.answerMaxCallback, answerVkMessageEvent: runtime.answerVkMessageEvent, recordQualityRating: runtime.recordQualityRating, resolveVkUserProfile: runtime.resolveVkUserProfile, runBotRuntime: runtime.runBotRuntime, sendVkMessage: runtime.sendVkMessage
+    answerMaxCallback: runtime.answerMaxCallback, answerVkMessageEvent: runtime.answerVkMessageEvent, phoneCollectionEnabled: runtime.phoneCollectionEnabled, recordQualityRating: runtime.recordQualityRating, resolveVkUserProfile: runtime.resolveVkUserProfile, runBotRuntime: runtime.runBotRuntime, sendVkMessage: runtime.sendVkMessage
   });
 }

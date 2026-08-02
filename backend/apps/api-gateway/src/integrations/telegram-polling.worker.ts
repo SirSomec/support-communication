@@ -10,6 +10,10 @@ import {
   offerTelegramCsatFeedbackAfterRating
 } from "./telegram-csat-feedback.js";
 import {
+  acknowledgeTelegramPhoneShare,
+  requestTelegramPhoneIfMissing
+} from "./telegram-phone-collection.js";
+import {
   parseTelegramCsatFeedbackDecline,
   parseTelegramQualityRating,
   resolveTelegramInboundConversation,
@@ -37,6 +41,7 @@ export interface TelegramPollingInput {
   runBotRuntime?: (event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string }) => Promise<{ instance?: { status?: string }; outcome?: string }>;
   offsets?: Map<string, number>;
   now?: () => Date;
+  phoneCollectionEnabled?: boolean;
   timeoutMs?: number;
 }
 
@@ -275,13 +280,21 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
         continue;
       }
       const isNewConversation = conversation.messages.length === 0;
+      if (input.phoneCollectionEnabled !== false && !resolved.csatFeedbackAwaiting && !parsed.phoneShared) {
+        await requestTelegramPhoneIfMissing({
+          api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher },
+          chatId: parsed.chatId,
+          conversation,
+          conversationRepository: input.conversationRepository
+        });
+      }
 
       const normalized = await input.conversationService.normalizeInboundEvent("telegram", {
         attachments: parsed.attachments,
         conversationId: conversation.id,
         csatFeedback: resolved.csatFeedbackAwaiting,
         eventId: telegramTenantEventId(connection.tenantId, connection.botId ?? undefined, parsed.eventId),
-        text: parsed.text
+        text: parsed.phoneShared && !parsed.text && !parsed.attachments.length ? "Contact shared" : parsed.text
       });
 
       if (normalized.status === "ok" && normalized.data?.duplicate) {
@@ -298,6 +311,18 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
       if (resolved.csatFeedbackAwaiting) {
         if (!normalized.data?.duplicate) {
           await acknowledgeTelegramCsatFeedback({
+            api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher },
+            chatId: parsed.chatId,
+            conversationId: conversation.id
+          });
+        }
+        await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, parsed.updateId + 1);
+        continue;
+      }
+
+      if (parsed.phoneShared) {
+        if (!normalized.data?.duplicate) {
+          await acknowledgeTelegramPhoneShare({
             api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher },
             chatId: parsed.chatId,
             conversationId: conversation.id
@@ -529,14 +554,14 @@ function parseTelegramPollingUpdate(update: TelegramUpdatePayload) {
   const attachments = telegramMessageAttachments(message as Record<string, unknown>);
   const text = String(message.text ?? message.caption ?? "").trim();
   const chatId = String(message.chat?.id ?? "").trim();
-  if ((!text && !attachments.length) || !chatId) {
+  const phone = telegramPollingContactPhone(message);
+  if ((!text && !attachments.length && !phone) || !chatId) {
     return null;
   }
 
   const firstName = String(message.from?.first_name ?? "").trim();
   const lastName = String(message.from?.last_name ?? "").trim();
   const username = String(message.from?.username ?? "").trim();
-  const phone = telegramPollingContactPhone(message);
   const displayName = [firstName, lastName].filter(Boolean).join(" ").trim() || (username ? `@${username}` : `Chat ${chatId}`);
   const messageId = String(message.message_id ?? "").trim();
 
@@ -549,6 +574,7 @@ function parseTelegramPollingUpdate(update: TelegramUpdatePayload) {
     text,
     updateId,
     phone,
+    phoneShared: Boolean(phone),
     username: username || undefined
   };
 }

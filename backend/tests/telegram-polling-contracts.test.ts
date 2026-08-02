@@ -26,6 +26,7 @@ describe("telegram polling ingress contracts", () => {
       ingressMode: "polling",
       intervalMs: 2500,
       limit: 25,
+      phoneCollectionEnabled: true,
       timeoutMs: 3000
     });
     assert.throws(() => loadTelegramPollingRuntimeConfig({

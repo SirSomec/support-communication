@@ -1,7 +1,8 @@
 const APPEAL_ANCHOR_TAG_PREFIX = "appeal-anchor:";
 
 export function normalizeClientPhone(phone) {
-  return String(phone ?? "").replace(/\D/g, "").trim();
+  const digits = String(phone ?? "").replace(/\D/g, "").trim();
+  return digits.length === 11 && digits.startsWith("8") ? `7${digits.slice(1)}` : digits;
 }
 
 export function extractAppealAnchorId(conversation) {
@@ -20,10 +21,9 @@ export function extractAppealAnchorId(conversation) {
 }
 
 export function resolveClientIdentityKey(conversation) {
-  const channel = String(conversation?.channel ?? "unknown").trim().toLowerCase() || "unknown";
   const phone = normalizeClientPhone(conversation?.phone);
   if (phone) {
-    return `phone:${channel}:${phone}`;
+    return `phone:${phone}`;
   }
 
   const anchorId = extractAppealAnchorId(conversation);

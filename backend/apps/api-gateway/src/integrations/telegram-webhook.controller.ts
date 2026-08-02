@@ -35,9 +35,13 @@ export class TelegramWebhookController {
       conversationService: this.conversationService,
       headers,
       integrationRepository: this.integrationRepository,
+      phoneCollectionEnabled: process.env.TELEGRAM_PHONE_COLLECTION_ENABLED !== "false",
       recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context),
       runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event),
-      telegramApi: { apiBaseUrl: String(process.env.TELEGRAM_API_BASE_URL ?? "").trim() || undefined }
+      telegramApi: {
+        apiBaseUrl: String(process.env.TELEGRAM_API_BASE_URL ?? "").trim() || undefined,
+        fetcher: globalThis.fetch
+      }
     });
   }
 }

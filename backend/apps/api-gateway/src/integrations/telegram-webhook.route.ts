@@ -23,6 +23,10 @@ import {
   declineTelegramCsatFeedback,
   offerTelegramCsatFeedbackAfterRating
 } from "./telegram-csat-feedback.js";
+import {
+  acknowledgeTelegramPhoneShare,
+  requestTelegramPhoneIfMissing
+} from "./telegram-phone-collection.js";
 
 const INTEGRATION_SERVICE = "integrationService";
 
@@ -40,6 +44,7 @@ export interface TelegramWebhookRouteInput {
   headers: Record<string, string | undefined>;
   integrationRepository: TelegramConnectionReader;
   now?: Date;
+  phoneCollectionEnabled?: boolean;
   // Прямые сервисные вызовы Bot API (скрыть опрос, промпт отзыва); без
   // fetcher используется globalThis.fetch, без токена подключения — пропуск.
   telegramApi?: { apiBaseUrl?: string; fetcher?: TelegramHttpFetch };
@@ -193,13 +198,21 @@ export async function handleTelegramWebhookFromRoute(
     return deniedEnvelope("telegram_conversation_create_failed", "Telegram conversation could not be created.");
   }
   const isNewConversation = conversation.messages.length === 0;
+  const phoneCollection = input.phoneCollectionEnabled !== false && !resolved.csatFeedbackAwaiting && !parsed.phoneShared
+    ? await requestTelegramPhoneIfMissing({
+        api: telegramApi,
+        chatId: parsed.chatId,
+        conversation,
+        conversationRepository: input.conversationRepository
+      })
+    : { requested: false };
 
   const normalized = await input.conversationService.normalizeInboundEvent("telegram", {
     attachments: parsed.attachments,
     conversationId: conversation.id,
     csatFeedback: resolved.csatFeedbackAwaiting,
     eventId: telegramTenantEventId(tenantId, tenantConnection?.botId ?? undefined, parsed.eventId),
-    text: parsed.text
+    text: parsed.phoneShared && !parsed.text && !parsed.attachments.length ? "Contact shared" : parsed.text
   });
 
   // Отзыв к оценке: сообщение сохранено в закрытом обращении, бот и
@@ -227,6 +240,29 @@ export async function handleTelegramWebhookFromRoute(
     });
   }
 
+  if (parsed.phoneShared) {
+    if (normalized.status === "ok" && !normalized.data?.duplicate) {
+      await acknowledgeTelegramPhoneShare({ api: telegramApi, chatId: parsed.chatId, conversationId: conversation.id });
+    }
+    return createEnvelope({
+      service: INTEGRATION_SERVICE,
+      operation: "receiveTelegramWebhook",
+      status: normalized.status === "ok" ? "ok" : normalized.status,
+      meta: { channel: "telegram", source: "telegram-bot-api", tenantId },
+      data: {
+        accepted: normalized.status === "ok",
+        chatId: parsed.chatId,
+        conversationId: conversation.id,
+        duplicate: Boolean(normalized.data?.duplicate),
+        messageId: normalized.data?.messageId ?? parsed.messageId,
+        phoneCollected: normalized.status === "ok",
+        tenantId,
+        updateId: parsed.updateId
+      },
+      error: normalized.error ?? null
+    });
+  }
+
   const runtimeEventId = telegramTenantEventId(tenantId, tenantConnection?.botId ?? undefined, parsed.eventId);
   const botRuntime = normalized.status === "ok" && input.runBotRuntime
     ? await tryBotRuntime(input.runBotRuntime, { channel: "Telegram", conversationId: conversation.id, eventId: runtimeEventId, payload: { isNewConversation, text: parsed.text }, tenantId, traceId: normalized.traceId })
@@ -235,7 +271,6 @@ export async function handleTelegramWebhookFromRoute(
   const autoAssignment = normalized.status === "ok" && needsOperator && input.autoAssignConversation
     ? await tryAutoAssignment(input.autoAssignConversation, conversation.id, tenantId)
     : null;
-
   return createEnvelope({
     service: INTEGRATION_SERVICE,
     operation: "receiveTelegramWebhook",
@@ -253,6 +288,7 @@ export async function handleTelegramWebhookFromRoute(
       conversationId: conversation.id,
       duplicate: Boolean(normalized.data?.duplicate),
       messageId: normalized.data?.messageId ?? parsed.messageId,
+      phoneCollectionRequested: phoneCollection.requested,
       tenantId,
       updateId: parsed.updateId
     },
@@ -331,6 +367,7 @@ export async function resolveTelegramInboundConversation(input: {
   }
 
   const displayName = input.displayName.trim() || `Telegram ${chatId}`;
+  const phone = normalizedTelegramPhone(input.phone) || await knownTelegramPhone(input.conversationRepository, { anchorId, tenantId });
   const resolved = await resolveOrForkAppealConversation({
     anchorId,
     conversationRepository: input.conversationRepository,
@@ -347,7 +384,7 @@ export async function resolveTelegramInboundConversation(input: {
       name: displayName,
       // Telegram передает номер только когда пользователь явно делится своим контактом.
       // Адрес доставки живет в providerConversationId и теге chat:*.
-      phone: normalizedTelegramPhone(input.phone),
+      phone,
       preview: "",
       previous: [],
       providerConversationId: chatId,
@@ -376,9 +413,24 @@ export async function resolveTelegramInboundConversation(input: {
     conversation: resolved.conversation,
     conversationRepository: input.conversationRepository,
     displayName,
-    phone: input.phone
+    phone
   });
   return { conversation, csatFeedbackAwaiting: Boolean(resolved.csatFeedbackAwaiting) };
+}
+
+async function knownTelegramPhone(
+  repository: Pick<ConversationRepository, "listConversations">,
+  input: { anchorId: string; tenantId: string }
+): Promise<string> {
+  const anchorTag = appealAnchorTag(input.anchorId);
+  const conversations = await repository.listConversations({ tenantId: input.tenantId, take: 100, messageTake: 1 });
+  for (const conversation of conversations) {
+    if (resolveConversationTenantId(conversation) !== input.tenantId) continue;
+    if (conversation.id !== input.anchorId && !conversation.tags.includes(anchorTag)) continue;
+    const phone = normalizedTelegramPhone(conversation.phone);
+    if (phone) return phone;
+  }
+  return "";
 }
 
 async function updateTelegramConversationProfile(input: {
@@ -510,9 +562,8 @@ function parseTelegramUpdate(body: Record<string, unknown>) {
 
   const attachments = telegramMessageAttachments(message);
   const text = String(message.text ?? message.caption ?? "").trim();
-  if (!text && !attachments.length) {
-    return null;
-  }
+  const phone = telegramContactPhone(message);
+  if (!text && !attachments.length && !phone) return null;
 
   const chat = message.chat as Record<string, unknown> | undefined;
   const from = message.from as Record<string, unknown> | undefined;
@@ -525,7 +576,6 @@ function parseTelegramUpdate(body: Record<string, unknown>) {
   const firstName = String(from?.first_name ?? "").trim();
   const lastName = String(from?.last_name ?? "").trim();
   const username = String(from?.username ?? "").trim();
-  const phone = telegramContactPhone(message);
   const displayName = [firstName, lastName].filter(Boolean).join(" ").trim() || (username ? `@${username}` : `Chat ${chatId}`);
   const messageId = String(message.message_id ?? "").trim();
 
@@ -538,6 +588,7 @@ function parseTelegramUpdate(body: Record<string, unknown>) {
     text,
     updateId,
     phone,
+    phoneShared: Boolean(phone),
     username: username || undefined
   };
 }
@@ -599,7 +650,9 @@ function objectRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function stringValue(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+  return typeof value === "string" || typeof value === "number" || typeof value === "bigint"
+    ? String(value).trim()
+    : "";
 }
 
 function finiteNonNegativeNumber(value: unknown): number | undefined {

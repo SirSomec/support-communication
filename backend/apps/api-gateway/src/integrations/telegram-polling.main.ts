@@ -24,6 +24,7 @@ interface TelegramPollingRuntimeConfig {
   ingressMode: "disabled" | "polling" | "webhook";
   intervalMs: number;
   limit: number;
+  phoneCollectionEnabled: boolean;
   timeoutMs: number;
 }
 
@@ -66,6 +67,7 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
             autoAssignConversation: (conversationId, tenantId) => routingService.autoAssignConversation(conversationId, { tenantId }),
             limit: config.limit,
             offsets,
+            phoneCollectionEnabled: config.phoneCollectionEnabled,
             recordQualityRating: (payload, context) => qualityService.recordClientQualityRating(payload, context),
             runBotRuntime: (event) => automationService.handleBotRuntimeInboundEvent(event),
             timeoutMs: config.timeoutMs
@@ -98,6 +100,7 @@ export function loadTelegramPollingRuntimeConfig(source: NodeJS.ProcessEnv = pro
     ingressMode,
     intervalMs: positiveInteger(source.TELEGRAM_POLLING_INTERVAL_MS, 5_000),
     limit: positiveInteger(source.TELEGRAM_POLLING_LIMIT, 50),
+    phoneCollectionEnabled: source.TELEGRAM_PHONE_COLLECTION_ENABLED !== "false",
     timeoutMs: positiveInteger(source.TELEGRAM_POLLING_TIMEOUT_MS, 10_000)
   };
 }

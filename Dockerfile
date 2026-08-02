@@ -23,8 +23,11 @@ EXPOSE 80
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0 AS frontend-production
 
+USER root
 COPY docker/nginx.static.conf /etc/nginx/conf.d/default.conf
 COPY --from=frontend-build /app/dist /usr/share/nginx/html
+RUN chmod -R a+rX /usr/share/nginx/html
+USER 101
 
 EXPOSE 8080
 

@@ -37,7 +37,9 @@
 }
 
 {$S3_DOMAIN} {
-	encode zstd gzip
+	# Presigned S3 uploads and HEAD checks need the original Content-Length.
+	# Response compression makes a small compressed length look like an object
+	# size mismatch and prevents the application from finalizing the upload.
 	request_body {
 		max_size 64MB
 	}

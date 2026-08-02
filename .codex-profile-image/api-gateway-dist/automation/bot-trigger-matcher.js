@@ -1,0 +1,64 @@
+/**
+ * Makes text comparable across common user input differences.
+ *
+ * NFC preserves normal displayed characters while making composed and
+ * decomposed Unicode forms equal. Whitespace is collapsed so line breaks and
+ * repeated spaces do not make an otherwise identical phrase miss.
+ */
+export function normalizeBotTriggerText(value, locale = "ru-RU") {
+    return value.normalize("NFC").toLocaleLowerCase(locale).replace(/\s+/gu, " ").trim();
+}
+/**
+ * Splits a normalized string into whole letters/numbers. It deliberately does
+ * not stem words: a trigger for "оплата" must not accidentally match
+ * "оплатить". The caller can use `contains` when that broader behavior is
+ * wanted.
+ */
+export function tokenizeBotTriggerText(value, locale = "ru-RU") {
+    const normalized = normalizeBotTriggerText(value, locale);
+    return normalized.match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+/**
+ * Determines whether one configured phrase matches an inbound message.
+ *
+ * - exact: the full normalized message equals the phrase;
+ * - contains: the normalized phrase is a contiguous substring of the message;
+ * - tokens: every whole token of the phrase occurs in the message, regardless
+ *   of token order. This is useful for a customer who writes a phrase with
+ *   extra words between its key terms.
+ *
+ * Empty or punctuation-only phrases never match; accepting one would make a
+ * scenario trigger on every inbound message.
+ */
+export function matchesBotTriggerPhrase(message, phrase, mode, locale = "ru-RU") {
+    const normalizedMessage = normalizeBotTriggerText(message, locale);
+    const normalizedPhrase = normalizeBotTriggerText(phrase, locale);
+    if (!normalizedMessage || !normalizedPhrase) {
+        return false;
+    }
+    if (tokenizeBotTriggerText(normalizedPhrase, locale).length === 0) {
+        return false;
+    }
+    if (mode === "exact") {
+        return normalizedMessage === normalizedPhrase;
+    }
+    if (mode === "contains") {
+        return normalizedMessage.includes(normalizedPhrase);
+    }
+    const phraseTokens = tokenizeBotTriggerText(normalizedPhrase, locale);
+    const messageTokens = new Set(tokenizeBotTriggerText(normalizedMessage, locale));
+    return phraseTokens.every((token) => messageTokens.has(token));
+}
+/**
+ * Catch-all trigger: matches every inbound message unless an exclusion phrase hits.
+ * An empty exclusion list means the scenario always matches.
+ */
+export function matchesBotAlwaysExceptTrigger(message, exclusions, mode = "contains", locale = "ru-RU") {
+    const phrases = Array.isArray(exclusions) ? exclusions : [];
+    if (!phrases.length)
+        return true;
+    if (!message?.trim())
+        return true;
+    return !phrases.some((phrase) => matchesBotTriggerPhrase(message, phrase, mode, locale));
+}
+//# sourceMappingURL=bot-trigger-matcher.js.map

@@ -1,0 +1,69 @@
+import { IntegrationRepository } from "./integration.repository.js";
+import { findActiveTelegramBotToken } from "./telegram-channel-connection.js";
+const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
+const DEFAULT_TELEGRAM_TIMEOUT_MS = 10_000;
+export function createTelegramOutboundMessageDispatcher(options = {}) {
+    const apiBaseUrl = String(options.apiBaseUrl ?? DEFAULT_TELEGRAM_API_BASE_URL).replace(/\/+$/, "");
+    const fetcher = options.fetcher ?? globalThis.fetch;
+    const integrationRepository = options.integrationRepository ?? IntegrationRepository.default();
+    const timeoutMs = Math.max(1, Math.trunc(Number(options.timeoutMs)) || DEFAULT_TELEGRAM_TIMEOUT_MS);
+    return {
+        async deliverMessage(request) {
+            if (String(request.channel).trim().toLowerCase() !== "telegram") {
+                return { status: "skipped", reason: "channel_not_telegram" };
+            }
+            const connections = integrationRepository.listTelegramConnectionsAsync
+                ? await integrationRepository.listTelegramConnectionsAsync()
+                : integrationRepository.listTelegramConnections();
+            const token = findActiveTelegramBotToken(connections, request.tenantId, request.channelConnectionId);
+            if (!token) {
+                return { status: "failed", reason: "telegram_connection_not_found" };
+            }
+            const chatId = String(request.chatId ?? request.conversationId ?? "").trim();
+            const text = String(request.text ?? "").trim();
+            if (!chatId) {
+                return { status: "failed", reason: "telegram_chat_id_required" };
+            }
+            if (!text) {
+                return { status: "failed", reason: "telegram_text_required" };
+            }
+            const endpoint = `${apiBaseUrl}/bot${token}/sendMessage`;
+            const response = await fetcher(endpoint, {
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    disable_web_page_preview: true,
+                    text
+                }),
+                headers: {
+                    "content-type": "application/json",
+                    "idempotency-key": request.idempotencyKey,
+                    "x-trace-id": request.traceId
+                },
+                method: "POST",
+                signal: AbortSignal.timeout(timeoutMs)
+            });
+            let payload = null;
+            try {
+                payload = await response.json();
+            }
+            catch {
+                payload = null;
+            }
+            if (!response.ok || payload?.ok === false) {
+                return {
+                    providerStatus: response.status,
+                    reason: `telegram_dispatch_failed:${response.status}`,
+                    status: "failed"
+                };
+            }
+            return {
+                providerMessageId: payload?.result?.message_id === undefined
+                    ? undefined
+                    : String(payload.result.message_id),
+                providerStatus: response.status,
+                status: "delivered"
+            };
+        }
+    };
+}
+//# sourceMappingURL=telegram-outbound.dispatcher.js.map

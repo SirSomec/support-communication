@@ -79,6 +79,52 @@ test("settings runtime loads channel connections from API", async ({ page, reque
   }
 });
 
+test("settings exposes queues as a standalone management section", async ({ page, request }) => {
+  const session = await loginTenantOperator(request);
+  await openAppShell(page, session);
+  await page.locator(".role-switcher select").selectOption({ label: "Администратор" });
+  await openSection(page, "Настройки");
+
+  const queuesTab = page.locator("#settings-tab-queues");
+  await expect(queuesTab).toBeVisible();
+  await expect(queuesTab).toContainText("Очереди");
+  await queuesTab.click();
+
+  const panel = page.locator(".queue-management-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "Очереди" })).toBeVisible();
+
+  const runId = Date.now().toString(36);
+  const queueName = `Runtime queue ${runId}`;
+  await panel.getByLabel("Название новой очереди").fill(queueName);
+  const createResponsePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/routing/queues") && response.request().method() === "POST"
+  );
+  await panel.getByRole("button", { name: "Создать очередь" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const queueCard = panel.locator(".queue-directory-card").filter({ hasText: queueName });
+  await expect(queueCard).toBeVisible();
+  await expect(queueCard).toContainText("Активна");
+
+  const renamedQueue = `${queueName} renamed`;
+  await queueCard.locator("input").fill(renamedQueue);
+  const renameResponsePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/routing/queues/") && response.request().method() === "PATCH"
+  );
+  await queueCard.getByRole("button", { name: "Сохранить" }).click();
+  expect((await renameResponsePromise).ok()).toBeTruthy();
+  await expect(queueCard).toContainText(renamedQueue);
+
+  const pauseResponsePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/routing/queues/") && response.request().method() === "PATCH"
+  );
+  await queueCard.getByRole("button", { name: "Приостановить" }).click();
+  expect((await pauseResponsePromise).ok()).toBeTruthy();
+  await expect(queueCard).toContainText("Приостановлена");
+  await expect(queueCard.getByRole("button", { name: "Возобновить" })).toBeVisible();
+});
+
 test("integration center wizard creates and checks telegram and max channels", async ({ page, request }) => {
   const session = await loginTenantOperator(request);
   await openAppShell(page, session);

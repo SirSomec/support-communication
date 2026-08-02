@@ -1,5 +1,5 @@
 import React from "react";
-import { Cable, ListChecks, ShieldCheck, Tags, Users, UsersRound } from "lucide-react";
+import { Cable, ListChecks, ListTree, ShieldCheck, Tags, Users, UsersRound } from "lucide-react";
 
 // Навигация настроек: вертикальные группы разделов-экранов.
 // Идентификаторы вкладок стабильны (settings-tab-*), на них опираются
@@ -9,7 +9,8 @@ const navGroups = [
     id: "integrations",
     label: "Интеграции",
     items: [
-      { id: "connections", label: "Центр интеграций", hint: "Все продукты, API и очереди в одном месте", icon: Cable }
+      { id: "connections", label: "Центр интеграций", hint: "Каналы, приложения и API", icon: Cable },
+      { id: "queues", label: "Очереди", hint: "Маршрутизация обращений и команды", icon: ListTree }
     ]
   },
   {

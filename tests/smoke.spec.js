@@ -1037,7 +1037,8 @@ test("quality workspace uses tenant data and completes manual QA", async ({ page
 
   await expect(page.getByTestId("quality-workspace")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Оценки и ручной QA" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Автоматическая проверка" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Проверка текста ответа" })).toBeVisible();
+  await expect(page.getByText("CSI/CSAT ставит клиент после закрытия диалога.")).toBeVisible();
   await expect(page.locator(".ai-quality-workspace")).toHaveCount(0);
   await expect(page.getByText("Risky wording")).toHaveCount(0);
 

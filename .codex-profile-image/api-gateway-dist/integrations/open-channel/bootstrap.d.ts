@@ -1,0 +1,12 @@
+import { type PrismaClientFactoryOptions } from "@support-communication/database";
+import { OpenChannelRepository, type PrismaOpenChannelClient } from "./open-channel.repository.js";
+export interface OpenChannelRepositoryBootstrapSource {
+    DATABASE_URL?: string;
+    NODE_ENV?: string;
+    PORT?: number | string;
+    SERVICE_NAME?: string;
+}
+export interface OpenChannelRepositoryBootstrapOptions {
+    prismaClientFactory?: (options: PrismaClientFactoryOptions) => PrismaOpenChannelClient;
+}
+export declare function configureOpenChannelRepository(source?: OpenChannelRepositoryBootstrapSource, options?: OpenChannelRepositoryBootstrapOptions): OpenChannelRepository;

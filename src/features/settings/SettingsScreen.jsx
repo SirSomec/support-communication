@@ -6,11 +6,13 @@ import { EmployeeManagementPanel } from "./EmployeeManagementPanel.jsx";
 import { ExternalAppPanel } from "./ExternalAppPanel.jsx";
 import { GroupManagementPanel } from "./GroupManagementPanel.jsx";
 import { IntegrationCenterPanel } from "./IntegrationCenterPanel.jsx";
+import { QueueManagementPanel } from "./QueueManagementPanel.jsx";
 import { RulesPanel } from "./RulesPanel.jsx";
 import { SettingsShell, settingsTabIds } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
 import { TopicDirectoryPanel } from "./TopicDirectoryPanel.jsx";
 import { integrationService } from "../../services/integrationService.js";
+import { routingService } from "../../services/routingService.js";
 import { settingsService } from "../../services/settingsService.js";
 
 export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptionsChange, navigationTarget = null }) {
@@ -22,6 +24,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
   const [activeTab, setActiveTab] = useState(requestedTab || "connections");
   const [integrationWorkspace, setIntegrationWorkspace] = useState(() => navigationTarget?.channelType || navigationTarget?.connectionId ? "channels" : "center");
   const [connectionSummary, setConnectionSummary] = useState(null);
+  const [queueSummary, setQueueSummary] = useState(null);
   const [externalSummary, setExternalSummary] = useState({ active: 0, total: 0 });
   const [employeeSummary, setEmployeeSummary] = useState({ total: 0 });
   const [groupSummary, setGroupSummary] = useState({ total: 0 });
@@ -57,10 +60,11 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
     let cancelled = false;
 
     async function loadSummaries() {
-      const [employees, topics, rules] = await Promise.all([
+      const [employees, topics, rules, queues] = await Promise.all([
         settingsService.fetchEmployees(),
         settingsService.fetchTopics(),
-        settingsService.fetchRules()
+        settingsService.fetchRules(),
+        routingService.fetchQueues()
       ]);
 
       if (cancelled) {
@@ -76,6 +80,15 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
       setGroupSummary({ total: employees.data?.groups?.length ?? 0 });
       setTopicTotals(topics.data?.totals ?? { active: 0, archived: 0, total: 0 });
       setRulesSummary({ active: rules.data?.totals?.active ?? 0 });
+      if (queues.status === "ok") {
+        const items = queues.data?.queues ?? [];
+        setQueueSummary({
+          active: items.filter((queue) => queue.status === "active").length,
+          total: items.length
+        });
+      } else {
+        setQueueSummary({ unavailable: true });
+      }
     }
 
     loadSummaries();
@@ -121,6 +134,11 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
       : connectionSummary
         ? `${connectionSummary.active} из ${connectionSummary.total} активны`
         : "загрузка...",
+    queues: queueSummary?.unavailable
+      ? "данные недоступны"
+      : queueSummary
+        ? `${queueSummary.active} из ${queueSummary.total} активны`
+        : "загрузка...",
     external: externalSummary.total ? `${externalSummary.active} из ${externalSummary.total} активны` : "нет подключений",
     employees: `${employeeSummary.total} сотрудников`,
     groups: `${groupSummary.total} групп`,
@@ -164,6 +182,15 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
             onWorkspaceChange={setIntegrationWorkspace}
             roleMode={roleMode}
             workspace={integrationWorkspace}
+          />
+        ) : null}
+
+        {activeTab === "queues" ? (
+          <QueueManagementPanel
+            access={access}
+            canEditSettings={canEditSettings}
+            onSummaryChange={setQueueSummary}
+            onToast={onToast}
           />
         ) : null}
 
@@ -271,6 +298,7 @@ function IntegrationWorkspace({
             onToast={onToast}
           />
         ) : null}
+
         {workspace === "external" ? (
           <ExternalAppPanel
             access={access}

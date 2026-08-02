@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   approveKnowledgeArticle,
@@ -19,6 +20,15 @@ import {
 } from "../src/app/qualityAiActions.js";
 
 describe("quality and knowledge workflow actions", () => {
+  it("clearly separates customer CSI/CSAT from AI draft scoring in the quality workspace", () => {
+    const source = readFileSync(new URL("../src/features/quality/QualityScreen.jsx", import.meta.url), "utf8");
+
+    assert.match(source, /Это не CSI\/CSAT/);
+    assert.match(source, /CSI\/CSAT ставит клиент после закрытия диалога/);
+    assert.match(source, /Черновик передаётся AI только с согласием оператора/);
+    assert.match(source, /AI не выставляет CSI\/CSAT и не меняет клиентскую оценку/);
+  });
+
   it("uses the backing conversation id for coaching draft scoring", () => {
     assert.equal(buildCoachingDraftScorePayload({
       conversationId: "vladimir",

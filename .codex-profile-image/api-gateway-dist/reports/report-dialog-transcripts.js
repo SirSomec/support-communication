@@ -1,0 +1,470 @@
+import { buildLiveReportWorkspace } from "./report-live-workspace.js";
+import { reportSnapshotAt, serializeReportRowsAsXlsx } from "./report-export.worker.js";
+export const DIALOG_TRANSCRIPT_REPORT_TYPE = "dialog_transcripts";
+export const DIALOG_TRANSCRIPT_COLUMN_OPTIONS = [
+    { id: "conversationId", label: "ID диалога" },
+    { id: "client", label: "Клиент" },
+    { id: "channel", label: "Канал" },
+    { id: "topic", label: "Тематика" },
+    { id: "status", label: "Статус" },
+    { id: "operator", label: "Оператор" },
+    { id: "rating", label: "Оценка (CSAT)" },
+    { id: "entryKind", label: "Тип записи" },
+    { id: "author", label: "Автор" },
+    { id: "at", label: "Время" },
+    { id: "text", label: "Текст" }
+];
+export const DIALOG_TRANSCRIPT_COLUMN_IDS = DIALOG_TRANSCRIPT_COLUMN_OPTIONS.map((column) => column.id);
+// Русские подписи статусов дублируют conversationStatusMeta фронтенда: выгрузка
+// должна читаться без приложения, а общего словаря между src и backend нет.
+const DIALOG_STATUS_LABELS = {
+    active: "В работе",
+    assigned: "Назначено",
+    closed: "Закрыто",
+    new: "Новое",
+    paused: "На паузе",
+    queued: "В очереди",
+    reopened: "Переоткрыто",
+    transferred: "Передано",
+    waiting_client: "Ожидает клиента",
+    waiting_operator: "Ожидает оператора"
+};
+const DIALOG_TRANSCRIPT_FORMATS = {
+    excel: "XLSX",
+    html: "HTML",
+    json: "JSON",
+    text: "TXT",
+    txt: "TXT",
+    xlsx: "XLSX"
+};
+const DIALOG_TRANSCRIPT_CONTENT_TYPES = {
+    HTML: "text/html; charset=utf-8",
+    JSON: "application/json",
+    TXT: "text/plain; charset=utf-8",
+    XLSX: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+};
+export function isDialogTranscriptReportType(reportType) {
+    return typeof reportType === "string" && reportType.trim().toLowerCase() === DIALOG_TRANSCRIPT_REPORT_TYPE;
+}
+export function isDialogTranscriptExportJob(job) {
+    return isDialogTranscriptReportType(job.filters?.reportKind);
+}
+export function normalizeDialogTranscriptFormat(value) {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    return DIALOG_TRANSCRIPT_FORMATS[value.trim().toLowerCase()];
+}
+export function dialogTranscriptContentType(format) {
+    return DIALOG_TRANSCRIPT_CONTENT_TYPES[format];
+}
+export function dialogStatusLabel(status) {
+    return DIALOG_STATUS_LABELS[status.trim().toLowerCase()] ?? status;
+}
+// Фильтры читаются и в новом множественном формате (operatorIds/statuses/
+// scores), и в одиночном legacy-формате старых заданий (operatorId/status/
+// score) — retry и дозапись файла по ним продолжают работать.
+export function dialogTranscriptFiltersFromJob(job) {
+    const operatorIds = stringListFilter(job.filters?.operatorIds, job.filters?.operatorId);
+    const scores = stringListFilter(job.filters?.scores, job.filters?.score);
+    const statuses = stringListFilter(job.filters?.statuses, job.filters?.status);
+    const topics = stringListFilter(job.filters?.topics, job.filters?.topic);
+    return {
+        ...(operatorIds ? { operatorIds } : {}),
+        ...(scores ? { scores } : {}),
+        ...(statuses ? { statuses } : {}),
+        ...(topics ? { topics } : {})
+    };
+}
+// Произвольный период выгрузки: даты локального дня пользователя (yyyy-mm-dd)
+// превращаются в UTC-окно с учётом timezoneOffsetMinutes. Невалидная пара —
+// undefined, вызывающая сторона решает, ошибка это или отсутствие диапазона.
+export function dialogTranscriptDateRange(filters) {
+    const fromRaw = typeof filters?.dateFrom === "string" ? filters.dateFrom.trim() : "";
+    const toRaw = typeof filters?.dateTo === "string" ? filters.dateTo.trim() : "";
+    if (!fromRaw && !toRaw) {
+        return undefined;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromRaw) || !/^\d{4}-\d{2}-\d{2}$/.test(toRaw)) {
+        return "invalid";
+    }
+    const offsetMs = transcriptTimezoneOffset(filters?.timezoneOffsetMinutes) * 60_000;
+    const fromMs = Date.parse(`${fromRaw}T00:00:00.000Z`) - offsetMs;
+    const toMs = Date.parse(`${toRaw}T00:00:00.000Z`) - offsetMs + 24 * 60 * 60_000;
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) {
+        return "invalid";
+    }
+    return { from: new Date(fromMs), to: new Date(toMs) };
+}
+export function buildDialogTranscriptDialogs(rows, filters = {}) {
+    const operators = normalizeFacetFilterList(filters.operatorIds);
+    const topics = normalizeFacetFilterList(filters.topics);
+    const statuses = normalizeFacetFilterList(filters.statuses);
+    const scores = normalizeScoreFilterList(filters.scores);
+    return rows
+        .filter((row) => {
+        if (operators && !operators.has(facetValue(row.operatorId)) && !operators.has(facetValue(row.operatorName))) {
+            return false;
+        }
+        if (topics && !topics.has(facetValue(row.topic))) {
+            return false;
+        }
+        if (statuses && !statuses.has(facetValue(row.status))) {
+            return false;
+        }
+        const score = row.rating?.score ?? null;
+        return !scores || scores.some((filter) => matchesScoreFilter(score, filter));
+    })
+        .map((row) => ({
+        channel: row.channel,
+        clientName: row.clientName || "Клиент",
+        createdAt: row.createdAt,
+        entries: transcriptEntries(row),
+        id: row.id,
+        ...(row.operatorId ? { operatorId: row.operatorId } : {}),
+        ...(row.operatorName ? { operatorName: row.operatorName } : {}),
+        rating: row.rating ? { ...row.rating } : null,
+        status: row.status,
+        statusLabel: dialogStatusLabel(row.status),
+        topic: row.topic,
+        updatedAt: row.updatedAt
+    }));
+}
+export function countDialogTranscriptEntries(dialogs) {
+    return dialogs.reduce((sum, dialog) => sum + dialog.entries.length, 0);
+}
+export async function buildDialogTranscriptSnapshot(repository, job) {
+    const tenantId = job.tenantId?.trim();
+    if (!tenantId) {
+        throw new Error("report_export_job_tenant_id_required");
+    }
+    const snapshotAt = reportSnapshotAt(job);
+    const range = dialogTranscriptDateRange(job.filters);
+    if (range === "invalid") {
+        throw new Error("report_export_period_invalid");
+    }
+    let from;
+    let to;
+    if (range) {
+        from = range.from;
+        to = new Date(Math.min(range.to.getTime(), snapshotAt.getTime()));
+    }
+    else {
+        const workspace = buildLiveReportWorkspace([], {
+            now: snapshotAt,
+            period: job.period,
+            timezoneOffsetMinutes: transcriptTimezoneOffset(job.filters?.timezoneOffsetMinutes)
+        });
+        from = new Date(workspace.windows.current.from);
+        to = new Date(Math.min(new Date(workspace.windows.current.to).getTime(), snapshotAt.getTime()));
+    }
+    const rows = await repository.listConversationTranscriptSourceRowsAsync({ from, tenantId, to });
+    const dialogs = buildDialogTranscriptDialogs(rows, dialogTranscriptFiltersFromJob(job));
+    return {
+        dialogs,
+        entryCount: countDialogTranscriptEntries(dialogs),
+        window: { from: from.toISOString(), to: to.toISOString() }
+    };
+}
+export function buildDialogTranscriptFile(dialogs, format, options = {}) {
+    const contentType = dialogTranscriptContentType(format);
+    if (format === "XLSX") {
+        return {
+            body: serializeReportRowsAsXlsx(dialogTranscriptXlsxInput(dialogs)),
+            contentType
+        };
+    }
+    if (format === "JSON") {
+        return { body: serializeDialogTranscriptsAsJson(dialogs, options), contentType };
+    }
+    if (format === "HTML") {
+        return { body: serializeDialogTranscriptsAsHtml(dialogs, options), contentType };
+    }
+    return { body: serializeDialogTranscriptsAsTxt(dialogs, options), contentType };
+}
+export function dialogTranscriptXlsxInput(dialogs) {
+    const rows = dialogs.flatMap((dialog) => dialog.entries.map((entry) => ({
+        at: formatTranscriptTimestamp(entry.at) || entry.time,
+        author: entry.author,
+        channel: dialog.channel,
+        client: dialog.clientName,
+        conversationId: dialog.id,
+        entryKind: entry.kindLabel,
+        operator: dialog.operatorName ?? dialog.operatorId ?? "",
+        rating: dialog.rating?.score ?? "",
+        status: dialog.statusLabel,
+        text: entry.text,
+        topic: dialog.topic
+    })));
+    return { columns: [...DIALOG_TRANSCRIPT_COLUMN_OPTIONS], rows };
+}
+export function serializeDialogTranscriptsAsJson(dialogs, options = {}) {
+    return JSON.stringify({
+        dialogCount: dialogs.length,
+        dialogs: dialogs.map((dialog) => ({
+            channel: dialog.channel,
+            client: dialog.clientName,
+            comments: dialog.entries.filter((entry) => entry.kind === "comment").map(jsonEntry),
+            createdAt: dialog.createdAt,
+            csatFeedback: dialog.entries.filter((entry) => entry.kind === "csat_feedback").map(jsonEntry),
+            id: dialog.id,
+            messages: dialog.entries.filter((entry) => entry.kind === "message").map(jsonEntry),
+            operator: dialog.operatorId || dialog.operatorName
+                ? { id: dialog.operatorId ?? null, name: dialog.operatorName ?? null }
+                : null,
+            rating: dialog.rating,
+            status: { key: dialog.status, label: dialog.statusLabel },
+            topic: dialog.topic,
+            updatedAt: dialog.updatedAt
+        })),
+        entryCount: countDialogTranscriptEntries(dialogs),
+        filters: exportedFilters(options.filters),
+        generatedAt: (options.generatedAt ?? new Date()).toISOString(),
+        reportType: DIALOG_TRANSCRIPT_REPORT_TYPE
+    }, null, 2);
+}
+export function serializeDialogTranscriptsAsTxt(dialogs, options = {}) {
+    const lines = [
+        "Выгрузка диалогов с перепиской",
+        `Сформировано: ${formatTranscriptTimestamp((options.generatedAt ?? new Date()).toISOString())}`,
+        `Фильтры: ${filtersSummary(options.filters)}`,
+        `Диалогов: ${dialogs.length} · Записей: ${countDialogTranscriptEntries(dialogs)}`
+    ];
+    for (const dialog of dialogs) {
+        lines.push("");
+        lines.push("=".repeat(72));
+        lines.push(`Диалог ${dialog.id} · ${dialog.clientName} · ${dialog.channel} · Тематика: ${dialog.topic}`);
+        lines.push(`Статус: ${dialog.statusLabel} · Оператор: ${dialog.operatorName ?? dialog.operatorId ?? "не назначен"} · Оценка: ${ratingSummary(dialog)}`);
+        lines.push("-".repeat(72));
+        if (!dialog.entries.length) {
+            lines.push("Сообщений нет.");
+            continue;
+        }
+        for (const entry of dialog.entries) {
+            lines.push(`[${formatTranscriptTimestamp(entry.at) || entry.time}] ${entry.kindLabel} — ${entry.author}: ${entry.text}`);
+        }
+    }
+    return `${lines.join("\r\n")}\r\n`;
+}
+export function serializeDialogTranscriptsAsHtml(dialogs, options = {}) {
+    const generatedAt = formatTranscriptTimestamp((options.generatedAt ?? new Date()).toISOString());
+    const sections = dialogs.map((dialog) => {
+        const entries = dialog.entries.length
+            ? dialog.entries.map((entry) => [
+                `<li class="entry ${entry.kind === "comment" ? "comment" : entry.authorRole}">`,
+                `<span class="entry-meta">${escapeHtml(formatTranscriptTimestamp(entry.at) || entry.time)} · ${escapeHtml(entry.kindLabel)} · ${escapeHtml(entry.author)}</span>`,
+                `<p>${escapeHtml(entry.text)}</p>`,
+                "</li>"
+            ].join("")).join("")
+            : "<li class=\"entry empty\"><p>Сообщений нет.</p></li>";
+        return [
+            "<section class=\"dialog\">",
+            "<header>",
+            `<h2>${escapeHtml(dialog.clientName)} <small>${escapeHtml(dialog.id)}</small></h2>`,
+            "<p class=\"dialog-meta\">",
+            `<span>Канал: ${escapeHtml(dialog.channel)}</span>`,
+            `<span>Тематика: ${escapeHtml(dialog.topic)}</span>`,
+            `<span>Статус: ${escapeHtml(dialog.statusLabel)}</span>`,
+            `<span>Оператор: ${escapeHtml(dialog.operatorName ?? dialog.operatorId ?? "не назначен")}</span>`,
+            `<span>Оценка: ${escapeHtml(ratingSummary(dialog))}</span>`,
+            "</p>",
+            "</header>",
+            `<ul class="entries">${entries}</ul>`,
+            "</section>"
+        ].join("");
+    }).join("");
+    return [
+        "<!doctype html>",
+        "<html lang=\"ru\">",
+        "<head>",
+        "<meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        "<title>Выгрузка диалогов с перепиской</title>",
+        "<style>",
+        "body{font-family:'Segoe UI',Arial,sans-serif;margin:24px auto;max-width:900px;padding:0 16px;color:#17212b;background:#f7f8fa;}",
+        "h1{font-size:22px;margin-bottom:4px;}",
+        ".summary{color:#5b6572;font-size:14px;margin-bottom:20px;}",
+        ".dialog{background:#fff;border:1px solid #dfe4ea;border-radius:10px;margin-bottom:16px;padding:16px 18px;}",
+        ".dialog h2{font-size:16px;margin:0 0 6px;}",
+        ".dialog h2 small{color:#8a94a1;font-weight:400;margin-left:6px;}",
+        ".dialog-meta{color:#5b6572;display:flex;flex-wrap:wrap;font-size:13px;gap:6px 14px;margin:0 0 10px;}",
+        ".entries{list-style:none;margin:0;padding:0;}",
+        ".entry{border-left:3px solid #c6d3e2;margin-bottom:10px;padding:4px 10px;}",
+        ".entry.client{border-left-color:#4d94ff;}",
+        ".entry.operator{border-left-color:#37b26c;}",
+        ".entry.comment{background:#fff8e6;border-left-color:#e2a93b;}",
+        ".entry-meta{color:#77818f;display:block;font-size:12px;margin-bottom:2px;}",
+        ".entry p{margin:0;white-space:pre-wrap;}",
+        "</style>",
+        "</head>",
+        "<body>",
+        "<h1>Выгрузка диалогов с перепиской</h1>",
+        `<p class="summary">Сформировано: ${escapeHtml(generatedAt)} · Фильтры: ${escapeHtml(filtersSummary(options.filters))} · Диалогов: ${dialogs.length} · Записей: ${countDialogTranscriptEntries(dialogs)}</p>`,
+        sections || "<p class=\"summary\">За выбранный период диалогов нет.</p>",
+        "</body>",
+        "</html>"
+    ].join("");
+}
+function transcriptEntries(row) {
+    const clientName = row.clientName || "Клиент";
+    const operatorName = row.operatorName || row.operatorId || "Оператор";
+    return row.messages
+        .filter((message) => message.type !== "event")
+        .map((message) => {
+        if (message.type === "internal") {
+            return transcriptEntry(message, {
+                author: message.author || operatorName,
+                authorRole: "operator",
+                kind: "comment",
+                kindLabel: "Внутренний комментарий"
+            });
+        }
+        if (message.type === "csat_feedback") {
+            return transcriptEntry(message, {
+                author: message.author || clientName,
+                authorRole: "client",
+                kind: "csat_feedback",
+                kindLabel: "Отзыв клиента на оценку"
+            });
+        }
+        if (message.side === "client") {
+            return transcriptEntry(message, {
+                author: message.author || clientName,
+                authorRole: "client",
+                kind: "message",
+                kindLabel: "Сообщение клиента"
+            });
+        }
+        return transcriptEntry(message, {
+            author: message.author || operatorName,
+            authorRole: "operator",
+            kind: "message",
+            kindLabel: "Сообщение оператора"
+        });
+    });
+}
+function transcriptEntry(message, target) {
+    return {
+        at: message.createdAt,
+        author: target.author,
+        authorRole: target.authorRole,
+        kind: target.kind,
+        kindLabel: target.kindLabel,
+        text: message.text,
+        time: message.time
+    };
+}
+function jsonEntry(entry) {
+    return {
+        author: entry.author,
+        authorRole: entry.authorRole,
+        sentAt: entry.at,
+        text: entry.text,
+        time: entry.time
+    };
+}
+function exportedFilters(filters = {}) {
+    return {
+        operators: cleanedFilterList(filters.operatorIds) ?? "all",
+        scores: cleanedFilterList(filters.scores) ?? "all",
+        statuses: cleanedFilterList(filters.statuses) ?? "all",
+        topics: cleanedFilterList(filters.topics) ?? "all"
+    };
+}
+function filtersSummary(filters = {}) {
+    const operators = cleanedFilterList(filters.operatorIds);
+    const statuses = cleanedFilterList(filters.statuses);
+    const scores = cleanedFilterList(filters.scores);
+    const topics = cleanedFilterList(filters.topics);
+    return [
+        `оператор — ${operators ? operators.join(", ") : "все"}`,
+        `тематика — ${topics ? topics.join(", ") : "все"}`,
+        `статус — ${statuses ? statuses.map(dialogStatusLabel).join(", ") : "все"}`,
+        `оценка — ${scores ? scores.map((score) => score === "none" ? "без оценки" : score).join(", ") : "все"}`
+    ].join(", ");
+}
+function cleanedFilterList(values) {
+    const cleaned = (values ?? [])
+        .map((value) => value.trim())
+        .filter((value) => value && value.toLowerCase() !== "all" && !value.startsWith("Все "));
+    return cleaned.length ? cleaned : undefined;
+}
+function ratingSummary(dialog) {
+    if (!dialog.rating || dialog.rating.score === null) {
+        return "без оценки";
+    }
+    return `${formatRatingScore(dialog.rating.score)} (${dialog.rating.scale})`;
+}
+function formatRatingScore(score) {
+    return Number.isInteger(score) ? String(score) : score.toFixed(1);
+}
+function normalizeFacetFilter(value) {
+    const normalized = value?.trim();
+    return !normalized || normalized === "all" || normalized.startsWith("Все ")
+        ? undefined
+        : normalized.toLocaleLowerCase("ru-RU");
+}
+function normalizeFacetFilterList(values) {
+    const normalized = (values ?? [])
+        .map((value) => normalizeFacetFilter(value))
+        .filter((value) => Boolean(value));
+    return normalized.length ? new Set(normalized) : undefined;
+}
+function normalizeScoreFilterList(values) {
+    const normalized = (values ?? [])
+        .map((value) => normalizeScoreFilter(value))
+        .filter((value) => value !== undefined);
+    return normalized.length ? normalized : undefined;
+}
+function stringListFilter(plural, single) {
+    const list = Array.isArray(plural)
+        ? plural.filter((value) => typeof value === "string")
+        : typeof single === "string" && single
+            ? [single]
+            : [];
+    return list.length ? list : undefined;
+}
+function facetValue(value) {
+    return (value ?? "").trim().toLocaleLowerCase("ru-RU");
+}
+function normalizeScoreFilter(value) {
+    const normalized = value?.trim().toLowerCase();
+    if (!normalized || normalized === "all") {
+        return undefined;
+    }
+    if (normalized === "none" || normalized === "unrated") {
+        return "none";
+    }
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+function matchesScoreFilter(score, filter) {
+    if (filter === undefined) {
+        return true;
+    }
+    if (filter === "none") {
+        return score === null;
+    }
+    return score !== null && Math.round(score) === filter;
+}
+function transcriptTimezoneOffset(value) {
+    const parsed = typeof value === "number" ? value : Number(value ?? 0);
+    return Number.isFinite(parsed) && Math.abs(parsed) <= 14 * 60 ? parsed : 0;
+}
+function formatTranscriptTimestamp(value) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return "";
+    }
+    const pad = (part) => String(part).padStart(2, "0");
+    return `${pad(parsed.getUTCDate())}.${pad(parsed.getUTCMonth() + 1)}.${parsed.getUTCFullYear()} ${pad(parsed.getUTCHours())}:${pad(parsed.getUTCMinutes())} UTC`;
+}
+function escapeHtml(value) {
+    return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+//# sourceMappingURL=report-dialog-transcripts.js.map

@@ -1,0 +1,77 @@
+const DEFAULT_MAX_API_BASE_URL = "https://platform-api2.max.ru";
+// `message_callback` is available through MAX long polling, but is not an
+// accepted webhook subscription type.  Keep this list aligned with MAX's
+// POST /subscriptions contract.
+const DEFAULT_UPDATE_TYPES = ["message_created", "bot_started"];
+/** Registers the only production ingress supported by MAX Bot API. */
+export async function subscribeMaxWebhook(input) {
+    const accessToken = required(input.accessToken, "max_access_token_required");
+    const webhookUrl = validateWebhookUrl(input.webhookUrl);
+    const secret = validateSecret(input.secret);
+    const apiBaseUrl = validateApiBaseUrl(input.apiBaseUrl ?? DEFAULT_MAX_API_BASE_URL);
+    const fetcher = input.fetcher ?? nativeFetch;
+    const response = await fetcher(`${apiBaseUrl}/subscriptions`, {
+        body: JSON.stringify({
+            secret,
+            update_types: input.updateTypes?.length ? input.updateTypes : DEFAULT_UPDATE_TYPES,
+            url: webhookUrl
+        }),
+        headers: { Authorization: accessToken, "Content-Type": "application/json" },
+        method: "POST",
+        signal: AbortSignal.timeout(10_000)
+    });
+    const body = await response.text();
+    if (!response.ok)
+        throw new Error(`max_subscription_failed:${response.status}:${safeError(body)}`);
+    let parsed;
+    try {
+        parsed = JSON.parse(body);
+    }
+    catch { /* MAX may return an empty successful response. */ }
+    if (parsed?.success === false)
+        throw new Error(`max_subscription_rejected:${safeError(String(parsed.message ?? "unknown"))}`);
+}
+async function nativeFetch(input, init) {
+    const response = await fetch(input, init);
+    return { ok: response.ok, status: response.status, text: () => response.text() };
+}
+function validateWebhookUrl(input) {
+    let url;
+    try {
+        url = new URL(required(input, "max_webhook_url_required"));
+    }
+    catch {
+        throw new Error("max_webhook_url_invalid");
+    }
+    if (url.protocol !== "https:" || url.port)
+        throw new Error("max_webhook_url_must_use_https_443");
+    return url.toString();
+}
+function validateApiBaseUrl(input) {
+    let url;
+    try {
+        url = new URL(required(input, "max_api_base_url_required"));
+    }
+    catch {
+        throw new Error("max_api_base_url_invalid");
+    }
+    if (url.protocol !== "https:")
+        throw new Error("max_api_base_url_must_use_https");
+    return url.toString().replace(/\/+$/, "");
+}
+function validateSecret(input) {
+    const value = required(input, "max_webhook_secret_required");
+    if (!/^[A-Za-z0-9_-]{5,256}$/.test(value))
+        throw new Error("max_webhook_secret_invalid");
+    return value;
+}
+function required(input, code) {
+    const value = String(input ?? "").trim();
+    if (!value)
+        throw new Error(code);
+    return value;
+}
+function safeError(input) {
+    return String(input ?? "").replace(/\s+/g, " ").slice(0, 200) || "unknown";
+}
+//# sourceMappingURL=max-subscription.js.map

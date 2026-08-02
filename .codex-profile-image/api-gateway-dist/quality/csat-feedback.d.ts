@@ -1,0 +1,13 @@
+import type { AppealConversationMutation } from "../conversation/appeal-lifecycle.js";
+import type { ConversationCsatFeedbackState, ConversationRecord } from "../conversation/conversation.types.js";
+export declare const CSAT_FEEDBACK_WINDOW_MS: number;
+export declare const CSAT_FEEDBACK_MESSAGE_TYPE = "csat_feedback";
+export declare const CSAT_FEEDBACK_NEW_APPEAL_CALLBACK = "quality:feedback:new_appeal";
+export declare const CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT = "\u041D\u043E\u0432\u043E\u0435 \u043E\u0431\u0440\u0430\u0449\u0435\u043D\u0438\u0435";
+export declare const CSAT_FEEDBACK_PROMPT_TEXT = "\u0421\u043F\u0430\u0441\u0438\u0431\u043E \u0437\u0430 \u043E\u0446\u0435\u043D\u043A\u0443! \u0425\u043E\u0442\u0438\u0442\u0435 \u043E\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439 \u2014 \u043D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u0435\u0433\u043E \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u043C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435\u043C, \u043C\u044B \u043F\u0435\u0440\u0435\u0434\u0430\u0434\u0438\u043C \u0435\u0433\u043E \u043A\u043E\u043C\u0430\u043D\u0434\u0435. \u0427\u0442\u043E\u0431\u044B \u0437\u0430\u0434\u0430\u0442\u044C \u043D\u043E\u0432\u044B\u0439 \u0432\u043E\u043F\u0440\u043E\u0441, \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \u00AB\u041D\u043E\u0432\u043E\u0435 \u043E\u0431\u0440\u0430\u0449\u0435\u043D\u0438\u0435\u00BB.";
+export declare const CSAT_FEEDBACK_ACK_TEXT = "\u0421\u043F\u0430\u0441\u0438\u0431\u043E \u0437\u0430 \u043E\u0442\u0437\u044B\u0432! \u041C\u044B \u043F\u0435\u0440\u0435\u0434\u0430\u043B\u0438 \u0435\u0433\u043E \u043A\u043E\u043C\u0430\u043D\u0434\u0435.";
+export declare const CSAT_FEEDBACK_NEW_APPEAL_TEXT = "\u041D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u2014 \u0438 \u043C\u044B \u043E\u0442\u043A\u0440\u043E\u0435\u043C \u043D\u043E\u0432\u043E\u0435 \u043E\u0431\u0440\u0430\u0449\u0435\u043D\u0438\u0435.";
+export declare function conversationCsatFeedback(conversation: ConversationRecord): ConversationCsatFeedbackState | null;
+export declare function isAwaitingCsatFeedback(conversation: ConversationRecord, nowMs?: number): boolean;
+export declare function withCsatFeedback(conversation: ConversationRecord, feedback: ConversationCsatFeedbackState): ConversationRecord;
+export declare function csatFeedbackConversationMutation(conversation: ConversationRecord, eventType: "quality.feedback.offered" | "quality.feedback.declined" | "quality.feedback.received", data?: Record<string, unknown>): AppealConversationMutation;

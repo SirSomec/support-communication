@@ -1,0 +1,392 @@
+import { writeStructuredLog } from "@support-communication/observability";
+import { acknowledgeTelegramCsatFeedback, declineTelegramCsatFeedback, offerTelegramCsatFeedbackAfterRating } from "./telegram-csat-feedback.js";
+import { parseTelegramCsatFeedbackDecline, parseTelegramQualityRating, resolveTelegramInboundConversation, resolveTelegramRatedTarget, telegramMessageAttachments, telegramRoutingQueueId, telegramTenantEventId } from "./telegram-webhook.route.js";
+const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
+export function startTelegramPollingWorker(input) {
+    const intervalMs = Math.max(1, Number(input.intervalMs ?? 10_000));
+    let stopped = false;
+    let running = false;
+    let timeout;
+    async function tick() {
+        if (stopped) {
+            return;
+        }
+        if (!running) {
+            running = true;
+            try {
+                await input.pollOnce();
+            }
+            catch (error) {
+                input.onError?.(error);
+            }
+            finally {
+                running = false;
+            }
+        }
+        if (!stopped) {
+            timeout = setTimeout(tick, intervalMs);
+        }
+    }
+    timeout = setTimeout(tick, 0);
+    return {
+        stop() {
+            stopped = true;
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+        }
+    };
+}
+export async function pollTelegramUpdatesOnce(input) {
+    const fetcher = input.fetcher ?? globalThis.fetch;
+    const offsets = input.offsets ?? new Map();
+    const connectionBackoff = input.connectionBackoff ?? new Map();
+    const nowMs = (input.now?.() ?? new Date()).getTime();
+    const allConnections = input.integrationRepository.listTelegramConnectionsAsync
+        ? await input.integrationRepository.listTelegramConnectionsAsync()
+        : input.integrationRepository.listTelegramConnections();
+    const connections = allConnections
+        .filter((connection) => connection.status === "active" && String(connection.botToken ?? "").trim());
+    const result = {
+        accepted: 0,
+        duplicates: 0,
+        failed: 0,
+        polled: connections.length
+    };
+    for (const connection of connections) {
+        const cursorKey = telegramCursorKey(connection);
+        const backoff = connectionBackoff.get(cursorKey);
+        if (backoff && backoff.nextAttemptAt > nowMs) {
+            continue;
+        }
+        try {
+            const updates = await fetchTelegramUpdates({
+                apiBaseUrl: input.apiBaseUrl,
+                connection,
+                fetcher,
+                limit: input.limit ?? 20,
+                offset: offsets.get(cursorKey) ?? connection.pollingOffset,
+                timeoutMs: input.timeoutMs ?? 10_000
+            });
+            for (const update of updates) {
+                const rating = parseTelegramQualityRating(update);
+                if (rating) {
+                    // Survey button taps must never fork a follow-up appeal: record the rating
+                    // and advance the cursor without touching conversation creation.
+                    const recorded = await recordPolledQualityRating({
+                        apiBaseUrl: input.apiBaseUrl,
+                        connection,
+                        conversationRepository: input.conversationRepository,
+                        fetcher,
+                        rating,
+                        recordQualityRating: input.recordQualityRating
+                    });
+                    if (recorded) {
+                        result.accepted += 1;
+                    }
+                    else {
+                        result.failed += 1;
+                    }
+                    const ratingUpdateId = Number(update.update_id);
+                    if (Number.isFinite(ratingUpdateId)) {
+                        await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, ratingUpdateId + 1);
+                    }
+                    continue;
+                }
+                const feedbackDecline = parseTelegramCsatFeedbackDecline(update);
+                if (feedbackDecline) {
+                    // «Новое обращение» под промптом отзыва: снять ожидание и скрыть промпт.
+                    const target = await resolveTelegramRatedTarget(input.conversationRepository, {
+                        botId: connection.botId ?? undefined,
+                        chatId: feedbackDecline.chatId,
+                        tenantId: connection.tenantId
+                    });
+                    if (target) {
+                        await declineTelegramCsatFeedback({
+                            api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher },
+                            callbackQueryId: feedbackDecline.callbackQueryId,
+                            chatId: feedbackDecline.chatId,
+                            conversation: target.conversation,
+                            conversationRepository: input.conversationRepository,
+                            promptMessageId: feedbackDecline.messageId
+                        });
+                        result.accepted += 1;
+                    }
+                    else {
+                        result.failed += 1;
+                    }
+                    const declineUpdateId = Number(update.update_id);
+                    if (Number.isFinite(declineUpdateId)) {
+                        await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, declineUpdateId + 1);
+                    }
+                    continue;
+                }
+                const parsed = parseTelegramPollingUpdate(update);
+                if (!parsed) {
+                    const ignoredUpdateId = Number(update.update_id);
+                    if (Number.isFinite(ignoredUpdateId)) {
+                        await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, ignoredUpdateId + 1);
+                    }
+                    continue;
+                }
+                const resolved = await resolveTelegramInboundConversation({
+                    botId: connection.botId ?? undefined,
+                    chatId: parsed.chatId,
+                    conversationRepository: input.conversationRepository,
+                    displayName: parsed.displayName,
+                    phone: parsed.phone,
+                    queueId: await telegramRoutingQueueId(input.integrationRepository, connection.tenantId, connection),
+                    tenantId: connection.tenantId,
+                    username: parsed.username
+                });
+                const conversation = resolved.conversation;
+                if (!conversation) {
+                    result.failed += 1;
+                    continue;
+                }
+                const isNewConversation = conversation.messages.length === 0;
+                const normalized = await input.conversationService.normalizeInboundEvent("telegram", {
+                    attachments: parsed.attachments,
+                    conversationId: conversation.id,
+                    csatFeedback: resolved.csatFeedbackAwaiting,
+                    eventId: telegramTenantEventId(connection.tenantId, connection.botId ?? undefined, parsed.eventId),
+                    text: parsed.text
+                });
+                if (normalized.status === "ok" && normalized.data?.duplicate) {
+                    result.duplicates += 1;
+                }
+                else if (normalized.status === "ok") {
+                    result.accepted += 1;
+                }
+                else {
+                    result.failed += 1;
+                    continue;
+                }
+                // Отзыв к CSAT-оценке: подтверждаем клиенту и не запускаем бота с
+                // автоназначением — обращение остается закрытым.
+                if (resolved.csatFeedbackAwaiting) {
+                    if (!normalized.data?.duplicate) {
+                        await acknowledgeTelegramCsatFeedback({
+                            api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher },
+                            chatId: parsed.chatId,
+                            conversationId: conversation.id
+                        });
+                    }
+                    await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, parsed.updateId + 1);
+                    continue;
+                }
+                const runtimeEventId = telegramTenantEventId(connection.tenantId, connection.botId ?? undefined, parsed.eventId);
+                let botRuntime = null;
+                if (input.runBotRuntime) {
+                    try {
+                        botRuntime = await input.runBotRuntime({ channel: "Telegram", conversationId: conversation.id, eventId: runtimeEventId, payload: { isNewConversation, text: parsed.text }, tenantId: connection.tenantId, traceId: normalized.traceId });
+                    }
+                    catch (error) {
+                        writeStructuredLog("warn", "Telegram inbound bot runtime failed", {
+                            conversationId: conversation.id,
+                            error: error instanceof Error ? error.message : String(error),
+                            operation: "telegram.polling.bot_runtime",
+                            service: "telegram-polling-worker",
+                            tenantId: connection.tenantId
+                        });
+                        botRuntime = null;
+                    }
+                }
+                const needsOperator = !botRuntime || ["handoff", "dead_lettered"].includes(String(botRuntime.instance?.status ?? ""));
+                if (needsOperator && input.autoAssignConversation) {
+                    try {
+                        await input.autoAssignConversation(conversation.id, connection.tenantId);
+                    }
+                    catch {
+                        // Inbound delivery remains accepted; an unassigned dialog stays visible in its queue.
+                    }
+                }
+                await persistTelegramOffset(input.integrationRepository, connection, offsets, cursorKey, parsed.updateId + 1);
+            }
+            connectionBackoff.delete(cursorKey);
+        }
+        catch (error) {
+            result.failed += 1;
+            const attempts = (backoff?.attempts ?? 0) + 1;
+            const baseMs = positiveBackoff(input.backoffBaseMs, 5_000);
+            const maxMs = positiveBackoff(input.backoffMaxMs, 5 * 60_000);
+            connectionBackoff.set(cursorKey, {
+                attempts,
+                nextAttemptAt: nowMs + Math.min(maxMs, baseMs * (2 ** Math.min(attempts - 1, 10)))
+            });
+            writeStructuredLog("warn", "Telegram polling connection failed", {
+                error: error instanceof Error ? error.message : String(error),
+                operation: "telegram.polling.connection",
+                service: "telegram-polling-worker",
+                tenantId: connection.tenantId
+            });
+        }
+    }
+    return result;
+}
+function positiveBackoff(value, fallback) {
+    return Number.isFinite(value) && Number(value) > 0 ? Number(value) : fallback;
+}
+async function recordPolledQualityRating(input) {
+    const { connection, rating } = input;
+    let recorded = false;
+    try {
+        if (!input.recordQualityRating) {
+            throw new Error("telegram_quality_not_configured");
+        }
+        const target = await resolveTelegramRatedTarget(input.conversationRepository, {
+            botId: connection.botId ?? undefined,
+            chatId: rating.chatId,
+            tenantId: connection.tenantId
+        });
+        if (!target?.operator) {
+            throw new Error("telegram_quality_conversation_unresolved");
+        }
+        const response = await input.recordQualityRating({
+            channel: "Telegram",
+            clientId: rating.chatId,
+            conversationId: target.conversation.id,
+            idempotencyKey: `telegram:${connection.botId ?? "default"}:${rating.callbackQueryId}`,
+            operator: target.operator,
+            scale: rating.scale,
+            score: rating.score,
+            topic: target.conversation.topic
+        }, { actorId: rating.chatId, actorType: "client", tenantId: connection.tenantId });
+        recorded = response.status === "ok";
+        if (!recorded) {
+            throw new Error(String(response.error?.code ?? "telegram_quality_rating_rejected"));
+        }
+        // Оценка записана: скрываем сообщение опроса и предлагаем комментарий.
+        await offerTelegramCsatFeedbackAfterRating({
+            api: { apiBaseUrl: input.apiBaseUrl, botToken: connection.botToken, fetcher: input.fetcher },
+            chatId: rating.chatId,
+            conversation: target.conversation,
+            conversationRepository: input.conversationRepository,
+            ratingId: String(response.data?.ratingId ?? "") || `telegram:${rating.callbackQueryId}`,
+            surveyMessageId: rating.messageId
+        });
+    }
+    catch (error) {
+        writeStructuredLog("warn", "Telegram quality rating ingestion failed", {
+            callbackQueryId: rating.callbackQueryId,
+            error: error instanceof Error ? error.message : String(error),
+            operation: "telegram.polling.quality_rating",
+            service: "telegram-polling-worker",
+            tenantId: connection.tenantId
+        });
+    }
+    await answerTelegramCallbackQuery({
+        apiBaseUrl: input.apiBaseUrl,
+        connection,
+        fetcher: input.fetcher,
+        callbackQueryId: rating.callbackQueryId,
+        text: recorded ? "Спасибо за оценку!" : undefined
+    });
+    return recorded;
+}
+async function answerTelegramCallbackQuery(input) {
+    const token = String(input.connection.botToken ?? "").trim();
+    if (!token) {
+        return;
+    }
+    const endpoint = new URL(`${String(input.apiBaseUrl ?? DEFAULT_TELEGRAM_API_BASE_URL).replace(/\/+$/, "")}/bot${token}/answerCallbackQuery`);
+    endpoint.searchParams.set("callback_query_id", input.callbackQueryId);
+    if (input.text) {
+        endpoint.searchParams.set("text", input.text);
+    }
+    try {
+        await input.fetcher(endpoint.toString(), {});
+    }
+    catch {
+        // Answering only stops the client-side spinner; a failure must not block ingestion.
+    }
+}
+function telegramCursorKey(connection) {
+    return `${connection.tenantId}:${connection.botId ?? "default"}`;
+}
+async function persistTelegramOffset(repository, connection, offsets, cursorKey, pollingOffset) {
+    if (repository.saveTelegramConnectionAsync) {
+        await repository.saveTelegramConnectionAsync({
+            ...connection,
+            pollingOffset,
+            updatedAt: new Date().toISOString()
+        });
+    }
+    connection.pollingOffset = pollingOffset;
+    offsets.set(cursorKey, pollingOffset);
+}
+async function fetchTelegramUpdates(input) {
+    const token = String(input.connection.botToken ?? "").trim();
+    const endpoint = new URL(`${String(input.apiBaseUrl ?? DEFAULT_TELEGRAM_API_BASE_URL).replace(/\/+$/, "")}/bot${token}/getUpdates`);
+    endpoint.searchParams.set("timeout", "0");
+    endpoint.searchParams.set("limit", String(input.limit));
+    endpoint.searchParams.set("allowed_updates", JSON.stringify(["message", "edited_message", "callback_query"]));
+    if (Number.isFinite(input.offset)) {
+        endpoint.searchParams.set("offset", String(input.offset));
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+    let response;
+    try {
+        response = await input.fetcher(endpoint.toString(), { signal: controller.signal });
+    }
+    catch (error) {
+        if (controller.signal.aborted) {
+            throw new Error(`telegram_polling_timeout:${input.timeoutMs}`);
+        }
+        throw new Error("telegram_polling_provider_failed");
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+    const payload = await response.json();
+    if (!response.ok || !payload.ok || !Array.isArray(payload.result)) {
+        throw new Error(response.status === 409 && isWebhookConflict(payload)
+            ? "telegram_polling_webhook_conflict"
+            : `telegram_polling_provider_failed:${response.status}`);
+    }
+    return payload.result;
+}
+function isWebhookConflict(payload) {
+    const description = "description" in payload ? String(payload.description ?? "") : "";
+    return /webhook/i.test(description) && /getUpdates/i.test(description);
+}
+function parseTelegramPollingUpdate(update) {
+    const updateId = Number(update.update_id);
+    const message = update.message ?? update.edited_message;
+    if (!Number.isFinite(updateId) || !message) {
+        return null;
+    }
+    const attachments = telegramMessageAttachments(message);
+    const text = String(message.text ?? message.caption ?? "").trim();
+    const chatId = String(message.chat?.id ?? "").trim();
+    if ((!text && !attachments.length) || !chatId) {
+        return null;
+    }
+    const firstName = String(message.from?.first_name ?? "").trim();
+    const lastName = String(message.from?.last_name ?? "").trim();
+    const username = String(message.from?.username ?? "").trim();
+    const phone = telegramPollingContactPhone(message);
+    const displayName = [firstName, lastName].filter(Boolean).join(" ").trim() || (username ? `@${username}` : `Chat ${chatId}`);
+    const messageId = String(message.message_id ?? "").trim();
+    return {
+        chatId,
+        displayName,
+        eventId: `telegram:${updateId}:${messageId || "message"}`,
+        messageId,
+        attachments,
+        text,
+        updateId,
+        phone,
+        username: username || undefined
+    };
+}
+function telegramPollingContactPhone(message) {
+    const contactUserId = String(message.contact?.user_id ?? "").trim();
+    const senderId = String(message.from?.id ?? "").trim();
+    const phone = String(message.contact?.phone_number ?? "").trim();
+    if (!contactUserId || !senderId || contactUserId !== senderId)
+        return undefined;
+    return /^[+\d][\d\s().-]{4,24}$/.test(phone) ? phone : undefined;
+}
+//# sourceMappingURL=telegram-polling.worker.js.map

@@ -1,0 +1,138 @@
+export declare const serviceAdminSession: {
+    id: string;
+    adminId: string;
+    adminName: string;
+    actorId: string;
+    actorName: string;
+    adminEmail: string;
+    role: string;
+    authState: string;
+    tenantScope: string;
+    currentTenantId: string;
+    allowedActions: string[];
+    availableOrganizations: {
+        id: string;
+        name: string;
+        role: string;
+    }[];
+    mfaVerifiedAt: string;
+    expiresAt: string;
+};
+export declare const tenants: {
+    id: string;
+    name: string;
+    legalName: string;
+    status: string;
+    planId: string;
+    region: string;
+    owner: string;
+    ownerEmail: string;
+    workspaces: number;
+    users: number;
+    activeUsers: number;
+    monthlyRevenue: number;
+    arr: number;
+    healthScore: number;
+    sla: number;
+    lastSeenAt: string;
+    domains: string[];
+    flags: string[];
+    incidentIds: string[];
+    notes: string;
+}[];
+export declare const tenantUsers: ({
+    id: string;
+    tenantId: string;
+    name: string;
+    email: string;
+    role: string;
+    status: string;
+    mfa: string;
+    inviteStatus: string;
+    lastActiveAt: string;
+    sessions: number;
+    risk: string;
+    device: string;
+    supportNotes: string;
+} | {
+    id: string;
+    tenantId: string;
+    name: string;
+    email: string;
+    role: string;
+    status: string;
+    mfa: string;
+    inviteStatus: string;
+    lastActiveAt: null;
+    sessions: number;
+    risk: string;
+    device: string;
+    supportNotes: string;
+})[];
+export declare const permissionRoles: {
+    key: string;
+    description: string;
+    actions: string[];
+    aliases: string[];
+    groupIds: string[];
+    metadata: {};
+}[];
+export declare const tariffs: {
+    id: string;
+    name: string;
+    priceMonthly: number;
+    includedUsers: number;
+    workspaceLimit: number;
+    retentionDays: number;
+    automationRuns: number;
+    features: string[];
+    changePolicy: string;
+}[];
+export declare const incidents: {
+    id: string;
+    title: string;
+    status: string;
+    severity: string;
+    componentId: string;
+    owner: string;
+    startedAt: string;
+    updatedAt: string;
+    affectedTenantIds: string[];
+    impact: string;
+    customerMessage: string;
+    updates: {
+        at: string;
+        author: string;
+        text: string;
+    }[];
+}[];
+export declare const featureFlags: {
+    id: string;
+    key: string;
+    name: string;
+    status: string;
+    environment: string;
+    scope: string;
+    rollout: number;
+    owner: string;
+    segments: string[];
+    enabledTenantIds: string[];
+    variants: {
+        id: string;
+        weight: number;
+    }[];
+    killSwitch: boolean;
+    updatedAt: string;
+}[];
+export declare const tenantAuditEvents: {
+    id: string;
+    at: string;
+    actor: string;
+    action: string;
+    target: string;
+    tenantId: string;
+    severity: string;
+    reason: string;
+    result: string;
+    traceId: string;
+}[];

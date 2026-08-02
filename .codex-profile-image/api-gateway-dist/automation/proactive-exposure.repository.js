@@ -1,0 +1,227 @@
+import { randomUUID } from "node:crypto";
+import { InMemoryStore } from "@support-communication/database";
+export const DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+let defaultRepository = null;
+export class ProactiveExposureRepository {
+    store;
+    prisma;
+    constructor(store, prisma) {
+        this.store = store;
+        this.prisma = prisma;
+    }
+    static default() {
+        // Prisma-only рантайм (план 2026-07-15): прод получает Prisma-репозиторий через
+        // configureAutomationRepository → useDefault; ленивый fallback остаётся in-memory
+        // только для неинициализированных (тестовых) окружений. json-ветка выпилена вместе с JsonFileStore.
+        if (!defaultRepository)
+            defaultRepository = ProactiveExposureRepository.inMemory();
+        return defaultRepository;
+    }
+    static useDefault(repository) { defaultRepository = repository; }
+    static clearDefault() { defaultRepository = null; }
+    static inMemory(seed = []) {
+        return new ProactiveExposureRepository(new InMemoryStore({ conversions: [], exposures: seed }));
+    }
+    static prisma(client) {
+        return new ProactiveExposureRepository(new InMemoryStore({ conversions: [], exposures: [] }), client);
+    }
+    async createPlanned(input) {
+        const exposure = { ...input, acceptedAt: null, attributionWindowEndsAt: null, conversationId: null,
+            deliveredAt: null, dismissedAt: null, exposureId: `pex_${randomUUID()}`, failedAt: null, failureCode: null,
+            shownAt: null, status: "planned" };
+        if (!this.prisma) {
+            let result = { created: true, exposure };
+            this.store.update((state) => {
+                const existing = state.exposures.find((item) => item.tenantId === input.tenantId && item.ruleId === input.ruleId
+                    && item.subjectId === input.subjectId && item.occurrenceKey === input.occurrenceKey);
+                if (existing)
+                    result = { created: false, exposure: existing };
+                return existing ? state : { ...state, conversions: state.conversions ?? [], exposures: [...state.exposures, exposure] };
+            });
+            return clone(result);
+        }
+        try {
+            return { created: true, exposure: fromRow(await this.prisma.proactiveExposure.create({ data: toRow(exposure) })) };
+        }
+        catch (error) {
+            const existing = await this.prisma.proactiveExposure.findUnique({ where: { tenantId_ruleId_subjectId_occurrenceKey: { occurrenceKey: input.occurrenceKey, ruleId: input.ruleId, subjectId: input.subjectId, tenantId: input.tenantId } } });
+            if (existing)
+                return { created: false, exposure: fromRow(existing) };
+            throw error;
+        }
+    }
+    async listPendingForSession(tenantId, presenceSessionId, limit = 5) {
+        if (!this.prisma)
+            return clone(this.store.read().exposures.filter((item) => item.tenantId === tenantId
+                && item.presenceSessionId === presenceSessionId && ["planned", "delivered"].includes(item.status)).slice(0, limit));
+        const rows = await this.prisma.proactiveExposure.findMany({ orderBy: { plannedAt: "asc" }, take: limit,
+            where: { presenceSessionId, status: { in: ["planned", "delivered"] }, tenantId } });
+        return rows.map(fromRow);
+    }
+    async markDelivered(input) {
+        return this.transition({ ...input, status: "delivered" });
+    }
+    async listRecent(tenantId, ruleId, subjectId, since) {
+        if (!this.prisma)
+            return clone(this.store.read().exposures.filter((item) => item.tenantId === tenantId && item.ruleId === ruleId
+                && item.subjectId === subjectId && Date.parse(item.plannedAt) >= Date.parse(since)));
+        return (await this.prisma.proactiveExposure.findMany({ where: { plannedAt: { gte: new Date(since) }, ruleId, subjectId, tenantId } })).map(fromRow);
+    }
+    async transition(input) {
+        const deliverable = ["planned"];
+        const visible = ["planned", "delivered"];
+        const allowed = input.status === "delivered" ? deliverable : input.status === "shown" ? visible
+            : input.status === "failed" ? [...visible, "shown"] : [...visible, "shown"];
+        const timestamp = `${input.status}At`;
+        if (!this.prisma) {
+            let saved = null;
+            this.store.update((state) => ({ ...state, conversions: state.conversions ?? [], exposures: state.exposures.map((item) => {
+                    if (item.exposureId !== input.exposureId || item.tenantId !== input.tenantId || item.presenceSessionId !== input.presenceSessionId)
+                        return item;
+                    if (item.status === input.status) {
+                        saved = input.conversationId && !item.conversationId ? { ...item, conversationId: input.conversationId } : item;
+                        return saved;
+                    }
+                    if (!allowed.includes(item.status))
+                        return item;
+                    saved = { ...item, status: input.status, [timestamp]: item[timestamp] ?? input.at,
+                        ...(input.status === "accepted" ? { attributionWindowEndsAt: item.attributionWindowEndsAt
+                                ?? new Date(Date.parse(input.at) + validAttributionWindowMs(input.attributionWindowMs)).toISOString() } : {}),
+                        ...(input.conversationId ? { conversationId: item.conversationId ?? input.conversationId } : {}),
+                        ...(input.failureCode ? { failureCode: input.failureCode } : {}) };
+                    return saved;
+                }) }));
+            return clone(saved);
+        }
+        const existing = await this.prisma.proactiveExposure.findUnique({ where: { exposureId: input.exposureId } });
+        if (!existing || String(existing.tenantId) !== input.tenantId || String(existing.presenceSessionId) !== input.presenceSessionId)
+            return null;
+        if (String(existing.status) === input.status) {
+            if (input.conversationId && !existing.conversationId) {
+                await this.prisma.proactiveExposure.updateMany({ data: { conversationId: input.conversationId },
+                    where: { conversationId: null, exposureId: input.exposureId, presenceSessionId: input.presenceSessionId,
+                        status: input.status, tenantId: input.tenantId } });
+                const enriched = await this.prisma.proactiveExposure.findUnique({ where: { exposureId: input.exposureId } });
+                return enriched ? fromRow(enriched) : null;
+            }
+            return fromRow(existing);
+        }
+        if (!allowed.includes(String(existing.status)))
+            return null;
+        const data = { status: input.status, [timestamp]: new Date(input.at),
+            ...(input.status === "accepted" && !existing.attributionWindowEndsAt ? { attributionWindowEndsAt: new Date(Date.parse(input.at)
+                    + validAttributionWindowMs(input.attributionWindowMs)) } : {}),
+            ...(input.conversationId ? { conversationId: input.conversationId } : {}), ...(input.failureCode ? { failureCode: input.failureCode } : {}) };
+        const updated = await this.prisma.proactiveExposure.updateMany({ data, where: { exposureId: input.exposureId,
+                presenceSessionId: input.presenceSessionId, status: { in: allowed }, tenantId: input.tenantId } });
+        if (updated.count === 0)
+            return null;
+        const row = await this.prisma.proactiveExposure.findUnique({ where: { exposureId: input.exposureId } });
+        return row && String(row.tenantId) === input.tenantId && String(row.presenceSessionId) === input.presenceSessionId ? fromRow(row) : null;
+    }
+    async recordMessageConversion(input) {
+        const candidates = await this.findAttributableExposures(input.tenantId, input.conversationId);
+        const occurredAt = validTimestamp(input.occurredAt);
+        const exposure = candidates.find((item) => item.acceptedAt && Date.parse(item.acceptedAt) <= Date.parse(occurredAt)
+            && Date.parse(item.attributionWindowEndsAt ?? new Date(Date.parse(item.acceptedAt) + DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS).toISOString()) >= Date.parse(occurredAt));
+        if (!exposure)
+            return null;
+        const conversion = { conversationId: input.conversationId, conversionId: `pcv_${randomUUID()}`,
+            experimentId: exposure.experimentId, experimentVersion: exposure.experimentVersion, exposureId: exposure.exposureId,
+            messageId: input.messageId ? String(input.messageId) : null, occurredAt, ruleId: exposure.ruleId, tenantId: input.tenantId,
+            trigger: "message", variant: exposure.variant };
+        if (!this.prisma || !this.prisma.proactiveConversionEvent) {
+            let saved = conversion;
+            this.store.update((state) => {
+                const existing = (state.conversions ?? []).find((item) => item.tenantId === input.tenantId && item.exposureId === exposure.exposureId);
+                if (existing)
+                    saved = existing;
+                return existing ? state : { ...state, conversions: [...(state.conversions ?? []), conversion] };
+            });
+            return clone(saved);
+        }
+        try {
+            return conversionFromRow(await this.prisma.proactiveConversionEvent.create({ data: conversionToRow(conversion) }));
+        }
+        catch (error) {
+            if (!isPrismaUniqueConstraintError(error))
+                throw error;
+            const existing = await this.prisma.proactiveConversionEvent.findUnique({ where: { tenantId_exposureId: { exposureId: exposure.exposureId, tenantId: input.tenantId } } });
+            if (!existing)
+                throw error;
+            return conversionFromRow(existing);
+        }
+    }
+    async aggregateMetrics(input) {
+        const from = validTimestamp(input.from);
+        const to = validTimestamp(input.to);
+        const exposures = await this.listInRange(input.tenantId, from, to);
+        const conversions = await this.listConversionsInRange(input.tenantId, from, to);
+        const keys = new Map(input.ruleVariants.map((item) => [`${item.ruleId}\u0000${item.variant}`, item]));
+        for (const exposure of exposures)
+            keys.set(`${exposure.ruleId}\u0000${exposure.variant}`, { ruleId: exposure.ruleId, variant: exposure.variant });
+        return [...keys.values()].sort((a, b) => `${a.ruleId}:${a.variant}`.localeCompare(`${b.ruleId}:${b.variant}`)).map((item) => {
+            const own = exposures.filter((exposure) => exposure.ruleId === item.ruleId && exposure.variant === item.variant);
+            const planned = own.filter((item) => inRange(item.plannedAt, from, to)).length;
+            const counts = { eligible: planned, planned,
+                delivered: own.filter((item) => item.deliveredAt && inRange(item.deliveredAt, from, to)).length,
+                shown: own.filter((item) => item.shownAt && inRange(item.shownAt, from, to)).length,
+                dismissed: own.filter((item) => item.dismissedAt && inRange(item.dismissedAt, from, to)).length,
+                accepted: own.filter((item) => item.acceptedAt && inRange(item.acceptedAt, from, to)).length,
+                converted: conversions.filter((conversion) => conversion.ruleId === item.ruleId && conversion.variant === item.variant).length };
+            return { counts, rates: { acceptanceRate: ratio(counts.accepted, counts.shown), conversionRate: ratio(counts.converted, counts.accepted),
+                    deliveryRate: ratio(counts.delivered, counts.eligible), showRate: ratio(counts.shown, counts.delivered) }, ruleId: item.ruleId, variant: item.variant };
+        });
+    }
+    async findAttributableExposures(tenantId, conversationId) {
+        if (!this.prisma)
+            return this.store.read().exposures.filter((item) => item.tenantId === tenantId && item.conversationId === conversationId && item.status === "accepted");
+        return (await this.prisma.proactiveExposure.findMany({ orderBy: { acceptedAt: "desc" }, where: { conversationId, status: "accepted", tenantId } })).map(fromRow);
+    }
+    async listInRange(tenantId, from, to) {
+        if (!this.prisma)
+            return this.store.read().exposures.filter((item) => item.tenantId === tenantId && [item.plannedAt, item.deliveredAt,
+                item.shownAt, item.dismissedAt, item.acceptedAt].some((timestamp) => inRange(timestamp, from, to)));
+        const range = { gte: new Date(from), lte: new Date(to) };
+        return (await this.prisma.proactiveExposure.findMany({ where: { OR: [{ plannedAt: range }, { deliveredAt: range }, { shownAt: range },
+                    { dismissedAt: range }, { acceptedAt: range }], tenantId } })).map(fromRow);
+    }
+    async listConversionsInRange(tenantId, from, to) {
+        if (!this.prisma || !this.prisma.proactiveConversionEvent)
+            return (this.store.read().conversions ?? []).filter((item) => item.tenantId === tenantId && inRange(item.occurredAt, from, to));
+        return (await this.prisma.proactiveConversionEvent.findMany({ where: { occurredAt: { gte: new Date(from), lte: new Date(to) }, tenantId } })).map(conversionFromRow);
+    }
+}
+function toRow(value) {
+    return { ...value, acceptedAt: null, attributionWindowEndsAt: null, createdAt: new Date(value.plannedAt),
+        deliveredAt: null, dismissedAt: null, failedAt: null, plannedAt: new Date(value.plannedAt), shownAt: null, updatedAt: new Date(value.plannedAt) };
+}
+function fromRow(row) {
+    return {
+        acceptedAt: isoOrNull(row.acceptedAt), attributionWindowEndsAt: isoOrNull(row.attributionWindowEndsAt), channelConnectionId: String(row.channelConnectionId), conversationId: textOrNull(row.conversationId),
+        deliveredAt: isoOrNull(row.deliveredAt), dismissedAt: isoOrNull(row.dismissedAt), experimentId: String(row.experimentId), experimentVersion: String(row.experimentVersion),
+        exposureId: String(row.exposureId), failedAt: isoOrNull(row.failedAt), failureCode: textOrNull(row.failureCode), message: String(row.message),
+        occurrenceKey: String(row.occurrenceKey), plannedAt: iso(row.plannedAt), presenceSessionId: String(row.presenceSessionId), ruleId: String(row.ruleId),
+        segmentSnapshot: (row.segmentSnapshot && typeof row.segmentSnapshot === "object" ? row.segmentSnapshot : {}),
+        shownAt: isoOrNull(row.shownAt), status: String(row.status), subjectId: String(row.subjectId),
+        tenantId: String(row.tenantId), variant: String(row.variant)
+    };
+}
+function iso(value) { return new Date(value).toISOString(); }
+function isoOrNull(value) { return value ? iso(value) : null; }
+function textOrNull(value) { return value == null ? null : String(value); }
+function conversionToRow(value) { return { ...value, occurredAt: new Date(value.occurredAt), createdAt: new Date(value.occurredAt) }; }
+function conversionFromRow(row) {
+    return { conversationId: String(row.conversationId), conversionId: String(row.conversionId),
+        experimentId: String(row.experimentId), experimentVersion: String(row.experimentVersion), exposureId: String(row.exposureId), messageId: textOrNull(row.messageId),
+        occurredAt: iso(row.occurredAt), ruleId: String(row.ruleId), tenantId: String(row.tenantId), trigger: "message", variant: String(row.variant) };
+}
+function validAttributionWindowMs(value) { return Number.isInteger(value) && Number(value) > 0 ? Number(value) : DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS; }
+function validTimestamp(value) { return Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : new Date().toISOString(); }
+function inRange(value, from, to) { return Boolean(value) && Date.parse(value) >= Date.parse(from) && Date.parse(value) <= Date.parse(to); }
+function ratio(numerator, denominator) { return denominator > 0 ? Number((numerator / denominator).toFixed(4)) : 0; }
+function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function isPrismaUniqueConstraintError(error) {
+    return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
+}
+//# sourceMappingURL=proactive-exposure.repository.js.map

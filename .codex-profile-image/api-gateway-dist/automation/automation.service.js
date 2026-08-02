@@ -1,0 +1,1616 @@
+import { randomUUID } from "node:crypto";
+import { createEnvelope } from "@support-communication/envelope";
+import { AiConnectionRepository } from "../ai-connections/ai-connection.repository.js";
+import { AiUsageRepository } from "../ai-connections/ai-usage.repository.js";
+import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import { AutomationRepository } from "./automation.repository.js";
+import { BotRuntimeService } from "./bot-runtime.service.js";
+import { BotSandboxService } from "./bot-sandbox.service.js";
+import { normalizeAgentPolicy } from "./agent-policy.js";
+import { matchesBotAlwaysExceptTrigger, matchesBotTriggerPhrase, normalizeBotTriggerText } from "./bot-trigger-matcher.js";
+import { DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS, ProactiveExposureRepository } from "./proactive-exposure.repository.js";
+import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
+import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrieval.service.js";
+import { isKnowledgeSourceRetrievalEligible } from "../knowledge-sources/knowledge-source.types.js";
+import { buildScenarioOperationalSummariesFromState, buildTenantAiUsageSummary } from "./scenario-operational-summary.js";
+import { recordBotAiFeedback, recordBotPublishFailure } from "./bot-observability.js";
+import { evaluateBotAlerts, summarizeBotMetricsForAlerts } from "./bot-alert-catalog.js";
+import { buildOperatorHandoffView } from "./operator-handoff-view.js";
+import { BotFeedbackRepository, isBotAiFeedbackOutcome } from "./bot-feedback.repository.js";
+import { PlatformRepository } from "../platform/platform.repository.js";
+import { metricsRegistry } from "@support-communication/observability";
+const AUTOMATION_SERVICE = "automationService";
+const VALID_NODE_TYPES = new Set(["message", "ai_reply", "quick_replies", "condition", "contact_request", "webhook", "handoff", "fallback"]);
+const BOT_SCENARIO_TRANSITIONS = {
+    archived: ["draft", "disabled"],
+    disabled: ["published", "archived"],
+    draft: ["published", "archived"],
+    published: ["disabled", "archived"]
+};
+export class AutomationService {
+    automationRepository;
+    exposureRepository;
+    knowledgeSourceRepository;
+    botFeedbackRepository;
+    platformRepository;
+    scenarios;
+    rules;
+    publishIdempotency = new Map();
+    constructor(automationRepository = AutomationRepository.default(), exposureRepository = ProactiveExposureRepository.default(), knowledgeSourceRepository = KnowledgeSourceRepository.default(), botFeedbackRepository = BotFeedbackRepository.default(), platformRepository = PlatformRepository.default()) {
+        this.automationRepository = automationRepository;
+        this.exposureRepository = exposureRepository;
+        this.knowledgeSourceRepository = knowledgeSourceRepository;
+        this.botFeedbackRepository = botFeedbackRepository;
+        this.platformRepository = platformRepository;
+        this.scenarios = [];
+        this.rules = [];
+    }
+    async fetchAutomationWorkspace(context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId) {
+            return tenantRequiredEnvelope("fetchAutomationWorkspace");
+        }
+        const state = await this.automationRepository.readStateAsync();
+        this.syncLocalCaches(state);
+        const scenarios = scopedBotScenarios(state.botScenarios, tenantId);
+        const aiUsage = await resolveTenantAiUsage(tenantId, context);
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "fetchAutomationWorkspace",
+            traceId: automationTraceId("fetchAutomationWorkspace"),
+            partial: true,
+            meta: apiMeta({ tenantId }),
+            data: {
+                aiReadiness: await aiReadinessForTenant(tenantId),
+                aiUsage,
+                auditEvents: [
+                    ...clone(state.workspaceAuditEvents.filter((event) => scenarioTenantId(event) === tenantId)),
+                    ...clone(state.botPublishAuditEvents.filter((event) => scenarioTenantId(event) === tenantId))
+                ],
+                botScenarios: clone(scenarios),
+                botScenarioVersions: clone(state.botScenarioVersions.filter((version) => scenarioTenantId(version) === tenantId)),
+                proactiveRules: clone(state.proactiveRules.filter((rule) => proactiveRuleTenantId(rule) === tenantId)),
+                runtimeMetrics: clone(state.workspaceRuntimeMetrics),
+                scenarioOperations: clone(buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)),
+                telemetry: {
+                    alerts: evaluateBotAlerts(summarizeBotMetricsForAlerts(metricsRegistry().snapshot())),
+                    feedback: await Promise.resolve(this.botFeedbackRepository.listFeedback({ tenantId })),
+                    metrics: metricsRegistry().snapshot().filter((metric) => metric.name.startsWith("bot_")),
+                    runbookPath: "docs/bots-ai-operations-runbook.md"
+                },
+                tenantId
+            }
+        });
+    }
+    async fetchVisitorWorkspace(context = {}, range = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId) {
+            return tenantRequiredEnvelope("fetchVisitorWorkspace");
+        }
+        const state = await this.automationRepository.readStateAsync();
+        this.syncLocalCaches(state);
+        const activeVisitors = state.activeVisitors?.length
+            ? clone(state.activeVisitors).filter((visitor) => String(visitor.tenantId ?? "").trim() === tenantId)
+            : [];
+        const rescueChats = state.rescueChats?.length
+            ? clone(state.rescueChats).filter((chat) => String(chat.tenantId ?? "").trim() === tenantId)
+            : [];
+        const metricsRange = resolveVisitorMetricsRange(range);
+        const proactiveRules = clone(state.proactiveRules.filter((rule) => proactiveRuleTenantId(rule) === tenantId));
+        const proactiveMetrics = await this.exposureRepository.aggregateMetrics({ from: metricsRange.from,
+            ruleVariants: proactiveRules.map((rule) => ({ ruleId: rule.id, variant: String(rule.activeVariant ?? "A") })), tenantId, to: metricsRange.to });
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "fetchVisitorWorkspace",
+            traceId: automationTraceId("fetchVisitorWorkspace"),
+            partial: true,
+            meta: apiMeta({ tenantId }),
+            data: {
+                activeVisitors,
+                proactiveMetrics: { attributionWindowHours: DEFAULT_PROACTIVE_ATTRIBUTION_WINDOW_MS / (60 * 60 * 1000),
+                    byRuleVariant: proactiveMetrics, range: metricsRange },
+                proactiveRules,
+                rescueChats,
+                tenantId
+            }
+        });
+    }
+    async createBotScenario(payload, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId) {
+            return tenantRequiredEnvelope("createBotScenario");
+        }
+        const request = payload ?? {};
+        const scenarioId = String(request.id ?? `bot-${randomUUID()}`).trim();
+        const scenario = {
+            basePrompt: normalizeScenarioBasePrompt(request.basePrompt),
+            channels: clone(request.channels ?? ["SDK"]),
+            flowEdges: clone(request.flowEdges ?? []),
+            flowNodes: clone(request.flowNodes ?? [{ id: "start", type: "message", title: "Start" }]),
+            id: scenarioId,
+            name: String(request.name ?? "Новый сценарий"),
+            priority: normalizeScenarioPriority(request.priority),
+            schemaVersion: "bot-flow/v1",
+            status: "draft",
+            tenantId,
+            sourceBindings: normalizeScenarioSourceBindings(request.sourceBindings ?? []),
+            triggerRules: resolveScenarioTriggerRules(request, defaultScenarioTriggerRules()),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        this.upsertScenario(scenario);
+        await this.automationRepository.saveBotScenario(scenario);
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "createBotScenario",
+            traceId: automationTraceId("createBotScenario"),
+            meta: apiMeta({ tenantId }),
+            data: { scenario: clone(scenario) }
+        });
+    }
+    async updateBotScenario(scenarioId, payload, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId) {
+            return tenantRequiredEnvelope("updateBotScenario");
+        }
+        const request = payload ?? {};
+        const existing = this.scenarios.find((item) => item.id === scenarioId) ?? await this.automationRepository.findBotScenario(scenarioId);
+        if (!existing || scenarioTenantId(existing) !== tenantId) {
+            return invalidEnvelope("updateBotScenario", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId });
+        }
+        if (existing.status === "archived") {
+            return conflictEnvelope("updateBotScenario", "bot_scenario_archived", "Restore the archived bot scenario before editing it.", { scenarioId });
+        }
+        if (existing.status === "published") {
+            // BAI-812: правки опубликованного сценария копятся в черновике следующей
+            // версии; runtime продолжает исполнять закреплённую опубликованную версию.
+            return this.saveScenarioDraftOverlay(existing, request, context);
+        }
+        const requestedStatus = normalizeBotScenarioStatus(request.status, existing.status);
+        if (requestedStatus !== existing.status) {
+            return conflictEnvelope("updateBotScenario", "bot_scenario_status_transition_required", "Use the dedicated scenario status action.", { scenarioId, status: requestedStatus });
+        }
+        const idempotencyKey = actionIdempotencyKey(context);
+        const fingerprint = stableStringify({ operation: "updateBotScenario", scenarioId, tenantId, triggerRules: request.triggerRules, triggerPhrases: request.triggerPhrases, sourceBindings: request.sourceBindings, priority: request.priority });
+        const cached = idempotencyKey ? await this.findPublishIdempotency(tenantId, idempotencyKey) : undefined;
+        if (cached) {
+            if (cached.fingerprint !== fingerprint)
+                return conflictEnvelope("updateBotScenario", "idempotency_key_reused", "Idempotency key was already used for a different scenario change.", { idempotencyKey, scenarioId });
+            return createEnvelope({ service: AUTOMATION_SERVICE, operation: "updateBotScenario", traceId: actionTraceId(context, "updateBotScenario"), meta: apiMeta({ idempotencyKey, tenantId }), data: { ...clone(cached.result), duplicate: true } });
+        }
+        const scenario = {
+            ...existing,
+            basePrompt: request.basePrompt !== undefined
+                ? normalizeScenarioBasePrompt(request.basePrompt)
+                : existing.basePrompt,
+            channels: clone(request.channels ?? existing.channels),
+            enabled: existing.enabled ?? true,
+            flowEdges: clone(request.flowEdges ?? existing.flowEdges),
+            flowNodes: clone(request.flowNodes ?? existing.flowNodes),
+            id: scenarioId,
+            name: String(request.name ?? existing.name),
+            priority: normalizeScenarioPriority(request.priority ?? existing.priority),
+            schemaVersion: "bot-flow/v1",
+            status: normalizeBotScenarioStatus(request.status, existing.status),
+            tenantId,
+            sourceBindings: normalizeScenarioSourceBindings(request.sourceBindings ?? existing.sourceBindings ?? []),
+            triggerRules: resolveScenarioTriggerRules(request, existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules()),
+            updatedAt: new Date().toISOString()
+        };
+        this.upsertScenario(scenario);
+        await this.automationRepository.saveBotScenario(scenario);
+        const result = { auditId: makeAuditId("bot_update"), scenario: clone(scenario) };
+        const changed = request.triggerRules !== undefined || request.triggerPhrases !== undefined || request.matchMode !== undefined || request.sourceBindings !== undefined || request.priority !== undefined;
+        if (changed)
+            await this.recordScenarioActionAudit({ action: "bot.trigger_policy.update", afterStatus: scenario.status, auditId: result.auditId, beforeStatus: existing.status, context, idempotencyKey, reason: actionReason(context, "trigger_policy_updated"), scenarioId, tenantId });
+        if (idempotencyKey) {
+            this.publishIdempotency.set(automationTenantIdempotencyKey(tenantId, idempotencyKey), { fingerprint, result: clone(result) });
+            await this.automationRepository.savePublishIdempotencyKeyAsync({ fingerprint, key: idempotencyKey, result: clone(result), tenantId });
+        }
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "updateBotScenario",
+            traceId: actionTraceId(context, "updateBotScenario"),
+            meta: apiMeta({ idempotencyKey: idempotencyKey ?? null, tenantId }),
+            data: { duplicate: false, ...result }
+        });
+    }
+    async listBotScenarios(context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("listBotScenarios");
+        const state = await this.automationRepository.readStateAsync();
+        this.syncLocalCaches(state);
+        const scenarios = scopedBotScenarios(state.botScenarios, tenantId)
+            .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")));
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "listBotScenarios",
+            traceId: automationTraceId("listBotScenarios"),
+            meta: apiMeta({ tenantId }),
+            data: { scenarios: clone(scenarios) }
+        });
+    }
+    async fetchBotScenario(scenarioId, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("fetchBotScenario");
+        const scenario = this.scenarios.find((item) => item.id === scenarioId) ?? await this.automationRepository.findBotScenario(scenarioId);
+        if (!scenario || scenarioTenantId(scenario) !== tenantId) {
+            return invalidEnvelope("fetchBotScenario", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId });
+        }
+        const versions = await this.automationRepository.listBotScenarioVersions(scenarioId);
+        const state = await this.automationRepository.readStateAsync();
+        const aiUsage = await resolveTenantAiUsage(tenantId, context);
+        const operations = buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)
+            .find((item) => item.scenarioId === scenarioId) ?? null;
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "fetchBotScenario",
+            traceId: automationTraceId("fetchBotScenario"),
+            meta: apiMeta({ tenantId }),
+            data: {
+                operations: clone(operations),
+                scenario: clone(scenario),
+                versions: clone(versions.filter((version) => version.tenantId === tenantId))
+            }
+        });
+    }
+    async disableBotScenario(scenarioId, context = {}) {
+        return this.transitionBotScenario(scenarioId, "disabled", "disableBotScenario", context);
+    }
+    async archiveBotScenario(scenarioId, context = {}) {
+        return this.transitionBotScenario(scenarioId, "archived", "archiveBotScenario", context);
+    }
+    async restoreBotScenario(scenarioId, context = {}) {
+        return this.transitionBotScenario(scenarioId, "disabled", "restoreBotScenario", context);
+    }
+    async validateBotFlowImport(input, context = {}) {
+        const { errors, payload } = parseAndValidateBotFlow(input);
+        const policyErrors = [];
+        let enriched = payload;
+        if (payload) {
+            const raw = typeof input === "string" ? null : input;
+            const triggerRules = resolveScenarioTriggerRules(raw ?? {}, defaultScenarioTriggerRules());
+            policyErrors.push(...validateScenarioTriggerRules(triggerRules));
+            const sourceBindings = normalizeScenarioSourceBindings(raw?.sourceBindings ?? []);
+            const tenantId = resolveAutomationTenantId(context);
+            if (tenantId) {
+                // Гейтов готовности/одобрения больше нет: привязанный источник используется
+                // безусловно. Проверяем только существование в своём tenant'е (опечатки, чужие id).
+                for (const binding of sourceBindings) {
+                    const source = await this.knowledgeSourceRepository.find(tenantId, binding.sourceId);
+                    if (!source) {
+                        policyErrors.push(`Источник знаний «${binding.sourceId}» не найден.`);
+                    }
+                }
+                if (payload.flowNodes.some((node) => node.type === "ai_reply")) {
+                    if (!sourceBindings.length)
+                        policyErrors.push("AI-ответу нужен хотя бы один источник знаний.");
+                    if ((await aiReadinessForTenant(tenantId)).status !== "ready") {
+                        policyErrors.push("AI-подключение организации не настроено или не прошло проверку.");
+                    }
+                    if (!payload.flowNodes.some((node) => node.type === "handoff" || node.type === "fallback")) {
+                        policyErrors.push("Добавьте передачу оператору или запасной ответ.");
+                    }
+                }
+                const state = await this.automationRepository.readStateAsync();
+                const conflict = findScenarioTriggerConflict(state.botScenarios, String(raw?.id ?? ""), tenantId, triggerRules, normalizeScenarioPriority(raw?.priority));
+                if (conflict) {
+                    policyErrors.push("Другой опубликованный сценарий уже использует эту ключевую фразу с тем же приоритетом.");
+                }
+            }
+            enriched = { ...payload, sourceBindings, triggerRules };
+        }
+        const allErrors = [...errors, ...policyErrors];
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "validateBotFlowImport",
+            traceId: automationTraceId("validateBotFlowImport"),
+            status: allErrors.length ? "invalid" : "ok",
+            meta: apiMeta({ tenantId: resolveAutomationTenantId(context) ?? undefined }),
+            data: {
+                errors: allErrors,
+                payload: allErrors.length ? null : enriched,
+                valid: allErrors.length === 0
+            },
+            error: allErrors.length
+                ? {
+                    code: "bot_flow_invalid",
+                    message: allErrors.join("; ")
+                }
+                : null
+        });
+    }
+    async publishBotScenario(payload, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId) {
+            return tenantRequiredEnvelope("publishBotScenario");
+        }
+        const request = payload ?? {};
+        const scenarioId = request.id?.trim();
+        const validation = parseAndValidateBotFlow(request);
+        if (!scenarioId) {
+            return publishFailure(tenantId, undefined, "bot_scenario_id_required", invalidEnvelope("publishBotScenario", "bot_scenario_id_required", "Bot scenario id is required.", {}));
+        }
+        const existing = this.scenarios.find((item) => item.id === scenarioId) ?? await this.automationRepository.findBotScenario(scenarioId);
+        if (!existing || scenarioTenantId(existing) !== tenantId) {
+            return publishFailure(tenantId, scenarioId, "bot_scenario_not_found", invalidEnvelope("publishBotScenario", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId }));
+        }
+        if (validation.errors.length) {
+            return publishFailure(tenantId, scenarioId, "bot_flow_invalid", invalidEnvelope("publishBotScenario", "bot_flow_invalid", validation.errors.join("; "), {
+                scenarioId
+            }));
+        }
+        const draftOverlay = existing.draft;
+        const triggerRules = resolveScenarioTriggerRules(request, draftOverlay?.triggerRules?.length
+            ? draftOverlay.triggerRules
+            : existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules());
+        const triggerErrors = validateScenarioTriggerRules(triggerRules);
+        if (triggerErrors.length) {
+            return publishFailure(tenantId, scenarioId, "bot_trigger_invalid", invalidEnvelope("publishBotScenario", "bot_trigger_invalid", triggerErrors.join("; "), { scenarioId, violations: triggerErrors }));
+        }
+        const state = await this.automationRepository.readStateAsync();
+        const triggerConflict = findScenarioTriggerConflict(state.botScenarios, scenarioId, tenantId, triggerRules, normalizeScenarioPriority(request.priority ?? existing.priority));
+        if (triggerConflict) {
+            return publishFailure(tenantId, scenarioId, "trigger_conflict", conflictEnvelope("publishBotScenario", "trigger_conflict", "Another published scenario already owns this keyword phrase and priority.", triggerConflict));
+        }
+        // Гейт готовности/одобрения источников при публикации снят (2026-07-17):
+        // привязанный источник используется ботом безусловно; несуществующие id
+        // отсекает валидация сценария выше.
+        const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? draftOverlay?.sourceBindings ?? existing.sourceBindings ?? []);
+        const prerequisiteViolations = [];
+        const nodes = validation.payload?.flowNodes ?? [];
+        const aiNodes = nodes.filter((node) => node.type === "ai_reply");
+        if (aiNodes.length) {
+            if (!sourceBindings.length)
+                prerequisiteViolations.push("AI-ответу нужен хотя бы один источник знаний.");
+            if ((await aiReadinessForTenant(tenantId)).status !== "ready")
+                prerequisiteViolations.push("AI-подключение организации не настроено или не прошло проверку.");
+            const hasHandoffPath = nodes.some((node) => node.type === "handoff" || node.type === "fallback");
+            if (!hasHandoffPath)
+                prerequisiteViolations.push("Добавьте передачу оператору или запасной ответ.");
+            // BAI-844: рамки ответов должны безопасно закрывать red-team-категории.
+            // Если источник ответа не обязателен, бот может ответить без доказательств —
+            // тогда обязательна передача оператору как страховка.
+            const ungroundedNode = aiNodes.find((node) => normalizeAgentPolicy(node.config).requireSource === false);
+            if (ungroundedNode && !hasHandoffPath) {
+                prerequisiteViolations.push("AI-ответ без обязательного источника разрешён только вместе с передачей оператору.");
+            }
+        }
+        if (prerequisiteViolations.length) {
+            return publishFailure(tenantId, scenarioId, "bot_publish_prerequisites_invalid", invalidEnvelope("publishBotScenario", "bot_publish_prerequisites_invalid", prerequisiteViolations.join(" "), { scenarioId, violations: prerequisiteViolations }));
+        }
+        const idempotencyKey = request.idempotencyKey?.trim() || actionIdempotencyKey(context);
+        const fingerprint = stableStringify({
+            channels: request.channels ?? [],
+            flowEdges: validation.payload?.flowEdges ?? [],
+            flowNodes: validation.payload?.flowNodes ?? [],
+            id: scenarioId,
+            name: validation.payload?.name,
+            priority: normalizeScenarioPriority(request.priority ?? existing.priority),
+            sourceBindings,
+            triggerRules,
+            tenantId
+        });
+        const cached = idempotencyKey ? await this.findPublishIdempotency(tenantId, idempotencyKey) : undefined;
+        if (cached) {
+            if (cached.fingerprint !== fingerprint) {
+                return publishFailure(tenantId, scenarioId, "idempotency_key_reused", conflictEnvelope("publishBotScenario", "idempotency_key_reused", "Idempotency key was already used for a different bot publish request.", {
+                    idempotencyKey,
+                    scenarioId
+                }));
+            }
+            return createEnvelope({
+                service: AUTOMATION_SERVICE,
+                operation: "publishBotScenario",
+                traceId: automationTraceId("publishBotScenario"),
+                meta: apiMeta({ idempotencyKey }),
+                data: {
+                    ...clone(cached.result),
+                    duplicate: true
+                }
+            });
+        }
+        if (!canTransitionBotScenario(existing.status, "published")) {
+            return publishFailure(tenantId, scenarioId, "bot_scenario_transition_invalid", conflictEnvelope("publishBotScenario", "bot_scenario_transition_invalid", `Bot scenario cannot be published from ${existing.status}.`, { scenarioId, status: existing.status }));
+        }
+        const result = {
+            auditId: makeAuditId("bot"),
+            channels: clone(request.channels ?? []),
+            duplicate: false,
+            handoffEvent: {
+                eventName: "bot.handoff.created",
+                schemaVersion: "bot-handoff/v1",
+                source: "publish"
+            },
+            queue: "bot-runtime",
+            runtimeJobId: makeQueueId("bot_runtime"),
+            runtimeVersion: `runtime-${scenarioId}-${Date.now().toString(36)}`,
+            scenarioId,
+            tenantId,
+            versionState: "published"
+        };
+        // Публикация материализует черновик следующей версии (если он был) и всегда очищает его.
+        const scenario = {
+            activeVersionId: String(result.runtimeVersion),
+            basePrompt: normalizeScenarioBasePrompt(request.basePrompt ?? draftOverlay?.basePrompt ?? existing.basePrompt),
+            channels: clone(request.channels ?? draftOverlay?.channels ?? existing.channels),
+            enabled: true,
+            flowEdges: clone(validation.payload?.flowEdges ?? draftOverlay?.flowEdges ?? existing.flowEdges),
+            flowNodes: clone(validation.payload?.flowNodes ?? draftOverlay?.flowNodes ?? existing.flowNodes),
+            id: scenarioId,
+            name: String(validation.payload?.name ?? draftOverlay?.name ?? existing.name),
+            priority: normalizeScenarioPriority(request.priority ?? draftOverlay?.priority ?? existing.priority),
+            schemaVersion: "bot-flow/v1",
+            status: "published",
+            tenantId,
+            sourceBindings,
+            triggerRules
+        };
+        this.upsertScenario(scenario);
+        await this.automationRepository.saveBotScenario(scenario);
+        await this.automationRepository.saveBotScenarioVersion({
+            basePrompt: scenario.basePrompt,
+            createdAt: new Date().toISOString(),
+            flowEdges: clone(scenario.flowEdges),
+            flowNodes: clone(scenario.flowNodes),
+            priority: scenario.priority ?? 0,
+            scenarioId,
+            sourceBindings: clone(scenario.sourceBindings ?? []),
+            status: "published",
+            tenantId,
+            triggerRules: clone(scenario.triggerRules ?? []),
+            versionId: String(result.runtimeVersion)
+        });
+        await this.automationRepository.saveBotPublishAuditEvent({
+            action: "bot.publish",
+            actor: actionActor(context),
+            auditId: result.auditId,
+            createdAt: new Date().toISOString(),
+            idempotencyKey: idempotencyKey ? `bot-publish:${tenantId}:${idempotencyKey}` : result.auditId,
+            immutable: true,
+            runtimeVersion: String(result.runtimeVersion),
+            scenarioId,
+            tenantId,
+            versionId: String(result.runtimeVersion)
+        });
+        await this.recordScenarioActionAudit({ action: "bot.publish", afterStatus: "published", auditId: result.auditId, beforeStatus: existing.status, context, idempotencyKey, scenarioId, tenantId });
+        if (idempotencyKey) {
+            this.publishIdempotency.set(automationTenantIdempotencyKey(tenantId, idempotencyKey), {
+                fingerprint,
+                result: clone(result)
+            });
+            await this.automationRepository.savePublishIdempotencyKeyAsync({
+                key: idempotencyKey,
+                fingerprint,
+                result: clone(result),
+                tenantId
+            });
+        }
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "publishBotScenario",
+            traceId: automationTraceId("publishBotScenario"),
+            meta: apiMeta({ idempotencyKey: idempotencyKey ?? null }),
+            data: result
+        });
+    }
+    async saveProactiveRule(rule, context = {}) {
+        const request = rule ?? {};
+        if (!request.id?.trim()) {
+            return invalidEnvelope("saveProactiveRule", "proactive_rule_id_required", "Proactive rule id is required.", {});
+        }
+        if (!Array.isArray(request.channels) || !request.channels.length) {
+            return invalidEnvelope("saveProactiveRule", "proactive_channels_required", "At least one proactive channel is required.", {
+                ruleId: request.id
+            });
+        }
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId) {
+            return tenantRequiredEnvelope("saveProactiveRule");
+        }
+        const state = await this.automationRepository.readStateAsync();
+        const foreignRule = state.proactiveRules.find((item) => item.id === request.id && proactiveRuleTenantId(item) !== tenantId);
+        if (foreignRule) {
+            return invalidEnvelope("saveProactiveRule", "proactive_rule_tenant_conflict", "Proactive rule id is already owned by another tenant.", { ruleId: request.id });
+        }
+        const savedRule = {
+            ...clone(request),
+            channels: clone(request.channels),
+            id: request.id,
+            status: request.status ?? "enabled",
+            tenantId
+        };
+        const index = this.rules.findIndex((item) => item.id === savedRule.id && proactiveRuleTenantId(item) === tenantId);
+        if (index >= 0) {
+            this.rules[index] = savedRule;
+        }
+        else {
+            this.rules.unshift(savedRule);
+        }
+        await this.automationRepository.saveProactiveRuleAsync(savedRule);
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "saveProactiveRule",
+            traceId: automationTraceId("saveProactiveRule"),
+            meta: apiMeta({ ruleId: savedRule.id, tenantId }),
+            data: {
+                auditId: makeAuditId("proactive"),
+                experiment: {
+                    activeVariant: savedRule.activeVariant ?? "A",
+                    id: `exp_${savedRule.id}_${Date.now().toString(36)}`,
+                    persisted: true
+                },
+                frequencyCap: {
+                    cooldown: savedRule.cooldown ?? "24h",
+                    id: `cap_${savedRule.id}_${Date.now().toString(36)}`,
+                    perChannel: true,
+                    perUser: true
+                },
+                queue: "proactive-delivery",
+                rule: savedRule,
+                targeting: {
+                    channels: clone(savedRule.channels),
+                    privacyChecked: true,
+                    segment: savedRule.segment ?? "manual"
+                }
+            }
+        });
+    }
+    async testBotScenario(payload, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId) {
+            return tenantRequiredEnvelope("testBotScenario");
+        }
+        const request = payload ?? {};
+        const scenarioId = request.id?.trim();
+        if (!scenarioId) {
+            return invalidEnvelope("testBotScenario", "bot_scenario_id_required", "Bot scenario id is required.", {});
+        }
+        const existing = this.scenarios.find((item) => item.id === scenarioId) ?? await this.automationRepository.findBotScenario(scenarioId);
+        if (!existing || scenarioTenantId(existing) !== tenantId) {
+            return invalidEnvelope("testBotScenario", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId });
+        }
+        const testRun = {
+            auditId: makeAuditId("bot"),
+            cases: clone(request.testCases ?? []),
+            queue: "bot-runtime",
+            scenarioId,
+            status: "running",
+            tenantId,
+            testRunId: `bot_test_${randomUUID()}`
+        };
+        await this.automationRepository.saveBotTestRunAsync(testRun);
+        const preview = await buildScenarioTestPreview(existing, tenantId, String(request.testMessage ?? "").trim());
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "testBotScenario",
+            traceId: automationTraceId("testBotScenario"),
+            meta: apiMeta({ scenarioId, tenantId }),
+            data: { ...testRun, preview }
+        });
+    }
+    async createBotSandboxSession(scenarioId, payload, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("createBotSandboxSession");
+        try {
+            const session = await this.sandboxService().createSession({
+                actor: actionActor(context),
+                channel: payload?.channel,
+                locale: payload?.locale,
+                mode: payload?.mode,
+                scenarioId,
+                tenantId
+            });
+            return createEnvelope({
+                service: AUTOMATION_SERVICE,
+                operation: "createBotSandboxSession",
+                traceId: actionTraceId(context, "createBotSandboxSession"),
+                meta: apiMeta({ scenarioId, tenantId }),
+                data: { session }
+            });
+        }
+        catch (error) {
+            return sandboxErrorEnvelope("createBotSandboxSession", error);
+        }
+    }
+    async fetchBotSandboxSession(scenarioId, sessionId, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("fetchBotSandboxSession");
+        try {
+            const session = await this.sandboxService().getSession(tenantId, scenarioId, sessionId);
+            return createEnvelope({
+                service: AUTOMATION_SERVICE,
+                operation: "fetchBotSandboxSession",
+                traceId: actionTraceId(context, "fetchBotSandboxSession"),
+                meta: apiMeta({ scenarioId, tenantId }),
+                data: { session }
+            });
+        }
+        catch (error) {
+            return sandboxErrorEnvelope("fetchBotSandboxSession", error);
+        }
+    }
+    async deleteBotSandboxSession(scenarioId, sessionId, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("deleteBotSandboxSession");
+        try {
+            await this.sandboxService().deleteSession(tenantId, scenarioId, sessionId);
+            return createEnvelope({
+                service: AUTOMATION_SERVICE,
+                operation: "deleteBotSandboxSession",
+                traceId: actionTraceId(context, "deleteBotSandboxSession"),
+                meta: apiMeta({ scenarioId, tenantId }),
+                data: { deleted: true, sessionId }
+            });
+        }
+        catch (error) {
+            return sandboxErrorEnvelope("deleteBotSandboxSession", error);
+        }
+    }
+    async postBotSandboxMessage(scenarioId, sessionId, payload, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("postBotSandboxMessage");
+        try {
+            const { session, turn } = await this.sandboxService().postMessage({
+                featureFlags: await this.botRuntimeFeatureFlags(),
+                messageId: payload?.messageId,
+                quickReply: payload?.quickReply,
+                scenarioId,
+                sessionId,
+                tenantId,
+                text: String(payload?.text ?? ""),
+                traceId: actionTraceId(context, "postBotSandboxMessage"),
+                value: payload?.value,
+                webhooksEnabled: payload?.webhooksEnabled
+            });
+            return createEnvelope({
+                service: AUTOMATION_SERVICE,
+                operation: "postBotSandboxMessage",
+                traceId: actionTraceId(context, "postBotSandboxMessage"),
+                meta: apiMeta({ scenarioId, sessionId, tenantId }),
+                data: { session, turn }
+            });
+        }
+        catch (error) {
+            return sandboxErrorEnvelope("postBotSandboxMessage", error);
+        }
+    }
+    async saveBotSandboxRegression(scenarioId, sessionId, payload, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("saveBotSandboxRegression");
+        try {
+            const testRun = await this.sandboxService().saveRegression({
+                actor: actionActor(context),
+                name: payload?.name,
+                scenarioId,
+                sessionId,
+                tenantId
+            });
+            return createEnvelope({
+                service: AUTOMATION_SERVICE,
+                operation: "saveBotSandboxRegression",
+                traceId: actionTraceId(context, "saveBotSandboxRegression"),
+                meta: apiMeta({ scenarioId, tenantId }),
+                data: { testRun }
+            });
+        }
+        catch (error) {
+            return sandboxErrorEnvelope("saveBotSandboxRegression", error);
+        }
+    }
+    /** BAI-812: правки published-сценария сохраняются как черновик следующей версии, не трогая runtime. */
+    async saveScenarioDraftOverlay(existing, request, context) {
+        const requestedStatus = normalizeBotScenarioStatus(request.status, existing.status);
+        if (requestedStatus !== existing.status) {
+            return conflictEnvelope("updateBotScenario", "bot_scenario_status_transition_required", "Use the dedicated scenario status action.", { scenarioId: existing.id, status: requestedStatus });
+        }
+        const previous = existing.draft ?? { updatedAt: new Date().toISOString() };
+        const draft = {
+            ...previous,
+            ...(request.name !== undefined ? { name: String(request.name) } : {}),
+            ...(request.channels !== undefined ? { channels: clone(request.channels) } : {}),
+            ...(request.basePrompt !== undefined ? { basePrompt: normalizeScenarioBasePrompt(request.basePrompt) } : {}),
+            ...(request.priority !== undefined ? { priority: normalizeScenarioPriority(request.priority) } : {}),
+            ...(request.flowNodes !== undefined ? { flowNodes: clone(request.flowNodes) } : {}),
+            ...(request.flowEdges !== undefined ? { flowEdges: clone(request.flowEdges) } : {}),
+            ...(request.sourceBindings !== undefined ? { sourceBindings: normalizeScenarioSourceBindings(request.sourceBindings) } : {}),
+            ...(request.triggerRules !== undefined || request.triggerPhrases !== undefined
+                ? { triggerRules: resolveScenarioTriggerRules(request, existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules()) }
+                : {}),
+            updatedAt: new Date().toISOString(),
+            updatedBy: actionActor(context)
+        };
+        const scenario = { ...existing, draft, updatedAt: new Date().toISOString() };
+        this.upsertScenario(scenario);
+        await this.automationRepository.saveBotScenario(scenario);
+        const auditId = makeAuditId("bot_draft");
+        await this.recordScenarioActionAudit({
+            action: "bot.draft.update",
+            afterStatus: existing.status,
+            auditId,
+            beforeStatus: existing.status,
+            context,
+            idempotencyKey: actionIdempotencyKey(context),
+            reason: actionReason(context, "draft_updated"),
+            scenarioId: existing.id,
+            tenantId: existing.tenantId
+        });
+        const saved = this.scenarios.find((item) => item.id === existing.id) ?? scenario;
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "updateBotScenario",
+            traceId: actionTraceId(context, "updateBotScenario"),
+            meta: apiMeta({ tenantId: existing.tenantId }),
+            data: { auditId, draftPending: true, scenario: clone(saved) }
+        });
+    }
+    async discardBotScenarioDraft(scenarioId, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("discardBotScenarioDraft");
+        const existing = this.scenarios.find((item) => item.id === scenarioId) ?? await this.automationRepository.findBotScenario(scenarioId);
+        if (!existing || scenarioTenantId(existing) !== tenantId) {
+            return invalidEnvelope("discardBotScenarioDraft", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId });
+        }
+        if (!existing.draft) {
+            return createEnvelope({
+                service: AUTOMATION_SERVICE,
+                operation: "discardBotScenarioDraft",
+                traceId: actionTraceId(context, "discardBotScenarioDraft"),
+                meta: apiMeta({ tenantId }),
+                data: { discarded: false, scenario: clone(existing) }
+            });
+        }
+        const { draft: _draft, ...withoutDraft } = existing;
+        const scenario = { ...withoutDraft, updatedAt: new Date().toISOString() };
+        this.upsertScenario(scenario);
+        await this.automationRepository.saveBotScenario(scenario);
+        const auditId = makeAuditId("bot_draft");
+        await this.recordScenarioActionAudit({
+            action: "bot.draft.discard",
+            afterStatus: scenario.status,
+            auditId,
+            beforeStatus: existing.status,
+            context,
+            reason: actionReason(context, "draft_discarded"),
+            scenarioId,
+            tenantId
+        });
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "discardBotScenarioDraft",
+            traceId: actionTraceId(context, "discardBotScenarioDraft"),
+            meta: apiMeta({ tenantId }),
+            data: { auditId, discarded: true, scenario: clone(scenario) }
+        });
+    }
+    /** BAI-813: откат опубликованного сценария к более ранней опубликованной версии. */
+    async rollbackBotScenarioToVersion(scenarioId, versionId, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("rollbackBotScenario");
+        if (!String(versionId ?? "").trim()) {
+            return invalidEnvelope("rollbackBotScenario", "bot_version_id_required", "Version id is required.", { scenarioId });
+        }
+        try {
+            const scenario = await this.rollbackBotRuntimeVersion(tenantId, scenarioId, versionId);
+            this.upsertScenario(scenario);
+            const auditId = makeAuditId("bot_rollback");
+            await this.recordScenarioActionAudit({
+                action: "bot.rollback",
+                afterStatus: scenario.status,
+                auditId,
+                beforeStatus: "published",
+                context,
+                idempotencyKey: actionIdempotencyKey(context),
+                reason: actionReason(context, `rollback_to_${versionId}`),
+                scenarioId,
+                tenantId
+            });
+            return createEnvelope({
+                service: AUTOMATION_SERVICE,
+                operation: "rollbackBotScenario",
+                traceId: actionTraceId(context, "rollbackBotScenario"),
+                meta: apiMeta({ tenantId, versionId }),
+                data: { auditId, scenario: clone(scenario), versionId }
+            });
+        }
+        catch (error) {
+            const code = error instanceof Error ? error.message : "bot_rollback_failed";
+            return invalidEnvelope("rollbackBotScenario", code === "bot_runtime_rollback_version_not_found" ? code : "bot_rollback_failed", code === "bot_runtime_rollback_version_not_found"
+                ? "Версия для отката не найдена или не опубликована."
+                : "Не удалось выполнить откат версии.", { scenarioId, versionId });
+        }
+    }
+    sandboxService() {
+        return new BotSandboxService(this.automationRepository);
+    }
+    async botRuntimeFeatureFlags() {
+        return isBotAiAgentsFlagEnforced()
+            ? this.platformRepository.listFeatureFlagsAsync()
+            : undefined;
+    }
+    async recordBotAiFeedback(payload, context = {}) {
+        const request = payload ?? {};
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("recordBotAiFeedback");
+        const actorId = String(context.actor ?? "").trim();
+        if (!actorId) {
+            return invalidEnvelope("recordBotAiFeedback", "bot_feedback_actor_required", "Authenticated operator context is required.", {});
+        }
+        const conversationId = String(request.conversationId ?? "").trim();
+        const outcome = request.outcome;
+        if (!conversationId || !isBotAiFeedbackOutcome(outcome)) {
+            return invalidEnvelope("recordBotAiFeedback", "bot_feedback_context_required", "conversationId and outcome (helped | not_helped | wrong_source) are required.", {});
+        }
+        const idempotencyKey = String(request.idempotencyKey ?? context.idempotencyKey ?? "").trim()
+            || `bot_feedback:${tenantId}:${conversationId}:${outcome}`;
+        const createdAt = new Date().toISOString();
+        const feedbackId = `bot_fb_${randomUUID()}`;
+        const citationSourceIds = Array.isArray(request.citationSourceIds)
+            ? request.citationSourceIds.map((id) => String(id ?? "").trim()).filter(Boolean)
+            : [];
+        const record = {
+            actorId,
+            citationSourceIds,
+            comment: request.comment == null ? null : String(request.comment).trim() || null,
+            conversationId,
+            createdAt,
+            feedbackId,
+            idempotencyKey,
+            knowledgeMutated: false,
+            outcome,
+            reviewRequired: outcome === "wrong_source" || outcome === "not_helped",
+            scenarioId: request.scenarioId == null ? null : String(request.scenarioId).trim() || null,
+            tenantId
+        };
+        const persisted = await Promise.resolve(this.botFeedbackRepository.saveFeedback(record));
+        const duplicate = persisted.feedbackId !== feedbackId;
+        if (!duplicate) {
+            recordBotAiFeedback({ outcome: persisted.outcome, scenarioId: persisted.scenarioId ?? undefined, tenantId });
+        }
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "recordBotAiFeedback",
+            traceId: automationTraceId("recordBotAiFeedback"),
+            meta: apiMeta({ conversationId, tenantId }),
+            data: {
+                duplicate,
+                feedback: clone(persisted),
+                knowledgeMutated: false,
+                reviewRequired: persisted.reviewRequired
+            }
+        });
+    }
+    /** BAI-852: очередь ревью — что оператор отметил «не помогло»/«неверный источник». */
+    async listBotAiFeedback(context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("listBotAiFeedback");
+        const feedback = await Promise.resolve(this.botFeedbackRepository.listFeedback({ tenantId }));
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "listBotAiFeedback",
+            traceId: automationTraceId("listBotAiFeedback"),
+            meta: apiMeta({ tenantId }),
+            data: { feedback: clone(feedback) }
+        });
+    }
+    async resolveBotAiFeedback(feedbackId, action, context = {}) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope("resolveBotAiFeedback");
+        if (!this.botFeedbackRepository.resolveFeedback) {
+            return invalidEnvelope("resolveBotAiFeedback", "bot_feedback_resolve_unsupported", "Feedback review is not available in this runtime.", {});
+        }
+        const resolved = await Promise.resolve(this.botFeedbackRepository.resolveFeedback(tenantId, String(feedbackId ?? "").trim(), String(action ?? "reviewed")));
+        if (!resolved) {
+            return invalidEnvelope("resolveBotAiFeedback", "bot_feedback_not_found", "Feedback item was not found.", { feedbackId });
+        }
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "resolveBotAiFeedback",
+            traceId: automationTraceId("resolveBotAiFeedback"),
+            meta: apiMeta({ tenantId }),
+            data: { feedback: clone(resolved) }
+        });
+    }
+    async createBotHandoffSummary(payload) {
+        const request = payload ?? {};
+        const tenantId = String(request.tenantId ?? "").trim();
+        if (!request.botId?.trim() || !request.conversationId?.trim()) {
+            return invalidEnvelope("createBotHandoffSummary", "bot_handoff_context_required", "botId and conversationId are required.", {
+                botId: request.botId ?? null,
+                conversationId: request.conversationId ?? null
+            });
+        }
+        if (!tenantId) {
+            return tenantRequiredEnvelope("createBotHandoffSummary");
+        }
+        const eventId = makeEventId("bot_handoff");
+        const traceId = automationTraceId("createBotHandoffSummary");
+        const operatorView = buildOperatorHandoffView({
+            aiOutcome: request.aiOutcome,
+            citations: Array.isArray(request.citations)
+                ? request.citations
+                    .map((item) => ({
+                    sourceId: String(item?.sourceId ?? "").trim(),
+                    title: String(item?.title ?? "").trim(),
+                    version: typeof item?.version === "number" ? item.version : undefined
+                }))
+                    .filter((item) => item.sourceId)
+                : [],
+            collectedFields: maskCollectedFields(request.collectedFields ?? {}),
+            goal: request.goal,
+            queue: request.queue,
+            reason: request.reason,
+            scenarioName: request.scenarioName ?? request.botId,
+            sessionState: request.sessionState,
+            topic: request.topic
+        });
+        const summary = {
+            aiOutcome: operatorView.aiOutcome,
+            botId: request.botId,
+            citations: operatorView.citations,
+            collectedFields: Object.fromEntries(operatorView.collectedFields.map((item) => [item.key, item.value])),
+            goal: operatorView.goal,
+            queue: operatorView.queue,
+            reason: operatorView.reason,
+            scenarioName: operatorView.scenarioName,
+            sessionState: operatorView.sessionState,
+            topic: operatorView.topic
+        };
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation: "createBotHandoffSummary",
+            traceId,
+            meta: apiMeta({ conversationId: request.conversationId }),
+            data: {
+                auditId: makeAuditId("bot"),
+                eventId,
+                eventName: "bot.handoff.created",
+                operatorView,
+                resourceId: request.conversationId,
+                resourceType: "conversation",
+                realtimeEvent: realtimeEvent({
+                    data: summary,
+                    eventId,
+                    eventName: "bot.handoff.created",
+                    resourceId: request.conversationId,
+                    resourceType: "conversation",
+                    schemaVersion: "bot-handoff/v1",
+                    tenantId,
+                    traceId
+                }),
+                summary
+            }
+        });
+    }
+    upsertScenario(scenario) {
+        const index = this.scenarios.findIndex((item) => item.id === scenario.id);
+        if (index >= 0) {
+            this.scenarios[index] = scenario;
+        }
+        else {
+            this.scenarios.unshift(scenario);
+        }
+    }
+    async transitionBotScenario(scenarioId, targetStatus, operation, context) {
+        const tenantId = resolveAutomationTenantId(context);
+        if (!tenantId)
+            return tenantRequiredEnvelope(operation);
+        const existing = this.scenarios.find((item) => item.id === scenarioId) ?? await this.automationRepository.findBotScenario(scenarioId);
+        if (!existing || scenarioTenantId(existing) !== tenantId) {
+            return invalidEnvelope(operation, "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId });
+        }
+        const idempotencyKey = actionIdempotencyKey(context);
+        const reason = actionReason(context, targetStatus === "archived" ? "user_deleted" : "user_disabled");
+        const fingerprint = stableStringify({ operation, reason, scenarioId, targetStatus, tenantId });
+        const cached = idempotencyKey ? await this.findPublishIdempotency(tenantId, idempotencyKey) : undefined;
+        if (cached) {
+            if (cached.fingerprint !== fingerprint)
+                return conflictEnvelope(operation, "idempotency_key_reused", "Idempotency key was already used for a different scenario action.", { idempotencyKey, scenarioId });
+            return createEnvelope({ service: AUTOMATION_SERVICE, operation, traceId: actionTraceId(context, operation), meta: apiMeta({ idempotencyKey, tenantId }), data: { ...clone(cached.result), duplicate: true } });
+        }
+        if (existing.status === targetStatus) {
+            return createEnvelope({
+                service: AUTOMATION_SERVICE,
+                operation,
+                traceId: actionTraceId(context, operation),
+                meta: apiMeta({ idempotencyKey: idempotencyKey ?? null, tenantId }),
+                data: { duplicate: true, scenario: clone(existing) }
+            });
+        }
+        if (!canTransitionBotScenario(existing.status, targetStatus)) {
+            return conflictEnvelope(operation, "bot_scenario_transition_invalid", `Bot scenario cannot transition from ${existing.status} to ${targetStatus}.`, { scenarioId, status: existing.status, targetStatus });
+        }
+        const now = new Date().toISOString();
+        const scenario = {
+            ...existing,
+            ...(targetStatus === "archived"
+                ? { archiveReason: reason, archivedAt: now, archivedBy: actionActor(context) }
+                : { archiveReason: undefined, archivedAt: undefined, archivedBy: undefined }),
+            disabledAt: now,
+            disabledBy: actionActor(context),
+            disableReason: targetStatus === "archived" ? "archived" : reason,
+            enabled: false,
+            status: targetStatus,
+            updatedAt: now
+        };
+        this.upsertScenario(scenario);
+        await this.automationRepository.saveBotScenario(scenario);
+        const auditId = makeAuditId("bot_action");
+        const result = { auditId, scenario: clone(scenario) };
+        await this.recordScenarioActionAudit({ action: lifecycleAuditAction(operation), afterStatus: targetStatus, auditId, beforeStatus: existing.status, context, idempotencyKey, reason, scenarioId, tenantId });
+        if (idempotencyKey) {
+            this.publishIdempotency.set(automationTenantIdempotencyKey(tenantId, idempotencyKey), { fingerprint, result: clone(result) });
+            await this.automationRepository.savePublishIdempotencyKeyAsync({ fingerprint, key: idempotencyKey, result: clone(result), tenantId });
+        }
+        return createEnvelope({
+            service: AUTOMATION_SERVICE,
+            operation,
+            traceId: actionTraceId(context, operation),
+            meta: apiMeta({ idempotencyKey: idempotencyKey ?? null, tenantId }),
+            data: { duplicate: false, ...result }
+        });
+    }
+    async recordScenarioActionAudit(input) {
+        await this.automationRepository.saveScenarioAuditEvent({ action: input.action, actor: actionActor(input.context), actorType: "user", auditId: input.auditId,
+            createdAt: new Date().toISOString(), fingerprint: input.idempotencyKey ? stableStringify({ action: input.action, reason: input.reason, scenarioId: input.scenarioId, tenantId: input.tenantId }) : undefined,
+            idempotencyKey: input.idempotencyKey, immutable: true, payload: { afterStatus: input.afterStatus, beforeStatus: input.beforeStatus }, reason: input.reason ?? "unspecified",
+            scenarioId: input.scenarioId, tenantId: input.tenantId, traceId: actionTraceId(input.context, input.action) });
+        await this.automationRepository.saveWorkspaceAuditEvent({
+            action: input.action, actor: actionActor(input.context), afterStatus: input.afterStatus, auditId: input.auditId,
+            beforeStatus: input.beforeStatus, createdAt: new Date().toISOString(),
+            idempotencyKey: input.idempotencyKey ? `bot-action:${input.tenantId}:${input.idempotencyKey}` : input.auditId,
+            immutable: true, reason: input.reason ?? actionReason(input.context, "published"), scenarioId: input.scenarioId,
+            tenantId: input.tenantId, traceId: actionTraceId(input.context, input.action)
+        });
+    }
+    async findPublishIdempotency(tenantId, key) {
+        const persisted = await this.automationRepository.findPublishIdempotencyKeyAsync(tenantId, key);
+        if (persisted) {
+            return { fingerprint: persisted.fingerprint, result: clone(persisted.result) };
+        }
+        return this.publishIdempotency.get(automationTenantIdempotencyKey(tenantId, key));
+    }
+    async handleBotRuntimeInboundEvent(event, options = {}) {
+        const featureFlags = options.featureFlags
+            ?? (isBotAiAgentsFlagEnforced()
+                ? await this.platformRepository.listFeatureFlagsAsync()
+                : undefined);
+        return new BotRuntimeService(this.automationRepository, { ...options, featureFlags }).handleInboundEvent(event);
+    }
+    async rollbackBotRuntimeVersion(tenantId, scenarioId, versionId) {
+        return new BotRuntimeService(this.automationRepository).rollbackToPublishedVersion(tenantId, scenarioId, versionId);
+    }
+    async retryBotRuntimeInboundEvent(event, options = {}) {
+        return new BotRuntimeService(this.automationRepository, options).retryInboundEvent(event);
+    }
+    syncLocalCaches(state) {
+        this.scenarios.splice(0, this.scenarios.length, ...clone(state.botScenarios));
+        this.rules.splice(0, this.rules.length, ...clone(state.proactiveRules));
+        state.publishIdempotencyKeys.forEach((item) => {
+            this.publishIdempotency.set(automationTenantIdempotencyKey(item.tenantId, item.key), {
+                fingerprint: item.fingerprint,
+                result: clone(item.result)
+            });
+        });
+    }
+}
+function apiMeta(extra = {}) {
+    return {
+        source: "api",
+        apiVersion: "v1",
+        ...extra
+    };
+}
+function automationTraceId(operation) {
+    return getCurrentTraceId() ?? createRequestTraceId(AUTOMATION_SERVICE, operation);
+}
+function actionTraceId(context, operation) {
+    return String(context.traceId ?? "").trim() || automationTraceId(operation);
+}
+function actionActor(context) {
+    return String(context.actor ?? "").trim() || "automation-admin";
+}
+function actionReason(context, fallback) {
+    return String(context.reason ?? "").trim().slice(0, 500) || fallback;
+}
+function actionIdempotencyKey(context) {
+    const value = String(context.idempotencyKey ?? "").trim();
+    return value ? value.slice(0, 200) : undefined;
+}
+function lifecycleAuditAction(operation) {
+    return operation === "disableBotScenario" ? "bot.disable" : operation === "archiveBotScenario" ? "bot.archive" : "bot.restore";
+}
+function clone(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+function overlayById(base, persisted) {
+    if (!persisted.length) {
+        return base;
+    }
+    const persistedById = new Map(persisted.map((item) => [item.id, item]));
+    const baseIds = new Set(base.map((item) => item.id));
+    return [
+        ...base.map((item) => clone(persistedById.get(item.id) ?? item)),
+        ...persisted.filter((item) => !baseIds.has(item.id)).map((item) => clone(item))
+    ];
+}
+function conflictEnvelope(operation, code, message, data) {
+    return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation,
+        traceId: automationTraceId(operation),
+        status: "conflict",
+        meta: apiMeta(),
+        data,
+        error: { code, message }
+    });
+}
+const SANDBOX_ERROR_MESSAGES = {
+    bot_sandbox_budget_exhausted: "Исчерпан лимит токенов на тестирование в этом месяце. Обратитесь к администратору сервиса, чтобы поднять лимит.",
+    bot_sandbox_channel_unsupported: "Выбранный канал не подключён к сценарию.",
+    bot_sandbox_message_required: "Введите сообщение, чтобы отправить его боту.",
+    bot_sandbox_published_version_not_found: "У сценария нет опубликованной версии — протестируйте черновик.",
+    bot_sandbox_scenario_not_found: "Сценарий не найден.",
+    bot_sandbox_session_empty: "В тестовом диалоге ещё нет реплик — сначала отправьте сообщение боту.",
+    bot_sandbox_session_not_found: "Тестовая сессия не найдена или истекла. Начните тест заново."
+};
+function sandboxErrorEnvelope(operation, error) {
+    const code = error instanceof Error ? error.message : "bot_sandbox_failed";
+    const known = SANDBOX_ERROR_MESSAGES[code];
+    return invalidEnvelope(operation, known ? code : "bot_sandbox_failed", known ?? "Не удалось выполнить операцию тест-чата. Попробуйте ещё раз.", {});
+}
+function invalidEnvelope(operation, code, message, data) {
+    return createEnvelope({
+        service: AUTOMATION_SERVICE,
+        operation,
+        traceId: automationTraceId(operation),
+        status: "invalid",
+        meta: apiMeta(),
+        data,
+        error: { code, message }
+    });
+}
+function makeAuditId(scope) {
+    return `evt_${scope}_${randomUUID()}`;
+}
+function makeEventId(scope) {
+    return `evt_${scope}_${randomUUID()}`;
+}
+function makeQueueId(scope) {
+    return `${scope}_${randomUUID()}`;
+}
+function parseAndValidateBotFlow(input) {
+    const errors = [];
+    let payload;
+    try {
+        payload = typeof input === "string" ? JSON.parse(input) : input;
+    }
+    catch (error) {
+        errors.push(error instanceof Error ? `JSON parse failed: ${error.message}` : "JSON parse failed");
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        errors.push("payload is required");
+        return { errors, payload: null };
+    }
+    const name = payload.name?.trim();
+    const flowNodes = payload.flowNodes ?? [];
+    const rawFlowEdges = payload.flowEdges ?? [];
+    if (!name) {
+        errors.push("name is required");
+    }
+    if (!Array.isArray(payload.flowNodes) || !flowNodes.length) {
+        errors.push("flowNodes are required");
+    }
+    else {
+        for (const node of flowNodes) {
+            if (!node.id?.trim() || !VALID_NODE_TYPES.has(node.type)) {
+                errors.push(`node ${node.id ?? "unknown"} has invalid type`);
+            }
+        }
+    }
+    if (payload.flowEdges !== undefined && (!Array.isArray(payload.flowEdges) || rawFlowEdges.some((edge) => !edge.from || !edge.to))) {
+        errors.push("flowEdges must contain from and to");
+    }
+    if (errors.length || !payload) {
+        return { errors, payload: null };
+    }
+    return {
+        errors,
+        payload: {
+            flowEdges: rawFlowEdges.map((edge) => ({
+                from: String(edge.from),
+                ...(edge.label ? { label: edge.label } : {}),
+                to: String(edge.to)
+            })),
+            flowNodes,
+            name: name ?? "",
+            schemaVersion: "bot-flow/v1",
+            sourceBindings: normalizeScenarioSourceBindings(payload.sourceBindings ?? []),
+            triggerRules: resolveScenarioTriggerRules(payload, defaultScenarioTriggerRules())
+        }
+    };
+}
+function stableStringify(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
+        return `{${Object.entries(value)
+            .filter(([, entryValue]) => entryValue !== undefined)
+            .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+            .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
+            .join(",")}}`;
+    }
+    return JSON.stringify(value);
+}
+function maskCollectedFields(fields) {
+    return Object.fromEntries(Object.entries(fields).map(([key, value]) => {
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+            return [key, maskCollectedFields(value)];
+        }
+        if (/phone|tel|mobile/i.test(key)) {
+            return [key, maskPhone(String(value ?? ""))];
+        }
+        if (/card|payment|pan|token|secret|otp|code/i.test(key)) {
+            return [key, "****"];
+        }
+        return [key, value];
+    }));
+}
+function maskPhone(value) {
+    const digits = value.replace(/\D/g, "");
+    const tail = digits.slice(-2);
+    return tail ? `+* *** ***-**-${tail}` : "***";
+}
+function realtimeEvent({ data, eventId, eventName, resourceId, resourceType, schemaVersion, tenantId, traceId }) {
+    return {
+        data,
+        eventId,
+        eventName,
+        occurredAt: new Date().toISOString(),
+        resourceId,
+        resourceType,
+        schemaVersion,
+        tenantId,
+        traceId
+    };
+}
+function resolveAutomationTenantId(context = {}) {
+    return String(context.tenantId ?? "").trim() || null;
+}
+function scenarioTenantId(item) {
+    return String(item.tenantId ?? "").trim() || null;
+}
+function canTransitionBotScenario(from, to) {
+    return from === to || (BOT_SCENARIO_TRANSITIONS[from] ?? []).includes(to);
+}
+async function aiReadinessForTenant(tenantId) {
+    const connections = await AiConnectionRepository.default().list(tenantId);
+    const readyConnectionCount = connections.filter((connection) => connection.status === "ready" && connection.disabledAt === null && connection.capabilities.includes("chat_completion")).length;
+    return { connectionCount: connections.length, readyConnectionCount, status: readyConnectionCount ? "ready" : connections.length ? "unavailable" : "not_configured" };
+}
+async function resolveTenantAiUsage(tenantId, context) {
+    const connections = await AiConnectionRepository.default().list(tenantId);
+    const primary = connections.find((connection) => connection.status === "ready" && connection.disabledAt === null)
+        ?? connections[0];
+    if (!primary) {
+        return buildTenantAiUsageSummary({ usedTokens: 0, viewer: context });
+    }
+    const usage = await AiUsageRepository.default().current(tenantId, primary.id);
+    return buildTenantAiUsageSummary({
+        month: usage.month,
+        monthlyTokenBudget: primary.limits.monthlyTokenBudget ?? null,
+        usedTokens: usage.usedTokens,
+        viewer: context
+    });
+}
+async function buildScenarioTestPreview(scenario, tenantId, testMessage) {
+    const sourceBindings = scenario.sourceBindings ?? [];
+    const sources = [];
+    for (const binding of sourceBindings) {
+        const source = await KnowledgeSourceRepository.default().find(tenantId, binding.sourceId);
+        if (source && isKnowledgeSourceRetrievalEligible(source))
+            sources.push(source);
+    }
+    const phraseRule = (scenario.triggerRules ?? []).find((rule) => rule.type === "phrase");
+    const alwaysExceptRule = (scenario.triggerRules ?? []).find((rule) => rule.type === "always_except");
+    const phraseMatched = phraseRule ? Boolean(testMessage) && (phraseRule.phrases ?? []).some((phrase) => matchesBotTriggerPhrase(testMessage, phrase, phraseRule.matchMode ?? "contains", phraseRule.locale)) : null;
+    if (phraseRule && !phraseMatched) {
+        return {
+            answerPreview: testMessage ? "Сценарий не запустится: сообщение не совпало ни с одной ключевой фразой." : "Введите сообщение клиента, чтобы проверить ключевую фразу.",
+            citations: [],
+            input: testMessage || "Введите сообщение клиента для проверки.",
+            outcome: "no_match",
+            reason: testMessage ? "phrase_not_matched" : "test_message_required",
+            steps: [],
+            trace: {
+                aiWouldCall: false,
+                dryRun: true,
+                isolation: "no_runtime_steps_no_outbound",
+                knowledgeSourceCount: sources.length,
+                readiness: (await aiReadinessForTenant(tenantId)).status,
+                retrievalCache: "skipped",
+                retrievalTokenBudget: 0,
+                retrievalTokensUsed: 0
+            },
+            trigger: { matched: false, matchMode: phraseRule.matchMode ?? "contains", phrases: phraseRule.phrases ?? [], type: "phrase" }
+        };
+    }
+    if (alwaysExceptRule) {
+        const matched = matchesBotAlwaysExceptTrigger(testMessage, alwaysExceptRule.phrases, alwaysExceptRule.matchMode ?? "contains", alwaysExceptRule.locale);
+        if (!matched) {
+            return {
+                answerPreview: "Сценарий не запустится: сообщение попало под исключение «Всегда, кроме».",
+                citations: [],
+                input: testMessage || "Введите сообщение клиента для проверки.",
+                outcome: "no_match",
+                reason: "always_except_excluded",
+                steps: [],
+                trace: {
+                    aiWouldCall: false,
+                    dryRun: true,
+                    isolation: "no_runtime_steps_no_outbound",
+                    knowledgeSourceCount: sources.length,
+                    readiness: (await aiReadinessForTenant(tenantId)).status,
+                    retrievalCache: "skipped",
+                    retrievalTokenBudget: 0,
+                    retrievalTokensUsed: 0
+                },
+                trigger: {
+                    matched: false,
+                    matchMode: alwaysExceptRule.matchMode ?? "contains",
+                    phrases: alwaysExceptRule.phrases ?? [],
+                    type: "always_except"
+                }
+            };
+        }
+    }
+    const aiNode = scenario.flowNodes.find((node) => node.type === "ai_reply");
+    const readiness = await aiReadinessForTenant(tenantId);
+    let retrieval = {
+        cache: "miss",
+        passages: [],
+        tokenBudget: 0,
+        tokensUsed: 0
+    };
+    if (aiNode && sources.length && testMessage) {
+        retrieval = await new KnowledgeRetrievalService().retrieve({
+            query: testMessage,
+            sourceBindings,
+            tenantId,
+            tokenBudget: 800
+        });
+    }
+    const wouldCallAi = Boolean(aiNode) && readiness.status === "ready" && sources.length > 0 && retrieval.passages.length > 0;
+    const needsHandoff = Boolean(aiNode) && !wouldCallAi;
+    const citations = retrieval.passages.length
+        ? retrieval.passages.map((passage) => ({
+            sourceId: passage.citation.sourceId,
+            title: passage.citation.title,
+            version: passage.citation.sourceVersion
+        }))
+        : sources.map((source) => ({ sourceId: source.id, title: source.title, version: source.version }));
+    return {
+        answerPreview: !aiNode
+            ? "Сценарий отправит настроенное сообщение."
+            : needsHandoff
+                ? (aiNode.config?.fallbackMessage
+                    ? String(aiNode.config.fallbackMessage)
+                    : "AI не будет отвечать: клиенту будет предложена помощь оператора.")
+                : "AI сформирует ответ только по выбранным источникам; при недостатке сведений передаст вопрос оператору.",
+        citations,
+        input: testMessage || "Введите сообщение клиента для проверки.",
+        outcome: needsHandoff ? "handoff" : aiNode ? "ai_response" : "message",
+        reason: needsHandoff
+            ? (readiness.status !== "ready" ? "ai_not_ready" : sources.length === 0 ? "knowledge_not_ready" : "retrieval_empty")
+            : "matched",
+        retrievalPassages: retrieval.passages.slice(0, 3).map((passage) => ({
+            score: passage.score,
+            sourceId: passage.citation.sourceId,
+            title: passage.citation.title,
+            preview: passage.content.slice(0, 160)
+        })),
+        steps: scenario.flowNodes.map((node) => ({ id: node.id, title: node.title ?? node.type, type: node.type })),
+        trace: {
+            aiWouldCall: wouldCallAi,
+            dryRun: true,
+            isolation: "no_runtime_steps_no_outbound",
+            knowledgeSourceCount: sources.length,
+            readiness: readiness.status,
+            retrievalCache: retrieval.cache,
+            retrievalTokenBudget: retrieval.tokenBudget,
+            retrievalTokensUsed: retrieval.tokensUsed,
+            stepsCount: scenario.flowNodes.length
+        },
+        trigger: phraseRule
+            ? { matched: phraseMatched, matchMode: phraseRule.matchMode ?? "contains", phrases: phraseRule.phrases ?? [], type: "phrase" }
+            : alwaysExceptRule
+                ? {
+                    matched: true,
+                    matchMode: alwaysExceptRule.matchMode ?? "contains",
+                    phrases: alwaysExceptRule.phrases ?? [],
+                    type: "always_except"
+                }
+                : { matched: true, type: (scenario.triggerRules ?? [])[0]?.type ?? "manual" }
+    };
+}
+function defaultScenarioTriggerRules() {
+    return [{ id: "new-conversation", priority: 0, type: "new_conversation" }];
+}
+function normalizeScenarioPriority(value) {
+    const parsed = Number(value ?? 0);
+    return Number.isInteger(parsed) ? Math.max(-10_000, Math.min(10_000, parsed)) : 0;
+}
+function normalizeScenarioBasePrompt(value) {
+    const text = String(value ?? "").trim();
+    if (!text)
+        return undefined;
+    return text.slice(0, 4_000);
+}
+function resolveScenarioTriggerRules(input, fallback) {
+    // Empty arrays must not wipe an existing fallback: clients often omit or
+    // accidentally send triggerRules: [] while the flow node still encodes the trigger.
+    if (Array.isArray(input.triggerRules) && input.triggerRules.length > 0) {
+        return normalizeScenarioTriggerRules(input.triggerRules);
+    }
+    if (Array.isArray(input.triggerPhrases)) {
+        return normalizeScenarioTriggerRules([{
+                id: "phrase-1",
+                matchMode: normalizeMatchMode(input.matchMode),
+                phrases: input.triggerPhrases,
+                priority: 0,
+                type: "phrase"
+            }]);
+    }
+    return normalizeScenarioTriggerRules(fallback);
+}
+function normalizeScenarioTriggerRules(value) {
+    return value.flatMap((rule, index) => {
+        if (!rule || !["manual", "new_conversation", "phrase", "always_except"].includes(rule.type))
+            return [];
+        const phrases = Array.isArray(rule.phrases)
+            ? rule.phrases.map((phrase) => String(phrase).trim()).filter(Boolean).slice(0, 32)
+            : [];
+        return [{
+                id: String(rule.id ?? `trigger-${index + 1}`).trim() || `trigger-${index + 1}`,
+                ...(rule.locale ? { locale: String(rule.locale).trim() } : {}),
+                ...((rule.type === "phrase" || rule.type === "always_except") ? { matchMode: normalizeMatchMode(rule.matchMode), phrases } : {}),
+                priority: normalizeScenarioPriority(rule.priority),
+                type: rule.type
+            }];
+    });
+}
+function normalizeScenarioSourceBindings(value) {
+    if (!Array.isArray(value))
+        return [];
+    const seen = new Set();
+    return value.flatMap((binding) => {
+        const sourceId = String(binding?.sourceId ?? "").trim();
+        if (!sourceId || seen.has(sourceId))
+            return [];
+        seen.add(sourceId);
+        const sourceVersion = String(binding?.sourceVersion ?? "").trim();
+        return [{ sourceId, ...(sourceVersion ? { sourceVersion } : {}) }];
+    });
+}
+function normalizeMatchMode(value) {
+    const mode = String(value ?? "contains");
+    return mode === "exact" || mode === "tokens" ? mode : "contains";
+}
+function validateScenarioTriggerRules(rules) {
+    if (!rules.length)
+        return ["At least one scenario trigger is required."];
+    const seen = new Set();
+    const errors = [];
+    for (const rule of rules) {
+        if (rule.type !== "phrase" && rule.type !== "always_except")
+            continue;
+        if (rule.type === "phrase" && !rule.phrases?.length) {
+            errors.push(`Trigger ${rule.id} requires at least one phrase.`);
+            continue;
+        }
+        for (const phrase of rule.phrases ?? []) {
+            const normalized = normalizeBotTriggerText(phrase, rule.locale);
+            if (!normalized || !/[\p{L}\p{N}]/u.test(normalized))
+                errors.push(`Trigger ${rule.id} contains an empty phrase.`);
+            const key = `${rule.type}\u0000${rule.locale ?? "ru-RU"}\u0000${rule.matchMode ?? "contains"}\u0000${normalized}`;
+            if (seen.has(key))
+                errors.push(`Trigger ${rule.id} contains a duplicate phrase.`);
+            seen.add(key);
+        }
+    }
+    return errors;
+}
+function findScenarioTriggerConflict(scenarios, scenarioId, tenantId, rules, priority) {
+    const phrases = rules.flatMap((rule) => rule.type === "phrase"
+        ? (rule.phrases ?? []).map((phrase) => ({ locale: rule.locale ?? "ru-RU", matchMode: rule.matchMode ?? "contains", phrase: normalizeBotTriggerText(phrase, rule.locale), priority: priority + (rule.priority ?? 0) }))
+        : []);
+    const alwaysExcept = rules.find((rule) => rule.type === "always_except");
+    if (!phrases.length && !alwaysExcept)
+        return null;
+    for (const candidate of scenarios) {
+        if (candidate.id === scenarioId || candidate.tenantId !== tenantId || candidate.status !== "published" || candidate.enabled === false)
+            continue;
+        if (alwaysExcept) {
+            const other = (candidate.triggerRules ?? []).find((rule) => rule.type === "always_except");
+            if (other) {
+                const otherPriority = priority + (alwaysExcept.priority ?? 0);
+                const candidatePriority = normalizeScenarioPriority(candidate.priority) + normalizeScenarioPriority(other.priority);
+                if (otherPriority === candidatePriority) {
+                    return { conflictingScenarioId: candidate.id, phrase: "*", priority: otherPriority, type: "always_except" };
+                }
+            }
+        }
+        for (const rule of candidate.triggerRules ?? []) {
+            if (rule.type !== "phrase")
+                continue;
+            for (const phrase of rule.phrases ?? []) {
+                const candidatePriority = normalizeScenarioPriority(candidate.priority) + normalizeScenarioPriority(rule.priority);
+                const duplicate = phrases.find((item) => item.locale === (rule.locale ?? "ru-RU")
+                    && item.matchMode === (rule.matchMode ?? "contains")
+                    && item.priority === candidatePriority
+                    && item.phrase === normalizeBotTriggerText(phrase, rule.locale));
+                if (duplicate)
+                    return { conflictingScenarioId: candidate.id, phrase: duplicate.phrase, priority: duplicate.priority };
+            }
+        }
+    }
+    return null;
+}
+function normalizeBotScenarioStatus(value, fallback) {
+    const status = String(value ?? "").trim().toLowerCase();
+    const aliases = {
+        archived: "archived",
+        draft: "draft",
+        published: "published",
+        "\u0430\u0440\u0445\u0438\u0432": "archived",
+        "\u0447\u0435\u0440\u043d\u043e\u0432\u0438\u043a": "draft",
+        "\u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d": "published"
+    };
+    return aliases[status] ?? fallback;
+}
+function resolveVisitorMetricsRange(input) {
+    const now = new Date();
+    const to = validRangeDate(input.to) ?? now;
+    const from = validRangeDate(input.from) ?? new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+    if (from.getTime() > to.getTime())
+        return { from: new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString(), to: to.toISOString() };
+    return { from: from.toISOString(), to: to.toISOString() };
+}
+function validRangeDate(value) {
+    return value && Number.isFinite(Date.parse(value)) ? new Date(value) : null;
+}
+function automationTenantIdempotencyKey(tenantId, key) {
+    return `${tenantId}\u0000${key}`;
+}
+function isBotAiAgentsFlagEnforced() {
+    // BOT_AI_AGENTS_PILOT_ENFORCE — устаревшее имя, поддерживается один релиз.
+    const configured = process.env.BOT_AI_AGENTS_FLAG_ENFORCE ?? process.env.BOT_AI_AGENTS_PILOT_ENFORCE;
+    return String(configured ?? "").trim() === "1";
+}
+function proactiveRuleTenantId(rule) {
+    return String(rule.tenantId ?? "").trim() || null;
+}
+function scopedBotScenarios(scenarios, tenantId) {
+    return scenarios.filter((scenario) => scenarioTenantId(scenario) === tenantId);
+}
+function publishFailure(tenantId, scenarioId, errorCode, envelope) {
+    recordBotPublishFailure({ errorCode, scenarioId, tenantId });
+    return envelope;
+}
+function tenantRequiredEnvelope(operation) {
+    return invalidEnvelope(operation, "tenant_context_required", "Tenant context is required for automation runtime operations.", {});
+}
+//# sourceMappingURL=automation.service.js.map

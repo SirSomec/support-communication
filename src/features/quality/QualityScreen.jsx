@@ -317,13 +317,22 @@ function AutomationStatus({ capabilities }) {
   const connected = capabilities.aiProviderConnected;
   return (
     <section className="quality-rail-section quality-automation-panel">
-      <header><Bot size={18} /><h2>Автоматическая проверка</h2></header>
+      <header><Bot size={18} /><h2>Проверка текста ответа</h2></header>
+      <div className="quality-automation-explainer">
+        <strong>Это не CSI/CSAT</strong>
+        <p>CSI/CSAT ставит клиент после закрытия диалога. Здесь проверяется черновик ответа оператора до отправки.</p>
+      </div>
+      <ol className="quality-automation-steps">
+        <li><span>1</span><div><strong>Во время набора</strong><small>Локальные правила автоматически проверяют тон, полноту и следующий шаг.</small></div></li>
+        <li><span>2</span><div><strong>При запуске AI‑оценки</strong><small>Черновик передаётся AI только с согласием оператора. Если AI недоступен, остаётся проверка по правилам.</small></div></li>
+        <li><span>3</span><div><strong>После проверки</strong><small>Оценка от 0 до 100 и замечания сохраняются в журнале ниже.</small></div></li>
+      </ol>
       <dl>
         <div><dt>AI‑провайдер</dt><dd className={connected ? "ok" : "muted"}><i />{connected ? "Подключён" : "Отключён"}</dd></div>
         <div><dt>Режим оценки</dt><dd>{qualityScoringModeLabel(capabilities.scoringMode)}</dd></div>
         <div><dt>Передача данных</dt><dd>{connected ? "Только с согласием оператора" : "Данные не передаются"}</dd></div>
       </dl>
-      <p><ShieldCheck size={16} />Проверка запускается в редакторе ответа. Здесь отображаются только сохранённые результаты.</p>
+      <p><ShieldCheck size={16} />AI не выставляет CSI/CSAT и не меняет клиентскую оценку.</p>
     </section>
   );
 }
@@ -350,7 +359,7 @@ function QualityEmptyState({ onRefresh, refreshing }) {
       <ol>
         <li><span>1</span><div><strong>Собирайте оценки</strong><small>CSAT появится после закрытия и оценки диалога клиентом.</small></div></li>
         <li><span>2</span><div><strong>Проводите ручной QA</strong><small>Низкие оценки попадут в очередь проверки автоматически.</small></div></li>
-        <li><span>3</span><div><strong>Используйте автопроверку</strong><small>Результаты проверки ответов сохраняются в журнале справа.</small></div></li>
+        <li><span>3</span><div><strong>Проверяйте текст ответа</strong><small>Локальная проверка работает при наборе, а AI‑оценка запускается отдельно и не влияет на CSAT.</small></div></li>
       </ol>
       <button disabled={refreshing} onClick={onRefresh} type="button"><RefreshCw className={refreshing ? "spin" : undefined} size={16} />{refreshing ? "Обновляем" : "Проверить данные"}</button>
     </div>

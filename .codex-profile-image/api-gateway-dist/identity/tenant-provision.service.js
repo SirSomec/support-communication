@@ -1,0 +1,328 @@
+import { randomBytes, randomUUID } from "node:crypto";
+import { createEnvelope } from "@support-communication/envelope";
+import { makeAuditId } from "./backend-ids.js";
+import { BillingRepository } from "../billing/billing.repository.js";
+import { IdentityRepository, hashPasswordCredential } from "./identity.repository.js";
+import { apiMeta, identityTraceId } from "./identity-meta.js";
+import { IntegrationRepository } from "../integrations/integration.repository.js";
+const SERVICE = "tenantProvisionService";
+export class TenantProvisionService {
+    identityRepository;
+    billingRepository;
+    integrationRepository;
+    constructor(identityRepository = IdentityRepository.default(), billingRepository = BillingRepository.default(), integrationRepository = IntegrationRepository.default()) {
+        this.identityRepository = identityRepository;
+        this.billingRepository = billingRepository;
+        this.integrationRepository = integrationRepository;
+    }
+    async provisionTenant(payload = {}, request = {}) {
+        const traceId = identityTraceId(SERVICE, "provisionTenant");
+        const tenantName = String(payload.tenant?.name ?? "").trim();
+        const tenantSlug = normalizeSlug(payload.tenant?.slug);
+        const tenantRegion = String(payload.tenant?.region ?? "").trim() || "ru-1";
+        const adminName = String(payload.admin?.name ?? "").trim();
+        const adminEmail = String(payload.admin?.email ?? "").trim().toLowerCase();
+        const adminPassword = String(payload.admin?.password ?? "");
+        const adminRole = normalizeProvisionAdminRole(payload.admin?.role);
+        const mfaRequired = payload.admin?.mfa !== false;
+        const channelDomain = String(payload.channel?.domain ?? "").trim();
+        const billingCycle = payload.plan?.billingCycle === "annual" ? "annual" : "monthly";
+        const industry = String(payload.tenant?.industry ?? "").trim().slice(0, 80) || "unspecified";
+        const limits = normalizeProvisionLimits(payload.limits);
+        if (!tenantName || !tenantSlug || !adminName || !adminEmail || !adminPassword) {
+            return invalidProvision(traceId, "tenant_provision_payload_invalid", "Tenant, admin email/name, and admin password are required.");
+        }
+        if (!channelDomain) {
+            return invalidProvision(traceId, "tenant_provision_channel_domain_required", "A real SDK channel domain is required.");
+        }
+        if (!isValidChannelDomain(channelDomain)) {
+            return invalidProvision(traceId, "tenant_provision_channel_domain_invalid", "Channel domain must be a valid hostname.");
+        }
+        const tenantId = `tenant-${tenantSlug}`;
+        if (await this.identityRepository.findTenant(tenantId)) {
+            return invalidProvision(traceId, "tenant_slug_duplicate", "Tenant slug is already in use.");
+        }
+        const [existingAdmin, existingCredential] = await Promise.all([
+            this.identityRepository.findTenantUserByEmail(adminEmail),
+            this.identityRepository.findPasswordCredentialByEmail(adminEmail)
+        ]);
+        if (existingAdmin || existingCredential) {
+            return invalidProvision(traceId, "tenant_admin_email_duplicate", "Admin email is already assigned to another tenant.");
+        }
+        const billingStatus = payload.plan?.trial ? "trial" : "active";
+        const planId = String(payload.plan?.id ?? "trial").trim() || "trial";
+        const defaultWorkspaceIds = [`ws-${tenantSlug}-dialogs`, `ws-${tenantSlug}-settings`];
+        const compensation = [];
+        try {
+            compensation.push(async () => {
+                await this.identityRepository.removeProvisionedTenant(tenantId);
+            });
+            await this.identityRepository.saveTenant({
+                activeUsers: 1,
+                arr: 0,
+                domains: channelDomain ? [channelDomain] : [],
+                flags: [],
+                healthScore: 100,
+                id: tenantId,
+                incidentIds: [],
+                lastSeenAt: new Date().toISOString(),
+                legalName: tenantName,
+                monthlyRevenue: 0,
+                name: tenantName,
+                notes: "Provisioned through onboarding.",
+                onboarding: {
+                    adminRole,
+                    billingCycle,
+                    industry,
+                    limits,
+                    mfaRequired
+                },
+                owner: adminName,
+                ownerEmail: adminEmail,
+                planId,
+                region: tenantRegion,
+                sla: 100,
+                status: billingStatus,
+                users: 1,
+                workspaces: defaultWorkspaceIds.length
+            });
+            compensation.push(async () => {
+                await this.billingRepository.removeProvisionedTenant(tenantId);
+            });
+            await this.billingRepository.saveTenant({
+                arr: 0,
+                healthScore: 100,
+                id: tenantId,
+                monthlyRevenue: 0,
+                name: tenantName,
+                owner: adminName,
+                planId,
+                region: tenantRegion,
+                sla: "99.9",
+                status: billingStatus,
+                usage: {
+                    aiTokens: 0,
+                    botRuns: 0,
+                    channels: 1,
+                    operators: 1,
+                    reportExports: 0,
+                    storageGb: 0,
+                    webhooks: 0
+                },
+                users: 1,
+                workspaces: defaultWorkspaceIds.length
+            });
+            const user = {
+                device: "Provisioned during onboarding",
+                email: adminEmail,
+                id: `usr-${randomUUID()}`,
+                inviteStatus: "accepted",
+                lastActiveAt: new Date().toISOString(),
+                mfa: mfaRequired ? "required" : "disabled",
+                name: adminName,
+                risk: "low",
+                role: adminRole,
+                sessions: 0,
+                status: "active",
+                supportNotes: "Created by tenant onboarding.",
+                tenantId
+            };
+            await this.identityRepository.saveTenantUser(user);
+            await this.identityRepository.savePasswordCredential({
+                algorithm: "scrypt",
+                email: adminEmail,
+                hash: hashPasswordCredential(adminPassword),
+                subjectId: user.id,
+                updatedAt: new Date().toISOString(),
+                version: 1
+            });
+            const activePolicy = await this.identityRepository.getActiveRbacPolicyVersion();
+            const roleGrants = [];
+            if (activePolicy) {
+                const grant = {
+                    action: "*",
+                    createdAt: new Date().toISOString(),
+                    createdBy: request.serviceAdminContext?.actor.id ?? "service-admin",
+                    effect: "allow",
+                    id: `grant_${randomUUID()}`,
+                    policyVersionId: activePolicy.id,
+                    resource: "tenant",
+                    // Канонический ключ роли владельца тенанта — "admin" ("owner"/"владелец"
+                    // лишь его алиасы). permission.service грузит гранты по резолвнутому
+                    // ключу роли (admin), а FK rbac_role_grants → permission_roles(key)
+                    // отвергает alias-значение на Postgres.
+                    roleKey: "admin",
+                    tenantId,
+                    traceId
+                };
+                await this.identityRepository.recordRbacRoleGrant(grant);
+                roleGrants.push(grant);
+            }
+            for (const employee of payload.employees ?? []) {
+                const employeeEmail = String(employee.email ?? "").trim().toLowerCase();
+                if (!employeeEmail || employeeEmail === adminEmail) {
+                    continue;
+                }
+                await this.identityRepository.saveTenantUser({
+                    device: "Invited during onboarding",
+                    email: employeeEmail,
+                    id: `usr-${randomUUID()}`,
+                    inviteStatus: "pending",
+                    lastActiveAt: new Date().toISOString(),
+                    // MFA (email-OTP) обязательна на платформе и включена у всех по умолчанию.
+                    mfa: "enabled",
+                    name: String(employee.name ?? employeeEmail.split("@")[0] ?? "Employee"),
+                    risk: "low",
+                    role: String(employee.role ?? "Operator"),
+                    sessions: 0,
+                    status: "active",
+                    supportNotes: `Invited during onboarding (${String(employee.team ?? "Support")}).`,
+                    tenantId
+                });
+            }
+            const rawPublicApiKey = generateStageApiKey();
+            compensation.push(async () => {
+                await this.integrationRepository.removeProvisionedTenant(tenantId);
+            });
+            await this.integrationRepository.savePublicApiKey({
+                createdAt: new Date().toISOString(),
+                environment: "stage",
+                keyId: `key-${tenantSlug}-${randomUUID()}`,
+                name: `${tenantName} SDK stage key`,
+                owner: request.serviceAdminContext?.actor.name ?? "service-admin",
+                rawSecret: rawPublicApiKey,
+                scopes: ["clients:identify", "conversations:write"],
+                status: "active",
+                tenantId
+            });
+            await this.identityRepository.recordServiceAdminAuditEvent({
+                action: "tenant.provision",
+                actor: request.serviceAdminContext?.actor.id ?? "service-admin",
+                actorName: request.serviceAdminContext?.actor.name ?? "Service Admin",
+                at: new Date().toISOString(),
+                id: makeAuditId("tenant_provision"),
+                immutable: true,
+                reason: `Provisioned tenant ${tenantId}`,
+                result: "ok",
+                severity: "info",
+                target: tenantId,
+                tenantId,
+                traceId,
+                userId: user.id
+            });
+            const createdSession = await this.identityRepository.createTenantOperatorSession({
+                tenantId,
+                userId: user.id
+            });
+            const embedSnippet = `<script src="https://${channelDomain}/sdk.js" data-api-key="${rawPublicApiKey}" data-tenant-id="${tenantId}" data-channel="${String(payload.channel?.type ?? "sdk").trim() || "sdk"}"></script>`;
+            return createEnvelope({
+                service: SERVICE,
+                operation: "provisionTenant",
+                traceId,
+                meta: apiMeta({ tenantId }),
+                data: {
+                    tenant: {
+                        id: tenantId,
+                        name: tenantName,
+                        planId,
+                        region: tenantRegion,
+                        slug: tenantSlug,
+                        status: billingStatus
+                    },
+                    tenantId,
+                    admin: {
+                        email: user.email,
+                        id: user.id,
+                        name: user.name,
+                        role: user.role,
+                        tenantId: user.tenantId
+                    },
+                    operator: {
+                        email: user.email,
+                        id: user.id,
+                        name: user.name,
+                        role: user.role
+                    },
+                    session: {
+                        accessToken: createdSession.accessToken,
+                        expiresAt: createdSession.expiresAt
+                    },
+                    roleGrants,
+                    defaultWorkspaceIds,
+                    publicApiKey: rawPublicApiKey,
+                    embedSnippet
+                }
+            });
+        }
+        catch (error) {
+            const rollbackErrors = [];
+            for (const rollback of compensation.reverse()) {
+                try {
+                    await rollback();
+                }
+                catch (rollbackError) {
+                    rollbackErrors.push(rollbackError instanceof Error ? rollbackError.message : "Unknown compensation failure.");
+                }
+            }
+            const causeMessage = error instanceof Error ? error.message : "Tenant provisioning failed.";
+            return createEnvelope({
+                service: SERVICE,
+                operation: "provisionTenant",
+                traceId,
+                status: "error",
+                meta: apiMeta(),
+                data: {},
+                error: {
+                    code: rollbackErrors.length > 0 ? "tenant_provision_rollback_failed" : "tenant_provision_failed",
+                    message: rollbackErrors.length > 0
+                        ? `${causeMessage} Compensation errors: ${rollbackErrors.join("; ")}`
+                        : causeMessage
+                }
+            });
+        }
+    }
+}
+function invalidProvision(traceId, code, message) {
+    return createEnvelope({
+        service: SERVICE,
+        operation: "provisionTenant",
+        traceId,
+        status: "invalid",
+        meta: apiMeta(),
+        data: {},
+        error: { code, message }
+    });
+}
+function normalizeSlug(input) {
+    return String(input ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+}
+function normalizeProvisionAdminRole(value) {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    return normalized === "admin" || normalized === "administrator" || normalized === "администратор"
+        ? "Admin"
+        : "Owner";
+}
+function normalizeProvisionLimits(input) {
+    return {
+        afterHoursBot: Boolean(input?.afterHoursBot),
+        aiAssist: input?.aiAssist !== false,
+        concurrentDialogs: boundedInteger(input?.concurrentDialogs, 12, 1, 100),
+        dailyMessages: boundedInteger(input?.dailyMessages, 5000, 100, 10_000_000),
+        operatorLimit: boundedInteger(input?.operatorLimit, 8, 1, 10_000)
+    };
+}
+function boundedInteger(value, fallback, minimum, maximum) {
+    const parsed = Math.floor(Number(value));
+    return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
+}
+function isValidChannelDomain(domain) {
+    return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain);
+}
+function generateStageApiKey() {
+    return `sk_stage_${randomBytes(18).toString("hex")}`;
+}
+//# sourceMappingURL=tenant-provision.service.js.map

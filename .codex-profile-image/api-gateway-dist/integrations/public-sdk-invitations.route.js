@@ -1,0 +1,69 @@
+import { createEnvelope } from "@support-communication/envelope";
+import { resolvePublicApiRequest } from "./public-api-auth.js";
+import { scopedSdkPresenceHash } from "./public-sdk-presence.route.js";
+import { createVisitorSessionToken } from "./public-sdk-messages.route.js";
+export async function handlePublicSdkInvitationPoll(input) {
+    const context = await resolveSession(input, "pollPublicSdkInvitations");
+    if ("response" in context)
+        return context.response;
+    const pending = await input.exposureRepository.listPendingForSession(context.tenantId, context.presenceSessionId);
+    const deliveredAt = validNow(input.now);
+    const invitations = await Promise.all(pending.map(async (exposure) => await input.exposureRepository.markDelivered({ at: deliveredAt, exposureId: exposure.exposureId,
+        presenceSessionId: context.presenceSessionId, tenantId: context.tenantId }) ?? exposure));
+    return createEnvelope({ service: "integrationService", operation: "pollPublicSdkInvitations",
+        meta: { apiVersion: "v1", source: "api" }, data: { invitations: invitations.map(publicInvitation), sessionId: context.sessionId } });
+}
+export async function handlePublicSdkInvitationAcknowledge(input) {
+    const operation = `${input.action}PublicSdkInvitation`;
+    const context = await resolveSession(input, operation);
+    if ("response" in context)
+        return context.response;
+    const exposureId = String(input.exposureId ?? "").trim();
+    if (!exposureId)
+        return invalid(operation, "proactive_exposure_id_required");
+    let exposure = await input.exposureRepository.transition({ at: validNow(input.now),
+        ...(input.conversationId ? { conversationId: input.conversationId } : {}), exposureId,
+        ...(input.failureCode ? { failureCode: input.failureCode.slice(0, 120) } : {}), presenceSessionId: context.presenceSessionId,
+        status: input.action, tenantId: context.tenantId });
+    if (!exposure)
+        return invalid(operation, "proactive_exposure_not_found");
+    if (input.action === "accepted" && !exposure.conversationId && input.onAccepted) {
+        const conversationId = await input.onAccepted(exposure);
+        if (conversationId)
+            exposure = await input.exposureRepository.transition({ at: validNow(input.now), conversationId,
+                exposureId, presenceSessionId: context.presenceSessionId, status: "accepted", tenantId: context.tenantId }) ?? exposure;
+    }
+    return createEnvelope({ service: "integrationService", operation, meta: { apiVersion: "v1", source: "api" },
+        data: { attribution: { experimentId: exposure.experimentId, experimentVersion: exposure.experimentVersion,
+                exposureId: exposure.exposureId, ruleId: exposure.ruleId, variant: exposure.variant }, conversationId: exposure.conversationId,
+            exposureId: exposure.exposureId, status: exposure.status,
+            ...(input.action === "accepted" && exposure.conversationId ? {
+                visitorSessionToken: createVisitorSessionToken({ conversationId: exposure.conversationId, tenantId: context.tenantId })
+            } : {}) } });
+}
+async function resolveSession(input, operation) {
+    const auth = await resolvePublicApiRequest({ authorization: input.authorization, environment: input.environment,
+        lookup: input.lookup, requiredScope: "clients:identify" });
+    if (!auth.allowed)
+        return { response: invalid(operation, auth.code) };
+    const sessionId = String(input.sessionId ?? "").trim().slice(0, 160);
+    const connectionId = String(auth.context.channelConnectionId ?? "").trim();
+    if (!sessionId || !connectionId)
+        return { response: invalid(operation, "sdk_presence_session_id_required") };
+    const sessionHash = scopedSdkPresenceHash(auth.context.tenantId, connectionId, sessionId);
+    const sessions = await input.integrationRepository.listLiveSdkVisitorPresence({ at: validNow(input.now), tenantId: auth.context.tenantId });
+    const presence = sessions.find((item) => item.channelConnectionId === connectionId && item.sessionKeyHash === sessionHash);
+    if (!presence)
+        return { response: invalid(operation, "sdk_presence_session_not_live") };
+    return { presenceSessionId: presence.id, sessionId, tenantId: auth.context.tenantId };
+}
+function publicInvitation(exposure) {
+    return { experimentVersion: exposure.experimentVersion, exposureId: exposure.exposureId, message: exposure.message,
+        plannedAt: exposure.plannedAt, ruleId: exposure.ruleId, variant: exposure.variant };
+}
+function validNow(value) { return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : new Date().toISOString(); }
+function invalid(operation, code) {
+    return createEnvelope({ service: "integrationService", operation, status: "invalid",
+        data: {}, error: { code, message: "The proactive invitation request is invalid for this SDK session." } });
+}
+//# sourceMappingURL=public-sdk-invitations.route.js.map

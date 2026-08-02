@@ -1,0 +1,87 @@
+export interface IntegrationConnection {
+    env: "beta" | "prod" | "stage";
+    id: string;
+    lastEvent: string;
+    name: string;
+    rawId: string;
+    status: string;
+    traffic: string;
+}
+export interface ChannelDetail {
+    channel: string;
+    connections: IntegrationConnection[];
+    detail: string;
+    groups: string[];
+    health: number;
+    id: string;
+    lastSync: string;
+    limit: string;
+    name: string;
+    rawId: string;
+    route: string;
+    status: string;
+}
+export interface ApiEnvironmentKey {
+    env: "production" | "stage";
+    id: string;
+    keyPreview: string;
+    lastRotated: string;
+    name: string;
+    owner: string;
+    protection: string;
+    scopes: string[];
+    status: string;
+}
+export interface WebhookDelivery {
+    attempts: number;
+    endpointId: string;
+    event: string;
+    httpStatus: string;
+    id: string;
+    status: string;
+    time: string;
+    traceId: string;
+}
+export interface SecuritySession {
+    device: string;
+    id: string;
+    ip: string;
+    lastSeen: string;
+    role: string;
+    status: string;
+    user: string;
+}
+export declare const channelDetails: ChannelDetail[];
+export declare const apiEnvironmentKeys: ApiEnvironmentKey[];
+export declare const webhookEndpoints: {
+    id: string;
+    name: string;
+    channel: string;
+    url: string;
+    status: string;
+    signature: string;
+    retries: string;
+    lastDelivery: string;
+    failureRate: string;
+}[];
+export declare const webhookDeliveryLog: WebhookDelivery[];
+export declare const apiChangelog: {
+    version: string;
+    title: string;
+    detail: string;
+}[];
+export declare const securityControls: {
+    id: string;
+    title: string;
+    state: string;
+    detail: string;
+    tone: string;
+}[];
+export declare const activeSecuritySessions: SecuritySession[];
+export declare const securityAlerts: {
+    id: string;
+    time: string;
+    level: string;
+    text: string;
+    route: string;
+}[];

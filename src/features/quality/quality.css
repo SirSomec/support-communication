@@ -122,6 +122,15 @@
 .quality-rail-section { padding: 20px; border-bottom: 1px solid var(--line); }
 .quality-rail-section > header { display: flex; align-items: center; gap: 8px; margin-bottom: 15px; color: #162941; }
 .quality-rail-section h2 { margin: 0; font-size: 15px; }
+.quality-automation-explainer { margin-bottom: 14px; padding: 12px; border: 1px solid #cfe0f5; border-radius: 8px; background: #f3f8ff; }
+.quality-automation-explainer strong { color: #1559a6; font-size: 12px; }
+.quality-automation-explainer p { margin: 5px 0 0; color: #425873; font-size: 12px; line-height: 1.5; }
+.quality-automation-steps { display: grid; gap: 11px; margin: 0 0 16px; padding: 0; list-style: none; }
+.quality-automation-steps li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 9px; align-items: start; }
+.quality-automation-steps li > span { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; background: #e9f2ff; color: #1768d1; font-size: 11px; font-weight: 800; }
+.quality-automation-steps li div { display: grid; gap: 2px; min-width: 0; }
+.quality-automation-steps strong { color: #263c58; font-size: 12px; }
+.quality-automation-steps small { color: #67768c; font-size: 11px; line-height: 1.45; }
 .quality-automation-panel dl { display: grid; margin: 0; }
 .quality-automation-panel dl div { display: grid; grid-template-columns: 1fr minmax(120px, 1.1fr); gap: 12px; align-items: start; padding: 11px 0; border-top: 1px solid #e3e8f0; }
 .quality-automation-panel dt { color: #67768c; font-size: 12px; }

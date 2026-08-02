@@ -1,0 +1,247 @@
+import { createHash, createHmac } from "node:crypto";
+export function createObjectStorageSigner(source = process.env, options = {}) {
+    return hasS3Configuration(source)
+        ? createS3CompatibleObjectStorageSigner(source, options)
+        : createLocalObjectStorageSigner(options);
+}
+export function createDeterministicObjectStorageSigner(options = {}) {
+    const expiresSeconds = options.expiresSeconds ?? 900;
+    const now = options.now ?? (() => new Date("2026-06-28T12:00:00.000Z"));
+    const metadataByFileId = options.metadataByFileId ?? {};
+    return {
+        getObjectMetadata(input) {
+            options.onMetadataInput?.(input);
+            if (options.metadata) {
+                return options.metadata(input);
+            }
+            return metadataByFileId[input.fileId];
+        },
+        signDownload(input) {
+            return {
+                method: "GET",
+                url: `https://storage.example.test/download/${input.fileId}`,
+                expiresAt: addSeconds(now(), expiresSeconds).toISOString()
+            };
+        },
+        signUpload(input) {
+            return {
+                method: "PUT",
+                url: `https://storage.example.test/upload/${input.fileId}`,
+                expiresAt: addSeconds(now(), expiresSeconds).toISOString()
+            };
+        }
+    };
+}
+export function createS3CompatibleObjectStorageSigner(source, options = {}) {
+    const endpoint = new URL(source.S3_ENDPOINT);
+    const accessKey = source.S3_ACCESS_KEY;
+    const secretKey = source.S3_SECRET_KEY;
+    const bucket = source.S3_BUCKET;
+    const region = source.S3_REGION?.trim() || "us-east-1";
+    const publicUploadBase = normalizePublicUploadBase(source.S3_PUBLIC_UPLOAD_BASE);
+    const expiresSeconds = options.expiresSeconds ?? 900;
+    const metadataFetcher = options.metadataFetcher ?? globalThis.fetch;
+    const metadataTimeoutMs = Math.max(1, Math.trunc(Number(options.metadataTimeoutMs)) || 10_000);
+    const now = options.now ?? (() => new Date());
+    return {
+        async getObjectMetadata(input) {
+            const signedAt = now();
+            const url = presignS3Url({
+                accessKey,
+                bucket,
+                endpoint,
+                expiresSeconds,
+                method: "HEAD",
+                objectKey: input.objectKey,
+                region,
+                secretKey,
+                signedAt
+            });
+            const response = await metadataFetcher(url, {
+                method: "HEAD",
+                signal: AbortSignal.timeout(metadataTimeoutMs)
+            });
+            if (response.status === 404) {
+                return undefined;
+            }
+            if (!response.ok) {
+                throw new Error(`object_storage_metadata_failed:${response.status}`);
+            }
+            const size = Number(response.headers.get("content-length"));
+            const checksum = response.headers.get("x-amz-checksum-sha256")
+                ?? response.headers.get("x-amz-meta-sha256")
+                ?? undefined;
+            return {
+                ...(checksum ? { checksum } : {}),
+                ...(Number.isFinite(size) && size >= 0 ? { sizeBytes: size } : {})
+            };
+        },
+        signDownload(input) {
+            const signedAt = now();
+            return {
+                method: "GET",
+                url: presignS3Url({ accessKey, bucket, endpoint, expiresSeconds, method: "GET", objectKey: input.objectKey, region, secretKey, signedAt }),
+                expiresAt: addSeconds(signedAt, expiresSeconds).toISOString()
+            };
+        },
+        signUpload(input) {
+            const signedAt = now();
+            const signedUrl = presignS3Url({
+                accessKey,
+                bucket,
+                endpoint,
+                expiresSeconds,
+                headers: {
+                    "content-type": input.contentType
+                },
+                method: "PUT",
+                objectKey: input.objectKey,
+                region,
+                secretKey,
+                signedAt
+            });
+            return {
+                method: "PUT",
+                url: publicUploadBase ? `${publicUploadBase}${signedUrl.slice(endpoint.origin.length)}` : signedUrl,
+                expiresAt: addSeconds(signedAt, expiresSeconds).toISOString(),
+                headers: {
+                    "content-type": input.contentType
+                }
+            };
+        }
+    };
+}
+/** "/s3" или абсолютный http(s)-префикс без хвостового слэша; пустое/кривое значение выключает rewrite. */
+function normalizePublicUploadBase(value) {
+    const trimmed = String(value ?? "").trim().replace(/\/+$/, "");
+    if (!trimmed)
+        return null;
+    if (trimmed.startsWith("/"))
+        return trimmed;
+    try {
+        const parsed = new URL(trimmed);
+        return parsed.protocol === "http:" || parsed.protocol === "https:" ? trimmed : null;
+    }
+    catch {
+        return null;
+    }
+}
+export function createLocalObjectStorageSigner(options = {}) {
+    const expiresSeconds = options.expiresSeconds ?? 900;
+    const now = options.now ?? (() => new Date());
+    return {
+        signDownload(input) {
+            return {
+                method: "GET",
+                url: `https://storage.local/download/${input.fileId}`,
+                expiresAt: addSeconds(now(), expiresSeconds).toISOString()
+            };
+        },
+        signUpload(input) {
+            return {
+                method: "PUT",
+                url: `https://storage.local/upload/${input.fileId}`,
+                expiresAt: addSeconds(now(), expiresSeconds).toISOString()
+            };
+        }
+    };
+}
+function presignS3Url(input) {
+    const dateStamp = formatDateStamp(input.signedAt);
+    const amzDate = formatAmzDate(input.signedAt);
+    const credentialScope = `${dateStamp}/${input.region}/s3/aws4_request`;
+    const canonicalUri = canonicalS3Path(input.endpoint, input.bucket, input.objectKey);
+    const query = {
+        "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+        "X-Amz-Credential": `${input.accessKey}/${credentialScope}`,
+        "X-Amz-Date": amzDate,
+        "X-Amz-Expires": String(input.expiresSeconds),
+        "X-Amz-SignedHeaders": signedHeaderNames(input.headers)
+    };
+    const canonicalQuery = canonicalQueryString(query);
+    const canonicalHeaders = `${canonicalHeaderString(input.endpoint, input.headers)}\n`;
+    const signedHeaders = signedHeaderNames(input.headers);
+    const canonicalRequest = [
+        input.method,
+        canonicalUri,
+        canonicalQuery,
+        canonicalHeaders,
+        signedHeaders,
+        "UNSIGNED-PAYLOAD"
+    ].join("\n");
+    const stringToSign = [
+        "AWS4-HMAC-SHA256",
+        amzDate,
+        credentialScope,
+        sha256(canonicalRequest)
+    ].join("\n");
+    const signingKey = deriveSigningKey(input.secretKey, dateStamp, input.region);
+    const signature = hmacHex(signingKey, stringToSign);
+    return `${input.endpoint.origin}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+}
+function hasS3Configuration(source) {
+    return Boolean(source.S3_ACCESS_KEY?.trim()
+        && source.S3_BUCKET?.trim()
+        && source.S3_ENDPOINT?.trim()
+        && source.S3_SECRET_KEY?.trim());
+}
+function canonicalS3Path(endpoint, bucket, objectKey) {
+    const basePath = endpoint.pathname.replace(/\/+$/, "");
+    return `${basePath}/${encodePathSegment(bucket)}/${objectKey.split("/").map(encodePathSegment).join("/")}`;
+}
+function canonicalQueryString(values) {
+    return Object.entries(values)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => `${encodeRfc3986(key)}=${encodeRfc3986(value)}`)
+        .join("&");
+}
+function canonicalHeaderString(endpoint, headers = {}) {
+    const normalized = {
+        ...Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value.trim().replace(/\s+/g, " ")])),
+        host: endpoint.host
+    };
+    return Object.entries(normalized)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => `${key}:${value}`)
+        .join("\n");
+}
+function signedHeaderNames(headers = {}) {
+    return [...Object.keys(headers).map((key) => key.toLowerCase()), "host"].sort().join(";");
+}
+function deriveSigningKey(secretKey, dateStamp, region) {
+    const dateKey = hmacBuffer(`AWS4${secretKey}`, dateStamp);
+    const regionKey = hmacBuffer(dateKey, region);
+    const serviceKey = hmacBuffer(regionKey, "s3");
+    return hmacBuffer(serviceKey, "aws4_request");
+}
+function hmacBuffer(key, value) {
+    return createHmac("sha256", key).update(value, "utf8").digest();
+}
+function hmacHex(key, value) {
+    return createHmac("sha256", key).update(value, "utf8").digest("hex");
+}
+function sha256(value) {
+    return createHash("sha256").update(value, "utf8").digest("hex");
+}
+function encodePathSegment(value) {
+    if (value === ".") {
+        return "%2E";
+    }
+    if (value === "..") {
+        return "%2E%2E";
+    }
+    return encodeRfc3986(value);
+}
+function encodeRfc3986(value) {
+    return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+function formatDateStamp(value) {
+    return value.toISOString().slice(0, 10).replace(/-/g, "");
+}
+function formatAmzDate(value) {
+    return `${formatDateStamp(value)}T${value.toISOString().slice(11, 19).replace(/:/g, "")}Z`;
+}
+function addSeconds(value, seconds) {
+    return new Date(value.getTime() + seconds * 1000);
+}
+//# sourceMappingURL=object-storage.js.map

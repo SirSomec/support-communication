@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Inbox, ListTree, PauseCircle, PlayCircle, PlugZap, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
+import { Inbox, PauseCircle, PlayCircle, PlugZap, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import { ChannelBadge, ConfirmDialog } from "../../ui.jsx";
 import { FieldHint, InlineHint, SettingsModal, SettingsSectionHeader } from "./SettingsPrimitives.jsx";
 import { submitSettingsChannelStatusToggle } from "../../app/settingsChannelActions.js";
 import { integrationService } from "../../services/integrationService.js";
 import { routingService } from "../../services/routingService.js";
-import { settingsService } from "../../services/settingsService.js";
 
 const typeLabels = {
   max: "MAX",
@@ -35,9 +34,6 @@ const detailTabs = [
 export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelType = "", focusConnectionId = "", onSummaryChange, onToast }) {
   const [connections, setConnections] = useState([]);
   const [queues, setQueues] = useState([]);
-  const [newQueueName, setNewQueueName] = useState("");
-  const [newQueueTeamId, setNewQueueTeamId] = useState("");
-  const [teams, setTeams] = useState([]);
   const [availableTypes, setAvailableTypes] = useState(["sdk", "telegram", "max", "vk"]);
   const [selectedType, setSelectedType] = useState("all");
   const [selectedConnectionId, setSelectedConnectionId] = useState("");
@@ -49,10 +45,8 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
-  const [queueError, setQueueError] = useState("");
   const [detailTab, setDetailTab] = useState("overview");
   const [isCreateOpen, setCreateOpen] = useState(false);
-  const [isQueueManagerOpen, setQueueManagerOpen] = useState(false);
   const canMutateConnections = canEditSettings && !error;
   const isTokenManagedType = tokenManagedTypes.has(form.type);
   const [testPayload, setTestPayload] = useState({
@@ -158,15 +152,13 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
   async function loadConnections() {
     setLoading(true);
     setError("");
-    const [response, queueResponse, employeeResponse] = await Promise.all([
+    const [response, queueResponse] = await Promise.all([
       integrationService.fetchChannelConnections(),
-      routingService.fetchQueues({ status: "active" }),
-      settingsService.fetchEmployees()
+      routingService.fetchQueues({ status: "active" })
     ]);
-    if (response.status === "ok" && queueResponse.status === "ok" && employeeResponse.status === "ok") {
+    if (response.status === "ok" && queueResponse.status === "ok") {
       const nextConnections = response.data.connections ?? [];
       setQueues(queueResponse.data.queues ?? []);
-      setTeams(employeeResponse.data.groups ?? []);
       setConnections(nextConnections);
       setAvailableTypes(response.data.availableTypes ?? availableTypes);
       onSummaryChange?.({
@@ -177,7 +169,6 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
       setError(response.error?.message ?? "Не удалось загрузить подключения.");
       setConnections([]);
       setQueues([]);
-      setTeams([]);
       onSummaryChange?.({ unavailable: true });
     }
     setLoading(false);
@@ -215,44 +206,6 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
 
     await loadConnections();
     onToast?.(`${channel.name}: ${nextEnabled ? "включен" : "отключен"} через backend, audit ${result.auditId}.`);
-  }
-
-  async function createQueue() {
-    const name = newQueueName.trim();
-    if (!name || !canMutateConnections) return;
-    setBusy("create-queue");
-    setQueueError("");
-    const selectedTeam = teams.find((team) => team.id === newQueueTeamId);
-    const response = await routingService.createQueue({
-      ...(selectedTeam ? { defaultTeamId: selectedTeam.id, memberIds: selectedTeam.memberIds ?? [] } : {}),
-      name
-    });
-    setBusy("");
-    if (response.status !== "ok") {
-      setQueueError(response.error?.message ?? "Не удалось создать очередь.");
-      return;
-    }
-    setNewQueueName("");
-    await loadConnections();
-    setForm((current) => ({ ...current, routingQueueId: response.data.queue.id }));
-    onToast?.(`${response.data.queue.name}: очередь создана.`);
-  }
-
-  async function updateQueueTeam(queue, teamId) {
-    const team = teams.find((item) => item.id === teamId);
-    setBusy(`queue:${queue.id}`);
-    setQueueError("");
-    const response = await routingService.updateQueue(queue.id, {
-      defaultTeamId: team?.id ?? null,
-      memberIds: team?.memberIds ?? []
-    });
-    setBusy("");
-    if (response.status !== "ok") {
-      setQueueError(response.error?.message ?? "Не удалось изменить команду очереди.");
-      return;
-    }
-    await loadConnections();
-    onToast?.(`${queue.name}: команда очереди изменена.`);
   }
 
   async function createConnection(event) {
@@ -394,22 +347,16 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
         meta={loading ? "загрузка" : `${totals.active} из ${totals.total} активны`}
         hint="Каналы, по которым клиенты пишут в поддержку. Новые обращения попадают в выбранную очередь."
         actions={
-          <>
-            <button className="settings-ghost-action" onClick={() => { setQueueError(""); setQueueManagerOpen(true); }} title="Очереди приема и команды, которые их разбирают" type="button">
-              <ListTree size={16} />
-              Очереди
-            </button>
-            <button
-              className="primary-action settings-create-connection"
-              disabled={!canMutateConnections}
-              onClick={openCreateModal}
-              title={canMutateConnections ? "Подключить новый канал" : access.reason}
-              type="button"
-            >
-              <Plus size={16} />
-              Новое подключение
-            </button>
-          </>
+          <button
+            className="primary-action settings-create-connection"
+            disabled={!canMutateConnections}
+            onClick={openCreateModal}
+            title={canMutateConnections ? "Подключить новый канал" : access.reason}
+            type="button"
+          >
+            <Plus size={16} />
+            Новое подключение
+          </button>
         }
       />
 
@@ -725,63 +672,6 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
             </div>
             {formError ? <div className="settings-form-error" role="alert">{formError}</div> : null}
           </form>
-        </SettingsModal>
-      ) : null}
-
-      {isQueueManagerOpen ? (
-        <SettingsModal
-          eyebrow="Подключения"
-          onClose={() => setQueueManagerOpen(false)}
-          size="wide"
-          title="Очереди приема"
-          titleId="queue-manager-title"
-        >
-          <div className="queue-manager">
-            <InlineHint>Очередь определяет, какая команда разбирает обращения. Подключение всегда направляет сообщения в одну очередь.</InlineHint>
-            {queueError ? <div className="settings-form-error" role="alert">{queueError}</div> : null}
-            <div className="queue-manager-list settings-scroll" aria-label="Список очередей">
-              {queues.map((queue) => (
-                <div className="connection-row queue-row" key={queue.id}>
-                  <div>
-                    <strong>{queue.name}</strong>
-                    <span>{queue.memberCounts?.queue ?? 0} участников</span>
-                  </div>
-                  <select
-                    aria-label={`Команда очереди ${queue.name}`}
-                    disabled={!canMutateConnections || busy === `queue:${queue.id}`}
-                    onChange={(event) => updateQueueTeam(queue, event.target.value)}
-                    value={queue.defaultTeamId ?? ""}
-                  >
-                    <option value="">Без команды</option>
-                    {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
-                  </select>
-                </div>
-              ))}
-              {!queues.length ? <div className="channel-log-empty">Очередей пока нет — создайте первую ниже.</div> : null}
-            </div>
-            <div className="queue-manager-create" aria-label="Создание очереди">
-              <label>
-                <span>Новая очередь</span>
-                <input
-                  aria-label="Название новой очереди"
-                  disabled={!canMutateConnections || busy === "create-queue"}
-                  onChange={(event) => setNewQueueName(event.target.value)}
-                  placeholder="Например, VIP поддержка"
-                  value={newQueueName}
-                />
-              </label>
-              <label>
-                <span>Команда</span>
-                <select aria-label="Команда новой очереди" disabled={!canMutateConnections || busy === "create-queue"} onChange={(event) => setNewQueueTeamId(event.target.value)} value={newQueueTeamId}>
-                  <option value="">Без команды</option>
-                  {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
-                </select>
-              </label>
-              <button disabled={!newQueueName.trim() || !canMutateConnections || busy === "create-queue"} onClick={createQueue} type="button">
-                <Plus size={16} /> Создать очередь
-              </button>
-            </div>
-          </div>
         </SettingsModal>
       ) : null}
 

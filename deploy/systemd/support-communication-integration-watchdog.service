@@ -1,0 +1,12 @@
+[Unit]
+Description=Support Communication integration watchdog
+After=network-online.target docker.service xray-telegram.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/support-communication/app/deploy/scripts/production-integration-watchdog.sh
+ReadWritePaths=/var/lib/support-communication
+NoNewPrivileges=true
+PrivateTmp=true
+

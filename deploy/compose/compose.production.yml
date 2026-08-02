@@ -44,6 +44,15 @@ x-runtime-environment: &runtime-environment
   REALTIME_REDIS_FANOUT_ENABLED: "true"
   REALTIME_REDIS_CHANNEL: ${REALTIME_REDIS_CHANNEL:-support:realtime}
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  NODE_USE_ENV_PROXY: "1"
+  HTTPS_PROXY: ${TELEGRAM_HTTPS_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio,api-gateway,frontend}
+  # Telegram must use exactly one ingress mechanism.  Keep this explicit so a
+  # configured bot cannot silently fall back to a disabled worker after deploy.
+  TELEGRAM_INGRESS_MODE: ${TELEGRAM_INGRESS_MODE:-disabled}
+  TELEGRAM_WEBHOOK_ENABLED: ${TELEGRAM_WEBHOOK_ENABLED:-false}
+  TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
+  TELEGRAM_POLLING_TIMEOUT_MS: ${TELEGRAM_POLLING_TIMEOUT_MS:-30000}
   WORKER_HEALTH_PORT: 4110
   WORKER_HEARTBEAT_INTERVAL_MS: 5000
   WORKER_HEARTBEAT_STALE_AFTER_MS: 15000

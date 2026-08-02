@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Support Communication integrations every five minutes
+
+[Timer]
+OnBootSec=3m
+OnUnitActiveSec=5m
+Persistent=true
+Unit=support-communication-integration-watchdog.service
+
+[Install]
+WantedBy=timers.target

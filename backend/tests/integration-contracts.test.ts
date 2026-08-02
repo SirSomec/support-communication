@@ -221,13 +221,14 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     assert.equal(missing.error?.code, "channel_type_connections_not_found");
   });
 
-  it("provisions Telegram and MAX channel connections from token without manual webhook URL", async () => {
+  it("provisions Telegram, VK and MAX channel connections from token without manual webhook URL", async () => {
     const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
     const providerCredentialCrypto = new ProviderConnectionCrypto({
       keyVersion: "test-v1",
       masterKeyBase64: Buffer.alloc(32, 7).toString("base64")
     });
     let telegramGetMeUrl = "";
+    const vkCalls: string[] = [];
     const integrations = new IntegrationService(repository, {
       maxFetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ success: true }) }),
       providerCredentialCrypto,
@@ -238,6 +239,19 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
           ok: true,
           status: 200
         };
+      },
+      vkFetch: async (input) => {
+        vkCalls.push(input);
+        if (input.endsWith("groups.getCallbackConfirmationCode")) {
+          return { ok: true, status: 200, text: async () => JSON.stringify({ response: { code: "vk-confirmation" } }) };
+        }
+        if (input.endsWith("groups.addCallbackServer")) {
+          return { ok: true, status: 200, text: async () => JSON.stringify({ response: { server_id: 42 } }) };
+        }
+        if (input.endsWith("groups.setCallbackSettings")) {
+          return { ok: true, status: 200, text: async () => JSON.stringify({ response: 1 }) };
+        }
+        throw new Error(`Unexpected VK API URL ${input}`);
       }
     });
     const tenantId = "tenant-token-only";
@@ -254,20 +268,35 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
       name: "MAX token only",
       type: "max"
     });
+    const vk = await integrations.createChannelConnection(tenantId, {
+      credentials: { groupId: "240625961", token: "vk-token" },
+      name: "VK token only",
+      type: "vk"
+    });
 
     assert.equal(telegram.status, "ok");
     assert.equal(max.status, "ok");
+    assert.equal(vk.status, "ok");
     assert.match(String(telegram.data.connection.webhookUrl), /\/webhooks\/telegram$/);
     assert.match(String(max.data.connection.webhookUrl), /\/webhooks\/max\/conn_max_/);
+    assert.match(String(vk.data.connection.webhookUrl), /\/webhooks\/vk\/conn_vk_/);
     assert.match(telegramGetMeUrl, /https:\/\/api\.telegram\.org\/bot123:telegramToken_123\/getMe/);
     assert.equal(telegram.data.connection.rawExternalId, "telegram:support_bot");
     assert.equal(repository.findTelegramConnectionByTenantId(tenantId)?.botUsername, "support_bot");
     assert.equal(JSON.stringify(telegram.data).includes("telegramToken_123"), false);
     assert.equal(JSON.stringify(max.data).includes("max-token"), false);
+    assert.equal(JSON.stringify(vk.data).includes("vk-token"), false);
     assert.match(String(max.data.providerRuntime.webhookSecret), /^[0-9a-f-]{36}$/);
     const maxCredential = repository.findProviderConnectionCredential(tenantId, String(max.data.connection.id));
     assert.equal(maxCredential?.provider, "max");
     assert.equal(providerCredentialCrypto.decrypt(JSON.parse(String(maxCredential?.accessTokenEncrypted))), "max-token");
+    const vkCredential = repository.findProviderConnectionCredential(tenantId, String(vk.data.connection.id));
+    assert.equal(providerCredentialCrypto.decrypt(JSON.parse(String(vkCredential?.confirmationCodeEncrypted))), "vk-confirmation");
+    assert.deepEqual(vkCalls.map((url) => url.split("/").at(-1)), [
+      "groups.getCallbackConfirmationCode",
+      "groups.addCallbackServer",
+      "groups.setCallbackSettings"
+    ]);
     if (priorPublicWebhookBaseUrl === undefined) delete process.env.PUBLIC_WEBHOOK_BASE_URL;
     else process.env.PUBLIC_WEBHOOK_BASE_URL = priorPublicWebhookBaseUrl;
   });

@@ -24,6 +24,7 @@ import {
 import { QueueDirectoryRepository } from "../routing/queue-directory.repository.js";
 import { ProviderConnectionCrypto } from "./provider-connection-crypto.js";
 import { subscribeMaxWebhook, type MaxHttpFetch } from "./max-subscription.js";
+import { prepareVkCallback, subscribeVkCallback, type VkHttpFetch } from "./vk-callback.js";
 
 const INTEGRATION_SERVICE = "integrationService";
 const DEFAULT_FIXTURE_TENANT_ID = "tenant-volga";
@@ -81,6 +82,7 @@ interface IntegrationServiceOptions {
   providerCredentialCrypto?: ProviderConnectionCrypto;
   queueDirectoryRepository?: Pick<QueueDirectoryRepository, "findQueue">;
   telegramFetch?: TelegramHttpFetch;
+  vkFetch?: VkHttpFetch;
 }
 
 export class IntegrationService {
@@ -299,13 +301,26 @@ export class IntegrationService {
       : null;
     let providerCredential: ProviderConnectionCredentialRecord | null = null;
     let webhookSecret: string | null = null;
+    let vkConfirmationCode: string | null = null;
     if (type === "vk" || type === "max") {
       const token = extractCredentialMaterial(payload.credentials);
       const crypto = providerCrypto!;
       // VK accepts only a short alphanumeric Callback API secret.  A UUID is
       // valid for MAX but contains hyphens and is rejected by VK.
       webhookSecret = type === "vk" ? randomBytes(12).toString("hex") : randomUUID();
-      if (type === "max") {
+      if (type === "vk") {
+        try {
+          vkConfirmationCode = (await prepareVkCallback({
+            accessToken: token,
+            apiVersion: String(payload.credentials?.apiVersion ?? "5.199"),
+            fetcher: this.options.vkFetch,
+            groupId: String(payload.credentials?.groupId ?? "").trim()
+          })).confirmationCode;
+        } catch (error) {
+          const code = error instanceof Error ? error.message : "vk_callback_prepare_failed";
+          return invalidEnvelope("createChannelConnection", code, "VK Callback API could not be prepared.", { type });
+        }
+      } else {
         try {
           await subscribeMaxWebhook({
             accessToken: token,
@@ -332,8 +347,8 @@ export class IntegrationService {
         accessTokenEncrypted: JSON.stringify(crypto.encrypt(token)),
         apiVersion: type === "vk" ? String(payload.credentials?.apiVersion ?? "5.199") : null,
         channelConnectionId: saved.id,
-        confirmationCodeEncrypted: type === "vk" && payload.credentials?.confirmationCode
-          ? JSON.stringify(crypto.encrypt(String(payload.credentials.confirmationCode)))
+        confirmationCodeEncrypted: type === "vk" && vkConfirmationCode
+          ? JSON.stringify(crypto.encrypt(vkConfirmationCode))
           : null,
         createdAt: now,
         externalAccountId: String(payload.credentials?.groupId ?? payload.credentials?.botId ?? "pending").trim() || "pending",
@@ -346,6 +361,22 @@ export class IntegrationService {
         updatedAt: now,
         webhookSecretEncrypted: JSON.stringify(crypto.encrypt(webhookSecret!))
       });
+    }
+    if (type === "vk") {
+      try {
+        await subscribeVkCallback({
+          accessToken: extractCredentialMaterial(payload.credentials),
+          apiVersion: String(payload.credentials?.apiVersion ?? "5.199"),
+          fetcher: this.options.vkFetch,
+          groupId: String(payload.credentials?.groupId ?? "").trim(),
+          secret: webhookSecret!,
+          webhookUrl: saved.webhookUrl
+        });
+      } catch (error) {
+        await this.integrationRepository.deleteChannelConnectionAsync(normalizedTenantId, saved.id);
+        const code = error instanceof Error ? error.message : "vk_callback_subscription_failed";
+        return invalidEnvelope("createChannelConnection", code, "VK Callback API could not be configured.", { type });
+      }
     }
     if (telegramConnection) {
       await this.integrationRepository.saveTelegramConnectionAsync(telegramConnection);

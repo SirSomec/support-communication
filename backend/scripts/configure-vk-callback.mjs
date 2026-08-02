@@ -27,30 +27,62 @@ try {
   const apiVersion = credential.apiVersion || "5.199";
 
   const servers = await vk("groups.getCallbackServers", { group_id: groupId }, accessToken, apiVersion);
-  const current = Array.isArray(servers.items)
+  let current = Array.isArray(servers.items)
     ? servers.items.find((item) => String(item?.url ?? "") === connection.webhookUrl)
     : undefined;
-  const serverId = current?.id ?? await addServer({ accessToken, apiVersion, groupId, secret, url: connection.webhookUrl });
-  const confirmation = await vk("groups.getCallbackConfirmationCode", { group_id: groupId }, accessToken, apiVersion);
-  const confirmationCode = required(String(confirmation.code ?? confirmation), "vk_confirmation_code_unavailable");
+  if (process.env.VK_CALLBACK_INSPECT === "true") {
+    const serverId = Number(current?.id ?? 0);
+    const settings = serverId > 0
+      ? await vk("groups.getCallbackSettings", { group_id: groupId, server_id: String(serverId) }, accessToken, apiVersion)
+      : null;
+    const callbackServers = Array.isArray(servers.items)
+      ? servers.items.map((item) => ({
+          id: item?.id ?? null,
+          status: item?.status ?? null,
+          title: item?.title ?? null,
+          url: item?.url ?? null
+        }))
+      : [];
+    process.stdout.write(`${JSON.stringify({
+      connectionId,
+      groupId,
+      expectedWebhookUrl: connection.webhookUrl,
+      callbackServers,
+      callbackSettings: settings
+    })}\n`);
+    process.exitCode = serverId > 0 ? 0 : 2;
+  } else {
+    const confirmation = await vk("groups.getCallbackConfirmationCode", { group_id: groupId }, accessToken, apiVersion);
+    const confirmationCode = required(String(confirmation.code ?? confirmation), "vk_confirmation_code_unavailable");
 
-  await vk("groups.setCallbackSettings", {
-    api_version: apiVersion,
-    group_id: groupId,
-    message_new: "1",
-    server_id: String(serverId)
-  }, accessToken, apiVersion);
+    if (String(current?.status ?? "").toLowerCase() === "failed") {
+      await vk("groups.deleteCallbackServer", { group_id: groupId, server_id: String(current.id) }, accessToken, apiVersion);
+      current = undefined;
+    }
 
-  await client.providerConnectionCredential.update({
-    data: {
-      confirmationCodeEncrypted: JSON.stringify(crypto.encrypt(confirmationCode)),
-      lastError: null,
-      updatedAt: new Date(),
-      webhookSecretEncrypted: JSON.stringify(crypto.encrypt(secret))
-    },
-    where: { channelConnectionId: connectionId }
-  });
-  process.stdout.write(`${JSON.stringify({ connectionId, configured: true, serverId, webhookUrl: connection.webhookUrl })}\n`);
+    // Adding a Callback API server immediately makes VK send the confirmation
+    // request. Store the answer first, otherwise VK marks the server failed.
+    await client.providerConnectionCredential.update({
+      data: {
+        confirmationCodeEncrypted: JSON.stringify(crypto.encrypt(confirmationCode)),
+        lastError: null,
+        updatedAt: new Date(),
+        webhookSecretEncrypted: JSON.stringify(crypto.encrypt(secret))
+      },
+      where: { channelConnectionId: connectionId }
+    });
+
+    const serverId = current?.id ?? await addServer({ accessToken, apiVersion, groupId, secret, url: connection.webhookUrl });
+
+    await vk("groups.setCallbackSettings", {
+      api_version: apiVersion,
+      group_id: groupId,
+      message_new: "1",
+      server_id: String(serverId)
+    }, accessToken, apiVersion);
+
+    process.stdout.write(`${JSON.stringify({ connectionId, configured: true, serverId, webhookUrl: connection.webhookUrl })}\n`);
+  }
 } finally {
   await client.$disconnect();
 }

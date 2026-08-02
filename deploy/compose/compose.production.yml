@@ -309,6 +309,7 @@ services:
       OUTBOX_QUEUE: message-delivery
       OUTBOX_TELEGRAM_ENABLED: ${OUTBOX_TELEGRAM_ENABLED:-true}
       OUTBOX_VK_ENABLED: ${OUTBOX_VK_ENABLED:-true}
+      OUTBOX_VK_ENDPOINT: ${OUTBOX_VK_API_BASE_URL:-https://api.vk.com}
       OUTBOX_MAX_ENABLED: ${OUTBOX_MAX_ENABLED:-true}
       OUTBOX_MAX_ENDPOINT: ${OUTBOX_MAX_API_BASE_URL:-https://platform-api2.max.ru}
 

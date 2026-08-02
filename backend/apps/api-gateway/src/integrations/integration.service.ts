@@ -302,7 +302,9 @@ export class IntegrationService {
     if (type === "vk" || type === "max") {
       const token = extractCredentialMaterial(payload.credentials);
       const crypto = providerCrypto!;
-      webhookSecret = randomUUID();
+      // VK accepts only a short alphanumeric Callback API secret.  A UUID is
+      // valid for MAX but contains hyphens and is rejected by VK.
+      webhookSecret = type === "vk" ? randomBytes(12).toString("hex") : randomUUID();
       if (type === "max") {
         try {
           await subscribeMaxWebhook({

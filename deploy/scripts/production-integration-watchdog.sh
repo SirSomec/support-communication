@@ -63,6 +63,9 @@ api="$(service_id api-gateway)"
 if [[ -z "$api" ]] || ! docker exec "$api" node -e "fetch('http://127.0.0.1:4100/api/v1/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
   failures+=("API readiness check failed")
 fi
+if [[ -n "$api" ]] && ! docker exec "$api" node -e "fetch('https://platform-api2.max.ru').then(r=>process.exit(r.status < 500 ? 0 : 1)).catch(()=>process.exit(1))"; then
+  failures+=("MAX API TLS or network check failed")
+fi
 
 if ((${#failures[@]} == 0)); then
   exit 0

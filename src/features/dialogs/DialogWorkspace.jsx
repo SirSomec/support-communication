@@ -53,6 +53,7 @@ export function DialogWorkspace({
   setTranscriptMode,
   status,
   templates,
+  templateValues,
   topic,
   topicOptions,
   topics,
@@ -105,6 +106,7 @@ export function DialogWorkspace({
         replyChannel={replyChannel}
         replyChannelOptions={replyChannelOptions}
         templates={templates}
+        templateValues={templateValues}
         onSaveTemplate={onSaveTemplate}
         onDialogAction={onDialogAction}
         onAssignment={onAssignment}
@@ -127,6 +129,7 @@ export function DialogWorkspace({
         onTopic={onTopic}
         setDraft={setDraft}
         templates={templates}
+        templateValues={templateValues}
         onClose={onCloseDialog}
         access={access}
         isClosed={isClosed}

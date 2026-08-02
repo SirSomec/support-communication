@@ -24,9 +24,16 @@ export function renderTemplatePreview(text, values = {}) {
     ...values
   };
 
+  return fillTemplateVariables(text, replacements);
+}
+
+export function fillTemplateVariables(text, values = {}) {
   return TEMPLATE_VARIABLES.reduce((result, variable) => {
     const key = variable.slice(1, -1);
-    return result.replaceAll(variable, String(replacements[key] ?? "—"));
+    const replacement = values[key];
+    return replacement === undefined || replacement === null
+      ? result
+      : result.replaceAll(variable, String(replacement));
   }, String(text ?? ""));
 }
 

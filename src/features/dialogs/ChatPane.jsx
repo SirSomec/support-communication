@@ -33,6 +33,7 @@ export function ChatPane({
   replyChannel,
   replyChannelOptions,
   templates,
+  templateValues,
   onSaveTemplate,
   onDialogAction,
   onAssignment,
@@ -227,6 +228,7 @@ export function ChatPane({
         replyChannel={replyChannel}
         replyChannelOptions={replyChannelOptions}
         templates={templates}
+        templateValues={templateValues}
         onSaveTemplate={onSaveTemplate}
         disabled={isClosed}
       />

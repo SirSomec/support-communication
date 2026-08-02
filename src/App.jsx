@@ -260,6 +260,12 @@ function App() {
     setToast
   });
   const selectedStatus = selected.status ?? "active";
+  const templateValues = useMemo(() => ({
+    client_name: String(selected.name ?? "").trim() || "клиент",
+    operator_name: String(tenantSession.operator?.name ?? selected.operatorName ?? "").trim() || "Оператор",
+    ticket_id: resolveThreadSendTarget(selected, replyChannel) || selected.id,
+    topic: String(selectedTopic || selected.topic || "").trim() || "Без тематики"
+  }), [replyChannel, selected, selectedTopic, tenantSession.operator?.name]);
   const isClosed = closedIds.has(selected.id) || selectedStatus === "closed";
   const { handleAiSuggestionAction, visibleAiSuggestions } = useAiSuggestions({
     suggestions: aiSuggestions,
@@ -644,6 +650,7 @@ function App() {
               setTranscriptMode={setTranscriptMode}
               status={selectedStatus}
               templates={templateLibrary}
+              templateValues={templateValues}
               topic={selectedTopic}
               topicOptions={topicOptions}
               topics={topics}

@@ -15,6 +15,7 @@ import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 import { TagManagerModal } from "./TagManagerModal.jsx";
 import { TopicCombobox } from "./TopicCombobox.jsx";
 import { getVisibleTags } from "./tagSuggestionModel.js";
+import { fillTemplateVariables } from "../templates/templateModel.js";
 
 export function CustomerPanel({
   conversation,
@@ -23,6 +24,7 @@ export function CustomerPanel({
   onTopic,
   setDraft,
   templates,
+  templateValues,
   onClose,
   access,
   isClosed,
@@ -371,7 +373,7 @@ export function CustomerPanel({
       <PanelSection title="Рекомендуемые шаблоны">
         <div className="template-list">
           {recommendedTemplates.slice(0, 3).map((template) => (
-            <button key={template.id} onClick={() => setDraft(template.text)}>
+            <button key={template.id} onClick={() => setDraft(fillTemplateVariables(template.text, templateValues))}>
               <span>
                 <strong>{template.title}</strong>
                 <small>{template.scope} · {template.channel}</small>

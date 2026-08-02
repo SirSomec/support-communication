@@ -20,6 +20,7 @@ import { getPreSendQualityChecks } from "../../app/aiQualityModel.js";
 import { attachmentStatusLabels } from "../../app/dialogModel.js";
 import { AiComposerPanel } from "./AiComposerPanel.jsx";
 import { AttachmentPreview } from "./AttachmentPreview.jsx";
+import { fillTemplateVariables } from "../templates/templateModel.js";
 import { suggestTemplates } from "./templateSuggestModel.js";
 import "./dialog-composer.css";
 
@@ -40,6 +41,7 @@ export function Composer({
   replyChannel = "",
   replyChannelOptions = [],
   templates,
+  templateValues,
   onSaveTemplate,
   disabled
 }) {
@@ -141,7 +143,7 @@ export function Composer({
   }
 
   function applySuggestion(template) {
-    setDraft(template.text);
+    setDraft(fillTemplateVariables(template.text, templateValues));
     // После подстановки Enter должен отправлять, даже если текст шаблона —
     // префикс другого шаблона; до следующего ввода подсказки не показываем.
     setSuggestDismissed(true);
@@ -223,7 +225,7 @@ export function Composer({
               <button
                 key={template.id}
                 onClick={() => {
-                  setDraft(template.text);
+                  setDraft(fillTemplateVariables(template.text, templateValues));
                   setTemplatePickerOpen(false);
                 }}
                 type="button"

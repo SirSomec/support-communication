@@ -2,6 +2,7 @@ import { CLIENT_PHONE_PATTERN, createAuditEvent, formatRescueNextAction, formatR
 import { threadAppeals } from "../features/dialogs/clientThreadModel.js";
 import { getVisibleTags, normalizeTagInput } from "../features/dialogs/tagSuggestionModel.js";
 import { routingService } from "../services/routingService.js";
+import { fillTemplateVariables } from "../features/templates/templateModel.js";
 
 export function useDialogActions({
   access,
@@ -307,10 +308,18 @@ export function useDialogActions({
     const targetConversationId = composeMode === "internal"
       ? selected.id
       : sendTargetConversationId || selected.id;
+    const messageText = composeMode === "reply"
+      ? fillTemplateVariables(draft.trim(), {
+        client_name: String(selected.name ?? "").trim() || "клиент",
+        operator_name: operatorName,
+        ticket_id: targetConversationId,
+        topic: String(selectedTopic || selected.topic || "").trim() || "Без тематики"
+      })
+      : draft.trim();
     const result = await appendMessage(targetConversationId, {
       type: composeMode === "internal" ? "internal" : undefined,
       side: composeMode === "internal" ? undefined : "agent",
-      text: draft.trim() || "Отправлено вложение",
+      text: messageText || "Отправлено вложение",
       attachments: readyAttachments,
       author: operatorName,
       time: "сейчас"

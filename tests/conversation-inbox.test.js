@@ -860,6 +860,45 @@ describe("composer attachment workflow", () => {
     assert.equal(cleared, true);
     assert.equal(draft, "");
   });
+
+  it("fills template variables before sending a reply", async () => {
+    const appendedMessages = [];
+    const actions = useDialogActions({
+      access: { canManageDialogs: true, reason: "" },
+      appendMessage: (...args) => {
+        appendedMessages.push(args);
+        return { ok: true };
+      },
+      applyConversationStatus: () => {},
+      attachments: [],
+      clearAttachments: () => {},
+      closedIds: new Set(),
+      composeMode: "reply",
+      draft: "Здравствуйте, {client_name}! Я {operator_name}. Тикет {ticket_id}, тема: {topic}.",
+      isClosed: false,
+      operator: { name: "Анна Орлова" },
+      selected: { id: "conv-42", name: "Мария", rescue: null, status: "active" },
+      selectedStatus: "active",
+      selectedTopic: "Доставка",
+      sendTargetConversationId: "conv-telegram-42",
+      setClosedIds: () => {},
+      setConversationItems: () => {},
+      setDraft: () => {},
+      setFilter: () => {},
+      setToast: () => {},
+      setTopics: () => {},
+      topics: { "conv-42": "Доставка" }
+    });
+
+    await actions.handleSend();
+
+    assert.equal(appendedMessages.length, 1);
+    assert.equal(appendedMessages[0][0], "conv-telegram-42");
+    assert.equal(
+      appendedMessages[0][1].text,
+      "Здравствуйте, Мария! Я Анна Орлова. Тикет conv-telegram-42, тема: Доставка."
+    );
+  });
 });
 
 describe("dialog transcript behavior", () => {

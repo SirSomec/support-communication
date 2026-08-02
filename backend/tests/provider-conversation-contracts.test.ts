@@ -18,15 +18,33 @@ describe("provider conversation identity", () => {
     };
     const first = await resolveOrCreateProviderConversation(input);
     const replay = await resolveOrCreateProviderConversation(input);
-    assert.equal(first?.id, replay?.id);
-    assert.equal(first?.channelConnectionId, "conn-max-1");
-    assert.equal(first?.providerConversationId, "chat-42");
-    assert.equal(first?.providerUserId, "user-7");
+    assert.equal(first?.conversation.id, replay?.conversation.id);
+    assert.equal(first?.conversation.channelConnectionId, "conn-max-1");
+    assert.equal(first?.conversation.providerConversationId, "chat-42");
+    assert.equal(first?.conversation.providerUserId, "user-7");
     assert.equal((await repository.listConversations({ tenantId: "tenant-a" })).length, 1);
   });
 
   it("isolates equal provider peer ids across connections and tenants", () => {
     assert.notEqual(providerConversationKey("tenant-a", "conn-1", "peer"), providerConversationKey("tenant-a", "conn-2", "peer"));
     assert.notEqual(providerConversationKey("tenant-a", "conn-1", "peer"), providerConversationKey("tenant-b", "conn-1", "peer"));
+  });
+
+  it("enriches a placeholder profile without overwriting a later operator edit", async () => {
+    const repository = ConversationRepository.inMemory();
+    const base = {
+      channel: "VK" as const,
+      channelConnectionId: "conn-vk-1",
+      conversationRepository: repository,
+      providerConversationId: "77",
+      providerUserId: "77",
+      tenantId: "tenant-a"
+    };
+    const created = await resolveOrCreateProviderConversation({ ...base, displayName: "VK 77" });
+    const enriched = await resolveOrCreateProviderConversation({ ...base, displayName: "Анна Иванова", phone: "+7 999 123-45-67" });
+
+    assert.equal(created?.conversation.name, "VK 77");
+    assert.equal(enriched?.conversation.name, "Анна Иванова");
+    assert.equal(enriched?.conversation.phone, "+7 999 123-45-67");
   });
 });

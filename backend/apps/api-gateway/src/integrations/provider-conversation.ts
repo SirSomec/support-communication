@@ -18,6 +18,7 @@ export interface ProviderConversationInput {
   channelConnectionId: string;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   displayName: string;
+  phone?: string;
   providerConversationId: string;
   providerUserId?: string;
   interceptCsatFeedback?: boolean;
@@ -55,7 +56,7 @@ export async function resolveOrCreateProviderConversation(input: ProviderConvers
       name: displayName,
       // MAX/VK не передают телефон: поле остается пустым для ручного заполнения
       // оператором, маршрутизация ответов идет по providerConversationId.
-      phone: "",
+      phone: normalizedPhone(input.phone),
       preview: "",
       previous: [],
       providerConversationId,
@@ -76,10 +77,17 @@ export async function resolveOrCreateProviderConversation(input: ProviderConvers
     tenantId
   });
 
-  return resolved ? {
+  if (!resolved) return null;
+
+  const conversation = await updateProviderConversationProfile({
+    channel: input.channel,
     conversation: resolved.conversation,
-    csatFeedbackAwaiting: Boolean(resolved.csatFeedbackAwaiting)
-  } : null;
+    conversationRepository: input.conversationRepository,
+    displayName,
+    phone: input.phone,
+    providerConversationId
+  });
+  return { conversation, csatFeedbackAwaiting: Boolean(resolved.csatFeedbackAwaiting) };
 }
 
 export function providerConversationKey(tenantId: string, connectionId: string, providerConversationId: string): string {
@@ -139,4 +147,36 @@ function required(value: unknown): string {
 
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
+}
+
+async function updateProviderConversationProfile(input: {
+  channel: "MAX" | "VK";
+  conversation: ConversationRecord;
+  conversationRepository: Pick<ConversationRepository, "saveConversationMutation">;
+  displayName: string;
+  phone?: string;
+  providerConversationId: string;
+}): Promise<ConversationRecord> {
+  const name = required(input.displayName);
+  const phone = normalizedPhone(input.phone);
+  const currentName = required(input.conversation.name);
+  const placeholder = `${input.channel} ${input.providerConversationId}`;
+  const shouldReplaceName = Boolean(name) && (!currentName || currentName === placeholder || currentName.startsWith(`${input.channel} `));
+  const shouldSetPhone = Boolean(phone) && !required(input.conversation.phone);
+  if (!shouldReplaceName && !shouldSetPhone) return input.conversation;
+
+  const conversation: ConversationRecord = {
+    ...input.conversation,
+    ...(shouldReplaceName ? { initials: initials(name), name } : {}),
+    ...(shouldSetPhone ? { phone } : {})
+  };
+  await input.conversationRepository.saveConversationMutation(
+    providerConversationMutation(conversation, input.channel, "conversation.updated")
+  );
+  return conversation;
+}
+
+function normalizedPhone(value: unknown): string {
+  const phone = String(value ?? "").trim();
+  return /^[+\d][\d\s().-]{4,24}$/.test(phone) ? phone : "";
 }

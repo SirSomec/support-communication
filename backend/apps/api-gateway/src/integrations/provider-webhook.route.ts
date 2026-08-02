@@ -17,6 +17,7 @@ import {
   withCsatFeedback
 } from "../quality/csat-feedback.js";
 import { AI_CLOSED_CONVERSATION_OPERATOR } from "../quality/quality.types.js";
+import type { VkUserProfileResolver } from "./vk-user-profile.js";
 
 export interface ProviderWebhookRouteInput {
   body: Record<string, unknown>;
@@ -34,6 +35,7 @@ export interface ProviderWebhookRouteInput {
     channel?: string; clientId?: string; conversationId?: string; idempotencyKey?: string;
     operator?: string; scale?: "CSAT" | "CSI" | "QA"; score?: number; topic?: string;
   }, context: { actorId?: string; actorType?: "client"; tenantId?: string }) => Promise<{ status: string; data?: Record<string, unknown>; error?: unknown }>;
+  resolveVkUserProfile?: VkUserProfileResolver;
   runBotRuntime?: (event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string }) => Promise<{ instance?: { status?: string }; outcome?: string }>;
 }
 
@@ -249,14 +251,29 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
 
   const event = input.channel === "VK" ? parseVkMessage(input.body) : parseMaxMessage(input.body);
   if (!event) return accepted(input.channel, { ignored: true, tenantId: credential.tenantId });
+  let displayName = event.displayName;
+  if (input.channel === "VK" && input.resolveVkUserProfile) {
+    try {
+      const accessToken = crypto.decrypt(JSON.parse(credential.accessTokenEncrypted) as ProviderCredentialEnvelope);
+      const profile = await input.resolveVkUserProfile({
+        accessToken,
+        apiVersion: credential.apiVersion,
+        userId: event.providerUserId
+      });
+      displayName = profile?.displayName || displayName;
+    } catch {
+      // Profile enrichment is optional and must not block inbound messages.
+    }
+  }
   const resolved = await resolveOrCreateProviderConversation({
     channel: input.channel,
     channelConnectionId: connection.id,
     conversationRepository: input.conversationRepository,
-    displayName: event.displayName,
+    displayName,
     interceptCsatFeedback: true,
     providerConversationId: event.providerConversationId,
     providerUserId: event.providerUserId,
+    phone: event.phone,
     queueId: connection.routingQueueId,
     tenantId: credential.tenantId
   });
@@ -295,6 +312,7 @@ interface ProviderInboundMessage {
   attachments: Array<Record<string, unknown>>;
   displayName: string;
   eventId: string;
+  phone?: string;
   providerConversationId: string;
   providerUserId: string;
   text: string;
@@ -332,6 +350,7 @@ function parseVkMessage(body: Record<string, unknown>): ProviderInboundMessage |
     attachments: normalizeAttachments(message?.attachments),
     displayName: `VK ${userId}`,
     eventId,
+    phone: value(message?.phone),
     providerConversationId: peerId,
     providerUserId: userId,
     text: value(message?.text)
@@ -352,6 +371,7 @@ function parseMaxMessage(body: Record<string, unknown>): ProviderInboundMessage 
     attachments: normalizeAttachments(messageBody?.attachments),
     displayName: value(sender?.name) || `MAX ${userId}`,
     eventId,
+    phone: value(sender?.phone),
     providerConversationId: chatId,
     providerUserId: userId,
     text: value(messageBody?.text)

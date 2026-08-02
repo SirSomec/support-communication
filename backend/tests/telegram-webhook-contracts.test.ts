@@ -203,6 +203,45 @@ describe("telegram webhook ingress contracts", () => {
     assert.deepEqual(realtimeEvents.map((event) => event.eventName), ["conversation.created"]);
   });
 
+  it("stores a phone only when the Telegram client explicitly shared it", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversation = await resolveOrCreateTelegramConversation({
+      chatId: "55667789",
+      conversationRepository: repository,
+      displayName: "Pavel Telegram",
+      phone: "+7 999 555-66-77",
+      tenantId: TENANT_ID
+    });
+
+    assert.equal(conversation?.phone, "+7 999 555-66-77");
+  });
+
+  it("accepts only the sender's own Telegram contact", async () => {
+    const repository = ConversationRepository.inMemory();
+    const conversations = new ConversationService(repository);
+    const integrationRepository = IntegrationRepository.inMemory(seedTelegramIntegrationState());
+    const response = await handleTelegramWebhookFromRoute({
+      body: {
+        message: {
+          chat: { id: 55667790, type: "private" },
+          contact: { phone_number: "+79990001122", user_id: 999 },
+          from: { first_name: "Pavel", id: 321 },
+          message_id: 1,
+          text: "Contact"
+        },
+        update_id: 9012
+      },
+      conversationRepository: repository,
+      conversationService: conversations,
+      headers: { "x-telegram-bot-api-secret-token": WEBHOOK_SECRET },
+      integrationRepository
+    }, loadTelegramWebhookConfig({ TELEGRAM_WEBHOOK_ENABLED: "true" }));
+
+    assert.equal(response.status, "ok");
+    const conversation = await repository.findConversation(telegramConversationId(TENANT_ID, "123456789", "55667790"));
+    assert.equal(conversation?.phone, "");
+  });
+
   it("accepts an idempotent CSAT callback only for the canonical assigned conversation", async () => {
     const repository = ConversationRepository.inMemory();
     const conversations = new ConversationService(repository);

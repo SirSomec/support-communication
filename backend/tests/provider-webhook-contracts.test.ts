@@ -27,6 +27,19 @@ describe("VK and MAX provider webhooks", () => {
     assert.equal((await runtime.conversations.listConversations({ tenantId: "tenant-a" })).length, 1);
   });
 
+  it("uses the VK public profile name when the resolver returns it", async () => {
+    const runtime = providerRuntime("vk", "conn-vk", "vk-secret", "vk-confirm");
+    runtime.resolveVkUserProfile = async () => ({ displayName: "Анна Иванова" });
+    await receive(runtime, "VK", {
+      event_id: "vk-profile-1",
+      object: { message: { from_id: 77, id: 12, peer_id: 77, text: "Hello" } },
+      secret: "vk-secret",
+      type: "message_new"
+    });
+
+    assert.equal((await runtime.conversations.listConversations({ tenantId: "tenant-a" }))[0]?.name, "Анна Иванова");
+  });
+
   it("accepts a MAX attachment-only message and rejects a wrong secret", async () => {
     const runtime = providerRuntime("max", "conn-max", "max-secret");
     const body = {
@@ -176,7 +189,7 @@ function providerRuntime(provider: "max" | "vk", connectionId: string, secret: s
     webhookSecretEncrypted: JSON.stringify(crypto.encrypt(secret))
   };
   integrations.saveProviderConnectionCredential(credential);
-  const runtime: any = { answerMaxCallback: async () => true, answerVkMessageEvent: async () => true, binding: null, conversations, integrations, ratings: [], recordQualityRating: undefined, runBotRuntime: undefined, sendVkMessage: undefined, service: new ConversationService(conversations) };
+  const runtime: any = { answerMaxCallback: async () => true, answerVkMessageEvent: async () => true, binding: null, conversations, integrations, ratings: [], recordQualityRating: undefined, resolveVkUserProfile: undefined, runBotRuntime: undefined, sendVkMessage: undefined, service: new ConversationService(conversations) };
   runtime.providerMessageBindings = {
     find: async (_tenantId: string, _connectionId: string, providerMessageId: string) => runtime.binding?.providerMessageId === providerMessageId ? runtime.binding : null,
     advance: async (binding: Record<string, any>, status: string) => {
@@ -193,6 +206,6 @@ function receive(runtime: ReturnType<typeof providerRuntime>, channel: "MAX" | "
     body, channel, channelConnectionId: channel === "VK" ? "conn-vk" : "conn-max",
     conversationRepository: runtime.conversations, conversationService: runtime.service,
     headers, integrationRepository: runtime.integrations, providerMessageBindings: runtime.providerMessageBindings,
-    answerMaxCallback: runtime.answerMaxCallback, answerVkMessageEvent: runtime.answerVkMessageEvent, recordQualityRating: runtime.recordQualityRating, runBotRuntime: runtime.runBotRuntime, sendVkMessage: runtime.sendVkMessage
+    answerMaxCallback: runtime.answerMaxCallback, answerVkMessageEvent: runtime.answerVkMessageEvent, recordQualityRating: runtime.recordQualityRating, resolveVkUserProfile: runtime.resolveVkUserProfile, runBotRuntime: runtime.runBotRuntime, sendVkMessage: runtime.sendVkMessage
   });
 }

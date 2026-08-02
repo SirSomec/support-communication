@@ -182,6 +182,7 @@ export async function handleTelegramWebhookFromRoute(
     chatId: parsed.chatId,
     conversationRepository: input.conversationRepository,
     displayName: parsed.displayName,
+    phone: parsed.phone,
     queueId: await telegramRoutingQueueId(input.integrationRepository, tenantId, tenantConnection),
     tenantId,
     username: parsed.username
@@ -298,6 +299,7 @@ export async function resolveOrCreateTelegramConversation(input: {
   chatId: string;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   displayName: string;
+  phone?: string;
   queueId?: string;
   tenantId: string;
   username?: string;
@@ -310,6 +312,7 @@ export async function resolveTelegramInboundConversation(input: {
   chatId: string;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   displayName: string;
+  phone?: string;
   queueId?: string;
   tenantId: string;
   username?: string;
@@ -342,9 +345,9 @@ export async function resolveTelegramInboundConversation(input: {
       language: "Unknown",
       messages: [],
       name: displayName,
-      // Телефон клиента Telegram не сообщает: поле остается пустым, пока его
-      // не заполнит оператор. Адрес доставки живет в providerConversationId и теге chat:*.
-      phone: "",
+      // Telegram передает номер только когда пользователь явно делится своим контактом.
+      // Адрес доставки живет в providerConversationId и теге chat:*.
+      phone: normalizedTelegramPhone(input.phone),
       preview: "",
       previous: [],
       providerConversationId: chatId,
@@ -368,10 +371,41 @@ export async function resolveTelegramInboundConversation(input: {
     tenantId
   });
 
-  return {
-    conversation: resolved?.conversation ?? null,
-    csatFeedbackAwaiting: Boolean(resolved?.csatFeedbackAwaiting)
+  if (!resolved) return { conversation: null, csatFeedbackAwaiting: false };
+  const conversation = await updateTelegramConversationProfile({
+    conversation: resolved.conversation,
+    conversationRepository: input.conversationRepository,
+    displayName,
+    phone: input.phone
+  });
+  return { conversation, csatFeedbackAwaiting: Boolean(resolved.csatFeedbackAwaiting) };
+}
+
+async function updateTelegramConversationProfile(input: {
+  conversation: ConversationRecord;
+  conversationRepository: Pick<ConversationRepository, "saveConversationMutation">;
+  displayName: string;
+  phone?: string;
+}): Promise<ConversationRecord> {
+  const displayName = input.displayName.trim();
+  const phone = normalizedTelegramPhone(input.phone);
+  const shouldReplaceName = Boolean(displayName) && /^(Telegram|Chat)\s+/i.test(input.conversation.name.trim());
+  const shouldSetPhone = Boolean(phone) && !input.conversation.phone.trim();
+  if (!shouldReplaceName && !shouldSetPhone) return input.conversation;
+  const conversation: ConversationRecord = {
+    ...input.conversation,
+    ...(shouldReplaceName ? { initials: initialsFromName(displayName), name: displayName } : {}),
+    ...(shouldSetPhone ? { phone } : {})
   };
+  await input.conversationRepository.saveConversationMutation(
+    conversationCreatedMutation(conversation, "conversation.updated")
+  );
+  return conversation;
+}
+
+function normalizedTelegramPhone(value: unknown): string {
+  const phone = String(value ?? "").trim();
+  return /^[+\d][\d\s().-]{4,24}$/.test(phone) ? phone : "";
 }
 
 async function tryBotRuntime(run: NonNullable<TelegramWebhookRouteInput["runBotRuntime"]>, event: Parameters<NonNullable<TelegramWebhookRouteInput["runBotRuntime"]>>[0]) {
@@ -491,6 +525,7 @@ function parseTelegramUpdate(body: Record<string, unknown>) {
   const firstName = String(from?.first_name ?? "").trim();
   const lastName = String(from?.last_name ?? "").trim();
   const username = String(from?.username ?? "").trim();
+  const phone = telegramContactPhone(message);
   const displayName = [firstName, lastName].filter(Boolean).join(" ").trim() || (username ? `@${username}` : `Chat ${chatId}`);
   const messageId = String(message.message_id ?? "").trim();
 
@@ -502,6 +537,7 @@ function parseTelegramUpdate(body: Record<string, unknown>) {
     attachments,
     text,
     updateId,
+    phone,
     username: username || undefined
   };
 }
@@ -547,6 +583,15 @@ function telegramAttachment(value: Record<string, unknown>, defaults: { fallback
     mimeType: defaults.mimeType || undefined,
     type: defaults.type
   };
+}
+
+function telegramContactPhone(message: Record<string, unknown>): string | undefined {
+  const contact = objectRecord(message.contact);
+  const from = objectRecord(message.from);
+  const contactUserId = stringValue(contact?.user_id);
+  const senderId = stringValue(from?.id);
+  if (!contactUserId || !senderId || contactUserId !== senderId) return undefined;
+  return normalizedTelegramPhone(contact?.phone_number) || undefined;
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | undefined {

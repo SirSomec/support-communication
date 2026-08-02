@@ -7,6 +7,7 @@ import { IntegrationRepository } from "./integration.repository.js";
 import { handleProviderWebhookFromRoute } from "./provider-webhook.route.js";
 import { ProviderMessageBindingRepository } from "./provider-message-binding.repository.js";
 import { QualityService } from "../quality/quality.service.js";
+import { fetchVkUserProfile } from "./vk-user-profile.js";
 
 @ApiTags("webhooks")
 @Controller("webhooks")
@@ -25,7 +26,7 @@ export class ProviderWebhookController {
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: "VK Callback API ingress" })
   receiveVk(@Param("connectionId") connectionId: string, @Body() body: Record<string, unknown>, @Headers() headers: Record<string, string | undefined>) {
-    return handleProviderWebhookFromRoute({ body, channel: "VK", channelConnectionId: connectionId, conversationRepository: this.conversations, conversationService: this.conversationService, headers, integrationRepository: this.integrations, providerMessageBindings: this.providerMessageBindings, recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context), runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event) });
+    return handleProviderWebhookFromRoute({ body, channel: "VK", channelConnectionId: connectionId, conversationRepository: this.conversations, conversationService: this.conversationService, headers, integrationRepository: this.integrations, providerMessageBindings: this.providerMessageBindings, recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context), resolveVkUserProfile: fetchVkUserProfile, runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event) });
   }
 
   @Post("max/:connectionId")

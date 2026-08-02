@@ -93,6 +93,10 @@ interface TelegramMessagePayload {
     id?: number | string;
     type?: string;
   };
+  contact?: {
+    phone_number?: string;
+    user_id?: number | string;
+  };
   document?: TelegramMediaPayload;
   from?: {
     first_name?: string;
@@ -259,6 +263,7 @@ export async function pollTelegramUpdatesOnce(input: TelegramPollingInput): Prom
         chatId: parsed.chatId,
         conversationRepository: input.conversationRepository,
         displayName: parsed.displayName,
+        phone: parsed.phone,
         queueId: await telegramRoutingQueueId(input.integrationRepository, connection.tenantId, connection),
         tenantId: connection.tenantId,
         username: parsed.username
@@ -531,6 +536,7 @@ function parseTelegramPollingUpdate(update: TelegramUpdatePayload) {
   const firstName = String(message.from?.first_name ?? "").trim();
   const lastName = String(message.from?.last_name ?? "").trim();
   const username = String(message.from?.username ?? "").trim();
+  const phone = telegramPollingContactPhone(message);
   const displayName = [firstName, lastName].filter(Boolean).join(" ").trim() || (username ? `@${username}` : `Chat ${chatId}`);
   const messageId = String(message.message_id ?? "").trim();
 
@@ -542,6 +548,15 @@ function parseTelegramPollingUpdate(update: TelegramUpdatePayload) {
     attachments,
     text,
     updateId,
+    phone,
     username: username || undefined
   };
+}
+
+function telegramPollingContactPhone(message: TelegramMessagePayload): string | undefined {
+  const contactUserId = String(message.contact?.user_id ?? "").trim();
+  const senderId = String(message.from?.id ?? "").trim();
+  const phone = String(message.contact?.phone_number ?? "").trim();
+  if (!contactUserId || !senderId || contactUserId !== senderId) return undefined;
+  return /^[+\d][\d\s().-]{4,24}$/.test(phone) ? phone : undefined;
 }

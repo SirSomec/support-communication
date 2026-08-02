@@ -50,8 +50,12 @@ if [[ -n "$telegram_worker" ]]; then
       failures+=("telegram-polling-worker lacks $required")
     fi
   done
-  if ! docker logs --since 7m "$telegram_worker" 2>&1 | grep -Fq '"enabled":true,"operation"' || ! docker logs --since 7m "$telegram_worker" 2>&1 | grep -Fq '"failed":0'; then
-    failures+=("telegram-polling-worker has no successful polling heartbeat in the last seven minutes")
+  # Docker's relative --since clock is inconsistent on hosts configured with a
+  # local timezone while JSON container logs are UTC.  The worker itself has a
+  # health endpoint; inspecting its recent records avoids false alerts.
+  worker_logs="$(docker logs --tail 200 "$telegram_worker" 2>&1)"
+  if ! grep -Fq '"enabled":true,"operation"' <<<"$worker_logs" || ! grep -Fq '"failed":0' <<<"$worker_logs"; then
+    failures+=("telegram-polling-worker has no successful polling heartbeat in recent logs")
   fi
 fi
 

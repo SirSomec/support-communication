@@ -127,6 +127,48 @@ test("integration center wizard creates and checks telegram and max channels", a
   await expect(page.locator(".integration-center")).toContainText(telegramName);
 });
 
+test("integration center wizard creates the first queue without leaving setup", async ({ page, request }) => {
+  await page.route("**/api/v1/routing/queues**", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        json: { status: "ok", data: { queues: [] } },
+        status: 200
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  const session = await loginTenantOperator(request);
+  await openAppShell(page, session);
+  await page.locator(".role-switcher select").selectOption({ label: "Администратор" });
+  await openSection(page, "Настройки");
+  await page.locator(".integration-view-switch button").filter({ hasText: "Каталог" }).click();
+  await page.locator(".integration-catalog-row").filter({ hasText: "Telegram" }).getByRole("button").click();
+
+  const wizard = page.getByRole("dialog", { name: "Подключить Telegram" });
+  await wizard.getByRole("button", { name: "Продолжить" }).click();
+  await wizard.getByLabel("Название подключения").fill(`First queue flow ${Date.now().toString(36)}`);
+  await wizard.getByLabel("Токен бота").fill("123:first-queue-token");
+  await wizard.getByRole("button", { name: "Продолжить" }).click();
+
+  await expect(wizard).toContainText("Очередей пока нет");
+  await expect(wizard.getByRole("button", { name: "Подключить" })).toBeDisabled();
+
+  const queueName = `Основная поддержка ${Date.now().toString(36)}`;
+  await wizard.getByLabel("Название новой очереди").fill(queueName);
+  const createQueueResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/routing/queues") && response.request().method() === "POST"
+  );
+  await wizard.getByRole("button", { name: "Создать очередь" }).click();
+  expect((await createQueueResponse).ok()).toBeTruthy();
+
+  await expect(wizard.getByLabel("Очередь для новых обращений")).toHaveValue(/.+/);
+  await expect(wizard.getByLabel("Очередь для новых обращений").locator("option:checked")).toHaveText(queueName);
+  await expect(wizard.getByRole("button", { name: "Подключить" })).toBeEnabled();
+});
+
 test("settings runtime exposes employees roles and rules from backend", async ({ page, request }) => {
   const session = await loginTenantOperator(request);
 

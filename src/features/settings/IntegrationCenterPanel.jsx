@@ -209,6 +209,27 @@ export function IntegrationCenterPanel({ access, canEditSettings, onManage, onSu
     onToast?.(`${item.name}: подключение создано.`);
   }
 
+  async function createWizardQueue(name) {
+    const normalizedName = String(name ?? "").trim();
+    if (!normalizedName || busy) return false;
+
+    setBusy("create-queue");
+    setFormError("");
+    const response = await routingService.createQueue({ name: normalizedName });
+    setBusy("");
+
+    if (response.status !== "ok" || !response.data?.queue?.id) {
+      setFormError(response.error?.message ?? "Не удалось создать очередь. Попробуйте ещё раз.");
+      return false;
+    }
+
+    const queue = response.data.queue;
+    setQueues((current) => [...current.filter((item) => item.id !== queue.id), queue]);
+    setForm((current) => ({ ...current, routingQueueId: queue.id }));
+    onToast?.(`${queue.name}: очередь создана и выбрана.`);
+    return true;
+  }
+
   async function runTest() {
     if (!created?.connection?.id || busy || wizard?.kind === "external") return;
     setBusy("test");
@@ -286,6 +307,7 @@ export function IntegrationCenterPanel({ access, canEditSettings, onManage, onSu
           onBack={() => setWizardStep((step) => Math.max(0, step - 1))}
           onChange={setForm}
           onClose={closeWizard}
+          onCreateQueue={createWizardQueue}
           onForward={goForward}
           onRunTest={runTest}
           product={wizard}
@@ -380,7 +402,7 @@ function HowItWorks({ onBrowse }) {
   );
 }
 
-function IntegrationWizard({ busy, created, form, formError, onBack, onChange, onClose, onForward, onRunTest, product, queues, step, testResult }) {
+function IntegrationWizard({ busy, created, form, formError, onBack, onChange, onClose, onCreateQueue, onForward, onRunTest, product, queues, step, testResult }) {
   const stepLabels = product.kind === "external"
     ? ["Выбор", "Приложение", "Очередь", "Готово"]
     : ["Выбор", "Доступ", "Очередь", "Проверка"];
@@ -396,7 +418,7 @@ function IntegrationWizard({ busy, created, form, formError, onBack, onChange, o
         ) : (
           <>
             {step > 0 ? <button disabled={Boolean(busy)} onClick={onBack} type="button"><ArrowLeft size={16} /> Назад</button> : <span />}
-            <button className="primary-action" disabled={Boolean(busy)} onClick={onForward} type="button">
+            <button className="primary-action" disabled={Boolean(busy) || (step === 2 && !form.routingQueueId)} onClick={onForward} type="button">
               {busy === "create" ? "Подключаем…" : step === 2 ? "Подключить" : "Продолжить"} <ArrowRight size={16} />
             </button>
           </>
@@ -412,7 +434,7 @@ function IntegrationWizard({ busy, created, form, formError, onBack, onChange, o
         </ol>
         {step === 0 ? <WizardIntro product={product} /> : null}
         {step === 1 ? <WizardAccess form={form} onChange={onChange} product={product} /> : null}
-        {step === 2 ? <WizardQueue form={form} onChange={onChange} queues={queues} /> : null}
+        {step === 2 ? <WizardQueue busy={busy} form={form} onChange={onChange} onCreateQueue={onCreateQueue} queues={queues} /> : null}
         {step === 3 ? <WizardSuccess created={created} onRunTest={onRunTest} product={product} testResult={testResult} busy={busy} /> : null}
         {formError ? <div className="settings-form-error" role="alert">{formError}</div> : null}
       </div>
@@ -466,19 +488,48 @@ function WizardAccess({ form, onChange, product }) {
   );
 }
 
-function WizardQueue({ form, onChange, queues }) {
+function WizardQueue({ busy, form, onChange, onCreateQueue, queues }) {
+  const [newQueueName, setNewQueueName] = useState("");
+
+  async function createQueue() {
+    const created = await onCreateQueue(newQueueName);
+    if (created) setNewQueueName("");
+  }
+
   return (
     <div className="integration-wizard-form settings-form">
       <p className="integration-wizard-lead">Выберите, какая команда будет получать новые обращения. Это можно изменить в любой момент.</p>
-      <label>
-        <span>Очередь для новых обращений</span>
-        <select disabled={!queues.length} onChange={(event) => onChange({ ...form, routingQueueId: event.target.value })} value={form.routingQueueId}>
-          {!queues.length ? <option value="">Нет доступных очередей</option> : null}
-          {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
-        </select>
-        <FieldHint>Все новые сообщения из этого подключения попадут в выбранную очередь.</FieldHint>
-      </label>
-      <InlineHint><CircleHelp size={16} /> Не уверены, что выбрать? Начните с основной очереди поддержки.</InlineHint>
+      {queues.length ? (
+        <label>
+          <span>Очередь для новых обращений</span>
+          <select disabled={Boolean(busy)} onChange={(event) => onChange({ ...form, routingQueueId: event.target.value })} value={form.routingQueueId}>
+            {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
+          </select>
+          <FieldHint>Все новые сообщения из этого подключения попадут в выбранную очередь.</FieldHint>
+        </label>
+      ) : (
+        <div className="integration-queue-empty" role="status">
+          <strong>Очередей пока нет</strong>
+          <span>Создайте первую очередь здесь. После создания она выберется автоматически.</span>
+        </div>
+      )}
+      <div className="integration-queue-create">
+        <label>
+          <span>{queues.length ? "Или создайте новую очередь" : "Название первой очереди"}</span>
+          <input
+            aria-label="Название новой очереди"
+            disabled={Boolean(busy)}
+            onChange={(event) => setNewQueueName(event.target.value)}
+            placeholder="Например, Основная поддержка"
+            value={newQueueName}
+          />
+          <FieldHint>Команду и участников можно назначить позже в управлении каналами.</FieldHint>
+        </label>
+        <button disabled={Boolean(busy) || !newQueueName.trim()} onClick={createQueue} type="button">
+          <Plus size={16} /> {busy === "create-queue" ? "Создаём…" : "Создать очередь"}
+        </button>
+      </div>
+      {queues.length ? <InlineHint><CircleHelp size={16} /> Не уверены, что выбрать? Начните с основной очереди поддержки.</InlineHint> : null}
     </div>
   );
 }

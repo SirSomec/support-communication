@@ -831,6 +831,51 @@
   box-shadow: 0 0 0 3px rgb(36 111 201 / 12%);
 }
 
+.integration-queue-empty {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #d8e6f7;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.integration-queue-empty strong {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.integration-queue-empty span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.integration-queue-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.integration-queue-create button {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #b9d5ff;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: var(--blue);
+  font-weight: 850;
+}
+
+.integration-queue-create button:disabled {
+  opacity: 0.55;
+}
+
 .integration-wizard-success {
   display: grid;
   justify-items: center;
@@ -3656,6 +3701,7 @@ button.primary-action.settings-danger-action:hover {
   .security-session-row,
   .api-changelog article,
   .security-alert,
+  .integration-queue-create,
   .queue-manager-create,
   .settings-rule-card,
   .settings-rule-card dl {
@@ -3749,6 +3795,7 @@ button.primary-action.settings-danger-action:hover {
 
   .integration-center-header .settings-ghost-action,
   .integration-list-toolbar button,
+  .integration-queue-create button,
   .integration-test-card button {
     width: 100%;
   }

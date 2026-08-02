@@ -28,6 +28,7 @@ export interface ProviderWebhookRouteInput {
   integrationRepository: Pick<IntegrationRepository, "findChannelConnectionAsync" | "findProviderConnectionCredentialByConnectionIdAsync">;
   providerMessageBindings?: Pick<ProviderMessageBindingRepository, "advance" | "find">;
   answerMaxCallback?: (input: { accessToken: string; callbackId: string; message: Record<string, unknown> }) => Promise<boolean>;
+  answerVkMessageEvent?: (input: { accessToken: string; apiVersion: string | null; eventId: string; peerId: string; text: string; userId: string }) => Promise<boolean>;
   sendVkMessage?: (input: { accessToken: string; apiVersion: string | null; keyboard?: Record<string, unknown>; peerId: string; text: string }) => Promise<boolean>;
   recordQualityRating?: (payload: {
     channel?: string; clientId?: string; conversationId?: string; idempotencyKey?: string;
@@ -126,6 +127,19 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
         });
       } else {
         await (input.sendVkMessage ?? sendVkMessage)({ accessToken, apiVersion: credential.apiVersion, peerId: feedbackDecline.providerConversationId, text: CSAT_FEEDBACK_NEW_APPEAL_TEXT });
+        const providerUserId = "providerUserId" in feedbackDecline && typeof feedbackDecline.providerUserId === "string"
+          ? feedbackDecline.providerUserId
+          : "";
+        if (providerUserId) {
+          await (input.answerVkMessageEvent ?? answerVkMessageEvent)({
+            accessToken,
+            apiVersion: credential.apiVersion,
+            eventId: feedbackDecline.callbackId,
+            peerId: feedbackDecline.providerConversationId,
+            text: "Новое обращение можно отправить сообщением в этот чат.",
+            userId: providerUserId
+          });
+        }
       }
     } catch { /* state is durable even if a provider response is unavailable */ }
     return accepted(input.channel, { accepted: true, callbackId: feedbackDecline.callbackId, conversationId: conversation.id, declined, tenantId: credential.tenantId });
@@ -198,6 +212,14 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
               keyboard: { buttons: [[{ action: { label: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT, payload: JSON.stringify({ callback: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK }), type: "callback" }, color: "primary" }]], inline: true },
               peerId: rating.providerConversationId,
               text: promptText
+            });
+            await (input.answerVkMessageEvent ?? answerVkMessageEvent)({
+              accessToken,
+              apiVersion: credential.apiVersion,
+              eventId: rating.callbackId,
+              peerId: rating.providerConversationId,
+              text: "Спасибо за оценку!",
+              userId: rating.providerUserId
             });
           }
         } catch {
@@ -411,17 +433,20 @@ function parseVkQualityRating(body: Record<string, unknown>): {
   return { callbackId, displayName: `VK ${providerUserId || providerConversationId}`, providerConversationId, providerUserId, score: Number(match[1]) };
 }
 
-function parseVkCsatFeedbackDecline(body: Record<string, unknown>): { callbackId: string; providerConversationId: string } | null {
+function parseVkCsatFeedbackDecline(body: Record<string, unknown>): { callbackId: string; providerConversationId: string; providerUserId: string } | null {
   if (value(body.type) !== "message_event") return null;
   const event = record(body.object) ?? body;
   const providerConversationId = value(event.peer_id);
+  const providerUserId = value(event.user_id);
   const callbackId = value(event.event_id);
   return vkCallbackPayload(event.payload) === CSAT_FEEDBACK_NEW_APPEAL_CALLBACK && providerConversationId && callbackId
-    ? { callbackId, providerConversationId }
+    ? { callbackId, providerConversationId, providerUserId }
     : null;
 }
 
 function vkCallbackPayload(input: unknown): string {
+  const direct = record(input);
+  if (direct) return value(direct.callback ?? direct.payload);
   const raw = value(input);
   try {
     const parsed = record(JSON.parse(raw));
@@ -470,6 +495,24 @@ async function sendVkMessage(input: { accessToken: string; apiVersion: string | 
   });
   if (input.keyboard) params.set("keyboard", JSON.stringify(input.keyboard));
   const response = await fetch("https://api.vk.com/method/messages.send", {
+    body: params.toString(),
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    method: "POST",
+    signal: AbortSignal.timeout(5_000)
+  });
+  return response.ok;
+}
+
+async function answerVkMessageEvent(input: { accessToken: string; apiVersion: string | null; eventId: string; peerId: string; text: string; userId: string }): Promise<boolean> {
+  const params = new URLSearchParams({
+    access_token: input.accessToken,
+    event_data: JSON.stringify({ type: "show_snackbar", text: input.text }),
+    event_id: input.eventId,
+    peer_id: input.peerId,
+    user_id: input.userId,
+    v: input.apiVersion?.trim() || "5.199"
+  });
+  const response = await fetch("https://api.vk.com/method/messages.sendMessageEventAnswer", {
     body: params.toString(),
     headers: { "content-type": "application/x-www-form-urlencoded" },
     method: "POST",

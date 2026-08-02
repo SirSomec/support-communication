@@ -801,20 +801,20 @@ export class ConversationService {
       },
       payload.reason
     );
-    const telegramSurvey = nextStatus === "closed" ? createTelegramCsatSurvey(conversation, event.traceId, tenantId) : null;
+    const channelSurvey = nextStatus === "closed" ? createChannelCsatSurvey(conversation, event.traceId, tenantId) : null;
     // A reopened dialog keeps its CSAT descriptor from the first close; queueing the survey
     // again would collide on the idempotency key and roll the whole close back.
-    const surveyAlreadySent = telegramSurvey
-      ? Boolean(await this.conversationRepository.findOutboundDescriptorByIdempotencyKey(telegramSurvey.descriptor.idempotencyKey ?? ""))
+    const surveyAlreadySent = channelSurvey
+      ? Boolean(await this.conversationRepository.findOutboundDescriptorByIdempotencyKey(channelSurvey.descriptor.idempotencyKey ?? ""))
       : false;
     let csatSurveyDelivery: Record<string, unknown> | undefined;
     let persisted: ConversationMutationRecord;
-    if (telegramSurvey && !surveyAlreadySent) {
+    if (channelSurvey && !surveyAlreadySent) {
       const queued = await this.conversationRepository.queueOutboundMessageReply({
           conversation,
-          descriptor: telegramSurvey.descriptor,
+          descriptor: channelSurvey.descriptor,
           lifecycleEvent,
-          outbox: telegramSurvey.outbox,
+          outbox: channelSurvey.outbox,
           realtimeEvent: event
         });
       csatSurveyDelivery = outboundDeliveryFromDescriptor(queued.descriptor);
@@ -2177,12 +2177,15 @@ function createConversationOutboundDescriptor(input: CreateConversationOutboundD
   };
 }
 
-function createTelegramCsatSurvey(
+function createChannelCsatSurvey(
   conversation: ConversationRecord,
   traceId: string,
   tenantId: string
 ): { descriptor: ConversationOutboundDescriptor; outbox: OutboxEvent } | null {
-  if (conversation.channel.trim().toLowerCase() !== "telegram") {
+  const channel = conversation.channel.trim().toLowerCase();
+  // SDK receives the survey state in its authenticated polling response. It is
+  // not an outbound provider and therefore must not receive an outbox descriptor.
+  if (!new Set(["telegram", "max"]).has(channel)) {
     return null;
   }
 
@@ -2203,6 +2206,7 @@ function createTelegramCsatSurvey(
     kind: "message_delivery",
     messageId,
     payload: {
+      ...(conversation.channelConnectionId ? { channelConnectionId: conversation.channelConnectionId } : {}),
       conversationId: conversation.id,
       messageId,
       providerConversationId,

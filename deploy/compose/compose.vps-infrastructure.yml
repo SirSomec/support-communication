@@ -1,0 +1,86 @@
+name: support-communication-infrastructure
+
+services:
+  postgres:
+    image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    restart: always
+    environment:
+      POSTGRES_DB: support_communication
+      POSTGRES_USER: runtime_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    command: ["postgres", "-c", "max_connections=300"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U runtime_owner -d support_communication"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+    restart: always
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
+    volumes:
+      - redis-data:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -qx PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+    restart: always
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      MINIO_API_CORS_ALLOW_ORIGIN: https://supportcom.ru
+    volumes:
+      - minio-data:/data
+    networks: [backend, edge]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc@sha256:993e8c454a7ec632923f7e3e61adf1d473261da6354cefd641aedd33a2cfe112
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      MINIO_APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY:?MINIO_APP_ACCESS_KEY is required}
+      MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY:?MINIO_APP_SECRET_KEY is required}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - >
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+        mc mb --ignore-existing local/support-communication-production;
+        mc admin user add local "$${MINIO_APP_ACCESS_KEY}" "$${MINIO_APP_SECRET_KEY}" || true;
+        mc admin policy attach local readwrite --user "$${MINIO_APP_ACCESS_KEY}"
+    command: []
+    networks: [backend]
+
+networks:
+  backend:
+    external: true
+    name: support-communication-backend
+  edge:
+    external: true
+    name: support-communication-edge
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

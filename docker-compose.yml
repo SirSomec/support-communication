@@ -45,11 +45,9 @@ services:
       # The local Chat API callback is intentionally origin-scoped; private
       # network callbacks remain blocked everywhere else.
       OPEN_CHANNEL_OUTBOUND_TRUSTED_ORIGINS: ${OPEN_CHANNEL_OUTBOUND_TRUSTED_ORIGINS:-http://host.docker.internal:8081}
-      # Presigned URL host must be reachable both from the host browser
-      # (attachment PUT/GET) and from containers (clamav-scanner download).
-      # kubernetes.docker.internal maps to 127.0.0.1 in the Docker Desktop
-      # hosts file and to the host gateway inside containers via extra_hosts.
-      S3_ENDPOINT: ${S3_ENDPOINT:-http://kubernetes.docker.internal:19000}
+      # API-to-MinIO traffic stays inside the Compose network. Browser uploads
+      # are rewritten to the same-origin /s3 proxy below.
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
       # Браузерные загрузки идут same-origin через nginx-прокси /s3 (см.
       # docker/nginx.conf): прямой PUT в minio блокировал наш CSP
       # (connect-src 'self'), а с чужих устройств — DNS/фаервол. Хост в

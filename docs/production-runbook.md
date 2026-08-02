@@ -1,5 +1,17 @@
 # Production deployment runbook
 
+> **Статус на 2026-07-28 (аудит инфраструктуры): описанная ниже процедура — целевая (target) архитектура и НЕ развёрнута на текущем прод-сервере.**
+>
+> Фактически прод `supportcom.ru` (аналитика на `ea.supportcom.ru`) обслуживает Raspberry Pi (OpenMediaVault/Debian 12, публичный IP 95.31.2.38) по другой схеме:
+> - реверс-прокси и TLS — **nginx-proxy-manager** (собственный Let's Encrypt), **не Caddy** из `deploy/caddy/Caddyfile`;
+> - backend support-communication приходит на `127.0.0.1:4101` через **реверс-SSH-туннель (`ssh -R`) с удалённого хоста** (не с самого Pi), а `supportcom-api-bridge.service` (socat `172.17.0.1:4101 → 127.0.0.1:4101`) пробрасывает его в docker-сеть. Порт `4101` — конвенция из корневого `docker-compose.yml` (маппинг `4101:4100`);
+> - на сервере **нет** compose-проекта `compose.production.yml`, ~18 воркеров, ClamAV, каталога `/opt/support-communication`, файла `/etc/support-communication/production.env`, системного пользователя `support-communication` и самого Caddy;
+> - строгие security-заголовки из Caddyfile (CSP, HSTS, блок `/api/v1/metrics`) **в бою не действуют** — трафик проходит через nginx-proxy-manager с его дефолтами;
+> - systemd-бэкап (`support-communication-backup.*`) **не установлен**, резервных копий данных продукта **нет вообще** (RPO = ∞); подробнее — `runtime-backup-and-recovery.md`;
+> - **алертинга нет** (postfix off, monit без почты и без слежения за продуктом, OMV email off, внешнего uptime-мониторинга нет): падение прода или проваленный бэкап никого не уведомляют.
+>
+> Всё, что описано ниже, — регламент для целевого развёртывания. Считать его планом, а не описанием текущего состояния сервера. Полный отчёт: [`infrastructure-audit-2026-07-28.md`](infrastructure-audit-2026-07-28.md).
+
 ## Scope
 
 This runbook deploys the application services to one Docker Compose host while PostgreSQL, Redis, object storage and SMTP are supplied as protected production services. It deliberately does not start local PostgreSQL, Redis, MinIO, Mailpit or demo bootstrap data.
@@ -59,7 +71,11 @@ The local `bootstrap` service must never be run in production. Supply `BOOTSTRAP
 
 The API exposes Prometheus text internally at `/api/v1/metrics`. The public Caddy edge deliberately returns `404` for this path. A monitoring collector must scrape the API over the Docker network or another authenticated private path. Containers use bounded JSON-file logs; the host log collector should forward them to centralized storage with retention and secret-redaction rules.
 
+> **Статус на 2026-07-28 (аудит):** Caddy в бою не используется, поэтому фильтрация `/api/v1/metrics` на периметре **отсутствует** (трафик идёт через nginx-proxy-manager с дефолтами). Ни collector'а метрик, ни централизованного сбора логов на прод-сервере не развёрнуто; алертинг отсутствует.
+
 ## Scheduled backups
+
+> **Статус на 2026-07-28 (аудит): не развёрнуто.** systemd-юниты бэкапа на прод-сервере не установлены, резервных копий данных продукта нет (RPO = ∞), алерта на пропущенный бэкап нет. См. `runtime-backup-and-recovery.md`. Инструкция ниже — целевой регламент.
 
 Install PostgreSQL client tools and MinIO Client (`mc`) on the host, then install the supplied systemd units from `deploy/systemd/`. The backup job creates a custom-format PostgreSQL dump, mirrors the production object bucket, writes SHA-256 checksums and optionally mirrors the complete recovery set to an independent S3-compatible destination.
 

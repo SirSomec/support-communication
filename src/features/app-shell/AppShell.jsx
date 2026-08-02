@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronDown, Globe2, Headphones, LogOut, Search, ShieldCheck, UsersRound, Zap } from "lucide-react";
+import { ChevronDown, Globe2, Headphones, LogOut, Search, ShieldCheck, UsersRound, Volume2, VolumeX, Zap } from "lucide-react";
 import { roleModes } from "../../app/access.js";
 import { navigationItems } from "../../app/navigationModel.js";
 import { PRESENCE_STATUSES, PRESENCE_STATUS_NOT_SET_LABEL, presenceStatusClass, presenceStatusLabel } from "../../app/presenceModel.js";
@@ -60,12 +60,14 @@ export function TopBar({
   onPresenceChange,
   onRoleMode,
   onToast,
+  onToggleMessageSound,
   notificationsEnabled = true,
   operatorConversationCount = 0,
   presencePending = false,
   presenceStatus = "",
   roleMode,
-  showRoleSwitcher = true
+  showRoleSwitcher = true,
+  soundEnabled = true
 }) {
   return (
     <header className="topbar">
@@ -116,6 +118,16 @@ export function TopBar({
             onToast={onToast}
           />
         ) : null}
+        <button
+          aria-label={soundEnabled ? "Отключить звук новых сообщений" : "Включить звук новых сообщений"}
+          aria-pressed={soundEnabled}
+          className={`icon-button sound-toggle ${soundEnabled ? "sound-enabled" : ""}`}
+          onClick={onToggleMessageSound}
+          title={soundEnabled ? "Отключить звук новых сообщений" : "Включить звук новых сообщений"}
+          type="button"
+        >
+          {soundEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
+        </button>
         <button className="icon-button" aria-label="Поиск" title="Поиск" type="button">
           <Search size={20} />
         </button>

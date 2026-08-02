@@ -10,7 +10,7 @@ import { CONVERSATION_PAGE_SIZE, normalizeConversationPagination } from "../feat
 const ATTACHMENT_PREVIEW_LABEL = "Вложение";
 const NOW_LABEL = "сейчас";
 
-export function useConversationInbox({ sessionActive = false, onPresenceEvent } = {}) {
+export function useConversationInbox({ sessionActive = false, onPresenceEvent, onRealtimeEvent } = {}) {
   const [conversationItems, setConversationItems] = useState([]);
   const [topics, setTopics] = useState({});
   const [closedIds, setClosedIds] = useState(() => new Set());
@@ -25,10 +25,15 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
   const inboxRequestRef = useRef(0);
   const processedRealtimeEventIdsRef = useRef(new Set());
   const onPresenceEventRef = useRef(onPresenceEvent);
+  const onRealtimeEventRef = useRef(onRealtimeEvent);
 
   useEffect(() => {
     onPresenceEventRef.current = onPresenceEvent;
   }, [onPresenceEvent]);
+
+  useEffect(() => {
+    onRealtimeEventRef.current = onRealtimeEvent;
+  }, [onRealtimeEvent]);
 
   const syncMetaFromItems = useCallback((items) => {
     setTopics(Object.fromEntries(items.map((conversation) => [conversation.id, conversation.topic ?? ""])));
@@ -482,6 +487,7 @@ export function useConversationInbox({ sessionActive = false, onPresenceEvent } 
       return;
     }
 
+    onRealtimeEventRef.current?.(event);
     scheduleConversationDetailRefresh(event.resourceId);
   }, [scheduleConversationDetailRefresh]);
 

@@ -174,6 +174,7 @@ export function composeMailMessage(
     `To: ${sanitizeMailHeader(mail.to)}`,
     ...(replyTo ? [`Reply-To: ${sanitizeMailHeader(replyTo)}`] : []),
     `Subject: ${encodeMailHeaderText(mail.subject)}`,
+    `Date: ${new Date().toUTCString()}`,
     "Content-Type: text/plain; charset=utf-8",
     "Content-Transfer-Encoding: 8bit",
     "MIME-Version: 1.0",

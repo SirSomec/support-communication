@@ -1405,10 +1405,12 @@ export function createTenantMaxChannelConnector({ apiBaseUrl, fetcher, providerA
         timeoutMs,
         transferStore: providerAttachmentTransferStore
       });
+      const keyboard = maxInlineKeyboard(request.replyMarkup);
+      const messageAttachments: Array<Record<string, unknown>> = [...attachments, ...(keyboard ? [keyboard] : [])];
       const chatId = encodeURIComponent(requireString(request.conversationId, "max_chat_id_required"));
       const response = await postOfficialProviderRequest({
         authorization: requireString(credential.accessToken, "max_access_token_required"),
-        body: JSON.stringify({ text: requireString(request.text, "max_text_required"), ...(attachments.length ? { attachments } : {}) }),
+        body: JSON.stringify({ text: requireString(request.text, "max_text_required"), ...(messageAttachments.length ? { attachments: messageAttachments } : {}) }),
         contentType: "application/json",
         endpoint: `${apiBaseUrl.replace(/\/+$/, "")}/messages?chat_id=${chatId}`,
         errorPrefix: "max",
@@ -1538,6 +1540,20 @@ async function postWorkerHttpRequest(
   if (!response.ok) {
     throw new Error(`worker_http_dispatch_failed:${response.status}`);
   }
+}
+
+function maxInlineKeyboard(replyMarkup: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  const rows = Array.isArray(replyMarkup?.inline_keyboard) ? replyMarkup.inline_keyboard : [];
+  const buttons = rows.map((row) => Array.isArray(row) ? row
+    .map((item) => objectValue(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .map((item) => ({
+      payload: String(item.callback_data ?? "").trim(),
+      text: String(item.text ?? "").trim(),
+      type: "callback"
+    }))
+    .filter((item) => item.text && item.payload) : []).filter((row) => row.length);
+  return buttons.length ? { payload: { buttons }, type: "inline_keyboard" } : null;
 }
 
 function workerHttpDispatchError(prefix: string, error: unknown): Error {

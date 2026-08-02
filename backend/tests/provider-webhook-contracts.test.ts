@@ -62,6 +62,67 @@ describe("VK and MAX provider webhooks", () => {
     assert.equal(runtime.binding.status, "read");
     assert.equal((await runtime.conversations.listDeliveryReceipts({ tenantId: "tenant-a" })).length, 2);
   });
+
+  it("runs a configured bot runtime for both MAX and VK inbound messages", async () => {
+    const max = providerRuntime("max", "conn-max", "max-secret");
+    const vk = providerRuntime("vk", "conn-vk", "vk-secret", "vk-confirm");
+    const events: Array<Record<string, unknown>> = [];
+    max.runBotRuntime = async (event: Record<string, unknown>) => { events.push(event); return { instance: { status: "completed" }, outcome: "replied" }; };
+    vk.runBotRuntime = max.runBotRuntime;
+
+    await receive(max, "MAX", {
+      message: { body: { mid: "max-bot-1", text: "MAX hello" }, recipient: { chat_id: 501 }, sender: { user_id: 91 } },
+      update_type: "message_created"
+    }, { "x-max-bot-api-secret": "max-secret" });
+    await receive(vk, "VK", {
+      event_id: "vk-bot-1", object: { message: { from_id: 77, id: 12, peer_id: 77, text: "VK hello" } }, secret: "vk-secret", type: "message_new"
+    });
+
+    assert.deepEqual(events.map((event) => event.channel), ["MAX", "VK"]);
+    assert.deepEqual(events.map((event) => event.payload), [
+      { isNewConversation: true, text: "MAX hello" },
+      { isNewConversation: true, text: "VK hello" }
+    ]);
+  });
+
+  it("records a MAX CSAT callback and treats the next message as feedback", async () => {
+    const runtime = providerRuntime("max", "conn-max", "max-secret");
+    const first = await receive(runtime, "MAX", {
+      message: { body: { mid: "max-csat-1", text: "Help" }, recipient: { chat_id: 601 }, sender: { name: "Client", user_id: 92 } },
+      update_type: "message_created"
+    }, { "x-max-bot-api-secret": "max-secret" });
+    assert.equal(first.status, "ok");
+    const conversation = (await runtime.conversations.listConversations({ tenantId: "tenant-a" }))[0];
+    await runtime.conversations.saveConversation({ ...conversation, operatorId: "operator-1", status: "closed" });
+    runtime.recordQualityRating = async (payload: Record<string, unknown>) => {
+      runtime.ratings.push(payload);
+      return { status: "ok", data: { ratingId: "max-rating-1" } };
+    };
+
+    const rated = await receive(runtime, "MAX", {
+      updates: [{
+        callback: {
+          callback_id: "max-callback-1",
+          message: { recipient: { chat_id: 601 }, sender: { name: "Client", user_id: 92 } },
+          payload: "quality:csat:5"
+        },
+        update_type: "message_callback"
+      }]
+    }, { "x-max-bot-api-secret": "max-secret" });
+    assert.equal(rated.data.processed, 1);
+    assert.deepEqual(runtime.ratings[0], {
+      channel: "MAX", clientId: "92", conversationId: conversation.id,
+      idempotencyKey: "max:conn-max:max-callback-1", operator: "operator-1", scale: "CSAT", score: 5, topic: conversation.topic
+    });
+    assert.equal((await runtime.conversations.findConversation(conversation.id))?.metadata?.csatFeedback?.state, "awaiting");
+
+    const feedback = await receive(runtime, "MAX", {
+      message: { body: { mid: "max-csat-feedback", text: "Спасибо" }, recipient: { chat_id: 601 }, sender: { name: "Client", user_id: 92 } },
+      update_type: "message_created"
+    }, { "x-max-bot-api-secret": "max-secret" });
+    assert.equal(feedback.data.recordedAsFeedback, true);
+    assert.equal((await runtime.conversations.findConversation(conversation.id))?.messages.at(-1)?.type, "csat_feedback");
+  });
 });
 
 function providerRuntime(provider: "max" | "vk", connectionId: string, secret: string, confirmation?: string) {
@@ -83,7 +144,7 @@ function providerRuntime(provider: "max" | "vk", connectionId: string, secret: s
     webhookSecretEncrypted: JSON.stringify(crypto.encrypt(secret))
   };
   integrations.saveProviderConnectionCredential(credential);
-  const runtime: any = { binding: null, conversations, integrations, service: new ConversationService(conversations) };
+  const runtime: any = { answerMaxCallback: async () => true, binding: null, conversations, integrations, ratings: [], recordQualityRating: undefined, runBotRuntime: undefined, service: new ConversationService(conversations) };
   runtime.providerMessageBindings = {
     find: async (_tenantId: string, _connectionId: string, providerMessageId: string) => runtime.binding?.providerMessageId === providerMessageId ? runtime.binding : null,
     advance: async (binding: Record<string, any>, status: string) => {
@@ -99,6 +160,7 @@ function receive(runtime: ReturnType<typeof providerRuntime>, channel: "MAX" | "
   return handleProviderWebhookFromRoute({
     body, channel, channelConnectionId: channel === "VK" ? "conn-vk" : "conn-max",
     conversationRepository: runtime.conversations, conversationService: runtime.service,
-    headers, integrationRepository: runtime.integrations, providerMessageBindings: runtime.providerMessageBindings
+    headers, integrationRepository: runtime.integrations, providerMessageBindings: runtime.providerMessageBindings,
+    answerMaxCallback: runtime.answerMaxCallback, recordQualityRating: runtime.recordQualityRating, runBotRuntime: runtime.runBotRuntime
   });
 }

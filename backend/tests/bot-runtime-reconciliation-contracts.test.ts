@@ -20,7 +20,7 @@ function automation(kind: "handoff" | "message") {
 
 function conversations() {
   const state = createEmptyConversationState();
-  state.conversations.push({ channel: "SDK", clientSince: "today", device: "web", entry: "widget", id: "conv-1", initials: "CU", language: "ru", messages: [], name: "Customer", operatorId: "operator-1", operatorName: "Operator", phone: "provider-chat-42", preview: "", previous: [], queueId: "queue-general", sla: "", slaTone: "", status: "assigned", tags: [], tenantId: "tenant-1", time: "", topic: "Support" });
+  state.conversations.push({ channel: "SDK", channelConnectionId: "conn-sdk", clientSince: "today", device: "web", entry: "widget", id: "conv-1", initials: "CU", language: "ru", messages: [], name: "Customer", operatorId: "operator-1", operatorName: "Operator", phone: "provider-chat-42", preview: "", previous: [], queueId: "queue-general", sla: "", slaTone: "", status: "assigned", tags: [], tenantId: "tenant-1", time: "", topic: "Support" });
   return ConversationRepository.inMemory(state);
 }
 
@@ -157,6 +157,7 @@ describe("bot runtime side-effect reconciliation", () => {
     assert.equal(handled.failed, 0);
     assert.equal(deliveries.length, 1);
     assert.equal(deliveries[0]?.conversationId, "provider-chat-42");
+    assert.equal(deliveries[0]?.channelConnectionId, "conn-sdk");
     assert.equal(deliveries[0]?.text, "Hello");
   });
 

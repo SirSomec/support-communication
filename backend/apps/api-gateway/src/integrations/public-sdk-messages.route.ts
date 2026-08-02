@@ -416,6 +416,7 @@ export async function handlePublicSdkMessagesPollFromRoute(
       conversationId,
       conversationStatus: conversation.status,
       count: replies.length,
+      ...(publicSdkCsatSurvey(conversation) ? { csatSurvey: publicSdkCsatSurvey(conversation) } : {}),
       messages: replies,
       since: since || null,
       visitorSessionToken: createVisitorSessionToken({
@@ -424,6 +425,24 @@ export async function handlePublicSdkMessagesPollFromRoute(
       })
     }
   });
+}
+
+function publicSdkCsatSurvey(conversation: ConversationRecord): Record<string, unknown> | null {
+  if (String(conversation.channel).toLowerCase() !== "sdk" || conversation.status !== "closed") {
+    return null;
+  }
+  const feedback = conversationCsatFeedback(conversation);
+  if (!feedback) {
+    return { scale: "CSAT", scores: [1, 2, 3, 4, 5], state: "rating" };
+  }
+  if (feedback.state === "awaiting" && isAwaitingCsatFeedback(conversation)) {
+    return {
+      declineAvailable: true,
+      prompt: "Спасибо за оценку! Оставьте комментарий следующим сообщением — мы передадим его команде.",
+      state: "feedback"
+    };
+  }
+  return { state: feedback.state };
 }
 
 export async function handlePublicSdkQualityRatingFromRoute(

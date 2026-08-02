@@ -21,7 +21,7 @@ export interface MaxWebhookSubscriptionInput {
 }
 
 const DEFAULT_MAX_API_BASE_URL = "https://platform-api2.max.ru";
-const DEFAULT_UPDATE_TYPES = ["message_created", "bot_started"];
+const DEFAULT_UPDATE_TYPES = ["message_created", "message_callback", "bot_started"];
 
 /** Registers the only production ingress supported by MAX Bot API. */
 export async function subscribeMaxWebhook(input: MaxWebhookSubscriptionInput): Promise<void> {

@@ -152,6 +152,7 @@ async function reconcileEffect(
       messageId,
       payload: {
         ...descriptor.payload,
+        ...(conversation.channelConnectionId ? { channelConnectionId: conversation.channelConnectionId } : {}),
         conversationId: conversation.id,
         createdAt: now,
         messageId,

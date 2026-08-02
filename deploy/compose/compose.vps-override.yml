@@ -1,0 +1,14 @@
+services:
+  edge:
+    environment:
+      S3_DOMAIN: ${S3_DOMAIN:?S3_DOMAIN is required}
+    volumes:
+      - ../caddy/Caddyfile.vps:/etc/caddy/Caddyfile:ro
+
+networks:
+  edge:
+    external: true
+    name: support-communication-edge
+  backend:
+    external: true
+    name: support-communication-backend

@@ -13,3 +13,5 @@ backend/.runtime/
 .worktrees/
 .claude/*
 !.claude/launch.json
+supportcom-mail-*-password.txt
+supportcom-service-admin-password.txt

@@ -14,6 +14,7 @@ import { RouteLoading } from "./app/RouteLoading.jsx";
 import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
 import { useWorkspaceRoute } from "./app/useWorkspaceRoute.js";
 import { useTenantSessionState } from "./app/useTenantSessionState.js";
+import { useOperatorAttention } from "./app/useOperatorAttention.js";
 import { resolveNotificationActionAvailability, resolveNotificationNavigationTarget } from "./app/notificationNavigation.js";
 import {
   findThreadByConversationId,
@@ -44,6 +45,7 @@ function App() {
   const [permissionModel, setPermissionModel] = useState(null);
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [notificationNavigationTarget, setNotificationNavigationTarget] = useState(null);
+  const realtimeAttentionHandlerRef = useRef(null);
   const {
     handleToastClose,
     isOutboundOpen,
@@ -94,8 +96,16 @@ function App() {
     topics
   } = useConversationInbox({
     onPresenceEvent: operatorPresence.handleRealtimeEvent,
+    onRealtimeEvent: (event) => realtimeAttentionHandlerRef.current?.(event),
     sessionActive: tenantSession.authenticated
   });
+  const operatorAttention = useOperatorAttention({
+    conversations: conversationItems,
+    operatorId: tenantSession.operator?.id ?? ""
+  });
+  useEffect(() => {
+    realtimeAttentionHandlerRef.current = operatorAttention.handleRealtimeEvent;
+  }, [operatorAttention.handleRealtimeEvent]);
   const {
     access,
     section,
@@ -524,11 +534,13 @@ function App() {
           onPresenceChange={(status) => void operatorPresence.changeStatus(status)}
           onRoleMode={handleRoleModeChange}
           onToast={setToast}
-          operatorConversationCount={conversationItems.filter((item) => item.operatorId === tenantSession.operator?.id).length}
+          operatorConversationCount={operatorAttention.assignedConversationCount}
           presencePending={operatorPresence.pending}
           presenceStatus={operatorPresence.presence?.status ?? ""}
           roleMode={roleMode}
           showRoleSwitcher={ROLE_SWITCHER_ENABLED}
+          soundEnabled={operatorAttention.soundEnabled}
+          onToggleMessageSound={operatorAttention.toggleMessageSound}
         />
         {section === "dialogs" && !conversationItems.length ? (
           inboxLoading ? (

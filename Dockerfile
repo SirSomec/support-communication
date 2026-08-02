@@ -33,7 +33,9 @@ FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb
 WORKDIR /app/backend
 
 COPY backend ./
-RUN npm ci && npx tsc -b --force
+RUN npm ci \
+  && npm run prisma:generate \
+  && npx tsc -b --force
 
 FROM backend-build AS backend-migrations
 

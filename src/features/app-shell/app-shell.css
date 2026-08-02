@@ -278,6 +278,10 @@
   background: #f3f7fd;
 }
 
+.sound-toggle.sound-enabled {
+  color: #0872d1;
+}
+
 .topbar-access-note {
   max-width: 240px;
   overflow: hidden;
@@ -304,7 +308,7 @@
 
   .topbar-left .status-select,
   .topbar-route-actions .ghost-action:not(.service-admin-entry),
-  .topbar-right > .icon-button {
+  .topbar-right > .icon-button:not(.sound-toggle) {
     display: none;
   }
 
@@ -315,7 +319,7 @@
   .topbar-right {
     display: grid;
     flex: 0 0 auto;
-    grid-template-columns: 38px 38px 38px;
+    grid-template-columns: repeat(4, 38px);
     justify-content: flex-end;
     justify-items: center;
     gap: 8px;
@@ -418,7 +422,7 @@
 
   .topbar-left .status-select,
   .topbar-route-actions .ghost-action:not(.service-admin-entry),
-  .topbar-right > .icon-button {
+  .topbar-right > .icon-button:not(.sound-toggle) {
     display: none;
   }
 
@@ -436,7 +440,7 @@
   .topbar-right {
     display: grid;
     flex: 0 0 auto;
-    grid-template-columns: 38px 38px 38px;
+    grid-template-columns: repeat(4, 38px);
     justify-content: flex-end;
     justify-items: center;
     gap: 8px;

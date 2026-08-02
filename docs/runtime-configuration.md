@@ -100,6 +100,8 @@ RUN_BACKEND_API_SMOKE=1 npm run test:backend-api-smoke
 
 ## Staging / Production Requirements
 
+> **Статус на 2026-07-28 (аудит инфраструктуры):** требования ниже — целевые. Фактический прод `supportcom.ru` (Raspberry Pi) **не** использует `deploy/compose/compose.production.yml` и Caddy: backend приходит на `127.0.0.1:4101` через реверс-SSH-туннель с удалённого хоста, а реверс-прокси/TLS обеспечивает nginx-proxy-manager. Порт `4101` — конвенция из корневого `docker-compose.yml` (маппинг `4101:4100`). Security-заголовки из `deploy/caddy/Caddyfile` на периметре не применяются, бэкапы и алертинг не развёрнуты. Подробнее — `production-runbook.md`, `runtime-backup-and-recovery.md` и полный отчёт [`infrastructure-audit-2026-07-28.md`](infrastructure-audit-2026-07-28.md).
+
 Production-like startup requires:
 
 - `RUNTIME_PROFILE=production-like`

@@ -20,11 +20,17 @@ export interface ProviderConversationInput {
   displayName: string;
   providerConversationId: string;
   providerUserId?: string;
+  interceptCsatFeedback?: boolean;
   queueId?: string;
   tenantId: string;
 }
 
-export async function resolveOrCreateProviderConversation(input: ProviderConversationInput): Promise<ConversationRecord | null> {
+export interface ResolvedProviderConversation {
+  conversation: ConversationRecord;
+  csatFeedbackAwaiting: boolean;
+}
+
+export async function resolveOrCreateProviderConversation(input: ProviderConversationInput): Promise<ResolvedProviderConversation | null> {
   const tenantId = required(input.tenantId);
   const connectionId = required(input.channelConnectionId);
   const providerConversationId = required(input.providerConversationId);
@@ -65,11 +71,15 @@ export async function resolveOrCreateProviderConversation(input: ProviderConvers
     }),
     createMutation: (conversation, eventType = "conversation.created") =>
       providerConversationMutation(conversation, input.channel, eventType),
+    interceptCsatFeedback: input.interceptCsatFeedback,
     providerConversationId,
     tenantId
   });
 
-  return resolved?.conversation ?? null;
+  return resolved ? {
+    conversation: resolved.conversation,
+    csatFeedbackAwaiting: Boolean(resolved.csatFeedbackAwaiting)
+  } : null;
 }
 
 export function providerConversationKey(tenantId: string, connectionId: string, providerConversationId: string): string {

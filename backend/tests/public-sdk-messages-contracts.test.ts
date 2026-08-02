@@ -367,6 +367,21 @@ describe("public sdk message ingress and widget poll contracts", () => {
     assert.equal((await conversations.listConversations({ tenantId: TENANT_ID })).length, 2);
   });
 
+  it("exposes a CSAT survey in the widget poll after the SDK conversation is closed", async () => {
+    const { baseUrl } = await createTestApiApp(apps);
+    const send = await publicPost(baseUrl, "/public/sdk/messages", { externalId: "visitor-poll-csat", text: "Need help" });
+    const conversationId = String(send.data.conversationId);
+    const conversations = ConversationRepository.default();
+    const conversation = await conversations.findConversation(conversationId);
+    assert.ok(conversation);
+    await conversations.saveConversation({ ...conversation, operatorId: "operator-poll", status: "closed" });
+
+    const poll = await publicGet(baseUrl, `/public/sdk/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      visitorSessionToken: String(send.data.visitorSessionToken)
+    });
+    assert.deepEqual(poll.data.csatSurvey, { scale: "CSAT", scores: [1, 2, 3, 4, 5], state: "rating" });
+  });
+
   it("accepts a widget rating and feedback for an appeal closed by the bot without an operator", async () => {
     const { baseUrl } = await createTestApiApp(apps);
     const send = await publicPost(baseUrl, "/public/sdk/messages", {

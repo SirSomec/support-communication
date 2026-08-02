@@ -6,19 +6,43 @@ import { ProviderConnectionCrypto, type ProviderCredentialEnvelope } from "./pro
 import type { IntegrationRepository } from "./integration.repository.js";
 import { resolveOrCreateProviderConversation } from "./provider-conversation.js";
 import type { ProviderMessageBindingRepository } from "./provider-message-binding.repository.js";
+import {
+  conversationCsatFeedback,
+  CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT,
+  CSAT_FEEDBACK_NEW_APPEAL_CALLBACK,
+  CSAT_FEEDBACK_NEW_APPEAL_TEXT,
+  CSAT_FEEDBACK_PROMPT_TEXT,
+  csatFeedbackConversationMutation,
+  isAwaitingCsatFeedback,
+  withCsatFeedback
+} from "../quality/csat-feedback.js";
+import { AI_CLOSED_CONVERSATION_OPERATOR } from "../quality/quality.types.js";
 
 export interface ProviderWebhookRouteInput {
   body: Record<string, unknown>;
   channel: "MAX" | "VK";
   channelConnectionId: string;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
-  conversationService: Pick<ConversationService, "normalizeInboundEvent" | "recordDeliveryReceipt">;
+  conversationService: Pick<ConversationService, "appendMessage" | "normalizeInboundEvent" | "recordDeliveryReceipt">;
   headers?: Record<string, string | undefined>;
   integrationRepository: Pick<IntegrationRepository, "findChannelConnectionAsync" | "findProviderConnectionCredentialByConnectionIdAsync">;
   providerMessageBindings?: Pick<ProviderMessageBindingRepository, "advance" | "find">;
+  answerMaxCallback?: (input: { accessToken: string; callbackId: string; message: Record<string, unknown> }) => Promise<boolean>;
+  recordQualityRating?: (payload: {
+    channel?: string; clientId?: string; conversationId?: string; idempotencyKey?: string;
+    operator?: string; scale?: "CSAT" | "CSI" | "QA"; score?: number; topic?: string;
+  }, context: { actorId?: string; actorType?: "client"; tenantId?: string }) => Promise<{ status: string; data?: Record<string, unknown>; error?: unknown }>;
+  runBotRuntime?: (event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string }) => Promise<{ instance?: { status?: string }; outcome?: string }>;
 }
 
 export async function handleProviderWebhookFromRoute(input: ProviderWebhookRouteInput): Promise<unknown> {
+  // MAX may batch webhook notifications in `updates`. Process each item with
+  // the same authenticated connection rather than silently ignoring callbacks.
+  if (input.channel === "MAX" && Array.isArray(input.body.updates)) {
+    const updates = input.body.updates.filter((item): item is Record<string, unknown> => Boolean(record(item)));
+    const results = await Promise.all(updates.map((body) => handleProviderWebhookFromRoute({ ...input, body })));
+    return accepted("MAX", { accepted: true, processed: results.length });
+  }
   const provider = input.channel.toLowerCase();
   const credential = await input.integrationRepository.findProviderConnectionCredentialByConnectionIdAsync(input.channelConnectionId);
   if (!credential || credential.provider !== provider || credential.status !== "active") return denied("provider_connection_not_found");
@@ -67,29 +91,163 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
     return accepted(input.channel, { conversationId: binding.conversationId, duplicate: Boolean(recorded.data?.duplicate), messageId: binding.internalMessageId, status: receipt.status, tenantId: credential.tenantId });
   }
 
+  const rating = input.channel === "MAX" ? parseMaxQualityRating(input.body) : null;
+  const feedbackDecline = input.channel === "MAX" ? parseMaxCsatFeedbackDecline(input.body) : null;
+  if (feedbackDecline) {
+    const conversation = await resolveMaxRatedConversation(
+      input.conversationRepository,
+      credential.tenantId,
+      connection.id,
+      feedbackDecline.providerConversationId
+    );
+    if (!conversation) return denied("provider_quality_conversation_unresolved");
+    let declined = false;
+    if (isAwaitingCsatFeedback(conversation)) {
+      const current = conversationCsatFeedback(conversation);
+      const updated = withCsatFeedback(conversation, {
+        offeredAt: current?.offeredAt ?? new Date().toISOString(),
+        ratingId: current?.ratingId ?? "",
+        state: "declined"
+      });
+      await input.conversationRepository.saveConversationMutation(
+        csatFeedbackConversationMutation(updated, "quality.feedback.declined", { ratingId: current?.ratingId ?? null })
+      );
+      declined = true;
+    }
+    try {
+      const accessToken = crypto.decrypt(JSON.parse(credential.accessTokenEncrypted) as ProviderCredentialEnvelope);
+      await (input.answerMaxCallback ?? answerMaxCallback)({
+        accessToken,
+        callbackId: feedbackDecline.callbackId,
+        message: { text: CSAT_FEEDBACK_NEW_APPEAL_TEXT }
+      });
+    } catch { /* state is durable even if MAX callback response is unavailable */ }
+    return accepted("MAX", { accepted: true, callbackId: feedbackDecline.callbackId, conversationId: conversation.id, declined, tenantId: credential.tenantId });
+  }
+  if (rating) {
+    if (!input.recordQualityRating) return denied("provider_quality_not_configured");
+    // A rating belongs to the closed dialog itself. Do not run the normal
+    // inbound resolver here: it deliberately forks a new appeal for a closed
+    // conversation that is not yet awaiting feedback.
+    const conversation = await resolveMaxRatedConversation(
+      input.conversationRepository,
+      credential.tenantId,
+      connection.id,
+      rating.providerConversationId
+    );
+    const operator = conversation?.operatorId?.trim()
+      || (conversation?.status === "closed" ? AI_CLOSED_CONVERSATION_OPERATOR : "");
+    if (!conversation || !operator) return denied("provider_quality_conversation_unresolved");
+
+    const recorded = await input.recordQualityRating({
+      channel: "MAX",
+      clientId: rating.providerUserId || rating.providerConversationId,
+      conversationId: conversation.id,
+      idempotencyKey: `max:${connection.id}:${rating.callbackId}`,
+      operator,
+      scale: "CSAT",
+      score: rating.score,
+      topic: conversation.topic
+    }, { actorId: rating.providerUserId || rating.providerConversationId, actorType: "client", tenantId: credential.tenantId });
+
+    let feedbackPromptOffered = false;
+    if (recorded.status === "ok" && conversation.status === "closed") {
+      const current = conversationCsatFeedback(conversation);
+      const alreadyAwaiting = isAwaitingCsatFeedback(conversation);
+      const ratingId = String(recorded.data?.ratingId ?? "") || `max:${connection.id}:${rating.callbackId}`;
+      const updated = withCsatFeedback(conversation, {
+        offeredAt: alreadyAwaiting && current ? current.offeredAt : new Date().toISOString(),
+        ratingId,
+        state: "awaiting"
+      });
+      await input.conversationRepository.saveConversationMutation(
+        csatFeedbackConversationMutation(updated, "quality.feedback.offered", { ratingId })
+      );
+      if (!alreadyAwaiting) {
+        const promptText = CSAT_FEEDBACK_PROMPT_TEXT;
+        let answered = false;
+        try {
+          const accessToken = crypto.decrypt(JSON.parse(credential.accessTokenEncrypted) as ProviderCredentialEnvelope);
+          answered = await (input.answerMaxCallback ?? answerMaxCallback)({
+            accessToken,
+            callbackId: rating.callbackId,
+            message: {
+              attachments: [{
+                payload: { buttons: [[{
+                  payload: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK,
+                  text: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT,
+                  type: "callback"
+                }]] },
+                type: "inline_keyboard"
+              }],
+              text: promptText
+            }
+          });
+        } catch {
+          // A callback acknowledgement is best-effort. Preserve the feedback
+          // state and use a normal outbound message if MAX is temporarily down.
+        }
+        if (!answered) {
+          const prompt = await input.conversationService.appendMessage({
+            conversationId: conversation.id,
+            idempotencyKey: `quality:csat:feedback-prompt:${conversation.id}:${ratingId}`,
+            text: promptText
+          }, { tenantId: credential.tenantId });
+          answered = prompt.status === "ok";
+        }
+        feedbackPromptOffered = answered;
+      }
+    }
+    return accepted(input.channel, {
+      accepted: recorded.status === "ok",
+      callbackId: rating.callbackId,
+      conversationId: conversation.id,
+      feedbackPromptOffered,
+      ratingId: recorded.data?.ratingId ?? null,
+      tenantId: credential.tenantId
+    });
+  }
+
   const event = input.channel === "VK" ? parseVkMessage(input.body) : parseMaxMessage(input.body);
   if (!event) return accepted(input.channel, { ignored: true, tenantId: credential.tenantId });
-  const conversation = await resolveOrCreateProviderConversation({
+  const resolved = await resolveOrCreateProviderConversation({
     channel: input.channel,
     channelConnectionId: connection.id,
     conversationRepository: input.conversationRepository,
     displayName: event.displayName,
+    interceptCsatFeedback: true,
     providerConversationId: event.providerConversationId,
     providerUserId: event.providerUserId,
     queueId: connection.routingQueueId,
     tenantId: credential.tenantId
   });
+  const conversation = resolved?.conversation;
   if (!conversation) return denied("provider_conversation_create_failed");
+  const isNewConversation = conversation.messages.length === 0;
+  const runtimeEventId = `${credential.tenantId}:${connection.id}:${event.eventId}`;
   const normalized = await input.conversationService.normalizeInboundEvent(provider, {
     attachments: event.attachments,
     conversationId: conversation.id,
-    eventId: `${credential.tenantId}:${connection.id}:${event.eventId}`,
-    text: event.text
+    eventId: runtimeEventId,
+    text: event.text,
+    csatFeedback: resolved.csatFeedbackAwaiting
   });
+  const botRuntime = normalized.status === "ok" && !resolved.csatFeedbackAwaiting && input.runBotRuntime
+    ? await tryBotRuntime(input.runBotRuntime, {
+        channel: input.channel,
+        conversationId: conversation.id,
+        eventId: runtimeEventId,
+        payload: { isNewConversation, text: event.text },
+        tenantId: credential.tenantId,
+        traceId: normalized.traceId
+      })
+    : null;
   return accepted(input.channel, {
+    botRuntime: botRuntime ? { outcome: botRuntime.outcome ?? null, status: botRuntime.instance?.status ?? null } : null,
     conversationId: conversation.id,
     duplicate: Boolean(normalized.data?.duplicate),
     messageId: record(normalized.data?.message)?.id ?? null,
+    recordedAsFeedback: resolved.csatFeedbackAwaiting,
     tenantId: credential.tenantId
   });
 }
@@ -185,6 +343,77 @@ function accepted(channel: "MAX" | "VK", data: Record<string, unknown>) {
   // code. Returning a JSON payload makes VK retry an already handled event.
   if (channel === "VK") return "ok";
   return createEnvelope({ service: "integrationService", operation: "receiveProviderWebhook", data, meta: { source: "provider-webhook" } });
+}
+
+function parseMaxQualityRating(body: Record<string, unknown>): {
+  callbackId: string; displayName: string; providerConversationId: string; providerUserId: string; score: number;
+} | null {
+  if (value(body.update_type) !== "message_callback") return null;
+  const callback = record(body.callback) ?? body;
+  const payload = value(callback.payload ?? callback.data ?? body.payload);
+  const match = /^quality:csat:([1-5])$/i.exec(payload);
+  const message = record(callback.message) ?? record(body.message);
+  const sender = record(message?.sender) ?? record(callback.user) ?? record(body.user);
+  const recipient = record(message?.recipient);
+  const providerConversationId = value(recipient?.chat_id ?? recipient?.user_id ?? callback.chat_id ?? body.chat_id);
+  const providerUserId = value(sender?.user_id ?? sender?.id ?? callback.user_id ?? body.user_id);
+  const callbackId = value(callback.callback_id ?? callback.id);
+  if (!match || !providerConversationId || !callbackId) return null;
+  return {
+    callbackId,
+    displayName: value(sender?.name) || `MAX ${providerUserId || providerConversationId}`,
+    providerConversationId,
+    providerUserId,
+    score: Number(match[1])
+  };
+}
+
+function parseMaxCsatFeedbackDecline(body: Record<string, unknown>): {
+  callbackId: string; providerConversationId: string;
+} | null {
+  if (value(body.update_type) !== "message_callback") return null;
+  const callback = record(body.callback) ?? body;
+  if (value(callback.payload ?? callback.data ?? body.payload) !== CSAT_FEEDBACK_NEW_APPEAL_CALLBACK) return null;
+  const message = record(callback.message) ?? record(body.message);
+  const recipient = record(message?.recipient);
+  const providerConversationId = value(recipient?.chat_id ?? recipient?.user_id ?? callback.chat_id ?? body.chat_id);
+  const callbackId = value(callback.callback_id ?? callback.id);
+  return providerConversationId && callbackId ? { callbackId, providerConversationId } : null;
+}
+
+async function resolveMaxRatedConversation(
+  repository: Pick<ConversationRepository, "listConversations">,
+  tenantId: string,
+  channelConnectionId: string,
+  providerConversationId: string
+) {
+  const listed = await repository.listConversations({ tenantId, take: 100 });
+  return listed
+    .filter((conversation) =>
+      String(conversation.channel).toLowerCase() === "max"
+      && String(conversation.channelConnectionId ?? "") === channelConnectionId
+      && String(conversation.providerConversationId ?? "") === providerConversationId
+    )
+    .sort((left, right) => Date.parse(String(right.updatedAt ?? "")) - Date.parse(String(left.updatedAt ?? "")))[0] ?? null;
+}
+
+async function answerMaxCallback(input: { accessToken: string; callbackId: string; message: Record<string, unknown> }): Promise<boolean> {
+  const baseUrl = String(process.env.MAX_API_BASE_URL ?? "https://platform-api2.max.ru").replace(/\/+$/, "");
+  const endpoint = `${baseUrl}/answers?callback_id=${encodeURIComponent(input.callbackId)}`;
+  const response = await fetch(endpoint, {
+    body: JSON.stringify({ message: input.message }),
+    headers: { Authorization: input.accessToken, "Content-Type": "application/json" },
+    method: "POST",
+    signal: AbortSignal.timeout(5_000)
+  });
+  return response.ok;
+}
+
+async function tryBotRuntime(
+  run: NonNullable<ProviderWebhookRouteInput["runBotRuntime"]>,
+  event: Parameters<NonNullable<ProviderWebhookRouteInput["runBotRuntime"]>>[0]
+) {
+  try { return await run(event); } catch { return null; }
 }
 
 function denied(code: string) {

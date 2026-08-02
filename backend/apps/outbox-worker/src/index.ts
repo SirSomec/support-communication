@@ -1056,7 +1056,11 @@ function createChannelConnectorHandler(
       throw error;
     }
 
-    if (providerMessageId && descriptorStore.recordProviderMessageBinding && descriptor.messageId) {
+    // A post-close quality survey is a service message, not a conversation
+    // message. It has no corresponding internal message row, so attempting
+    // to bind a provider receipt would violate the FK and add noisy errors.
+    if (providerMessageId && descriptorStore.recordProviderMessageBinding && descriptor.messageId
+      && stringValue(descriptor.payload.purpose) !== "quality_csat_survey") {
       try {
         await descriptorStore.recordProviderMessageBinding({
           channelConnectionId: requireString(request.channelConnectionId, "provider_channel_connection_id_required"),

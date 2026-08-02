@@ -22,7 +22,8 @@ describe("official VK/MAX outbound connectors", () => {
         return { accessToken: "vk-secret-token", apiVersion: "5.199", externalAccountId: "group-1" };
       }
     });
-    const delivered = await connector.deliverMessage(request("VK", "conn-vk", "peer-7"));
+    const replyMarkup = { inline_keyboard: [[{ callback_data: "quality:csat:5", text: "5" }]] };
+    const delivered = await connector.deliverMessage({ ...request("VK", "conn-vk", "peer-7"), replyMarkup });
     assert.equal(delivered?.providerMessageId, "91");
     assert.equal(call?.url, "https://api.vk.com/method/messages.send");
     const form = new URLSearchParams(call?.init.body);
@@ -30,6 +31,10 @@ describe("official VK/MAX outbound connectors", () => {
     assert.equal(form.get("peer_id"), "peer-7");
     assert.equal(form.get("message"), "Operator reply");
     assert.equal(form.get("v"), "5.199");
+    assert.deepEqual(JSON.parse(String(form.get("keyboard"))), {
+      buttons: [[{ action: { label: "5", payload: "quality:csat:5", type: "callback" }, color: "primary" }]],
+      inline: true
+    });
   });
 
   it("uploads a VK image and sends its saved provider attachment id", async () => {

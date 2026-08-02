@@ -77,6 +77,7 @@ try {
     await vk("groups.setCallbackSettings", {
       api_version: apiVersion,
       group_id: groupId,
+      message_event: "1",
       message_new: "1",
       server_id: String(serverId)
     }, accessToken, apiVersion);

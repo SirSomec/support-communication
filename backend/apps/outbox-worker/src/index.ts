@@ -1371,6 +1371,8 @@ export function createTenantVkChannelConnector({ apiBaseUrl, fetcher, providerAt
         v: credential.apiVersion?.trim() || "5.199"
       });
       if (providerAttachments.length) params.set("attachment", providerAttachments.join(","));
+      const keyboard = vkInlineKeyboard(request.replyMarkup);
+      if (keyboard) params.set("keyboard", JSON.stringify(keyboard));
       const response = await postOfficialProviderRequest({
         body: params.toString(),
         contentType: "application/x-www-form-urlencoded",
@@ -1554,6 +1556,23 @@ function maxInlineKeyboard(replyMarkup: Record<string, unknown> | undefined): Re
     }))
     .filter((item) => item.text && item.payload) : []).filter((row) => row.length);
   return buttons.length ? { payload: { buttons }, type: "inline_keyboard" } : null;
+}
+
+function vkInlineKeyboard(replyMarkup: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  const rows = Array.isArray(replyMarkup?.inline_keyboard) ? replyMarkup.inline_keyboard : [];
+  const buttons = rows.map((row) => Array.isArray(row) ? row
+    .map((item) => objectValue(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .map((item) => ({
+      action: {
+        label: String(item.text ?? "").trim(),
+        payload: String(item.callback_data ?? "").trim(),
+        type: "callback"
+      },
+      color: "primary"
+    }))
+    .filter((item) => item.action.label && item.action.payload) : []).filter((row) => row.length);
+  return buttons.length ? { buttons, inline: true } : null;
 }
 
 function workerHttpDispatchError(prefix: string, error: unknown): Error {

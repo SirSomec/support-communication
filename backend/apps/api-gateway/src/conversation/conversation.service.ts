@@ -2185,11 +2185,11 @@ function createChannelCsatSurvey(
   const channel = conversation.channel.trim().toLowerCase();
   // SDK receives the survey state in its authenticated polling response. It is
   // not an outbound provider and therefore must not receive an outbox descriptor.
-  if (!new Set(["telegram", "max"]).has(channel)) {
+  if (!new Set(["telegram", "max", "vk"]).has(channel)) {
     return null;
   }
 
-  const providerConversationId = telegramChatIdFromConversation(conversation);
+  const providerConversationId = providerConversationIdFromConversation(conversation);
   if (!providerConversationId) {
     return null;
   }
@@ -2248,7 +2248,7 @@ function createChannelCsatSurvey(
   return { descriptor, outbox };
 }
 
-function telegramChatIdFromConversation(conversation: ConversationRecord): string {
+function providerConversationIdFromConversation(conversation: ConversationRecord): string {
   const taggedChatId = conversation.tags
     .map((tag) => tag.trim())
     .find((tag) => /^(telegram-chat|telegram_chat_id|chat):/i.test(tag));

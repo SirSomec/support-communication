@@ -123,6 +123,33 @@ describe("VK and MAX provider webhooks", () => {
     assert.equal(feedback.data.recordedAsFeedback, true);
     assert.equal((await runtime.conversations.findConversation(conversation.id))?.messages.at(-1)?.type, "csat_feedback");
   });
+
+  it("records a VK CSAT callback and offers the feedback flow", async () => {
+    const runtime = providerRuntime("vk", "conn-vk", "vk-secret", "vk-confirm");
+    await receive(runtime, "VK", {
+      event_id: "vk-csat-message", object: { message: { from_id: 77, id: 12, peer_id: 701, text: "Help" } }, secret: "vk-secret", type: "message_new"
+    });
+    const conversation = (await runtime.conversations.listConversations({ tenantId: "tenant-a" }))[0];
+    await runtime.conversations.saveConversation({ ...conversation, operatorId: "operator-1", status: "closed" });
+    runtime.recordQualityRating = async (payload: Record<string, unknown>) => {
+      runtime.ratings.push(payload);
+      return { status: "ok", data: { ratingId: "vk-rating-1" } };
+    };
+    const messages: Array<Record<string, unknown>> = [];
+    runtime.sendVkMessage = async (input: Record<string, unknown>) => { messages.push(input); return true; };
+
+    const rated = await receive(runtime, "VK", {
+      event_id: "vk-csat-event", object: { event_id: "vk-callback-1", peer_id: 701, payload: "quality:csat:4", user_id: 77 }, secret: "vk-secret", type: "message_event"
+    });
+    assert.equal(rated, "ok");
+    assert.deepEqual(runtime.ratings[0], {
+      channel: "VK", clientId: "77", conversationId: conversation.id,
+      idempotencyKey: "vk:conn-vk:vk-callback-1", operator: "operator-1", scale: "CSAT", score: 4, topic: conversation.topic
+    });
+    assert.equal((await runtime.conversations.findConversation(conversation.id))?.metadata?.csatFeedback?.state, "awaiting");
+    assert.equal(messages[0]?.peerId, "701");
+    assert.equal((messages[0]?.keyboard as any)?.inline, true);
+  });
 });
 
 function providerRuntime(provider: "max" | "vk", connectionId: string, secret: string, confirmation?: string) {
@@ -144,7 +171,7 @@ function providerRuntime(provider: "max" | "vk", connectionId: string, secret: s
     webhookSecretEncrypted: JSON.stringify(crypto.encrypt(secret))
   };
   integrations.saveProviderConnectionCredential(credential);
-  const runtime: any = { answerMaxCallback: async () => true, binding: null, conversations, integrations, ratings: [], recordQualityRating: undefined, runBotRuntime: undefined, service: new ConversationService(conversations) };
+  const runtime: any = { answerMaxCallback: async () => true, binding: null, conversations, integrations, ratings: [], recordQualityRating: undefined, runBotRuntime: undefined, sendVkMessage: undefined, service: new ConversationService(conversations) };
   runtime.providerMessageBindings = {
     find: async (_tenantId: string, _connectionId: string, providerMessageId: string) => runtime.binding?.providerMessageId === providerMessageId ? runtime.binding : null,
     advance: async (binding: Record<string, any>, status: string) => {
@@ -161,6 +188,6 @@ function receive(runtime: ReturnType<typeof providerRuntime>, channel: "MAX" | "
     body, channel, channelConnectionId: channel === "VK" ? "conn-vk" : "conn-max",
     conversationRepository: runtime.conversations, conversationService: runtime.service,
     headers, integrationRepository: runtime.integrations, providerMessageBindings: runtime.providerMessageBindings,
-    answerMaxCallback: runtime.answerMaxCallback, recordQualityRating: runtime.recordQualityRating, runBotRuntime: runtime.runBotRuntime
+    answerMaxCallback: runtime.answerMaxCallback, recordQualityRating: runtime.recordQualityRating, runBotRuntime: runtime.runBotRuntime, sendVkMessage: runtime.sendVkMessage
   });
 }

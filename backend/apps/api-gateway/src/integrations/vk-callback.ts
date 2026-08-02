@@ -50,6 +50,7 @@ export async function subscribeVkCallback(input: VkCallbackSubscriptionInput): P
   if (!Number.isInteger(serverId) || serverId <= 0) throw new Error("vk_callback_server_id_invalid");
   await callVk("groups.setCallbackSettings", {
     api_version: apiVersion(input),
+    message_event: "1",
     message_new: "1",
     server_id: String(serverId)
   }, input);

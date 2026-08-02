@@ -392,6 +392,26 @@ describe("phase 2 conversation, message, channel and realtime backend contracts"
     assert.equal(outbox.filter((event) => event.payload.descriptorId === descriptors[0]?.id).length, 1);
   });
 
+  it("queues the same durable CSAT survey for a VK dialog when it is closed", async () => {
+    const repository = ConversationRepository.inMemory();
+    await repository.saveConversation({
+      channel: "VK", channelConnectionId: "conn-vk", clientSince: "2026-07-11", device: "VK", entry: "VK",
+      id: "vk-csat-close", initials: "VK", language: "ru", messages: [], name: "VK client", phone: "701",
+      preview: "Question resolved", previous: [], providerConversationId: "701", sla: "Active", slaTone: "ok", status: "active",
+      tags: ["vk"], tenantId: "tenant-mygig", time: "now", topic: "Support / VK"
+    });
+    const closed = await new ConversationService(repository).transitionConversationStatus({
+      conversationId: "vk-csat-close", nextStatus: "closed", resolutionOutcome: "resolved"
+    }, { tenantId: "tenant-mygig" });
+    const descriptors = await repository.listOutboundDescriptors({ conversationId: "vk-csat-close", kind: "message_delivery" });
+
+    assert.equal(closed.status, "ok");
+    assert.equal(closed.data.csatSurveyDelivery.deliveryState, "queued");
+    assert.equal(descriptors[0]?.channel, "VK");
+    assert.equal(descriptors[0]?.payload.providerConversationId, "701");
+    assert.equal((descriptors[0]?.payload.replyMarkup as any)?.inline_keyboard?.[0]?.[4]?.callback_data, "quality:csat:5");
+  });
+
   it("persists a repeat close after reopen without re-sending the CSAT survey", async () => {
     const repository = ConversationRepository.inMemory();
     await repository.saveConversation({

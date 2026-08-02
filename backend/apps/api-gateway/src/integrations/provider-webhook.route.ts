@@ -28,6 +28,7 @@ export interface ProviderWebhookRouteInput {
   integrationRepository: Pick<IntegrationRepository, "findChannelConnectionAsync" | "findProviderConnectionCredentialByConnectionIdAsync">;
   providerMessageBindings?: Pick<ProviderMessageBindingRepository, "advance" | "find">;
   answerMaxCallback?: (input: { accessToken: string; callbackId: string; message: Record<string, unknown> }) => Promise<boolean>;
+  sendVkMessage?: (input: { accessToken: string; apiVersion: string | null; keyboard?: Record<string, unknown>; peerId: string; text: string }) => Promise<boolean>;
   recordQualityRating?: (payload: {
     channel?: string; clientId?: string; conversationId?: string; idempotencyKey?: string;
     operator?: string; scale?: "CSAT" | "CSI" | "QA"; score?: number; topic?: string;
@@ -91,14 +92,15 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
     return accepted(input.channel, { conversationId: binding.conversationId, duplicate: Boolean(recorded.data?.duplicate), messageId: binding.internalMessageId, status: receipt.status, tenantId: credential.tenantId });
   }
 
-  const rating = input.channel === "MAX" ? parseMaxQualityRating(input.body) : null;
-  const feedbackDecline = input.channel === "MAX" ? parseMaxCsatFeedbackDecline(input.body) : null;
+  const rating = input.channel === "MAX" ? parseMaxQualityRating(input.body) : parseVkQualityRating(input.body);
+  const feedbackDecline = input.channel === "MAX" ? parseMaxCsatFeedbackDecline(input.body) : parseVkCsatFeedbackDecline(input.body);
   if (feedbackDecline) {
-    const conversation = await resolveMaxRatedConversation(
+    const conversation = await resolveRatedConversation(
       input.conversationRepository,
       credential.tenantId,
       connection.id,
-      feedbackDecline.providerConversationId
+      feedbackDecline.providerConversationId,
+      input.channel
     );
     if (!conversation) return denied("provider_quality_conversation_unresolved");
     let declined = false;
@@ -116,34 +118,39 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
     }
     try {
       const accessToken = crypto.decrypt(JSON.parse(credential.accessTokenEncrypted) as ProviderCredentialEnvelope);
-      await (input.answerMaxCallback ?? answerMaxCallback)({
-        accessToken,
-        callbackId: feedbackDecline.callbackId,
-        message: { text: CSAT_FEEDBACK_NEW_APPEAL_TEXT }
-      });
-    } catch { /* state is durable even if MAX callback response is unavailable */ }
-    return accepted("MAX", { accepted: true, callbackId: feedbackDecline.callbackId, conversationId: conversation.id, declined, tenantId: credential.tenantId });
+      if (input.channel === "MAX") {
+        await (input.answerMaxCallback ?? answerMaxCallback)({
+          accessToken,
+          callbackId: feedbackDecline.callbackId,
+          message: { text: CSAT_FEEDBACK_NEW_APPEAL_TEXT }
+        });
+      } else {
+        await (input.sendVkMessage ?? sendVkMessage)({ accessToken, apiVersion: credential.apiVersion, peerId: feedbackDecline.providerConversationId, text: CSAT_FEEDBACK_NEW_APPEAL_TEXT });
+      }
+    } catch { /* state is durable even if a provider response is unavailable */ }
+    return accepted(input.channel, { accepted: true, callbackId: feedbackDecline.callbackId, conversationId: conversation.id, declined, tenantId: credential.tenantId });
   }
   if (rating) {
     if (!input.recordQualityRating) return denied("provider_quality_not_configured");
     // A rating belongs to the closed dialog itself. Do not run the normal
     // inbound resolver here: it deliberately forks a new appeal for a closed
     // conversation that is not yet awaiting feedback.
-    const conversation = await resolveMaxRatedConversation(
+    const conversation = await resolveRatedConversation(
       input.conversationRepository,
       credential.tenantId,
       connection.id,
-      rating.providerConversationId
+      rating.providerConversationId,
+      input.channel
     );
     const operator = conversation?.operatorId?.trim()
       || (conversation?.status === "closed" ? AI_CLOSED_CONVERSATION_OPERATOR : "");
     if (!conversation || !operator) return denied("provider_quality_conversation_unresolved");
 
     const recorded = await input.recordQualityRating({
-      channel: "MAX",
+      channel: input.channel,
       clientId: rating.providerUserId || rating.providerConversationId,
       conversationId: conversation.id,
-      idempotencyKey: `max:${connection.id}:${rating.callbackId}`,
+      idempotencyKey: `${input.channel.toLowerCase()}:${connection.id}:${rating.callbackId}`,
       operator,
       scale: "CSAT",
       score: rating.score,
@@ -154,7 +161,7 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
     if (recorded.status === "ok" && conversation.status === "closed") {
       const current = conversationCsatFeedback(conversation);
       const alreadyAwaiting = isAwaitingCsatFeedback(conversation);
-      const ratingId = String(recorded.data?.ratingId ?? "") || `max:${connection.id}:${rating.callbackId}`;
+      const ratingId = String(recorded.data?.ratingId ?? "") || `${input.channel.toLowerCase()}:${connection.id}:${rating.callbackId}`;
       const updated = withCsatFeedback(conversation, {
         offeredAt: alreadyAwaiting && current ? current.offeredAt : new Date().toISOString(),
         ratingId,
@@ -168,21 +175,31 @@ export async function handleProviderWebhookFromRoute(input: ProviderWebhookRoute
         let answered = false;
         try {
           const accessToken = crypto.decrypt(JSON.parse(credential.accessTokenEncrypted) as ProviderCredentialEnvelope);
-          answered = await (input.answerMaxCallback ?? answerMaxCallback)({
-            accessToken,
-            callbackId: rating.callbackId,
-            message: {
-              attachments: [{
-                payload: { buttons: [[{
-                  payload: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK,
-                  text: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT,
-                  type: "callback"
-                }]] },
-                type: "inline_keyboard"
-              }],
+          if (input.channel === "MAX") {
+            answered = await (input.answerMaxCallback ?? answerMaxCallback)({
+              accessToken,
+              callbackId: rating.callbackId,
+              message: {
+                attachments: [{
+                  payload: { buttons: [[{
+                    payload: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK,
+                    text: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT,
+                    type: "callback"
+                  }]] },
+                  type: "inline_keyboard"
+                }],
+                text: promptText
+              }
+            });
+          } else {
+            answered = await (input.sendVkMessage ?? sendVkMessage)({
+              accessToken,
+              apiVersion: credential.apiVersion,
+              keyboard: { buttons: [[{ action: { label: CSAT_FEEDBACK_NEW_APPEAL_BUTTON_TEXT, payload: CSAT_FEEDBACK_NEW_APPEAL_CALLBACK, type: "callback" }, color: "primary" }]], inline: true },
+              peerId: rating.providerConversationId,
               text: promptText
-            }
-          });
+            });
+          }
         } catch {
           // A callback acknowledgement is best-effort. Preserve the feedback
           // state and use a normal outbound message if MAX is temporarily down.
@@ -381,16 +398,40 @@ function parseMaxCsatFeedbackDecline(body: Record<string, unknown>): {
   return providerConversationId && callbackId ? { callbackId, providerConversationId } : null;
 }
 
-async function resolveMaxRatedConversation(
+function parseVkQualityRating(body: Record<string, unknown>): {
+  callbackId: string; displayName: string; providerConversationId: string; providerUserId: string; score: number;
+} | null {
+  if (value(body.type) !== "message_event") return null;
+  const event = record(body.object) ?? body;
+  const match = /^quality:csat:([1-5])$/i.exec(value(event.payload));
+  const providerConversationId = value(event.peer_id);
+  const providerUserId = value(event.user_id);
+  const callbackId = value(event.event_id);
+  if (!match || !providerConversationId || !callbackId) return null;
+  return { callbackId, displayName: `VK ${providerUserId || providerConversationId}`, providerConversationId, providerUserId, score: Number(match[1]) };
+}
+
+function parseVkCsatFeedbackDecline(body: Record<string, unknown>): { callbackId: string; providerConversationId: string } | null {
+  if (value(body.type) !== "message_event") return null;
+  const event = record(body.object) ?? body;
+  const providerConversationId = value(event.peer_id);
+  const callbackId = value(event.event_id);
+  return value(event.payload) === CSAT_FEEDBACK_NEW_APPEAL_CALLBACK && providerConversationId && callbackId
+    ? { callbackId, providerConversationId }
+    : null;
+}
+
+async function resolveRatedConversation(
   repository: Pick<ConversationRepository, "listConversations">,
   tenantId: string,
   channelConnectionId: string,
-  providerConversationId: string
+  providerConversationId: string,
+  channel: "MAX" | "VK"
 ) {
   const listed = await repository.listConversations({ tenantId, take: 100 });
   return listed
     .filter((conversation) =>
-      String(conversation.channel).toLowerCase() === "max"
+      String(conversation.channel).toLowerCase() === channel.toLowerCase()
       && String(conversation.channelConnectionId ?? "") === channelConnectionId
       && String(conversation.providerConversationId ?? "") === providerConversationId
     )
@@ -403,6 +444,24 @@ async function answerMaxCallback(input: { accessToken: string; callbackId: strin
   const response = await fetch(endpoint, {
     body: JSON.stringify({ message: input.message }),
     headers: { Authorization: input.accessToken, "Content-Type": "application/json" },
+    method: "POST",
+    signal: AbortSignal.timeout(5_000)
+  });
+  return response.ok;
+}
+
+async function sendVkMessage(input: { accessToken: string; apiVersion: string | null; keyboard?: Record<string, unknown>; peerId: string; text: string }): Promise<boolean> {
+  const params = new URLSearchParams({
+    access_token: input.accessToken,
+    message: input.text,
+    peer_id: input.peerId,
+    random_id: String(Date.now()),
+    v: input.apiVersion?.trim() || "5.199"
+  });
+  if (input.keyboard) params.set("keyboard", JSON.stringify(input.keyboard));
+  const response = await fetch("https://api.vk.com/method/messages.send", {
+    body: params.toString(),
+    headers: { "content-type": "application/x-www-form-urlencoded" },
     method: "POST",
     signal: AbortSignal.timeout(5_000)
   });

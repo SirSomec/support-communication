@@ -2,6 +2,13 @@ services:
   edge:
     environment:
       S3_DOMAIN: ${S3_DOMAIN:?S3_DOMAIN is required}
+    networks:
+      edge: {}
+      backend:
+        aliases:
+          # Workers retrieve presigned S3 URLs through this hostname. Resolve
+          # it locally to Caddy to avoid an unreliable public-IP hairpin.
+          - s3.supportcom.ru
     volumes:
       - ../caddy/Caddyfile.vps:/etc/caddy/Caddyfile:ro
 

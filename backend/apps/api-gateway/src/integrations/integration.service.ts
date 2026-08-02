@@ -297,7 +297,6 @@ export class IntegrationService {
           process.env.PROVIDER_CREDENTIAL_KEY_VERSION?.trim() || "v1"
         ))
       : null;
-    const saved = await this.integrationRepository.saveChannelConnectionAsync(connection);
     let providerCredential: ProviderConnectionCredentialRecord | null = null;
     let webhookSecret: string | null = null;
     if (type === "vk" || type === "max") {
@@ -318,6 +317,15 @@ export class IntegrationService {
           return invalidEnvelope("createChannelConnection", code, "MAX webhook subscription could not be configured.", { type });
         }
       }
+    }
+
+    // MAX validates the webhook URL during subscription.  Persist only after
+    // that remote operation succeeds, so a failed attempt cannot leave an
+    // active-looking channel without usable credentials.
+    const saved = await this.integrationRepository.saveChannelConnectionAsync(connection);
+    if (type === "vk" || type === "max") {
+      const token = extractCredentialMaterial(payload.credentials);
+      const crypto = providerCrypto!;
       providerCredential = await this.integrationRepository.saveProviderConnectionCredentialAsync({
         accessTokenEncrypted: JSON.stringify(crypto.encrypt(token)),
         apiVersion: type === "vk" ? String(payload.credentials?.apiVersion ?? "5.199") : null,
@@ -334,7 +342,7 @@ export class IntegrationService {
         status: saved.status,
         tenantId: normalizedTenantId,
         updatedAt: now,
-        webhookSecretEncrypted: JSON.stringify(crypto.encrypt(webhookSecret))
+        webhookSecretEncrypted: JSON.stringify(crypto.encrypt(webhookSecret!))
       });
     }
     if (telegramConnection) {

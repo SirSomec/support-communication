@@ -272,6 +272,30 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     else process.env.PUBLIC_WEBHOOK_BASE_URL = priorPublicWebhookBaseUrl;
   });
 
+  it("does not persist a MAX connection when webhook subscription is rejected", async () => {
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
+    const integrations = new IntegrationService(repository, {
+      maxFetch: async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ message: "unsupported update type" }) }),
+      providerCredentialCrypto: new ProviderConnectionCrypto({
+        keyVersion: "test-v1",
+        masterKeyBase64: Buffer.alloc(32, 7).toString("base64")
+      })
+    });
+    const priorPublicWebhookBaseUrl = process.env.PUBLIC_WEBHOOK_BASE_URL;
+    process.env.PUBLIC_WEBHOOK_BASE_URL = "https://support.example.test";
+
+    const result = await integrations.createChannelConnection("tenant-max-rejected", {
+      credentials: { token: "max-token" },
+      name: "Rejected MAX",
+      type: "max"
+    });
+
+    assert.equal(result.status, "invalid");
+    assert.equal(repository.listChannelConnections({ tenantId: "tenant-max-rejected" }).length, 0);
+    if (priorPublicWebhookBaseUrl === undefined) delete process.env.PUBLIC_WEBHOOK_BASE_URL;
+    else process.env.PUBLIC_WEBHOOK_BASE_URL = priorPublicWebhookBaseUrl;
+  });
+
   it("queues API key rotation without returning raw key material", async () => {
     const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 

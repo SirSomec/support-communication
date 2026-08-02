@@ -47,6 +47,9 @@ x-runtime-environment: &runtime-environment
   NODE_USE_ENV_PROXY: "1"
   HTTPS_PROXY: ${TELEGRAM_HTTPS_PROXY:-}
   NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis,minio,api-gateway,frontend}
+  # MAX uses a certificate chain issued by the Russian Ministry of Digital
+  # Development. Node must load this additional, pinned CA for platform-api2.
+  NODE_EXTRA_CA_CERTS: /etc/ssl/certs/russian-trusted-root-ca.crt
   # Telegram must use exactly one ingress mechanism.  Keep this explicit so a
   # configured bot cannot silently fall back to a disabled worker after deploy.
   TELEGRAM_INGRESS_MODE: ${TELEGRAM_INGRESS_MODE:-disabled}
@@ -71,6 +74,8 @@ x-runtime-service: &runtime-service
   security_opt:
     - no-new-privileges:true
   stop_grace_period: 45s
+  volumes:
+    - ../certs/russian-trusted-root-ca.crt:/etc/ssl/certs/russian-trusted-root-ca.crt:ro
   networks: [backend]
   mem_limit: 768m
   cpus: 1.0
@@ -305,6 +310,7 @@ services:
       OUTBOX_TELEGRAM_ENABLED: ${OUTBOX_TELEGRAM_ENABLED:-true}
       OUTBOX_VK_ENABLED: ${OUTBOX_VK_ENABLED:-true}
       OUTBOX_MAX_ENABLED: ${OUTBOX_MAX_ENABLED:-true}
+      OUTBOX_MAX_ENDPOINT: ${OUTBOX_MAX_API_BASE_URL:-https://platform-api2.max.ru}
 
   identity-events-worker:
     <<: *runtime-service

@@ -26,17 +26,17 @@ const navigationItems = [
   { id: "webhooks", label: "Webhooks" }
 ];
 
-const widgetExample = `<script defer src="https://cdn.example.com/support-widget.js"></script>
+const widgetExample = `<script defer src="https://supportcom.ru/widget.js"></script>
 <script>
   SupportWidget.init({
-    apiBase: "https://api.example.com/api/v1",
+    apiBase: "https://supportcom.ru/api/v1",
     publicKey: "sk_live_<public_api_key>",
     externalId: "customer_42",
     environment: "production"
   });
 </script>`;
 
-const identifyExample = `const apiBase = "https://api.example.com/api/v1";
+const identifyExample = `const apiBase = "https://supportcom.ru/api/v1";
 
 const response = await fetch(
   \`\${apiBase}/public/sdk/identify?environment=production\`,
@@ -56,7 +56,7 @@ const response = await fetch(
 const result = await response.json();`;
 
 const messageExample = `const response = await fetch(
-  "https://api.example.com/api/v1/public/sdk/messages?environment=production",
+  "https://supportcom.ru/api/v1/public/sdk/messages?environment=production",
   {
     method: "POST",
     headers: {
@@ -74,7 +74,7 @@ const messageExample = `const response = await fetch(
 const { data } = await response.json();
 // data.conversationId и data.visitorSessionToken нужны для получения ответов.`;
 
-const openChannelExample = `curl -X POST "https://api.example.com/api/v1/open-channel/<channel_token>" \\
+const openChannelExample = `curl -X POST "https://supportcom.ru/api/v1/open-channel/<channel_token>" \\
   -H "Content-Type: application/json" \\
   -d '{
     "sender": {
@@ -215,7 +215,7 @@ export function ApiDocsPage() {
             </div>
             <div className="api-docs-base-url" aria-label="Базовый адрес API">
               <span>Базовый URL</span>
-              <code>https://api.example.com/api/v1</code>
+              <code>https://supportcom.ru/api/v1</code>
             </div>
           </section>
 

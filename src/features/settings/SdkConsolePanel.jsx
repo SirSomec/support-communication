@@ -7,7 +7,7 @@ import { integrationService } from "../../services/integrationService.js";
 
 const sdkSnippet = `SupportSDK.init({ appId: "gig-app", channels: ["SDK", "Telegram", "MAX", "VK"] })`;
 function widgetSnippet({ apiBase, environment, publicKey }) {
-  return `<script src="https://cdn.example.com/support-widget.js"></script>\n<script>\n  SupportWidget.init({\n    apiBase: "${apiBase}",\n    publicKey: "${publicKey}",\n    environment: "${environment}"\n  });\n</script>`;
+  return `<script src="https://supportcom.ru/widget.js"></script>\n<script>\n  SupportWidget.init({\n    apiBase: "${apiBase}",\n    publicKey: "${publicKey}",\n    environment: "${environment}"\n  });\n</script>`;
 }
 
 function defaultWidgetApiBase() {

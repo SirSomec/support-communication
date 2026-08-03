@@ -57,6 +57,8 @@ export function CustomerPanel({
   const [phoneSaving, setPhoneSaving] = useState(false);
   const [copyState, setCopyState] = useState("idle");
   const phoneValue = String(conversation.phone ?? "").trim();
+  const city = String(conversation.city ?? "").trim();
+  const location = String(conversation.location ?? "").trim();
   // Пустой телефон (источник его не передал) может заполнить любой оператор
   // с правом ведения диалогов; исправлять уже сохраненный номер — только
   // роль, которой контакты видны без маски.
@@ -137,6 +139,8 @@ export function CustomerPanel({
       `Клиент: ${conversation.name}`,
       `Телефон: ${visiblePhone}`,
       `Канал: ${conversation.channel || "Не указан"}`,
+      ...(city ? [`Город: ${city}`] : []),
+      ...(location ? [`Локация: ${location}`] : []),
       `Тематика: ${topic || conversation.topic || "Не выбрана"}`
     ].join("\n"));
     setCopyState(result.ok ? "copied" : "error");
@@ -288,6 +292,8 @@ export function CustomerPanel({
           </div>
         )}
         <InfoRow label="Устройство" value={conversation.device} icon={<Smartphone size={15} />} />
+        {city ? <InfoRow label="Город" value={city} /> : null}
+        {location ? <InfoRow label="Локация" value={location} /> : null}
         <InfoRow label="Точка входа" value={conversation.entry} />
         <InfoRow label="Клиент с" value={conversation.clientSince} />
         <InfoRow label="Язык" value={conversation.language} />

@@ -38,6 +38,8 @@ export function mapApiConversation(input) {
     entry: nonEmptyString(input?.entry, channel),
     language: nonEmptyString(input?.language, DEFAULT_LANGUAGE),
     clientSince: nonEmptyString(input?.clientSince, DEFAULT_CLIENT_SINCE),
+    ...(nonEmptyString(input?.city) ? { city: nonEmptyString(input.city) } : {}),
+    ...(nonEmptyString(input?.location) ? { location: nonEmptyString(input.location) } : {}),
     tags: Array.isArray(input?.tags) ? input.tags.map((tag) => String(tag)) : [],
     previous: Array.isArray(input?.previous) ? input.previous : [],
     ...(nonEmptyString(input?.updatedAt) ? { updatedAt: nonEmptyString(input.updatedAt) } : {}),

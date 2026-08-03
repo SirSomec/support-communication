@@ -96,6 +96,19 @@ describe("conversationApiMapper", () => {
     assert.equal(mapped[0].status, "active");
   });
 
+  it("preserves city and location received from the dialog API", () => {
+    const mapped = mapApiConversation({
+      id: "conv-location",
+      name: "Alice",
+      channel: "SDK",
+      city: "Казань",
+      location: "ул. Баумана, 1"
+    });
+
+    assert.equal(mapped.city, "Казань");
+    assert.equal(mapped.location, "ул. Баумана, 1");
+  });
+
   it("normalizes inbound file metadata and accepts only safe attachment URLs", () => {
     const message = mapApiMessage({
       attachments: [

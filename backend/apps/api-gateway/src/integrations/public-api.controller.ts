@@ -285,6 +285,11 @@ export class PublicApiController {
       conversationRepository: this.conversationRepository,
       environment,
       lookup: this.lookup,
+      notifyBotRating: (input) => new ExternalBotBridge({
+        agentsOnline: (tenantId) => resolveAgentsOnline(tenantId),
+        delivery: openChannelDeliveryService(),
+        repository: OpenChannelRepository.default()
+      }).notifyClientRated(input),
       recordQualityRating: (rating, context) => this.qualityService.recordClientQualityRating(rating, context)
     });
   }

@@ -80,6 +80,11 @@ export interface PublicSdkRatingRouteInput {
   conversationRepository: Pick<ConversationRepository, "findConversation" | "saveConversationMutation">;
   environment: PublicApiEnvironment;
   lookup: PublicApiKeyLookup;
+  notifyBotRating?: (input: {
+    conversation: ConversationRecord;
+    rating: "bad" | "good";
+    tenantId: string;
+  }) => Promise<boolean>;
   recordQualityRating: (payload: {
     channel?: string; clientId?: string; conversationId?: string; idempotencyKey?: string;
     operator?: string; scale?: "CSAT" | "CSI" | "QA"; score?: number; topic?: string;
@@ -510,6 +515,14 @@ export async function handlePublicSdkQualityRatingFromRoute(
     score: Number(score),
     topic: conversation.topic
   }, { actorId: clientId, actorType: "client", tenantId: auth.context.tenantId });
+
+  if (recorded.status === "ok" && input.notifyBotRating) {
+    await input.notifyBotRating({
+      conversation,
+      rating: Number(score) >= 3 ? "good" : "bad",
+      tenantId: auth.context.tenantId
+    }).catch(() => false);
+  }
 
   // Оценка принята по закрытому обращению: блок оценки в виджете скрывается,
   // а следующее сообщение клиента станет отзывом, не открывая новое обращение.

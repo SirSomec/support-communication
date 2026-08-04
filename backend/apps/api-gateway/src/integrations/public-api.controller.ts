@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { ConversationRepository } from "../conversation/conversation.repository.js";
+import type { ConversationRecord } from "../conversation/conversation.types.js";
 import { AutomationService } from "../automation/automation.service.js";
 import { ProactiveExposureRepository } from "../automation/proactive-exposure.repository.js";
 import { ConversationService } from "../conversation/conversation.service.js";
@@ -24,6 +25,7 @@ import {
 import { handlePublicSdkPresenceDisconnect, handlePublicSdkPresenceHeartbeat, type PublicSdkPresenceBody } from "./public-sdk-presence.route.js";
 import { handlePublicSdkInvitationAcknowledge, handlePublicSdkInvitationPoll } from "./public-sdk-invitations.route.js";
 import { OpenChannelRepository } from "./open-channel/open-channel.repository.js";
+import { compatWebhookEventBase } from "./open-channel/open-channel-payload.js";
 import { ExternalBotBridge } from "./open-channel/external-bot.route.js";
 import { handleAgentsOnlineStatus, handleWidgetClientInfoFromRoute, type WidgetClientInfoBody } from "./open-channel/client-info.route.js";
 import { openChannelDeliveryService, resolveAgentsOnline } from "./open-channel/open-channel-public.controller.js";
@@ -174,7 +176,7 @@ export class PublicApiController {
   sendPublicSdkMessage(
     @Headers("authorization") authorization: string | undefined,
     @Query("environment") environment: PublicApiEnvironment = "production",
-    @Body() payload: { conversationId?: string; externalId?: string; pageUrl?: string; text?: string } = {}
+    @Body() payload: { conversationId?: string; externalId?: string; offlineMessage?: boolean; pageUrl?: string; text?: string } = {}
   ) {
     return handlePublicSdkMessageIngressFromRoute({
       authorization,
@@ -183,11 +185,37 @@ export class PublicApiController {
       conversationRepository: this.conversationRepository,
       conversationService: this.conversationService,
       environment,
+      emitOfflineMessage: (event) => this.emitOfflineMessageWebhook(event),
       lookup: this.lookup,
       recordProactiveConversion: this.proactiveExposureRepository,
       runBotRuntime: (event) => this.runBotRuntimeWithExternalBridge(event, payload),
       resolveQueueId: (tenantId, channelConnectionId) => this.resolveSdkQueueId(tenantId, channelConnectionId)
     });
+  }
+
+  private async emitOfflineMessageWebhook(input: {
+    conversation: ConversationRecord;
+    messageId: string | null;
+    tenantId: string;
+    text: string;
+  }): Promise<void> {
+    const repository = OpenChannelRepository.default();
+    const state = await repository.findConversationState(input.conversation.id);
+    const widgetId = input.conversation.channelConnectionId ?? input.conversation.channel.toLowerCase();
+    const subscriptions = await repository.listActiveWebhookSubscriptionsForEvent(input.tenantId, "offline_message");
+    await Promise.all(subscriptions.map((subscription) => openChannelDeliveryService().enqueue({
+      body: {
+        ...compatWebhookEventBase("offline_message", input.conversation, state, widgetId),
+        analytics: {},
+        message: input.text,
+        offline_message_id: input.messageId ?? `offline_${Date.now().toString(36)}`
+      },
+      conversationId: input.conversation.id,
+      eventName: "offline_message",
+      kind: "webhook",
+      tenantId: input.tenantId,
+      url: subscription.url
+    })));
   }
 
   /**

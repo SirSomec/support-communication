@@ -45,12 +45,14 @@ export interface PublicSdkMessageRouteInput {
     attachments?: Array<Record<string, unknown>>;
     conversationId?: string;
     externalId?: string;
+    offlineMessage?: boolean;
     pageUrl?: string;
     text?: string;
   };
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent">;
   environment: PublicApiEnvironment;
+  emitOfflineMessage?: (input: { conversation: ConversationRecord; messageId: string | null; text: string; tenantId: string }) => Promise<void>;
   lookup: PublicApiKeyLookup;
   resolveQueueId?: (tenantId: string, channelConnectionId?: string | null) => Promise<string | undefined>;
   recordProactiveConversion?: Pick<ProactiveExposureRepository, "recordMessageConversion">;
@@ -293,6 +295,14 @@ export async function handlePublicSdkMessageIngressFromRoute(
   });
   const normalizedMessage = normalized.data?.message as Record<string, unknown> | null | undefined;
   const messageId = normalizedMessage?.id ? String(normalizedMessage.id) : null;
+  if (normalized.status === "ok" && input.body.offlineMessage === true && input.emitOfflineMessage) {
+    await input.emitOfflineMessage({
+      conversation,
+      messageId,
+      tenantId: auth.context.tenantId,
+      text
+    }).catch(() => undefined);
+  }
   // Отзыв к CSAT-оценке не конвертирует проактивные показы, не будит бота и
   // не назначает оператора: обращение остается закрытым.
   const proactiveConversion = normalized.status === "ok" && !csatFeedback && input.recordProactiveConversion

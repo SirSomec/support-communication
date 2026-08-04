@@ -11,6 +11,7 @@ import { IntegrationModule } from "../apps/api-gateway/dist/integrations/integra
 import { IntegrationRepository } from "../apps/api-gateway/dist/integrations/integration.repository.js";
 import { QualityRepository } from "../apps/api-gateway/dist/quality/quality.repository.js";
 import { WorkspaceRepository } from "../apps/api-gateway/dist/workspace/workspace.repository.js";
+import { OpenChannelRepository } from "../apps/api-gateway/dist/integrations/open-channel/open-channel.repository.js";
 
 const PUBLIC_API_KEY = "sk_test_public_sdk_contract_secret";
 const PUBLIC_KEY_ID = "pak_public_sdk_contract_stage";
@@ -365,6 +366,33 @@ describe("public sdk message ingress and widget poll contracts", () => {
     assert.notEqual(followUp.data.conversationId, conversationId);
     assert.equal("recordedAsFeedback" in followUp.data, false);
     assert.equal((await conversations.listConversations({ tenantId: TENANT_ID })).length, 2);
+  });
+
+  it("emits a webhook-compatible offline_message from the widget path", async () => {
+    const { baseUrl } = await createTestApiApp(apps);
+    const repository = OpenChannelRepository.default();
+    repository.saveWebhookSubscription({
+      createdAt: new Date().toISOString(),
+      events: ["offline_message"],
+      id: "owh-public-sdk-offline",
+      status: "active",
+      tenantId: TENANT_ID,
+      updatedAt: new Date().toISOString(),
+      url: "https://consumer.example/offline"
+    });
+
+    const sent = await publicPost(baseUrl, "/public/sdk/messages", {
+      externalId: "visitor-offline-001",
+      offlineMessage: true,
+      pageUrl: "https://acme.example/contact",
+      text: "Please call me"
+    });
+    assert.equal(sent.data.accepted, true);
+    const delivery = (await repository.listDeliveries({ tenantId: TENANT_ID }))
+      .find((item) => item.eventName === "offline_message");
+    assert.ok(delivery);
+    assert.equal((delivery.body as Record<string, unknown>).event_name, "offline_message");
+    assert.equal((delivery.body as Record<string, unknown>).message, "Please call me");
   });
 
   it("exposes a CSAT survey in the widget poll after the SDK conversation is closed", async () => {

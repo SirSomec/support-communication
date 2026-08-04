@@ -177,13 +177,14 @@ async function apiRequest(method, path, { body, query } = {}) {
   return envelope.data ?? {};
 }
 
-async function sendVisitorMessage(text, attachments = []) {
+async function sendVisitorMessage(text, attachments = [], offlineMessage = false) {
   const data = await apiRequest("POST", "/public/sdk/messages", {
     body: {
       conversationId: state.conversationId,
       externalId: state.externalId,
       pageUrl: state.pageUrlOverride ?? (typeof window !== "undefined" ? window.location.href : undefined),
       text,
+      ...(offlineMessage ? { offlineMessage: true } : {}),
       ...(attachments.length ? { attachments } : {})
     }
   });
@@ -885,7 +886,7 @@ function createPageApi() {
       }
       this.setContactInfo(payload);
       appendMessage("visitor", message);
-      sendVisitorMessage(message).catch((error) => {
+      sendVisitorMessage(message, [], true).catch((error) => {
         appendSystemMessage(`Ошибка отправки: ${error.message}`);
       });
       return { result: "ok" };

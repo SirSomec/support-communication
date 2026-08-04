@@ -260,6 +260,26 @@ describe("open channel chat ingress", () => {
     assert.equal(dialog.metadata?.clientGeo?.source, "location_message");
     assert.equal(dialog.messages.length, messageCountBeforeLocation);
   });
+
+  it("updates city and location from a location event without appending a chat message", async () => {
+    const runtime = openChannelRuntime();
+    await receiveChatEvent(runtime, {
+      sender: { id: "client-location-label" },
+      message: {
+        id: "geo-label-1",
+        latitude: 55.755826,
+        longitude: 37.6173,
+        text: "Moscow, Russia",
+        type: "location"
+      }
+    });
+
+    const dialog = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
+    assert.equal(dialog.metadata?.clientGeo?.city, "Moscow", JSON.stringify(dialog.metadata));
+    assert.equal(dialog.metadata?.clientGeo?.country, "Russia");
+    assert.equal(dialog.metadata?.clientGeo?.latitude, 55.755826);
+    assert.equal(dialog.messages.filter((message) => message.side === "client").length, 0);
+  });
 });
 
 describe("private Jivo webhook migration adapter", () => {

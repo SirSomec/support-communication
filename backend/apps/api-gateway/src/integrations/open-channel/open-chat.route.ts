@@ -56,6 +56,8 @@ export interface OpenChatGeo {
 }
 
 export interface OpenChatMessage {
+  city?: string;
+  country?: string;
   date?: number;
   file?: string;
   file_name?: string;
@@ -133,7 +135,12 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
   }
 
   const locationGeo = type === "location" ? geoFromLocationMessage(message) : undefined;
-  const profileGeo = locationGeo ?? input.body.sender?.geo;
+  // A provider may send stable GeoIP fields on sender and a more precise
+  // human-readable place in the location message.  Keep both in the client
+  // profile instead of letting the coordinate-only event erase the city.
+  const profileGeo = locationGeo
+    ? { ...input.body.sender?.geo, ...locationGeo }
+    : input.body.sender?.geo;
   if (profileGeo) {
     conversation = await persistOpenChatGeo({
       conversation,
@@ -501,7 +508,22 @@ function openChatGeoMetadata(geo: OpenChatGeo | undefined): NonNullable<Conversa
 function geoFromLocationMessage(message: OpenChatMessage): OpenChatGeo | undefined {
   const latitude = finiteInRangeOrUndefined(message.latitude, -90, 90);
   const longitude = finiteInRangeOrUndefined(message.longitude, -180, 180);
-  return latitude === undefined || longitude === undefined ? undefined : { latitude, longitude, source: "location_message" };
+  const label = nonEmpty(message.title) ?? nonEmpty(message.text)?.split(/\r?\n/, 1)[0]?.trim();
+  const labelParts = label?.split(",").map((part) => part.trim()).filter(Boolean) ?? [];
+  const city = nonEmpty(message.city) ?? (labelParts.length > 1 ? labelParts[0] : undefined);
+  const country = nonEmpty(message.country) ?? (labelParts.length > 1 ? labelParts.at(-1) : undefined);
+
+  if (latitude === undefined && longitude === undefined && !city && !country) {
+    return undefined;
+  }
+
+  return {
+    ...(latitude !== undefined ? { latitude } : {}),
+    ...(longitude !== undefined ? { longitude } : {}),
+    ...(city ? { city } : {}),
+    ...(country ? { country } : {}),
+    source: "location_message"
+  };
 }
 
 function sameClientGeo(

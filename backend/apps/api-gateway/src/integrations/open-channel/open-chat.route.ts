@@ -155,6 +155,13 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
     return okJson();
   }
 
+  // A location payload is profile data, not a visitor utterance.  Keeping it
+  // out of the transcript also prevents bot workflows from replying to a
+  // coordinate-only update.  The coordinates were persisted above.
+  if (type === "location") {
+    return okJson();
+  }
+
   if (type === "stop") {
     if (conversation.status !== "closed") {
       await input.conversationService.transitionConversationStatus({

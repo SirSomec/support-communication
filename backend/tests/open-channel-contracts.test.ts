@@ -243,12 +243,13 @@ describe("open channel chat ingress", () => {
     assert.equal(ratings[0].score, 5);
   });
 
-  it("persists a provider-neutral geographic profile and a client location event", async () => {
+  it("persists a provider-neutral geographic profile without adding location data to the transcript", async () => {
     const runtime = openChannelRuntime();
     await receiveChatEvent(runtime, {
       sender: { id: "client-geo", geo: { city: "Kazan", country: "Russia", region: "Tatarstan", source: "provider" } },
       message: { type: "start" }
     });
+    const messageCountBeforeLocation = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0].messages.length;
     await receiveChatEvent(runtime, {
       sender: { id: "client-geo" },
       message: { type: "location", id: "geo-1", latitude: 55.796, longitude: 49.108 }
@@ -257,6 +258,7 @@ describe("open channel chat ingress", () => {
     assert.equal(dialog.metadata?.clientGeo?.city, "Kazan");
     assert.equal(dialog.metadata?.clientGeo?.latitude, 55.796);
     assert.equal(dialog.metadata?.clientGeo?.source, "location_message");
+    assert.equal(dialog.messages.length, messageCountBeforeLocation);
   });
 });
 

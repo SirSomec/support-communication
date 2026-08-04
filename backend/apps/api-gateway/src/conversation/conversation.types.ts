@@ -35,6 +35,12 @@ export interface ConversationAppealMetadata {
   csatFeedback?: ConversationCsatFeedbackState;
   isRepeatAppeal?: boolean;
   parentConversationId?: string;
+  webhookEnrichment?: {
+    crmLink?: string;
+    enableAssign?: boolean;
+    page?: { title?: string; url: string };
+    updatedAt: string;
+  };
 }
 
 // Read-time данные для инбокса: активная бот-сессия и последняя клиентская

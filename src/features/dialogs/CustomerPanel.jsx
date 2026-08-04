@@ -59,6 +59,11 @@ export function CustomerPanel({
   const phoneValue = String(conversation.phone ?? "").trim();
   const city = String(conversation.city ?? "").trim();
   const location = String(conversation.location ?? "").trim();
+  const webhookEnrichment = conversation.metadata?.webhookEnrichment && typeof conversation.metadata.webhookEnrichment === "object"
+    ? conversation.metadata.webhookEnrichment
+    : null;
+  const crmLink = String(webhookEnrichment?.crmLink ?? "").trim();
+  const webhookPage = String(webhookEnrichment?.page?.url ?? "").trim();
   // Пустой телефон (источник его не передал) может заполнить любой оператор
   // с правом ведения диалогов; исправлять уже сохраненный номер — только
   // роль, которой контакты видны без маски.
@@ -294,6 +299,8 @@ export function CustomerPanel({
         <InfoRow label="Устройство" value={conversation.device} icon={<Smartphone size={15} />} />
         {city ? <InfoRow label="Город" value={city} /> : null}
         {location ? <InfoRow label="Локация" value={location} /> : null}
+        {webhookPage ? <InfoRow label="Страница" value={webhookPage} /> : null}
+        {crmLink ? <InfoRow label="CRM" value={crmLink} /> : null}
         <InfoRow label="Точка входа" value={conversation.entry} />
         <InfoRow label="Клиент с" value={conversation.clientSince} />
         <InfoRow label="Язык" value={conversation.language} />

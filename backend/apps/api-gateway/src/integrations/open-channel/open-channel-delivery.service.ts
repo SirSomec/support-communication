@@ -206,12 +206,16 @@ export class OpenChannelDeliveryService {
       ? parsed.custom_data.filter((item): item is Record<string, unknown> => Boolean(asRecord(item)))
       : [];
     const crmLink = String(parsed.crm_link ?? "").trim();
-    if (!contactInfo && !customData.length && !crmLink) return;
+    const enableAssign = typeof parsed.enable_assign === "boolean" ? parsed.enable_assign : undefined;
+    const page = asRecord(parsed.page);
+    const pageUrl = String(page?.url ?? "").trim();
+    const pageTitle = String(page?.title ?? "").trim();
+    if (!contactInfo && !customData.length && !crmLink && enableAssign === undefined && !pageUrl) return;
 
     const conversation = await this.conversationRepository.findConversation(delivery.conversationId);
     if (!conversation || conversation.tenantId !== delivery.tenantId) return;
 
-    applyWebhookEnrichment(conversation, { contactInfo, crmLink, customData });
+    applyWebhookEnrichment(conversation, { contactInfo, crmLink, customData, enableAssign, pageTitle, pageUrl });
     await this.repository.mergeConversationState({
       conversationId: conversation.id,
       ...(customData.length ? { customData } : {}),
@@ -225,11 +229,26 @@ function applyWebhookEnrichment(conversation: ConversationRecord, input: {
   contactInfo?: Record<string, unknown>;
   crmLink: string;
   customData: Array<Record<string, unknown>>;
+  enableAssign?: boolean;
+  pageTitle: string;
+  pageUrl: string;
 }): void {
   const name = String(input.contactInfo?.name ?? "").trim();
   const phone = String(input.contactInfo?.phone ?? "").trim();
   if (name) conversation.name = name;
   if (phone) conversation.phone = phone;
+  if (input.pageUrl) {
+    conversation.tags = [...conversation.tags.filter((tag) => !tag.startsWith("page:")), `page:${input.pageUrl}`];
+  }
+  conversation.metadata = {
+    ...conversation.metadata,
+    webhookEnrichment: {
+      ...(input.crmLink ? { crmLink: input.crmLink } : {}),
+      ...(input.enableAssign !== undefined ? { enableAssign: input.enableAssign } : {}),
+      ...(input.pageUrl ? { page: { ...(input.pageTitle ? { title: input.pageTitle } : {}), url: input.pageUrl } } : {}),
+      updatedAt: new Date().toISOString()
+    }
+  };
 
   const noteLines = [
     ...(input.contactInfo ? [`Контакты из CRM: ${[name, phone, String(input.contactInfo.email ?? "").trim()].filter(Boolean).join(", ")}`] : []),

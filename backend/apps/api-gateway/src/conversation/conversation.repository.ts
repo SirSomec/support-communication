@@ -1929,8 +1929,29 @@ function appealMetadataFromJson(value: unknown): ConversationAppealMetadata | un
   if (clientGeo) {
     metadata.clientGeo = clientGeo;
   }
+  const webhookEnrichment = webhookEnrichmentFromJson(record.webhookEnrichment);
+  if (webhookEnrichment) {
+    metadata.webhookEnrichment = webhookEnrichment;
+  }
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function webhookEnrichmentFromJson(value: unknown): NonNullable<ConversationAppealMetadata["webhookEnrichment"]> | undefined {
+  const record = recordFromJson(value);
+  if (!record) return undefined;
+  const text = (input: unknown) => typeof input === "string" && input.trim() ? input.trim() : undefined;
+  const updatedAt = text(record.updatedAt);
+  const pageRecord = recordFromJson(record.page);
+  const url = text(pageRecord?.url);
+  if (!updatedAt) return undefined;
+  const result = {
+    ...(text(record.crmLink) ? { crmLink: text(record.crmLink) } : {}),
+    ...(typeof record.enableAssign === "boolean" ? { enableAssign: record.enableAssign } : {}),
+    ...(url ? { page: { ...(text(pageRecord?.title) ? { title: text(pageRecord?.title) } : {}), url } } : {}),
+    updatedAt
+  };
+  return Object.keys(result).length > 1 ? result : undefined;
 }
 
 function clientGeoFromJson(value: unknown): NonNullable<ConversationAppealMetadata["clientGeo"]> | undefined {

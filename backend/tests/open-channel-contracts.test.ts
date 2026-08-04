@@ -537,7 +537,9 @@ describe("open channel delivery queue", () => {
           result: "ok",
           contact_info: { name: "Пётр Петров", phone: "+79990001122", email: "petr@example.com" },
           custom_data: [{ title: "LTV", content: "42000" }],
-          crm_link: "https://crm.example/clients/1"
+          crm_link: "https://crm.example/clients/1",
+          enable_assign: true,
+          page: { title: "Client card", url: "https://crm.example/clients/1" }
         })
       }),
       repository: runtime.repository,
@@ -557,6 +559,9 @@ describe("open channel delivery queue", () => {
     const enriched = await runtime.conversations.findConversation(conversation.id);
     assert.equal(enriched?.name, "Пётр Петров");
     assert.equal(enriched?.phone, "+79990001122");
+    assert.equal(enriched?.metadata?.webhookEnrichment?.crmLink, "https://crm.example/clients/1");
+    assert.equal(enriched?.metadata?.webhookEnrichment?.enableAssign, true);
+    assert.equal(enriched?.metadata?.webhookEnrichment?.page?.url, "https://crm.example/clients/1");
     const note = enriched?.messages.find((message) => message.type === "event" && message.text.includes("LTV"));
     assert.ok(note);
     assert.equal(note.text.includes("https://crm.example/clients/1"), true);

@@ -46,6 +46,7 @@ export interface OpenChatUser {
 export interface OpenChatGeo {
   city?: string;
   country?: string;
+  countryCode?: string;
   latitude?: number;
   longitude?: number;
   organization?: string;
@@ -88,7 +89,7 @@ export interface OpenChatRouteResult {
 
 export interface OpenChatInboundInput {
   body: OpenChatEvent;
-  botBridge?: Pick<ExternalBotBridge, "forwardClientMessage">;
+  botBridge?: Pick<ExternalBotBridge, "forwardClientMessage" | "notifyClientRated">;
   runBotRuntime?: (event: { channel: string; conversationId: string; eventId: string; payload?: Record<string, unknown>; tenantId: string; traceId: string }) => Promise<{ instance?: { status?: string }; outcome?: string }>;
   channelToken: string;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
@@ -180,6 +181,14 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
         score,
         topic: conversation.topic
       }, { actorId: clientId, actorType: "client", tenantId: channel.tenantId });
+    }
+    if (score !== null && input.botBridge) {
+      await input.botBridge.notifyClientRated({
+        comment: message.text,
+        conversation,
+        rating: score >= 3 ? "good" : "bad",
+        tenantId: channel.tenantId
+      }).catch(() => false);
     }
     return okJson();
   }
@@ -470,6 +479,7 @@ function openChatGeoMetadata(geo: OpenChatGeo | undefined): NonNullable<Conversa
   const clientGeo = {
     ...(nonEmpty(geo.city) ? { city: nonEmpty(geo.city) } : {}),
     ...(nonEmpty(geo.country) ? { country: nonEmpty(geo.country) } : {}),
+    ...(nonEmpty(geo.countryCode) ? { countryCode: nonEmpty(geo.countryCode) } : {}),
     ...(latitude !== undefined ? { latitude } : {}),
     ...(longitude !== undefined ? { longitude } : {}),
     ...(nonEmpty(geo.organization) ? { organization: nonEmpty(geo.organization) } : {}),
@@ -491,7 +501,7 @@ function sameClientGeo(
   left: NonNullable<ConversationRecord["metadata"]>["clientGeo"],
   right: NonNullable<ConversationRecord["metadata"]>["clientGeo"]
 ): boolean {
-  return left?.city === right?.city && left?.country === right?.country
+  return left?.city === right?.city && left?.country === right?.country && left?.countryCode === right?.countryCode
     && left?.latitude === right?.latitude && left?.longitude === right?.longitude
     && left?.organization === right?.organization && left?.region === right?.region
     && left?.regionCode === right?.regionCode && left?.source === right?.source;

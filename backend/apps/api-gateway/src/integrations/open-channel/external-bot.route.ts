@@ -148,6 +148,48 @@ export class ExternalBotBridge {
     });
   }
 
+  /** Delivers the result of a bot-requested rating form back to its owner. */
+  async notifyClientRated(input: {
+    comment?: string;
+    conversation: Pick<ConversationRecord, "channel" | "id" | "name">;
+    rating: "bad" | "good";
+    tenantId: string;
+  }): Promise<boolean> {
+    const state = await this.repository.findConversationState(input.conversation.id);
+    if (!state?.rateRequested) return false;
+    const connectionId = String(state.attributes?.externalBotConnectionId ?? "").trim();
+    if (!connectionId) return false;
+    const connection = (await this.repository.listBotConnections(input.tenantId))
+      .find((item) => item.id === connectionId && item.status === "active");
+    if (!connection) return false;
+
+    await this.delivery.enqueue({
+      body: {
+        agents_online: await this.resolveAgentsOnline(input.tenantId),
+        channel: { id: connection.id, type: input.conversation.channel.toLowerCase() },
+        chat_id: String(stableNumericId(input.conversation.id)),
+        client_id: state.clientId ?? "",
+        event: "CLIENT_RATED",
+        id: randomUUID(),
+        rate: {
+          ...(String(input.comment ?? "").trim() ? { comment: String(input.comment).trim() } : {}),
+          rating: input.rating,
+          timestamp: Math.floor(Date.now() / 1000)
+        },
+        sender: {
+          id: stableNumericId(state.clientId ?? input.conversation.id),
+          name: input.conversation.name
+        }
+      },
+      conversationId: input.conversation.id,
+      eventName: "CLIENT_RATED",
+      kind: "bot_event",
+      tenantId: input.tenantId,
+      url: externalBotProviderUrl(connection)
+    });
+    return true;
+  }
+
   private async resolveAgentsOnline(tenantId: string): Promise<boolean> {
     try {
       return Boolean(await this.agentsOnlineResolver?.(tenantId));

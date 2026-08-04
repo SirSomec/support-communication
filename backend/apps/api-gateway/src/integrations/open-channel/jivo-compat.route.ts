@@ -11,7 +11,7 @@ import { OpenChannelRepository } from "./open-channel.repository.js";
  */
 export async function handleJivoCompatibleWebhook(input: {
   body: Record<string, unknown>;
-  botBridge?: Pick<ExternalBotBridge, "forwardClientMessage">;
+  botBridge?: Pick<ExternalBotBridge, "forwardClientMessage" | "notifyClientRated">;
   channelToken: string;
   conversationRepository: Pick<ConversationRepository, "findConversation" | "listConversations" | "saveConversationMutation">;
   conversationService: Pick<ConversationService, "normalizeInboundEvent" | "transitionConversationStatus">;
@@ -41,6 +41,7 @@ export function jivoWebhookToOpenChatEvent(body: Record<string, unknown>): OpenC
   const visitor = record(body.visitor);
   const client = record(body.client);
   const page = record(body.page);
+  const topic = record(body.topic);
   const geoip = record(session.geoip);
   const clientId = firstText(visitor.number, visitor.id, client.id, body.client_id, body.chat_id, body.user_token);
   if (!clientId) return null;
@@ -64,6 +65,7 @@ export function jivoWebhookToOpenChatEvent(body: Record<string, unknown>): OpenC
       geo: {
         ...(firstText(geoip.city) ? { city: firstText(geoip.city) } : {}),
         ...(firstText(geoip.country) ? { country: firstText(geoip.country) } : {}),
+        ...(firstText(geoip.country_code) ? { countryCode: firstText(geoip.country_code) } : {}),
         ...(numberOrUndefined(geoip.latitude) !== undefined ? { latitude: numberOrUndefined(geoip.latitude) } : {}),
         ...(numberOrUndefined(geoip.longitude) !== undefined ? { longitude: numberOrUndefined(geoip.longitude) } : {}),
         ...(firstText(geoip.organization) ? { organization: firstText(geoip.organization) } : {}),
@@ -72,7 +74,7 @@ export function jivoWebhookToOpenChatEvent(body: Record<string, unknown>): OpenC
         source: "geoip"
       },
       id: clientId,
-      ...(firstText(body.topic, page.title) ? { intent: firstText(body.topic, page.title) } : {})
+      ...(firstText(topic.title, body.topic, page.title) ? { intent: firstText(topic.title, body.topic, page.title) } : {})
     },
     message: {
       ...(firstText(messageBody.id, body.message_id, body.offline_message_id) ? { id: firstText(messageBody.id, body.message_id, body.offline_message_id) } : {}),

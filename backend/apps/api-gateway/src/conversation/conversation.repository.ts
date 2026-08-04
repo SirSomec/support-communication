@@ -1946,6 +1946,7 @@ function clientGeoFromJson(value: unknown): NonNullable<ConversationAppealMetada
   return {
     ...(text(record.city) ? { city: text(record.city) } : {}),
     ...(text(record.country) ? { country: text(record.country) } : {}),
+    ...(text(record.countryCode) ? { countryCode: text(record.countryCode) } : {}),
     ...(number(record.latitude, -90, 90) !== undefined ? { latitude: number(record.latitude, -90, 90) } : {}),
     ...(number(record.longitude, -180, 180) !== undefined ? { longitude: number(record.longitude, -180, 180) } : {}),
     ...(text(record.organization) ? { organization: text(record.organization) } : {}),

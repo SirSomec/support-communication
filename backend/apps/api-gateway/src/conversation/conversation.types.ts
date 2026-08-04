@@ -22,6 +22,7 @@ export interface ConversationAppealMetadata {
   clientGeo?: {
     city?: string;
     country?: string;
+    countryCode?: string;
     latitude?: number;
     longitude?: number;
     organization?: string;

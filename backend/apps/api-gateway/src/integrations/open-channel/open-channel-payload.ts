@@ -77,6 +77,7 @@ export function sessionStub(conversation?: ConversationRecord): Record<string, u
     geoip: {
       ...(geo?.city ? { city: geo.city } : {}),
       ...(geo?.country ? { country: geo.country } : {}),
+      ...(geo?.countryCode ? { country_code: geo.countryCode } : {}),
       ...(geo?.latitude !== undefined ? { latitude: geo.latitude } : {}),
       ...(geo?.longitude !== undefined ? { longitude: geo.longitude } : {}),
       ...(geo?.organization ? { organization: geo.organization } : {}),

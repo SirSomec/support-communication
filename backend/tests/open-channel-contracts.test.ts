@@ -267,12 +267,15 @@ describe("private Jivo webhook migration adapter", () => {
       chat_id: "chat-17",
       message: { id: "jivo-message-1", text: "Need help" },
       page: { title: "Pricing", url: "https://example.test/pricing" },
-      session: { geoip: { city: "Kazan", country: "Russia", region: "Tatarstan", latitude: 55.796, longitude: 49.108 } },
+      session: { geoip: { city: "Kazan", country: "Russia", country_code: "RU", region: "Tatarstan", latitude: 55.796, longitude: 49.108 } },
+      topic: { title: "Delivery" },
       visitor: { email: "client@example.test", name: "Client", number: "visitor-17" }
     };
     const event = jivoWebhookToOpenChatEvent(body);
     assert.equal(event?.sender?.id, "visitor-17");
     assert.equal(event?.sender?.geo?.city, "Kazan");
+    assert.equal(event?.sender?.geo?.countryCode, "RU");
+    assert.equal(event?.sender?.intent, "Delivery");
     assert.equal(event?.message?.type, "text");
 
     const runtime = openChannelRuntime();
@@ -287,6 +290,8 @@ describe("private Jivo webhook migration adapter", () => {
     const dialog = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
     assert.equal(dialog.metadata?.clientGeo?.city, "Kazan");
     assert.equal(dialog.metadata?.clientGeo?.region, "Tatarstan");
+    assert.equal(dialog.metadata?.clientGeo?.countryCode, "RU");
+    assert.equal(dialog.topic, "Delivery");
     const outgoing = compatWebhookEventBase("chat_updated", dialog, undefined, "widget-1");
     assert.equal((outgoing.session.geoip as Record<string, unknown>).city, "Kazan");
   });
@@ -331,6 +336,25 @@ describe("external bot exchange", () => {
     assert.equal(body.client_id, "client-9");
     assert.equal(body.agents_online, true);
     assert.equal((body.message as Record<string, unknown>).type, "TEXT");
+
+    runtime.repository.mergeConversationState({
+      conversationId: conversation.id,
+      rateRequested: true,
+      tenantId: TENANT_ID
+    });
+    const rated = await handleOpenChatInbound({
+      body: { sender: { id: "client-9" }, message: { type: "rate", id: "rate-9", text: "Great service", value: 1 } },
+      botBridge: bridge,
+      channelToken: CHANNEL_TOKEN,
+      conversationRepository: runtime.conversations,
+      conversationService: runtime.service,
+      repository: runtime.repository
+    });
+    assert.equal(rated.statusCode, 200);
+    const clientRated = delivery.enqueued.find((item) => item.eventName === "CLIENT_RATED");
+    assert.ok(clientRated);
+    assert.equal((clientRated.body as Record<string, unknown>).event, "CLIENT_RATED");
+    assert.equal(((clientRated.body as Record<string, unknown>).rate as Record<string, unknown>).rating, "good");
 
     const assigned = { ...conversation, operatorId: "op-1" };
     assert.equal(await bridge.forwardClientMessage({

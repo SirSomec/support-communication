@@ -71,11 +71,18 @@ export function pageFromConversation(conversation: ConversationRecord): { title?
   return { url: pageTag.slice("page:".length) };
 }
 
-export function sessionStub(): Record<string, unknown> {
-  // GeoIP/UTM enrichment is not collected server-side yet; the structure is
-  // kept so consumers can keep optional-chaining the same paths.
+export function sessionStub(conversation?: ConversationRecord): Record<string, unknown> {
+  const geo = conversation?.metadata?.clientGeo;
   return {
-    geoip: {},
+    geoip: {
+      ...(geo?.city ? { city: geo.city } : {}),
+      ...(geo?.country ? { country: geo.country } : {}),
+      ...(geo?.latitude !== undefined ? { latitude: geo.latitude } : {}),
+      ...(geo?.longitude !== undefined ? { longitude: geo.longitude } : {}),
+      ...(geo?.organization ? { organization: geo.organization } : {}),
+      ...(geo?.region ? { region: geo.region } : {}),
+      ...(geo?.regionCode ? { region_code: geo.regionCode } : {})
+    },
     ip_addr: "",
     user_agent: "",
     utm: "",
@@ -111,7 +118,7 @@ export function compatWebhookEventBase(
     event_name: eventName,
     organization: null,
     page: pageFromConversation(conversation),
-    session: sessionStub(),
+    session: sessionStub(conversation),
     status: null,
     tags: conversation.tags
       .filter((tag) => !tag.includes(":"))

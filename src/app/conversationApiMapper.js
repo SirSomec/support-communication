@@ -38,8 +38,8 @@ export function mapApiConversation(input) {
     entry: nonEmptyString(input?.entry, channel),
     language: nonEmptyString(input?.language, DEFAULT_LANGUAGE),
     clientSince: nonEmptyString(input?.clientSince, DEFAULT_CLIENT_SINCE),
-    ...(nonEmptyString(input?.city) ? { city: nonEmptyString(input.city) } : {}),
-    ...(nonEmptyString(input?.location) ? { location: nonEmptyString(input.location) } : {}),
+    ...(clientGeo(input).city ? { city: clientGeo(input).city } : {}),
+    ...(clientGeo(input).location ? { location: clientGeo(input).location } : {}),
     tags: Array.isArray(input?.tags) ? input.tags.map((tag) => String(tag)) : [],
     previous: Array.isArray(input?.previous) ? input.previous : [],
     ...(nonEmptyString(input?.updatedAt) ? { updatedAt: nonEmptyString(input.updatedAt) } : {}),
@@ -327,4 +327,11 @@ function nonEmptyString(value, fallback = "") {
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function clientGeo(input) {
+  const geo = isRecord(input?.metadata?.clientGeo) ? input.metadata.clientGeo : {};
+  const city = nonEmptyString(input?.city, nonEmptyString(geo.city));
+  const location = nonEmptyString(input?.location, [geo.region, geo.country].filter((value) => nonEmptyString(value)).join(", "));
+  return { city, location };
 }

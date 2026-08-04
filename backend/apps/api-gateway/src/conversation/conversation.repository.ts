@@ -1925,8 +1925,35 @@ function appealMetadataFromJson(value: unknown): ConversationAppealMetadata | un
   if (csatFeedback) {
     metadata.csatFeedback = csatFeedback;
   }
+  const clientGeo = clientGeoFromJson(record.clientGeo);
+  if (clientGeo) {
+    metadata.clientGeo = clientGeo;
+  }
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function clientGeoFromJson(value: unknown): NonNullable<ConversationAppealMetadata["clientGeo"]> | undefined {
+  const record = recordFromJson(value);
+  if (!record || !["geoip", "location_message", "provider"].includes(String(record.source))) return undefined;
+  const number = (input: unknown, min: number, max: number) => {
+    const parsed = Number(input);
+    return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : undefined;
+  };
+  const text = (input: unknown) => typeof input === "string" && input.trim() ? input.trim() : undefined;
+  const updatedAt = text(record.updatedAt);
+  if (!updatedAt) return undefined;
+  return {
+    ...(text(record.city) ? { city: text(record.city) } : {}),
+    ...(text(record.country) ? { country: text(record.country) } : {}),
+    ...(number(record.latitude, -90, 90) !== undefined ? { latitude: number(record.latitude, -90, 90) } : {}),
+    ...(number(record.longitude, -180, 180) !== undefined ? { longitude: number(record.longitude, -180, 180) } : {}),
+    ...(text(record.organization) ? { organization: text(record.organization) } : {}),
+    ...(text(record.region) ? { region: text(record.region) } : {}),
+    ...(text(record.regionCode) ? { regionCode: text(record.regionCode) } : {}),
+    source: String(record.source) as NonNullable<ConversationAppealMetadata["clientGeo"]>["source"],
+    updatedAt
+  };
 }
 
 function csatFeedbackStateFromJson(value: unknown): ConversationAppealMetadata["csatFeedback"] | undefined {

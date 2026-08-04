@@ -19,6 +19,17 @@ export interface ConversationCsatFeedbackState {
 
 export interface ConversationAppealMetadata {
   anchorId?: string;
+  clientGeo?: {
+    city?: string;
+    country?: string;
+    latitude?: number;
+    longitude?: number;
+    organization?: string;
+    region?: string;
+    regionCode?: string;
+    source: "geoip" | "location_message" | "provider";
+    updatedAt: string;
+  };
   closedAt?: string;
   csatFeedback?: ConversationCsatFeedbackState;
   isRepeatAppeal?: boolean;

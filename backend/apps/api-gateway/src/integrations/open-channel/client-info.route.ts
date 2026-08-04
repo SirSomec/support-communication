@@ -123,6 +123,21 @@ export async function handleWidgetClientInfoFromRoute(input: WidgetClientInfoRou
         });
       }
     }
+    if (changedContact) {
+      for (const subscription of await repository.listActiveWebhookSubscriptionsForEvent(auth.context.tenantId, "client_updated")) {
+        await input.delivery.enqueue({
+          body: {
+            ...compatWebhookEventBase("client_updated", conversation, state, widgetId),
+            client_id: stableNumericId(String(input.body.externalId ?? conversation.id))
+          },
+          conversationId: conversation.id,
+          eventName: "client_updated",
+          kind: "webhook",
+          tenantId: auth.context.tenantId,
+          url: subscription.url
+        });
+      }
+    }
     if (attributes) {
       for (const subscription of await repository.listActiveWebhookSubscriptionsForEvent(auth.context.tenantId, "client_attribute_updated")) {
         await input.delivery.enqueue({

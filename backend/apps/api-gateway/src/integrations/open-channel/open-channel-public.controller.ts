@@ -10,6 +10,7 @@ import { OpenChannelRepository } from "./open-channel.repository.js";
 import { OpenChannelDeliveryService } from "./open-channel-delivery.service.js";
 import { handleOpenChatInbound, handleOpenChatStatus, type OpenChatEvent, type OpenChatRouteResult } from "./open-chat.route.js";
 import { ExternalBotBridge, handleExternalBotProviderEvent } from "./external-bot.route.js";
+import { handleJivoCompatibleWebhook } from "./jivo-compat.route.js";
 
 /**
  * Public endpoints of the external integration surface. URL shapes follow
@@ -79,6 +80,27 @@ export class OpenChannelPublicController {
       channelToken,
       conversationRepository: this.conversationRepository,
       repository: this.repository
+    });
+    respond(response, result);
+  }
+
+  /** Private migration endpoint; excluded from the neutral public API spec. */
+  @Post("compat/jivo/webhooks/:channelToken")
+  @ApiExcludeEndpoint()
+  async receiveJivoCompatibleWebhook(
+    @Param("channelToken") channelToken: string,
+    @Body() body: Record<string, unknown>,
+    @Res() response: HttpResponseLike
+  ): Promise<void> {
+    const result = await handleJivoCompatibleWebhook({
+      body: body ?? {},
+      botBridge: this.botBridge(),
+      channelToken,
+      conversationRepository: this.conversationRepository,
+      conversationService: this.conversationService,
+      recordQualityRating: (payload, context) => this.qualityService.recordClientQualityRating(payload, context),
+      repository: this.repository,
+      runBotRuntime: (event) => this.automationService.handleBotRuntimeInboundEvent(event)
     });
     respond(response, result);
   }

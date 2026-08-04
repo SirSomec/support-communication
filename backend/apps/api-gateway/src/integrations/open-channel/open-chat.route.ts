@@ -26,6 +26,8 @@ import type { ExternalBotBridge } from "./external-bot.route.js";
 export const OPEN_CHAT_CHANNEL = "CHATAPI";
 
 export interface OpenChatUser {
+  /** Optional geographic profile supplied by the channel provider. */
+  geo?: OpenChatGeo;
   crm_link?: string;
   custom_data?: string;
   email?: string;
@@ -38,6 +40,18 @@ export interface OpenChatUser {
   photo?: string;
   title?: string;
   url?: string;
+}
+
+/** Location is intentionally provider-neutral on the public Open Channel API. */
+export interface OpenChatGeo {
+  city?: string;
+  country?: string;
+  latitude?: number;
+  longitude?: number;
+  organization?: string;
+  region?: string;
+  regionCode?: string;
+  source?: "geoip" | "location_message" | "provider";
 }
 
 export interface OpenChatMessage {
@@ -107,7 +121,7 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
     return plain(400, "sender_id_required");
   }
 
-  const conversation = await resolveOrCreateOpenChatConversation({
+  let conversation = await resolveOrCreateOpenChatConversation({
     channel,
     clientId,
     conversationRepository: input.conversationRepository,
@@ -115,6 +129,16 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
   });
   if (!conversation) {
     return plain(400, "conversation_create_failed");
+  }
+
+  const locationGeo = type === "location" ? geoFromLocationMessage(message) : undefined;
+  const profileGeo = locationGeo ?? input.body.sender?.geo;
+  if (profileGeo) {
+    conversation = await persistOpenChatGeo({
+      conversation,
+      conversationRepository: input.conversationRepository,
+      geo: profileGeo
+    });
   }
 
   await repository.mergeConversationState({
@@ -246,6 +270,7 @@ export async function resolveOrCreateOpenChatConversation(input: {
   sender: OpenChatUser;
 }): Promise<ConversationRecord | null> {
   const displayName = String(input.sender.name ?? "").trim() || `Client ${input.clientId}`;
+  const initialGeo = openChatGeoMetadata(input.sender.geo);
   const anchorId = openChatConversationKey(input.channel.tenantId, input.channel.id, input.clientId);
   const resolved = await resolveOrForkAppealConversation({
     anchorId,
@@ -262,6 +287,7 @@ export async function resolveOrCreateOpenChatConversation(input: {
       id: anchorId,
       initials: initials(displayName),
       language: "Unknown",
+      ...(initialGeo ? { metadata: { clientGeo: initialGeo } } : {}),
       messages: [],
       name: displayName,
       // Без телефона в профиле отправителя поле остается пустым: clientId —
@@ -291,7 +317,16 @@ export async function resolveOrCreateOpenChatConversation(input: {
     tenantId: input.channel.tenantId
   });
 
-  return resolved?.conversation ?? null;
+  if (!resolved) return null;
+
+  if (!input.sender.geo || resolved.conversation.metadata?.clientGeo) {
+    return resolved.conversation;
+  }
+  return persistOpenChatGeo({
+    conversation: resolved.conversation,
+    conversationRepository: input.conversationRepository,
+    geo: input.sender.geo
+  });
 }
 
 export function openChatConversationKey(tenantId: string, channelId: string, clientId: string): string {
@@ -408,6 +443,60 @@ function openChatConversationMutation(
   return { conversation, lifecycleEvent, realtimeEvent };
 }
 
+async function persistOpenChatGeo(input: {
+  conversation: ConversationRecord;
+  conversationRepository: Pick<ConversationRepository, "saveConversationMutation">;
+  geo: OpenChatGeo;
+}): Promise<ConversationRecord> {
+  const clientGeo = openChatGeoMetadata({ ...input.conversation.metadata?.clientGeo, ...input.geo });
+  if (!clientGeo || sameClientGeo(input.conversation.metadata?.clientGeo, clientGeo)) {
+    return input.conversation;
+  }
+  const updated: ConversationRecord = {
+    ...input.conversation,
+    metadata: { ...input.conversation.metadata, clientGeo },
+    updatedAt: clientGeo.updatedAt
+  };
+  const persisted = await input.conversationRepository.saveConversationMutation(
+    openChatConversationMutation(updated, "conversation.updated")
+  );
+  return persisted.conversation;
+}
+
+function openChatGeoMetadata(geo: OpenChatGeo | undefined): NonNullable<ConversationRecord["metadata"]>["clientGeo"] | undefined {
+  if (!geo) return undefined;
+  const latitude = finiteInRangeOrUndefined(geo.latitude, -90, 90);
+  const longitude = finiteInRangeOrUndefined(geo.longitude, -180, 180);
+  const clientGeo = {
+    ...(nonEmpty(geo.city) ? { city: nonEmpty(geo.city) } : {}),
+    ...(nonEmpty(geo.country) ? { country: nonEmpty(geo.country) } : {}),
+    ...(latitude !== undefined ? { latitude } : {}),
+    ...(longitude !== undefined ? { longitude } : {}),
+    ...(nonEmpty(geo.organization) ? { organization: nonEmpty(geo.organization) } : {}),
+    ...(nonEmpty(geo.region) ? { region: nonEmpty(geo.region) } : {}),
+    ...(nonEmpty(geo.regionCode) ? { regionCode: nonEmpty(geo.regionCode) } : {}),
+    source: geo.source ?? "provider",
+    updatedAt: new Date().toISOString()
+  };
+  return Object.keys(clientGeo).length > 2 ? clientGeo : undefined;
+}
+
+function geoFromLocationMessage(message: OpenChatMessage): OpenChatGeo | undefined {
+  const latitude = finiteInRangeOrUndefined(message.latitude, -90, 90);
+  const longitude = finiteInRangeOrUndefined(message.longitude, -180, 180);
+  return latitude === undefined || longitude === undefined ? undefined : { latitude, longitude, source: "location_message" };
+}
+
+function sameClientGeo(
+  left: NonNullable<ConversationRecord["metadata"]>["clientGeo"],
+  right: NonNullable<ConversationRecord["metadata"]>["clientGeo"]
+): boolean {
+  return left?.city === right?.city && left?.country === right?.country
+    && left?.latitude === right?.latitude && left?.longitude === right?.longitude
+    && left?.organization === right?.organization && left?.region === right?.region
+    && left?.regionCode === right?.regionCode && left?.source === right?.source;
+}
+
 function contentEventId(channelId: string, clientId: string, type: string, message: OpenChatMessage): string {
   const digest = createHash("sha256")
     .update(`${channelId}\0${clientId}\0${type}\0${JSON.stringify(message)}\0${Date.now()}`)
@@ -418,6 +507,16 @@ function contentEventId(channelId: string, clientId: string, type: string, messa
 
 function isFiniteInRange(value: number, min: number, max: number): boolean {
   return Number.isFinite(value) && value >= min && value <= max;
+}
+
+function finiteInRangeOrUndefined(value: unknown, min: number, max: number): number | undefined {
+  const parsed = Number(value);
+  return isFiniteInRange(parsed, min, max) ? parsed : undefined;
+}
+
+function nonEmpty(value: unknown): string | undefined {
+  const text = String(value ?? "").trim();
+  return text || undefined;
 }
 
 function initials(name: string): string {

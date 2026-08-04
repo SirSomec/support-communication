@@ -12,6 +12,10 @@ import {
   handleOpenChatStatus
 } from "../apps/api-gateway/dist/integrations/open-channel/open-chat.route.js";
 import {
+  handleJivoCompatibleWebhook,
+  jivoWebhookToOpenChatEvent
+} from "../apps/api-gateway/dist/integrations/open-channel/jivo-compat.route.js";
+import {
   ExternalBotBridge,
   externalBotMessageText,
   handleExternalBotProviderEvent
@@ -19,7 +23,7 @@ import {
 import { OpenChannelDeliveryService } from "../apps/api-gateway/dist/integrations/open-channel/open-channel-delivery.service.js";
 import { OpenChannelEventPump } from "../apps/api-gateway/dist/integrations/open-channel/open-channel-event-pump.js";
 import { handleWidgetClientInfoFromRoute } from "../apps/api-gateway/dist/integrations/open-channel/client-info.route.js";
-import { stableNumericId } from "../apps/api-gateway/dist/integrations/open-channel/open-channel-payload.js";
+import { compatWebhookEventBase, stableNumericId } from "../apps/api-gateway/dist/integrations/open-channel/open-channel-payload.js";
 import { OpenChannelModule } from "../apps/api-gateway/dist/integrations/open-channel/open-channel.module.js";
 import { EnvelopeHttpExceptionFilter } from "../apps/api-gateway/dist/http-exception.filter.js";
 import { hashPublicApiKeySecret } from "../apps/api-gateway/dist/integrations/public-api-auth.js";
@@ -237,6 +241,54 @@ describe("open channel chat ingress", () => {
     assert.equal(ratings.length, 1);
     assert.equal(ratings[0].scale, "CSAT");
     assert.equal(ratings[0].score, 5);
+  });
+
+  it("persists a provider-neutral geographic profile and a client location event", async () => {
+    const runtime = openChannelRuntime();
+    await receiveChatEvent(runtime, {
+      sender: { id: "client-geo", geo: { city: "Kazan", country: "Russia", region: "Tatarstan", source: "provider" } },
+      message: { type: "start" }
+    });
+    await receiveChatEvent(runtime, {
+      sender: { id: "client-geo" },
+      message: { type: "location", id: "geo-1", latitude: 55.796, longitude: 49.108 }
+    });
+    const dialog = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
+    assert.equal(dialog.metadata?.clientGeo?.city, "Kazan");
+    assert.equal(dialog.metadata?.clientGeo?.latitude, 55.796);
+    assert.equal(dialog.metadata?.clientGeo?.source, "location_message");
+  });
+});
+
+describe("private Jivo webhook migration adapter", () => {
+  it("translates geoip and client message fields into the neutral event", async () => {
+    const body = {
+      event_name: "client_message",
+      chat_id: "chat-17",
+      message: { id: "jivo-message-1", text: "Need help" },
+      page: { title: "Pricing", url: "https://example.test/pricing" },
+      session: { geoip: { city: "Kazan", country: "Russia", region: "Tatarstan", latitude: 55.796, longitude: 49.108 } },
+      visitor: { email: "client@example.test", name: "Client", number: "visitor-17" }
+    };
+    const event = jivoWebhookToOpenChatEvent(body);
+    assert.equal(event?.sender?.id, "visitor-17");
+    assert.equal(event?.sender?.geo?.city, "Kazan");
+    assert.equal(event?.message?.type, "text");
+
+    const runtime = openChannelRuntime();
+    const result = await handleJivoCompatibleWebhook({
+      body,
+      channelToken: CHANNEL_TOKEN,
+      conversationRepository: runtime.conversations,
+      conversationService: runtime.service,
+      repository: runtime.repository
+    });
+    assert.equal(result.statusCode, 200);
+    const dialog = (await runtime.conversations.listConversations({ tenantId: TENANT_ID }))[0];
+    assert.equal(dialog.metadata?.clientGeo?.city, "Kazan");
+    assert.equal(dialog.metadata?.clientGeo?.region, "Tatarstan");
+    const outgoing = compatWebhookEventBase("chat_updated", dialog, undefined, "widget-1");
+    assert.equal((outgoing.session.geoip as Record<string, unknown>).city, "Kazan");
   });
 });
 
@@ -772,6 +824,9 @@ describe("widget client info", () => {
     const attributeUpdated = delivery.enqueued.find((item) => item.eventName === "client_attribute_updated");
     assert.ok(attributeUpdated);
     assert.deepEqual((attributeUpdated.body as Record<string, unknown>).attributes, { Vozrast: 42 });
+    const clientUpdated = delivery.enqueued.find((item) => item.eventName === "client_updated");
+    assert.ok(clientUpdated);
+    assert.equal((clientUpdated.body as Record<string, unknown>).event_name, "client_updated");
   });
 });
 
@@ -827,6 +882,19 @@ describe("open channel http surface", () => {
     });
     assert.equal(accepted.status, 200);
     assert.equal((await accepted.json()).result, "ok");
+
+    const migratedWebhook = await fetch(`${baseUrl}/api/v1/compat/jivo/webhooks/${CHANNEL_TOKEN}`, {
+      body: JSON.stringify({
+        event_name: "client_message",
+        message: { id: "compat-http-1", text: "Compatibility message" },
+        session: { geoip: { city: "Kazan", country: "Russia" } },
+        visitor: { number: "compat-http-client" }
+      }),
+      headers: { "content-type": "application/json; charset=utf-8" },
+      method: "POST"
+    });
+    assert.equal(migratedWebhook.status, 200);
+    assert.equal((await migratedWebhook.json()).result, "ok");
 
     const status = await fetch(`${baseUrl}/api/v1/open-channel/${CHANNEL_TOKEN}/status`);
     assert.equal(status.status, 200);

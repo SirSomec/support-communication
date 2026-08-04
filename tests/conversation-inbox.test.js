@@ -109,6 +109,16 @@ describe("conversationApiMapper", () => {
     assert.equal(mapped.location, "ул. Баумана, 1");
   });
 
+  it("derives client city and location from the persisted geographic profile", () => {
+    const mapped = mapApiConversation({
+      id: "conv-geo-profile",
+      metadata: { clientGeo: { city: "Kazan", country: "Russia", region: "Tatarstan" } }
+    });
+
+    assert.equal(mapped.city, "Kazan");
+    assert.equal(mapped.location, "Tatarstan, Russia");
+  });
+
   it("normalizes inbound file metadata and accepts only safe attachment URLs", () => {
     const message = mapApiMessage({
       attachments: [

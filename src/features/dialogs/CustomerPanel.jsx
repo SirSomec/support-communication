@@ -64,6 +64,7 @@ export function CustomerPanel({
     : null;
   const crmLink = String(webhookEnrichment?.crmLink ?? "").trim();
   const webhookPage = String(webhookEnrichment?.page?.url ?? "").trim();
+  const crmAssignEnabled = webhookEnrichment?.enableAssign === true;
   // Пустой телефон (источник его не передал) может заполнить любой оператор
   // с правом ведения диалогов; исправлять уже сохраненный номер — только
   // роль, которой контакты видны без маски.
@@ -301,6 +302,7 @@ export function CustomerPanel({
         {location ? <InfoRow label="Локация" value={location} /> : null}
         {webhookPage ? <InfoRow label="Страница" value={webhookPage} /> : null}
         {crmLink ? <InfoRow label="CRM" value={crmLink} /> : null}
+        {crmAssignEnabled ? <InfoRow label="CRM-привязка" value="Доступна" /> : null}
         <InfoRow label="Точка входа" value={conversation.entry} />
         <InfoRow label="Клиент с" value={conversation.clientSince} />
         <InfoRow label="Язык" value={conversation.language} />

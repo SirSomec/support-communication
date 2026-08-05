@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { CreditCard, Gauge, WalletCards } from "lucide-react";
+import { Bot, CreditCard, Gauge, WalletCards } from "lucide-react";
 import { tenantBillingService } from "../../services/tenantBillingService.js";
 import { SettingsModal } from "./SettingsPrimitives.jsx";
 
@@ -9,6 +9,8 @@ export function BillingPanel({ onToast }) {
   const [operatorLimit, setOperatorLimit] = useState(1);
   const [savingOperatorLimit, setSavingOperatorLimit] = useState(false);
   const [isBalanceOperationsOpen, setBalanceOperationsOpen] = useState(false);
+  const [pendingAiPackage, setPendingAiPackage] = useState(null);
+  const [purchasingAiPackage, setPurchasingAiPackage] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,6 +33,7 @@ export function BillingPanel({ onToast }) {
   const quotas = state.data?.quotas ?? [];
   const balance = state.data?.balance?.amountKopeks ?? 0;
   const aiDialogQuota = quotas.find((quota) => quota.resource === "ai_dialogs");
+  const aiDialogPackages = state.data?.aiDialogPackages ?? [];
   const monthlyCost = current?.billingAvailability === "free" ? 0 : Number(current?.priceMonthly ?? 0) * Number(operatorSettings?.operatorLimit ?? 1);
   const balanceOperations = (state.data?.invoices?.items ?? []).filter((invoice) => ["manual-balance", "internal-daily-charge", "internal-ai-package-purchase"].includes(invoice.provider) && invoice.paymentStatus === "succeeded");
 
@@ -47,6 +50,35 @@ export function BillingPanel({ onToast }) {
     onToast("Лимит операторов сохранён.");
   };
 
+  const openAiPackagePurchase = (aiPackage) => {
+    setPendingAiPackage({
+      ...aiPackage,
+      idempotencyKey: crypto.randomUUID()
+    });
+  };
+
+  const purchaseAiPackage = async () => {
+    if (!pendingAiPackage) return;
+    setPurchasingAiPackage(true);
+    const response = await tenantBillingService.purchaseAiDialogPackage({
+      idempotencyKey: pendingAiPackage.idempotencyKey,
+      packageId: pendingAiPackage.id
+    });
+    if (response.status !== "ok") {
+      setPurchasingAiPackage(false);
+      onToast(response.error?.message ?? "Не удалось купить пакет AI-диалогов.");
+      return;
+    }
+
+    const overview = await tenantBillingService.fetchOverview();
+    setPurchasingAiPackage(false);
+    setPendingAiPackage(null);
+    if (overview.status === "ok") {
+      setState({ data: overview.data, error: "", loading: false });
+    }
+    onToast(`Пакет на ${pendingAiPackage.dialogCount.toLocaleString("ru-RU")} AI-диалогов подключён.`);
+  };
+
   return <section className="billing-panel">
     <header><CreditCard size={20} /><div><h2>Тариф и оплата</h2><p>Текущий доступ и использование ресурсов организации. Изменение тарифа выполняет администратор платформы.</p></div></header>
     <div className="billing-overview">
@@ -54,11 +86,26 @@ export function BillingPanel({ onToast }) {
       <div aria-label="Текущий баланс" className="billing-balance"><WalletCards size={20} /><span>Текущий баланс</span><strong>{formatMoney(balance)}</strong><small>Пополняется администратором платформы</small></div>
     </div>
     <section className="billing-ai-dialogs"><strong>AI-диалоги</strong><span>{aiDialogQuota ? `${aiDialogQuota.remaining.toLocaleString("ru-RU")} из ${aiDialogQuota.limit.toLocaleString("ru-RU")} доступно` : "Пакет не подключён"}</span><small>Один диалог списывается после первого успешного ответа AI-бота.</small></section>
+    <section className="billing-ai-packages" aria-labelledby="billing-ai-packages-title">
+      <div className="billing-ai-packages__heading"><Bot size={19} /><div><h3 id="billing-ai-packages-title">Купить пакет AI-диалогов</h3><p>Стоимость спишется с текущего баланса. Пакеты суммируются и не сгорают.</p></div></div>
+      <div className="billing-ai-packages__grid">{aiDialogPackages.map((aiPackage) => {
+        const insufficientBalance = balance < aiPackage.priceKopeks;
+        return <article key={aiPackage.id}>
+          <strong>{aiPackage.dialogCount.toLocaleString("ru-RU")} диалогов</strong>
+          <span>{formatMoney(aiPackage.priceKopeks)}</span>
+          <small>{formatMoney(aiPackage.priceKopeks / aiPackage.dialogCount)} за диалог{aiPackage.discountPercent ? ` · скидка ${aiPackage.discountPercent}%` : ""}</small>
+          <button disabled={insufficientBalance} onClick={() => openAiPackagePurchase(aiPackage)} type="button">{insufficientBalance ? "Недостаточно средств" : "Купить пакет"}</button>
+        </article>;
+      })}</div>
+    </section>
     <section className="billing-balance-history"><h3>Операции баланса</h3><button className="billing-balance-history__open" onClick={() => setBalanceOperationsOpen(true)} type="button">Посмотреть операции{balanceOperations.length ? ` (${balanceOperations.length})` : ""}</button></section>
     {operatorSettings ? <section className="billing-operator-limit"><div><strong>Лимит операторов</strong><p>{operatorSettings.locked ? "На Free доступен только владелец организации." : `Выберите от ${operatorSettings.usedSeats} до ${operatorSettings.includedUsers} операторов. Это ограничит новые приглашения.`}</p></div><div className="billing-operator-limit__controls"><input aria-label="Лимит операторов" disabled={operatorSettings.locked || savingOperatorLimit} min={Math.max(1, operatorSettings.usedSeats)} max={operatorSettings.includedUsers} onChange={(event) => setOperatorLimit(event.target.value)} type="number" value={operatorLimit} /><button disabled={operatorSettings.locked || savingOperatorLimit || Number(operatorLimit) === operatorSettings.operatorLimit} onClick={saveOperatorLimit} type="button">{savingOperatorLimit ? "Сохранение…" : "Сохранить"}</button></div></section> : null}
     <h3><Gauge size={17} /> Лимиты</h3><div className="billing-quotas">{quotas.map((quota) => <div key={quota.resource}><span>{quota.resource}</span><strong>{quota.used} / {quota.limit}</strong><i><b style={{ width: `${quota.limit ? Math.min(100, quota.used / quota.limit * 100) : 100}%` }} /></i></div>)}</div>
     {isBalanceOperationsOpen ? <SettingsModal eyebrow="Тариф и оплата" footer={<button onClick={() => setBalanceOperationsOpen(false)} type="button">Закрыть</button>} onClose={() => setBalanceOperationsOpen(false)} size="wide" title="Операции баланса" titleId="billing-balance-operations-title">
       {balanceOperations.length ? <div className="billing-operations-table-wrap"><table className="billing-operations-table"><thead><tr><th scope="col">Дата</th><th scope="col">Операция</th><th scope="col">Сумма</th></tr></thead><tbody>{balanceOperations.map((invoice) => <tr key={invoice.id}><td>{formatDate(invoice.createdAt)}</td><td>{invoice.provider === "manual-balance" ? "Ручное пополнение" : invoice.provider === "internal-ai-package-purchase" ? "Покупка пакета AI-диалогов" : "Ежедневное списание"}</td><td className={invoice.provider === "manual-balance" ? "credit" : "debit"}>{invoice.provider === "manual-balance" ? "+" : "−"}{formatMoney(invoice.amountPaid)}</td></tr>)}</tbody></table></div> : <p className="billing-operations-empty">Операций по балансу пока нет.</p>}
+    </SettingsModal> : null}
+    {pendingAiPackage ? <SettingsModal eyebrow="Покупка AI-диалогов" footer={<><button disabled={purchasingAiPackage} onClick={() => setPendingAiPackage(null)} type="button">Отмена</button><button className="billing-ai-purchase-confirm" disabled={purchasingAiPackage} onClick={purchaseAiPackage} type="button">{purchasingAiPackage ? "Покупка…" : `Купить за ${formatMoney(pendingAiPackage.priceKopeks)}`}</button></>} onClose={() => { if (!purchasingAiPackage) setPendingAiPackage(null); }} title="Подтвердите покупку" titleId="billing-ai-purchase-title">
+      <div className="billing-ai-purchase-summary"><strong>{pendingAiPackage.dialogCount.toLocaleString("ru-RU")} AI-диалогов</strong><p>С баланса будет списано {formatMoney(pendingAiPackage.priceKopeks)}. После покупки останется {formatMoney(balance - pendingAiPackage.priceKopeks)}.</p><small>Пакет сразу добавится к текущему остатку и не имеет срока действия.</small></div>
     </SettingsModal> : null}
   </section>;
 }

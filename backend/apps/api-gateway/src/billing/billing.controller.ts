@@ -212,6 +212,19 @@ export class TenantBillingController {
     return this.billingService.fetchTenantBillingOverview(request.tenantOperatorContext?.tenantId ?? "");
   }
 
+  @Post("ai-dialog-packages/purchases")
+  @RequireTenantOperatorPermission("settings.manage")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Purchases an AI dialog package from the current tenant balance" })
+  purchaseAiDialogPackage(@Body() payload: AiDialogPackageBody, @Req() request: TenantOperatorRequest) {
+    return this.billingService.purchaseAiDialogPackage({
+      idempotencyKey: payload.idempotencyKey,
+      packageId: payload.packageId,
+      reason: "Tenant self-service AI dialog package purchase",
+      tenantId: request.tenantOperatorContext?.tenantId ?? ""
+    });
+  }
+
 }
 
 @ApiTags("quotas")

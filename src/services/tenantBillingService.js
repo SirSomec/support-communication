@@ -21,4 +21,12 @@ export const tenantBillingService = {
       service: "tenantBillingService"
     });
   },
+  purchaseAiDialogPackage({ idempotencyKey, packageId }) {
+    return apiRequest("/tenant/billing/ai-dialog-packages/purchases", {
+      method: "POST",
+      body: { idempotencyKey, packageId },
+      operation: "purchaseTenantAiDialogPackage",
+      service: "tenantBillingService"
+    });
+  },
 };

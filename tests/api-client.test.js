@@ -7,7 +7,8 @@ import {
   createApiErrorEnvelope,
   resetApiClientTestConfig
 } from "../src/services/apiClient.js";
-import { clearServiceAdminSession, setServiceAdminSession } from "../src/app/sessionStore.js";
+import { clearServiceAdminSession, clearTenantSession, setServiceAdminSession, setTenantSession } from "../src/app/sessionStore.js";
+import { tenantBillingService } from "../src/services/tenantBillingService.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -15,6 +16,7 @@ describe("api client", () => {
   afterEach(() => {
     mock.restoreAll();
     clearServiceAdminSession();
+    clearTenantSession();
     resetApiClientTestConfig();
     globalThis.fetch = originalFetch;
   });
@@ -55,12 +57,35 @@ describe("api client", () => {
       }), { headers: { "content-type": "application/json" }, status: 200 });
     });
 
-    const { setTenantSession } = await import("../src/app/sessionStore.js");
     setTenantSession({ accessToken: "tenant-token", tenantId: "tenant-demo" });
 
     const response = await apiRequest("/auth/tenant/state", {
       operation: "getTenantAuthState",
       service: "authService"
+    });
+
+    assert.equal(response.status, "ok");
+  });
+
+  it("purchases an AI-dialog package through the current tenant session", async () => {
+    setTenantSession({ accessToken: "tenant-token", tenantId: "tenant-demo" });
+    globalThis.fetch = mock.fn(async (url, options) => {
+      assert.equal(url, "/api/v1/tenant/billing/ai-dialog-packages/purchases");
+      assert.equal(options.method, "POST");
+      assert.equal(options.headers.authorization, "Bearer tenant-token");
+      assert.deepEqual(JSON.parse(options.body), {
+        idempotencyKey: "tenant-ai-purchase-1",
+        packageId: "ai-dialogs-1000"
+      });
+      return new Response(JSON.stringify({ status: "ok", data: { remainingDialogs: 1000 } }), {
+        headers: { "content-type": "application/json" },
+        status: 200
+      });
+    });
+
+    const response = await tenantBillingService.purchaseAiDialogPackage({
+      idempotencyKey: "tenant-ai-purchase-1",
+      packageId: "ai-dialogs-1000"
     });
 
     assert.equal(response.status, "ok");

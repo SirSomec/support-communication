@@ -88,6 +88,16 @@
 .billing-balance { align-content: start; background: #f4fbf8; border: 1px solid #bee5d2; border-radius: 12px; color: #176345; display: grid; gap: 5px; padding: 18px; }
 .billing-balance span, .billing-balance small { color: #4b7863; }.billing-balance strong { color: #176345; font-size: 24px; }.billing-balance small { font-size: 12px; }
 .billing-ai-dialogs { background: #f7faff; border: 1px solid #dbe7f5; border-radius: 10px; display: grid; gap: 4px; padding: 14px; }.billing-ai-dialogs span { color: var(--blue-dark); font-weight: 750; }.billing-ai-dialogs small { color: var(--muted); }
+.billing-ai-packages { display: grid; gap: 12px; }
+.billing-ai-packages__heading { align-items: flex-start; display: flex; gap: 9px; }
+.billing-ai-packages__heading p { color: var(--muted); font-size: 13px; margin: 3px 0 0; }
+.billing-ai-packages__grid { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.billing-ai-packages__grid article { border: 1px solid #dbe7f5; border-radius: 10px; display: grid; gap: 7px; padding: 14px; }
+.billing-ai-packages__grid article > span { color: var(--blue-dark); font-size: 19px; font-weight: 800; }
+.billing-ai-packages__grid article > small { color: var(--muted); min-height: 32px; }
+.billing-ai-packages__grid button, .billing-ai-purchase-confirm { background: var(--blue); border: 0; border-radius: 8px; color: #fff; font-weight: 750; min-height: 38px; padding: 0 13px; }
+.billing-ai-packages__grid button:disabled { background: #e7edf4; color: #778493; cursor: not-allowed; }
+.billing-ai-purchase-summary { display: grid; gap: 8px; }.billing-ai-purchase-summary strong { font-size: 21px; }.billing-ai-purchase-summary p { margin: 0; }.billing-ai-purchase-summary small { color: var(--muted); }
 .billing-balance-history { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
 .billing-balance-history__open { border: 1px solid #c3dcf9; border-radius: 8px; background: #f6faff; color: var(--blue-dark); font-weight: 750; min-height: 36px; padding: 0 12px; }
 .billing-operations-table-wrap { overflow: auto; }
@@ -97,6 +107,7 @@
 .billing-operations-table td:last-child { font-weight: 800; text-align: right; }
 .billing-operations-table .credit { color: #176345; }.billing-operations-table .debit { color: #a34d3f; }
 .billing-operations-empty { color: var(--muted); margin: 0; }
+@media (max-width: 760px) { .billing-ai-packages__grid { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .billing-overview { grid-template-columns: 1fr; } }
 .billing-quotas { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }.billing-quotas > div { display: grid; gap: 5px; padding: 10px; border: 1px solid #e0e8f2; border-radius: 9px; }.billing-quotas span { color: var(--muted); font-size: 12px; }.billing-quotas i { height: 5px; overflow: hidden; border-radius: 999px; background: #e6eef8; }.billing-quotas b { display:block; height:100%; background: var(--blue); }
 .billing-plans { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; }.billing-plans article { display:grid; gap:7px; padding:13px; border:1px solid #e0e8f2; border-radius:10px; }.billing-plans article.current { border-color: var(--blue); background:#f6faff; }.billing-plans small { color:var(--muted); }.billing-plans em { color:var(--blue-dark); font-size:12px; font-style:normal; font-weight:700; }.billing-plans button { width:max-content; border:0; background:none; color:var(--blue); padding:0; font:inherit; font-size:12px; font-weight:700; }

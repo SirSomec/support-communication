@@ -22,6 +22,16 @@ function telegramFetchOk(username = "settings_bot") {
 }
 
 describe("settings runtime contracts", () => {
+  it("binds a tenant AI package purchase route to the authenticated organization", () => {
+    const source = readFileSync(new URL("../apps/api-gateway/src/billing/billing.controller.ts", import.meta.url), "utf8");
+    const tenantController = source.slice(source.indexOf("export class TenantBillingController"), source.indexOf('@ApiTags("quotas")'));
+
+    assert.match(tenantController, /@Post\("ai-dialog-packages\/purchases"\)/);
+    assert.match(tenantController, /@RequireTenantOperatorPermission\("settings\.manage"\)/);
+    assert.match(tenantController, /tenantId:\s*request\.tenantOperatorContext\?\.tenantId/);
+    assert.doesNotMatch(tenantController, /tenantId:\s*payload\.tenantId/);
+  });
+
   it("blocks employee invitations when the Free plan already has its owner", async () => {
     const identityRepository = createSeededIdentityRepository();
     const billingRepository = createSeededBillingRepository();

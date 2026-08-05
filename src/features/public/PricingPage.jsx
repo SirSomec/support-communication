@@ -3,7 +3,31 @@ import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { publicCatalogService } from "../../services/publicCatalogService.js";
 import "./public.css";
 
-const featureLabels = { "shared-inbox": "Общий inbox", "website-chat": "Чат на сайте", "email-support": "Поддержка по email", "basic-analytics": "Базовая аналитика", omnichannel: "Омниканальность", routing: "Маршрутизация", sla: "SLA", exports: "Экспорт", sso: "SSO" };
+const planLabels = {
+  free: "Бесплатный",
+  starter: "Для небольшой команды",
+  business: "Для растущей команды",
+  scale: "Для большой команды",
+  enterprise: "Индивидуальный"
+};
+
+const featureLabels = {
+  "shared-inbox": "Все обращения в одном окне",
+  "website-chat": "Чат на сайте",
+  "email-support": "Поддержка по электронной почте",
+  "basic-analytics": "Основные показатели работы",
+  omnichannel: "Обращения из разных каналов в одном месте",
+  routing: "Распределение обращений между сотрудниками",
+  sla: "Контроль времени ответа",
+  exports: "Выгрузка данных",
+  "advanced-automation": "Автоматизация повторяющихся задач",
+  "quality-ai": "Проверка качества ответов с помощью искусственного интеллекта",
+  "custom-integrations": "Подключение нужных вам сервисов",
+  sso: "Единый вход для сотрудников",
+  "dedicated-success": "Персональный менеджер",
+  "data-residency": "Хранение данных в выбранной стране",
+  "custom-sla": "Согласованный срок ответа службы поддержки"
+};
 const formatPrice = (amount) => new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(Number(amount ?? 0) / 100);
 
 export function PricingPage({ onNavigateAuth = () => {}, onRequestDemo = () => {}, onStartFree = () => {} }) {
@@ -20,12 +44,12 @@ export function PricingPage({ onNavigateAuth = () => {}, onRequestDemo = () => {
     return () => { cancelled = true; };
   }, []);
   return <main className="public-page pricing-page">
-    <header className="public-nav"><a className="public-brand" href="#/landing"><span>SC</span><strong>Support Communication</strong></a><nav><a href="#/landing">Продукт</a><a href="#/pricing">Тарифы</a><a href="#/docs">Документация API</a></nav><div className="public-nav-actions"><button className="public-btn ghost" onClick={onNavigateAuth} type="button">Войти</button><button className="public-btn primary" onClick={() => onStartFree({ plan: "free", source: "pricing-nav" })} type="button">Начать бесплатно</button></div></header>
-    <section className="pricing-hero"><span>Тарифы</span><h1>Начните бесплатно. Масштабируйтесь, когда команда будет готова.</h1><p>Free включает одного оператора-владельца без карты. Выберите платный тариф, когда понадобятся команда и расширенные лимиты.</p></section>
+    <header className="public-nav"><a className="public-brand" href="#/landing"><span>SC</span><strong>Support Communication</strong></a><nav><a href="#/landing">Продукт</a><a href="#/pricing">Тарифы</a><a href="#/docs">Описание возможностей</a></nav><div className="public-nav-actions"><button className="public-btn ghost" onClick={onNavigateAuth} type="button">Войти</button><button className="public-btn primary" onClick={() => onStartFree({ plan: "free", source: "pricing-nav" })} type="button">Начать бесплатно</button></div></header>
+    <section className="pricing-hero"><span>Тарифы</span><h1>Начните бесплатно — выберите подходящий вариант, когда команда станет больше.</h1><p>Бесплатный тариф подойдёт, чтобы попробовать сервис одному сотруднику. Банковская карта не нужна. Когда потребуется больше сотрудников или возможностей, выберите другой тариф.</p></section>
     <section className="pricing-grid" aria-label="Тарифы Support Communication">{loading ? <p>Загрузка тарифов…</p> : tariffs.map((tariff) => {
       const free = tariff.billingAvailability === "free";
       const enterprise = tariff.id === "enterprise";
-      return <article className={`pricing-card${free ? " featured" : ""}`} key={tariff.id}><header><strong>{tariff.name}</strong><span>{free ? "Для старта" : enterprise ? "Для крупных команд" : "За оператора в месяц"}</span></header><div className="pricing-price">{free ? "Бесплатно" : enterprise ? "По запросу" : formatPrice(tariff.priceMonthly)}</div><p>{tariff.ownerOnly ? "Один оператор — владелец организации" : `${formatPrice(tariff.priceMonthly)} за оператора · до ${tariff.includedUsers} операторов`}</p><ul>{(tariff.features ?? []).map((feature) => <li key={feature}><CheckCircle2 size={16} />{featureLabels[feature] ?? feature}</li>)}</ul>{enterprise ? <button className="public-btn secondary" onClick={() => onRequestDemo({ planInterest: "enterprise", source: "pricing-enterprise", title: "Запрос Enterprise" })} type="button">Связаться с нами</button> : <button className={`public-btn ${free ? "primary" : "secondary"}`} onClick={() => onStartFree({ plan: "free", source: "pricing-card" })} type="button">{free ? "Начать бесплатно" : "Начать с Free"}<ArrowRight size={16} /></button>}</article>;
+      return <article className={`pricing-card${free ? " featured" : ""}`} key={tariff.id}><header><strong>{planLabels[tariff.id] ?? tariff.name}</strong><span>{free ? "Чтобы попробовать сервис" : enterprise ? "Для компаний с особыми требованиями" : "Стоимость за сотрудника в месяц"}</span></header><div className="pricing-price">{free ? "Бесплатно" : enterprise ? "Обсудим условия" : formatPrice(tariff.priceMonthly)}</div><p>{tariff.ownerOnly ? "Для одного сотрудника — владельца организации" : `${formatPrice(tariff.priceMonthly)} за сотрудника · до ${tariff.includedUsers} сотрудников`}</p><ul>{(tariff.features ?? []).map((feature) => <li key={feature}><CheckCircle2 size={16} />{featureLabels[feature] ?? "Дополнительные возможности"}</li>)}</ul>{enterprise ? <button className="public-btn secondary" onClick={() => onRequestDemo({ planInterest: "enterprise", source: "pricing-enterprise", title: "Обсуждение индивидуального тарифа" })} type="button">Связаться с нами</button> : <button className={`public-btn ${free ? "primary" : "secondary"}`} onClick={() => onStartFree({ plan: "free", source: "pricing-card" })} type="button">{free ? "Начать бесплатно" : "Попробовать бесплатно"}<ArrowRight size={16} /></button>}</article>;
     })}</section>
   </main>;
 }

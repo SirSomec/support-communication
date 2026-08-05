@@ -1275,7 +1275,10 @@ export class AutomationService {
   }
 
   async retryBotRuntimeInboundEvent(event: BotRuntimeInboundEvent, options: BotRuntimeOptions = {}) {
-    return new BotRuntimeService(this.automationRepository, options).retryInboundEvent(event);
+    return new BotRuntimeService(this.automationRepository, {
+      ...options,
+      aiDialogBilling: options.aiDialogBilling ?? this.billingService
+    }).retryInboundEvent(event);
   }
 
   private syncLocalCaches(state: { botScenarios: BotScenario[]; proactiveRules: ProactiveRule[]; publishIdempotencyKeys: AutomationPublishIdempotencyRecord[] }): void {

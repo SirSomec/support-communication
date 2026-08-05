@@ -262,8 +262,12 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
               <ArrowLeft size={16} />
               Назад
             </button>
-            <button disabled={activeIndex === steps.length - 1} onClick={() => moveStep(1)} type="button">
-              Далее
+            <button
+              disabled={activeIndex === steps.length - 1 ? isProvisioning : false}
+              onClick={activeIndex === steps.length - 1 ? handleFinish : () => moveStep(1)}
+              type="button"
+            >
+              {activeIndex === steps.length - 1 ? (isProvisioning ? "Создание..." : "Завершить") : "Далее"}
               <ArrowRight size={16} />
             </button>
           </footer>

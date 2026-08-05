@@ -1678,6 +1678,8 @@ test("onboarding completes tenant setup and returns to app", async ({ page }) =>
   await page.locator(".onboarding-employee-form input").first().fill("operator@qa.example");
   await page.locator(".onboarding-employee-form button").click();
   await expect(page.locator(".onboarding-employee-list")).toContainText("operator@qa.example");
+  await expect(page.locator(".onboarding-step-footer").getByRole("button", { name: "Завершить" })).toBeEnabled();
+  await expect(page.locator(".onboarding-step-footer").getByRole("button", { name: "Далее" })).toHaveCount(0);
   await page.getByRole("button", { name: "Завершить" }).click();
   await expect(page.getByTestId("route-app-shell")).toBeVisible();
   await expect(page.locator(".toast")).toContainText("QA Retail");

@@ -36,6 +36,7 @@ import { ScreenStateStrip, Skeleton, Toast, WorkspaceState } from "./ui.jsx";
 const ROLE_SWITCHER_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROLE_SWITCHER === "true";
 const SERVICE_ADMIN_UNAVAILABLE_MESSAGE = "Откройте /service-admin — этот раздел недоступен из рабочего места организации.";
 const LandingPage = lazy(() => import("./features/public/index.js"));
+const PricingPage = lazy(() => import("./features/public/PricingPage.jsx"));
 const ApiDocsPage = lazy(() => import("./features/public/ApiDocsPage.jsx"));
 const AuthPage = lazy(() => import("./features/auth/index.js"));
 const OrganizationOnboarding = lazy(() => import("./features/onboarding/index.js"));
@@ -455,10 +456,17 @@ function App() {
 
   if (route.namespace === "public") {
     return (
-      <div data-testid={route.view === "docs" ? "route-public-docs" : "route-public-landing"}>
+      <div data-testid={route.view === "docs" ? "route-public-docs" : route.view === "pricing" ? "route-public-pricing" : "route-public-landing"}>
         <Suspense fallback={<RouteLoading label="Загрузка публичного контура" />}>
           {route.view === "docs" ? (
             <ApiDocsPage />
+          ) : route.view === "pricing" ? (
+            <PricingPage
+              demoRequestEnabled
+              onNavigateAuth={routeActions.openAuth}
+              onRequestDemo={handlePublicDemoRequest}
+              onStartTrial={routeActions.openOnboarding}
+            />
           ) : (
             <LandingPage
               demoRequestEnabled

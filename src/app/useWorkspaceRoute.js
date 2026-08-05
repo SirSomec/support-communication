@@ -4,6 +4,7 @@ import { legacyServiceAdminHashToPath } from "../service-admin/serviceAdminPath.
 const routeByHash = {
   "#/app": { namespace: "app", view: "dialogs" },
   "#/landing": { namespace: "public", view: "landing" },
+  "#/pricing": { namespace: "public", view: "pricing" },
   "#/docs": { namespace: "public", view: "docs" },
   "#/login": { namespace: "auth", view: "login" },
   "#/auth": { namespace: "auth", view: "login" },
@@ -17,6 +18,7 @@ const hashByPathPattern = [
   [/^\/app(\/|$)/, "#/app"],
   [/^\/onboarding(\/|$)/, "#/onboarding"],
   [/^\/landing(\/|$)/, "#/landing"],
+  [/^\/pricing(\/|$)/, "#/pricing"],
   [/^\/docs(\/|$)/, "#/docs"]
 ];
 
@@ -98,6 +100,7 @@ export function useWorkspaceRoute({
     openApp: () => navigate("app", "dialogs"),
     openAuth: () => navigate("auth", "login"),
     openLanding: () => navigate("public", "landing"),
+    openPricing: () => navigate("public", "pricing"),
     openOnboarding: () => navigate("onboarding", "organization"),
     completeAuth: async (payload) => {
       onAuthenticated?.(payload);
@@ -129,7 +132,7 @@ function parseCurrentRoute() {
 
 function hashForRoute(route) {
   if (route.namespace === "public") {
-    return route.view === "docs" ? "#/docs" : "#/landing";
+    return route.view === "docs" ? "#/docs" : route.view === "pricing" ? "#/pricing" : "#/landing";
   }
 
   if (route.namespace === "auth") {

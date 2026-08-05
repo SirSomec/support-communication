@@ -1,9 +1,11 @@
 import { apiRequest } from "./apiClient.js";
 
 const SERVICE = "tenantProvisionService";
-const provisionPlanIds = { Enterprise: "enterprise", Growth: "business", Start: "starter" };
+const provisionPlanIds = { Enterprise: "enterprise", Free: "free", Growth: "business", Start: "starter" };
 
 export function mapOnboardingFormToProvisionPayload({ admin, employees = [], limits = {}, plan, tenant }) {
+  const planId = provisionPlanIds[plan.id] ?? (String(plan.id ?? "starter").trim().toLowerCase() || "starter");
+  const isFree = planId === "free";
   return {
     tenant: {
       name: tenant.name.trim(),
@@ -19,9 +21,9 @@ export function mapOnboardingFormToProvisionPayload({ admin, employees = [], lim
       mfa: Boolean(admin.mfa)
     },
     plan: {
-      id: provisionPlanIds[plan.id] ?? (String(plan.id ?? "starter").trim().toLowerCase() || "starter"),
-      trial: Boolean(plan.trial),
-      billingCycle: plan.billingCycle === "annual" ? "annual" : "monthly"
+      id: planId,
+      trial: isFree ? false : Boolean(plan.trial),
+      billingCycle: isFree ? "monthly" : plan.billingCycle === "annual" ? "annual" : "monthly"
     },
     employees: employees.map((employee) => ({
       email: employee.email,

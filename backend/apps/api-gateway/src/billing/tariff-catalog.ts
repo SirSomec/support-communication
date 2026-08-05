@@ -2,10 +2,30 @@ import type { BillingTariff } from "./billing.types.js";
 
 export const billingTariffCatalog: BillingTariff[] = [
   {
+    id: "free",
+    name: "Free",
+    billingAvailability: "free",
+    priceMonthly: 0,
+    includedUsers: 1,
+    ownerOnly: true,
+    workspaceLimit: 1,
+    webhookLimit: 0,
+    storageGb: 1,
+    retentionDays: 7,
+    automationRuns: 0,
+    aiTokens: 0,
+    botRuns: 0,
+    reportExports: 3,
+    features: ["shared-inbox", "website-chat", "email-support"],
+    changePolicy: "self_service_upgrade"
+  },
+  {
     id: "starter",
     name: "Starter",
+    billingAvailability: "paid",
     priceMonthly: 39000,
     includedUsers: 3,
+    ownerOnly: false,
     workspaceLimit: 3,
     webhookLimit: 20000,
     storageGb: 50,
@@ -20,8 +40,10 @@ export const billingTariffCatalog: BillingTariff[] = [
   {
     id: "business",
     name: "Business",
+    billingAvailability: "paid",
     priceMonthly: 129000,
     includedUsers: 15,
+    ownerOnly: false,
     workspaceLimit: 10,
     webhookLimit: 150000,
     storageGb: 300,
@@ -36,8 +58,10 @@ export const billingTariffCatalog: BillingTariff[] = [
   {
     id: "scale",
     name: "Scale",
+    billingAvailability: "paid",
     priceMonthly: 380000,
     includedUsers: 35,
+    ownerOnly: false,
     workspaceLimit: 20,
     webhookLimit: 600000,
     storageGb: 1000,
@@ -52,8 +76,10 @@ export const billingTariffCatalog: BillingTariff[] = [
   {
     id: "enterprise",
     name: "Enterprise",
+    billingAvailability: "paid",
     priceMonthly: 990000,
     includedUsers: 70,
+    ownerOnly: false,
     workspaceLimit: 40,
     webhookLimit: 2500000,
     storageGb: 5000,

@@ -17,6 +17,24 @@ export class SettingsController {
     private readonly settingsRulesService: SettingsRulesService
   ) {}
 
+  @Get("billing/operator-limit")
+  @RequireTenantOperatorPermission("settings.read")
+  @RequireServiceAdminAction("settings.read")
+  @ApiOperation({ operationId: "fetchSettingsOperatorLimit", summary: "Get the tenant-selected operator limit within its current tariff" })
+  @ApiOkResponse({ description: "Tenant operator limit envelope" })
+  fetchOperatorLimit(@Req() request: SettingsRequest) {
+    return this.settingsEmployeeService.fetchOperatorLimit({ tenantId: tenantIdFromRequest(request) });
+  }
+
+  @Patch("billing/operator-limit")
+  @RequireTenantOperatorPermission("settings.manage")
+  @RequireServiceAdminAction("settings.manage")
+  @ApiOperation({ operationId: "updateSettingsOperatorLimit", summary: "Set the tenant operator limit without exceeding tariff seats" })
+  @ApiOkResponse({ description: "Updated tenant operator limit envelope" })
+  updateOperatorLimit(@Body() payload: { operatorLimit?: unknown }, @Req() request: SettingsRequest) {
+    return this.settingsEmployeeService.updateOperatorLimit(payload, { tenantId: tenantIdFromRequest(request) });
+  }
+
   @Get("employees")
   @RequireTenantOperatorPermission("settings.read")
   @RequireServiceAdminAction("settings.read")

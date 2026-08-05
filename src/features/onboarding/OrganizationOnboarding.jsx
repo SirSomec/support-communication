@@ -35,8 +35,8 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     domain: ""
   });
   const [plan, setPlan] = useState({
-    id: "Growth",
-    trial: true,
+    id: "Free",
+    trial: false,
     billingCycle: "monthly"
   });
   const [admin, setAdmin] = useState({
@@ -48,10 +48,10 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
   });
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [limits, setLimits] = useState({
-    operatorLimit: 8,
+    operatorLimit: 1,
     concurrentDialogs: 12,
     dailyMessages: 5000,
-    aiAssist: true,
+    aiAssist: false,
     afterHoursBot: false
   });
   const [employeeDraft, setEmployeeDraft] = useState({

@@ -2,6 +2,8 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Req, U
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
+import { RequireTenantOperatorPermission, type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
+import { TenantOperatorAuthGuard } from "../identity/tenant-operator-auth.guard.js";
 import { type BillingInvoiceState, type BillingSubscriptionState } from "./billing.repository.js";
 import { changeTenantTariffFromRoute } from "./billing.route.js";
 import { BillingService } from "./billing.service.js";
@@ -55,6 +57,13 @@ export class BillingController {
   @ApiOkResponse({ description: "Billing tariff catalog envelope" })
   fetchTariffs() {
     return this.billingService.fetchTariffs();
+  }
+
+  @Get("payment-provider-readiness")
+  @RequireServiceAdminAction("billing.read")
+  @ApiOkResponse({ description: "Safe payment-provider launch readiness without exposing credentials" })
+  fetchPaymentProviderReadiness() {
+    return this.billingService.fetchPaymentProviderReadiness();
   }
 
   @Post("tariff-preview")
@@ -153,6 +162,38 @@ export class PublicBillingCatalogController {
   fetchTariffs() {
     return this.billingService.fetchTariffs();
   }
+}
+
+interface YooKassaWebhookBody {
+  object?: { id?: string };
+}
+
+@ApiTags("public")
+@Controller("public/billing/yookassa")
+export class YooKassaWebhookController {
+  constructor(private readonly billingService: BillingService) {}
+
+  @Post("webhook")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Verifies a YooKassa payment server-to-server before syncing billing state" })
+  receiveWebhook(@Body() payload: YooKassaWebhookBody) {
+    return this.billingService.handleYooKassaWebhook(payload?.object?.id ?? "");
+  }
+}
+
+@ApiTags("tenant-billing")
+@UseGuards(TenantOperatorAuthGuard)
+@Controller("tenant/billing")
+export class TenantBillingController {
+  constructor(private readonly billingService: BillingService) {}
+
+  @Get("overview")
+  @RequireTenantOperatorPermission("settings.manage")
+  @ApiOkResponse({ description: "Current tenant tariff, quota usage and invoice overview" })
+  fetchOverview(@Req() request: TenantOperatorRequest) {
+    return this.billingService.fetchTenantBillingOverview(request.tenantOperatorContext?.tenantId ?? "");
+  }
+
 }
 
 @ApiTags("quotas")

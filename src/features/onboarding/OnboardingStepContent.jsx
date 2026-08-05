@@ -9,7 +9,7 @@ import {
   X
 } from "lucide-react";
 import { RangeControl, StepHeading } from "./OnboardingControls.jsx";
-import { employeeRoles, planOptions } from "./onboardingModel.js";
+import { employeeRoles, isFreePlan, planOptions } from "./onboardingModel.js";
 
 export function OnboardingStepContent({
   activeStep,
@@ -111,7 +111,11 @@ export function OnboardingStepContent({
                   <button
                     className={plan.id === option.id ? "selected" : ""}
                     key={option.id}
-                    onClick={() => setPlan((current) => ({ ...current, id: option.id }))}
+                    onClick={() => {
+                      const free = isFreePlan(option.id);
+                      setPlan((current) => ({ ...current, billingCycle: free ? "monthly" : current.billingCycle, id: option.id, trial: free ? false : current.trial }));
+                      if (free) setLimits((current) => ({ ...current, afterHoursBot: false, aiAssist: false, operatorLimit: 1 }));
+                    }}
                     type="button"
                   >
                     <strong>{option.id}</strong>
@@ -121,7 +125,7 @@ export function OnboardingStepContent({
                   </button>
                 ))}
               </div>
-              <div className="onboarding-toggle-grid">
+              {!isFreePlan(plan.id) ? <div className="onboarding-toggle-grid">
                 <label>
                   <input
                     checked={plan.trial}
@@ -138,7 +142,7 @@ export function OnboardingStepContent({
                   />
                   Годовая оплата
                 </label>
-              </div>
+              </div> : <p className="onboarding-preview-row">Free активируется сразу и включает одного оператора-владельца.</p>}
             </div>
           ) : null}
 
@@ -259,6 +263,9 @@ export function OnboardingStepContent({
                 title="Сотрудники"
                 text="Добавьте хотя бы одного сотрудника, чтобы проверить invite flow и будущие роли в организации."
               />
+              {isFreePlan(plan.id) ? (
+                <div className="onboarding-empty-state"><Users size={22} /><span>Free включает только владельца организации. Для приглашения команды смените тариф.</span></div>
+              ) : <>
               <form className="onboarding-employee-form" onSubmit={handleAddEmployee}>
                 <label className="onboarding-field">
                   <span>Email сотрудника</span>
@@ -306,6 +313,7 @@ export function OnboardingStepContent({
                   </div>
                 )}
               </div>
+              </>}
             </div>
           ) : null}
     </>

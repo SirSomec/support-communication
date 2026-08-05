@@ -11,6 +11,7 @@ import { TeamDirectoryRepository } from "../apps/api-gateway/src/identity/team-d
 import { PermissionService } from "../apps/api-gateway/src/identity/permission.service.ts";
 import { permissionRoles, serviceAdminSession } from "../apps/api-gateway/src/identity/seed-catalog.ts";
 import { createSeededIdentityRepository } from "../apps/api-gateway/src/identity/seed.ts";
+import { createSeededBillingRepository } from "../apps/api-gateway/src/billing/seed.ts";
 
 function telegramFetchOk(username = "settings_bot") {
   return async (_input: string) => ({
@@ -21,6 +22,65 @@ function telegramFetchOk(username = "settings_bot") {
 }
 
 describe("settings runtime contracts", () => {
+  it("blocks employee invitations when the Free plan already has its owner", async () => {
+    const identityRepository = createSeededIdentityRepository();
+    const billingRepository = createSeededBillingRepository();
+    const tenant = await billingRepository.findTenant("tenant-northstar");
+    assert.ok(tenant);
+    await billingRepository.saveTenant({ ...tenant, planId: "free" });
+    const settings = new SettingsEmployeeService(
+      identityRepository,
+      TeamDirectoryRepository.inMemory(),
+      undefined,
+      { sendInvite: async () => {} },
+      billingRepository
+    );
+
+    const freeLimitChange = await settings.updateOperatorLimit({ operatorLimit: 2 }, { tenantId: "tenant-northstar" });
+    assert.equal(freeLimitChange.status, "invalid");
+    assert.equal(freeLimitChange.error?.code, "operator_limit_owner_only");
+
+    const result = await settings.inviteEmployee({
+      email: "new-owner@northstar.example",
+      name: "New Owner",
+      roleKey: "employee"
+    }, { tenantId: "tenant-northstar" });
+
+    assert.equal(result.status, "invalid");
+    assert.equal(result.error?.code, "employee_seat_limit_exceeded");
+  });
+
+  it("lets a tenant owner set an operator limit within the tariff and enforces it for invitations", async () => {
+    const identityRepository = createSeededIdentityRepository();
+    const billingRepository = createSeededBillingRepository();
+    const settings = new SettingsEmployeeService(
+      identityRepository,
+      TeamDirectoryRepository.inMemory(),
+      undefined,
+      { sendInvite: async () => {} },
+      billingRepository
+    );
+    const tenantId = "tenant-northstar";
+
+    const updated = await settings.updateOperatorLimit({ operatorLimit: 4 }, { tenantId });
+    assert.equal(updated.status, "ok");
+    assert.equal(updated.data.operatorLimit, 4);
+    assert.equal(updated.data.usedSeats, 3);
+
+    const invited = await settings.inviteEmployee({ email: "fourth@northstar.example", name: "Fourth operator" }, { tenantId });
+    assert.equal(invited.status, "ok");
+    const overLimit = await settings.inviteEmployee({ email: "fifth@northstar.example", name: "Fifth operator" }, { tenantId });
+    assert.equal(overLimit.status, "invalid");
+    assert.equal(overLimit.error?.code, "employee_seat_limit_exceeded");
+
+    const belowUsage = await settings.updateOperatorLimit({ operatorLimit: 3 }, { tenantId });
+    assert.equal(belowUsage.status, "invalid");
+    assert.equal(belowUsage.error?.code, "operator_limit_below_usage");
+    const abovePlan = await settings.updateOperatorLimit({ operatorLimit: 16 }, { tenantId });
+    assert.equal(abovePlan.status, "invalid");
+    assert.equal(abovePlan.error?.code, "operator_limit_plan_exceeded");
+  });
+
   it("lists multiple telegram channel connections for one tenant", async () => {
     const integrations = new IntegrationService(IntegrationRepository.inMemory(), { telegramFetch: telegramFetchOk() });
     const tenantId = "tenant-settings";

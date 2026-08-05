@@ -115,6 +115,38 @@ describe("tenant provision contracts", () => {
     assert.equal(secondUsers.some((user) => user.email === "owner@second-pilot.test"), true);
   });
 
+  it("provisions the Free plan as active with only its owner", async () => {
+    const { baseUrl } = await createTestApiApp(apps);
+    const created = await provisionTenant(baseUrl, {
+      tenant: { name: "Free Pilot", slug: "free-pilot", region: "ru-1" },
+      admin: { name: "Free Owner", email: "owner@free-pilot.test", password: "Owner-2026!" },
+      channel: { type: "sdk", domain: "free.example" },
+      plan: { id: "free", trial: true }
+    });
+
+    assert.equal(created.response.status, 200);
+    assert.equal(created.envelope.data.tenant.planId, "free");
+    assert.equal(created.envelope.data.tenant.status, "active");
+    const users = await IdentityRepository.default().findTenantUsers("tenant-free-pilot");
+    assert.equal(users.length, 1);
+    assert.equal(users[0]?.role, "Owner");
+  });
+
+  it("rejects provisioning extra employees on the Free plan", async () => {
+    const { baseUrl } = await createTestApiApp(apps);
+    const created = await provisionTenant(baseUrl, {
+      tenant: { name: "Free Team", slug: "free-team", region: "ru-1" },
+      admin: { name: "Free Owner", email: "owner@free-team.test", password: "Owner-2026!" },
+      employees: [{ email: "operator@free-team.test", name: "Operator" }],
+      channel: { type: "sdk", domain: "free-team.example" },
+      plan: { id: "free" }
+    });
+
+    assert.equal(created.response.status, 200);
+    assert.equal(created.envelope.status, "invalid");
+    assert.equal(created.envelope.error?.code, "tenant_provision_owner_only_plan");
+  });
+
   it("compensates identity, billing, and integration writes when a late provisioning step fails", async () => {
     const identityRepository = IdentityRepository.inMemory();
     const billingRepository = BillingRepository.inMemory();

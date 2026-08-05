@@ -11,6 +11,14 @@ export const billingService = {
     });
   },
 
+  async fetchPaymentProviderReadiness() {
+    return apiRequest("/billing/payment-provider-readiness", {
+      authMode: "service-admin",
+      operation: "fetchPaymentProviderReadiness",
+      service: SERVICE
+    });
+  },
+
   async previewTariffChange({ tenantId, ...payload } = {}) {
     if (!hasRouteId(tenantId)) {
       return missingIdEnvelope("previewTariffChange", "Tenant id is required.");

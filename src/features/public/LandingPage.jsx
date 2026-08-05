@@ -272,7 +272,7 @@ export function LandingPage({
           <a href="#capabilities">Возможности</a>
           <a href="#ai-agent">ИИ-бот</a>
           <a href="#channels">Каналы</a>
-          <a href="#tariffs">Тарифы</a>
+          <a href="#/pricing">Тарифы</a>
           <a href="#/docs">Документация API</a>
           <a href="#faq">FAQ</a>
         </nav>
@@ -545,7 +545,7 @@ export function LandingPage({
           <div className="public-footer-column">
             <strong>Продукт</strong>
             <a href="#capabilities">Возможности</a>
-            <a href="#tariffs">Тарифы</a>
+            <a href="#/pricing">Тарифы</a>
             <a href="#channels">Каналы и SDK</a>
             <span>Статус API: {apiStatusLabel}</span>
           </div>

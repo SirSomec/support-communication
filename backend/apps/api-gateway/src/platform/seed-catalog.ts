@@ -168,6 +168,21 @@ export const incidentPostmortems = [
 
 export const featureFlags: FeatureFlag[] = [
   {
+    id: "flag-yookassa-payments",
+    key: "ff-yookassa-payments",
+    name: "YooKassa payments launch gate",
+    status: "off",
+    environment: "production",
+    scope: "tenant",
+    rollout: 0,
+    owner: "Billing",
+    segments: [],
+    enabledTenantIds: [],
+    variants: [],
+    killSwitch: true,
+    updatedAt: "2026-08-05T00:00:00.000Z"
+  },
+  {
     id: "flag-ai-agents-v1",
     key: "ai_agents_v1",
     name: "AI agents v1",

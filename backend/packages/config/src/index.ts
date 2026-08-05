@@ -20,6 +20,8 @@ const backendConfigSchema = z.object({
   API_VERSION: z.string().min(1).default("v1"),
   RUNTIME_PROFILE: z.enum(["local", "production-like"]).default("local"),
   BILLING_PROVIDER_MODE: z.enum(["sandbox", "production"]).default("sandbox"),
+  BILLING_CHECKOUT_PROVIDER_MODE: z.enum(["disabled", "yookassa"]).default("disabled"),
+  BILLING_RECURRING_TERMS_VERSION: z.string().min(1).default("v1"),
   BROWSER_PUSH_PUBLIC_KEY: optionalNonEmptyString,
   BROWSER_PUSH_PRIVATE_KEY: optionalNonEmptyString,
   BROWSER_PUSH_SUBJECT: optionalNonEmptyString,
@@ -43,6 +45,9 @@ const backendConfigSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4100),
   PROVIDER_CREDENTIAL_MASTER_KEY: optionalCredentialMasterKey,
   PUBLIC_API_KEY_SECRET: z.string().min(16).optional(),
+  YOOKASSA_RETURN_URL: optionalNonEmptyString,
+  YOOKASSA_SECRET_KEY: optionalNonEmptyString,
+  YOOKASSA_SHOP_ID: optionalNonEmptyString,
   REDIS_URL: z.string().url(),
   S3_ACCESS_KEY: z.string().min(1),
   S3_BUCKET: z.string().min(1),
@@ -107,6 +112,33 @@ const backendConfigSchema = z.object({
         path: ["AUTH_RATE_LIMIT_ENABLED"],
         message: "Authentication rate limiting cannot be disabled in production."
       });
+    }
+  }
+
+  if (config.BILLING_CHECKOUT_PROVIDER_MODE === "yookassa") {
+    for (const key of ["YOOKASSA_SHOP_ID", "YOOKASSA_SECRET_KEY", "YOOKASSA_RETURN_URL"] as const) {
+      if (!config[key]) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is required when BILLING_CHECKOUT_PROVIDER_MODE=yookassa.`
+        });
+      }
+    }
+
+    if (config.YOOKASSA_RETURN_URL) {
+      try {
+        const returnUrl = new URL(config.YOOKASSA_RETURN_URL);
+        if (returnUrl.protocol !== "https:") {
+          throw new Error("non-HTTPS URL");
+        }
+      } catch {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["YOOKASSA_RETURN_URL"],
+          message: "YOOKASSA_RETURN_URL must be an HTTPS URL when YooKassa is enabled."
+        });
+      }
     }
   }
 

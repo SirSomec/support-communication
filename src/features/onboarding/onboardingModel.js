@@ -16,6 +16,12 @@ export const steps = [
 
 export const planOptions = [
   {
+    id: "Free",
+    price: "0 ₽",
+    description: "Один оператор-владелец, чат для сайта и базовые инструменты поддержки.",
+    limits: "1 оператор"
+  },
+  {
     id: "Start",
     price: "19 900 ₽",
     description: "Первый канал, базовые шаблоны, очередь и отчеты.",
@@ -76,6 +82,10 @@ export function getCompletion({
       && hasEmailShape(admin.email)
       && String(admin.password ?? "").length >= 8,
     limits: limits.operatorLimit > 0 && limits.concurrentDialogs > 0 && limits.dailyMessages >= 100,
-    employees: employees.length > 0
+    employees: isFreePlan(plan.id) || employees.length > 0
   };
+}
+
+export function isFreePlan(planId) {
+  return String(planId ?? "").trim().toLowerCase() === "free";
 }

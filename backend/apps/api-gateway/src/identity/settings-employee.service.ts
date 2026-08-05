@@ -3,7 +3,8 @@ import { createEnvelope, type BackendEnvelope } from "@support-communication/env
 import { writeStructuredLog } from "@support-communication/observability";
 import { makeAuditId } from "./backend-ids.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
-import { IdentityRepository, type IdentityTenantUser } from "./identity.repository.js";
+import { IdentityRepository, type IdentityTenant, type IdentityTenantUser } from "./identity.repository.js";
+import { BillingRepository } from "../billing/billing.repository.js";
 import { TeamDirectoryRepository } from "./team-directory.repository.js";
 import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
 import {
@@ -74,7 +75,8 @@ export class SettingsEmployeeService {
     private readonly identityRepository = IdentityRepository.default(),
     private readonly teamDirectoryRepository = TeamDirectoryRepository.default(),
     private readonly recoveryDelivery?: Pick<MfaOtpRuntime, "deliverRecovery">,
-    private readonly inviteDelivery?: InviteMailDelivery
+    private readonly inviteDelivery?: InviteMailDelivery,
+    private readonly billingRepository = BillingRepository.default()
   ) {}
 
   listSettingsAuditEvents() {
@@ -136,6 +138,82 @@ export class SettingsEmployeeService {
     });
   }
 
+  async fetchOperatorLimit(options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = normalizeTenantId(options.tenantId);
+    if (!tenantId) return tenantContextRequiredEnvelope("fetchOperatorLimit");
+
+    const [tenant, billingTenant] = await Promise.all([
+      this.identityRepository.findTenant(tenantId),
+      this.billingRepository.findTenant(tenantId)
+    ]);
+    if (!tenant || !billingTenant) {
+      return invalidEnvelope("fetchOperatorLimit", "billing_tenant_not_found", "Tenant billing settings were not found.", { tenantId });
+    }
+    const tariff = await this.billingRepository.findTariff(billingTenant.planId);
+    if (!tariff) {
+      return invalidEnvelope("fetchOperatorLimit", "billing_tariff_not_found", "The tenant tariff was not found.", { planId: billingTenant.planId, tenantId });
+    }
+    const users = await this.identityRepository.findTenantUsers(tenantId);
+    return createEnvelope({
+      service: SERVICE,
+      operation: "fetchOperatorLimit",
+      traceId: identityTraceId(SERVICE, "fetchOperatorLimit"),
+      meta: apiMeta({ tenantId }),
+      data: buildOperatorLimitSettings(tenant, tariff, users.filter((user) => user.status !== "deactivated").length)
+    });
+  }
+
+  async updateOperatorLimit(payload: { operatorLimit?: unknown } = {}, options: EmployeeTenantOptions = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = normalizeTenantId(options.tenantId);
+    if (!tenantId) return tenantContextRequiredEnvelope("updateOperatorLimit");
+    const requestedLimit = Number(payload.operatorLimit);
+    if (!Number.isInteger(requestedLimit) || requestedLimit < 1) {
+      return invalidEnvelope("updateOperatorLimit", "operator_limit_invalid", "Operator limit must be a positive integer.", { tenantId });
+    }
+
+    const [tenant, billingTenant] = await Promise.all([
+      this.identityRepository.findTenant(tenantId),
+      this.billingRepository.findTenant(tenantId)
+    ]);
+    if (!tenant || !billingTenant) {
+      return invalidEnvelope("updateOperatorLimit", "billing_tenant_not_found", "Tenant billing settings were not found.", { tenantId });
+    }
+    const tariff = await this.billingRepository.findTariff(billingTenant.planId);
+    if (!tariff) {
+      return invalidEnvelope("updateOperatorLimit", "billing_tariff_not_found", "The tenant tariff was not found.", { planId: billingTenant.planId, tenantId });
+    }
+    const users = await this.identityRepository.findTenantUsers(tenantId);
+    const usedSeats = users.filter((user) => user.status !== "deactivated").length;
+    if (tariff.ownerOnly && requestedLimit !== 1) {
+      return invalidEnvelope("updateOperatorLimit", "operator_limit_owner_only", "The Free plan is limited to its organization owner.", { operatorLimit: 1, planId: tariff.id, tenantId });
+    }
+    if (requestedLimit > tariff.includedUsers) {
+      return invalidEnvelope("updateOperatorLimit", "operator_limit_plan_exceeded", "Operator limit cannot exceed the seats included in the current plan.", { includedUsers: tariff.includedUsers, planId: tariff.id, requestedLimit, tenantId });
+    }
+    if (requestedLimit < usedSeats) {
+      return invalidEnvelope("updateOperatorLimit", "operator_limit_below_usage", "Deactivate or remove employees before lowering the operator limit.", { requestedLimit, tenantId, usedSeats });
+    }
+
+    const currentLimits = tenant.onboarding?.limits ?? defaultOperatorLimits();
+    const saved = await this.identityRepository.saveTenant({
+      ...tenant,
+      onboarding: {
+        adminRole: tenant.onboarding?.adminRole ?? "Owner",
+        billingCycle: tenant.onboarding?.billingCycle ?? "monthly",
+        industry: tenant.onboarding?.industry ?? "unspecified",
+        limits: { ...currentLimits, operatorLimit: requestedLimit },
+        mfaRequired: tenant.onboarding?.mfaRequired ?? true
+      }
+    });
+    return createEnvelope({
+      service: SERVICE,
+      operation: "updateOperatorLimit",
+      traceId: identityTraceId(SERVICE, "updateOperatorLimit"),
+      meta: apiMeta({ tenantId }),
+      data: buildOperatorLimitSettings(saved, tariff, usedSeats)
+    });
+  }
+
   async inviteEmployee(payload: EmployeeInvitePayload = {}, options: { tenantId?: string } = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenantId = normalizeTenantId(payload.tenantId ?? options.tenantId);
     if (!tenantId) {
@@ -155,6 +233,29 @@ export class SettingsEmployeeService {
     // запись переиспользуется и возвращается в состояние "invited".
     if (existing && existing.status !== "deactivated") {
       return invalidEnvelope("inviteEmployee", "employee_email_exists", "Employee email already exists in this tenant.", { tenantId, email });
+    }
+
+    const billingTenant = await this.billingRepository.findTenant(tenantId);
+    const tariff = billingTenant ? await this.billingRepository.findTariff(billingTenant.planId) : undefined;
+    if (tariff) {
+      const users = await this.identityRepository.findTenantUsers(tenantId);
+      const usedSeats = users.filter((user) => user.status !== "deactivated").length;
+      const consumesSeat = !existing || existing.status === "deactivated";
+      const tenant = await this.identityRepository.findTenant(tenantId);
+      const configuredLimit = tenant?.onboarding?.limits.operatorLimit;
+      const operatorLimit = tariff.ownerOnly
+        ? 1
+        : Math.min(tariff.includedUsers, normalizeOperatorLimit(configuredLimit, tariff.includedUsers));
+      if (consumesSeat && usedSeats >= operatorLimit) {
+        return invalidEnvelope(
+          "inviteEmployee",
+          "employee_seat_limit_exceeded",
+          tariff.ownerOnly
+            ? "The Free plan includes only the organization owner. Upgrade the plan to invite teammates."
+            : "The operator-seat limit for the current plan has been reached.",
+          { includedUsers: tariff.includedUsers, operatorLimit, planId: tariff.id, tenantId, usedSeats }
+        );
+      }
     }
 
     const roleKey = normalizeRoleKey(payload.roleKey);
@@ -1061,6 +1162,39 @@ function tenantContextRequiredEnvelope(operation: string, data: Record<string, u
     ...data,
     tenantId: null
   });
+}
+
+function buildOperatorLimitSettings(
+  tenant: IdentityTenant,
+  tariff: { id: string; includedUsers: number; ownerOnly: boolean },
+  usedSeats: number
+) {
+  const requested = tenant?.onboarding?.limits.operatorLimit;
+  const operatorLimit = tariff.ownerOnly
+    ? 1
+    : Math.min(tariff.includedUsers, normalizeOperatorLimit(requested, tariff.includedUsers));
+  return {
+    includedUsers: tariff.includedUsers,
+    locked: tariff.ownerOnly,
+    operatorLimit,
+    planId: tariff.id,
+    usedSeats
+  };
+}
+
+function defaultOperatorLimits() {
+  return {
+    afterHoursBot: false,
+    aiAssist: false,
+    concurrentDialogs: 1,
+    dailyMessages: 100,
+    operatorLimit: 1
+  };
+}
+
+function normalizeOperatorLimit(value: unknown, fallback: number): number {
+  const numeric = Math.floor(Number(value));
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
 }
 
 function normalizeRoleKey(value: unknown): string {

@@ -1,10 +1,15 @@
 import React from "react";
-import { Cable, ListChecks, ListTree, ShieldCheck, Tags, Users, UsersRound } from "lucide-react";
+import { Cable, CreditCard, ListChecks, ListTree, ShieldCheck, Tags, Users, UsersRound } from "lucide-react";
 
 // Навигация настроек: вертикальные группы разделов-экранов.
 // Идентификаторы вкладок стабильны (settings-tab-*), на них опираются
 // deep-link из уведомлений и smoke-тесты.
 const navGroups = [
+  {
+    id: "billing",
+    label: "Оплата",
+    items: [{ id: "billing", label: "Тариф и оплата", hint: "Тариф, лимиты и счета", icon: CreditCard }]
+  },
   {
     id: "integrations",
     label: "Интеграции",

@@ -15,14 +15,16 @@ export function BillingTariffWorkspace({ onAudit }) {
   const [preview, setPreview] = useState(null);
   const [confirmationText, setConfirmationText] = useState("");
   const [planOverrides, setPlanOverrides] = useState({});
+  const [paymentReadiness, setPaymentReadiness] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadWorkspace() {
-      const [tenantResponse, tariffResponse] = await Promise.all([
+      const [tenantResponse, tariffResponse, readinessResponse] = await Promise.all([
         tenantService.fetchTenants(),
-        billingService.fetchTariffs()
+        billingService.fetchTariffs(),
+        billingService.fetchPaymentProviderReadiness()
       ]);
 
       if (cancelled) {
@@ -32,6 +34,7 @@ export function BillingTariffWorkspace({ onAudit }) {
       const items = tenantResponse.status === "ok" ? tenantResponse.data?.items ?? [] : [];
       setTenants(items);
       setTariffs(tariffResponse.status === "ok" ? tariffResponse.data?.items ?? [] : []);
+      setPaymentReadiness(readinessResponse.status === "ok" ? readinessResponse.data : null);
       setSelectedTenantId(items[0]?.id ?? "");
     }
 
@@ -93,6 +96,11 @@ export function BillingTariffWorkspace({ onAudit }) {
 
   return (
     <div className="service-admin-workspace-grid billing-workspace">
+      <section className="service-admin-detail-panel">
+        <SectionTitle title="Готовность платежей" action={paymentReadiness?.mode === "yookassa" ? "Включено" : "Выключено"} />
+        <p>{paymentReadiness?.mode === "yookassa" ? "YooKassa включена. Перед запуском проверьте все контрольные пункты." : "Платежи безопасно выключены. Внесите credentials в защищённую runtime-конфигурацию, затем включите BILLING_CHECKOUT_PROVIDER_MODE=yookassa."}</p>
+        <div className="service-admin-preview">{Object.entries(paymentReadiness?.checks ?? {}).map(([key, ready]) => <span key={key}><b>{key}</b>{ready ? "готово" : "требуется"}</span>)}</div>
+      </section>
       <section className="service-admin-list-panel">
         <header className="service-admin-panel-toolbar">
           <select

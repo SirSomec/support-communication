@@ -72,6 +72,16 @@ describe("tenant provision service", () => {
     assert.equal(payload.channel.domain, "support.acme-pilot.test");
   });
 
+  it("maps the Free onboarding plan without a trial", () => {
+    const payload = mapOnboardingFormToProvisionPayload({
+      ...onboardingForm,
+      employees: [],
+      plan: { billingCycle: "annual", id: "Free", trial: true }
+    });
+
+    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "free", trial: false });
+  });
+
   it("does not include the test message step in onboarding completion", () => {
     const completion = getCompletion({
       admin: onboardingForm.admin,

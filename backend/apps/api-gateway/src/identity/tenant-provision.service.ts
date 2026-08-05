@@ -109,7 +109,10 @@ export class TenantProvisionService {
     const channelDomain = String(payload.channel?.domain ?? "").trim();
     const billingCycle = payload.plan?.billingCycle === "annual" ? "annual" : "monthly";
     const industry = String(payload.tenant?.industry ?? "").trim().slice(0, 80) || "unspecified";
-    const limits = normalizeProvisionLimits(payload.limits);
+    const requestedLimits = normalizeProvisionLimits(payload.limits);
+    const planId = normalizeProvisionPlanId(payload.plan?.id);
+    const tariff = await this.billingRepository.findTariff(planId);
+    const invitedEmployees = normalizeProvisionEmployees(payload.employees, adminEmail);
 
     if (!tenantName || !tenantSlug || !adminName || !adminEmail || !adminPassword) {
       return invalidProvision(traceId, "tenant_provision_payload_invalid", "Tenant, admin email/name, and admin password are required.");
@@ -121,6 +124,20 @@ export class TenantProvisionService {
 
     if (!isValidChannelDomain(channelDomain)) {
       return invalidProvision(traceId, "tenant_provision_channel_domain_invalid", "Channel domain must be a valid hostname.");
+    }
+
+    if (!tariff) {
+      return invalidProvision(traceId, "tenant_provision_plan_invalid", "The selected billing plan is not available.");
+    }
+
+    const limits = applyPlanLimitPolicy(requestedLimits, tariff);
+
+    if (tariff.ownerOnly && invitedEmployees.length > 0) {
+      return invalidProvision(traceId, "tenant_provision_owner_only_plan", "The Free plan includes only the organization owner. Upgrade the plan before inviting teammates.");
+    }
+
+    if (invitedEmployees.length + 1 > tariff.includedUsers) {
+      return invalidProvision(traceId, "tenant_provision_seat_limit_exceeded", "The selected plan does not include enough operator seats for the invited employees.");
     }
 
     const tenantId = `tenant-${tenantSlug}`;
@@ -136,8 +153,7 @@ export class TenantProvisionService {
       return invalidProvision(traceId, "tenant_admin_email_duplicate", "Admin email is already assigned to another tenant.");
     }
 
-    const billingStatus = payload.plan?.trial ? "trial" : "active";
-    const planId = String(payload.plan?.id ?? "trial").trim() || "trial";
+    const billingStatus = tariff.billingAvailability === "free" ? "active" : payload.plan?.trial ? "trial" : "active";
     const defaultWorkspaceIds = [`ws-${tenantSlug}-dialogs`, `ws-${tenantSlug}-settings`];
     const compensation: Array<() => Promise<void>> = [];
 
@@ -250,11 +266,8 @@ export class TenantProvisionService {
         roleGrants.push(grant);
       }
 
-      for (const employee of payload.employees ?? []) {
-        const employeeEmail = String(employee.email ?? "").trim().toLowerCase();
-        if (!employeeEmail || employeeEmail === adminEmail) {
-          continue;
-        }
+      for (const employee of invitedEmployees) {
+        const employeeEmail = employee.email;
 
         await this.identityRepository.saveTenantUser({
           device: "Invited during onboarding",
@@ -406,6 +419,38 @@ function normalizeProvisionAdminRole(value: string | undefined): "Admin" | "Owne
   return normalized === "admin" || normalized === "administrator" || normalized === "администратор"
     ? "Admin"
     : "Owner";
+}
+
+function normalizeProvisionPlanId(value: string | undefined): string {
+  const normalized = String(value ?? "starter").trim().toLowerCase();
+  return normalized === "trial" ? "starter" : normalized || "starter";
+}
+
+function normalizeProvisionEmployees(
+  employees: TenantProvisionPayload["employees"],
+  adminEmail: string
+): Array<{ email: string; name?: string; role?: string; team?: string }> {
+  const seen = new Set<string>();
+  return (employees ?? []).flatMap((employee) => {
+    const email = String(employee.email ?? "").trim().toLowerCase();
+    if (!email || email === adminEmail || seen.has(email)) {
+      return [];
+    }
+    seen.add(email);
+    return [{ ...employee, email }];
+  });
+}
+
+function applyPlanLimitPolicy(
+  limits: NonNullable<IdentityTenant["onboarding"]>["limits"],
+  tariff: { includedUsers: number; ownerOnly: boolean }
+): NonNullable<IdentityTenant["onboarding"]>["limits"] {
+  return {
+    ...limits,
+    afterHoursBot: tariff.ownerOnly ? false : limits.afterHoursBot,
+    aiAssist: tariff.ownerOnly ? false : limits.aiAssist,
+    operatorLimit: tariff.ownerOnly ? 1 : Math.min(limits.operatorLimit, tariff.includedUsers)
+  };
 }
 
 function normalizeProvisionLimits(input: TenantProvisionPayload["limits"]): NonNullable<IdentityTenant["onboarding"]>["limits"] {

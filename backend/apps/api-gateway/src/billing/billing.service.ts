@@ -19,6 +19,8 @@ import {
   type BillingSyncJob
 } from "./billing.repository.js";
 import { type BillingTariff, type TenantBillingState } from "./billing.types.js";
+import { YooKassaCheckoutUnavailableError, createYooKassaPaymentProvider, type YooKassaPaymentProvider } from "./yookassa.provider.js";
+import { PlatformRepository } from "../platform/platform.repository.js";
 
 const BILLING_SERVICE = "billingService";
 const QUOTA_SERVICE = "quotaService";
@@ -64,6 +66,13 @@ interface ProviderSyncPayload {
   tenantId?: string;
 }
 
+interface TenantCheckoutPayload {
+  idempotencyKey?: string;
+  nextPlanId?: string;
+  recurringConsent?: boolean;
+  termsVersion?: string;
+}
+
 interface QuotaMetric {
   available: number;
   resource: string;
@@ -75,7 +84,11 @@ interface QuotaMetric {
 }
 
 export class BillingService {
-  constructor(private readonly billingRepository = BillingRepository.default()) {}
+  constructor(
+    private readonly billingRepository = BillingRepository.default(),
+    private readonly yooKassaProvider: YooKassaPaymentProvider = createYooKassaPaymentProvider(),
+    private readonly platformRepository = PlatformRepository.default()
+  ) {}
 
   async fetchTariffs(): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tariffs = await this.billingRepository.listTariffs();
@@ -756,6 +769,184 @@ export class BillingService {
         tenant: tenantSummary(tenant)
       }
     });
+  }
+
+  async fetchPaymentProviderReadiness(): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const mode = process.env.BILLING_CHECKOUT_PROVIDER_MODE === "yookassa" ? "yookassa" : "disabled";
+    const launchEnabled = await this.isYooKassaLaunchEnabled();
+    const checks = {
+      recurringTermsVersionConfigured: Boolean(process.env.BILLING_RECURRING_TERMS_VERSION?.trim()),
+      returnUrlConfigured: Boolean(process.env.YOOKASSA_RETURN_URL?.trim()),
+      secretKeyConfigured: Boolean(process.env.YOOKASSA_SECRET_KEY?.trim()),
+      shopIdConfigured: Boolean(process.env.YOOKASSA_SHOP_ID?.trim()),
+      webhookBaseUrlConfigured: Boolean(process.env.PUBLIC_WEBHOOK_BASE_URL?.trim())
+    };
+    return createEnvelope({
+      service: BILLING_SERVICE,
+      operation: "fetchPaymentProviderReadiness",
+      traceId: billingTraceId(BILLING_SERVICE, "fetchPaymentProviderReadiness"),
+      meta: apiMeta(),
+      data: {
+        canEnable: Object.values(checks).every(Boolean) && launchEnabled,
+        checks,
+        launchFlag: { key: "ff-yookassa-payments", status: launchEnabled ? "on" : "off" },
+        mode,
+        provider: "yookassa",
+        safeByDefault: mode === "disabled",
+        webhookPath: "/public/billing/yookassa/webhook"
+      }
+    });
+  }
+
+  async fetchTenantBillingOverview(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const [subscription, quotas, invoices, tariffs] = await Promise.all([
+      this.fetchTenantSubscription(tenantId),
+      this.fetchTenantQuotaSnapshot(tenantId),
+      this.fetchTenantInvoices(tenantId),
+      this.fetchTariffs()
+    ]);
+    if (subscription.status !== "ok") return subscription;
+    if (quotas.status !== "ok") return quotas;
+    if (invoices.status !== "ok") return invoices;
+
+    return createEnvelope({
+      service: BILLING_SERVICE,
+      operation: "fetchTenantBillingOverview",
+      traceId: billingTraceId(BILLING_SERVICE, "fetchTenantBillingOverview"),
+      meta: apiMeta({ tenantId }),
+      data: {
+        invoices: invoices.data,
+        quotas: quotas.data?.quotas ?? [],
+        recurringTermsVersion: process.env.BILLING_RECURRING_TERMS_VERSION?.trim() || "v1",
+        subscription: subscription.data,
+        tariffs: tariffs.status === "ok" ? tariffs.data?.items ?? [] : []
+      }
+    });
+  }
+
+  async startTenantCheckout(tenantId: string, payload: TenantCheckoutPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenant = await this.findTenant(tenantId);
+    const request = payload ?? {};
+    const nextTariff = await this.findTariff(request.nextPlanId);
+    const idempotencyKey = String(request.idempotencyKey ?? "").trim();
+    if (!tenant) return notFoundEnvelope(BILLING_SERVICE, "startTenantCheckout", "tenant_not_found", "Tenant was not found.", { tenantId });
+    if (!nextTariff) return notFoundEnvelope(BILLING_SERVICE, "startTenantCheckout", "tariff_not_found", "Tariff was not found.", { tenantId: tenant.id });
+    if (nextTariff.billingAvailability !== "paid" || nextTariff.priceMonthly <= 0) return invalidEnvelope(BILLING_SERVICE, "startTenantCheckout", "paid_tariff_required", "Checkout is available only for a paid tariff.", { nextPlanId: nextTariff.id, tenantId: tenant.id });
+    if (!await this.isYooKassaLaunchEnabled()) return invalidEnvelope(BILLING_SERVICE, "startTenantCheckout", "payment_launch_disabled", "Online payments have not been enabled by service administration.", { tenantId: tenant.id });
+    const termsVersion = String(request.termsVersion ?? "").trim();
+    const expectedTermsVersion = process.env.BILLING_RECURRING_TERMS_VERSION?.trim() || "v1";
+    if (request.recurringConsent !== true || termsVersion !== expectedTermsVersion) return invalidEnvelope(BILLING_SERVICE, "startTenantCheckout", "recurring_consent_required", "Explicit consent to the current recurring-payment terms is required.", { nextPlanId: nextTariff.id, tenantId: tenant.id, termsVersion: expectedTermsVersion });
+    if (nextTariff.id === tenant.planId) return conflictEnvelope(BILLING_SERVICE, "startTenantCheckout", "tariff_noop", "Tenant is already on the requested tariff.", { nextPlanId: nextTariff.id, tenantId: tenant.id });
+    if (!isCheckoutIdempotencyKey(idempotencyKey)) return invalidEnvelope(BILLING_SERVICE, "startTenantCheckout", "idempotency_key_required", "Checkout requires an idempotency key between 8 and 128 characters.", { tenantId: tenant.id });
+    try {
+      const checkout = await this.yooKassaProvider.createCheckout({ amountKopeks: nextTariff.priceMonthly, description: `Support Communication: ${nextTariff.name}`, idempotencyKey, metadata: { planId: nextTariff.id, recurringConsent: "true", termsVersion, tenantId: tenant.id } });
+      return createEnvelope({ service: BILLING_SERVICE, operation: "startTenantCheckout", traceId: billingTraceId(BILLING_SERVICE, "startTenantCheckout"), meta: apiMeta({ tenantId: tenant.id }), data: { nextPlanId: nextTariff.id, paymentId: checkout.paymentId, redirectUrl: checkout.redirectUrl, tenantId: tenant.id } });
+    } catch (error) {
+      const unavailable = error instanceof YooKassaCheckoutUnavailableError;
+      return invalidEnvelope(BILLING_SERVICE, "startTenantCheckout", unavailable ? "checkout_not_configured" : "checkout_creation_failed", unavailable ? "Online checkout is not configured yet." : "Unable to start online checkout.", { tenantId: tenant.id });
+    }
+  }
+
+  async handleYooKassaWebhook(paymentId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const requestedPaymentId = String(paymentId ?? "").trim();
+    if (!requestedPaymentId) return invalidEnvelope(BILLING_SERVICE, "handleYooKassaWebhook", "payment_id_required", "Webhook payment id is required.", {});
+    try {
+      const payment = await this.yooKassaProvider.fetchPayment(requestedPaymentId);
+      const tenantId = String(payment.metadata.tenantId ?? "").trim();
+      const planId = String(payment.metadata.planId ?? "").trim();
+      const expectedTermsVersion = process.env.BILLING_RECURRING_TERMS_VERSION?.trim() || "v1";
+      const tenant = await this.findTenant(tenantId);
+      const tariff = await this.findTariff(planId);
+      if (!tenant || !tariff || tariff.billingAvailability !== "paid" || payment.currency !== "RUB" || payment.amountKopeks !== tariff.priceMonthly || payment.metadata.recurringConsent !== "true" || payment.metadata.termsVersion !== expectedTermsVersion) {
+        return invalidEnvelope(BILLING_SERVICE, "handleYooKassaWebhook", "payment_metadata_invalid", "Provider payment does not match a billable tenant and tariff.", { paymentId: payment.paymentId });
+      }
+      const now = new Date(payment.createdAt);
+      const invoice: Partial<BillingInvoiceState> = {
+        amountDue: payment.amountKopeks,
+        amountPaid: payment.status === "succeeded" ? payment.amountKopeks : 0,
+        currency: "RUB",
+        paidAt: payment.status === "succeeded" ? now.toISOString() : null,
+        paymentStatus: payment.status === "succeeded" ? "succeeded" : payment.status === "canceled" ? "failed" : "pending",
+        providerInvoiceId: payment.paymentId,
+        status: payment.status === "succeeded" ? "paid" : "open"
+      };
+      if (payment.status !== "succeeded") {
+        return this.syncProviderBillingState({ eventType: `payment.${payment.status}`, idempotencyKey: `yookassa:${payment.paymentId}:${payment.status}`, invoice, provider: "yookassa", tenantId });
+      }
+      if (!payment.paymentMethodSaved || !payment.paymentMethodId) {
+        return invalidEnvelope(BILLING_SERVICE, "handleYooKassaWebhook", "saved_payment_method_required", "The first successful payment must include a saved payment method.", { paymentId: payment.paymentId, tenantId });
+      }
+      const periodEnd = new Date(now);
+      periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+      return this.syncProviderBillingState({
+        eventType: "payment.succeeded",
+        idempotencyKey: `yookassa:${payment.paymentId}:succeeded`,
+        invoice,
+        provider: "yookassa",
+        subscription: { currentPeriodEnd: periodEnd.toISOString(), currentPeriodStart: now.toISOString(), planId: tariff.id, providerCustomerId: payment.paymentMethodId, providerSubscriptionId: `yookassa:${tenant.id}`, seats: tariff.includedUsers, status: "active", unitAmountMonthly: tariff.priceMonthly },
+        tenantId
+      });
+    } catch (error) {
+      const unavailable = error instanceof YooKassaCheckoutUnavailableError;
+      return invalidEnvelope(BILLING_SERVICE, "handleYooKassaWebhook", unavailable ? "checkout_not_configured" : "payment_lookup_failed", unavailable ? "Online checkout is not configured yet." : "Unable to verify provider payment.", { paymentId: requestedPaymentId });
+    }
+  }
+
+  async cancelTenantSubscription(tenantId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenant = await this.findTenant(tenantId);
+    const subscription = await this.billingRepository.findTenantSubscription(tenantId);
+    if (!tenant) return notFoundEnvelope(BILLING_SERVICE, "cancelTenantSubscription", "tenant_not_found", "Tenant was not found.", { tenantId });
+    if (!subscription || subscription.provider !== "yookassa") return invalidEnvelope(BILLING_SERVICE, "cancelTenantSubscription", "subscription_not_cancelable", "No active YooKassa subscription was found.", { tenantId: tenant.id });
+    if (subscription.cancelAtPeriodEnd) {
+      return createEnvelope({ service: BILLING_SERVICE, operation: "cancelTenantSubscription", traceId: billingTraceId(BILLING_SERVICE, "cancelTenantSubscription"), meta: apiMeta({ tenantId: tenant.id }), data: { cancelAtPeriodEnd: true, subscription: sanitizeSubscription(subscription), tenantId: tenant.id } });
+    }
+    return this.syncProviderBillingState({
+      eventType: "subscription.cancel_at_period_end",
+      idempotencyKey: `yookassa:${subscription.providerSubscriptionId}:cancel-at-period-end`,
+      provider: "yookassa",
+      subscription: { ...subscription, cancelAtPeriodEnd: true },
+      tenantId: tenant.id
+    });
+  }
+
+  async renewDueYooKassaSubscriptions(now = new Date()): Promise<{ attempted: number; failed: number; paymentIds: string[] }> {
+    if (!await this.isYooKassaLaunchEnabled()) return { attempted: 0, failed: 0, paymentIds: [] };
+    const due = await this.billingRepository.listDueYooKassaSubscriptions(now.toISOString());
+    const paymentIds: string[] = [];
+    let failed = 0;
+    for (const subscription of due) {
+      const tariff = await this.findTariff(subscription.planId);
+      if (!tariff || tariff.billingAvailability !== "paid") {
+        failed += 1;
+        continue;
+      }
+      try {
+        const termsVersion = process.env.BILLING_RECURRING_TERMS_VERSION?.trim() || "v1";
+        const charge = await this.yooKassaProvider.chargeSavedMethod({
+          amountKopeks: tariff.priceMonthly,
+          description: `Support Communication renewal: ${tariff.name}`,
+          idempotencyKey: `yookassa:renewal:${subscription.id}:${subscription.currentPeriodEnd}`,
+          metadata: { planId: tariff.id, recurringConsent: "true", renewal: "true", tenantId: subscription.tenantId, termsVersion },
+          paymentMethodId: subscription.providerCustomerId
+        });
+        paymentIds.push(charge.paymentId);
+        await this.syncProviderBillingState({
+          eventType: "invoice.created",
+          idempotencyKey: `yookassa:${charge.paymentId}:created`,
+          invoice: { amountDue: tariff.priceMonthly, amountPaid: 0, currency: "RUB", paymentStatus: "pending", providerInvoiceId: charge.paymentId, status: "open", subscriptionId: subscription.id },
+          provider: "yookassa",
+          tenantId: subscription.tenantId
+        });
+      } catch {
+        failed += 1;
+      }
+    }
+    return { attempted: due.length, failed, paymentIds };
+  }
+
+  private async isYooKassaLaunchEnabled(): Promise<boolean> {
+    const launchFlag = (await this.platformRepository.listFeatureFlagsAsync()).find((flag) => flag.key === "ff-yookassa-payments");
+    return launchFlag?.status === "on";
   }
 
   async syncProviderBillingState(payload: ProviderSyncPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -1939,6 +2130,10 @@ function paymentSummary(invoices: BillingInvoiceState[]): Record<string, unknown
     openAmount: aggregate?.openAmount ?? (invoices.length === 0 ? 0 : null),
     paidAmount: aggregate?.paidAmount ?? (invoices.length === 0 ? 0 : null)
   };
+}
+
+function isCheckoutIdempotencyKey(value: string): boolean {
+  return value.length >= 8 && value.length <= 128;
 }
 
 function sanitizeSubscription(subscription: BillingSubscriptionState): Record<string, unknown> {

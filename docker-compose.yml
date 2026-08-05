@@ -423,6 +423,28 @@ services:
     volumes:
       - api-gateway-runtime:/app/backend/.runtime
 
+  yookassa-renewal-worker:
+    restart: always
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/billing/yookassa-renewal.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      SERVICE_NAME: yookassa-renewal-worker
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
+      BILLING_CHECKOUT_PROVIDER_MODE: ${BILLING_CHECKOUT_PROVIDER_MODE:-disabled}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL:-}
+      YOOKASSA_RENEWAL_WORKER_INTERVAL_MS: ${YOOKASSA_RENEWAL_WORKER_INTERVAL_MS:-3600000}
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
   sla-timer-worker:
     build:
       context: .

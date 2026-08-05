@@ -71,6 +71,22 @@
   font-size: 12px;
 }
 
+.billing-panel { display: grid; gap: 16px; max-width: 920px; }
+.billing-operator-limit { align-items: center; background: #f7faff; border: 1px solid #dbe7f5; border-radius: 10px; display: flex; gap: 18px; justify-content: space-between; padding: 14px; }
+.billing-operator-limit p { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+.billing-operator-limit__controls { align-items: center; display: flex; gap: 8px; }
+.billing-operator-limit__controls input { max-width: 76px; }
+@media (max-width: 620px) { .billing-operator-limit { align-items: stretch; flex-direction: column; } .billing-operator-limit__controls input { flex: 1; max-width: none; } }
+.billing-consent { align-items: flex-start; color: var(--muted); display: flex; font-size: 13px; gap: 8px; line-height: 1.4; }
+.billing-consent input { margin-top: 2px; }
+.billing-panel header { display: flex; gap: 10px; align-items: flex-start; }
+.billing-panel h2, .billing-panel h3 { margin: 0; color: var(--text); }
+.billing-panel header p { margin: 3px 0 0; color: var(--muted); }
+.billing-current { display: grid; gap: 4px; padding: 18px; border: 1px solid #c3dcf9; border-radius: 12px; background: #f6faff; }
+.billing-current strong { font-size: 20px; }.billing-current span { color: var(--blue-dark); font-weight: 750; }.billing-current small { color: var(--muted); }
+.billing-quotas { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }.billing-quotas > div { display: grid; gap: 5px; padding: 10px; border: 1px solid #e0e8f2; border-radius: 9px; }.billing-quotas span { color: var(--muted); font-size: 12px; }.billing-quotas i { height: 5px; overflow: hidden; border-radius: 999px; background: #e6eef8; }.billing-quotas b { display:block; height:100%; background: var(--blue); }
+.billing-plans { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; }.billing-plans article { display:grid; gap:7px; padding:13px; border:1px solid #e0e8f2; border-radius:10px; }.billing-plans article.current { border-color: var(--blue); background:#f6faff; }.billing-plans small { color:var(--muted); }.billing-plans em { color:var(--blue-dark); font-size:12px; font-style:normal; font-weight:700; }.billing-plans button { width:max-content; border:0; background:none; color:var(--blue); padding:0; font:inherit; font-size:12px; font-weight:700; }
+
 /* --- Каркас: навигация + контент ---------------------------------------- */
 
 .settings-shell {

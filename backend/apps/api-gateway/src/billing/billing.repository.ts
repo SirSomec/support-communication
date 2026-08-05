@@ -439,6 +439,7 @@ export interface BillingRepositoryPort {
   listQuotaLedgerEntries(tenantId?: string): MaybePromise<BillingQuotaLedgerEntry[]>;
   listQuotaReservations(input?: BillingQuotaReservationListInput): MaybePromise<BillingQuotaReservation[]>;
   listTariffs(): MaybePromise<BillingTariff[]>;
+  listDueYooKassaSubscriptions(now: string): MaybePromise<BillingSubscriptionState[]>;
   listTenantInvoices(tenantId: string | undefined): MaybePromise<BillingInvoiceState[]>;
   removeProvisionedTenant(tenantId: string): MaybePromise<void>;
   savePaymentRetrySchedule(schedule: BillingPaymentRetrySchedule): MaybePromise<BillingPaymentRetrySchedule>;
@@ -568,6 +569,10 @@ export class BillingRepository implements BillingRepositoryPort {
 
   listTenantInvoices(tenantId: string | undefined): MaybePromise<BillingInvoiceState[]> {
     return this.adapter.listTenantInvoices(tenantId);
+  }
+
+  listDueYooKassaSubscriptions(now: string): MaybePromise<BillingSubscriptionState[]> {
+    return this.adapter.listDueYooKassaSubscriptions(now);
   }
 
   listBillingSyncJobs(): MaybePromise<BillingSyncJob[]> {
@@ -898,6 +903,7 @@ interface PrismaBillingDelegates {
   };
   billingSubscription: {
     findFirst(input: { orderBy: { updatedAt: "desc" }; where: { tenantId: string } }): Promise<PrismaBillingSubscriptionRow | null>;
+    findMany(input: { orderBy: { currentPeriodEnd: "asc" }; where: { cancelAtPeriodEnd: false; currentPeriodEnd: { lte: Date }; provider: string; status: string } }): Promise<PrismaBillingSubscriptionRow[]>;
     upsert(input: {
       create: PrismaBillingSubscriptionUpsertInput;
       update: PrismaBillingSubscriptionUpsertInput;
@@ -1537,6 +1543,14 @@ class PrismaBillingRepository implements BillingRepositoryPort {
       where: { tenantId }
     });
     return clone(rows.map(toBillingInvoice));
+  }
+
+  async listDueYooKassaSubscriptions(now: string): Promise<BillingSubscriptionState[]> {
+    const rows = await this.client.billingSubscription.findMany({
+      orderBy: { currentPeriodEnd: "asc" },
+      where: { cancelAtPeriodEnd: false, currentPeriodEnd: { lte: new Date(now) }, provider: "yookassa", status: "active" }
+    });
+    return clone(rows.map(toBillingSubscription));
   }
 
   async listBillingSyncJobs(): Promise<BillingSyncJob[]> {
@@ -2445,6 +2459,12 @@ function createDurableBillingRepository(store: DurableStore<BillingState>): Bill
       return clone((store.read().invoices ?? [])
         .filter((invoice) => invoice.tenantId === tenantId)
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+    },
+
+    listDueYooKassaSubscriptions(now: string): BillingSubscriptionState[] {
+      return clone((store.read().subscriptions ?? [])
+        .filter((subscription) => subscription.provider === "yookassa" && subscription.status === "active" && !subscription.cancelAtPeriodEnd && subscription.currentPeriodEnd <= now)
+        .sort((left, right) => left.currentPeriodEnd.localeCompare(right.currentPeriodEnd)));
     },
 
     listBillingSyncJobs(): BillingSyncJob[] {

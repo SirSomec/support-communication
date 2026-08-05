@@ -1,8 +1,10 @@
 export interface BillingTariff {
+  billingAvailability: "free" | "paid";
   id: string;
   name: string;
   priceMonthly: number;
   includedUsers: number;
+  ownerOnly: boolean;
   workspaceLimit: number;
   webhookLimit: number;
   storageGb: number;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { CreditCard, Gauge } from "lucide-react";
+import { CreditCard, Gauge, WalletCards } from "lucide-react";
 import { tenantBillingService } from "../../services/tenantBillingService.js";
 
 export function BillingPanel({ onToast }) {
@@ -45,8 +45,11 @@ export function BillingPanel({ onToast }) {
   };
 
   return <section className="billing-panel">
-    <header><CreditCard size={20} /><div><h2>Тариф и лимиты</h2><p>Текущий доступ и использование ресурсов организации. Изменение тарифа выполняет администратор платформы.</p></div></header>
-    <div className="billing-current"><strong>{current?.name ?? "Тариф не определён"}</strong><span>{current?.billingAvailability === "free" ? "Бесплатно" : `${formatMoney(current?.priceMonthly)} за оператора в месяц`}</span><small>{current?.ownerOnly ? "Один оператор-владелец" : `Текущая стоимость: ${formatMoney(monthlyCost)} в месяц · максимум ${current?.includedUsers ?? 0} операторов`}</small><small>Баланс: {formatMoney(balance)}</small></div>
+    <header><CreditCard size={20} /><div><h2>Тариф и оплата</h2><p>Текущий доступ и использование ресурсов организации. Изменение тарифа выполняет администратор платформы.</p></div></header>
+    <div className="billing-overview">
+      <div className="billing-current"><strong>{current?.name ?? "Тариф не определён"}</strong><span>{current?.billingAvailability === "free" ? "Бесплатно" : `${formatMoney(current?.priceMonthly)} за оператора в месяц`}</span><small>{current?.ownerOnly ? "Один оператор-владелец" : `Текущая стоимость: ${formatMoney(monthlyCost)} в месяц · максимум ${current?.includedUsers ?? 0} операторов`}</small></div>
+      <div aria-label="Текущий баланс" className="billing-balance"><WalletCards size={20} /><span>Текущий баланс</span><strong>{formatMoney(balance)}</strong><small>Пополняется администратором платформы</small></div>
+    </div>
     {balanceOperations.length ? <section className="billing-balance-history"><h3>Операции баланса</h3><div className="billing-quotas">{balanceOperations.map((invoice) => <div key={invoice.id}><span>Ручное пополнение</span><strong>+{formatMoney(invoice.amountPaid)}</strong><small>{formatDate(invoice.createdAt)}</small></div>)}</div></section> : null}
     {operatorSettings ? <section className="billing-operator-limit"><div><strong>Лимит операторов</strong><p>{operatorSettings.locked ? "На Free доступен только владелец организации." : `Выберите от ${operatorSettings.usedSeats} до ${operatorSettings.includedUsers} операторов. Это ограничит новые приглашения.`}</p></div><div className="billing-operator-limit__controls"><input aria-label="Лимит операторов" disabled={operatorSettings.locked || savingOperatorLimit} min={Math.max(1, operatorSettings.usedSeats)} max={operatorSettings.includedUsers} onChange={(event) => setOperatorLimit(event.target.value)} type="number" value={operatorLimit} /><button disabled={operatorSettings.locked || savingOperatorLimit || Number(operatorLimit) === operatorSettings.operatorLimit} onClick={saveOperatorLimit} type="button">{savingOperatorLimit ? "Сохранение…" : "Сохранить"}</button></div></section> : null}
     <h3><Gauge size={17} /> Лимиты</h3><div className="billing-quotas">{quotas.map((quota) => <div key={quota.resource}><span>{quota.resource}</span><strong>{quota.used} / {quota.limit}</strong><i><b style={{ width: `${quota.limit ? Math.min(100, quota.used / quota.limit * 100) : 100}%` }} /></i></div>)}</div>

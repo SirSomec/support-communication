@@ -84,6 +84,10 @@
 .billing-panel header p { margin: 3px 0 0; color: var(--muted); }
 .billing-current { display: grid; gap: 4px; padding: 18px; border: 1px solid #c3dcf9; border-radius: 12px; background: #f6faff; }
 .billing-current strong { font-size: 20px; }.billing-current span { color: var(--blue-dark); font-weight: 750; }.billing-current small { color: var(--muted); }
+.billing-overview { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(220px, .48fr); }
+.billing-balance { align-content: start; background: #f4fbf8; border: 1px solid #bee5d2; border-radius: 12px; color: #176345; display: grid; gap: 5px; padding: 18px; }
+.billing-balance span, .billing-balance small { color: #4b7863; }.billing-balance strong { color: #176345; font-size: 24px; }.billing-balance small { font-size: 12px; }
+@media (max-width: 620px) { .billing-overview { grid-template-columns: 1fr; } }
 .billing-quotas { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }.billing-quotas > div { display: grid; gap: 5px; padding: 10px; border: 1px solid #e0e8f2; border-radius: 9px; }.billing-quotas span { color: var(--muted); font-size: 12px; }.billing-quotas i { height: 5px; overflow: hidden; border-radius: 999px; background: #e6eef8; }.billing-quotas b { display:block; height:100%; background: var(--blue); }
 .billing-plans { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; }.billing-plans article { display:grid; gap:7px; padding:13px; border:1px solid #e0e8f2; border-radius:10px; }.billing-plans article.current { border-color: var(--blue); background:#f6faff; }.billing-plans small { color:var(--muted); }.billing-plans em { color:var(--blue-dark); font-size:12px; font-style:normal; font-weight:700; }.billing-plans button { width:max-content; border:0; background:none; color:var(--blue); padding:0; font:inherit; font-size:12px; font-weight:700; }
 

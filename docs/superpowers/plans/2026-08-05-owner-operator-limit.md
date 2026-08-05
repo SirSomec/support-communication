@@ -10,6 +10,8 @@
 - [x] Let the organization owner manage only the operator limit within the tariff already assigned by service administration.
 - [x] Validate the tariff seat ceiling, active employee count, and the Free owner-only constraint on the server.
 - [x] Enforce the selected operator limit in the employee invitation path.
+- [x] Remove public trial language and make landing, pricing, and onboarding start with Free only.
+- [x] Force the public provisioning endpoint to Free, so a crafted client payload cannot self-assign a paid tariff.
 
 ## Important milestones
 

@@ -36,7 +36,6 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
   });
   const [plan, setPlan] = useState({
     id: "Free",
-    trial: false,
     billingCycle: "monthly"
   });
   const [admin, setAdmin] = useState({
@@ -70,7 +69,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
   const activeIndex = steps.findIndex((step) => step.id === activeStep);
   const allComplete = completedCount === steps.length;
   const incompleteSteps = steps.filter((step) => !completion[step.id]);
-  const selectedPlan = planOptions.find((option) => option.id === plan.id) ?? planOptions[1];
+  const selectedPlan = planOptions[0];
 
   function moveStep(direction) {
     const nextIndex = Math.min(Math.max(activeIndex + direction, 0), steps.length - 1);
@@ -190,7 +189,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
         </button>
         <div>
           <h1>Onboarding организации</h1>
-          <p>Организация, trial, первый администратор, лимиты и сотрудники перед входом в app namespace.</p>
+          <p>Организация Free, первый администратор и базовые лимиты перед входом в приложение.</p>
         </div>
         <button className="onboarding-finish" disabled={isProvisioning} onClick={handleFinish} type="button">
           {isProvisioning ? "Создание..." : "Завершить"}
@@ -274,7 +273,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
           <h2>Сводка</h2>
           <SummaryRow label="Организация" value={tenant.name || "не задана"} />
           <SummaryRow label="Slug" value={tenant.slug || "tenant-slug"} />
-          <SummaryRow label="Тариф" value={`${selectedPlan.id}${plan.trial ? " · trial" : ""}`} />
+          <SummaryRow label="Тариф" value={selectedPlan.id} />
           <SummaryRow label="Администратор" value={admin.email || "не задан"} />
           <SummaryRow label="Лимиты" value={`${limits.operatorLimit} операторов · ${limits.concurrentDialogs} диалогов`} />
           <SummaryRow label="Сотрудники" value={`${employees.length} приглашений`} />

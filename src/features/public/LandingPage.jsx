@@ -135,8 +135,8 @@ const faqItems = [
     answer: "Web SDK, Telegram, ВКонтакте, MAX и REST API уже работают в продакшене. WhatsApp, Email и Viber — на подключении."
   },
   {
-    question: "Как устроен trial?",
-    answer: "Trial стартует с полноценной организацией: первый администратор, лимиты операторов и тестовое сообщение. Карта не нужна."
+    question: "Что входит в Free?",
+    answer: "Free создаёт рабочую организацию с одним оператором-владельцем. Карта не нужна; тариф меняет администратор платформы, когда команде потребуются дополнительные места."
   },
   {
     question: "Как защищены данные?",
@@ -201,7 +201,7 @@ export function LandingPage({
   demoRequestEnabled = false,
   onNavigateAuth = noop,
   onRequestDemo = noop,
-  onStartTrial = noop
+  onStartFree = noop
 }) {
   const [requestDialog, setRequestDialog] = React.useState(null);
   const [requestForm, setRequestForm] = React.useState(defaultRequestForm());
@@ -278,8 +278,8 @@ export function LandingPage({
         </nav>
         <div className="public-nav-actions">
           <button className="public-btn ghost" onClick={onNavigateAuth} type="button">Войти</button>
-          <button className="public-btn primary" onClick={() => onStartTrial({ plan: "business", source: "landing-nav" })} type="button">
-            Запустить trial
+          <button className="public-btn primary" onClick={() => onStartFree({ plan: "free", source: "landing-nav" })} type="button">
+            Начать бесплатно
             <ArrowRight size={15} />
           </button>
         </div>
@@ -294,8 +294,8 @@ export function LandingPage({
             а рабочее место смены, готовое к продакшену.
           </p>
           <div className="public-hero-actions">
-            <button className="public-btn primary large" onClick={() => onStartTrial({ plan: "business", source: "landing-hero" })} type="button">
-              Запустить trial бесплатно
+            <button className="public-btn primary large" onClick={() => onStartFree({ plan: "free", source: "landing-hero" })} type="button">
+              Начать бесплатно
               <ArrowRight size={17} />
             </button>
             <button
@@ -458,11 +458,11 @@ export function LandingPage({
       <section className="public-section public-tariffs" id="tariffs" aria-labelledby="tariffs-title">
         <div className="public-section-heading">
           <h2 id="tariffs-title">Тарифы без скрытых контуров</h2>
-          <p>Trial начинается с рабочей организации: первый администратор, лимиты и тестовое сообщение уже внутри.</p>
+          <p>Free создаёт рабочую организацию с одним оператором-владельцем. Расширение тарифа выполняется через администратора платформы.</p>
         </div>
         <div className="public-tariff-grid">
           {tariffs.map((tariff) => {
-            const isFeatured = tariff.id === "business";
+            const isFeatured = tariff.id === "free";
             const isEnterprise = tariff.id === "enterprise";
             return (
               <article
@@ -492,10 +492,10 @@ export function LandingPage({
                 ) : (
                   <button
                     className={`public-btn ${isFeatured ? "primary" : "secondary"}`}
-                    onClick={() => onStartTrial({ plan: tariff.id, source: "landing-tariff" })}
+                    onClick={() => onStartFree({ plan: "free", source: "landing-tariff" })}
                     type="button"
                   >
-                    {isFeatured ? "Запустить trial" : "Выбрать тариф"}
+                    {isFeatured ? "Начать бесплатно" : "Начать с Free"}
                   </button>
                 )}
               </article>
@@ -526,8 +526,8 @@ export function LandingPage({
             <strong id="cta-title">Запустите поддержку уже сегодня</strong>
             <span>Рабочая организация, SDK и Telegram — за один день. Без карты.</span>
           </div>
-          <button className="public-btn primary large" onClick={() => onStartTrial({ plan: "business", source: "landing-cta" })} type="button">
-            Запустить trial
+          <button className="public-btn primary large" onClick={() => onStartFree({ plan: "free", source: "landing-cta" })} type="button">
+            Начать бесплатно
             <ArrowRight size={17} />
           </button>
         </div>

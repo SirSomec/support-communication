@@ -54,9 +54,9 @@ describe("tenant provision contracts", () => {
     assert.equal(persistedTenant?.id, "tenant-acme-pilot");
     assert.deepEqual(persistedTenant?.onboarding, {
       adminRole: "Owner",
-      billingCycle: "annual",
+      billingCycle: "monthly",
       industry: "retail",
-      limits: { afterHoursBot: true, aiAssist: false, concurrentDialogs: 7, dailyMessages: 1200, operatorLimit: 4 },
+      limits: { afterHoursBot: false, aiAssist: false, concurrentDialogs: 7, dailyMessages: 1200, operatorLimit: 1 },
       mfaRequired: true
     });
     const [owner] = await IdentityRepository.default().findTenantUsers("tenant-acme-pilot");

@@ -52,12 +52,12 @@ describe("tenant provision service", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("maps onboarding form state to the tenant provision API body", () => {
+  it("always maps public onboarding to the Free plan", () => {
     const payload = mapOnboardingFormToProvisionPayload(onboardingForm);
 
     assert.equal(payload.tenant.name, "Acme Pilot");
     assert.equal(payload.admin.email, "owner@acme-pilot.test");
-    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "business", trial: true });
+    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "free" });
     assert.deepEqual(payload.limits, onboardingForm.limits);
     assert.deepEqual(payload.admin, {
       email: "owner@acme-pilot.test",
@@ -72,14 +72,14 @@ describe("tenant provision service", () => {
     assert.equal(payload.channel.domain, "support.acme-pilot.test");
   });
 
-  it("maps the Free onboarding plan without a trial", () => {
+  it("does not allow form state to override the Free onboarding plan", () => {
     const payload = mapOnboardingFormToProvisionPayload({
       ...onboardingForm,
       employees: [],
       plan: { billingCycle: "annual", id: "Free", trial: true }
     });
 
-    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "free", trial: false });
+    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "free" });
   });
 
   it("does not include the test message step in onboarding completion", () => {
@@ -105,7 +105,7 @@ describe("tenant provision service", () => {
 
     assert.deepEqual(labels, [
       "Организация",
-      "Тариф / trial",
+      "Тариф",
       "Первый администратор",
       "Лимиты",
       "Сотрудники"

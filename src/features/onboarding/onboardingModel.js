@@ -8,7 +8,7 @@ import {
 
 export const steps = [
   { id: "tenant", label: "Организация", icon: Building2 },
-  { id: "plan", label: "Тариф / trial", icon: CreditCard },
+  { id: "plan", label: "Тариф", icon: CreditCard },
   { id: "admin", label: "Первый администратор", icon: UserPlus },
   { id: "limits", label: "Лимиты", icon: Gauge },
   { id: "employees", label: "Сотрудники", icon: Users }
@@ -20,24 +20,6 @@ export const planOptions = [
     price: "0 ₽",
     description: "Один оператор-владелец, чат для сайта и базовые инструменты поддержки.",
     limits: "1 оператор"
-  },
-  {
-    id: "Start",
-    price: "19 900 ₽",
-    description: "Первый канал, базовые шаблоны, очередь и отчеты.",
-    limits: "до 5 операторов"
-  },
-  {
-    id: "Growth",
-    price: "49 900 ₽",
-    description: "Все каналы, SDK, AI-подсказки, SLA и смены.",
-    limits: "до 25 операторов"
-  },
-  {
-    id: "Enterprise",
-    price: "по договору",
-    description: "SSO, расширенный аудит, выделенные лимиты и SLA.",
-    limits: "индивидуально"
   }
 ];
 

@@ -16,11 +16,14 @@ export class TenantProvisionController {
       admin?: { email?: string; name?: string; password?: string };
       channel?: { domain?: string; type?: string };
       employees?: Array<{ email?: string; name?: string; role?: string; team?: string }>;
-      plan?: { id?: string; trial?: boolean };
+      plan?: { billingCycle?: string; id?: string; trial?: boolean };
       tenant?: { name?: string; region?: string; slug?: string };
     },
     @Req() request: Partial<ServiceAdminRequest>
   ) {
-    return this.tenantProvisionService.provisionTenant(payload, request);
+    return this.tenantProvisionService.provisionTenant({
+      ...payload,
+      plan: { billingCycle: "monthly", id: "free", trial: false }
+    }, request);
   }
 }

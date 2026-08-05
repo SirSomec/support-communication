@@ -465,14 +465,14 @@ function App() {
               demoRequestEnabled
               onNavigateAuth={routeActions.openAuth}
               onRequestDemo={handlePublicDemoRequest}
-              onStartTrial={routeActions.openOnboarding}
+              onStartFree={routeActions.openOnboarding}
             />
           ) : (
             <LandingPage
               demoRequestEnabled
               onNavigateAuth={routeActions.openAuth}
               onRequestDemo={handlePublicDemoRequest}
-              onStartTrial={routeActions.openOnboarding}
+              onStartFree={routeActions.openOnboarding}
             />
           )}
         </Suspense>

@@ -103,46 +103,23 @@ export function OnboardingStepContent({
             <div className="onboarding-step">
               <StepHeading
                 icon={<CreditCard size={20} />}
-                title="Тариф и trial"
-                text="Выберите тариф, trial и billing cycle. Эти значения попадут в guards лимитов и доступности функций."
+                title="Бесплатный тариф"
+                text="На старте создаётся Free-организация с одним оператором-владельцем. Изменение тарифа выполняет администратор платформы."
               />
               <div className="onboarding-plan-grid">
                 {planOptions.map((option) => (
-                  <button
-                    className={plan.id === option.id ? "selected" : ""}
+                  <div
+                    className="selected"
                     key={option.id}
-                    onClick={() => {
-                      const free = isFreePlan(option.id);
-                      setPlan((current) => ({ ...current, billingCycle: free ? "monthly" : current.billingCycle, id: option.id, trial: free ? false : current.trial }));
-                      if (free) setLimits((current) => ({ ...current, afterHoursBot: false, aiAssist: false, operatorLimit: 1 }));
-                    }}
-                    type="button"
                   >
                     <strong>{option.id}</strong>
                     <b>{option.price}</b>
                     <span>{option.description}</span>
                     <small>{option.limits}</small>
-                  </button>
+                  </div>
                 ))}
               </div>
-              {!isFreePlan(plan.id) ? <div className="onboarding-toggle-grid">
-                <label>
-                  <input
-                    checked={plan.trial}
-                    onChange={(event) => setPlan((current) => ({ ...current, trial: event.target.checked }))}
-                    type="checkbox"
-                  />
-                  Включить trial на 14 дней
-                </label>
-                <label>
-                  <input
-                    checked={plan.billingCycle === "annual"}
-                    onChange={(event) => setPlan((current) => ({ ...current, billingCycle: event.target.checked ? "annual" : "monthly" }))}
-                    type="checkbox"
-                  />
-                  Годовая оплата
-                </label>
-              </div> : <p className="onboarding-preview-row">Free активируется сразу и включает одного оператора-владельца.</p>}
+              <p className="onboarding-preview-row">Free активируется сразу и включает одного оператора-владельца.</p>
             </div>
           ) : null}
 

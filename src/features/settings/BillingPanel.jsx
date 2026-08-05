@@ -153,10 +153,10 @@ export function BillingPanel({ onToast }) {
         const usagePercent = quota.limit ? Math.min(100, quota.used / quota.limit * 100) : 0;
         const remaining = Math.max(0, quota.available ?? quota.remaining ?? quota.limit - quota.used);
         return <article className={`billing-quota${quota.limit === 0 ? " is-unavailable" : ""}`} key={quota.resource}>
-          <div className="billing-quota__top"><strong>{details.label}</strong><span>{quota.limit === 0 ? "Не включено" : `${formatQuotaValue(quota.used, quota.resource)} из ${formatQuotaValue(quota.limit, quota.resource)}`}</span></div>
+          <div className="billing-quota__top"><strong>{details.label}</strong><span>{`${formatQuotaValue(quota.used, quota.resource)} из ${formatQuotaValue(quota.limit, quota.resource)}`}</span></div>
           <p>{details.description}</p>
           <i aria-hidden="true"><b style={{ width: `${usagePercent}%` }} /></i>
-          <small>{quota.limit === 0 ? "Подключите подходящий тариф, чтобы использовать этот ресурс." : `Осталось: ${formatQuotaValue(remaining, quota.resource)}`}</small>
+          <small>{quota.limit === 0 ? "Лимит на текущем тарифе: 0" : `Осталось: ${formatQuotaValue(remaining, quota.resource)}`}</small>
         </article>;
       })}</div>
     </section>

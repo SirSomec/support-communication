@@ -12,9 +12,14 @@
 - [x] Enforce the selected operator limit in the employee invitation path.
 - [x] Remove public trial language and make landing, pricing, and onboarding start with Free only.
 - [x] Force the public provisioning endpoint to Free, so a crafted client payload cannot self-assign a paid tariff.
+- [x] Show paid tariff prices per operator and calculate the monthly amount from the selected operator limit.
+- [x] Add server-calculated tenant balance and service-admin manual balance top-ups with an idempotency key and recorded billing event.
+- [x] Synchronize an owner-selected operator limit with billing subscription seats and calculate billing revenue per seat.
+- [x] Treat the service-admin entitlement as the current tariff while provider reconciliation is pending.
 
 ## Important milestones
 
 - The service-admin billing workspace is the sole tariff-management surface; it already records service-admin audit events.
 - The tenant settings panel is informational for the tariff and actionable only for its allowed operator limit.
 - Free remains immutable at one operator-owner.
+- The billing subscription now receives the selected number of paid-plan seats, while `unitAmountMonthly` remains the per-operator price.

@@ -27,6 +27,9 @@ export function BillingPanel({ onToast }) {
   if (state.error) return <div className="settings-empty" role="alert">{state.error}</div>;
   const current = state.data?.subscription?.tariff;
   const quotas = state.data?.quotas ?? [];
+  const balance = state.data?.balance?.amountKopeks ?? 0;
+  const monthlyCost = current?.billingAvailability === "free" ? 0 : Number(current?.priceMonthly ?? 0) * Number(operatorSettings?.operatorLimit ?? 1);
+  const balanceOperations = (state.data?.invoices?.items ?? []).filter((invoice) => invoice.provider === "manual-balance" && invoice.paymentStatus === "succeeded").slice(0, 5);
 
   const saveOperatorLimit = async () => {
     setSavingOperatorLimit(true);
@@ -43,7 +46,8 @@ export function BillingPanel({ onToast }) {
 
   return <section className="billing-panel">
     <header><CreditCard size={20} /><div><h2>Тариф и лимиты</h2><p>Текущий доступ и использование ресурсов организации. Изменение тарифа выполняет администратор платформы.</p></div></header>
-    <div className="billing-current"><strong>{current?.name ?? "Тариф не определён"}</strong><span>{current?.billingAvailability === "free" ? "Бесплатно" : `${formatMoney(current?.priceMonthly)} в месяц`}</span><small>{current?.ownerOnly ? "Один оператор-владелец" : `Включено мест: ${current?.includedUsers ?? 0}`}</small></div>
+    <div className="billing-current"><strong>{current?.name ?? "Тариф не определён"}</strong><span>{current?.billingAvailability === "free" ? "Бесплатно" : `${formatMoney(current?.priceMonthly)} за оператора в месяц`}</span><small>{current?.ownerOnly ? "Один оператор-владелец" : `Текущая стоимость: ${formatMoney(monthlyCost)} в месяц · максимум ${current?.includedUsers ?? 0} операторов`}</small><small>Баланс: {formatMoney(balance)}</small></div>
+    {balanceOperations.length ? <section className="billing-balance-history"><h3>Операции баланса</h3><div className="billing-quotas">{balanceOperations.map((invoice) => <div key={invoice.id}><span>Ручное пополнение</span><strong>+{formatMoney(invoice.amountPaid)}</strong><small>{formatDate(invoice.createdAt)}</small></div>)}</div></section> : null}
     {operatorSettings ? <section className="billing-operator-limit"><div><strong>Лимит операторов</strong><p>{operatorSettings.locked ? "На Free доступен только владелец организации." : `Выберите от ${operatorSettings.usedSeats} до ${operatorSettings.includedUsers} операторов. Это ограничит новые приглашения.`}</p></div><div className="billing-operator-limit__controls"><input aria-label="Лимит операторов" disabled={operatorSettings.locked || savingOperatorLimit} min={Math.max(1, operatorSettings.usedSeats)} max={operatorSettings.includedUsers} onChange={(event) => setOperatorLimit(event.target.value)} type="number" value={operatorLimit} /><button disabled={operatorSettings.locked || savingOperatorLimit || Number(operatorLimit) === operatorSettings.operatorLimit} onClick={saveOperatorLimit} type="button">{savingOperatorLimit ? "Сохранение…" : "Сохранить"}</button></div></section> : null}
     <h3><Gauge size={17} /> Лимиты</h3><div className="billing-quotas">{quotas.map((quota) => <div key={quota.resource}><span>{quota.resource}</span><strong>{quota.used} / {quota.limit}</strong><i><b style={{ width: `${quota.limit ? Math.min(100, quota.used / quota.limit * 100) : 100}%` }} /></i></div>)}</div>
   </section>;
@@ -51,4 +55,8 @@ export function BillingPanel({ onToast }) {
 
 function formatMoney(amount) {
   return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(Number(amount ?? 0) / 100);
+}
+
+function formatDate(value) {
+  return value ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "";
 }

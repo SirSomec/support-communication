@@ -111,6 +111,36 @@ describe("YooKassa checkout provider", () => {
     assert.equal(overview.data.recurringTermsVersion, "v1");
   });
 
+  it("records a manual balance top-up and exposes the balance in the tenant overview", async () => {
+    const billing = new BillingService(BillingRepository.inMemory(bootstrapBillingState()));
+    const topUp = await billing.topUpTenantBalance({ amountKopeks: 125000, idempotencyKey: "manual-credit-1", reason: "Bank transfer received", tenantId: "tenant-lumen" });
+    assert.equal(topUp.status, "ok");
+    assert.equal(topUp.data.balance?.amountKopeks, 125000);
+    const overview = await billing.fetchTenantBillingOverview("tenant-lumen");
+    assert.equal(overview.status, "ok");
+    assert.equal(overview.data.balance?.amountKopeks, 125000);
+    const replay = await billing.topUpTenantBalance({ amountKopeks: 125000, idempotencyKey: "manual-credit-1", reason: "Bank transfer received", tenantId: "tenant-lumen" });
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.data.balance?.amountKopeks, 125000);
+  });
+
+  it("shows the service-admin entitlement tariff while provider reconciliation is pending", async () => {
+    const billing = new BillingService(BillingRepository.inMemory(bootstrapBillingState()));
+    const changed = await billing.changeTenantTariff({
+      confirmationText: "CHANGE tenant-lumen TO enterprise",
+      confirmed: true,
+      nextPlanId: "enterprise",
+      reason: "Move the tenant to its assigned enterprise tariff.",
+      tenantId: "tenant-lumen"
+    });
+    assert.equal(changed.status, "ok");
+    const subscription = await billing.fetchTenantSubscription("tenant-lumen");
+    assert.equal(subscription.status, "ok");
+    assert.equal(subscription.data.entitlementPlanId, "enterprise");
+    assert.equal(subscription.data.providerPlanId, "starter");
+    assert.equal(subscription.data.tariff?.id, "enterprise");
+  });
+
   it("keeps checkout disabled until service administration enables the launch flag", async () => {
     const billing = new BillingService(BillingRepository.inMemory(bootstrapBillingState()), {
       isEnabled: () => true,

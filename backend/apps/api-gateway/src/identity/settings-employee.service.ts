@@ -5,6 +5,7 @@ import { makeAuditId } from "./backend-ids.js";
 import { apiMeta, identityTraceId } from "./identity-meta.js";
 import { IdentityRepository, type IdentityTenant, type IdentityTenantUser } from "./identity.repository.js";
 import { BillingRepository } from "../billing/billing.repository.js";
+import { BillingService } from "../billing/billing.service.js";
 import { TeamDirectoryRepository } from "./team-directory.repository.js";
 import { createMfaOtpRuntimeFromEnv, type MfaOtpRuntime } from "./mfa-otp.js";
 import {
@@ -70,6 +71,7 @@ export class SettingsEmployeeService {
   private readonly groups = new Map<string, EmployeeGroup>();
   private readonly hydratedGroupTenants = new Set<string>();
   private readonly auditEvents: Array<Record<string, unknown>> = [];
+  private readonly billingService: BillingService;
 
   constructor(
     private readonly identityRepository = IdentityRepository.default(),
@@ -77,7 +79,9 @@ export class SettingsEmployeeService {
     private readonly recoveryDelivery?: Pick<MfaOtpRuntime, "deliverRecovery">,
     private readonly inviteDelivery?: InviteMailDelivery,
     private readonly billingRepository = BillingRepository.default()
-  ) {}
+  ) {
+    this.billingService = new BillingService(this.billingRepository);
+  }
 
   listSettingsAuditEvents() {
     return this.auditEvents.map((event) => ({ ...event }));
@@ -205,12 +209,19 @@ export class SettingsEmployeeService {
         mfaRequired: tenant.onboarding?.mfaRequired ?? true
       }
     });
+    const billingSync = await this.billingService.syncTenantOperatorSeats({ seats: requestedLimit, tenantId });
+    if (billingSync.status !== "ok") {
+      return errorEnvelope("updateOperatorLimit", "billing_subscription_sync_failed", "The operator limit was saved, but billing subscription seats could not be synchronized. Retry the save to resume synchronization.", {
+        operatorLimit: requestedLimit,
+        tenantId
+      });
+    }
     return createEnvelope({
       service: SERVICE,
       operation: "updateOperatorLimit",
       traceId: identityTraceId(SERVICE, "updateOperatorLimit"),
       meta: apiMeta({ tenantId }),
-      data: buildOperatorLimitSettings(saved, tariff, usedSeats)
+      data: { ...buildOperatorLimitSettings(saved, tariff, usedSeats), subscription: billingSync.data.subscription }
     });
   }
 
@@ -1107,6 +1118,18 @@ function invalidEnvelope(operation: string, code: string, message: string, data:
     operation,
     traceId: identityTraceId(SERVICE, operation),
     status: "invalid",
+    meta: apiMeta(),
+    data,
+    error: { code, message }
+  });
+}
+
+function errorEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>) {
+  return createEnvelope({
+    service: SERVICE,
+    operation,
+    traceId: identityTraceId(SERVICE, operation),
+    status: "error",
     meta: apiMeta(),
     data,
     error: { code, message }

@@ -36,6 +36,8 @@ interface QuotaReservationTransitionBody {
   idempotencyKey?: string;
 }
 
+interface BalanceTopUpBody { amountKopeks?: number; idempotencyKey?: string; reason?: string; }
+
 interface ProviderSyncBody {
   approvalId?: string;
   eventType?: string;
@@ -109,6 +111,14 @@ export class BillingController {
   @ApiOkResponse({ description: "Tenant billing invoice envelope" })
   fetchTenantInvoices(@Param("tenantId") tenantId: string) {
     return this.billingService.fetchTenantInvoices(tenantId);
+  }
+
+  @Post("tenants/:tenantId/balance/top-ups")
+  @RequireServiceAdminAction("billing.change")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Manual tenant balance top-up envelope" })
+  topUpTenantBalance(@Param("tenantId") tenantId: string, @Body() payload: BalanceTopUpBody, @Req() request: ServiceAdminRequest) {
+    return this.billingService.topUpTenantBalance({ ...payload, actor: request.serviceAdminContext?.actor, tenantId });
   }
 
   @Post("provider-sync")

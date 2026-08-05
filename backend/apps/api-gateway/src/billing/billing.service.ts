@@ -62,6 +62,7 @@ interface ProviderSyncPayload {
   idempotencyKey?: string;
   invoice?: Partial<BillingInvoiceState>;
   provider?: string;
+  reason?: string;
   subscription?: Partial<BillingSubscriptionState>;
   tenantId?: string;
 }
@@ -732,7 +733,9 @@ export class BillingService {
     }
 
     const subscription = await this.billingRepository.findTenantSubscription(tenant.id);
-    const tariff = await this.findTariff(subscription?.planId ?? tenant.planId);
+    // The service-admin assignment is the source of truth for product access.
+    // Provider reconciliation can arrive later and is exposed separately below.
+    const tariff = await this.findTariff(tenant.planId);
 
     return createEnvelope({
       service: BILLING_SERVICE,
@@ -815,12 +818,60 @@ export class BillingService {
       traceId: billingTraceId(BILLING_SERVICE, "fetchTenantBillingOverview"),
       meta: apiMeta({ tenantId }),
       data: {
+        balance: { amountKopeks: balanceKopeks((invoices.data?.items as Array<Record<string, unknown>> | undefined) ?? []), currency: "RUB" },
         invoices: invoices.data,
         quotas: quotas.data?.quotas ?? [],
         recurringTermsVersion: process.env.BILLING_RECURRING_TERMS_VERSION?.trim() || "v1",
         subscription: subscription.data,
         tariffs: tariffs.status === "ok" ? tariffs.data?.items ?? [] : []
       }
+    });
+  }
+
+  async topUpTenantBalance(input: { amountKopeks?: number; actor?: ServiceAdminActor; idempotencyKey?: string; reason?: string; tenantId?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const amountKopeks = Math.floor(Number(input.amountKopeks));
+    const tenantId = String(input.tenantId ?? "").trim();
+    const reason = String(input.reason ?? "").trim();
+    const idempotencyKey = String(input.idempotencyKey ?? "").trim();
+    if (!tenantId || !Number.isSafeInteger(amountKopeks) || amountKopeks < 1 || reason.length < 3 || !idempotencyKey) {
+      return invalidEnvelope(BILLING_SERVICE, "topUpTenantBalance", "balance_top_up_invalid", "Amount, reason, and idempotency key are required.", { tenantId });
+    }
+    const synced = await this.syncProviderBillingState({ actor: input.actor, eventType: "balance.top_up", idempotencyKey: `balance:${idempotencyKey}`, invoice: { amountDue: 0, amountPaid: amountKopeks, currency: "RUB", paymentStatus: "succeeded", providerInvoiceId: `balance:${idempotencyKey}`, status: "paid" }, provider: "manual-balance", reason, tenantId });
+    if (synced.status !== "ok") return synced;
+    const invoices = await this.fetchTenantInvoices(tenantId);
+    return createEnvelope({ service: BILLING_SERVICE, operation: "topUpTenantBalance", traceId: billingTraceId(BILLING_SERVICE, "topUpTenantBalance"), meta: apiMeta({ tenantId }), data: { balance: { amountKopeks: balanceKopeks((invoices.data?.items as Array<Record<string, unknown>> | undefined) ?? []), currency: "RUB" }, reason, topUp: synced.data } });
+  }
+
+  async syncTenantOperatorSeats(input: { seats?: number; tenantId?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = String(input.tenantId ?? "").trim();
+    const seats = Math.floor(Number(input.seats));
+    const tenant = await this.findTenant(tenantId);
+    if (!tenant) return notFoundEnvelope(BILLING_SERVICE, "syncTenantOperatorSeats", "tenant_not_found", `Tenant ${tenantId || "(empty)"} was not found.`, { tenantId });
+    const tariff = await this.findTariff(tenant.planId);
+    if (!tariff || !Number.isSafeInteger(seats) || seats < 1 || seats > tariff.includedUsers || (tariff.ownerOnly && seats !== 1)) {
+      return invalidEnvelope(BILLING_SERVICE, "syncTenantOperatorSeats", "operator_seats_invalid", "Operator seats must fit the current tariff.", { planId: tenant.planId, seats, tenantId });
+    }
+    const current = await this.billingRepository.findTenantSubscription(tenantId);
+    const now = new Date().toISOString();
+    const provider = current?.provider || "internal-billing";
+    return this.syncProviderBillingState({
+      eventType: "subscription.seats_updated",
+      idempotencyKey: `operator-seats:${tenantId}:${tenant.planId}:${seats}`,
+      provider,
+      subscription: {
+        ...current,
+        billingPeriod: current?.billingPeriod ?? "monthly",
+        createdAt: current?.createdAt ?? now,
+        currentPeriodEnd: current?.currentPeriodEnd ?? now,
+        currentPeriodStart: current?.currentPeriodStart ?? now,
+        id: current?.id ?? `sub_${tenantId}_internal`,
+        planId: tenant.planId,
+        seats,
+        status: current?.status ?? "active",
+        unitAmountMonthly: tariff.priceMonthly,
+        updatedAt: now
+      },
+      tenantId
     });
   }
 
@@ -980,6 +1031,7 @@ export class BillingService {
       eventType,
       invoice: request.invoice,
       provider,
+      reason: request.reason,
       subscription: request.subscription,
       tenantId: tenant.id
     });
@@ -1053,6 +1105,7 @@ export class BillingService {
         eventType,
         invoice: invoice ? sanitizeInvoice(invoice) : null,
         provider,
+        reason: request.reason ?? null,
         subscription: subscription ? sanitizeSubscription(subscription) : null,
         tenantId: tenant.id
       },
@@ -1875,9 +1928,10 @@ function providerTenantChanges(tenant: TenantBillingState, subscription: Billing
   if (subscription.planId !== tenant.planId) {
     changes.planId = subscription.planId;
   }
-  if (subscription.unitAmountMonthly !== tenant.monthlyRevenue) {
-    changes.monthlyRevenue = subscription.unitAmountMonthly;
-    changes.arr = subscription.unitAmountMonthly * 12;
+  const monthlyRevenue = subscription.unitAmountMonthly * subscription.seats;
+  if (monthlyRevenue !== tenant.monthlyRevenue) {
+    changes.monthlyRevenue = monthlyRevenue;
+    changes.arr = monthlyRevenue * 12;
   }
 
   return changes;
@@ -2036,6 +2090,7 @@ function providerSyncFingerprint(input: {
   eventType: string;
   invoice: Partial<BillingInvoiceState> | undefined;
   provider: string;
+  reason?: string;
   subscription: Partial<BillingSubscriptionState> | undefined;
   tenantId: string;
 }): string {
@@ -2043,6 +2098,7 @@ function providerSyncFingerprint(input: {
     eventType: input.eventType,
     invoice: input.invoice ? invoiceFingerprintData(input.invoice) : null,
     provider: input.provider,
+    reason: input.reason ?? null,
     subscription: input.subscription ? subscriptionFingerprintData(input.subscription) : null,
     tenantId: input.tenantId
   });
@@ -2107,6 +2163,11 @@ function providerSyncResponseData(input: {
     subscription: input.subscription,
     syncJobId: input.syncJobId
   };
+}
+
+function balanceKopeks(invoices: Array<Record<string, unknown>>): number {
+  return invoices.filter((invoice) => invoice.provider === "manual-balance" && invoice.paymentStatus === "succeeded")
+    .reduce((total, invoice) => total + Math.max(0, Number(invoice.amountPaid ?? 0) - Number(invoice.amountDue ?? 0)), 0);
 }
 
 function paymentSummary(invoices: BillingInvoiceState[]): Record<string, unknown> {

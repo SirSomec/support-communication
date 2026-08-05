@@ -46,6 +46,15 @@ export const billingService = {
       service: SERVICE
     });
   },
+  async topUpTenantBalance({ tenantId, ...payload } = {}) {
+    if (!hasRouteId(tenantId)) return missingIdEnvelope("topUpTenantBalance", "Tenant id is required.");
+    return apiRequest(`/billing/tenants/${encodeURIComponent(tenantId)}/balance/top-ups`, {
+      authMode: "service-admin", body: { ...payload, idempotencyKey: crypto.randomUUID() }, method: "POST", operation: "topUpTenantBalance", service: SERVICE
+    });
+  },
+  async fetchTenantInvoices(tenantId) {
+    return apiRequest(`/billing/tenants/${encodeURIComponent(tenantId)}/invoices`, { authMode: "service-admin", operation: "fetchTenantInvoices", service: SERVICE });
+  },
 
   getReadiness() {
     return {

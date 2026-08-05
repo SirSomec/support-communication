@@ -66,6 +66,9 @@ describe("settings runtime contracts", () => {
     assert.equal(updated.status, "ok");
     assert.equal(updated.data.operatorLimit, 4);
     assert.equal(updated.data.usedSeats, 3);
+    assert.equal(updated.data.subscription?.seats, 4);
+    assert.equal(updated.data.subscription?.unitAmountMonthly, 129000);
+    assert.equal((await billingRepository.findTenant(tenantId))?.monthlyRevenue, 516000);
 
     const invited = await settings.inviteEmployee({ email: "fourth@northstar.example", name: "Fourth operator" }, { tenantId });
     assert.equal(invited.status, "ok");

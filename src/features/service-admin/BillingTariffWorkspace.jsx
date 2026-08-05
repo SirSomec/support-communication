@@ -16,6 +16,9 @@ export function BillingTariffWorkspace({ onAudit }) {
   const [confirmationText, setConfirmationText] = useState("");
   const [planOverrides, setPlanOverrides] = useState({});
   const [paymentReadiness, setPaymentReadiness] = useState(null);
+  const [balance, setBalance] = useState(0);
+  const [topUpAmount, setTopUpAmount] = useState("1000");
+  const [topUpReason, setTopUpReason] = useState("Ручное пополнение баланса");
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +57,20 @@ export function BillingTariffWorkspace({ onAudit }) {
   const currentPreview = selectedTenant && nextTariff && preview?.tenant?.id === selectedTenant.id && preview.nextTariff?.id === nextTariff.id ? preview : null;
   const confirmationRequired = Boolean(currentPreview?.confirmation?.required);
   const canApply = Boolean(currentPreview && reason.trim().length >= 8 && (!confirmationRequired || confirmationText === currentPreview.confirmation.expectedText));
+  useEffect(() => {
+    if (!selectedTenant?.id) return;
+    billingService.fetchTenantInvoices(selectedTenant.id).then((response) => {
+      if (response.status !== "ok") return;
+      setBalance((response.data?.items ?? []).filter((invoice) => invoice.provider === "manual-balance" && invoice.paymentStatus === "succeeded").reduce((sum, invoice) => sum + Math.max(0, Number(invoice.amountPaid ?? 0) - Number(invoice.amountDue ?? 0)), 0));
+    });
+  }, [selectedTenant?.id]);
+
+  async function handleTopUp() {
+    if (!selectedTenant) return;
+    const envelope = await billingService.topUpTenantBalance({ amountKopeks: Math.round(Number(topUpAmount) * 100), reason: topUpReason, tenantId: selectedTenant.id });
+    if (envelope.status === "ok") setBalance(envelope.data.balance.amountKopeks);
+    onAudit(envelope, { action: "tenant.balance.top_up", target: selectedTenant.id });
+  }
 
   async function handlePreview() {
     if (!selectedTenant || !nextTariff) {
@@ -153,6 +170,7 @@ export function BillingTariffWorkspace({ onAudit }) {
           </div>
           {selectedTenant ? <StatusBadge tone={getStatusTone(selectedTenant.status)}>{formatLabel(selectedTenant.status)}</StatusBadge> : null}
         </div>
+        <div className="service-admin-action-box"><header><WalletCards size={18} /><div><strong>Баланс организации</strong><span>{formatCurrency(balance)}</span></div></header><label className="service-admin-reason-field"><span>Сумма, ₽</span><input min="1" onChange={(event) => setTopUpAmount(event.target.value)} type="number" value={topUpAmount} /></label><label className="service-admin-reason-field"><span>Причина</span><input onChange={(event) => setTopUpReason(event.target.value)} value={topUpReason} /></label><button disabled={!selectedTenant || Number(topUpAmount) <= 0 || topUpReason.trim().length < 3} onClick={handleTopUp} type="button">Пополнить баланс</button></div>
 
         <div className="tariff-card-grid">
           {tariffs.map((tariff) => (

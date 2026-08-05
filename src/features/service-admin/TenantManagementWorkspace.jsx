@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Ban, Building2, CheckCircle2, Eye, Search, ShieldAlert } from "lucide-react";
 import { SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
 import { tenantService } from "../../services/tenantService.js";
-import { formatCurrency, formatDateTime, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
+import { formatDateTime, formatKopeks, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
 
 const tenantStatusOptions = ["all", "active", "watch", "restricted", "trial"];
 const nextStatusOptions = ["active", "watch", "restricted"];
@@ -135,7 +135,7 @@ export function TenantManagementWorkspace({ onAudit }) {
               <Building2 size={18} />
               <span>
                 <strong>{tenant.name}</strong>
-                <small>{tenant.region} - {tenant.users} пользователей - {formatCurrency(tenant.monthlyRevenue)}</small>
+                <small>{tenant.region} - {tenant.users} пользователей - {formatKopeks(tenant.monthlyRevenue)}</small>
               </span>
               <StatusBadge tone={getStatusTone(tenant.status)}>{formatLabel(tenant.status)}</StatusBadge>
             </button>

@@ -3,7 +3,7 @@ import { CreditCard, Eye, ShieldAlert, WalletCards } from "lucide-react";
 import { SectionTitle, StatusBadge } from "../../ui.jsx";
 import { billingService } from "../../services/billingService.js";
 import { tenantService } from "../../services/tenantService.js";
-import { formatCurrency, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
+import { formatKopeks, formatLabel, getStatusTone } from "./serviceAdminUtils.js";
 
 export function BillingTariffWorkspace({ onAudit }) {
   const [tenants, setTenants] = useState([]);
@@ -61,7 +61,15 @@ export function BillingTariffWorkspace({ onAudit }) {
     if (!selectedTenant?.id) return;
     billingService.fetchTenantInvoices(selectedTenant.id).then((response) => {
       if (response.status !== "ok") return;
-      setBalance((response.data?.items ?? []).filter((invoice) => invoice.provider === "manual-balance" && invoice.paymentStatus === "succeeded").reduce((sum, invoice) => sum + Math.max(0, Number(invoice.amountPaid ?? 0) - Number(invoice.amountDue ?? 0)), 0));
+      setBalance((response.data?.items ?? []).reduce((sum, invoice) => {
+        if (invoice.paymentStatus !== "succeeded") return sum;
+
+        const amount = Math.max(0, Number(invoice.amountPaid ?? 0));
+        if (invoice.provider === "manual-balance") return sum + amount;
+        if (invoice.provider === "internal-daily-charge") return sum - amount;
+
+        return sum;
+      }, 0));
     });
   }, [selectedTenant?.id]);
 
@@ -165,12 +173,12 @@ export function BillingTariffWorkspace({ onAudit }) {
         <div className="service-admin-detail-head">
           <div>
             <span>Текущий: {currentTariff?.name}</span>
-            <h3>{formatCurrency(currentTariff?.priceMonthly ?? 0)} / мес.</h3>
+            <h3>{formatKopeks(currentTariff?.priceMonthly ?? 0)} / мес.</h3>
             <p>{currentTariff?.changePolicy}</p>
           </div>
           {selectedTenant ? <StatusBadge tone={getStatusTone(selectedTenant.status)}>{formatLabel(selectedTenant.status)}</StatusBadge> : null}
         </div>
-        <div className="service-admin-action-box"><header><WalletCards size={18} /><div><strong>Баланс организации</strong><span>{formatCurrency(balance)}</span></div></header><label className="service-admin-reason-field"><span>Сумма, ₽</span><input min="1" onChange={(event) => setTopUpAmount(event.target.value)} type="number" value={topUpAmount} /></label><label className="service-admin-reason-field"><span>Причина</span><input onChange={(event) => setTopUpReason(event.target.value)} value={topUpReason} /></label><button disabled={!selectedTenant || Number(topUpAmount) <= 0 || topUpReason.trim().length < 3} onClick={handleTopUp} type="button">Пополнить баланс</button></div>
+        <div className="service-admin-action-box"><header><WalletCards size={18} /><div><strong>Баланс организации</strong><span>{formatKopeks(balance)}</span></div></header><label className="service-admin-reason-field"><span>Сумма, ₽</span><input min="1" onChange={(event) => setTopUpAmount(event.target.value)} type="number" value={topUpAmount} /></label><label className="service-admin-reason-field"><span>Причина</span><input onChange={(event) => setTopUpReason(event.target.value)} value={topUpReason} /></label><button disabled={!selectedTenant || Number(topUpAmount) <= 0 || topUpReason.trim().length < 3} onClick={handleTopUp} type="button">Пополнить баланс</button></div>
 
         <div className="tariff-card-grid">
           {tariffs.map((tariff) => (
@@ -186,7 +194,7 @@ export function BillingTariffWorkspace({ onAudit }) {
             >
               <WalletCards size={18} />
               <strong>{tariff.name}</strong>
-              <span>{formatCurrency(tariff.priceMonthly)}</span>
+              <span>{formatKopeks(tariff.priceMonthly)}</span>
               <small>до {tariff.includedUsers} пользователей · до {tariff.workspaceLimit} каналов</small>
             </button>
           ))}
@@ -217,7 +225,7 @@ export function BillingTariffWorkspace({ onAudit }) {
 
           {currentPreview ? (
             <div className="service-admin-preview">
-              <span><b>Дельта в месяц</b>{formatCurrency(currentPreview.monthlyDelta)}</span>
+              <span><b>Дельта в месяц</b>{formatKopeks(currentPreview.monthlyDelta)}</span>
               <span><b>Пользователи</b>{formatLabel(currentPreview.capacityCheck.users)} ({currentPreview.capacityCheck.seatDelta})</span>
               <span><b>Пространства</b>{formatLabel(currentPreview.capacityCheck.workspaces)} ({currentPreview.capacityCheck.workspaceDelta})</span>
               <span><b>Согласование</b>{currentPreview.approval.required ? "требуется" : "не требуется"}</span>

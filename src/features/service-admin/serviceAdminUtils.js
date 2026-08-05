@@ -8,6 +8,12 @@ export function formatCurrency(value) {
   }).format(value);
 }
 
+// Billing amounts from the API are stored in kopeks; callers must declare
+// that unit explicitly to avoid showing kopeks as rubles.
+export function formatKopeks(value) {
+  return formatCurrency(Number(value ?? 0) / 100);
+}
+
 export function formatDateTime(value) {
   if (!value) {
     return "нет данных";

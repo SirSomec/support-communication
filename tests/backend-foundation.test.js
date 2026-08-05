@@ -96,7 +96,7 @@ describe("backend phase 0 foundation scaffold", () => {
     assert.match(backendPackage.scripts["start:api-gateway"], /--env-file=.env.example/);
     assert.ok(
       mainSource.indexOf("app.setGlobalPrefix(`api/${config.API_VERSION}`)") <
-        mainSource.indexOf("setupOpenApi(app, config.API_VERSION)"),
+        mainSource.indexOf("setupOpenApi(app, config.API_VERSION,"),
       "global prefix is configured before OpenAPI document generation"
     );
   });

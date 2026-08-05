@@ -36,8 +36,8 @@ x-runtime-environment: &runtime-environment
   AI_CONNECTIONS_KEY_VERSION: ${AI_CONNECTIONS_KEY_VERSION:-v1}
   FILE_SCAN_CALLBACK_TOKEN: ${FILE_SCAN_CALLBACK_TOKEN:?FILE_SCAN_CALLBACK_TOKEN is required}
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
-  # In production the generated specification is filtered to client-facing routes.
-  OPENAPI_ENABLED: ${OPENAPI_ENABLED:-false}
+  # Public OpenAPI must remain disabled in the production deployment.
+  OPENAPI_ENABLED: "false"
   AUTH_RATE_LIMIT_ENABLED: "true"
   TRUST_PROXY_HEADERS: "true"
   PUBLIC_WEBHOOK_BASE_URL: https://${APP_DOMAIN:?APP_DOMAIN is required}

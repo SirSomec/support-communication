@@ -109,7 +109,24 @@
 .billing-operations-empty { color: var(--muted); margin: 0; }
 @media (max-width: 760px) { .billing-ai-packages__grid { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .billing-overview { grid-template-columns: 1fr; } }
-.billing-quotas { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }.billing-quotas > div { display: grid; gap: 5px; padding: 10px; border: 1px solid #e0e8f2; border-radius: 9px; }.billing-quotas span { color: var(--muted); font-size: 12px; }.billing-quotas i { height: 5px; overflow: hidden; border-radius: 999px; background: #e6eef8; }.billing-quotas b { display:block; height:100%; background: var(--blue); }
+.billing-limits { display: grid; gap: 10px; }
+.billing-limits__heading { align-items: end; display: flex; gap: 16px; justify-content: space-between; }
+.billing-limits__heading h3 { align-items: center; display: flex; gap: 7px; }
+.billing-limits__heading p, .billing-limits__heading > span { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+.billing-limits__heading > span { max-width: 235px; text-align: right; }
+.billing-quotas { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.billing-quota { border: 1px solid #e0e8f2; border-radius: 10px; display: grid; gap: 8px; padding: 13px; }
+.billing-quota__top { align-items: baseline; display: flex; gap: 10px; justify-content: space-between; }
+.billing-quota__top strong { color: var(--text); font-size: 14px; }
+.billing-quota__top span { color: var(--muted); font-size: 12px; text-align: right; }
+.billing-quota p { color: var(--muted); font-size: 12px; line-height: 1.4; margin: 0; min-height: 34px; }
+.billing-quota i { background: #e6eef8; border-radius: 999px; height: 5px; overflow: hidden; }
+.billing-quota i b { background: var(--blue); display: block; height: 100%; }
+.billing-quota small { color: #58708a; font-size: 12px; font-weight: 700; }
+.billing-quota.is-unavailable { background: #fafbfd; }
+.billing-quota.is-unavailable i b { background: #aebdcd; }
+.billing-quota.is-unavailable small { color: var(--muted); font-weight: 400; }
+@media (max-width: 620px) { .billing-limits__heading { align-items: flex-start; flex-direction: column; } .billing-limits__heading > span { max-width: none; text-align: left; } }
 .billing-plans { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; }.billing-plans article { display:grid; gap:7px; padding:13px; border:1px solid #e0e8f2; border-radius:10px; }.billing-plans article.current { border-color: var(--blue); background:#f6faff; }.billing-plans small { color:var(--muted); }.billing-plans em { color:var(--blue-dark); font-size:12px; font-style:normal; font-weight:700; }.billing-plans button { width:max-content; border:0; background:none; color:var(--blue); padding:0; font:inherit; font-size:12px; font-weight:700; }
 
 /* --- Каркас: навигация + контент ---------------------------------------- */

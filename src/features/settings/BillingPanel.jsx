@@ -3,6 +3,49 @@ import { Bot, CreditCard, Gauge, WalletCards } from "lucide-react";
 import { tenantBillingService } from "../../services/tenantBillingService.js";
 import { SettingsModal } from "./SettingsPrimitives.jsx";
 
+const quotaDetails = {
+  ai_dialogs: {
+    description: "AI-ответ списывается после первого успешного ответа бота в диалоге.",
+    label: "AI-диалоги"
+  },
+  ai: {
+    description: "Токены расходуются, когда AI обрабатывает сообщения и готовит ответы.",
+    label: "AI-токены"
+  },
+  bots: {
+    description: "Запуски сценариев автоматизации для обработки обращений.",
+    label: "Запуски ботов"
+  },
+  channels: {
+    description: "Подключённые каналы, в которых можно принимать обращения клиентов.",
+    label: "Каналы"
+  },
+  operators: {
+    description: "Сотрудники, которых можно назначать на диалоги и добавлять в смену.",
+    label: "Операторы"
+  },
+  reports: {
+    description: "Выгрузки отчётов за текущий период.",
+    label: "Экспорт отчётов"
+  },
+  storage: {
+    description: "Место для файлов и материалов в организации.",
+    label: "Хранилище"
+  },
+  users: {
+    description: "Учётные записи сотрудников, которым можно выдать доступ к сервису.",
+    label: "Пользователи"
+  },
+  webhooks: {
+    description: "Исходящие уведомления, отправляемые в другие системы.",
+    label: "Вебхуки"
+  },
+  workspaces: {
+    description: "Рабочие пространства для разделения команд и процессов.",
+    label: "Рабочие пространства"
+  }
+};
+
 export function BillingPanel({ onToast }) {
   const [state, setState] = useState({ data: null, error: "", loading: true });
   const [operatorSettings, setOperatorSettings] = useState(null);
@@ -100,7 +143,23 @@ export function BillingPanel({ onToast }) {
     </section>
     <section className="billing-balance-history"><h3>Операции баланса</h3><button className="billing-balance-history__open" onClick={() => setBalanceOperationsOpen(true)} type="button">Посмотреть операции{balanceOperations.length ? ` (${balanceOperations.length})` : ""}</button></section>
     {operatorSettings ? <section className="billing-operator-limit"><div><strong>Лимит операторов</strong><p>{operatorSettings.locked ? "На Free доступен только владелец организации." : `Выберите от ${operatorSettings.usedSeats} до ${operatorSettings.includedUsers} операторов. Это ограничит новые приглашения.`}</p></div><div className="billing-operator-limit__controls"><input aria-label="Лимит операторов" disabled={operatorSettings.locked || savingOperatorLimit} min={Math.max(1, operatorSettings.usedSeats)} max={operatorSettings.includedUsers} onChange={(event) => setOperatorLimit(event.target.value)} type="number" value={operatorLimit} /><button disabled={operatorSettings.locked || savingOperatorLimit || Number(operatorLimit) === operatorSettings.operatorLimit} onClick={saveOperatorLimit} type="button">{savingOperatorLimit ? "Сохранение…" : "Сохранить"}</button></div></section> : null}
-    <h3><Gauge size={17} /> Лимиты</h3><div className="billing-quotas">{quotas.map((quota) => <div key={quota.resource}><span>{quota.resource}</span><strong>{quota.used} / {quota.limit}</strong><i><b style={{ width: `${quota.limit ? Math.min(100, quota.used / quota.limit * 100) : 100}%` }} /></i></div>)}</div>
+    <section className="billing-limits" aria-labelledby="billing-limits-title">
+      <div className="billing-limits__heading">
+        <div><h3 id="billing-limits-title"><Gauge size={17} /> Лимиты</h3><p>Использование ресурсов в текущем расчётном периоде.</p></div>
+        <span>Слева — использовано, справа — доступно по тарифу</span>
+      </div>
+      <div className="billing-quotas">{quotas.map((quota) => {
+        const details = quotaDetails[quota.resource] ?? { description: "Доступный объём ресурса для вашей организации.", label: quota.resource };
+        const usagePercent = quota.limit ? Math.min(100, quota.used / quota.limit * 100) : 0;
+        const remaining = Math.max(0, quota.available ?? quota.remaining ?? quota.limit - quota.used);
+        return <article className={`billing-quota${quota.limit === 0 ? " is-unavailable" : ""}`} key={quota.resource}>
+          <div className="billing-quota__top"><strong>{details.label}</strong><span>{quota.limit === 0 ? "Не включено" : `${formatQuotaValue(quota.used, quota.resource)} из ${formatQuotaValue(quota.limit, quota.resource)}`}</span></div>
+          <p>{details.description}</p>
+          <i aria-hidden="true"><b style={{ width: `${usagePercent}%` }} /></i>
+          <small>{quota.limit === 0 ? "Подключите подходящий тариф, чтобы использовать этот ресурс." : `Осталось: ${formatQuotaValue(remaining, quota.resource)}`}</small>
+        </article>;
+      })}</div>
+    </section>
     {isBalanceOperationsOpen ? <SettingsModal eyebrow="Тариф и оплата" footer={<button onClick={() => setBalanceOperationsOpen(false)} type="button">Закрыть</button>} onClose={() => setBalanceOperationsOpen(false)} size="wide" title="Операции баланса" titleId="billing-balance-operations-title">
       {balanceOperations.length ? <div className="billing-operations-table-wrap"><table className="billing-operations-table"><thead><tr><th scope="col">Дата</th><th scope="col">Операция</th><th scope="col">Сумма</th></tr></thead><tbody>{balanceOperations.map((invoice) => <tr key={invoice.id}><td>{formatDate(invoice.createdAt)}</td><td>{invoice.provider === "manual-balance" ? "Ручное пополнение" : invoice.provider === "internal-ai-package-purchase" ? "Покупка пакета AI-диалогов" : "Ежедневное списание"}</td><td className={invoice.provider === "manual-balance" ? "credit" : "debit"}>{invoice.provider === "manual-balance" ? "+" : "−"}{formatMoney(invoice.amountPaid)}</td></tr>)}</tbody></table></div> : <p className="billing-operations-empty">Операций по балансу пока нет.</p>}
     </SettingsModal> : null}
@@ -112,6 +171,13 @@ export function BillingPanel({ onToast }) {
 
 function formatMoney(amount) {
   return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(Number(amount ?? 0) / 100);
+}
+
+function formatQuotaValue(value, resource) {
+  const amount = Number(value ?? 0).toLocaleString("ru-RU");
+  if (resource === "storage") return `${amount} ГБ`;
+  if (resource === "ai") return `${amount} токенов`;
+  return amount;
 }
 
 function formatDate(value) {

@@ -955,7 +955,16 @@ export class BillingService {
 
     const key = `ai-dialog:${tenantId}:${safeConversationId}`;
     const reserved = await this.reserveQuota({ idempotencyKey: `${key}:reserve`, requested: 1, resource: "ai_dialogs", tenantId });
-    if (reserved.status !== "ok") return deniedEnvelope(BILLING_SERVICE, "reserveAiProcessedDialog", "ai_dialog_package_exhausted", "No prepaid AI dialogs are available.", { conversationId: safeConversationId, tenantId });
+    if (reserved.status !== "ok") {
+      if (reserved.status === "denied" && reserved.error?.code === "quota_exceeded") {
+        return deniedEnvelope(BILLING_SERVICE, "reserveAiProcessedDialog", "ai_dialog_package_exhausted", "No prepaid AI dialogs are available.", { conversationId: safeConversationId, tenantId });
+      }
+      return errorEnvelope(BILLING_SERVICE, "reserveAiProcessedDialog", "ai_dialog_billing_unavailable", "AI dialog billing is temporarily unavailable.", {
+        causeCode: reserved.error?.code ?? reserved.status,
+        conversationId: safeConversationId,
+        tenantId
+      });
+    }
     return reserved;
   }
 

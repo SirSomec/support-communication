@@ -4,6 +4,7 @@ import { assertCredentialMasterKeySafety } from "@support-communication/config";
 import { writeStructuredLog } from "@support-communication/observability";
 import { configureAutomationRepository } from "../automation/bootstrap.js";
 import { AutomationService } from "../automation/automation.service.js";
+import { configureBillingRepository } from "../billing/bootstrap.js";
 import { configureConversationRepository } from "../conversation/bootstrap.js";
 import { ConversationService } from "../conversation/conversation.service.js";
 import { configureIdentityRepository } from "../identity/bootstrap.js";
@@ -32,6 +33,11 @@ export function runTelegramPollingWorkerFromEnv(source: NodeJS.ProcessEnv = proc
   assertCredentialMasterKeySafety(source, { required: ["AI_CONNECTIONS_MASTER_KEY"] });
   const config = loadTelegramPollingRuntimeConfig(source);
   const conversationRepository = configureConversationRepository(source);
+  // Telegram polling runs outside the API Gateway bootstrap. Configure every
+  // repository used transitively by AutomationService before constructing it;
+  // otherwise BillingService falls back to an empty in-memory repository and
+  // valid prepaid packages look like missing tenants.
+  configureBillingRepository(source);
   const automationService = new AutomationService(configureAutomationRepository(source));
   configureIdentityRepository(source);
   const integrationRepository = configureIntegrationRepository(source);

@@ -286,8 +286,17 @@ export class BotRuntimeService {
       if (aiDialogBilling?.reserveAiProcessedDialog) {
         const reservation = await aiDialogBilling.reserveAiProcessedDialog(event.tenantId, event.conversationId);
         if (reservation.status !== "ok") {
-          return consultationHandoffResult(node, event, context, scenarioId, "ai_dialog_package_exhausted",
-            String(node.config?.fallbackMessage ?? "Пакет AI-диалогов закончился. Передаю диалог оператору."));
+          const packageExhausted = reservation.error?.code === "ai_dialog_package_exhausted" || reservation.error?.code === "quota_exceeded";
+          return consultationHandoffResult(
+            node,
+            event,
+            context,
+            scenarioId,
+            packageExhausted ? "ai_dialog_package_exhausted" : "ai_dialog_billing_unavailable",
+            packageExhausted
+              ? String(node.config?.fallbackMessage ?? "Пакет AI-диалогов закончился. Передаю диалог оператору.")
+              : "AI-бот временно недоступен. Передаю диалог оператору."
+          );
         }
         aiDialogReservationId = String(reservation.data?.reservationId ?? "");
       }

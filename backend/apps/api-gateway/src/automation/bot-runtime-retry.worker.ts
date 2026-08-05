@@ -1,7 +1,8 @@
-import { BotRuntimeService, type BotRuntimeInboundEvent } from "./bot-runtime.service.js";
+import { BotRuntimeService, type BotRuntimeInboundEvent, type BotRuntimeOptions } from "./bot-runtime.service.js";
 import type { AutomationRepository } from "./automation.repository.js";
 
 export interface BotRuntimeRetryWorkerInput {
+  aiDialogBilling?: BotRuntimeOptions["aiDialogBilling"];
   automationRepository: AutomationRepository;
   leaseMs?: number;
   limit?: number;
@@ -31,6 +32,7 @@ export async function runBotRuntimeRetryOnce(input: BotRuntimeRetryWorkerInput):
     skipped: 0
   };
   const runtime = input.runtime ?? new BotRuntimeService(input.automationRepository, {
+    aiDialogBilling: input.aiDialogBilling,
     maxAttempts: input.maxAttempts,
     now: () => new Date(now)
   });

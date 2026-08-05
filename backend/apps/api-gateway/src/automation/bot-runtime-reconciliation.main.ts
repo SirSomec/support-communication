@@ -4,6 +4,8 @@ import { writeStructuredLog } from "@support-communication/observability";
 import { configureConversationRealtimeFanout, configureConversationRepository } from "../conversation/bootstrap.js";
 import { ConversationService } from "../conversation/conversation.service.js";
 import { configureAutomationRepository } from "./bootstrap.js";
+import { configureBillingRepository } from "../billing/bootstrap.js";
+import { BillingService } from "../billing/billing.service.js";
 import { runBotRuntimeReconciliationOnce } from "./bot-runtime-reconciliation.worker.js";
 import { runBotRuntimeRetryOnce } from "./bot-runtime-retry.worker.js";
 import { QueueDirectoryRepository } from "../routing/queue-directory.repository.js";
@@ -16,6 +18,7 @@ export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessE
   // история, resolutionOutcome, журнал, realtime и CSAT-опрос — как у оператора.
   const conversationService = new ConversationService(conversationRepository, { realtimeFanout });
   const automationRepository = configureAutomationRepository(source);
+  const billingService = new BillingService(configureBillingRepository(source));
   const queueDirectoryRepository = new QueueDirectoryRepository();
   const input = {
     automationRepository,
@@ -36,6 +39,7 @@ export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessE
   };
   const run = async () => {
     const runtimeRetries = await runBotRuntimeRetryOnce({
+      aiDialogBilling: billingService,
       automationRepository,
       leaseMs: positive(source.BOT_RUNTIME_RETRY_LEASE_MS, 30_000),
       limit: positive(source.BOT_RUNTIME_RETRY_LIMIT, 50),

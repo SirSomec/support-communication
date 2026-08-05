@@ -36,6 +36,9 @@ describe("telegram polling ingress contracts", () => {
 
     const apiMain = readFileSync(new URL("../apps/api-gateway/src/main.ts", import.meta.url), "utf8");
     assert.doesNotMatch(apiMain, /startTelegramPollingWorker|createTelegramOutboundMessageDispatcher/);
+    const pollingMain = readFileSync(new URL("../apps/api-gateway/src/integrations/telegram-polling.main.ts", import.meta.url), "utf8");
+    assert.match(pollingMain, /configureBillingRepository\(source\)/);
+    assert.ok(pollingMain.indexOf("configureBillingRepository(source)") < pollingMain.indexOf("new AutomationService"));
 
     const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
     const releaseChecklist = readFileSync(new URL("../scripts/release-checklist.mjs", import.meta.url), "utf8");

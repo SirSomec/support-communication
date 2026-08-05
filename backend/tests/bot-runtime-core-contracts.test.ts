@@ -147,7 +147,48 @@ describe("durable bot runtime core", () => {
 
     assert.equal(result.step.outcome, "ai_handoff_requested");
     assert.equal(result.instance.status, "handoff");
+    assert.equal(result.step.handoffSummary?.reason, "ai_dialog_package_exhausted");
     assert.equal(JSON.stringify(result.step.sideEffects).includes("This answer must not be delivered"), false);
+  });
+
+  it("does not report a billing infrastructure failure as an exhausted AI package", async () => {
+    const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: { handoffQueue: "Support" } }], [{ from: "start", to: "answer" }]);
+    const runtime = new BotRuntimeService(repo, {
+      aiDialogBilling: { reserveAiProcessedDialog: async () => ({ error: { code: "tenant_not_found" }, status: "not_found" }) },
+      aiResponder: { respond: async () => ({ citations: [], model: "test-model", text: "This answer must not be delivered" }) }
+    });
+
+    const result = await runtime.handleInboundEvent(event("evt-ai-billing-unavailable", { text: "Question" }));
+
+    assert.equal(result.step.outcome, "ai_handoff_requested");
+    assert.equal(result.step.handoffSummary?.reason, "ai_dialog_billing_unavailable");
+    assert.equal(result.instance.context.lastAiFailure, "ai_dialog_billing_unavailable");
+    assert.equal(JSON.stringify(result.step.sideEffects).includes("Пакет AI-диалогов закончился"), false);
+  });
+
+  it("passes AI dialog billing into the default retry runtime", async () => {
+    const nodes: BotScenario["flowNodes"] = [{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply" }];
+    const state = createEmptyAutomationState();
+    state.botScenarios.push({ channels: ["SDK"], flowEdges: [{ from: "start", to: "answer" }], flowNodes: nodes, id: "bot-1", name: "Bot", schemaVersion: "bot-flow/v1", status: "published", tenantId: "tenant-1" });
+    state.botScenarioVersions.push({ createdAt: "2026-07-11T10:00:00.000Z", flowEdges: [{ from: "start", to: "answer" }], flowNodes: nodes, scenarioId: "bot-1", status: "published", tenantId: "tenant-1", versionId: "v1" });
+    state.botRuntimeInstances.push({ attempts: 1, context: {}, conversationId: "conv-1", createdAt: "2026-07-11T11:00:00.000Z", currentNodeId: "start", id: "runtime-1", lastError: "temporary_failure", nextAttemptAt: "2026-07-11T11:00:01.000Z", scenarioId: "bot-1", status: "retry_scheduled", tenantId: "tenant-1", updatedAt: "2026-07-11T11:00:00.000Z", versionId: "v1" });
+    state.botRuntimeSteps.push({ conversationId: "conv-1", createdAt: "2026-07-11T11:00:00.000Z", error: "temporary_failure", handoffSummary: null, id: "step-1", inputEvent: event("evt-ai-retry", { text: "Question" }), inputEventId: "evt-ai-retry", lifecycleEvent: null, nodeId: "answer", nodeType: "ai_reply", outcome: "retry_scheduled", runtimeId: "runtime-1", sideEffects: [], tenantId: "tenant-1", webhookResponse: null });
+    const repo = AutomationRepository.inMemory(state);
+    let reservations = 0;
+
+    const result = await runBotRuntimeRetryOnce({
+      aiDialogBilling: {
+        reserveAiProcessedDialog: async () => {
+          reservations += 1;
+          return { data: { reservationId: "reservation-1" }, status: "ok" };
+        }
+      },
+      automationRepository: repo,
+      now: "2026-07-11T11:00:02.000Z"
+    });
+
+    assert.equal(result.claimed, 1);
+    assert.equal(reservations, 1);
   });
 
   it("hands off when the model emits the [[HANDOFF]] marker and never shows the marker to the client", async () => {

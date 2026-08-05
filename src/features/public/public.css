@@ -36,6 +36,11 @@
 .pricing-card.featured { border-color: var(--public-blue); box-shadow: 0 16px 38px rgb(11 116 255 / 15%); }
 .pricing-card header { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }.pricing-card header strong { font-size: 21px; }.pricing-card header span { color: var(--public-muted); font-size: 12px; }.pricing-price { color: var(--public-heading); font-size: 29px; font-weight: 850; }.pricing-card p { min-height: 40px; margin: 0; color: var(--public-muted); line-height: 1.4; }.pricing-card ul { display: grid; gap: 9px; min-height: 110px; margin: 0; padding: 0; list-style: none; }.pricing-card li { display: flex; gap: 8px; align-items: flex-start; color: #40506a; font-size: 13px; }.pricing-card li svg { flex: 0 0 auto; color: var(--public-teal); }.pricing-card .public-btn { margin-top: auto; }
 
+@media (min-width: 1280px) {
+  .pricing-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .pricing-card { padding: 20px; }
+}
+
 /* ---------- nav ---------- */
 
 .public-nav {

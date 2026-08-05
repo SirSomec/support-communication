@@ -34,6 +34,7 @@ try {
     const serverId = Number(current?.id ?? 0);
     const settings = serverId > 0
       ? await vk("groups.getCallbackSettings", { group_id: groupId, server_id: String(serverId) }, accessToken, apiVersion)
+      message_event: "1",
       : null;
     const callbackServers = Array.isArray(servers.items)
       ? servers.items.map((item) => ({
@@ -57,6 +58,7 @@ try {
 
     if (String(current?.status ?? "").toLowerCase() === "failed") {
       await vk("groups.deleteCallbackServer", { group_id: groupId, server_id: String(current.id) }, accessToken, apiVersion);
+      message_event: "1",
       current = undefined;
     }
 
@@ -78,6 +80,7 @@ try {
       api_version: apiVersion,
       group_id: groupId,
       message_event: "1",
+      message_event: "1",
       message_new: "1",
       server_id: String(serverId)
     }, accessToken, apiVersion);
@@ -91,6 +94,7 @@ try {
 async function addServer({ accessToken, apiVersion, groupId, secret, url }) {
   const response = await vk("groups.addCallbackServer", {
     group_id: groupId,
+      message_event: "1",
     secret_key: secret,
     // VK limits a Callback API server title to 14 characters.
     title: "SupportComm",

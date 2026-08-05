@@ -45,3 +45,19 @@
 	}
 	reverse_proxy minio:9000
 }
+
+monitor.supportcom.ru {
+	encode zstd gzip
+	basic_auth {
+		admin $2a$14$AFA82MHIMBimX1LyXmcZBO6l3gvZnIRqLnBjxoJaAg0tfBiDuZ7BCn
+	}
+	reverse_proxy netdata:19999
+}
+
+status.supportcom.ru {
+	encode zstd gzip
+	basic_auth {
+		admin $2a$14$AFA82MHIMBimX1LyXmcZBO6l3gvZnIRqLnBjxoJaAg0tfBiDuZ7BCn
+	}
+	reverse_proxy uptime-kuma:3001
+}

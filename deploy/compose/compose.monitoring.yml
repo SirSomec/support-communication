@@ -1,0 +1,48 @@
+services:
+  netdata:
+    image: netdata/netdata:stable
+    restart: always
+    hostname: supportcom-vps
+    environment:
+      DO_NOT_TRACK: "1"
+    cap_add: ["SYS_PTRACE"]
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - netdata-config:/etc/netdata
+      - netdata-lib:/var/lib/netdata
+      - netdata-cache:/var/cache/netdata
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [edge]
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - uptime-kuma-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [edge, backend, mail]
+
+volumes:
+  netdata-config:
+  netdata-lib:
+  netdata-cache:
+  uptime-kuma-data:
+
+networks:
+  edge:
+    external: true
+    name: support-communication-edge
+  backend:
+    external: true
+    name: support-communication-backend
+  mail:
+    external: true
+    name: mailserver_default

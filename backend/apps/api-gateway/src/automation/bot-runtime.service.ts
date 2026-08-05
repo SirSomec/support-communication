@@ -29,6 +29,11 @@ export interface BotRuntimeInboundEvent {
 
 export interface BotRuntimeOptions {
   aiResponder?: Pick<AiBotResponseService, "respond">;
+  aiDialogBilling?: {
+    commitAiProcessedDialog?(reservationId: string, tenantId: string, conversationId: string): Promise<{ status?: string; error?: { code?: string } | null }>;
+    releaseAiProcessedDialog?(reservationId: string, tenantId: string, conversationId: string): Promise<{ status?: string; error?: { code?: string } | null }>;
+    reserveAiProcessedDialog?(tenantId: string, conversationId: string): Promise<{ data?: Record<string, unknown>; status?: string; error?: { code?: string } | null }>;
+  };
   featureFlags?: FeatureFlag[];
   fetch?: typeof fetch;
   maxAttempts?: number;
@@ -276,6 +281,27 @@ export class BotRuntimeService {
           };
         }
       }
+      const aiDialogBilling = this.options.aiDialogBilling;
+      let aiDialogReservationId = "";
+      if (aiDialogBilling?.reserveAiProcessedDialog) {
+        const reservation = await aiDialogBilling.reserveAiProcessedDialog(event.tenantId, event.conversationId);
+        if (reservation.status !== "ok") {
+          return consultationHandoffResult(node, event, context, scenarioId, "ai_dialog_package_exhausted",
+            String(node.config?.fallbackMessage ?? "Пакет AI-диалогов закончился. Передаю диалог оператору."));
+        }
+        aiDialogReservationId = String(reservation.data?.reservationId ?? "");
+      }
+      const commitAiDialog = async () => {
+        if (!aiDialogBilling?.commitAiProcessedDialog || !aiDialogReservationId) return;
+        const committed = await aiDialogBilling.commitAiProcessedDialog(aiDialogReservationId, event.tenantId, event.conversationId);
+        if (committed.status !== "ok") throw new Error("bot_ai_billing_commit_failed");
+        aiDialogReservationId = "";
+      };
+      const releaseAiDialog = async () => {
+        if (!aiDialogBilling?.releaseAiProcessedDialog || !aiDialogReservationId) return;
+        await aiDialogBilling.releaseAiProcessedDialog(aiDialogReservationId, event.tenantId, event.conversationId);
+        aiDialogReservationId = "";
+      };
       try {
         // BAI-877: «умный» поиск включается политикой сценария И тенант-флагом;
         // без featureFlags (тесты/песочница) доверяем политике. Неэлигибельность
@@ -308,6 +334,7 @@ export class BotRuntimeService {
         // При обоих маркерах приоритет у передачи оператору: закрытие
         // необратимее, пусть спорный случай посмотрит человек.
         if (rawResponse.handoffRequested === true || directive.handoffRequested) {
+          await commitAiDialog();
           return {
             aiResponse: aiResponse.text.trim()
               ? aiResponse
@@ -328,6 +355,7 @@ export class BotRuntimeService {
         // переходом (история, resolutionOutcome, CSAT) через side effect;
         // проверка до post-policy: прощальная реплика не обязана цитировать.
         if (rawResponse.resolveRequested === true || directive.resolveRequested) {
+          await commitAiDialog();
           return {
             aiResponse: aiResponse.text.trim()
               ? aiResponse
@@ -346,9 +374,11 @@ export class BotRuntimeService {
         // BAI-842: post-policy — фактический ответ без источника (при наличии знаний) передаём оператору.
         const postDecision = evaluatePostPolicy(aiResponse.citations.length, aiResponse.materialsAvailable ?? 0, policy);
         if (postDecision.action === "handoff") {
+          await releaseAiDialog();
           return consultationHandoffResult(node, event, context, scenarioId, postDecision.reason,
             String(node.config?.fallbackMessage ?? "Не нашёл это в проверенных материалах — передаю вопрос оператору, чтобы не ошибиться."));
         }
+        await commitAiDialog();
         return {
           aiResponse,
           context: {
@@ -360,6 +390,7 @@ export class BotRuntimeService {
           status: "active" as const
         };
       } catch (error) {
+        await releaseAiDialog();
         const reason = error instanceof Error ? error.message : "bot_ai_unavailable";
         const handoffSummary = {
           botId: scenarioId ?? event.scenarioId ?? "",

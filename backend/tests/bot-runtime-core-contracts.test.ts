@@ -136,6 +136,20 @@ describe("durable bot runtime core", () => {
     assert.equal(JSON.stringify(result.instance.context).includes("What are your hours?"), false);
   });
 
+  it("hands off without delivering the generated answer when the AI dialog package is exhausted", async () => {
+    const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: { handoffQueue: "Support" } }], [{ from: "start", to: "answer" }]);
+    const runtime = new BotRuntimeService(repo, {
+      aiDialogBilling: { reserveAiProcessedDialog: async () => ({ error: { code: "ai_dialog_package_exhausted" }, status: "denied" }) },
+      aiResponder: { respond: async () => ({ citations: [{ sourceId: "source-1", title: "FAQ", version: 1 }], model: "test-model", text: "This answer must not be delivered" }) }
+    });
+
+    const result = await runtime.handleInboundEvent(event("evt-ai-no-package", { text: "Question" }));
+
+    assert.equal(result.step.outcome, "ai_handoff_requested");
+    assert.equal(result.instance.status, "handoff");
+    assert.equal(JSON.stringify(result.step.sideEffects).includes("This answer must not be delivered"), false);
+  });
+
   it("hands off when the model emits the [[HANDOFF]] marker and never shows the marker to the client", async () => {
     const repo = repository([{ id: "start", type: "condition" }, { id: "answer", type: "ai_reply", config: { handoffQueue: "Support" } }], [{ from: "start", to: "answer" }]);
     // Сырой текст модели: кастомный aiResponder без собственного парсинга —

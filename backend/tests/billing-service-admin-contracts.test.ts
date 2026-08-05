@@ -1794,6 +1794,29 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(items.some((invoice) => invoice.providerSecret !== undefined), false);
   });
 
+  it("purchases an AI-dialog package and consumes one dialog idempotently", async () => {
+    const billing = new BillingService();
+    const topUp = await billing.topUpTenantBalance({ amountKopeks: 2_000_000, idempotencyKey: "ai-dialog-test-topup", reason: "AI billing contract test", tenantId: "tenant-volga" });
+    assert.equal(topUp.status, "ok");
+    const purchase = await billing.purchaseAiDialogPackage({ idempotencyKey: "ai-package-contract", packageId: "ai-dialogs-1000", reason: "AI package contract test", tenantId: "tenant-volga" });
+    assert.equal(purchase.status, "ok");
+
+    const first = await billing.chargeAiProcessedDialog("tenant-volga", "conversation-ai-contract");
+    const replay = await billing.chargeAiProcessedDialog("tenant-volga", "conversation-ai-contract");
+    const invoices = await billing.fetchTenantInvoices("tenant-volga");
+    const items = invoices.data.items as Array<Record<string, unknown>>;
+    const quotas = await billing.fetchTenantQuotaSnapshot("tenant-volga");
+    const aiDialogs = (quotas.data.quotas as Array<Record<string, unknown>>).find((quota) => quota.resource === "ai_dialogs");
+
+    assert.equal(first.status, "ok");
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.data.duplicate, true);
+    assert.equal(items.filter((invoice) => invoice.provider === "internal-ai-package-purchase").length, 1);
+    assert.equal(aiDialogs?.limit, 1000);
+    assert.equal(aiDialogs?.used, 1);
+    assert.equal(aiDialogs?.remaining, 999);
+  });
+
   it("does not aggregate invoice amounts across currencies", async () => {
     const state = bootstrapBillingState();
     const rubInvoice = state.invoices.find((invoice) => invoice.tenantId === "tenant-volga");

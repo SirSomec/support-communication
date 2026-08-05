@@ -204,7 +204,9 @@ export class TenantProvisionService {
         region: tenantRegion,
         sla: "99.9",
         status: billingStatus,
-        usage: {
+      usage: {
+        aiDialogCredits: 0,
+        aiDialogs: 0,
           aiTokens: 0,
           botRuns: 0,
           channels: 1,

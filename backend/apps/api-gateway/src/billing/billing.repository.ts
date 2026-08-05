@@ -4511,6 +4511,8 @@ function usageFromRow(value: unknown): BillingTenantState["usage"] {
   const usage = toJsonRecord(value);
 
   return {
+    aiDialogCredits: numberFromRow(usage.aiDialogCredits, 0),
+    aiDialogs: numberFromRow(usage.aiDialogs, 0),
     aiTokens: numberFromRow(usage.aiTokens, 0),
     botRuns: numberFromRow(usage.botRuns, 0),
     channels: numberFromRow(usage.channels, 0),
@@ -4524,6 +4526,9 @@ function usageFromRow(value: unknown): BillingTenantState["usage"] {
 function applyUsageDelta(usage: BillingTenantState["usage"], resource: string, requested: number): BillingTenantState["usage"] {
   const next = { ...usage };
   switch (resource) {
+    case "ai_dialogs":
+      next.aiDialogs += requested;
+      break;
     case "ai":
       next.aiTokens += requested;
       break;
@@ -4569,6 +4574,8 @@ function quotaUsageValue(tenant: BillingTenantState, resource: string): number {
 
   const usage = tenant.usage;
   switch (resource) {
+    case "ai_dialogs":
+      return usage.aiDialogs;
     case "ai":
       return usage.aiTokens;
     case "bots":

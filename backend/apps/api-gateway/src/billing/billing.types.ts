@@ -31,6 +31,8 @@ export interface TenantBillingState {
   healthScore: number;
   sla: string;
   usage: {
+    aiDialogCredits: number;
+    aiDialogs: number;
     aiTokens: number;
     botRuns: number;
     channels: number;

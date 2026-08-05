@@ -52,6 +52,12 @@ export const billingService = {
       authMode: "service-admin", body: { ...payload, idempotencyKey: crypto.randomUUID() }, method: "POST", operation: "topUpTenantBalance", service: SERVICE
     });
   },
+  async purchaseAiDialogPackage({ tenantId, ...payload } = {}) {
+    if (!hasRouteId(tenantId)) return missingIdEnvelope("purchaseAiDialogPackage", "Tenant id is required.");
+    return apiRequest(`/billing/tenants/${encodeURIComponent(tenantId)}/ai-dialog-packages/purchases`, {
+      authMode: "service-admin", body: { ...payload, idempotencyKey: crypto.randomUUID() }, method: "POST", operation: "purchaseAiDialogPackage", service: SERVICE
+    });
+  },
   async fetchTenantInvoices(tenantId) {
     return apiRequest(`/billing/tenants/${encodeURIComponent(tenantId)}/invoices`, { authMode: "service-admin", operation: "fetchTenantInvoices", service: SERVICE });
   },

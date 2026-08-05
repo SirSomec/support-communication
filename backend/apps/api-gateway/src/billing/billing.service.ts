@@ -67,6 +67,12 @@ interface ProviderSyncPayload {
   tenantId?: string;
 }
 
+const AI_DIALOG_PACKAGES = [
+  { dialogCount: 1000, discountPercent: 0, id: "ai-dialogs-1000", priceKopeks: 2_000_000 },
+  { dialogCount: 5000, discountPercent: 5, id: "ai-dialogs-5000", priceKopeks: 9_500_000 },
+  { dialogCount: 10000, discountPercent: 10, id: "ai-dialogs-10000", priceKopeks: 18_000_000 }
+] as const;
+
 interface TenantCheckoutPayload {
   idempotencyKey?: string;
   nextPlanId?: string;
@@ -100,6 +106,7 @@ export class BillingService {
       traceId: billingTraceId(BILLING_SERVICE, "fetchTariffs"),
       meta: apiMeta(),
       data: {
+        aiDialogPackages: AI_DIALOG_PACKAGES,
         billingMode: "monthly",
         currency: "RUB",
         items: clone(tariffs),
@@ -705,7 +712,7 @@ export class BillingService {
     }
 
     const tariff = await this.findTariff(tenant.planId);
-    const quotaResources = ["operators", "users", "workspaces", "webhooks", "storage", "ai", "bots", "reports", "channels"];
+    const quotaResources = ["operators", "users", "workspaces", "webhooks", "storage", "ai", "ai_dialogs", "bots", "reports", "channels"];
     const quotas = await Promise.all(quotaResources.map(async (resource) => {
       const reserved = await this.activeReservedAmount(tenant.id, resource);
       return quotaMetric(tenant, tariff, resource, reserved);
@@ -819,6 +826,7 @@ export class BillingService {
       meta: apiMeta({ tenantId }),
       data: {
         balance: { amountKopeks: balanceKopeks((invoices.data?.items as Array<Record<string, unknown>> | undefined) ?? []), currency: "RUB" },
+        aiDialogPackages: AI_DIALOG_PACKAGES,
         invoices: invoices.data,
         quotas: quotas.data?.quotas ?? [],
         recurringTermsVersion: process.env.BILLING_RECURRING_TERMS_VERSION?.trim() || "v1",
@@ -840,6 +848,26 @@ export class BillingService {
     if (synced.status !== "ok") return synced;
     const invoices = await this.fetchTenantInvoices(tenantId);
     return createEnvelope({ service: BILLING_SERVICE, operation: "topUpTenantBalance", traceId: billingTraceId(BILLING_SERVICE, "topUpTenantBalance"), meta: apiMeta({ tenantId }), data: { balance: { amountKopeks: balanceKopeks((invoices.data?.items as Array<Record<string, unknown>> | undefined) ?? []), currency: "RUB" }, reason, topUp: synced.data } });
+  }
+
+  async purchaseAiDialogPackage(input: { actor?: ServiceAdminActor; idempotencyKey?: string; packageId?: string; reason?: string; tenantId?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenantId = String(input.tenantId ?? "").trim();
+    const packageId = String(input.packageId ?? "").trim();
+    const idempotencyKey = String(input.idempotencyKey ?? "").trim();
+    const reason = String(input.reason ?? "").trim();
+    const tenant = await this.findTenant(tenantId);
+    const selectedPackage = AI_DIALOG_PACKAGES.find((item) => item.id === packageId);
+    if (!tenant) return notFoundEnvelope(BILLING_SERVICE, "purchaseAiDialogPackage", "tenant_not_found", "Tenant was not found.", { tenantId });
+    if (!selectedPackage || !idempotencyKey || reason.length < 3) return invalidEnvelope(BILLING_SERVICE, "purchaseAiDialogPackage", "ai_dialog_package_invalid", "Package, reason, and idempotency key are required.", { packageId, tenantId });
+    const invoices = await this.billingRepository.listTenantInvoices(tenantId);
+    const balance = balanceKopeks(invoices as unknown as Array<Record<string, unknown>>);
+    if (balance < selectedPackage.priceKopeks) return deniedEnvelope(BILLING_SERVICE, "purchaseAiDialogPackage", "balance_insufficient", "Insufficient balance for the AI dialog package.", { balanceKopeks: balance, packageId, priceKopeks: selectedPackage.priceKopeks, tenantId });
+    const providerInvoiceId = `ai-package:${tenantId}:${packageId}:${idempotencyKey}`;
+    const synced = await this.syncProviderBillingState({ actor: input.actor, eventType: "balance.ai_package_purchase", idempotencyKey: providerInvoiceId, invoice: { amountDue: selectedPackage.priceKopeks, amountPaid: selectedPackage.priceKopeks, currency: "RUB", paymentStatus: "succeeded", providerInvoiceId, status: "paid" }, provider: "internal-ai-package-purchase", reason, tenantId });
+    if (synced.status !== "ok") return synced;
+    if (synced.data?.duplicate !== true) await this.billingRepository.saveTenant({ ...tenant, usage: { ...tenant.usage, aiDialogCredits: tenant.usage.aiDialogCredits + selectedPackage.dialogCount } });
+    const updated = await this.findTenant(tenantId);
+    return createEnvelope({ service: BILLING_SERVICE, operation: "purchaseAiDialogPackage", traceId: billingTraceId(BILLING_SERVICE, "purchaseAiDialogPackage"), meta: apiMeta({ tenantId }), data: { balance: { amountKopeks: balance - selectedPackage.priceKopeks, currency: "RUB" }, duplicate: synced.data?.duplicate === true, package: selectedPackage, remainingDialogs: Math.max(0, Number(updated?.usage.aiDialogCredits ?? 0) - Number(updated?.usage.aiDialogs ?? 0)) } });
   }
 
   async syncTenantOperatorSeats(input: { seats?: number; tenantId?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -910,6 +938,35 @@ export class BillingService {
     });
     if (synced.status !== "ok") return synced;
     return createEnvelope({ service: BILLING_SERVICE, operation: "chargeTenantDailySubscription", traceId: billingTraceId(BILLING_SERVICE, "chargeTenantDailySubscription"), meta: apiMeta({ tenantId }), data: { amountKopeks, balance: { amountKopeks: balance - amountKopeks, currency: "RUB" }, chargeDate, duplicate: synced.data?.duplicate === true } });
+  }
+
+  /** Charges exactly once for a conversation that received an AI bot answer. */
+  async chargeAiProcessedDialog(tenantId: string, conversationId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const reserved = await this.reserveAiProcessedDialog(tenantId, conversationId);
+    if (reserved.status !== "ok") return reserved;
+    return this.commitAiProcessedDialog(String(reserved.data?.reservationId ?? ""), tenantId, conversationId);
+  }
+
+  async reserveAiProcessedDialog(tenantId: string, conversationId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const safeConversationId = String(conversationId ?? "").trim();
+    const tenant = await this.findTenant(tenantId);
+    if (!tenant) return notFoundEnvelope(BILLING_SERVICE, "reserveAiProcessedDialog", "tenant_not_found", "Tenant was not found.", { tenantId });
+    if (!safeConversationId) return invalidEnvelope(BILLING_SERVICE, "reserveAiProcessedDialog", "conversation_id_required", "AI dialog billing requires a conversation id.", { tenantId });
+
+    const key = `ai-dialog:${tenantId}:${safeConversationId}`;
+    const reserved = await this.reserveQuota({ idempotencyKey: `${key}:reserve`, requested: 1, resource: "ai_dialogs", tenantId });
+    if (reserved.status !== "ok") return deniedEnvelope(BILLING_SERVICE, "reserveAiProcessedDialog", "ai_dialog_package_exhausted", "No prepaid AI dialogs are available.", { conversationId: safeConversationId, tenantId });
+    return reserved;
+  }
+
+  async commitAiProcessedDialog(reservationId: string, tenantId: string, conversationId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const committed = await this.commitQuotaReservation({ idempotencyKey: `ai-dialog:${tenantId}:${conversationId}:commit`, reservationId });
+    if (committed.status !== "ok") return committed;
+    return createEnvelope({ service: BILLING_SERVICE, operation: "commitAiProcessedDialog", traceId: billingTraceId(BILLING_SERVICE, "commitAiProcessedDialog"), meta: apiMeta({ tenantId }), data: { conversationId, duplicate: committed.data?.duplicate === true, remainingDialogs: Math.max(0, Number(committed.data?.limit ?? 0) - Number(committed.data?.usedAfter ?? 0)) } });
+  }
+
+  async releaseAiProcessedDialog(reservationId: string, tenantId: string, conversationId: string): Promise<BackendEnvelope<Record<string, unknown>>> {
+    return this.releaseQuotaReservation({ idempotencyKey: `ai-dialog:${tenantId}:${conversationId}:release`, reservationId });
   }
 
   async startTenantCheckout(tenantId: string, payload: TenantCheckoutPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -1826,6 +1883,7 @@ function quotaReservationResponseData(reservation: BillingQuotaReservation, dupl
 
 function quotaMetric(tenant: TenantBillingState, tariff: BillingTariff | undefined, resource: string, reserved = 0): QuotaMetric | undefined {
   const metrics: Record<string, { limit: number; used: number }> = {
+    ai_dialogs: { used: tenant.usage.aiDialogs, limit: tenant.usage.aiDialogCredits },
     ai: { used: tenant.usage.aiTokens, limit: tariff?.aiTokens ?? 0 },
     bots: { used: tenant.usage.botRuns, limit: tariff?.botRuns ?? 0 },
     channels: { used: tenant.usage.channels, limit: tariff?.workspaceLimit ?? 0 },
@@ -2207,9 +2265,11 @@ function balanceKopeks(invoices: Array<Record<string, unknown>>): number {
     if (invoice.paymentStatus !== "succeeded") return total;
     if (invoice.provider === "manual-balance") return total + Math.max(0, Number(invoice.amountPaid ?? 0));
     if (invoice.provider === "internal-daily-charge") return total - Math.max(0, Number(invoice.amountPaid ?? 0));
+    if (invoice.provider === "internal-ai-package-purchase") return total - Math.max(0, Number(invoice.amountPaid ?? 0));
     return total;
   }, 0);
 }
+
 
 function deniedEnvelope(service: string, operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
   return createEnvelope({

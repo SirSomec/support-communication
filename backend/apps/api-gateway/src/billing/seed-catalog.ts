@@ -18,6 +18,8 @@ export const tenantBillingStates: TenantBillingState[] = [
     healthScore: 91,
     sla: "99.9",
     usage: {
+      aiDialogCredits: 0,
+      aiDialogs: 0,
       aiTokens: 1250000,
       botRuns: 8400,
       channels: 6,
@@ -41,6 +43,8 @@ export const tenantBillingStates: TenantBillingState[] = [
     healthScore: 77,
     sla: "99.5",
     usage: {
+      aiDialogCredits: 0,
+      aiDialogs: 0,
       aiTokens: 5100000,
       botRuns: 69000,
       channels: 12,
@@ -64,6 +68,8 @@ export const tenantBillingStates: TenantBillingState[] = [
     healthScore: 84,
     sla: "99.0",
     usage: {
+      aiDialogCredits: 0,
+      aiDialogs: 0,
       aiTokens: 180000,
       botRuns: 1200,
       channels: 3,

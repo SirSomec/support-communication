@@ -33,6 +33,7 @@ import {
 } from "./bot-feedback.repository.js";
 import { PlatformRepository } from "../platform/platform.repository.js";
 import { metricsRegistry } from "@support-communication/observability";
+import { BillingService } from "../billing/billing.service.js";
 
 const AUTOMATION_SERVICE = "automationService";
 const VALID_NODE_TYPES = new Set(["message", "ai_reply", "quick_replies", "condition", "contact_request", "webhook", "handoff", "fallback"]);
@@ -123,7 +124,8 @@ export class AutomationService {
     private readonly exposureRepository: ProactiveExposureRepository = ProactiveExposureRepository.default(),
     private readonly knowledgeSourceRepository: KnowledgeSourceRepository = KnowledgeSourceRepository.default(),
     private readonly botFeedbackRepository: BotFeedbackRepositoryPort = BotFeedbackRepository.default(),
-    private readonly platformRepository: PlatformRepository = PlatformRepository.default()
+    private readonly platformRepository: PlatformRepository = PlatformRepository.default(),
+    private readonly billingService: BillingService = new BillingService()
   ) {
     this.scenarios = [];
     this.rules = [];
@@ -1265,7 +1267,7 @@ export class AutomationService {
       ?? (isBotAiAgentsFlagEnforced()
         ? await this.platformRepository.listFeatureFlagsAsync()
         : undefined);
-    return new BotRuntimeService(this.automationRepository, { ...options, featureFlags }).handleInboundEvent(event);
+    return new BotRuntimeService(this.automationRepository, { ...options, featureFlags, aiDialogBilling: options.aiDialogBilling ?? this.billingService }).handleInboundEvent(event);
   }
 
   async rollbackBotRuntimeVersion(tenantId: string, scenarioId: string, versionId: string) {

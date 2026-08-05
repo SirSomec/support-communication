@@ -24,12 +24,14 @@ const formatPrice = (amount) => new Intl.NumberFormat("ru-RU", { style: "currenc
 
 export function PricingPage({ onNavigateAuth = () => {}, onRequestDemo = () => {}, onStartFree = () => {} }) {
   const [tariffs, setTariffs] = React.useState([]);
+  const [aiDialogPackages, setAiDialogPackages] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   React.useEffect(() => {
     let cancelled = false;
     void publicCatalogService.fetchTariffs().then((response) => {
       if (!cancelled) {
         setTariffs(response.status === "ok" && Array.isArray(response.data?.items) ? response.data.items : []);
+        setAiDialogPackages(response.status === "ok" && Array.isArray(response.data?.aiDialogPackages) ? response.data.aiDialogPackages : []);
         setLoading(false);
       }
     });
@@ -43,6 +45,8 @@ export function PricingPage({ onNavigateAuth = () => {}, onRequestDemo = () => {
       const enterprise = tariff.id === "enterprise";
       return <article className={`pricing-card${free ? " featured" : ""}`} key={tariff.id}><header><strong>{tariff.name}</strong><span>{free ? "Чтобы попробовать сервис" : enterprise ? "Для компаний с особыми требованиями" : "Стоимость за сотрудника в месяц"}</span></header>{!enterprise && <div className="pricing-price">{free ? "Бесплатно" : formatPrice(tariff.priceMonthly)}</div>}<p>{tariff.ownerOnly ? "Для одного сотрудника — владельца организации" : enterprise ? `До ${tariff.includedUsers} сотрудников` : `${formatPrice(tariff.priceMonthly)} за сотрудника · до ${tariff.includedUsers} сотрудников`}</p><ul>{(tariff.features ?? []).map((feature) => <li key={feature}><CheckCircle2 size={16} />{featureLabels[feature] ?? "Дополнительные возможности"}</li>)}</ul>{enterprise ? <button className="public-btn secondary" onClick={() => onRequestDemo({ planInterest: "enterprise", source: "pricing-enterprise", title: "Обсуждение индивидуального тарифа" })} type="button">Связаться с нами</button> : <button className={`public-btn ${free ? "primary" : "secondary"}`} onClick={() => onStartFree({ plan: "free", source: "pricing-card" })} type="button">{free ? "Начать бесплатно" : "Попробовать бесплатно"}<ArrowRight size={16} /></button>}</article>;
     })}</section>
+    <section className="pricing-hero"><span>AI-бот</span><h2>Пакеты обработанных диалогов</h2><p>AI-бот оплачивается отдельно от операторов. Диалог списывается один раз — после первого успешного ответа бота. Бесплатных AI-ответов нет.</p></section>
+    <section className="pricing-grid" aria-label="Пакеты AI-диалогов">{aiDialogPackages.map((item) => <article className="pricing-card" key={item.id}><header><strong>{item.dialogCount.toLocaleString("ru-RU")} диалогов</strong><span>{item.discountPercent ? `Скидка ${item.discountPercent}%` : "Базовая стоимость 20 ₽ за диалог"}</span></header><div className="pricing-price">{formatPrice(item.priceKopeks)}</div><p>{formatPrice(Math.round(item.priceKopeks / item.dialogCount))} за обработанный диалог</p><button className="public-btn secondary" onClick={() => onStartFree({ plan: "free", source: `pricing-${item.id}` })} type="button">Начать работу<ArrowRight size={16} /></button></article>)}</section>
   </main>;
 }
 

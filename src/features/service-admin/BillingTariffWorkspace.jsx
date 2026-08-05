@@ -8,6 +8,7 @@ import { formatKopeks, formatLabel, getStatusTone } from "./serviceAdminUtils.js
 export function BillingTariffWorkspace({ onAudit }) {
   const [tenants, setTenants] = useState([]);
   const [tariffs, setTariffs] = useState([]);
+  const [aiDialogPackages, setAiDialogPackages] = useState([]);
   const [tenantFilter, setTenantFilter] = useState("all");
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [selectedPlanId, setSelectedPlanId] = useState("scale");
@@ -19,6 +20,7 @@ export function BillingTariffWorkspace({ onAudit }) {
   const [balance, setBalance] = useState(0);
   const [topUpAmount, setTopUpAmount] = useState("1000");
   const [topUpReason, setTopUpReason] = useState("Ручное пополнение баланса");
+  const [selectedAiPackageId, setSelectedAiPackageId] = useState("ai-dialogs-1000");
 
   useEffect(() => {
     let cancelled = false;
@@ -37,6 +39,7 @@ export function BillingTariffWorkspace({ onAudit }) {
       const items = tenantResponse.status === "ok" ? tenantResponse.data?.items ?? [] : [];
       setTenants(items);
       setTariffs(tariffResponse.status === "ok" ? tariffResponse.data?.items ?? [] : []);
+      setAiDialogPackages(tariffResponse.status === "ok" ? tariffResponse.data?.aiDialogPackages ?? [] : []);
       setPaymentReadiness(readinessResponse.status === "ok" ? readinessResponse.data : null);
       setSelectedTenantId(items[0]?.id ?? "");
     }
@@ -67,6 +70,7 @@ export function BillingTariffWorkspace({ onAudit }) {
         const amount = Math.max(0, Number(invoice.amountPaid ?? 0));
         if (invoice.provider === "manual-balance") return sum + amount;
         if (invoice.provider === "internal-daily-charge") return sum - amount;
+        if (invoice.provider === "internal-ai-package-purchase") return sum - amount;
 
         return sum;
       }, 0));
@@ -78,6 +82,13 @@ export function BillingTariffWorkspace({ onAudit }) {
     const envelope = await billingService.topUpTenantBalance({ amountKopeks: Math.round(Number(topUpAmount) * 100), reason: topUpReason, tenantId: selectedTenant.id });
     if (envelope.status === "ok") setBalance(envelope.data.balance.amountKopeks);
     onAudit(envelope, { action: "tenant.balance.top_up", target: selectedTenant.id });
+  }
+
+  async function handleAiPackagePurchase() {
+    if (!selectedTenant || !selectedAiPackageId) return;
+    const envelope = await billingService.purchaseAiDialogPackage({ packageId: selectedAiPackageId, reason: topUpReason, tenantId: selectedTenant.id });
+    if (envelope.status === "ok") setBalance(envelope.data.balance.amountKopeks);
+    onAudit(envelope, { action: "tenant.ai_dialog_package.purchase", target: selectedTenant.id });
   }
 
   async function handlePreview() {
@@ -179,6 +190,7 @@ export function BillingTariffWorkspace({ onAudit }) {
           {selectedTenant ? <StatusBadge tone={getStatusTone(selectedTenant.status)}>{formatLabel(selectedTenant.status)}</StatusBadge> : null}
         </div>
         <div className="service-admin-action-box"><header><WalletCards size={18} /><div><strong>Баланс организации</strong><span>{formatKopeks(balance)}</span></div></header><label className="service-admin-reason-field"><span>Сумма, ₽</span><input min="1" onChange={(event) => setTopUpAmount(event.target.value)} type="number" value={topUpAmount} /></label><label className="service-admin-reason-field"><span>Причина</span><input onChange={(event) => setTopUpReason(event.target.value)} value={topUpReason} /></label><button disabled={!selectedTenant || Number(topUpAmount) <= 0 || topUpReason.trim().length < 3} onClick={handleTopUp} type="button">Пополнить баланс</button></div>
+        <div className="service-admin-action-box"><header><WalletCards size={18} /><div><strong>Пакет AI-диалогов</strong><span>Списание из баланса организации</span></div></header><label className="service-admin-reason-field"><span>Пакет</span><select onChange={(event) => setSelectedAiPackageId(event.target.value)} value={selectedAiPackageId}>{aiDialogPackages.map((item) => <option key={item.id} value={item.id}>{item.dialogCount.toLocaleString("ru-RU")} диалогов — {formatKopeks(item.priceKopeks)}</option>)}</select></label><button disabled={!selectedTenant || !selectedAiPackageId || topUpReason.trim().length < 3} onClick={handleAiPackagePurchase} type="button">Начислить пакет</button></div>
 
         <div className="tariff-card-grid">
           {tariffs.map((tariff) => (

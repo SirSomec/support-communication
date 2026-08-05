@@ -124,6 +124,25 @@ describe("YooKassa checkout provider", () => {
     assert.equal(replay.data.balance?.amountKopeks, 125000);
   });
 
+  it("charges an active paid subscription once per day from the tenant balance", async () => {
+    const state = bootstrapBillingState();
+    const subscription = state.subscriptions.find((item) => item.tenantId === "tenant-lumen");
+    assert.ok(subscription);
+    subscription.status = "active";
+    const billing = new BillingService(BillingRepository.inMemory(state));
+    await billing.topUpTenantBalance({ amountKopeks: 500000, idempotencyKey: "daily-charge-credit", reason: "Prepaid balance for daily billing", tenantId: "tenant-lumen" });
+    const date = new Date("2026-08-05T12:00:00.000Z");
+    const first = await billing.chargeTenantDailySubscription("tenant-lumen", date);
+    assert.equal(first.status, "ok");
+    assert.equal(first.data.amountKopeks, 30193);
+    assert.equal(first.data.balance?.amountKopeks, 469807);
+    const replay = await billing.chargeTenantDailySubscription("tenant-lumen", date);
+    assert.equal(replay.status, "ok");
+    assert.equal(replay.data.duplicate, true);
+    const overview = await billing.fetchTenantBillingOverview("tenant-lumen");
+    assert.equal(overview.data.balance?.amountKopeks, 469807);
+  });
+
   it("shows the service-admin entitlement tariff while provider reconciliation is pending", async () => {
     const billing = new BillingService(BillingRepository.inMemory(bootstrapBillingState()));
     const changed = await billing.changeTenantTariff({

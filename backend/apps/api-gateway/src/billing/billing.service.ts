@@ -875,6 +875,43 @@ export class BillingService {
     });
   }
 
+  async chargeDailySubscriptions(now = new Date()): Promise<{ charged: number; insufficientFunds: number; skipped: number; tenantIds: string[] }> {
+    const subscriptions = await this.billingRepository.listActiveSubscriptions();
+    const result = { charged: 0, insufficientFunds: 0, skipped: 0, tenantIds: [] as string[] };
+    for (const subscription of subscriptions) {
+      const charged = await this.chargeTenantDailySubscription(subscription.tenantId, now);
+      if (charged.status === "ok") { result.charged += 1; result.tenantIds.push(subscription.tenantId); }
+      else if (charged.status === "denied" && charged.error?.code === "balance_insufficient") result.insufficientFunds += 1;
+      else result.skipped += 1;
+    }
+    return result;
+  }
+
+  async chargeTenantDailySubscription(tenantId: string, now = new Date()): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const tenant = await this.findTenant(tenantId);
+    const subscription = await this.billingRepository.findTenantSubscription(tenantId);
+    const tariff = tenant ? await this.findTariff(tenant.planId) : undefined;
+    if (!tenant || !subscription || !tariff || tariff.billingAvailability === "free" || subscription.status !== "active" || subscription.cancelAtPeriodEnd) {
+      return invalidEnvelope(BILLING_SERVICE, "chargeTenantDailySubscription", "daily_charge_not_applicable", "The tenant does not have an active paid subscription.", { tenantId });
+    }
+    const chargeDate = now.toISOString().slice(0, 10);
+    const amountKopeks = dailyChargeKopeks(tariff.priceMonthly, subscription.seats, now);
+    const invoices = await this.billingRepository.listTenantInvoices(tenantId);
+    const balance = balanceKopeks(invoices as unknown as Array<Record<string, unknown>>);
+    if (balance < amountKopeks) {
+      return deniedEnvelope(BILLING_SERVICE, "chargeTenantDailySubscription", "balance_insufficient", "Insufficient balance for the daily subscription charge.", { amountKopeks, balanceKopeks: balance, chargeDate, tenantId });
+    }
+    const synced = await this.syncProviderBillingState({
+      eventType: "balance.daily_charge",
+      idempotencyKey: `daily-charge:${tenantId}:${chargeDate}`,
+      invoice: { amountDue: amountKopeks, amountPaid: amountKopeks, currency: "RUB", paymentStatus: "succeeded", providerInvoiceId: `daily-charge:${tenantId}:${chargeDate}`, status: "paid" },
+      provider: "internal-daily-charge",
+      tenantId
+    });
+    if (synced.status !== "ok") return synced;
+    return createEnvelope({ service: BILLING_SERVICE, operation: "chargeTenantDailySubscription", traceId: billingTraceId(BILLING_SERVICE, "chargeTenantDailySubscription"), meta: apiMeta({ tenantId }), data: { amountKopeks, balance: { amountKopeks: balance - amountKopeks, currency: "RUB" }, chargeDate, duplicate: synced.data?.duplicate === true } });
+  }
+
   async startTenantCheckout(tenantId: string, payload: TenantCheckoutPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {
     const tenant = await this.findTenant(tenantId);
     const request = payload ?? {};
@@ -2166,8 +2203,31 @@ function providerSyncResponseData(input: {
 }
 
 function balanceKopeks(invoices: Array<Record<string, unknown>>): number {
-  return invoices.filter((invoice) => invoice.provider === "manual-balance" && invoice.paymentStatus === "succeeded")
-    .reduce((total, invoice) => total + Math.max(0, Number(invoice.amountPaid ?? 0) - Number(invoice.amountDue ?? 0)), 0);
+  return invoices.reduce((total, invoice) => {
+    if (invoice.paymentStatus !== "succeeded") return total;
+    if (invoice.provider === "manual-balance") return total + Math.max(0, Number(invoice.amountPaid ?? 0));
+    if (invoice.provider === "internal-daily-charge") return total - Math.max(0, Number(invoice.amountPaid ?? 0));
+    return total;
+  }, 0);
+}
+
+function deniedEnvelope(service: string, operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {
+  return createEnvelope({
+    service,
+    operation,
+    traceId: billingTraceId(service, operation),
+    status: "denied",
+    meta: apiMeta(),
+    data,
+    error: { code, message }
+  });
+}
+
+function dailyChargeKopeks(unitAmountMonthly: number, seats: number, now: Date): number {
+  const days = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  const day = now.getUTCDate();
+  const monthly = Math.max(0, Math.floor(unitAmountMonthly)) * Math.max(1, Math.floor(seats));
+  return Math.floor(monthly * day / days) - Math.floor(monthly * (day - 1) / days);
 }
 
 function paymentSummary(invoices: BillingInvoiceState[]): Record<string, unknown> {

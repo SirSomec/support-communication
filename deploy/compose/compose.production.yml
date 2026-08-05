@@ -332,6 +332,14 @@ services:
       BILLING_SYNC_PROVIDER_URL: ${BILLING_SYNC_PROVIDER_URL:-}
       OUTBOX_QUEUE: billing-sync
 
+  daily-billing-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/billing/daily-billing.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: daily-billing-worker
+      DAILY_BILLING_WORKER_INTERVAL_MS: ${DAILY_BILLING_WORKER_INTERVAL_MS:-3600000}
+
   file-scan-scanner-worker:
     <<: *runtime-service
     command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/outbox-worker/dist/main.js", "--file-scan-scanner"]

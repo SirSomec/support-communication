@@ -16,6 +16,7 @@
 - [x] Add server-calculated tenant balance and service-admin manual balance top-ups with an idempotency key and recorded billing event.
 - [x] Synchronize an owner-selected operator limit with billing subscription seats and calculate billing revenue per seat.
 - [x] Treat the service-admin entitlement as the current tariff while provider reconciliation is pending.
+- [x] Charge active paid subscriptions daily from the tenant balance with calendar-day proration and replay safety.
 
 ## Important milestones
 
@@ -23,3 +24,4 @@
 - The tenant settings panel is informational for the tariff and actionable only for its allowed operator limit.
 - Free remains immutable at one operator-owner.
 - The billing subscription now receives the selected number of paid-plan seats, while `unitAmountMonthly` remains the per-operator price.
+- Daily debits are posted as balance operations; if funds are insufficient, no debit is recorded and the next worker run retries the charge.

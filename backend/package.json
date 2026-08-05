@@ -68,6 +68,7 @@
     "report-export:worker:once": "npm run build && node --env-file=.env.example scripts/report-export-worker-smoke.mjs",
     "quota-expiration:worker:once": "npm run build && node --env-file=.env.example apps/api-gateway/dist/billing/quota-expiration.main.js --once",
     "yookassa-renewal:worker:once": "npm run build && node --env-file=.env.example apps/api-gateway/dist/billing/yookassa-renewal.main.js --once",
+    "daily-billing:worker:once": "npm run build && node --env-file=.env.example apps/api-gateway/dist/billing/daily-billing.main.js --once",
     "report-object-storage:live-smoke": "node scripts/report-object-storage-live-smoke.mjs",
     "file-scan:worker:once": "npm run build && node --env-file=.env.example scripts/file-scan-worker-smoke.mjs",
     "file-scan:api-callback-smoke": "npm run build && node --env-file=.env.example scripts/file-scan-api-callback-smoke.mjs",

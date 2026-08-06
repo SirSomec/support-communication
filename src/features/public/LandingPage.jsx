@@ -149,20 +149,21 @@ const faqItems = [
 ];
 
 const tariffFeatureLabels = {
-  "advanced-automation": "Расширенная автоматизация",
-  "basic-analytics": "Базовые отчёты",
-  "custom-integrations": "Кастомные интеграции",
-  "custom-sla": "Индивидуальный SLA",
-  "data-residency": "Региональное хранение данных",
-  "dedicated-success": "Выделенный CSM",
-  "email-support": "Поддержка по email",
-  exports: "Экспорт отчётов и аудита",
-  omnichannel: "Омниканальная очередь",
-  routing: "Маршрутизация диалогов",
-  "shared-inbox": "Общая очередь",
-  sla: "SLA-контроль",
-  sso: "SAML и SSO",
-  "quality-ai": "ИИ-оценка качества"
+  "advanced-automation": "Автоматизация повторяющихся задач",
+  "basic-analytics": "Основные показатели работы",
+  "custom-integrations": "Подключение нужных вам сервисов",
+  "custom-sla": "Согласованный срок ответа службы поддержки",
+  "data-residency": "Хранение данных в выбранной стране",
+  "dedicated-success": "Персональный менеджер",
+  "email-support": "Поддержка по электронной почте",
+  exports: "Выгрузка данных",
+  omnichannel: "Обращения из разных каналов в одном месте",
+  routing: "Распределение обращений между сотрудниками",
+  "shared-inbox": "Все обращения в одном окне",
+  "website-chat": "Чат на сайте",
+  sla: "Контроль времени ответа",
+  sso: "Единый вход для сотрудников",
+  "quality-ai": "Проверка качества ответов с помощью искусственного интеллекта"
 };
 
 function ClientLogos() {
@@ -471,10 +472,10 @@ export function LandingPage({
               >
                 <header>
                   <strong>{tariff.name}</strong>
-                  {isFeatured ? <span className="public-tariff-flag">популярный</span> : <span>в месяц</span>}
+                  <span>{isFeatured ? "Чтобы попробовать сервис" : isEnterprise ? "Для компаний с особыми требованиями" : "Стоимость за сотрудника в месяц"}</span>
                 </header>
-                <div className="public-price">{isEnterprise ? "Индивидуально" : formatTariffPrice(tariff.priceMonthly)}</div>
-                <p>{tariff.billingAvailability === "free" ? "Один оператор-владелец" : `${formatTariffPrice(tariff.priceMonthly)} за оператора в месяц · до ${tariff.includedUsers} операторов`}</p>
+                {!isEnterprise && <div className="public-price">{tariff.billingAvailability === "free" ? "Бесплатно" : formatTariffPrice(tariff.priceMonthly)}</div>}
+                <p>{tariff.billingAvailability === "free" ? "Для одного сотрудника — владельца организации" : isEnterprise ? `До ${tariff.includedUsers} сотрудников` : `${formatTariffPrice(tariff.priceMonthly)} за сотрудника · до ${tariff.includedUsers} сотрудников`}</p>
                 <ul>
                   {(tariff.features ?? []).map((feature) => (
                     <li key={feature}><CheckCircle2 size={15} /> {tariffFeatureLabels[feature] ?? feature}</li>
@@ -487,7 +488,7 @@ export function LandingPage({
                     onClick={() => handleDemoRequest?.({ planInterest: "enterprise", source: "landing-tariff-contact", title: "Контакт по запросу" })}
                     type="button"
                   >
-                    Контакт по запросу
+                    Связаться с нами
                   </button>
                 ) : (
                   <button
@@ -495,7 +496,7 @@ export function LandingPage({
                     onClick={() => onStartFree({ plan: "free", source: "landing-tariff" })}
                     type="button"
                   >
-                    {isFeatured ? "Начать бесплатно" : "Начать с Free"}
+                    {isFeatured ? "Начать бесплатно" : "Попробовать бесплатно"}
                   </button>
                 )}
               </article>
@@ -683,7 +684,7 @@ export default LandingPage;
 
 function formatTariffPrice(value) {
   const price = Number(value);
-  return Number.isFinite(price) ? `${new Intl.NumberFormat("ru-RU").format(price)} ₽` : "По запросу";
+  return Number.isFinite(price) ? `${new Intl.NumberFormat("ru-RU").format(price / 100)} ₽` : "По запросу";
 }
 
 function defaultRequestForm(overrides = {}) {

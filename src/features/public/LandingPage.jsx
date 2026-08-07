@@ -21,7 +21,7 @@ import {
   Zap
 } from "lucide-react";
 import { publicCatalogService } from "../../services/publicCatalogService.js";
-import operatorCockpitPreview from "../../assets/operator-cockpit-concept.png";
+import operatorCockpitPreview from "../../assets/operator-cockpit-concept.jpg";
 import "./public.css";
 
 const noop = () => {};
@@ -273,8 +273,8 @@ export function LandingPage({
           <a href="#capabilities">Возможности</a>
           <a href="#ai-agent">ИИ-бот</a>
           <a href="#channels">Каналы</a>
-          <a href="#/pricing">Тарифы</a>
-          <a href="#/docs">Документация API</a>
+          <a href="/pricing/">Тарифы</a>
+          <a href="/docs/">Документация API</a>
           <a href="#faq">FAQ</a>
         </nav>
         <div className="public-nav-actions">
@@ -328,7 +328,9 @@ export function LandingPage({
           </div>
           <img
             alt="Рабочее место оператора: очередь диалогов, чат с клиентом и карточка клиента"
+            height={759}
             src={operatorCockpitPreview}
+            width={1200}
           />
         </div>
       </section>
@@ -474,7 +476,7 @@ export function LandingPage({
                   <strong>{tariff.name}</strong>
                   <span>{isFeatured ? "Чтобы попробовать сервис" : isEnterprise ? "Для компаний с особыми требованиями" : "Стоимость за сотрудника в месяц"}</span>
                 </header>
-                {!isEnterprise && <div className="public-price">{tariff.billingAvailability === "free" ? "Бесплатно" : formatTariffPrice(tariff.priceMonthly)}</div>}
+                <div className="public-price">{tariff.billingAvailability === "free" ? "Бесплатно" : isEnterprise ? "Индивидуально" : formatTariffPrice(tariff.priceMonthly)}</div>
                 <p>{tariff.billingAvailability === "free" ? "Для одного сотрудника — владельца организации" : isEnterprise ? `До ${tariff.includedUsers} сотрудников` : `${formatTariffPrice(tariff.priceMonthly)} за сотрудника · до ${tariff.includedUsers} сотрудников`}</p>
                 <ul>
                   {(tariff.features ?? []).map((feature) => (
@@ -546,19 +548,19 @@ export function LandingPage({
           <div className="public-footer-column">
             <strong>Продукт</strong>
             <a href="#capabilities">Возможности</a>
-            <a href="#/pricing">Тарифы</a>
+            <a href="/pricing/">Тарифы</a>
             <a href="#channels">Каналы и SDK</a>
             <span>Статус API: {apiStatusLabel}</span>
           </div>
           <div className="public-footer-column">
             <strong>Ресурсы</strong>
-            <a href="#/docs">Документация API</a>
+            <a href="/docs/">Документация API</a>
             <span>Руководство по ИИ</span>
             <span>Безопасность</span>
           </div>
           <div className="public-footer-column">
             <strong>Контакты</strong>
-            <span>sales@supportcomm.ru</span>
+            <span>sales@supportcom.ru</span>
             <span>Telegram: @supportcomm</span>
             <span>Демо по запросу</span>
           </div>

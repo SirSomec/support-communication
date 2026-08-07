@@ -6,18 +6,35 @@ import { serviceAdminSpaFallback } from "./vite.service-admin-fallback.js";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, isSsrBuild }) => {
   const env = loadEnv(mode, rootDir, "");
+  const publicSiteBuildConfig = {
+    PUBLIC_SITE_ORIGIN: env.PUBLIC_SITE_ORIGIN || "https://supportcom.ru",
+    PUBLIC_SITE_INDEXABLE: env.PUBLIC_SITE_INDEXABLE || (mode === "production" ? "true" : "false")
+  };
   return {
     plugins: [react(), serviceAdminSpaFallback()],
+    define: {
+      __PUBLIC_SITE_BUILD_CONFIG__: JSON.stringify(publicSiteBuildConfig)
+    },
     appType: "mpa",
     build: {
-      rollupOptions: {
-        input: {
-          main: resolve(rootDir, "index.html"),
-          "service-admin": resolve(rootDir, "service-admin/index.html")
-        }
-      }
+      ...(isSsrBuild
+        ? {
+            outDir: resolve(rootDir, ".prerender"),
+            emptyOutDir: true,
+            rollupOptions: {
+              output: { entryFileNames: "public-server-entry.js" }
+            }
+          }
+        : {
+            rollupOptions: {
+              input: {
+                main: resolve(rootDir, "index.html"),
+                "service-admin": resolve(rootDir, "service-admin/index.html")
+              }
+            }
+          })
     },
     server: {
       port: Number(env.PORT) || 5173,

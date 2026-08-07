@@ -266,7 +266,7 @@ export function ApiDocsPage() {
   return (
     <main className="api-docs-page" data-testid="api-docs-page">
       <header className="api-docs-header">
-        <a className="api-docs-brand" href="#/landing">
+        <a className="api-docs-brand" href="/">
           <span>SC</span>
           <strong>Support Communication</strong>
         </a>
@@ -275,7 +275,7 @@ export function ApiDocsPage() {
             OpenAPI
             <ExternalLink size={15} />
           </a>
-          <a className="api-docs-back-link" href="#/landing">
+          <a className="api-docs-back-link" href="/">
             <ArrowLeft size={15} />
             На главную
           </a>

@@ -3,23 +3,17 @@ import { legacyServiceAdminHashToPath } from "../service-admin/serviceAdminPath.
 
 const routeByHash = {
   "#/app": { namespace: "app", view: "dialogs" },
-  "#/landing": { namespace: "public", view: "landing" },
-  "#/pricing": { namespace: "public", view: "pricing" },
-  "#/docs": { namespace: "public", view: "docs" },
   "#/login": { namespace: "auth", view: "login" },
   "#/auth": { namespace: "auth", view: "login" },
   "#/onboarding": { namespace: "onboarding", view: "organization" }
 };
 
-const defaultRoute = { namespace: "public", view: "landing" };
+const defaultRoute = { namespace: "auth", view: "login" };
 
 const hashByPathPattern = [
   [/^\/(auth|login)(\/|$)/, "#/login"],
   [/^\/app(\/|$)/, "#/app"],
-  [/^\/onboarding(\/|$)/, "#/onboarding"],
-  [/^\/landing(\/|$)/, "#/landing"],
-  [/^\/pricing(\/|$)/, "#/pricing"],
-  [/^\/docs(\/|$)/, "#/docs"]
+  [/^\/onboarding(\/|$)/, "#/onboarding"]
 ];
 
 // Прямые URL вида /auth/login приводим к hash-роуту до первого рендера,
@@ -53,6 +47,15 @@ export function useWorkspaceRoute({
 
   useEffect(() => {
     function handleHashChange() {
+      if (["#/landing", "#/pricing", "#/docs"].includes(window.location.hash)) {
+        const pathname = window.location.hash === "#/pricing"
+          ? "/pricing/"
+          : window.location.hash === "#/docs"
+            ? "/docs/"
+            : "/";
+        window.location.replace(pathname);
+        return;
+      }
       setRoute(parseCurrentRoute());
     }
 
@@ -99,8 +102,8 @@ export function useWorkspaceRoute({
   const actions = useMemo(() => ({
     openApp: () => navigate("app", "dialogs"),
     openAuth: () => navigate("auth", "login"),
-    openLanding: () => navigate("public", "landing"),
-    openPricing: () => navigate("public", "pricing"),
+    openLanding: () => window.location.assign("/"),
+    openPricing: () => window.location.assign("/pricing/"),
     openOnboarding: () => navigate("onboarding", "organization"),
     completeAuth: async (payload) => {
       onAuthenticated?.(payload);
@@ -127,14 +130,15 @@ function parseCurrentRoute() {
     return defaultRoute;
   }
 
-  return routeByHash[window.location.hash] ?? defaultRoute;
+  const exactRoute = routeByHash[window.location.hash];
+  if (exactRoute) return exactRoute;
+  if (window.location.hash.startsWith("#/app/")) return routeByHash["#/app"];
+  if (window.location.hash.startsWith("#/auth/")) return routeByHash["#/auth"];
+  if (window.location.hash.startsWith("#/onboarding/")) return routeByHash["#/onboarding"];
+  return defaultRoute;
 }
 
 function hashForRoute(route) {
-  if (route.namespace === "public") {
-    return route.view === "docs" ? "#/docs" : route.view === "pricing" ? "#/pricing" : "#/landing";
-  }
-
   if (route.namespace === "auth") {
     return "#/login";
   }

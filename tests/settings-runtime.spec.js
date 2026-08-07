@@ -15,7 +15,7 @@ async function loginTenantOperator(request) {
 
 async function openAppShell(page, session) {
   if (page.url() === "about:blank") {
-    await page.goto("/#/landing");
+    await page.goto("/");
   }
 
   await page.evaluate((storedSession) => {

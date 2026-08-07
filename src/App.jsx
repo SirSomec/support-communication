@@ -28,16 +28,12 @@ import { DraftSwitchDialog, OutboundDialogLauncher, SaveTemplateDialog } from ".
 import { Sidebar, TopBar } from "./features/app-shell/AppShell.jsx";
 import { SectionRouter } from "./features/section-router.jsx";
 import { permissionService } from "./services/permissionService.js";
-import { publicLeadService } from "./services/publicLeadService.js";
 import { qualityService } from "./services/qualityService.js";
 import { settingsService } from "./services/settingsService.js";
 import { ScreenStateStrip, Skeleton, Toast, WorkspaceState } from "./ui.jsx";
 
 const ROLE_SWITCHER_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROLE_SWITCHER === "true";
 const SERVICE_ADMIN_UNAVAILABLE_MESSAGE = "Откройте /service-admin — этот раздел недоступен из рабочего места организации.";
-const LandingPage = lazy(() => import("./features/public/index.js"));
-const PricingPage = lazy(() => import("./features/public/PricingPage.jsx"));
-const ApiDocsPage = lazy(() => import("./features/public/ApiDocsPage.jsx"));
 const AuthPage = lazy(() => import("./features/auth/index.js"));
 const OrganizationOnboarding = lazy(() => import("./features/onboarding/index.js"));
 
@@ -323,23 +319,6 @@ function App() {
     setTopics
   });
 
-  async function handlePublicDemoRequest(payload) {
-    const response = await publicLeadService.createDemoRequest(payload);
-
-    if (response.status === "ok") {
-      setToast("Заявка на демо принята. Мы свяжемся с вами после проверки маршрута.");
-      return response;
-    }
-
-    if (response.status === "rate_limited" && response.data?.duplicate) {
-      setToast("Заявка уже принята. Повторная отправка ограничена.");
-      return response;
-    }
-
-    setToast(response.error?.message ?? "Не удалось отправить заявку на демо.");
-    return response;
-  }
-
   function handleNotificationNavigation(actionTarget, item) {
     const resolvedTarget = resolveNotificationNavigationTarget(actionTarget);
 
@@ -453,33 +432,6 @@ function App() {
       ignore = true;
     };
   }, [tenantSession.authenticated]);
-
-  if (route.namespace === "public") {
-    return (
-      <div data-testid={route.view === "docs" ? "route-public-docs" : route.view === "pricing" ? "route-public-pricing" : "route-public-landing"}>
-        <Suspense fallback={<RouteLoading label="Загрузка публичного контура" />}>
-          {route.view === "docs" ? (
-            <ApiDocsPage />
-          ) : route.view === "pricing" ? (
-            <PricingPage
-              demoRequestEnabled
-              onNavigateAuth={routeActions.openAuth}
-              onRequestDemo={handlePublicDemoRequest}
-              onStartFree={routeActions.openOnboarding}
-            />
-          ) : (
-            <LandingPage
-              demoRequestEnabled
-              onNavigateAuth={routeActions.openAuth}
-              onRequestDemo={handlePublicDemoRequest}
-              onStartFree={routeActions.openOnboarding}
-            />
-          )}
-        </Suspense>
-        {toast ? <Toast message={toast} onClose={handleToastClose} /> : null}
-      </div>
-    );
-  }
 
   if (route.namespace === "auth") {
     return (

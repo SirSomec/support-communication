@@ -199,7 +199,7 @@ test("clients segment filter and export descriptor are backend backed", async ({
 });
 
 test("public landing demo and contact request submit to backend", async ({ page }) => {
-  await page.goto("/#/landing", { waitUntil: "domcontentloaded" });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("route-public-landing")).toBeVisible({ timeout: 15000 });
 
   await expect(page.getByRole("button", { name: "Демо по запросу" })).toBeEnabled();
@@ -1604,7 +1604,7 @@ test("critical sections do not overflow responsive viewports", async ({ page }) 
 });
 
 test("route namespaces keep public auth and service admin isolated", async ({ page }) => {
-  await page.goto("/#/landing");
+  await page.goto("/");
   await expect(page.getByTestId("route-public-landing")).toBeVisible();
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await expect(page.locator(".topbar")).toHaveCount(0);
@@ -1779,7 +1779,7 @@ test("landing auth onboarding and service admin do not overflow responsive viewp
   ]) {
     await page.setViewportSize(viewport);
 
-    for (const route of ["/#/landing", "/#/login", "/#/onboarding"]) {
+    for (const route of ["/", "/#/login", "/#/onboarding"]) {
       await page.goto(route);
       await expectHealthyPage(page);
     }

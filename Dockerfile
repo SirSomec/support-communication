@@ -15,12 +15,22 @@ WORKDIR /app
 ARG VITE_ENABLE_SERVICE_ADMIN=false
 ENV VITE_ENABLE_SERVICE_ADMIN=$VITE_ENABLE_SERVICE_ADMIN
 
+ARG PUBLIC_SITE_ORIGIN=https://supportcom.ru
+ARG PUBLIC_SITE_INDEXABLE=true
+ARG PUBLIC_SITE_GOOGLE_VERIFICATION=""
+ARG PUBLIC_SITE_YANDEX_VERIFICATION=""
+ENV PUBLIC_SITE_ORIGIN=$PUBLIC_SITE_ORIGIN \
+  PUBLIC_SITE_INDEXABLE=$PUBLIC_SITE_INDEXABLE \
+  PUBLIC_SITE_GOOGLE_VERIFICATION=$PUBLIC_SITE_GOOGLE_VERIFICATION \
+  PUBLIC_SITE_YANDEX_VERIFICATION=$PUBLIC_SITE_YANDEX_VERIFICATION
+
 COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY index.html vite.config.js vite.service-admin-fallback.js ./
 COPY service-admin ./service-admin
 COPY public ./public
+COPY scripts ./scripts
 COPY src ./src
 COPY --from=widget-build /app/packages/web-widget/dist/widget.js ./public/widget.js
 RUN npm run build

@@ -65,6 +65,9 @@ RUN npm ci \
 
 FROM backend-build AS backend-migrations
 
+RUN rm -rf /usr/local/lib/node_modules/npm \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx
+
 ENV NODE_ENV=production
 
 CMD ["node", "scripts/run-prisma.mjs", "prisma", "migrate", "deploy", "--schema", "prisma/schema.prisma"]
@@ -75,6 +78,9 @@ RUN apk add --no-cache poppler-utils \
   && npm prune --omit=dev \
   && mkdir -p /app/backend/.runtime \
   && chown node:node /app/backend/.runtime
+
+RUN rm -rf /usr/local/lib/node_modules/npm \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx
 
 ENV NODE_ENV=production
 USER node

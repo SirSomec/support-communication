@@ -77,6 +77,11 @@ describe("production deployment contract", () => {
     assert.match(dockerfile, /AS backend-migrations/);
     assert.match(dockerfile, /ENV NODE_ENV=production/);
     assert.match(dockerfile, /USER node/);
+    assert.equal(
+      dockerfile.match(/rm -rf \/usr\/local\/lib\/node_modules\/npm/g)?.length,
+      2,
+      "both production backend targets must remove the unused global npm runtime"
+    );
   });
 
   it("provides a scheduled production backup with checksums and independent offsite storage", () => {

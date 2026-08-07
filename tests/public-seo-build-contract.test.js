@@ -48,6 +48,14 @@ describe("public SEO build contract", () => {
     }
   });
 
+  it("keeps analytics disabled unless a valid build-time counter ID is supplied", () => {
+    assert.equal(createPublicRouteManifest({ PUBLIC_SITE_METRIKA_ID: "" }).length, 3);
+    assert.throws(
+      () => createPublicRouteManifest({ PUBLIC_SITE_METRIKA_ID: "counter-from-runtime" }),
+      /PUBLIC_SITE_METRIKA_ID/
+    );
+  });
+
   it("generates and verifies indexable prerendered documents", async () => {
     const env = { PUBLIC_SITE_ORIGIN: "https://supportcom.ru", PUBLIC_SITE_INDEXABLE: "true" };
     const { distDir, routes } = await createFixture(env);

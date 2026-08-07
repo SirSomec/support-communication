@@ -14,6 +14,11 @@ describe("production deployment contract", () => {
     assert.equal(result.status, 0, result.stderr);
   });
 
+  it("keeps the portable schema fail-closed on Redis transport", () => {
+    const preflight = readFileSync("scripts/production-config-preflight.mjs", "utf8");
+    assert.match(preflight, /if \(schemaOnly\) \{\s+issues\.push\(\.\.\.validateRedisUrlPolicy\(env\)\)/);
+  });
+
   it("keeps local infrastructure and credentials out of the production manifest", () => {
     const compose = readFileSync(composePath, "utf8");
     assert.doesNotMatch(compose, /kubernetes\.docker\.internal|mailpit|minio-password|support:support|bootstrap:local/i);

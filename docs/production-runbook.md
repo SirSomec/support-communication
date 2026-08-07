@@ -35,7 +35,7 @@ This runbook deploys the application services to one Docker Compose host while P
 6. Run the fail-closed check:
 
    ```bash
-   npm run production:config:check -- /etc/support-communication/production.env
+   npm run production:config:check -- --verify-runtime /etc/support-communication/production.env
    ```
 
 The preflight rejects placeholder values, local credentials, mutable image tags, insecure Redis/S3 URLs, malformed CORS origins and invalid master keys. It never prints secret values.

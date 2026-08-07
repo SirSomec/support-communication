@@ -77,6 +77,15 @@ function normalizeOrigin(value = DEFAULT_PUBLIC_SITE_ORIGIN) {
   return url.origin;
 }
 
+function normalizeMetrikaId(value = "") {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return "";
+  if (!/^[1-9]\d{3,11}$/.test(normalized)) {
+    throw new Error("PUBLIC_SITE_METRIKA_ID must contain 4 to 12 digits and cannot start with zero");
+  }
+  return normalized;
+}
+
 function absoluteUrl(origin, pathname) {
   return new URL(pathname.replace(/^\//, ""), `${origin}/`).href;
 }
@@ -86,6 +95,7 @@ export function getPublicSiteConfig(env = embeddedPublicSiteEnv) {
   return Object.freeze({
     origin,
     indexable: readBoolean(env.PUBLIC_SITE_INDEXABLE, defaultPublicSiteIndexable),
+    metrikaId: normalizeMetrikaId(env.PUBLIC_SITE_METRIKA_ID),
     googleSiteVerification: env.PUBLIC_SITE_GOOGLE_VERIFICATION || env.GOOGLE_SITE_VERIFICATION || "",
     yandexSiteVerification: env.PUBLIC_SITE_YANDEX_VERIFICATION || env.YANDEX_SITE_VERIFICATION || ""
   });

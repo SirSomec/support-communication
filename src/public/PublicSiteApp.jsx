@@ -1,9 +1,19 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ApiDocsPage } from "../features/public/ApiDocsPage.jsx";
 import { LandingPage } from "../features/public/LandingPage.jsx";
 import { PricingPage } from "../features/public/PricingPage.jsx";
 import { publicLeadService } from "../services/publicLeadService.js";
+import {
+  disablePublicAnalytics,
+  initializePublicAnalytics,
+  PUBLIC_ANALYTICS_GOALS,
+  readPublicAnalyticsConsent,
+  trackPublicAnalyticsGoal,
+  trackPublicRouteView,
+  writePublicAnalyticsConsent
+} from "./analytics/publicAnalytics.js";
 import { resolvePublicRoute } from "./routing.js";
+import { getPublicSiteConfig } from "./seo/publicRouteManifest.js";
 
 const PUBLIC_TEST_IDS = Object.freeze({
   docs: "route-public-docs",
@@ -26,6 +36,63 @@ function PublicToast({ message, onClose }) {
   );
 }
 
+function PublicAnalyticsConsent({ routeView }) {
+  const { metrikaId } = getPublicSiteConfig();
+  const [consent, setConsent] = useState("loading");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!metrikaId) return;
+    const storedConsent = readPublicAnalyticsConsent();
+    setConsent(storedConsent ?? "unset");
+    if (storedConsent === "granted") {
+      initializePublicAnalytics({ counterId: metrikaId });
+      trackPublicRouteView(routeView);
+    } else if (storedConsent === "denied") {
+      disablePublicAnalytics({ counterId: metrikaId });
+    }
+  }, [metrikaId, routeView]);
+
+  if (!metrikaId || consent === "loading") return null;
+
+  function grantConsent() {
+    writePublicAnalyticsConsent("granted");
+    setConsent("granted");
+    setSettingsOpen(false);
+    initializePublicAnalytics({ counterId: metrikaId });
+    trackPublicRouteView(routeView);
+  }
+
+  function denyConsent() {
+    writePublicAnalyticsConsent("denied");
+    setConsent("denied");
+    setSettingsOpen(false);
+    disablePublicAnalytics({ counterId: metrikaId });
+  }
+
+  const showDialog = consent === "unset" || settingsOpen;
+  if (!showDialog) {
+    return (
+      <button className="public-analytics-settings" onClick={() => setSettingsOpen(true)} type="button">
+        Настройки аналитики
+      </button>
+    );
+  }
+
+  return (
+    <aside aria-labelledby="public-analytics-title" className="public-analytics-consent" role="dialog">
+      <div>
+        <strong id="public-analytics-title">Помогите улучшать сайт</strong>
+        <p>С вашего согласия Яндекс Метрика собирает обезличенную статистику посещений и конверсий. Вебвизор выключен, данные полей форм не передаются.</p>
+      </div>
+      <div className="public-analytics-actions">
+        <button className="public-btn secondary" onClick={denyConsent} type="button">Отказаться</button>
+        <button className="public-btn primary" onClick={grantConsent} type="button">Разрешить аналитику</button>
+      </div>
+    </aside>
+  );
+}
+
 export function PublicSiteApp({ pathname = globalThis.location?.pathname ?? "/" }) {
   const route = resolvePublicRoute(pathname);
   const [toast, setToast] = useState("");
@@ -34,6 +101,7 @@ export function PublicSiteApp({ pathname = globalThis.location?.pathname ?? "/" 
     const response = await publicLeadService.createDemoRequest(payload);
 
     if (response.status === "ok") {
+      trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.demoFormSubmitSuccess);
       setToast("Заявка на демо принята. Мы свяжемся с вами после проверки маршрута.");
       return response;
     }
@@ -47,6 +115,16 @@ export function PublicSiteApp({ pathname = globalThis.location?.pathname ?? "/" 
     return response;
   }, []);
 
+  const handleNavigateAuth = useCallback(() => {
+    trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.loginClick);
+    navigateToPrivateHash("#/login");
+  }, []);
+
+  const handleStartFree = useCallback(() => {
+    trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.registrationStart);
+    navigateToPrivateHash("#/onboarding");
+  }, []);
+
   if (!route) return null;
 
   let page;
@@ -55,18 +133,19 @@ export function PublicSiteApp({ pathname = globalThis.location?.pathname ?? "/" 
   } else if (route.view === "pricing") {
     page = (
       <PricingPage
-        onNavigateAuth={() => navigateToPrivateHash("#/login")}
+        onNavigateAuth={handleNavigateAuth}
         onRequestDemo={handlePublicDemoRequest}
-        onStartFree={() => navigateToPrivateHash("#/onboarding")}
+        onStartFree={handleStartFree}
       />
     );
   } else {
     page = (
       <LandingPage
         demoRequestEnabled
-        onNavigateAuth={() => navigateToPrivateHash("#/login")}
+        onDemoOpen={() => trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.demoFormOpen)}
+        onNavigateAuth={handleNavigateAuth}
         onRequestDemo={handlePublicDemoRequest}
-        onStartFree={() => navigateToPrivateHash("#/onboarding")}
+        onStartFree={handleStartFree}
       />
     );
   }
@@ -74,6 +153,7 @@ export function PublicSiteApp({ pathname = globalThis.location?.pathname ?? "/" 
   return (
     <div data-testid={PUBLIC_TEST_IDS[route.view]}>
       {page}
+      <PublicAnalyticsConsent routeView={route.view} />
       {toast ? <PublicToast message={toast} onClose={() => setToast("")} /> : null}
     </div>
   );

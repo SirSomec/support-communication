@@ -45,6 +45,7 @@
     "test:public-seo": "node --test tests/public-seo-build-contract.test.js",
     "test:public-routing": "node --test tests/public-routing.test.js",
     "test:public-performance": "node --test tests/public-performance-contract.test.js",
+    "test:public-analytics": "node --test tests/public-analytics.test.js",
     "test:seo-http": "node --test tests/nginx-seo-contract.test.js",
     "test:seo-contracts": "node --test tests/public-seo-build-contract.test.js tests/public-routing.test.js tests/public-performance-contract.test.js tests/nginx-seo-contract.test.js",
     "test:session-store": "node --test tests/session-store.test.js",

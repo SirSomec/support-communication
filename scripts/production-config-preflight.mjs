@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { validateRedisUrlPolicy, verifyRedisRuntimeTopology } from "./production-redis-policy.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const schemaOnly = process.argv.includes("--schema-only");
+const verifyRuntime = process.argv.includes("--verify-runtime");
 const envArgument = process.argv.find((argument) => !argument.startsWith("--") && argument !== process.argv[0] && argument !== process.argv[1]);
 const envPath = resolve(root, envArgument || "deploy/env/production.env");
 const composePath = resolve(root, "deploy/compose/compose.production.yml");
@@ -24,6 +26,10 @@ for (const key of required) {
   if (!env[key]) issues.push(`${key}: required`);
 }
 
+if (schemaOnly) {
+  issues.push(...validateRedisUrlPolicy(env));
+}
+
 if (!schemaOnly) {
   const placeholder = /\b(REQUIRED|CHANGE[_-]?ME|EXAMPLE)\b/i;
   for (const [key, value] of Object.entries(env)) {
@@ -39,7 +45,7 @@ if (!schemaOnly) {
   }
 
   checkUrl("DATABASE_URL", ["postgresql:", "postgres:"]);
-  checkUrl("REDIS_URL", ["rediss:"]);
+  issues.push(...validateRedisUrlPolicy(env, { verifyRuntime }));
   checkUrl("S3_ENDPOINT", ["https:"]);
   checkUrl("CLAMAV_ALLOWED_DOWNLOAD_ORIGINS", ["https:"]);
 
@@ -99,9 +105,23 @@ if (!schemaOnly) {
   if (bootstrapPassword && bootstrapPassword.length < 12) {
     issues.push("BOOTSTRAP_SERVICE_ADMIN_PASSWORD: must be at least 12 characters");
   }
+
+  if (verifyRuntime && env.REDIS_URL?.startsWith("redis:")) {
+    issues.push(...verifyRedisRuntimeTopology(env));
+  }
 }
 
-const compose = spawnSync("docker", ["compose", "--env-file", envPath, "-f", composePath, "config", "--quiet"], {
+const composePaths = verifyRuntime
+  ? [
+      composePath,
+      resolve(root, "deploy/compose/compose.vps-override.yml"),
+      resolve(root, "deploy/compose/compose.vps-infrastructure.yml")
+    ]
+  : [composePath];
+const composeArguments = ["compose", "--env-file", envPath];
+for (const path of composePaths) composeArguments.push("-f", path);
+composeArguments.push("config", "--quiet");
+const compose = spawnSync("docker", composeArguments, {
   cwd: root,
   encoding: "utf8",
   windowsHide: true

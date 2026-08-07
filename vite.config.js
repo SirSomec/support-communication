@@ -10,7 +10,8 @@ export default defineConfig(({ mode, isSsrBuild }) => {
   const env = loadEnv(mode, rootDir, "");
   const publicSiteBuildConfig = {
     PUBLIC_SITE_ORIGIN: env.PUBLIC_SITE_ORIGIN || "https://supportcom.ru",
-    PUBLIC_SITE_INDEXABLE: env.PUBLIC_SITE_INDEXABLE || (mode === "production" ? "true" : "false")
+    PUBLIC_SITE_INDEXABLE: env.PUBLIC_SITE_INDEXABLE || (mode === "production" ? "true" : "false"),
+    PUBLIC_SITE_METRIKA_ID: env.PUBLIC_SITE_METRIKA_ID || ""
   };
   return {
     plugins: [react(), serviceAdminSpaFallback()],

@@ -200,6 +200,7 @@ function ClientLogos() {
 
 export function LandingPage({
   demoRequestEnabled = false,
+  onDemoOpen = noop,
   onNavigateAuth = noop,
   onRequestDemo = noop,
   onStartFree = noop
@@ -224,6 +225,7 @@ export function LandingPage({
   }, []);
 
   function openRequestDialog({ planInterest = "business", source = "landing-hero", title = "Демо по запросу" } = {}) {
+    onDemoOpen();
     setRequestDialog({ source, title });
     setRequestForm(defaultRequestForm({ planInterest, source }));
     setRequestState({ error: "", submitting: false });

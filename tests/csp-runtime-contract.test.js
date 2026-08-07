@@ -23,13 +23,15 @@ describe("frontend Content-Security-Policy", () => {
       ["object-src", ["'none'"]],
       ["frame-ancestors", ["'none'"]],
       ["form-action", ["'self'"]],
-      ["script-src", ["'self'"]]
+      ["script-src", ["'self'", "https://mc.yandex.ru", "https://yastatic.net"]]
     ]) {
       assert.deepEqual(directives.get(name), expected, `${name} must stay fail-closed`);
     }
     assert.ok(directives.get("style-src")?.includes("'unsafe-inline'"), "temporary dynamic-style compatibility must be explicit");
     assert.ok(!directives.get("script-src")?.includes("'unsafe-inline'"));
     assert.ok(!directives.get("script-src")?.includes("'unsafe-eval'"));
+    assert.ok(!matches[0][1].includes("webvisor"), "Webvisor hosts must not be allowed");
+    assert.ok(directives.get("connect-src")?.includes("https://mc.yandex.ru"));
   });
 
   for (const entrypoint of ["index.html", "service-admin/index.html"]) {

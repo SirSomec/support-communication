@@ -128,7 +128,7 @@ Production HTTP security defaults:
 - `CORS_ALLOWED_ORIGINS` is a comma-separated list of exact HTTP(S) origins; an empty value keeps the API same-origin only.
 - `OPENAPI_ENABLED` defaults to disabled in the production compose manifest. Enable it only behind a separate access control boundary.
 - `TRUST_PROXY_HEADERS=true` is safe only when the API is reachable exclusively through the controlled edge proxy.
-- Run `npm run production:config:check -- deploy/env/production.env` before migrations and every production rollout.
+- Run `npm run production:config:check -- --verify-runtime deploy/env/production.env` before migrations and every production rollout. The runtime check is mandatory when an explicitly approved internal Docker network uses `redis:` instead of `rediss:`.
 - See `docs/production-runbook.md` for the complete server procedure, first-admin bootstrap, backups and rollback.
 
 Recommended verification before release:

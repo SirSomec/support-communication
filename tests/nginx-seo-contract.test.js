@@ -22,6 +22,9 @@ describe("nginx public SEO HTTP contract", () => {
         assert.match(exactLocation(config, "/"), /try_files\s+\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/pricing/"), /try_files\s+\/pricing\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/docs/"), /try_files\s+\/docs\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/website-support-chat/"), /try_files\s+\/website-support-chat\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/ai-support-bot/"), /try_files\s+\/ai-support-bot\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/support-sla/"), /try_files\s+\/support-sla\/index\.html\s+=404;/);
       });
 
       it("permanently canonicalizes public and private legacy paths", () => {
@@ -30,6 +33,12 @@ describe("nginx public SEO HTTP contract", () => {
           ["/landing", "/"],
           ["/pricing", "/pricing/"],
           ["/docs", "/docs/"],
+          ["/website-support-chat", "/website-support-chat/"],
+          ["/website-support-chat/index.html", "/website-support-chat/"],
+          ["/ai-support-bot", "/ai-support-bot/"],
+          ["/ai-support-bot/index.html", "/ai-support-bot/"],
+          ["/support-sla", "/support-sla/"],
+          ["/support-sla/index.html", "/support-sla/"],
           ["/app", '"/#/app"'],
           ["/login", '"/#/login"'],
           ["/auth", '"/#/login"'],
@@ -98,6 +107,10 @@ describe("nginx public SEO HTTP contract", () => {
     assert.match(page, /<h1>[^<]+<\/h1>/);
     assert.match(page, /href="\/"/);
     assert.match(page, /href="\/pricing\/"/);
+    assert.match(page, /href="\/docs\/"/);
+    assert.match(page, /href="\/website-support-chat\/"/);
+    assert.match(page, /href="\/ai-support-bot\/"/);
+    assert.match(page, /href="\/support-sla\/"/);
     assert.doesNotMatch(page, /<script\b/i);
   });
 });

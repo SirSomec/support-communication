@@ -21,15 +21,16 @@ import {
   Zap
 } from "lucide-react";
 import { publicCatalogService } from "../../services/publicCatalogService.js";
+import { commercialPageDefinitions } from "../../public/content/commercialPageDefinitions.js";
 import operatorCockpitPreview from "../../assets/operator-cockpit-concept.jpg";
 import "./public.css";
 
 const noop = () => {};
 
 const heroStats = [
-  ["−38%", "время первого ответа за месяц"],
-  ["100%", "действий — в журнале аудита"],
-  ["1 день", "от регистрации до первого диалога"]
+  ["Web SDK", "сообщения, файлы, presence и CSAT"],
+  ["SLA", "назначение, паузы и rescue"],
+  ["1–70", "мест в текущей тарифной сетке"]
 ];
 
 const aiHighlights = [
@@ -56,11 +57,11 @@ const aiHighlights = [
 ];
 
 const channelItems = [
-  { key: "web-sdk", name: "Web SDK", icon: Code2, tint: "blue", status: "работает", live: true, text: "Виджет на сайт одной строкой: идентификация посетителя, диалоги, вложения." },
-  { key: "telegram", name: "Telegram", icon: Send, tint: "sky", status: "работает", live: true, text: "Входящие диалоги и ответы операторов через бота, подключение по токену." },
-  { key: "vk", name: "ВКонтакте", mark: "VK", tint: "vk", status: "работает", live: true, text: "Приём и отправка сообщений сообщества в общей ленте со всеми каналами." },
-  { key: "max", name: "MAX", mark: "MAX", tint: "max", status: "работает", live: true, text: "Полный приём и отправка сообщений в национальном мессенджере MAX." },
-  { key: "rest-api", name: "REST API", icon: Webhook, tint: "blue", status: "работает", live: true, text: "Клиенты, диалоги, отчёты, webhooks и audit export для любых интеграций." },
+  { key: "web-sdk", name: "Web SDK", icon: Code2, tint: "blue", status: "реализовано", live: true, text: "Идентификация посетителя, сообщения, файлы, presence и оценки после настройки SDK key и домена." },
+  { key: "telegram", name: "Telegram", icon: Send, tint: "sky", status: "требует настройки", live: true, text: "Входящие диалоги и ответы операторов через бота после подключения действующего bot token." },
+  { key: "vk", name: "ВКонтакте", mark: "VK", tint: "vk", status: "требует live-проверки", live: false, text: "Интеграционный контур реализован; перед сильным production claim нужна приёмка с реальными credentials." },
+  { key: "max", name: "MAX", mark: "MAX", tint: "max", status: "требует live-проверки", live: false, text: "Интеграционный контур реализован; публичный live-статус подтверждается отдельной приёмкой." },
+  { key: "rest-api", name: "REST API", icon: Webhook, tint: "blue", status: "реализовано", live: true, text: "Публичный API и Open Channel для поддерживаемых интеграционных сценариев." },
   { key: "whatsapp", name: "WhatsApp", icon: MessageSquare, tint: "green", status: "на подключении", live: false, text: "Бизнес-переписка и шаблоны сообщений — в той же операционной ленте." },
   { key: "email", name: "Email", icon: Mail, tint: "violet", status: "на подключении", live: false, text: "Обращения на почту превращаются в диалоги с тематиками и SLA." },
   { key: "viber", name: "Viber", icon: Phone, tint: "purple", status: "на подключении", live: false, text: "Ещё один канал мессенджеров — подключается как управляемый источник событий." }
@@ -69,15 +70,15 @@ const channelItems = [
 const workflowSteps = [
   {
     title: "Подключите каналы",
-    text: "Web SDK вставляется одной строкой, Telegram-бот подключается по токену. Первое сообщение — через минуты."
+    text: "Настройте SDK key и разрешённый домен для сайта или подключите Telegram-бота с действующим токеном."
   },
   {
     title: "Настройте смену",
-    text: "Роли, лимиты операторов, тематики и SLA — очередь сама распределяет и спасает просроченные диалоги."
+    text: "Задайте роли, лимиты, тематики и правила SLA; назначения и rescue остаются управляемыми действиями команды."
   },
   {
     title: "Контролируйте качество",
-    text: "Оценки клиентов, проверки текста, отчёты с XLSX-выгрузкой и журнал аудита каждого действия."
+    text: "Используйте клиентские оценки, ручные проверки, отчёты с XLSX-выгрузкой и доступные события аудита."
   }
 ];
 
@@ -104,35 +105,14 @@ const capabilityItems = [
   }
 ];
 
-const testimonialItems = [
-  {
-    quote: "«Перевели поддержку из трёх чатов в одну очередь. Первый ответ ускорился почти вдвое, и наконец видно, кто чем занят.»",
-    initial: "М",
-    author: "Марина, руководитель поддержки",
-    meta: "интернет-ритейл · пример отзыва"
-  },
-  {
-    quote: "«SDK подключили за вечер. Больше не теряем обращения с сайта — всё падает в ту же очередь, что и Telegram.»",
-    initial: "А",
-    author: "Алексей, владелец бизнеса",
-    meta: "онлайн-сервис · пример отзыва"
-  },
-  {
-    quote: "«Для нас критичен аудит: каждое действие оператора в журнале, PII маскируется. Security-ревью прошли без замечаний.»",
-    initial: "Д",
-    author: "Дмитрий, ИБ-директор",
-    meta: "финтех · пример отзыва"
-  }
-];
-
 const faqItems = [
   {
     question: "Сколько занимает запуск?",
-    answer: "Обычно один день: регистрация создаёт рабочую организацию, SDK ставится одной строкой, Telegram подключается по токену бота."
+    answer: "Регистрация создаёт Free-организацию. Срок подключения зависит от выбранного канала, домена, credentials и проверки интеграции."
   },
   {
     question: "Какие каналы поддерживаются?",
-    answer: "Web SDK, Telegram, ВКонтакте, MAX и REST API уже работают в продакшене. WhatsApp, Email и Viber — на подключении."
+    answer: "Web SDK и REST API реализованы, Telegram требует настройки bot token. Для публичного live-статуса ВКонтакте и MAX нужна отдельная приёмка с реальными credentials; WhatsApp, Email и Viber не заявляются работающими."
   },
   {
     question: "Что входит в Free?",
@@ -140,7 +120,7 @@ const faqItems = [
   },
   {
     question: "Как защищены данные?",
-    answer: "Email OTP, роли и блокировки, изоляция организаций, маскирование PII и полный журнал аудита с экспортом."
+    answer: "В продукте реализованы роли и блокировки, изоляция организаций и журнал доступных событий. Соответствие конкретным законам или внешним стандартам требует отдельного подтверждения."
   },
   {
     question: "Можно ли выгружать отчёты?",
@@ -165,38 +145,6 @@ const tariffFeatureLabels = {
   sso: "Единый вход для сотрудников",
   "quality-ai": "Проверка качества ответов с помощью искусственного интеллекта"
 };
-
-function ClientLogos() {
-  const logoText = { fontFamily: "inherit", fontSize: 17, fontWeight: 800, letterSpacing: 0.4 };
-  return (
-    <div className="public-logo-row" role="img" aria-label="Примеры клиентов: Нордвэй, Контур, Пик, Ритм, Орбита">
-      <svg viewBox="0 0 132 28" height="26">
-        <path d="M4 22 12 6l6 10 4-6 6 12z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
-        <text x="38" y="20" fill="currentColor" style={logoText}>НОРДВЭЙ</text>
-      </svg>
-      <svg viewBox="0 0 118 28" height="26">
-        <circle cx="14" cy="14" r="9" fill="none" stroke="currentColor" strokeWidth="2.4" />
-        <circle cx="14" cy="14" r="3.4" fill="currentColor" />
-        <text x="34" y="20" fill="currentColor" style={logoText}>КОНТУР</text>
-      </svg>
-      <svg viewBox="0 0 76 28" height="26">
-        <path d="M5 22 14 6l9 16z" fill="currentColor" />
-        <text x="32" y="20" fill="currentColor" style={logoText}>ПИК</text>
-      </svg>
-      <svg viewBox="0 0 92 28" height="26">
-        <rect x="5" y="13" width="4" height="9" rx="1.4" fill="currentColor" />
-        <rect x="12" y="7" width="4" height="15" rx="1.4" fill="currentColor" />
-        <rect x="19" y="10" width="4" height="12" rx="1.4" fill="currentColor" />
-        <text x="33" y="20" fill="currentColor" style={logoText}>РИТМ</text>
-      </svg>
-      <svg viewBox="0 0 112 28" height="26">
-        <ellipse cx="15" cy="14" rx="11" ry="5.6" fill="none" stroke="currentColor" strokeWidth="2" transform="rotate(-18 15 14)" />
-        <circle cx="15" cy="14" r="3.2" fill="currentColor" />
-        <text x="36" y="20" fill="currentColor" style={logoText}>ОРБИТА</text>
-      </svg>
-    </div>
-  );
-}
 
 export function LandingPage({
   demoRequestEnabled = false,
@@ -223,6 +171,19 @@ export function LandingPage({
     });
     return () => { ignore = true; };
   }, []);
+
+  React.useEffect(() => {
+    if (!demoRequestEnabled || typeof window === "undefined") return;
+    const demoSource = new URLSearchParams(window.location.search).get("demo");
+    if (demoSource !== "ai-support-bot") return;
+
+    window.history.replaceState(null, "", `${window.location.pathname}#request-demo`);
+    openRequestDialog({
+      planInterest: "ai",
+      source: "ai-support-bot-landing",
+      title: "Демо AI-сценария поддержки"
+    });
+  }, [demoRequestEnabled, onDemoOpen]);
 
   function openRequestDialog({ planInterest = "business", source = "landing-hero", title = "Демо по запросу" } = {}) {
     onDemoOpen();
@@ -290,11 +251,11 @@ export function LandingPage({
 
       <section className="public-hero" aria-labelledby="public-hero-title">
         <div className="public-hero-copy">
-          <span className="public-hero-badge"><Zap size={14} /> Запуск пилота за один день</span>
+          <span className="public-hero-badge"><Zap size={14} /> Web SDK, очередь и рабочее место оператора</span>
           <h1 id="public-hero-title">Вся поддержка клиентов — в&nbsp;одном операционном контуре</h1>
           <p>
-            SDK на сайте, Telegram, лимиты операторов, SLA, отчёты и аудит — не набор витрин,
-            а рабочее место смены, готовое к продакшену.
+            Web SDK на сайте, Telegram после настройки, лимиты операторов, SLA, отчёты и аудит
+            объединены в рабочем месте смены.
           </p>
           <div className="public-hero-actions">
             <button className="public-btn primary large" onClick={() => onStartFree({ plan: "free", source: "landing-hero" })} type="button">
@@ -365,17 +326,17 @@ export function LandingPage({
                 <span className="public-ai-chat-avatar"><Bot size={13} /></span>
                 Сценарий «Оплата и возвраты»
               </span>
-              <span>активен</span>
+            <span>демонстрационный сценарий</span>
             </header>
             <div className="public-ai-chat-body">
               <div className="public-ai-message client">Как вернуть деньги за отменённый заказ?</div>
               <div className="public-ai-message bot">
-                Возврат приходит на карту за 3–5 рабочих дней. Могу оформить заявку прямо сейчас —
-                подскажите номер заказа.
+                Срок возврата зависит от правил вашей компании. Подскажите номер заказа — проверю
+                доступный сценарий или передам диалог оператору.
               </div>
               <div className="public-ai-trace">
                 <Search size={14} />
-                <span><b>Как бот думал:</b> триггер «возврат» · источник «Политика возвратов v3» · 412 токенов · 0.9 с</span>
+                <span><b>Как бот обработал пример:</b> триггер «возврат» · демонстрационный источник «Политика возвратов»</span>
               </div>
               <div className="public-ai-handoff">
                 <UserRound size={14} />
@@ -386,17 +347,12 @@ export function LandingPage({
         </div>
       </section>
 
-      <section className="public-section public-logos" aria-label="Примеры клиентов">
-        <span className="public-logos-caption">Поддержку на платформе строят команды — примеры клиентов</span>
-        <ClientLogos />
-      </section>
-
       <section className="public-section public-channels" id="channels" aria-labelledby="channels-title">
         <div className="public-section-heading">
           <h2 id="channels-title">Каналы, где живут ваши клиенты</h2>
           <p>
-            Одна очередь для всех каналов. SDK на сайте, Telegram, ВКонтакте и MAX уже в продакшене;
-            популярные мессенджеры индустрии — на подключении.
+            Статус каждого канала указан отдельно: реализованный код не подменяет настройку credentials
+            и live-приёмку внешнего провайдера.
           </p>
         </div>
         <div className="public-channel-grid">
@@ -416,7 +372,7 @@ export function LandingPage({
       <section className="public-section public-steps" aria-labelledby="steps-title">
         <div className="public-section-heading">
           <h2 id="steps-title">Как это работает</h2>
-          <p>Три шага от регистрации до работающей поддержки — без внедренцев и месяцев настройки.</p>
+          <p>Три управляемых этапа от регистрации до проверки рабочего сценария поддержки.</p>
         </div>
         <div className="public-step-grid">
           {workflowSteps.map(({ title, text }, index) => (
@@ -438,24 +394,6 @@ export function LandingPage({
               <strong>{title}</strong>
               <p>{text}</p>
             </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="public-section public-testimonials" aria-labelledby="testimonials-title">
-        <h2 id="testimonials-title">Что говорят команды</h2>
-        <div className="public-testimonial-grid">
-          {testimonialItems.map(({ quote, initial, author, meta }) => (
-            <figure className="public-testimonial-card" key={author}>
-              <blockquote>{quote}</blockquote>
-              <figcaption>
-                <span>{initial}</span>
-                <div>
-                  <strong>{author}</strong>
-                  <small>{meta}</small>
-                </div>
-              </figcaption>
-            </figure>
           ))}
         </div>
       </section>
@@ -513,7 +451,7 @@ export function LandingPage({
       <section className="public-section public-faq" id="faq" aria-labelledby="faq-title">
         <div className="public-faq-intro">
           <h2 id="faq-title">Частые вопросы</h2>
-          <p>Не нашли ответа — напишите нам, отвечаем в рабочие часы в тот же день.</p>
+          <p>Не нашли ответа — отправьте заявку на демо, чтобы команда уточнила ваш сценарий.</p>
         </div>
         <div className="public-faq-list">
           {faqItems.map(({ question, answer }, index) => (
@@ -528,8 +466,8 @@ export function LandingPage({
       <section className="public-section public-cta" aria-labelledby="cta-title">
         <div className="public-cta-band">
           <div>
-            <strong id="cta-title">Запустите поддержку уже сегодня</strong>
-            <span>Рабочая организация, SDK и Telegram — за один день. Без карты.</span>
+            <strong id="cta-title">Начните настройку поддержки</strong>
+            <span>Free создаёт организацию для одного владельца; подключение каналов проверяется отдельно.</span>
           </div>
           <button className="public-btn primary large" onClick={() => onStartFree({ plan: "free", source: "landing-cta" })} type="button">
             Начать бесплатно
@@ -555,10 +493,11 @@ export function LandingPage({
             <span>Статус API: {apiStatusLabel}</span>
           </div>
           <div className="public-footer-column">
-            <strong>Ресурсы</strong>
+            <strong>Решения и ресурсы</strong>
+            {commercialPageDefinitions.map((page) => (
+              <a href={page.pathname} key={page.id}>{page.breadcrumbLabel}</a>
+            ))}
             <a href="/docs/">Документация API</a>
-            <span>Руководство по ИИ</span>
-            <span>Безопасность</span>
           </div>
           <div className="public-footer-column">
             <strong>Контакты</strong>
@@ -580,6 +519,7 @@ export function LandingPage({
             aria-modal="true"
             className="public-request-dialog"
             data-testid="public-demo-request-dialog"
+            id="request-demo"
             role="dialog"
           >
             <header>

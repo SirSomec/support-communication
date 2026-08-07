@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ApiDocsPage } from "../features/public/ApiDocsPage.jsx";
+import { CommercialLandingPage } from "../features/public/CommercialLandingPage.jsx";
 import { LandingPage } from "../features/public/LandingPage.jsx";
 import { PricingPage } from "../features/public/PricingPage.jsx";
 import { publicLeadService } from "../services/publicLeadService.js";
@@ -17,6 +18,7 @@ import { getPublicSiteConfig } from "./seo/publicRouteManifest.js";
 
 const PUBLIC_TEST_IDS = Object.freeze({
   docs: "route-public-docs",
+  commercial: "route-public-commercial",
   landing: "route-public-landing",
   pricing: "route-public-pricing"
 });
@@ -36,7 +38,7 @@ function PublicToast({ message, onClose }) {
   );
 }
 
-function PublicAnalyticsConsent({ routeView }) {
+function PublicAnalyticsConsent({ route }) {
   const { metrikaId } = getPublicSiteConfig();
   const [consent, setConsent] = useState("loading");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -47,11 +49,11 @@ function PublicAnalyticsConsent({ routeView }) {
     setConsent(storedConsent ?? "unset");
     if (storedConsent === "granted") {
       initializePublicAnalytics({ counterId: metrikaId });
-      trackPublicRouteView(routeView);
+      trackPublicRouteView(route.analyticsGoal);
     } else if (storedConsent === "denied") {
       disablePublicAnalytics({ counterId: metrikaId });
     }
-  }, [metrikaId, routeView]);
+  }, [metrikaId, route.analyticsGoal]);
 
   if (!metrikaId || consent === "loading") return null;
 
@@ -60,7 +62,7 @@ function PublicAnalyticsConsent({ routeView }) {
     setConsent("granted");
     setSettingsOpen(false);
     initializePublicAnalytics({ counterId: metrikaId });
-    trackPublicRouteView(routeView);
+    trackPublicRouteView(route.analyticsGoal);
   }
 
   function denyConsent() {
@@ -130,6 +132,8 @@ export function PublicSiteApp({ pathname = globalThis.location?.pathname ?? "/" 
   let page;
   if (route.view === "docs") {
     page = <ApiDocsPage />;
+  } else if (route.view === "commercial") {
+    page = <CommercialLandingPage onStartFree={handleStartFree} pageId={route.id} />;
   } else if (route.view === "pricing") {
     page = (
       <PricingPage
@@ -153,7 +157,7 @@ export function PublicSiteApp({ pathname = globalThis.location?.pathname ?? "/" 
   return (
     <div data-testid={PUBLIC_TEST_IDS[route.view]}>
       {page}
-      <PublicAnalyticsConsent routeView={route.view} />
+      <PublicAnalyticsConsent route={route} />
       {toast ? <PublicToast message={toast} onClose={() => setToast("")} /> : null}
     </div>
   );

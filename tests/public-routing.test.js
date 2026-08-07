@@ -10,16 +10,20 @@ import {
 } from "../src/public/routing.js";
 
 describe("public pathname routing", () => {
-  it("resolves the three canonical public paths", () => {
+  it("resolves all canonical public paths", () => {
     assert.equal(resolvePublicRoute("/")?.view, "landing");
     assert.equal(resolvePublicRoute("/pricing/")?.view, "pricing");
     assert.equal(resolvePublicRoute("/docs/")?.view, "docs");
+    assert.equal(resolvePublicRoute("/website-support-chat/")?.view, "commercial");
+    assert.equal(resolvePublicRoute("/ai-support-bot/")?.view, "commercial");
+    assert.equal(resolvePublicRoute("/support-sla/")?.view, "commercial");
     assert.equal(resolvePublicRoute("/unknown/"), null);
   });
 
   it("accepts slashless paths while keeping trailing-slash canonicals", () => {
     assert.equal(normalizePublicPathname("/pricing"), "/pricing/");
     assert.equal(normalizePublicPathname("/docs"), "/docs/");
+    assert.equal(normalizePublicPathname("/support-sla"), "/support-sla/");
     assert.equal(resolvePublicRoute("/pricing")?.pathname, "/pricing/");
   });
 
@@ -64,11 +68,13 @@ describe("public/private bootstrap boundary", () => {
     const publicSources = [
       "src/features/public/LandingPage.jsx",
       "src/features/public/PricingPage.jsx",
-      "src/features/public/ApiDocsPage.jsx"
+      "src/features/public/ApiDocsPage.jsx",
+      "src/features/public/CommercialLandingPage.jsx"
     ].map((file) => readFileSync(file, "utf8")).join("\n");
 
     assert.doesNotMatch(publicSources, /href=["']#\/(landing|pricing|docs)/);
     assert.match(publicSources, /href="\/pricing\/"/);
     assert.match(publicSources, /href="\/docs\/"/);
+    assert.match(publicSources, /commercialPageDefinitions/);
   });
 });

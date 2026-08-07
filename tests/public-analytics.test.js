@@ -89,12 +89,34 @@ describe("public analytics", () => {
     initializePublicAnalytics({ counterId: "12345678", ...fixture });
     assert.equal(trackPublicAnalyticsGoal("email=user@example.test"), false);
     assert.equal(trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.registrationStart), true);
-    assert.equal(trackPublicRouteView("pricing"), true);
-    assert.equal(trackPublicRouteView("pricing"), false);
+    assert.equal(trackPublicRouteView(PUBLIC_ANALYTICS_GOALS.pricingView), true);
+    assert.equal(trackPublicRouteView(PUBLIC_ANALYTICS_GOALS.pricingView), false);
 
     const goalCalls = fixture.windowRef.ym.a.filter(([, method]) => method === "reachGoal");
     assert.deepEqual(goalCalls.map((call) => call[2]), ["registration_start", "pricing_view"]);
     assert.ok(goalCalls.every((call) => call.length === 3), "goals must never receive arbitrary parameters");
+  });
+
+  it("sends each allowlisted commercial route goal only once per page load", () => {
+    const fixture = createBrowserFixture();
+    initializePublicAnalytics({ counterId: "12345678", ...fixture });
+
+    for (const goal of [
+      PUBLIC_ANALYTICS_GOALS.websiteSupportChatView,
+      PUBLIC_ANALYTICS_GOALS.aiSupportBotView,
+      PUBLIC_ANALYTICS_GOALS.supportSlaView
+    ]) {
+      assert.equal(trackPublicRouteView(goal), true);
+      assert.equal(trackPublicRouteView(goal), false);
+    }
+    assert.equal(trackPublicRouteView("unlisted_route_view"), false);
+
+    const goalCalls = fixture.windowRef.ym.a.filter(([, method]) => method === "reachGoal");
+    assert.deepEqual(goalCalls.map((call) => call[2]), [
+      "website_support_chat_view",
+      "ai_support_bot_view",
+      "support_sla_view"
+    ]);
   });
 
   it("uses the documented counter opt-out flag when consent is withdrawn", () => {

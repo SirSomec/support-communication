@@ -1,3 +1,5 @@
+import { commercialPageDefinitions } from "../content/commercialPageDefinitions.js";
+
 const DEFAULT_PUBLIC_SITE_ORIGIN = "https://supportcom.ru";
 const DEFAULT_OG_IMAGE_PATH = "/og/support-communication.jpg";
 const DEFAULT_BRAND_LOGO_PATH = "/icon-512.png";
@@ -6,7 +8,7 @@ const embeddedPublicSiteEnv = typeof __PUBLIC_SITE_BUILD_CONFIG__ === "undefined
   : Object.freeze(__PUBLIC_SITE_BUILD_CONFIG__);
 const defaultPublicSiteIndexable = !(typeof import.meta.env === "object" && import.meta.env?.DEV === true);
 
-const routeDefinitions = Object.freeze([
+const coreRouteDefinitions = [
   Object.freeze({
     id: "home",
     view: "landing",
@@ -16,6 +18,7 @@ const routeDefinitions = Object.freeze([
     description: "Объедините обращения из MAX, Telegram, ВКонтакте и Web SDK в одном окне: маршрутизация, SLA, контроль качества, отчёты и AI-бот.",
     h1: "Вся поддержка клиентов — в одном операционном контуре",
     breadcrumbLabel: "Главная",
+    analyticsGoal: null,
     includeInSitemap: true,
     openGraph: Object.freeze({
       type: "website",
@@ -32,6 +35,7 @@ const routeDefinitions = Object.freeze([
     description: "Сравните тарифы Support Communication для единого окна поддержки, маршрутизации обращений, контроля SLA, аналитики и автоматизации.",
     h1: "Начните бесплатно — выберите подходящий вариант, когда команда станет больше.",
     breadcrumbLabel: "Тарифы",
+    analyticsGoal: "pricing_view",
     includeInSitemap: true,
     openGraph: Object.freeze({
       type: "website",
@@ -48,6 +52,7 @@ const routeDefinitions = Object.freeze([
     description: "Документация Support Communication: Web SDK, публичный API, Open Channel, сообщения, файлы, CSAT, webhooks и безопасное подключение каналов.",
     h1: "Интеграции с Support Communication",
     breadcrumbLabel: "API и интеграции",
+    analyticsGoal: "docs_view",
     includeInSitemap: true,
     openGraph: Object.freeze({
       type: "website",
@@ -55,7 +60,27 @@ const routeDefinitions = Object.freeze([
     }),
     jsonLdTypes: Object.freeze(["BreadcrumbList"])
   })
-]);
+];
+
+const commercialRouteDefinitions = commercialPageDefinitions.map((page) => Object.freeze({
+  id: page.id,
+  view: "commercial",
+  pathname: page.pathname,
+  outputFile: page.outputFile,
+  title: page.title,
+  description: page.description,
+  h1: page.h1,
+  breadcrumbLabel: page.breadcrumbLabel,
+  analyticsGoal: page.analyticsGoal,
+  includeInSitemap: true,
+  openGraph: Object.freeze({
+    type: "website",
+    imagePath: DEFAULT_OG_IMAGE_PATH
+  }),
+  jsonLdTypes: Object.freeze(["BreadcrumbList"])
+}));
+
+const routeDefinitions = Object.freeze([...coreRouteDefinitions, ...commercialRouteDefinitions]);
 
 function readBoolean(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;

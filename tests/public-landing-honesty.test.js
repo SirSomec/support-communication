@@ -12,21 +12,26 @@ describe("public landing honesty contracts", () => {
     assert.doesNotMatch(source, /19 900|49 900|99\.98%|p95 184|126 активных|82% в SLA|37% закрыто/);
   });
 
-  it("labels the product preview and social proof as illustrative", () => {
+  it("labels the product preview and demo scenario without fictional social proof", () => {
     assert.match(source, /Демонстрационный пример интерфейса/);
     assert.match(source, /без клиентских данных/);
-    assert.match(source, /пример отзыва/);
-    assert.match(source, /примеры клиентов/);
+    assert.match(source, /демонстрационный сценарий/);
+    assert.doesNotMatch(source, /пример отзыва|примеры клиентов|НОРДВЭЙ|ОРБИТА/);
+    assert.doesNotMatch(source, /−38%|100%.*журнал|за один день|через минуты|0\.9 с/);
   });
 
-  it("marks only production channels as working and pending channels as pending", () => {
-    for (const channel of ["Web SDK", "Telegram", "ВКонтакте", "MAX", "REST API"]) {
-      assert.match(source, new RegExp(`name: "${channel}",[^\\n]+status: "работает"`));
+  it("separates implemented channels, configured providers and external live gates", () => {
+    for (const channel of ["Web SDK", "REST API"]) {
+      assert.match(source, new RegExp(`name: "${channel}",[^\\n]+status: "реализовано"`));
+    }
+    assert.match(source, /name: "Telegram",[^\n]+status: "требует настройки"/);
+    for (const channel of ["ВКонтакте", "MAX"]) {
+      assert.match(source, new RegExp(`name: "${channel}",[^\\n]+status: "требует live-проверки"`));
     }
     for (const channel of ["WhatsApp", "Email", "Viber"]) {
       assert.match(source, new RegExp(`name: "${channel}",[^\\n]+status: "на подключении"`));
-      assert.doesNotMatch(source, new RegExp(`name: "${channel}",[^\\n]+status: "работает"`));
     }
+    assert.doesNotMatch(source, /уже работают в продакшене|полный журнал аудита/);
   });
 
   it("does not invent an enterprise price and keeps trial claims card-free", () => {

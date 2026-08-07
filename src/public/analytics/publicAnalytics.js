@@ -1,3 +1,4 @@
+import { commercialPageDefinitions } from "../content/commercialPageDefinitions.js";
 import { getPublicSiteConfig } from "../seo/publicRouteManifest.js";
 
 const METRIKA_SCRIPT_ID = "supportcom-yandex-metrika";
@@ -5,19 +6,23 @@ const METRIKA_SCRIPT_SRC = "https://mc.yandex.ru/metrika/tag.js";
 
 export const PUBLIC_ANALYTICS_CONSENT_KEY = "supportcom:public-analytics-consent:v1";
 export const PUBLIC_ANALYTICS_GOALS = Object.freeze({
+  aiSupportBotView: commercialPageDefinitions.find((page) => page.id === "ai-support-bot").analyticsGoal,
   demoFormOpen: "demo_form_open",
   demoFormSubmitSuccess: "demo_form_submit_success",
   docsView: "docs_view",
   loginClick: "login_click",
   pricingView: "pricing_view",
-  registrationStart: "registration_start"
+  registrationStart: "registration_start",
+  supportSlaView: commercialPageDefinitions.find((page) => page.id === "support-sla").analyticsGoal,
+  websiteSupportChatView: commercialPageDefinitions.find((page) => page.id === "website-support-chat").analyticsGoal
 });
 
 const allowedGoals = new Set(Object.values(PUBLIC_ANALYTICS_GOALS));
-const routeGoalByView = Object.freeze({
-  docs: PUBLIC_ANALYTICS_GOALS.docsView,
-  pricing: PUBLIC_ANALYTICS_GOALS.pricingView
-});
+const routeViewGoals = new Set([
+  PUBLIC_ANALYTICS_GOALS.docsView,
+  PUBLIC_ANALYTICS_GOALS.pricingView,
+  ...commercialPageDefinitions.map((page) => page.analyticsGoal)
+]);
 
 let runtime = createRuntime();
 
@@ -122,9 +127,8 @@ export function trackPublicAnalyticsGoal(goal) {
   return true;
 }
 
-export function trackPublicRouteView(view) {
-  const goal = routeGoalByView[view];
-  if (!goal || runtime.routeGoalsSent.has(goal)) return false;
+export function trackPublicRouteView(goal) {
+  if (!routeViewGoals.has(goal) || runtime.routeGoalsSent.has(goal)) return false;
   if (!trackPublicAnalyticsGoal(goal)) return false;
   runtime.routeGoalsSent.add(goal);
   return true;

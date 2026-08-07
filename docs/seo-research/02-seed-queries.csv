@@ -1,0 +1,71 @@
+query,topic,assumed_intent,funnel_stage,source,brand_flag,manual_review,notes
+система поддержки клиентов,category,commercial_investigation,consideration,research_plan,false,false,Базовая гипотеза категории; проверить тип страниц и спрос
+программа для поддержки клиентов,category,commercial_investigation,consideration,current_site,false,false,Продуктовая формулировка без привязки к ITSM
+сервис поддержки клиентов,category,commercial_investigation,consideration,research_plan,false,true,Может означать аутсорсинг; проверить состав выдачи
+платформа клиентской поддержки,category,commercial_investigation,consideration,current_site,false,false,Соответствует публичному позиционированию платформы
+helpdesk для клиентов,category,commercial_investigation,consideration,market_language:happydesk.ru,false,false,Проверить вариант helpdesk и русское написание
+хелпдеск для бизнеса,category,commercial_investigation,consideration,market_language:happydesk.ru,false,false,Коммерческая русскоязычная формулировка категории
+help desk для службы поддержки,category,commercial_investigation,consideration,market_language:shanix.ru,false,true,Раздельное написание; возможна примесь внутренней IT-поддержки
+service desk для клиентов,category,commercial_investigation,consideration,market_language:shanix.ru,false,true,Термин часто относится к внутреннему ITSM; нужен SERP-review
+система обработки обращений клиентов,category,solution_discovery,consideration,product_requirements,false,false,Соответствует учёту и жизненному циклу обращений
+система учета обращений клиентов,category,solution_discovery,consideration,market_language:shanix.ru,false,true,Возможна выдача CRM и государственных систем обращений
+тикет система для поддержки клиентов,category,commercial_investigation,consideration,market_language:okdesk.ru,false,false,Рыночный синоним helpdesk; проверить дефис и словоформы
+единое окно для обращений клиентов,category,solution_discovery,consideration,current_site,false,true,Единое окно может означать государственные и логистические сервисы
+омниканальная поддержка клиентов,channel,solution_discovery,consideration,current_site,false,false,Текущий title главной; проверить каннибализацию до выбора URL
+омниканальная платформа поддержки,channel,commercial_investigation,consideration,product_requirements,false,false,Платформенная формулировка для объединения каналов
+поддержка клиентов из разных каналов,channel,solution_discovery,awareness,current_site,false,false,Проблемная формулировка из тарифных преимуществ
+обращения из разных каналов в одном окне,channel,solution_discovery,consideration,current_site,false,false,Соответствует shared inbox и единой очереди
+обращения из мессенджеров в одном окне,channel,solution_discovery,consideration,market_language:happydesk.ru,false,false,Рыночная лексика объединения мессенджеров
+чат поддержки для сайта,channel,commercial_investigation,consideration,current_site,false,false,Целевой сценарий Web SDK и оператора
+онлайн чат поддержки для сайта,channel,commercial_investigation,consideration,market_language:jivo.ru,false,true,В выдаче вероятна смесь sales-чата и клиентской поддержки
+виджет поддержки на сайт,channel,commercial_investigation,consideration,current_site,false,false,Соответствует встраиваемому Web SDK
+поддержка клиентов в telegram,channel,solution_discovery,consideration,current_site,false,false,Канал работает через Telegram-бота
+telegram бот для поддержки клиентов,channel,commercial_investigation,consideration,current_site,false,false,Отделить от разработки заказного бота как услуги
+поддержка клиентов во вконтакте,channel,solution_discovery,consideration,current_site,false,true,Проверить написания ВК и VK и интент поддержки сообщества
+бот вконтакте для поддержки клиентов,channel,commercial_investigation,consideration,current_site,false,true,Может пересекаться с конструкторами маркетинговых ботов
+поддержка клиентов в max,channel,solution_discovery,consideration,current_site,false,true,Новая лексика; исключить запросы в поддержку самого MAX
+бот в max для поддержки клиентов,channel,commercial_investigation,consideration,market_language:leaderchat.ru,false,true,Проверить спрос и неоднозначность названия MAX
+автоматизация клиентской поддержки,automation,solution_discovery,consideration,market_language:happydesk.ru,false,false,Широкая продуктовая задача автоматизации
+автоматизация службы поддержки,automation,solution_discovery,consideration,product_requirements,false,false,Операционный вариант формулировки
+ии бот для поддержки клиентов,automation,commercial_investigation,consideration,current_site,false,false,Основная продуктовая гипотеза AI-бота
+ai бот поддержки,automation,commercial_investigation,consideration,current_site,false,true,Короткая смешанная формулировка; возможен B2C-интент
+чат бот с ии для поддержки клиентов,automation,commercial_investigation,consideration,market_language:botsaas.io,false,false,Рыночная формулировка AI-чат-бота
+ии агент для клиентской поддержки,automation,commercial_investigation,consideration,market_language:aixis.ru,false,false,Современный рыночный термин AI support agent
+бот первой линии поддержки,automation,solution_discovery,consideration,market_language:leaderchat.ru,false,false,Соответствует сценарию ответа до оператора
+автоматизация первой линии поддержки,automation,solution_discovery,consideration,market_language:aixis.ru,false,false,Задача снижения ручной нагрузки первой линии
+бот поддержки по базе знаний,automation,feature_evaluation,consideration,current_site,false,false,Соответствует подключаемым источникам знаний
+передача диалога от бота оператору,automation,feature_evaluation,consideration,current_site,false,false,Сценарий handoff с контекстом
+конструктор ботов для поддержки,automation,commercial_investigation,consideration,product_requirements,false,true,Может пересекаться с универсальными конструкторами чат-ботов
+контроль sla поддержки,operations,solution_discovery,consideration,current_site,false,false,Публично подтверждённый операционный сценарий
+управление sla обращений,operations,feature_evaluation,consideration,product_requirements,false,true,Проверить решение против информационных материалов об SLA
+контроль времени первого ответа,operations,solution_discovery,consideration,current_site,false,false,Показатель и отчёт доступны в продукте
+распределение обращений между операторами,operations,solution_discovery,consideration,current_site,false,false,Публичная формулировка функции маршрутизации
+автоматическое назначение обращений,operations,feature_evaluation,consideration,product_requirements,false,false,Соответствует автоматической маршрутизации очереди
+управление очередью поддержки,operations,solution_discovery,consideration,current_site,false,false,Соответствует рабочему месту смены
+единая очередь обращений,operations,solution_discovery,consideration,current_site,false,true,Может пересекаться с электронными очередями и госуслугами
+контроль нагрузки операторов поддержки,operations,solution_discovery,consideration,current_site,false,false,Соответствует лимитам и загрузке операторов
+панель руководителя службы поддержки,operations,feature_evaluation,consideration,product_requirements,false,true,Проверить наличие самостоятельного коммерческого intent
+аналитика службы поддержки,operations,feature_evaluation,consideration,current_site,false,true,Возможна информационная выдача и шаблоны метрик
+контроль качества ответов операторов,operations,solution_discovery,consideration,current_site,false,false,Соответствует ручным и AI-проверкам качества
+отчеты по обращениям клиентов,operations,feature_evaluation,consideration,current_site,false,true,Может быть информационным запросом про шаблоны отчётов
+api службы поддержки,integration,integration_evaluation,consideration,current_site,false,false,Соответствует публичной API-документации
+helpdesk api,integration,integration_evaluation,consideration,market_language:helpdesk.com,false,true,Англоязычная краткая форма; проверить российский спрос
+webhook helpdesk,integration,integration_evaluation,consideration,current_site,false,true,Технический низкочастотный intent без оценки частотности
+web sdk чат поддержки,integration,integration_evaluation,consideration,current_site,false,false,Соответствует готовому Web SDK
+интеграция helpdesk с crm,integration,integration_evaluation,consideration,market_language:okdesk.ru,false,true,Интеграция с конкретной CRM не заявляется; нужен общий intent review
+интеграция telegram с helpdesk,integration,integration_evaluation,consideration,current_site,false,false,Связывает подтверждённый канал с категорией продукта
+интеграция вк с helpdesk,integration,integration_evaluation,consideration,current_site,false,false,Связывает сообщения сообщества с общей очередью
+open channel для поддержки,integration,integration_evaluation,consideration,current_site,false,true,Технический термин может быть непонятен вне документации
+встраиваемый чат поддержки api,integration,integration_evaluation,consideration,current_site,false,true,Проверить естественность формулировки и пересечение с Web SDK
+система поддержки клиентов цена,commercial_modifiers,transactional,decision,research_plan,false,false,Ценовой модификатор категории
+helpdesk тарифы,commercial_modifiers,transactional,decision,current_site,false,false,Ценовой intent; проверить латиницу и кириллицу
+стоимость helpdesk для бизнеса,commercial_modifiers,transactional,decision,market_language:helpdesk.com,false,false,Стоимость по B2B-сценарию
+купить helpdesk систему,commercial_modifiers,transactional,decision,research_plan,false,true,Для SaaS слово купить может проигрывать подписке
+helpdesk для малого бизнеса,commercial_modifiers,commercial_investigation,consideration,current_site,false,false,Соответствует диапазону команд и бесплатному старту
+helpdesk для компании,commercial_modifiers,commercial_investigation,consideration,research_plan,false,true,Широкий B2B-модификатор без сегмента
+внедрение системы поддержки клиентов,commercial_modifiers,transactional,decision,research_plan,false,true,Возможна выдача интеграторов и услуг внедрения
+бесплатный helpdesk для одного оператора,commercial_modifiers,transactional,decision,current_site,false,false,Соответствует Free для одного владельца-оператора
+support communication тарифы,commercial_modifiers,navigational,decision,current_site,own,false,Собственный брендовый запрос
+support communication платформа поддержки,commercial_modifiers,navigational,consideration,current_site,own,false,Собственный брендовый запрос категории
+аналог usedesk,commercial_modifiers,comparative_commercial,decision,research_plan,competitor,true,Сравнительный брендовый кластер; не использовать без отдельного Gate
+альтернатива jivo для поддержки,commercial_modifiers,comparative_commercial,decision,research_plan,competitor,true,Сравнительный брендовый кластер; проверить правовые и редакционные риски

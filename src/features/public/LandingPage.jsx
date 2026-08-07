@@ -407,6 +407,7 @@ export function LandingPage({
           {tariffs.map((tariff) => {
             const isFeatured = tariff.id === "free";
             const isEnterprise = tariff.id === "enterprise";
+            const isPaidPerOperator = tariff.billingAvailability !== "free" && !isEnterprise;
             return (
               <article
                 className={`public-tariff-card${isFeatured ? " featured" : ""}${isEnterprise ? " enterprise" : ""}`}
@@ -414,13 +415,16 @@ export function LandingPage({
               >
                 <header>
                   <strong>{tariff.name}</strong>
-                  <span>{isFeatured ? "Чтобы попробовать сервис" : isEnterprise ? "Для компаний с особыми требованиями" : "Стоимость за сотрудника в месяц"}</span>
+                  <span>{isFeatured ? "Чтобы попробовать сервис" : isEnterprise ? "Для компаний с особыми требованиями" : `Для команды до ${tariff.includedUsers} сотрудников`}</span>
                 </header>
-                <div className="public-price">{tariff.billingAvailability === "free" ? "Бесплатно" : isEnterprise ? "Индивидуально" : formatTariffPrice(tariff.priceMonthly)}</div>
-                <p>{tariff.billingAvailability === "free" ? "Для одного сотрудника — владельца организации" : isEnterprise ? `До ${tariff.includedUsers} сотрудников` : `${formatTariffPrice(tariff.priceMonthly)} за сотрудника · до ${tariff.includedUsers} сотрудников`}</p>
+                <div className="public-price-row">
+                  <div className="public-price">{tariff.billingAvailability === "free" ? "Бесплатно" : isEnterprise ? "Индивидуально" : formatTariffPrice(tariff.priceMonthly)}</div>
+                  {isPaidPerOperator ? <span>за сотрудника<br />в месяц</span> : null}
+                </div>
+                <p className="public-tariff-audience">{tariff.billingAvailability === "free" ? "Для одного сотрудника — владельца организации" : isEnterprise ? `До ${tariff.includedUsers} сотрудников` : `До ${tariff.includedUsers} сотрудников в команде`}</p>
                 <ul>
                   {(tariff.features ?? []).map((feature) => (
-                    <li key={feature}><CheckCircle2 size={15} /> {tariffFeatureLabels[feature] ?? feature}</li>
+                    <li key={feature}><CheckCircle2 aria-hidden="true" size={16} /> <span>{tariffFeatureLabels[feature] ?? feature}</span></li>
                   ))}
                 </ul>
                 {isEnterprise ? (
@@ -431,6 +435,7 @@ export function LandingPage({
                     type="button"
                   >
                     Связаться с нами
+                    <ArrowRight aria-hidden="true" size={16} />
                   </button>
                 ) : (
                   <button
@@ -439,6 +444,7 @@ export function LandingPage({
                     type="button"
                   >
                     {isFeatured ? "Начать бесплатно" : "Попробовать бесплатно"}
+                    <ArrowRight aria-hidden="true" size={16} />
                   </button>
                 )}
               </article>

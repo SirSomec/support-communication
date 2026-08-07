@@ -536,21 +536,6 @@
   width: 100%;
 }
 
-.onboarding-legal-draft {
-  display: grid;
-  gap: 4px;
-  padding: 13px 14px;
-  border: 1px solid #f3cf8c;
-  border-radius: 9px;
-  background: #fffaf0;
-  color: #754d05;
-}
-
-.onboarding-legal-draft span {
-  font-size: 13px;
-  line-height: 1.45;
-}
-
 .onboarding-legal-list {
   display: grid;
   overflow: hidden;

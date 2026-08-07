@@ -269,10 +269,6 @@ export function OnboardingStepContent({
             title="Правовые документы"
             text="Подтвердите каждый пункт отдельно. Версия документов и время принятия будут сохранены вместе с регистрацией."
           />
-          <div className="onboarding-legal-draft">
-            <strong>Документы подготовлены как проект</strong>
-            <span>Перед коммерческим запуском необходимо утвердить реквизиты оператора и финальные формулировки.</span>
-          </div>
           <div className="onboarding-legal-list">
             <label>
               <input

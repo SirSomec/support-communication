@@ -15,9 +15,52 @@ const checks = [
   {
     file: "apps/api-gateway/src/integrations/public-api.controller.ts",
     patterns: [
+      /operationId:\s*"createPublicSdkUpload"/,
       /operationId:\s*"identifyPublicSdkClient"/,
-      /ApiQuery\(\{\s*name:\s*"environment"/,
+      /operationId:\s*"pollPublicSdkMessages"/,
+      /PUBLIC_SDK_MESSAGE_BODY_SCHEMA/,
+      /PUBLIC_SDK_RATING_BODY_SCHEMA/,
+      /ApiPublicEnvironment/,
       /denial envelopes include rate-limit metadata/
+    ]
+  },
+  {
+    file: "apps/api-gateway/src/integrations/public-api.openapi.ts",
+    patterns: [
+      /PUBLIC_API_ENVIRONMENT_QUERY/,
+      /required:\s*false/,
+      /PUBLIC_API_ENVELOPE_SCHEMA/,
+      /PUBLIC_SDK_UPLOAD_BODY_SCHEMA/,
+      /PUBLIC_SDK_MESSAGE_BODY_SCHEMA/,
+      /PUBLIC_SDK_CLIENT_INFO_BODY_SCHEMA/,
+      /OPEN_CHANNEL_EVENT_BODY_SCHEMA/,
+      /visitorSessionToken/
+    ]
+  },
+  {
+    file: "apps/api-gateway/src/openapi.ts",
+    patterns: [
+      /Support Communication Client API/,
+      /Руководство для разработчиков/,
+      /displayOperationId:\s*true/,
+      /persistAuthorization:\s*false/,
+      /pruneUnusedSchemas\(document\)/
+    ],
+    forbidden: [
+      /Phase 0 API Gateway shell/
+    ]
+  },
+  {
+    file: "../src/features/public/ApiDocsPage.jsx",
+    patterns: [
+      /const pollExample/,
+      /const uploadExample/,
+      /client_updated/,
+      /idempotency-key/,
+      /visitorSessionToken/
+    ],
+    forbidden: [
+      /x-webhook-nonce/
     ]
   },
   {
@@ -40,12 +83,12 @@ const checks = [
   {
     file: "../docs/open-channel-api.md",
     patterns: [
-      /`chat_accepted`, `chat_updated`, `chat_finished`, `client_attribute_updated`,\s*`offline_message`/,
+      /`chat_accepted`, `chat_updated`, `chat_finished`, `client_updated`,\s*`client_attribute_updated`, `offline_message`/,
       /`invalid_client` \(401\), `invalid_request` \(400\)/,
-      /Офлайн-формы нет — `offline_message` зарезервировано, событие не эмитится/
+      /`offline_message` \| Виджет отправил офлайн-сообщение/,
+      /результат `CLIENT_RATED` пересылается бот-провайдеру/
     ],
     forbidden: [
-      /\bclient_updated\b/,
       /\bunauthorized_client\b/,
       /\bdepartment\b/
     ]
@@ -53,10 +96,7 @@ const checks = [
   {
     file: "apps/api-gateway/src/integrations/open-channel/open-channel-admin.controller.ts",
     patterns: [
-      /SUPPORTED_WEBHOOK_EVENTS = \["chat_accepted", "chat_updated", "chat_finished", "client_attribute_updated", "offline_message"\]/
-    ],
-    forbidden: [
-      /"client_updated"/
+      /SUPPORTED_WEBHOOK_EVENTS = \["chat_accepted", "chat_updated", "chat_finished", "client_attribute_updated", "client_updated", "offline_message"\]/
     ]
   }
 ];

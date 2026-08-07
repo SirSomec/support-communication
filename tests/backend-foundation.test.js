@@ -126,8 +126,9 @@ describe("backend phase 0 foundation scaffold", () => {
     assert.match(controllerSource, /ApiBearerAuth/);
     assert.match(controllerSource, /operationId:\s*"identifyPublicSdkClient"/);
     assert.match(controllerSource, /Public SDK identify runtime endpoint/);
-    assert.match(controllerSource, /ApiQuery\(\{\s*name:\s*"environment"/);
-    assert.match(controllerSource, /production or stage public API key environment/);
+    assert.match(controllerSource, /ApiPublicEnvironment/);
+    assert.match(controllerSource, /PUBLIC_SDK_IDENTIFY_BODY_SCHEMA/);
+    assert.match(controllerSource, /PUBLIC_SDK_MESSAGE_BODY_SCHEMA/);
     assert.match(controllerSource, /denial envelopes include rate-limit metadata/);
   });
 

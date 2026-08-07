@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, Res } from "@nestjs/common";
-import { ApiExcludeEndpoint, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Res } from "@nestjs/common";
+import { ApiBody, ApiExcludeEndpoint, ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { ConversationRepository } from "../../conversation/conversation.repository.js";
 import { ConversationService } from "../../conversation/conversation.service.js";
 import { RoutingService } from "../../routing/routing.service.js";
@@ -11,6 +11,7 @@ import { OpenChannelDeliveryService } from "./open-channel-delivery.service.js";
 import { handleOpenChatInbound, handleOpenChatStatus, type OpenChatEvent, type OpenChatRouteResult } from "./open-chat.route.js";
 import { ExternalBotBridge, handleExternalBotProviderEvent } from "./external-bot.route.js";
 import { handleJivoCompatibleWebhook } from "./jivo-compat.route.js";
+import { OPEN_CHANNEL_EVENT_BODY_SCHEMA } from "../public-api.openapi.js";
 
 /**
  * Public endpoints of the external integration surface. URL shapes follow
@@ -41,12 +42,21 @@ export class OpenChannelPublicController {
   ) {}
 
   @Post("open-channel/:channelToken")
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     description: "Open Channel chat ingress: POST {sender, recipient, message} events.",
     operationId: "receiveOpenChatEvent",
     summary: "Receive an Open Channel chat event"
   })
   @ApiParam({ name: "channelToken", description: "Open Channel chat token from the channel settings" })
+  @ApiBody({ schema: OPEN_CHANNEL_EVENT_BODY_SCHEMA })
+  @ApiResponse({
+    status: 200,
+    description: "Event accepted or acknowledged.",
+    content: { "application/json": { schema: { properties: { result: { example: "ok", type: "string" } }, type: "object" } } }
+  })
+  @ApiResponse({ status: 400, description: "Permanent payload error. Do not retry.", content: { "text/plain": { schema: { example: "message_type_required", type: "string" } } } })
+  @ApiResponse({ status: 404, description: "Channel token is unknown or inactive.", content: { "text/plain": { schema: { example: "channel_not_found", type: "string" } } } })
   async receiveOpenChatEvent(
     @Param("channelToken") channelToken: string,
     @Body() body: OpenChatEvent,
@@ -72,6 +82,8 @@ export class OpenChannelPublicController {
     summary: "Fetch Open Channel chat status"
   })
   @ApiParam({ name: "channelToken", description: "Chat API channel token" })
+  @ApiResponse({ status: 200, description: "Plain-text activity flag: 1 when an active dialog exists, otherwise 0.", content: { "text/plain": { schema: { enum: ["0", "1"], type: "string" } } } })
+  @ApiResponse({ status: 404, description: "Channel token is unknown or inactive.", content: { "text/plain": { schema: { example: "channel_not_found", type: "string" } } } })
   async fetchOpenChannelStatus(
     @Param("channelToken") channelToken: string,
     @Res() response: HttpResponseLike

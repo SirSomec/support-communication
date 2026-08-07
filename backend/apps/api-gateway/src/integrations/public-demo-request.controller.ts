@@ -1,6 +1,7 @@
 import { Body, Controller, Headers, HttpCode, HttpStatus, Post, Req } from "@nestjs/common";
-import { ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { ApiBody, ApiHeader, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { PublicDemoRequestService, type PublicDemoRequestPayload } from "./public-demo-request.service.js";
+import { ApiPublicEnvelope, PUBLIC_DEMO_REQUEST_BODY_SCHEMA } from "./public-api.openapi.js";
 
 interface PublicDemoRequestHttpRequest {
   headers?: Record<string, string | string[] | undefined>;
@@ -22,7 +23,9 @@ export class PublicDemoRequestController {
     operationId: "createPublicDemoRequest",
     summary: "Create a public demo request"
   })
-  @ApiOkResponse({ description: "Public demo request envelope with sanitized lead id, audit event and notification descriptor" })
+  @ApiHeader({ name: "Idempotency-Key", required: false, description: "Stable key for retrying the same lead request safely" })
+  @ApiBody({ schema: PUBLIC_DEMO_REQUEST_BODY_SCHEMA })
+  @ApiPublicEnvelope("Public demo request envelope with sanitized lead id, duplicate state and notification descriptor.")
   createDemoRequest(
     @Body() payload: PublicDemoRequestPayload = {},
     @Headers("idempotency-key") idempotencyKey: string | undefined,

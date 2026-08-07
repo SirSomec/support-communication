@@ -36,8 +36,8 @@
 (список типов каналов, `null` = все, например `["SDK", "CHATAPI"]`).
 
 Поля подписки вебхуков: `url`, `events` (`null` = все поддерживаемые:
-`chat_accepted`, `chat_updated`, `chat_finished`, `client_attribute_updated`,
-`offline_message`).
+`chat_accepted`, `chat_updated`, `chat_finished`, `client_updated`,
+`client_attribute_updated`, `offline_message`).
 
 ---
 
@@ -174,7 +174,9 @@ POST JSON на URL подписки. Тип события — строково�
 | `chat_accepted` | Оператор принял диалог |
 | `chat_updated` | Обновились данные клиента в активном диалоге |
 | `chat_finished` | Диалог завершён (включает переписку) |
+| `client_updated` | Обновились контактные данные клиента |
 | `client_attribute_updated` | Изменены атрибуты клиента |
+| `offline_message` | Виджет отправил офлайн-сообщение через `sendOfflineMessage` |
 
 Общие поля события: `event_name`, `widget_id`, `user_token` (значение
 `setUserToken` из Widget API, иначе `null`), `visitor {name, email, phone,
@@ -241,7 +243,7 @@ email}`, `analytics`.
 | `setCustomData([{title?, key?, content, link?}])` | До 10 полей произвольных данных в панель оператора |
 | `setClientAttributes({имя: значение})` | Атрибуты клиента (строки/числа) |
 | `setUserToken(token)` | Идентификатор клиента — попадёт в поле `user_token` всех вебхуков |
-| `sendOfflineMessage({name, email, phone, description, message})` | Контакты + сообщение одним вызовом → `{result}` |
+| `sendOfflineMessage({name, email, phone, description, message})` | Контакты + сообщение одним вызовом; дополнительно эмитит `offline_message` → `{result}` |
 | `sendPageTitle(title, fromApi?, url?)` | Обновить страницу клиента для SPA |
 | `showProactiveInvitation(text, departmentId?)` | Показать приглашение к диалогу |
 | `setWidgetColor(color, color2?)` | Цвет/градиент виджета |
@@ -263,14 +265,13 @@ email}`, `analytics`.
 ## 6. Ограничения текущей версии
 
 - Телефония (`call_event`, `startCall`) не поддерживается.
-- Офлайн-формы нет — `offline_message` зарезервировано, событие не эмитится;
-  `sendOfflineMessage` отправляет обычное сообщение с контактами.
 - CRM-вебхуки (сделки/задачи/воронки) не поддерживаются.
 - `session.geoip`/`utm` в вебхуках передаются пустыми структурами (поля
   сохранены для совместимости парсеров).
 - `INIT_RATE` принимается и фиксируется, но отдельная форма оценки в виджете
-  по нему пока не показывается (оценка доступна при закрытии диалога).
-- Оценка из `CLIENT_RATED` не пересылается бот-провайдеру.
+  по нему пока не показывается (оценка доступна при закрытии диалога). После
+  оценки результат `CLIENT_RATED` пересылается бот-провайдеру, запросившему
+  оценку через `INIT_RATE`.
 
 ## 7. Конфигурация
 

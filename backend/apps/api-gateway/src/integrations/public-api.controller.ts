@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query } from "@nestjs/common";
-import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { ConversationRepository } from "../conversation/conversation.repository.js";
 import type { ConversationRecord } from "../conversation/conversation.types.js";
 import { AutomationService } from "../automation/automation.service.js";
@@ -29,6 +29,20 @@ import { compatWebhookEventBase } from "./open-channel/open-channel-payload.js";
 import { ExternalBotBridge } from "./open-channel/external-bot.route.js";
 import { handleAgentsOnlineStatus, handleWidgetClientInfoFromRoute, type WidgetClientInfoBody } from "./open-channel/client-info.route.js";
 import { openChannelDeliveryService, resolveAgentsOnline } from "./open-channel/open-channel-public.controller.js";
+import {
+  ApiPublicEnvironment,
+  ApiPublicEnvelope,
+  PUBLIC_SDK_CLIENT_INFO_BODY_SCHEMA,
+  PUBLIC_SDK_IDENTIFY_BODY_SCHEMA,
+  PUBLIC_SDK_INVITATION_ACK_BODY_SCHEMA,
+  PUBLIC_SDK_MESSAGE_BODY_SCHEMA,
+  PUBLIC_SDK_PRESENCE_BODY_SCHEMA,
+  PUBLIC_SDK_PRESENCE_DISCONNECT_BODY_SCHEMA,
+  PUBLIC_SDK_RATING_BODY_SCHEMA,
+  PUBLIC_SDK_SESSION_TOKEN_BODY_SCHEMA,
+  PUBLIC_SDK_UPLOAD_BODY_SCHEMA,
+  PUBLIC_SDK_UPLOAD_FINALIZE_BODY_SCHEMA
+} from "./public-api.openapi.js";
 
 @ApiTags("public")
 @ApiBearerAuth()
@@ -50,6 +64,9 @@ export class PublicApiController {
   @Post("sdk/uploads")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "createPublicSdkUpload", summary: "Create a one-time upload descriptor for a public SDK attachment" })
+  @ApiPublicEnvironment()
+  @ApiBody({ schema: PUBLIC_SDK_UPLOAD_BODY_SCHEMA })
+  @ApiPublicEnvelope("One-time object-storage upload descriptor. Finalize the file before attaching it to a message.")
   createPublicSdkUpload(
     @Headers("authorization") authorization: string | undefined,
     @Query("environment") environment: PublicApiEnvironment = "production",
@@ -63,6 +80,10 @@ export class PublicApiController {
   @Post("sdk/uploads/:fileId/finalize")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "finalizePublicSdkUpload", summary: "Finalize a public SDK attachment upload before sending it in a conversation" })
+  @ApiParam({ name: "fileId", description: "File identifier returned by the upload descriptor endpoint" })
+  @ApiPublicEnvironment()
+  @ApiBody({ required: false, schema: PUBLIC_SDK_UPLOAD_FINALIZE_BODY_SCHEMA })
+  @ApiPublicEnvelope("Finalized attachment envelope. Wait for the scan state before relying on a download link.")
   finalizePublicSdkUpload(
     @Headers("authorization") authorization: string | undefined,
     @Param("fileId") fileId: string,
@@ -77,6 +98,9 @@ export class PublicApiController {
   @Post("sdk/presence/heartbeat")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "heartbeatPublicSdkPresence", summary: "Refresh an anonymous SDK visitor presence session" })
+  @ApiPublicEnvironment()
+  @ApiBody({ schema: PUBLIC_SDK_PRESENCE_BODY_SCHEMA })
+  @ApiPublicEnvelope("Live SDK presence session with a refreshed expiry time.")
   heartbeatPublicSdkPresence(@Headers("authorization") authorization: string | undefined,
     @Query("environment") environment: PublicApiEnvironment = "production", @Body() payload: PublicSdkPresenceBody = {}) {
     return handlePublicSdkPresenceHeartbeat({ authorization, body: payload, environment, lookup: this.lookup,
@@ -86,6 +110,9 @@ export class PublicApiController {
   @Post("sdk/presence/disconnect")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "disconnectPublicSdkPresence", summary: "Disconnect an SDK visitor presence session" })
+  @ApiPublicEnvironment()
+  @ApiBody({ schema: PUBLIC_SDK_PRESENCE_DISCONNECT_BODY_SCHEMA })
+  @ApiPublicEnvelope("Presence disconnect result for the supplied SDK session.")
   disconnectPublicSdkPresence(@Headers("authorization") authorization: string | undefined,
     @Query("environment") environment: PublicApiEnvironment = "production", @Body() payload: PublicSdkPresenceBody = {}) {
     return handlePublicSdkPresenceDisconnect({ authorization, body: payload, environment, lookup: this.lookup,
@@ -94,6 +121,9 @@ export class PublicApiController {
 
   @Get("sdk/invitations")
   @ApiOperation({ operationId: "pollPublicSdkInvitations", summary: "Poll pending proactive invitations for a live SDK session" })
+  @ApiPublicEnvironment()
+  @ApiQuery({ name: "sessionId", required: true, type: String, description: "Live sessionId previously sent to the presence heartbeat endpoint" })
+  @ApiPublicEnvelope("Pending proactive invitations for the live SDK session.")
   pollPublicSdkInvitations(@Headers("authorization") authorization: string | undefined,
     @Query("sessionId") sessionId: string | undefined,
     @Query("environment") environment: PublicApiEnvironment = "production") {
@@ -104,6 +134,11 @@ export class PublicApiController {
   @Post("sdk/invitations/:exposureId/:action")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "acknowledgePublicSdkInvitation", summary: "Acknowledge a proactive SDK invitation lifecycle event" })
+  @ApiParam({ name: "exposureId", description: "Invitation exposure identifier returned by the polling endpoint" })
+  @ApiParam({ name: "action", enum: ["shown", "dismissed", "accepted", "failed"], description: "Invitation lifecycle action" })
+  @ApiPublicEnvironment()
+  @ApiBody({ schema: PUBLIC_SDK_INVITATION_ACK_BODY_SCHEMA })
+  @ApiPublicEnvelope("Updated invitation exposure and optional conversation session token after acceptance.")
   acknowledgePublicSdkInvitation(@Headers("authorization") authorization: string | undefined,
     @Param("exposureId") exposureId: string, @Param("action") action: "shown" | "dismissed" | "accepted" | "failed",
     @Query("environment") environment: PublicApiEnvironment = "production",
@@ -129,8 +164,9 @@ export class PublicApiController {
     operationId: "identifyPublicSdkClient",
     summary: "Identify a public SDK client"
   })
-  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
-  @ApiOkResponse({ description: "Public SDK identify envelope guarded by public API key auth" })
+  @ApiPublicEnvironment()
+  @ApiBody({ schema: PUBLIC_SDK_IDENTIFY_BODY_SCHEMA })
+  @ApiPublicEnvelope("Public SDK identify envelope guarded by public API key auth.")
   identifyPublicClient(
     @Headers("authorization") authorization: string | undefined,
     @Query("environment") environment: PublicApiEnvironment = "production",
@@ -171,12 +207,13 @@ export class PublicApiController {
     operationId: "sendPublicSdkMessage",
     summary: "Accept a public SDK message"
   })
-  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
-  @ApiOkResponse({ description: "Public SDK ingress envelope with conversation and visitor session token" })
+  @ApiPublicEnvironment()
+  @ApiBody({ schema: PUBLIC_SDK_MESSAGE_BODY_SCHEMA })
+  @ApiPublicEnvelope("Public SDK ingress envelope with conversation, message and short-lived visitor session identifiers.")
   sendPublicSdkMessage(
     @Headers("authorization") authorization: string | undefined,
     @Query("environment") environment: PublicApiEnvironment = "production",
-    @Body() payload: { conversationId?: string; externalId?: string; offlineMessage?: boolean; pageUrl?: string; text?: string } = {}
+    @Body() payload: { attachments?: Array<Record<string, unknown>>; conversationId?: string; externalId?: string; offlineMessage?: boolean; pageUrl?: string; text?: string } = {}
   ) {
     return handlePublicSdkMessageIngressFromRoute({
       authorization,
@@ -259,7 +296,9 @@ export class PublicApiController {
     operationId: "updatePublicSdkClientInfo",
     summary: "Update public SDK visitor client info"
   })
-  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
+  @ApiPublicEnvironment()
+  @ApiBody({ schema: PUBLIC_SDK_CLIENT_INFO_BODY_SCHEMA })
+  @ApiPublicEnvelope("Updated public SDK client card and stable visitor number.")
   updatePublicSdkClientInfo(
     @Headers("authorization") authorization: string | undefined,
     @Query("environment") environment: PublicApiEnvironment = "production",
@@ -281,7 +320,8 @@ export class PublicApiController {
     operationId: "fetchPublicSdkAgentsStatus",
     summary: "Fetch public SDK agents online status"
   })
-  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
+  @ApiPublicEnvironment()
+  @ApiPublicEnvelope("Current availability of agents for SDK chatMode().")
   fetchPublicSdkAgentsStatus(
     @Headers("authorization") authorization: string | undefined,
     @Query("environment") environment: PublicApiEnvironment = "production"
@@ -298,8 +338,9 @@ export class PublicApiController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "recordPublicSdkQualityRating", summary: "Record a public SDK conversation rating" })
   @ApiParam({ name: "conversationId", description: "SDK conversation identifier" })
-  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
-  @ApiOkResponse({ description: "Public SDK quality rating acceptance envelope" })
+  @ApiPublicEnvironment()
+  @ApiBody({ schema: PUBLIC_SDK_RATING_BODY_SCHEMA })
+  @ApiPublicEnvelope("Public SDK quality rating acceptance envelope and feedback offer state.")
   recordPublicSdkQualityRating(
     @Headers("authorization") authorization: string | undefined,
     @Param("conversationId") conversationId: string,
@@ -326,8 +367,9 @@ export class PublicApiController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "declinePublicSdkCsatFeedback", summary: "Skip the CSAT feedback comment and unlock a new appeal" })
   @ApiParam({ name: "conversationId", description: "SDK conversation identifier" })
-  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
-  @ApiOkResponse({ description: "Public SDK CSAT feedback decline envelope" })
+  @ApiPublicEnvironment()
+  @ApiBody({ schema: PUBLIC_SDK_SESSION_TOKEN_BODY_SCHEMA })
+  @ApiPublicEnvelope("Public SDK CSAT feedback decline envelope.")
   declinePublicSdkCsatFeedback(
     @Headers("authorization") authorization: string | undefined,
     @Param("conversationId") conversationId: string,
@@ -370,10 +412,10 @@ export class PublicApiController {
     summary: "Poll public SDK conversation replies"
   })
   @ApiParam({ name: "conversationId", description: "SDK conversation identifier" })
-  @ApiQuery({ name: "visitorSessionToken", required: true, description: "Short-lived signed visitor session token" })
-  @ApiQuery({ name: "since", required: false, description: "Optional last seen operator message id" })
-  @ApiQuery({ name: "environment", required: false, description: "production or stage public API key environment" })
-  @ApiOkResponse({ description: "Public SDK poll envelope with operator reply messages only; ready attachments include short-lived signed download links" })
+  @ApiQuery({ name: "visitorSessionToken", required: true, type: String, description: "Short-lived signed visitor session token" })
+  @ApiQuery({ name: "since", required: false, type: String, description: "Optional last seen operator message id" })
+  @ApiPublicEnvironment()
+  @ApiPublicEnvelope("Public SDK poll envelope with operator replies, CSAT state and refreshed session token; ready attachments include short-lived download links.")
   pollPublicSdkConversationMessages(
     @Headers("authorization") authorization: string | undefined,
     @Param("conversationId") conversationId: string,

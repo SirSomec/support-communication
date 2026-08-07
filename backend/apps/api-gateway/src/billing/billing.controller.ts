@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
-import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
+import { ApiBody, ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { ServiceAdminSessionGuard } from "../identity/service-admin-session.guard.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
 import { RequireTenantOperatorPermission, type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
@@ -7,6 +7,7 @@ import { TenantOperatorAuthGuard } from "../identity/tenant-operator-auth.guard.
 import { type BillingInvoiceState, type BillingSubscriptionState } from "./billing.repository.js";
 import { changeTenantTariffFromRoute } from "./billing.route.js";
 import { BillingService } from "./billing.service.js";
+import { ApiPublicEnvelope, YOOKASSA_WEBHOOK_BODY_SCHEMA } from "../integrations/public-api.openapi.js";
 
 interface TariffChangeBody {
   approvalId?: string;
@@ -176,7 +177,7 @@ export class PublicBillingCatalogController {
   constructor(private readonly billingService: BillingService) {}
 
   @Get("tariffs")
-  @ApiOkResponse({ description: "Public canonical tariff catalog envelope" })
+  @ApiPublicEnvelope("Public canonical tariff catalog envelope.")
   fetchTariffs() {
     return this.billingService.fetchTariffs();
   }
@@ -193,7 +194,8 @@ export class YooKassaWebhookController {
 
   @Post("webhook")
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ description: "Verifies a YooKassa payment server-to-server before syncing billing state" })
+  @ApiBody({ schema: YOOKASSA_WEBHOOK_BODY_SCHEMA })
+  @ApiPublicEnvelope("Verified YooKassa server-to-server notification and billing synchronization result.")
   receiveWebhook(@Body() payload: YooKassaWebhookBody) {
     return this.billingService.handleYooKassaWebhook(payload?.object?.id ?? "");
   }

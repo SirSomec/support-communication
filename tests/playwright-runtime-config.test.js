@@ -56,5 +56,6 @@ describe("Playwright runtime configuration", () => {
     assert.match(viteConfig, /process\.env\.DEV_API_PROXY_TARGET \|\| env\.DEV_API_PROXY_TARGET/);
     assert.doesNotMatch(gatewayScript, /_STORE_FILE/);
     assert.doesNotMatch(gatewayScript, /_REPOSITORY/);
+    assert.match(gatewayScript, /PUBLIC_WEBHOOK_BASE_URL:\s*"https:\/\/playwright\.invalid"/);
   });
 });

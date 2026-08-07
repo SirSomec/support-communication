@@ -41,6 +41,7 @@ const env = {
   LOCAL_DEVELOPMENT_SEED_ENABLED: "false",
   REPORT_EXPORT_OBJECT_ROOT: ".runtime/playwright-report-exports",
   REPORT_EXPORT_OBJECT_STORAGE_MODE: "local",
+  PUBLIC_WEBHOOK_BASE_URL: "https://playwright.invalid",
   NODE_ENV: "test",
   MFA_OTP_DELIVERY_MODE: "deterministic",
   DATABASE_URL: smokeDatabaseUrl,

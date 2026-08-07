@@ -159,6 +159,7 @@ test("onboarding creates tenant and owner session opens workspace", async ({ pag
   const runId = Date.now().toString(36);
   await page.locator(".onboarding-field").filter({ hasText: "Название организации" }).locator("input").fill(`Pilot Retail ${runId}`);
   await page.getByRole("button", { name: "Сгенерировать" }).click();
+  await page.locator(".onboarding-field").filter({ hasText: "Домен сайта для Web SDK" }).locator("input").fill(`pilot-${runId}.example`);
   await page.getByRole("button", { name: "Далее" }).click();
   await page.getByRole("button", { name: "Далее" }).click();
   await page.locator(".onboarding-field").filter({ hasText: "Имя" }).locator("input").fill("Pilot Owner");
@@ -166,10 +167,10 @@ test("onboarding creates tenant and owner session opens workspace", async ({ pag
   await page.locator(".onboarding-field").filter({ hasText: "Пароль" }).locator("input").fill("correct-password");
   await page.getByRole("button", { name: "Далее" }).click();
   await page.getByRole("button", { name: "Далее" }).click();
-  await page.locator(".onboarding-field").filter({ hasText: "Email сотрудника" }).locator("input").fill(`operator-${runId}@pilot.example`);
-  await page.getByRole("button", { name: "Добавить" }).click();
-  await expect(page.locator(".onboarding-employee-list").getByText(`operator-${runId}@pilot.example`, { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Завершить" }).click();
+  for (const checkbox of await page.locator(".onboarding-legal-list input[type='checkbox']").all()) {
+    await checkbox.check();
+  }
+  await page.locator(".onboarding-step-footer").getByRole("button", { name: "Завершить" }).click();
   await expect(page.getByTestId("route-app-shell")).toBeVisible({ timeout: 20000 });
 });
 

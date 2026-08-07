@@ -325,6 +325,36 @@ describe("phase 6 public API, webhooks and SDK integration backend contracts", (
     else process.env.PUBLIC_WEBHOOK_BASE_URL = priorPublicWebhookBaseUrl;
   });
 
+  it("uses a deterministic MAX subscription for explicit test tokens", async () => {
+    const repository = IntegrationRepository.inMemory(bootstrapIntegrationState());
+    const integrations = new IntegrationService(repository, {
+      providerCredentialCrypto: new ProviderConnectionCrypto({
+        keyVersion: "test-v1",
+        masterKeyBase64: Buffer.alloc(32, 8).toString("base64")
+      })
+    });
+    const priorNodeEnv = process.env.NODE_ENV;
+    const priorPublicWebhookBaseUrl = process.env.PUBLIC_WEBHOOK_BASE_URL;
+    process.env.NODE_ENV = "test";
+    process.env.PUBLIC_WEBHOOK_BASE_URL = "https://support.example.test";
+
+    try {
+      const result = await integrations.createChannelConnection("tenant-max-smoke", {
+        credentials: { token: "runtime-max-token" },
+        name: "MAX smoke",
+        type: "max"
+      });
+
+      assert.equal(result.status, "ok");
+      assert.equal(repository.listChannelConnections({ tenantId: "tenant-max-smoke" }).length, 1);
+    } finally {
+      if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = priorNodeEnv;
+      if (priorPublicWebhookBaseUrl === undefined) delete process.env.PUBLIC_WEBHOOK_BASE_URL;
+      else process.env.PUBLIC_WEBHOOK_BASE_URL = priorPublicWebhookBaseUrl;
+    }
+  });
+
   it("queues API key rotation without returning raw key material", async () => {
     const integrations = new IntegrationService(IntegrationRepository.inMemory(bootstrapIntegrationState()));
 

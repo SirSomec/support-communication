@@ -325,7 +325,7 @@ export class IntegrationService {
           await subscribeMaxWebhook({
             accessToken: token,
             apiBaseUrl: this.options.maxApiBaseUrl ?? process.env.MAX_API_BASE_URL,
-            fetcher: this.options.maxFetch,
+            fetcher: this.options.maxFetch ?? resolveTestMaxFetch(token),
             secret: webhookSecret,
             webhookUrl: connection.webhookUrl
           });
@@ -1233,6 +1233,25 @@ function resolveTestTelegramFetch(botToken: string): TelegramHttpFetch | undefin
           username: "qa_telegram_bot"
         }
       };
+    }
+  });
+}
+
+function resolveTestMaxFetch(accessToken: string): MaxHttpFetch | undefined {
+  if (!["development", "test"].includes(process.env.NODE_ENV ?? "test")) {
+    return undefined;
+  }
+
+  const token = String(accessToken ?? "").trim();
+  if (!token.includes("max-token")) {
+    return undefined;
+  }
+
+  return async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({ success: true });
     }
   });
 }

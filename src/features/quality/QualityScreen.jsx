@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { mapApiConversation } from "../../app/conversationApiMapper.js";
 import { submitManualQaReview } from "../../app/qualityAiActions.js";
+import { createScreenStateItems } from "../../app/screenState.js";
 import { dialogService } from "../../services/dialogService.js";
 import { qualityService } from "../../services/qualityService.js";
 import { ChannelBadge, Modal, ProductScreen, ToolbarSearch } from "../../ui.jsx";
@@ -177,7 +178,13 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
 
   if (loading) {
     return (
-      <ProductScreen title="Качество" subtitle="Оценки клиентов и контроль работы команды" onBack={onBack} actions={headerAction}>
+      <ProductScreen
+        title="Качество"
+        subtitle="Оценки клиентов и контроль работы команды"
+        onBack={onBack}
+        actions={headerAction}
+        stateItems={createScreenStateItems({ emptyWhenZero: "ожидание API", loading: "загружается...", total: 0 })}
+      >
         <QualityLoadingState />
       </ProductScreen>
     );
@@ -185,7 +192,13 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
 
   if (error && !qualityScores.length) {
     return (
-      <ProductScreen title="Качество" subtitle="Оценки клиентов и контроль работы команды" onBack={onBack} actions={headerAction}>
+      <ProductScreen
+        title="Качество"
+        subtitle="Оценки клиентов и контроль работы команды"
+        onBack={onBack}
+        actions={headerAction}
+        stateItems={createScreenStateItems({ errors: 1, loading: "остановлена", total: 0 })}
+      >
         <section className="quality-state quality-state-error" role="alert">
           <AlertTriangle size={28} />
           <div><h2>Не удалось загрузить данные</h2><p>{error}</p></div>
@@ -196,7 +209,18 @@ export function QualityScreen({ access, onBack, onToast, operator }) {
   }
 
   return (
-    <ProductScreen title="Качество" subtitle="Оценки клиентов и контроль работы команды" onBack={onBack} actions={headerAction}>
+    <ProductScreen
+      title="Качество"
+      subtitle="Оценки клиентов и контроль работы команды"
+      onBack={onBack}
+      actions={headerAction}
+      stateItems={createScreenStateItems({
+        empty: `${qualityScores.length} оценок`,
+        emptyWhenZero: "оценок пока нет",
+        errors: error ? 1 : 0,
+        total: qualityScores.length
+      })}
+    >
       {error ? <div className="quality-inline-error" role="alert">{error}</div> : null}
 
       <section aria-label="Ключевые показатели качества" className="quality-metrics">

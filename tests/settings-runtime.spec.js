@@ -170,6 +170,7 @@ test("integration center wizard creates and checks telegram and max channels", a
   const names = channelsPayload.data.connections.map((connection) => connection.name);
   expect(names).toEqual(expect.arrayContaining([telegramName, maxName]));
 
+  await page.locator(".integration-view-switch button").filter({ hasText: "Мои подключения" }).click();
   await expect(page.locator(".integration-center")).toContainText(telegramName);
 });
 

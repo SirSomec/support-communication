@@ -117,7 +117,22 @@ async function expectHealthyPage(page) {
 }
 
 async function expectNoElementOverflow(page, selector) {
-  await expect.poll(async () => page.locator(selector).evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBeTruthy();
+  await expect.poll(async () => page.locator(selector).evaluate((node) => JSON.stringify({
+    clientWidth: node.clientWidth,
+    offenders: [...node.querySelectorAll("*")]
+      .filter((element) => element.scrollWidth > element.clientWidth + 1)
+      .map((element) => ({
+        className: element.className?.toString().slice(0, 100) ?? "",
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        tagName: element.tagName
+      }))
+      .sort((left, right) => (right.scrollWidth - right.clientWidth) - (left.scrollWidth - left.clientWidth))
+      .slice(0, 5),
+    ok: node.scrollWidth <= node.clientWidth + 1,
+    scrollWidth: node.scrollWidth,
+    viewport: window.innerWidth
+  }))).toMatch(/"ok":true/);
 }
 
 async function activeElementSnapshot(page) {
@@ -203,7 +218,7 @@ test("public landing demo and contact request submit to backend", async ({ page 
   await expect(page.getByTestId("route-public-landing")).toBeVisible({ timeout: 15000 });
 
   await expect(page.getByRole("button", { name: "Демо по запросу" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: /Контакт по запросу/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Связаться с нами" })).toBeEnabled();
   await page.getByRole("button", { name: "Демо по запросу" }).click();
   await expect(page.getByTestId("public-demo-request-dialog")).toBeVisible();
 
@@ -221,7 +236,7 @@ test("public landing demo and contact request submit to backend", async ({ page 
   expect(payload.status).toBe("ok");
   expect(payload.data.leadId).toBeTruthy();
   expect(payload.data.notificationDescriptor.status).toBe("queued");
-  await expect(page.locator(".toast")).toContainText("Заявка на демо принята");
+  await expect(page.locator(".public-toast")).toContainText("Заявка на демо принята");
   await expectHealthyPage(page);
 });
 
@@ -622,6 +637,30 @@ async function ensureCheckboxState(page, locator, checked) {
 }
 
 test("composer exposes AI explainability and pre-send quality checks", async ({ page }) => {
+  await page.route("**/api/v1/quality/workspace", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        data: {
+          ...payload.data,
+          aiSuggestions: [{
+            confidence: 94,
+            conversationId: "maria",
+            id: "ai-maria-summary",
+            risk: "low",
+            suggestedTopic: "Delivery / Status",
+            text: "Клиент ждет заказ. Проверить статус доставки и вернуться с точным сроком.",
+            title: "Краткое резюме",
+            tone: "calm",
+            type: "summary"
+          }]
+        }
+      }
+    });
+  });
   await openAppShell(page);
   await selectRole(page, "Администратор");
 
@@ -1060,6 +1099,8 @@ test("quality workspace uses tenant data and completes manual QA", async ({ page
   expect(manualReviewPayload.data.auditId).toBeTruthy();
   await expect(page.locator(".toast")).toContainText("Ручная проверка сохранена");
   await expect(page.locator(".quality-audit-panel")).toHaveCount(0);
+  await expect(page.locator(".quality-row").filter({ hasText: "Vladimir B." })).toHaveCount(0);
+  await page.getByLabel("Статус проверки").selectOption("reviewed");
   await expect(page.locator(".quality-row").filter({ hasText: "Vladimir B." })).toContainText("Проверено");
   await expectHealthyPage(page);
 });
@@ -1542,9 +1583,11 @@ test("website widget setup separates the simple path from SDK tools", async ({ p
   await expect(sdkPanel).toContainText("Добавить чат на сайт");
   await sdkPanel.getByRole("button", { name: "Настроить виджет" }).click();
   await expect(sdkPanel.locator(".widget-preview-chat")).toBeVisible();
-  await sdkPanel.locator(".widget-preview-toggle").click();
+  await sdkPanel.locator(".widget-preview-chat-head").getByRole("button", { name: "Свернуть предпросмотр" }).focus();
+  await page.keyboard.press("Enter");
   await expect(sdkPanel.locator(".widget-preview-chat")).toHaveCount(0);
-  await sdkPanel.locator(".widget-preview-toggle").click();
+  await sdkPanel.locator(".widget-preview-toggle").focus();
+  await page.keyboard.press("Enter");
   await sdkPanel.getByRole("button", { name: "Создать ключ" }).click();
   await expect(sdkPanel.locator(".widget-public-key")).toContainText("sk_live_");
   await sdkPanel.getByRole("button", { name: "Скопировать код" }).click();
@@ -1642,7 +1685,11 @@ test("auth flow covers login 2fa recovery invite and organization selection", as
   await expect(page.getByTestId("route-app-shell")).toBeVisible();
   await expect(page.locator(".toast")).toContainText("Lumen Health");
 
-  await page.goto("/#/login");
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  await page.goto(`/?auth=${Date.now()}#/login`);
   await page.getByRole("button", { name: "Invite", exact: true }).click();
   await page.locator(".auth-field").filter({ hasText: "Email" }).locator("input").fill("nikolai@lumen.example");
   await page.locator(".auth-field").filter({ hasText: "Invite code" }).locator("input").fill("expired-token");
@@ -1652,7 +1699,11 @@ test("auth flow covers login 2fa recovery invite and organization selection", as
   await page.getByRole("button", { name: "Начать onboarding" }).click();
   await expect(page.getByTestId("route-onboarding")).toBeVisible();
 
-  await page.goto("/#/login");
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  await page.goto(`/?auth=${Date.now()}#/login`);
   await page.getByRole("button", { name: "Login" }).click();
   await page.locator(".auth-input-with-icon input").first().fill("sergey@volga.example");
   await page.locator("input[type='password']").fill("correct-password");
@@ -1667,7 +1718,7 @@ test("onboarding completes tenant setup and returns to app", async ({ page }) =>
 
   await page.locator(".onboarding-field").filter({ hasText: "Название организации" }).locator("input").fill("QA Retail");
   await page.getByRole("button", { name: "Сгенерировать" }).click();
-  await page.locator(".onboarding-field").filter({ hasText: "Домен сайта для SDK" }).locator("input").fill("qa.example.test");
+  await page.locator(".onboarding-field").filter({ hasText: "Домен сайта для Web SDK" }).locator("input").fill("qa.example.test");
   await page.getByRole("button", { name: "Далее" }).click();
   await page.getByRole("button", { name: "Далее" }).click();
   await page.locator(".onboarding-field").filter({ hasText: "Имя" }).locator("input").fill("QA Admin");
@@ -1675,12 +1726,12 @@ test("onboarding completes tenant setup and returns to app", async ({ page }) =>
   await page.locator(".onboarding-field").filter({ hasText: "Пароль" }).locator("input").fill("correct-password");
   await page.getByRole("button", { name: "Далее" }).click();
   await page.getByRole("button", { name: "Далее" }).click();
-  await page.locator(".onboarding-employee-form input").first().fill("operator@qa.example");
-  await page.locator(".onboarding-employee-form button").click();
-  await expect(page.locator(".onboarding-employee-list")).toContainText("operator@qa.example");
+  for (const checkbox of await page.locator(".onboarding-legal-list input[type='checkbox']").all()) {
+    await checkbox.check();
+  }
   await expect(page.locator(".onboarding-step-footer").getByRole("button", { name: "Завершить" })).toBeEnabled();
   await expect(page.locator(".onboarding-step-footer").getByRole("button", { name: "Далее" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Завершить" }).click();
+  await page.locator(".onboarding-step-footer").getByRole("button", { name: "Завершить" }).click();
   await expect(page.getByTestId("route-app-shell")).toBeVisible();
   await expect(page.locator(".toast")).toContainText("QA Retail");
   await expectHealthyPage(page);
@@ -1743,8 +1794,8 @@ test("service admin critical actions require reason confirmation and audit", asy
   await page.locator(".tariff-card-grid button").filter({ hasText: "Starter" }).click();
   await page.locator(".billing-workspace textarea").fill("QA проверка влияния понижения тарифа");
   await page.locator(".billing-workspace button").filter({ hasText: "Предпросмотр" }).click();
-  await expect(page.locator(".service-admin-preview")).toContainText("Согласование");
-  await page.locator(".billing-workspace input").fill("CHANGE tenant-volga TO starter");
+  await expect(page.locator(".billing-workspace .service-admin-preview").filter({ hasText: "Согласование" })).toBeVisible();
+  await page.getByRole("textbox", { name: /Введите подтверждение: CHANGE/ }).fill("CHANGE tenant-volga TO starter");
   await page.locator(".billing-workspace button").filter({ hasText: "Применить" }).click();
   await expect(page.locator(".service-admin-feedback")).toContainText("Изменение тарифа");
 

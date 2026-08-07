@@ -1,0 +1,16 @@
+[Unit]
+Description=Encrypted off-site Borg backup of the RUVDS host
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/ruvds-borg-backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+PrivateTmp=true
+NoNewPrivileges=true

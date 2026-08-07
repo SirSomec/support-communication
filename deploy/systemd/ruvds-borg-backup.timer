@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily encrypted off-site backup of the RUVDS host
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=10m
+Unit=ruvds-borg-backup.service
+
+[Install]
+WantedBy=timers.target

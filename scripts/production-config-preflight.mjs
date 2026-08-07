@@ -7,8 +7,12 @@ import { validateRedisUrlPolicy, verifyRedisRuntimeTopology } from "./production
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const schemaOnly = process.argv.includes("--schema-only");
 const verifyRuntime = process.argv.includes("--verify-runtime");
+const infrastructureEnvArgument = process.argv
+  .find((argument) => argument.startsWith("--infrastructure-env="))
+  ?.slice("--infrastructure-env=".length);
 const envArgument = process.argv.find((argument) => !argument.startsWith("--") && argument !== process.argv[0] && argument !== process.argv[1]);
 const envPath = resolve(root, envArgument || "deploy/env/production.env");
+const infrastructureEnvPath = infrastructureEnvArgument ? resolve(root, infrastructureEnvArgument) : null;
 const composePath = resolve(root, "deploy/compose/compose.production.yml");
 const env = parseEnv(readFileSync(envPath, "utf8"));
 
@@ -115,10 +119,11 @@ const composePaths = verifyRuntime
   ? [
       composePath,
       resolve(root, "deploy/compose/compose.vps-override.yml"),
-      resolve(root, "deploy/compose/compose.vps-infrastructure.yml")
+      ...(infrastructureEnvPath ? [resolve(root, "deploy/compose/compose.vps-infrastructure.yml")] : [])
     ]
   : [composePath];
 const composeArguments = ["compose", "--env-file", envPath];
+if (infrastructureEnvPath) composeArguments.push("--env-file", infrastructureEnvPath);
 for (const path of composePaths) composeArguments.push("-f", path);
 composeArguments.push("config", "--quiet");
 const compose = spawnSync("docker", composeArguments, {

@@ -38,6 +38,15 @@ This runbook deploys the application services to one Docker Compose host while P
    npm run production:config:check -- --verify-runtime /etc/support-communication/production.env
    ```
 
+   If PostgreSQL, Redis and MinIO are managed by the colocated VPS infrastructure
+   manifest with a separate env file, validate both configurations explicitly:
+
+   ```bash
+   npm run production:config:check -- --verify-runtime \
+     --infrastructure-env=/opt/support-communication/secrets/infra.env \
+     /opt/support-communication/secrets/production.env
+   ```
+
 The preflight rejects placeholder values, local credentials, mutable image tags, insecure Redis/S3 URLs, malformed CORS origins and invalid master keys. It never prints secret values.
 
 ## Initial deployment

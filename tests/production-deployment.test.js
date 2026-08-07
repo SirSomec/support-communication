@@ -19,6 +19,13 @@ describe("production deployment contract", () => {
     assert.match(preflight, /if \(schemaOnly\) \{\s+issues\.push\(\.\.\.validateRedisUrlPolicy\(env\)\)/);
   });
 
+  it("loads the colocated infrastructure manifest only with its explicit env file", () => {
+    const preflight = readFileSync("scripts/production-config-preflight.mjs", "utf8");
+    assert.match(preflight, /--infrastructure-env=/);
+    assert.match(preflight, /infrastructureEnvPath \? \[resolve\(root, "deploy\/compose\/compose\.vps-infrastructure\.yml"\)\] : \[\]/);
+    assert.match(preflight, /composeArguments\.push\("--env-file", infrastructureEnvPath\)/);
+  });
+
   it("keeps local infrastructure and credentials out of the production manifest", () => {
     const compose = readFileSync(composePath, "utf8");
     assert.doesNotMatch(compose, /kubernetes\.docker\.internal|mailpit|minio-password|support:support|bootstrap:local/i);

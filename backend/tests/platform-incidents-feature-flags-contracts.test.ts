@@ -464,11 +464,13 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
   it("ingests platform telemetry samples with bounded retention metadata", async () => {
     const repository = seededPlatformRepository();
     const platform = new PlatformMonitoringService(repository);
+    const sampledAt = new Date(Date.now() - 60_000);
+    const expiresAt = new Date(sampledAt.getTime() + (30 * 24 * 60 * 60_000));
 
     const ingested = await platform.ingestTelemetrySample({
       componentId: "cmp-webhooks",
       metricKey: "latency_p95_ms",
-      sampledAt: "2026-07-01T08:15:00.000Z",
+      sampledAt: sampledAt.toISOString(),
       source: "synthetic-probe",
       tags: { route: "/api/v1/integrations/webhooks" },
       tenantId: "tenant-volga",
@@ -481,7 +483,7 @@ describe("phase 9 platform monitoring, incidents and feature flag backend contra
     assert.equal(ingested.operation, "ingestTelemetrySample");
     assert.match(String(ingested.data.sample.id), /^telemetry-sample-/);
     assert.deepEqual(ingested.data.retention, {
-      expiresAt: "2026-07-31T08:15:00.000Z",
+      expiresAt: expiresAt.toISOString(),
       policy: "platform-telemetry-samples-30d",
       retentionDays: 30
     });

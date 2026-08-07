@@ -838,6 +838,15 @@ function createFakePrismaIntegrationClient(options: {
   };
   const client: PrismaIntegrationClient = {
     channelConnection: {
+      async delete(input) {
+        const existing = channelConnectionRows.get(input.where.id);
+        if (!existing) {
+          throw new Error("fake_prisma_channel_connection_not_found");
+        }
+
+        channelConnectionRows.delete(input.where.id);
+        return clone(existing);
+      },
       async findMany(input) {
         return findRuntimeRows(channelConnectionRows, input.where, "createdAt");
       },
@@ -883,6 +892,16 @@ function createFakePrismaIntegrationClient(options: {
 
         return clone(input.data);
       },
+      async deleteMany(input) {
+        let count = 0;
+        for (const [keyId, row] of rows) {
+          if (row.tenantId === input.where.tenantId) {
+            rows.delete(keyId);
+            count += 1;
+          }
+        }
+        return { count };
+      },
       async findMany(input) {
         calls.publicApiKeyFindMany.push(input);
         return [...rows.values()]
@@ -894,6 +913,16 @@ function createFakePrismaIntegrationClient(options: {
 
         return clone(rows.get(input.where.keyId) ?? null);
       },
+      async updateMany(input) {
+        let count = 0;
+        for (const [keyId, row] of rows) {
+          if (row.tenantId === input.where.tenantId && row.channelConnectionId === input.where.channelConnectionId) {
+            rows.set(keyId, { ...row, ...clone(input.data) });
+            count += 1;
+          }
+        }
+        return { count };
+      },
       async upsert(input) {
         calls.publicApiKeyUpserts.push(clone(input));
         const existing = rows.get(input.where.keyId);
@@ -903,6 +932,11 @@ function createFakePrismaIntegrationClient(options: {
         rows.set(input.where.keyId, next);
 
         return clone(next);
+      }
+    },
+    conversation: {
+      async updateMany() {
+        return { count: 0 };
       }
     },
     publicApiKeyRevealState: {
@@ -1101,6 +1135,7 @@ function createFakePrismaIntegrationClient(options: {
 }
 
 interface FakePublicApiKeyRow {
+  channelConnectionId?: string | null;
   createdAt: Date;
   environment: "production" | "stage";
   keyId: string;

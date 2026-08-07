@@ -106,7 +106,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.match(moduleSource, /controllers:\s*\[[^\]]*PublicBillingCatalogController/);
     assert.equal(response.status, "ok");
     assert.equal(response.data.currency, "RUB");
-    assert.deepEqual(response.data.items.map((tariff) => tariff.id), ["starter", "business", "scale", "enterprise"]);
+    assert.deepEqual(response.data.items.map((tariff) => tariff.id), ["free", "starter", "business", "scale", "enterprise"]);
   });
 
   it("changes tenant tariff only with reason, explicit confirmation and audit metadata", async () => {
@@ -127,10 +127,10 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
 
     const applied = await billing.changeTenantTariff({
       tenantId: "tenant-lumen",
-      nextPlanId: "business",
-      reason: "Trial conversion approved",
+      nextPlanId: "scale",
+      reason: "Growth conversion approved",
       confirmed: true,
-      confirmationText: "CHANGE tenant-lumen TO business"
+      confirmationText: "CHANGE tenant-lumen TO scale"
     });
     assert.equal(applied.status, "ok");
     assert.equal(applied.data.applied, true);
@@ -177,9 +177,9 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
 
     const allowed = await changeTenantTariffFromRoute(billing, {
       confirmed: true,
-      confirmationText: "CHANGE tenant-lumen TO business",
-      nextPlanId: "business",
-      reason: "Trial conversion approved",
+      confirmationText: "CHANGE tenant-lumen TO scale",
+      nextPlanId: "scale",
+      reason: "Growth conversion approved",
       tenantId: "tenant-lumen"
     }, {
       headers: {},
@@ -198,7 +198,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(allowed.status, "ok");
     assert.equal(allowed.data.applied, true);
     assert.equal(allowed.data.auditEvent.actor, "svc-admin-billing");
-    assert.equal((await billingRepository.findTenant("tenant-lumen"))?.planId, "business");
+    assert.equal((await billingRepository.findTenant("tenant-lumen"))?.planId, "scale");
   });
 
   it("records immutable RBAC denial audit for denied service-admin billing writes", async () => {
@@ -647,10 +647,10 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
 
     const applied = await billing.changeTenantTariff({
       tenantId: "tenant-lumen",
-      nextPlanId: "business",
-      reason: "Trial conversion approved",
+      nextPlanId: "scale",
+      reason: "Growth conversion approved",
       confirmed: true,
-      confirmationText: "CHANGE tenant-lumen TO business"
+      confirmationText: "CHANGE tenant-lumen TO scale"
     });
     assert.equal(applied.status, "ok");
 
@@ -690,10 +690,10 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
 
     const failed = await billing.changeTenantTariff({
       tenantId: "tenant-lumen",
-      nextPlanId: "business",
-      reason: "Trial conversion approved",
+      nextPlanId: "scale",
+      reason: "Growth conversion approved",
       confirmed: true,
-      confirmationText: "CHANGE tenant-lumen TO business"
+      confirmationText: "CHANGE tenant-lumen TO scale"
     });
 
     assert.equal(failed.status, "error");
@@ -785,12 +785,12 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
 
     const allowed = await billing.checkQuota({
       tenantId: "tenant-lumen",
-      resource: "operators",
+      resource: "reports",
       requested: 1
     });
     assert.equal(allowed.status, "ok");
     assert.equal(allowed.data.decision, "allow");
-    assert.equal(allowed.data.resource, "operators");
+    assert.equal(allowed.data.resource, "reports");
 
     const denied = await billing.checkQuota({
       tenantId: "tenant-lumen",
@@ -921,7 +921,11 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
   });
 
   it("commits users and workspaces reservations into their quota counters", async () => {
-    const billing = new BillingService(BillingRepository.inMemory());
+    const repository = BillingRepository.inMemory();
+    const tenant = await repository.findTenant("tenant-lumen");
+    assert.ok(tenant);
+    await repository.saveTenant({ ...tenant, planId: "scale" });
+    const billing = new BillingService(repository);
 
     for (const resource of ["users", "workspaces"] as const) {
       const before = await billing.fetchTenantQuotaSnapshot("tenant-lumen");

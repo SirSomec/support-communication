@@ -202,11 +202,12 @@ describe("Prisma-backed platform repository contracts", () => {
     const incidents = new IncidentService(repository);
     const flags = new FeatureFlagService(repository);
 
+    const sampledAt = new Date(Date.now() - 60_000).toISOString();
     const sample = await platform.ingestTelemetrySample({
       componentId: "cmp-webhooks",
       id: "telemetry-prisma-service",
       metricKey: "latency_p95_ms",
-      sampledAt: "2026-07-03T12:00:00.000Z",
+      sampledAt,
       source: "service-test",
       tags: { route: "/api/v1/platform" },
       tenantId: "tenant-volga",

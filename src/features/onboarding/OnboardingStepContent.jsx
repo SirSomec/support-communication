@@ -1,298 +1,318 @@
 import {
   Building2,
+  Check,
+  CheckCircle2,
   CreditCard,
+  ExternalLink,
+  FileCheck2,
   Gauge,
-  KeyRound,
-  Mail,
-  UserPlus,
-  Users,
-  X
+  UserPlus
 } from "lucide-react";
 import { RangeControl, StepHeading } from "./OnboardingControls.jsx";
-import { employeeRoles, isFreePlan, planOptions } from "./onboardingModel.js";
+
+const priceFormatter = new Intl.NumberFormat("ru-RU", {
+  currency: "RUB",
+  maximumFractionDigits: 0,
+  style: "currency"
+});
+
+function formatPlanPrice(plan) {
+  if (plan.billingAvailability === "free") return "0 ₽";
+  return priceFormatter.format(Number(plan.priceMonthly ?? 0) / 100);
+}
 
 export function OnboardingStepContent({
   activeStep,
   admin,
-  employeeDraft,
-  employees,
-  handleAddEmployee,
+  availablePlans,
+  catalogState,
   handleGenerateSlug,
-  handleRemoveEmployee,
+  handleSelectPlan,
+  legal,
   limits,
   plan,
+  selectedPlan,
   setAdmin,
-  setEmployeeDraft,
+  setLegal,
   setLimits,
-  setNotice,
-  setPlan,
   setTenant,
   tenant
 }) {
   return (
     <>
-          {activeStep === "tenant" ? (
-            <div className="onboarding-step">
-              <StepHeading
-                icon={<Building2 size={20} />}
-                title="Организация"
-                text="Создайте рабочее пространство и публичный slug, который будет использоваться в маршрутах и audit."
+      {activeStep === "tenant" ? (
+        <div className="onboarding-step">
+          <StepHeading
+            icon={<Building2 size={20} />}
+            title="Организация"
+            text="Укажите данные организации и реальный домен сайта, на котором будет подключён Web SDK."
+          />
+          <div className="onboarding-form-grid">
+            <label className="onboarding-field">
+              <span>Название организации</span>
+              <input
+                onChange={(event) => setTenant((current) => ({ ...current, name: event.target.value }))}
+                placeholder="North Retail"
+                value={tenant.name}
               />
-              <div className="onboarding-form-grid">
-                <label className="onboarding-field">
-                  <span>Название организации</span>
-                  <input
-                    onChange={(event) => setTenant((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="North Retail"
-                    value={tenant.name}
-                  />
-                </label>
-                <label className="onboarding-field slug-field">
-                  <span>Slug организации</span>
-                  <div>
-                    <input
-                      onChange={(event) => setTenant((current) => ({ ...current, slug: event.target.value.toLowerCase() }))}
-                      placeholder="north-retail"
-                      value={tenant.slug}
-                    />
-                    <button onClick={handleGenerateSlug} type="button">Сгенерировать</button>
-                  </div>
-                </label>
-                <label className="onboarding-field">
-                  <span>Регион данных</span>
-                  <select
-                    onChange={(event) => setTenant((current) => ({ ...current, region: event.target.value }))}
-                    value={tenant.region}
-                  >
-                    <option value="ru-1">RU-1</option>
-                    <option value="eu-1">EU-1</option>
-                    <option value="kz-1">KZ-1</option>
-                  </select>
-                </label>
-                <label className="onboarding-field">
-                  <span>Отрасль</span>
-                  <select
-                    onChange={(event) => setTenant((current) => ({ ...current, industry: event.target.value }))}
-                    value={tenant.industry}
-                  >
-                    <option value="retail">Retail</option>
-                    <option value="fintech">Fintech</option>
-                    <option value="marketplace">Marketplace</option>
-                    <option value="healthcare">Healthcare</option>
-                  </select>
-                </label>
-                <label className="onboarding-field">
-                  <span>Домен сайта для SDK</span>
-                  <input
-                    autoCapitalize="none"
-                    onChange={(event) => setTenant((current) => ({ ...current, domain: event.target.value.toLowerCase() }))}
-                    placeholder="support.company.ru"
-                    value={tenant.domain}
-                  />
-                </label>
-              </div>
-              <div className="onboarding-preview-row">
-                <KeyRound size={17} />
-                <span>Workspace URL</span>
-                <strong>https://app.support.local/{tenant.slug || "org-slug"}</strong>
-              </div>
-            </div>
-          ) : null}
-
-          {activeStep === "plan" ? (
-            <div className="onboarding-step">
-              <StepHeading
-                icon={<CreditCard size={20} />}
-                title="Бесплатный тариф"
-                text="На старте создаётся Free-организация с одним оператором-владельцем. Изменение тарифа выполняет администратор платформы."
-              />
-              <div className="onboarding-plan-grid">
-                {planOptions.map((option) => (
-                  <div
-                    className="selected"
-                    key={option.id}
-                  >
-                    <strong>{option.id}</strong>
-                    <b>{option.price}</b>
-                    <span>{option.description}</span>
-                    <small>{option.limits}</small>
-                  </div>
-                ))}
-              </div>
-              <p className="onboarding-preview-row">Free активируется сразу и включает одного оператора-владельца.</p>
-            </div>
-          ) : null}
-
-          {activeStep === "admin" ? (
-            <div className="onboarding-step">
-              <StepHeading
-                icon={<UserPlus size={20} />}
-                title="Первый администратор"
-                text="Первый администратор получает owner-доступ, может пригласить сотрудников и подключить SSO позже."
-              />
-              <div className="onboarding-form-grid">
-                <label className="onboarding-field">
-                  <span>Имя</span>
-                  <input
-                    onChange={(event) => setAdmin((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="Анна Смирнова"
-                    value={admin.name}
-                  />
-                </label>
-                <label className="onboarding-field">
-                  <span>Email</span>
-                  <input
-                    onChange={(event) => setAdmin((current) => ({ ...current, email: event.target.value }))}
-                    placeholder="admin@company.ru"
-                    type="email"
-                    value={admin.email}
-                  />
-                </label>
-                <label className="onboarding-field">
-                  <span>Пароль</span>
-                  <input
-                    autoComplete="new-password"
-                    minLength={8}
-                    onChange={(event) => setAdmin((current) => ({ ...current, password: event.target.value }))}
-                    placeholder="Минимум 8 символов"
-                    type="password"
-                    value={admin.password ?? ""}
-                  />
-                </label>
-                <label className="onboarding-field">
-                  <span>Роль</span>
-                  <select
-                    onChange={(event) => setAdmin((current) => ({ ...current, role: event.target.value }))}
-                    value={admin.role}
-                  >
-                    <option>Владелец</option>
-                    <option>Администратор</option>
-                    <option>Service owner</option>
-                  </select>
-                </label>
-                <label className="onboarding-check-row">
-                  <input
-                    checked={admin.mfa}
-                    onChange={(event) => setAdmin((current) => ({ ...current, mfa: event.target.checked }))}
-                    type="checkbox"
-                  />
-                  Требовать 2FA при первом входе
-                </label>
-              </div>
-            </div>
-          ) : null}
-
-          {activeStep === "limits" ? (
-            <div className="onboarding-step">
-              <StepHeading
-                icon={<Gauge size={20} />}
-                title="Лимиты"
-                text="Настройте стартовые лимиты, которые будут применяться к очередям, операторам и тарифным guard."
-              />
-              <div className="onboarding-limit-grid">
-                <RangeControl
-                  label="Операторы"
-                  max={50}
-                  min={1}
-                  onChange={(value) => setLimits((current) => ({ ...current, operatorLimit: value }))}
-                  value={limits.operatorLimit}
+            </label>
+            <label className="onboarding-field slug-field">
+              <span>Slug организации</span>
+              <div>
+                <input
+                  onChange={(event) => setTenant((current) => ({ ...current, slug: event.target.value.toLowerCase() }))}
+                  placeholder="north-retail"
+                  value={tenant.slug}
                 />
-                <RangeControl
-                  label="Диалогов на оператора"
-                  max={40}
-                  min={1}
-                  onChange={(value) => setLimits((current) => ({ ...current, concurrentDialogs: value }))}
-                  value={limits.concurrentDialogs}
-                />
-                <label className="onboarding-field">
-                  <span>Сообщений в день</span>
-                  <input
-                    min="100"
-                    onChange={(event) => setLimits((current) => ({ ...current, dailyMessages: Number(event.target.value) }))}
-                    type="number"
-                    value={limits.dailyMessages}
-                  />
-                </label>
-                <label className="onboarding-check-row">
-                  <input
-                    checked={limits.aiAssist}
-                    onChange={(event) => setLimits((current) => ({ ...current, aiAssist: event.target.checked }))}
-                    type="checkbox"
-                  />
-                  Включить AI-подсказки
-                </label>
-                <label className="onboarding-check-row">
-                  <input
-                    checked={limits.afterHoursBot}
-                    onChange={(event) => setLimits((current) => ({ ...current, afterHoursBot: event.target.checked }))}
-                    type="checkbox"
-                  />
-                  After-hours bot для нерабочего времени
-                </label>
+                <button onClick={handleGenerateSlug} type="button">Сгенерировать</button>
               </div>
-            </div>
-          ) : null}
-
-          {activeStep === "employees" ? (
-            <div className="onboarding-step">
-              <StepHeading
-                icon={<Users size={20} />}
-                title="Сотрудники"
-                text="Добавьте хотя бы одного сотрудника, чтобы проверить invite flow и будущие роли в организации."
+            </label>
+            <label className="onboarding-field">
+              <span>Регион данных</span>
+              <select
+                onChange={(event) => setTenant((current) => ({ ...current, region: event.target.value }))}
+                value={tenant.region}
+              >
+                <option value="ru-1">RU-1</option>
+                <option value="eu-1">EU-1</option>
+                <option value="kz-1">KZ-1</option>
+              </select>
+            </label>
+            <label className="onboarding-field">
+              <span>Отрасль</span>
+              <select
+                onChange={(event) => setTenant((current) => ({ ...current, industry: event.target.value }))}
+                value={tenant.industry}
+              >
+                <option value="retail">Retail</option>
+                <option value="fintech">Fintech</option>
+                <option value="marketplace">Marketplace</option>
+                <option value="healthcare">Healthcare</option>
+              </select>
+            </label>
+            <label className="onboarding-field wide">
+              <span>Домен сайта для Web SDK</span>
+              <input
+                autoCapitalize="none"
+                onChange={(event) => setTenant((current) => ({ ...current, domain: event.target.value.toLowerCase() }))}
+                placeholder="support.company.ru"
+                value={tenant.domain}
               />
-              {isFreePlan(plan.id) ? (
-                <div className="onboarding-empty-state"><Users size={22} /><span>Free включает только владельца организации. Для приглашения команды смените тариф.</span></div>
-              ) : <>
-              <form className="onboarding-employee-form" onSubmit={handleAddEmployee}>
-                <label className="onboarding-field">
-                  <span>Email сотрудника</span>
-                  <input
-                    onChange={(event) => setEmployeeDraft((current) => ({ ...current, email: event.target.value }))}
-                    placeholder="operator@company.ru"
-                    type="email"
-                    value={employeeDraft.email}
-                  />
-                </label>
-                <label className="onboarding-field">
-                  <span>Роль</span>
-                  <select
-                    onChange={(event) => setEmployeeDraft((current) => ({ ...current, role: event.target.value }))}
-                    value={employeeDraft.role}
-                  >
-                    {employeeRoles.map((role) => <option key={role}>{role}</option>)}
-                  </select>
-                </label>
-                <label className="onboarding-field">
-                  <span>Группа</span>
-                  <input
-                    onChange={(event) => setEmployeeDraft((current) => ({ ...current, team: event.target.value }))}
-                    value={employeeDraft.team}
-                  />
-                </label>
-                <button className="onboarding-inline-primary" type="submit">Добавить</button>
-              </form>
-              <div className="onboarding-employee-list">
-                {employees.length ? employees.map((employee) => (
-                  <article key={employee.email}>
-                    <Mail size={17} />
-                    <div>
-                      <strong>{employee.email}</strong>
-                      <span>{employee.role} · {employee.team}</span>
-                    </div>
-                    <button aria-label={`Удалить ${employee.email}`} onClick={() => handleRemoveEmployee(employee.email)} type="button">
-                      <X size={16} />
-                    </button>
-                  </article>
-                )) : (
-                  <div className="onboarding-empty-state">
-                    <Users size={22} />
-                    <span>Список приглашений пока пуст.</span>
-                  </div>
-                )}
-              </div>
-              </>}
-            </div>
+              <small>Укажите домен без протокола и пути, например company.ru.</small>
+            </label>
+          </div>
+        </div>
+      ) : null}
+
+      {activeStep === "plan" ? (
+        <div className="onboarding-step onboarding-plan-step">
+          <StepHeading
+            icon={<CreditCard size={20} />}
+            title="Выберите тарифный план"
+            text="Enterprise оформляется индивидуально и поэтому недоступен в самостоятельной регистрации. Платный тариф будет назначен организации в trial-статусе."
+          />
+          {catalogState === "fallback" ? (
+            <p className="onboarding-catalog-message" role="status">
+              Не удалось обновить каталог. Показаны последние зафиксированные условия тарифов.
+            </p>
           ) : null}
+          <div aria-label="Доступные тарифы" className="onboarding-plan-grid" role="radiogroup">
+            {availablePlans.map((option) => {
+              const selected = option.id === plan.id;
+              return (
+                <button
+                  aria-checked={selected}
+                  className={selected ? "selected" : ""}
+                  key={option.id}
+                  onClick={() => handleSelectPlan(option)}
+                  role="radio"
+                  type="button"
+                >
+                  <header>
+                    <strong>{option.name}</strong>
+                    {selected ? <span className="onboarding-plan-selected"><Check size={16} /></span> : null}
+                  </header>
+                  <div className="onboarding-plan-price">
+                    <b>{formatPlanPrice(option)}</b>
+                    {option.billingAvailability === "paid" ? <span>за сотрудника<br />в месяц</span> : null}
+                  </div>
+                  <p>{option.ownerOnly ? "Для одного владельца" : `До ${option.includedUsers} сотрудников`}</p>
+                  <ul>
+                    {option.features.map((feature) => (
+                      <li key={feature}><CheckCircle2 aria-hidden="true" size={15} />{feature}</li>
+                    ))}
+                  </ul>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {activeStep === "admin" ? (
+        <div className="onboarding-step">
+          <StepHeading
+            icon={<UserPlus size={20} />}
+            title="Первый администратор"
+            text="Этот пользователь станет владельцем организации и сможет управлять командой после первого входа."
+          />
+          <div className="onboarding-form-grid">
+            <label className="onboarding-field">
+              <span>Имя</span>
+              <input
+                autoComplete="name"
+                onChange={(event) => setAdmin((current) => ({ ...current, name: event.target.value }))}
+                placeholder="Анна Смирнова"
+                value={admin.name}
+              />
+            </label>
+            <label className="onboarding-field">
+              <span>Email</span>
+              <input
+                autoComplete="email"
+                onChange={(event) => setAdmin((current) => ({ ...current, email: event.target.value }))}
+                placeholder="admin@company.ru"
+                type="email"
+                value={admin.email}
+              />
+            </label>
+            <label className="onboarding-field">
+              <span>Пароль</span>
+              <input
+                autoComplete="new-password"
+                minLength={8}
+                onChange={(event) => setAdmin((current) => ({ ...current, password: event.target.value }))}
+                placeholder="Минимум 8 символов"
+                type="password"
+                value={admin.password ?? ""}
+              />
+            </label>
+            <label className="onboarding-field">
+              <span>Роль</span>
+              <select
+                onChange={(event) => setAdmin((current) => ({ ...current, role: event.target.value }))}
+                value={admin.role}
+              >
+                <option>Владелец</option>
+                <option>Администратор</option>
+              </select>
+            </label>
+            <label className="onboarding-check-row wide">
+              <input
+                checked={admin.mfa}
+                onChange={(event) => setAdmin((current) => ({ ...current, mfa: event.target.checked }))}
+                type="checkbox"
+              />
+              Требовать 2FA при первом входе
+            </label>
+          </div>
+        </div>
+      ) : null}
+
+      {activeStep === "limits" ? (
+        <div className="onboarding-step">
+          <StepHeading
+            icon={<Gauge size={20} />}
+            title="Стартовые лимиты"
+            text={`Настройте рабочие ограничения в пределах тарифа ${selectedPlan?.name ?? "Free"}. Изменить их можно будет в настройках.`}
+          />
+          <div className="onboarding-limit-grid">
+            <RangeControl
+              label={`Операторы · максимум ${selectedPlan?.includedUsers ?? 1}`}
+              max={selectedPlan?.includedUsers ?? 1}
+              min={1}
+              onChange={(value) => setLimits((current) => ({ ...current, operatorLimit: value }))}
+              value={Math.min(limits.operatorLimit, selectedPlan?.includedUsers ?? 1)}
+            />
+            <RangeControl
+              label="Диалогов на оператора"
+              max={40}
+              min={1}
+              onChange={(value) => setLimits((current) => ({ ...current, concurrentDialogs: value }))}
+              value={limits.concurrentDialogs}
+            />
+            <label className="onboarding-field">
+              <span>Сообщений в день</span>
+              <input
+                min="100"
+                onChange={(event) => setLimits((current) => ({ ...current, dailyMessages: Number(event.target.value) }))}
+                type="number"
+                value={limits.dailyMessages}
+              />
+            </label>
+            <label className="onboarding-check-row">
+              <input
+                checked={limits.aiAssist}
+                disabled={selectedPlan?.ownerOnly}
+                onChange={(event) => setLimits((current) => ({ ...current, aiAssist: event.target.checked }))}
+                type="checkbox"
+              />
+              Включить AI-подсказки
+            </label>
+            <label className="onboarding-check-row">
+              <input
+                checked={limits.afterHoursBot}
+                disabled={selectedPlan?.ownerOnly}
+                onChange={(event) => setLimits((current) => ({ ...current, afterHoursBot: event.target.checked }))}
+                type="checkbox"
+              />
+              After-hours bot
+            </label>
+          </div>
+        </div>
+      ) : null}
+
+      {activeStep === "legal" ? (
+        <div className="onboarding-step onboarding-legal-step">
+          <StepHeading
+            icon={<FileCheck2 size={20} />}
+            title="Правовые документы"
+            text="Подтвердите каждый пункт отдельно. Версия документов и время принятия будут сохранены вместе с регистрацией."
+          />
+          <div className="onboarding-legal-draft">
+            <strong>Документы подготовлены как проект</strong>
+            <span>Перед коммерческим запуском необходимо утвердить реквизиты оператора и финальные формулировки.</span>
+          </div>
+          <div className="onboarding-legal-list">
+            <label>
+              <input
+                checked={legal.termsAccepted}
+                onChange={(event) => setLegal((current) => ({ ...current, termsAccepted: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>
+                <strong>Пользовательское соглашение</strong>
+                <small>Принимаю условия использования платформы от имени организации.</small>
+                <a href="/legal/#terms" rel="noreferrer" target="_blank">Открыть документ <ExternalLink size={14} /></a>
+              </span>
+            </label>
+            <label>
+              <input
+                checked={legal.privacyPolicyAcknowledged}
+                onChange={(event) => setLegal((current) => ({ ...current, privacyPolicyAcknowledged: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>
+                <strong>Политика обработки персональных данных</strong>
+                <small>Подтверждаю, что ознакомился с целями, составом и порядком обработки данных.</small>
+                <a href="/legal/#privacy" rel="noreferrer" target="_blank">Открыть документ <ExternalLink size={14} /></a>
+              </span>
+            </label>
+            <label>
+              <input
+                checked={legal.personalDataConsent}
+                onChange={(event) => setLegal((current) => ({ ...current, personalDataConsent: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>
+                <strong>Согласие на обработку персональных данных</strong>
+                <small>Даю отдельное, конкретное и информированное согласие для регистрации и работы аккаунта.</small>
+                <a href="/legal/#consent" rel="noreferrer" target="_blank">Открыть согласие <ExternalLink size={14} /></a>
+              </span>
+            </label>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

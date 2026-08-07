@@ -440,7 +440,7 @@ export function LandingPage({
                 ) : (
                   <button
                     className={`public-btn ${isFeatured ? "primary" : "secondary"}`}
-                    onClick={() => onStartFree({ plan: "free", source: "landing-tariff" })}
+                    onClick={() => onStartFree({ plan: tariff.id, source: "landing-tariff" })}
                     type="button"
                   >
                     {isFeatured ? "Начать бесплатно" : "Попробовать бесплатно"}
@@ -514,7 +514,7 @@ export function LandingPage({
         </div>
         <div className="public-footer-bottom">
           <span>© 2026 Support Communication</span>
-          <span>Политика обработки данных · Условия сервиса</span>
+          <span><a href="/legal/#privacy">Политика обработки данных</a> · <a href="/legal/#terms">Условия сервиса</a></span>
         </div>
       </footer>
 

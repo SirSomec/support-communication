@@ -22,6 +22,7 @@ describe("nginx public SEO HTTP contract", () => {
         assert.match(exactLocation(config, "/"), /try_files\s+\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/pricing/"), /try_files\s+\/pricing\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/docs/"), /try_files\s+\/docs\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/legal/"), /try_files\s+\/legal\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/website-support-chat/"), /try_files\s+\/website-support-chat\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/ai-support-bot/"), /try_files\s+\/ai-support-bot\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/support-sla/"), /try_files\s+\/support-sla\/index\.html\s+=404;/);
@@ -33,6 +34,8 @@ describe("nginx public SEO HTTP contract", () => {
           ["/landing", "/"],
           ["/pricing", "/pricing/"],
           ["/docs", "/docs/"],
+          ["/legal", "/legal/"],
+          ["/legal/index.html", "/legal/"],
           ["/website-support-chat", "/website-support-chat/"],
           ["/website-support-chat/index.html", "/website-support-chat/"],
           ["/ai-support-bot", "/ai-support-bot/"],

@@ -14,6 +14,13 @@ import { IntegrationRepository } from "../apps/api-gateway/dist/integrations/int
 })
 class TenantProvisionContractTestModule {}
 
+const acceptedLegal = {
+  documentVersion: "draft-2026-08-07",
+  personalDataConsent: true,
+  privacyPolicyAcknowledged: true,
+  termsAccepted: true
+};
+
 describe("tenant provision contracts", () => {
   const apps: INestApplication[] = [];
 
@@ -37,6 +44,7 @@ describe("tenant provision contracts", () => {
         tenant: { name: "Acme Pilot", slug: "acme-pilot", region: "ru-1", industry: "retail" },
         admin: { name: "Owner", email: "owner@acme-pilot.test", password: "Owner-2026!", role: "Владелец", mfa: true },
         channel: { type: "sdk", domain: "acme.example" },
+        legal: acceptedLegal,
         plan: { billingCycle: "annual", id: "business", trial: true },
         limits: { afterHoursBot: true, aiAssist: false, concurrentDialogs: 7, dailyMessages: 1200, operatorLimit: 4 }
       })
@@ -45,6 +53,8 @@ describe("tenant provision contracts", () => {
 
     assert.equal(provisionResponse.status, 200);
     assert.equal(provisionEnvelope.data.tenant.id, "tenant-acme-pilot");
+    assert.equal(provisionEnvelope.data.tenant.planId, "business");
+    assert.equal(provisionEnvelope.data.tenant.status, "trial");
     assert.equal(provisionEnvelope.data.admin.email, "owner@acme-pilot.test");
     assert.equal("refreshToken" in provisionEnvelope.data.session, false);
     assert.equal(typeof provisionEnvelope.data.publicApiKey, "string");
@@ -52,13 +62,15 @@ describe("tenant provision contracts", () => {
     assert.equal(String(provisionEnvelope.data.embedSnippet).includes("data-api-key"), true);
     const persistedTenant = await IdentityRepository.default().findTenant("tenant-acme-pilot");
     assert.equal(persistedTenant?.id, "tenant-acme-pilot");
-    assert.deepEqual(persistedTenant?.onboarding, {
-      adminRole: "Owner",
-      billingCycle: "monthly",
-      industry: "retail",
-      limits: { afterHoursBot: false, aiAssist: false, concurrentDialogs: 7, dailyMessages: 1200, operatorLimit: 1 },
-      mfaRequired: true
-    });
+    assert.equal(persistedTenant?.onboarding?.adminRole, "Owner");
+    assert.equal(persistedTenant?.onboarding?.billingCycle, "monthly");
+    assert.equal(persistedTenant?.onboarding?.industry, "retail");
+    assert.deepEqual(persistedTenant?.onboarding?.limits, { afterHoursBot: true, aiAssist: false, concurrentDialogs: 7, dailyMessages: 1200, operatorLimit: 4 });
+    assert.equal(persistedTenant?.onboarding?.mfaRequired, true);
+    assert.equal(persistedTenant?.onboarding?.legalAcceptance.documentVersion, "draft-2026-08-07");
+    assert.equal(persistedTenant?.onboarding?.legalAcceptance.personalDataConsent, true);
+    assert.match(String(persistedTenant?.onboarding?.legalAcceptance.acceptedAt), /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(provisionEnvelope.data.legalAcceptance.documentVersion, "draft-2026-08-07");
     const [owner] = await IdentityRepository.default().findTenantUsers("tenant-acme-pilot");
     assert.equal(owner.role, "Owner");
     assert.equal(owner.mfa, "required");
@@ -147,6 +159,30 @@ describe("tenant provision contracts", () => {
     assert.equal(created.envelope.error?.code, "tenant_provision_owner_only_plan");
   });
 
+  it("rejects Enterprise and missing legal acceptance in public onboarding", async () => {
+    const { baseUrl } = await createTestApiApp(apps);
+    const enterprise = await provisionTenant(baseUrl, {
+      tenant: { name: "Enterprise Pilot", slug: "enterprise-pilot", region: "ru-1" },
+      admin: { name: "Owner", email: "owner@enterprise-pilot.test", password: "Owner-2026!" },
+      channel: { type: "sdk", domain: "enterprise.example" },
+      plan: { id: "enterprise" }
+    });
+    assert.equal(enterprise.envelope.error?.code, "tenant_provision_plan_invalid");
+
+    const missingLegalResponse = await fetch(`${baseUrl}/api/v1/tenants/provision`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        tenant: { name: "No Legal Pilot", slug: "no-legal-pilot", region: "ru-1" },
+        admin: { name: "Owner", email: "owner@no-legal-pilot.test", password: "Owner-2026!" },
+        channel: { type: "sdk", domain: "no-legal.example" },
+        plan: { id: "starter" }
+      })
+    });
+    const missingLegal = await missingLegalResponse.json() as { error?: { code?: string } };
+    assert.equal(missingLegal.error?.code, "tenant_provision_legal_acceptance_required");
+  });
+
   it("compensates identity, billing, and integration writes when a late provisioning step fails", async () => {
     const identityRepository = IdentityRepository.inMemory();
     const billingRepository = BillingRepository.inMemory();
@@ -161,6 +197,7 @@ describe("tenant provision contracts", () => {
       admin: { name: "Rollback Owner", email: "owner@rollback-pilot.test", password: "Owner-2026!" },
       employees: [{ name: "Operator", email: "operator@rollback-pilot.test" }],
       channel: { type: "sdk", domain: "rollback.example" },
+      legal: acceptedLegal,
       plan: { id: "trial", trial: true }
     });
 
@@ -181,7 +218,7 @@ async function provisionTenant(baseUrl: string, payload: Record<string, unknown>
     headers: {
       "content-type": "application/json"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ legal: acceptedLegal, ...payload })
   });
   const envelope = await response.json() as { data: Record<string, any> };
 

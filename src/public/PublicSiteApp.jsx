@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ApiDocsPage } from "../features/public/ApiDocsPage.jsx";
 import { CommercialLandingPage } from "../features/public/CommercialLandingPage.jsx";
 import { LandingPage } from "../features/public/LandingPage.jsx";
+import { LegalPage } from "../features/public/LegalPage.jsx";
 import { PricingPage } from "../features/public/PricingPage.jsx";
 import { publicLeadService } from "../services/publicLeadService.js";
 import {
@@ -20,6 +21,7 @@ const PUBLIC_TEST_IDS = Object.freeze({
   docs: "route-public-docs",
   commercial: "route-public-commercial",
   landing: "route-public-landing",
+  legal: "route-public-legal",
   pricing: "route-public-pricing"
 });
 
@@ -116,9 +118,10 @@ export function PublicSiteApp({ pathname = globalThis.location?.pathname ?? "/" 
     navigateToPrivateHash("#/login");
   }, []);
 
-  const handleStartFree = useCallback(() => {
+  const handleStartFree = useCallback(({ plan = "free" } = {}) => {
     trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.registrationStart);
-    navigateToPrivateHash("#/onboarding");
+    const normalizedPlan = String(plan).trim().toLowerCase();
+    navigateToPrivateHash(normalizedPlan && normalizedPlan !== "free" ? `#/onboarding/${normalizedPlan}` : "#/onboarding");
   }, []);
 
   if (!route) return null;
@@ -126,6 +129,8 @@ export function PublicSiteApp({ pathname = globalThis.location?.pathname ?? "/" 
   let page;
   if (route.view === "docs") {
     page = <ApiDocsPage />;
+  } else if (route.view === "legal") {
+    page = <LegalPage />;
   } else if (route.view === "commercial") {
     page = <CommercialLandingPage onStartFree={handleStartFree} pageId={route.id} />;
   } else if (route.view === "pricing") {

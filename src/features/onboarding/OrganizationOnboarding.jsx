@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { setTenantSession } from "../../app/sessionStore.js";
 import { authService } from "../../services/authService.js";
+import { publicCatalogService } from "../../services/publicCatalogService.js";
 import {
   mapOnboardingFormToProvisionPayload,
   tenantProvisionService
@@ -14,10 +15,12 @@ import {
 import { StepButton, SummaryRow } from "./OnboardingControls.jsx";
 import { OnboardingStepContent } from "./OnboardingStepContent.jsx";
 import {
+  createOnboardingPlanOptions,
   createSlug,
   getCompletion,
-  hasEmailShape,
+  LEGAL_DOCUMENT_VERSION,
   planOptions,
+  readRequestedOnboardingPlan,
   stepRequirements,
   steps
 } from "./onboardingModel.js";
@@ -34,10 +37,12 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     industry: "retail",
     domain: ""
   });
-  const [plan, setPlan] = useState({
-    id: "Free",
+  const [plan, setPlan] = useState(() => ({
+    id: readRequestedOnboardingPlan(),
     billingCycle: "monthly"
-  });
+  }));
+  const [availablePlans, setAvailablePlans] = useState(() => [...planOptions]);
+  const [catalogState, setCatalogState] = useState("loading");
   const [admin, setAdmin] = useState({
     name: "",
     email: "",
@@ -53,23 +58,43 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     aiAssist: false,
     afterHoursBot: false
   });
-  const [employeeDraft, setEmployeeDraft] = useState({
-    email: "",
-    role: "Оператор",
-    team: "Support"
+  const [legal, setLegal] = useState({
+    documentVersion: LEGAL_DOCUMENT_VERSION,
+    personalDataConsent: false,
+    privacyPolicyAcknowledged: false,
+    termsAccepted: false
   });
-  const [employees, setEmployees] = useState([]);
   const [notice, setNotice] = useState({ tone: "info", text: "" });
 
+  useEffect(() => {
+    let cancelled = false;
+    void publicCatalogService.fetchTariffs().then((response) => {
+      if (cancelled) return;
+      if (response.status === "ok" && Array.isArray(response.data?.items)) {
+        const nextPlans = createOnboardingPlanOptions(response.data.items);
+        setAvailablePlans(nextPlans);
+        setPlan((current) => nextPlans.some((option) => option.id === current.id)
+          ? current
+          : { ...current, id: "free" });
+        setCatalogState("ready");
+      } else {
+        setCatalogState("fallback");
+      }
+    }).catch(() => {
+      if (!cancelled) setCatalogState("fallback");
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   const completion = useMemo(() => {
-    return getCompletion({ admin, employees, limits, plan, tenant });
-  }, [admin, employees, limits, plan, tenant]);
+    return getCompletion({ admin, legal, limits, plan, tenant });
+  }, [admin, legal, limits, plan, tenant]);
   const completedCount = Object.values(completion).filter(Boolean).length;
   const progress = Math.round((completedCount / steps.length) * 100);
   const activeIndex = steps.findIndex((step) => step.id === activeStep);
   const allComplete = completedCount === steps.length;
   const incompleteSteps = steps.filter((step) => !completion[step.id]);
-  const selectedPlan = planOptions[0];
+  const selectedPlan = availablePlans.find((option) => option.id === plan.id) ?? availablePlans[0];
 
   function moveStep(direction) {
     const nextIndex = Math.min(Math.max(activeIndex + direction, 0), steps.length - 1);
@@ -80,27 +105,12 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     setTenant((current) => ({ ...current, slug: createSlug(current.name) }));
   }
 
-  function handleAddEmployee(event) {
-    event.preventDefault();
-    const email = employeeDraft.email.trim().toLowerCase();
-
-    if (!hasEmailShape(email)) {
-      setNotice({ tone: "error", text: "Введите корректный email сотрудника." });
-      return;
-    }
-
-    if (employees.some((employee) => employee.email === email)) {
-      setNotice({ tone: "error", text: "Этот сотрудник уже добавлен в список приглашений." });
-      return;
-    }
-
-    setEmployees((current) => [...current, { ...employeeDraft, email }]);
-    setEmployeeDraft((current) => ({ ...current, email: "" }));
-    setNotice({ tone: "success", text: `${email} добавлен в список приглашений.` });
-  }
-
-  function handleRemoveEmployee(email) {
-    setEmployees((current) => current.filter((employee) => employee.email !== email));
+  function handleSelectPlan(option) {
+    setPlan({ id: option.id, billingCycle: "monthly" });
+    setLimits((current) => ({
+      ...current,
+      operatorLimit: Math.min(Math.max(current.operatorLimit, 1), option.includedUsers)
+    }));
   }
 
   async function handleFinish() {
@@ -114,15 +124,13 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
       return;
     }
 
-    if (isProvisioning) {
-      return;
-    }
+    if (isProvisioning) return;
 
     setIsProvisioning(true);
     setNotice({ tone: "info", text: "Создаем организацию..." });
 
     try {
-      const provisionPayload = mapOnboardingFormToProvisionPayload({ admin, employees, limits, plan, tenant });
+      const provisionPayload = mapOnboardingFormToProvisionPayload({ admin, legal, limits, plan, tenant });
       const provisionResponse = await tenantProvisionService.provisionOrganization(provisionPayload);
 
       if (provisionResponse.status !== "ok" || !provisionResponse.data?.tenant) {
@@ -168,7 +176,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
         embedSnippet,
         plan,
         limits,
-        employees
+        legal
       });
     } catch {
       setNotice({
@@ -188,8 +196,8 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
           Назад
         </button>
         <div>
-          <h1>Onboarding организации</h1>
-          <p>Организация Free, первый администратор и базовые лимиты перед входом в приложение.</p>
+          <h1>Настройка поддержки и коммуникаций</h1>
+          <p>Создайте организацию, выберите тариф и подтвердите условия использования.</p>
         </div>
         <button className="onboarding-finish" disabled={isProvisioning} onClick={handleFinish} type="button">
           {isProvisioning ? "Создание..." : "Завершить"}
@@ -200,7 +208,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
       <section className="onboarding-progress" aria-label="Прогресс onboarding">
         <div>
           <strong>{progress}%</strong>
-          <span>{completedCount} из {steps.length} пунктов завершено</span>
+          <span>Шаг {activeIndex + 1} из {steps.length} · завершено {completedCount}</span>
         </div>
         <div className="onboarding-progress-track">
           <span style={{ width: `${progress}%` }} />
@@ -224,7 +232,7 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
       ) : null}
 
       <div className="onboarding-layout">
-        <aside className="onboarding-checklist" aria-label="Checklist onboarding">
+        <aside className="onboarding-checklist" aria-label="Этапы настройки">
           {steps.map((step) => (
             <StepButton
               active={step.id === activeStep}
@@ -242,18 +250,17 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
           <OnboardingStepContent
             activeStep={activeStep}
             admin={admin}
-            employeeDraft={employeeDraft}
-            employees={employees}
-            handleAddEmployee={handleAddEmployee}
+            availablePlans={availablePlans}
+            catalogState={catalogState}
             handleGenerateSlug={handleGenerateSlug}
-            handleRemoveEmployee={handleRemoveEmployee}
+            handleSelectPlan={handleSelectPlan}
+            legal={legal}
             limits={limits}
             plan={plan}
+            selectedPlan={selectedPlan}
             setAdmin={setAdmin}
-            setEmployeeDraft={setEmployeeDraft}
+            setLegal={setLegal}
             setLimits={setLimits}
-            setNotice={setNotice}
-            setPlan={setPlan}
             setTenant={setTenant}
             tenant={tenant}
           />
@@ -277,10 +284,10 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
           <h2>Сводка</h2>
           <SummaryRow label="Организация" value={tenant.name || "не задана"} />
           <SummaryRow label="Slug" value={tenant.slug || "tenant-slug"} />
-          <SummaryRow label="Тариф" value={selectedPlan.id} />
+          <SummaryRow label="Выбранный тариф" value={selectedPlan?.name ?? "Free"} />
           <SummaryRow label="Администратор" value={admin.email || "не задан"} />
           <SummaryRow label="Лимиты" value={`${limits.operatorLimit} операторов · ${limits.concurrentDialogs} диалогов`} />
-          <SummaryRow label="Сотрудники" value={`${employees.length} приглашений`} />
+          <SummaryRow label="Юридический статус" value={completion.legal ? "согласия приняты" : "не подтвержден"} />
         </aside>
       </div>
     </main>

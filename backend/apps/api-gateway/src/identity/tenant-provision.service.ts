@@ -14,6 +14,8 @@ import { IntegrationRepository } from "../integrations/integration.repository.js
 import type { ServiceAdminRequest } from "./service-admin-auth.js";
 
 const SERVICE = "tenantProvisionService";
+const PUBLIC_LEGAL_DOCUMENT_VERSION = "draft-2026-08-07";
+const PUBLIC_ONBOARDING_PLAN_IDS = new Set(["free", "starter", "business", "scale"]);
 
 interface TenantProvisionPayload {
   admin?: {
@@ -33,6 +35,12 @@ interface TenantProvisionPayload {
     role?: string;
     team?: string;
   }>;
+  legal?: {
+    documentVersion?: string;
+    personalDataConsent?: boolean;
+    privacyPolicyAcknowledged?: boolean;
+    termsAccepted?: boolean;
+  };
   plan?: {
     billingCycle?: string;
     id?: string;
@@ -70,6 +78,7 @@ export interface TenantProvisionData {
     role: string;
   };
   publicApiKey: string;
+  legalAcceptance: NonNullable<NonNullable<IdentityTenant["onboarding"]>["legalAcceptance"]>;
   roleGrants: IdentityRbacRoleGrant[];
   session: {
     accessToken: string;
@@ -113,6 +122,7 @@ export class TenantProvisionService {
     const planId = normalizeProvisionPlanId(payload.plan?.id);
     const tariff = await this.billingRepository.findTariff(planId);
     const invitedEmployees = normalizeProvisionEmployees(payload.employees, adminEmail);
+    const legalAcceptance = normalizeLegalAcceptance(payload.legal);
 
     if (!tenantName || !tenantSlug || !adminName || !adminEmail || !adminPassword) {
       return invalidProvision(traceId, "tenant_provision_payload_invalid", "Tenant, admin email/name, and admin password are required.");
@@ -126,8 +136,12 @@ export class TenantProvisionService {
       return invalidProvision(traceId, "tenant_provision_channel_domain_invalid", "Channel domain must be a valid hostname.");
     }
 
-    if (!tariff) {
+    if (!PUBLIC_ONBOARDING_PLAN_IDS.has(planId) || !tariff) {
       return invalidProvision(traceId, "tenant_provision_plan_invalid", "The selected billing plan is not available.");
+    }
+
+    if (!legalAcceptance) {
+      return invalidProvision(traceId, "tenant_provision_legal_acceptance_required", "The current terms, privacy policy, and personal data consent must be accepted separately.");
     }
 
     const limits = applyPlanLimitPolicy(requestedLimits, tariff);
@@ -178,6 +192,7 @@ export class TenantProvisionService {
           adminRole,
           billingCycle,
           industry,
+          legalAcceptance,
           limits,
           mfaRequired
         },
@@ -362,6 +377,7 @@ export class TenantProvisionService {
           },
           roleGrants,
           defaultWorkspaceIds,
+          legalAcceptance,
           publicApiKey: rawPublicApiKey,
           embedSnippet
         }
@@ -424,8 +440,31 @@ function normalizeProvisionAdminRole(value: string | undefined): "Admin" | "Owne
 }
 
 function normalizeProvisionPlanId(value: string | undefined): string {
-  const normalized = String(value ?? "starter").trim().toLowerCase();
-  return normalized === "trial" ? "starter" : normalized || "starter";
+  const normalized = String(value ?? "free").trim().toLowerCase();
+  return normalized === "trial" ? "starter" : normalized || "free";
+}
+
+function normalizeLegalAcceptance(
+  legal: TenantProvisionPayload["legal"]
+): NonNullable<NonNullable<IdentityTenant["onboarding"]>["legalAcceptance"]> | null {
+  const documentVersion = String(legal?.documentVersion ?? "").trim();
+  if (
+    documentVersion !== PUBLIC_LEGAL_DOCUMENT_VERSION
+    || legal?.termsAccepted !== true
+    || legal?.privacyPolicyAcknowledged !== true
+    || legal?.personalDataConsent !== true
+  ) {
+    return null;
+  }
+
+  return {
+    acceptedAt: new Date().toISOString(),
+    documentVersion,
+    personalDataConsent: true,
+    privacyPolicyAcknowledged: true,
+    source: "public-onboarding",
+    termsAccepted: true
+  };
 }
 
 function normalizeProvisionEmployees(

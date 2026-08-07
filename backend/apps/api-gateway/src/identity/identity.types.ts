@@ -22,6 +22,14 @@ export interface IdentityTenant {
     adminRole: "Admin" | "Owner";
     billingCycle: "annual" | "monthly";
     industry: string;
+    legalAcceptance?: {
+      acceptedAt: string;
+      documentVersion: string;
+      personalDataConsent: true;
+      privacyPolicyAcknowledged: true;
+      source: "public-onboarding";
+      termsAccepted: true;
+    };
     limits: {
       afterHoursBot: boolean;
       aiAssist: boolean;

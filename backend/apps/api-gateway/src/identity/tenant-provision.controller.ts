@@ -16,14 +16,25 @@ export class TenantProvisionController {
       admin?: { email?: string; name?: string; password?: string };
       channel?: { domain?: string; type?: string };
       employees?: Array<{ email?: string; name?: string; role?: string; team?: string }>;
+      legal?: {
+        documentVersion?: string;
+        personalDataConsent?: boolean;
+        privacyPolicyAcknowledged?: boolean;
+        termsAccepted?: boolean;
+      };
       plan?: { billingCycle?: string; id?: string; trial?: boolean };
       tenant?: { name?: string; region?: string; slug?: string };
     },
     @Req() request: Partial<ServiceAdminRequest>
   ) {
+    const requestedPlanId = String(payload.plan?.id ?? "free").trim().toLowerCase() || "free";
     return this.tenantProvisionService.provisionTenant({
       ...payload,
-      plan: { billingCycle: "monthly", id: "free", trial: false }
+      plan: {
+        billingCycle: "monthly",
+        id: requestedPlanId,
+        trial: requestedPlanId !== "free"
+      }
     }, request);
   }
 }

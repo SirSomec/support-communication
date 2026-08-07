@@ -205,6 +205,9 @@ export class SettingsEmployeeService {
         adminRole: tenant.onboarding?.adminRole ?? "Owner",
         billingCycle: tenant.onboarding?.billingCycle ?? "monthly",
         industry: tenant.onboarding?.industry ?? "unspecified",
+        ...(tenant.onboarding?.legalAcceptance
+          ? { legalAcceptance: tenant.onboarding.legalAcceptance }
+          : {}),
         limits: { ...currentLimits, operatorLimit: requestedLimit },
         mfaRequired: tenant.onboarding?.mfaRequired ?? true
       }

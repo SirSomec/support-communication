@@ -9,7 +9,12 @@ import {
   mapOnboardingFormToProvisionPayload,
   tenantProvisionService
 } from "../src/services/tenantProvisionService.js";
-import { getCompletion, steps } from "../src/features/onboarding/onboardingModel.js";
+import {
+  createOnboardingPlanOptions,
+  getCompletion,
+  LEGAL_DOCUMENT_VERSION,
+  steps
+} from "../src/features/onboarding/onboardingModel.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -29,9 +34,14 @@ const onboardingForm = {
     afterHoursBot: false
   },
   plan: {
-    id: "Growth",
-    trial: true,
+    id: "business",
     billingCycle: "monthly"
+  },
+  legal: {
+    documentVersion: LEGAL_DOCUMENT_VERSION,
+    personalDataConsent: true,
+    privacyPolicyAcknowledged: true,
+    termsAccepted: true
   },
   admin: {
     name: "Owner",
@@ -39,8 +49,7 @@ const onboardingForm = {
     password: "Owner-2026!",
     role: "Владелец",
     mfa: true
-  },
-  employees: [{ email: "agent@acme-pilot.test", role: "Оператор", team: "Support" }]
+  }
 };
 
 describe("tenant provision service", () => {
@@ -52,12 +61,12 @@ describe("tenant provision service", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("always maps public onboarding to the Free plan", () => {
+  it("maps the selected onboarding plan and separate legal acceptance", () => {
     const payload = mapOnboardingFormToProvisionPayload(onboardingForm);
 
     assert.equal(payload.tenant.name, "Acme Pilot");
     assert.equal(payload.admin.email, "owner@acme-pilot.test");
-    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "free" });
+    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "business" });
     assert.deepEqual(payload.limits, onboardingForm.limits);
     assert.deepEqual(payload.admin, {
       email: "owner@acme-pilot.test",
@@ -67,25 +76,25 @@ describe("tenant provision service", () => {
       role: "Владелец"
     });
     assert.equal(payload.tenant.industry, "retail");
-    assert.equal(payload.employees.length, 1);
+    assert.deepEqual(payload.legal, onboardingForm.legal);
+    assert.equal("employees" in payload, false);
     assert.equal("testMessage" in payload, false);
     assert.equal(payload.channel.domain, "support.acme-pilot.test");
   });
 
-  it("does not allow form state to override the Free onboarding plan", () => {
+  it("normalizes billing cadence while preserving a supported selected plan", () => {
     const payload = mapOnboardingFormToProvisionPayload({
       ...onboardingForm,
-      employees: [],
-      plan: { billingCycle: "annual", id: "Free", trial: true }
+      plan: { billingCycle: "annual", id: "Starter", trial: true }
     });
 
-    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "free" });
+    assert.deepEqual(payload.plan, { billingCycle: "monthly", id: "starter" });
   });
 
   it("does not include the test message step in onboarding completion", () => {
     const completion = getCompletion({
       admin: onboardingForm.admin,
-      employees: onboardingForm.employees,
+      legal: onboardingForm.legal,
       limits: {
         operatorLimit: 8,
         concurrentDialogs: 12,
@@ -106,11 +115,23 @@ describe("tenant provision service", () => {
     assert.deepEqual(labels, [
       "Организация",
       "Тариф",
-      "Первый администратор",
+      "Администратор",
       "Лимиты",
-      "Сотрудники"
+      "Соглашения"
     ]);
     assert.equal(labels.join(" ").includes("Р"), false);
+  });
+
+  it("keeps enterprise out of self-service onboarding tariffs", () => {
+    const plans = createOnboardingPlanOptions([
+      { id: "free", name: "Free", billingAvailability: "free", includedUsers: 1, features: [] },
+      { id: "starter", name: "Starter", billingAvailability: "paid", includedUsers: 3, features: [] },
+      { id: "business", name: "Business", billingAvailability: "paid", includedUsers: 15, features: [] },
+      { id: "scale", name: "Scale", billingAvailability: "paid", includedUsers: 35, features: [] },
+      { id: "enterprise", name: "Enterprise", billingAvailability: "paid", includedUsers: 70, features: [] }
+    ]);
+
+    assert.deepEqual(plans.map((plan) => plan.id), ["free", "starter", "business", "scale"]);
   });
 
   it("posts mapped onboarding payload without a privileged bearer token", async () => {

@@ -59,6 +59,23 @@ const coreRouteDefinitions = [
       imagePath: DEFAULT_OG_IMAGE_PATH
     }),
     jsonLdTypes: Object.freeze(["BreadcrumbList"])
+  }),
+  Object.freeze({
+    id: "legal",
+    view: "legal",
+    pathname: "/legal/",
+    outputFile: "legal/index.html",
+    title: "Правовые документы платформы | Support Communication",
+    description: "Пользовательское соглашение, политика обработки персональных данных и отдельное согласие для регистрации в платформе Support Communication.",
+    h1: "Правовые документы Support Communication",
+    breadcrumbLabel: "Правовые документы",
+    analyticsGoal: null,
+    includeInSitemap: true,
+    openGraph: Object.freeze({
+      type: "website",
+      imagePath: DEFAULT_OG_IMAGE_PATH
+    }),
+    jsonLdTypes: Object.freeze(["BreadcrumbList"])
   })
 ];
 

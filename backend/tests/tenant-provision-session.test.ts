@@ -13,6 +13,13 @@ import { IntegrationRepository } from "../apps/api-gateway/dist/integrations/int
 })
 class TenantProvisionSessionTestModule {}
 
+const acceptedLegal = {
+  documentVersion: "draft-2026-08-07",
+  personalDataConsent: true,
+  privacyPolicyAcknowledged: true,
+  termsAccepted: true
+};
+
 describe("tenant provision session contracts", () => {
   const apps: INestApplication[] = [];
 
@@ -88,7 +95,7 @@ async function provisionTenant(baseUrl: string, payload: Record<string, unknown>
     headers: {
       "content-type": "application/json"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ legal: acceptedLegal, ...payload })
   });
   const envelope = await response.json() as { data: Record<string, any>; error?: { code?: string } };
 

@@ -1,7 +1,7 @@
 import { apiRequest } from "./apiClient.js";
 
 const SERVICE = "tenantProvisionService";
-export function mapOnboardingFormToProvisionPayload({ admin, employees = [], limits = {}, plan, tenant }) {
+export function mapOnboardingFormToProvisionPayload({ admin, legal, limits = {}, plan, tenant }) {
   return {
     tenant: {
       name: tenant.name.trim(),
@@ -17,15 +17,15 @@ export function mapOnboardingFormToProvisionPayload({ admin, employees = [], lim
       mfa: Boolean(admin.mfa)
     },
     plan: {
-      id: "free",
+      id: String(plan.id ?? "free").trim().toLowerCase(),
       billingCycle: "monthly"
     },
-    employees: employees.map((employee) => ({
-      email: employee.email,
-      ...(employee.name ? { name: employee.name } : {}),
-      role: employee.role,
-      team: employee.team
-    })),
+    legal: {
+      documentVersion: legal.documentVersion,
+      personalDataConsent: legal.personalDataConsent === true,
+      privacyPolicyAcknowledged: legal.privacyPolicyAcknowledged === true,
+      termsAccepted: legal.termsAccepted === true
+    },
     channel: {
       domain: String(tenant.domain ?? "").trim().toLowerCase(),
       type: "sdk"

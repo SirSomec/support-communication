@@ -15,6 +15,7 @@ describe("public pathname routing", () => {
     assert.equal(resolvePublicRoute("/")?.view, "landing");
     assert.equal(resolvePublicRoute("/pricing/")?.view, "pricing");
     assert.equal(resolvePublicRoute("/docs/")?.view, "docs");
+    assert.equal(resolvePublicRoute("/legal/")?.view, "legal");
     assert.equal(resolvePublicRoute("/website-support-chat/")?.view, "commercial");
     assert.equal(resolvePublicRoute("/ai-support-bot/")?.view, "commercial");
     assert.equal(resolvePublicRoute("/support-sla/")?.view, "commercial");
@@ -24,6 +25,7 @@ describe("public pathname routing", () => {
   it("accepts slashless paths while keeping trailing-slash canonicals", () => {
     assert.equal(normalizePublicPathname("/pricing"), "/pricing/");
     assert.equal(normalizePublicPathname("/docs"), "/docs/");
+    assert.equal(normalizePublicPathname("/legal"), "/legal/");
     assert.equal(normalizePublicPathname("/support-sla"), "/support-sla/");
     assert.equal(resolvePublicRoute("/pricing")?.pathname, "/pricing/");
   });
@@ -90,6 +92,7 @@ describe("public/private bootstrap boundary", () => {
       "src/features/public/LandingPage.jsx",
       "src/features/public/PricingPage.jsx",
       "src/features/public/ApiDocsPage.jsx",
+      "src/features/public/LegalPage.jsx",
       "src/features/public/CommercialLandingPage.jsx"
     ].map((file) => readFileSync(file, "utf8")).join("\n");
 
@@ -97,5 +100,11 @@ describe("public/private bootstrap boundary", () => {
     assert.match(publicSources, /href="\/pricing\/"/);
     assert.match(publicSources, /href="\/docs\/"/);
     assert.match(publicSources, /commercialPageDefinitions/);
+  });
+
+  it("serves every core public page through the Vite development fallback", () => {
+    const fallbackSource = readFileSync("vite.service-admin-fallback.js", "utf8");
+
+    assert.match(fallbackSource, /pricing\|docs\|legal/);
   });
 });

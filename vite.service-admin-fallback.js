@@ -1,5 +1,5 @@
 const APP_DEEP_LINK_PATTERN = /^\/(auth|login|app|onboarding|landing)(\/|$)/;
-const PUBLIC_DEV_PATH_PATTERN = /^\/(pricing|docs)\/?(?:\?|$)/;
+const PUBLIC_DEV_PATH_PATTERN = /^\/(pricing|docs|legal)\/?(?:\?|$)/;
 
 function rewriteAppUrls(req, { includePublicDevPaths = false } = {}) {
   const url = req.url ?? "";

@@ -34,6 +34,14 @@ export function isPrivateWorkspaceHash(hash = "") {
   return privateWorkspaceHashes.some((prefix) => value === prefix || value.startsWith(`${prefix}/`));
 }
 
+export function navigateToPrivateHash(hash, windowLike = globalThis.window) {
+  if (!windowLike || !isPrivateWorkspaceHash(hash)) return false;
+
+  windowLike.history.pushState(null, "", `/${hash}`);
+  windowLike.location.reload();
+  return true;
+}
+
 export function syncPublicDocumentHead(route, documentLike = globalThis.document) {
   if (!route || !documentLike?.head) return;
 

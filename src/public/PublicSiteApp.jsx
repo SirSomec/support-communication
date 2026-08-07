@@ -13,7 +13,7 @@ import {
   trackPublicRouteView,
   writePublicAnalyticsConsent
 } from "./analytics/publicAnalytics.js";
-import { resolvePublicRoute } from "./routing.js";
+import { navigateToPrivateHash, resolvePublicRoute } from "./routing.js";
 import { getPublicSiteConfig } from "./seo/publicRouteManifest.js";
 
 const PUBLIC_TEST_IDS = Object.freeze({
@@ -22,12 +22,6 @@ const PUBLIC_TEST_IDS = Object.freeze({
   landing: "route-public-landing",
   pricing: "route-public-pricing"
 });
-
-function navigateToPrivateHash(hash) {
-  if (typeof window !== "undefined") {
-    window.location.assign(`/${hash}`);
-  }
-}
 
 function PublicToast({ message, onClose }) {
   return (

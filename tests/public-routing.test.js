@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   isPrivateWorkspaceHash,
   legacyPublicPathForHash,
+  navigateToPrivateHash,
   normalizeLegacyPublicHash,
   normalizePublicPathname,
   resolvePublicRoute
@@ -50,6 +51,26 @@ describe("public pathname routing", () => {
     assert.equal(isPrivateWorkspaceHash("#/login"), true);
     assert.equal(isPrivateWorkspaceHash("#/onboarding"), true);
     assert.equal(isPrivateWorkspaceHash("#/pricing"), false);
+  });
+
+  it("reloads the document when moving from a public page into the private app", () => {
+    const calls = [];
+    const windowLike = {
+      history: {
+        pushState: (...args) => calls.push(["pushState", ...args])
+      },
+      location: {
+        reload: () => calls.push(["reload"])
+      }
+    };
+
+    assert.equal(navigateToPrivateHash("#/onboarding", windowLike), true);
+    assert.deepEqual(calls, [
+      ["pushState", null, "", "/#/onboarding"],
+      ["reload"]
+    ]);
+    assert.equal(navigateToPrivateHash("#/pricing", windowLike), false);
+    assert.equal(calls.length, 2);
   });
 });
 

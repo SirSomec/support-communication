@@ -25,6 +25,7 @@ describe("nginx public SEO HTTP contract", () => {
       });
 
       it("permanently canonicalizes public and private legacy paths", () => {
+        assert.match(config, /absolute_redirect\s+off;/, "redirects behind the edge proxy must keep relative Location headers");
         const redirects = new Map([
           ["/landing", "/"],
           ["/pricing", "/pricing/"],

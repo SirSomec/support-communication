@@ -336,7 +336,8 @@ export class WorkspaceService {
       return tenantContextRequiredEnvelope(FILE_SERVICE, "createUploadDescriptor");
     }
     const tenantId = sanitizeTenantId(context.tenantId);
-    if (!ATTACHMENT_CHANNELS.has(String(payload.channel ?? "").trim())) {
+    const channel = String(payload.channel ?? "").trim();
+    if (!ATTACHMENT_CHANNELS.has(channel)) {
       return deniedEnvelope(FILE_SERVICE, "createUploadDescriptor", "attachment_channel_unsupported", "This channel does not support file attachments.", {
         auditEvent: uploadDescriptorDeniedAuditEvent("attachment_channel_unsupported", payload.channel, tenantId),
         channel: payload.channel,
@@ -345,8 +346,10 @@ export class WorkspaceService {
     }
 
     const requestedBytes = payload.sizeBytes ?? 0;
-    const quota = await this.fileUploadQuota?.checkFileUpload({
-      channel: payload.channel,
+    // Вложения в обращениях — служебный канал связи с поддержкой. Они не должны
+    // блокироваться исчерпанной квотой рабочего пространства.
+    const quota = channel === "SUPPORT" ? undefined : await this.fileUploadQuota?.checkFileUpload({
+      channel,
       requestedBytes,
       resource: "storage",
       tenantId

@@ -741,6 +741,46 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.equal(JSON.stringify(denied).includes("objects/obj_"), false);
   });
 
+  it("does not apply a tenant storage quota to support ticket attachments", async () => {
+    const quotaChecks: Array<Record<string, unknown>> = [];
+    const workspace = new WorkspaceService(WorkspaceRepository.inMemory(), {
+      fileUploadQuota: {
+        checkFileUpload: async (input: Record<string, unknown>) => {
+          quotaChecks.push(input);
+          return {
+            allowed: false,
+            limitBytes: 4096,
+            remainingBytes: 0,
+            usedBytes: 4096
+          };
+        }
+      },
+      objectStorage: {
+        signUpload: async () => ({
+          expiresAt: "2026-06-28T12:30:00.000Z",
+          headers: {},
+          method: "PUT",
+          url: "https://storage.example.test/upload/support"
+        }),
+        signDownload: async () => ({
+          expiresAt: "2026-06-28T12:30:00.000Z",
+          method: "GET",
+          url: "https://storage.example.test/download/support"
+        })
+      }
+    });
+
+    const upload = await workspace.createUploadDescriptor({
+      channel: "SUPPORT",
+      fileName: "support-screenshot.png",
+      mimeType: "image/png",
+      sizeBytes: 1024
+    }, { tenantId: "tenant-lumen" });
+
+    assert.equal(upload.status, "ok");
+    assert.deepEqual(quotaChecks, []);
+  });
+
   it("wires file upload quota checks to billing storage usage", async () => {
     const calls: Array<Record<string, unknown>> = [];
     const checker = createBillingFileUploadQuotaChecker({

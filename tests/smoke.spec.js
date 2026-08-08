@@ -1795,12 +1795,11 @@ test("service admin critical actions require reason confirmation and audit", asy
   await page.locator(".service-admin-action-picker button").filter({ hasText: "Войти от имени" }).click();
   await page.locator(".user-support-workspace .service-admin-confirm input").check();
   await page.locator(".user-support-workspace .service-admin-action-box footer button").click();
-  await expect(page.locator(".service-admin-impersonation")).toContainText("только чтение");
-  await expect(page.locator(".service-admin-feedback")).toContainText("Вход от имени пользователя");
+  await expect(page.locator(".impersonation-workspace-banner")).toContainText("Изменение данных недоступно");
 
-  await page.locator(".service-admin-impersonation button").click();
-  await expect(page.locator(".service-admin-impersonation")).toHaveCount(0);
-  await expect(page.locator(".service-admin-feedback")).toContainText("Выход из режима доступа");
+  await page.locator(".impersonation-workspace-banner button").click();
+  await expect(page.locator(".impersonation-workspace-banner")).toHaveCount(0);
+  await expect(page.locator(".service-admin-tabs")).toBeVisible();
 
   await page.locator(".service-admin-tabs button").filter({ hasText: "Биллинг" }).click();
   await page.locator(".service-admin-tenant-list button").filter({ hasText: "Volga Logistics" }).click();

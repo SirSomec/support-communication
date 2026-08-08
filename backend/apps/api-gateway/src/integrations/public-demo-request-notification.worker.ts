@@ -31,7 +31,7 @@ export interface SmtpPublicDemoRequestNotificationProviderOptions {
   secure?: boolean;
   timeoutMs?: number;
   tlsRejectUnauthorized?: boolean;
-  to: string;
+  to: string | string[];
 }
 
 export interface PublicDemoRequestNotificationWorkerRepository {
@@ -138,11 +138,12 @@ export function createSmtpPublicDemoRequestNotificationProvider(
 ): PublicDemoRequestNotificationProvider {
   return {
     async send({ descriptor, now }) {
+      const recipients = smtpRecipients(options.to);
       const message = buildPublicDemoRequestEmail({
         descriptor,
         from: options.from,
         now,
-        to: options.to
+        to: recipients
       });
       const queuedId = await sendSmtpMessage({
         auth: options.auth,
@@ -153,7 +154,7 @@ export function createSmtpPublicDemoRequestNotificationProvider(
         secure: options.secure ?? false,
         timeoutMs: options.timeoutMs ?? 10_000,
         tlsRejectUnauthorized: options.tlsRejectUnauthorized ?? true,
-        to: options.to
+        to: recipients
       });
 
       return {
@@ -176,7 +177,7 @@ function buildPublicDemoRequestEmail(input: {
   descriptor: PublicDemoRequestNotificationDescriptor;
   from: string;
   now: string;
-  to: string;
+  to: string[];
 }): string {
   const payload = input.descriptor.payload;
   const company = emailText(payload.company, "Unknown company");
@@ -188,7 +189,7 @@ function buildPublicDemoRequestEmail(input: {
   const subject = `New public demo request from ${company}`;
   const lines = [
     `From: ${sanitizeAddress(input.from)}`,
-    `To: ${sanitizeAddress(input.to)}`,
+    `To: ${input.to.map(sanitizeAddress).join(", ")}`,
     `Subject: ${sanitizeHeader(subject)}`,
     "Content-Type: text/plain; charset=utf-8",
     "MIME-Version: 1.0",
@@ -221,7 +222,7 @@ function sendSmtpMessage(input: {
   secure: boolean;
   timeoutMs: number;
   tlsRejectUnauthorized: boolean;
-  to: string;
+  to: string[];
 }): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = input.secure
@@ -272,7 +273,9 @@ function sendSmtpMessage(input: {
             await writeSmtpCommand(socket, reader.readLine, `AUTH PLAIN ${encodeSmtpPlainAuth(input.auth)}`, 235);
           }
           await writeSmtpCommand(socket, reader.readLine, `MAIL FROM:<${smtpAddress(input.from)}>`, 250);
-          await writeSmtpCommand(socket, reader.readLine, `RCPT TO:<${smtpAddress(input.to)}>`, 250);
+          for (const recipient of input.to) {
+            await writeSmtpCommand(socket, reader.readLine, `RCPT TO:<${smtpAddress(recipient)}>`, 250);
+          }
           await writeSmtpCommand(socket, reader.readLine, "DATA", 354);
           const dataResponse = await writeSmtpCommand(socket, reader.readLine, `${dotStuff(input.message)}\r\n.`, 250);
           await writeSmtpCommand(socket, reader.readLine, "QUIT", 221);
@@ -399,4 +402,26 @@ function smtpAddress(value: string): string {
     throw new Error("smtp_address_invalid");
   }
   return normalized;
+}
+
+function smtpRecipients(value: string | string[]): string[] {
+  const candidates = (Array.isArray(value) ? value : [value])
+    .flatMap((item) => item.split(/[;,]/));
+  const recipients: string[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of candidates) {
+    const recipient = smtpAddress(candidate);
+    const key = recipient.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      recipients.push(recipient);
+    }
+  }
+
+  if (recipients.length === 0) {
+    throw new Error("smtp_recipient_required");
+  }
+
+  return recipients;
 }

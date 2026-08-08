@@ -1539,6 +1539,12 @@
   box-shadow: 0 0 0 3px rgb(11 116 255 / 14%);
 }
 
+.public-request-dialog input[aria-invalid="true"],
+.public-request-dialog textarea[aria-invalid="true"] {
+  border-color: #d9575f;
+  box-shadow: 0 0 0 3px rgb(217 87 95 / 12%);
+}
+
 .public-request-consent {
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;

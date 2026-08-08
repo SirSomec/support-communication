@@ -247,7 +247,7 @@ describe("public demo request contracts", () => {
         host: "127.0.0.1",
         port: smtp.port,
         timeoutMs: 1000,
-        to: "sales@support.local"
+        to: ["sales@support.local", "admin@support.local"]
       });
 
       const result = await provider.send({
@@ -273,12 +273,13 @@ describe("public demo request contracts", () => {
 
       assert.match(result.providerMessageId, /^smtp-/);
       assert.equal(smtp.messages.length, 1);
-      assert.match(smtp.messages[0], /To: sales@support\.local/);
+      assert.match(smtp.messages[0], /To: sales@support\.local, admin@support\.local/);
       assert.match(smtp.messages[0], /From: noreply@support\.local/);
       assert.match(smtp.messages[0], /Subject: New public demo request from Acme Retail/);
       assert.match(smtp.messages[0], /owner@acme\.example/);
       assert.match(smtp.commands.join("\n"), /MAIL FROM:<noreply@support\.local>/);
       assert.match(smtp.commands.join("\n"), /RCPT TO:<sales@support\.local>/);
+      assert.match(smtp.commands.join("\n"), /RCPT TO:<admin@support\.local>/);
     } finally {
       await smtp.close();
     }

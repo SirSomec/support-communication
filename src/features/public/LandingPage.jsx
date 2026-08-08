@@ -178,7 +178,7 @@ export function LandingPage({
 }) {
   const [requestDialog, setRequestDialog] = React.useState(null);
   const [requestForm, setRequestForm] = React.useState(defaultRequestForm());
-  const [requestState, setRequestState] = React.useState({ error: "", submitting: false });
+  const [requestState, setRequestState] = React.useState({ error: "", fieldErrors: {}, submitting: false });
   const [tariffs, setTariffs] = React.useState([]);
   const [publicStatus, setPublicStatus] = React.useState("checking");
   const handleDemoRequest = demoRequestEnabled
@@ -212,7 +212,7 @@ export function LandingPage({
     onDemoOpen();
     setRequestDialog({ source, title });
     setRequestForm(defaultRequestForm({ planInterest, source }));
-    setRequestState({ error: "", submitting: false });
+    setRequestState({ error: "", fieldErrors: {}, submitting: false });
   }
 
   function updateRequestForm(field, value) {
@@ -220,6 +220,12 @@ export function LandingPage({
       ...current,
       [field]: value
     }));
+    setRequestState((current) => {
+      if (!current.error && !current.fieldErrors[field]) return current;
+      const fieldErrors = { ...current.fieldErrors };
+      delete fieldErrors[field];
+      return { ...current, error: "", fieldErrors };
+    });
   }
 
   async function submitRequestForm(event) {
@@ -228,20 +234,41 @@ export function LandingPage({
       return;
     }
 
-    setRequestState({ error: "", submitting: true });
+    // Browser autofill can populate visible controls without firing React's
+    // change handlers. Read the submitted form so those values are not lost.
+    const payload = readDemoRequestForm(event.currentTarget, requestForm);
+    const fieldErrors = validateDemoRequest(payload);
+    if (Object.keys(fieldErrors).length > 0) {
+      setRequestForm(payload);
+      setRequestState({ error: "Проверьте обязательные поля формы.", fieldErrors, submitting: false });
+      return;
+    }
+
+    setRequestState({ error: "", fieldErrors: {}, submitting: true });
     const response = await onRequestDemo({
-      ...requestForm,
+      ...payload,
       source: requestDialog.source
     });
 
     if (response?.status === "ok") {
       setRequestDialog(null);
-      setRequestState({ error: "", submitting: false });
+      setRequestState({ error: "", fieldErrors: {}, submitting: false });
+      return;
+    }
+
+    const responseFieldErrors = mapDemoRequestFieldErrors(response?.data?.fields);
+    if (Object.keys(responseFieldErrors).length > 0) {
+      setRequestState({
+        error: "Проверьте обязательные поля формы.",
+        fieldErrors: responseFieldErrors,
+        submitting: false
+      });
       return;
     }
 
     setRequestState({
       error: response?.error?.message ?? "Не удалось отправить заявку.",
+      fieldErrors: responseFieldErrors,
       submitting: false
     });
   }
@@ -565,12 +592,13 @@ export function LandingPage({
               <button aria-label="Закрыть заявку" onClick={() => setRequestDialog(null)} type="button">Закрыть</button>
             </header>
 
-            <form onSubmit={submitRequestForm}>
+            <form noValidate onSubmit={submitRequestForm}>
               <div className="public-request-grid">
                 <label>
                   <span>Имя</span>
                   <input
                     autoComplete="name"
+                    aria-invalid={Boolean(requestState.fieldErrors.name)}
                     name="name"
                     onChange={(event) => updateRequestForm("name", event.target.value)}
                     required
@@ -581,6 +609,7 @@ export function LandingPage({
                   <span>Компания</span>
                   <input
                     autoComplete="organization"
+                    aria-invalid={Boolean(requestState.fieldErrors.company)}
                     name="company"
                     onChange={(event) => updateRequestForm("company", event.target.value)}
                     required
@@ -591,6 +620,7 @@ export function LandingPage({
                   <span>Email</span>
                   <input
                     autoComplete="email"
+                    aria-invalid={Boolean(requestState.fieldErrors.email)}
                     name="email"
                     onChange={(event) => updateRequestForm("email", event.target.value)}
                     required
@@ -613,6 +643,7 @@ export function LandingPage({
                 <span>Сообщение</span>
                 <textarea
                   name="message"
+                  aria-invalid={Boolean(requestState.fieldErrors.message)}
                   onChange={(event) => updateRequestForm("message", event.target.value)}
                   required
                   rows={4}
@@ -622,6 +653,7 @@ export function LandingPage({
               <label className="public-request-consent">
                 <input
                   checked={requestForm.consent}
+                  aria-invalid={Boolean(requestState.fieldErrors.consent)}
                   name="consent"
                   onChange={(event) => updateRequestForm("consent", event.target.checked)}
                   required
@@ -678,4 +710,38 @@ function defaultRequestForm(overrides = {}) {
     website: "",
     ...overrides
   };
+}
+
+function readDemoRequestForm(form, fallback) {
+  const values = new FormData(form);
+  return {
+    ...fallback,
+    company: String(values.get("company") ?? "").trim(),
+    consent: values.get("consent") === "on",
+    email: String(values.get("email") ?? "").trim(),
+    message: String(values.get("message") ?? "").trim(),
+    name: String(values.get("name") ?? "").trim(),
+    planInterest: String(values.get("planInterest") ?? fallback.planInterest ?? "").trim(),
+    website: String(values.get("website") ?? "").trim()
+  };
+}
+
+function validateDemoRequest(payload) {
+  const fieldErrors = {};
+  if (payload.name.length < 2) fieldErrors.name = true;
+  if (payload.company.length < 2) fieldErrors.company = true;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) fieldErrors.email = true;
+  if (payload.message.length < 10) fieldErrors.message = true;
+  if (payload.consent !== true) fieldErrors.consent = true;
+  return fieldErrors;
+}
+
+function mapDemoRequestFieldErrors(fields) {
+  if (!Array.isArray(fields)) return {};
+  return fields.reduce((errors, field) => {
+    if (["name", "company", "email", "message", "consent"].includes(field)) {
+      errors[field] = true;
+    }
+    return errors;
+  }, {});
 }

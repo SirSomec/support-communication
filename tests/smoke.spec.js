@@ -222,11 +222,28 @@ test("public landing demo and contact request submit to backend", async ({ page 
   await page.getByRole("button", { name: "Демо по запросу" }).click();
   await expect(page.getByTestId("public-demo-request-dialog")).toBeVisible();
 
-  await page.getByLabel("Имя").fill("Jane Owner");
-  await page.getByLabel("Компания").fill("Acme Retail");
-  await page.getByLabel("Email").fill("owner@acme.example");
-  await page.getByLabel("Сообщение").fill("Need a demo for 20 operators and SDK migration.");
-  await page.getByLabel("Согласие на обработку заявки").check();
+  let demoRequestCount = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/public/demo-requests") && request.method() === "POST") {
+      demoRequestCount += 1;
+    }
+  });
+
+  await page.getByTestId("public-demo-request-submit").click();
+  await expect(page.locator(".public-request-error")).toContainText("Проверьте обязательные поля формы");
+  await expect(page.getByLabel("Имя")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByLabel("Согласие на обработку заявки")).toHaveAttribute("aria-invalid", "true");
+  expect(demoRequestCount).toBe(0);
+
+  // Simulate browser autofill: visible field values may be updated without React
+  // receiving input events. The submit handler must use the form's current data.
+  await page.getByTestId("public-demo-request-dialog").evaluate((dialog) => {
+    dialog.querySelector('input[name="name"]').value = "Jane Owner";
+    dialog.querySelector('input[name="company"]').value = "Acme Retail";
+    dialog.querySelector('input[name="email"]').value = "owner@acme.example";
+    dialog.querySelector('textarea[name="message"]').value = "Need a demo for 20 operators and SDK migration.";
+    dialog.querySelector('input[name="consent"]').checked = true;
+  });
 
   const submitResponse = page.waitForResponse((response) =>
     response.url().includes("/api/v1/public/demo-requests") && response.request().method() === "POST"

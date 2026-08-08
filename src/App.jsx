@@ -15,6 +15,7 @@ import { useTemplateLibrary } from "./app/useTemplateLibrary.js";
 import { useWorkspaceRoute } from "./app/useWorkspaceRoute.js";
 import { useTenantSessionState } from "./app/useTenantSessionState.js";
 import { useOperatorAttention } from "./app/useOperatorAttention.js";
+import { clearImpersonationSession, clearTenantSession, getImpersonationSession } from "./app/sessionStore.js";
 import { resolveNotificationActionAvailability, resolveNotificationNavigationTarget } from "./app/notificationNavigation.js";
 import {
   findThreadByConversationId,
@@ -30,6 +31,7 @@ import { SectionRouter } from "./features/section-router.jsx";
 import { permissionService } from "./services/permissionService.js";
 import { qualityService } from "./services/qualityService.js";
 import { settingsService } from "./services/settingsService.js";
+import { supportAdminService } from "./services/supportAdminService.js";
 import { ScreenStateStrip, Skeleton, Toast, WorkspaceState } from "./ui.jsx";
 
 const ROLE_SWITCHER_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROLE_SWITCHER === "true";
@@ -43,6 +45,7 @@ function App() {
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [notificationNavigationTarget, setNotificationNavigationTarget] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [impersonation, setImpersonation] = useState(() => getImpersonationSession());
   const realtimeAttentionHandlerRef = useRef(null);
   const {
     handleToastClose,
@@ -135,6 +138,24 @@ function App() {
       handleSectionSelect("support");
     }
   }, [handleSectionSelect, route.namespace, route.view]);
+  useEffect(() => {
+    if (!impersonation || tenantSession.loading) {
+      return;
+    }
+
+    const expired = Date.parse(impersonation.expiresAt) <= Date.now();
+    const wrongTenant = tenantSession.authenticated && tenantSession.tenantId !== impersonation.tenantId;
+    if (!expired && !wrongTenant) {
+      return;
+    }
+
+    clearImpersonationSession();
+    setImpersonation(null);
+    if (expired) {
+      clearTenantSession();
+      window.location.assign("/service-admin");
+    }
+  }, [impersonation, tenantSession.authenticated, tenantSession.loading, tenantSession.tenantId]);
   const handleTenantLogout = useCallback(async () => {
     const response = await tenantSession.logout();
     routeActions.openAuth();
@@ -142,6 +163,19 @@ function App() {
       setToast("Локальная сессия завершена, но сервер не подтвердил отзыв токена.");
     }
   }, [routeActions, setToast, tenantSession]);
+  const handleExitImpersonation = useCallback(async () => {
+    const activeImpersonation = getImpersonationSession();
+    if (activeImpersonation?.id) {
+      await supportAdminService.stopImpersonation({
+        impersonationId: activeImpersonation.id,
+        reason: "Возврат из рабочего места пользователя в админ-панель"
+      });
+    }
+    clearImpersonationSession();
+    clearTenantSession();
+    setImpersonation(null);
+    window.location.assign("/service-admin");
+  }, []);
   const {
     attachments,
     clearAttachments,
@@ -495,10 +529,19 @@ function App() {
     <div className={`app-shell ${sidebarCollapsed ? "app-shell-sidebar-collapsed" : ""}`} data-testid="route-app-shell">
       <Sidebar active={section} access={access} collapsed={sidebarCollapsed} onSelect={handleSectionSelect} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} operator={tenantSession.operator} presenceStatus={operatorPresence.presence?.status ?? ""} />
       <main className="workspace">
+        {impersonation ? (
+          <section className="impersonation-workspace-banner" aria-live="polite">
+            <div>
+              <strong>Режим просмотра от имени {impersonation.operatorName ?? tenantSession.operator?.name ?? "пользователя"}</strong>
+              <span>Изменение данных недоступно. Доступ завершится {new Date(impersonation.expiresAt).toLocaleString("ru-RU")}.</span>
+            </div>
+            <button onClick={handleExitImpersonation} type="button">Вернуться в админку</button>
+          </section>
+        ) : null}
         <TopBar
           access={access}
           activeSection={section}
-          onLogout={handleTenantLogout}
+          onLogout={impersonation ? handleExitImpersonation : handleTenantLogout}
           onOpenLanding={routeActions.openLanding}
           getNotificationActionAvailability={getNotificationActionAvailability}
           onNavigateNotificationAction={handleNotificationNavigation}

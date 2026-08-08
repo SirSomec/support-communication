@@ -410,7 +410,11 @@ export interface StoredTenantOperatorSession {
 }
 
 interface CreateTenantOperatorSessionInput {
+  /** Creates a support-view session that can use only explicitly read-only actions. */
+  readOnly?: boolean;
+  sessionId?: string;
   tenantId: string;
+  ttlMinutes?: number;
   userId: string;
 }
 
@@ -595,6 +599,7 @@ interface CreateServiceAdminSessionInput {
   currentTenantId?: string;
   mfaVerified?: boolean;
   role?: string;
+  sessionId?: string;
   sessionIdPrefix?: string;
   tenantScope?: string;
   ttlMinutes?: number;
@@ -607,6 +612,31 @@ interface TouchServiceAdminSessionActivityInput {
 
 // Продлеваем не чаще раза в 5 минут на сессию, чтобы не писать в БД на каждый запрос.
 const SESSION_ACTIVITY_EXTEND_THROTTLE_MS = 5 * 60 * 1000;
+const IMPERSONATED_TENANT_SESSION_PREFIX = "top-session_impersonation_";
+const READ_ONLY_TENANT_OPERATOR_ACTIONS = [
+  "audit.read",
+  "automation.read",
+  "billing.read",
+  "channels.read",
+  "clients.read",
+  "dialogs.read",
+  "files.read",
+  "flags.read",
+  "knowledge.read",
+  "notifications.read",
+  "operations.read",
+  "platform.read",
+  "presence.read",
+  "quality.read",
+  "quotas.read",
+  "realtime.events.read",
+  "reports.read",
+  "routing.read",
+  "settings.read",
+  "stream.read",
+  "tickets.read",
+  "visitors.read"
+] as const;
 
 interface CreateServiceAdminTokenPairInput {
   accessTokenExpiresAt: string;
@@ -3010,7 +3040,7 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
         availableOrganizations: resolved.availableOrganizations,
         currentTenantId: resolved.currentTenantId,
         expiresAt: addMinutes(now, input.ttlMinutes ?? SESSION_IDLE_TTL_MINUTES),
-        id: `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
+        id: input.sessionId ?? `${input.sessionIdPrefix ?? "svc-session"}_${randomUUID()}`,
         mfaVerifiedAt: input.mfaVerified === false ? null : now,
         revokedAt: null,
         role: resolved.role,
@@ -3028,7 +3058,10 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
     }
 
     const permissionRoles = await this.listPermissionRoles();
-    const permissions = resolveTenantOperatorPermissions(user.role, permissionRoles);
+    const permissions = readOnlyTenantOperatorPermissions(
+      resolveTenantOperatorPermissions(user.role, permissionRoles),
+      input.readOnly === true
+    );
     const session = await this.createServiceAdminSession({
       actorId: user.id,
       actorName: user.name,
@@ -3037,14 +3070,16 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
       availableOrganizations: [{ id: user.tenantId, name: user.tenantId, role: "operator" }],
       currentTenantId: user.tenantId,
       role: user.role,
+      sessionId: input.sessionId,
       sessionIdPrefix: "top-session",
       tenantScope: user.tenantId,
-      ttlMinutes: SESSION_IDLE_TTL_MINUTES
+      ttlMinutes: input.ttlMinutes ?? SESSION_IDLE_TTL_MINUTES
     });
     const tokenPair = createTenantOperatorSessionTokens({
       hashToken: hashServiceAdminToken,
       sessionId: session.id,
-      subjectId: user.id
+      subjectId: user.id,
+      ttlMinutes: input.ttlMinutes ?? SESSION_IDLE_TTL_MINUTES
     });
     await this.createServiceAdminTokenPair({
       accessTokenExpiresAt: tokenPair.accessTokenExpiresAt,
@@ -3160,7 +3195,6 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
   }
 
   async touchServiceAdminSessionActivity({ accessToken, now = new Date() }: TouchServiceAdminSessionActivityInput): Promise<void> {
-    const newExpiresAt = addMinutes(now, SESSION_IDLE_TTL_MINUTES);
     const tokenPair = await this.client.serviceAdminTokenPair.findFirst({
       orderBy: { issuedAt: "desc" },
       where: {
@@ -3170,7 +3204,17 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
         rotatedAt: null
       }
     });
-    if (!tokenPair || Date.parse(toIso(tokenPair.accessTokenExpiresAt)) >= newExpiresAt.getTime() - SESSION_ACTIVITY_EXTEND_THROTTLE_MS) {
+    if (!tokenPair) {
+      return;
+    }
+
+    const session = await this.client.serviceAdminSession.findUnique({ where: { id: tokenPair.sessionId } });
+    if (!session || isImpersonatedTenantOperatorSession(toServiceAdminSession(session))) {
+      return;
+    }
+
+    const newExpiresAt = addMinutes(now, SESSION_IDLE_TTL_MINUTES);
+    if (Date.parse(toIso(tokenPair.accessTokenExpiresAt)) >= newExpiresAt.getTime() - SESSION_ACTIVITY_EXTEND_THROTTLE_MS) {
       return;
     }
 
@@ -3178,8 +3222,7 @@ class PrismaIdentityRepository implements IdentityRepositoryPort {
       data: { accessTokenExpiresAt: newExpiresAt },
       where: { id: tokenPair.id }
     });
-    const session = await this.client.serviceAdminSession.findUnique({ where: { id: tokenPair.sessionId } });
-    if (session && !session.revokedAt && Date.parse(toIso(session.expiresAt)) < newExpiresAt.getTime()) {
+    if (!session.revokedAt && Date.parse(toIso(session.expiresAt)) < newExpiresAt.getTime()) {
       await this.client.serviceAdminSession.update({
         data: { expiresAt: newExpiresAt },
         where: { id: session.id }
@@ -3947,7 +3990,10 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       }
 
       const storedPermissionRoles = store.read().permissionRoles;
-      const permissions = resolveTenantOperatorPermissions(user.role, storedPermissionRoles?.length ? storedPermissionRoles : identityPermissionRoleCatalog);
+      const permissions = readOnlyTenantOperatorPermissions(
+        resolveTenantOperatorPermissions(user.role, storedPermissionRoles?.length ? storedPermissionRoles : identityPermissionRoleCatalog),
+        input.readOnly === true
+      );
       const now = new Date();
       const session: StoredServiceAdminSession = {
         actorId: user.id,
@@ -3961,8 +4007,8 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         currentTenantId: user.tenantId,
         role: user.role,
         tenantScope: user.tenantId,
-        id: `top-session_${randomUUID()}`,
-        expiresAt: addMinutes(now, SESSION_IDLE_TTL_MINUTES).toISOString(),
+        id: input.sessionId ?? `top-session_${randomUUID()}`,
+        expiresAt: addMinutes(now, input.ttlMinutes ?? SESSION_IDLE_TTL_MINUTES).toISOString(),
         mfaVerifiedAt: now.toISOString(),
         revokedAt: null
       };
@@ -3973,7 +4019,8 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
       const tokenPair = createTenantOperatorSessionTokens({
         hashToken: hashServiceAdminToken,
         sessionId: session.id,
-        subjectId: user.id
+        subjectId: user.id,
+        ttlMinutes: input.ttlMinutes ?? SESSION_IDLE_TTL_MINUTES
       });
       const existingPairs = store.read().serviceAdminTokenPairs ?? [];
       if (hasActiveServiceAdminTokenHashConflict(existingPairs, {
@@ -4681,8 +4728,6 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
     touchServiceAdminSessionActivity({ accessToken, now = new Date() }: TouchServiceAdminSessionActivityInput): void {
       const tokenHash = hashServiceAdminToken(accessToken);
       const nowMs = now.getTime();
-      const newExpiresAt = addMinutes(now, SESSION_IDLE_TTL_MINUTES);
-      const newExpiresAtMs = newExpiresAt.getTime();
       const tokenPair = (store.read().serviceAdminTokenPairs ?? []).find((item) => (
         item.accessTokenHash === tokenHash
         && !item.revokedAt
@@ -4690,7 +4735,16 @@ function createDurableIdentityRepository(store: DurableStore<IdentityState>): Id
         && Number.isFinite(Date.parse(item.accessTokenExpiresAt))
         && Date.parse(item.accessTokenExpiresAt) > nowMs
       ));
-      if (!tokenPair || Date.parse(tokenPair.accessTokenExpiresAt) >= newExpiresAtMs - SESSION_ACTIVITY_EXTEND_THROTTLE_MS) {
+      const session = tokenPair
+        ? store.read().serviceAdminSessions.find((item) => item.id === tokenPair.sessionId)
+        : undefined;
+      if (!tokenPair || !session || isImpersonatedTenantOperatorSession(session)) {
+        return;
+      }
+
+      const newExpiresAt = addMinutes(now, SESSION_IDLE_TTL_MINUTES);
+      const newExpiresAtMs = newExpiresAt.getTime();
+      if (Date.parse(tokenPair.accessTokenExpiresAt) >= newExpiresAtMs - SESSION_ACTIVITY_EXTEND_THROTTLE_MS) {
         return;
       }
 
@@ -5035,6 +5089,21 @@ function secureStringEqual(expectedValue: string, actualValue: string): boolean 
 
 function isTenantOperatorSession(session: StoredServiceAdminSession): boolean {
   return session.id.startsWith("top-session_");
+}
+
+function isImpersonatedTenantOperatorSession(session: StoredServiceAdminSession): boolean {
+  return session.id.startsWith(IMPERSONATED_TENANT_SESSION_PREFIX);
+}
+
+function readOnlyTenantOperatorPermissions(permissions: string[], readOnly: boolean): string[] {
+  if (!readOnly) {
+    return permissions;
+  }
+
+  const explicitReadActions = permissions.filter((action) => action.endsWith(".read"));
+  return explicitReadActions.length > 0
+    ? [...new Set(explicitReadActions)]
+    : [...READ_ONLY_TENANT_OPERATOR_ACTIONS];
 }
 
 function toTenantOperatorSession(session: StoredServiceAdminSession): StoredTenantOperatorSession {

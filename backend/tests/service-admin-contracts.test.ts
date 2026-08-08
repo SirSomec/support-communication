@@ -60,6 +60,48 @@ describe("service-admin workspace contracts", () => {
     assert.equal(invite.status, "ok");
   });
 
+  it("changes an account role only through a confirmed, audited service-admin action", async () => {
+    const repository = createSeededIdentityRepository();
+    const support = new ServiceAdminService(repository);
+
+    const updated = await support.updateUserRole({
+      actor: { id: "svc-admin", name: "Service Admin" },
+      confirmed: true,
+      reason: "Expanded queue escalation coverage",
+      roleKey: "senior",
+      userId: "usr-lumen-invite"
+    });
+    const invalid = await support.updateUserRole({
+      actor: { id: "svc-admin", name: "Service Admin" },
+      confirmed: true,
+      reason: "Attempted platform escalation without approval",
+      roleKey: "service_admin",
+      userId: "usr-lumen-invite"
+    });
+
+    assert.equal(updated.status, "ok");
+    assert.equal(updated.data.user.role, "Senior operator");
+    assert.equal(updated.data.auditEvent.action, "user.role.update");
+    assert.equal(invalid.status, "invalid");
+    assert.equal(invalid.error?.code, "user_role_invalid");
+  });
+
+  it("does not allow service-admin to remove the last active tenant administrator", async () => {
+    const repository = createSeededIdentityRepository();
+    const support = new ServiceAdminService(repository);
+
+    const result = await support.updateUserRole({
+      actor: { id: "svc-admin", name: "Service Admin" },
+      confirmed: true,
+      reason: "Attempted operator role downgrade during support review",
+      roleKey: "employee",
+      userId: "usr-volga-admin"
+    });
+
+    assert.equal(result.status, "invalid");
+    assert.equal(result.error?.code, "last_active_administrator");
+  });
+
   it("starts and stops impersonation with audit evidence", async () => {
     const repository = createSeededIdentityRepository();
     const support = new ServiceAdminService(repository);

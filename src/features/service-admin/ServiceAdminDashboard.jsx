@@ -18,7 +18,6 @@ import {
   ShieldCheck,
   Siren,
   Settings2,
-  TimerReset,
   UserCog,
   Users,
   WalletCards,
@@ -35,6 +34,7 @@ import { operationsService } from "../../services/operationsService.js";
 import { platformMonitoringService } from "../../services/platformMonitoringService.js";
 import { supportAdminService } from "../../services/supportAdminService.js";
 import { tenantService } from "../../services/tenantService.js";
+import { setImpersonationSession, setTenantSession } from "../../app/sessionStore.js";
 import { BillingTariffWorkspace } from "./BillingTariffWorkspace.jsx";
 import { FeatureFlagWorkspace } from "./FeatureFlagWorkspace.jsx";
 import { IncidentMonitoringWorkspace } from "./IncidentMonitoringWorkspace.jsx";
@@ -50,7 +50,6 @@ import {
   formatDateTime,
   formatLabel,
   formatResult,
-  formatTimer,
   getStatusTone,
   noop
 } from "./serviceAdminUtils.js";
@@ -87,9 +86,7 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
   });
   const [feedback, setFeedback] = useState(null);
   const [loadError, setLoadError] = useState("");
-  const [impersonation, setImpersonation] = useState(null);
   const [workerObservability, setWorkerObservability] = useState([]);
-  const [clockTick, setClockTick] = useState(Date.now());
 
   const openIncidentCount = dashboard.openIncidentCount;
   const riskyUsers = dashboard.riskyUsers;
@@ -154,14 +151,6 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
     void loadDashboard();
   }, [loadDashboard]);
 
-  const remainingSeconds = useMemo(() => {
-    if (!impersonation) {
-      return 0;
-    }
-
-    return Math.ceil((new Date(impersonation.expiresAt).getTime() - clockTick) / 1000);
-  }, [clockTick, impersonation]);
-
   const recordEnvelope = useCallback((envelope, fallback = {}) => {
     const entry = envelopeToAuditEntry(envelope, {
       actor: "Service Admin",
@@ -179,22 +168,28 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
   }, [onToast]);
 
   const handleImpersonationStart = useCallback((envelope) => {
-    setImpersonation(envelope.data.impersonation);
     recordEnvelope(envelope, { action: "impersonation.start", severity: "warn" });
-  }, [recordEnvelope]);
-
-  const handleImpersonationExit = useCallback(async () => {
-    if (!impersonation) {
+    const workspaceSession = envelope.data?.tenantSession;
+    if (!workspaceSession?.accessToken || !workspaceSession?.tenantId || !workspaceSession?.operator) {
+      onToast("Сервер не выдал сессию рабочего места. Доступ от имени пользователя не был открыт.");
       return;
     }
 
-    const envelope = await supportAdminService.stopImpersonation({
-      impersonationId: impersonation.id,
-      reason: "Выход из режима доступа администратора сервиса"
+    setTenantSession({
+      accessToken: workspaceSession.accessToken,
+      operator: workspaceSession.operator,
+      tenantId: workspaceSession.tenantId
     });
-    setImpersonation(null);
-    recordEnvelope(envelope, { action: "impersonation.stop" });
-  }, [impersonation, recordEnvelope]);
+    setImpersonationSession({
+      expiresAt: workspaceSession.expiresAt,
+      id: workspaceSession.impersonationId,
+      mode: workspaceSession.mode,
+      operatorName: workspaceSession.operator.name,
+      tenantId: workspaceSession.tenantId,
+      tenantName: envelope.data?.impersonation?.tenantName ?? workspaceSession.tenantId
+    });
+    window.location.assign("/#/app");
+  }, [onToast, recordEnvelope]);
 
   async function handleRefreshAuthState() {
     const envelope = await authService.getAuthState();
@@ -217,28 +212,6 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
     });
     onToast(`Состояние входа обновлено: ${envelope.traceId}`);
   }
-
-  useEffect(() => {
-    if (!impersonation) {
-      return undefined;
-    }
-
-    const timer = window.setInterval(() => setClockTick(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [impersonation]);
-
-  useEffect(() => {
-    if (impersonation && remainingSeconds <= 0) {
-      const expiredImpersonation = impersonation;
-      setImpersonation(null);
-      supportAdminService.stopImpersonation({
-        impersonationId: expiredImpersonation.id,
-        reason: "Время доступа администратора сервиса истекло"
-      }).then((envelope) => {
-        recordEnvelope(envelope, { action: "impersonation.expired", severity: "warn" });
-      });
-    }
-  }, [impersonation, recordEnvelope, remainingSeconds]);
 
   const currentWorkspace = workspaceOptions.find((option) => option.value === activeWorkspace) ?? workspaceOptions[0];
   const attentionCount = openIncidentCount + riskyUsers + degradedComponents;
@@ -265,13 +238,6 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
           </div>
         </header>
         <div className="service-admin-content">
-      {impersonation ? (
-        <ServiceAdminImpersonationBanner
-          impersonation={impersonation}
-          onExit={handleImpersonationExit}
-          remainingSeconds={remainingSeconds}
-        />
-      ) : null}
 
       {loadError ? <div className="service-admin-feedback error" role="alert">Не удалось обновить часть данных. {loadError}</div> : null}
 
@@ -339,23 +305,6 @@ function guardedFlagsLabel(value) { return typeof value === "number" ? value : "
 function resolveServiceAdminWorkspace(navigationTarget) {
   const workspace = typeof navigationTarget?.workspace === "string" ? navigationTarget.workspace : "";
   return workspaceOptions.some((option) => option.value === workspace) ? workspace : "";
-}
-
-function ServiceAdminImpersonationBanner({ impersonation, onExit, remainingSeconds }) {
-  return (
-    <section className="service-admin-impersonation" aria-live="polite">
-      <TimerReset size={20} />
-      <div>
-        <strong>{impersonation.tenantName}</strong>
-        <span>{formatLabel(impersonation.mode)} - доступ истечет через {formatTimer(remainingSeconds)}</span>
-      </div>
-      <code>{impersonation.id}</code>
-      <button onClick={onExit} type="button">
-        <DoorOpen size={17} />
-        Выйти
-      </button>
-    </section>
-  );
 }
 
 function WorkerObservabilityPanel({ workers = [] }) {

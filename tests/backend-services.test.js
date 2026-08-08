@@ -583,6 +583,19 @@ describe("frontend backend service contracts", () => {
         { reason: "Invite expired" }
       ],
       [
+        () => supportAdminService.updateUserRole({
+          userId: "usr-ns-agent",
+          roleKey: "senior",
+          reason: "Expanded queue escalation coverage",
+          confirmed: true
+        }),
+        "supportAdminService",
+        "updateUserRole",
+        "/api/v1/service-admin/users/usr-ns-agent/role",
+        "POST",
+        { roleKey: "senior", reason: "Expanded queue escalation coverage", confirmed: true }
+      ],
+      [
         () => supportAdminService.startImpersonation({
           tenantId: "tenant-volga",
           userId: "usr-volga-admin",
@@ -705,6 +718,7 @@ describe("frontend backend service contracts", () => {
       [() => supportAdminService.forceLogout({ reason: "Session risk" }), "supportAdminService", "forceLogout"],
       [() => supportAdminService.blockUser({ reason: "Account takeover" }), "supportAdminService", "blockUser"],
       [() => supportAdminService.resendInvite({ reason: "Invite expired" }), "supportAdminService", "resendInvite"],
+      [() => supportAdminService.updateUserRole({ reason: "Role update" }), "supportAdminService", "updateUserRole"],
       [() => supportAdminService.stopImpersonation({ reason: "QA exit reason" }), "supportAdminService", "stopImpersonation"],
       [() => supportAdminService.updateAiConnection("tenant-volga", undefined, {}), "supportAdminService", "updateAiConnection"],
       [() => supportAdminService.deleteAiConnection("tenant-volga", ""), "supportAdminService", "deleteAiConnection"],

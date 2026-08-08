@@ -192,6 +192,7 @@ function buildPublicDemoRequestEmail(input: {
     `From: ${from}`,
     `To: ${input.to.map(sanitizeAddress).join(", ")}`,
     `Subject: ${sanitizeHeader(subject)}`,
+    `Date: ${smtpMessageDate(input.now)}`,
     `Message-ID: ${smtpMessageId(input.descriptor.id, from)}`,
     "Content-Type: text/plain; charset=utf-8",
     "MIME-Version: 1.0",
@@ -389,6 +390,11 @@ function smtpMessageId(descriptorId: string, from: string): string {
   const domain = from.slice(from.lastIndexOf("@") + 1);
   const token = createHash("sha256").update(descriptorId).digest("hex").slice(0, 32);
   return `<lead-notification-${token}@${domain}>`;
+}
+
+function smtpMessageDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date().toUTCString() : date.toUTCString();
 }
 
 function emailText(value: unknown, fallback: string): string {

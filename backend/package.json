@@ -15,6 +15,7 @@
     "test:integration": "npm run build && node --test --import tsx tests/*.test.ts",
     "tenant-isolation:verify": "node --test --import tsx tests/tenant-isolation-contracts.test.ts",
     "audit-immutability:verify": "node --test --import tsx tests/audit-immutability-contracts.test.ts",
+    "rbac:catalog:verify": "node --import tsx scripts/verify-rbac-catalog.ts",
     "migration-rollback-check:verify": "node --test --import tsx tests/migration-rollback-check-contracts.test.ts",
     "public-api:docs:verify": "node scripts/public-api-docs-smoke.mjs",
     "public-api:docs:runtime-smoke": "node scripts/public-api-docs-smoke.mjs --runtime",

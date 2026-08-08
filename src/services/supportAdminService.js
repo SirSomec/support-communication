@@ -48,6 +48,15 @@ export const supportAdminService = {
     });
   },
 
+  async updateUserRole({ userId, ...payload } = {}) {
+    return userActionRequest({
+      operation: "updateUserRole",
+      payload,
+      route: "role",
+      userId
+    });
+  },
+
   async startImpersonation(payload = {}) {
     return apiRequest("/service-admin/impersonations", {
       authMode: "service-admin",
@@ -106,6 +115,7 @@ export const supportAdminService = {
         "forceLogout",
         "blockUser",
         "resendInvite",
+        "updateUserRole",
         "startImpersonation",
         "stopImpersonation",
         "fetchAiConnections",

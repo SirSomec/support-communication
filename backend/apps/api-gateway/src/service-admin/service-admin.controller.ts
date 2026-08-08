@@ -10,6 +10,10 @@ interface UserActionBody {
   reason?: string;
 }
 
+interface UserRoleBody extends UserActionBody {
+  roleKey?: string;
+}
+
 interface ImpersonationBody {
   approvalId?: string;
   confirmed?: boolean;
@@ -104,6 +108,14 @@ export class ServiceAdminController {
   @ApiOkResponse({ description: "Service-admin invite resend envelope" })
   resendInvite(@Param("userId") userId: string, @Body() payload: UserActionBody, @Req() request: ServiceAdminRequest) {
     return this.serviceAdminService.resendInvite({ ...payload, actor: request.serviceAdminContext?.actor, userId });
+  }
+
+  @Post("users/:userId/role")
+  @RequireServiceAdminAction("service-admin.users.write")
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: "Service-admin account role update envelope" })
+  updateUserRole(@Param("userId") userId: string, @Body() payload: UserRoleBody, @Req() request: ServiceAdminRequest) {
+    return this.serviceAdminService.updateUserRole({ ...payload, actor: request.serviceAdminContext?.actor, userId });
   }
 
   @Post("impersonations/start")

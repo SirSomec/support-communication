@@ -27,6 +27,29 @@ import "./public.css";
 
 const noop = () => {};
 
+function SignalRoutes({ className = "" }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={`public-signal-routes ${className}`}
+      fill="none"
+      preserveAspectRatio="none"
+      viewBox="0 0 720 420"
+    >
+      <path className="public-route-line primary" d="M8 316h98c20 0 30-10 30-30v-44c0-20 10-30 30-30h134c20 0 30-10 30-30v-58c0-20 10-30 30-30h352" />
+      <path className="public-route-line secondary" d="M42 360h186c20 0 30-10 30-30v-40c0-20 10-30 30-30h232c20 0 30-10 30-30v-28c0-20 10-30 30-30h132" />
+      <path className="public-route-line dashed" d="M4 112h166c18 0 28 10 28 28v22c0 18 10 28 28 28h178c18 0 28 10 28 28v24c0 18 10 28 28 28h256" />
+      <g className="public-route-nodes">
+        <circle cx="136" cy="286" r="6" />
+        <circle cx="330" cy="182" r="6" />
+        <circle cx="550" cy="230" r="6" />
+        <circle cx="198" cy="162" r="6" />
+        <circle cx="432" cy="218" r="6" />
+      </g>
+    </svg>
+  );
+}
+
 const heroStats = [
   ["Web SDK", "сообщения, файлы, presence и CSAT"],
   ["SLA", "назначение, паузы и rescue"],
@@ -250,6 +273,7 @@ export function LandingPage({
       </header>
 
       <section className="public-hero" aria-labelledby="public-hero-title">
+        <SignalRoutes className="public-hero-routes" />
         <div className="public-hero-copy">
           <span className="public-hero-badge"><Zap size={14} /> Web SDK, очередь и рабочее место оператора</span>
           <h1 id="public-hero-title">Вся поддержка клиентов — в&nbsp;одном операционном контуре</h1>
@@ -299,6 +323,7 @@ export function LandingPage({
       </section>
 
       <section className="public-ai" id="ai-agent" aria-labelledby="ai-agent-title">
+        <SignalRoutes className="public-ai-routes" />
         <div className="public-ai-inner">
           <div className="public-ai-copy">
             <span className="public-ai-badge"><Bot size={14} /> Встроенный ИИ-агент</span>
@@ -348,6 +373,7 @@ export function LandingPage({
       </section>
 
       <section className="public-section public-channels" id="channels" aria-labelledby="channels-title">
+        <SignalRoutes className="public-channel-routes" />
         <div className="public-section-heading">
           <h2 id="channels-title">Каналы, где живут ваши клиенты</h2>
           <p>
@@ -370,6 +396,7 @@ export function LandingPage({
       </section>
 
       <section className="public-section public-steps" aria-labelledby="steps-title">
+        <SignalRoutes className="public-step-routes" />
         <div className="public-section-heading">
           <h2 id="steps-title">Как это работает</h2>
           <p>Три управляемых этапа от регистрации до проверки рабочего сценария поддержки.</p>
@@ -399,6 +426,7 @@ export function LandingPage({
       </section>
 
       <section className="public-section public-tariffs" id="tariffs" aria-labelledby="tariffs-title">
+        <SignalRoutes className="public-tariff-routes" />
         <div className="public-section-heading">
           <h2 id="tariffs-title">Тарифы без скрытых контуров</h2>
           <p>Free создаёт рабочую организацию с одним оператором-владельцем. Расширение тарифа выполняется через администратора платформы.</p>
@@ -471,6 +499,7 @@ export function LandingPage({
 
       <section className="public-section public-cta" aria-labelledby="cta-title">
         <div className="public-cta-band">
+          <SignalRoutes className="public-cta-routes" />
           <div>
             <strong id="cta-title">Начните настройку поддержки</strong>
             <span>Free создаёт организацию для одного владельца; подключение каналов проверяется отдельно.</span>

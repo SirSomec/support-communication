@@ -140,16 +140,19 @@ export async function validateTelegramBotToken(
   }
 
   const endpoint = `${apiBaseUrl.replace(/\/+$/, "")}/bot${token}/getMe`;
-  const signal = AbortSignal.timeout(Math.max(1, timeoutMs));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
   let response: Awaited<ReturnType<TelegramHttpFetch>>;
   let payload: TelegramGetMeResponse;
   try {
-    response = await fetcher(endpoint, { signal });
+    response = await fetcher(endpoint, { signal: controller.signal });
     payload = await response.json() as TelegramGetMeResponse;
   } catch {
-    throw new Error(signal.aborted
+    throw new Error(controller.signal.aborted
       ? "telegram_bot_token_validation_timeout"
       : "telegram_bot_token_validation_failed");
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!response.ok || !payload.ok || !payload.result?.id) {

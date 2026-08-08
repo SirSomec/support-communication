@@ -58,6 +58,7 @@ const DEFAULT_SMTP_PORT = 1025;
 const DEFAULT_SMTP_TIMEOUT_MS = 10_000;
 const MAX_SMTP_TIMEOUT_MS = 120_000;
 const MAX_SMTP_RESPONSE_LINE_BYTES = 8_192;
+const MFA_EMAIL_BOUNDARY = "----=_SupportCommunication_MfaOtp_6f4b9e2a";
 
 export function createMfaOtpDeliveryFromEnv(
   source: NodeJS.ProcessEnv = process.env,
@@ -275,20 +276,72 @@ function buildOtpEmail(from: string, input: NormalizedDeliveryInput): string {
   const lines = [
     `From: ${sanitizeHeader(from)}`,
     `To: ${sanitizeHeader(input.email)}`,
-    "Subject: Your MFA verification code",
+    `Subject: ${encodeMimeHeader("Код для подтверждения входа")}`,
     `Date: ${new Date().toUTCString()}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary=\"${MFA_EMAIL_BOUNDARY}\"`,
+    "",
+    `--${MFA_EMAIL_BOUNDARY}`,
     "Content-Type: text/plain; charset=utf-8",
     "Content-Transfer-Encoding: 8bit",
-    "MIME-Version: 1.0",
     "",
-    `Your MFA verification code is: ${input.otp}`,
-    `This code expires at: ${input.expiresAt}`,
-    `Request reference: ${input.challengeId}`,
+    "Код для подтверждения входа",
     "",
-    "If you did not request this code, ignore this email."
+    `Ваш одноразовый код: ${input.otp}`,
+    "Введите его в окне входа в сервис.",
+    "",
+    `Код действует до: ${input.expiresAt}`,
+    "",
+    "Никому не сообщайте этот код. Если вы не запрашивали вход, просто проигнорируйте это письмо.",
+    "",
+    `--${MFA_EMAIL_BOUNDARY}`,
+    "Content-Type: text/html; charset=utf-8",
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    buildOtpEmailHtml(input),
+    "",
+    `--${MFA_EMAIL_BOUNDARY}--`
   ];
 
   return `${lines.join("\r\n")}\r\n`;
+}
+
+function buildOtpEmailHtml(input: NormalizedDeliveryInput): string {
+  const otp = escapeHtml(input.otp);
+  const expiresAt = escapeHtml(input.expiresAt);
+
+  return [
+    "<!doctype html>",
+    "<html lang=\"ru\">",
+    "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head>",
+    "<body style=\"margin:0;padding:0;background-color:#f4f7fb;color:#172033;font-family:Arial,Helvetica,sans-serif;\">",
+    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;background-color:#f4f7fb;\"><tr><td align=\"center\" style=\"padding:32px 16px;\">",
+    "<table role=\"presentation\" width=\"600\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;max-width:600px;background-color:#ffffff;border-radius:16px;\"><tr><td style=\"padding:40px 32px;\">",
+    "<p style=\"margin:0 0 12px;font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#52627d;\">Безопасность аккаунта</p>",
+    "<h1 style=\"margin:0 0 16px;font-size:28px;line-height:34px;font-weight:700;color:#172033;\">Подтверждение входа</h1>",
+    "<p style=\"margin:0 0 28px;font-size:16px;line-height:24px;color:#46536b;\">Введите этот одноразовый код в окне входа в сервис.</p>",
+    `<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;\"><tr><td align=\"center\" bgcolor=\"#edf3ff\" style=\"padding:24px 16px;background-color:#edf3ff;border:1px solid #c9dafd;border-radius:12px;\"><span style=\"display:inline-block;font-family:'Courier New',Courier,monospace;font-size:36px;line-height:44px;font-weight:700;letter-spacing:8px;color:#153f9f;\">${otp}</span></td></tr></table>`,
+    `<p style=\"margin:24px 0 0;font-size:14px;line-height:20px;color:#66738a;\">Код действует до: ${expiresAt}</p>`,
+    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;\"><tr><td style=\"padding-top:28px;\"><div style=\"height:1px;background-color:#e5eaf2;line-height:1px;font-size:1px;\">&nbsp;</div></td></tr></table>",
+    "<p style=\"margin:24px 0 0;font-size:14px;line-height:21px;color:#66738a;\">Никому не сообщайте этот код. Если вы не запрашивали вход, просто проигнорируйте это письмо.</p>",
+    "</td></tr></table>",
+    "</td></tr></table>",
+    "</body></html>"
+  ].join("");
+}
+
+function encodeMimeHeader(value: string): string {
+  return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>\"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[character] ?? character);
 }
 
 function buildRecoveryEmail(from: string, input: NormalizedRecoveryDeliveryInput): string {

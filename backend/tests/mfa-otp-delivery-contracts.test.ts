@@ -88,6 +88,39 @@ describe("MFA OTP delivery contracts", () => {
     }
   });
 
+  it("formats MFA codes as a Russian multipart email with a prominent centered HTML code", async () => {
+    const messages: string[] = [];
+    const delivery = createMfaOtpDeliveryFromEnv(validSmtpEnv, {
+      serviceMail: async () => ({
+        from: "security@support-communication.local",
+        async send(_to, message) {
+          messages.push(message);
+          return "mfa-email-contract-message";
+        }
+      })
+    });
+    const input = {
+      challengeId: "mfa_contract_003",
+      email: "owner@example.com",
+      expiresAt: "2026-07-10T12:30:00.000Z",
+      otp: "826419"
+    };
+
+    const result = await delivery.send(input);
+
+    assert.equal(result.providerMessageId, "smtp-mfa-email-contract-message");
+    assert.equal(messages.length, 1);
+    const message = messages[0] ?? "";
+    assert.match(message, /Subject: =\?UTF-8\?B\?.+\?=/);
+    assert.match(message, /Content-Type: multipart\/alternative/);
+    assert.match(message, /Код для подтверждения входа/);
+    assert.match(message, /Никому не сообщайте этот код/);
+    assert.match(message, /<html lang=\"ru\">/);
+    assert.match(message, /<td align=\"center\" bgcolor=\"#edf3ff\"/);
+    assert.match(message, /font-size:36px/);
+    assert.match(message, new RegExp(`>${input.otp}</span>`));
+  });
+
   it("validates SMTP configuration at creation without opening a network connection", () => {
     assert.doesNotThrow(() => createMfaOtpDeliveryFromEnv(validSmtpEnv));
 

@@ -58,7 +58,7 @@ const workspaceOptions = [
   { label: "Обзор", value: "overview", icon: Activity, hint: "Главные показатели и задачи, которые требуют внимания." },
   { label: "Организации", value: "tenants", icon: Landmark, hint: "Управляйте компаниями, их доступом и состоянием аккаунта." },
   { label: "Пользователи", value: "users", icon: Users, hint: "Помогайте пользователям и проверяйте права доступа." },
-  { label: "Тарифы и оплата", value: "billing", icon: WalletCards, hint: "Настраивайте тарифы и контролируйте оплату." },
+  { label: "Тарифы и оплата — Биллинг", value: "billing", icon: WalletCards, hint: "Настраивайте тарифы и контролируйте оплату." },
   { label: "Состояние сервиса — Инциденты", value: "incidents", icon: Siren, hint: "Проверяйте неполадки, работу фоновых задач и систем." },
   { label: "Настройки функций — Флаги", value: "flags", icon: Settings2, hint: "Включайте функции постепенно и безопасно." },
   { label: "ИИ-подключения", value: "ai", icon: Bot, hint: "Настраивайте сервисы искусственного интеллекта." },

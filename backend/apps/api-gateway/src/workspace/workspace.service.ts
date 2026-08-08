@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
+import { createOutboxEvent } from "@support-communication/events";
 import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import { ConversationRepository } from "../conversation/conversation.repository.js";
 import { createObjectStorageSigner } from "./object-storage.js";
 import { KnowledgeSourceRepository } from "../knowledge-sources/knowledge-source.repository.js";
 import {
@@ -82,6 +84,7 @@ export interface FileUploadQuotaChecker {
 }
 
 export interface WorkspaceServiceOptions {
+  conversationRepository?: ConversationRepository;
   fileUploadQuota?: FileUploadQuotaChecker;
   objectStorage?: ObjectStorageSigner;
 }
@@ -116,6 +119,7 @@ export interface KnowledgeAttachmentDeletePayload {
 }
 
 export class WorkspaceService {
+  private readonly conversationRepository: ConversationRepository;
   private readonly fileUploadQuota?: FileUploadQuotaChecker;
   private readonly objectStorage: ObjectStorageSigner;
 
@@ -123,6 +127,7 @@ export class WorkspaceService {
     private readonly workspaceRepository = WorkspaceRepository.default(),
     options: WorkspaceServiceOptions = {}
   ) {
+    this.conversationRepository = options.conversationRepository ?? ConversationRepository.default();
     this.fileUploadQuota = options.fileUploadQuota;
     this.objectStorage = options.objectStorage ?? createObjectStorageSigner();
   }
@@ -402,11 +407,50 @@ export class WorkspaceService {
       sizeBytes: persisted.sizeBytes,
       tenantId: requireWorkspaceTenantId(persisted.tenantId)
     });
+    const signedFile = await this.objectStorage.signDownload({
+      fileId: persisted.fileId,
+      fileName: persisted.fileName,
+      objectKey: persisted.objectKey,
+      tenantId: requireWorkspaceTenantId(persisted.tenantId)
+    });
+    const traceId = workspaceTraceId(FILE_SERVICE, "createUploadDescriptor");
+    await this.conversationRepository.recordOutboundDescriptor({
+      descriptor: {
+        auditId: persisted.auditId,
+        channel: persisted.channel,
+        conversationId: null,
+        createdAt: new Date().toISOString(),
+        deliveryState: "not_sent",
+        id: persisted.fileId,
+        idempotencyKey: `workspace-file:${persisted.fileId}`,
+        kind: "attachment_upload",
+        messageId: null,
+        outboxEventId: null,
+        payload: {
+          antivirusState: "scan_pending",
+          channel: persisted.channel,
+          deliveryState: "not_sent",
+          fileId: persisted.fileId,
+          fileName: persisted.fileName,
+          mimeType: persisted.mimeType,
+          queue: "file-scan",
+          signedFile,
+          signedUpload,
+          sizeBytes: persisted.sizeBytes,
+          storageState: "upload_queued"
+        },
+        requestFingerprint: null,
+        retryable: true,
+        status: "upload_queued",
+        tenantId: requireWorkspaceTenantId(persisted.tenantId),
+        traceId
+      }
+    });
 
     return createEnvelope({
       service: FILE_SERVICE,
       operation: "createUploadDescriptor",
-      traceId: workspaceTraceId(FILE_SERVICE, "createUploadDescriptor"),
+      traceId,
       meta: apiMeta({ channel: payload.channel }),
       data: uploadDescriptor(persisted, signedUpload)
     });
@@ -498,6 +542,24 @@ export class WorkspaceService {
     file.storageState = "uploaded";
     file.scanState = "scan_pending";
     const persisted = await this.workspaceRepository.saveFile(file);
+    const existingScanEvent = (await this.conversationRepository.listOutboxEvents())
+      .find((event) => event.type === "attachment.upload.requested" && String(event.payload.fileId ?? "") === persisted.fileId);
+    if (!existingScanEvent) {
+      await this.conversationRepository.enqueueOutboxEvent(createOutboxEvent({
+        aggregateId: persisted.fileId,
+        aggregateType: "attachment",
+        payload: {
+          channel: persisted.channel,
+          descriptorId: persisted.fileId,
+          fileId: persisted.fileId,
+          fileName: persisted.fileName,
+          sizeBytes: persisted.sizeBytes
+        },
+        queue: "file-scan",
+        traceId: workspaceTraceId(FILE_SERVICE, "finalizeUpload"),
+        type: "attachment.upload.requested"
+      }));
+    }
 
     return createEnvelope({
       service: FILE_SERVICE,

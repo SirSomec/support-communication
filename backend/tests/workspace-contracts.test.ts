@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, it } from "node:test";
 import { createDeterministicObjectStorageSigner, createS3CompatibleObjectStorageSigner } from "../apps/api-gateway/src/workspace/object-storage.ts";
 import { createBillingFileUploadQuotaChecker } from "../apps/api-gateway/src/workspace/workspace-quota.ts";
+import { ConversationRepository } from "../apps/api-gateway/src/conversation/conversation.repository.ts";
 import { WorkspaceRepository, type ClientProfileRecord, type KnowledgeArticle, type TemplateRecord } from "../apps/api-gateway/src/workspace/workspace.repository.ts";
 import { WorkspaceService as RuntimeWorkspaceService, type WorkspaceRequestContext } from "../apps/api-gateway/src/workspace/workspace.service.ts";
 import { bootstrapWorkspaceState } from "../apps/api-gateway/src/workspace/seed.ts";
@@ -20,6 +21,7 @@ type ClientProfileIdentityRepository = {
 };
 
 beforeEach(() => {
+  ConversationRepository.useDefault(ConversationRepository.inMemory());
   WorkspaceRepository.useDefault(WorkspaceRepository.inMemory(bootstrapWorkspaceState()));
 });
 
@@ -630,6 +632,10 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
     assert.equal(finalized.status, "ok");
     assert.equal(finalized.data.scanState, "scan_pending");
     assert.equal(finalized.data.downloadPolicy.permissionRequired, "files.read");
+    const scanEvents = await ConversationRepository.default().listOutboxEvents();
+    assert.equal(scanEvents.length, 1);
+    assert.equal(scanEvents[0]?.queue, "file-scan");
+    assert.equal(scanEvents[0]?.payload.fileId, upload.data.fileId);
 
     const scanPendingDownload = await workspace.getDownloadPolicy(upload.data.fileId, { canDownload: true });
     assert.equal(scanPendingDownload.status, "denied");
@@ -1453,6 +1459,13 @@ describe("phase 3 files, clients, templates and knowledge backend contracts", ()
         fileName: "signed-map.pdf",
         objectKey: signedObjectKey,
         sizeBytes: 4096,
+        tenantId: "tenant-lumen"
+      },
+      {
+        operation: "download",
+        fileId: upload.data.fileId,
+        fileName: "signed-map.pdf",
+        objectKey: signedObjectKey,
         tenantId: "tenant-lumen"
       },
       {

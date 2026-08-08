@@ -42,19 +42,23 @@ export class ServiceAdminSessionGuard implements CanActivate {
           const deniedSession = await repository.findServiceAdminSessionByAccessToken(bearerToken);
           const activePolicy = await repository.getActiveRbacPolicyVersion();
           const roleKey = resolvePermissionRoleKey(deniedSession?.role ?? "service_admin", await repository.listPermissionRoles());
-          await repository.recordPermissionDenialEvent({
-            action: requiredAction,
-            actorId: deniedSession?.actorId ?? null,
-            at: new Date().toISOString(),
-            id: makeAuditId("rbac_denial"),
-            immutable: true,
-            policyVersionId: activePolicy?.id ?? null,
-            reason: "Service-admin session does not include the required action.",
-            resource: "service-admin",
-            roleKey,
-            tenantId: null,
-            traceId: identityTraceId("serviceAdminGuard", "permissionDenied")
-          });
+          try {
+            await repository.recordPermissionDenialEvent({
+              action: requiredAction,
+              actorId: deniedSession?.actorId ?? null,
+              at: new Date().toISOString(),
+              id: makeAuditId("rbac_denial"),
+              immutable: true,
+              policyVersionId: activePolicy?.id ?? null,
+              reason: "Service-admin session does not include the required action.",
+              resource: "service-admin",
+              roleKey,
+              tenantId: null,
+              traceId: identityTraceId("serviceAdminGuard", "permissionDenied")
+            });
+          } catch {
+            // Аудит отказа не должен превращать корректный 403 в 500.
+          }
         }
         const message = `Service-admin session denied: ${decision.code}`;
         if (decision.status === "unauthorized") {
@@ -131,19 +135,23 @@ export class ServiceAdminSessionGuard implements CanActivate {
       const repository = IdentityRepository.default();
       const activePolicy = await repository.getActiveRbacPolicyVersion();
       const roleKey = resolvePermissionRoleKey(roles[0] ?? "service_admin", await repository.listPermissionRoles());
-      await repository.recordPermissionDenialEvent({
-        action: requiredAction,
-        actorId,
-        at: new Date().toISOString(),
-        id: makeAuditId("rbac_denial"),
-        immutable: true,
-        policyVersionId: activePolicy?.id ?? null,
-        reason: "Demo service-admin headers do not include the required action.",
-        resource: "service-admin",
-        roleKey,
-        tenantId: currentTenantId || null,
-        traceId: identityTraceId("serviceAdminGuard", "demoPermissionDenied")
-      });
+      try {
+        await repository.recordPermissionDenialEvent({
+          action: requiredAction,
+          actorId,
+          at: new Date().toISOString(),
+          id: makeAuditId("rbac_denial"),
+          immutable: true,
+          policyVersionId: activePolicy?.id ?? null,
+          reason: "Demo service-admin headers do not include the required action.",
+          resource: "service-admin",
+          roleKey,
+          tenantId: currentTenantId || null,
+          traceId: identityTraceId("serviceAdminGuard", "demoPermissionDenied")
+        });
+      } catch {
+        // Аудит отказа не должен превращать корректный 403 в 500.
+      }
       throw new ForbiddenException(`Service-admin permission ${requiredAction} is required for this operation.`);
     }
 

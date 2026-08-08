@@ -112,7 +112,7 @@ describe("service-admin workspace contracts", () => {
       durationMinutes: 15,
       reason: "Read-only support investigation approved",
       tenantId: "tenant-lumen",
-      userId: "usr-lumen-invite"
+      userId: "usr-lumen-multi"
     });
     assert.equal(started.status, "ok");
 

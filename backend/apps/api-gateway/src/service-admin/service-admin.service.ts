@@ -421,11 +421,36 @@ export class ServiceAdminService {
       tenantId: tenant.id,
       userId: user?.id ?? null
     });
+    let tenantSession: { accessToken: string; expiresAt: string; sessionId: string } | undefined;
+    if (requestedMode === "read_only_by_default" && user) {
+      try {
+        const createdSession = await this.identityRepository.createTenantOperatorSession({
+          readOnly: true,
+          sessionId: tenantOperatorSessionIdForImpersonation(impersonation.id),
+          tenantId: tenant.id,
+          ttlMinutes: effectiveDurationMinutes,
+          userId: user.id
+        });
+        tenantSession = {
+          accessToken: createdSession.accessToken,
+          expiresAt: impersonation.expiresAt,
+          sessionId: createdSession.sessionId
+        };
+      } catch {
+        return serviceAdminPersistenceErrorEnvelope("startImpersonation", "impersonation.start", auditEvent, {
+          tenantId: tenant.id,
+          userId: user.id
+        });
+      }
+    }
     const persisted = await this.createImpersonationWithConflictEnvelope(request, {
       ...impersonation,
       auditEventId: auditEvent.id
     }, auditEvent, requestedMode, approvalValidation.approval?.id ?? null);
     if ("envelope" in persisted) {
+      if (tenantSession) {
+        await this.identityRepository.revokeServiceAdminSession(tenantSession.sessionId);
+      }
       return persisted.envelope;
     }
 
@@ -437,7 +462,20 @@ export class ServiceAdminService {
       data: {
         access: impersonationAccess(persisted.session),
         auditEvent: persisted.auditEvent,
-        impersonation: clone(persisted.session)
+        impersonation: clone(persisted.session),
+        tenantSession: tenantSession ? {
+          accessToken: tenantSession.accessToken,
+          expiresAt: tenantSession.expiresAt,
+          impersonationId: persisted.session.id,
+          mode: persisted.session.mode,
+          operator: {
+            email: user?.email ?? "",
+            id: user?.id ?? "",
+            name: user?.name ?? "",
+            role: user?.role ?? ""
+          },
+          tenantId: persisted.session.tenantId
+        } : null
       }
     });
   }
@@ -521,6 +559,15 @@ export class ServiceAdminService {
       tenantId: impersonation.tenantId,
       userId: impersonation.userId
     });
+    try {
+      await this.identityRepository.revokeServiceAdminSession(tenantOperatorSessionIdForImpersonation(impersonation.id));
+    } catch {
+      return serviceAdminPersistenceErrorEnvelope("stopImpersonation", "impersonation.stop", auditEvent, {
+        impersonationId: impersonation.id,
+        tenantId: impersonation.tenantId,
+        userId: impersonation.userId
+      });
+    }
     let persisted: { auditEvent: AuditEvent; session: ImpersonationSession };
     try {
       persisted = await this.identityRepository.stopServiceAdminImpersonation({
@@ -1450,6 +1497,10 @@ function impersonationAccess(session: ImpersonationSession): Record<string, unkn
     readOnly: !writeGranted,
     writeGranted
   };
+}
+
+function tenantOperatorSessionIdForImpersonation(impersonationId: string): string {
+  return `top-session_impersonation_${impersonationId}`;
 }
 
 function conflictEnvelope(operation: string, code: string, message: string, data: Record<string, unknown>): BackendEnvelope<Record<string, unknown>> {

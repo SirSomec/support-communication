@@ -29,6 +29,10 @@ interface UserActionPayload {
   userId?: string;
 }
 
+interface UserRoleUpdatePayload extends UserActionPayload {
+  roleKey?: string;
+}
+
 interface ImpersonationPayload {
   actor?: ServiceAdminActor;
   approvalId?: string;
@@ -108,6 +112,48 @@ export class ServiceAdminService {
         tenants: clone(tenants)
       }
     });
+  }
+
+  async updateUserRole(payload: UserRoleUpdatePayload): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const roleKey = normalizeAssignableRoleKey(payload.roleKey);
+    if (!roleKey) {
+      return invalidEnvelope("updateUserRole", "user_role_invalid", "The requested account role is not supported.", {
+        roleKey: payload.roleKey ?? null,
+        userId: payload.userId ?? null
+      });
+    }
+
+    const user = await this.findUser(payload.userId);
+    if (!user) {
+      return this.notFoundWithAudit("updateUserRole", "user_not_found", `User ${payload.userId ?? "(empty)"} was not found.`, {
+        userId: payload.userId ?? null
+      }, {
+        action: "user.role.update",
+        actor: payload.actor,
+        reason: payload.reason,
+        result: "blocked_user_not_found",
+        severity: "warning",
+        target: payload.userId ?? "unknown",
+        tenantId: null,
+        userId: payload.userId ?? null
+      });
+    }
+
+    const currentRoleKey = normalizeAssignableRoleKey(user.role);
+    if (currentRoleKey === "admin" && roleKey !== "admin" && user.status === "active") {
+      const activeAdministrators = (await this.identityRepository.findTenantUsers(user.tenantId))
+        .filter((candidate) => candidate.status === "active" && normalizeAssignableRoleKey(candidate.role) === "admin");
+      if (activeAdministrators.length <= 1) {
+        return invalidEnvelope("updateUserRole", "last_active_administrator", "At least one active tenant administrator must remain assigned.", {
+          tenantId: user.tenantId,
+          userId: user.id
+        });
+      }
+    }
+
+    return this.applyUserAction(payload, "user.role.update", (nextUser) => {
+      nextUser.role = roleLabelFromKey(roleKey);
+    }, "critical");
   }
 
   async fetchAuditEvents(filters: UserFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
@@ -945,6 +991,9 @@ export class ServiceAdminService {
         userId: user.id
       });
     }
+    if (nextUser.role !== user.role) {
+      await this.identityRepository.refreshTenantOperatorSessionPermissions(persisted.user.id);
+    }
     const persistedUser = toServiceAdminUser(persisted.user);
 
     return createEnvelope({
@@ -1626,4 +1675,18 @@ function toTenantUserChanges(previous: ServiceAdminUser, next: ServiceAdminUser)
   if (next.tenantId !== previous.tenantId) changes.tenantId = next.tenantId;
 
   return changes;
+}
+
+function normalizeAssignableRoleKey(value: unknown): "admin" | "senior" | "employee" | null {
+  const role = String(value ?? "").trim().toLowerCase();
+  if (["admin", "administrator", "owner", "администратор"].includes(role)) return "admin";
+  if (["senior", "senior operator", "lead", "старший сотрудник"].includes(role)) return "senior";
+  if (["employee", "operator", "сотрудник"].includes(role)) return "employee";
+  return null;
+}
+
+function roleLabelFromKey(roleKey: "admin" | "senior" | "employee"): string {
+  if (roleKey === "admin") return "Admin";
+  if (roleKey === "senior") return "Senior operator";
+  return "Operator";
 }

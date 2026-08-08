@@ -2,12 +2,14 @@ const TENANT_ACCESS_TOKEN_KEY = "sc_access_token";
 const TENANT_ID_KEY = "sc_tenant_id";
 const TENANT_OPERATOR_KEY = "sc_operator";
 const SERVICE_ADMIN_ACCESS_TOKEN_KEY = "sc_service_admin_access_token";
+const IMPERSONATION_SESSION_KEY = "sc_impersonation_session";
 
 const MANAGED_KEYS = [
   TENANT_ACCESS_TOKEN_KEY,
   TENANT_ID_KEY,
   TENANT_OPERATOR_KEY,
-  SERVICE_ADMIN_ACCESS_TOKEN_KEY
+  SERVICE_ADMIN_ACCESS_TOKEN_KEY,
+  IMPERSONATION_SESSION_KEY
 ];
 
 const memoryStorage = new Map();
@@ -110,6 +112,19 @@ export function getOperator() {
   }
 }
 
+export function getImpersonationSession() {
+  const raw = getStorage().getItem(IMPERSONATION_SESSION_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export function setTenantSession({ accessToken, tenantId, operator } = {}) {
   const storage = getStorage();
 
@@ -134,6 +149,10 @@ export function setServiceAdminSession({ accessToken } = {}) {
   }
 }
 
+export function setImpersonationSession(session = {}) {
+  getStorage().setItem(IMPERSONATION_SESSION_KEY, JSON.stringify(session));
+}
+
 export function setSession(session = {}) {
   setTenantSession(session);
 }
@@ -147,6 +166,10 @@ export function clearTenantSession() {
 
 export function clearServiceAdminSession() {
   getStorage().removeItem(SERVICE_ADMIN_ACCESS_TOKEN_KEY);
+}
+
+export function clearImpersonationSession() {
+  getStorage().removeItem(IMPERSONATION_SESSION_KEY);
 }
 
 export function clearSession() {

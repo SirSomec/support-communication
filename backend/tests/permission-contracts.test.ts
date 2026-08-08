@@ -44,4 +44,30 @@ describe("permission model contracts", () => {
     assert.equal(allowed.status, "ok");
     assert.equal(allowed.data.allowed, true);
   });
+
+  it("keeps an RBAC denial controlled when denial audit persistence fails", async () => {
+    const permission = new PermissionService({
+      getActiveRbacPolicyVersion: async () => undefined,
+      listPermissionRoles: async () => [{
+        actions: ["impersonation.start"],
+        aliases: ["service_admin"],
+        description: "Platform service administrator",
+        groupIds: ["service-admins"],
+        key: "service_admin",
+        metadata: {}
+      }],
+      recordPermissionDenialEvent: async () => {
+        throw new Error("permission_denial_audit_unavailable");
+      }
+    } as never);
+
+    const decision = await permission.validatePermission({
+      action: "impersonation.start",
+      resource: "impersonation",
+      roleMode: "service_admin"
+    });
+
+    assert.equal(decision.status, "denied");
+    assert.equal(decision.error?.code, "rbac_policy_unavailable");
+  });
 });

@@ -2,16 +2,19 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import {
   clearServiceAdminSession,
+  clearImpersonationSession,
   clearSession,
   clearTenantSession,
   getAccessToken,
   getOperator,
   getServiceAdminAccessToken,
+  getImpersonationSession,
   getTenantAccessToken,
   getTenantId,
   hasServiceAdminSession,
   hasSession,
   setServiceAdminSession,
+  setImpersonationSession,
   setSession,
   setTenantSession
 } from "../src/app/sessionStore.js";
@@ -20,6 +23,7 @@ describe("sessionStore", () => {
   afterEach(() => {
     clearSession();
     clearServiceAdminSession();
+    clearImpersonationSession();
   });
 
   it("round-trips tenant access token", () => {
@@ -67,5 +71,23 @@ describe("sessionStore", () => {
     clearTenantSession();
     assert.equal(hasSession(), false);
     assert.equal(hasServiceAdminSession(), true);
+  });
+
+  it("stores impersonation context separately from both bearer sessions", () => {
+    const impersonation = {
+      expiresAt: "2026-08-08T12:15:00.000Z",
+      id: "imp_tenant-a_123",
+      operatorName: "Support Operator",
+      tenantId: "tenant-a"
+    };
+    setTenantSession({ accessToken: "tenant-token", tenantId: "tenant-a" });
+    setServiceAdminSession({ accessToken: "service-admin-token" });
+    setImpersonationSession(impersonation);
+
+    assert.deepEqual(getImpersonationSession(), impersonation);
+    clearImpersonationSession();
+    assert.equal(getImpersonationSession(), null);
+    assert.equal(getTenantAccessToken(), "tenant-token");
+    assert.equal(getServiceAdminAccessToken(), "service-admin-token");
   });
 });

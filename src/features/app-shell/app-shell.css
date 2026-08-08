@@ -11,6 +11,38 @@
   grid-template-columns: 60px minmax(0, 1fr);
 }
 
+.impersonation-workspace-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 18px;
+  background: #fff7df;
+  border-bottom: 1px solid #e8c56b;
+  color: #5f4300;
+}
+
+.impersonation-workspace-banner div {
+  display: grid;
+  gap: 3px;
+}
+
+.impersonation-workspace-banner span {
+  font-size: 13px;
+}
+
+.impersonation-workspace-banner button {
+  flex: 0 0 auto;
+  border: 1px solid #b88100;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: #fff;
+  color: #704d00;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;

@@ -5,6 +5,89 @@
 - технический специалист сможет понять границы сервисов, точки API и таблицы;
 - нетехнический читатель сможет понять, за какую часть продукта отвечает каждый блок.
 
+## Production: RUVDS и домен
+
+**Актуально на 2026-08-08.** Проект опубликован и работает на подключённом
+VPS RUVDS. Основная точка входа — [https://supporcom.ru](https://supporcom.ru).
+Это production-контур, а не локальный Compose-стенд. Внешние сервисы доступны
+только через HTTPS; PostgreSQL, Redis, MinIO и воркеры не публикуют порты в
+интернет.
+
+### Схема сервера
+
+```text
+Интернет
+  └─ HTTPS :443 / HTTP :80 → Caddy (контейнер edge)
+       ├─ supporcom.ru       → frontend:8080 и api-gateway:4100 (/api/*)
+       ├─ s3.supporcom.ru   → minio:9000 (только через Caddy)
+       ├─ monitor.supporcom.ru → netdata:19999 (Basic Auth)
+       └─ status.supporcom.ru  → uptime-kuma:3001 (Basic Auth)
+
+Docker network support-communication-edge
+  └─ edge, frontend, api-gateway, minio, netdata, uptime-kuma
+
+Docker network support-communication-backend
+  └─ api-gateway и все workers ↔ postgres, redis, minio, clamav
+```
+
+На хосте используются следующие контуры Compose.
+
+| Контур | Compose-проект | Контейнеры и назначение |
+| --- | --- | --- |
+| Приложение | `support-communication-production` | `edge` (Caddy/TLS), `frontend`, `api-gateway`, `migrate` (одноразовая миграция в профиле `release`), `clamav`, `clamav-scanner` и прикладные воркеры. |
+| Данные | `support-communication-infrastructure` | `postgres`, `redis`, `minio`, `minio-init`; данные хранятся в именованных Docker volumes и не имеют опубликованных портов. |
+| Наблюдаемость | развёртывается в production-контуре | `netdata` и `uptime-kuma`; их веб-интерфейсы доступны только через защищённые поддомены Caddy. |
+
+Прикладные воркеры: `notification-delivery`, `lead-notification`,
+`webhook-delivery`, `telegram-polling`, `proactive-delivery`,
+`bot-runtime-reconciliation`, `knowledge-document-ingestion`,
+`url-source-refresh`, `report-digest`, `report-export`, `quota-expiration`,
+`sla-timer`, `rescue-return`, `outbox`, `identity-events`, `billing-sync`,
+`daily-billing` и `file-scan-scanner`. Их имена в Compose имеют суффикс
+`-worker`; все они используют приватную сеть `backend` и перезапускаются
+Docker при сбое.
+
+Операционные файлы размещаются на VPS в `/opt/support-communication/`: рабочая
+копия приложения — `app/`, защищённые файлы окружения — `secrets/`, а каталоги
+старых поставок — `releases/`. Секреты не входят в Git и не должны попадать в
+release notes или логи; резервные копии с ними хранятся только в зашифрованном
+операционном контуре.
+
+### Бэкап и восстановление
+
+На RUVDS ежедневно в 03:15 (Europe/Moscow, с jitter до 10 минут) создаётся
+зашифрованный Borg-бэкап. В него входят логические дампы PostgreSQL и Redis,
+зеркало MinIO, консистентная копия Uptime Kuma, конфигурация и нужные Docker
+volumes. Репозиторий находится вне VPS на OpenMediaVault; ключ VPS ограничен
+`borg serve --append-only`. Последняя документированная проверка восстановления
+от 2026-08-08 прошла успешно. Регламент: [RUVDS Borg backup](ruvds-borg-backup-runbook.md)
+и [результат restore-теста](ruvds-borg-restore-test-2026-08-08.md).
+
+### Правила публикации обновлений и релизов
+
+1. Изменение попадает в `main` только после успешного CI и `npm run release:gate`.
+2. CI публикует frontend, API и migration image с неизменяемым тегом
+   `sha-<commit>`; запрещены `latest` и пересборка кода непосредственно на VPS.
+   У образов формируются SBOM, provenance и GitHub attestation.
+3. Для релиза создаётся Git-тег по [Semantic Versioning](https://semver.org/),
+   затем черновик GitHub Release с кратким changelog, SHA коммита, digest трёх
+   образов, сведениями о миграциях и инструкцией отката. Публиковать релиз можно
+   после production-проверки.
+4. Перед обновлением обязательно проверить конфигурацию и свежий бэкап; затем
+   подтянуть именно зафиксированные образы, выполнить `migrate` один раз и
+   пересоздать сервисы. `docker compose restart` для новой конфигурации или
+   образа не подходит.
+5. После развёртывания проверить HTTPS, readiness, вход, основной пользовательский
+   сценарий и Uptime Kuma. При сбое вернуть предыдущие digest образов; откат БД
+   допускается только по заранее проверенному плану миграции.
+
+Полная локальная процедура и команды находятся в
+[production runbook](production-runbook.md). Официальные правила и справка:
+[Docker Compose в production](https://docs.docker.com/compose/how-tos/production/),
+[`docker compose pull`](https://docs.docker.com/reference/cli/docker/compose/pull/),
+[`docker compose up`](https://docs.docker.com/reference/cli/docker/compose/up/) и
+[управление GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository).
+
 ## 1. Что делает система
 
 Support Communication - платформа для клиентской поддержки. Она принимает обращения клиентов из разных каналов, показывает их операторам, помогает маршрутизировать диалоги, подключает ботов, хранит историю, считает качество работы, управляет тарифами и дает администраторам инструменты контроля.

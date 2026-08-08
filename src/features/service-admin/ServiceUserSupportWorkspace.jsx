@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Ban, KeyRound, LogOut, Send, ShieldAlert, UserCog } from "lucide-react";
+import { Ban, KeyRound, LogOut, Send, ShieldAlert, ShieldCheck, UserCog } from "lucide-react";
 import { SectionTitle, StatusBadge, ToolbarSearch } from "../../ui.jsx";
 import { supportAdminService } from "../../services/supportAdminService.js";
 import { formatDateTime, formatLabel, formatRole, getStatusTone } from "./serviceAdminUtils.js";
@@ -29,6 +29,12 @@ const actionConfigs = {
     confirm: "Новое письмо-приглашение отменит старую ссылку.",
     run: (user, reason, confirmed) => supportAdminService.resendInvite({ confirmed, reason, userId: user.id })
   },
+  role: {
+    icon: ShieldCheck,
+    label: "Изменить права",
+    confirm: "Роль определяет доступ к данным и функциям организации. Изменение сразу применяется к активным сессиям.",
+    run: (user, reason, confirmed, roleKey) => supportAdminService.updateUserRole({ confirmed, reason, roleKey, userId: user.id })
+  },
   impersonate: {
     icon: UserCog,
     label: "Войти от имени",
@@ -44,6 +50,11 @@ const actionConfigs = {
 };
 
 const userStatusOptions = ["all", "active", "blocked", "invited"];
+const accountRoles = [
+  { key: "employee", label: "Оператор" },
+  { key: "senior", label: "Старший оператор" },
+  { key: "admin", label: "Администратор" }
+];
 
 export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
   const [tenants, setTenants] = useState([]);
@@ -56,6 +67,7 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
   const [selectedAction, setSelectedAction] = useState("reset2fa");
   const [reason, setReason] = useState("Личность клиента подтверждена в тикете поддержки");
   const [confirmed, setConfirmed] = useState(false);
+  const [roleKey, setRoleKey] = useState("employee");
   const [userOverrides, setUserOverrides] = useState({});
 
   useEffect(() => {
@@ -107,14 +119,20 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
   const actionConfig = actionConfigs[selectedAction];
   const ActionIcon = actionConfig.icon;
   const impersonationScopeMissing = selectedAction === "impersonate" && !selectedUser?.tenantId;
-  const actionDisabled = !selectedUser || reason.trim().length < 8 || !confirmed || impersonationScopeMissing;
+  const currentRoleKey = roleKeyFromUser(selectedUser?.role);
+  const roleUnchanged = selectedAction === "role" && roleKey === currentRoleKey;
+  const actionDisabled = !selectedUser || reason.trim().length < 8 || !confirmed || impersonationScopeMissing || roleUnchanged;
+
+  useEffect(() => {
+    setRoleKey(roleKeyFromUser(selectedUser?.role));
+  }, [selectedUser?.id]);
 
   async function handleRunAction() {
     if (!selectedUser) {
       return;
     }
 
-    const envelope = await actionConfig.run(selectedUser, reason, confirmed);
+    const envelope = await actionConfig.run(selectedUser, reason, confirmed, roleKey);
 
     if (envelope.status !== "ok") {
       onAudit(envelope, { action: `support.${selectedAction}`, target: selectedUser.id, severity: "warn" });
@@ -230,6 +248,14 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
             <span>Причина</span>
             <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} />
           </label>
+          {selectedAction === "role" ? (
+            <label className="service-admin-reason-field">
+              <span>Набор прав</span>
+              <select className="inline-select" value={roleKey} onChange={(event) => setRoleKey(event.target.value)}>
+                {accountRoles.map((role) => <option key={role.key} value={role.key}>{role.label}</option>)}
+              </select>
+            </label>
+          ) : null}
           <label className="service-admin-confirm">
             <input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />
             <span>Подтверждаю, что действие согласовано и должно попасть в аудит.</span>
@@ -254,4 +280,11 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
       )}
     </div>
   );
+}
+
+function roleKeyFromUser(role) {
+  const normalized = String(role ?? "").trim().toLowerCase();
+  if (["admin", "administrator", "owner", "администратор"].includes(normalized)) return "admin";
+  if (["senior", "senior operator", "lead", "старший сотрудник"].includes(normalized)) return "senior";
+  return "employee";
 }

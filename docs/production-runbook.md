@@ -1,20 +1,20 @@
 # Production deployment runbook
 
-> **Статус на 2026-07-28 (аудит инфраструктуры): описанная ниже процедура — целевая (target) архитектура и НЕ развёрнута на текущем прод-сервере.**
->
-> Фактически прод `supportcom.ru` (аналитика на `ea.supportcom.ru`) обслуживает Raspberry Pi (OpenMediaVault/Debian 12, публичный IP 95.31.2.38) по другой схеме:
-> - реверс-прокси и TLS — **nginx-proxy-manager** (собственный Let's Encrypt), **не Caddy** из `deploy/caddy/Caddyfile`;
-> - backend support-communication приходит на `127.0.0.1:4101` через **реверс-SSH-туннель (`ssh -R`) с удалённого хоста** (не с самого Pi), а `supportcom-api-bridge.service` (socat `172.17.0.1:4101 → 127.0.0.1:4101`) пробрасывает его в docker-сеть. Порт `4101` — конвенция из корневого `docker-compose.yml` (маппинг `4101:4100`);
-> - на сервере **нет** compose-проекта `compose.production.yml`, ~18 воркеров, ClamAV, каталога `/opt/support-communication`, файла `/etc/support-communication/production.env`, системного пользователя `support-communication` и самого Caddy;
-> - строгие security-заголовки из Caddyfile (CSP, HSTS, блок `/api/v1/metrics`) **в бою не действуют** — трафик проходит через nginx-proxy-manager с его дефолтами;
-> - systemd-бэкап (`support-communication-backup.*`) **не установлен**, резервных копий данных продукта **нет вообще** (RPO = ∞); подробнее — `runtime-backup-and-recovery.md`;
-> - **алертинга нет** (postfix off, monit без почты и без слежения за продуктом, OMV email off, внешнего uptime-мониторинга нет): падение прода или проваленный бэкап никого не уведомляют.
->
-> Всё, что описано ниже, — регламент для целевого развёртывания. Считать его планом, а не описанием текущего состояния сервера. Полный отчёт: [`infrastructure-audit-2026-07-28.md`](infrastructure-audit-2026-07-28.md).
+> **Статус на 2026-08-08:** production развёрнут на подключённом VPS RUVDS и
+> обслуживает `https://supporcom.ru` через Caddy. Прежний аудит Raspberry Pi от
+> 2026-07-28 является историческим снимком и не описывает действующий контур.
+> На VPS работают Compose-проекты приложения, инфраструктуры данных и мониторинга;
+> PostgreSQL, Redis и MinIO доступны только в приватных Docker-сетях. Ежедневный
+> зашифрованный Borg-бэкап и проверка восстановления описаны в
+> [`ruvds-borg-backup-runbook.md`](ruvds-borg-backup-runbook.md) и
+> [`ruvds-borg-restore-test-2026-08-08.md`](ruvds-borg-restore-test-2026-08-08.md).
 
 ## Scope
 
-This runbook deploys the application services to one Docker Compose host while PostgreSQL, Redis, object storage and SMTP are supplied as protected production services. It deliberately does not start local PostgreSQL, Redis, MinIO, Mailpit or demo bootstrap data.
+This runbook deploys the application to the RUVDS Docker host. PostgreSQL, Redis
+and MinIO run in the separately managed `support-communication-infrastructure`
+Compose project; the application project connects to them only through protected
+Docker networks. Mailpit and demo bootstrap data are never started in production.
 
 ## Prerequisites
 

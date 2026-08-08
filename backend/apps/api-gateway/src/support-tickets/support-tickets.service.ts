@@ -86,6 +86,15 @@ export class SupportTicketsService {
     return ticket ? ok("detailForAdmin", { ticket: ticketToClient(ticket) }) : missing("detailForAdmin");
   }
 
+  async attachmentTenantForAdmin(ticketId: string, fileId: string): Promise<string | null> {
+    const ticket = await this.findTicket(ticketId);
+    if (!ticket) return null;
+    const attached = (ticket.messages ?? []).some((message: any) =>
+      Array.isArray(message.attachments) && message.attachments.some((attachment: any) => String(attachment?.fileId ?? "") === fileId)
+    );
+    return attached ? String(ticket.tenantId) : null;
+  }
+
   async replyFromAdmin(ticketId: string, payload: { body?: string; status?: string }, actor?: { id?: string; name?: string; email?: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
     const body = text(payload.body, 1, 10_000);
     if (!body) return invalid("replyFromAdmin", "support_ticket_message_invalid", "Message is required.");

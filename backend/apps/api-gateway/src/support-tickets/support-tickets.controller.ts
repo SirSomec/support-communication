@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Param, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import { TenantOperatorAuthGuard } from "../identity/tenant-operator-auth.guard.js";
 import { type TenantOperatorRequest } from "../identity/tenant-operator-auth.js";
 import { RequireServiceAdminAction, type ServiceAdminRequest } from "../identity/service-admin-auth.js";
@@ -50,7 +50,7 @@ export class SupportTicketsController {
 @UseGuards(ServiceAdminSessionGuard)
 @Controller("service-admin/support-tickets")
 export class SupportTicketsAdminController {
-  constructor(private readonly service: SupportTicketsService) {}
+  constructor(private readonly service: SupportTicketsService, private readonly workspace: WorkspaceService) {}
 
   @Get()
   @RequireServiceAdminAction("support-tickets.read")
@@ -59,6 +59,14 @@ export class SupportTicketsAdminController {
   @Get(":ticketId")
   @RequireServiceAdminAction("support-tickets.read")
   detail(@Param("ticketId") ticketId: string) { return this.service.detailForAdmin(ticketId); }
+
+  @Get(":ticketId/attachments/:fileId/download-policy")
+  @RequireServiceAdminAction("support-tickets.read")
+  async attachmentDownloadPolicy(@Param("ticketId") ticketId: string, @Param("fileId") fileId: string) {
+    const tenantId = await this.service.attachmentTenantForAdmin(ticketId, fileId);
+    if (!tenantId) throw new NotFoundException("Support ticket attachment was not found.");
+    return this.workspace.getDownloadPolicy(fileId, { canDownload: true, tenantId });
+  }
 
   @Post(":ticketId/messages")
   @RequireServiceAdminAction("support-tickets.write")

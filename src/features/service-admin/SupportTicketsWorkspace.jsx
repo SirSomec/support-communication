@@ -62,6 +62,17 @@ export function SupportTicketsWorkspace({ onAudit, onToast }) {
     );
     onAudit?.(response, { action: "support_ticket.status" });
   }
+  async function downloadAttachment(fileId) {
+    if (!selected || !fileId) return;
+    const response = await supportTicketAdminService.attachmentDownloadPolicy(selected.id, fileId);
+    const signedUrl = response.status === "ok" ? response.data?.signedUrl : "";
+    if (!signedUrl) return onToast(response.error?.message ?? "Не удалось подготовить скачивание файла.");
+    const link = document.createElement("a");
+    link.href = signedUrl;
+    link.rel = "noopener noreferrer";
+    link.target = "_blank";
+    link.click();
+  }
   return (
     <section className="service-support-workspace">
       <div className="service-support-toolbar">
@@ -133,10 +144,10 @@ export function SupportTicketsWorkspace({ onAudit, onToast }) {
                     {item.attachments?.length ? (
                       <div className="service-support-attachments">
                         {item.attachments.map((file) => (
-                          <span key={file.fileId} title={file.mimeType ?? "Attachment"}>
+                          <button key={file.fileId} onClick={() => downloadAttachment(file.fileId)} title={`Скачать: ${file.fileName}`} type="button">
                             <FilePlus2 size={15} />
                             {file.fileName}
-                          </span>
+                          </button>
                         ))}
                       </div>
                     ) : null}

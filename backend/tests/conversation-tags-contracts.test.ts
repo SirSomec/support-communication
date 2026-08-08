@@ -75,6 +75,19 @@ describe("dialog tags backend contracts", () => {
     assert.equal(lifecycle.filter((event) => event.eventType === "tags.changed").length, 1);
   });
 
+  it("preserves integration tags when an operator replaces manual tags", async () => {
+    const { conversations, repository } = createService();
+    const maria = await repository.findConversation("maria");
+    assert.ok(maria);
+    maria.tags = ["telegram", "chat:1210145661", "connection:conn_1", "важно"];
+    await repository.saveConversation(maria);
+
+    const updated = await conversations.updateConversationTags({ conversationId: "maria", tags: ["доставка"] }, scope);
+
+    assert.equal(updated.status, "ok");
+    assert.deepEqual(updated.data.tags, ["доставка", "telegram", "chat:1210145661", "connection:conn_1"]);
+  });
+
   it("validates the payload shape and limits", async () => {
     const { conversations } = createService();
 

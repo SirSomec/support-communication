@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildTagSuggestions,
+  getManualTags,
+  getSystemTags,
   getVisibleTags,
+  isSystemTag,
   isServiceTag,
   normalizeTagInput,
   TAG_LIMIT_PER_DIALOG,
@@ -35,6 +38,17 @@ describe("tag suggestion model", () => {
     assert.equal(isServiceTag("repeat-appeal"), true);
     assert.equal(isServiceTag("appeal-anchor:thread-1"), true);
     assert.equal(isServiceTag("доставка"), false);
+  });
+
+  it("separates integration metadata into a collapsible system-tag group", () => {
+    const conversation = conversationFixture({
+      tags: ["telegram", "chat:1210145661", "bot:855726110", "username:sirsomion", "phone-requested", "важно", "appeal-anchor:thread-1"]
+    });
+
+    assert.deepEqual(getManualTags(conversation), ["важно"]);
+    assert.deepEqual(getSystemTags(conversation), ["telegram", "chat:1210145661", "bot:855726110", "username:sirsomion", "phone-requested", "appeal-anchor:thread-1"]);
+    assert.equal(isSystemTag("connection:conn_123"), true);
+    assert.equal(isSystemTag("важно"), false);
   });
 
   it("normalizes tag input to lowercase with collapsed whitespace", () => {
@@ -102,7 +116,7 @@ describe("tag suggestion model", () => {
     assert.deepEqual(suggestions.map((item) => item.tag), ["важно"]);
   });
 
-  it("suggests thread channels and popular tags from other dialogs", () => {
+  it("suggests popular manual tags from other dialogs without exposing system tags", () => {
     const conversation = conversationFixture({ channels: ["SDK", "Telegram"] });
     const conversations = [
       conversationFixture({ id: "other-1", phone: "+7 911 000-00-01", tags: ["возврат", "важно"] }),
@@ -114,8 +128,8 @@ describe("tag suggestion model", () => {
     const suggestions = buildTagSuggestions({ conversation, conversations, limit: 20 });
     const byTag = new Map(suggestions.map((item) => [item.tag, item]));
 
-    assert.equal(byTag.get("sdk")?.source, "channel");
-    assert.equal(byTag.get("telegram")?.source, "channel");
+    assert.ok(!byTag.has("sdk"));
+    assert.ok(!byTag.has("telegram"));
     assert.equal(byTag.get("возврат")?.source, "popular");
     assert.match(byTag.get("возврат")?.hint ?? "", /диалогов: 2/);
     assert.ok(!byTag.has("промокод"), "single-use tags are not popular");

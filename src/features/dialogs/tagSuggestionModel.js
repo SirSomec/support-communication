@@ -2,6 +2,27 @@ import { isRepeatAppeal, REPEAT_APPEAL_TAG } from "../../app/dialogModel.js";
 import { threadAppeals } from "./clientThreadModel.js";
 
 const APPEAL_ANCHOR_TAG_PREFIX = "appeal-anchor:";
+const SYSTEM_TAGS = new Set([
+  "chat-api",
+  "max",
+  "outbound",
+  "phone-requested",
+  "queued",
+  "sdk",
+  "telegram",
+  "telegram-chat",
+  "vk"
+]);
+const SYSTEM_TAG_PREFIXES = [
+  APPEAL_ANCHOR_TAG_PREFIX,
+  "bot:",
+  "chat:",
+  "connection:",
+  "email:",
+  "external:",
+  "page:",
+  "username:"
+];
 
 export const TAG_MIN_LENGTH = 2;
 export const TAG_MAX_LENGTH = 32;
@@ -12,6 +33,43 @@ export const TAG_LIMIT_PER_DIALOG = 20;
 export function isServiceTag(tag) {
   const value = String(tag ?? "");
   return value === REPEAT_APPEAL_TAG || value.startsWith(APPEAL_ANCHOR_TAG_PREFIX);
+}
+
+export function isSystemTag(tag) {
+  const value = normalizeTagInput(tag);
+  return SYSTEM_TAGS.has(value) || value === REPEAT_APPEAL_TAG || SYSTEM_TAG_PREFIXES.some((prefix) => value.startsWith(prefix));
+}
+
+export function getSystemTags(conversation) {
+  const tags = Array.isArray(conversation?.tags) ? conversation.tags : [];
+  const seen = new Set();
+  const systemTags = [];
+
+  for (const tag of tags) {
+    const value = String(tag);
+    const key = value.toLowerCase();
+    if (!isSystemTag(value) || seen.has(key)) continue;
+    seen.add(key);
+    systemTags.push(value);
+  }
+
+  return systemTags;
+}
+
+export function getManualTags(conversation) {
+  const tags = Array.isArray(conversation?.tags) ? conversation.tags : [];
+  const seen = new Set();
+  const manualTags = [];
+
+  for (const tag of tags) {
+    const value = String(tag);
+    const key = value.toLowerCase();
+    if (isSystemTag(value) || seen.has(key)) continue;
+    seen.add(key);
+    manualTags.push(value);
+  }
+
+  return manualTags;
 }
 
 export function getVisibleTags(conversation) {
@@ -86,7 +144,7 @@ export function buildTagSuggestions({ conversation, topic = "", conversations = 
   const suggestions = [];
   const push = (tag, hint, source) => {
     const normalized = normalizeTagInput(tag);
-    if (!normalized || normalized.length > TAG_MAX_LENGTH || excluded.has(normalized) || isServiceTag(normalized)) {
+    if (!normalized || normalized.length > TAG_MAX_LENGTH || excluded.has(normalized) || isSystemTag(normalized)) {
       return;
     }
     excluded.add(normalized);
@@ -157,7 +215,7 @@ function collectPopularTags(conversations, appeals) {
     if (!item || ownIds.has(item.id)) {
       continue;
     }
-    for (const tag of getVisibleTags(item)) {
+    for (const tag of getManualTags(item)) {
       const normalized = normalizeTagInput(tag);
       counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
     }

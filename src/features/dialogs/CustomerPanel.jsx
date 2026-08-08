@@ -14,7 +14,7 @@ import { ClientArchiveDetailModal, ClientDialogsListModal } from "./ClientHistor
 import { RepeatAppealBadge } from "./RepeatAppealBadge.jsx";
 import { TagManagerModal } from "./TagManagerModal.jsx";
 import { TopicCombobox } from "./TopicCombobox.jsx";
-import { getVisibleTags } from "./tagSuggestionModel.js";
+import { getManualTags, getSystemTags } from "./tagSuggestionModel.js";
 import { fillTemplateVariables } from "../templates/templateModel.js";
 
 export function CustomerPanel({
@@ -49,7 +49,9 @@ export function CustomerPanel({
   const historyFetchedForRef = useRef("");
   const [isTagManagerOpen, setTagManagerOpen] = useState(false);
   const [removingTag, setRemovingTag] = useState("");
-  const visibleTags = useMemo(() => getVisibleTags(conversation), [conversation]);
+  const [systemTagsExpanded, setSystemTagsExpanded] = useState(false);
+  const visibleTags = useMemo(() => getManualTags(conversation), [conversation]);
+  const systemTags = useMemo(() => getSystemTags(conversation), [conversation]);
   const canManageTags = Boolean(onTagsApply) && Boolean(access.canManageDialogs);
   const [phoneEditing, setPhoneEditing] = useState(false);
   const [phoneDraft, setPhoneDraft] = useState("");
@@ -381,7 +383,22 @@ export function CustomerPanel({
               ) : null}
             </span>
           ))}
-          {!visibleTags.length ? <p className="tag-list-empty">Тегов пока нет.</p> : null}
+          {systemTags.length ? (
+            <button
+              aria-expanded={systemTagsExpanded}
+              className="system-tags-toggle"
+              onClick={() => setSystemTagsExpanded((expanded) => !expanded)}
+              type="button"
+            >
+              Системные теги · {systemTags.length}
+            </button>
+          ) : null}
+          {systemTagsExpanded ? (
+            <div className="system-tags-list" aria-label="Системные теги">
+              {systemTags.map((tag) => <span key={tag}>{tag}</span>)}
+            </div>
+          ) : null}
+          {!visibleTags.length && !systemTags.length ? <p className="tag-list-empty">Тегов пока нет.</p> : null}
         </div>
       </PanelSection>
 

@@ -3,8 +3,8 @@ import { Plus, Sparkles } from "lucide-react";
 import { Modal } from "../../ui.jsx";
 import {
   buildTagSuggestions,
-  getVisibleTags,
-  isServiceTag,
+  getManualTags,
+  getSystemTags,
   normalizeTagInput,
   TAG_LIMIT_PER_DIALOG,
   TAG_MAX_LENGTH,
@@ -15,8 +15,10 @@ import {
 // одним нажатием «Сохранить» — так случайный клик по предложению не уходит
 // в API, а закрытие по Esc ничего не меняет.
 export function TagManagerModal({ conversation, topic, allConversations = [], onApply, onClose }) {
-  const initialTags = useMemo(() => getVisibleTags(conversation), [conversation]);
+  const initialTags = useMemo(() => getManualTags(conversation), [conversation]);
+  const systemTags = useMemo(() => getSystemTags(conversation), [conversation]);
   const [draftTags, setDraftTags] = useState(initialTags);
+  const [systemTagsExpanded, setSystemTagsExpanded] = useState(false);
   const [input, setInput] = useState("");
   const [inputError, setInputError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -24,7 +26,7 @@ export function TagManagerModal({ conversation, topic, allConversations = [], on
   // Предложения строятся без учета видимых тегов диалога: если оператор
   // удалит тег в черновике, подсказка снова станет доступна ниже.
   const suggestions = useMemo(() => buildTagSuggestions({
-    conversation: { ...conversation, tags: (conversation.tags ?? []).filter((tag) => isServiceTag(tag)) },
+    conversation: { ...conversation, tags: systemTags },
     conversations: allConversations,
     limit: 8,
     topic
@@ -102,6 +104,23 @@ export function TagManagerModal({ conversation, topic, allConversations = [], on
               <p className="tag-manager-empty">Тегов пока нет — выберите из предложенных или добавьте свой.</p>
             ) : null}
           </div>
+          {systemTags.length ? (
+            <div className="tag-manager-system">
+              <button
+                aria-expanded={systemTagsExpanded}
+                className="system-tags-toggle"
+                onClick={() => setSystemTagsExpanded((expanded) => !expanded)}
+                type="button"
+              >
+                Системные теги · {systemTags.length}
+              </button>
+              {systemTagsExpanded ? (
+                <div className="system-tags-list" aria-label="Системные теги">
+                  {systemTags.map((tag) => <span key={tag}>{tag}</span>)}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
         <form className="tag-manager-input" onSubmit={handleInputSubmit}>

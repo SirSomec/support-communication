@@ -187,7 +187,24 @@ function normalizeConversationTag(value: unknown): string {
 }
 
 function isServiceConversationTag(tag: string): boolean {
-  return tag === REPEAT_APPEAL_TAG || tag.startsWith(APPEAL_ANCHOR_TAG_PREFIX);
+  return tag === REPEAT_APPEAL_TAG
+    || tag === "chat-api"
+    || tag === "max"
+    || tag === "outbound"
+    || tag === "phone-requested"
+    || tag === "queued"
+    || tag === "sdk"
+    || tag === "telegram"
+    || tag === "telegram-chat"
+    || tag === "vk"
+    || tag.startsWith(APPEAL_ANCHOR_TAG_PREFIX)
+    || tag.startsWith("bot:")
+    || tag.startsWith("chat:")
+    || tag.startsWith("connection:")
+    || tag.startsWith("email:")
+    || tag.startsWith("external:")
+    || tag.startsWith("page:")
+    || tag.startsWith("username:");
 }
 
 interface AppendMessagePayload {

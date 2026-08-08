@@ -1888,6 +1888,46 @@
   opacity: 0.45;
 }
 
+.system-tags-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid #bcd9ff;
+  border-radius: 6px;
+  background: #eef6ff;
+  color: #1d5fbf;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.tag-list .system-tags-toggle:hover,
+.system-tags-toggle:hover {
+  color: #0d4d9e;
+  background: #e2f0ff;
+}
+
+.system-tags-list {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.tag-list .system-tags-list span,
+.system-tags-list span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid #d9e4f2;
+  border-radius: 6px;
+  background: #f7faff;
+  color: #53657d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .tag-list-empty {
   margin: 0;
   color: var(--muted);
@@ -2000,6 +2040,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+
+.tag-manager-system {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
 }
 
 .tag-manager-chip {

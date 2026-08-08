@@ -12,13 +12,20 @@ import {
   Gauge,
   RadioTower,
   RefreshCw,
+  Bot,
+  CircleHelp,
+  ClipboardList,
   ShieldCheck,
   Siren,
+  Settings2,
   TimerReset,
   UserCog,
-  Users
+  Users,
+  WalletCards,
+  Mail,
+  Landmark
 } from "lucide-react";
-import { MetricTile, ProductScreen, SectionTitle, SegmentedControl, StatusBadge } from "../../ui.jsx";
+import { SectionTitle, StatusBadge } from "../../ui.jsx";
 import { auditService } from "../../services/auditService.js";
 import { authService } from "../../services/authService.js";
 import { featureFlagService } from "../../services/featureFlagService.js";
@@ -48,14 +55,15 @@ import {
 import "./service-admin.css";
 
 const workspaceOptions = [
-  { label: "Организации", value: "tenants" },
-  { label: "Пользователи", value: "users" },
-  { label: "Биллинг", value: "billing" },
-  { label: "Инциденты", value: "incidents" },
-  { label: "Флаги", value: "flags" },
-  { label: "AI", value: "ai" },
-  { label: "Почта", value: "mail" },
-  { label: "Аудит", value: "audit" }
+  { label: "Обзор", value: "overview", icon: Activity, hint: "Главные показатели и задачи, которые требуют внимания." },
+  { label: "Организации", value: "tenants", icon: Landmark, hint: "Управляйте компаниями, их доступом и состоянием аккаунта." },
+  { label: "Пользователи", value: "users", icon: Users, hint: "Помогайте пользователям и проверяйте права доступа." },
+  { label: "Тарифы и оплата", value: "billing", icon: WalletCards, hint: "Настраивайте тарифы и контролируйте оплату." },
+  { label: "Состояние сервиса — Инциденты", value: "incidents", icon: Siren, hint: "Проверяйте неполадки, работу фоновых задач и систем." },
+  { label: "Настройки функций — Флаги", value: "flags", icon: Settings2, hint: "Включайте функции постепенно и безопасно." },
+  { label: "ИИ-подключения", value: "ai", icon: Bot, hint: "Настраивайте сервисы искусственного интеллекта." },
+  { label: "Почта", value: "mail", icon: Mail, hint: "Настройте письма, которые сервис отправляет от своего имени." },
+  { label: "Журнал действий — Аудит", value: "audit", icon: ClipboardList, hint: "Просматривайте историю важных изменений." }
 ];
 
 function formatMeasuredValue(value, suffix) {
@@ -64,7 +72,7 @@ function formatMeasuredValue(value, suffix) {
 
 export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, backLabel = "Выйти", onToast = noop }) {
   const requestedWorkspace = resolveServiceAdminWorkspace(navigationTarget);
-  const [activeWorkspace, setActiveWorkspace] = useState(requestedWorkspace || "tenants");
+  const [activeWorkspace, setActiveWorkspace] = useState(requestedWorkspace || "overview");
   const [auditEvents, setAuditEvents] = useState([]);
   const [dashboard, setDashboard] = useState({
     degradedComponents: 0,
@@ -229,39 +237,31 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
     }
   }, [impersonation, recordEnvelope, remainingSeconds]);
 
+  const currentWorkspace = workspaceOptions.find((option) => option.value === activeWorkspace) ?? workspaceOptions[0];
+  const attentionCount = openIncidentCount + riskyUsers + degradedComponents;
+
   return (
-    <ProductScreen
-      title="Администрирование сервиса"
-      subtitle="Операции с организациями, поддержка учетных записей, биллинг, AI-подключения, инциденты платформы, флаги и аудит привилегированных действий."
-      backLabel={backLabel}
-      onBack={onBack}
-      stateItems={[
-        { label: "организации", value: dashboard.tenantCount, tone: "ok" },
-        { label: "открытые инциденты", value: openIncidentCount, tone: openIncidentCount ? "warn" : "ok" },
-        { label: "рисковые пользователи", value: riskyUsers, tone: riskyUsers ? "warn" : "ok" },
-        { label: "деградации компонентов", value: degradedComponents, tone: degradedComponents ? "error" : "ok" }
-      ]}
-      actions={
-        <>
-          <select
-            aria-label="Рабочая зона администратора сервиса"
-            className="inline-select"
-            onChange={(event) => setActiveWorkspace(event.target.value)}
-            value={activeWorkspace}
-          >
-            {workspaceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-          <button onClick={handleRefreshAuthState} type="button">
-            <RefreshCw size={17} />
-            Состояние входа
-          </button>
-          <button onClick={loadDashboard} type="button">
-            <RefreshCw size={17} />
-            Обновить данные
-          </button>
-        </>
-      }
-    >
+    <div className="service-admin-console">
+      <aside className="service-admin-sidebar">
+        <div className="service-admin-brand"><span>Support</span>com</div>
+        <nav className="service-admin-tabs" aria-label="Разделы панели управления">
+          {workspaceOptions.map((option) => {
+            const Icon = option.icon;
+            return <button className={activeWorkspace === option.value ? "selected" : ""} key={option.value} onClick={() => setActiveWorkspace(option.value)} type="button"><Icon size={19} /><span>{option.label}</span></button>;
+          })}
+        </nav>
+        <div className="service-admin-sidebar-help"><CircleHelp size={20} /><strong>Подсказка</strong><span>{currentWorkspace.hint}</span></div>
+        <button className="service-admin-logout" onClick={onBack} type="button"><DoorOpen size={17} />{backLabel}</button>
+      </aside>
+      <section className="service-admin-main">
+        <header className="service-admin-topbar">
+          <div><span className="service-admin-crumb">Панель управления</span><h1>{currentWorkspace.label}</h1></div>
+          <div className="service-admin-topbar-actions">
+            <button title="Проверить, что ваша сессия ещё активна" onClick={handleRefreshAuthState} type="button"><ShieldCheck size={17} />Проверить доступ</button>
+            <button className="primary" title="Загрузить актуальные сведения во всех разделах" onClick={loadDashboard} type="button"><RefreshCw size={17} />Обновить</button>
+          </div>
+        </header>
+        <div className="service-admin-content">
       {impersonation ? (
         <ServiceAdminImpersonationBanner
           impersonation={impersonation}
@@ -270,31 +270,7 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
         />
       ) : null}
 
-      {loadError ? <div className="service-admin-feedback error" role="alert">{loadError}</div> : null}
-
-      <div className="metric-strip service-admin-metrics">
-        <MetricTile icon={<Building2 size={21} />} label="Организации" value={dashboard.tenantCount} detail="активные аккаунты сервиса" />
-        <MetricTile icon={<Users size={21} />} label="Пользователи" value={dashboard.userCount} detail={`${riskyUsers} профиля с высоким риском`} tone={riskyUsers ? "danger" : ""} />
-        <MetricTile icon={<Siren size={21} />} label="Инциденты" value={openIncidentCount} detail="открытые события платформы" tone={openIncidentCount ? "danger" : ""} />
-        <MetricTile icon={<Flag size={21} />} label="Стоп-флаги" value={guardedFlags} detail="флаги с защитным выключателем" />
-      </div>
-
-      <PlatformSnapshotPanel onEnvelope={recordEnvelope} />
-      <WorkerObservabilityPanel workers={workerObservability} />
-
-      <section className="work-panel service-admin-workspace-shell">
-        <header className="service-admin-workspace-header">
-          <div>
-            <SectionTitle title="Рабочие зоны администратора сервиса" action="привилегированные действия требуют причины и аудита" />
-          </div>
-          <SegmentedControl
-            ariaLabel="Вкладки администратора сервиса"
-            className="service-admin-tabs"
-            onChange={setActiveWorkspace}
-            options={workspaceOptions}
-            value={activeWorkspace}
-          />
-        </header>
+      {loadError ? <div className="service-admin-feedback error" role="alert">Не удалось обновить часть данных. {loadError}</div> : null}
 
         {feedback ? (
           <div className="service-admin-feedback" role="status">
@@ -305,6 +281,8 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
           </div>
         ) : null}
 
+        {activeWorkspace === "overview" ? <ServiceAdminOverview dashboard={dashboard} attentionCount={attentionCount} onNavigate={setActiveWorkspace} workers={workerObservability} /> : null}
+        {activeWorkspace === "incidents" ? <><ServiceAdminHelp title="Состояние сервиса" text="Здесь видно, всё ли работает как ожидается. Подтверждайте только те уведомления, которые уже проверили." /><PlatformSnapshotPanel onEnvelope={recordEnvelope} /><WorkerObservabilityPanel workers={workerObservability} /><IncidentMonitoringWorkspace onAudit={recordEnvelope} /></> : null}
         {activeWorkspace === "tenants" ? <TenantManagementWorkspace onAudit={recordEnvelope} /> : null}
         {activeWorkspace === "users" ? (
           <ServiceUserSupportWorkspace
@@ -313,15 +291,46 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
           />
         ) : null}
         {activeWorkspace === "billing" ? <BillingTariffWorkspace onAudit={recordEnvelope} /> : null}
-        {activeWorkspace === "incidents" ? <IncidentMonitoringWorkspace onAudit={recordEnvelope} /> : null}
         {activeWorkspace === "flags" ? <FeatureFlagWorkspace onAudit={recordEnvelope} /> : null}
         {activeWorkspace === "ai" ? <AiConnectionsWorkspace onAudit={recordEnvelope} onToast={onToast} /> : null}
         {activeWorkspace === "mail" ? <MailSettingsWorkspace onAudit={recordEnvelope} onToast={onToast} /> : null}
         {activeWorkspace === "audit" ? <ServiceAdminAuditStream events={auditEvents} /> : null}
+        </div>
       </section>
-    </ProductScreen>
+    </div>
   );
 }
+
+function ServiceAdminHelp({ title, text }) {
+  return <div className="service-admin-inline-help"><CircleHelp size={19} /><div><strong>{title}</strong><span>{text}</span></div></div>;
+}
+
+function ServiceAdminOverview({ dashboard, attentionCount, onNavigate, workers }) {
+  const serviceIsHealthy = attentionCount === 0;
+  return <>
+    <section className="service-admin-intro">
+      <div><h2>Панель управления сервисом</h2><p>Все важные настройки и состояние сервиса — в одном месте. Выберите раздел слева, чтобы продолжить работу.</p></div>
+      <div className={`service-admin-health ${serviceIsHealthy ? "healthy" : "attention"}`}><CheckCircle2 size={26} /><div><strong>{serviceIsHealthy ? "Сервис работает стабильно" : "Есть задачи, требующие внимания"}</strong><span>{serviceIsHealthy ? "Все основные системы работают в штатном режиме" : `${attentionCount} пунктов стоит проверить в первую очередь`}</span></div><button onClick={() => onNavigate("incidents")} type="button">Открыть состояние сервиса</button></div>
+    </section>
+    <div className="service-admin-overview-metrics">
+      <OverviewCard icon={<Building2 size={21} />} label="Организации" value={dashboard.tenantCount} detail="активных аккаунтов" onClick={() => onNavigate("tenants")} />
+      <OverviewCard icon={<Users size={21} />} label="Пользователи" value={dashboard.userCount} detail="пользуются сервисом" onClick={() => onNavigate("users")} />
+      <OverviewCard icon={<AlertTriangle size={21} />} label="Требуют внимания" value={attentionCount} detail="задач для проверки" tone={attentionCount ? "attention" : ""} onClick={() => onNavigate("incidents")} />
+      <OverviewCard icon={<Flag size={21} />} label="Настройки функций" value={guardedFlagsLabel(dashboard.guardedFlags)} detail="функций с защитой" onClick={() => onNavigate("flags")} />
+    </div>
+    <section className="service-admin-overview-grid">
+      <div className="service-admin-priority"><SectionTitle title="С чего начать" action="быстрые переходы" /><button onClick={() => onNavigate("incidents")} type="button"><AlertTriangle size={19} /><span><strong>Проверить состояние сервиса</strong><small>Неполадки и фоновые задачи собраны в одном разделе</small></span></button><button onClick={() => onNavigate("users")} type="button"><UserCog size={19} /><span><strong>Проверить доступ пользователей</strong><small>Помощь с учётными записями и правами</small></span></button><button onClick={() => onNavigate("audit")} type="button"><ClipboardList size={19} /><span><strong>Открыть журнал действий</strong><small>История важных изменений в сервисе</small></span></button></div>
+      <ServiceAdminHelp title="Как пользоваться панелью" text="В каждом разделе есть понятное описание. Для важных изменений потребуется указать причину — это помогает команде видеть историю действий." />
+    </section>
+    <WorkerObservabilityPanel workers={workers} />
+  </>;
+}
+
+function OverviewCard({ icon, label, value, detail, tone = "", onClick }) {
+  return <button className={`service-admin-overview-card ${tone}`} onClick={onClick} type="button"><span className="service-admin-overview-icon">{icon}</span><span><small>{label}</small><strong>{value}</strong><em>{detail}</em></span></button>;
+}
+
+function guardedFlagsLabel(value) { return typeof value === "number" ? value : "—"; }
 
 function resolveServiceAdminWorkspace(navigationTarget) {
   const workspace = typeof navigationTarget?.workspace === "string" ? navigationTarget.workspace : "";

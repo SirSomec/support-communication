@@ -29,7 +29,7 @@ export function Sidebar({ active, access, collapsed = false, onSelect, onToggleC
         </button>
       </div>
       <nav className="nav-list" aria-label="Главная навигация">
-        {navigationItems.map(({ key, label, icon: Icon }) => {
+        {navigationItems.filter((item) => item.key !== "support").map(({ key, label, icon: Icon }) => {
           const isAllowed = access.sections.includes(key);
 
           return (
@@ -47,6 +47,13 @@ export function Sidebar({ active, access, collapsed = false, onSelect, onToggleC
             </button>
           );
         })}
+      </nav>
+      <nav className="nav-list sidebar-support-nav" aria-label="Поддержка">
+        {navigationItems.filter((item) => item.key === "support").map(({ key, label, icon: Icon }) => (
+          <button aria-label={label} className={`nav-item ${active === key ? "active" : ""}`} key={key} onClick={() => onSelect(key)} title={label} type="button">
+            <Icon size={20} /><span>{label}</span>
+          </button>
+        ))}
       </nav>
       <div className="operator-card">
         <span className="operator-avatar" aria-hidden="true">{operatorInitials}</span>

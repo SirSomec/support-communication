@@ -23,6 +23,7 @@ import { requestTraceMiddleware } from "./trace-id.middleware.js";
 import { sensitiveRateLimitMiddleware } from "./sensitive-rate-limit.middleware.js";
 import { WorkspaceModule } from "./workspace/workspace.module.js";
 import { KnowledgeSourcesModule } from "./knowledge-sources/knowledge-sources.module.js";
+import { SupportTicketsModule } from "./support-tickets/support-tickets.module.js";
 
 @Module({
   imports: [
@@ -45,7 +46,8 @@ import { KnowledgeSourcesModule } from "./knowledge-sources/knowledge-sources.mo
     ServiceAdminModule,
     AiConnectionsModule,
     WorkspaceModule,
-    KnowledgeSourcesModule
+    KnowledgeSourcesModule,
+    SupportTicketsModule
   ],
   controllers: [HealthController, MetricsController]
 })

@@ -16,7 +16,7 @@ export const serviceAdminPrivilegedActions: string[] = [
   "notifications.read", "operations.read", "operations.write", "settings.read",
   "settings.manage", "service-admin.users.read", "service-admin.users.write",
   "service-admin.audit.read", "service-admin.audit.export", "security.review",
-  "templates.read", "templates.write", "incidents.manage", "flags.manage",
+  "templates.read", "templates.write", "incidents.manage", "flags.manage", "support-tickets.read", "support-tickets.write",
   "impersonation.start"
 ];
 
@@ -24,7 +24,7 @@ export const identityPermissionRoleCatalog: IdentityPermissionRole[] = [
   {
     key: "employee",
     description: "Line support operator",
-    actions: ["dialogs.read", "templates.read", "templates.write", "clients.read", "presence.write"],
+    actions: ["dialogs.read", "templates.read", "templates.write", "clients.read", "presence.write", "support.read"],
     aliases: ["employee", "operator", "line_1", "line-1", "сотрудник"],
     groupIds: ["line-1"],
     metadata: {}
@@ -40,7 +40,7 @@ export const identityPermissionRoleCatalog: IdentityPermissionRole[] = [
       "automation.proactive.read", "reports.read", "reports.export", "quality.read",
       "quality.scoring-audits.write", "quality.ratings.write", "quality.manual-reviews.write",
       "knowledge.read", "automation.read", "permissions.read", "notifications.read",
-      "settings.read", "employees.passwordReset", "outbound.start"
+      "settings.read", "employees.passwordReset", "outbound.start", "support.read"
     ],
     aliases: ["senior", "senior_operator", "lead", "старший", "старший сотрудник"],
     groupIds: ["senior-shifts"],

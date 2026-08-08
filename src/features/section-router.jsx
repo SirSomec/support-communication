@@ -8,6 +8,7 @@ import { PanelScreen } from "./panel/PanelScreen.jsx";
 import { QualityScreen } from "./quality/QualityScreen.jsx";
 import { ReportsScreen } from "./reports/ReportsScreen.jsx";
 import { SettingsScreen } from "./settings/SettingsScreen.jsx";
+import { SupportScreen } from "./support/SupportScreen.jsx";
 import { TemplatesScreen } from "./templates/TemplatesScreen.jsx";
 import { VisitorsScreen } from "./visitors/VisitorsScreen.jsx";
 import "./workspace-sections.css";
@@ -80,6 +81,10 @@ export function SectionRouter({
 
   if (section === "settings") {
     return <SettingsScreen {...screenProps} />;
+  }
+
+  if (section === "support") {
+    return <SupportScreen {...screenProps} />;
   }
 
   return (

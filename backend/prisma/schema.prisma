@@ -17,6 +17,7 @@ model Tenant {
   updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   auditEvents TenantAuditEvent[]
   users       TenantUser[]
+  supportTickets SupportTicket[]
 
   @@map("tenants")
 }
@@ -58,6 +59,7 @@ model TenantUser {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   teamMemberships TeamMembership[]
+  supportTickets SupportTicket[] @relation("SupportTicketRequester")
 
   @@unique([tenantId, email], map: "tenant_users_tenant_id_email_key")
   @@unique([tenantId, id], map: "tenant_users_tenant_id_id_key")
@@ -3287,4 +3289,41 @@ model ServiceMailSettings {
   updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("service_mail_settings")
+}
+
+// Обращения в поддержку сервиса. Вложения хранятся в уже существующем
+// workspace_files: здесь сохраняются только file_id и безопасные метаданные.
+model SupportTicket {
+  id              String   @id
+  tenantId        String   @map("tenant_id")
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requesterId     String   @map("requester_id")
+  requester       TenantUser @relation("SupportTicketRequester", fields: [tenantId, requesterId], references: [tenantId, id], onDelete: Restrict)
+  requesterName   String   @map("requester_name")
+  requesterEmail  String   @map("requester_email")
+  subject         String
+  status          String   @default("open")
+  lastMessageAt   DateTime @default(now()) @map("last_message_at") @db.Timestamptz(3)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  messages        SupportTicketMessage[]
+
+  @@index([tenantId, requesterId, updatedAt], map: "support_tickets_tenant_requester_updated_idx")
+  @@index([status, lastMessageAt], map: "support_tickets_status_last_message_idx")
+  @@map("support_tickets")
+}
+
+model SupportTicketMessage {
+  id          String   @id
+  ticketId    String   @map("ticket_id")
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorKind  String   @map("author_kind")
+  authorId    String?  @map("author_id")
+  authorName  String   @map("author_name")
+  body        String
+  attachments Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([ticketId, createdAt], map: "support_ticket_messages_ticket_created_idx")
+  @@map("support_ticket_messages")
 }

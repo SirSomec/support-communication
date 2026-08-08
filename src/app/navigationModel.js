@@ -8,6 +8,7 @@ import {
   MessageCircle,
   Settings,
   ShieldCheck,
+  CircleHelp,
   UsersRound,
   Zap
 } from "lucide-react";
@@ -23,5 +24,6 @@ export const navigationItems = [
   { key: "knowledge", label: "Знания", icon: BookOpen },
   { key: "automation", label: "Боты", icon: Bot },
   { key: "audit", label: "Аудит", icon: FileClock },
-  { key: "settings", label: "Настройки", icon: Settings }
+  { key: "settings", label: "Настройки", icon: Settings },
+  { key: "support", label: "Поддержка", icon: CircleHelp }
 ];

@@ -130,6 +130,11 @@ function App() {
     },
     onDenied: setToast
   });
+  useEffect(() => {
+    if (route.namespace === "app" && route.view === "support") {
+      handleSectionSelect("support");
+    }
+  }, [handleSectionSelect, route.namespace, route.view]);
   const handleTenantLogout = useCallback(async () => {
     const response = await tenantSession.logout();
     routeActions.openAuth();

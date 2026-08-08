@@ -19,7 +19,7 @@ const CLIENT_SERVICE = "clientService";
 const FILE_SERVICE = "fileService";
 const TEMPLATE_SERVICE = "templateService";
 const KNOWLEDGE_SERVICE = "knowledgeService";
-const ATTACHMENT_CHANNELS = new Set(["SDK", "Telegram", "VK", "MAX"]);
+const ATTACHMENT_CHANNELS = new Set(["SDK", "Telegram", "VK", "MAX", "SUPPORT"]);
 const PENDING_UPLOAD_DESCRIPTOR_LIMIT = 25;
 
 export interface ObjectStorageSignUploadInput {
@@ -682,6 +682,18 @@ export class WorkspaceService {
         signedUrl: signedDownload.url,
         expiresAt: signedDownload.expiresAt
       }
+    });
+  }
+
+  async getUploadStatus(fileId: string, context: WorkspaceRequestContext = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
+    const file = await this.workspaceRepository.findFile(fileId, { tenantId: context.tenantId });
+    if (!file) return notFoundEnvelope(FILE_SERVICE, "getUploadStatus", "file_not_found", `File ${fileId} was not found.`, { fileId });
+    return createEnvelope({
+      service: FILE_SERVICE,
+      operation: "getUploadStatus",
+      traceId: workspaceTraceId(FILE_SERVICE, "getUploadStatus"),
+      meta: apiMeta({ fileId }),
+      data: { fileId: file.fileId, fileName: file.fileName, scanState: file.scanState, scanVerdict: file.scanVerdict ?? null, storageState: file.storageState }
     });
   }
 

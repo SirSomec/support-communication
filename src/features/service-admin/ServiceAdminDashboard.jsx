@@ -23,7 +23,8 @@ import {
   Users,
   WalletCards,
   Mail,
-  Landmark
+  Landmark,
+  MessagesSquare
 } from "lucide-react";
 import { SectionTitle, StatusBadge } from "../../ui.jsx";
 import { auditService } from "../../services/auditService.js";
@@ -42,6 +43,7 @@ import { ServiceUserSupportWorkspace } from "./ServiceUserSupportWorkspace.jsx";
 import { TenantManagementWorkspace } from "./TenantManagementWorkspace.jsx";
 import { AiConnectionsWorkspace } from "./AiConnectionsWorkspace.jsx";
 import { MailSettingsWorkspace } from "./MailSettingsWorkspace.jsx";
+import { SupportTicketsWorkspace } from "./SupportTicketsWorkspace.jsx";
 import {
   envelopeToAuditEntry,
   formatAction,
@@ -63,6 +65,7 @@ const workspaceOptions = [
   { label: "Настройки функций — Флаги", value: "flags", icon: Settings2, hint: "Включайте функции постепенно и безопасно." },
   { label: "ИИ-подключения", value: "ai", icon: Bot, hint: "Настраивайте сервисы искусственного интеллекта." },
   { label: "Почта", value: "mail", icon: Mail, hint: "Настройте письма, которые сервис отправляет от своего имени." },
+  { label: "Поддержка", value: "support", icon: MessagesSquare, hint: "Обрабатывайте обращения пользователей и отвечайте из единого контура сервиса." },
   { label: "Журнал действий — Аудит", value: "audit", icon: ClipboardList, hint: "Просматривайте историю важных изменений." }
 ];
 
@@ -71,7 +74,7 @@ function formatMeasuredValue(value, suffix) {
 }
 
 export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, backLabel = "Выйти", onToast = noop }) {
-  const requestedWorkspace = resolveServiceAdminWorkspace(navigationTarget);
+  const requestedWorkspace = resolveServiceAdminWorkspace(navigationTarget) || (new URLSearchParams(window.location.search).get("workspace") === "support" ? "support" : "");
   const [activeWorkspace, setActiveWorkspace] = useState(requestedWorkspace || "overview");
   const [auditEvents, setAuditEvents] = useState([]);
   const [dashboard, setDashboard] = useState({
@@ -294,6 +297,7 @@ export function ServiceAdminDashboard({ navigationTarget = null, onBack = noop, 
         {activeWorkspace === "flags" ? <FeatureFlagWorkspace onAudit={recordEnvelope} /> : null}
         {activeWorkspace === "ai" ? <AiConnectionsWorkspace onAudit={recordEnvelope} onToast={onToast} /> : null}
         {activeWorkspace === "mail" ? <MailSettingsWorkspace onAudit={recordEnvelope} onToast={onToast} /> : null}
+        {activeWorkspace === "support" ? <SupportTicketsWorkspace onAudit={recordEnvelope} onToast={onToast} /> : null}
         {activeWorkspace === "audit" ? <ServiceAdminAuditStream events={auditEvents} /> : null}
         </div>
       </section>

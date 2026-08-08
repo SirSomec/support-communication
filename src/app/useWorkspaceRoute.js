@@ -132,6 +132,7 @@ function parseCurrentRoute() {
 
   const exactRoute = routeByHash[window.location.hash];
   if (exactRoute) return exactRoute;
+  if (window.location.hash.startsWith("#/app/support")) return { namespace: "app", view: "support" };
   if (window.location.hash.startsWith("#/app/")) return routeByHash["#/app"];
   if (window.location.hash.startsWith("#/auth/")) return routeByHash["#/auth"];
   if (window.location.hash.startsWith("#/onboarding/")) return routeByHash["#/onboarding"];

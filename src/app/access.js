@@ -28,7 +28,8 @@ export const ACTION_TO_SECTION = {
   "settings.manage": "settings",
   "settings.integrations.read": "settings",
   "settings.integrations.write": "settings",
-  "settings.integrations.manage": "settings"
+  "settings.integrations.manage": "settings",
+  "support.read": "support"
 };
 
 const ROLE_MODE_TO_KEY = {
@@ -175,5 +176,5 @@ function fallbackActionsForRoleMode(roleMode) {
     ];
   }
 
-  return ["dialogs.read", "clients.read", "templates.read", "templates.write", "presence.write"];
+  return ["dialogs.read", "clients.read", "templates.read", "templates.write", "presence.write", "support.read"];
 }

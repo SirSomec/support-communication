@@ -42,6 +42,7 @@ function App() {
   const [permissionModel, setPermissionModel] = useState(null);
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [notificationNavigationTarget, setNotificationNavigationTarget] = useState(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const realtimeAttentionHandlerRef = useRef(null);
   const {
     handleToastClose,
@@ -486,8 +487,8 @@ function App() {
   }
 
   return (
-    <div className="app-shell" data-testid="route-app-shell">
-      <Sidebar active={section} access={access} onSelect={handleSectionSelect} operator={tenantSession.operator} presenceStatus={operatorPresence.presence?.status ?? ""} />
+    <div className={`app-shell ${sidebarCollapsed ? "app-shell-sidebar-collapsed" : ""}`} data-testid="route-app-shell">
+      <Sidebar active={section} access={access} collapsed={sidebarCollapsed} onSelect={handleSectionSelect} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} operator={tenantSession.operator} presenceStatus={operatorPresence.presence?.status ?? ""} />
       <main className="workspace">
         <TopBar
           access={access}

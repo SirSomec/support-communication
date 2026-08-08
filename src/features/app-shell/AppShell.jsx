@@ -1,19 +1,32 @@
 import React from "react";
-import { ChevronDown, Globe2, Headphones, LogOut, Search, ShieldCheck, UsersRound, Volume2, VolumeX, Zap } from "lucide-react";
+import { ChevronDown, Globe2, Headphones, LogOut, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, UsersRound, Volume2, VolumeX, Zap } from "lucide-react";
 import { roleModes } from "../../app/access.js";
 import { navigationItems } from "../../app/navigationModel.js";
 import { PRESENCE_STATUSES, PRESENCE_STATUS_NOT_SET_LABEL, presenceStatusClass, presenceStatusLabel } from "../../app/presenceModel.js";
 import { NotificationCenter } from "../notifications/NotificationCenter.jsx";
 import "./app-shell.css";
 
-export function Sidebar({ active, access, onSelect, operator, presenceStatus = "" }) {
+export function Sidebar({ active, access, collapsed = false, onSelect, onToggleCollapsed, operator, presenceStatus = "" }) {
   const operatorName = operator?.name || operator?.email || "Сотрудник";
   const operatorInitials = buildInitials(operatorName);
 
   return (
-    <aside className="sidebar">
-      <div className="brand-mark">
-        <Headphones size={22} />
+    <aside className={`sidebar ${collapsed ? "sidebar-collapsed" : ""}`} id="workspace-sidebar">
+      <div className="sidebar-brand">
+        <div className="brand-mark">
+          <Headphones size={22} />
+        </div>
+        <button
+          aria-controls="workspace-sidebar"
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Развернуть боковое меню" : "Свернуть боковое меню"}
+          className="sidebar-toggle"
+          onClick={onToggleCollapsed}
+          title={collapsed ? "Развернуть меню" : "Свернуть меню"}
+          type="button"
+        >
+          {collapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+        </button>
       </div>
       <nav className="nav-list" aria-label="Главная навигация">
         {navigationItems.map(({ key, label, icon: Icon }) => {

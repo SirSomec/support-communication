@@ -348,7 +348,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
       durationMinutes: 15,
       reason: "Customer approved webhook replay check",
       tenantId: "tenant-lumen",
-      userId: "usr-lumen-invite"
+      userId: "usr-lumen-multi"
     }, {
       headers: {},
       serviceAdminContext: {
@@ -370,7 +370,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(denied.data.tenantId, "tenant-lumen");
     assert.equal(await identityRepository.findActiveServiceAdminImpersonation({
       tenantId: "tenant-lumen",
-      userId: "usr-lumen-invite"
+      userId: "usr-lumen-multi"
     }), undefined);
     const denials = await identityRepository.listPermissionDenialEvents({ tenantId: "tenant-lumen" });
     assert.equal(denials.length, 1);
@@ -382,7 +382,7 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
       durationMinutes: 15,
       reason: "Customer approved webhook replay check",
       tenantId: "tenant-lumen",
-      userId: "usr-lumen-invite"
+      userId: "usr-lumen-multi"
     }, {
       headers: {},
       serviceAdminContext: {
@@ -3738,6 +3738,15 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(impersonation.data.impersonation.approvalId, null);
     assert.match(impersonation.data.impersonation.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(impersonation.data.auditEvent.action, "impersonation.start");
+    assert.equal(typeof impersonation.data.tenantSession.accessToken, "string");
+    assert.equal(impersonation.data.tenantSession.refreshToken, undefined);
+
+    const sessionRepository = RuntimeIdentityRepository.default();
+    const tenantSession = await sessionRepository.findTenantOperatorSessionByAccessToken(impersonation.data.tenantSession.accessToken);
+    assert.ok(tenantSession);
+    assert.equal(tenantSession?.session.id, `top-session_impersonation_${impersonation.data.impersonation.id}`);
+    assert.equal(tenantSession?.permissions.includes("*"), false);
+    assert.equal(tenantSession?.permissions.every((action) => action.endsWith(".read")), true);
 
     const duplicateImpersonation = await support.startImpersonation({
       tenantId: "tenant-volga",
@@ -3749,6 +3758,13 @@ describe("phase 8 billing, quotas and service-admin backend contracts", () => {
     assert.equal(duplicateImpersonation.status, "ok");
     assert.equal(duplicateImpersonation.data.duplicate, true);
     assert.equal(duplicateImpersonation.data.impersonation.id, impersonation.data.impersonation.id);
+
+    const stoppedImpersonation = await support.stopImpersonation({
+      impersonationId: impersonation.data.impersonation.id,
+      reason: "Return to service-admin after support review"
+    });
+    assert.equal(stoppedImpersonation.status, "ok");
+    assert.equal(await sessionRepository.findTenantOperatorSessionByAccessToken(impersonation.data.tenantSession.accessToken), undefined);
 
     const breakGlass = await support.requestBreakGlassApproval({
       tenantId: "tenant-volga",

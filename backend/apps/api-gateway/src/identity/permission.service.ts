@@ -134,23 +134,29 @@ export class PermissionService {
     };
 
     if (!allowed) {
-      await this.identityRepository.recordPermissionDenialEvent({
-        action,
-        actorId,
-        at: new Date().toISOString(),
-        id: makeAuditId("rbac_denial"),
-        immutable: true,
-        policyVersionId: activePolicy?.id ?? null,
-        reason: !activePolicy
-          ? "No active RBAC policy version was available."
-          : role === "unknown"
-            ? "Actor role is not recognized by the permission model."
-            : "No tenant-scoped grant matched.",
-        resource,
-        roleKey: auditRoleKey,
-        tenantId: tenantId ?? null,
-        traceId: identityTraceId(SERVICE, "permissionDenial")
-      });
+      try {
+        await this.identityRepository.recordPermissionDenialEvent({
+          action,
+          actorId,
+          at: new Date().toISOString(),
+          id: makeAuditId("rbac_denial"),
+          immutable: true,
+          policyVersionId: activePolicy?.id ?? null,
+          reason: !activePolicy
+            ? "No active RBAC policy version was available."
+            : role === "unknown"
+              ? "Actor role is not recognized by the permission model."
+              : "No tenant-scoped grant matched.",
+          resource,
+          roleKey: auditRoleKey,
+          tenantId: tenantId ?? null,
+          traceId: identityTraceId(SERVICE, "permissionDenial")
+        });
+      } catch {
+        // The policy decision must remain a controlled denial even when its
+        // best-effort audit write cannot be persisted (for example, during
+        // recovery from an incomplete RBAC catalog bootstrap).
+      }
     }
 
     return createEnvelope({

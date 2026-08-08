@@ -343,10 +343,23 @@ test("keyboard navigation exposes focus states and modal trap", async ({ page })
 
   await page.keyboard.press("Tab");
   const firstFocus = await activeElementSnapshot(page);
-  expect(firstFocus.className).toContain("nav-item");
-  expect(firstFocus.label).toContain("Диалоги");
+  expect(firstFocus.className).toContain("sidebar-toggle");
+  expect(firstFocus.label).toContain("Свернуть боковое меню");
   expect(firstFocus.outlineStyle).not.toBe("none");
   expect(firstFocus.outlineWidth).not.toBe("0px");
+
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("route-app-shell")).toHaveClass(/app-shell-sidebar-collapsed/);
+  await expect(page.getByRole("button", { name: "Развернуть боковое меню" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("route-app-shell")).not.toHaveClass(/app-shell-sidebar-collapsed/);
+
+  await page.keyboard.press("Tab");
+  const firstNavigationFocus = await activeElementSnapshot(page);
+  expect(firstNavigationFocus.className).toContain("nav-item");
+  expect(firstNavigationFocus.label).toContain("Диалоги");
+  expect(firstNavigationFocus.outlineStyle).not.toBe("none");
+  expect(firstNavigationFocus.outlineWidth).not.toBe("0px");
 
   for (let step = 0; step < 20; step += 1) {
     const active = await activeElementSnapshot(page);

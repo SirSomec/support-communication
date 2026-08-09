@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-const demoUrl = process.env.PILOT_WIDGET_DEMO_URL ?? "http://127.0.0.1:5174/demo.html";
-const appUrl = process.env.PILOT_OPERATOR_APP_URL ?? "http://127.0.0.1:5173";
+const widgetPort = Number(process.env.PLAYWRIGHT_WIDGET_PORT ?? 5174);
+const appPort = Number(process.env.PLAYWRIGHT_WEB_PORT ?? 5173);
+const demoUrl = process.env.PILOT_WIDGET_DEMO_URL ?? `http://127.0.0.1:${widgetPort}/demo.html`;
+const appUrl = process.env.PILOT_OPERATOR_APP_URL ?? `http://127.0.0.1:${appPort}`;
 
 test("widget demo page loads and SupportWidget.init is available", async ({ page }) => {
   await page.goto(demoUrl, { waitUntil: "domcontentloaded" });

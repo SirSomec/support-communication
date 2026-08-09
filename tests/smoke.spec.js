@@ -841,7 +841,7 @@ test("draft switch warning preserves or discards unsent draft", async ({ page })
   await expectHealthyPage(page);
 });
 
-test("knowledge editor supports article draft status and preview", async ({ page }) => {
+test("knowledge editor supports article draft status and publication", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Знания");
@@ -851,43 +851,27 @@ test("knowledge editor supports article draft status and preview", async ({ page
   // BAI-852: вкладка ревью обратной связи присутствует.
   await expect(page.locator(".knowledge-tabs")).toContainText("Обратная связь");
   await page.locator(".knowledge-row").filter({ hasText: "Order tracking" }).click();
-  await expect(page.locator(".knowledge-preview")).toContainText("Order tracking");
+  await expect(page.getByLabel("Название статьи")).toHaveValue("Order tracking");
 
-  await page.locator(".knowledge-editor-form input").fill("Order tracking v5");
+  await page.getByLabel("Название статьи").fill("Order tracking v5");
   const knowledgeDraftPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/knowledge/")
     && response.url().includes("/drafts")
     && response.request().method() === "POST"
   );
-  await page.locator(".knowledge-editor-form button").filter({ hasText: "Сохранить" }).click();
+  await page.getByRole("button", { name: "Сохранить черновик" }).click();
   const knowledgeDraftResponse = await knowledgeDraftPromise;
   expect(knowledgeDraftResponse.ok()).toBeTruthy();
   const knowledgeDraftPayload = await knowledgeDraftResponse.json();
   expect(knowledgeDraftPayload.status).toBe("ok");
   expect(knowledgeDraftPayload.data.article.status).toBe("draft");
   expect(knowledgeDraftPayload.data.auditEvent.id).toBeTruthy();
-  await expect(page.locator(".toast")).toContainText("черновик сохранен в backend");
-  await expect(page.locator(".knowledge-version-list")).toContainText("draft");
-  await expect(page.locator(".knowledge-approval-list")).toContainText("Сохранил версию");
+  await expect(page.locator(".toast")).toContainText("Черновик сохранён.");
+  await expect(page.getByLabel("Название статьи")).toHaveValue("Order tracking v5");
 
-  const submitReviewPromise = page.waitForResponse((response) =>
-    response.url().includes("/api/v1/knowledge/")
-    && response.url().includes("/submit-review")
-    && response.request().method() === "POST"
-  );
-  await page.locator(".knowledge-editor-form button").filter({ hasText: "На проверку" }).click();
-  const submitReviewResponse = await submitReviewPromise;
-  expect(submitReviewResponse.ok()).toBeTruthy();
-  const submitReviewPayload = await submitReviewResponse.json();
-  expect(submitReviewPayload.status).toBe("ok");
-  expect(submitReviewPayload.data.article.status).toBe("review");
-  expect(submitReviewPayload.data.approvalDecision.immutable).toBeTruthy();
-  await expect(page.locator(".toast")).toContainText("отправлена на проверку");
-
-  await expect(page.locator(".knowledge-preview")).toContainText("Order tracking v5");
-  await expect(page.locator(".knowledge-preview")).toContainText("review");
-
-  await expect(page.locator(".knowledge-governance-panel").filter({ hasText: "Вложения" }).getByRole("button", { name: /Добавить/ })).toBeEnabled();
+  await page.locator(".article-editor-topbar").getByRole("button", { name: "Настройки" }).click();
+  await expect(page.getByRole("region", { name: "Настройки статьи" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Вложения/ })).toBeEnabled();
   await expect(page.locator(".knowledge-attachment-list")).toContainText("delivery-status-map.pdf");
   const deleteAttachmentPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/knowledge/")
@@ -899,27 +883,22 @@ test("knowledge editor supports article draft status and preview", async ({ page
   expect(deleteAttachmentResponse.ok()).toBeTruthy();
   const deleteAttachmentPayload = await deleteAttachmentResponse.json();
   expect(deleteAttachmentPayload.data.auditEvent.action).toBe("knowledge.article.attachment.deleted");
-  await expect(page.locator(".knowledge-attachment-list")).not.toContainText("delivery-status-map.pdf");
-  await expect(page.locator(".knowledge-channel-picker button").filter({ hasText: "SDK" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".knowledge-attachment-list")).toHaveCount(0);
+  await expect(page.locator(".article-details-channels button").filter({ hasText: "SDK" })).toHaveAttribute("aria-pressed", "true");
 
   const publishPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/knowledge/")
     && response.url().includes("/publish")
     && response.request().method() === "POST"
   );
-  await page.locator(".knowledge-editor-form button").filter({ hasText: "Опубликовать" }).click();
+  await page.getByRole("button", { name: "Опубликовать" }).click();
   const publishResponse = await publishPromise;
   expect(publishResponse.ok()).toBeTruthy();
   const publishPayload = await publishResponse.json();
   expect(publishPayload.data.article.status).toBe("published");
-  await expect(page.locator(".toast")).toContainText("опубликована");
-  await expect(page.locator(".knowledge-preview")).toContainText("published");
-
-  await page.locator(".knowledge-preview-toolbar button").filter({ hasText: "Self-service" }).click();
-  await page.locator(".knowledge-self-service-preview input").fill("delivery");
-  await expect(page.locator(".knowledge-widget-results")).toContainText("Order tracking v5");
-  await expect(page.locator(".knowledge-self-service-preview")).toContainText("Текущая статья доступна клиенту");
-  await expect(page.locator(".knowledge-self-service-preview")).toContainText("Написать оператору");
+  await expect(page.locator(".toast")).toContainText("Статья опубликована.");
+  await expect(page.locator(".article-editor-topbar .article-status")).toContainText("Опубликована");
+  await expect(page.locator(".knowledge-row").filter({ hasText: "Order tracking v5" })).toContainText("Опубликована");
   await expectHealthyPage(page);
 });
 

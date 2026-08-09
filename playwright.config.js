@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? 4100);
 const webPort = Number(process.env.PLAYWRIGHT_WEB_PORT ?? 5173);
+const widgetPort = Number(process.env.PLAYWRIGHT_WIDGET_PORT ?? 5174);
 
 export default defineConfig({
   testDir: "./tests",
@@ -32,10 +33,10 @@ export default defineConfig({
       url: `http://127.0.0.1:${webPort}`
     },
     {
-      command: "npm run widget:preview:e2e",
+      command: `npm run widget:build && npm run preview --prefix packages/web-widget -- --port ${widgetPort}`,
       reuseExistingServer: false,
       timeout: 120_000,
-      url: "http://127.0.0.1:5174/demo.html"
+      url: `http://127.0.0.1:${widgetPort}/demo.html`
     }
   ],
   projects: [

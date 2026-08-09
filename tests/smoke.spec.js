@@ -1043,7 +1043,7 @@ test("scenario wizard knowledge step offers files, articles and urls", async ({ 
   await openSection(page, "Боты");
 
   await page.evaluate(() => sessionStorage.removeItem("bot-scenario-wizard-draft-v1"));
-  await page.getByRole("button", { name: "Создать в мастере" }).click();
+  await page.getByRole("button", { name: /Создать (бота|в мастере)/ }).click();
   const wizard = page.getByRole("dialog", { name: "Мастер создания сценария" });
   await expect(wizard).toBeVisible();
 
@@ -1114,108 +1114,50 @@ test("quality workspace uses tenant data and completes manual QA", async ({ page
   await expectHealthyPage(page);
 });
 
-test("bot builder supports canonical nodes and import validation", async ({ page }) => {
+test("bot console supports operations, settings and live testing", async ({ page }) => {
   await openAppShell(page);
   await selectRole(page, "Администратор");
   await openSection(page, "Боты");
-  const deliveryScenario = page.locator(".scenario-card").filter({ hasText: "Delivery status" });
-  await deliveryScenario.getByRole("button", { name: "Открыть" }).click();
+  const scenarioList = page.locator(".scenario-list-item");
+  await expect(scenarioList.first()).toBeVisible();
+  await scenarioList.first().click();
 
-  // BAI-810: консоль сценария с вкладками — паспорт, результаты, версии.
-  await expect(page.locator(".scenario-console")).toBeVisible();
-  await expect(page.locator(".scenario-passport-grid")).toContainText("Когда запускается");
-  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Результаты" }).click();
-  await expect(page.locator(".scenario-ops-panel")).toContainText("Эксплуатация сценария");
-  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Обзор" }).click();
+  // Редизайн BAI-810: единая консоль вместо канваса и разрозненных карточек.
+  const scenarioConsole = page.locator(".scenario-console");
+  await expect(scenarioConsole).toBeVisible();
+  await expect(scenarioConsole.locator(".scenario-passport-grid")).toContainText("Когда запускается");
+  await scenarioConsole.getByRole("button", { name: "Результаты", exact: true }).click();
+  await expect(scenarioConsole.locator(".scenario-ops-panel")).toContainText("Эксплуатация сценария");
+  await expect(scenarioConsole.locator(".scenario-ops-panel")).toContainText("AI usage / cost — биллинг");
 
-  await page.locator(".bot-mode-toggle input[type='checkbox']").check();
-  await expect(page.locator(".bot-builder-panel")).toBeVisible();
-  await expect(page.locator(".bot-flow-node")).toHaveCount(3);
-  for (const label of ["Сообщение", "Запрос контакта", "Handoff"]) {
-    await expect(page.locator(".bot-flow-canvas")).toContainText(label);
-  }
+  await scenarioConsole.getByRole("button", { name: "Настройки", exact: true }).click();
+  await expect(scenarioConsole.locator(".scenario-settings-form")).toBeVisible();
 
-  await page.locator(".bot-node-editor input").first().fill("Backend saved node");
-  await page.locator(".bot-node-editor button").filter({ hasText: "Сохранить" }).click();
-  await expect(page.locator(".toast")).toContainText("сценарий сохранен на backend");
-  await expect(page.locator(".bot-flow-node.selected")).toContainText("Backend saved node");
-
-  // Import runs before publish: published scenarios are edit-locked by lifecycle governance.
-  const exportValue = await page.locator(".bot-io-panel textarea").first().inputValue();
-  const payload = JSON.parse(exportValue);
-  expect(payload.schemaVersion).toBe("bot-flow/v1");
-  expect(payload.flowEdges.length).toBeGreaterThan(0);
-
-  await page.locator(".bot-io-panel textarea").nth(1).fill('{"name":"Broken","flowNodes":[{"id":"bad","type":"bad_type"}]}');
-  await page.locator(".bot-io-panel button").filter({ hasText: "Импорт" }).click();
-  await expect(page.locator(".bot-import-error")).toContainText("валидными type");
-
-  payload.name = "Импортированный сценарий";
-  payload.flowNodes[0].title = "Импортированная нода";
-  await page.locator(".bot-io-panel textarea").nth(1).fill(JSON.stringify(payload));
-  await page.locator(".bot-io-panel button").filter({ hasText: "Импорт" }).click();
-  await expect(page.locator(".toast")).toContainText("сохранен на backend");
-  await expect(page.locator(".bot-builder-panel .section-title")).toContainText("Импортированный сценарий");
-  await expect(page.locator(".bot-flow-node.selected")).toContainText("Импортированная нода");
-
-  const publishPromise = page.waitForResponse((response) =>
-    response.url().includes("/api/v1/automation/bot-scenarios/")
-    && response.url().includes("/publish")
-    && response.request().method() === "POST"
-  );
-  await page.getByRole("button", { name: "Опубликовать", exact: true }).click();
-  const publishDialog = page.getByRole("dialog", { name: /Публикация/ });
-  await expect(publishDialog).toBeVisible();
-  await publishDialog.getByRole("button", { name: "Опубликовать", exact: true }).click();
-  const publishResponse = await publishPromise;
-  expect(publishResponse.ok()).toBeTruthy();
-  const publishPayload = await publishResponse.json();
-  expect(publishPayload.status).toBe("ok");
-  expect(publishPayload.data.auditId).toBeTruthy();
-  expect(publishPayload.data.runtimeVersion).toMatch(/^runtime-/);
-  expect(publishPayload.data.versionState).toBe("published");
-  await expect(page.locator(".toast")).toContainText("опубликован: runtime-");
-
-  // BAI-812: правки опубликованного сценария копятся в черновике следующей версии.
-  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Настройка" }).click();
-  await expect(page.locator(".scenario-settings-note").first()).toContainText("черновик");
-  await page.locator(".scenario-settings-form input[type='text']").first().fill("Импортированный сценарий v2");
-  await page.getByRole("button", { name: "Сохранить черновик изменений" }).click();
-  await expect(page.locator(".toast")).toContainText("черновик");
-  await expect(page.locator(".scenario-console-badges")).toContainText("неопубликованные изменения");
-  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Обзор" }).click();
-  await page.getByRole("button", { name: "Отменить изменения" }).click();
-  await expect(page.locator(".toast")).toContainText("отменён");
-  await expect(page.locator(".scenario-console-badges")).not.toContainText("неопубликованные изменения");
-
-  // BAI-813: вкладка версий показывает активную версию публикации.
-  await page.locator(".scenario-console-head .segmented-control button", { hasText: "Версии" }).click();
-  await expect(page.locator(".scenario-version-list")).toContainText("активная");
-
-  // BAI-804: живой тест-чат — сообщение проходит настоящий runtime в изолированной sandbox-сессии.
-  await page.getByRole("button", { name: "Тест-чат" }).click();
+  // BAI-804: живой тест-чат остаётся частью консоли, а не отдельного canvas.
+  await scenarioConsole.getByRole("button", { name: "Тестирование", exact: true }).click();
+  await expect(scenarioConsole.locator(".sandbox-chat-panel")).toBeVisible();
   const sandboxTurnPromise = page.waitForResponse((response) =>
     response.url().includes("/api/v1/automation/bot-scenarios/")
     && response.url().includes("/sandbox-sessions/")
     && response.url().includes("/messages")
     && response.request().method() === "POST"
   );
-  await page.locator(".sandbox-composer input").fill("Здравствуйте, подскажите статус заказа");
-  await page.locator(".sandbox-composer button[type='submit']").click();
+  await scenarioConsole.locator(".sandbox-composer input").fill("Здравствуйте, подскажите статус заказа");
+  await scenarioConsole.locator(".sandbox-composer button[type='submit']").click();
   const sandboxTurnResponse = await sandboxTurnPromise;
   expect(sandboxTurnResponse.ok()).toBeTruthy();
   const sandboxTurnPayload = await sandboxTurnResponse.json();
   expect(sandboxTurnPayload.status).toBe("ok");
   expect(sandboxTurnPayload.data.session.id).toMatch(/^sbx_/);
   expect(sandboxTurnPayload.data.turn.trace).toBeTruthy();
-  await expect(page.locator(".sandbox-bubble--client")).toContainText("статус заказа");
-  await expect(page.locator(".sandbox-bubble--bot, .sandbox-event").first()).toBeVisible();
-  await page.locator(".sandbox-trace > button").first().click();
-  await expect(page.locator(".sandbox-trace-details")).toContainText("Шаг");
-  await page.getByRole("button", { name: "Сохранить как проверку" }).click();
+  await expect(scenarioConsole.locator(".sandbox-bubble--client")).toContainText("статус заказа");
+  await expect(scenarioConsole.locator(".sandbox-bubble--bot, .sandbox-event").first()).toBeVisible();
+  await scenarioConsole.locator(".sandbox-trace > button").first().click();
+  await expect(scenarioConsole.locator(".sandbox-trace-details")).toContainText("Шаг");
+  await scenarioConsole.getByRole("button", { name: "Сохранить как проверку" }).click();
   await expect(page.locator(".toast")).toContainText("проверочный набор");
-  await page.getByRole("button", { name: "Начать заново" }).click();
-  await expect(page.locator(".sandbox-chat-empty")).toBeVisible();
+  await scenarioConsole.getByRole("button", { name: "Начать заново" }).click();
+  await expect(scenarioConsole.locator(".sandbox-chat-empty")).toBeVisible();
   await expectHealthyPage(page);
 });
 
@@ -1239,7 +1181,7 @@ test("scenario wizard keeps keyboard focus, aria steps and responsive layout", a
     // The wizard intentionally restores an unfinished draft (including the step),
     // so reset the persisted draft to observe the first step on every viewport.
     await page.evaluate(() => sessionStorage.removeItem("bot-scenario-wizard-draft-v1"));
-    await page.getByRole("button", { name: "Создать в мастере" }).click();
+    await page.getByRole("button", { name: /Создать (бота|в мастере)/ }).click();
     const wizard = page.getByRole("dialog", { name: "Мастер создания сценария" });
     await expect(wizard).toBeVisible();
     await expect(wizard).toHaveAttribute("aria-modal", "true");

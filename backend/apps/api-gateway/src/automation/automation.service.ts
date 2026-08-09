@@ -449,7 +449,6 @@ export class AutomationService {
     }
     const request = payload ?? {};
     const scenarioId = request.id?.trim();
-    const validation = parseAndValidateBotFlow(request);
 
     if (!scenarioId) {
       return publishFailure(tenantId, undefined, "bot_scenario_id_required", invalidEnvelope("publishBotScenario", "bot_scenario_id_required", "Bot scenario id is required.", {}));
@@ -459,37 +458,34 @@ export class AutomationService {
     if (!existing || scenarioTenantId(existing) !== tenantId) {
       return publishFailure(tenantId, scenarioId, "bot_scenario_not_found", invalidEnvelope("publishBotScenario", "bot_scenario_not_found", `Bot scenario ${scenarioId} was not found.`, { scenarioId }));
     }
+    // The persisted draft is the source of truth for the next publication.
+    // The UI intentionally sends the whole currently published scenario for
+    // backwards compatibility, so its stale fields must not mask draft edits.
+    const publishRequest = mergeScenarioDraftForPublish(existing, request);
+    const validation = parseAndValidateBotFlow(publishRequest);
     if (validation.errors.length) {
       return publishFailure(tenantId, scenarioId, "bot_flow_invalid", invalidEnvelope("publishBotScenario", "bot_flow_invalid", validation.errors.join("; "), {
         scenarioId
       }));
     }
 
-    const draftOverlay = existing.draft;
-    const triggerRules = resolveScenarioTriggerRules(request, draftOverlay?.triggerRules?.length
-      ? draftOverlay.triggerRules
-      : existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules());
+    const triggerRules = resolveScenarioTriggerRules(
+      publishRequest,
+      existing.triggerRules?.length ? existing.triggerRules : defaultScenarioTriggerRules()
+    );
     const triggerErrors = validateScenarioTriggerRules(triggerRules);
     if (triggerErrors.length) {
       return publishFailure(tenantId, scenarioId, "bot_trigger_invalid", invalidEnvelope("publishBotScenario", "bot_trigger_invalid", triggerErrors.join("; "), { scenarioId, violations: triggerErrors }));
     }
     const state = await this.automationRepository.readStateAsync();
-    const triggerConflict = findScenarioTriggerConflict(state.botScenarios, scenarioId, tenantId, triggerRules, normalizeScenarioPriority(request.priority ?? existing.priority));
+    const triggerConflict = findScenarioTriggerConflict(state.botScenarios, scenarioId, tenantId, triggerRules, normalizeScenarioPriority(publishRequest.priority ?? existing.priority));
     if (triggerConflict) {
       return publishFailure(tenantId, scenarioId, "trigger_conflict", conflictEnvelope("publishBotScenario", "trigger_conflict", "Another published scenario already owns this keyword phrase and priority.", triggerConflict));
     }
     // Гейт готовности/одобрения источников при публикации снят (2026-07-17):
     // привязанный источник используется ботом безусловно; несуществующие id
     // отсекает валидация сценария выше.
-    // A published scenario can have a saved draft overlay.  The console still
-    // includes the last published fields in its publish request, so those stale
-    // values must never override an explicitly edited draft binding.  An empty
-    // draft array is meaningful too: it intentionally removes all sources.
-    const sourceBindings = normalizeScenarioSourceBindings(
-      draftOverlay?.sourceBindings !== undefined
-        ? draftOverlay.sourceBindings
-        : request.sourceBindings ?? existing.sourceBindings ?? []
-    );
+    const sourceBindings = normalizeScenarioSourceBindings(publishRequest.sourceBindings ?? []);
     const prerequisiteViolations: string[] = [];
     const nodes = validation.payload?.flowNodes ?? [];
     const aiNodes = nodes.filter((node) => node.type === "ai_reply");
@@ -512,12 +508,12 @@ export class AutomationService {
 
     const idempotencyKey = request.idempotencyKey?.trim() || actionIdempotencyKey(context);
     const fingerprint = stableStringify({
-      channels: request.channels ?? [],
+      channels: publishRequest.channels ?? [],
       flowEdges: validation.payload?.flowEdges ?? [],
       flowNodes: validation.payload?.flowNodes ?? [],
       id: scenarioId,
       name: validation.payload?.name,
-      priority: normalizeScenarioPriority(request.priority ?? existing.priority),
+      priority: normalizeScenarioPriority(publishRequest.priority ?? existing.priority),
       sourceBindings,
       triggerRules,
       tenantId
@@ -550,7 +546,7 @@ export class AutomationService {
 
     const result = {
       auditId: makeAuditId("bot"),
-      channels: clone(request.channels ?? []),
+      channels: clone(publishRequest.channels ?? []),
       duplicate: false,
       handoffEvent: {
         eventName: "bot.handoff.created",
@@ -568,14 +564,14 @@ export class AutomationService {
     // Публикация материализует черновик следующей версии (если он был) и всегда очищает его.
     const scenario: BotScenario = {
       activeVersionId: String(result.runtimeVersion),
-      basePrompt: normalizeScenarioBasePrompt(request.basePrompt ?? draftOverlay?.basePrompt ?? existing.basePrompt),
-      channels: clone(request.channels ?? draftOverlay?.channels ?? existing.channels),
+      basePrompt: normalizeScenarioBasePrompt(publishRequest.basePrompt),
+      channels: clone(publishRequest.channels ?? existing.channels),
       enabled: true,
-      flowEdges: clone(validation.payload?.flowEdges ?? draftOverlay?.flowEdges ?? existing.flowEdges),
-      flowNodes: clone(validation.payload?.flowNodes ?? draftOverlay?.flowNodes ?? existing.flowNodes),
+      flowEdges: clone(validation.payload?.flowEdges ?? existing.flowEdges),
+      flowNodes: clone(validation.payload?.flowNodes ?? existing.flowNodes),
       id: scenarioId,
-      name: String(validation.payload?.name ?? draftOverlay?.name ?? existing.name),
-      priority: normalizeScenarioPriority(request.priority ?? draftOverlay?.priority ?? existing.priority),
+      name: String(validation.payload?.name ?? existing.name),
+      priority: normalizeScenarioPriority(publishRequest.priority ?? existing.priority),
       schemaVersion: "bot-flow/v1",
       status: "published",
       tenantId,
@@ -1780,6 +1776,26 @@ function normalizeScenarioTriggerRules(value: BotTriggerRule[]): BotTriggerRule[
       type: rule.type
     }];
   });
+}
+
+function mergeScenarioDraftForPublish(
+  existing: BotScenario,
+  request: PublishBotScenarioPayload
+): PublishBotScenarioPayload {
+  const draft = existing.draft;
+  return {
+    ...request,
+    basePrompt: draft?.basePrompt ?? request.basePrompt ?? existing.basePrompt,
+    channels: draft?.channels ?? request.channels ?? existing.channels,
+    flowEdges: draft?.flowEdges ?? request.flowEdges ?? existing.flowEdges,
+    flowNodes: draft?.flowNodes ?? request.flowNodes ?? existing.flowNodes,
+    id: request.id ?? existing.id,
+    name: draft?.name ?? request.name ?? existing.name,
+    priority: draft?.priority ?? request.priority ?? existing.priority,
+    schemaVersion: request.schemaVersion ?? existing.schemaVersion,
+    sourceBindings: draft?.sourceBindings ?? request.sourceBindings ?? existing.sourceBindings,
+    triggerRules: draft?.triggerRules ?? request.triggerRules ?? existing.triggerRules
+  };
 }
 
 function normalizeScenarioSourceBindings(value: BotScenario["sourceBindings"]): NonNullable<BotScenario["sourceBindings"]> {

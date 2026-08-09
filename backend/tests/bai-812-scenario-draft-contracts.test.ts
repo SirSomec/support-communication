@@ -91,30 +91,55 @@ describe("BAI-812 draft-over-published scenario", () => {
     await publishBaseline(automation);
     await automation.updateBotScenario("bot-draft", {
       basePrompt: "Промпт из черновика",
-      flowNodes: [{ id: "start", type: "condition" }, { id: "reply", title: "Ответ v2", type: "message" }],
-      flowEdges: [{ from: "start", to: "reply" }],
-      sourceBindings: [{ sourceId: "document-new" }]
+      channels: ["SDK", "Telegram"],
+      flowNodes: [
+        { id: "start", type: "condition" },
+        { id: "reply", title: "Ответ v2", type: "message", config: { retrievalMode: "semantic", retrievalScoreThreshold: 0.65 } }
+      ],
+      flowEdges: [{ from: "start", label: "draft-next", to: "reply" }],
+      name: "Сценарий v2",
+      priority: 17,
+      sourceBindings: [{ sourceId: "document-new" }],
+      triggerRules: [{ id: "rule-v2", matchMode: "exact", phrases: ["новый заказ"], priority: 17, type: "phrase" }]
     }, CONTEXT);
 
-    // The console payload contains the previous published source list.  The
-    // persisted draft selection remains authoritative when publishing it.
+    // The console payload contains the previous published configuration.  All
+    // persisted draft fields remain authoritative when publishing it.
     const republished = await automation.publishBotScenario({
-      ...scenarioPayload("Ответ v2"),
-      basePrompt: undefined,
+      ...scenarioPayload("Ответ v1"),
+      basePrompt: "Старый промпт",
+      priority: 0,
       sourceBindings: [],
       idempotencyKey: "pub-v2"
     }, CONTEXT);
     assert.equal(republished.status, "ok");
 
     const detail = await automation.fetchBotScenario("bot-draft", CONTEXT);
-    const scenario = detail.data.scenario as { basePrompt?: string; draft?: unknown; flowNodes: Array<{ title?: string }>; sourceBindings?: Array<{ sourceId: string }> };
+    const scenario = detail.data.scenario as {
+      basePrompt?: string;
+      channels: string[];
+      draft?: unknown;
+      flowEdges: Array<{ label?: string }>;
+      flowNodes: Array<{ config?: { retrievalMode?: string; retrievalScoreThreshold?: number }; title?: string }>;
+      name: string;
+      priority?: number;
+      sourceBindings?: Array<{ sourceId: string }>;
+      triggerRules?: Array<{ matchMode?: string; phrases?: string[]; priority?: number }>;
+    };
     assert.equal(scenario.draft, undefined);
     assert.equal(scenario.basePrompt, "Промпт из черновика");
+    assert.deepEqual(scenario.channels, ["SDK", "Telegram"]);
+    assert.equal(scenario.flowEdges[0]?.label, "draft-next");
     assert.equal(scenario.flowNodes[1]?.title, "Ответ v2");
+    assert.equal(scenario.flowNodes[1]?.config?.retrievalMode, "semantic");
+    assert.equal(scenario.flowNodes[1]?.config?.retrievalScoreThreshold, 0.65);
+    assert.equal(scenario.name, "Сценарий v2");
+    assert.equal(scenario.priority, 17);
     assert.deepEqual(scenario.sourceBindings, [{ sourceId: "document-new" }]);
+    assert.deepEqual(scenario.triggerRules?.[0], { id: "rule-v2", matchMode: "exact", phrases: ["новый заказ"], priority: 17, type: "phrase" });
 
     const runtime = new BotRuntimeService(AutomationRepository.default());
-    const run = await runtime.handleInboundEvent({ channel: "SDK", conversationId: "conv-2", eventId: "evt-2", payload: { text: "где заказ" }, tenantId: TENANT, traceId: "trace-2" });
+    const run = await runtime.handleInboundEvent({ channel: "SDK", conversationId: "conv-2", eventId: "evt-2", payload: { text: "новый заказ" }, tenantId: TENANT, traceId: "trace-2" });
     assert.equal((run.step.sideEffects[0] as { descriptor: { payload: { text: string } } }).descriptor.payload.text, "Ответ v2");
   });
 

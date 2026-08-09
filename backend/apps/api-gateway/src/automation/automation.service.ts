@@ -481,7 +481,15 @@ export class AutomationService {
     // Гейт готовности/одобрения источников при публикации снят (2026-07-17):
     // привязанный источник используется ботом безусловно; несуществующие id
     // отсекает валидация сценария выше.
-    const sourceBindings = normalizeScenarioSourceBindings(request.sourceBindings ?? draftOverlay?.sourceBindings ?? existing.sourceBindings ?? []);
+    // A published scenario can have a saved draft overlay.  The console still
+    // includes the last published fields in its publish request, so those stale
+    // values must never override an explicitly edited draft binding.  An empty
+    // draft array is meaningful too: it intentionally removes all sources.
+    const sourceBindings = normalizeScenarioSourceBindings(
+      draftOverlay?.sourceBindings !== undefined
+        ? draftOverlay.sourceBindings
+        : request.sourceBindings ?? existing.sourceBindings ?? []
+    );
     const prerequisiteViolations: string[] = [];
     const nodes = validation.payload?.flowNodes ?? [];
     const aiNodes = nodes.filter((node) => node.type === "ai_reply");

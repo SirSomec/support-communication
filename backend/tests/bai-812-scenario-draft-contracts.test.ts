@@ -92,21 +92,26 @@ describe("BAI-812 draft-over-published scenario", () => {
     await automation.updateBotScenario("bot-draft", {
       basePrompt: "Промпт из черновика",
       flowNodes: [{ id: "start", type: "condition" }, { id: "reply", title: "Ответ v2", type: "message" }],
-      flowEdges: [{ from: "start", to: "reply" }]
+      flowEdges: [{ from: "start", to: "reply" }],
+      sourceBindings: [{ sourceId: "document-new" }]
     }, CONTEXT);
 
+    // The console payload contains the previous published source list.  The
+    // persisted draft selection remains authoritative when publishing it.
     const republished = await automation.publishBotScenario({
       ...scenarioPayload("Ответ v2"),
       basePrompt: undefined,
+      sourceBindings: [],
       idempotencyKey: "pub-v2"
     }, CONTEXT);
     assert.equal(republished.status, "ok");
 
     const detail = await automation.fetchBotScenario("bot-draft", CONTEXT);
-    const scenario = detail.data.scenario as { basePrompt?: string; draft?: unknown; flowNodes: Array<{ title?: string }> };
+    const scenario = detail.data.scenario as { basePrompt?: string; draft?: unknown; flowNodes: Array<{ title?: string }>; sourceBindings?: Array<{ sourceId: string }> };
     assert.equal(scenario.draft, undefined);
     assert.equal(scenario.basePrompt, "Промпт из черновика");
     assert.equal(scenario.flowNodes[1]?.title, "Ответ v2");
+    assert.deepEqual(scenario.sourceBindings, [{ sourceId: "document-new" }]);
 
     const runtime = new BotRuntimeService(AutomationRepository.default());
     const run = await runtime.handleInboundEvent({ channel: "SDK", conversationId: "conv-2", eventId: "evt-2", payload: { text: "где заказ" }, tenantId: TENANT, traceId: "trace-2" });

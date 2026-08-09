@@ -29,6 +29,15 @@ describe("quality and knowledge workflow actions", () => {
     assert.match(source, /AI не выставляет CSI\/CSAT и не меняет клиентскую оценку/);
   });
 
+  it("paginates long lists of knowledge sources without changing bulk selection scope", () => {
+    const source = readFileSync(new URL("../src/features/knowledge/KnowledgeScreen.jsx", import.meta.url), "utf8");
+
+    assert.match(source, /const KNOWLEDGE_SOURCE_PAGE_SIZE = 10/);
+    assert.match(source, /\{pageSources\.map\(\(source\) =>/);
+    assert.match(source, /<PaginationControls/);
+    assert.match(source, /Выбрать все \(\{sources\.length\}\)/);
+  });
+
   it("uses the backing conversation id for coaching draft scoring", () => {
     assert.equal(buildCoachingDraftScorePayload({
       conversationId: "vladimir",

@@ -1,8 +1,10 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { AlertCircle, BookOpenCheck, Check, Database, FileText, Link2 } from "lucide-react";
+import { PaginationControls } from "../../ui.jsx";
 import { describeScenarioSourceState } from "./scenarioKnowledgeSourceState.js";
 
 const EMPTY_SOURCES = [];
+const KNOWLEDGE_SOURCES_PAGE_SIZE = 8;
 
 /**
  * Controlled selector for knowledge sources that are safe to use in a bot scenario.
@@ -19,6 +21,7 @@ export function ScenarioKnowledgeSourceSelector({
   selectedSourceIds = EMPTY_SOURCES,
   sources = EMPTY_SOURCES
 }) {
+  const [page, setPage] = useState(1);
   const selectedIds = useMemo(() => new Set(selectedSourceIds), [selectedSourceIds]);
   const visibleSources = useMemo(
     () => sources
@@ -26,6 +29,16 @@ export function ScenarioKnowledgeSourceSelector({
       .filter((item) => !item.state.hidden),
     [sources]
   );
+  const totalPages = Math.max(1, Math.ceil(visibleSources.length / KNOWLEDGE_SOURCES_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageSources = useMemo(() => {
+    const start = (currentPage - 1) * KNOWLEDGE_SOURCES_PAGE_SIZE;
+    return visibleSources.slice(start, start + KNOWLEDGE_SOURCES_PAGE_SIZE);
+  }, [currentPage, visibleSources]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   function toggleSource(sourceId) {
     if (disabled || isLoading) {
@@ -60,33 +73,42 @@ export function ScenarioKnowledgeSourceSelector({
       ) : null}
 
       {!isLoading && !error && visibleSources.length > 0 ? (
-        <ul aria-label="Источники знаний" className="scenario-knowledge-source-list">
-          {visibleSources.map(({ source, state }) => {
-            const selected = selectedIds.has(source.id);
-            const SourceIcon = getSourceIcon(source);
-            const label = source.title || source.name || "Источник без названия";
+        <>
+          <ul aria-label="Источники знаний" className="scenario-knowledge-source-list">
+            {pageSources.map(({ source, state }) => {
+              const selected = selectedIds.has(source.id);
+              const SourceIcon = getSourceIcon(source);
+              const label = source.title || source.name || "Источник без названия";
 
-            return (
-              <li key={source.id}>
-                <label className={`${selected ? "selected" : ""}${state.selectable ? "" : " unavailable"}`}>
-                  <input
-                    checked={selected}
-                    disabled={!state.selectable && !selected}
-                    onChange={() => toggleSource(source.id)}
-                    type="checkbox"
-                  />
-                  <SourceIcon aria-hidden="true" size={18} />
-                  <span>
-                    <strong>{label}</strong>
-                    <small>{source.description || source.typeLabel || getSourceTypeLabel(source)}</small>
-                    {state.hint ? <small className="scenario-knowledge-source-hint">{state.hint}</small> : null}
-                  </span>
-                  {selected ? <Check aria-label="Выбран" className="scenario-knowledge-source-check" size={17} /> : null}
-                </label>
-              </li>
-            );
-          })}
-        </ul>
+              return (
+                <li key={source.id}>
+                  <label className={`${selected ? "selected" : ""}${state.selectable ? "" : " unavailable"}`}>
+                    <input
+                      checked={selected}
+                      disabled={!state.selectable && !selected}
+                      onChange={() => toggleSource(source.id)}
+                      type="checkbox"
+                    />
+                    <SourceIcon aria-hidden="true" size={18} />
+                    <span>
+                      <strong>{label}</strong>
+                      <small>{source.description || source.typeLabel || getSourceTypeLabel(source)}</small>
+                      {state.hint ? <small className="scenario-knowledge-source-hint">{state.hint}</small> : null}
+                    </span>
+                    {selected ? <Check aria-label="Выбран" className="scenario-knowledge-source-check" size={17} /> : null}
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          <PaginationControls
+            currentPage={currentPage}
+            itemLabel="источники знаний"
+            onPageChange={setPage}
+            pageSize={KNOWLEDGE_SOURCES_PAGE_SIZE}
+            totalItems={visibleSources.length}
+          />
+        </>
       ) : null}
     </fieldset>
   );

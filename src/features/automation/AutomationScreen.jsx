@@ -2,17 +2,12 @@ import React, { useEffect, useRef, useState } from "react";
 import "./automation.css";
 import {
   AlertTriangle,
-  Bot,
   CheckCircle2,
   Download,
   FileText,
-  ListChecks,
   Pencil,
-  PlayCircle,
   Plus,
-  Sparkles,
-  Workflow,
-  Zap
+  Sparkles
 } from "lucide-react";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { buildBotScenarioUpdatePatch, changeBotScenarioLifecycle, discardBotScenarioDraft, publishBotScenario, rollbackBotScenario, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
@@ -20,7 +15,7 @@ import { automationService } from "../../services/automationService.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
 import { summarizeBulkUpload } from "../knowledge/knowledgeBulkModel.js";
 import { uploadKnowledgeDocumentFiles } from "../knowledge/knowledgeUploadPipeline.js";
-import { ConfirmDialog, MetricTile, ProductScreen, SectionTitle, SegmentedControl } from "../../ui.jsx";
+import { ConfirmDialog, ProductScreen, SectionTitle } from "../../ui.jsx";
 import { ScenarioCreationWizard } from "./ScenarioCreationWizard.jsx";
 import { ScenarioListPanel } from "./ScenarioListPanel.jsx";
 import { ScenarioArchiveConfirmModal, ScenarioPauseConfirmModal, ScenarioPublishChecklistModal } from "./ScenarioLifecycleModals.jsx";
@@ -31,9 +26,6 @@ import { botNodeTypeLabels, botNodeTypeOptions, createDraftScenario, createScena
 export function AutomationScreen({ onBack, onToast, access }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [auditEvents, setAuditEvents] = useState([]);
-  const [proactiveRules, setProactiveRules] = useState([]);
-  const [runtimeMetrics, setRuntimeMetrics] = useState([]);
   const [scenarioItems, setScenarioItems] = useState([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState("");
@@ -49,7 +41,6 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [workspacePartial, setWorkspacePartial] = useState(false);
   const [sandboxVerifiedScenarioId, setSandboxVerifiedScenarioId] = useState("");
   const [consoleTab, setConsoleTab] = useState("overview");
-  const [workView, setWorkView] = useState("scenarios");
   const sandboxChatRef = useRef(null);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [pauseTarget, setPauseTarget] = useState(null);
@@ -60,7 +51,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
   const [publishChecklistOpen, setPublishChecklistOpen] = useState(false);
   const [advancedMode, setAdvancedMode] = useState(() => loadAdvancedModePreference());
   const [scenarioOperations, setScenarioOperations] = useState([]);
-  const [aiUsage, setAiUsage] = useState(null);
+  const [aiDialogUsage, setAiDialogUsage] = useState(null);
 
   function toggleAdvancedMode(nextValue) {
     const enabled = Boolean(nextValue);
@@ -94,11 +85,8 @@ export function AutomationScreen({ onBack, onToast, access }) {
     const nextNodeId = selected?.flowNodes?.some((node) => node.id === selectedNodeId)
       ? selectedNodeId
       : (selected?.flowNodes?.[0]?.id ?? "");
-    setAuditEvents(Array.isArray(response.data?.auditEvents) ? response.data.auditEvents : []);
-    setProactiveRules(Array.isArray(response.data?.proactiveRules) ? response.data.proactiveRules : []);
-    setRuntimeMetrics(normalizeRuntimeMetrics(response.data?.runtimeMetrics));
     setAiReadiness(response.data?.aiReadiness ?? { status: "not_configured" });
-    setAiUsage(response.data?.aiUsage ?? null);
+    setAiDialogUsage(response.data?.aiDialogUsage ?? null);
     setScenarioOperations(Array.isArray(response.data?.scenarioOperations) ? response.data.scenarioOperations : []);
     setScenarioVersions(Array.isArray(response.data?.botScenarioVersions) ? response.data.botScenarioVersions : []);
     setWorkspacePartial(Boolean(response.data?.partial));
@@ -281,11 +269,6 @@ export function AutomationScreen({ onBack, onToast, access }) {
       </ProductScreen>
     );
   }
-  const enabledScenarios = scenarioItems.filter((scenario) => isEnabledAutomationStatus(scenario.status)).length;
-  const enabledProactive = proactiveRules.filter((rule) => isEnabledAutomationStatus(rule.status)).length;
-  const botMetricRows = runtimeMetrics.length
-    ? runtimeMetrics
-    : [{ label: "Bot runtime", value: "нет данных", detail: "runtimeMetrics не вернулись из backend" }];
   const exportPayload = JSON.stringify({
     schemaVersion: selectedScenario.schemaVersion,
     exportVersion: selectedScenario.exportVersion,
@@ -644,7 +627,6 @@ export function AutomationScreen({ onBack, onToast, access }) {
   }
 
   function focusSandboxChat() {
-    setWorkView("scenarios");
     setConsoleTab("test");
     sandboxChatRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -792,58 +774,19 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
   return (
     <ProductScreen
-      title="Боты и автоматизация"
-      subtitle="Сценарии AI-оператора, proactive-приглашения, handoff в очереди и audit действий автоматики."
+      title="Боты"
+      subtitle="Создавайте, настраивайте и контролируйте ботов. Проверяйте сценарии и публикуйте изменения без лишних экранов."
       onBack={onBack}
-      stateItems={createScreenStateItems({
-        total: scenarioItems.length,
-        empty: `${scenarioItems.length} сценариев`,
-        emptyWhenZero: "сценариев нет",
-        errors: importError || knowledgeSourcesError || workspacePartial ? 1 : 0,
-        errorLabel: knowledgeSourcesError || workspacePartial ? "частичные данные" : "ошибок flow нет"
-      })}
       actions={
         <>
           <button disabled={!canManageAutomation || isSaving} onClick={openScenarioWizard} title={canManageAutomation ? "Открыть мастер создания сценария" : access.reason} type="button">
             <Plus size={17} />
-            Создать в мастере
-          </button>
-          <button disabled={!canManageAutomation || isSaving} onClick={handleScenarioPublish} title={canManageAutomation ? "Опубликовать сценарий" : access.reason} type="button">
-            <CheckCircle2 size={17} />
-            Опубликовать
-          </button>
-          <button className="primary-action" disabled={!canManageAutomation || isSaving} onClick={focusSandboxChat} title={canManageAutomation ? "Открыть живой тест-чат" : access.reason} type="button">
-            <PlayCircle size={17} />
-            Тест-чат
+            Создать бота
           </button>
         </>
       }
     >
-      <div className="metric-strip">
-        <MetricTile icon={<Bot size={21} />} label="Сценарии" value={scenarioItems.length} detail={`${enabledScenarios} включены`} />
-        <MetricTile icon={<Zap size={21} />} label="Proactive" value={proactiveRules.length} detail={`${enabledProactive} активны`} />
-        <MetricTile icon={<Workflow size={21} />} label="Handoff" value="4" detail="очереди назначения" />
-        <MetricTile icon={<ListChecks size={21} />} label="Audit" value={auditEvents.length} detail="последние события" />
-      </div>
-
-      <BotSetupChecklist
-        aiReady={aiReadiness?.status === "ready"}
-        hasEnabledScenario={enabledScenarios > 0}
-        hasScenario={scenarioItems.length > 0}
-        hasSources={knowledgeSources.some((source) => source.readiness === "ready")}
-        tested={Boolean(sandboxVerifiedScenarioId)}
-      />
-
-      <SegmentedControl
-        ariaLabel="Режим раздела ботов"
-        className="automation-view-switch"
-        onChange={setWorkView}
-        options={[{ label: "Сценарии", value: "scenarios" }, { label: "Работа ботов", value: "operations" }]}
-        value={workView}
-      />
-
-      {workView === "scenarios" ? (
-        <div className="automation-layout automation-layout--console">
+      <div className="automation-layout automation-layout--console">
           <ScenarioListPanel
             aiReadiness={aiReadiness}
             canManage={canManageAutomation}
@@ -871,7 +814,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
               access={access}
               activeTab={consoleTab}
               aiReadiness={aiReadiness}
-              aiUsage={aiUsage}
+              aiDialogUsage={aiDialogUsage}
               canManage={canManageAutomation}
               isSaving={isSaving}
               knowledgeSources={knowledgeSources}
@@ -896,54 +839,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
               versions={scenarioVersions}
             />
           </div>
-        </div>
-      ) : (
-        <div className="automation-layout">
-          <section className="work-panel bot-metrics-card">
-            <SectionTitle title="Метрики ботов" action="backend runtime" />
-            <div className="bot-metric-list">
-              {botMetricRows.map((metric) => (
-                <span key={metric.label}>
-                  <b>{metric.value}</b>
-                  <strong>{metric.label}</strong>
-                  <small>{metric.detail}</small>
-                </span>
-              ))}
-            </div>
-          </section>
-
-          <section className="work-panel">
-            <SectionTitle title="Audit автоматизации" action="экспорт, лимиты, rescue" />
-            <div className="audit-list">
-              {auditEvents.map((event) => (
-                <article className="audit-row" key={event.id}>
-                  <time>{event.time}</time>
-                  <strong>{event.action}</strong>
-                  <span>{event.actor} · {event.role}</span>
-                  <p>{event.target}: {event.detail}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-        </div>
-      )}
-
-      <section className="work-panel bot-mode-panel">
-        <SectionTitle title="Режим работы" action={advancedMode ? "дополнительный" : "no-code"} />
-        <div className="bot-mode-toggle">
-          <label>
-            <input
-              checked={advancedMode}
-              onChange={(event) => toggleAdvancedMode(event.target.checked)}
-              type="checkbox"
-            />
-            <span>
-              <strong>Дополнительный режим</strong>
-              <small>Canvas, редактор нод и JSON import/export — только после базового no-code пути. Импорт проходит ту же серверную проверку policy/source/trigger.</small>
-            </span>
-          </label>
-        </div>
-      </section>
+      </div>
 
       {advancedMode ? (
       <section className="work-panel bot-builder-panel">
@@ -1103,12 +999,7 @@ export function AutomationScreen({ onBack, onToast, access }) {
           </aside>
         </div>
       </section>
-      ) : (
-        <section className="work-panel bot-advanced-closed">
-          <SectionTitle title="Canvas и JSON скрыты" action="no-code путь" />
-          <p>Основной путь — мастер, список сценариев и песочница. Включите дополнительный режим выше, если нужен canvas или JSON import/export.</p>
-        </section>
-      )}
+      ) : null}
       {isScenarioWizardOpen ? <ScenarioCreationWizard aiReadiness={aiReadiness} canFixAiConnection={Boolean(access?.canManageServiceAdmin || access?.role === "Администратор сервиса")} existingScenarios={scenarioItems} isSaving={isSaving} knowledgeSources={knowledgeSources} knowledgeSourcesError={knowledgeSourcesError} knowledgeSourcesLoading={knowledgeSourcesLoading} knowledgeUploadProgress={knowledgeUploadProgress} onAddArticleSource={addArticleKnowledgeSource} onAddUrlSource={addUrlKnowledgeSource} onClose={() => setScenarioWizardOpen(false)} onCreate={handleScenarioWizardCreate} onOpenAiConnections={() => window.open("/service-admin", "_blank", "noopener,noreferrer")} onUploadKnowledgeFiles={uploadKnowledgeFiles} /> : null}
       {archiveTarget ? <ScenarioArchiveConfirmModal isSaving={isSaving} onClose={() => setArchiveTarget(null)} onConfirm={(scenario) => void confirmArchiveScenario(scenario)} scenario={archiveTarget} /> : null}
       {pauseTarget ? <ScenarioPauseConfirmModal isSaving={isSaving} onClose={() => setPauseTarget(null)} onConfirm={(scenario) => void confirmDisableScenario(scenario)} scenario={pauseTarget} /> : null}
@@ -1133,35 +1024,6 @@ export function AutomationScreen({ onBack, onToast, access }) {
 
 function normalizeScenarios(value) {
   return Array.isArray(value) ? value.map((scenario) => normalizeScenario(scenario)) : [];
-}
-
-/** BAI-861: короткий чек-лист «с чего начать», исчезает, когда бот запущен. */
-function BotSetupChecklist({ aiReady, hasEnabledScenario, hasScenario, hasSources, tested }) {
-  const steps = [
-    { done: hasSources, label: "Подключите знания", hint: "Раздел «Знания»: статья, документ или страница" },
-    { done: hasScenario, label: "Создайте сценарий", hint: "Мастер задаёт запуск, ответ и передачу оператору" },
-    { done: aiReady, label: "Подключите AI", hint: "Настраивает администратор сервиса в разделе «AI»" },
-    { done: tested, label: "Протестируйте в чате", hint: "Живой тест-чат показывает ответ и путь бота" },
-    { done: hasEnabledScenario, label: "Опубликуйте", hint: "После проверки сценарий начнёт отвечать клиентам" }
-  ];
-  const completed = steps.filter((step) => step.done).length;
-  if (completed === steps.length) return null;
-  return (
-    <section aria-label="С чего начать" className="work-panel bot-setup-checklist">
-      <SectionTitle action={`${completed} из ${steps.length}`} title="С чего начать" />
-      <ol>
-        {steps.map((step) => (
-          <li className={step.done ? "done" : ""} key={step.label}>
-            {step.done ? <CheckCircle2 size={16} /> : <span className="bot-setup-dot" aria-hidden="true" />}
-            <span>
-              <strong>{step.label}</strong>
-              <small>{step.hint}</small>
-            </span>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
 }
 
 function normalizeScenario(scenario = {}) {
@@ -1231,18 +1093,6 @@ function normalizeFlowNodes(value, scenarioId, channels) {
   });
 }
 
-function normalizeRuntimeMetrics(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.map((metric) => ({
-    detail: String(metric.detail ?? metric.queue ?? "backend"),
-    label: String(metric.label ?? metric.id ?? "Metric"),
-    value: String(metric.value ?? "—")
-  }));
-}
-
 function createPreviewMessages(flowNodes) {
   return flowNodes.slice(0, 3).map((node, index) => ({
     side: index === 0 ? "client" : "bot",
@@ -1258,9 +1108,4 @@ function replaceScenario(current, persisted) {
 
 function normalizeStringList(value, fallback) {
   return Array.isArray(value) ? value.map((item) => String(item)) : fallback;
-}
-
-function isEnabledAutomationStatus(status) {
-  const value = String(status ?? "").toLowerCase();
-  return value.includes("enabled") || value.includes("published") || value.includes("включ");
 }

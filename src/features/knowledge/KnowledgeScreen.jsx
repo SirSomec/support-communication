@@ -26,7 +26,7 @@ import { collectKnowledgeLoadErrors } from "./knowledgeLoadModel.js";
 import { buildBotScenarioUpdatePatch, submitBotScenarioUpdate } from "../../app/automationScenarioActions.js";
 import { knowledgeService } from "../../services/knowledgeService.js";
 import { automationService } from "../../services/automationService.js";
-import { ConfirmDialog, MetricTile, Modal, ProductScreen, SectionTitle, SegmentedControl, StatusBadge } from "../../ui.jsx";
+import { ConfirmDialog, MetricTile, Modal, PaginationControls, ProductScreen, SectionTitle, SegmentedControl, StatusBadge } from "../../ui.jsx";
 import { KnowledgeBaseWorkspace } from "../quality/KnowledgeBaseWorkspace.jsx";
 
 const TABS = [
@@ -53,6 +53,7 @@ const SOURCE_STATUS_LABELS = {
   ready: { label: "Готов", tone: "ok" },
   uploaded: { label: "Загружен", tone: "info" }
 };
+const KNOWLEDGE_SOURCE_PAGE_SIZE = 10;
 
 /** Раздел «Знания» (BAI-820): всё, что знает бот и операторы, — в одном месте. */
 export function KnowledgeScreen({ access, onBack, onToast, operator }) {
@@ -885,8 +886,20 @@ export function KnowledgeScreen({ access, onBack, onToast, operator }) {
 }
 
 function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onArchive, onDelete, onDisable, onEnable, onPreview, onRefresh, onRename, onToggleSelect, onToggleSelectAll, selectedIds = [], selectionToolbar = null, sources, title, usage }) {
+  const [page, setPage] = useState(1);
   const selectable = Boolean(onToggleSelect);
   const selectedSet = new Set(selectedIds);
+  const totalPages = Math.max(1, Math.ceil(sources.length / KNOWLEDGE_SOURCE_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageSources = useMemo(() => {
+    const start = (currentPage - 1) * KNOWLEDGE_SOURCE_PAGE_SIZE;
+    return sources.slice(start, start + KNOWLEDGE_SOURCE_PAGE_SIZE);
+  }, [currentPage, sources]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
   return (
     <section className="work-panel">
       <SectionTitle action={<span className="knowledge-panel-actions">{actions}</span>} title={title} />
@@ -898,7 +911,7 @@ function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onArc
               onChange={() => onToggleSelectAll?.()}
               type="checkbox"
             />
-            <span>Выбрать все</span>
+            <span>Выбрать все ({sources.length})</span>
           </label>
           {selectionToolbar}
         </div>
@@ -910,7 +923,7 @@ function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onArc
         </div>
       ) : (
         <ul className="knowledge-source-list">
-          {sources.map((source) => {
+          {pageSources.map((source) => {
             const statusMeta = SOURCE_STATUS_LABELS[source.status] ?? { label: source.status, tone: "info" };
             const sourceUsage = usage[source.id] ?? [];
             const rowBusy = busyAction.endsWith(source.id);
@@ -980,6 +993,13 @@ function SourceManagerPanel({ actions, busyAction, canWrite, emptyMessage, onArc
           })}
         </ul>
       )}
+      <PaginationControls
+        currentPage={currentPage}
+        itemLabel={title.toLowerCase()}
+        onPageChange={setPage}
+        pageSize={KNOWLEDGE_SOURCE_PAGE_SIZE}
+        totalItems={sources.length}
+      />
     </section>
   );
 }

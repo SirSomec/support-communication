@@ -215,17 +215,6 @@ export function ScenarioCreationWizard({
     <Modal
       closeLabel="Закрыть мастер создания сценария"
       eyebrow={`Без кода · черновик ${draftSavedAt ? `(${draftSavedAt})` : ""}`}
-      footer={step === scenarioWizardSteps.length - 1 ? (
-        <>
-          <button disabled={isSaving} onClick={() => setStep(step - 1)} type="button"><ArrowLeft size={16} />Назад</button>
-          <button className="primary-action" disabled={!canCreate || isSaving} onClick={() => void handleCreate()} type="button"><CheckCircle2 size={17} />{isSaving ? "Создаём..." : "Создать черновик"}</button>
-        </>
-      ) : (
-        <>
-          <button disabled={step === 0 || isSaving} onClick={() => setStep(step - 1)} type="button"><ArrowLeft size={16} />Назад</button>
-          <button className="primary-action" disabled={!canAdvance || isSaving} onClick={() => setStep(step + 1)} type="button">Далее<ArrowRight size={16} /></button>
-        </>
-      )}
       onClose={onClose}
       overlayClassName="scenario-wizard-overlay"
       panelClassName="scenario-wizard-panel"
@@ -478,6 +467,20 @@ export function ScenarioCreationWizard({
           <div className="scenario-wizard-note"><CircleHelp size={18} /><span>Черновик шагов сохранён в этом браузере. После создания откроется canvas — там можно поменять шаги и нажать «Прогнать тест» до публикации.</span></div>
         </section>
       ) : null}
+
+      <nav aria-label="Навигация по мастеру" className="scenario-wizard-actions">
+        {step === scenarioWizardSteps.length - 1 ? (
+          <>
+            <button disabled={isSaving} onClick={() => setStep(step - 1)} type="button"><ArrowLeft size={16} />Назад</button>
+            <button className="primary-action" disabled={!canCreate || isSaving} onClick={() => void handleCreate()} type="button"><CheckCircle2 size={17} />{isSaving ? "Создаём..." : "Создать черновик"}</button>
+          </>
+        ) : (
+          <>
+            <button disabled={step === 0 || isSaving} onClick={() => setStep(step - 1)} type="button"><ArrowLeft size={16} />Назад</button>
+            <button className="primary-action" disabled={!canAdvance || isSaving} onClick={() => setStep(step + 1)} type="button">Далее<ArrowRight size={16} /></button>
+          </>
+        )}
+      </nav>
     </Modal>
   );
 }

@@ -24,6 +24,13 @@ export interface ScenarioOperationalAiUsage {
   usedTokens: number;
 }
 
+export interface ScenarioOperationalAiDialogUsage {
+  limit: number;
+  remaining: number;
+  reserved: number;
+  used: number;
+}
+
 export interface ScenarioOperationalFailure {
   at: string;
   conversationId: string;
@@ -52,6 +59,7 @@ export interface ScenarioOperationalCitation {
 }
 
 export interface ScenarioOperationalSummary {
+  aiDialogUsage: ScenarioOperationalAiDialogUsage | null;
   aiUsage: ScenarioOperationalAiUsage | null;
   lastCitations: ScenarioOperationalCitation[];
   lastFallbackReason: string | null;
@@ -100,6 +108,7 @@ export function buildTenantAiUsageSummary(input: {
 }
 
 export function buildScenarioOperationalSummaries(input: {
+  aiDialogUsage?: ScenarioOperationalAiDialogUsage | null;
   aiUsage?: ScenarioOperationalAiUsage | null;
   publishEvents?: AutomationBotPublishAuditEvent[];
   runtimeInstances?: AutomationBotRuntimeInstance[];
@@ -138,6 +147,7 @@ export function buildScenarioOperationalSummaries(input: {
       const lastFallbackReason = collectLatestFallbackReason(scenarioSteps, scenarioInstances);
 
       return {
+        aiDialogUsage: input.aiDialogUsage ?? null,
         aiUsage: input.aiUsage ?? null,
         lastCitations,
         lastFallbackReason,
@@ -153,9 +163,11 @@ export function buildScenarioOperationalSummaries(input: {
 export function buildScenarioOperationalSummariesFromState(
   state: Pick<AutomationState, "botPublishAuditEvents" | "botRuntimeInstances" | "botRuntimeSteps" | "botScenarios">,
   tenantId: string,
-  aiUsage: ScenarioOperationalAiUsage | null = null
+  aiUsage: ScenarioOperationalAiUsage | null = null,
+  aiDialogUsage: ScenarioOperationalAiDialogUsage | null = null
 ): ScenarioOperationalSummary[] {
   return buildScenarioOperationalSummaries({
+    aiDialogUsage,
     aiUsage,
     publishEvents: state.botPublishAuditEvents,
     runtimeInstances: state.botRuntimeInstances,

@@ -20,7 +20,8 @@ import { KnowledgeRetrievalService } from "../knowledge-sources/knowledge-retrie
 import { isKnowledgeSourceRetrievalEligible, type KnowledgeSourceRecord } from "../knowledge-sources/knowledge-source.types.js";
 import {
   buildScenarioOperationalSummariesFromState,
-  buildTenantAiUsageSummary
+  buildTenantAiUsageSummary,
+  type ScenarioOperationalAiDialogUsage
 } from "./scenario-operational-summary.js";
 import { recordBotAiFeedback, recordBotPublishFailure } from "./bot-observability.js";
 import { evaluateBotAlerts, summarizeBotMetricsForAlerts } from "./bot-alert-catalog.js";
@@ -139,7 +140,11 @@ export class AutomationService {
     const state = await this.automationRepository.readStateAsync();
     this.syncLocalCaches(state);
     const scenarios = scopedBotScenarios(state.botScenarios, tenantId);
-    const aiUsage = await resolveTenantAiUsage(tenantId, context);
+    const [aiReadiness, aiUsage, aiDialogUsage] = await Promise.all([
+      aiReadinessForTenant(tenantId),
+      resolveTenantAiUsage(tenantId, context),
+      this.resolveTenantAiDialogUsage(tenantId)
+    ]);
 
     return createEnvelope({
       service: AUTOMATION_SERVICE,
@@ -148,7 +153,8 @@ export class AutomationService {
       partial: true,
       meta: apiMeta({ tenantId }),
       data: {
-        aiReadiness: await aiReadinessForTenant(tenantId),
+        aiDialogUsage,
+        aiReadiness,
         aiUsage,
         auditEvents: [
           ...clone(state.workspaceAuditEvents.filter((event) => scenarioTenantId(event) === tenantId)),
@@ -158,7 +164,7 @@ export class AutomationService {
         botScenarioVersions: clone(state.botScenarioVersions.filter((version) => scenarioTenantId(version) === tenantId)),
         proactiveRules: clone(state.proactiveRules.filter((rule) => proactiveRuleTenantId(rule) === tenantId)),
         runtimeMetrics: clone(state.workspaceRuntimeMetrics),
-        scenarioOperations: clone(buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)),
+        scenarioOperations: clone(buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage, aiDialogUsage)),
         telemetry: {
           alerts: evaluateBotAlerts(summarizeBotMetricsForAlerts(metricsRegistry().snapshot())),
           feedback: await Promise.resolve(this.botFeedbackRepository.listFeedback({ tenantId })),
@@ -334,8 +340,11 @@ export class AutomationService {
     }
     const versions = await this.automationRepository.listBotScenarioVersions(scenarioId);
     const state = await this.automationRepository.readStateAsync();
-    const aiUsage = await resolveTenantAiUsage(tenantId, context);
-    const operations = buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage)
+    const [aiUsage, aiDialogUsage] = await Promise.all([
+      resolveTenantAiUsage(tenantId, context),
+      this.resolveTenantAiDialogUsage(tenantId)
+    ]);
+    const operations = buildScenarioOperationalSummariesFromState(state, tenantId, aiUsage, aiDialogUsage)
       .find((item) => item.scenarioId === scenarioId) ?? null;
     return createEnvelope({
       service: AUTOMATION_SERVICE,
@@ -343,6 +352,7 @@ export class AutomationService {
       traceId: automationTraceId("fetchBotScenario"),
       meta: apiMeta({ tenantId }),
       data: {
+        aiDialogUsage,
         operations: clone(operations),
         scenario: clone(scenario),
         versions: clone(versions.filter((version) => version.tenantId === tenantId))
@@ -1281,6 +1291,25 @@ export class AutomationService {
     }).retryInboundEvent(event);
   }
 
+  private async resolveTenantAiDialogUsage(tenantId: string): Promise<ScenarioOperationalAiDialogUsage | null> {
+    const snapshot = await this.billingService.fetchTenantQuotaSnapshot(tenantId);
+    if (snapshot.status !== "ok") return null;
+    const quota = Array.isArray(snapshot.data?.quotas)
+      ? snapshot.data.quotas.find((item) => item && typeof item === "object" && (item as { resource?: unknown }).resource === "ai_dialogs") as Record<string, unknown> | undefined
+      : undefined;
+    if (!quota) return null;
+
+    const used = nonNegativeInteger(quota.used);
+    const limit = nonNegativeInteger(quota.limit);
+    const reserved = nonNegativeInteger(quota.reserved);
+    return {
+      limit,
+      remaining: nonNegativeInteger(quota.remaining),
+      reserved,
+      used
+    };
+  }
+
   private syncLocalCaches(state: { botScenarios: BotScenario[]; proactiveRules: ProactiveRule[]; publishIdempotencyKeys: AutomationPublishIdempotencyRecord[] }): void {
     this.scenarios.splice(0, this.scenarios.length, ...clone(state.botScenarios));
     this.rules.splice(0, this.rules.length, ...clone(state.proactiveRules));
@@ -1846,6 +1875,11 @@ function resolveVisitorMetricsRange(input: VisitorMetricsRange): { from: string;
 
 function validRangeDate(value: string | undefined): Date | null {
   return value && Number.isFinite(Date.parse(value)) ? new Date(value) : null;
+}
+
+function nonNegativeInteger(value: unknown): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
 }
 
 function automationTenantIdempotencyKey(tenantId: string, key: string): string {

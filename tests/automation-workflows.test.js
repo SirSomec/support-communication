@@ -39,6 +39,17 @@ describe("automation workflow actions", () => {
     assert.match(source, /if \(created\) clearWizardDraft\(\)/);
   });
 
+  it("keeps wizard navigation in the current step and paginates knowledge source selection", () => {
+    const wizard = readFileSync(new URL("../src/features/automation/ScenarioCreationWizard.jsx", import.meta.url), "utf8");
+    const selector = readFileSync(new URL("../src/features/automation/ScenarioKnowledgeSourceSelector.jsx", import.meta.url), "utf8");
+
+    assert.match(wizard, /<nav aria-label="Навигация по мастеру" className="scenario-wizard-actions">/);
+    assert.doesNotMatch(wizard, /footer=\{step === scenarioWizardSteps\.length - 1/);
+    assert.match(selector, /const KNOWLEDGE_SOURCES_PAGE_SIZE = 8/);
+    assert.match(selector, /<PaginationControls/);
+    assert.match(selector, /pageSources\.map/);
+  });
+
   it("builds a narrow published-scenario draft patch without published fields", () => {
     assert.deepEqual(buildBotScenarioUpdatePatch("bot-checkout", {
       sourceBindings: [{ sourceId: "knowledge-v2" }]

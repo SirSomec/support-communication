@@ -86,19 +86,19 @@ describe("BAI-600 scenario list model", () => {
     assert.equal(view.statusLabel, formatScenarioStatusLabel("published"));
     assert.equal(view.fallbackReasonLabel, formatFallbackReasonLabel("bot_ai_quota_exhausted"));
     assert.match(view.citationsLabel, /Оплата/);
-    assert.equal(view.usage, null);
+    assert.equal(view.billingUsage, null);
     assert.equal(view.failureCount, 1);
     assert.equal(view.publishCount, 1);
     assert.equal(view.handoffCount, 1);
 
-    const withUsage = buildScenarioOperationalView({ status: "published" }, {
-      estimatedCostBucket: "low",
-      estimatedCostUsd: 0.004,
-      month: "2026-07",
-      monthlyTokenBudget: 50_000,
-      usedTokens: 2_000
+    const withBillingUsage = buildScenarioOperationalView({ status: "published" }, {
+      limit: 5_000,
+      remaining: 3_750,
+      reserved: 2,
+      used: 1_248
     });
-    assert.match(withUsage.usage.budgetLabel, /2000 \/ 50000/);
-    assert.match(withUsage.usage.costLabel, /низкая/);
+    assert.match(withBillingUsage.billingUsage.dialogLabel, /1[\s\u00a0]?248 из 5[\s\u00a0]?000/);
+    assert.match(withBillingUsage.billingUsage.availableLabel, /3[\s\u00a0]?750/);
+    assert.match(withBillingUsage.billingUsage.reservedLabel, /2/);
   });
 });

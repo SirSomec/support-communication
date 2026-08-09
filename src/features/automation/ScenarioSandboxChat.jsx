@@ -6,8 +6,6 @@ import { SectionTitle } from "../../ui.jsx";
 let sandboxMessageCounter = 0;
 
 const RETRIEVAL_MODE_LABELS = {
-  llm: "умный поиск (ИИ)",
-  llm_fallback: "умный поиск недоступен — искал быстрый",
   semantic: "поиск по смыслу (эмбеддинги)",
   semantic_fallback: "поиск по смыслу недоступен — искал быстрый"
 };

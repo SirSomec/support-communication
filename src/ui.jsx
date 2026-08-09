@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, CheckCircle2, ChevronLeft, CircleGauge, Inbox, LoaderCircle, Search, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleGauge, Inbox, LoaderCircle, Search, X } from "lucide-react";
 import { useModalA11y } from "./app/useModalA11y.js";
 import "./ui.css";
 
@@ -316,5 +316,28 @@ export function Modal({
         {footer ? <footer>{footer}</footer> : null}
       </section>
     </div>
+  );
+}
+
+export function PaginationControls({ currentPage, itemLabel = "элементов", onPageChange, pageSize, totalItems }) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  if (totalPages <= 1) return null;
+
+  const start = (currentPage - 1) * pageSize + 1;
+  const end = Math.min(currentPage * pageSize, totalItems);
+
+  return (
+    <nav aria-label={`Пагинация: ${itemLabel}`} className="pagination-controls">
+      <span className="pagination-controls__summary">Показано {start}–{end} из {totalItems}</span>
+      <span className="pagination-controls__actions">
+        <button aria-label="Предыдущая страница" disabled={currentPage === 1} onClick={() => onPageChange(currentPage - 1)} type="button">
+          <ChevronLeft aria-hidden="true" size={16} /> Назад
+        </button>
+        <span aria-current="page" className="pagination-controls__current">{currentPage} / {totalPages}</span>
+        <button aria-label="Следующая страница" disabled={currentPage === totalPages} onClick={() => onPageChange(currentPage + 1)} type="button">
+          Далее <ChevronRight aria-hidden="true" size={16} />
+        </button>
+      </span>
+    </nav>
   );
 }

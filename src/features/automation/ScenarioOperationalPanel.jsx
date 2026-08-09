@@ -3,8 +3,8 @@ import { AlertTriangle, BookOpenCheck, Coins, GitBranch, Radio, Shuffle } from "
 import { SectionTitle, StatusBadge } from "../../ui.jsx";
 import { buildScenarioOperationalView } from "./automationModel.js";
 
-export function ScenarioOperationalPanel({ aiUsage = null, operations = null, scenarioName = "" }) {
-  const view = buildScenarioOperationalView(operations, aiUsage);
+export function ScenarioOperationalPanel({ aiDialogUsage = null, operations = null, scenarioName = "" }) {
+  const view = buildScenarioOperationalView(operations, aiDialogUsage);
 
   return (
     <section className="work-panel scenario-ops-panel" aria-label={`Эксплуатация сценария ${scenarioName}`}>
@@ -25,15 +25,15 @@ export function ScenarioOperationalPanel({ aiUsage = null, operations = null, sc
           <dt>Последние citations</dt>
           <dd><BookOpenCheck size={14} aria-hidden="true" /> {view.citationsLabel}</dd>
         </div>
-        {view.usage ? (
+        {view.billingUsage ? (
           <div>
-            <dt>AI usage / cost ({view.usage.month})</dt>
-            <dd><Coins size={14} aria-hidden="true" /> {view.usage.budgetLabel} · {view.usage.costLabel}</dd>
+            <dt>AI usage / cost — биллинг</dt>
+            <dd><Coins size={14} aria-hidden="true" /> {view.billingUsage.dialogLabel} · {view.billingUsage.availableLabel}{view.billingUsage.reservedLabel}</dd>
           </div>
         ) : (
           <div>
-            <dt>AI usage / cost</dt>
-            <dd>Доступно администратору настроек или Service Admin</dd>
+            <dt>AI usage / cost — биллинг</dt>
+            <dd>Данные об использованных AI-диалогах пока недоступны</dd>
           </div>
         )}
       </dl>

@@ -1,20 +1,21 @@
-import React from "react";
-import { AlertTriangle, Bot, MoreHorizontal, Trash2, Undo2 } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { AlertTriangle, Bot, CheckCircle2, Search } from "lucide-react";
 import { ChannelList, StatusBadge } from "../../ui.jsx";
 import { buildScenarioListRow } from "./automationModel.js";
 
+const FILTERS = [
+  { label: "Все", value: "all" },
+  { label: "Активные", value: "published" },
+  { label: "Требуют внимания", value: "attention" },
+  { label: "Черновики", value: "draft" }
+];
+
 export function ScenarioListPanel({
   aiReadiness,
-  canManage,
-  isSaving,
   knowledgeSources,
   knowledgeSourcesError,
   knowledgeSourcesLoading,
-  onArchive,
-  onDisable,
   onOpen,
-  onPublish,
-  onRestore,
   onRetry,
   partial,
   scenarios,
@@ -22,126 +23,100 @@ export function ScenarioListPanel({
   versions,
   workspaceError
 }) {
-  const rows = scenarios.map((scenario) => buildScenarioListRow(scenario, {
-    aiReadiness,
-    knowledgeSources,
-    versions
-  }));
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
+  const rows = useMemo(() => scenarios.map((scenario) => ({
+    scenario,
+    ...buildScenarioListRow(scenario, { aiReadiness, knowledgeSources, versions })
+  })), [aiReadiness, knowledgeSources, scenarios, versions]);
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleRows = rows.filter((row) => {
+    const matchesQuery = !normalizedQuery || [row.name, row.triggerSummary, ...(row.channels ?? [])]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery);
+    const needsAttention = row.hasErrors || ["draft", "disabled"].includes(row.status);
+    const matchesFilter = filter === "all"
+      || (filter === "attention" && needsAttention)
+      || row.status === filter;
+    return matchesQuery && matchesFilter;
+  });
+  const attentionCount = rows.filter((row) => row.hasErrors || ["draft", "disabled"].includes(row.status)).length;
 
   return (
-    <section className="work-panel scenario-list-panel" aria-label="Список сценариев ботов">
+    <aside className="work-panel scenario-list-panel" aria-label="Список ботов">
       <header className="scenario-list-panel__header">
         <div>
-          <strong>Сценарии</strong>
-          <span>Название, статус, каналы, триггер, AI и публикация</span>
+          <strong>Список ботов</strong>
+          <span>{rows.length ? `${rows.length} в рабочем пространстве` : "Ботов пока нет"}</span>
         </div>
-        <StatusBadge tone={partial || knowledgeSourcesError ? "warn" : "info"}>
-          {rows.length ? `${rows.length} шт.` : "пусто"}
-        </StatusBadge>
+        {attentionCount ? <StatusBadge tone="warn">{attentionCount} требуют внимания</StatusBadge> : null}
       </header>
+
+      <label className="scenario-list-search">
+        <Search aria-hidden="true" size={16} />
+        <span className="sr-only">Поиск ботов</span>
+        <input onChange={(event) => setQuery(event.target.value)} placeholder="Поиск ботов" type="search" value={query} />
+      </label>
+
+      <div className="scenario-list-filters" aria-label="Фильтр ботов">
+        {FILTERS.map((item) => (
+          <button aria-pressed={filter === item.value} className={filter === item.value ? "active" : ""} key={item.value} onClick={() => setFilter(item.value)} type="button">
+            {item.label}
+          </button>
+        ))}
+      </div>
 
       {workspaceError ? (
         <div className="scenario-list-state scenario-list-state--error" role="alert">
-          <AlertTriangle size={18} />
+          <AlertTriangle size={17} />
           <div>
             <strong>Не удалось обновить список</strong>
             <span>{workspaceError}</span>
+            {onRetry ? <button onClick={onRetry} type="button">Повторить</button> : null}
           </div>
-          {onRetry ? <button onClick={onRetry} type="button">Повторить</button> : null}
         </div>
       ) : null}
 
       {partial || knowledgeSourcesError || knowledgeSourcesLoading ? (
         <div className={`scenario-list-state ${knowledgeSourcesError ? "scenario-list-state--warn" : "scenario-list-state--info"}`} role="status">
-          <AlertTriangle size={18} />
-          <span>
-            {knowledgeSourcesLoading
-              ? "Источники знаний ещё загружаются — часть данных AI может быть неполной."
-              : knowledgeSourcesError
-                ? `Частичные данные: ${knowledgeSourcesError}`
-                : "Workspace загружен частично — часть метрик или readiness может быть устаревшей."}
-          </span>
+          <AlertTriangle size={16} />
+          <span>{knowledgeSourcesLoading ? "Проверяем подключённые источники." : knowledgeSourcesError ? "Часть данных о знаниях недоступна." : "Часть данных может быть неактуальна."}</span>
         </div>
       ) : null}
 
       {!rows.length && !workspaceError ? (
         <div className="entity-empty scenario-list-empty">
           <Bot size={22} />
-          <strong>Сценариев пока нет</strong>
-          <span>Создайте первый сценарий в мастере: он сохранится как черновик, его можно проверить и опубликовать.</span>
+          <strong>Ботов пока нет</strong>
+          <span>Создайте первого бота, чтобы настроить сценарий, проверить его и опубликовать.</span>
         </div>
       ) : null}
 
-      {rows.length ? (
-        <div className="scenario-list">
-          {rows.map((row) => {
-            const scenario = scenarios.find((item) => item.id === row.id);
+      {visibleRows.length ? (
+        <div className="scenario-list scenario-list--compact">
+          {visibleRows.map((row) => {
             const selected = selectedScenarioId === row.id;
+            const needsAttention = row.hasErrors || ["draft", "disabled"].includes(row.status);
             return (
-              <article className={`scenario-card scenario-card--list ${selected ? "selected" : ""}`} key={row.id}>
-                <header>
-                  <Bot size={18} aria-hidden="true" />
-                  <strong>{row.name}</strong>
-                  <StatusBadge tone={row.statusTone}>{row.statusLabel}</StatusBadge>
-                </header>
-
-                <dl className="scenario-card-meta">
-                  <div>
-                    <dt>Триггер</dt>
-                    <dd>{row.triggerSummary}</dd>
-                  </div>
-                  <div>
-                    <dt>AI / источники</dt>
-                    <dd>{row.aiSummary}</dd>
-                  </div>
-                  <div>
-                    <dt>Последняя публикация</dt>
-                    <dd>{row.lastPublishedLabel}</dd>
-                  </div>
-                </dl>
-
-                {row.hasErrors ? (
-                  <ul className="scenario-card-errors">
-                    {row.errors.map((error) => (
-                      <li key={error}><AlertTriangle size={14} aria-hidden="true" /> {error}</li>
-                    ))}
-                  </ul>
-                ) : null}
-
-                <footer>
+              <button aria-current={selected ? "true" : undefined} className={`scenario-list-item ${selected ? "selected" : ""}`} key={row.id} onClick={() => onOpen?.(row.scenario)} type="button">
+                <span className="scenario-list-item__icon"><Bot aria-hidden="true" size={18} /></span>
+                <span className="scenario-list-item__content">
+                  <span className="scenario-list-item__title"><strong>{row.name}</strong><StatusBadge tone={row.statusTone}>{row.statusLabel}</StatusBadge></span>
                   <ChannelList channels={row.channels} />
-                  <div className="scenario-card-actions" aria-label={`Действия для ${row.name}`}>
-                    <MoreHorizontal size={15} aria-hidden="true" />
-                    <button onClick={() => onOpen?.(scenario)} type="button">Открыть</button>
-                    {canManage && row.status === "published" ? (
-                      <button disabled={isSaving} onClick={() => onDisable?.(scenario)} type="button">Пауза</button>
-                    ) : null}
-                    {canManage && (row.status === "disabled" || row.status === "draft") ? (
-                      <button
-                        disabled={isSaving}
-                        onClick={() => (onPublish ?? onOpen)?.(scenario)}
-                        type="button"
-                      >
-                        Проверить и опубликовать
-                      </button>
-                    ) : null}
-                    {canManage && row.status === "archived" ? (
-                      <button disabled={isSaving} onClick={() => onRestore?.(scenario)} type="button">
-                        <Undo2 size={15} /> Восстановить
-                      </button>
-                    ) : null}
-                    {canManage && row.status !== "archived" ? (
-                      <button className="scenario-delete-button" disabled={isSaving} onClick={() => onArchive?.(scenario)} type="button">
-                        <Trash2 size={15} /> Удалить
-                      </button>
-                    ) : null}
-                  </div>
-                </footer>
-              </article>
+                  <small className={needsAttention ? "attention" : ""}>{needsAttention ? (row.errors?.[0] ?? "Нужно проверить настройки") : row.triggerSummary}</small>
+                </span>
+              </button>
             );
           })}
         </div>
+      ) : rows.length && !workspaceError ? (
+        <div className="scenario-list-empty scenario-list-empty--filtered">
+          <CheckCircle2 size={20} />
+          <strong>Ничего не найдено</strong>
+          <button onClick={() => { setQuery(""); setFilter("all"); }} type="button">Сбросить фильтры</button>
+        </div>
       ) : null}
-    </section>
+    </aside>
   );
 }

@@ -509,17 +509,9 @@ export function formatFallbackReasonLabel(reason) {
   return labels[value] ?? value;
 }
 
-export function formatAiUsageCostBucket(bucket) {
-  const value = String(bucket ?? "").trim().toLowerCase();
-  if (value === "low") return "низкая";
-  if (value === "medium") return "средняя";
-  if (value === "high") return "высокая";
-  return "нет";
-}
-
-export function buildScenarioOperationalView(operations = null, aiUsage = null) {
+export function buildScenarioOperationalView(operations = null, aiDialogUsage = null) {
   const source = operations && typeof operations === "object" ? operations : {};
-  const usage = aiUsage ?? source.aiUsage ?? null;
+  const billingUsage = aiDialogUsage ?? source.aiDialogUsage ?? null;
   const recentFailures = Array.isArray(source.recentFailures) ? source.recentFailures : [];
   const recentHandoffs = Array.isArray(source.recentHandoffs) ? source.recentHandoffs : [];
   const recentPublishes = Array.isArray(source.recentPublishes) ? source.recentPublishes : [];
@@ -550,13 +542,15 @@ export function buildScenarioOperationalView(operations = null, aiUsage = null) 
     })),
     statusLabel: formatScenarioStatusLabel(source.status),
     statusTone: scenarioStatusTone(source.status),
-    usage: usage
+    billingUsage: billingUsage
       ? {
-        budgetLabel: usage.monthlyTokenBudget != null
-          ? `${usage.usedTokens} / ${usage.monthlyTokenBudget} ток.`
-          : `${usage.usedTokens} ток.`,
-        costLabel: `оценка ${formatAiUsageCostBucket(usage.estimatedCostBucket)}${usage.estimatedCostUsd ? ` · ~$${Number(usage.estimatedCostUsd).toFixed(4)}` : ""}`,
-        month: usage.month
+        availableLabel: `доступно ${Math.max(0, Number(billingUsage.remaining) || 0).toLocaleString("ru-RU")}`,
+        dialogLabel: Number(billingUsage.limit) > 0
+          ? `${Math.max(0, Number(billingUsage.used) || 0).toLocaleString("ru-RU")} из ${Math.max(0, Number(billingUsage.limit) || 0).toLocaleString("ru-RU")} AI-диалогов`
+          : `${Math.max(0, Number(billingUsage.used) || 0).toLocaleString("ru-RU")} AI-диалогов`,
+        reservedLabel: Number(billingUsage.reserved) > 0
+          ? ` · в резерве ${Math.max(0, Number(billingUsage.reserved) || 0).toLocaleString("ru-RU")}`
+          : ""
       }
       : null
   };

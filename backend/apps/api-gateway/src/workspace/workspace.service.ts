@@ -1063,7 +1063,10 @@ export class WorkspaceService {
   ): Promise<BackendEnvelope<Record<string, unknown>>> {
     return this.transitionKnowledgeArticle(payload, context, {
       action: "archived",
-      allowedStatuses: ["published"],
+      // Archiving is the user-facing delete action. Allow it from every active
+      // workflow state so an unfinished or pending article does not become a
+      // permanent piece of clutter in the knowledge base.
+      allowedStatuses: ["draft", "review", "approved", "published"],
       nextStatus: "archived",
       nextVisibility: "internal",
       operation: "archiveKnowledgeArticle",

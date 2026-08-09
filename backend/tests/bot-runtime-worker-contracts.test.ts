@@ -105,7 +105,7 @@ describe("bot runtime worker contracts", () => {
     assert.equal(sideEffect.descriptor.channel, "SDK");
     assert.equal(sideEffect.descriptor.conversationId, "conv-bot-runtime-outbound");
     assert.equal(sideEffect.descriptor.deliveryState, "queued");
-    assert.equal(sideEffect.descriptor.idempotencyKey, "bot-runtime:evt_inbound_outbound:reply");
+    assert.equal(sideEffect.descriptor.idempotencyKey, "bot-runtime:greeting:tenant-demo:conv-bot-runtime-outbound:bot-runtime-outbound");
     assert.equal(sideEffect.descriptor.kind, "message_delivery");
     assert.equal(sideEffect.descriptor.messageId, "bot_msg_evt_inbound_outbound_reply");
     assert.equal(sideEffect.descriptor.payload.text, "Thanks, I can help.");
@@ -113,6 +113,20 @@ describe("bot runtime worker contracts", () => {
     assert.equal(sideEffect.descriptor.status, "queued");
     assert.equal(sideEffect.descriptor.tenantId, "tenant-demo");
     assert.equal(sideEffect.descriptor.traceId, "trc_bot_runtime_outbound");
+  });
+
+  it("uses one greeting idempotency key for retried first events in the same dialog", () => {
+    const scenario: BotScenario = {
+      channels: ["SDK"],
+      flowEdges: [{ from: "start", to: "welcome" }],
+      flowNodes: [{ id: "start", type: "condition" }, { id: "welcome", title: "Hello", type: "message" }],
+      id: "bot-greeting", name: "Greeting bot", schemaVersion: "bot-flow/v1", status: "published", tenantId: "tenant-demo"
+    };
+    const first = planBotRuntimeStateTransition({ channel: "SDK", conversationId: "conv-greeting", currentNodeId: "start", eventId: "evt-1", scenario, tenantId: "tenant-demo", traceId: "trace-1" });
+    const retried = planBotRuntimeStateTransition({ channel: "SDK", conversationId: "conv-greeting", currentNodeId: "start", eventId: "evt-2", scenario, tenantId: "tenant-demo", traceId: "trace-2" });
+    assert.equal(first.sideEffects[0]?.kind, "message_delivery");
+    assert.equal(retried.sideEffects[0]?.kind, "message_delivery");
+    assert.equal(first.sideEffects[0]?.descriptor.idempotencyKey, retried.sideEffects[0]?.descriptor.idempotencyKey);
   });
 
   it("plans one handoff descriptor from a deterministic handoff step", () => {
@@ -231,7 +245,7 @@ describe("bot runtime worker contracts", () => {
     assert.equal(second.length, 1);
     assert.equal(first[0].descriptor.id, second[0].descriptor.id);
     assert.equal(descriptors.length, 1);
-    assert.equal(descriptors[0].idempotencyKey, "bot-runtime:evt_inbound_persist:reply");
+    assert.equal(descriptors[0].idempotencyKey, "bot-runtime:greeting:tenant-demo:conv-bot-runtime-persist:bot-runtime-persist");
     assert.equal(descriptors[0].payload.text, "Persisted reply");
     assert.equal(descriptors[0].status, "queued");
     assert.equal(descriptors[0].traceId, "trc_bot_runtime_persist");

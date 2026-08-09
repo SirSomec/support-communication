@@ -10,7 +10,7 @@ import { UnansweredQuestionRepository } from "../knowledge-sources/unanswered-qu
 import { HttpMcpReadOnlyTransport, McpReadOnlyConnectorService } from "../knowledge-sources/mcp-readonly-connector.service.js";
 import { McpConnectorRepository } from "../knowledge-sources/mcp-connector.repository.js";
 import { WorkspaceRepository } from "../workspace/workspace.repository.js";
-import { formatSessionForPrompt } from "./agent-session-state.js";
+import { deriveSessionMemory, formatSessionForPrompt, selectRelevantSessionTurns } from "./agent-session-state.js";
 import { AgentSessionStateRepository } from "./agent-session-state.repository.js";
 import type { KnowledgeSourceBinding } from "./automation.types.js";
 import { recordBotAiRequest } from "./bot-observability.js";
@@ -121,7 +121,7 @@ export class AiBotResponseService {
           behaviorRules: input.behaviorRules,
           instructions: input.instructions,
           knowledge: materials.length ? materials.map((item) => item.content).join("\n\n") : "",
-          sessionState: session ? formatSessionForPrompt(session) : undefined
+          sessionState: session ? formatSessionForPrompt({ ...session, recentTurns: selectRelevantSessionTurns(session, input.message) }) : undefined
         }) },
         { role: "user", content: input.message.slice(0, 4_000) }
       ] });
@@ -140,13 +140,15 @@ export class AiBotResponseService {
       const directive = extractAiDirectives(completion.content);
       const text = directive.text.slice(0, 8_000);
       if (input.conversationId) {
+        const memory = deriveSessionMemory(session, input.message, text);
         await this.sessions.updateAfterRun({
           assistantText: text,
           conversationId: input.conversationId,
-          intent: session?.intent ?? null,
-          openQuestion: session?.openQuestion ?? null,
+          facts: memory.facts,
+          intent: memory.intent ?? null,
+          openQuestion: memory.openQuestion ?? null,
           scenarioRevisionId: input.scenarioRevisionId ?? session?.scenarioRevisionId ?? null,
-          summary: session?.summary || input.message.slice(0, 200),
+          summary: memory.summary,
           tenantId: input.tenantId,
           tokensUsed: tokens,
           userText: input.message

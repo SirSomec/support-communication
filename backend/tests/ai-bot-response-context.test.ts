@@ -7,6 +7,8 @@ import {
   extractAiDirectives,
   extractRelevantKnowledge
 } from "../apps/api-gateway/src/automation/ai-bot-response.service.ts";
+import { deriveSessionMemory, selectRelevantSessionTurns } from "../apps/api-gateway/src/automation/agent-session-state.ts";
+import type { AgentSessionState } from "../apps/api-gateway/src/automation/agent-session-state.types.ts";
 
 describe("AI bot compact knowledge context", () => {
   it("selects a bounded relevant passage instead of replaying the whole document", () => {
@@ -19,6 +21,38 @@ describe("AI bot compact knowledge context", () => {
 
   it("falls back to a bounded beginning when there is no lexical match", () => {
     assert.equal(extractRelevantKnowledge("Short approved article", "unrelated", 100), "Short approved article");
+  });
+});
+
+describe("AI bot session memory", () => {
+  const session = (): AgentSessionState => ({
+    conversationId: "conv-1", createdAt: "2026-08-01T10:00:00.000Z", expiresAt: "2026-08-02T10:00:00.000Z",
+    facts: [], intent: "delivery", openQuestion: null,
+    recentTurns: [
+      { at: "2026-08-01T10:00:00.000Z", role: "user", text: "У меня заказ A-42" },
+      { at: "2026-08-01T10:00:01.000Z", role: "assistant", text: "Проверю доставку заказа" },
+      { at: "2026-08-01T10:01:00.000Z", role: "user", text: "Ещё нужен возврат оплаты" },
+      { at: "2026-08-01T10:01:01.000Z", role: "assistant", text: "Уточню правила возврата" },
+      { at: "2026-08-01T10:02:00.000Z", role: "user", text: "Когда будет курьер?" },
+      { at: "2026-08-01T10:02:01.000Z", role: "assistant", text: "Сейчас проверю статус" }
+    ],
+    scenarioRevisionId: null, schemaVersion: 1, summary: "Клиент ожидает доставку.", tenantId: "tenant-1",
+    tokenEstimate: 100, turnCount: 3, updatedAt: "2026-08-01T10:02:01.000Z", version: 3
+  });
+
+  it("retains operational facts and gives the newest customer state priority in the summary", () => {
+    const memory = deriveSessionMemory(session(), "Где заказ № A-42?", "Проверяю доставку.");
+    assert.equal(memory.facts?.orderReference, "A-42");
+    assert.equal(memory.intent, "delivery");
+    assert.equal(memory.openQuestion, "Где заказ № A-42?");
+    assert.match(memory.summary ?? "", /^Текущая тема: delivery/);
+  });
+
+  it("selects relevant history instead of replaying every retained turn", () => {
+    const turns = selectRelevantSessionTurns(session(), "Где мой заказ и доставка?", 4);
+    assert.ok(turns.length <= 4);
+    assert.ok(turns.some((turn) => turn.text.includes("заказ A-42")));
+    assert.equal(turns.at(-1)?.text, "Сейчас проверю статус");
   });
 });
 

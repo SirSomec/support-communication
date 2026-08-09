@@ -342,7 +342,13 @@ function createStateTransitionSideEffects(
   }
 
   const messageId = makeBotRuntimeMessageId(input.eventId, node.id);
-  const idempotencyKey = `bot-runtime:${input.eventId}:${node.id}`;
+  // A start node may be reached twice when a channel retries the first inbound
+  // event with a different provider id.  A greeting is a conversation-level
+  // effect, so its idempotency must not depend on that retried event id.
+  const isGreeting = input.currentNodeId === "start";
+  const idempotencyKey = isGreeting
+    ? `bot-runtime:greeting:${input.tenantId}:${input.conversationId}:${input.scenario.id}`
+    : `bot-runtime:${input.eventId}:${node.id}`;
 
   return [{
     descriptor: {

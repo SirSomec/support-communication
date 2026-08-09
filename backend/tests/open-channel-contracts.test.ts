@@ -184,6 +184,27 @@ describe("open channel chat ingress", () => {
     resolveBot();
   });
 
+  it("deduplicates a retried id-less message and does not restart the bot", async () => {
+    const runtime = openChannelRuntime();
+    let botRuns = 0;
+    const event = { sender: { id: "client-retry" }, message: { date: 1_723_200_000, text: "Hello", type: "text" } };
+    const runBotRuntime = async () => {
+      botRuns += 1;
+      return { instance: { status: "active" } };
+    };
+
+    const first = await handleOpenChatInbound({ body: event, channelToken: CHANNEL_TOKEN, conversationRepository: runtime.conversations,
+      conversationService: runtime.service, repository: runtime.repository, runBotRuntime });
+    await new Promise((resolve) => setImmediate(resolve));
+    const replay = await handleOpenChatInbound({ body: event, channelToken: CHANNEL_TOKEN, conversationRepository: runtime.conversations,
+      conversationService: runtime.service, repository: runtime.repository, runBotRuntime });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal((first.body as Record<string, unknown>).duplicate, false);
+    assert.equal((replay.body as Record<string, unknown>).duplicate, true);
+    assert.equal(botRuns, 1);
+  });
+
   it("rejects unknown channel tokens with a plain 404", async () => {
     const runtime = openChannelRuntime();
     const denied = await receiveChatEvent(runtime, { sender: { id: "x" }, message: { type: "text", text: "hi" } }, "missing-token");

@@ -12,7 +12,9 @@ export const DEFAULT_AGENT_SESSION_POLICY: AgentSessionPolicy = {
   compactionTurnThreshold: 8,
   maxFactChars: 120,
   maxFacts: 12,
-  maxRecentTurns: 4,
+  // Four user/assistant exchanges are enough for local coherence. Older
+  // context is preserved as a summary and structured facts.
+  maxRecentTurns: 8,
   maxSummaryChars: 480,
   maxTurnChars: 280,
   ttlMs: 24 * 60 * 60 * 1_000
@@ -139,6 +141,57 @@ export function formatSessionForPrompt(state: AgentSessionState): string {
   ].join("\n");
 }
 
+/**
+ * Produces bounded, non-sensitive state from a turn without another model
+ * call. It deliberately keeps only operational identifiers, never contacts
+ * or free-form personal data.
+ */
+export function deriveSessionMemory(
+  current: AgentSessionState | null,
+  userText: string,
+  assistantText?: string
+): Pick<AgentSessionUpdateInput, "facts" | "intent" | "openQuestion" | "summary"> {
+  const text = String(userText ?? "").trim();
+  const normalized = text.toLocaleLowerCase();
+  const facts: Record<string, string> = {};
+  const order = /(?:заказ(?:а|у)?|order)\s*(?:№|no\.?|#)?\s*([a-zа-я0-9][a-zа-я0-9-]{2,})/iu.exec(text)?.[1];
+  const ticket = /(?:обращени[ея]|тикет|ticket)\s*(?:№|no\.?|#)?\s*([a-zа-я0-9][a-zа-я0-9-]{2,})/iu.exec(text)?.[1];
+  if (order) facts.orderReference = order;
+  if (ticket) facts.ticketReference = ticket;
+
+  const intent = inferIntent(normalized) ?? current?.intent ?? undefined;
+  const openQuestion = /[?？]/u.test(text) || /^(?:где|когда|как|почему|сколько|можно|нужен|хочу|what|when|where|how)\b/iu.test(text)
+    ? clip(text, 240)
+    : current?.openQuestion ?? undefined;
+  const latest = [
+    intent ? `Текущая тема: ${intent}.` : "",
+    text ? `Последнее сообщение клиента: ${clip(text, 180)}.` : "",
+    assistantText ? `Последний ответ: ${clip(assistantText, 140)}.` : ""
+  ].filter(Boolean).join(" ");
+  // Put the newest information first so bounded clipping cannot hide it.
+  const summary = clip([latest, current?.summary ? `Ранее: ${current.summary}` : ""].filter(Boolean).join(" "), 480);
+  return { facts, ...(intent ? { intent } : {}), ...(openQuestion ? { openQuestion } : {}), summary };
+}
+
+/** Selects the newest turns plus older turns that lexically match the question. */
+export function selectRelevantSessionTurns(state: AgentSessionState, question: string, limit = 4): AgentSessionTurn[] {
+  const turns = state.recentTurns;
+  if (turns.length <= limit) return turns;
+  const terms = new Set(String(question).toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+  const newest = turns.slice(-2);
+  const candidates = turns.slice(0, -2).map((turn, index) => ({
+    index,
+    turn,
+    score: (turn.text.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).reduce((score, term) => score + (terms.has(term) ? 1 : 0), 0)
+  }));
+  const selected = candidates
+    .sort((left, right) => right.score - left.score || right.index - left.index)
+    .slice(0, Math.max(0, limit - newest.length))
+    .filter((item) => item.score > 0)
+    .map((item) => item.turn);
+  return turns.filter((turn) => selected.includes(turn) || newest.includes(turn));
+}
+
 function emptySession(input: AgentSessionUpdateInput, nowIso: string, policy: AgentSessionPolicy): AgentSessionState {
   return {
     conversationId: input.conversationId,
@@ -177,6 +230,14 @@ function clip(value: string, max: number): string {
 
 function deriveSummary(userText: string, intent: string | null): string {
   return intent ? `Клиент продолжает сценарий ${intent}: ${clip(userText, 160)}` : clip(userText, 200);
+}
+
+function inferIntent(text: string): string | null {
+  if (/(доставк|курьер|посылк|отправлен|трек|delivery|shipment)/u.test(text)) return "delivery";
+  if (/(оплат|сч[её]т|карт|плат[её]ж|payment|invoice)/u.test(text)) return "payment";
+  if (/(возврат|вернут|refund|cancel)/u.test(text)) return "refund";
+  if (/(аккаунт|войти|парол|login|account)/u.test(text)) return "account_access";
+  return null;
 }
 
 function extractPreservedFacts(state: AgentSessionState): AgentSessionFact[] {

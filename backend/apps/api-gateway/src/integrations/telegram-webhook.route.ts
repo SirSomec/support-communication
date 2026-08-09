@@ -264,7 +264,7 @@ export async function handleTelegramWebhookFromRoute(
   }
 
   const runtimeEventId = telegramTenantEventId(tenantId, tenantConnection?.botId ?? undefined, parsed.eventId);
-  const botRuntime = normalized.status === "ok" && input.runBotRuntime
+  const botRuntime = normalized.status === "ok" && !normalized.data?.duplicate && input.runBotRuntime
     ? await tryBotRuntime(input.runBotRuntime, { channel: "Telegram", conversationId: conversation.id, eventId: runtimeEventId, payload: { isNewConversation, text: parsed.text }, tenantId, traceId: normalized.traceId })
     : null;
   const needsOperator = !botRuntime || ["handoff", "dead_lettered"].includes(String(botRuntime.instance?.status ?? ""));

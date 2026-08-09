@@ -233,13 +233,15 @@ export async function handleOpenChatInbound(input: OpenChatInboundInput): Promis
       tenantId: channel.tenantId,
       traceId: getCurrentTraceId() ?? createRequestTraceId("open-chat")
     };
-  const botRuntimeQueued = Boolean(input.runBotRuntime);
+  // Never let a normalized duplicate advance a bot flow.  The provider can
+  // legitimately retry a request after its acknowledgement times out.
+  const botRuntimeQueued = Boolean(input.runBotRuntime && !normalized.data?.duplicate);
 
   // Chat API clients have a short request timeout.  Bot generation may take
   // several seconds, so it must not delay the acknowledgement of a valid
   // inbound event.  The runtime persists its side effects independently and
   // reconciliation delivers the resulting reply to the channel callback.
-  if (input.runBotRuntime) {
+  if (botRuntimeQueued) {
     void Promise.resolve()
       .then(() => input.runBotRuntime!(botRuntimeEvent))
       .catch(() => undefined);
@@ -538,10 +540,24 @@ function sameClientGeo(
 
 function contentEventId(channelId: string, clientId: string, type: string, message: OpenChatMessage): string {
   const digest = createHash("sha256")
-    .update(`${channelId}\0${clientId}\0${type}\0${JSON.stringify(message)}\0${Date.now()}`)
+    // Do not add a clock value here: that turns a provider retry without a
+    // message id into a different event and can restart a bot greeting.
+    .update(`${channelId}\0${clientId}\0${type}\0${stableJson(message)}`)
     .digest("hex")
     .slice(0, 24);
   return `content_${digest}`;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function isFiniteInRange(value: number, min: number, max: number): boolean {

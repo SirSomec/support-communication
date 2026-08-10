@@ -753,15 +753,17 @@
   border-left: 1px solid var(--public-line);
   border-radius: 0;
   background:
-    radial-gradient(circle at 100% 0, var(--channel-glow, rgb(86 132 255 / 18%)), transparent 58%),
-    linear-gradient(135deg, var(--channel-surface, #f7f9fc), #fff 78%);
-  transition: box-shadow 180ms ease, transform 180ms ease;
+    radial-gradient(ellipse 92% 76% at 104% -4%, var(--channel-glow, rgb(86 132 255 / 34%)), transparent 72%),
+    radial-gradient(ellipse 74% 58% at -4% 108%, var(--channel-sheen, rgb(86 132 255 / 18%)), transparent 70%),
+    linear-gradient(135deg, var(--channel-surface, #eef4ff) 0%, #fff 74%);
+  transition: background 220ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
 .public-channel-card:nth-child(4n + 1) { border-left: 0; }
 .public-channel-card:nth-child(n + 5) { border-top: 1px solid var(--public-line); }
 .public-channel-card:hover {
   z-index: 1;
+  background-position: 8px -6px, -6px 8px, 0 0;
   box-shadow: inset 0 0 0 1px var(--channel-ink, #5584db), 0 14px 30px rgb(25 50 96 / 10%);
   transform: translateY(-3px);
 }
@@ -782,8 +784,6 @@
 .public-channel-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
 }
 
 .public-channel-tile {
@@ -841,28 +841,13 @@
 }
 
 .channel-web-sdk,
-.channel-rest-api { --channel-ink: #1678f2; --channel-glow: rgb(22 120 242 / 18%); --channel-surface: #edf6ff; }
-.channel-telegram { --channel-ink: #26a5e4; --channel-glow: rgb(38 165 228 / 22%); --channel-surface: #edf8ff; }
-.channel-vk { --channel-ink: #0077ff; --channel-glow: rgb(0 119 255 / 21%); --channel-surface: #edf5ff; }
-.channel-max { --channel-ink: #471aff; --channel-glow: rgb(104 29 255 / 24%); --channel-surface: #f3efff; }
-.channel-whatsapp { --channel-ink: #25d366; --channel-glow: rgb(37 211 102 / 21%); --channel-surface: #effcf4; }
-.channel-email { --channel-ink: #8254d8; --channel-glow: rgb(130 84 216 / 18%); --channel-surface: #f6f1ff; }
-.channel-viber { --channel-ink: #7360f2; --channel-glow: rgb(115 96 242 / 21%); --channel-surface: #f3f1ff; }
-
-.public-channel-status {
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: #e7f7f0;
-  color: #0c7a5f;
-  font-size: 11px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.public-channel-status.pending {
-  background: #f1f4f9;
-  color: #7a889c;
-}
+.channel-rest-api { --channel-ink: #1678f2; --channel-glow: rgb(22 120 242 / 42%); --channel-sheen: rgb(48 198 255 / 26%); --channel-surface: #e3f2ff; }
+.channel-telegram { --channel-ink: #26a5e4; --channel-glow: rgb(38 165 228 / 50%); --channel-sheen: rgb(0 212 255 / 26%); --channel-surface: #dff5ff; }
+.channel-vk { --channel-ink: #0077ff; --channel-glow: rgb(0 119 255 / 46%); --channel-sheen: rgb(39 174 255 / 25%); --channel-surface: #e0eeff; }
+.channel-max { --channel-ink: #471aff; --channel-glow: rgb(122 39 255 / 48%); --channel-sheen: rgb(0 197 255 / 24%); --channel-surface: #eee5ff; }
+.channel-whatsapp { --channel-ink: #25d366; --channel-glow: rgb(37 211 102 / 44%); --channel-sheen: rgb(143 255 71 / 24%); --channel-surface: #e3ffea; }
+.channel-email { --channel-ink: #8254d8; --channel-glow: rgb(130 84 216 / 41%); --channel-sheen: rgb(237 125 255 / 22%); --channel-surface: #f1e8ff; }
+.channel-viber { --channel-ink: #7360f2; --channel-glow: rgb(115 96 242 / 46%); --channel-sheen: rgb(179 108 255 / 24%); --channel-surface: #ebe7ff; }
 
 /* ---------- how it works ---------- */
 

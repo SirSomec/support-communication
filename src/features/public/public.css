@@ -746,33 +746,37 @@
   display: grid;
   min-width: 0;
   align-content: start;
-  gap: 8px;
-  padding: 24px 20px;
+  gap: 10px;
+  min-height: 236px;
+  padding: 28px 24px;
   border: 0;
   border-left: 1px solid var(--public-line);
   border-radius: 0;
-  background: rgb(247 249 252 / 86%);
-  transition: background 180ms ease, transform 180ms ease;
+  background:
+    radial-gradient(circle at 100% 0, var(--channel-glow, rgb(86 132 255 / 18%)), transparent 58%),
+    linear-gradient(135deg, var(--channel-surface, #f7f9fc), #fff 78%);
+  transition: box-shadow 180ms ease, transform 180ms ease;
 }
 
 .public-channel-card:nth-child(4n + 1) { border-left: 0; }
 .public-channel-card:nth-child(n + 5) { border-top: 1px solid var(--public-line); }
-.public-channel-card:hover { z-index: 1; background: #ffffff; transform: translateY(-3px); }
-
-.public-channel-card.pending {
-  background: rgb(251 252 254 / 88%);
+.public-channel-card:hover {
+  z-index: 1;
+  box-shadow: inset 0 0 0 1px var(--channel-ink, #5584db), 0 14px 30px rgb(25 50 96 / 10%);
+  transform: translateY(-3px);
 }
 
 .public-channel-card strong {
   color: #17233a;
-  font-size: 15px;
+  font-size: 17px;
+  line-height: 1.25;
 }
 
 .public-channel-card p {
   margin: 0;
   color: var(--public-muted);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .public-channel-top {
@@ -784,11 +788,12 @@
 
 .public-channel-tile {
   display: grid;
-  width: 46px;
-  height: 46px;
+  width: 54px;
+  height: 54px;
   place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 13px;
+  border: 1px solid rgb(255 255 255 / 78%);
+  border-radius: 16px;
+  box-shadow: 0 8px 16px rgb(27 52 101 / 9%);
 }
 
 .public-channel-tile.blue {
@@ -828,9 +833,21 @@
   color: #7a52d1;
 }
 
-.public-channel-tile b {
-  font-weight: 900;
+.public-channel-tile img {
+  display: block;
+  width: 29px;
+  height: 29px;
+  object-fit: contain;
 }
+
+.channel-web-sdk,
+.channel-rest-api { --channel-ink: #1678f2; --channel-glow: rgb(22 120 242 / 18%); --channel-surface: #edf6ff; }
+.channel-telegram { --channel-ink: #26a5e4; --channel-glow: rgb(38 165 228 / 22%); --channel-surface: #edf8ff; }
+.channel-vk { --channel-ink: #0077ff; --channel-glow: rgb(0 119 255 / 21%); --channel-surface: #edf5ff; }
+.channel-max { --channel-ink: #471aff; --channel-glow: rgb(104 29 255 / 24%); --channel-surface: #f3efff; }
+.channel-whatsapp { --channel-ink: #25d366; --channel-glow: rgb(37 211 102 / 21%); --channel-surface: #effcf4; }
+.channel-email { --channel-ink: #8254d8; --channel-glow: rgb(130 84 216 / 18%); --channel-surface: #f6f1ff; }
+.channel-viber { --channel-ink: #7360f2; --channel-glow: rgb(115 96 242 / 21%); --channel-surface: #f3f1ff; }
 
 .public-channel-status {
   padding: 3px 9px;

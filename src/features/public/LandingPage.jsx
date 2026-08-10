@@ -81,13 +81,13 @@ const aiHighlights = [
 
 const channelItems = [
   { key: "web-sdk", name: "Web SDK", icon: Code2, tint: "blue", status: "реализовано", live: true, text: "Идентификация посетителя, сообщения, файлы, presence и оценки после настройки SDK key и домена." },
-  { key: "telegram", name: "Telegram", icon: Send, tint: "sky", status: "требует настройки", live: true, text: "Входящие диалоги и ответы операторов через бота после подключения действующего bot token." },
-  { key: "vk", name: "ВКонтакте", mark: "VK", tint: "vk", status: "требует live-проверки", live: false, text: "Интеграционный контур реализован; перед сильным production claim нужна приёмка с реальными credentials." },
-  { key: "max", name: "MAX", mark: "MAX", tint: "max", status: "требует live-проверки", live: false, text: "Интеграционный контур реализован; публичный live-статус подтверждается отдельной приёмкой." },
+  { key: "telegram", name: "Telegram", logo: "https://cdn.simpleicons.org/telegram/26A5E4", tint: "sky", status: "требует настройки", live: true, text: "Входящие диалоги и ответы операторов через бота после подключения действующего bot token." },
+  { key: "vk", name: "ВКонтакте", logo: "https://cdn.simpleicons.org/vk/0077FF", tint: "vk", status: "требует live-проверки", live: false, text: "Интеграционный контур реализован; перед сильным production claim нужна приёмка с реальными credentials." },
+  { key: "max", name: "MAX", logo: "https://max.ru/favicon.svg", tint: "max", status: "требует live-проверки", live: false, text: "Интеграционный контур реализован; публичный live-статус подтверждается отдельной приёмкой." },
   { key: "rest-api", name: "REST API", icon: Webhook, tint: "blue", status: "реализовано", live: true, text: "Публичный API и Open Channel для поддерживаемых интеграционных сценариев." },
-  { key: "whatsapp", name: "WhatsApp", icon: MessageSquare, tint: "green", status: "на подключении", live: false, text: "Бизнес-переписка и шаблоны сообщений — в той же операционной ленте." },
+  { key: "whatsapp", name: "WhatsApp", logo: "https://cdn.simpleicons.org/whatsapp/25D366", tint: "green", status: "на подключении", live: false, text: "Бизнес-переписка и шаблоны сообщений — в той же операционной ленте." },
   { key: "email", name: "Email", icon: Mail, tint: "violet", status: "на подключении", live: false, text: "Обращения на почту превращаются в диалоги с тематиками и SLA." },
-  { key: "viber", name: "Viber", icon: Phone, tint: "purple", status: "на подключении", live: false, text: "Ещё один канал мессенджеров — подключается как управляемый источник событий." }
+  { key: "viber", name: "Viber", logo: "https://cdn.simpleicons.org/viber/7360F2", tint: "purple", status: "на подключении", live: false, text: "Ещё один канал мессенджеров — подключается как управляемый источник событий." }
 ];
 
 const workflowSteps = [
@@ -409,10 +409,12 @@ export function LandingPage({
           </p>
         </div>
         <div className="public-channel-grid">
-          {channelItems.map(({ key, name, icon: Icon, mark, tint, status, live, text }) => (
-            <article className={`public-channel-card${live ? "" : " pending"}`} key={key}>
+          {channelItems.map(({ key, name, icon: Icon, logo, tint, status, live, text }) => (
+            <article className={`public-channel-card channel-${key}${live ? "" : " pending"}`} key={key}>
               <div className="public-channel-top">
-                <span className={`public-channel-tile ${tint}`}>{Icon ? <Icon size={19} /> : <b>{mark}</b>}</span>
+                <span className={`public-channel-tile ${tint}`}>
+                  {logo ? <img alt="" aria-hidden="true" src={logo} /> : <Icon size={22} />}
+                </span>
                 <span className={`public-channel-status${live ? "" : " pending"}`}>{status}</span>
               </div>
               <strong>{name}</strong>

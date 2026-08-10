@@ -6,6 +6,7 @@ import { SettingsEmployeeService } from "../apps/api-gateway/src/identity/settin
 import { TeamDirectoryRepository } from "../apps/api-gateway/src/identity/team-directory.repository.ts";
 import { MailSettingsRepository } from "../apps/api-gateway/src/mail/mail-settings.repository.ts";
 import { MailSettingsService } from "../apps/api-gateway/src/mail/mail-settings.service.ts";
+import { composeMailMessage } from "../apps/api-gateway/src/mail/smtp-transport.ts";
 import {
   createInviteMailDeliveryFromEnv,
   createServiceMailOverrideResolver
@@ -30,6 +31,24 @@ const validSettingsInput = {
 };
 
 describe("service mail settings contracts", () => {
+  it("formats service emails as Russian multipart messages and escapes dynamic HTML content", () => {
+    const message = composeMailMessage(
+      { from: "noreply@service.example", fromName: "Служба поддержки" },
+      {
+        bodyLines: ["Здравствуйте!", "", "Код приглашения: invite_12345678", "https://service.example/activate", "<script>alert('unsafe')</script>"],
+        subject: "Обращение поддержки",
+        to: "operator@example.com"
+      }
+    );
+
+    assert.match(message, /Content-Type: multipart\/alternative/);
+    assert.match(message, /<html lang=\"ru\">/);
+    assert.match(message, /font-size:24px/);
+    assert.match(message, /invite_12345678/);
+    assert.match(message, /href="https:\/\/service\.example\/activate"/);
+    assert.match(message, /&lt;script&gt;alert\(&#39;unsafe&#39;\)&lt;\/script&gt;/);
+  });
+
   it("saves the singleton settings with an encrypted password and never returns the secret", async () => {
     const repository = MailSettingsRepository.inMemory();
     const service = new MailSettingsService(repository, secureEnvironment);
@@ -310,7 +329,10 @@ describe("invite mail delivery contracts", () => {
       assert.equal(messages.length, 1);
       const message = messages[0] ?? "";
       assert.match(message, /Subject: =\?UTF-8\?B\?/);
+      assert.match(message, /Content-Type: multipart\/alternative/);
       assert.match(message, /invite_12345678-1234-1234-1234-123456789abc/);
+      assert.match(message, /<html lang=\"ru\">/);
+      assert.match(message, /font-size:24px/);
       assert.match(message, /To: employee@volga\.example/);
       assert.match(message, /From: =\?UTF-8\?B\?[^\r\n]+ <noreply@service\.example>/);
     } finally {

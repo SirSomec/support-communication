@@ -6,6 +6,8 @@ import type {
   PublicDemoRequestNotificationStatus
 } from "./integration.repository.js";
 
+const PUBLIC_DEMO_EMAIL_BOUNDARY = "----=_SupportCommunication_PublicDemo_09d5b3e1";
+
 export interface PublicDemoRequestNotificationProvider {
   disabled?: boolean;
   send(input: PublicDemoRequestNotificationProviderInput): Promise<PublicDemoRequestNotificationProviderResult>;
@@ -186,31 +188,100 @@ function buildPublicDemoRequestEmail(input: {
   const planInterest = emailText(payload.planInterest, "not specified");
   const source = emailText(payload.source, "unknown");
   const messagePreview = emailText(payload.messagePreview, "");
-  const subject = `New public demo request from ${company}`;
+  const subject = `Новая заявка на демонстрацию: ${company}`;
   const from = sanitizeAddress(input.from);
+  const bodyLines = [
+    "Новая заявка на демонстрацию сервиса.",
+    "",
+    `Компания: ${company}`,
+    `Контакт: ${name}`,
+    `Email: ${email}`,
+    `Интересующий тариф: ${planInterest}`,
+    `Источник: ${source}`,
+    "",
+    "Сообщение:",
+    messagePreview || "(не указано)",
+    "",
+    `Идентификатор заявки: ${input.descriptor.leadId}`,
+    `Время отправки: ${input.now}`
+  ];
   const lines = [
     `From: ${from}`,
     `To: ${input.to.map(sanitizeAddress).join(", ")}`,
-    `Subject: ${sanitizeHeader(subject)}`,
+    `Subject: ${encodeMimeHeader(subject)}`,
     `Date: ${smtpMessageDate(input.now)}`,
     `Message-ID: ${smtpMessageId(input.descriptor.id, from)}`,
-    "Content-Type: text/plain; charset=utf-8",
     "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary=\"${PUBLIC_DEMO_EMAIL_BOUNDARY}\"`,
     "",
-    `Lead id: ${input.descriptor.leadId}`,
-    `Created notification: ${input.descriptor.id}`,
-    `Sent at: ${input.now}`,
-    `Name: ${name}`,
-    `Company: ${company}`,
-    `Email: ${email}`,
-    `Plan interest: ${planInterest}`,
-    `Source: ${source}`,
+    `--${PUBLIC_DEMO_EMAIL_BOUNDARY}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "Content-Transfer-Encoding: 8bit",
     "",
-    "Message:",
-    messagePreview || "(empty)"
+    ...bodyLines,
+    "",
+    `--${PUBLIC_DEMO_EMAIL_BOUNDARY}`,
+    "Content-Type: text/html; charset=utf-8",
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    buildPublicDemoRequestEmailHtml({ company, email, leadId: input.descriptor.leadId, messagePreview, name, planInterest, source, sentAt: input.now }),
+    "",
+    `--${PUBLIC_DEMO_EMAIL_BOUNDARY}--`
   ];
 
   return `${lines.join("\r\n")}\r\n`;
+}
+
+function buildPublicDemoRequestEmailHtml(input: {
+  company: string;
+  email: string;
+  leadId: string;
+  messagePreview: string;
+  name: string;
+  planInterest: string;
+  sentAt: string;
+  source: string;
+}): string {
+  const rows = [
+    ["Компания", input.company],
+    ["Контакт", input.name],
+    ["Email", input.email],
+    ["Интересующий тариф", input.planInterest],
+    ["Источник", input.source]
+  ].map(([label, value]) => `<tr><td style=\"padding:10px 0;border-bottom:1px solid #e5eaf2;font-size:14px;line-height:20px;color:#66738a;\">${escapeHtml(label)}</td><td align=\"right\" style=\"padding:10px 0 10px 16px;border-bottom:1px solid #e5eaf2;font-size:14px;line-height:20px;font-weight:600;color:#172033;\">${escapeHtml(value)}</td></tr>`).join("");
+  const message = escapeHtml(input.messagePreview || "Не указано").replace(/\r?\n/g, "<br>");
+
+  return [
+    "<!doctype html>",
+    "<html lang=\"ru\">",
+    "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head>",
+    "<body style=\"margin:0;padding:0;background-color:#f4f7fb;color:#172033;font-family:Arial,Helvetica,sans-serif;\">",
+    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;background-color:#f4f7fb;\"><tr><td align=\"center\" style=\"padding:32px 16px;\">",
+    "<table role=\"presentation\" width=\"600\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;max-width:600px;background-color:#ffffff;border-radius:16px;\"><tr><td style=\"padding:40px 32px;\">",
+    "<p style=\"margin:0 0 12px;font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#52627d;\">Новая заявка</p>",
+    "<h1 style=\"margin:0 0 24px;font-size:28px;line-height:34px;font-weight:700;color:#172033;\">Заявка на демонстрацию</h1>",
+    `<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;\">${rows}</table>`,
+    "<p style=\"margin:28px 0 8px;font-size:14px;line-height:20px;font-weight:700;color:#172033;\">Сообщение</p>",
+    `<p style=\"margin:0;padding:16px;background-color:#f7f9fc;border-radius:10px;font-size:16px;line-height:24px;color:#46536b;\">${message}</p>`,
+    `<p style=\"margin:24px 0 0;font-size:12px;line-height:18px;color:#7b879b;\">Идентификатор заявки: ${escapeHtml(input.leadId)}<br>Время отправки: ${escapeHtml(input.sentAt)}</p>`,
+    "</td></tr></table>",
+    "</td></tr></table>",
+    "</body></html>"
+  ].join("");
+}
+
+function encodeMimeHeader(value: string): string {
+  return `=?UTF-8?B?${Buffer.from(sanitizeHeader(value), "utf8").toString("base64")}?=`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>\"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[character] ?? character);
 }
 
 function sendSmtpMessage(input: {

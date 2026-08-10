@@ -275,10 +275,14 @@ describe("public demo request contracts", () => {
       assert.equal(smtp.messages.length, 1);
       assert.match(smtp.messages[0], /To: sales@support\.local, admin@support\.local/);
       assert.match(smtp.messages[0], /From: noreply@support\.local/);
-      assert.match(smtp.messages[0], /Subject: New public demo request from Acme Retail/);
+      assert.match(smtp.messages[0], /Subject: =\?UTF-8\?B\?.+\?=/);
       assert.match(smtp.messages[0], /Date: Sun, 05 Jul 2026 10:01:00 GMT/);
       assert.match(smtp.messages[0], /Message-ID: <lead-notification-[a-f0-9]{32}@support\.local>/);
       assert.match(smtp.messages[0], /owner@acme\.example/);
+      assert.match(smtp.messages[0], /Content-Type: multipart\/alternative/);
+      assert.match(smtp.messages[0], /Новая заявка на демонстрацию сервиса/);
+      assert.match(smtp.messages[0], /<html lang=\"ru\">/);
+      assert.match(smtp.messages[0], /Заявка на демонстрацию/);
       assert.match(smtp.commands.join("\n"), /MAIL FROM:<noreply@support\.local>/);
       assert.match(smtp.commands.join("\n"), /RCPT TO:<sales@support\.local>/);
       assert.match(smtp.commands.join("\n"), /RCPT TO:<admin@support\.local>/);

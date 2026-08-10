@@ -59,6 +59,7 @@ const DEFAULT_SMTP_TIMEOUT_MS = 10_000;
 const MAX_SMTP_TIMEOUT_MS = 120_000;
 const MAX_SMTP_RESPONSE_LINE_BYTES = 8_192;
 const MFA_EMAIL_BOUNDARY = "----=_SupportCommunication_MfaOtp_6f4b9e2a";
+const RECOVERY_EMAIL_BOUNDARY = "----=_SupportCommunication_PasswordRecovery_45a1c7d3";
 
 export function createMfaOtpDeliveryFromEnv(
   source: NodeJS.ProcessEnv = process.env,
@@ -348,21 +349,58 @@ function buildRecoveryEmail(from: string, input: NormalizedRecoveryDeliveryInput
   const lines = [
     `From: ${sanitizeHeader(from)}`,
     `To: ${sanitizeHeader(input.email)}`,
-    "Subject: Password recovery request",
+    `Subject: ${encodeMimeHeader("Восстановление пароля")}`,
     `Date: ${new Date().toUTCString()}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary=\"${RECOVERY_EMAIL_BOUNDARY}\"`,
+    "",
+    `--${RECOVERY_EMAIL_BOUNDARY}`,
     "Content-Type: text/plain; charset=utf-8",
     "Content-Transfer-Encoding: 8bit",
-    "MIME-Version: 1.0",
     "",
-    "Use this one-time token to reset your password:",
+    "Восстановление пароля",
+    "",
+    "Используйте этот одноразовый токен, чтобы восстановить пароль:",
     input.recoveryToken,
-    `This token expires at: ${input.expiresAt}`,
-    `Request reference: ${input.requestId}`,
     "",
-    "If you did not request a password reset, ignore this email."
+    `Токен действует до: ${input.expiresAt}`,
+    "",
+    "Никому не сообщайте этот токен. Если вы не запрашивали восстановление пароля, просто проигнорируйте это письмо.",
+    "",
+    `--${RECOVERY_EMAIL_BOUNDARY}`,
+    "Content-Type: text/html; charset=utf-8",
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    buildRecoveryEmailHtml(input),
+    "",
+    `--${RECOVERY_EMAIL_BOUNDARY}--`
   ];
 
   return `${lines.join("\r\n")}\r\n`;
+}
+
+function buildRecoveryEmailHtml(input: NormalizedRecoveryDeliveryInput): string {
+  const token = escapeHtml(input.recoveryToken);
+  const expiresAt = escapeHtml(input.expiresAt);
+
+  return [
+    "<!doctype html>",
+    "<html lang=\"ru\">",
+    "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head>",
+    "<body style=\"margin:0;padding:0;background-color:#f4f7fb;color:#172033;font-family:Arial,Helvetica,sans-serif;\">",
+    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;background-color:#f4f7fb;\"><tr><td align=\"center\" style=\"padding:32px 16px;\">",
+    "<table role=\"presentation\" width=\"600\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;max-width:600px;background-color:#ffffff;border-radius:16px;\"><tr><td style=\"padding:40px 32px;\">",
+    "<p style=\"margin:0 0 12px;font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#52627d;\">Безопасность аккаунта</p>",
+    "<h1 style=\"margin:0 0 16px;font-size:28px;line-height:34px;font-weight:700;color:#172033;\">Восстановление пароля</h1>",
+    "<p style=\"margin:0 0 28px;font-size:16px;line-height:24px;color:#46536b;\">Введите этот одноразовый токен, чтобы задать новый пароль.</p>",
+    `<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;\"><tr><td align=\"center\" bgcolor=\"#edf3ff\" style=\"padding:20px 16px;background-color:#edf3ff;border:1px solid #c9dafd;border-radius:12px;\"><span style=\"display:inline-block;font-family:'Courier New',Courier,monospace;font-size:20px;line-height:28px;font-weight:700;letter-spacing:1px;color:#153f9f;word-break:break-all;\">${token}</span></td></tr></table>`,
+    `<p style=\"margin:24px 0 0;font-size:14px;line-height:20px;color:#66738a;\">Токен действует до: ${expiresAt}</p>`,
+    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;\"><tr><td style=\"padding-top:28px;\"><div style=\"height:1px;background-color:#e5eaf2;line-height:1px;font-size:1px;\">&nbsp;</div></td></tr></table>",
+    "<p style=\"margin:24px 0 0;font-size:14px;line-height:21px;color:#66738a;\">Никому не сообщайте этот токен. Если вы не запрашивали восстановление пароля, просто проигнорируйте это письмо.</p>",
+    "</td></tr></table>",
+    "</td></tr></table>",
+    "</body></html>"
+  ].join("");
 }
 
 function sendSmtpMessage(input: SmtpConfig & { message: string; to: string }): Promise<string> {

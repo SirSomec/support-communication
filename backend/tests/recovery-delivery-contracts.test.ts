@@ -85,9 +85,14 @@ describe("password recovery delivery contracts", () => {
       assert.equal(result.providerMessageId, "smtp-recovery-contract-message");
       assert.doesNotMatch(JSON.stringify(result), new RegExp(recoveryInput.recoveryToken));
       assert.equal(messages.length, 1);
-      assert.match(messages[0] ?? "", /Subject: Password recovery request/);
-      assert.match(messages[0] ?? "", new RegExp(recoveryInput.recoveryToken));
-      assert.match(messages[0] ?? "", /Request reference: rcv_contract_001/);
+      const message = messages[0] ?? "";
+      assert.match(message, /Subject: =\?UTF-8\?B\?.+\?=/);
+      assert.match(message, /Content-Type: multipart\/alternative/);
+      assert.match(message, /Восстановление пароля/);
+      assert.match(message, new RegExp(recoveryInput.recoveryToken));
+      assert.match(message, /<html lang=\"ru\">/);
+      assert.match(message, /font-size:20px/);
+      assert.match(message, /Никому не сообщайте этот токен/);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());

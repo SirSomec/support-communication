@@ -22,6 +22,7 @@ export interface SmtpTransportConfig {
 }
 
 const MAX_SMTP_RESPONSE_LINE_BYTES = 8_192;
+const SERVICE_MAIL_BOUNDARY = "----=_SupportCommunication_ServiceMail_1e4c8a73";
 
 /**
  * Все коды ошибок транспорта. Диагностика различает сетевой уровень (DNS,
@@ -175,14 +176,72 @@ export function composeMailMessage(
     ...(replyTo ? [`Reply-To: ${sanitizeMailHeader(replyTo)}`] : []),
     `Subject: ${encodeMailHeaderText(mail.subject)}`,
     `Date: ${new Date().toUTCString()}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary=\"${SERVICE_MAIL_BOUNDARY}\"`,
+    "",
+    `--${SERVICE_MAIL_BOUNDARY}`,
     "Content-Type: text/plain; charset=utf-8",
     "Content-Transfer-Encoding: 8bit",
-    "MIME-Version: 1.0",
     "",
-    ...mail.bodyLines
+    ...mail.bodyLines,
+    "",
+    `--${SERVICE_MAIL_BOUNDARY}`,
+    "Content-Type: text/html; charset=utf-8",
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    buildServiceMailHtml(mail.subject, mail.bodyLines),
+    "",
+    `--${SERVICE_MAIL_BOUNDARY}--`
   ];
 
   return `${lines.join("\r\n")}\r\n`;
+}
+
+function buildServiceMailHtml(subject: string, bodyLines: string[]): string {
+  const content = bodyLines.map((line) => {
+    const normalized = String(line ?? "");
+    if (!normalized) {
+      return "<div style=\"height:12px;line-height:12px;font-size:12px;\">&nbsp;</div>";
+    }
+
+    const invitationCode = normalized.match(/^Код приглашения:\s*(.+)$/i);
+    if (invitationCode) {
+      return `<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;margin:8px 0 20px;\"><tr><td align=\"center\" bgcolor=\"#edf3ff\" style=\"padding:20px 16px;background-color:#edf3ff;border:1px solid #c9dafd;border-radius:12px;\"><span style=\"display:inline-block;font-family:'Courier New',Courier,monospace;font-size:24px;line-height:32px;font-weight:700;letter-spacing:1px;color:#153f9f;word-break:break-all;\">${escapeHtml(invitationCode[1] ?? "")}</span></td></tr></table>`;
+    }
+
+    return `<p style=\"margin:0 0 12px;font-size:16px;line-height:24px;color:#46536b;\">${linkifyServiceMailText(normalized).replace(/\r?\n/g, "<br>")}</p>`;
+  }).join("");
+
+  return [
+    "<!doctype html>",
+    "<html lang=\"ru\">",
+    "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head>",
+    "<body style=\"margin:0;padding:0;background-color:#f4f7fb;color:#172033;font-family:Arial,Helvetica,sans-serif;\">",
+    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;background-color:#f4f7fb;\"><tr><td align=\"center\" style=\"padding:32px 16px;\">",
+    "<table role=\"presentation\" width=\"600\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"width:100%;max-width:600px;background-color:#ffffff;border-radius:16px;\"><tr><td style=\"padding:40px 32px;\">",
+    `<h1 style=\"margin:0 0 24px;font-size:28px;line-height:34px;font-weight:700;color:#172033;\">${escapeHtml(subject)}</h1>`,
+    content,
+    "</td></tr></table>",
+    "</td></tr></table>",
+    "</body></html>"
+  ].join("");
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>\"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[character] ?? character);
+}
+
+function linkifyServiceMailText(value: string): string {
+  return escapeHtml(value).replace(
+    /(https?:\/\/[^\s<]+)/g,
+    '<a href="$1" style="color:#153f9f;text-decoration:underline;">$1</a>'
+  );
 }
 
 export function encodeMailHeaderText(value: string): string {

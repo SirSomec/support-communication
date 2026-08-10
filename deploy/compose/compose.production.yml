@@ -15,6 +15,7 @@ x-runtime-environment: &runtime-environment
   S3_PUBLIC_UPLOAD_BASE: ${S3_PUBLIC_UPLOAD_BASE:-}
   MAIL_HOST: ${MAIL_HOST:?MAIL_HOST is required}
   MAIL_PORT: ${MAIL_PORT:-587}
+  MAIL_SECURE: ${MAIL_SECURE:-false}
   MAIL_USERNAME: ${MAIL_USERNAME:-}
   MAIL_PASSWORD: ${MAIL_PASSWORD:-}
   MAIL_FROM: ${MAIL_FROM:?MAIL_FROM is required}

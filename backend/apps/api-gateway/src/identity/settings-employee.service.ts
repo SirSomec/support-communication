@@ -583,8 +583,8 @@ export class SettingsEmployeeService {
     if (tenantMismatch) {
       return tenantMismatch;
     }
-    if (user.status !== "invited") {
-      return invalidEnvelope("resendEmployeeInvite", "employee_not_invited", "Invite can be resent only for employees in invited state.", {
+    if (user.status === "deactivated") {
+      return invalidEnvelope("resendEmployeeInvite", "employee_deactivated", "Invite cannot be resent for a deactivated employee.", {
         employeeId: user.id,
         status: user.status,
         tenantId: user.tenantId

@@ -905,6 +905,13 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(String(passwordResetUser?.supportNotes ?? "").includes("Password reset sent"), false);
     assert.equal((passwordResetUser?.metadata?.passwordRecovery as Record<string, unknown>)?.requestId, passwordReset.data.recovery.requestId);
 
+    const resentInvite = await settings.resendEmployeeInvite("usr-ns-agent", {
+      reason: "Operator asked to receive the invitation again"
+    }, { tenantId: "tenant-northstar" });
+    assert.equal(resentInvite.status, "ok");
+    assert.equal(resentInvite.data.inviteDescriptor.deliveryState, "sent");
+    assert.equal(resentInvite.data.employee.id, "usr-ns-agent");
+
     const mfaReset = await settings.resetEmployeeMfa("usr-ns-agent", {
       reason: "Phone replacement approved"
     }, { tenantId: "tenant-northstar" });

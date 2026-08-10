@@ -31,6 +31,7 @@ describe("production deployment contract", () => {
     assert.doesNotMatch(compose, /kubernetes\.docker\.internal|mailpit|minio-password|support:support|bootstrap:local/i);
     assert.doesNotMatch(compose, /^\s+(postgres|redis|minio):\s*$/m);
     assert.match(compose, /NODE_ENV:\s*production/);
+    assert.match(compose, /MAIL_SECURE:\s*\$\{MAIL_SECURE:-false\}/);
     assert.match(compose, /OPENAPI_ENABLED:\s*"false"/);
     assert.match(compose, /read_only:\s*true/);
     assert.match(compose, /cap_drop:\s*\["ALL"\]/);

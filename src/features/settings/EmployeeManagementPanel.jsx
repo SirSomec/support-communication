@@ -289,7 +289,10 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
       email: saved.email,
       employee: saved.employee
     });
-    onToast(`${saved.employee}: приглашение отправлено повторно.`);
+    const inviteDeliveryFailed = response.data?.inviteDescriptor?.deliveryState === "failed";
+    onToast(inviteDeliveryFailed
+      ? `${saved.employee}: приглашение создано, но письмо не ушло.`
+      : `${saved.employee}: приглашение отправлено повторно.`);
   }
 
   async function handleInviteEmployee(event) {
@@ -555,7 +558,7 @@ export function EmployeeManagementPanel({ access, canEditSettings, canResetEmplo
                   </label>
                 </div>
                 <div className="employee-danger-zone" aria-label="Управление учетной записью">
-                  {selectedEmployee.status === "invited" ? (
+                  {selectedEmployee.status !== "deactivated" ? (
                     <button
                       disabled={!canEditEmployeeDirectory || saving}
                       onClick={handleResendInvite}

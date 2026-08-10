@@ -20,17 +20,12 @@ describe("public landing honesty contracts", () => {
     assert.doesNotMatch(source, /−38%|100%.*журнал|за один день|через минуты|0\.9 с/);
   });
 
-  it("separates implemented channels, configured providers and external live gates", () => {
-    for (const channel of ["Web SDK", "REST API"]) {
-      assert.match(source, new RegExp(`name: "${channel}",[^\\n]+status: "реализовано"`));
+  it("keeps channel descriptions honest without presentation status labels", () => {
+    for (const channel of ["Web SDK", "Telegram", "ВКонтакте", "MAX", "REST API", "WhatsApp", "Email", "Viber"]) {
+      assert.match(source, new RegExp(`name: "${channel}",[^\\n]+text:`));
     }
-    assert.match(source, /name: "Telegram",[^\n]+status: "требует настройки"/);
-    for (const channel of ["ВКонтакте", "MAX"]) {
-      assert.match(source, new RegExp(`name: "${channel}",[^\\n]+status: "требует live-проверки"`));
-    }
-    for (const channel of ["WhatsApp", "Email", "Viber"]) {
-      assert.match(source, new RegExp(`name: "${channel}",[^\\n]+status: "на подключении"`));
-    }
+    assert.match(source, /live-приёмка внешнего\s+провайдера/);
+    assert.doesNotMatch(source, /public-channel-status|status: "|live: /);
     assert.doesNotMatch(source, /уже работают в продакшене|полный журнал аудита/);
   });
 

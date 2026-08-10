@@ -144,6 +144,11 @@ export function ServiceUserSupportWorkspace({ onAudit, onImpersonationStart }) {
     } else {
       setUserOverrides((current) => ({ ...current, [selectedUser.id]: envelope.data.user }));
       onAudit(envelope, { action: `support.${selectedAction}`, target: selectedUser.id });
+      if (selectedAction === "invite" && envelope.data?.inviteDescriptor?.deliveryState === "failed") {
+        setLoadError("Приглашение создано, но письмо не отправлено. Проверьте служебную почту и журналы доставки.");
+      } else if (selectedAction === "invite") {
+        setLoadError("");
+      }
     }
 
     setConfirmed(false);

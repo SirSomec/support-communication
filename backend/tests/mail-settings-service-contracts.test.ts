@@ -9,7 +9,8 @@ import { MailSettingsService } from "../apps/api-gateway/src/mail/mail-settings.
 import { composeMailMessage } from "../apps/api-gateway/src/mail/smtp-transport.ts";
 import {
   createInviteMailDeliveryFromEnv,
-  createServiceMailOverrideResolver
+  createServiceMailOverrideResolver,
+  resolveServiceTransportConfig
 } from "../apps/api-gateway/src/mail/service-mailer.ts";
 
 const MASTER_KEY = Buffer.alloc(32, 7).toString("base64");
@@ -238,6 +239,29 @@ describe("service mail override resolver contracts", () => {
       repository: () => repository
     });
     assert.equal(await resolver(), null);
+  });
+
+  it("uses the noreply environment transport when service-admin mail is not configured", async () => {
+    const repository = MailSettingsRepository.inMemory();
+    const resolved = await resolveServiceTransportConfig({
+      environment: {
+        MAIL_FROM: "noreply@support.example",
+        MAIL_HOST: "smtp.support.example",
+        MAIL_PORT: "587",
+        NODE_ENV: "production"
+      },
+      repository: () => repository
+    });
+
+    assert.deepEqual(resolved && {
+      from: resolved.config.from,
+      host: resolved.config.host,
+      source: resolved.source
+    }, {
+      from: "noreply@support.example",
+      host: "smtp.support.example",
+      source: "environment"
+    });
   });
 });
 

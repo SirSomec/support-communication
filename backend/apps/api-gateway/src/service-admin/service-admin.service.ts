@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { createEnvelope, type BackendEnvelope } from "@support-communication/envelope";
-import { createRequestTraceId, getCurrentTraceId } from "@support-communication/observability";
+import { createRequestTraceId, getCurrentTraceId, writeStructuredLog } from "@support-communication/observability";
 import { IdentityRepository, isActiveServiceAdminImpersonationConflict, type IdentityBreakGlassApproval, type IdentityServiceAdminAuditEvent, type IdentityServiceAdminImpersonationSession, type IdentityTenant, type IdentityTenantUser } from "../identity/identity.repository.js";
 import { type ServiceAdminActor } from "../identity/service-admin-auth.js";
+import { createInviteMailDeliveryFromEnv, type InviteMailDelivery } from "../mail/service-mailer.js";
 import { type ServiceAdminUser } from "./service-admin.types.js";
 import {
   applyAuditRedactionOverlay,
@@ -83,7 +84,10 @@ interface AuditRecordInput {
 type AuditRecordResult = { auditEvent: AuditEvent } | { envelope: BackendEnvelope<Record<string, unknown>> };
 
 export class ServiceAdminService {
-  constructor(private readonly identityRepository = IdentityRepository.default()) {}
+  constructor(
+    private readonly identityRepository = IdentityRepository.default(),
+    private readonly inviteDelivery?: InviteMailDelivery
+  ) {}
 
   async fetchSupportUsers(filters: UserFilters = {}): Promise<BackendEnvelope<Record<string, unknown>>> {
     const query = String(filters.query ?? "").trim().toLowerCase();
@@ -320,9 +324,54 @@ export class ServiceAdminService {
   }
 
   async resendInvite(payload: UserActionPayload): Promise<BackendEnvelope<Record<string, unknown>>> {
-    return this.applyUserAction(payload, "user.invite.resend", (user) => {
+    const result = await this.applyUserAction(payload, "user.invite.resend", (user) => {
       user.inviteStatus = "sent";
     });
+    if (result.status !== "ok") {
+      return result;
+    }
+
+    const user = result.data.user as ServiceAdminUser;
+    let deliveryState: "failed" | "sent" = "sent";
+    let expiresAt: string | null = null;
+
+    try {
+      const inviteToken = await this.identityRepository.createInviteToken({
+        code: `invite_${randomUUID()}`,
+        email: user.email,
+        tenantId: user.tenantId
+      });
+      expiresAt = inviteToken.expiresAt;
+      const delivery = this.inviteDelivery ?? createInviteMailDeliveryFromEnv();
+      await delivery.sendInvite({
+        code: inviteToken.code,
+        email: inviteToken.email,
+        expiresAt: inviteToken.expiresAt,
+        inviteeName: user.name,
+        tenantId: inviteToken.tenantId
+      });
+    } catch (error) {
+      deliveryState = "failed";
+      writeStructuredLog("warn", "Service-admin invite email delivery failed", {
+        errorName: error instanceof Error ? error.message : typeof error,
+        service: SUPPORT_ADMIN_SERVICE,
+        tenantId: user.tenantId,
+        userId: user.id
+      });
+    }
+
+    return {
+      ...result,
+      data: {
+        ...result.data,
+        inviteDescriptor: {
+          deliveryState,
+          email: user.email,
+          expiresAt,
+          tenantId: user.tenantId
+        }
+      }
+    };
   }
 
   async startImpersonation(payload: ImpersonationPayload | null | undefined): Promise<BackendEnvelope<Record<string, unknown>>> {

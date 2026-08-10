@@ -60,6 +60,31 @@ describe("service-admin workspace contracts", () => {
     assert.equal(invite.status, "ok");
   });
 
+  it("sends a new invite through the shared mail delivery route", async () => {
+    const repository = createSeededIdentityRepository();
+    const deliveries: Array<Record<string, unknown>> = [];
+    const support = new ServiceAdminService(repository, {
+      async sendInvite(input) {
+        deliveries.push({ ...input });
+        return { providerMessageId: "service-admin-invite" };
+      }
+    });
+
+    const invite = await support.resendInvite({
+      actor: { id: "svc-admin", name: "Service Admin" },
+      confirmed: true,
+      reason: "Invite resent after mailbox correction",
+      userId: "usr-lumen-invite"
+    });
+
+    assert.equal(invite.status, "ok");
+    assert.equal((invite.data.inviteDescriptor as Record<string, unknown>).deliveryState, "sent");
+    assert.equal(deliveries.length, 1);
+    assert.equal(deliveries[0]?.email, "nikolai@lumen.example");
+    assert.equal(deliveries[0]?.tenantId, "tenant-lumen");
+    assert.match(String(deliveries[0]?.code ?? ""), /^invite_/);
+  });
+
   it("changes an account role only through a confirmed, audited service-admin action", async () => {
     const repository = createSeededIdentityRepository();
     const support = new ServiceAdminService(repository);

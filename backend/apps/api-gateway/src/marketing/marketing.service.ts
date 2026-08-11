@@ -133,10 +133,11 @@ export class MarketingService {
     if (!access.allowed) return deniedEnvelope("fetchWorkspace", access.reason);
 
     const periodStart = marketingPeriodStart(new Date());
-    const [settings, campaigns, audiences, audienceSyncs, templates, users, grants, usage, channels, apiKeys] = await Promise.all([
+    const [settings, campaigns, audiences, audienceMemberCounts, audienceSyncs, templates, users, grants, usage, channels, apiKeys] = await Promise.all([
       this.ensureSettings(context.tenantId),
       prisma.marketingCampaign.findMany({ where: { tenantId: context.tenantId }, orderBy: { updatedAt: "desc" }, take: 100 }),
-      prisma.marketingAudience.findMany({ where: { tenantId: context.tenantId, status: "active" }, orderBy: { updatedAt: "desc" }, take: 100, include: { _count: { select: { members: true } } } }),
+      prisma.marketingAudience.findMany({ where: { tenantId: context.tenantId, status: "active" }, orderBy: { updatedAt: "desc" }, take: 100 }),
+      prisma.marketingAudienceMember.groupBy({ by: ["audienceId"], where: { tenantId: context.tenantId }, _count: { _all: true } }),
       prisma.marketingAudienceSync.findMany({ where: { tenantId: context.tenantId }, select: { audienceId: true, lastAttemptAt: true, lastError: true, lastSuccessAt: true, status: true } }),
       prisma.marketingTemplate.findMany({ where: { tenantId: context.tenantId }, orderBy: { updatedAt: "desc" }, take: 100 }),
       access.isOwner ? prisma.tenantUser.findMany({ where: { tenantId: context.tenantId, status: "active" }, select: { id: true, name: true, email: true, role: true } }) : [],
@@ -154,7 +155,7 @@ export class MarketingService {
     return envelope("fetchWorkspace", {
       access: { enabled: true, isOwner: access.isOwner },
       campaigns: campaigns.map((campaign: any) => ({ ...serialize(campaign), deliverySummary: summarizeDeliveries(deliveries, campaign.id) })),
-      audiences: audiences.map((audience: any) => ({ ...serialize(audience), sync: serialize(audienceSyncs.find((sync: { audienceId: string }) => sync.audienceId === audience.id) ?? null) })),
+      audiences: audiences.map((audience: any) => ({ ...serialize(audience), _count: { members: audienceMemberCounts.find((count: { audienceId: string }) => count.audienceId === audience.id)?._count._all ?? 0 }, sync: serialize(audienceSyncs.find((sync: { audienceId: string }) => sync.audienceId === audience.id) ?? null) })),
       templates: templates.map(serialize),
       channels: channels.map(serialize),
       channelCapabilities: channels.map((channel: { id: string; status: string; type: string }) => marketingChannelCapability(channel)),

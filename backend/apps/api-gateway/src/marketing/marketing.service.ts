@@ -329,6 +329,38 @@ export class MarketingService {
     });
   }
 
+  async searchTestRecipients(value: unknown, context: MarketingContext) {
+    await this.requireModuleAccess(context);
+    const { phone, query } = marketingTestRecipientSearchTerms(value);
+    if (query.length < 2) return envelope("searchTestRecipients", { items: [], query, minimumQueryLength: 2 });
+    const profiles = await prisma.clientProfile.findMany({
+      where: {
+        tenantId: context.tenantId,
+        OR: [
+          { name: { contains: query, mode: "insensitive" } },
+          { email: { contains: query, mode: "insensitive" } },
+          { phone: { contains: query } },
+          ...(phone.length >= 3 ? [{ phoneNormalized: { contains: phone } }] : [])
+        ]
+      },
+      orderBy: [{ name: "asc" }, { updatedAt: "desc" }],
+      take: 20,
+      select: { channel: true, email: true, id: true, name: true, phone: true, sourceProfileId: true }
+    });
+    return envelope("searchTestRecipients", {
+      items: profiles.map((profile: { channel: string; email: string | null; id: string; name: string; phone: string; sourceProfileId: string }) => ({
+        channel: profile.channel,
+        email: maskMarketingTestRecipientEmail(profile.email),
+        id: profile.id,
+        name: profile.name,
+        phone: maskMarketingTestRecipientPhone(profile.phone),
+        sourceProfileId: profile.sourceProfileId
+      })),
+      query,
+      minimumQueryLength: 2
+    });
+  }
+
   async getCampaignAnalytics(context: MarketingContext) {
     await this.requireModuleAccess(context);
     await this.reconcileOutboundDeliveryStates(context.tenantId);
@@ -1280,6 +1312,20 @@ function marketingChannelCapability(channel: { id: string; status: string; type:
   };
 }
 export function normalizePhone(value: unknown) { const digits = text(value, 64).replace(/\D/g, ""); return digits.length === 11 && digits.startsWith("8") ? `7${digits.slice(1)}` : digits; }
+export function marketingTestRecipientSearchTerms(value: unknown) {
+  const query = text(value, 128);
+  return { phone: normalizePhone(query), query };
+}
+export function maskMarketingTestRecipientPhone(value: unknown) {
+  const digits = normalizePhone(value);
+  return digits.length >= 4 ? `••• ${digits.slice(-4)}` : "";
+}
+export function maskMarketingTestRecipientEmail(value: unknown) {
+  const email = text(value, 320).toLocaleLowerCase();
+  const separator = email.lastIndexOf("@");
+  if (separator <= 0 || separator === email.length - 1) return "";
+  return `${email[0]}***${email.slice(separator)}`;
+}
 function normalizeEmail(value: unknown) { const candidate = text(value, 320).toLocaleLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) ? candidate : ""; }
 function boundedPositiveInt(value: unknown, fallback: number, maximum: number) {
   const parsed = Number(value);

@@ -129,6 +129,11 @@ export class MarketingController {
   @ApiOperation({ operationId: "getMarketingClientPreferences", summary: "Get per-channel marketing consent and unsubscribe history" })
   preferences(@Param("clientId") clientId: string, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.getClientPreferences(clientId, context(request))); }
 
+  @Get("test-recipients/search")
+  @ApiQuery({ name: "q", required: true, example: "Самойлов", description: "Surname, phone number, or email fragment; at least two characters." })
+  @ApiOperation({ operationId: "searchMarketingTestRecipients", summary: "Find existing client profiles for a test campaign delivery" })
+  searchTestRecipients(@Query("q") query: string | undefined, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.searchTestRecipients(query, context(request))); }
+
   @Post("campaigns/:campaignId/launch")
   @HttpCode(HttpStatus.OK)
   @ApiParam({ name: "campaignId" })

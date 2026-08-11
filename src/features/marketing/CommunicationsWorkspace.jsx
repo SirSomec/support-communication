@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   Archive,
   ArrowRight,
@@ -44,7 +44,6 @@ const EMPTY_CAMPAIGN = Object.freeze({
   scheduledAt: "",
   strategy: "manual",
   templateId: "",
-  testClientIds: "",
   title: ""
 });
 const PLANS = Object.freeze([
@@ -275,6 +274,7 @@ function AnalyticsView({ campaigns, usage }) {
 function CampaignDialog({ onClose, onCreated, onToast, workspace }) {
   const [draft, setDraft] = useState(EMPTY_CAMPAIGN);
   const [blocks, setBlocks] = useState([]);
+  const [testRecipients, setTestRecipients] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const templates = Array.isArray(workspace.templates) ? workspace.templates : [];
@@ -316,7 +316,7 @@ function CampaignDialog({ onClose, onCreated, onToast, workspace }) {
     });
     setSubmitting(false);
     if (response.status !== "ok") { onToast?.(response.error?.message ?? "Не удалось создать кампанию."); return; }
-    const testIds = draft.testClientIds.split(",").map((item) => item.trim()).filter(Boolean);
+    const testIds = testRecipients.map((recipient) => recipient.id);
     if (testIds.length) await marketingService.testCampaign(response.data?.campaign?.id, testIds);
     onToast?.(draft.scheduledAt ? "Кампания запланирована." : "Черновик кампании создан.");
     onCreated();
@@ -332,12 +332,66 @@ function CampaignDialog({ onClose, onCreated, onToast, workspace }) {
         </div></section>
         <section><div className="communications-section-heading"><div><h3>Каналы</h3><p>Выберите один или несколько каналов доставки.</p></div></div><div className="communications-channel-picker">{availableChannels.map((channel) => { const selected = draft.channels.includes(channel.id); return <button aria-pressed={selected} className={selected ? "is-selected" : ""} key={channel.id} onClick={() => toggleChannel(channel.id)} type="button"><ChannelIcon channel={channel.id} size={18} /><span>{channel.label}</span>{selected ? <Check size={15} /> : null}</button>; })}</div></section>
         <section><div className="communications-section-heading"><div><h3>Сообщение</h3><p>Добавьте текст, эмодзи и необходимые вложения.</p></div><span>{draft.contentText.length}/4000</span></div><div className="communications-composer-toolbar"><button onClick={() => updateDraft({ contentText: `${draft.contentText} 😊` })} title="Добавить эмодзи" type="button">😊</button><label title="Добавить изображение или файл"><Paperclip size={17} /><input accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.mp3,.mp4" disabled={uploading} onChange={uploadFile} type="file" /></label><button onClick={() => setBlocks((current) => [...current, { id: crypto.randomUUID(), text: "", type: "heading" }])} type="button"><FileText size={16} /> Заголовок</button></div><textarea maxLength={4000} onChange={(event) => updateDraft({ contentText: event.target.value })} placeholder="Введите текст сообщения. Можно использовать переменные, например {{client.name}}" required value={draft.contentText} />{blocks.length ? <div className="communications-attachments">{blocks.map((block) => <div key={block.id}>{block.type === "image" ? <Image size={15} /> : block.type === "heading" ? <FileText size={15} /> : <Paperclip size={15} />}<input aria-label="Содержимое блока" onChange={(event) => setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, text: event.target.value } : item))} placeholder={block.fileName || "Текст заголовка"} readOnly={Boolean(block.fileName)} value={block.fileName || block.text || ""} /><button aria-label="Удалить блок" onClick={() => setBlocks((current) => current.filter((item) => item.id !== block.id))} type="button"><X size={15} /></button></div>)}</div> : null}</section>
-        <section><h3>Отправка</h3><div className="communications-form-grid"><label><span>Стратегия</span><select onChange={(event) => updateDraft({ strategy: event.target.value })} value={draft.strategy}><option value="manual">Выбранные каналы</option><option value="preferred">Предпочтительный канал</option><option value="cascade">Каскад каналов</option><option value="all">По всем каналам</option></select></label><label><span>Дата и время</span><input onChange={(event) => updateDraft({ scheduledAt: event.target.value })} type="datetime-local" value={draft.scheduledAt} /></label></div><details><summary>Тестовая отправка</summary><label><span>ID тестовых получателей</span><input onChange={(event) => updateDraft({ testClientIds: event.target.value })} placeholder="До 20 клиентов" value={draft.testClientIds} /></label></details></section>
+        <section><h3>Отправка</h3><div className="communications-form-grid"><label><span>Стратегия</span><select onChange={(event) => updateDraft({ strategy: event.target.value })} value={draft.strategy}><option value="manual">Выбранные каналы</option><option value="preferred">Предпочтительный канал</option><option value="cascade">Каскад каналов</option><option value="all">По всем каналам</option></select></label><label><span>Дата и время</span><input onChange={(event) => updateDraft({ scheduledAt: event.target.value })} type="datetime-local" value={draft.scheduledAt} /></label></div><TestRecipientPicker onChange={setTestRecipients} value={testRecipients} /></section>
       </div>
       <aside className="communications-preview-pane"><div className="communications-preview-title"><span>Предпросмотр</span><small>{draft.channels.length ? draft.channels.map(channelLabel).join(" · ") : "Канал не выбран"}</small></div><MessagePreview blocks={blocks} text={draft.contentText} title={draft.title} /><div className="communications-safety-note"><Check size={16} /><p>Если согласия нет, клиент сначала получит запрос. Любой ответ подтвердит согласие, и кампания продолжится автоматически.</p></div></aside>
       <footer className="communications-dialog-footer"><button onClick={onClose} type="button">Отмена</button><button className="primary-action" disabled={submitting || !draft.channels.length} type="submit">{submitting ? "Сохраняем…" : draft.scheduledAt ? "Запланировать" : "Сохранить черновик"}<ArrowRight size={16} /></button></footer>
     </form>
   </Modal>;
+}
+
+function TestRecipientPicker({ onChange, value }) {
+  const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
+  const [results, setResults] = useState([]);
+  const [status, setStatus] = useState("idle");
+  const selectedIds = useMemo(() => new Set(value.map((recipient) => recipient.id)), [value]);
+  const availableResults = useMemo(() => results.filter((recipient) => !selectedIds.has(recipient.id)), [results, selectedIds]);
+
+  useEffect(() => {
+    const normalizedQuery = deferredQuery.trim();
+    if (normalizedQuery.length < 2) {
+      setResults([]);
+      setStatus("idle");
+      return undefined;
+    }
+    let active = true;
+    setStatus("loading");
+    void marketingService.searchTestRecipients(normalizedQuery).then((response) => {
+      if (!active) return;
+      if (response.status !== "ok") {
+        setResults([]);
+        setStatus("error");
+        return;
+      }
+      setResults(Array.isArray(response.data?.items) ? response.data.items : []);
+      setStatus("ready");
+    });
+    return () => { active = false; };
+  }, [deferredQuery]);
+
+  const addRecipient = (recipient) => {
+    if (value.length >= 20 || selectedIds.has(recipient.id)) return;
+    onChange([...value, recipient]);
+    setQuery("");
+    setResults([]);
+    setStatus("idle");
+  };
+  const removeRecipient = (recipientId) => onChange(value.filter((recipient) => recipient.id !== recipientId));
+
+  return <details className="communications-test-recipient-picker">
+    <summary>Тестовая отправка <span>{value.length ? `${value.length} из 20` : "не настроена"}</span></summary>
+    <div className="communications-test-recipient-content">
+      {value.length ? <div aria-label="Выбранные тестовые получатели" className="communications-test-recipient-selected">{value.map((recipient) => <span key={recipient.id}><strong>{recipient.name}</strong><small>{recipient.email || recipient.phone || channelLabel(recipient.channel)}</small><button aria-label={`Удалить ${recipient.name}`} onClick={() => removeRecipient(recipient.id)} type="button"><X size={13} /></button></span>)}</div> : null}
+      <label><span>Найти клиента</span><div className="communications-test-recipient-search"><Search size={16} /><input aria-autocomplete="list" aria-controls="marketing-test-recipient-results" aria-expanded={availableResults.length > 0} autoComplete="off" disabled={value.length >= 20} onChange={(event) => setQuery(event.target.value)} placeholder="Фамилия, телефон или email" role="combobox" value={query} /></div></label>
+      {query.trim().length === 1 ? <small className="communications-test-recipient-hint">Введите ещё один символ для поиска.</small> : null}
+      {status === "loading" ? <div className="communications-test-recipient-state"><RefreshCw className="is-spinning" size={15} /> Ищем клиентов…</div> : null}
+      {status === "error" ? <div className="communications-test-recipient-state is-error"><CircleAlert size={15} /> Не удалось выполнить поиск. Попробуйте ещё раз.</div> : null}
+      {status === "ready" && !availableResults.length ? <div className="communications-test-recipient-state">Клиенты не найдены или уже добавлены.</div> : null}
+      {availableResults.length ? <div className="communications-test-recipient-results" id="marketing-test-recipient-results" role="listbox">{availableResults.map((recipient) => <button aria-selected="false" key={recipient.id} onClick={() => addRecipient(recipient)} role="option" type="button"><span className="communications-test-recipient-avatar">{recipientInitials(recipient.name)}</span><span><strong>{recipient.name}</strong><small>{[recipient.phone, recipient.email, channelLabel(recipient.channel)].filter(Boolean).join(" · ")}</small></span><Plus size={16} /></button>)}</div> : null}
+      <small className="communications-test-recipient-hint">Можно добавить до 20 существующих клиентов. Контакты показаны в маскированном виде.</small>
+    </div>
+  </details>;
 }
 
 function AudienceDialog({ onClose, onCreated, onToast }) {
@@ -408,6 +462,7 @@ function MessagePreview({ blocks, text, title }) { return <div className="commun
 
 function deliveryMetric(summary = {}) { const delivered = Number(summary?.delivered ?? 0); const failed = Number(summary?.failed ?? 0); const total = delivered + failed + Number(summary?.queued ?? 0) + Number(summary?.sending ?? 0); if (!total) return { caption: "Нет отправок", label: "—", width: "0%" }; const rate = Math.round(delivered / total * 1000) / 10; return { caption: `${formatNumber(delivered)} из ${formatNumber(total)}`, label: `${rate}%`, width: `${Math.max(4, rate)}%` }; }
 function channelLabel(channel) { const labels = { email: "Email", sms: "SMS", telegram: "Telegram", whatsapp: "WhatsApp", vk: "VK" }; return labels[String(channel).toLowerCase()] ?? String(channel); }
+function recipientInitials(name) { return String(name ?? "").trim().split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toLocaleUpperCase("ru") || "К"; }
 function formatNumber(value) { return new Intl.NumberFormat("ru-RU").format(Number(value) || 0); }
 function formatDateTime(value) { if (!value) return "—"; return new Intl.DateTimeFormat("ru-RU", { day: "numeric", hour: "2-digit", minute: "2-digit", month: "short" }).format(new Date(value)); }
 function formatShortDate(value) { return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short" }).format(new Date(value)); }

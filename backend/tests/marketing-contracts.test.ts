@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -64,5 +64,19 @@ describe("marketing import identifiers", () => {
   it("normalizes Russian phone formats before exact matching", () => {
     assert.equal(normalizePhone("+7 (999) 123-45-67"), "79991234567");
     assert.equal(normalizePhone("8 999 123 45 67"), "79991234567");
+  });
+});
+
+describe("marketing test recipient search", () => {
+  it("normalizes surname, phone, and email search terms", () => {
+    assert.deepEqual(marketingTestRecipientSearchTerms("  Самойлов  "), { phone: "", query: "Самойлов" });
+    assert.deepEqual(marketingTestRecipientSearchTerms("8 (999) 123-45-67"), { phone: "79991234567", query: "8 (999) 123-45-67" });
+    assert.deepEqual(marketingTestRecipientSearchTerms("alex@example.ru"), { phone: "", query: "alex@example.ru" });
+  });
+
+  it("returns masked contact hints without exposing searchable values", () => {
+    assert.equal(maskMarketingTestRecipientPhone("+7 999 123-45-67"), "••• 4567");
+    assert.equal(maskMarketingTestRecipientEmail("alex@example.ru"), "a***@example.ru");
+    assert.doesNotMatch(maskMarketingTestRecipientEmail("alex@example.ru"), /alex@/);
   });
 });

@@ -82,12 +82,14 @@ export class MarketingService {
     entry?: string;
     name: string;
     phone: string;
+    providerConversationId?: string;
     tenantId: string;
     topic?: string;
   }): Promise<{ reason?: string; requested: boolean }> {
     const channel = text(input.channel, 64).toLowerCase();
     const phone = text(input.phone, 256);
-    if (!channel || !phone) return { requested: false, reason: "destination_missing" };
+    const destination = inboundMarketingDeliveryAddress(phone, input.providerConversationId);
+    if (!channel || !phone || !destination) return { requested: false, reason: "destination_missing" };
     const settings = await this.ensureSettings(input.tenantId);
     if (settings.moduleStatus !== "active") return { requested: false, reason: "marketing_module_inactive" };
     const sourceProfileId = inboundMarketingProfileIdentity(input.tenantId, channel, phone);
@@ -163,7 +165,7 @@ export class MarketingService {
         idempotencyKey: `marketing-consent:${consentId}`,
         requestFingerprint: `marketing-consent:${consentProfile.id}:${channel}`,
         retryable: true,
-        payload: { channel, clientName: text(input.name, 256), marketingConsentId: consentId, message: settings.consentText || DEFAULT_MARKETING_CONSENT_TEXT, phone, queue: "message-delivery", topic: "marketing-consent" },
+        payload: { channel, clientName: text(input.name, 256), marketingConsentId: consentId, message: settings.consentText || DEFAULT_MARKETING_CONSENT_TEXT, phone: destination, queue: "message-delivery", topic: "marketing-consent" },
         auditId: null,
         traceId: outbox.traceId,
         outboxEventId: outbox.id
@@ -1251,6 +1253,9 @@ function text(value: unknown, max: number) { return typeof value === "string" ? 
 export function inboundMarketingProfileIdentity(tenantId: string, channel: string, phone: string): string {
   const digest = createHash("sha256").update(`${tenantId.trim()}:${channel.trim().toLowerCase()}:${phone.trim()}`).digest("hex").slice(0, 32);
   return `inbound_${channel.trim().toLowerCase()}_${digest}`;
+}
+export function inboundMarketingDeliveryAddress(phone: string, providerConversationId?: string): string {
+  return text(providerConversationId, 256) || text(phone, 256);
 }
 export function normalizeConsentReply(value: unknown): "grant" | null {
   return text(value, 200) ? "grant" : null;

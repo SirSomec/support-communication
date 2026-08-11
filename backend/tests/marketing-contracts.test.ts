@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -52,6 +52,11 @@ describe("marketing consent replies", () => {
     assert.notEqual(telegram, inboundMarketingProfileIdentity("tenant-a", "vk", "user-42"));
     assert.notEqual(telegram, inboundMarketingProfileIdentity("tenant-b", "telegram", "user-42"));
     assert.doesNotMatch(telegram, /user-42/);
+  });
+
+  it("routes first inbound consent to the provider conversation address", () => {
+    assert.equal(inboundMarketingDeliveryAddress("+79990000000", "telegram-chat-42"), "telegram-chat-42");
+    assert.equal(inboundMarketingDeliveryAddress("+79990000000"), "+79990000000");
   });
 });
 

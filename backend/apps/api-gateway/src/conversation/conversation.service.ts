@@ -1858,6 +1858,7 @@ export class ConversationService {
         entry: conversation.entry,
         name: conversation.name,
         phone: conversation.phone,
+        providerConversationId: conversation.providerConversationId,
         tenantId,
         topic: conversation.topic
       }).catch(() => ({ requested: false as const }));

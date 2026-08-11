@@ -12,6 +12,7 @@ const MARKETING_PLANS = Object.freeze({
   scale: { includedMessages: 100_000, overageKopeks: 20 }
 });
 const DEFAULT_CONTENT = Object.freeze({ blocks: [] });
+export const DEFAULT_MARKETING_CONSENT_TEXT = "Чтобы получать новости и предложения в этом канале, ответьте на это сообщение любым текстом. Отправляя ответ, вы соглашаетесь на получение маркетинговых сообщений.";
 const prisma = createPrismaClient() as any;
 
 export interface MarketingContext {
@@ -20,21 +21,50 @@ export interface MarketingContext {
 }
 
 export class MarketingService {
-  async recordInboundConsentReply(input: { channel: string; phone: string; tenantId: string; text: string }): Promise<{ recorded: boolean; status?: "granted" | "withdrawn" }> {
+  async recordInboundConsentReply(input: { channel: string; phone: string; tenantId: string; text: string }): Promise<{ recorded: boolean; status?: "granted" }> {
     const reply = normalizeConsentReply(input.text);
     if (!reply || !input.phone.trim()) return { recorded: false };
     const profiles = await prisma.clientProfile.findMany({ where: { tenantId: input.tenantId, phone: input.phone.trim() }, select: { id: true }, take: 2 });
     if (profiles.length !== 1) return { recorded: false };
     const pending = await prisma.marketingConsent.findUnique({ where: { tenantId_clientId_channel: { tenantId: input.tenantId, clientId: profiles[0].id, channel: input.channel } } });
     if (!pending || pending.status !== "pending") return { recorded: false };
-    const status = reply === "grant" ? "granted" : "withdrawn";
-    await prisma.marketingConsent.update({ where: { id: pending.id }, data: {
-      status,
-      source: "client_reply",
-      evidence: { ...(isRecord(pending.evidence) ? pending.evidence : {}), inboundReply: input.text.trim().slice(0, 500), recordedBy: "client", recordedAt: new Date().toISOString() },
-      recordedAt: new Date()
-    } });
-    return { recorded: true, status };
+    const now = new Date();
+    const [settings, tenant, profile, blockedDeliveries] = await Promise.all([
+      this.ensureSettings(input.tenantId),
+      prisma.tenant.findUnique({ where: { id: input.tenantId }, select: { metadata: true } }),
+      prisma.clientProfile.findUnique({ where: { id: profiles[0].id }, select: { timeZone: true } }),
+      prisma.marketingDelivery.findMany({
+        where: { tenantId: input.tenantId, clientId: profiles[0].id, channel: input.channel, status: "excluded", excludedReason: "consent_required" },
+        select: { campaignId: true, channel: true, clientId: true, id: true }
+      })
+    ]);
+    const campaignIds = [...new Set(blockedDeliveries.map((delivery: { campaignId: string }) => delivery.campaignId))];
+    const resumableCampaigns = campaignIds.length
+      ? await prisma.marketingCampaign.findMany({ where: { tenantId: input.tenantId, id: { in: campaignIds }, status: { in: ["sending", "completed"] } }, select: { id: true } })
+      : [];
+    const resumableIds = new Set(resumableCampaigns.map((campaign: { id: string }) => campaign.id));
+    const resumableDeliveries = blockedDeliveries.filter((delivery: { campaignId: string }) => resumableIds.has(delivery.campaignId));
+    const fallbackTimeZone = tenantTimeZone(tenant?.metadata);
+    const scheduledAt = quietHoursEnd(now, settings.quietHoursStart, settings.quietHoursEnd, tenantTimeZone({ timeZone: profile?.timeZone || fallbackTimeZone }));
+    const recorded = await prisma.$transaction(async (tx: any) => {
+      const updated = await tx.marketingConsent.updateMany({ where: { id: pending.id, status: "pending" }, data: {
+        status: "granted",
+        source: "client_reply",
+        evidence: { ...(isRecord(pending.evidence) ? pending.evidence : {}), inboundReply: input.text.trim().slice(0, 500), recordedBy: "client", recordedAt: now.toISOString(), rule: "any_reply_after_request" },
+        recordedAt: now
+      } });
+      if (!updated.count) return false;
+      if (resumableDeliveries.length) {
+        await tx.marketingDelivery.updateMany({ where: { id: { in: resumableDeliveries.map((delivery: { id: string }) => delivery.id) }, status: "excluded", excludedReason: "consent_required" }, data: { status: "queued", excludedReason: null, scheduledAt } });
+        await tx.marketingCampaign.updateMany({ where: { tenantId: input.tenantId, id: { in: [...resumableIds] } }, data: { status: "sending" } });
+        await this.createUsageCharges(tx, input.tenantId, resumableDeliveries, settings, now);
+      }
+      await tx.marketingAuditEvent.create({ data: { id: `mkt_audit_${randomUUID()}`, tenantId: input.tenantId, actorUserId: null, action: "marketing.consent.granted_by_reply", entityType: "consent", entityId: pending.id, details: { channel: input.channel, clientId: profiles[0].id, resumedDeliveries: resumableDeliveries.length, rule: "any_reply_after_request" } } });
+      return true;
+    });
+    if (!recorded) return { recorded: false };
+    await this.dispatchQueuedMarketingDeliveries(input.tenantId);
+    return { recorded: true, status: "granted" };
   }
 
   async billPendingOverage(limit = 10): Promise<{ billed: number; failed: number; skipped: number }> {
@@ -627,13 +657,18 @@ export class MarketingService {
         } });
         await tx.outboxEvent.create({ data: { id: outbox.id, aggregateId: outbox.aggregateId, aggregateType: outbox.aggregateType, occurredAt: new Date(outbox.occurredAt), payload: outbox.payload, queue: outbox.queue, status: outbox.status, traceId: outbox.traceId, type: outbox.type } });
       }
-      const consentRequests: typeof rows = [];
+      const consentRequests: typeof rows = rows.filter((row: any) =>
+        row.status === "excluded"
+        && row.excludedReason === "consent_required"
+        && Boolean(row.profile?.phone)
+        && !knownConsentSet.has(`${row.clientId}:${row.channel}`)
+      );
       for (const row of consentRequests) {
         const consentId = `mkt_consent_${randomUUID()}`;
         const descriptorId = `mkt_consent_outbound_${randomUUID()}`;
         const outbox = createOutboxEvent({ aggregateId: consentId, aggregateType: "marketing_consent", payload: { channel: row.channel, descriptorId, maxAttempts: 3 }, queue: "message-delivery", traceId: createRequestTraceId(SERVICE, "requestMarketingConsent"), type: "conversation.outbound.requested" });
         await tx.marketingConsent.create({ data: { id: consentId, tenantId: context.tenantId, clientId: row.clientId, channel: row.channel, status: "pending", source: "system", consentVersion: quietSettings.consentVersion, evidence: { campaignId: campaign.id, requestedBy: context.userId }, recordedAt: now } });
-        await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId: context.tenantId, conversationId: null, messageId: null, channel: row.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing-consent:${consentId}`, requestFingerprint: `marketing-consent:${row.clientId}:${row.channel}`, retryable: true, payload: { channel: row.channel, clientName: row.profile.name ?? "", marketingConsentId: consentId, message: quietSettings.consentText || "Разрешаете получать маркетинговые сообщения? Ответьте «Да», чтобы подтвердить согласие.", phone: row.profile.phone, queue: "message-delivery", topic: "marketing-consent" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
+        await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId: context.tenantId, conversationId: null, messageId: null, channel: row.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing-consent:${consentId}`, requestFingerprint: `marketing-consent:${row.clientId}:${row.channel}`, retryable: true, payload: { channel: row.channel, clientName: row.profile.name ?? "", marketingConsentId: consentId, message: quietSettings.consentText || DEFAULT_MARKETING_CONSENT_TEXT, phone: row.profile.phone, queue: "message-delivery", topic: "marketing-consent" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
         await tx.outboxEvent.create({ data: { id: outbox.id, aggregateId: outbox.aggregateId, aggregateType: outbox.aggregateType, occurredAt: new Date(outbox.occurredAt), payload: outbox.payload, queue: outbox.queue, status: outbox.status, traceId: outbox.traceId, type: outbox.type } });
       }
       await this.createUsageCharges(tx, context.tenantId, rows.filter((row: any) => row.status === "queued"), billingSettings, now);
@@ -861,8 +896,11 @@ export class MarketingService {
   }
 
   private async ensureSettings(tenantId: string) {
-    const settings = await prisma.marketingSettings.upsert({ where: { tenantId }, create: { tenantId }, update: {} });
-    await prisma.marketingConsentTextVersion.upsert({ where: { tenantId_version: { tenantId, version: settings.consentVersion } }, create: { id: `mkt_consent_text_${randomUUID()}`, tenantId, version: settings.consentVersion, content: settings.consentText }, update: {} });
+    let settings = await prisma.marketingSettings.upsert({ where: { tenantId }, create: { tenantId, consentText: DEFAULT_MARKETING_CONSENT_TEXT }, update: {} });
+    if (!String(settings.consentText ?? "").trim()) {
+      settings = await prisma.marketingSettings.update({ where: { tenantId }, data: { consentText: DEFAULT_MARKETING_CONSENT_TEXT } });
+    }
+    await prisma.marketingConsentTextVersion.upsert({ where: { tenantId_version: { tenantId, version: settings.consentVersion } }, create: { id: `mkt_consent_text_${randomUUID()}`, tenantId, version: settings.consentVersion, content: settings.consentText }, update: { content: settings.consentText } });
     return settings;
   }
 
@@ -965,7 +1003,7 @@ export class MarketingService {
         const existing = await tx.marketingConsent.findUnique({ where: { tenantId_clientId_channel: { tenantId, clientId: delivery.clientId, channel: delivery.channel } }, select: { id: true } });
         if (existing) return false;
         await tx.marketingConsent.create({ data: { id: consentId, tenantId, clientId: delivery.clientId, channel: delivery.channel, status: "pending", source: "system", consentVersion: settings.consentVersion, evidence: { campaignId: campaign.id, requestedBy: campaign.createdBy }, recordedAt: new Date() } });
-        await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId, conversationId: null, messageId: null, channel: delivery.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing-consent:${consentId}`, requestFingerprint: `marketing-consent:${delivery.clientId}:${delivery.channel}`, retryable: true, payload: { channel: delivery.channel, clientName: profile.name ?? "", marketingConsentId: consentId, message: settings.consentText || "Разрешаете получать маркетинговые сообщения? Ответьте «Да», чтобы подтвердить согласие.", phone: profile.phone, queue: "message-delivery", topic: "marketing-consent" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
+        await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId, conversationId: null, messageId: null, channel: delivery.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing-consent:${consentId}`, requestFingerprint: `marketing-consent:${delivery.clientId}:${delivery.channel}`, retryable: true, payload: { channel: delivery.channel, clientName: profile.name ?? "", marketingConsentId: consentId, message: settings.consentText || DEFAULT_MARKETING_CONSENT_TEXT, phone: profile.phone, queue: "message-delivery", topic: "marketing-consent" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
         await tx.outboxEvent.create({ data: { id: outbox.id, aggregateId: outbox.aggregateId, aggregateType: outbox.aggregateType, occurredAt: new Date(outbox.occurredAt), payload: outbox.payload, queue: outbox.queue, status: outbox.status, traceId: outbox.traceId, type: outbox.type } });
         return true;
       });
@@ -991,7 +1029,10 @@ export class MarketingService {
     const sendingCampaigns = await prisma.marketingCampaign.findMany({ where: { tenantId, status: "sending" }, select: { id: true } });
     await Promise.all(sendingCampaigns.map(async (campaign: { id: string }) => {
       const active = await prisma.marketingDelivery.count({ where: { tenantId, campaignId: campaign.id, status: { in: ["queued", "waiting"] } } });
-      if (active === 0) await prisma.marketingCampaign.update({ where: { id: campaign.id }, data: { status: "completed" } });
+      if (active > 0) return;
+      const consentBlocked = await prisma.marketingDelivery.findMany({ where: { tenantId, campaignId: campaign.id, status: "excluded", excludedReason: "consent_required" }, select: { channel: true, clientId: true } });
+      const pendingConsent = consentBlocked.length ? await prisma.marketingConsent.count({ where: { tenantId, status: "pending", OR: consentBlocked.map((delivery: { channel: string; clientId: string }) => ({ channel: delivery.channel, clientId: delivery.clientId })) } }) : 0;
+      if (pendingConsent === 0) await prisma.marketingCampaign.update({ where: { id: campaign.id }, data: { status: "completed" } });
     }));
   }
 
@@ -1083,11 +1124,8 @@ function invalidEnvelope(operation: string, code: string, message: string) { ret
 function deniedEnvelope(operation: string, code: string) { return createEnvelope({ service: SERVICE, operation, traceId: createRequestTraceId(SERVICE, operation), status: "invalid", data: {}, error: { code, message: "Marketing module access is required." } }); }
 function notFoundEnvelope(operation: string, code: string, message: string) { return createEnvelope({ service: SERVICE, operation, traceId: createRequestTraceId(SERVICE, operation), status: "not_found", data: {}, error: { code, message } }); }
 function text(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
-export function normalizeConsentReply(value: unknown): "grant" | "withdraw" | null {
-  const reply = text(value, 200).toLocaleLowerCase("ru-RU").replace(/[.!?…,;:]+/g, " ").replace(/\s+/g, " ").trim();
-  if (["да", "согласен", "согласна", "подтверждаю", "подтверждаю согласие", "yes"].includes(reply)) return "grant";
-  if (["нет", "не согласен", "не согласна", "отказываюсь", "no"].includes(reply)) return "withdraw";
-  return null;
+export function normalizeConsentReply(value: unknown): "grant" | null {
+  return text(value, 200) ? "grant" : null;
 }
 function optionalText(value: unknown, max: number) { const valueText = text(value, max); return valueText || null; }
 function uniqueStrings(value: unknown) { return Array.isArray(value) ? [...new Set(value.map((item) => text(item, 64)).filter(Boolean))] : []; }

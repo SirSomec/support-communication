@@ -1847,7 +1847,7 @@ export class ConversationService {
       traceId: event.traceId
       }
     });
-    await new MarketingService().recordInboundConsentReply({ channel, phone: conversation.phone, tenantId, text });
+    await new MarketingService().recordInboundConsentReply({ channel, phone: conversation.phone, tenantId, text: message.text }).catch(() => ({ recorded: false as const }));
     await this.publishRealtimeEvent(persisted.realtimeEvent);
 
     return createEnvelope({

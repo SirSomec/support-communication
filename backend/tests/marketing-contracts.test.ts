@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { hashMarketingApiKey, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -27,10 +27,17 @@ describe("marketing quiet hours", () => {
 });
 
 describe("marketing consent replies", () => {
-  it("accepts only explicit consent or refusal replies", () => {
+  it("explains that any reply is treated as marketing consent", () => {
+    assert.match(DEFAULT_MARKETING_CONSENT_TEXT, /ответьте.+любым текстом/i);
+    assert.match(DEFAULT_MARKETING_CONSENT_TEXT, /соглашаетесь.+маркетинговых сообщений/i);
+  });
+
+  it("treats any non-empty reply after the request as consent", () => {
     assert.equal(normalizeConsentReply("\u0414\u0430!"), "grant");
-    assert.equal(normalizeConsentReply("\u043e\u0442\u043a\u0430\u0437\u044b\u0432\u0430\u044e\u0441\u044c"), "withdraw");
-    assert.equal(normalizeConsentReply("\u0438\u043d\u0442\u0435\u0440\u0435\u0441\u043d\u043e"), null);
+    assert.equal(normalizeConsentReply("\u0438\u043d\u0442\u0435\u0440\u0435\u0441\u043d\u043e"), "grant");
+    assert.equal(normalizeConsentReply("\u043d\u0435\u0442"), "grant");
+    assert.equal(normalizeConsentReply("Attachment received"), "grant");
+    assert.equal(normalizeConsentReply("   "), null);
   });
 });
 

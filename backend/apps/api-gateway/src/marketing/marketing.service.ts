@@ -31,17 +31,17 @@ export class MarketingService {
   async recordInboundConsentReply(input: { channel: string; phone: string; tenantId: string; text: string }): Promise<{ recorded: boolean; status?: "granted" }> {
     const reply = normalizeConsentReply(input.text);
     if (!reply || !input.phone.trim()) return { recorded: false };
-    const profiles = await prisma.clientProfile.findMany({ where: { tenantId: input.tenantId, phone: input.phone.trim() }, select: { id: true }, take: 2 });
-    if (profiles.length !== 1) return { recorded: false };
-    const pending = await prisma.marketingConsent.findUnique({ where: { tenantId_clientId_channel: { tenantId: input.tenantId, clientId: profiles[0].id, channel: input.channel } } });
+    const channel = text(input.channel, 64).toLowerCase();
+    const profile = await this.findInboundMarketingProfile(input.tenantId, channel, input.phone);
+    if (!profile) return { recorded: false };
+    const pending = await prisma.marketingConsent.findUnique({ where: { tenantId_clientId_channel: { tenantId: input.tenantId, clientId: profile.id, channel } } });
     if (!pending || pending.status !== "pending") return { recorded: false };
     const now = new Date();
-    const [settings, tenant, profile, blockedDeliveries] = await Promise.all([
+    const [settings, tenant, blockedDeliveries] = await Promise.all([
       this.ensureSettings(input.tenantId),
       prisma.tenant.findUnique({ where: { id: input.tenantId }, select: { metadata: true } }),
-      prisma.clientProfile.findUnique({ where: { id: profiles[0].id }, select: { timeZone: true } }),
       prisma.marketingDelivery.findMany({
-        where: { tenantId: input.tenantId, clientId: profiles[0].id, channel: input.channel, status: "excluded", excludedReason: "consent_required" },
+        where: { tenantId: input.tenantId, clientId: profile.id, channel, status: "excluded", excludedReason: "consent_required" },
         select: { campaignId: true, channel: true, clientId: true, id: true }
       })
     ]);
@@ -66,12 +66,113 @@ export class MarketingService {
         await tx.marketingCampaign.updateMany({ where: { tenantId: input.tenantId, id: { in: [...resumableIds] } }, data: { status: "sending" } });
         await this.createUsageCharges(tx, input.tenantId, resumableDeliveries, settings, now);
       }
-      await tx.marketingAuditEvent.create({ data: { id: `mkt_audit_${randomUUID()}`, tenantId: input.tenantId, actorUserId: null, action: "marketing.consent.granted_by_reply", entityType: "consent", entityId: pending.id, details: { channel: input.channel, clientId: profiles[0].id, resumedDeliveries: resumableDeliveries.length, rule: "any_reply_after_request" } } });
+      await tx.marketingAuditEvent.create({ data: { id: `mkt_audit_${randomUUID()}`, tenantId: input.tenantId, actorUserId: null, action: "marketing.consent.granted_by_reply", entityType: "consent", entityId: pending.id, details: { channel, clientId: profile.id, resumedDeliveries: resumableDeliveries.length, rule: "any_reply_after_request" } } });
       return true;
     });
     if (!recorded) return { recorded: false };
     await this.dispatchQueuedMarketingDeliveries(input.tenantId);
     return { recorded: true, status: "granted" };
+  }
+
+  async requestInboundMarketingConsent(input: {
+    channel: string;
+    clientSince?: string;
+    conversationId: string;
+    device?: string;
+    entry?: string;
+    name: string;
+    phone: string;
+    tenantId: string;
+    topic?: string;
+  }): Promise<{ reason?: string; requested: boolean }> {
+    const channel = text(input.channel, 64).toLowerCase();
+    const phone = text(input.phone, 256);
+    if (!channel || !phone) return { requested: false, reason: "destination_missing" };
+    const settings = await this.ensureSettings(input.tenantId);
+    if (settings.moduleStatus !== "active") return { requested: false, reason: "marketing_module_inactive" };
+    const sourceProfileId = inboundMarketingProfileIdentity(input.tenantId, channel, phone);
+    let profile = await this.findInboundMarketingProfile(input.tenantId, channel, phone);
+    if (!profile) {
+      profile = await prisma.clientProfile.upsert({
+        where: { tenantId_sourceProfileId: { tenantId: input.tenantId, sourceProfileId } },
+        create: {
+          id: `client_${createHash("sha256").update(`${input.tenantId}:${sourceProfileId}`).digest("hex").slice(0, 32)}`,
+          tenantId: input.tenantId,
+          sourceProfileId,
+          name: text(input.name, 256) || "Клиент",
+          channel,
+          phone,
+          phoneNormalized: normalizePhone(phone) || null,
+          device: text(input.device, 128) || channel,
+          entry: text(input.entry, 128) || channel,
+          topic: text(input.topic, 256) || `${channel} / inbound`,
+          clientSince: text(input.clientSince, 128) || new Date().toISOString().slice(0, 10),
+          previous: []
+        },
+        update: {
+          name: text(input.name, 256) || "Клиент",
+          channel,
+          phone,
+          phoneNormalized: normalizePhone(phone) || null,
+          device: text(input.device, 128) || channel,
+          entry: text(input.entry, 128) || channel,
+          topic: text(input.topic, 256) || `${channel} / inbound`,
+          clientSince: text(input.clientSince, 128) || new Date().toISOString().slice(0, 10)
+        },
+        select: { channel: true, id: true, timeZone: true }
+      });
+    }
+    if (!profile) return { requested: false, reason: "profile_resolution_failed" };
+    const consentProfile = profile;
+    const existing = await prisma.marketingConsent.findUnique({ where: { tenantId_clientId_channel: { tenantId: input.tenantId, clientId: consentProfile.id, channel } }, select: { status: true } });
+    if (existing) return { requested: false, reason: existing.status === "pending" ? "awaiting_reply" : `consent_${existing.status}` };
+    const consentId = `mkt_consent_${randomUUID()}`;
+    const descriptorId = `mkt_consent_outbound_${randomUUID()}`;
+    const now = new Date();
+    const outbox = createOutboxEvent({
+      aggregateId: consentId,
+      aggregateType: "marketing_consent",
+      payload: { channel, descriptorId, maxAttempts: 3 },
+      queue: "message-delivery",
+      traceId: createRequestTraceId(SERVICE, "requestInboundMarketingConsent"),
+      type: "conversation.outbound.requested"
+    });
+    const requested = await prisma.$transaction(async (tx: any) => {
+      const concurrent = await tx.marketingConsent.findUnique({ where: { tenantId_clientId_channel: { tenantId: input.tenantId, clientId: consentProfile.id, channel } }, select: { id: true } });
+      if (concurrent) return false;
+      await tx.marketingConsent.create({ data: {
+        id: consentId,
+        tenantId: input.tenantId,
+        clientId: consentProfile.id,
+        channel,
+        status: "pending",
+        source: "system",
+        consentVersion: settings.consentVersion,
+        evidence: { conversationId: input.conversationId, descriptorId, requestedAt: now.toISOString(), trigger: "first_inbound_message" },
+        recordedAt: now
+      } });
+      await tx.conversationOutboundDescriptor.create({ data: {
+        id: descriptorId,
+        kind: "outbound_conversation",
+        tenantId: input.tenantId,
+        conversationId: null,
+        messageId: null,
+        channel,
+        status: "queued",
+        deliveryState: "queued",
+        idempotencyKey: `marketing-consent:${consentId}`,
+        requestFingerprint: `marketing-consent:${consentProfile.id}:${channel}`,
+        retryable: true,
+        payload: { channel, clientName: text(input.name, 256), marketingConsentId: consentId, message: settings.consentText || DEFAULT_MARKETING_CONSENT_TEXT, phone, queue: "message-delivery", topic: "marketing-consent" },
+        auditId: null,
+        traceId: outbox.traceId,
+        outboxEventId: outbox.id
+      } });
+      await tx.outboxEvent.create({ data: { id: outbox.id, aggregateId: outbox.aggregateId, aggregateType: outbox.aggregateType, occurredAt: new Date(outbox.occurredAt), payload: outbox.payload, queue: outbox.queue, status: outbox.status, traceId: outbox.traceId, type: outbox.type } });
+      await tx.marketingAuditEvent.create({ data: { id: `mkt_audit_${randomUUID()}`, tenantId: input.tenantId, actorUserId: null, action: "marketing.consent.requested_on_first_inbound", entityType: "consent", entityId: consentId, details: { channel, clientId: consentProfile.id, conversationId: input.conversationId, descriptorId } } });
+      return true;
+    });
+    return { requested, ...(requested ? {} : { reason: "request_already_created" }) };
   }
 
   async billPendingOverage(limit = 10): Promise<{ billed: number; failed: number; skipped: number }> {
@@ -902,6 +1003,19 @@ export class MarketingService {
     return { allowed: isOwner || Boolean(grant?.enabled), isOwner, reason: "marketing_access_required" };
   }
 
+  private async findInboundMarketingProfile(tenantId: string, channel: string, phone: string): Promise<{ channel: string; id: string; timeZone: string | null } | null> {
+    const sourceProfileId = inboundMarketingProfileIdentity(tenantId, channel, phone);
+    const exact = await prisma.clientProfile.findUnique({
+      where: { tenantId_sourceProfileId: { tenantId, sourceProfileId } },
+      select: { channel: true, id: true, timeZone: true }
+    });
+    if (exact) return exact;
+    const candidates = await prisma.clientProfile.findMany({ where: { tenantId, phone: phone.trim() }, select: { channel: true, id: true, timeZone: true }, take: 10 });
+    const channelMatches = candidates.filter((candidate: { channel: string }) => candidate.channel.toLowerCase() === channel.toLowerCase());
+    if (channelMatches.length === 1) return channelMatches[0];
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
   private async ensureSettings(tenantId: string) {
     let settings = await prisma.marketingSettings.upsert({ where: { tenantId }, create: { tenantId, consentText: DEFAULT_MARKETING_CONSENT_TEXT }, update: {} });
     const currentConsentText = String(settings.consentText ?? "").trim();
@@ -1134,6 +1248,10 @@ function invalidEnvelope(operation: string, code: string, message: string) { ret
 function deniedEnvelope(operation: string, code: string) { return createEnvelope({ service: SERVICE, operation, traceId: createRequestTraceId(SERVICE, operation), status: "invalid", data: {}, error: { code, message: "Marketing module access is required." } }); }
 function notFoundEnvelope(operation: string, code: string, message: string) { return createEnvelope({ service: SERVICE, operation, traceId: createRequestTraceId(SERVICE, operation), status: "not_found", data: {}, error: { code, message } }); }
 function text(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
+export function inboundMarketingProfileIdentity(tenantId: string, channel: string, phone: string): string {
+  const digest = createHash("sha256").update(`${tenantId.trim()}:${channel.trim().toLowerCase()}:${phone.trim()}`).digest("hex").slice(0, 32);
+  return `inbound_${channel.trim().toLowerCase()}_${digest}`;
+}
 export function normalizeConsentReply(value: unknown): "grant" | null {
   return text(value, 200) ? "grant" : null;
 }

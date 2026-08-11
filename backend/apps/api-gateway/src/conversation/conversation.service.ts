@@ -1847,7 +1847,21 @@ export class ConversationService {
       traceId: event.traceId
       }
     });
-    await new MarketingService().recordInboundConsentReply({ channel, phone: conversation.phone, tenantId, text: message.text }).catch(() => ({ recorded: false as const }));
+    const marketingService = new MarketingService();
+    const consentReply = await marketingService.recordInboundConsentReply({ channel, phone: conversation.phone, tenantId, text: message.text }).catch(() => ({ recorded: false as const }));
+    if (!consentReply.recorded && !csatFeedback) {
+      await marketingService.requestInboundMarketingConsent({
+        channel,
+        clientSince: conversation.clientSince,
+        conversationId: conversation.id,
+        device: conversation.device,
+        entry: conversation.entry,
+        name: conversation.name,
+        phone: conversation.phone,
+        tenantId,
+        topic: conversation.topic
+      }).catch(() => ({ requested: false as const }));
+    }
     await this.publishRealtimeEvent(persisted.realtimeEvent);
 
     return createEnvelope({

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, isLegacyMarketingConsentText, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -44,6 +44,14 @@ describe("marketing consent replies", () => {
     assert.equal(normalizeConsentReply("\u043d\u0435\u0442"), "grant");
     assert.equal(normalizeConsentReply("Attachment received"), "grant");
     assert.equal(normalizeConsentReply("   "), null);
+  });
+
+  it("uses a stable tenant- and channel-scoped identity for first inbound consent", () => {
+    const telegram = inboundMarketingProfileIdentity("tenant-a", "Telegram", "user-42");
+    assert.equal(telegram, inboundMarketingProfileIdentity("tenant-a", "telegram", "user-42"));
+    assert.notEqual(telegram, inboundMarketingProfileIdentity("tenant-a", "vk", "user-42"));
+    assert.notEqual(telegram, inboundMarketingProfileIdentity("tenant-b", "telegram", "user-42"));
+    assert.doesNotMatch(telegram, /user-42/);
   });
 });
 

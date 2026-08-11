@@ -29,6 +29,7 @@ import { TeamDirectoryRepository } from "../identity/team-directory.repository.j
 import { AutomationRepository } from "../automation/automation.repository.js";
 import { conversationCsatFeedback } from "../quality/csat-feedback.js";
 import { QualityRepository } from "../quality/quality.repository.js";
+import { MarketingService } from "../marketing/marketing.service.js";
 
 const DIALOG_SERVICE = "dialogService";
 const CHANNEL_SERVICE = "channelService";
@@ -1846,6 +1847,7 @@ export class ConversationService {
       traceId: event.traceId
       }
     });
+    await new MarketingService().recordInboundConsentReply({ channel, phone: conversation.phone, tenantId, text });
     await this.publishRealtimeEvent(persisted.realtimeEvent);
 
     return createEnvelope({

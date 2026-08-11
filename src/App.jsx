@@ -32,6 +32,7 @@ import { permissionService } from "./services/permissionService.js";
 import { qualityService } from "./services/qualityService.js";
 import { settingsService } from "./services/settingsService.js";
 import { supportAdminService } from "./services/supportAdminService.js";
+import { marketingService } from "./services/marketingService.js";
 import { ScreenStateStrip, Skeleton, Toast, WorkspaceState } from "./ui.jsx";
 
 const ROLE_SWITCHER_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROLE_SWITCHER === "true";
@@ -45,6 +46,7 @@ function App() {
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [notificationNavigationTarget, setNotificationNavigationTarget] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [marketingNavigationGranted, setMarketingNavigationGranted] = useState(false);
   const [impersonation, setImpersonation] = useState(() => getImpersonationSession());
   const realtimeAttentionHandlerRef = useRef(null);
   const {
@@ -105,6 +107,17 @@ function App() {
     operatorId: tenantSession.operator?.id ?? ""
   });
   useEffect(() => {
+    if (!tenantSession.authenticated) {
+      setMarketingNavigationGranted(false);
+      return;
+    }
+    let cancelled = false;
+    void marketingService.getAccessStatus().then((response) => {
+      if (!cancelled) setMarketingNavigationGranted(response.status === "ok" && Boolean(response.data?.allowed || response.data?.isOwner));
+    });
+    return () => { cancelled = true; };
+  }, [tenantSession.authenticated, tenantSession.tenantId, tenantSession.operator?.id]);
+  useEffect(() => {
     realtimeAttentionHandlerRef.current = operatorAttention.handleRealtimeEvent;
   }, [operatorAttention.handleRealtimeEvent]);
   const {
@@ -120,7 +133,7 @@ function App() {
     initialRoleMode: "Администратор",
     isOutboundOpen,
     permissionModel,
-    sessionPermissions: tenantSession.permissions,
+    sessionPermissions: marketingNavigationGranted ? [...tenantSession.permissions, "marketing.access"] : tenantSession.permissions,
     setOutboundOpen,
     setToast,
     useSessionPermissions: tenantSession.authenticated

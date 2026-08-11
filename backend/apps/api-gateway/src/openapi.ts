@@ -1,8 +1,8 @@
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import type { INestApplication } from "@nestjs/common";
 
-const CLIENT_API_TAGS = new Set(["public", "open-channel"]);
-const CLIENT_API_PATH = /^\/api\/v\d+\/(?:public|open-channel)(?:\/|$)/;
+const CLIENT_API_TAGS = new Set(["public", "open-channel", "marketing"]);
+const CLIENT_API_PATH = /^\/api\/v\d+\/(?:public|open-channel|marketing)(?:\/|$)/;
 
 export function setupOpenApi(
   app: INestApplication,
@@ -23,9 +23,15 @@ export function setupOpenApi(
     .setExternalDoc("Руководство для разработчиков", "/#/docs")
     .addTag("public", "Web SDK, публичный каталог и server-to-server callbacks")
     .addTag("open-channel", "Кастомные двунаправленные каналы поддержки")
+    .addTag("marketing", "Маркетинговые кампании, аудитории, согласия и API-ключ организации")
+    .addTag("Marketing campaigns", "Черновики, запуск, пауза, отмена и результаты кампаний")
+    .addTag("Audiences", "Статические аудитории, импорт и CRM-снимки")
+    .addTag("Preferences", "Согласия и отписки получателей")
+    .addTag("Marketing analytics", "Статусы доставки и экспорт результатов")
+    .addTag("CRM audience sync", "Подписанные входящие CRM-снимки с защитой от повторов")
     .addBearerAuth({
       bearerFormat: "public API key or access token",
-      description: "For Web SDK endpoints use the public key for the selected environment: Bearer sk_live_… or Bearer sk_test_…",
+      description: "For Web SDK endpoints use Bearer sk_live_… or sk_test_…. Marketing endpoints require an organization owner key: Bearer mk_live_….",
       scheme: "bearer",
       type: "http"
     })

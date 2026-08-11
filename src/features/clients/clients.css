@@ -196,3 +196,11 @@
     grid-template-columns: 1fr;
   }
 }
+.client-marketing-form { display: grid; gap: 10px; }
+.client-marketing-form p { color: var(--muted, #667085); font-size: 13px; margin: 0; }
+.client-marketing-form textarea { border: 1px solid var(--line, #d0d5dd); border-radius: 8px; min-height: 80px; padding: 9px; resize: vertical; }
+.client-marketing-form button { justify-content: center; }
+.client-marketing-consent { align-items: center; border-top: 1px solid var(--line, #e4e7ec); display: grid; gap: 7px; grid-template-columns: auto 1fr auto; margin-top: 14px; padding-top: 12px; }
+.client-marketing-consent span, .client-marketing-consent small { color: var(--muted, #667085); font-size: 13px; }
+.client-marketing-consent small { grid-column: 1 / -1; }
+@media (max-width: 560px) { .client-marketing-consent { grid-template-columns: 1fr; } }

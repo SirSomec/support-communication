@@ -341,6 +341,33 @@ services:
       SERVICE_NAME: daily-billing-worker
       DAILY_BILLING_WORKER_INTERVAL_MS: ${DAILY_BILLING_WORKER_INTERVAL_MS:-3600000}
 
+  marketing-delivery-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/marketing/marketing-delivery.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: marketing-delivery-worker
+      MARKETING_DELIVERY_INTERVAL_MS: ${MARKETING_DELIVERY_INTERVAL_MS:-10000}
+      MARKETING_DELIVERY_LIMIT: ${MARKETING_DELIVERY_LIMIT:-50}
+
+  marketing-billing-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/marketing/marketing-billing.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: marketing-billing-worker
+      MARKETING_BILLING_INTERVAL_MS: ${MARKETING_BILLING_INTERVAL_MS:-3600000}
+      MARKETING_BILLING_BATCH_LIMIT: ${MARKETING_BILLING_BATCH_LIMIT:-10}
+
+  marketing-retention-worker:
+    <<: *runtime-service
+    command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/api-gateway/dist/marketing/marketing-retention.main.js"]
+    environment:
+      <<: *runtime-environment
+      SERVICE_NAME: marketing-retention-worker
+      MARKETING_RETENTION_DAYS: ${MARKETING_RETENTION_DAYS:-90}
+      MARKETING_RETENTION_INTERVAL_MS: ${MARKETING_RETENTION_INTERVAL_MS:-86400000}
+
   file-scan-scanner-worker:
     <<: *runtime-service
     command: ["node", "--import", "./scripts/worker-health-runtime.mjs", "apps/outbox-worker/dist/main.js", "--file-scan-scanner"]

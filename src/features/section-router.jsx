@@ -4,6 +4,7 @@ import { AuditScreen } from "./audit/AuditScreen.jsx";
 import { AutomationScreen } from "./automation/AutomationScreen.jsx";
 import { ClientsScreen } from "./clients/ClientsScreen.jsx";
 import { KnowledgeScreen } from "./knowledge/KnowledgeScreen.jsx";
+import { MarketingScreen } from "./marketing/MarketingScreen.jsx";
 import { PanelScreen } from "./panel/PanelScreen.jsx";
 import { QualityScreen } from "./quality/QualityScreen.jsx";
 import { ReportsScreen } from "./reports/ReportsScreen.jsx";
@@ -73,6 +74,10 @@ export function SectionRouter({
 
   if (section === "automation") {
     return <AutomationScreen {...screenProps} />;
+  }
+
+  if (section === "marketing") {
+    return <MarketingScreen {...screenProps} />;
   }
 
   if (section === "audit") {

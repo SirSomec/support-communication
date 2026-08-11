@@ -2300,7 +2300,10 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
 }
 
 function toOutboundConversationRequest(event: StoredOutboxEvent, descriptor: WorkerOutboundDescriptor, channel: string): ChannelConnectorRequest {
+  const attachments = attachmentsFromPayload(descriptor.payload.attachments);
+  const replyMarkup = objectValue(descriptor.payload.replyMarkup);
   return {
+    ...(attachments ? { attachments } : {}),
     channel,
     ...(stringValue(descriptor.payload.clientName) ? { clientName: stringValue(descriptor.payload.clientName) } : {}),
     descriptorId: descriptor.id,
@@ -2308,6 +2311,7 @@ function toOutboundConversationRequest(event: StoredOutboxEvent, descriptor: Wor
     message: requireString(descriptor.payload.message, "message_required"),
     outboxEventId: event.id,
     phone: requireString(descriptor.payload.phone, "phone_required"),
+    ...(replyMarkup ? { replyMarkup } : {}),
     tenantId: requireString(descriptor.tenantId, "tenant_id_required"),
     topic: requireString(descriptor.payload.topic, "topic_required"),
     traceId: event.traceId

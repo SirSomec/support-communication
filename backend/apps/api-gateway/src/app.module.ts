@@ -24,6 +24,7 @@ import { sensitiveRateLimitMiddleware } from "./sensitive-rate-limit.middleware.
 import { WorkspaceModule } from "./workspace/workspace.module.js";
 import { KnowledgeSourcesModule } from "./knowledge-sources/knowledge-sources.module.js";
 import { SupportTicketsModule } from "./support-tickets/support-tickets.module.js";
+import { MarketingModule } from "./marketing/marketing.module.js";
 
 @Module({
   imports: [
@@ -47,7 +48,8 @@ import { SupportTicketsModule } from "./support-tickets/support-tickets.module.j
     AiConnectionsModule,
     WorkspaceModule,
     KnowledgeSourcesModule,
-    SupportTicketsModule
+    SupportTicketsModule,
+    MarketingModule
   ],
   controllers: [HealthController, MetricsController]
 })

@@ -10,6 +10,7 @@ import {
   Gauge,
   GitBranch,
   Mail,
+  Megaphone,
   MessageCircle,
   MessageSquare,
   Phone,
@@ -106,6 +107,11 @@ const workflowSteps = [
 ];
 
 const capabilityItems = [
+  {
+    icon: Megaphone,
+    title: "Маркетинговые коммуникации",
+    text: "Персональные и массовые кампании по уже подключённым каналам: статические аудитории, согласия по каждому каналу, тихие часы и прозрачная статистика доставки."
+  },
   {
     icon: MessageSquare,
     title: "Омниканальная очередь",

@@ -505,6 +505,66 @@ services:
       retries: 6
       start_period: 15s
 
+  marketing-delivery-worker:
+    restart: always
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/marketing/marketing-delivery.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      SERVICE_NAME: marketing-delivery-worker
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
+      MARKETING_DELIVERY_INTERVAL_MS: 10000
+      MARKETING_DELIVERY_LIMIT: 50
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  marketing-retention-worker:
+    restart: always
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/marketing/marketing-retention.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      SERVICE_NAME: marketing-retention-worker
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
+      MARKETING_RETENTION_DAYS: 90
+      MARKETING_RETENTION_INTERVAL_MS: 86400000
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
+  marketing-billing-worker:
+    restart: always
+    build:
+      context: .
+      target: api-gateway
+    command: ["node", "apps/api-gateway/dist/marketing/marketing-billing.main.js"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: staging
+      RUNTIME_PROFILE: production-like
+      SERVICE_NAME: marketing-billing-worker
+      DATABASE_URL: postgresql://support:support@postgres:5432/support_communication?connection_limit=5&pool_timeout=30
+      MARKETING_BILLING_INTERVAL_MS: 3600000
+      MARKETING_BILLING_BATCH_LIMIT: 10
+      YOOKASSA_API_BASE_URL: ${YOOKASSA_API_BASE_URL:-https://api.yookassa.ru/v3}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+    volumes:
+      - api-gateway-runtime:/app/backend/.runtime
+
   outbox-worker:
     restart: always
     build:

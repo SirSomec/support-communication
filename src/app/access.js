@@ -14,6 +14,7 @@ export const ACTION_TO_SECTION = {
   "templates.read": "templates",
   "templates.write": "templates",
   "templates.manageShared": "templates",
+  "marketing.access": "marketing",
   "visitors.read": "visitors",
   "automation.proactive.read": "visitors",
   "reports.read": "reports",
@@ -66,16 +67,17 @@ export function resolveRolePermissions(roleMode, permissionModel) {
 export function constrainPermissionsForRoleMode(sessionPermissions = [], roleMode, permissionModel = null) {
   const normalizedSession = normalizePermissions(sessionPermissions);
   const rolePermissions = resolveRolePermissions(roleMode, permissionModel);
+  const marketingPermission = normalizedSession.includes("marketing.access") ? ["marketing.access"] : [];
 
   if (normalizedSession.includes("*")) {
-    return rolePermissions;
+    return [...new Set([...rolePermissions, ...marketingPermission])];
   }
 
   if (rolePermissions.includes("*")) {
-    return normalizedSession;
+    return [...new Set([...normalizedSession, ...marketingPermission])];
   }
 
-  return rolePermissions.filter((permission) => normalizedSession.includes(permission));
+  return [...new Set([...rolePermissions.filter((permission) => normalizedSession.includes(permission)), ...marketingPermission])];
 }
 
 export function buildAccessProfile(permissions = [], permissionModel = null) {

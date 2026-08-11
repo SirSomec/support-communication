@@ -38,10 +38,12 @@ export interface ClientProfileRecord {
   channel: string;
   clientSince: string;
   device: string;
+  email?: string | null;
   entry: string;
   id: string;
   name: string;
   phone: string;
+  phoneNormalized?: string | null;
   previous: string[][];
   sourceProfileId: string;
   tenantId?: string;
@@ -551,10 +553,12 @@ interface PrismaClientProfileCreateInput {
   channel: string;
   clientSince: string;
   device: string;
+  email?: string | null;
   entry: string;
   id: string;
   name: string;
   phone: string;
+  phoneNormalized?: string | null;
   previous: string[][];
   sourceProfileId: string;
   tenantId: string;
@@ -2334,10 +2338,12 @@ function toPrismaClientProfileCreateInput(profile: ClientProfileRecord): PrismaC
     channel: profile.channel,
     clientSince: profile.clientSince,
     device: profile.device,
+    email: profile.email?.trim().toLocaleLowerCase() || null,
     entry: profile.entry,
     id: profile.id,
     name: profile.name,
     phone: profile.phone,
+    phoneNormalized: normalizePhoneForStorage(profile.phone),
     previous: clone(profile.previous),
     sourceProfileId: profile.sourceProfileId,
     tenantId: requireWorkspaceTenantId(profile.tenantId),
@@ -2345,14 +2351,22 @@ function toPrismaClientProfileCreateInput(profile: ClientProfileRecord): PrismaC
   };
 }
 
+function normalizePhoneForStorage(value: string): string | null {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  return digits.length === 11 && digits.startsWith("8") ? `7${digits.slice(1)}` : digits;
+}
+
 function toPrismaClientProfileUpdateInput(profile: PrismaClientProfileCreateInput): PrismaClientProfileUpdateInput {
   return {
     channel: profile.channel,
     clientSince: profile.clientSince,
     device: profile.device,
+    email: profile.email?.trim().toLocaleLowerCase() || null,
     entry: profile.entry,
     name: profile.name,
     phone: profile.phone,
+    phoneNormalized: profile.phoneNormalized ?? normalizePhoneForStorage(profile.phone),
     previous: clone(profile.previous),
     topic: profile.topic
   };
@@ -2363,10 +2377,12 @@ function toClientProfileRecord(row: PrismaClientProfileRow): ClientProfileRecord
     channel: row.channel,
     clientSince: row.clientSince,
     device: row.device,
+    email: row.email,
     entry: row.entry,
     id: row.id,
     name: row.name,
     phone: row.phone,
+    phoneNormalized: row.phoneNormalized,
     previous: clone(row.previous),
     sourceProfileId: row.sourceProfileId,
     tenantId: row.tenantId,

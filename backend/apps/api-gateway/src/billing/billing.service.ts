@@ -1098,6 +1098,36 @@ export class BillingService {
     return { attempted: due.length, failed, paymentIds };
   }
 
+  async chargeMarketingOverage(input: { amountKopeks: number; idempotencyKey: string; periodStart: string; tenantId: string }): Promise<BackendEnvelope<Record<string, unknown>>> {
+    if (!Number.isSafeInteger(input.amountKopeks) || input.amountKopeks < 1 || !input.idempotencyKey || !input.tenantId) {
+      return invalidEnvelope(BILLING_SERVICE, "chargeMarketingOverage", "marketing_overage_invalid", "Tenant, amount and idempotency key are required.", { tenantId: input.tenantId || null });
+    }
+    if (!await this.isYooKassaLaunchEnabled()) return invalidEnvelope(BILLING_SERVICE, "chargeMarketingOverage", "checkout_not_configured", "YooKassa payment launch is disabled.", { tenantId: input.tenantId });
+    const [tenant, subscription] = await Promise.all([this.findTenant(input.tenantId), this.billingRepository.findTenantSubscription(input.tenantId)]);
+    if (!tenant) return notFoundEnvelope(BILLING_SERVICE, "chargeMarketingOverage", "tenant_not_found", "Tenant was not found.", { tenantId: input.tenantId });
+    if (!subscription || subscription.provider !== "yookassa" || subscription.status !== "active") return invalidEnvelope(BILLING_SERVICE, "chargeMarketingOverage", "marketing_overage_subscription_required", "An active YooKassa subscription with a saved payment method is required.", { tenantId: tenant.id });
+    try {
+      const charge = await this.yooKassaProvider.chargeSavedMethod({
+        amountKopeks: input.amountKopeks,
+        description: `Support Communication marketing overage for ${input.periodStart.slice(0, 7)}`,
+        idempotencyKey: input.idempotencyKey,
+        metadata: { kind: "marketing_overage", periodStart: input.periodStart, tenantId: tenant.id },
+        paymentMethodId: subscription.providerCustomerId
+      });
+      const synced = await this.syncProviderBillingState({
+        eventType: "marketing.overage.invoice_created",
+        idempotencyKey: `yookassa:${charge.paymentId}:marketing-overage-created`,
+        invoice: { amountDue: input.amountKopeks, amountPaid: 0, currency: "RUB", paymentStatus: "pending", providerInvoiceId: charge.paymentId, status: "open", subscriptionId: subscription.id },
+        provider: "yookassa",
+        tenantId: tenant.id
+      });
+      if (synced.status !== "ok") return synced;
+      return createEnvelope({ service: BILLING_SERVICE, operation: "chargeMarketingOverage", traceId: billingTraceId(BILLING_SERVICE, "chargeMarketingOverage"), meta: apiMeta({ tenantId: tenant.id }), data: { paymentId: charge.paymentId, tenantId: tenant.id } });
+    } catch (error) {
+      return errorEnvelope(BILLING_SERVICE, "chargeMarketingOverage", "marketing_overage_charge_failed", error instanceof Error ? error.message : "Marketing overage charge failed.", { tenantId: tenant.id });
+    }
+  }
+
   private async isYooKassaLaunchEnabled(): Promise<boolean> {
     const launchFlag = (await this.platformRepository.listFeatureFlagsAsync()).find((flag) => flag.key === "ff-yookassa-payments");
     return launchFlag?.status === "on";

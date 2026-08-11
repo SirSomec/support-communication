@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Download, Filter, ShieldCheck, Sparkles, Tag } from "lucide-react";
+import { Download, Filter, Megaphone, ShieldCheck, Sparkles, Tag } from "lucide-react";
 import { submitClientExport, submitClientMerge, submitClientUnmerge } from "../../app/clientProfileActions.js";
 import { buildSourceProfileId, groupConversationsIntoClientProfiles, normalizeClientPhone } from "../../app/clientProfileModel.js";
 import { maskPhone } from "../../app/dialogModel.js";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { clientService } from "../../services/clientService.js";
+import { marketingService } from "../../services/marketingService.js";
 import { ChannelBadge, EntityTable, ProductScreen, SectionTitle, ToolbarSearch } from "../../ui.jsx";
 import "./clients.css";
 
@@ -58,6 +59,9 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
   const [exportPending, setExportPending] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [mergedIds, setMergedIds] = useState([]);
+  const [marketingDraft, setMarketingDraft] = useState("");
+  const [marketingSending, setMarketingSending] = useState(false);
+  const [marketingConsents, setMarketingConsents] = useState([]);
   useEffect(() => {
     let cancelled = false;
 
@@ -103,6 +107,14 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     }
   }, [clients, selectedId]);
   const selected = clients.find((client) => client.clientIdentityKey === selectedId) ?? clients[0] ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    if (!selected) { setMarketingConsents([]); return undefined; }
+    void marketingService.getClientPreferences(getClientMutationProfileId(selected)).then((response) => {
+      if (!cancelled && response.status === "ok") setMarketingConsents(response.data?.consents ?? []);
+    });
+    return () => { cancelled = true; };
+  }, [selected?.clientIdentityKey, selected?.sourceProfileId]);
   const canMergeProfiles = Boolean(selected) && access.canViewSensitive;
   const canExportClients = !exportPending && !segmentsLoading && clients.length > 0;
   const visiblePhone = selected ? (access.canViewSensitive ? selected.phone : maskPhone(selected.phone)) : "";
@@ -174,6 +186,31 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     }
 
     onToast(`Экспорт клиентов поставлен в очередь: ${result.fileName}.`);
+  }
+
+  async function createPersonalMarketingDraft(event) {
+    event.preventDefault();
+    if (!selected || !marketingDraft.trim()) return;
+    setMarketingSending(true);
+    const response = await marketingService.createCampaign({
+      channels: [selected.channel],
+      content: { blocks: [{ type: "text", text: marketingDraft.trim() }] },
+      sourceProfileIds: [getClientMutationProfileId(selected)],
+      strategy: "preferred",
+      title: `Персонально · ${selected.name}`
+    });
+    setMarketingSending(false);
+    if (response.status !== "ok") { onToast(response.error?.message ?? "Не удалось создать персональную коммуникацию."); return; }
+    setMarketingDraft("");
+    onToast("Персональная коммуникация создана в черновиках раздела «Коммуникации».");
+  }
+
+  async function withdrawMarketingConsent() {
+    if (!selected) return;
+    const response = await marketingService.recordConsent({ clientId: getClientMutationProfileId(selected), channel: selected.channel, status: "withdrawn" });
+    if (response.status !== "ok") { onToast(response.error?.message ?? "Не удалось отозвать согласие."); return; }
+    setMarketingConsents((current) => [...current.filter((consent) => consent.channel !== selected.channel), response.data?.consent].filter(Boolean));
+    onToast("Согласие отозвано. Это действие зарегистрировано для выбранного канала.");
   }
 
   return (
@@ -261,6 +298,16 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
             <div className="tag-list">
               {selected.tags.map((tag) => <span key={tag}><Tag size={13} />{tag}</span>)}
             </div>
+          </section>
+
+          <section className="work-panel">
+            <SectionTitle title="Маркетинговая коммуникация" action={selected.channel} />
+            <form className="client-marketing-form" onSubmit={createPersonalMarketingDraft}>
+              <p>Создаёт персональный черновик для этого клиента. Перед запуском будут проверены канал и согласие.</p>
+              <textarea maxLength={4000} onChange={(event) => setMarketingDraft(event.target.value)} placeholder="Текст сообщения, эмодзи и переменные" value={marketingDraft} />
+              <button className="primary-action" disabled={marketingSending || !marketingDraft.trim()} type="submit"><Megaphone size={16} /> {marketingSending ? "Создаём…" : "Создать черновик"}</button>
+            </form>
+            <div className="client-marketing-consent"><strong>{"\u0421\u043e\u0433\u043b\u0430\u0441\u0438\u0435 \u0432 \u043a\u0430\u043d\u0430\u043b\u0435"}</strong><span>{marketingConsents.find((consent) => consent.channel === selected.channel)?.status ?? "\u043d\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u0438"}</span><button className="danger-action" onClick={withdrawMarketingConsent} type="button">{"\u041e\u0442\u043e\u0437\u0432\u0430\u0442\u044c \u0441\u043e\u0433\u043b\u0430\u0441\u0438\u0435"}</button><small>{"\u041e\u0442\u0437\u044b\u0432 \u0432\u044b\u043f\u043e\u043b\u043d\u044f\u0435\u0442\u0441\u044f \u0432\u0440\u0443\u0447\u043d\u0443\u044e \u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u0435\u0442\u0441\u044f \u0432 \u0436\u0443\u0440\u043d\u0430\u043b\u0435."}</small></div>
           </section>
 
           <section className="work-panel">

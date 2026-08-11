@@ -25,6 +25,7 @@ import "./api-docs.css";
 const navigationItems = [
   { id: "overview", label: "Обзор" },
   { id: "authentication", label: "Авторизация" },
+  { id: "marketing", label: "Маркетинговые коммуникации" },
   { id: "web-sdk", label: "Web SDK" },
   { id: "messages", label: "Сообщения" },
   { id: "runtime", label: "Сессии и файлы" },
@@ -188,6 +189,27 @@ function verifySignedDelivery(rawBody, headers, secret) {
 
 // Ограничьте возраст timestamp и дедуплицируйте idempotency-key
 // (либо x-webhook-delivery-id) до выполнения бизнес-логики.`;
+
+const marketingExample = `const response = await fetch(
+  "https://supportcom.ru/api/v1/marketing/campaigns",
+  {
+    method: "POST",
+    headers: {
+      authorization: "Bearer mk_live_<organization_api_key>",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      title: "Сентябрьское предложение",
+      audienceId: "mkt_audience_123",
+      channels: ["telegram"],
+      strategy: "preferred",
+      content: { blocks: [{ type: "text", text: "Здравствуйте, {{client.name}}!" }] }
+    })
+  }
+);
+
+const result = await response.json();
+if (result.status !== "ok") throw new Error(result.error?.code);`;
 
 function scrollToSection(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -360,6 +382,44 @@ export function ApiDocsPage() {
               <div><strong><code>clients:identify</code></strong><span>Идентификация, presence и проактивные приглашения.</span></div>
               <div><strong><code>conversations:write</code></strong><span>Сообщения, polling, файлы, карточка клиента и оценки.</span></div>
               <div><strong>Envelope</strong><span>HTTP 200 не гарантирует успех: проверяйте <code>status</code>, <code>error.code</code> и <code>traceId</code>.</span></div>
+            </div>
+          </section>
+
+          <section className="api-docs-section" id="marketing">
+            <div className="api-docs-section-heading">
+              <span className="api-docs-section-icon teal"><Webhook size={19} /></span>
+              <div>
+                <p className="api-docs-kicker">02 · Маркетинговый API</p>
+                <h2>Кампании, статические аудитории и согласия</h2>
+                <p>API доступен владельцу организации и его постоянному ключу <code>mk_live_…</code>. Лимит — 300 запросов в минуту. OAuth и персональные ключи не используются; ключ даёт полный доступ к модулю и должен храниться только на сервере.</p>
+              </div>
+            </div>
+            <CodeExample code={marketingExample} language="JavaScript" title="Создание черновика кампании" />
+            <div className="api-docs-info-row"><div><strong><code>POST /marketing/audiences/import-preview</code></strong><span>Сверяет до 100 000 строк по client ID, внешнему ID, нормализованному телефону и email. Неоднозначные строки возвращает для ручного выбора существующего клиента.</span></div><div><strong><code>GET /marketing/analytics/campaigns</code></strong><span>Возвращает сводку очереди, отправок, доставок, ошибок и исключений по кампаниям. Если канал не передаёт прочтения, API указывает <code>not_supported</code>, а не нулевое значение.</span></div></div>
+            <div className="api-docs-info-row"><div><strong><code>GET /marketing/channel-capabilities</code></strong><span>Возвращает только активные подключения tenant и допустимые блоки сообщения. Перед созданием и запуском кампании сервер повторно валидирует эту матрицу.</span></div></div>
+            <div className="api-docs-info-row">
+              <div><strong><code>POST /marketing/audiences</code></strong><span>Статический список из существующих профилей или импортированных идентификаторов. Не найденные профили не создаются и исключаются.</span></div>
+              <div><strong><code>POST /marketing/audiences/:id/syncs</code></strong><span>Владелец выпускает одноразово показываемый секрет для входящей CRM-синхронизации. CRM отправляет полный снимок <code>records</code> в <code>/marketing/inbound/crm/:syncId</code> с секретом, event ID, текущим timestamp и HMAC-SHA256 подписью; повторный event ID безопасен, а пустой массив очищает CRM-часть аудитории.</span></div>
+              <div><strong><code>POST /marketing/campaigns</code></strong><span>Черновик с блоковым контентом, каналами, стратегией доставки и временем старта.</span></div>
+              <div><strong><code>POST /marketing/campaigns/:id/launch</code></strong><span>Создаёт снимок получателей. Передайте <code>Idempotency-Key</code>; согласия и исключения фиксируются в момент запуска.</span></div>
+            </div>
+            <div className="api-docs-info-row">
+              <div><strong><code>POST /marketing/campaigns/:id/pause</code></strong><span>{"\u041e\u0441\u0442\u0430\u043d\u0430\u0432\u043b\u0438\u0432\u0430\u0435\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u043d\u0435\u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043d\u044b\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u043a\u0430\u043c\u043f\u0430\u043d\u0438\u0438."}</span></div>
+              <div><strong><code>POST /marketing/campaigns/:id/resume</code></strong><span>{"\u0412\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u044f\u0435\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0443 \u0442\u043e\u043b\u044c\u043a\u043e \u043e\u0441\u0442\u0430\u0432\u0448\u0438\u0445\u0441\u044f \u043f\u043e\u043b\u0443\u0447\u0430\u0442\u0435\u043b\u0435\u0439; \u0434\u043b\u044f \u043a\u0430\u0436\u0434\u043e\u0433\u043e \u043f\u043e\u043b\u0443\u0447\u0430\u0442\u0435\u043b\u044f \u0442\u0438\u0445\u0438\u0435 \u0447\u0430\u0441\u044b \u043f\u0440\u0438\u043c\u0435\u043d\u044f\u044e\u0442\u0441\u044f \u043a \u0435\u0433\u043e \u043e\u0447\u0435\u0440\u0435\u0434\u0438 \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e."}</span></div>
+              <div><strong><code>PATCH /marketing/audiences/:id/archive</code></strong><span>{"\u0410\u0440\u0445\u0438\u0432\u0438\u0440\u0443\u0435\u0442 \u043d\u0435\u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u043c\u0443\u044e \u043a\u043e\u0433\u043e\u0440\u0442\u0443; \u043f\u0440\u043e\u0444\u0438\u043b\u0438 \u043a\u043b\u0438\u0435\u043d\u0442\u043e\u0432 \u0438 \u0438\u0441\u0442\u043e\u0440\u0438\u044f \u043d\u0435 \u0443\u0434\u0430\u043b\u044f\u044e\u0442\u0441\u044f."}</span></div>
+              <div><strong><code>POST /marketing/consents</code></strong><span>{"\u0417\u0430\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u0442 \u0440\u0443\u0447\u043d\u043e\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u0438\u043b\u0438 \u043e\u0442\u0437\u044b\u0432 \u0441\u043e\u0433\u043b\u0430\u0441\u0438\u044f \u043f\u043e \u043a\u043e\u043d\u043a\u0440\u0435\u0442\u043d\u043e\u043c\u0443 \u043a\u0430\u043d\u0430\u043b\u0443."}</span></div>
+            </div>
+            <div className="api-docs-info-row"><div><strong><code>POST /marketing/campaigns/:id/test</code></strong><span>{"\u0411\u0435\u0441\u043f\u043b\u0430\u0442\u043d\u043e \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0435\u0442 \u0442\u0435\u0441\u0442 \u0434\u043e 20 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u043c \u043f\u0440\u043e\u0444\u0438\u043b\u044f\u043c. \u041f\u0440\u043e\u0432\u0435\u0440\u044f\u044e\u0442\u0441\u044f \u0430\u043a\u0442\u0438\u0432\u043d\u043e\u0441\u0442\u044c \u043a\u0430\u043d\u0430\u043b\u0430, \u0441\u043e\u0433\u043b\u0430\u0441\u0438\u0435 \u0438 \u0442\u0438\u0445\u0438\u0435 \u0447\u0430\u0441\u044b; \u0442\u0430\u0440\u0438\u0444\u043d\u043e\u0435 \u0441\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u043d\u0435 \u0441\u043e\u0437\u0434\u0430\u0451\u0442\u0441\u044f."}</span></div></div>
+            <div className="api-docs-info-row">
+              <div><strong><code>POST /marketing/campaigns/:id/clone</code></strong><span>{"\u0421\u043e\u0437\u0434\u0430\u0451\u0442 \u043d\u043e\u0432\u044b\u0439 \u0447\u0435\u0440\u043d\u043e\u0432\u0438\u043a \u0438\u0437 \u043a\u0430\u043c\u043f\u0430\u043d\u0438\u0438 \u0441 \u0442\u0435\u043c \u0436\u0435 \u043a\u043e\u043d\u0442\u0435\u043d\u0442\u043e\u043c \u0438 \u0430\u0443\u0434\u0438\u0442\u043e\u0440\u0438\u0435\u0439; \u0438\u0441\u0442\u043e\u0440\u0438\u044f, \u0440\u0430\u0441\u0441\u044b\u043b\u043a\u0430 \u0438 \u0441\u043f\u0438\u0441\u0430\u043d\u0438\u044f \u043d\u0435 \u043a\u043e\u043f\u0438\u0440\u0443\u044e\u0442\u0441\u044f."}</span></div>
+              <div><strong><code>PATCH /marketing/api-key/:id/revoke</code></strong><span>{"\u0412\u043b\u0430\u0434\u0435\u043b\u0435\u0446 \u043c\u043e\u0436\u0435\u0442 \u043d\u0435\u043c\u0435\u0434\u043b\u0435\u043d\u043d\u043e \u043e\u0442\u043e\u0437\u0432\u0430\u0442\u044c \u043f\u043e\u0441\u0442\u043e\u044f\u043d\u043d\u044b\u0439 \u043a\u043b\u044e\u0447; \u043e\u043d \u043f\u0435\u0440\u0435\u0441\u0442\u0430\u0451\u0442 \u043f\u0440\u043e\u0445\u043e\u0434\u0438\u0442\u044c \u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044e \u0441\u0440\u0430\u0437\u0443."}</span></div>
+              <div><strong><code>POST /marketing/campaigns/:id/retry-failed</code></strong><span>{"\u041f\u043e\u0432\u0442\u043e\u0440\u043d\u043e \u043f\u043e\u0441\u0442\u0430\u0432\u0438\u0442 \u0432 \u043e\u0447\u0435\u0440\u0435\u0434\u044c \u0442\u043e\u043b\u044c\u043a\u043e \u0442\u0435\u0440\u043c\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0435 \u043e\u0448\u0438\u0431\u043a\u0438 \u0434\u043e\u0441\u0442\u0430\u0432\u043a\u0438. \u0423\u0436\u0435 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043d\u044b\u0435 \u0438 \u0434\u043e\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u043d\u044b\u0435 \u043f\u043e\u043b\u0443\u0447\u0430\u0442\u0435\u043b\u0438 \u043d\u0435 \u0437\u0430\u0442\u0440\u0430\u0433\u0438\u0432\u0430\u044e\u0442\u0441\u044f, \u0442\u0430\u0440\u0438\u0444\u043d\u043e\u0435 \u0441\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u043d\u0435 \u043f\u043e\u0432\u0442\u043e\u0440\u044f\u0435\u0442\u0441\u044f."}</span></div>
+            </div>
+            <div className="api-docs-info-row"><div><strong><code>GET /marketing/campaigns/:id/results?page=1&amp;pageSize=100</code></strong><span>Постранично возвращает получателей: до 1 000 записей на страницу и до 100 000 страниц. Сводка приходит в каждом ответе.</span></div><div><strong><code>POST /marketing/campaigns/:id/results/export</code></strong><span>Возвращает аудитируемый набор данных сводки или получателей для CSV либо XLSX. Интерфейс экранирует значения, начинающиеся с формульных символов, перед открытием в таблицах.</span></div></div>
+            <p className="api-docs-note">{"\u0412\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u0432 \u043a\u0430\u043c\u043f\u0430\u043d\u0438\u044f\u0445 \u043f\u0440\u0438\u043d\u0438\u043c\u0430\u044e\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0438\u0437 \u043e\u0431\u044a\u0435\u043a\u0442\u043d\u043e\u0433\u043e \u0445\u0440\u0430\u043d\u0438\u043b\u0438\u0449\u0430 \u0442\u043e\u0439 \u0436\u0435 \u043e\u0440\u0433\u0430\u043d\u0438\u0437\u0430\u0446\u0438\u0438, \u0442\u043e\u043b\u044c\u043a\u043e \u043f\u043e\u0441\u043b\u0435 \u0443\u0441\u043f\u0435\u0448\u043d\u043e\u0439 \u0437\u0430\u0433\u0440\u0437\u043a\u0438 \u0438 \u0430\u043d\u0442\u0438\u0432\u0438\u0440\u0443\u0441\u043d\u043e\u0439 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438."}</p>
+            <div className="api-docs-callout">
+              <ShieldCheck size={21} />
+              <div><strong>Согласие обязательно для каждого канала</strong><p>При первом контакте платформа запрашивает согласие в соответствующем канале. До подтверждения маркетинговая доставка не выполняется. Входящая CRM-синхронизация не создаёт клиентов и не заменяет доказательство согласия; кампанию по CRM-аудитории нельзя запустить, если последний успешный снимок старше 24 часов.</p></div>
             </div>
           </section>
 

@@ -259,9 +259,13 @@ export class OutboxPublisher {
         await this.store.markPublished(event.id);
         published += 1;
       } catch (error) {
+        const requestedMaxAttempts = positiveInteger(Number(event.payload.maxAttempts));
+        const effectiveMaxAttempts = requestedMaxAttempts && maxAttempts
+          ? Math.min(requestedMaxAttempts, maxAttempts)
+          : requestedMaxAttempts ?? maxAttempts;
         await this.store.markFailed(event.id, error instanceof Error ? error : String(error), new Date(), {
           currentAttempts: event.attempts,
-          maxAttempts,
+          maxAttempts: effectiveMaxAttempts,
           retryBackoffMs
         });
         failed += 1;

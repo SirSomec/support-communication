@@ -997,6 +997,14 @@ function ownValue<TValue>(values: Record<string, TValue>, key: string): TValue |
   return values[key];
 }
 
+function channelConnector(values: Record<string, ChannelConnector>, channel: string): ChannelConnector | undefined {
+  const direct = ownValue(values, channel);
+  if (direct) return direct;
+  const normalized = channel.trim().toLowerCase();
+  const registeredChannel = Object.keys(values).find((key) => key.trim().toLowerCase() === normalized);
+  return registeredChannel ? ownValue(values, registeredChannel) : undefined;
+}
+
 function internalBillingSyncEventType(job: StoredBillingSyncJob): string {
   return stringValue(job.payload.fromPlanId) && stringValue(job.payload.toPlanId)
     ? "billing.tenant.plan_changed"
@@ -1027,7 +1035,7 @@ function createChannelConnectorHandler(
       });
       return;
     }
-    const connector = ownValue(channelConnectors, channel);
+    const connector = channelConnector(channelConnectors, channel);
     if (!connector) {
       throw new Error(`channel_connector_not_registered:${channel}`);
     }

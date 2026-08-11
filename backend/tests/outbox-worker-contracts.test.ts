@@ -1976,7 +1976,7 @@ describe("outbox worker runtime contracts", () => {
         tenantId: "tenant-volga"
       }],
       ["outbound_002", {
-        channel: "Telegram",
+        channel: "telegram",
         conversationId: null,
         id: "outbound_002",
         idempotencyKey: "outbound-key-002",

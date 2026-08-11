@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, isLegacyMarketingConsentText, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -30,6 +30,12 @@ describe("marketing consent replies", () => {
   it("explains that any reply is treated as marketing consent", () => {
     assert.match(DEFAULT_MARKETING_CONSENT_TEXT, /ответьте.+любым текстом/i);
     assert.match(DEFAULT_MARKETING_CONSENT_TEXT, /соглашаетесь.+маркетинговых сообщений/i);
+  });
+
+  it("upgrades only known legacy prompts without overwriting owner copy", () => {
+    assert.equal(isLegacyMarketingConsentText("Согласны на рекламу?"), true);
+    assert.equal(isLegacyMarketingConsentText("Разрешаете получать маркетинговые сообщения? Ответьте «Да», чтобы подтвердить согласие."), true);
+    assert.equal(isLegacyMarketingConsentText("Наш согласованный юридический текст"), false);
   });
 
   it("treats any non-empty reply after the request as consent", () => {

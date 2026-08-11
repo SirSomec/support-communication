@@ -13,6 +13,13 @@ const MARKETING_PLANS = Object.freeze({
 });
 const DEFAULT_CONTENT = Object.freeze({ blocks: [] });
 export const DEFAULT_MARKETING_CONSENT_TEXT = "Чтобы получать новости и предложения в этом канале, ответьте на это сообщение любым текстом. Отправляя ответ, вы соглашаетесь на получение маркетинговых сообщений.";
+const LEGACY_MARKETING_CONSENT_TEXTS = new Set([
+  "Согласны на рекламу?",
+  "Разрешаете получать маркетинговые сообщения? Ответьте «Да», чтобы подтвердить согласие."
+]);
+export function isLegacyMarketingConsentText(value: unknown): boolean {
+  return LEGACY_MARKETING_CONSENT_TEXTS.has(text(value, 5_000));
+}
 const prisma = createPrismaClient() as any;
 
 export interface MarketingContext {
@@ -897,8 +904,11 @@ export class MarketingService {
 
   private async ensureSettings(tenantId: string) {
     let settings = await prisma.marketingSettings.upsert({ where: { tenantId }, create: { tenantId, consentText: DEFAULT_MARKETING_CONSENT_TEXT }, update: {} });
-    if (!String(settings.consentText ?? "").trim()) {
+    const currentConsentText = String(settings.consentText ?? "").trim();
+    if (!currentConsentText) {
       settings = await prisma.marketingSettings.update({ where: { tenantId }, data: { consentText: DEFAULT_MARKETING_CONSENT_TEXT } });
+    } else if (isLegacyMarketingConsentText(currentConsentText)) {
+      settings = await prisma.marketingSettings.update({ where: { tenantId }, data: { consentText: DEFAULT_MARKETING_CONSENT_TEXT, consentVersion: { increment: 1 } } });
     }
     await prisma.marketingConsentTextVersion.upsert({ where: { tenantId_version: { tenantId, version: settings.consentVersion } }, create: { id: `mkt_consent_text_${randomUUID()}`, tenantId, version: settings.consentVersion, content: settings.consentText }, update: { content: settings.consentText } });
     return settings;

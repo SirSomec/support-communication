@@ -67,6 +67,7 @@ export function MarketingScreen({ onBack, onToast }) {
   const audiences = Array.isArray(workspace.audiences) ? workspace.audiences : [];
   const templates = Array.isArray(workspace.templates) ? workspace.templates : [];
   const users = Array.isArray(workspace.users) ? workspace.users : [];
+  const apiKeys = Array.isArray(workspace.apiKeys) ? workspace.apiKeys : [];
   const previewBlocks = useMemo(() => buildDraftContent(draft, contentBlocks).blocks, [contentBlocks, draft]);
 
   const createCampaign = async (event) => {

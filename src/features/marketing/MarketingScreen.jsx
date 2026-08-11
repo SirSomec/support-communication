@@ -54,7 +54,11 @@ export function MarketingScreen({ onBack, onToast }) {
       setStatus("error");
       return;
     }
-    setWorkspace({ ...emptyWorkspace, ...(response.data ?? {}) });
+    setWorkspace({
+      ...emptyWorkspace,
+      ...(response.data ?? {}),
+      access: { ...(response.data?.access ?? {}), isOwner: Boolean(response.data?.access?.isOwner || nextAccess.isOwner) }
+    });
     setSettingsDraft({
       consentText: response.data?.settings?.consentText ?? "",
       quietHoursEnd: String(response.data?.settings?.quietHoursEnd ?? 9),
@@ -70,6 +74,7 @@ export function MarketingScreen({ onBack, onToast }) {
   const templates = Array.isArray(workspace.templates) ? workspace.templates : [];
   const users = Array.isArray(workspace.users) ? workspace.users : [];
   const apiKeys = Array.isArray(workspace.apiKeys) ? workspace.apiKeys : [];
+  const isOwner = Boolean(workspace.access?.isOwner || accessInfo?.isOwner);
   const previewBlocks = useMemo(() => buildDraftContent(draft, contentBlocks).blocks, [contentBlocks, draft]);
 
   const createCampaign = async (event) => {
@@ -328,8 +333,11 @@ export function MarketingScreen({ onBack, onToast }) {
           <article><SendHorizontal size={20} /><span>Тариф</span><strong>{workspace.settings?.planKey ?? "Не подключён"}</strong></article>
           <article><SendHorizontal size={20} /><span>Расход за период</span><strong>{workspace.usage?.messages ?? 0}</strong><small>{formatRoubles(workspace.usage?.overageKopeks ?? 0)} сверх лимита</small></article>
         </section>
+        <section className="marketing-settings-workspace" hidden={activeView !== "settings"}>
+          <header><span className="marketing-eyebrow">Настройки коммуникаций</span><h2>Доступы, API и правила отправки</h2><p>Управляйте участниками, интеграциями и политикой согласий в отдельном рабочем разделе.</p></header>
         {workspace.access?.isOwner ? <section className="marketing-access-panel"><div><h2>Доступ и API</h2><p>Владелец выдаёт полный доступ к модулю индивидуально. Роли и другие права не меняются.</p><button onClick={createApiKey} type="button">Создать API-ключ</button>{apiSecret ? <code className="marketing-api-secret">{apiSecret}</code> : null}<form className="marketing-settings-form" onSubmit={saveSettings}><strong>Тихие часы и согласие</strong><label>С <select value={settingsDraft.quietHoursStart} onChange={(event) => setSettingsDraft((value) => ({ ...value, quietHoursStart: event.target.value }))}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>)}</select></label><label>До <select value={settingsDraft.quietHoursEnd} onChange={(event) => setSettingsDraft((value) => ({ ...value, quietHoursEnd: event.target.value }))}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>)}</select></label><label>Текст согласия<textarea value={settingsDraft.consentText} onChange={(event) => setSettingsDraft((value) => ({ ...value, consentText: event.target.value }))} /></label><button type="submit">Сохранить</button></form></div><div className="marketing-access-list">{users.map((user) => <article key={user.id}><span><strong>{user.name}</strong><small>{user.email} · {user.role}</small></span><button className={user.marketingEnabled ? "danger-action" : "primary-action"} disabled={String(user.role).toLowerCase() === "owner"} onClick={() => updateUserAccess(user)} type="button">{user.marketingEnabled ? "Отозвать доступ" : "Выдать доступ"}</button></article>)}</div></section> : null}
         {workspace.access?.isOwner ? <section className="marketing-api-key-list"><div><h2>{"\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 API-\u043a\u043b\u044e\u0447\u0438"}</h2><p>{"\u0421\u0435\u043a\u0440\u0435\u0442 \u0432\u044b\u0434\u0430\u0451\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u043e\u0434\u0438\u043d \u0440\u0430\u0437. \u041e\u0442\u0437\u044b\u0432 \u043d\u0435\u043c\u0435\u0434\u043b\u0435\u043d\u043d\u043e \u043f\u0440\u0435\u043a\u0440\u0430\u0449\u0430\u0435\u0442 API-\u0434\u043e\u0441\u0442\u0443\u043f."}</p></div>{apiKeys.length ? <div className="marketing-api-key-rows">{apiKeys.map((apiKey) => <article key={apiKey.id}><span><strong>mk_live_…{apiKey.keyLastFour}</strong><small>{apiKey.revokedAt ? "\u043e\u0442\u043e\u0437\u0432\u0430\u043d" : "\u0430\u043a\u0442\u0438\u0432\u0435\u043d"} · {apiKey.lastUsedAt ? new Date(apiKey.lastUsedAt).toLocaleString("ru-RU") : "\u0435\u0449\u0451 \u043d\u0435 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043b\u0441\u044f"}</small></span>{!apiKey.revokedAt ? <button className="danger-action" onClick={() => revokeApiKey(apiKey.id)} type="button">{"\u041e\u0442\u043e\u0437\u0432\u0430\u0442\u044c"}</button> : null}</article>)}</div> : <small>{"\u041a\u043b\u044e\u0447\u0435\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442."}</small>}</section> : null}
+        </section>
         <section className="marketing-create" hidden={activeView !== "campaigns"}>
           <div><h2>Новая кампания</h2><p>Создайте черновик, добавьте блоки контента и проверьте его перед запуском.</p><MarketingMessagePreview blocks={previewBlocks} channels={draft.channels} title={draft.title} /></div>
           <form onSubmit={createCampaign}>

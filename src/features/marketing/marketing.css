@@ -74,6 +74,7 @@
 
 /* Communications workspace refresh */
 .marketing-header-actions { align-items: center; display: flex; gap: 8px; }
+.marketing-header-actions .marketing-icon-button { display: none; }
 .marketing-icon-button { align-items: center; background: var(--surface, #fff); border: 1px solid var(--line, #d0d5dd); border-radius: 10px; color: var(--text, #344054); cursor: pointer; display: inline-flex; height: 38px; justify-content: center; width: 38px; }
 .marketing-icon-button:hover { background: #f8fafc; border-color: #98a2b3; }
 .marketing-commandbar { align-items: center; background: #f8fbff; border: 1px solid #dbeafe; border-radius: 18px; display: flex; gap: 18px; justify-content: space-between; padding: 20px 22px; }
@@ -89,7 +90,13 @@
 .marketing-view-audiences .marketing-campaigns, .marketing-view-audiences .marketing-export-panel, .marketing-view-audiences .marketing-retry-panel, .marketing-view-audiences .marketing-clone-panel, .marketing-view-audiences .marketing-resume-panel, .marketing-view-templates .marketing-campaigns, .marketing-view-templates .marketing-export-panel, .marketing-view-templates .marketing-retry-panel, .marketing-view-templates .marketing-clone-panel, .marketing-view-templates .marketing-resume-panel, .marketing-view-analytics .marketing-campaigns, .marketing-view-analytics .marketing-export-panel, .marketing-view-analytics .marketing-retry-panel, .marketing-view-analytics .marketing-clone-panel, .marketing-view-analytics .marketing-resume-panel, .marketing-view-templates .marketing-import-review { display: none; }
 .marketing-view-templates .marketing-tools > :not(:last-child) { display: none; }
 .marketing-view-audiences .marketing-tools > :last-child { display: none; }
-.marketing-access-panel, .marketing-api-key-list { display: none !important; }
+.marketing-settings-workspace { display: grid; gap: 16px; }
+.marketing-settings-workspace > header { background: #f8fbff; border: 1px solid #dbeafe; border-radius: 18px; padding: 20px 22px; }
+.marketing-settings-workspace > header h2 { color: var(--text, #101828); font-size: 21px; letter-spacing: -.02em; margin: 4px 0 5px; }
+.marketing-settings-workspace > header p { color: var(--muted, #667085); margin: 0; }
+.marketing-settings-workspace .marketing-access-panel { border-radius: 18px; box-shadow: 0 1px 2px rgb(16 24 40 / 4%); }
+.marketing-settings-workspace .marketing-api-key-list { border-radius: 18px; box-shadow: 0 1px 2px rgb(16 24 40 / 4%); }
+.marketing-view-settings .marketing-tools, .marketing-view-settings .marketing-import-review, .marketing-view-settings .marketing-campaigns, .marketing-view-settings .marketing-export-panel, .marketing-view-settings .marketing-retry-panel, .marketing-view-settings .marketing-clone-panel, .marketing-view-settings .marketing-resume-panel { display: none; }
 .marketing-analytics { background: var(--surface, #fff); border: 1px solid var(--line, #e4e7ec); border-radius: 18px; display: grid; gap: 20px; padding: 22px; }
 .marketing-analytics-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .marketing-analytics-grid article { background: #f8fafc; border: 1px solid #eaecf0; border-radius: 12px; display: grid; gap: 6px; padding: 14px; }

@@ -11,6 +11,7 @@ import { RulesPanel } from "./RulesPanel.jsx";
 import { SettingsShell, settingsTabIds } from "./SettingsShell.jsx";
 import { SdkConsolePanel } from "./SdkConsolePanel.jsx";
 import { BillingPanel } from "./BillingPanel.jsx";
+import { MarketingCommunicationsPanel } from "./MarketingCommunicationsPanel.jsx";
 import { TopicDirectoryPanel } from "./TopicDirectoryPanel.jsx";
 import { integrationService } from "../../services/integrationService.js";
 import { routingService } from "../../services/routingService.js";
@@ -242,6 +243,7 @@ export function SettingsScreen({ onBack, onToast, access, roleMode, onTopicOptio
             onToast={onToast}
           />
         ) : null}
+        {activeTab === "marketing" ? <MarketingCommunicationsPanel onToast={onToast} /> : null}
         {activeTab === "billing" ? <BillingPanel onToast={onToast} /> : null}
       </SettingsShell>
     </section>

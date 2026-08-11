@@ -15,10 +15,10 @@ import {
 } from "lucide-react";
 
 export const navigationItems = [
-  { key: "marketing", label: "Коммуникации", icon: Megaphone },
   { key: "dialogs", label: "Диалоги", icon: MessageCircle },
   { key: "panel", label: "Панель", icon: LayoutDashboard },
   { key: "clients", label: "Клиенты", icon: UsersRound },
+  { key: "marketing", label: "Коммуникации", icon: Megaphone },
   { key: "templates", label: "Шаблоны", icon: ClipboardList },
   { key: "visitors", label: "Визиты", icon: Zap },
   { key: "reports", label: "Отчеты", icon: BarChart3 },

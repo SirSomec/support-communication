@@ -1040,6 +1040,8 @@ model MarketingSettings {
   quietHoursEnd      Int      @default(9) @map("quiet_hours_end")
   consentText        String   @default("") @map("consent_text")
   consentVersion     Int      @default(1) @map("consent_version")
+  requestConsentEnabled Boolean @default(true) @map("request_consent_enabled")
+  allowWithoutConsent Boolean @default(false) @map("allow_without_consent")
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 

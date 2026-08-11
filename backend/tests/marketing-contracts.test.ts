@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -27,6 +27,19 @@ describe("marketing quiet hours", () => {
 });
 
 describe("marketing consent replies", () => {
+  it("keeps consent requests enabled and consent bypass disabled by default", () => {
+    assert.deepEqual(marketingConsentPolicy(undefined), { allowWithoutConsent: false, requestConsentEnabled: true });
+    assert.deepEqual(marketingConsentPolicy({ allowWithoutConsent: true, requestConsentEnabled: false }), { allowWithoutConsent: true, requestConsentEnabled: false });
+  });
+
+  it("allows an explicit bypass without overriding a withdrawn consent", () => {
+    assert.equal(marketingConsentAllowsDelivery("granted", false), true);
+    assert.equal(marketingConsentAllowsDelivery(undefined, false), false);
+    assert.equal(marketingConsentAllowsDelivery(undefined, true), true);
+    assert.equal(marketingConsentAllowsDelivery("pending", true), true);
+    assert.equal(marketingConsentAllowsDelivery("withdrawn", true), false);
+  });
+
   it("explains that any reply is treated as marketing consent", () => {
     assert.match(DEFAULT_MARKETING_CONSENT_TEXT, /ответьте.+любым текстом/i);
     assert.match(DEFAULT_MARKETING_CONSENT_TEXT, /соглашаетесь.+маркетинговых сообщений/i);

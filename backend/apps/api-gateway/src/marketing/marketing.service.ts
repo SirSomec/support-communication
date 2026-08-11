@@ -20,6 +20,16 @@ const LEGACY_MARKETING_CONSENT_TEXTS = new Set([
 export function isLegacyMarketingConsentText(value: unknown): boolean {
   return LEGACY_MARKETING_CONSENT_TEXTS.has(text(value, 5_000));
 }
+export function marketingConsentPolicy(settings: { allowWithoutConsent?: boolean; requestConsentEnabled?: boolean } | null | undefined) {
+  return {
+    allowWithoutConsent: settings?.allowWithoutConsent === true,
+    requestConsentEnabled: settings?.requestConsentEnabled !== false
+  };
+}
+export function marketingConsentAllowsDelivery(status: unknown, allowWithoutConsent: boolean): boolean {
+  const normalizedStatus = String(status ?? "").toLowerCase();
+  return normalizedStatus === "granted" || (allowWithoutConsent && normalizedStatus !== "withdrawn");
+}
 const prisma = createPrismaClient() as any;
 
 export interface MarketingContext {
@@ -92,6 +102,7 @@ export class MarketingService {
     if (!channel || !phone || !destination) return { requested: false, reason: "destination_missing" };
     const settings = await this.ensureSettings(input.tenantId);
     if (settings.moduleStatus !== "active") return { requested: false, reason: "marketing_module_inactive" };
+    if (!marketingConsentPolicy(settings).requestConsentEnabled) return { requested: false, reason: "consent_requests_disabled" };
     const sourceProfileId = inboundMarketingProfileIdentity(input.tenantId, channel, phone);
     let profile = await this.findInboundMarketingProfile(input.tenantId, channel, phone);
     if (!profile) {
@@ -379,21 +390,23 @@ export class MarketingService {
     if (!campaign.audienceId) return invalidEnvelope("preflightCampaign", "marketing_campaign_audience_required", "A static audience is required for preflight.");
     const members = await prisma.marketingAudienceMember.findMany({ where: { tenantId: context.tenantId, audienceId: campaign.audienceId }, select: { clientId: true } });
     const clientIds = members.map((member: { clientId: string }) => member.clientId);
-    const [profiles, consents] = await Promise.all([
+    const [profiles, consents, settings, usage] = await Promise.all([
       prisma.clientProfile.findMany({ where: { tenantId: context.tenantId, id: { in: clientIds } }, select: { id: true, phone: true } }),
-      prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: clientIds }, channel: { in: campaign.channels }, status: "granted" }, select: { clientId: true, channel: true } })
+      prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: clientIds }, channel: { in: campaign.channels } }, select: { clientId: true, channel: true, status: true } }),
+      this.ensureSettings(context.tenantId),
+      prisma.marketingUsageCharge.count({ where: { tenantId: context.tenantId, periodStart: marketingPeriodStart(new Date()) } })
     ]);
     const profileSet = new Set(profiles.filter((profile: { phone: string }) => Boolean(profile.phone)).map((profile: { id: string }) => profile.id));
-    const consentSet = new Set(consents.map((consent: { clientId: string; channel: string }) => `${consent.clientId}:${consent.channel}`));
+    const consentStatusByKey = new Map(consents.map((consent: { clientId: string; channel: string; status: string }) => [`${consent.clientId}:${consent.channel}`, consent.status] as const));
+    const { allowWithoutConsent } = marketingConsentPolicy(settings);
     let consentRequired = 0;
     let destinationMissing = 0;
     let eligible = 0;
     for (const clientId of clientIds) for (const channel of campaign.channels) {
       if (!profileSet.has(clientId)) { destinationMissing += 1; continue; }
-      if (!consentSet.has(`${clientId}:${channel}`)) { consentRequired += 1; continue; }
+      if (!marketingConsentAllowsDelivery(consentStatusByKey.get(`${clientId}:${channel}`), allowWithoutConsent)) { consentRequired += 1; continue; }
       eligible += 1;
     }
-    const [settings, usage] = await Promise.all([this.ensureSettings(context.tenantId), prisma.marketingUsageCharge.count({ where: { tenantId: context.tenantId, periodStart: marketingPeriodStart(new Date()) } })]);
     await this.recordAudit(context, "marketing.campaign.preflight", "campaign", campaign.id, { audience: members.length, eligible });
     return envelope("preflightCampaign", { campaignId: campaign.id, audience: members.length, channelCount: campaign.channels.length, eligible, exclusions: { consentRequired, destinationMissing }, projectedOverageRecipients: Math.max(0, usage + eligible - settings.includedMessages) });
   }
@@ -482,6 +495,8 @@ export class MarketingService {
     const quietHoursStart = hour(payload.quietHoursStart);
     const quietHoursEnd = hour(payload.quietHoursEnd);
     const consentText = payload.consentText === undefined ? undefined : text(payload.consentText, 5_000);
+    const requestConsentEnabled = typeof payload.requestConsentEnabled === "boolean" ? payload.requestConsentEnabled : undefined;
+    const allowWithoutConsent = typeof payload.allowWithoutConsent === "boolean" ? payload.allowWithoutConsent : undefined;
     const current = await this.ensureSettings(context.tenantId);
     const consentChanged = consentText !== undefined && consentText !== current.consentText;
     const settings = await prisma.$transaction(async (tx: any) => {
@@ -489,12 +504,15 @@ export class MarketingService {
       const updated = await tx.marketingSettings.update({ where: { tenantId: context.tenantId }, data: {
         ...(quietHoursStart === null ? {} : { quietHoursStart }),
         ...(quietHoursEnd === null ? {} : { quietHoursEnd }),
+        ...(requestConsentEnabled === undefined ? {} : { requestConsentEnabled }),
+        ...(allowWithoutConsent === undefined ? {} : { allowWithoutConsent }),
         ...(consentText === undefined ? {} : { consentText, ...(consentChanged ? { consentVersion: nextVersion } : {}) })
       } });
       if (consentChanged) await tx.marketingConsentTextVersion.create({ data: { id: `mkt_consent_text_${randomUUID()}`, tenantId: context.tenantId, version: nextVersion, content: consentText ?? "", createdBy: context.userId } });
       return updated;
     });
-    await this.recordAudit(context, "marketing.settings.updated", "settings", context.tenantId, { consentChanged, quietHoursEnd: settings.quietHoursEnd, quietHoursStart: settings.quietHoursStart });
+    await this.recordAudit(context, "marketing.settings.updated", "settings", context.tenantId, { allowWithoutConsent: settings.allowWithoutConsent, consentChanged, quietHoursEnd: settings.quietHoursEnd, quietHoursStart: settings.quietHoursStart, requestConsentEnabled: settings.requestConsentEnabled });
+    if (allowWithoutConsent === true) await this.releaseConsentBlockedDeliveries(context.tenantId);
     return envelope("updateSettings", { settings: serialize(settings) });
   }
 
@@ -730,8 +748,8 @@ export class MarketingService {
     const members = await prisma.marketingAudienceMember.findMany({ where: { tenantId: context.tenantId, audienceId: campaign.audienceId }, select: { clientId: true } });
     if (members.length > 100_000) return invalidEnvelope("launchCampaign", "marketing_campaign_limit_exceeded", "A campaign cannot contain more than 100,000 matched clients.");
     const consents = await prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: members.map((member: { clientId: string }) => member.clientId) }, channel: { in: campaign.channels } }, select: { clientId: true, channel: true, status: true } });
-    const consentSet = new Set(consents.filter((consent: { status: string }) => consent.status === "granted").map((consent: { clientId: string; channel: string }) => `${consent.clientId}:${consent.channel}`));
-    const knownConsentSet = new Set(consents.map((consent: { clientId: string; channel: string }) => `${consent.clientId}:${consent.channel}`));
+    const consentStatusByKey = new Map(consents.map((consent: { clientId: string; channel: string; status: string }) => [`${consent.clientId}:${consent.channel}`, consent.status] as const));
+    const consentPolicy = marketingConsentPolicy(quietSettings);
     const now = new Date();
     const keyPrefix = text(idempotencyKey, 160) || `launch_${campaign.id}_${now.toISOString()}`;
     const profiles = await prisma.clientProfile.findMany({ where: { tenantId: context.tenantId, id: { in: members.map((member: { clientId: string }) => member.clientId) } }, select: { id: true, name: true, phone: true, channel: true, timeZone: true } });
@@ -749,16 +767,17 @@ export class MarketingService {
       const profile = profileById.get(member.clientId);
       const selectedChannels = campaign.strategy === "preferred" && profile?.channel && campaign.channels.includes(profile.channel)
         ? [profile.channel] : campaign.channels;
-      const eligibleChannels = selectedChannels.filter((channel: string) => consentSet.has(`${member.clientId}:${channel}`) && Boolean(profile?.phone));
+      const eligibleChannels = selectedChannels.filter((channel: string) => marketingConsentAllowsDelivery(consentStatusByKey.get(`${member.clientId}:${channel}`), consentPolicy.allowWithoutConsent) && Boolean(profile?.phone));
       return selectedChannels.map((channel: string) => {
-        const hasConsent = consentSet.has(`${member.clientId}:${channel}`);
+        const consentStatus = consentStatusByKey.get(`${member.clientId}:${channel}`);
+        const consentAllowsDelivery = marketingConsentAllowsDelivery(consentStatus, consentPolicy.allowWithoutConsent);
         const hasDestination = Boolean(profile?.phone);
         const cascadeWaiting = campaign.strategy === "cascade" && eligibleChannels.indexOf(channel) > 0;
-        const queued = hasConsent && hasDestination && !cascadeWaiting;
+        const queued = consentAllowsDelivery && hasDestination && !cascadeWaiting;
         return {
           id: `mkt_delivery_${randomUUID()}`, tenantId: context.tenantId, campaignId: campaign.id, clientId: member.clientId, channel,
           status: cascadeWaiting ? "waiting" : queued ? "queued" : "excluded",
-          excludedReason: hasConsent ? (hasDestination ? null : "destination_missing") : "consent_required",
+          excludedReason: consentAllowsDelivery ? (hasDestination ? null : "destination_missing") : "consent_required",
           outboundDescriptorId: null,
           scheduledAt: queued ? quietUntilByClientId.get(member.clientId) ?? null : null,
           idempotencyKey: `${keyPrefix}:${member.clientId}:${channel}`,
@@ -800,10 +819,12 @@ export class MarketingService {
         await tx.outboxEvent.create({ data: { id: outbox.id, aggregateId: outbox.aggregateId, aggregateType: outbox.aggregateType, occurredAt: new Date(outbox.occurredAt), payload: outbox.payload, queue: outbox.queue, status: outbox.status, traceId: outbox.traceId, type: outbox.type } });
       }
       const consentRequests: typeof rows = rows.filter((row: any) =>
-        row.status === "excluded"
+        consentPolicy.requestConsentEnabled
+        && !consentPolicy.allowWithoutConsent
+        && row.status === "excluded"
         && row.excludedReason === "consent_required"
         && Boolean(row.profile?.phone)
-        && !knownConsentSet.has(`${row.clientId}:${row.channel}`)
+        && !consentStatusByKey.has(`${row.clientId}:${row.channel}`)
       );
       for (const row of consentRequests) {
         const consentId = `mkt_consent_${randomUUID()}`;
@@ -841,8 +862,9 @@ export class MarketingService {
     if (!profiles.length) return invalidEnvelope("sendTestCampaign", "marketing_test_recipient_not_found", "Test recipients must be existing client profiles.");
     const fallbackTimeZone = tenantTimeZone(tenant?.metadata);
     if (profiles.some((profile: { timeZone: string | null }) => quietHoursEnd(new Date(), settings.quietHoursStart, settings.quietHoursEnd, tenantTimeZone({ timeZone: profile.timeZone || fallbackTimeZone })))) return invalidEnvelope("sendTestCampaign", "marketing_quiet_hours_active", "Tests cannot be sent during recipients' quiet hours.");
-    const consents = await prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: profiles.map((profile: { id: string }) => profile.id) }, channel: { in: campaign.channels }, status: "granted" }, select: { clientId: true, channel: true } });
-    const consentSet = new Set(consents.map((consent: { clientId: string; channel: string }) => `${consent.clientId}:${consent.channel}`));
+    const consents = await prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: profiles.map((profile: { id: string }) => profile.id) }, channel: { in: campaign.channels } }, select: { clientId: true, channel: true, status: true } });
+    const consentStatusByKey = new Map(consents.map((consent: { clientId: string; channel: string; status: string }) => [`${consent.clientId}:${consent.channel}`, consent.status] as const));
+    const { allowWithoutConsent } = marketingConsentPolicy(settings);
     const message = contentToText(campaign.content) || (contentAttachments(campaign.content).length ? "Вложение" : "");
     if (!message) return invalidEnvelope("sendTestCampaign", "marketing_content_required", "Campaign content must include text or an attachment before testing.");
     const testKey = text(idempotencyKey, 160) || `test_${randomUUID()}`;
@@ -851,7 +873,7 @@ export class MarketingService {
     await prisma.$transaction(async (tx: any) => {
       for (const profile of profiles) {
         const eligibleChannels = (campaign.strategy === "preferred" && profile.channel && campaign.channels.includes(profile.channel) ? [profile.channel] : campaign.channels)
-          .filter((channel: string) => Boolean(profile.phone) && consentSet.has(`${profile.id}:${channel}`));
+          .filter((channel: string) => Boolean(profile.phone) && marketingConsentAllowsDelivery(consentStatusByKey.get(`${profile.id}:${channel}`), allowWithoutConsent));
         const channels = campaign.strategy === "cascade" ? eligibleChannels.slice(0, 1) : eligibleChannels;
         excluded += Math.max(0, campaign.channels.length - channels.length);
         for (const channel of channels) {
@@ -1132,7 +1154,63 @@ export class MarketingService {
     return queued;
   }
 
+  private async releaseConsentBlockedDeliveries(tenantId: string, limit = 500): Promise<number> {
+    const blocked = await prisma.marketingDelivery.findMany({
+      where: { tenantId, excludedReason: "consent_required", status: "excluded" },
+      orderBy: { createdAt: "asc" },
+      take: Math.max(1, Math.min(limit, 1_000)),
+      select: { campaignId: true, channel: true, clientId: true, id: true }
+    });
+    if (!blocked.length) return 0;
+    const [settings, campaigns, profiles, consents, tenant] = await Promise.all([
+      this.ensureSettings(tenantId),
+      prisma.marketingCampaign.findMany({ where: { tenantId, id: { in: blocked.map((delivery: { campaignId: string }) => delivery.campaignId) }, status: { in: ["sending", "completed"] } }, select: { id: true, strategy: true } }),
+      prisma.clientProfile.findMany({ where: { tenantId, id: { in: blocked.map((delivery: { clientId: string }) => delivery.clientId) } }, select: { id: true, phone: true, timeZone: true } }),
+      prisma.marketingConsent.findMany({ where: { tenantId, OR: blocked.map((delivery: { clientId: string; channel: string }) => ({ clientId: delivery.clientId, channel: delivery.channel })) }, select: { channel: true, clientId: true, status: true } }),
+      prisma.tenant.findUnique({ where: { id: tenantId }, select: { metadata: true } })
+    ]);
+    if (!marketingConsentPolicy(settings).allowWithoutConsent) return 0;
+    const campaignStrategyById = new Map<string, string>(campaigns.map((campaign: { id: string; strategy: string }) => [campaign.id, campaign.strategy]));
+    const profilesById = new Map<string, { id: string; phone: string; timeZone: string | null }>(profiles.map((profile: { id: string; phone: string; timeZone: string | null }) => [profile.id, profile]));
+    const consentStatusByKey = new Map<string, string>(consents.map((consent: { channel: string; clientId: string; status: string }) => [`${consent.clientId}:${consent.channel}`, consent.status]));
+    const fallbackTimeZone = tenantTimeZone(tenant?.metadata);
+    const now = new Date();
+    const releasable: Array<{ campaignId: string; channel: string; clientId: string; id: string; scheduledAt: Date | null; status: "queued" | "waiting" }> = [];
+    const terminalExclusions: Array<{ id: string; reason: string }> = [];
+    const claimedCascadeClients = new Set<string>();
+    for (const delivery of blocked as Array<{ campaignId: string; channel: string; clientId: string; id: string }>) {
+      const profile = profilesById.get(delivery.clientId);
+      const strategy = campaignStrategyById.get(delivery.campaignId);
+      const consentStatus = consentStatusByKey.get(`${delivery.clientId}:${delivery.channel}`);
+      if (!strategy) { terminalExclusions.push({ id: delivery.id, reason: "campaign_not_sending" }); continue; }
+      if (!profile?.phone) { terminalExclusions.push({ id: delivery.id, reason: "destination_missing" }); continue; }
+      if (!marketingConsentAllowsDelivery(consentStatus, true)) { terminalExclusions.push({ id: delivery.id, reason: "consent_withdrawn" }); continue; }
+      const cascadeKey = `${delivery.campaignId}:${delivery.clientId}`;
+      const status = strategy === "cascade" && claimedCascadeClients.has(cascadeKey) ? "waiting" : "queued";
+      if (strategy === "cascade") claimedCascadeClients.add(cascadeKey);
+      releasable.push({ ...delivery, scheduledAt: status === "queued" ? quietHoursEnd(now, settings.quietHoursStart, settings.quietHoursEnd, tenantTimeZone({ timeZone: profile.timeZone || fallbackTimeZone })) : null, status });
+    }
+    if (!releasable.length && !terminalExclusions.length) return 0;
+    await prisma.$transaction(async (tx: any) => {
+      for (const delivery of terminalExclusions) {
+        await tx.marketingDelivery.updateMany({ where: { id: delivery.id, excludedReason: "consent_required", status: "excluded" }, data: { excludedReason: delivery.reason } });
+      }
+      for (const delivery of releasable) {
+        await tx.marketingDelivery.updateMany({ where: { id: delivery.id, excludedReason: "consent_required", status: "excluded" }, data: { excludedReason: null, scheduledAt: delivery.scheduledAt, status: delivery.status } });
+      }
+      if (releasable.length) await tx.marketingCampaign.updateMany({ where: { tenantId, id: { in: [...new Set(releasable.map((delivery) => delivery.campaignId))] } }, data: { status: "sending" } });
+      await this.createUsageCharges(tx, tenantId, releasable.filter((delivery) => delivery.status === "queued"), settings, now);
+      await tx.marketingAuditEvent.create({ data: { id: `mkt_audit_${randomUUID()}`, tenantId, actorUserId: null, action: "marketing.consent_policy.blocked_deliveries_released", entityType: "settings", entityId: tenantId, details: { released: releasable.length, terminalExclusions: terminalExclusions.length, rule: "allow_without_consent" } } });
+    });
+    if (releasable.length) await this.dispatchQueuedMarketingDeliveries(tenantId);
+    return releasable.length;
+  }
+
   private async requestMissingMarketingConsents(tenantId: string, limit = 500): Promise<number> {
+    const settings = await this.ensureSettings(tenantId);
+    const consentPolicy = marketingConsentPolicy(settings);
+    if (consentPolicy.allowWithoutConsent) { await this.releaseConsentBlockedDeliveries(tenantId, limit); return 0; }
+    if (!consentPolicy.requestConsentEnabled) return 0;
     const deliveries = await prisma.marketingDelivery.findMany({
       where: { tenantId, excludedReason: "consent_required", status: "excluded" },
       orderBy: { createdAt: "asc" },
@@ -1140,8 +1218,7 @@ export class MarketingService {
       select: { campaignId: true, channel: true, clientId: true, id: true }
     });
     if (!deliveries.length) return 0;
-    const [settings, campaigns, profiles, consents] = await Promise.all([
-      this.ensureSettings(tenantId),
+    const [campaigns, profiles, consents] = await Promise.all([
       prisma.marketingCampaign.findMany({ where: { tenantId, id: { in: deliveries.map((delivery: { campaignId: string }) => delivery.campaignId) } }, select: { createdBy: true, id: true } }),
       prisma.clientProfile.findMany({ where: { tenantId, id: { in: deliveries.map((delivery: { clientId: string }) => delivery.clientId) } }, select: { id: true, name: true, phone: true } }),
       prisma.marketingConsent.findMany({ where: { tenantId, OR: deliveries.map((delivery: { clientId: string; channel: string }) => ({ clientId: delivery.clientId, channel: delivery.channel })) }, select: { channel: true, clientId: true } })

@@ -39,7 +39,8 @@ export class MarketingController {
   revokeApiKey(@Param("apiKeyId") apiKeyId: string, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.revokeApiKey(apiKeyId, context(request))); }
 
   @Patch("settings")
-  @ApiOperation({ operationId: "updateMarketingSettings", summary: "Update quiet hours and consent text; owner only" })
+  @ApiOperation({ operationId: "updateMarketingSettings", summary: "Update quiet hours and tenant marketing consent policy; owner only" })
+  @ApiBody({ schema: { example: { allowWithoutConsent: false, consentText: "Reply to confirm marketing consent.", quietHoursEnd: 9, quietHoursStart: 21, requestConsentEnabled: true }, properties: { allowWithoutConsent: { type: "boolean" }, consentText: { type: "string" }, quietHoursEnd: { maximum: 23, minimum: 0, type: "integer" }, quietHoursStart: { maximum: 23, minimum: 0, type: "integer" }, requestConsentEnabled: { type: "boolean" } }, type: "object" } })
   settings(@Body() body: Record<string, unknown>, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.updateSettings(body ?? {}, context(request))); }
 
   @Patch("access/:userId")

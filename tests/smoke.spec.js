@@ -374,7 +374,7 @@ test("keyboard navigation exposes focus states and modal trap", async ({ page })
   await page.keyboard.press("Tab");
   const firstNavigationFocus = await activeElementSnapshot(page);
   expect(firstNavigationFocus.className).toContain("nav-item");
-  expect(firstNavigationFocus.label).toContain("Коммуникации");
+  expect(firstNavigationFocus.label).toContain("Диалоги");
   expect(firstNavigationFocus.outlineStyle).not.toBe("none");
   expect(firstNavigationFocus.outlineWidth).not.toBe("0px");
 

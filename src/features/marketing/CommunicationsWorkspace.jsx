@@ -160,7 +160,7 @@ export function MarketingScreen({ onBack, onToast }) {
         onOpenCampaign={openCampaignResults}
         workspace={workspace}
       /> : null}
-      {dialog === "campaign" ? <CampaignDialog onClose={() => setDialog(null)} onCreated={() => { setDialog(null); void loadWorkspace(); }} onToast={onToast} workspace={workspace} /> : null}
+      {dialog === "campaign" ? <CampaignDialog onClose={() => setDialog(null)} onCreated={() => { setDialog(null); void loadWorkspace(); }} onToast={onToast} onWorkspaceChange={loadWorkspace} workspace={workspace} /> : null}
       {dialog === "audience" ? <AudienceDialog onClose={() => setDialog(null)} onCreated={() => { setDialog(null); void loadWorkspace(); }} onToast={onToast} /> : null}
       {dialog === "template" ? <TemplateDialog onClose={() => setDialog(null)} onCreated={() => { setDialog(null); void loadWorkspace(); }} onToast={onToast} /> : null}
       {campaignResult ? <ResultsDialog onClose={() => setCampaignResult(null)} result={campaignResult} /> : null}
@@ -271,11 +271,14 @@ function AnalyticsView({ campaigns, usage }) {
   </section>;
 }
 
-function CampaignDialog({ onClose, onCreated, onToast, workspace }) {
+function CampaignDialog({ onClose, onCreated, onToast, onWorkspaceChange, workspace }) {
   const [draft, setDraft] = useState(EMPTY_CAMPAIGN);
   const [blocks, setBlocks] = useState([]);
   const [testRecipients, setTestRecipients] = useState([]);
+  const [campaignId, setCampaignId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
   const [uploading, setUploading] = useState(false);
   const templates = Array.isArray(workspace.templates) ? workspace.templates : [];
   const audiences = Array.isArray(workspace.audiences) ? workspace.audiences : [];
@@ -284,10 +287,14 @@ function CampaignDialog({ onClose, onCreated, onToast, workspace }) {
     const source = Array.isArray(workspace.channels) ? workspace.channels : [];
     return source.length ? source.map((channel) => ({ id: channel.type, label: channel.name || channelLabel(channel.type) })) : ["email", "sms", "telegram", "whatsapp"].map((id) => ({ id, label: channelLabel(id) }));
   }, [workspace.channels]);
-  const updateDraft = (patch) => setDraft((current) => ({ ...current, ...patch }));
+  const updateDraft = (patch) => {
+    setTestResult(null);
+    setDraft((current) => ({ ...current, ...patch }));
+  };
   const toggleChannel = (channel) => updateDraft({ channels: draft.channels.includes(channel) ? draft.channels.filter((item) => item !== channel) : [...draft.channels, channel] });
   const applyTemplate = (templateId) => {
     const template = templates.find((item) => item.id === templateId);
+    setTestResult(null);
     setDraft((current) => ({ ...current, templateId, title: current.title || template?.title || "", contentText: template?.content?.blocks?.find((block) => block.type === "text")?.text ?? current.contentText }));
     setBlocks((template?.content?.blocks ?? []).filter((block) => block.type !== "text").map((block) => ({ ...block, id: crypto.randomUUID() })));
   };
@@ -303,24 +310,80 @@ function CampaignDialog({ onClose, onCreated, onToast, workspace }) {
     if (uploaded.status !== "ready" || !uploaded.fileId) { onToast?.(uploaded.error ?? "Файл не готов к отправке."); return; }
     setBlocks((current) => [...current, { fileId: uploaded.fileId, fileName: file.name, id: crypto.randomUUID(), mimeType: file.type, type: file.type.startsWith("image/") ? "image" : "file" }]);
   };
-  const submit = async (event) => {
-    event.preventDefault();
-    setSubmitting(true);
-    const response = await marketingService.createCampaign({
+  const campaignPayload = () => ({
       audienceId: draft.audienceId || undefined,
       channels: draft.channels,
       clientIds: draft.clientIds.split(",").map((item) => item.trim()).filter(Boolean),
       content: { blocks: [{ type: "text", text: draft.contentText }, ...blocks].filter((block) => block.type !== "text" || block.text) },
-      scheduledAt: draft.scheduledAt ? new Date(draft.scheduledAt).toISOString() : undefined,
+      scheduledAt: draft.scheduledAt ? new Date(draft.scheduledAt).toISOString() : null,
       strategy: draft.strategy,
       title: draft.title
     });
+
+  const saveCampaign = async () => {
+    const response = campaignId
+      ? await marketingService.updateCampaign(campaignId, campaignPayload())
+      : await marketingService.createCampaign(campaignPayload());
+    const savedCampaignId = response.data?.campaign?.id || campaignId;
+    if (response.status === "ok" && savedCampaignId) setCampaignId(savedCampaignId);
+    return { response, savedCampaignId };
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    const { response } = await saveCampaign();
     setSubmitting(false);
-    if (response.status !== "ok") { onToast?.(response.error?.message ?? "Не удалось создать кампанию."); return; }
-    const testIds = testRecipients.map((recipient) => recipient.id);
-    if (testIds.length) await marketingService.testCampaign(response.data?.campaign?.id, testIds);
-    onToast?.(draft.scheduledAt ? "Кампания запланирована." : "Черновик кампании создан.");
+    if (response.status !== "ok") { onToast?.(response.error?.message ?? "Не удалось сохранить кампанию."); return; }
+    onToast?.(draft.scheduledAt ? "Кампания запланирована." : campaignId ? "Черновик кампании обновлён." : "Черновик кампании создан.");
     onCreated();
+  };
+
+  const testAvailabilityMessage = !testRecipients.length
+    ? "Добавьте хотя бы одного тестового получателя."
+    : !draft.title.trim()
+      ? "Укажите название кампании."
+      : !draft.channels.length
+        ? "Выберите хотя бы один канал."
+        : !draft.contentText.trim()
+          ? "Добавьте текст сообщения."
+          : "Сначала сохраним текущую версию как черновик, затем отправим тест. Основная кампания не запустится.";
+  const canSendTest = Boolean(testRecipients.length && draft.title.trim() && draft.channels.length && draft.contentText.trim());
+
+  const sendTest = async () => {
+    if (!canSendTest || testing || submitting) return;
+    setTesting(true);
+    setTestResult(null);
+    const { response: saved, savedCampaignId } = await saveCampaign();
+    if (saved.status !== "ok" || !savedCampaignId) {
+      const message = saved.error?.message ?? "Не удалось сохранить черновик перед тестовой отправкой.";
+      setTestResult({ message, tone: "error" });
+      onToast?.(message);
+      setTesting(false);
+      return;
+    }
+    const tested = await marketingService.testCampaign(savedCampaignId, testRecipients.map((recipient) => recipient.id));
+    setTesting(false);
+    if (tested.status !== "ok") {
+      const message = tested.error?.message ?? "Не удалось запустить тестовую отправку.";
+      setTestResult({ message, tone: "error" });
+      onToast?.(message);
+      void onWorkspaceChange?.();
+      return;
+    }
+    const queued = Number(tested.data?.queued ?? 0);
+    const excluded = Array.isArray(tested.data?.excluded) ? tested.data.excluded.length : Number(tested.data?.excluded ?? 0);
+    const message = queued > 0
+      ? `Тест поставлен в очередь. Сообщений: ${queued}${excluded ? `, исключено: ${excluded}` : ""}.`
+      : `Тест не отправлен. Исключено получателей: ${excluded}. Проверьте доступность канала, согласие и тихие часы.`;
+    setTestResult({ message, tone: queued > 0 ? "success" : "error" });
+    onToast?.(message);
+    void onWorkspaceChange?.();
+  };
+
+  const changeTestRecipients = (recipients) => {
+    setTestResult(null);
+    setTestRecipients(recipients);
   };
   return <Modal className="communications-campaign-dialog" eyebrow="Новая кампания" onClose={onClose} title="Создайте коммуникацию">
     <form className="communications-campaign-form" onSubmit={submit}>
@@ -333,15 +396,15 @@ function CampaignDialog({ onClose, onCreated, onToast, workspace }) {
         </div></section>
         <section><div className="communications-section-heading"><div><h3>Каналы</h3><p>Выберите один или несколько каналов доставки.</p></div></div><div className="communications-channel-picker">{availableChannels.map((channel) => { const selected = draft.channels.includes(channel.id); return <button aria-pressed={selected} className={selected ? "is-selected" : ""} key={channel.id} onClick={() => toggleChannel(channel.id)} type="button"><ChannelIcon channel={channel.id} size={18} /><span>{channel.label}</span>{selected ? <Check size={15} /> : null}</button>; })}</div></section>
         <section><div className="communications-section-heading"><div><h3>Сообщение</h3><p>Добавьте текст, эмодзи и необходимые вложения.</p></div><span>{draft.contentText.length}/4000</span></div><div className="communications-composer-toolbar"><button onClick={() => updateDraft({ contentText: `${draft.contentText} 😊` })} title="Добавить эмодзи" type="button">😊</button><label title="Добавить изображение или файл"><Paperclip size={17} /><input accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.mp3,.mp4" disabled={uploading} onChange={uploadFile} type="file" /></label><button onClick={() => setBlocks((current) => [...current, { id: crypto.randomUUID(), text: "", type: "heading" }])} type="button"><FileText size={16} /> Заголовок</button></div><textarea maxLength={4000} onChange={(event) => updateDraft({ contentText: event.target.value })} placeholder="Введите текст сообщения. Можно использовать переменные, например {{client.name}}" required value={draft.contentText} />{blocks.length ? <div className="communications-attachments">{blocks.map((block) => <div key={block.id}>{block.type === "image" ? <Image size={15} /> : block.type === "heading" ? <FileText size={15} /> : <Paperclip size={15} />}<input aria-label="Содержимое блока" onChange={(event) => setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, text: event.target.value } : item))} placeholder={block.fileName || "Текст заголовка"} readOnly={Boolean(block.fileName)} value={block.fileName || block.text || ""} /><button aria-label="Удалить блок" onClick={() => setBlocks((current) => current.filter((item) => item.id !== block.id))} type="button"><X size={15} /></button></div>)}</div> : null}</section>
-        <section><h3>Отправка</h3><div className="communications-form-grid"><label><span>Стратегия</span><select onChange={(event) => updateDraft({ strategy: event.target.value })} value={draft.strategy}><option value="manual">Выбранные каналы</option><option value="preferred">Предпочтительный канал</option><option value="cascade">Каскад каналов</option><option value="all">По всем каналам</option></select></label><label><span>Дата и время</span><input onChange={(event) => updateDraft({ scheduledAt: event.target.value })} type="datetime-local" value={draft.scheduledAt} /></label></div><TestRecipientPicker onChange={setTestRecipients} value={testRecipients} /></section>
+        <section><h3>Отправка</h3><div className="communications-form-grid"><label><span>Стратегия</span><select onChange={(event) => updateDraft({ strategy: event.target.value })} value={draft.strategy}><option value="manual">Выбранные каналы</option><option value="preferred">Предпочтительный канал</option><option value="cascade">Каскад каналов</option><option value="all">По всем каналам</option></select></label><label><span>Дата и время</span><input onChange={(event) => updateDraft({ scheduledAt: event.target.value })} type="datetime-local" value={draft.scheduledAt} /></label></div><TestRecipientPicker availabilityMessage={testAvailabilityMessage} canSend={canSendTest} onChange={changeTestRecipients} onSend={sendTest} result={testResult} sending={testing} value={testRecipients} /></section>
       </div>
       <aside className="communications-preview-pane"><div className="communications-preview-title"><span>Предпросмотр</span><small>{draft.channels.length ? draft.channels.map(channelLabel).join(" · ") : "Канал не выбран"}</small></div><MessagePreview blocks={blocks} text={draft.contentText} title={draft.title} /><div className="communications-safety-note"><Check size={16} /><p>{consentPolicyMessage}</p></div></aside>
-      <footer className="communications-dialog-footer"><button onClick={onClose} type="button">Отмена</button><button className="primary-action" disabled={submitting || !draft.channels.length} type="submit">{submitting ? "Сохраняем…" : draft.scheduledAt ? "Запланировать" : "Сохранить черновик"}<ArrowRight size={16} /></button></footer>
+      <footer className="communications-dialog-footer"><button onClick={onClose} type="button">Отмена</button><button className="primary-action" disabled={submitting || testing || !draft.channels.length} type="submit">{submitting ? "Сохраняем…" : draft.scheduledAt ? "Запланировать" : campaignId ? "Сохранить изменения" : "Сохранить черновик"}<ArrowRight size={16} /></button></footer>
     </form>
   </Modal>;
 }
 
-function TestRecipientPicker({ onChange, value }) {
+function TestRecipientPicker({ availabilityMessage, canSend, onChange, onSend, result, sending, value }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [results, setResults] = useState([]);
@@ -391,6 +454,11 @@ function TestRecipientPicker({ onChange, value }) {
       {status === "ready" && !availableResults.length ? <div className="communications-test-recipient-state">Клиенты не найдены или уже добавлены.</div> : null}
       {availableResults.length ? <div className="communications-test-recipient-results" id="marketing-test-recipient-results" role="listbox">{availableResults.map((recipient) => <button aria-selected="false" key={recipient.id} onClick={() => addRecipient(recipient)} role="option" type="button"><span className="communications-test-recipient-avatar">{recipientInitials(recipient.name)}</span><span><strong>{recipient.name}</strong><small>{[recipient.phone, recipient.email, channelLabel(recipient.channel)].filter(Boolean).join(" · ")}</small></span><Plus size={16} /></button>)}</div> : null}
       <small className="communications-test-recipient-hint">Можно добавить до 20 существующих клиентов. Контакты показаны в маскированном виде.</small>
+      <div className="communications-test-recipient-action">
+        <p>{availabilityMessage}</p>
+        <button className="primary-action" disabled={!canSend || sending} onClick={onSend} type="button"><Send size={15} /> {sending ? "Отправляем тест…" : "Отправить тест"}</button>
+      </div>
+      {result ? <div aria-live="polite" className={`communications-test-result is-${result.tone}`} role="status">{result.tone === "success" ? <Check size={15} /> : <CircleAlert size={15} />}<span>{result.message}</span></div> : null}
     </div>
   </details>;
 }

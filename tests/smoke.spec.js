@@ -294,6 +294,59 @@ test("audience file import accepts Russian spreadsheet headers and numeric phone
   await expectHealthyPage(page);
 });
 
+test("audience import asks which client profile to use for duplicate phone matches", async ({ page }) => {
+  const { tenantSession } = await openAppShell(page);
+  const activation = await page.request.post("/api/v1/marketing/module/activate", {
+    data: { planKey: "start" },
+    headers: { authorization: `Bearer ${tenantSession.accessToken}` }
+  });
+  expect(activation.ok()).toBeTruthy();
+
+  let createdPayload;
+  await page.route("**/api/v1/marketing/audiences/import-preview", async (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      status: "ok",
+      data: {
+        records: [{
+          index: 0,
+          status: "ambiguous",
+          candidates: [
+            { channel: "telegram", id: "client_duplicate_a", name: "Александр Самойлов", phone: "+7 916 281-83-30" },
+            { channel: "telegram", id: "client_duplicate_b", name: "Александр Самойлов", phone: "+7 916 281-83-30" }
+          ]
+        }],
+        summary: { ambiguous: 1, matched: 0, recordCount: 1, reviewRequired: 1, unmatched: 0 }
+      }
+    })
+  }));
+  await page.route("**/api/v1/marketing/audiences", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    createdPayload = route.request().postDataJSON();
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "ok", data: { audience: { id: "audience_duplicate_phone" }, matchedCount: 1 } }) });
+  });
+
+  await selectRole(page, "Администратор");
+  await openSection(page, "Коммуникации");
+  await page.getByRole("button", { name: "Аудитории", exact: true }).click();
+  await page.getByRole("button", { name: "Создать аудиторию", exact: true }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Кого включить в коммуникацию" });
+  await dialog.getByLabel("Название аудитории").fill("Дубликаты по телефону");
+  await dialog.locator('input[type="file"]').setInputFiles({ name: "clients.csv", mimeType: "text/csv", buffer: Buffer.from("phone\r\n79162818330", "utf8") });
+  await dialog.getByRole("button", { name: "Создать аудиторию" }).click();
+
+  await expect(dialog.getByText("Выберите нужный профиль")).toBeVisible();
+  await expect(dialog.getByText("Найдено профилей: 2")).toBeVisible();
+  await expect(dialog.getByRole("radio")).toHaveCount(2);
+  await dialog.getByRole("radio").nth(1).check();
+  await dialog.getByRole("button", { name: "Создать с выбранными" }).click();
+
+  expect(createdPayload.matchOverrides).toEqual({ 0: "client_duplicate_b" });
+  expect(createdPayload.records).toEqual([{ phone: "79162818330" }]);
+  await expect(dialog).toHaveCount(0);
+  await expectHealthyPage(page);
+});
+
 test("public landing demo and contact request submit to backend", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("route-public-landing")).toBeVisible({ timeout: 15000 });

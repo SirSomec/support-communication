@@ -594,11 +594,13 @@ function TestRecipientPicker({ availabilityMessage, canSend, onChange, onSend, r
 function AudienceDialog({ onClose, onCreated, onToast }) {
   const [draft, setDraft] = useState({ clientIds: "", fileName: "", name: "", records: [] });
   const [importError, setImportError] = useState("");
+  const [review, setReview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const importFile = async (event) => {
     const [file] = Array.from(event.target.files ?? []);
     event.target.value = "";
     if (!file) return;
+    setReview(null);
     try {
       const name = file.name.toLowerCase();
       const xlsx = name.endsWith(".xlsx") ? await import("read-excel-file/browser") : null;
@@ -616,10 +618,18 @@ function AudienceDialog({ onClose, onCreated, onToast }) {
     setImportError("");
     const records = draft.records.length ? draft.records : undefined;
     const clientIds = draft.clientIds.split(",").map((item) => item.trim()).filter(Boolean);
-    if (records?.length) {
+    if (records?.length && !review) {
       const preview = await marketingService.previewAudienceImport(records);
       if (preview.status !== "ok") { setSubmitting(false); onToast?.(preview.error?.message ?? "Не удалось сверить аудиторию."); return; }
-      if (!(preview.data?.summary?.matched ?? 0) && !clientIds.length) {
+      const summary = preview.data?.summary ?? {};
+      const reviewRows = (preview.data?.records ?? []).filter((row) => row.status !== "matched");
+      if ((summary.ambiguous ?? 0) > 0) {
+        setReview({ overrides: {}, rows: reviewRows, summary });
+        setSubmitting(false);
+        onToast?.(`Найдено неоднозначных строк: ${summary.ambiguous}. Выберите нужный профиль клиента.`);
+        return;
+      }
+      if (!(summary.matched ?? 0) && !clientIds.length) {
         const message = "В файле не найдено клиентов из базы сервиса. Используйте колонки «Телефон», «Почта», clientId или externalId и проверьте значения.";
         setSubmitting(false);
         setImportError(message);
@@ -627,13 +637,34 @@ function AudienceDialog({ onClose, onCreated, onToast }) {
         return;
       }
     }
-    const response = await marketingService.createAudience({ clientIds, name: draft.name, records, source: records ? "import" : "manual" });
+    const selectedOverrides = review?.overrides ?? {};
+    if (review && !(review.summary?.matched ?? 0) && !Object.keys(selectedOverrides).length && !clientIds.length) {
+      const message = "Выберите один из найденных профилей клиента или добавьте Client ID вручную.";
+      setSubmitting(false);
+      setImportError(message);
+      return;
+    }
+    const response = await marketingService.createAudience({ clientIds, matchOverrides: selectedOverrides, name: draft.name, records, source: records ? "import" : "manual" });
     setSubmitting(false);
     if (response.status !== "ok") { const message = response.error?.code === "marketing_audience_invalid" ? "Не найдено ни одного клиента из базы сервиса. Проверьте идентификаторы, телефоны или почту в файле." : response.error?.message ?? "Не удалось создать аудиторию."; setImportError(message); onToast?.(message); return; }
     onToast?.(`Аудитория создана: сопоставлено ${response.data?.matchedCount ?? 0} клиентов.`);
     onCreated();
   };
-  return <Modal eyebrow="Новая аудитория" onClose={onClose} title="Кого включить в коммуникацию"><form className="communications-simple-form" onSubmit={submit}><label><span>Название аудитории</span><input autoFocus required onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Например, Активные клиенты" value={draft.name} /></label><div className="communications-import-zone"><Upload size={23} /><div><strong>Импортировать внешний список</strong><p>CSV, XLSX или JSON · поддерживаются Телефон, Почта, clientId и externalId</p></div><label><input accept=".csv,.xlsx,.json" onChange={importFile} type="file" />Выбрать файл</label>{draft.records.length ? <span><Check size={14} /> {draft.fileName} · {draft.records.length} строк готово к сверке</span> : null}</div>{importError ? <div className="communications-import-error" role="alert"><CircleAlert size={16} /><span>{importError}</span></div> : null}<div className="communications-or"><span>или</span></div><label><span>ID клиентов через запятую</span><textarea onChange={(event) => setDraft((current) => ({ ...current, clientIds: event.target.value }))} placeholder="client_1, client_2" value={draft.clientIds} /></label><footer><button onClick={onClose} type="button">Отмена</button><button className="primary-action" disabled={submitting} type="submit">{submitting ? "Сверяем…" : "Создать аудиторию"}</button></footer></form></Modal>;
+  return <Modal eyebrow="Новая аудитория" onClose={onClose} title="Кого включить в коммуникацию">
+    <form className="communications-simple-form" onSubmit={submit}>
+      <label><span>Название аудитории</span><input autoFocus required onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Например, Активные клиенты" value={draft.name} /></label>
+      <div className="communications-import-zone"><Upload size={23} /><div><strong>Импортировать внешний список</strong><p>CSV, XLSX или JSON · поддерживаются Телефон, Почта, clientId и externalId</p></div><label><input accept=".csv,.xlsx,.json" onChange={importFile} type="file" />Выбрать файл</label>{draft.records.length ? <span><Check size={14} /> {draft.fileName} · {draft.records.length} строк готово к сверке</span> : null}</div>
+      {review ? <section aria-labelledby="audience-import-review-title" className="communications-import-review">
+        <header><span><strong id="audience-import-review-title">Выберите нужный профиль</strong><small>Одинаковые данные найдены у нескольких клиентов. Неоднозначные строки без выбора будут исключены.</small></span><button onClick={() => { setImportError(""); setReview(null); }} type="button">Вернуться</button></header>
+        <div className="communications-import-review-summary"><span><strong>{review.summary?.matched ?? 0}</strong> определено автоматически</span><span><strong>{review.summary?.ambiguous ?? 0}</strong> требуют выбора</span><span><strong>{review.summary?.unmatched ?? 0}</strong> не найдено</span></div>
+        <div className="communications-import-review-rows">{review.rows.map((row) => row.status === "ambiguous" ? <article key={row.index}><div><strong>Строка {row.index + 2}</strong><small>Найдено профилей: {row.candidates.length}</small></div><div aria-label={`Выбор клиента для строки ${row.index + 2}`} className="communications-import-candidates" role="radiogroup">{row.candidates.map((candidate) => <label key={candidate.id}><input checked={review.overrides[row.index] === candidate.id} name={`audience-row-${row.index}`} onChange={() => { setImportError(""); setReview((current) => ({ ...current, overrides: { ...current.overrides, [row.index]: candidate.id } })); }} type="radio" /><span><strong>{candidate.name}</strong><small>{[channelLabel(candidate.channel), candidate.phone, `профиль …${candidate.id.slice(-6)}`].filter(Boolean).join(" · ")}</small></span></label>)}</div></article> : <article className="is-unmatched" key={row.index}><div><strong>Строка {row.index + 2}</strong><small>Клиент не найден — строка будет исключена</small></div></article>)}</div>
+      </section> : null}
+      {importError ? <div className="communications-import-error" role="alert"><CircleAlert size={16} /><span>{importError}</span></div> : null}
+      <div className="communications-or"><span>или</span></div>
+      <label><span>ID клиентов через запятую</span><textarea onChange={(event) => setDraft((current) => ({ ...current, clientIds: event.target.value }))} placeholder="client_1, client_2" value={draft.clientIds} /></label>
+      <footer><button onClick={onClose} type="button">Отмена</button><button className="primary-action" disabled={submitting} type="submit">{submitting ? (review ? "Создаём…" : "Сверяем…") : (review ? "Создать с выбранными" : "Создать аудиторию")}</button></footer>
+    </form>
+  </Modal>;
 }
 
 function TemplateDialog({ onClose, onCreated, onToast }) {

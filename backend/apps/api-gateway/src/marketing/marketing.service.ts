@@ -616,7 +616,7 @@ export class MarketingService {
     }), { matched: 0, ambiguous: 0, unmatched: 0 });
     await this.recordAudit(context, "marketing.audience.import_previewed", "audience_import", context.tenantId, { recordCount: records.length, ...summary });
     return envelope("previewAudienceImport", {
-      records: matches.slice(0, 1_000).map((item) => ({ index: item.index, status: item.candidates.length === 1 ? "matched" : item.candidates.length ? "ambiguous" : "unmatched", candidates: item.candidates.map((candidate) => ({ id: candidate.id, name: candidate.name, phone: candidate.phone })) })),
+      records: matches.slice(0, 1_000).map((item) => ({ index: item.index, status: item.candidates.length === 1 ? "matched" : item.candidates.length ? "ambiguous" : "unmatched", candidates: item.candidates.map((candidate) => ({ channel: candidate.channel, id: candidate.id, name: candidate.name, phone: candidate.phone })) })),
       summary: { ...summary, recordCount: records.length, reviewRequired: summary.ambiguous + summary.unmatched }
     });
   }
@@ -1562,7 +1562,7 @@ export class MarketingService {
     return [...new Set([...automatic, ...existing.map((client: { id: string }) => client.id)])];
   }
 
-  private async resolveImportedClientMatches(records: Array<Record<string, unknown>>, tenantId: string): Promise<Array<{ index: number; candidates: Array<{ id: string; name: string; phone: string }> }>> {
+  private async resolveImportedClientMatches(records: Array<Record<string, unknown>>, tenantId: string): Promise<Array<{ index: number; candidates: Array<{ channel: string; id: string; name: string; phone: string }> }>> {
     if (!records.length) return [];
     const normalizedRecords = records.map(normalizeMarketingImportRecord);
     const clientIds = uniqueStrings(normalizedRecords.map((record) => record.clientId ?? record.id));
@@ -1577,8 +1577,8 @@ export class MarketingService {
       ...(phones.length ? [{ phone: { in: phones } }] : []),
       ...(normalizedPhones.length ? [{ phoneNormalized: { in: normalizedPhones } }] : []),
       ...(emails.length ? [{ email: { in: emails, mode: "insensitive" as const } }] : [])
-    ] }, select: { email: true, id: true, name: true, phone: true, phoneNormalized: true, sourceProfileId: true } });
-    const byValue = new Map<string, Array<{ id: string; name: string; phone: string }>>();
+    ] }, select: { channel: true, email: true, id: true, name: true, phone: true, phoneNormalized: true, sourceProfileId: true } });
+    const byValue = new Map<string, Array<{ channel: string; id: string; name: string; phone: string }>>();
     for (const match of matches) for (const value of [match.id, match.phone, normalizePhone(match.phoneNormalized ?? match.phone), match.sourceProfileId, normalizeEmail(match.email)]) {
       const key = text(value, 128); if (key) byValue.set(key, [...(byValue.get(key) ?? []), match]);
     }

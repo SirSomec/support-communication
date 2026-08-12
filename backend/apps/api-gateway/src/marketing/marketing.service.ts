@@ -4,6 +4,7 @@ import { createPrismaClient } from "@support-communication/database";
 import { createOutboxEvent } from "@support-communication/events";
 import { createRequestTraceId } from "@support-communication/observability";
 import { BillingService } from "../billing/billing.service.js";
+import { createObjectStorageSigner } from "../workspace/object-storage.js";
 
 const SERVICE = "marketingService";
 const MARKETING_PLANS = Object.freeze({
@@ -877,8 +878,8 @@ export class MarketingService {
     const consents = await prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: profiles.map((profile: { id: string }) => profile.id) }, channel: { in: campaign.channels } }, select: { clientId: true, channel: true, status: true } });
     const consentStatusByKey = new Map(consents.map((consent: { clientId: string; channel: string; status: string }) => [`${consent.clientId}:${consent.channel}`, consent.status] as const));
     const { allowWithoutConsent } = marketingConsentPolicy(settings);
-    const message = contentToText(campaign.content) || (contentAttachments(campaign.content).length ? "Вложение" : "");
-    if (!message) return invalidEnvelope("sendTestCampaign", "marketing_content_required", "Campaign content must include text or an attachment before testing.");
+    const deliveryAttachments = await this.resolveContentAttachments(campaign.content, context.tenantId);
+    if (!contentToText(campaign.content) && !deliveryAttachments.length) return invalidEnvelope("sendTestCampaign", "marketing_content_required", "Campaign content must include text or an attachment before testing.");
     const testKey = text(idempotencyKey, 160) || `test_${randomUUID()}`;
     let queued = 0;
     let excluded = 0;
@@ -898,12 +899,14 @@ export class MarketingService {
         for (const channel of channels) {
           const destination = destinationByKey.get(marketingDestinationKey(profile.phone, channel));
           if (!destination) continue;
+          const deliveryContent = marketingContentForChannel(campaign.content, channel);
+          const message = deliveryContent.message || "Вложение";
           const descriptorKey = `marketing-test:${campaign.id}:${testKey}:${profile.id}:${channel}`;
           const existing = await tx.conversationOutboundDescriptor.findUnique({ where: { idempotencyKey: descriptorKey }, select: { id: true } });
           if (existing) continue;
           const descriptorId = `mkt_test_outbound_${randomUUID()}`;
           const outbox = createOutboxEvent({ aggregateId: descriptorId, aggregateType: "marketing_test_delivery", payload: { channel, descriptorId, maxAttempts: 3 }, queue: "message-delivery", traceId: createRequestTraceId(SERVICE, "sendTestCampaign"), type: "conversation.outbound.requested" });
-          await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId: context.tenantId, conversationId: null, messageId: null, channel, status: "queued", deliveryState: "queued", idempotencyKey: descriptorKey, requestFingerprint: `marketing-test:${campaign.id}:${profile.id}:${channel}`, retryable: true, payload: { attachments: contentAttachments(campaign.content), channel, channelConnectionId: destination.channelConnectionId, clientName: profile.name ?? "", marketingCampaignId: campaign.id, marketingTest: true, message, phone: profile.phone, providerConversationId: destination.providerConversationId, queue: "message-delivery", replyMarkup: contentReplyMarkup(campaign.content), topic: "marketing-test" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
+          await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId: context.tenantId, conversationId: null, messageId: null, channel, status: "queued", deliveryState: "queued", idempotencyKey: descriptorKey, requestFingerprint: `marketing-test:${campaign.id}:${profile.id}:${channel}`, retryable: true, payload: { attachments: deliveryAttachments, channel, channelConnectionId: destination.channelConnectionId, clientName: profile.name ?? "", marketingCampaignId: campaign.id, marketingTest: true, message, ...(deliveryContent.messageFormat ? { messageFormat: deliveryContent.messageFormat } : {}), phone: profile.phone, providerConversationId: destination.providerConversationId, queue: "message-delivery", replyMarkup: contentReplyMarkup(campaign.content), topic: "marketing-test" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
           await tx.outboxEvent.create({ data: { id: outbox.id, aggregateId: outbox.aggregateId, aggregateType: outbox.aggregateType, occurredAt: new Date(outbox.occurredAt), payload: outbox.payload, queue: outbox.queue, status: outbox.status, traceId: outbox.traceId, type: outbox.type } });
           queued += 1;
         }
@@ -923,9 +926,8 @@ export class MarketingService {
     if (!failed.length) return envelope("retryFailedCampaignDeliveries", { campaignId: campaign.id, retried: 0, skipped: 0 });
     const profiles = await prisma.clientProfile.findMany({ where: { tenantId: context.tenantId, id: { in: failed.map((delivery: { clientId: string }) => delivery.clientId) } }, select: { id: true, name: true, phone: true } });
     const profileById = new Map<string, { id: string; name: string; phone: string }>(profiles.map((profile: { id: string; name: string; phone: string }) => [profile.id, profile] as const));
-    const attachments = contentAttachments(campaign.content);
-    const message = contentToText(campaign.content) || (attachments.length ? "Вложение" : "");
-    if (!message) return invalidEnvelope("retryFailedCampaignDeliveries", "marketing_content_required", "Campaign content is unavailable for a retry.");
+    const attachments = await this.resolveContentAttachments(campaign.content, context.tenantId);
+    if (!contentToText(campaign.content) && !attachments.length) return invalidEnvelope("retryFailedCampaignDeliveries", "marketing_content_required", "Campaign content is unavailable for a retry.");
     let retried = 0;
     let skipped = 0;
     for (const delivery of failed) {
@@ -936,11 +938,13 @@ export class MarketingService {
         continue;
       }
       const descriptorId = `mkt_retry_outbound_${randomUUID()}`;
+      const deliveryContent = marketingContentForChannel(campaign.content, delivery.channel);
+      const message = deliveryContent.message || "Вложение";
       const outbox = createOutboxEvent({ aggregateId: delivery.id, aggregateType: "marketing_delivery", payload: { channel: delivery.channel, descriptorId, marketingDeliveryId: delivery.id, maxAttempts: 3 }, queue: "message-delivery", traceId: createRequestTraceId(SERVICE, "retryFailedCampaignDeliveries"), type: "conversation.outbound.requested" });
       const claimed = await prisma.$transaction(async (tx: any) => {
         const changed = await tx.marketingDelivery.updateMany({ where: { id: delivery.id, status: "failed" }, data: { status: "queued", excludedReason: null, outboundDescriptorId: descriptorId, scheduledAt: null } });
         if (!changed.count) return false;
-        await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId: context.tenantId, conversationId: null, messageId: null, channel: delivery.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing-retry:${delivery.idempotencyKey}:${randomUUID()}`, requestFingerprint: `marketing-retry:${delivery.id}`, retryable: true, payload: { attachments, channel: delivery.channel, clientName: profile.name ?? "", marketingCampaignId: campaign.id, marketingDeliveryId: delivery.id, marketingRetry: true, message, phone: profile.phone, queue: "message-delivery", replyMarkup: contentReplyMarkup(campaign.content), topic: "marketing" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
+        await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId: context.tenantId, conversationId: null, messageId: null, channel: delivery.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing-retry:${delivery.idempotencyKey}:${randomUUID()}`, requestFingerprint: `marketing-retry:${delivery.id}`, retryable: true, payload: { attachments, channel: delivery.channel, clientName: profile.name ?? "", marketingCampaignId: campaign.id, marketingDeliveryId: delivery.id, marketingRetry: true, message, ...(deliveryContent.messageFormat ? { messageFormat: deliveryContent.messageFormat } : {}), phone: profile.phone, queue: "message-delivery", replyMarkup: contentReplyMarkup(campaign.content), topic: "marketing" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
         await tx.outboxEvent.create({ data: { id: outbox.id, aggregateId: outbox.aggregateId, aggregateType: outbox.aggregateType, occurredAt: new Date(outbox.occurredAt), payload: outbox.payload, queue: outbox.queue, status: outbox.status, traceId: outbox.traceId, type: outbox.type } });
         return true;
       });
@@ -1135,6 +1139,43 @@ export class MarketingService {
     return files.length === fileIds.length && files.every((file: { storageState: string; scanState: string; scanVerdict: string | null }) => file.storageState === "uploaded" && ["clean", "scan_clean"].includes(file.scanState) && file.scanVerdict === "clean");
   }
 
+  private async resolveContentAttachments(content: unknown, tenantId: string): Promise<Array<Record<string, unknown>>> {
+    const attachments = contentAttachments(content);
+    if (!attachments.length) return [];
+    const fileIds = attachments.map((attachment) => String(attachment.fileId));
+    const files = await prisma.workspaceFile.findMany({
+      where: { tenantId, fileId: { in: fileIds } },
+      select: { checksum: true, fileId: true, fileName: true, mimeType: true, objectKey: true, scanState: true, scanVerdict: true, sizeBytes: true, storageState: true }
+    });
+    const fileById = new Map<string, { checksum: string | null; fileId: string; fileName: string; mimeType: string; objectKey: string; scanState: string; scanVerdict: string | null; sizeBytes: number; storageState: string }>(
+      files.map((file: any) => [String(file.fileId), file])
+    );
+    const objectStorage = createObjectStorageSigner();
+    const resolved: Array<Record<string, unknown>> = [];
+    for (const attachment of attachments) {
+      const fileId = String(attachment.fileId);
+      const file = fileById.get(fileId);
+      if (!file || file.storageState !== "uploaded" || !["clean", "scan_clean"].includes(file.scanState) || file.scanVerdict !== "clean") {
+        throw new Error(`marketing_attachment_not_ready:${fileId}`);
+      }
+      const signedFile = await objectStorage.signDownload({ fileId, fileName: file.fileName, objectKey: file.objectKey, tenantId });
+      resolved.push({
+        ...attachment,
+        ...(file.checksum ? { checksum: file.checksum } : {}),
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        signedFile: {
+          expiresAt: signedFile.expiresAt,
+          ...(signedFile.headers ? { headers: signedFile.headers } : {}),
+          method: signedFile.method,
+          url: signedFile.url
+        }
+      });
+    }
+    return resolved;
+  }
+
   private async findCampaign(id: string, tenantId: string) {
     return prisma.marketingCampaign.findFirst({ where: { id, tenantId } });
   }
@@ -1153,6 +1194,7 @@ export class MarketingService {
     ]);
     const campaignsById = new Map<string, { content: unknown; id: string }>(campaigns.map((campaign: { content: unknown; id: string }) => [campaign.id, campaign] as const));
     const profilesById = new Map<string, { id: string; name: string; phone: string }>(profiles.map((profile: { id: string; name: string; phone: string }) => [profile.id, profile] as const));
+    const attachmentsByCampaignId = new Map<string, Promise<Array<Record<string, unknown>>>>();
     let queued = 0;
     for (const delivery of deliveries) {
       const campaign = campaignsById.get(delivery.campaignId);
@@ -1161,12 +1203,16 @@ export class MarketingService {
         await prisma.marketingDelivery.updateMany({ where: { id: delivery.id, outboundDescriptorId: null, status: "queued" }, data: { status: "excluded", excludedReason: campaign ? "destination_missing" : "campaign_not_sending" } });
         continue;
       }
+      const attachmentPromise = attachmentsByCampaignId.get(campaign.id) ?? this.resolveContentAttachments(campaign.content, tenantId);
+      attachmentsByCampaignId.set(campaign.id, attachmentPromise);
+      const attachments = await attachmentPromise;
+      const deliveryContent = marketingContentForChannel(campaign.content, delivery.channel);
       const descriptorId = `mkt_outbound_${randomUUID()}`;
       const outbox = createOutboxEvent({ aggregateId: delivery.id, aggregateType: "marketing_delivery", payload: { channel: delivery.channel, descriptorId, marketingDeliveryId: delivery.id, maxAttempts: 3 }, queue: "message-delivery", traceId: createRequestTraceId(SERVICE, "dispatchQueuedMarketingDeliveries"), type: "conversation.outbound.requested" });
       const claimed = await prisma.$transaction(async (tx: any) => {
         const claim = await tx.marketingDelivery.updateMany({ where: { id: delivery.id, outboundDescriptorId: null, status: "queued" }, data: { outboundDescriptorId: descriptorId } });
         if (!claim.count) return false;
-        await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId, conversationId: null, messageId: null, channel: delivery.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing:${delivery.idempotencyKey}`, requestFingerprint: `marketing:${delivery.id}`, retryable: true, payload: { attachments: contentAttachments(campaign.content), channel: delivery.channel, clientName: profile.name ?? "", marketingCampaignId: campaign.id, marketingDeliveryId: delivery.id, message: contentToText(campaign.content) || "Вложение", phone: profile.phone, queue: "message-delivery", replyMarkup: contentReplyMarkup(campaign.content), topic: "marketing" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
+        await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId, conversationId: null, messageId: null, channel: delivery.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing:${delivery.idempotencyKey}`, requestFingerprint: `marketing:${delivery.id}`, retryable: true, payload: { attachments, channel: delivery.channel, clientName: profile.name ?? "", marketingCampaignId: campaign.id, marketingDeliveryId: delivery.id, message: deliveryContent.message || "Вложение", ...(deliveryContent.messageFormat ? { messageFormat: deliveryContent.messageFormat } : {}), phone: profile.phone, queue: "message-delivery", replyMarkup: contentReplyMarkup(campaign.content), topic: "marketing" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
         await tx.outboxEvent.create({ data: { id: outbox.id, aggregateId: outbox.aggregateId, aggregateType: outbox.aggregateType, occurredAt: new Date(outbox.occurredAt), payload: outbox.payload, queue: outbox.queue, status: outbox.status, traceId: outbox.traceId, type: outbox.type } });
         return true;
       });
@@ -1296,6 +1342,7 @@ export class MarketingService {
     const billingSettings = await this.ensureSettings(tenantId);
     const campaigns = await prisma.marketingCampaign.findMany({ where: { tenantId, status: "sending", strategy: "cascade" }, select: { id: true, content: true } });
     for (const campaign of campaigns) {
+      let attachments: Array<Record<string, unknown>> | undefined;
       const deliveries = await prisma.marketingDelivery.findMany({ where: { tenantId, campaignId: campaign.id, status: { in: ["queued", "waiting", "failed", "sent", "delivered"] } }, orderBy: { createdAt: "asc" } });
       const byClient = new Map<string, any[]>();
       for (const delivery of deliveries) byClient.set(delivery.clientId, [...(byClient.get(delivery.clientId) ?? []), delivery]);
@@ -1309,11 +1356,13 @@ export class MarketingService {
         if (!next) continue;
         const profile = await prisma.clientProfile.findFirst({ where: { tenantId, id: next.clientId }, select: { name: true, phone: true } });
         if (!profile?.phone) { await prisma.marketingDelivery.update({ where: { id: next.id }, data: { status: "excluded", excludedReason: "destination_missing" } }); continue; }
+        attachments ??= await this.resolveContentAttachments(campaign.content, tenantId);
+        const deliveryContent = marketingContentForChannel(campaign.content, next.channel);
         const descriptorId = `mkt_outbound_${randomUUID()}`;
         const outbox = createOutboxEvent({ aggregateId: next.id, aggregateType: "marketing_delivery", payload: { channel: next.channel, descriptorId, marketingDeliveryId: next.id, maxAttempts: 3 }, queue: "message-delivery", traceId: createRequestTraceId(SERVICE, "advanceCascadeDeliveries"), type: "conversation.outbound.requested" });
         await prisma.$transaction(async (tx: any) => {
           await tx.marketingDelivery.update({ where: { id: next.id }, data: { status: "queued", outboundDescriptorId: descriptorId } });
-          await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId, conversationId: null, messageId: null, channel: next.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing:${next.idempotencyKey}`, requestFingerprint: `marketing:${next.id}`, retryable: true, payload: { attachments: contentAttachments(campaign.content), channel: next.channel, clientName: profile.name, marketingCampaignId: campaign.id, marketingDeliveryId: next.id, message: contentToText(campaign.content) || "Вложение", phone: profile.phone, queue: "message-delivery", replyMarkup: contentReplyMarkup(campaign.content), topic: "marketing" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
+          await tx.conversationOutboundDescriptor.create({ data: { id: descriptorId, kind: "outbound_conversation", tenantId, conversationId: null, messageId: null, channel: next.channel, status: "queued", deliveryState: "queued", idempotencyKey: `marketing:${next.idempotencyKey}`, requestFingerprint: `marketing:${next.id}`, retryable: true, payload: { attachments, channel: next.channel, clientName: profile.name, marketingCampaignId: campaign.id, marketingDeliveryId: next.id, message: deliveryContent.message || "Вложение", ...(deliveryContent.messageFormat ? { messageFormat: deliveryContent.messageFormat } : {}), phone: profile.phone, queue: "message-delivery", replyMarkup: contentReplyMarkup(campaign.content), topic: "marketing" }, auditId: null, traceId: outbox.traceId, outboxEventId: outbox.id } });
           await tx.outboxEvent.create({ data: { id: outbox.id, aggregateId: outbox.aggregateId, aggregateType: outbox.aggregateType, occurredAt: new Date(outbox.occurredAt), payload: outbox.payload, queue: outbox.queue, status: outbox.status, traceId: outbox.traceId, type: outbox.type } });
           await this.createUsageCharges(tx, tenantId, [next], billingSettings, new Date());
         });
@@ -1440,10 +1489,32 @@ function normalizeContent(value: unknown) {
     return { ...block, type, html: undefined };
   }).filter(Boolean) };
 }
-function contentToText(content: unknown): string {
+export function marketingContentForChannel(content: unknown, channel: unknown): { message: string; messageFormat?: "html" } {
   const blocks = isRecord(content) && Array.isArray(content.blocks) ? content.blocks : [];
-  return blocks.filter(isRecord).map((block) => text(block.text ?? block.title ?? block.alt, 4_000)).filter(Boolean).join("\n").trim().slice(0, 4_000);
+  const contentBlocks = blocks.filter(isRecord);
+  const ordered = [
+    ...contentBlocks.filter((block) => text(block.type, 32) === "heading"),
+    ...contentBlocks.filter((block) => text(block.type, 32) !== "heading")
+  ];
+  const hasHeading = ordered.some((block) => text(block.type, 32) === "heading" && text(block.text ?? block.title, 4_000));
+  const richHeading = hasHeading && ["max", "telegram"].includes(text(channel, 64).toLowerCase());
+  const parts = ordered.flatMap((block) => {
+    const type = text(block.type, 32);
+    if (type === "divider") return ["────────"];
+    if (type === "spacer") return [""];
+    if ([...MARKETING_MEDIA_BLOCKS, "button"].includes(type)) return [];
+    const value = text(block.text ?? block.title ?? block.alt, 4_000);
+    if (!value) return [];
+    if (type === "heading") return [richHeading ? `<b>${escapeMarketingHtml(value)}</b>` : `【${value}】`];
+    return [richHeading ? escapeMarketingHtml(value) : value];
+  });
+  const message = parts.join("\n\n").trim().slice(0, 4_000);
+  return { message, ...(richHeading ? { messageFormat: "html" as const } : {}) };
 }
+function contentToText(content: unknown): string {
+  return marketingContentForChannel(content, "plain").message;
+}
+function escapeMarketingHtml(value: string): string { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function contentAttachments(content: unknown): Array<Record<string, unknown>> {
   const blocks = isRecord(content) && Array.isArray(content.blocks) ? content.blocks : [];
   return blocks.filter(isRecord).filter((block) => ["image", "file", "gif", "audio", "video"].includes(text(block.type, 32))).map((block) => {

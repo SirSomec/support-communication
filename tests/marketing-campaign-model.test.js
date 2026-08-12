@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { campaignAdditionalBlocks, campaignStatusLabel, campaignToDraft, canLaunchCampaignDraft, isCampaignEditable } from "../src/features/marketing/marketingCampaignModel.js";
+import { campaignAdditionalBlocks, campaignContentBlocks, campaignStatusLabel, campaignToDraft, canLaunchCampaignDraft, isCampaignEditable } from "../src/features/marketing/marketingCampaignModel.js";
 
 describe("marketing campaign modal model", () => {
   it("hydrates an existing campaign into editable form values", () => {
@@ -34,5 +34,11 @@ describe("marketing campaign modal model", () => {
     assert.equal(canLaunchCampaignDraft({ ...complete, audienceId: "" }), false);
     assert.equal(canLaunchCampaignDraft({ ...complete, channels: [] }), false);
     assert.equal(canLaunchCampaignDraft({ ...complete, audienceId: "", clientIds: "client_1" }), true);
+  });
+
+  it("places headings before message text and attachments", () => {
+    const image = { fileId: "file-1", fileName: "offer.png", type: "image" };
+    const heading = { id: "heading-1", text: "Важно", type: "heading" };
+    assert.deepEqual(campaignContentBlocks("Основной текст", [image, heading]), [heading, { type: "text", text: "Основной текст" }, image]);
   });
 });

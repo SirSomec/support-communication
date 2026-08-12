@@ -37,7 +37,7 @@ describe("official VK/MAX outbound connectors", () => {
     });
   });
 
-  it("uploads a VK image and sends its saved provider attachment id", async () => {
+  it("uploads a VK image for a proactive campaign and sends its saved provider attachment id", async () => {
     let messageBody = "";
     const connector = createTenantVkChannelConnector({
       apiBaseUrl: "https://api.vk.com",
@@ -51,11 +51,14 @@ describe("official VK/MAX outbound connectors", () => {
       },
       resolveCredential: async () => ({ accessToken: "vk-secret-token", apiVersion: "5.199", externalAccountId: "group-1" })
     });
-    await connector.deliverMessage({
+    await connector.startConversation({
       ...request("VK", "conn-vk", "peer-7"),
+      message: "【Заголовок】\n\nТекст",
       attachments: [{ fileId: "file-vk", fileName: "photo.png", mimeType: "image/png", signedFile: { expiresAt: "2099-01-01T00:00:00.000Z", method: "GET", url: "https://storage.test/vk-photo" } }]
     });
-    assert.equal(new URLSearchParams(messageBody).get("attachment"), "photo-7_42_key-1");
+    const sent = new URLSearchParams(messageBody);
+    assert.equal(sent.get("attachment"), "photo-7_42_key-1");
+    assert.equal(sent.get("message"), "【Заголовок】\n\nТекст");
   });
 
   it("sends MAX messages with Authorization and chat_id", async () => {
@@ -114,6 +117,7 @@ describe("official VK/MAX outbound connectors", () => {
 
   it("uploads a MAX attachment once and reuses its durable token", async () => {
     const calls: string[] = [];
+    const messageBodies: Array<Record<string, unknown>> = [];
     let transfer: any = null;
     const transferStore = {
       find: async () => transfer,
@@ -124,23 +128,26 @@ describe("official VK/MAX outbound connectors", () => {
     };
     const connector = createTenantMaxChannelConnector({
       apiBaseUrl: "https://platform-api2.max.ru",
-      fetcher: async (url) => {
+      fetcher: async (url, init) => {
         calls.push(url);
         if (url === "https://storage.test/file-1") return { ok: true, status: 200, text: async () => "", arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
         if (url.endsWith("/uploads?type=image")) return { ok: true, status: 200, text: async () => JSON.stringify({ url: "https://upload.max.test/u1" }) };
         if (url === "https://upload.max.test/u1") return { ok: true, status: 200, text: async () => JSON.stringify({ token: "max-file-token" }) };
+        messageBodies.push(JSON.parse(String(init.body ?? "{}")));
         return { ok: true, status: 200, text: async () => JSON.stringify({ message: { body: { mid: `mid-${calls.length}` } } }) };
       },
       providerAttachmentTransferStore: transferStore,
       resolveCredential: async () => ({ accessToken: "max-secret-token", externalAccountId: "bot-1" })
     });
     const attachment = { fileId: "file-1", fileName: "photo.png", mimeType: "image/png", signedFile: { expiresAt: "2099-01-01T00:00:00.000Z", method: "GET", url: "https://storage.test/file-1" } };
-    await connector.deliverMessage({ ...request("MAX", "conn-max", "chat-7"), attachments: [attachment] });
-    await connector.deliverMessage({ ...request("MAX", "conn-max", "chat-7"), attachments: [attachment] });
+    const campaignRequest = { ...request("MAX", "conn-max", "chat-7"), attachments: [attachment], message: "<b>Заголовок</b>\n\nТекст", messageFormat: "html" as const };
+    await connector.startConversation(campaignRequest);
+    await connector.startConversation(campaignRequest);
     assert.equal(calls.filter((url) => url === "https://storage.test/file-1").length, 1);
     assert.equal(calls.filter((url) => url.endsWith("/uploads?type=image")).length, 1);
     assert.equal(transfer.providerAttachmentToken, "max-file-token");
     assert.equal(transfer.status, "uploaded");
+    assert.deepEqual(messageBodies[0], { attachments: [{ payload: { token: "max-file-token" }, type: "image" }], format: "html", text: "<b>Заголовок</b>\n\nТекст" });
   });
 
   it("bounds VK and MAX attachment provider requests with the connector timeout", async () => {

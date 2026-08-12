@@ -66,6 +66,7 @@ export interface ChannelConnectorRequest {
   clientName?: string;
   conversationId?: string;
   message?: string;
+  messageFormat?: "html" | "markdown";
   messageId?: string;
   phone?: string;
   replyMarkup?: Record<string, unknown>;
@@ -1260,6 +1261,7 @@ export function createTenantTelegramChannelConnector({
       endpoint: telegramSendMessageEndpoint(apiBaseUrl, botToken),
       fetcher,
       idempotencyKey: requireString(request.idempotencyKey, "telegram_idempotency_key_required"),
+      messageFormat: request.messageFormat,
       replyMarkup: request.replyMarkup,
       text: message,
       timeoutMs,
@@ -1267,30 +1269,28 @@ export function createTenantTelegramChannelConnector({
     });
   };
 
-  return {
-    deliverMessage: async (request) => {
-      if (!request.attachments?.length) {
-        return sendMessage(request, requireString(request.text, "telegram_text_required"));
-      }
+  const sendWithAttachments = async (request: ChannelConnectorRequest, message: string): Promise<void> => {
+    if (!request.attachments?.length) return sendMessage(request, message);
+    const botToken = await resolveToken(request);
+    return sendTelegramAttachments({
+      apiBaseUrl,
+      attachments: request.attachments,
+      botToken,
+      chatId: requireString(request.conversationId ?? request.phone, "telegram_chat_id_required"),
+      downloadTimeoutMs: timeoutMs,
+      fetcher,
+      idempotencyKey: requireString(request.idempotencyKey, "telegram_idempotency_key_required"),
+      messageFormat: request.messageFormat,
+      replyMarkup: request.replyMarkup,
+      text: message,
+      timeoutMs: Math.max(timeoutMs, 30_000),
+      traceId: requireString(request.traceId, "telegram_trace_id_required")
+    });
+  };
 
-      const botToken = await resolveToken(request);
-      return sendTelegramAttachments({
-        apiBaseUrl,
-        attachments: request.attachments,
-        botToken,
-        chatId: requireString(request.conversationId ?? request.phone, "telegram_chat_id_required"),
-        downloadTimeoutMs: timeoutMs,
-        fetcher,
-        idempotencyKey: requireString(request.idempotencyKey, "telegram_idempotency_key_required"),
-        replyMarkup: request.replyMarkup,
-        text: stringValue(request.text),
-        // Attachment uploads carry the file bytes to the provider, so allow
-        // them more time than a plain sendMessage call.
-        timeoutMs: Math.max(timeoutMs, 30_000),
-        traceId: requireString(request.traceId, "telegram_trace_id_required")
-      });
-    },
-    startConversation: async (request) => sendMessage(request, requireString(request.message, "telegram_text_required"))
+  return {
+    deliverMessage: async (request) => sendWithAttachments(request, requireString(request.text, "telegram_text_required")),
+    startConversation: async (request) => sendWithAttachments(request, requireString(request.message, "telegram_text_required"))
   };
 }
 
@@ -1424,7 +1424,7 @@ export function createTenantMaxChannelConnector({ apiBaseUrl, fetcher, providerA
       const chatId = encodeURIComponent(requireString(request.conversationId, "max_chat_id_required"));
       const response = await postOfficialProviderRequest({
         authorization: requireString(credential.accessToken, "max_access_token_required"),
-        body: JSON.stringify({ text: messageText, ...(messageAttachments.length ? { attachments: messageAttachments } : {}) }),
+        body: JSON.stringify({ text: messageText, ...(request.messageFormat ? { format: request.messageFormat } : {}), ...(messageAttachments.length ? { attachments: messageAttachments } : {}) }),
         contentType: "application/json",
         endpoint: `${apiBaseUrl.replace(/\/+$/, "")}/messages?chat_id=${chatId}`,
         errorPrefix: "max",
@@ -1752,6 +1752,7 @@ async function postTelegramSendMessage({
   endpoint,
   fetcher,
   idempotencyKey,
+  messageFormat,
   replyMarkup,
   text,
   timeoutMs,
@@ -1761,6 +1762,7 @@ async function postTelegramSendMessage({
   endpoint: string;
   fetcher: WorkerHttpFetch;
   idempotencyKey: string;
+  messageFormat?: "html" | "markdown";
   replyMarkup?: Record<string, unknown>;
   text: string;
   timeoutMs: number;
@@ -1777,6 +1779,7 @@ async function postTelegramSendMessage({
       body: JSON.stringify({
         chat_id: chatId,
         disable_web_page_preview: true,
+        ...(messageFormat ? { parse_mode: messageFormat === "html" ? "HTML" : "MarkdownV2" } : {}),
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         text
       }),
@@ -2126,6 +2129,7 @@ async function sendTelegramAttachments(input: {
   downloadTimeoutMs: number;
   fetcher: WorkerHttpFetch;
   idempotencyKey: string;
+  messageFormat?: "html" | "markdown";
   replyMarkup?: Record<string, unknown>;
   text: string;
   timeoutMs: number;
@@ -2141,6 +2145,7 @@ async function sendTelegramAttachments(input: {
       endpoint: telegramApiEndpoint(input.apiBaseUrl, input.botToken, "sendMessage"),
       fetcher: input.fetcher,
       idempotencyKey: `${input.idempotencyKey}:text`,
+      messageFormat: input.messageFormat,
       replyMarkup: input.replyMarkup,
       text: input.text,
       timeoutMs: input.timeoutMs,
@@ -2159,6 +2164,7 @@ async function sendTelegramAttachments(input: {
     const body = multipartFormBody(boundary, {
       chat_id: input.chatId,
       ...(caption ? { caption } : {}),
+      ...(caption && input.messageFormat ? { parse_mode: input.messageFormat === "html" ? "HTML" : "MarkdownV2" } : {}),
       ...(isLast && !separateText && input.replyMarkup ? { reply_markup: JSON.stringify(input.replyMarkup) } : {})
     }, { bytes, fieldName: "document", fileName, mimeType });
     await postTelegramMultipart({
@@ -2321,6 +2327,7 @@ function toOutboundConversationRequest(event: StoredOutboxEvent, descriptor: Wor
     descriptorId: descriptor.id,
     idempotencyKey: descriptor.idempotencyKey || descriptor.id,
     message: requireString(descriptor.payload.message, "message_required"),
+    ...(messageFormatFromPayload(descriptor.payload.messageFormat) ? { messageFormat: messageFormatFromPayload(descriptor.payload.messageFormat) } : {}),
     outboxEventId: event.id,
     phone: requireString(descriptor.payload.phone, "phone_required"),
     ...(replyMarkup ? { replyMarkup } : {}),
@@ -2328,6 +2335,11 @@ function toOutboundConversationRequest(event: StoredOutboxEvent, descriptor: Wor
     topic: requireString(descriptor.payload.topic, "topic_required"),
     traceId: event.traceId
   };
+}
+
+function messageFormatFromPayload(value: unknown): "html" | "markdown" | undefined {
+  const format = stringValue(value).toLowerCase();
+  return format === "html" || format === "markdown" ? format : undefined;
 }
 
 function createLoggingOutboxHandler(writeLog: WorkerLogWriter): OutboxEventHandler {

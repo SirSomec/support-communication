@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -96,5 +96,23 @@ describe("marketing test recipient search", () => {
     assert.equal(maskMarketingTestRecipientPhone("+7 999 123-45-67"), "••• 4567");
     assert.equal(maskMarketingTestRecipientEmail("alex@example.ru"), "a***@example.ru");
     assert.doesNotMatch(maskMarketingTestRecipientEmail("alex@example.ru"), /alex@/);
+  });
+});
+
+describe("marketing channel content", () => {
+  const content = { blocks: [{ type: "text", text: "Основной <текст>" }, { type: "heading", text: "Важное & новое" }] };
+
+  it("moves headings before the message and marks them as HTML for Telegram and MAX", () => {
+    assert.deepEqual(marketingContentForChannel(content, "telegram"), {
+      message: "<b>Важное &amp; новое</b>\n\nОсновной &lt;текст&gt;",
+      messageFormat: "html"
+    });
+    assert.equal(marketingContentForChannel(content, "MAX").messageFormat, "html");
+  });
+
+  it("uses a visible plain-text heading fallback for VK", () => {
+    assert.deepEqual(marketingContentForChannel(content, "vk"), {
+      message: "【Важное & новое】\n\nОсновной <текст>"
+    });
   });
 });

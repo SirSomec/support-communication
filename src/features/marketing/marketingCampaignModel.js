@@ -28,6 +28,16 @@ export function campaignAdditionalBlocks(campaign) {
   return blocks.filter((block) => block?.type !== "text").map((block, index) => ({ ...block, id: block.id || block.fileId || `campaign_block_${index}` }));
 }
 
+export function campaignContentBlocks(contentText, blocks = []) {
+  const headings = [];
+  const remaining = [];
+  for (const block of blocks) {
+    if (block?.type === "heading") headings.push(block);
+    else remaining.push(block);
+  }
+  return [...headings, ...(String(contentText ?? "").trim() ? [{ type: "text", text: contentText }] : []), ...remaining];
+}
+
 export function isCampaignEditable(status) {
   return ["draft", "scheduled"].includes(String(status || "draft"));
 }

@@ -923,7 +923,7 @@ describe("outbox worker runtime contracts", () => {
     assert.equal(calls, 1);
   });
 
-  it("delivers Telegram attachments as sendDocument uploads with the text as caption", async () => {
+  it("delivers proactive Telegram attachments as sendDocument uploads with a formatted caption", async () => {
     const worker = await import("../apps/outbox-worker/src/index.ts");
     const calls: Array<{ url: string; init: { body?: string | Uint8Array; headers?: Record<string, string>; method?: string } }> = [];
     const connector = worker.createTenantTelegramChannelConnector({
@@ -945,7 +945,7 @@ describe("outbox worker runtime contracts", () => {
       timeoutMs: 25
     });
 
-    await connector.deliverMessage({
+    await connector.startConversation({
       attachments: [{
         fileId: "file_tg_attachment",
         fileName: "квитанция.pdf",
@@ -961,10 +961,10 @@ describe("outbox worker runtime contracts", () => {
       conversationId: "tg-chat-200",
       descriptorId: "telegram_delivery_attachment",
       idempotencyKey: "telegram-attachment-key",
-      messageId: "msg_telegram_attachment",
+      message: "<b>Заголовок</b>\n\nОтправлено вложение",
+      messageFormat: "html",
       outboxEventId: "outbox_telegram_attachment",
       tenantId: "tenant-volga",
-      text: "Отправлено вложение",
       traceId: "trc_telegram_attachment"
     });
 
@@ -975,7 +975,8 @@ describe("outbox worker runtime contracts", () => {
     assert.equal(calls[1].init.headers?.["idempotency-key"], "telegram-attachment-key:document:0");
     const multipart = new TextDecoder().decode(calls[1].init.body as Uint8Array);
     assert.match(multipart, /name="chat_id"\r\n\r\ntg-chat-200/);
-    assert.match(multipart, /name="caption"\r\n\r\nОтправлено вложение/);
+    assert.match(multipart, /name="caption"\r\n\r\n<b>Заголовок<\/b>\n\nОтправлено вложение/);
+    assert.match(multipart, /name="parse_mode"\r\n\r\nHTML/);
     assert.match(multipart, /name="document"; filename="квитанция\.pdf"/);
     assert.match(multipart, /Content-Type: application\/pdf/);
     assert.match(multipart, /PDFBYTES/);
@@ -1983,9 +1984,11 @@ describe("outbox worker runtime contracts", () => {
         kind: "outbound_conversation",
         messageId: null,
         payload: {
+          attachments: [{ fileId: "file-campaign-1", fileName: "offer.png", mimeType: "image/png", signedFile: { expiresAt: "2099-01-01T00:00:00.000Z", method: "GET", url: "https://storage.test/offer.png" } }],
           channelConnectionId: "telegram-connection-1",
           clientName: "Runtime Client",
-          message: "Hello from descriptor",
+          message: "<b>Offer</b>\n\nHello from descriptor",
+          messageFormat: "html",
           phone: "+7 900 000-00-00",
           providerConversationId: "telegram-chat-42",
           topic: "Delivery / Status"
@@ -2022,9 +2025,11 @@ describe("outbox worker runtime contracts", () => {
     assert.deepEqual(connectorCalls.map((call) => call.request.descriptorId), ["delivery_002", "outbound_002"]);
     assert.deepEqual(connectorCalls.map((call) => call.request.idempotencyKey), ["reply-key-002", "outbound-key-002"]);
     assert.deepEqual(connectorCalls.map((call) => call.request.outboxEventId), [delivery.id, outbound.id]);
-    assert.deepEqual(connectorCalls.map((call) => call.request.text ?? call.request.message), ["Reply from descriptor", "Hello from descriptor"]);
+    assert.deepEqual(connectorCalls.map((call) => call.request.text ?? call.request.message), ["Reply from descriptor", "<b>Offer</b>\n\nHello from descriptor"]);
     assert.equal(connectorCalls[1].request.channelConnectionId, "telegram-connection-1");
     assert.equal(connectorCalls[1].request.conversationId, "telegram-chat-42");
+    assert.equal(connectorCalls[1].request.messageFormat, "html");
+    assert.deepEqual(connectorCalls[1].request.attachments, [{ fileId: "file-campaign-1", fileName: "offer.png", mimeType: "image/png", signedFile: { expiresAt: "2099-01-01T00:00:00.000Z", method: "GET", url: "https://storage.test/offer.png" } }]);
     assert.deepEqual(connectorCalls.map((call) => call.request.traceId), ["trc_connector_delivery", "trc_connector_outbound"]);
   });
 

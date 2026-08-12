@@ -34,8 +34,10 @@ import { uploadComposerAttachment } from "../../app/useComposerAttachments.js";
 import { ProductScreen, WorkspaceState } from "../../ui.jsx";
 import { marketingService } from "../../services/marketingService.js";
 import { campaignAdditionalBlocks, campaignStatusLabel, campaignToDraft, canLaunchCampaignDraft, isCampaignEditable } from "./marketingCampaignModel.js";
+import { insertEmojiAtSelection } from "./marketingEmojiModel.js";
 import "./communications-workspace.css";
 
+const EmojiPickerPanel = React.lazy(() => import("./EmojiPickerPanel.jsx"));
 const EMPTY_WORKSPACE = Object.freeze({ audiences: [], campaigns: [], channels: [], templates: [] });
 const PLANS = Object.freeze([
   { key: "start", name: "Start", price: "4 900 ₽/мес.", included: "10 000 сообщений" },
@@ -275,6 +277,8 @@ function CampaignDialog({ campaign, onClose, onToast, onWorkspaceChange, workspa
   const [testResult, setTestResult] = useState(null);
   const [operationResult, setOperationResult] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const messageTextareaRef = React.useRef(null);
+  const messageSelectionRef = React.useRef({ end: draft.contentText.length, start: draft.contentText.length });
   const templates = Array.isArray(workspace.templates) ? workspace.templates : [];
   const audiences = Array.isArray(workspace.audiences) ? workspace.audiences : [];
   const editable = isCampaignEditable(campaignStatus);
@@ -290,6 +294,18 @@ function CampaignDialog({ campaign, onClose, onToast, onWorkspaceChange, workspa
     setDraft((current) => ({ ...current, ...patch }));
   };
   const toggleChannel = (channel) => updateDraft({ channels: draft.channels.includes(channel) ? draft.channels.filter((item) => item !== channel) : [...draft.channels, channel] });
+  const rememberMessageSelection = (event) => {
+    messageSelectionRef.current = { end: event.currentTarget.selectionEnd, start: event.currentTarget.selectionStart };
+  };
+  const insertEmoji = (emoji) => {
+    const next = insertEmojiAtSelection(draft.contentText, emoji, messageSelectionRef.current.start, messageSelectionRef.current.end);
+    updateDraft({ contentText: next.value });
+    messageSelectionRef.current = { end: next.cursor, start: next.cursor };
+    requestAnimationFrame(() => {
+      messageTextareaRef.current?.focus();
+      messageTextareaRef.current?.setSelectionRange(next.cursor, next.cursor);
+    });
+  };
   const applyTemplate = (templateId) => {
     const template = templates.find((item) => item.id === templateId);
     setTestResult(null);
@@ -456,7 +472,7 @@ function CampaignDialog({ campaign, onClose, onToast, onWorkspaceChange, workspa
           {!draft.audienceId ? <label className="is-wide"><span>ID клиентов</span><input onChange={(event) => updateDraft({ clientIds: event.target.value })} placeholder="client_1, client_2" value={draft.clientIds} /></label> : null}
         </div></section>
         <section><div className="communications-section-heading"><div><h3>Каналы</h3><p>Выберите один или несколько каналов доставки.</p></div></div><div className="communications-channel-picker">{availableChannels.map((channel) => { const selected = draft.channels.includes(channel.id); return <button aria-pressed={selected} className={selected ? "is-selected" : ""} key={channel.id} onClick={() => toggleChannel(channel.id)} type="button"><ChannelIcon channel={channel.id} size={18} /><span>{channel.label}</span>{selected ? <Check size={15} /> : null}</button>; })}</div></section>
-        <section><div className="communications-section-heading"><div><h3>Сообщение</h3><p>Добавьте текст, эмодзи и необходимые вложения.</p></div><span>{draft.contentText.length}/4000</span></div><div className="communications-composer-toolbar"><button onClick={() => updateDraft({ contentText: `${draft.contentText} 😊` })} title="Добавить эмодзи" type="button">😊</button><label title="Добавить изображение или файл"><Paperclip size={17} /><input accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.mp3,.mp4" disabled={uploading || !editable} onChange={uploadFile} type="file" /></label><button onClick={() => { setOperationResult(null); setBlocks((current) => [...current, { id: crypto.randomUUID(), text: "", type: "heading" }]); }} type="button"><FileText size={16} /> Заголовок</button></div><textarea maxLength={4000} onChange={(event) => updateDraft({ contentText: event.target.value })} placeholder="Введите текст сообщения. Можно использовать переменные, например {{client.name}}" required value={draft.contentText} />{blocks.length ? <div className="communications-attachments">{blocks.map((block) => <div key={block.id}>{block.type === "image" ? <Image size={15} /> : block.type === "heading" ? <FileText size={15} /> : <Paperclip size={15} />}<input aria-label="Содержимое блока" onChange={(event) => { setOperationResult(null); setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, text: event.target.value } : item)); }} placeholder={block.fileName || "Текст заголовка"} readOnly={Boolean(block.fileName)} value={block.fileName || block.text || ""} /><button aria-label="Удалить блок" onClick={() => { setOperationResult(null); setBlocks((current) => current.filter((item) => item.id !== block.id)); }} type="button"><X size={15} /></button></div>)}</div> : null}</section>
+        <section><div className="communications-section-heading"><div><h3>Сообщение</h3><p>Добавьте текст, эмодзи и необходимые вложения.</p></div><span>{draft.contentText.length}/4000</span></div><div className="communications-composer-toolbar"><EmojiPickerButton disabled={!editable} onSelect={insertEmoji} /><label title="Добавить изображение или файл"><Paperclip size={17} /><input accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.mp3,.mp4" disabled={uploading || !editable} onChange={uploadFile} type="file" /></label><button onClick={() => { setOperationResult(null); setBlocks((current) => [...current, { id: crypto.randomUUID(), text: "", type: "heading" }]); }} type="button"><FileText size={16} /> Заголовок</button></div><textarea maxLength={4000} onChange={(event) => updateDraft({ contentText: event.target.value })} onClick={rememberMessageSelection} onKeyUp={rememberMessageSelection} onSelect={rememberMessageSelection} placeholder="Введите текст сообщения. Можно использовать переменные, например {{client.name}}" ref={messageTextareaRef} required value={draft.contentText} />{blocks.length ? <div className="communications-attachments">{blocks.map((block) => <div key={block.id}>{block.type === "image" ? <Image size={15} /> : block.type === "heading" ? <FileText size={15} /> : <Paperclip size={15} />}<input aria-label="Содержимое блока" onChange={(event) => { setOperationResult(null); setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, text: event.target.value } : item)); }} placeholder={block.fileName || "Текст заголовка"} readOnly={Boolean(block.fileName)} value={block.fileName || block.text || ""} /><button aria-label="Удалить блок" onClick={() => { setOperationResult(null); setBlocks((current) => current.filter((item) => item.id !== block.id)); }} type="button"><X size={15} /></button></div>)}</div> : null}</section>
         <section><h3>Отправка</h3><div className="communications-form-grid"><label><span>Стратегия</span><select onChange={(event) => updateDraft({ strategy: event.target.value })} value={draft.strategy}><option value="manual">Выбранные каналы</option><option value="preferred">Предпочтительный канал</option><option value="cascade">Каскад каналов</option><option value="all">По всем каналам</option></select></label><label><span>Дата и время</span><input onChange={(event) => updateDraft({ scheduledAt: event.target.value })} type="datetime-local" value={draft.scheduledAt} /></label></div><TestRecipientPicker availabilityMessage={testAvailabilityMessage} canSend={canSendTest} onChange={changeTestRecipients} onSend={sendTest} result={testResult} sending={testing} value={testRecipients} /></section>
       </fieldset>
       <aside className="communications-preview-pane"><div className="communications-preview-title"><span>Предпросмотр</span><small>{draft.channels.length ? draft.channels.map(channelLabel).join(" · ") : "Канал не выбран"}</small></div><MessagePreview blocks={blocks} text={draft.contentText} title={draft.title} /><div className="communications-safety-note"><Check size={16} /><p>{consentPolicyMessage}</p></div></aside>
@@ -464,6 +480,55 @@ function CampaignDialog({ campaign, onClose, onToast, onWorkspaceChange, workspa
       <footer className="communications-dialog-footer"><div className="communications-dialog-footer-note"><strong>{campaignStatusLabel(campaignStatus)}</strong><span>{editable ? launchAvailabilityMessage : "Редактирование недоступно после запуска."}</span></div><button onClick={onClose} type="button">Закрыть</button>{editable ? <><button className="communications-save-action" disabled={busy || !draft.title.trim() || !draft.channels.length} type="submit">{submitting ? "Сохраняем…" : campaignId ? "Сохранить изменения" : "Сохранить черновик"}</button><button className="primary-action communications-launch-action" disabled={busy || !canLaunch} onClick={launchCampaign} title={canLaunch ? "Запустить кампанию сейчас" : launchAvailabilityMessage} type="button"><Play size={15} /> {launching ? "Запускаем…" : "Запустить"}</button></> : null}</footer>
     </form>
   </Modal>;
+}
+
+function EmojiPickerButton({ disabled, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const panelId = React.useId();
+  const rootRef = React.useRef(null);
+  const triggerRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutsideClick = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return <div className="communications-emoji-picker-anchor" ref={rootRef}>
+    <button
+      aria-controls={open ? panelId : undefined}
+      aria-expanded={open}
+      aria-haspopup="dialog"
+      aria-label="Открыть выбор эмодзи"
+      className={open ? "is-active" : ""}
+      disabled={disabled}
+      onClick={() => setOpen((current) => !current)}
+      ref={triggerRef}
+      title="Добавить эмодзи"
+      type="button"
+    >😊</button>
+    {open ? <div aria-label="Выбор эмодзи" className="communications-emoji-picker-popover" id={panelId} role="dialog">
+      <header>
+        <div><strong>Эмодзи</strong><span>Поиск, категории и оттенки кожи</span></div>
+        <button aria-label="Закрыть выбор эмодзи" onClick={() => { setOpen(false); triggerRef.current?.focus(); }} type="button"><X size={15} /></button>
+      </header>
+      <React.Suspense fallback={<div className="communications-emoji-picker-loading"><RefreshCw className="is-spinning" size={17} /> Загружаем эмодзи…</div>}>
+        <EmojiPickerPanel onEmojiSelect={onSelect} />
+      </React.Suspense>
+    </div> : null}
+  </div>;
 }
 
 function TestRecipientPicker({ availabilityMessage, canSend, onChange, onSend, result, sending, value }) {

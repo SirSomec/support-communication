@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { inflateRawSync } from "node:zlib";
+import { readSheet } from "read-excel-file/node";
 import { createServer } from "vite";
+import { parseAudienceXlsx } from "../src/features/marketing/audienceImportModel.js";
 
 describe("marketing XLSX export", () => {
   it("creates a standard XLSX ZIP container without spreadsheet formulas", async () => {
@@ -15,6 +17,10 @@ describe("marketing XLSX export", () => {
       assert.match(archive.toString("utf8"), /xl\/worksheets\/sheet1\.xml/);
       const sheet = readZipEntry(archive, "xl/worksheets/sheet1.xml");
       assert.match(sheet, /&apos;=HYPERLINK/);
+
+      const audienceWorkbook = await module.createMarketingXlsx([{ phone: 79162818330 }]);
+      const audienceRecords = await parseAudienceXlsx(Buffer.from(await audienceWorkbook.arrayBuffer()), readSheet);
+      assert.deepEqual(audienceRecords, [{ phone: "79162818330" }]);
     } finally {
       await server.close();
     }

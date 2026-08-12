@@ -33,7 +33,7 @@ import {
 import { uploadComposerAttachment } from "../../app/useComposerAttachments.js";
 import { ProductScreen, WorkspaceState } from "../../ui.jsx";
 import { marketingService } from "../../services/marketingService.js";
-import { normalizeAudienceImportRecords, parseAudienceCsv, rowsToAudienceRecords } from "./audienceImportModel.js";
+import { normalizeAudienceImportRecords, parseAudienceCsv, parseAudienceXlsx } from "./audienceImportModel.js";
 import { campaignAdditionalBlocks, campaignContentBlocks, campaignStatusLabel, campaignToDraft, canLaunchCampaignDraft, isCampaignEditable } from "./marketingCampaignModel.js";
 import { insertEmojiAtSelection } from "./marketingEmojiModel.js";
 import "./communications-workspace.css";
@@ -601,9 +601,8 @@ function AudienceDialog({ onClose, onCreated, onToast }) {
     if (!file) return;
     try {
       const name = file.name.toLowerCase();
-      const readXlsxFile = name.endsWith(".xlsx") ? (await import("read-excel-file/browser")).default : null;
-      const rows = readXlsxFile ? await readXlsxFile(file) : null;
-      const parsed = rows ? rowsToAudienceRecords(rows) : name.endsWith(".json") ? normalizeAudienceImportRecords(JSON.parse(await file.text())) : parseAudienceCsv(await file.text());
+      const xlsx = name.endsWith(".xlsx") ? await import("read-excel-file/browser") : null;
+      const parsed = xlsx ? await parseAudienceXlsx(file, xlsx.readSheet) : name.endsWith(".json") ? normalizeAudienceImportRecords(JSON.parse(await file.text())) : parseAudienceCsv(await file.text());
       const records = parsed.slice(0, 100_000);
       if (!records.length) throw new Error("empty_import");
       setImportError("");

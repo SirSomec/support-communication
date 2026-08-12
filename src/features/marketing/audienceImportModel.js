@@ -107,3 +107,8 @@ export function rowsToAudienceRecords(rows) {
 export function parseAudienceCsv(text) {
   return rowsToAudienceRecords(parseDelimitedRows(text, delimiterFor(text)));
 }
+
+export async function parseAudienceXlsx(file, readSheet) {
+  if (typeof readSheet !== "function") throw new TypeError("XLSX reader is unavailable");
+  return rowsToAudienceRecords(await readSheet(file));
+}

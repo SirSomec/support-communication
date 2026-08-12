@@ -189,8 +189,8 @@ export function MarketingScreen({ onBack, onToast }) {
     try {
       if (file.size > 10 * 1024 * 1024) throw new Error("Файл импорта не должен быть больше 10 МБ.");
       const fileName = file.name.toLowerCase();
-      const readXlsxFile = fileName.endsWith(".xlsx") ? (await import("read-excel-file/browser")).default : null;
-      const sheetRows = readXlsxFile ? await readXlsxFile(file) : null;
+      const xlsx = fileName.endsWith(".xlsx") ? await import("read-excel-file/browser") : null;
+      const sheetRows = xlsx ? await xlsx.readSheet(file) : null;
       const records = sheetRows
         ? rowsToAudienceRecords(sheetRows)
         : fileName.endsWith(".json") ? JSON.parse(await file.text()) : parseAudienceCsv(await file.text());

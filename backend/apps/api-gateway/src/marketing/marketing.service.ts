@@ -31,6 +31,15 @@ export function marketingConsentAllowsDelivery(status: unknown, allowWithoutCons
   const normalizedStatus = String(status ?? "").toLowerCase();
   return normalizedStatus === "granted" || (allowWithoutConsent && normalizedStatus !== "withdrawn");
 }
+export function normalizeMarketingChannel(channel: unknown): string {
+  return text(channel, 64).toLowerCase();
+}
+export function marketingChannelRestrictionKey(clientId: unknown, channel: unknown): string {
+  return `${text(clientId, 128)}:${normalizeMarketingChannel(channel)}`;
+}
+export function marketingChannelIsRestricted(restrictionKeys: ReadonlySet<string>, clientId: unknown, channel: unknown): boolean {
+  return restrictionKeys.has(marketingChannelRestrictionKey(clientId, channel));
+}
 const prisma = createPrismaClient() as any;
 
 export interface MarketingContext {
@@ -48,20 +57,23 @@ export class MarketingService {
     const pending = await prisma.marketingConsent.findUnique({ where: { tenantId_clientId_channel: { tenantId: input.tenantId, clientId: profile.id, channel } } });
     if (!pending || pending.status !== "pending") return { recorded: false };
     const now = new Date();
-    const [settings, tenant, blockedDeliveries] = await Promise.all([
+    const [settings, tenant, blockedDeliveries, channelRestriction] = await Promise.all([
       this.ensureSettings(input.tenantId),
       prisma.tenant.findUnique({ where: { id: input.tenantId }, select: { metadata: true } }),
       prisma.marketingDelivery.findMany({
         where: { tenantId: input.tenantId, clientId: profile.id, channel, status: "excluded", excludedReason: "consent_required" },
         select: { campaignId: true, channel: true, clientId: true, id: true }
-      })
+      }),
+      prisma.marketingChannelRestriction.findUnique({ where: { tenantId_clientId_channel: { tenantId: input.tenantId, clientId: profile.id, channel } }, select: { blocked: true } })
     ]);
     const campaignIds = [...new Set(blockedDeliveries.map((delivery: { campaignId: string }) => delivery.campaignId))];
     const resumableCampaigns = campaignIds.length
       ? await prisma.marketingCampaign.findMany({ where: { tenantId: input.tenantId, id: { in: campaignIds }, status: { in: ["sending", "completed"] } }, select: { id: true } })
       : [];
     const resumableIds = new Set(resumableCampaigns.map((campaign: { id: string }) => campaign.id));
-    const resumableDeliveries = blockedDeliveries.filter((delivery: { campaignId: string }) => resumableIds.has(delivery.campaignId));
+    const resumableDeliveries = channelRestriction?.blocked
+      ? []
+      : blockedDeliveries.filter((delivery: { campaignId: string }) => resumableIds.has(delivery.campaignId));
     const fallbackTimeZone = tenantTimeZone(tenant?.metadata);
     const scheduledAt = quietHoursEnd(now, settings.quietHoursStart, settings.quietHoursEnd, tenantTimeZone({ timeZone: profile?.timeZone || fallbackTimeZone }));
     const recorded = await prisma.$transaction(async (tx: any) => {
@@ -138,6 +150,8 @@ export class MarketingService {
     }
     if (!profile) return { requested: false, reason: "profile_resolution_failed" };
     const consentProfile = profile;
+    const restriction = await prisma.marketingChannelRestriction.findUnique({ where: { tenantId_clientId_channel: { tenantId: input.tenantId, clientId: consentProfile.id, channel } }, select: { blocked: true } });
+    if (restriction?.blocked) return { requested: false, reason: "channel_restricted" };
     const existing = await prisma.marketingConsent.findUnique({ where: { tenantId_clientId_channel: { tenantId: input.tenantId, clientId: consentProfile.id, channel } }, select: { status: true } });
     if (existing) return { requested: false, reason: existing.status === "pending" ? "awaiting_reply" : `consent_${existing.status}` };
     const consentId = `mkt_consent_${randomUUID()}`;
@@ -391,25 +405,29 @@ export class MarketingService {
     if (!campaign.audienceId) return invalidEnvelope("preflightCampaign", "marketing_campaign_audience_required", "A static audience is required for preflight.");
     const members = await prisma.marketingAudienceMember.findMany({ where: { tenantId: context.tenantId, audienceId: campaign.audienceId }, select: { clientId: true } });
     const clientIds = members.map((member: { clientId: string }) => member.clientId);
-    const [profiles, consents, settings, usage] = await Promise.all([
+    const [profiles, consents, restrictions, settings, usage] = await Promise.all([
       prisma.clientProfile.findMany({ where: { tenantId: context.tenantId, id: { in: clientIds } }, select: { id: true, phone: true } }),
       prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: clientIds }, channel: { in: campaign.channels } }, select: { clientId: true, channel: true, status: true } }),
+      prisma.marketingChannelRestriction.findMany({ where: { tenantId: context.tenantId, clientId: { in: clientIds }, blocked: true }, select: { clientId: true, channel: true } }),
       this.ensureSettings(context.tenantId),
       prisma.marketingUsageCharge.count({ where: { tenantId: context.tenantId, periodStart: marketingPeriodStart(new Date()) } })
     ]);
     const profileSet = new Set(profiles.filter((profile: { phone: string }) => Boolean(profile.phone)).map((profile: { id: string }) => profile.id));
     const consentStatusByKey = new Map(consents.map((consent: { clientId: string; channel: string; status: string }) => [`${consent.clientId}:${consent.channel}`, consent.status] as const));
+    const restrictionKeys = new Set<string>(restrictions.map((restriction: { clientId: string; channel: string }) => marketingChannelRestrictionKey(restriction.clientId, restriction.channel)));
     const { allowWithoutConsent } = marketingConsentPolicy(settings);
+    let channelRestricted = 0;
     let consentRequired = 0;
     let destinationMissing = 0;
     let eligible = 0;
     for (const clientId of clientIds) for (const channel of campaign.channels) {
       if (!profileSet.has(clientId)) { destinationMissing += 1; continue; }
+      if (marketingChannelIsRestricted(restrictionKeys, clientId, channel)) { channelRestricted += 1; continue; }
       if (!marketingConsentAllowsDelivery(consentStatusByKey.get(`${clientId}:${channel}`), allowWithoutConsent)) { consentRequired += 1; continue; }
       eligible += 1;
     }
     await this.recordAudit(context, "marketing.campaign.preflight", "campaign", campaign.id, { audience: members.length, eligible });
-    return envelope("preflightCampaign", { campaignId: campaign.id, audience: members.length, channelCount: campaign.channels.length, eligible, exclusions: { consentRequired, destinationMissing }, projectedOverageRecipients: Math.max(0, usage + eligible - settings.includedMessages) });
+    return envelope("preflightCampaign", { campaignId: campaign.id, audience: members.length, channelCount: campaign.channels.length, eligible, exclusions: { channelRestricted, consentRequired, destinationMissing }, projectedOverageRecipients: Math.max(0, usage + eligible - settings.includedMessages) });
   }
 
   async exportCampaignResults(campaignId: string, kind: unknown, format: unknown, context: MarketingContext) {
@@ -431,10 +449,42 @@ export class MarketingService {
 
   async getClientPreferences(clientId: string, context: MarketingContext) {
     await this.requireModuleAccess(context);
-    const client = await prisma.clientProfile.findFirst({ where: { tenantId: context.tenantId, OR: [{ id: clientId }, { sourceProfileId: clientId }] }, select: { id: true } });
+    const client = await prisma.clientProfile.findFirst({ where: { tenantId: context.tenantId, OR: [{ id: clientId }, { sourceProfileId: clientId }] }, select: { channel: true, id: true } });
     if (!client) return notFoundEnvelope("getClientPreferences", "marketing_client_not_found", "Client was not found.");
-    const consents = await prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: client.id }, orderBy: { recordedAt: "desc" } });
-    return envelope("getClientPreferences", { clientId: client.id, consents: consents.map(serialize) });
+    const [consents, restrictions, activeChannels] = await Promise.all([
+      prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: client.id }, orderBy: { recordedAt: "desc" } }),
+      prisma.marketingChannelRestriction.findMany({ where: { tenantId: context.tenantId, clientId: client.id, blocked: true }, orderBy: { updatedAt: "desc" } }),
+      prisma.channelConnection.findMany({ where: { tenantId: context.tenantId, status: "active" }, select: { type: true } })
+    ]);
+    const channels = [...new Set(uniqueStrings([client.channel, ...activeChannels.map((item: { type: string }) => item.type), ...consents.map((item: { channel: string }) => item.channel), ...restrictions.map((item: { channel: string }) => item.channel)]).map(normalizeMarketingChannel).filter(Boolean))];
+    return envelope("getClientPreferences", { channels, clientId: client.id, consents: consents.map(serialize), restrictions: restrictions.map(serialize) });
+  }
+
+  async updateClientChannelRestriction(clientId: string, payload: Record<string, unknown>, context: MarketingContext) {
+    await this.requireModuleAccess(context);
+    const channel = normalizeMarketingChannel(payload.channel);
+    if (!channel || typeof payload.blocked !== "boolean") return invalidEnvelope("updateClientChannelRestriction", "marketing_channel_restriction_invalid", "Client, channel and an explicit blocked state are required.");
+    const client = await prisma.clientProfile.findFirst({ where: { tenantId: context.tenantId, OR: [{ id: clientId }, { sourceProfileId: clientId }] }, select: { channel: true, id: true } });
+    if (!client) return notFoundEnvelope("updateClientChannelRestriction", "marketing_client_not_found", "Client was not found.");
+    const activeChannels = await prisma.channelConnection.findMany({ where: { tenantId: context.tenantId, status: "active" }, select: { type: true } });
+    const allowedChannels = new Set([client.channel, ...activeChannels.map((item: { type: string }) => item.type)].map(normalizeMarketingChannel));
+    if (!allowedChannels.has(channel)) return invalidEnvelope("updateClientChannelRestriction", "marketing_channel_restriction_channel_invalid", "The channel must belong to the client or be active for the tenant.");
+    const reason = optionalText(payload.reason, 500) || null;
+    const now = new Date();
+    const restriction = payload.blocked
+      ? await prisma.marketingChannelRestriction.upsert({
+        where: { tenantId_clientId_channel: { tenantId: context.tenantId, clientId: client.id, channel } },
+        create: { id: `mkt_restriction_${randomUUID()}`, tenantId: context.tenantId, clientId: client.id, channel, blocked: true, reason, updatedBy: context.userId },
+        update: { blocked: true, reason, updatedBy: context.userId, updatedAt: now }
+      })
+      : await prisma.$transaction(async (tx: any) => {
+        await tx.marketingChannelRestriction.deleteMany({ where: { tenantId: context.tenantId, clientId: client.id, channel } });
+        return { blocked: false, channel, clientId: client.id, reason: null, updatedAt: now };
+      });
+    let cancelledDeliveries = 0;
+    if (payload.blocked) cancelledDeliveries = await this.excludeRestrictedPendingDeliveries(context.tenantId, client.id, channel);
+    await this.recordAudit(context, payload.blocked ? "marketing.channel_restriction.enabled" : "marketing.channel_restriction.disabled", "client", client.id, { blocked: payload.blocked, cancelledDeliveries, channel, reason });
+    return envelope("updateClientChannelRestriction", { restriction: serialize(restriction) });
   }
 
   async updateAccess(userId: string, enabled: boolean, context: MarketingContext) {
@@ -748,8 +798,13 @@ export class MarketingService {
     }
     const members = await prisma.marketingAudienceMember.findMany({ where: { tenantId: context.tenantId, audienceId: campaign.audienceId }, select: { clientId: true } });
     if (members.length > 100_000) return invalidEnvelope("launchCampaign", "marketing_campaign_limit_exceeded", "A campaign cannot contain more than 100,000 matched clients.");
-    const consents = await prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: members.map((member: { clientId: string }) => member.clientId) }, channel: { in: campaign.channels } }, select: { clientId: true, channel: true, status: true } });
+    const memberClientIds = members.map((member: { clientId: string }) => member.clientId);
+    const [consents, restrictions] = await Promise.all([
+      prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: memberClientIds }, channel: { in: campaign.channels } }, select: { clientId: true, channel: true, status: true } }),
+      prisma.marketingChannelRestriction.findMany({ where: { tenantId: context.tenantId, clientId: { in: memberClientIds }, blocked: true }, select: { clientId: true, channel: true } })
+    ]);
     const consentStatusByKey = new Map(consents.map((consent: { clientId: string; channel: string; status: string }) => [`${consent.clientId}:${consent.channel}`, consent.status] as const));
+    const restrictionKeys = new Set<string>(restrictions.map((restriction: { clientId: string; channel: string }) => marketingChannelRestrictionKey(restriction.clientId, restriction.channel)));
     const consentPolicy = marketingConsentPolicy(quietSettings);
     const now = new Date();
     const keyPrefix = text(idempotencyKey, 160) || `launch_${campaign.id}_${now.toISOString()}`;
@@ -768,17 +823,18 @@ export class MarketingService {
       const profile = profileById.get(member.clientId);
       const selectedChannels = campaign.strategy === "preferred" && profile?.channel && campaign.channels.includes(profile.channel)
         ? [profile.channel] : campaign.channels;
-      const eligibleChannels = selectedChannels.filter((channel: string) => marketingConsentAllowsDelivery(consentStatusByKey.get(`${member.clientId}:${channel}`), consentPolicy.allowWithoutConsent) && Boolean(profile?.phone));
+      const eligibleChannels = selectedChannels.filter((channel: string) => !marketingChannelIsRestricted(restrictionKeys, member.clientId, channel) && marketingConsentAllowsDelivery(consentStatusByKey.get(`${member.clientId}:${channel}`), consentPolicy.allowWithoutConsent) && Boolean(profile?.phone));
       return selectedChannels.map((channel: string) => {
+        const channelRestricted = marketingChannelIsRestricted(restrictionKeys, member.clientId, channel);
         const consentStatus = consentStatusByKey.get(`${member.clientId}:${channel}`);
-        const consentAllowsDelivery = marketingConsentAllowsDelivery(consentStatus, consentPolicy.allowWithoutConsent);
+        const consentAllowsDelivery = !channelRestricted && marketingConsentAllowsDelivery(consentStatus, consentPolicy.allowWithoutConsent);
         const hasDestination = Boolean(profile?.phone);
         const cascadeWaiting = campaign.strategy === "cascade" && eligibleChannels.indexOf(channel) > 0;
         const queued = consentAllowsDelivery && hasDestination && !cascadeWaiting;
         return {
           id: `mkt_delivery_${randomUUID()}`, tenantId: context.tenantId, campaignId: campaign.id, clientId: member.clientId, channel,
           status: cascadeWaiting ? "waiting" : queued ? "queued" : "excluded",
-          excludedReason: consentAllowsDelivery ? (hasDestination ? null : "destination_missing") : "consent_required",
+          excludedReason: channelRestricted ? "channel_restricted" : consentAllowsDelivery ? (hasDestination ? null : "destination_missing") : "consent_required",
           outboundDescriptorId: null,
           scheduledAt: queued ? quietUntilByClientId.get(member.clientId) ?? null : null,
           idempotencyKey: `${keyPrefix}:${member.clientId}:${channel}`,
@@ -875,8 +931,13 @@ export class MarketingService {
       const key = marketingDestinationKey(conversation.phone, conversation.channel);
       if (!destinationByKey.has(key)) destinationByKey.set(key, { channelConnectionId: conversation.channelConnectionId, providerConversationId: conversation.providerConversationId });
     }
-    const consents = await prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: profiles.map((profile: { id: string }) => profile.id) }, channel: { in: campaign.channels } }, select: { clientId: true, channel: true, status: true } });
+    const profileIds = profiles.map((profile: { id: string }) => profile.id);
+    const [consents, restrictions] = await Promise.all([
+      prisma.marketingConsent.findMany({ where: { tenantId: context.tenantId, clientId: { in: profileIds }, channel: { in: campaign.channels } }, select: { clientId: true, channel: true, status: true } }),
+      prisma.marketingChannelRestriction.findMany({ where: { tenantId: context.tenantId, clientId: { in: profileIds }, blocked: true }, select: { clientId: true, channel: true } })
+    ]);
     const consentStatusByKey = new Map(consents.map((consent: { clientId: string; channel: string; status: string }) => [`${consent.clientId}:${consent.channel}`, consent.status] as const));
+    const restrictionKeys = new Set<string>(restrictions.map((restriction: { clientId: string; channel: string }) => marketingChannelRestrictionKey(restriction.clientId, restriction.channel)));
     const { allowWithoutConsent } = marketingConsentPolicy(settings);
     const deliveryAttachments = await this.resolveContentAttachments(campaign.content, context.tenantId);
     if (!contentToText(campaign.content) && !deliveryAttachments.length) return invalidEnvelope("sendTestCampaign", "marketing_content_required", "Campaign content must include text or an attachment before testing.");
@@ -892,6 +953,7 @@ export class MarketingService {
             return Boolean(profile.phone)
               && Boolean(destination?.providerConversationId)
               && (!requiresConnection || Boolean(destination?.channelConnectionId))
+              && !marketingChannelIsRestricted(restrictionKeys, profile.id, channel)
               && marketingConsentAllowsDelivery(consentStatusByKey.get(`${profile.id}:${channel}`), allowWithoutConsent);
           });
         const channels = campaign.strategy === "cascade" ? eligibleChannels.slice(0, 1) : eligibleChannels;
@@ -924,14 +986,24 @@ export class MarketingService {
     if (!await this.hasActiveChannels(context.tenantId, campaign.channels)) return invalidEnvelope("retryFailedCampaignDeliveries", "marketing_channel_unavailable", "A selected campaign channel is not active for this tenant.");
     const failed = await prisma.marketingDelivery.findMany({ where: { tenantId: context.tenantId, campaignId: campaign.id, status: "failed" }, orderBy: { updatedAt: "asc" }, take: 1_000, select: { id: true, clientId: true, channel: true, idempotencyKey: true } });
     if (!failed.length) return envelope("retryFailedCampaignDeliveries", { campaignId: campaign.id, retried: 0, skipped: 0 });
-    const profiles = await prisma.clientProfile.findMany({ where: { tenantId: context.tenantId, id: { in: failed.map((delivery: { clientId: string }) => delivery.clientId) } }, select: { id: true, name: true, phone: true } });
+    const failedClientIds = failed.map((delivery: { clientId: string }) => delivery.clientId);
+    const [profiles, restrictions] = await Promise.all([
+      prisma.clientProfile.findMany({ where: { tenantId: context.tenantId, id: { in: failedClientIds } }, select: { id: true, name: true, phone: true } }),
+      prisma.marketingChannelRestriction.findMany({ where: { tenantId: context.tenantId, clientId: { in: failedClientIds }, blocked: true }, select: { clientId: true, channel: true } })
+    ]);
     const profileById = new Map<string, { id: string; name: string; phone: string }>(profiles.map((profile: { id: string; name: string; phone: string }) => [profile.id, profile] as const));
+    const restrictionKeys = new Set<string>(restrictions.map((restriction: { clientId: string; channel: string }) => marketingChannelRestrictionKey(restriction.clientId, restriction.channel)));
     const attachments = await this.resolveContentAttachments(campaign.content, context.tenantId);
     if (!contentToText(campaign.content) && !attachments.length) return invalidEnvelope("retryFailedCampaignDeliveries", "marketing_content_required", "Campaign content is unavailable for a retry.");
     let retried = 0;
     let skipped = 0;
     for (const delivery of failed) {
       const profile = profileById.get(delivery.clientId);
+      if (marketingChannelIsRestricted(restrictionKeys, delivery.clientId, delivery.channel)) {
+        const updated = await prisma.marketingDelivery.updateMany({ where: { id: delivery.id, status: "failed" }, data: { status: "excluded", excludedReason: "channel_restricted" } });
+        skipped += updated.count;
+        continue;
+      }
       if (!profile?.phone) {
         const updated = await prisma.marketingDelivery.updateMany({ where: { id: delivery.id, status: "failed" }, data: { status: "excluded", excludedReason: "destination_missing" } });
         skipped += updated.count;
@@ -1188,17 +1260,24 @@ export class MarketingService {
       select: { id: true, campaignId: true, channel: true, clientId: true, idempotencyKey: true }
     });
     if (!deliveries.length) return 0;
-    const [campaigns, profiles] = await Promise.all([
+    const deliveryClientIds = deliveries.map((delivery: { clientId: string }) => delivery.clientId);
+    const [campaigns, profiles, restrictions] = await Promise.all([
       prisma.marketingCampaign.findMany({ where: { tenantId, id: { in: deliveries.map((delivery: { campaignId: string }) => delivery.campaignId) }, status: "sending" }, select: { content: true, id: true } }),
-      prisma.clientProfile.findMany({ where: { tenantId, id: { in: deliveries.map((delivery: { clientId: string }) => delivery.clientId) } }, select: { id: true, name: true, phone: true } })
+      prisma.clientProfile.findMany({ where: { tenantId, id: { in: deliveryClientIds } }, select: { id: true, name: true, phone: true } }),
+      prisma.marketingChannelRestriction.findMany({ where: { tenantId, clientId: { in: deliveryClientIds }, blocked: true }, select: { clientId: true, channel: true } })
     ]);
     const campaignsById = new Map<string, { content: unknown; id: string }>(campaigns.map((campaign: { content: unknown; id: string }) => [campaign.id, campaign] as const));
     const profilesById = new Map<string, { id: string; name: string; phone: string }>(profiles.map((profile: { id: string; name: string; phone: string }) => [profile.id, profile] as const));
+    const restrictionKeys = new Set<string>(restrictions.map((restriction: { clientId: string; channel: string }) => marketingChannelRestrictionKey(restriction.clientId, restriction.channel)));
     const attachmentsByCampaignId = new Map<string, Promise<Array<Record<string, unknown>>>>();
     let queued = 0;
     for (const delivery of deliveries) {
       const campaign = campaignsById.get(delivery.campaignId);
       const profile = profilesById.get(delivery.clientId);
+      if (marketingChannelIsRestricted(restrictionKeys, delivery.clientId, delivery.channel)) {
+        await prisma.marketingDelivery.updateMany({ where: { id: delivery.id, outboundDescriptorId: null, status: "queued" }, data: { status: "excluded", excludedReason: "channel_restricted" } });
+        continue;
+      }
       if (!campaign || !profile?.phone) {
         await prisma.marketingDelivery.updateMany({ where: { id: delivery.id, outboundDescriptorId: null, status: "queued" }, data: { status: "excluded", excludedReason: campaign ? "destination_missing" : "campaign_not_sending" } });
         continue;
@@ -1229,17 +1308,20 @@ export class MarketingService {
       select: { campaignId: true, channel: true, clientId: true, id: true }
     });
     if (!blocked.length) return 0;
-    const [settings, campaigns, profiles, consents, tenant] = await Promise.all([
+    const blockedClientIds = blocked.map((delivery: { clientId: string }) => delivery.clientId);
+    const [settings, campaigns, profiles, consents, restrictions, tenant] = await Promise.all([
       this.ensureSettings(tenantId),
       prisma.marketingCampaign.findMany({ where: { tenantId, id: { in: blocked.map((delivery: { campaignId: string }) => delivery.campaignId) }, status: { in: ["sending", "completed"] } }, select: { id: true, strategy: true } }),
-      prisma.clientProfile.findMany({ where: { tenantId, id: { in: blocked.map((delivery: { clientId: string }) => delivery.clientId) } }, select: { id: true, phone: true, timeZone: true } }),
+      prisma.clientProfile.findMany({ where: { tenantId, id: { in: blockedClientIds } }, select: { id: true, phone: true, timeZone: true } }),
       prisma.marketingConsent.findMany({ where: { tenantId, OR: blocked.map((delivery: { clientId: string; channel: string }) => ({ clientId: delivery.clientId, channel: delivery.channel })) }, select: { channel: true, clientId: true, status: true } }),
+      prisma.marketingChannelRestriction.findMany({ where: { tenantId, clientId: { in: blockedClientIds }, blocked: true }, select: { clientId: true, channel: true } }),
       prisma.tenant.findUnique({ where: { id: tenantId }, select: { metadata: true } })
     ]);
     if (!marketingConsentPolicy(settings).allowWithoutConsent) return 0;
     const campaignStrategyById = new Map<string, string>(campaigns.map((campaign: { id: string; strategy: string }) => [campaign.id, campaign.strategy]));
     const profilesById = new Map<string, { id: string; phone: string; timeZone: string | null }>(profiles.map((profile: { id: string; phone: string; timeZone: string | null }) => [profile.id, profile]));
     const consentStatusByKey = new Map<string, string>(consents.map((consent: { channel: string; clientId: string; status: string }) => [`${consent.clientId}:${consent.channel}`, consent.status]));
+    const restrictionKeys = new Set<string>(restrictions.map((restriction: { clientId: string; channel: string }) => marketingChannelRestrictionKey(restriction.clientId, restriction.channel)));
     const fallbackTimeZone = tenantTimeZone(tenant?.metadata);
     const now = new Date();
     const releasable: Array<{ campaignId: string; channel: string; clientId: string; id: string; scheduledAt: Date | null; status: "queued" | "waiting" }> = [];
@@ -1251,6 +1333,7 @@ export class MarketingService {
       const consentStatus = consentStatusByKey.get(`${delivery.clientId}:${delivery.channel}`);
       if (!strategy) { terminalExclusions.push({ id: delivery.id, reason: "campaign_not_sending" }); continue; }
       if (!profile?.phone) { terminalExclusions.push({ id: delivery.id, reason: "destination_missing" }); continue; }
+      if (marketingChannelIsRestricted(restrictionKeys, delivery.clientId, delivery.channel)) { terminalExclusions.push({ id: delivery.id, reason: "channel_restricted" }); continue; }
       if (!marketingConsentAllowsDelivery(consentStatus, true)) { terminalExclusions.push({ id: delivery.id, reason: "consent_withdrawn" }); continue; }
       const cascadeKey = `${delivery.campaignId}:${delivery.clientId}`;
       const status = strategy === "cascade" && claimedCascadeClients.has(cascadeKey) ? "waiting" : "queued";
@@ -1285,18 +1368,25 @@ export class MarketingService {
       select: { campaignId: true, channel: true, clientId: true, id: true }
     });
     if (!deliveries.length) return 0;
-    const [campaigns, profiles, consents] = await Promise.all([
+    const deliveryClientIds = deliveries.map((delivery: { clientId: string }) => delivery.clientId);
+    const [campaigns, profiles, consents, restrictions] = await Promise.all([
       prisma.marketingCampaign.findMany({ where: { tenantId, id: { in: deliveries.map((delivery: { campaignId: string }) => delivery.campaignId) } }, select: { createdBy: true, id: true } }),
-      prisma.clientProfile.findMany({ where: { tenantId, id: { in: deliveries.map((delivery: { clientId: string }) => delivery.clientId) } }, select: { id: true, name: true, phone: true } }),
-      prisma.marketingConsent.findMany({ where: { tenantId, OR: deliveries.map((delivery: { clientId: string; channel: string }) => ({ clientId: delivery.clientId, channel: delivery.channel })) }, select: { channel: true, clientId: true } })
+      prisma.clientProfile.findMany({ where: { tenantId, id: { in: deliveryClientIds } }, select: { id: true, name: true, phone: true } }),
+      prisma.marketingConsent.findMany({ where: { tenantId, OR: deliveries.map((delivery: { clientId: string; channel: string }) => ({ clientId: delivery.clientId, channel: delivery.channel })) }, select: { channel: true, clientId: true } }),
+      prisma.marketingChannelRestriction.findMany({ where: { tenantId, clientId: { in: deliveryClientIds }, blocked: true }, select: { clientId: true, channel: true } })
     ]);
     const campaignById = new Map<string, { createdBy: string; id: string }>(campaigns.map((campaign: { createdBy: string; id: string }) => [campaign.id, campaign] as const));
     const profileById = new Map<string, { id: string; name: string; phone: string }>(profiles.map((profile: { id: string; name: string; phone: string }) => [profile.id, profile] as const));
     const consentKeys = new Set(consents.map((consent: { channel: string; clientId: string }) => `${consent.clientId}:${consent.channel}`));
+    const restrictionKeys = new Set<string>(restrictions.map((restriction: { clientId: string; channel: string }) => marketingChannelRestrictionKey(restriction.clientId, restriction.channel)));
     let requested = 0;
     for (const delivery of deliveries) {
       const campaign = campaignById.get(delivery.campaignId);
       const profile = profileById.get(delivery.clientId);
+      if (marketingChannelIsRestricted(restrictionKeys, delivery.clientId, delivery.channel)) {
+        await prisma.marketingDelivery.updateMany({ where: { id: delivery.id, status: "excluded", excludedReason: "consent_required" }, data: { excludedReason: "channel_restricted" } });
+        continue;
+      }
       if (!campaign || !profile?.phone || consentKeys.has(`${delivery.clientId}:${delivery.channel}`)) continue;
       const consentId = `mkt_consent_${randomUUID()}`;
       const descriptorId = `mkt_consent_outbound_${randomUUID()}`;
@@ -1354,6 +1444,8 @@ export class MarketingService {
         if (clientDeliveries.some((delivery) => delivery.status === "queued") || !clientDeliveries.some((delivery) => delivery.status === "failed")) continue;
         const next = clientDeliveries.find((delivery) => delivery.status === "waiting");
         if (!next) continue;
+        const restriction = await prisma.marketingChannelRestriction.findUnique({ where: { tenantId_clientId_channel: { tenantId, clientId: next.clientId, channel: normalizeMarketingChannel(next.channel) } }, select: { blocked: true } });
+        if (restriction?.blocked) { await prisma.marketingDelivery.update({ where: { id: next.id }, data: { status: "excluded", excludedReason: "channel_restricted" } }); continue; }
         const profile = await prisma.clientProfile.findFirst({ where: { tenantId, id: next.clientId }, select: { name: true, phone: true } });
         if (!profile?.phone) { await prisma.marketingDelivery.update({ where: { id: next.id }, data: { status: "excluded", excludedReason: "destination_missing" } }); continue; }
         attachments ??= await this.resolveContentAttachments(campaign.content, tenantId);
@@ -1368,6 +1460,25 @@ export class MarketingService {
         });
       }
     }
+  }
+
+  private async excludeRestrictedPendingDeliveries(tenantId: string, clientId: string, channel: string): Promise<number> {
+    const candidates = await prisma.marketingDelivery.findMany({
+      where: { tenantId, clientId, status: { in: ["queued", "waiting", "paused"] } },
+      select: { campaignId: true, channel: true, clientId: true, id: true, outboundDescriptorId: true }
+    });
+    const restricted = candidates.filter((delivery: { channel: string }) => normalizeMarketingChannel(delivery.channel) === channel);
+    if (!restricted.length) return 0;
+    const deliveryIds = restricted.map((delivery: { id: string }) => delivery.id);
+    const descriptorIds = restricted.map((delivery: { outboundDescriptorId: string | null }) => delivery.outboundDescriptorId).filter(Boolean);
+    const now = new Date();
+    await prisma.$transaction(async (tx: any) => {
+      await tx.marketingDelivery.updateMany({ where: { id: { in: deliveryIds }, status: { in: ["queued", "waiting", "paused"] } }, data: { status: "excluded", excludedReason: "channel_restricted" } });
+      if (descriptorIds.length) await tx.conversationOutboundDescriptor.updateMany({ where: { id: { in: descriptorIds }, status: "queued", deliveryState: "queued" }, data: { status: "failed", deliveryState: "failed" } });
+      await tx.outboxEvent.updateMany({ where: { aggregateType: "marketing_delivery", aggregateId: { in: deliveryIds }, status: "pending" }, data: { status: "dead_lettered", deadLetteredAt: now, lastError: "channel_restricted" } });
+      await tx.marketingUsageCharge.deleteMany({ where: { tenantId, billingStatus: "pending", OR: restricted.map((delivery: { campaignId: string; channel: string; clientId: string }) => ({ campaignId: delivery.campaignId, channel: delivery.channel, clientId: delivery.clientId })) } });
+    });
+    return restricted.length;
   }
 
   private async createUsageCharges(tx: any, tenantId: string, deliveries: Array<{ campaignId: string; clientId: string; channel: string }>, settings: { includedMessages: number; overageKopeks: number }, now: Date): Promise<void> {

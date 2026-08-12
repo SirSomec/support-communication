@@ -203,4 +203,129 @@
 .client-marketing-consent { align-items: center; border-top: 1px solid var(--line, #e4e7ec); display: grid; gap: 7px; grid-template-columns: auto 1fr auto; margin-top: 14px; padding-top: 12px; }
 .client-marketing-consent span, .client-marketing-consent small { color: var(--muted, #667085); font-size: 13px; }
 .client-marketing-consent small { grid-column: 1 / -1; }
+.client-channel-restrictions {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line, #e4e7ec);
+}
+
+.client-channel-restrictions-head {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.client-channel-restrictions-head > span:last-child,
+.client-channel-restriction > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.client-channel-restrictions-head small,
+.client-channel-restriction small {
+  color: var(--muted, #667085);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.client-channel-restrictions-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: #fff1f1;
+  color: #c43b45;
+}
+
+.client-channel-restriction-list {
+  display: grid;
+  gap: 8px;
+}
+
+.client-channel-restriction {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 58px;
+  padding: 9px 11px;
+  border: 1px solid #dce5ef;
+  border-radius: 10px;
+  background: #f8fbff;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.client-channel-restriction:hover {
+  border-color: #b9cce2;
+  box-shadow: 0 4px 14px rgb(31 64 104 / 7%);
+}
+
+.client-channel-restriction.blocked {
+  border-color: #f0c9cd;
+  background: #fff7f7;
+}
+
+.client-channel-restriction-state {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: #eaf7ef;
+  color: #218a55;
+}
+
+.client-channel-restriction.blocked .client-channel-restriction-state {
+  background: #ffe4e6;
+  color: #c43b45;
+}
+
+.client-restriction-switch {
+  position: relative;
+  display: inline-flex;
+  width: 38px;
+  height: 22px;
+}
+
+.client-restriction-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.client-restriction-switch i {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background 160ms ease;
+}
+
+.client-restriction-switch i::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 22%);
+  content: "";
+  transition: transform 160ms ease;
+}
+
+.client-restriction-switch input:checked + i { background: #d64550; }
+.client-restriction-switch input:checked + i::after { transform: translateX(16px); }
+.client-restriction-switch input:focus-visible + i { outline: 3px solid rgb(26 115 232 / 24%); outline-offset: 2px; }
+.client-restriction-switch input:disabled + i { cursor: wait; opacity: 0.65; }
+.client-channel-restriction .spin { animation: client-restriction-spin 800ms linear infinite; }
+
+@keyframes client-restriction-spin { to { transform: rotate(360deg); } }
 @media (max-width: 560px) { .client-marketing-consent { grid-template-columns: 1fr; } }

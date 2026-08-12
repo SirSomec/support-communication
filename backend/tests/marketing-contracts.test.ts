@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingChannelIsRestricted, marketingChannelRestrictionKey, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizeMarketingChannel, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -70,6 +70,22 @@ describe("marketing consent replies", () => {
   it("routes first inbound consent to the provider conversation address", () => {
     assert.equal(inboundMarketingDeliveryAddress("+79990000000", "telegram-chat-42"), "telegram-chat-42");
     assert.equal(inboundMarketingDeliveryAddress("+79990000000"), "+79990000000");
+  });
+});
+
+describe("marketing channel restrictions", () => {
+  it("normalizes channels and blocks only the matching client-channel pair", () => {
+    const restrictions = new Set([marketingChannelRestrictionKey("client-1", "Telegram")]);
+    assert.equal(normalizeMarketingChannel(" MAX "), "max");
+    assert.equal(marketingChannelIsRestricted(restrictions, "client-1", "telegram"), true);
+    assert.equal(marketingChannelIsRestricted(restrictions, "client-1", "vk"), false);
+    assert.equal(marketingChannelIsRestricted(restrictions, "client-2", "telegram"), false);
+  });
+
+  it("keeps a manual restriction independent from consent bypass", () => {
+    const restrictions = new Set([marketingChannelRestrictionKey("client-1", "max")]);
+    assert.equal(marketingConsentAllowsDelivery("granted", true), true);
+    assert.equal(marketingChannelIsRestricted(restrictions, "client-1", "max"), true);
   });
 });
 

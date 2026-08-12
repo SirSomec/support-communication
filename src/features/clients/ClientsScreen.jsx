@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Download, Filter, Megaphone, ShieldCheck, Sparkles, Tag } from "lucide-react";
+import { Ban, CheckCircle2, Download, Filter, LoaderCircle, Megaphone, ShieldCheck, Sparkles, Tag } from "lucide-react";
 import { submitClientExport, submitClientMerge, submitClientUnmerge } from "../../app/clientProfileActions.js";
 import { buildSourceProfileId, groupConversationsIntoClientProfiles, normalizeClientPhone } from "../../app/clientProfileModel.js";
 import { maskPhone } from "../../app/dialogModel.js";
@@ -62,6 +62,9 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
   const [marketingDraft, setMarketingDraft] = useState("");
   const [marketingSending, setMarketingSending] = useState(false);
   const [marketingConsents, setMarketingConsents] = useState([]);
+  const [marketingChannels, setMarketingChannels] = useState([]);
+  const [marketingRestrictions, setMarketingRestrictions] = useState([]);
+  const [restrictionSavingChannel, setRestrictionSavingChannel] = useState("");
   useEffect(() => {
     let cancelled = false;
 
@@ -109,9 +112,16 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
   const selected = clients.find((client) => client.clientIdentityKey === selectedId) ?? clients[0] ?? null;
   useEffect(() => {
     let cancelled = false;
-    if (!selected) { setMarketingConsents([]); return undefined; }
+    if (!selected) { setMarketingChannels([]); setMarketingConsents([]); setMarketingRestrictions([]); return undefined; }
+    setMarketingChannels([selected.channel]);
+    setMarketingConsents([]);
+    setMarketingRestrictions([]);
     void marketingService.getClientPreferences(getClientMutationProfileId(selected)).then((response) => {
-      if (!cancelled && response.status === "ok") setMarketingConsents(response.data?.consents ?? []);
+      if (!cancelled && response.status === "ok") {
+        setMarketingChannels(response.data?.channels ?? [selected.channel]);
+        setMarketingConsents(response.data?.consents ?? []);
+        setMarketingRestrictions(response.data?.restrictions ?? []);
+      }
     });
     return () => { cancelled = true; };
   }, [selected?.clientIdentityKey, selected?.sourceProfileId]);
@@ -119,6 +129,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
   const canExportClients = !exportPending && !segmentsLoading && clients.length > 0;
   const visiblePhone = selected ? (access.canViewSensitive ? selected.phone : maskPhone(selected.phone)) : "";
   const visibleClientId = selected ? (access.canViewSensitive ? getClientId(selected) : `${getClientId(selected).slice(0, 8)}***`) : "";
+  const selectedChannelRestricted = Boolean(selected) && marketingRestrictions.some((restriction) => restriction.blocked && String(restriction.channel).toLowerCase() === String(selected.channel).toLowerCase());
   const duplicateCandidates = selected
     ? clients
       .filter((client) => client.clientIdentityKey !== selected.clientIdentityKey)
@@ -213,6 +224,26 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     onToast("Согласие отозвано. Это действие зарегистрировано для выбранного канала.");
   }
 
+  async function toggleChannelRestriction(channel, blocked) {
+    if (!selected || restrictionSavingChannel) return;
+    const normalizedChannel = String(channel).toLowerCase();
+    setRestrictionSavingChannel(normalizedChannel);
+    const response = await marketingService.updateClientChannelRestriction(getClientMutationProfileId(selected), {
+      blocked,
+      channel: normalizedChannel,
+      reason: "Изменено вручную в карточке клиента"
+    });
+    setRestrictionSavingChannel("");
+    if (response.status !== "ok") {
+      onToast(response.error?.message ?? "Не удалось изменить запрет коммуникаций.");
+      return;
+    }
+    setMarketingRestrictions((current) => blocked
+      ? [...current.filter((item) => String(item.channel).toLowerCase() !== normalizedChannel), response.data?.restriction].filter(Boolean)
+      : current.filter((item) => String(item.channel).toLowerCase() !== normalizedChannel));
+    onToast(blocked ? `Коммуникации в канале ${channel} запрещены.` : `Коммуникации в канале ${channel} снова разрешены.`);
+  }
+
   return (
     <ProductScreen
       title="Клиенты"
@@ -305,9 +336,29 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
             <form className="client-marketing-form" onSubmit={createPersonalMarketingDraft}>
               <p>Создаёт персональный черновик для этого клиента. Перед запуском будут проверены канал и согласие.</p>
               <textarea maxLength={4000} onChange={(event) => setMarketingDraft(event.target.value)} placeholder="Текст сообщения, эмодзи и переменные" value={marketingDraft} />
-              <button className="primary-action" disabled={marketingSending || !marketingDraft.trim()} type="submit"><Megaphone size={16} /> {marketingSending ? "Создаём…" : "Создать черновик"}</button>
+              <button className="primary-action" disabled={marketingSending || selectedChannelRestricted || !marketingDraft.trim()} title={selectedChannelRestricted ? "Для этого клиента запрещены коммуникации в выбранном канале" : undefined} type="submit"><Megaphone size={16} /> {marketingSending ? "Создаём…" : "Создать черновик"}</button>
             </form>
             <div className="client-marketing-consent"><strong>{"\u0421\u043e\u0433\u043b\u0430\u0441\u0438\u0435 \u0432 \u043a\u0430\u043d\u0430\u043b\u0435"}</strong><span>{marketingConsents.find((consent) => consent.channel === selected.channel)?.status ?? "\u043d\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u0438"}</span><button className="danger-action" onClick={withdrawMarketingConsent} type="button">{"\u041e\u0442\u043e\u0437\u0432\u0430\u0442\u044c \u0441\u043e\u0433\u043b\u0430\u0441\u0438\u0435"}</button><small>{"\u041e\u0442\u0437\u044b\u0432 \u0432\u044b\u043f\u043e\u043b\u043d\u044f\u0435\u0442\u0441\u044f \u0432\u0440\u0443\u0447\u043d\u0443\u044e \u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u0435\u0442\u0441\u044f \u0432 \u0436\u0443\u0440\u043d\u0430\u043b\u0435."}</small></div>
+            <div className="client-channel-restrictions">
+              <div className="client-channel-restrictions-head">
+                <span className="client-channel-restrictions-icon"><Ban size={17} /></span>
+                <span><strong>Запрет коммуникаций</strong><small>Запрет имеет приоритет над согласием и настройкой рассылок без согласия.</small></span>
+              </div>
+              <div className="client-channel-restriction-list">
+                {(marketingChannels.length ? marketingChannels : [selected.channel]).map((channel) => {
+                  const normalizedChannel = String(channel).toLowerCase();
+                  const blocked = marketingRestrictions.some((restriction) => restriction.blocked && String(restriction.channel).toLowerCase() === normalizedChannel);
+                  const saving = restrictionSavingChannel === normalizedChannel;
+                  return (
+                    <label className={`client-channel-restriction ${blocked ? "blocked" : ""}`} key={normalizedChannel}>
+                      <span className="client-channel-restriction-state">{saving ? <LoaderCircle className="spin" size={16} /> : blocked ? <Ban size={16} /> : <CheckCircle2 size={16} />}</span>
+                      <span><strong>{channel}</strong><small>{blocked ? "Рассылки запрещены" : "Рассылки разрешены"}</small></span>
+                      <span className="client-restriction-switch"><input checked={blocked} disabled={Boolean(restrictionSavingChannel)} onChange={(event) => void toggleChannelRestriction(channel, event.target.checked)} type="checkbox" /><i aria-hidden="true" /></span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           </section>
 
           <section className="work-panel">

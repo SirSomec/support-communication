@@ -127,8 +127,14 @@ export class MarketingController {
 
   @Get("clients/:clientId/preferences")
   @ApiParam({ name: "clientId" })
-  @ApiOperation({ operationId: "getMarketingClientPreferences", summary: "Get per-channel marketing consent and unsubscribe history" })
+  @ApiOperation({ operationId: "getMarketingClientPreferences", summary: "Get per-channel marketing consent and communication restrictions" })
   preferences(@Param("clientId") clientId: string, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.getClientPreferences(clientId, context(request))); }
+
+  @Patch("clients/:clientId/channel-restriction")
+  @ApiParam({ name: "clientId" })
+  @ApiBody({ schema: { example: { blocked: true, channel: "telegram", reason: "Client request" }, properties: { blocked: { type: "boolean" }, channel: { type: "string" }, reason: { maxLength: 500, type: "string" } }, required: ["blocked", "channel"], type: "object" } })
+  @ApiOperation({ operationId: "updateMarketingClientChannelRestriction", summary: "Allow or prohibit marketing communications for one client channel" })
+  channelRestriction(@Param("clientId") clientId: string, @Body() body: Record<string, unknown>, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.updateClientChannelRestriction(clientId, body ?? {}, context(request))); }
 
   @Get("test-recipients/search")
   @ApiQuery({ name: "q", required: true, example: "Самойлов", description: "Surname, phone number, or email fragment; at least two characters." })

@@ -1234,6 +1234,22 @@ model MarketingConsent {
   @@map("marketing_consents")
 }
 
+model MarketingChannelRestriction {
+  id        String   @id
+  tenantId  String   @map("tenant_id")
+  clientId  String   @map("client_id")
+  channel   String
+  blocked   Boolean  @default(true)
+  reason    String?
+  updatedBy String?  @map("updated_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([tenantId, clientId, channel], map: "marketing_channel_restrictions_tenant_client_channel_key")
+  @@index([tenantId, channel, blocked], map: "marketing_channel_restrictions_tenant_channel_blocked_idx")
+  @@map("marketing_channel_restrictions")
+}
+
 model MarketingConsentTextVersion {
   id        String   @id
   tenantId  String   @map("tenant_id")

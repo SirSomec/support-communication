@@ -213,6 +213,46 @@ test("clients segment filter and export descriptor are backend backed", async ({
   await expectHealthyPage(page);
 });
 
+test("client channel communication restrictions are persisted and reversible", async ({ page }) => {
+  const { tenantSession } = await openAppShell(page);
+  const activation = await page.request.post("/api/v1/marketing/module/activate", {
+    data: { planKey: "start" },
+    headers: { authorization: `Bearer ${tenantSession.accessToken}` }
+  });
+  expect(activation.ok()).toBeTruthy();
+
+  await selectRole(page, "Администратор");
+  const preferencesResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/marketing/clients/") && response.url().endsWith("/preferences") && response.request().method() === "GET"
+  );
+  await openSection(page, "Клиенты");
+  expect((await preferencesResponse).ok()).toBeTruthy();
+
+  const restriction = page.locator(".client-channel-restriction").first();
+  await expect(restriction).toBeVisible();
+  await expect(restriction).toContainText("Рассылки разрешены");
+  const checkbox = restriction.locator('input[type="checkbox"]');
+
+  const blockResponse = page.waitForResponse((response) =>
+    response.url().includes("/channel-restriction") && response.request().method() === "PATCH"
+  );
+  await checkbox.check();
+  const blockedPayload = await (await blockResponse).json();
+  expect(blockedPayload.status).toBe("ok");
+  expect(blockedPayload.data.restriction.blocked).toBe(true);
+  await expect(restriction).toContainText("Рассылки запрещены");
+
+  const allowResponse = page.waitForResponse((response) =>
+    response.url().includes("/channel-restriction") && response.request().method() === "PATCH"
+  );
+  await checkbox.uncheck();
+  const allowedPayload = await (await allowResponse).json();
+  expect(allowedPayload.status).toBe("ok");
+  expect(allowedPayload.data.restriction.blocked).toBe(false);
+  await expect(restriction).toContainText("Рассылки разрешены");
+  await expectHealthyPage(page);
+});
+
 test("public landing demo and contact request submit to backend", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("route-public-landing")).toBeVisible({ timeout: 15000 });

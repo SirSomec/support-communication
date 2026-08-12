@@ -1980,8 +1980,8 @@ async function resolveMaxAttachments(input: {
         body,
         headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
         method: "POST"
-      }, "max_attachment_upload_failed", input.timeoutMs);
-      const token = requireString(uploaded.token ?? uploadDescriptor.token, "max_attachment_token_required");
+      }, "max_attachment_upload_failed", Math.max(input.timeoutMs, 20_000));
+      const token = maxAttachmentToken(uploaded, uploadDescriptor);
       if (input.transferStore) await input.transferStore.markUploaded({ ...key, providerAttachmentToken: token });
       resolved.push({ payload: { token }, type });
     } catch (error) {
@@ -1990,6 +1990,19 @@ async function resolveMaxAttachments(input: {
     }
   }
   return resolved;
+}
+
+function maxAttachmentToken(uploaded: Record<string, unknown>, uploadDescriptor: Record<string, unknown>): string {
+  const directToken = stringValue(uploaded.token) || stringValue(uploadDescriptor.token);
+  if (directToken) return directToken;
+
+  const photos = objectValue(uploaded.photos);
+  for (const photo of Object.values(photos ?? {})) {
+    const token = stringValue(objectValue(photo)?.token) || stringValue(photo);
+    if (token) return token;
+  }
+
+  throw new Error("max_attachment_token_required");
 }
 
 function maxAttachmentType(attachment: Record<string, unknown>): "audio" | "file" | "image" | "video" {
@@ -2121,6 +2134,15 @@ function telegramSendMessageEndpoint(apiBaseUrl: string, botToken: string): stri
 
 const telegramCaptionLimit = 1024;
 
+function telegramAttachmentUpload(mimeType: string): { fieldName: string; method: string } {
+  const normalizedMimeType = mimeType.toLowerCase();
+  if (normalizedMimeType === "image/gif") return { fieldName: "animation", method: "sendAnimation" };
+  if (normalizedMimeType.startsWith("image/")) return { fieldName: "photo", method: "sendPhoto" };
+  if (normalizedMimeType.startsWith("video/")) return { fieldName: "video", method: "sendVideo" };
+  if (normalizedMimeType.startsWith("audio/")) return { fieldName: "audio", method: "sendAudio" };
+  return { fieldName: "document", method: "sendDocument" };
+}
+
 async function sendTelegramAttachments(input: {
   apiBaseUrl: string;
   attachments: Array<Record<string, unknown>>;
@@ -2160,19 +2182,20 @@ async function sendTelegramAttachments(input: {
     const bytes = await downloadProviderAttachment(attachment, input.fetcher, input.downloadTimeoutMs);
     const caption = !separateText && index === 0 ? input.text : "";
     const isLast = index === input.attachments.length - 1;
+    const upload = telegramAttachmentUpload(mimeType);
     const boundary = `----support-${fileId.replace(/[^A-Za-z0-9]/g, "").slice(-24)}`;
     const body = multipartFormBody(boundary, {
       chat_id: input.chatId,
       ...(caption ? { caption } : {}),
       ...(caption && input.messageFormat ? { parse_mode: input.messageFormat === "html" ? "HTML" : "MarkdownV2" } : {}),
       ...(isLast && !separateText && input.replyMarkup ? { reply_markup: JSON.stringify(input.replyMarkup) } : {})
-    }, { bytes, fieldName: "document", fileName, mimeType });
+    }, { bytes, fieldName: upload.fieldName, fileName, mimeType });
     await postTelegramMultipart({
       body,
       boundary,
-      endpoint: telegramApiEndpoint(input.apiBaseUrl, input.botToken, "sendDocument"),
+      endpoint: telegramApiEndpoint(input.apiBaseUrl, input.botToken, upload.method),
       fetcher: input.fetcher,
-      idempotencyKey: `${input.idempotencyKey}:document:${index}`,
+      idempotencyKey: `${input.idempotencyKey}:${upload.fieldName}:${index}`,
       timeoutMs: input.timeoutMs,
       traceId: input.traceId
     });

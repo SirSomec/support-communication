@@ -982,6 +982,62 @@ describe("outbox worker runtime contracts", () => {
     assert.match(multipart, /PDFBYTES/);
   });
 
+  it("delivers proactive Telegram images as native photos", async () => {
+    const worker = await import("../apps/outbox-worker/src/index.ts");
+    const calls: Array<{ url: string; init: { body?: string | Uint8Array; headers?: Record<string, string>; method?: string } }> = [];
+    const connector = worker.createTenantTelegramChannelConnector({
+      apiBaseUrl: "https://telegram.example.test",
+      channel: "Telegram",
+      fetcher: async (url: string, init: { body?: string | Uint8Array; headers?: Record<string, string>; method?: string }) => {
+        calls.push({ url, init });
+        if (url.includes("storage.example.test")) {
+          return {
+            arrayBuffer: async () => new TextEncoder().encode("PNG_BYTES").buffer,
+            ok: true,
+            status: 200,
+            text: async () => ""
+          };
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }) };
+      },
+      resolveBotToken: async () => "123:BOT-TOKEN",
+      timeoutMs: 25
+    });
+
+    await connector.startConversation({
+      attachments: [{
+        fileId: "file_tg_photo",
+        fileName: "photo.png",
+        mimeType: "image/png",
+        signedFile: {
+          expiresAt: "2999-01-01T00:00:00.000Z",
+          method: "GET",
+          url: "https://storage.example.test/signed/file_tg_photo"
+        },
+        sizeBytes: 9
+      }],
+      channel: "Telegram",
+      conversationId: "tg-chat-201",
+      descriptorId: "telegram_delivery_photo",
+      idempotencyKey: "telegram-photo-key",
+      message: "<b>Heading</b>\n\nPhoto caption",
+      messageFormat: "html",
+      outboxEventId: "outbox_telegram_photo",
+      tenantId: "tenant-volga",
+      traceId: "trc_telegram_photo"
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].url, "https://telegram.example.test/bot123:BOT-TOKEN/sendPhoto");
+    assert.equal(calls[1].init.headers?.["idempotency-key"], "telegram-photo-key:photo:0");
+    const multipart = new TextDecoder().decode(calls[1].init.body as Uint8Array);
+    assert.match(multipart, /name="photo"; filename="photo\.png"/);
+    assert.match(multipart, /name="caption"\r\n\r\n<b>Heading<\/b>\n\nPhoto caption/);
+    assert.match(multipart, /name="parse_mode"\r\n\r\nHTML/);
+    assert.match(multipart, /Content-Type: image\/png/);
+    assert.match(multipart, /PNG_BYTES/);
+  });
+
   it("aborts a stalled Telegram attachment download at the connector timeout", async () => {
     const worker = await import("../apps/outbox-worker/src/index.ts");
     const connector = worker.createTenantTelegramChannelConnector({

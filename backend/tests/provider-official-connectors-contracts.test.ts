@@ -132,7 +132,7 @@ describe("official VK/MAX outbound connectors", () => {
         calls.push(url);
         if (url === "https://storage.test/file-1") return { ok: true, status: 200, text: async () => "", arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
         if (url.endsWith("/uploads?type=image")) return { ok: true, status: 200, text: async () => JSON.stringify({ url: "https://upload.max.test/u1" }) };
-        if (url === "https://upload.max.test/u1") return { ok: true, status: 200, text: async () => JSON.stringify({ token: "max-file-token" }) };
+        if (url === "https://upload.max.test/u1") return { ok: true, status: 200, text: async () => JSON.stringify({ photos: { "photo-1": { token: "max-file-token" } } }) };
         messageBodies.push(JSON.parse(String(init.body ?? "{}")));
         return { ok: true, status: 200, text: async () => JSON.stringify({ message: { body: { mid: `mid-${calls.length}` } } }) };
       },

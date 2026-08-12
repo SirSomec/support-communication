@@ -235,6 +235,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     const response = await marketingService.updateClientChannelRestriction(getClientMutationProfileId(selected), {
       blocked,
       channel: normalizedChannel,
+      conversationId: selected.id,
       reason: "Изменено вручную в карточке клиента"
     });
     setRestrictionSavingChannel("");

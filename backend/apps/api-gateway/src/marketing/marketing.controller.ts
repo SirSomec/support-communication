@@ -132,7 +132,7 @@ export class MarketingController {
 
   @Patch("clients/:clientId/channel-restriction")
   @ApiParam({ name: "clientId" })
-  @ApiBody({ schema: { example: { blocked: true, channel: "telegram", reason: "Client request" }, properties: { blocked: { type: "boolean" }, channel: { type: "string" }, reason: { maxLength: 500, type: "string" } }, required: ["blocked", "channel"], type: "object" } })
+  @ApiBody({ schema: { example: { blocked: true, channel: "telegram", conversationId: "dlg-42", reason: "Client request" }, properties: { blocked: { type: "boolean" }, channel: { type: "string" }, conversationId: { description: "Tenant conversation used to materialize a missing client profile.", type: "string" }, reason: { maxLength: 500, type: "string" } }, required: ["blocked", "channel"], type: "object" } })
   @ApiOperation({ operationId: "updateMarketingClientChannelRestriction", summary: "Allow or prohibit marketing communications for one client channel" })
   channelRestriction(@Param("clientId") clientId: string, @Body() body: Record<string, unknown>, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.updateClientChannelRestriction(clientId, body ?? {}, context(request))); }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, isMarketingTenantOwner, marketingChannelIsRestricted, marketingChannelRestrictionKey, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizeMarketingChannel, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, isMarketingTenantOwner, marketingChannelIsRestricted, marketingChannelRestrictionKey, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingConversationSourceProfileId, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizeMarketingChannel, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -94,6 +94,13 @@ describe("marketing tenant owner resolution", () => {
     assert.equal(isMarketingTenantOwner({ email: "operator@example.com", role: "Owner" }, {}), true);
     assert.equal(isMarketingTenantOwner({ email: "Owner@Example.com", role: "Admin" }, { ownerEmail: "owner@example.com" }), true);
     assert.equal(isMarketingTenantOwner({ email: "admin@example.com", role: "Admin" }, { ownerEmail: "owner@example.com" }), false);
+  });
+});
+
+describe("marketing conversation profile resolution", () => {
+  it("uses the same stable source profile identity as the clients workspace", () => {
+    assert.equal(marketingConversationSourceProfileId("Telegram", "+7 (999) 123-45-67"), "src_telegram_79991234567");
+    assert.equal(marketingConversationSourceProfileId("", "+7 (999) 123-45-67"), "");
   });
 });
 

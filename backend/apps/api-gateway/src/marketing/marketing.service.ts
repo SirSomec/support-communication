@@ -45,6 +45,11 @@ export function isMarketingTenantOwner(user: { email?: unknown; role?: unknown }
   const ownerEmail = isRecord(tenantMetadata) ? normalizeEmail(tenantMetadata.ownerEmail) : "";
   return Boolean(ownerEmail && ownerEmail === normalizeEmail(user?.email));
 }
+export function marketingConversationSourceProfileId(channel: unknown, phone: unknown): string {
+  const normalizedChannel = normalizeMarketingChannel(channel);
+  const normalizedPhone = normalizePhone(phone);
+  return normalizedChannel && normalizedPhone ? `src_${normalizedChannel}_${normalizedPhone}` : "";
+}
 const prisma = createPrismaClient() as any;
 
 export interface MarketingContext {
@@ -469,7 +474,45 @@ export class MarketingService {
     await this.requireModuleAccess(context);
     const channel = normalizeMarketingChannel(payload.channel);
     if (!channel || typeof payload.blocked !== "boolean") return invalidEnvelope("updateClientChannelRestriction", "marketing_channel_restriction_invalid", "Client, channel and an explicit blocked state are required.");
-    const client = await prisma.clientProfile.findFirst({ where: { tenantId: context.tenantId, OR: [{ id: clientId }, { sourceProfileId: clientId }] }, select: { channel: true, id: true } });
+    let client = await prisma.clientProfile.findFirst({ where: { tenantId: context.tenantId, OR: [{ id: clientId }, { sourceProfileId: clientId }] }, select: { channel: true, id: true } });
+    if (!client && payload.conversationId) {
+      const conversation = await prisma.conversation.findFirst({
+        where: { id: text(payload.conversationId, 128), tenantId: context.tenantId },
+        select: { channel: true, clientSince: true, device: true, entry: true, id: true, name: true, phone: true, previous: true, topic: true }
+      });
+      const sourceProfileId = conversation ? marketingConversationSourceProfileId(conversation.channel, conversation.phone) : "";
+      if (conversation && sourceProfileId === clientId) {
+        client = await prisma.clientProfile.upsert({
+          where: { tenantId_sourceProfileId: { tenantId: context.tenantId, sourceProfileId } },
+          create: {
+            id: `client_${createHash("sha256").update(`${context.tenantId}:${sourceProfileId}`).digest("hex").slice(0, 32)}`,
+            tenantId: context.tenantId,
+            sourceProfileId,
+            name: conversation.name,
+            channel: normalizeMarketingChannel(conversation.channel),
+            phone: conversation.phone,
+            phoneNormalized: normalizePhone(conversation.phone),
+            device: conversation.device,
+            entry: conversation.entry,
+            topic: conversation.topic,
+            clientSince: conversation.clientSince,
+            previous: conversation.previous
+          },
+          update: {
+            name: conversation.name,
+            channel: normalizeMarketingChannel(conversation.channel),
+            phone: conversation.phone,
+            phoneNormalized: normalizePhone(conversation.phone),
+            device: conversation.device,
+            entry: conversation.entry,
+            topic: conversation.topic,
+            clientSince: conversation.clientSince,
+            previous: conversation.previous
+          },
+          select: { channel: true, id: true }
+        });
+      }
+    }
     if (!client) return notFoundEnvelope("updateClientChannelRestriction", "marketing_client_not_found", "Client was not found.");
     const activeChannels = await prisma.channelConnection.findMany({ where: { tenantId: context.tenantId, status: "active" }, select: { type: true } });
     const allowedChannels = new Set([client.channel, ...activeChannels.map((item: { type: string }) => item.type)].map(normalizeMarketingChannel));

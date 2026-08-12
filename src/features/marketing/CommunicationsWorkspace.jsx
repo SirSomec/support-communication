@@ -33,19 +33,10 @@ import {
 import { uploadComposerAttachment } from "../../app/useComposerAttachments.js";
 import { ProductScreen, WorkspaceState } from "../../ui.jsx";
 import { marketingService } from "../../services/marketingService.js";
+import { campaignAdditionalBlocks, campaignStatusLabel, campaignToDraft, canLaunchCampaignDraft, isCampaignEditable } from "./marketingCampaignModel.js";
 import "./communications-workspace.css";
 
 const EMPTY_WORKSPACE = Object.freeze({ audiences: [], campaigns: [], channels: [], templates: [] });
-const EMPTY_CAMPAIGN = Object.freeze({
-  audienceId: "",
-  channels: [],
-  clientIds: "",
-  contentText: "",
-  scheduledAt: "",
-  strategy: "manual",
-  templateId: "",
-  title: ""
-});
 const PLANS = Object.freeze([
   { key: "start", name: "Start", price: "4 900 ₽/мес.", included: "10 000 сообщений" },
   { key: "business", name: "Business", price: "9 900 ₽/мес.", included: "50 000 сообщений" },
@@ -66,6 +57,7 @@ export function MarketingScreen({ onBack, onToast }) {
   const [activatingPlan, setActivatingPlan] = useState("");
   const [activeTab, setActiveTab] = useState("campaigns");
   const [dialog, setDialog] = useState(null);
+  const [campaignDialog, setCampaignDialog] = useState(null);
   const [campaignResult, setCampaignResult] = useState(null);
 
   const loadWorkspace = useCallback(async () => {
@@ -136,7 +128,7 @@ export function MarketingScreen({ onBack, onToast }) {
     <ProductScreen
       actions={status === "ready" ? <div className="communications-page-actions">
         <button aria-label="Обновить коммуникации" className="communications-icon-button" onClick={loadWorkspace} title="Обновить" type="button"><RefreshCw size={17} /></button>
-        <button className="primary-action communications-primary-action" onClick={() => setDialog("campaign")} type="button"><Plus size={17} /> Создать кампанию</button>
+        <button className="primary-action communications-primary-action" onClick={() => setCampaignDialog({ campaign: null })} type="button"><Plus size={17} /> Создать кампанию</button>
       </div> : null}
       backLabel="Диалоги"
       onBack={onBack}
@@ -155,12 +147,13 @@ export function MarketingScreen({ onBack, onToast }) {
           if (response.status === "ok") void loadWorkspace();
         }}
         onCloneCampaign={cloneCampaign}
-        onCreate={(kind) => setDialog(kind)}
+        onCreate={(kind) => kind === "campaign" ? setCampaignDialog({ campaign: null }) : setDialog(kind)}
         onExecuteCampaign={executeCampaign}
-        onOpenCampaign={openCampaignResults}
+        onOpenCampaign={(campaign) => setCampaignDialog({ campaign })}
+        onOpenCampaignResults={openCampaignResults}
         workspace={workspace}
       /> : null}
-      {dialog === "campaign" ? <CampaignDialog onClose={() => setDialog(null)} onCreated={() => { setDialog(null); void loadWorkspace(); }} onToast={onToast} onWorkspaceChange={loadWorkspace} workspace={workspace} /> : null}
+      {campaignDialog ? <CampaignDialog campaign={campaignDialog.campaign} onClose={() => setCampaignDialog(null)} onToast={onToast} onWorkspaceChange={loadWorkspace} workspace={workspace} /> : null}
       {dialog === "audience" ? <AudienceDialog onClose={() => setDialog(null)} onCreated={() => { setDialog(null); void loadWorkspace(); }} onToast={onToast} /> : null}
       {dialog === "template" ? <TemplateDialog onClose={() => setDialog(null)} onCreated={() => { setDialog(null); void loadWorkspace(); }} onToast={onToast} /> : null}
       {campaignResult ? <ResultsDialog onClose={() => setCampaignResult(null)} result={campaignResult} /> : null}
@@ -168,7 +161,7 @@ export function MarketingScreen({ onBack, onToast }) {
   );
 }
 
-function CommunicationsHome({ activeTab, onActiveTabChange, onArchiveAudience, onCloneCampaign, onCreate, onExecuteCampaign, onOpenCampaign, workspace }) {
+function CommunicationsHome({ activeTab, onActiveTabChange, onArchiveAudience, onCloneCampaign, onCreate, onExecuteCampaign, onOpenCampaign, onOpenCampaignResults, workspace }) {
   const campaigns = Array.isArray(workspace.campaigns) ? workspace.campaigns : [];
   const audiences = Array.isArray(workspace.audiences) ? workspace.audiences : [];
   const templates = Array.isArray(workspace.templates) ? workspace.templates : [];
@@ -176,14 +169,14 @@ function CommunicationsHome({ activeTab, onActiveTabChange, onArchiveAudience, o
     <nav aria-label="Разделы коммуникаций" className="communications-tabs">
       {TABS.map(({ id, label, icon: Icon }) => <button aria-current={activeTab === id ? "page" : undefined} className={activeTab === id ? "is-active" : ""} key={id} onClick={() => onActiveTabChange(id)} type="button"><Icon size={16} />{label}</button>)}
     </nav>
-    {activeTab === "campaigns" ? <CampaignsView audiences={audiences} campaigns={campaigns} onClone={onCloneCampaign} onCreate={() => onCreate("campaign")} onExecute={onExecuteCampaign} onOpen={onOpenCampaign} usage={workspace.usage} /> : null}
+    {activeTab === "campaigns" ? <CampaignsView audiences={audiences} campaigns={campaigns} onClone={onCloneCampaign} onCreate={() => onCreate("campaign")} onExecute={onExecuteCampaign} onOpen={onOpenCampaign} onResults={onOpenCampaignResults} usage={workspace.usage} /> : null}
     {activeTab === "audiences" ? <AudiencesView audiences={audiences} onArchive={onArchiveAudience} onCreate={() => onCreate("audience")} /> : null}
     {activeTab === "templates" ? <TemplatesView onCreate={() => onCreate("template")} templates={templates} /> : null}
     {activeTab === "analytics" ? <AnalyticsView campaigns={campaigns} usage={workspace.usage} /> : null}
   </div>;
 }
 
-function CampaignsView({ audiences, campaigns, onClone, onCreate, onExecute, onOpen, usage }) {
+function CampaignsView({ audiences, campaigns, onClone, onCreate, onExecute, onOpen, onResults, usage }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
@@ -215,7 +208,7 @@ function CampaignsView({ audiences, campaigns, onClone, onCreate, onExecute, onO
         </div>
         {filteredCampaigns.length ? <div className="communications-table-wrap"><table className="communications-table">
           <thead><tr><th>Кампания</th><th>Аудитория</th><th>Каналы</th><th>Отправка</th><th>Статус</th><th>Доставка</th><th><span className="sr-only">Действия</span></th></tr></thead>
-          <tbody>{filteredCampaigns.map((campaign) => <CampaignRow audienceName={audienceNames.get(campaign.audienceId)} campaign={campaign} key={campaign.id} onClone={onClone} onExecute={onExecute} onOpen={onOpen} />)}</tbody>
+          <tbody>{filteredCampaigns.map((campaign) => <CampaignRow audienceName={audienceNames.get(campaign.audienceId)} campaign={campaign} key={campaign.id} onClone={onClone} onExecute={onExecute} onOpen={onOpen} onResults={onResults} />)}</tbody>
         </table></div> : <EmptyCampaigns hasFilters={Boolean(query || statusFilter !== "all" || channelFilter !== "all")} onCreate={onCreate} />}
         <button className="communications-create-row" onClick={onCreate} type="button"><span><Plus size={19} /></span><strong>Создать новую кампанию</strong><small>Выберите аудиторию, каналы и сообщение для запуска</small><ArrowRight size={17} /></button>
       </section>
@@ -228,20 +221,19 @@ function CampaignsView({ audiences, campaigns, onClone, onCreate, onExecute, onO
   </div>;
 }
 
-function CampaignRow({ audienceName, campaign, onClone, onExecute, onOpen }) {
+function CampaignRow({ audienceName, campaign, onClone, onExecute, onOpen, onResults }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const delivery = deliveryMetric(campaign.deliverySummary);
   return <tr>
-    <td><button className="communications-campaign-name" onClick={() => onOpen(campaign)} type="button"><strong>{campaign.title || "Без названия"}</strong><span>{shortCampaignId(campaign.id)}</span></button></td>
+    <td><button aria-label={`Открыть кампанию ${campaign.title}`} className="communications-campaign-name" onClick={() => onOpen(campaign)} type="button"><strong>{campaign.title || "Без названия"}</strong><span>{shortCampaignId(campaign.id)}</span></button></td>
     <td><span className="communications-cell-primary">{audienceName || (campaign.clientIds?.length ? "Персональная" : "Не выбрана")}</span><small>{campaign.audienceId ? "Статическая аудитория" : "Получатели вручную"}</small></td>
     <td><ChannelStack channels={campaign.channels} /></td>
     <td><span className="communications-cell-primary">{campaign.scheduledAt ? formatDateTime(campaign.scheduledAt) : campaign.status === "draft" ? "Не назначена" : "По триггеру"}</span></td>
     <td><CampaignStatus status={campaign.status} /></td>
     <td><div className="communications-delivery"><strong>{delivery.label}</strong><small>{delivery.caption}</small><span><i style={{ width: delivery.width }} /></span></div></td>
     <td className="communications-row-menu"><button aria-expanded={menuOpen} aria-label={`Действия: ${campaign.title}`} onClick={() => setMenuOpen((value) => !value)} type="button"><Ellipsis size={18} /></button>{menuOpen ? <div className="communications-menu">
-      <button onClick={() => { setMenuOpen(false); onOpen(campaign); }} type="button">Результаты</button>
+      <button onClick={() => { setMenuOpen(false); onResults(campaign); }} type="button"><BarChart3 size={14} /> Статистика</button>
       <button onClick={() => { setMenuOpen(false); onClone(campaign); }} type="button"><Copy size={14} /> Дублировать</button>
-      {["draft", "scheduled"].includes(campaign.status) ? <button onClick={() => { setMenuOpen(false); onExecute(campaign, "launch"); }} type="button"><Play size={14} /> Запустить</button> : null}
       {campaign.status === "sending" ? <button onClick={() => { setMenuOpen(false); onExecute(campaign, "pause"); }} type="button"><Pause size={14} /> Поставить на паузу</button> : null}
       {campaign.status === "paused" ? <button onClick={() => { setMenuOpen(false); onExecute(campaign, "resume"); }} type="button"><Play size={14} /> Продолжить</button> : null}
     </div> : null}</td>
@@ -271,17 +263,22 @@ function AnalyticsView({ campaigns, usage }) {
   </section>;
 }
 
-function CampaignDialog({ onClose, onCreated, onToast, onWorkspaceChange, workspace }) {
-  const [draft, setDraft] = useState(EMPTY_CAMPAIGN);
-  const [blocks, setBlocks] = useState([]);
+function CampaignDialog({ campaign, onClose, onToast, onWorkspaceChange, workspace }) {
+  const [draft, setDraft] = useState(() => campaignToDraft(campaign));
+  const [blocks, setBlocks] = useState(() => campaignAdditionalBlocks(campaign));
   const [testRecipients, setTestRecipients] = useState([]);
-  const [campaignId, setCampaignId] = useState("");
+  const [campaignId, setCampaignId] = useState(campaign?.id ?? "");
+  const [campaignStatus, setCampaignStatus] = useState(campaign?.status ?? "draft");
   const [submitting, setSubmitting] = useState(false);
+  const [launching, setLaunching] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  const [operationResult, setOperationResult] = useState(null);
   const [uploading, setUploading] = useState(false);
   const templates = Array.isArray(workspace.templates) ? workspace.templates : [];
   const audiences = Array.isArray(workspace.audiences) ? workspace.audiences : [];
+  const editable = isCampaignEditable(campaignStatus);
+  const busy = submitting || testing || launching;
   const consentPolicyMessage = marketingConsentPolicyMessage(workspace.settings);
   const availableChannels = useMemo(() => {
     const source = Array.isArray(workspace.channels) ? workspace.channels : [];
@@ -289,12 +286,14 @@ function CampaignDialog({ onClose, onCreated, onToast, onWorkspaceChange, worksp
   }, [workspace.channels]);
   const updateDraft = (patch) => {
     setTestResult(null);
+    setOperationResult(null);
     setDraft((current) => ({ ...current, ...patch }));
   };
   const toggleChannel = (channel) => updateDraft({ channels: draft.channels.includes(channel) ? draft.channels.filter((item) => item !== channel) : [...draft.channels, channel] });
   const applyTemplate = (templateId) => {
     const template = templates.find((item) => item.id === templateId);
     setTestResult(null);
+    setOperationResult(null);
     setDraft((current) => ({ ...current, templateId, title: current.title || template?.title || "", contentText: template?.content?.blocks?.find((block) => block.type === "text")?.text ?? current.contentText }));
     setBlocks((template?.content?.blocks ?? []).filter((block) => block.type !== "text").map((block) => ({ ...block, id: crypto.randomUUID() })));
   };
@@ -308,35 +307,54 @@ function CampaignDialog({ onClose, onCreated, onToast, onWorkspaceChange, worksp
     const uploaded = await uploadComposerAttachment({ channel: draft.channels[0], file, idempotencyKey: `marketing-upload:${crypto.randomUUID()}`, mimeType: file.type || "application/octet-stream", name: file.name, sizeBytes: file.size });
     setUploading(false);
     if (uploaded.status !== "ready" || !uploaded.fileId) { onToast?.(uploaded.error ?? "Файл не готов к отправке."); return; }
+    setOperationResult(null);
     setBlocks((current) => [...current, { fileId: uploaded.fileId, fileName: file.name, id: crypto.randomUUID(), mimeType: file.type, type: file.type.startsWith("image/") ? "image" : "file" }]);
   };
-  const campaignPayload = () => ({
-      audienceId: draft.audienceId || undefined,
-      channels: draft.channels,
-      clientIds: draft.clientIds.split(",").map((item) => item.trim()).filter(Boolean),
-      content: { blocks: [{ type: "text", text: draft.contentText }, ...blocks].filter((block) => block.type !== "text" || block.text) },
-      scheduledAt: draft.scheduledAt ? new Date(draft.scheduledAt).toISOString() : null,
-      strategy: draft.strategy,
-      title: draft.title
-    });
+  const campaignPayload = (overrides = {}) => {
+    const nextDraft = { ...draft, ...overrides };
+    return {
+      audienceId: nextDraft.audienceId || undefined,
+      channels: nextDraft.channels,
+      clientIds: nextDraft.clientIds.split(",").map((item) => item.trim()).filter(Boolean),
+      content: { blocks: [{ type: "text", text: nextDraft.contentText }, ...blocks].filter((block) => block.type !== "text" || block.text) },
+      scheduledAt: nextDraft.scheduledAt ? new Date(nextDraft.scheduledAt).toISOString() : null,
+      strategy: nextDraft.strategy,
+      title: nextDraft.title
+    };
+  };
 
-  const saveCampaign = async () => {
+  const saveCampaign = async (overrides = {}) => {
     const response = campaignId
-      ? await marketingService.updateCampaign(campaignId, campaignPayload())
-      : await marketingService.createCampaign(campaignPayload());
+      ? await marketingService.updateCampaign(campaignId, campaignPayload(overrides))
+      : await marketingService.createCampaign(campaignPayload(overrides));
     const savedCampaignId = response.data?.campaign?.id || campaignId;
-    if (response.status === "ok" && savedCampaignId) setCampaignId(savedCampaignId);
+    if (response.status === "ok" && savedCampaignId) {
+      setCampaignId(savedCampaignId);
+      setCampaignStatus(response.data?.campaign?.status ?? campaignStatus);
+    }
     return { response, savedCampaignId };
   };
 
   const submit = async (event) => {
     event.preventDefault();
+    if (!editable || busy) return;
+    const existedBeforeSave = Boolean(campaignId);
     setSubmitting(true);
+    setOperationResult(null);
     const { response } = await saveCampaign();
     setSubmitting(false);
-    if (response.status !== "ok") { onToast?.(response.error?.message ?? "Не удалось сохранить кампанию."); return; }
-    onToast?.(draft.scheduledAt ? "Кампания запланирована." : campaignId ? "Черновик кампании обновлён." : "Черновик кампании создан.");
-    onCreated();
+    if (response.status !== "ok") {
+      const message = response.error?.message ?? "Не удалось сохранить кампанию.";
+      setOperationResult({ message, tone: "error" });
+      onToast?.(message);
+      return;
+    }
+    const message = draft.scheduledAt
+      ? "Расписание сохранено. Окно осталось открытым."
+      : existedBeforeSave ? "Изменения черновика сохранены." : "Черновик сохранён. Можно продолжить редактирование или запустить кампанию.";
+    setOperationResult({ message, tone: "success" });
+    onToast?.(message);
+    void onWorkspaceChange?.();
   };
 
   const testAvailabilityMessage = !testRecipients.length
@@ -348,7 +366,17 @@ function CampaignDialog({ onClose, onCreated, onToast, onWorkspaceChange, worksp
         : !draft.contentText.trim()
           ? "Добавьте текст сообщения."
           : "Сначала сохраним текущую версию как черновик, затем отправим тест. Основная кампания не запустится.";
-  const canSendTest = Boolean(testRecipients.length && draft.title.trim() && draft.channels.length && draft.contentText.trim());
+  const canSendTest = Boolean(editable && testRecipients.length && draft.title.trim() && draft.channels.length && draft.contentText.trim());
+  const canLaunch = editable && canLaunchCampaignDraft(draft);
+  const launchAvailabilityMessage = !draft.title.trim()
+    ? "Укажите название кампании."
+    : !draft.channels.length
+      ? "Выберите хотя бы один канал."
+      : !draft.contentText.trim()
+        ? "Добавьте текст сообщения."
+        : !draft.audienceId && !draft.clientIds.split(",").some((item) => item.trim())
+          ? "Выберите аудиторию или укажите получателей."
+          : "Кампания будет сохранена и запущена немедленно.";
 
   const sendTest = async () => {
     if (!canSendTest || testing || submitting) return;
@@ -385,21 +413,55 @@ function CampaignDialog({ onClose, onCreated, onToast, onWorkspaceChange, worksp
     setTestResult(null);
     setTestRecipients(recipients);
   };
-  return <Modal className="communications-campaign-dialog" eyebrow="Новая кампания" onClose={onClose} title="Создайте коммуникацию">
+
+  const launchCampaign = async () => {
+    if (!canLaunch || busy) return;
+    setLaunching(true);
+    setOperationResult(null);
+    const { response: saved, savedCampaignId } = await saveCampaign({ scheduledAt: "" });
+    if (saved.status !== "ok" || !savedCampaignId) {
+      const message = saved.error?.message ?? "Не удалось сохранить кампанию перед запуском.";
+      setOperationResult({ message, tone: "error" });
+      onToast?.(message);
+      setLaunching(false);
+      return;
+    }
+    setDraft((current) => ({ ...current, scheduledAt: "" }));
+    const launched = await marketingService.launchCampaign(savedCampaignId);
+    setLaunching(false);
+    if (launched.status !== "ok") {
+      const message = launched.error?.message ?? "Не удалось запустить кампанию.";
+      setOperationResult({ message, tone: "error" });
+      onToast?.(message);
+      void onWorkspaceChange?.();
+      return;
+    }
+    setCampaignStatus("sending");
+    const queued = Number(launched.data?.queued ?? 0);
+    const excluded = Number(launched.data?.excluded ?? 0);
+    const message = `Кампания запущена. В очереди: ${queued}${excluded ? `, исключено: ${excluded}` : ""}.`;
+    setOperationResult({ message, tone: "success" });
+    onToast?.(message);
+    void onWorkspaceChange?.();
+  };
+
+  return <Modal className="communications-campaign-dialog" eyebrow={campaignId ? campaignStatusLabel(campaignStatus) : "Новая кампания"} onClose={onClose} title={campaignId ? "Кампания" : "Создайте коммуникацию"}>
     <form className="communications-campaign-form" onSubmit={submit}>
-      <div className="communications-editor-pane">
+      {campaignId ? <div className={`communications-campaign-state ${editable ? "is-editable" : "is-locked"}`}><CampaignStatus status={campaignStatus} /><p>{editable ? "Кампанию можно редактировать, тестировать и запускать." : "Кампания уже запущена. Поля доступны только для просмотра."}</p></div> : null}
+      <fieldset className="communications-editor-pane" disabled={!editable}>
         <section><h3>Основное</h3><div className="communications-form-grid">
-          <label className="is-wide"><span>Название кампании</span><input autoFocus required onChange={(event) => updateDraft({ title: event.target.value })} placeholder="Например, Весенняя акция" value={draft.title} /></label>
+          <label className="is-wide"><span>Название кампании</span><input autoFocus={!campaignId} required onChange={(event) => updateDraft({ title: event.target.value })} placeholder="Например, Весенняя акция" value={draft.title} /></label>
           <label><span>Аудитория</span><select onChange={(event) => updateDraft({ audienceId: event.target.value })} value={draft.audienceId}><option value="">Персональные получатели</option>{audiences.map((audience) => <option key={audience.id} value={audience.id}>{audience.name} · {audience._count?.members ?? 0}</option>)}</select></label>
           <label><span>Шаблон</span><select onChange={(event) => applyTemplate(event.target.value)} value={draft.templateId}><option value="">С чистого листа</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.title}</option>)}</select></label>
           {!draft.audienceId ? <label className="is-wide"><span>ID клиентов</span><input onChange={(event) => updateDraft({ clientIds: event.target.value })} placeholder="client_1, client_2" value={draft.clientIds} /></label> : null}
         </div></section>
         <section><div className="communications-section-heading"><div><h3>Каналы</h3><p>Выберите один или несколько каналов доставки.</p></div></div><div className="communications-channel-picker">{availableChannels.map((channel) => { const selected = draft.channels.includes(channel.id); return <button aria-pressed={selected} className={selected ? "is-selected" : ""} key={channel.id} onClick={() => toggleChannel(channel.id)} type="button"><ChannelIcon channel={channel.id} size={18} /><span>{channel.label}</span>{selected ? <Check size={15} /> : null}</button>; })}</div></section>
-        <section><div className="communications-section-heading"><div><h3>Сообщение</h3><p>Добавьте текст, эмодзи и необходимые вложения.</p></div><span>{draft.contentText.length}/4000</span></div><div className="communications-composer-toolbar"><button onClick={() => updateDraft({ contentText: `${draft.contentText} 😊` })} title="Добавить эмодзи" type="button">😊</button><label title="Добавить изображение или файл"><Paperclip size={17} /><input accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.mp3,.mp4" disabled={uploading} onChange={uploadFile} type="file" /></label><button onClick={() => setBlocks((current) => [...current, { id: crypto.randomUUID(), text: "", type: "heading" }])} type="button"><FileText size={16} /> Заголовок</button></div><textarea maxLength={4000} onChange={(event) => updateDraft({ contentText: event.target.value })} placeholder="Введите текст сообщения. Можно использовать переменные, например {{client.name}}" required value={draft.contentText} />{blocks.length ? <div className="communications-attachments">{blocks.map((block) => <div key={block.id}>{block.type === "image" ? <Image size={15} /> : block.type === "heading" ? <FileText size={15} /> : <Paperclip size={15} />}<input aria-label="Содержимое блока" onChange={(event) => setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, text: event.target.value } : item))} placeholder={block.fileName || "Текст заголовка"} readOnly={Boolean(block.fileName)} value={block.fileName || block.text || ""} /><button aria-label="Удалить блок" onClick={() => setBlocks((current) => current.filter((item) => item.id !== block.id))} type="button"><X size={15} /></button></div>)}</div> : null}</section>
+        <section><div className="communications-section-heading"><div><h3>Сообщение</h3><p>Добавьте текст, эмодзи и необходимые вложения.</p></div><span>{draft.contentText.length}/4000</span></div><div className="communications-composer-toolbar"><button onClick={() => updateDraft({ contentText: `${draft.contentText} 😊` })} title="Добавить эмодзи" type="button">😊</button><label title="Добавить изображение или файл"><Paperclip size={17} /><input accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.mp3,.mp4" disabled={uploading || !editable} onChange={uploadFile} type="file" /></label><button onClick={() => { setOperationResult(null); setBlocks((current) => [...current, { id: crypto.randomUUID(), text: "", type: "heading" }]); }} type="button"><FileText size={16} /> Заголовок</button></div><textarea maxLength={4000} onChange={(event) => updateDraft({ contentText: event.target.value })} placeholder="Введите текст сообщения. Можно использовать переменные, например {{client.name}}" required value={draft.contentText} />{blocks.length ? <div className="communications-attachments">{blocks.map((block) => <div key={block.id}>{block.type === "image" ? <Image size={15} /> : block.type === "heading" ? <FileText size={15} /> : <Paperclip size={15} />}<input aria-label="Содержимое блока" onChange={(event) => { setOperationResult(null); setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, text: event.target.value } : item)); }} placeholder={block.fileName || "Текст заголовка"} readOnly={Boolean(block.fileName)} value={block.fileName || block.text || ""} /><button aria-label="Удалить блок" onClick={() => { setOperationResult(null); setBlocks((current) => current.filter((item) => item.id !== block.id)); }} type="button"><X size={15} /></button></div>)}</div> : null}</section>
         <section><h3>Отправка</h3><div className="communications-form-grid"><label><span>Стратегия</span><select onChange={(event) => updateDraft({ strategy: event.target.value })} value={draft.strategy}><option value="manual">Выбранные каналы</option><option value="preferred">Предпочтительный канал</option><option value="cascade">Каскад каналов</option><option value="all">По всем каналам</option></select></label><label><span>Дата и время</span><input onChange={(event) => updateDraft({ scheduledAt: event.target.value })} type="datetime-local" value={draft.scheduledAt} /></label></div><TestRecipientPicker availabilityMessage={testAvailabilityMessage} canSend={canSendTest} onChange={changeTestRecipients} onSend={sendTest} result={testResult} sending={testing} value={testRecipients} /></section>
-      </div>
+      </fieldset>
       <aside className="communications-preview-pane"><div className="communications-preview-title"><span>Предпросмотр</span><small>{draft.channels.length ? draft.channels.map(channelLabel).join(" · ") : "Канал не выбран"}</small></div><MessagePreview blocks={blocks} text={draft.contentText} title={draft.title} /><div className="communications-safety-note"><Check size={16} /><p>{consentPolicyMessage}</p></div></aside>
-      <footer className="communications-dialog-footer"><button onClick={onClose} type="button">Отмена</button><button className="primary-action" disabled={submitting || testing || !draft.channels.length} type="submit">{submitting ? "Сохраняем…" : draft.scheduledAt ? "Запланировать" : campaignId ? "Сохранить изменения" : "Сохранить черновик"}<ArrowRight size={16} /></button></footer>
+      {operationResult ? <div aria-live="polite" className={`communications-campaign-operation is-${operationResult.tone}`} role="status">{operationResult.tone === "success" ? <Check size={15} /> : <CircleAlert size={15} />}<span>{operationResult.message}</span></div> : null}
+      <footer className="communications-dialog-footer"><div className="communications-dialog-footer-note"><strong>{campaignStatusLabel(campaignStatus)}</strong><span>{editable ? launchAvailabilityMessage : "Редактирование недоступно после запуска."}</span></div><button onClick={onClose} type="button">Закрыть</button>{editable ? <><button className="communications-save-action" disabled={busy || !draft.title.trim() || !draft.channels.length} type="submit">{submitting ? "Сохраняем…" : campaignId ? "Сохранить изменения" : "Сохранить черновик"}</button><button className="primary-action communications-launch-action" disabled={busy || !canLaunch} onClick={launchCampaign} title={canLaunch ? "Запустить кампанию сейчас" : launchAvailabilityMessage} type="button"><Play size={15} /> {launching ? "Запускаем…" : "Запустить"}</button></> : null}</footer>
     </form>
   </Modal>;
 }
@@ -524,7 +586,7 @@ function ActivationScreen({ accessInfo, activatingPlan, onActivate }) {
 function Metric({ icon: Icon, label, tone, value }) { return <article className={`communications-metric is-${tone}`}><span><Icon size={19} /></span><div><small>{label}</small><strong>{value}</strong></div></article>; }
 function ChannelStack({ channels = [] }) { return <span className="communications-channel-stack">{channels.length ? channels.map((channel) => <span aria-label={channelLabel(channel)} key={channel} title={channelLabel(channel)}><ChannelIcon channel={channel} size={15} /></span>) : <small>—</small>}</span>; }
 function ChannelIcon({ channel, size = 16 }) { const normalized = String(channel).toLowerCase(); const Icon = normalized.includes("email") || normalized.includes("mail") ? Mail : normalized.includes("telegram") ? Send : normalized.includes("whatsapp") ? MessageCircle : MessageSquareText; return <Icon size={size} />; }
-function CampaignStatus({ status }) { const labels = { cancelled: "Отменена", completed: "Завершена", draft: "Черновик", failed: "Ошибка", paused: "На паузе", scheduled: "Запланирована", sending: "Активна" }; return <span className={`communications-status is-${status || "draft"}`}>{["completed"].includes(status) ? <Check size={13} /> : status === "sending" ? <Play size={12} /> : status === "paused" ? <Pause size={12} /> : <Clock3 size={13} />}{labels[status] ?? status ?? "Черновик"}</span>; }
+function CampaignStatus({ status }) { return <span className={`communications-status is-${status || "draft"}`}>{["completed"].includes(status) ? <Check size={13} /> : status === "sending" ? <Play size={12} /> : status === "paused" ? <Pause size={12} /> : <Clock3 size={13} />}{campaignStatusLabel(status)}</span>; }
 function SyncStatus({ sync }) { if (!sync) return <span className="communications-sync is-neutral">Не запускалась</span>; if (sync.status === "failed" || sync.lastError) return <span className="communications-sync is-error"><CircleAlert size={13} /> Требует внимания</span>; return <span className="communications-sync is-success"><Check size={13} /> Синхронизирована</span>; }
 function EmptyCampaigns({ hasFilters, onCreate }) { return <div className="communications-empty"><Megaphone size={23} /><strong>{hasFilters ? "Ничего не найдено" : "Кампаний пока нет"}</strong><p>{hasFilters ? "Измените фильтры или поисковый запрос." : "Создайте первую коммуникацию для выбранной аудитории."}</p>{!hasFilters ? <button className="primary-action" onClick={onCreate} type="button"><Plus size={16} /> Создать кампанию</button> : null}</div>; }
 function MessagePreview({ blocks, text, title }) { return <div className="communications-phone-preview"><div className="communications-phone-top"><span /><strong>Предпросмотр</strong><Ellipsis size={16} /></div><div className="communications-phone-body"><div className="communications-preview-avatar"><Megaphone size={16} /></div><div className="communications-message-bubble">{title ? <strong>{title}</strong> : null}<p>{text || "Ваше сообщение появится здесь"}</p>{blocks.map((block) => block.type === "image" ? <div className="communications-preview-media" key={block.id}><Image size={24} /><span>{block.fileName}</span></div> : block.type === "heading" && block.text ? <h4 key={block.id}>{block.text}</h4> : block.fileName ? <div className="communications-preview-file" key={block.id}><Paperclip size={15} />{block.fileName}</div> : null)}<time>12:42</time></div></div></div>; }

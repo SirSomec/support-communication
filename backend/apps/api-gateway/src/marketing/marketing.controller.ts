@@ -127,8 +127,9 @@ export class MarketingController {
 
   @Get("clients/:clientId/preferences")
   @ApiParam({ name: "clientId" })
+  @ApiQuery({ name: "conversationId", required: false, description: "Tenant conversation used to materialize a missing client profile before reading preferences." })
   @ApiOperation({ operationId: "getMarketingClientPreferences", summary: "Get per-channel marketing consent and communication restrictions" })
-  preferences(@Param("clientId") clientId: string, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.getClientPreferences(clientId, context(request))); }
+  preferences(@Param("clientId") clientId: string, @Query("conversationId") conversationId: string | undefined, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.getClientPreferences(clientId, conversationId, context(request))); }
 
   @Patch("clients/:clientId/channel-restriction")
   @ApiParam({ name: "clientId" })

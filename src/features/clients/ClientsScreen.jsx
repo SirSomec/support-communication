@@ -116,7 +116,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     setMarketingChannels([selected.channel]);
     setMarketingConsents([]);
     setMarketingRestrictions([]);
-    void marketingService.getClientPreferences(getClientMutationProfileId(selected)).then((response) => {
+    void marketingService.getClientPreferences(getClientMutationProfileId(selected), selected.id).then((response) => {
       if (!cancelled && response.status === "ok") {
         setMarketingChannels(response.data?.channels ?? [selected.channel]);
         setMarketingConsents(response.data?.consents ?? []);

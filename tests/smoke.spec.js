@@ -223,12 +223,16 @@ test("client channel communication restrictions are persisted and reversible", a
 
   await selectRole(page, "Администратор");
   const preferencesResponse = page.waitForResponse((response) =>
-    response.url().includes("/api/v1/marketing/clients/") && response.url().endsWith("/preferences") && response.request().method() === "GET"
+    response.url().includes("/api/v1/marketing/clients/") && response.url().includes("/preferences?") && response.request().method() === "GET"
   );
   await openSection(page, "Клиенты");
-  expect((await preferencesResponse).ok()).toBeTruthy();
+  const preferencesPayload = await (await preferencesResponse).json();
+  expect(preferencesPayload.status).toBe("ok");
+  expect(preferencesPayload.data.channels.length).toBeGreaterThanOrEqual(2);
 
-  const restriction = page.locator(".client-channel-restriction").first();
+  const restrictions = page.locator(".client-channel-restriction");
+  await expect(restrictions).toHaveCount(preferencesPayload.data.channels.length);
+  const restriction = restrictions.first();
   await expect(restriction).toBeVisible();
   await expect(restriction).toContainText("Рассылки разрешены");
   const checkbox = restriction.locator('input[type="checkbox"]');

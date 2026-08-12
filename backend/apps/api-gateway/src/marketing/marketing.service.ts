@@ -1564,23 +1564,25 @@ export class MarketingService {
 
   private async resolveImportedClientMatches(records: Array<Record<string, unknown>>, tenantId: string): Promise<Array<{ index: number; candidates: Array<{ id: string; name: string; phone: string }> }>> {
     if (!records.length) return [];
-    const clientIds = uniqueStrings(records.map((record) => record.clientId ?? record.id));
-    const sourceProfileIds = uniqueStrings(records.map((record) => record.externalId ?? record.sourceProfileId));
-    const phones = uniqueStrings(records.map((record) => record.phone));
-    const normalizedPhones = [...new Set(records.map((record) => normalizePhone(record.phone)).filter(Boolean))];
-    const emails = [...new Set(records.map((record) => normalizeEmail(record.email)).filter(Boolean))];
+    const normalizedRecords = records.map(normalizeMarketingImportRecord);
+    const clientIds = uniqueStrings(normalizedRecords.map((record) => record.clientId ?? record.id));
+    const sourceProfileIds = uniqueStrings(normalizedRecords.map((record) => record.externalId ?? record.sourceProfileId));
+    const phones = uniqueStrings(normalizedRecords.map((record) => record.phone));
+    const normalizedPhones = [...new Set(normalizedRecords.map((record) => normalizePhone(record.phone)).filter(Boolean))];
+    const emails = [...new Set(normalizedRecords.map((record) => normalizeEmail(record.email)).filter(Boolean))];
+    if (![clientIds, sourceProfileIds, phones, normalizedPhones, emails].some((items) => items.length)) return normalizedRecords.map((_, index) => ({ index, candidates: [] }));
     const matches = await prisma.clientProfile.findMany({ where: { tenantId, OR: [
       ...(clientIds.length ? [{ id: { in: clientIds } }] : []),
       ...(sourceProfileIds.length ? [{ sourceProfileId: { in: sourceProfileIds } }] : []),
       ...(phones.length ? [{ phone: { in: phones } }] : []),
       ...(normalizedPhones.length ? [{ phoneNormalized: { in: normalizedPhones } }] : []),
-      ...(emails.length ? [{ email: { in: emails } }] : [])
+      ...(emails.length ? [{ email: { in: emails, mode: "insensitive" as const } }] : [])
     ] }, select: { email: true, id: true, name: true, phone: true, phoneNormalized: true, sourceProfileId: true } });
     const byValue = new Map<string, Array<{ id: string; name: string; phone: string }>>();
     for (const match of matches) for (const value of [match.id, match.phone, normalizePhone(match.phoneNormalized ?? match.phone), match.sourceProfileId, normalizeEmail(match.email)]) {
       const key = text(value, 128); if (key) byValue.set(key, [...(byValue.get(key) ?? []), match]);
     }
-    return records.map((record, index) => {
+    return normalizedRecords.map((record, index) => {
       const values = [record.clientId, record.id, record.externalId, record.sourceProfileId, record.phone, normalizePhone(record.phone), normalizeEmail(record.email)].map((value) => text(value, 128)).filter(Boolean);
       const candidates = [...new Map(values.flatMap((value) => byValue.get(value) ?? []).map((candidate) => [candidate.id, candidate])).values()];
       return { index, candidates };
@@ -1605,6 +1607,27 @@ export function normalizeConsentReply(value: unknown): "grant" | null {
   return text(value, 200) ? "grant" : null;
 }
 function optionalText(value: unknown, max: number) { const valueText = text(value, max); return valueText || null; }
+const MARKETING_IMPORT_FIELD_ALIASES = new Map<string, string>([
+  ["clientid", "clientId"], ["client id", "clientId"], ["id", "clientId"], ["id клиента", "clientId"], ["ид клиента", "clientId"], ["идентификатор клиента", "clientId"],
+  ["externalid", "externalId"], ["external id", "externalId"], ["внешний id", "externalId"], ["внешний ид", "externalId"], ["внешний идентификатор", "externalId"],
+  ["sourceprofileid", "sourceProfileId"], ["source profile id", "sourceProfileId"], ["id профиля", "sourceProfileId"],
+  ["phone", "phone"], ["telephone", "phone"], ["tel", "phone"], ["mobile", "phone"], ["телефон", "phone"], ["номер телефона", "phone"], ["мобильный телефон", "phone"],
+  ["email", "email"], ["mail", "email"], ["почта", "email"], ["электронная почта", "email"], ["эл почта", "email"]
+]);
+function normalizeMarketingImportHeader(value: unknown): string {
+  return String(value ?? "").replace(/^\uFEFF/, "").trim().toLowerCase().replace(/ё/g, "е").replace(/[._-]+/g, " ").replace(/[^a-zа-я0-9 ]/gi, "").replace(/\s+/g, " ").trim();
+}
+function marketingImportValue(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "bigint") return String(value);
+  return "";
+}
+export function normalizeMarketingImportRecord(record: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(Object.entries(record).map(([header, value]) => {
+    const normalizedHeader = normalizeMarketingImportHeader(header);
+    return [MARKETING_IMPORT_FIELD_ALIASES.get(normalizedHeader) ?? header.replace(/^\uFEFF/, "").trim(), marketingImportValue(value)];
+  }));
+}
 export function marketingDestinationKey(phone: unknown, channel: unknown) { return `${text(phone, 256)}:${text(channel, 64).toLowerCase()}`; }
 function uniqueStrings(value: unknown) { return Array.isArray(value) ? [...new Set(value.map((item) => text(item, 64)).filter(Boolean))] : []; }
 const MARKETING_MEDIA_BLOCKS = new Set(["image", "file", "gif", "audio", "video"]);

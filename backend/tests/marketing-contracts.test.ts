@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, isMarketingTenantOwner, marketingChannelIsRestricted, marketingChannelRestrictionKey, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingConversationSourceProfileId, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizeMarketingChannel, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, isMarketingTenantOwner, marketingChannelIsRestricted, marketingChannelRestrictionKey, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingConversationSourceProfileId, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizeMarketingChannel, normalizeMarketingImportRecord, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -108,6 +108,17 @@ describe("marketing import identifiers", () => {
   it("normalizes Russian phone formats before exact matching", () => {
     assert.equal(normalizePhone("+7 (999) 123-45-67"), "79991234567");
     assert.equal(normalizePhone("8 999 123 45 67"), "79991234567");
+  });
+
+  it("accepts common Russian spreadsheet headers and numeric phone cells", () => {
+    assert.deepEqual(normalizeMarketingImportRecord({ "\uFEFFНомер телефона": 79991234567, "Электронная почта": " User@Example.ru " }), {
+      phone: "79991234567",
+      email: "User@Example.ru"
+    });
+    assert.deepEqual(normalizeMarketingImportRecord({ client_id: "client-42", external_id: 9001 }), {
+      clientId: "client-42",
+      externalId: "9001"
+    });
   });
 });
 

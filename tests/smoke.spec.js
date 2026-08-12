@@ -259,6 +259,41 @@ test("client channel communication restrictions are persisted and reversible", a
   await expectHealthyPage(page);
 });
 
+test("audience file import accepts Russian spreadsheet headers and numeric phones", async ({ page }) => {
+  const { tenantSession } = await openAppShell(page);
+  const activation = await page.request.post("/api/v1/marketing/module/activate", {
+    data: { planKey: "start" },
+    headers: { authorization: `Bearer ${tenantSession.accessToken}` }
+  });
+  expect(activation.ok()).toBeTruthy();
+
+  await selectRole(page, "Администратор");
+  await openSection(page, "Коммуникации");
+  await page.getByRole("button", { name: "Аудитории", exact: true }).click();
+  await page.getByRole("button", { name: "Создать аудиторию", exact: true }).first().click();
+
+  const dialog = page.getByRole("dialog", { name: "Кого включить в коммуникацию" });
+  await dialog.getByLabel("Название аудитории").fill("Импорт с русскими колонками");
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: "clients.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("\uFEFFНомер телефона;Почта\r\n79992041844;", "utf8")
+  });
+  await expect(dialog).toContainText("clients.csv · 1 строк готово к сверке");
+
+  const previewResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/marketing/audiences/import-preview") && response.request().method() === "POST");
+  const createResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/marketing/audiences") && response.request().method() === "POST");
+  await dialog.getByRole("button", { name: "Создать аудиторию" }).click();
+  const previewPayload = await (await previewResponse).json();
+  const createPayload = await (await createResponse).json();
+  expect(previewPayload.data.summary.matched).toBe(1);
+  expect(createPayload.status).toBe("ok");
+  expect(createPayload.data.matchedCount).toBe(1);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".communications-list-table")).toContainText("Импорт с русскими колонками");
+  await expectHealthyPage(page);
+});
+
 test("public landing demo and contact request submit to backend", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("route-public-landing")).toBeVisible({ timeout: 15000 });

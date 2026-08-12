@@ -33,6 +33,7 @@ import {
 import { uploadComposerAttachment } from "../../app/useComposerAttachments.js";
 import { ProductScreen, WorkspaceState } from "../../ui.jsx";
 import { marketingService } from "../../services/marketingService.js";
+import { normalizeAudienceImportRecords, parseAudienceCsv, rowsToAudienceRecords } from "./audienceImportModel.js";
 import { campaignAdditionalBlocks, campaignContentBlocks, campaignStatusLabel, campaignToDraft, canLaunchCampaignDraft, isCampaignEditable } from "./marketingCampaignModel.js";
 import { insertEmojiAtSelection } from "./marketingEmojiModel.js";
 import "./communications-workspace.css";
@@ -591,7 +592,8 @@ function TestRecipientPicker({ availabilityMessage, canSend, onChange, onSend, r
 }
 
 function AudienceDialog({ onClose, onCreated, onToast }) {
-  const [draft, setDraft] = useState({ clientIds: "", name: "", records: "" });
+  const [draft, setDraft] = useState({ clientIds: "", fileName: "", name: "", records: [] });
+  const [importError, setImportError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const importFile = async (event) => {
     const [file] = Array.from(event.target.files ?? []);
@@ -601,26 +603,38 @@ function AudienceDialog({ onClose, onCreated, onToast }) {
       const name = file.name.toLowerCase();
       const readXlsxFile = name.endsWith(".xlsx") ? (await import("read-excel-file/browser")).default : null;
       const rows = readXlsxFile ? await readXlsxFile(file) : null;
-      const records = rows ? rowsToRecords(rows) : name.endsWith(".json") ? JSON.parse(await file.text()) : parseCsv(await file.text());
-      setDraft((current) => ({ ...current, records: JSON.stringify(records) }));
+      const parsed = rows ? rowsToAudienceRecords(rows) : name.endsWith(".json") ? normalizeAudienceImportRecords(JSON.parse(await file.text())) : parseAudienceCsv(await file.text());
+      const records = parsed.slice(0, 100_000);
+      if (!records.length) throw new Error("empty_import");
+      setImportError("");
+      setDraft((current) => ({ ...current, fileName: file.name, records }));
       onToast?.(`Файл загружен: ${records.length} строк. Сверка с базой выполнится при сохранении.`);
-    } catch { onToast?.("Не удалось прочитать файл. Проверьте формат CSV, XLSX или JSON."); }
+    } catch { setImportError("Не удалось прочитать строки файла. Проверьте формат и наличие строки заголовков."); onToast?.("Не удалось прочитать файл. Проверьте формат CSV, XLSX или JSON."); }
   };
   const submit = async (event) => {
     event.preventDefault();
     setSubmitting(true);
-    const records = draft.records ? JSON.parse(draft.records) : undefined;
+    setImportError("");
+    const records = draft.records.length ? draft.records : undefined;
+    const clientIds = draft.clientIds.split(",").map((item) => item.trim()).filter(Boolean);
     if (records?.length) {
       const preview = await marketingService.previewAudienceImport(records);
       if (preview.status !== "ok") { setSubmitting(false); onToast?.(preview.error?.message ?? "Не удалось сверить аудиторию."); return; }
+      if (!(preview.data?.summary?.matched ?? 0) && !clientIds.length) {
+        const message = "В файле не найдено клиентов из базы сервиса. Используйте колонки «Телефон», «Почта», clientId или externalId и проверьте значения.";
+        setSubmitting(false);
+        setImportError(message);
+        onToast?.(message);
+        return;
+      }
     }
-    const response = await marketingService.createAudience({ clientIds: draft.clientIds.split(",").map((item) => item.trim()).filter(Boolean), name: draft.name, records, source: records ? "import" : "manual" });
+    const response = await marketingService.createAudience({ clientIds, name: draft.name, records, source: records ? "import" : "manual" });
     setSubmitting(false);
-    if (response.status !== "ok") { onToast?.(response.error?.message ?? "Не удалось создать аудиторию."); return; }
+    if (response.status !== "ok") { const message = response.error?.code === "marketing_audience_invalid" ? "Не найдено ни одного клиента из базы сервиса. Проверьте идентификаторы, телефоны или почту в файле." : response.error?.message ?? "Не удалось создать аудиторию."; setImportError(message); onToast?.(message); return; }
     onToast?.(`Аудитория создана: сопоставлено ${response.data?.matchedCount ?? 0} клиентов.`);
     onCreated();
   };
-  return <Modal eyebrow="Новая аудитория" onClose={onClose} title="Кого включить в коммуникацию"><form className="communications-simple-form" onSubmit={submit}><label><span>Название аудитории</span><input autoFocus required onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Например, Активные клиенты" value={draft.name} /></label><div className="communications-import-zone"><Upload size={23} /><div><strong>Импортировать внешний список</strong><p>CSV, XLSX или JSON · только существующие клиенты попадут в аудиторию</p></div><label><input accept=".csv,.xlsx,.json" onChange={importFile} type="file" />Выбрать файл</label>{draft.records ? <span><Check size={14} /> Файл готов к сверке</span> : null}</div><div className="communications-or"><span>или</span></div><label><span>ID клиентов через запятую</span><textarea onChange={(event) => setDraft((current) => ({ ...current, clientIds: event.target.value }))} placeholder="client_1, client_2" value={draft.clientIds} /></label><footer><button onClick={onClose} type="button">Отмена</button><button className="primary-action" disabled={submitting} type="submit">{submitting ? "Сверяем…" : "Создать аудиторию"}</button></footer></form></Modal>;
+  return <Modal eyebrow="Новая аудитория" onClose={onClose} title="Кого включить в коммуникацию"><form className="communications-simple-form" onSubmit={submit}><label><span>Название аудитории</span><input autoFocus required onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Например, Активные клиенты" value={draft.name} /></label><div className="communications-import-zone"><Upload size={23} /><div><strong>Импортировать внешний список</strong><p>CSV, XLSX или JSON · поддерживаются Телефон, Почта, clientId и externalId</p></div><label><input accept=".csv,.xlsx,.json" onChange={importFile} type="file" />Выбрать файл</label>{draft.records.length ? <span><Check size={14} /> {draft.fileName} · {draft.records.length} строк готово к сверке</span> : null}</div>{importError ? <div className="communications-import-error" role="alert"><CircleAlert size={16} /><span>{importError}</span></div> : null}<div className="communications-or"><span>или</span></div><label><span>ID клиентов через запятую</span><textarea onChange={(event) => setDraft((current) => ({ ...current, clientIds: event.target.value }))} placeholder="client_1, client_2" value={draft.clientIds} /></label><footer><button onClick={onClose} type="button">Отмена</button><button className="primary-action" disabled={submitting} type="submit">{submitting ? "Сверяем…" : "Создать аудиторию"}</button></footer></form></Modal>;
 }
 
 function TemplateDialog({ onClose, onCreated, onToast }) {
@@ -670,5 +684,3 @@ function formatShortDate(value) { return new Intl.DateTimeFormat("ru-RU", { day:
 function formatTime(value) { return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
 function formatRelativeDate(value) { if (!value) return "недавно"; const hours = Math.max(1, Math.round((Date.now() - new Date(value).getTime()) / 3_600_000)); return hours < 24 ? `${hours} ч назад` : formatShortDate(value); }
 function shortCampaignId(value) { const source = String(value ?? ""); return source.length > 18 ? `ID: …${source.slice(-8)}` : source ? `ID: ${source}` : ""; }
-function parseCsv(text) { const rows = String(text).split(/\r?\n/).filter(Boolean).map((row) => row.split(/[;,]/).map((cell) => cell.trim())); const headers = rows.shift() ?? []; return rows.map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""]))); }
-function rowsToRecords(rows) { const [headers = [], ...body] = rows; return body.filter((row) => row.some((cell) => cell !== null && cell !== "")).map((row) => Object.fromEntries(headers.map((header, index) => [String(header ?? "").trim(), row[index] ?? ""]))); }

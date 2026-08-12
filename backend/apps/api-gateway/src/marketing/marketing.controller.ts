@@ -51,12 +51,13 @@ export class MarketingController {
   @Post("audiences")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "createMarketingAudience", summary: "Create a static audience from existing client profiles" })
-  @ApiBody({ schema: { example: { name: "Постоянные клиенты", clientIds: ["client_1"] } } })
-  audience(@Body() body: { clientIds?: string[]; name?: string }, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.createAudience(body ?? {}, context(request))); }
+  @ApiBody({ schema: { example: { name: "Постоянные клиенты", records: [{ "Номер телефона": 79991234567, "Электронная почта": "client@example.ru" }], source: "import" }, properties: { clientIds: { items: { type: "string" }, type: "array" }, matchOverrides: { additionalProperties: { type: "string" }, type: "object" }, name: { type: "string" }, records: { items: { additionalProperties: true, type: "object" }, maxItems: 100000, type: "array" }, source: { enum: ["manual", "import", "crm"], type: "string" } }, required: ["name"], type: "object" } })
+  audience(@Body() body: { clientIds?: string[]; matchOverrides?: Record<string, string>; name?: string; records?: Record<string, unknown>[]; source?: string }, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.createAudience(body ?? {}, context(request))); }
 
   @Post("audiences/import-preview")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: "previewMarketingAudienceImport", summary: "Match external audience rows before a user confirms ambiguous rows" })
+  @ApiBody({ schema: { example: { records: [{ "Телефон": "+7 (999) 123-45-67" }, { email: "client@example.ru" }] }, properties: { records: { description: "Rows keyed by clientId, externalId, phone/email or common Russian spreadsheet aliases such as Телефон, Номер телефона, Почта and Электронная почта.", items: { additionalProperties: true, type: "object" }, maxItems: 100000, type: "array" } }, required: ["records"], type: "object" } })
   previewAudienceImport(@Body() body: { records?: Record<string, unknown>[] }, @Req() request: TenantOperatorRequest) { return this.run(() => this.marketingService.previewAudienceImport(body ?? {}, context(request))); }
 
   @Patch("audiences/:audienceId/archive")

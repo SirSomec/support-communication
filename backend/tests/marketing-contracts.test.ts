@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingChannelIsRestricted, marketingChannelRestrictionKey, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizeMarketingChannel, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, isMarketingTenantOwner, marketingChannelIsRestricted, marketingChannelRestrictionKey, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizeMarketingChannel, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -86,6 +86,14 @@ describe("marketing channel restrictions", () => {
     const restrictions = new Set([marketingChannelRestrictionKey("client-1", "max")]);
     assert.equal(marketingConsentAllowsDelivery("granted", true), true);
     assert.equal(marketingChannelIsRestricted(restrictions, "client-1", "max"), true);
+  });
+});
+
+describe("marketing tenant owner resolution", () => {
+  it("recognizes an explicit owner role or the tenant owner email without granting access to other admins", () => {
+    assert.equal(isMarketingTenantOwner({ email: "operator@example.com", role: "Owner" }, {}), true);
+    assert.equal(isMarketingTenantOwner({ email: "Owner@Example.com", role: "Admin" }, { ownerEmail: "owner@example.com" }), true);
+    assert.equal(isMarketingTenantOwner({ email: "admin@example.com", role: "Admin" }, { ownerEmail: "owner@example.com" }), false);
   });
 });
 

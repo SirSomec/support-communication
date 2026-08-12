@@ -40,6 +40,11 @@ export function marketingChannelRestrictionKey(clientId: unknown, channel: unkno
 export function marketingChannelIsRestricted(restrictionKeys: ReadonlySet<string>, clientId: unknown, channel: unknown): boolean {
   return restrictionKeys.has(marketingChannelRestrictionKey(clientId, channel));
 }
+export function isMarketingTenantOwner(user: { email?: unknown; role?: unknown } | null | undefined, tenantMetadata: unknown): boolean {
+  if (String(user?.role ?? "").trim().toLowerCase() === "owner") return true;
+  const ownerEmail = isRecord(tenantMetadata) ? normalizeEmail(tenantMetadata.ownerEmail) : "";
+  return Boolean(ownerEmail && ownerEmail === normalizeEmail(user?.email));
+}
 const prisma = createPrismaClient() as any;
 
 export interface MarketingContext {
@@ -1141,17 +1146,21 @@ export class MarketingService {
   }
 
   private async requireOwner(context: MarketingContext) {
-    const user = await prisma.tenantUser.findUnique({ where: { tenantId_id: { tenantId: context.tenantId, id: context.userId } }, select: { role: true } });
-    if (String(user?.role ?? "").toLowerCase() !== "owner") throw new MarketingAccessError("tenant_owner_required");
+    const [user, tenant] = await Promise.all([
+      prisma.tenantUser.findUnique({ where: { tenantId_id: { tenantId: context.tenantId, id: context.userId } }, select: { email: true, role: true } }),
+      prisma.tenant.findUnique({ where: { id: context.tenantId }, select: { metadata: true } })
+    ]);
+    if (!isMarketingTenantOwner(user, tenant?.metadata)) throw new MarketingAccessError("tenant_owner_required");
   }
 
   private async resolveAccess(context: MarketingContext): Promise<{ allowed: boolean; isOwner: boolean; reason: string }> {
-    const [settings, user, grant] = await Promise.all([
+    const [settings, user, grant, tenant] = await Promise.all([
       this.ensureSettings(context.tenantId),
-      prisma.tenantUser.findUnique({ where: { tenantId_id: { tenantId: context.tenantId, id: context.userId } }, select: { role: true } }),
-      prisma.marketingAccess.findUnique({ where: { tenantId_userId: { tenantId: context.tenantId, userId: context.userId } } })
+      prisma.tenantUser.findUnique({ where: { tenantId_id: { tenantId: context.tenantId, id: context.userId } }, select: { email: true, role: true } }),
+      prisma.marketingAccess.findUnique({ where: { tenantId_userId: { tenantId: context.tenantId, userId: context.userId } } }),
+      prisma.tenant.findUnique({ where: { id: context.tenantId }, select: { metadata: true } })
     ]);
-    const isOwner = String(user?.role ?? "").toLowerCase() === "owner";
+    const isOwner = isMarketingTenantOwner(user, tenant?.metadata);
     if (settings.moduleStatus !== "active") return { allowed: false, isOwner, reason: "marketing_module_inactive" };
     return { allowed: isOwner || Boolean(grant?.enabled), isOwner, reason: "marketing_access_required" };
   }

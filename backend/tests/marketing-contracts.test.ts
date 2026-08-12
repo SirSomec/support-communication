@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, isMarketingTenantOwner, marketingChannelIsRestricted, marketingChannelRestrictionKey, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingConversationSourceProfileId, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizeMarketingChannel, normalizeMarketingImportRecord, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, isMarketingTenantOwner, marketingChannelIsRestricted, marketingChannelRestrictionKey, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingContentForChannel, marketingConversationSourceProfileId, marketingDestinationIsUsable, marketingDestinationKey, marketingDestinationPayload, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizeMarketingChannel, normalizeMarketingImportRecord, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -125,7 +125,18 @@ describe("marketing import identifiers", () => {
 describe("marketing test recipient search", () => {
   it("matches a saved provider destination by phone and normalized channel", () => {
     assert.equal(marketingDestinationKey("+79991234567", "Telegram"), marketingDestinationKey("+79991234567", "telegram"));
+    assert.equal(marketingDestinationKey("8 (999) 123-45-67", "Telegram"), marketingDestinationKey("+7 999 123-45-67", "telegram"));
     assert.notEqual(marketingDestinationKey("+79991234567", "telegram"), marketingDestinationKey("+79991234567", "vk"));
+  });
+
+  it("requires an address and provider connection where the official connector needs one", () => {
+    const telegram = { channelConnectionId: null, providerConversationId: "chat-42" };
+    const max = { channelConnectionId: "connection-max", providerConversationId: "chat-7" };
+    assert.equal(marketingDestinationIsUsable("telegram", telegram), true);
+    assert.equal(marketingDestinationIsUsable("max", telegram), false);
+    assert.equal(marketingDestinationIsUsable("vk", undefined), false);
+    assert.equal(marketingDestinationIsUsable("max", max), true);
+    assert.deepEqual(marketingDestinationPayload(max), { channelConnectionId: "connection-max", providerConversationId: "chat-7" });
   });
 
   it("normalizes surname, phone, and email search terms", () => {

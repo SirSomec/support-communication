@@ -115,6 +115,7 @@ export function MarketingScreen({ onBack, onToast }) {
     const method = action === "launch" ? marketingService.launchCampaign
       : action === "pause" ? marketingService.pauseCampaign
         : action === "resume" ? marketingService.resumeCampaign
+          : action === "retry" ? marketingService.retryFailedCampaign
           : marketingService.cancelCampaign;
     const response = await method(campaign.id);
     onToast?.(response.status === "ok" ? "Статус кампании обновлён." : response.error?.message ?? "Операция не выполнена.");
@@ -237,6 +238,7 @@ function CampaignRow({ audienceName, campaign, onClone, onExecute, onOpen, onRes
     <td className="communications-row-menu"><button aria-expanded={menuOpen} aria-label={`Действия: ${campaign.title}`} onClick={() => setMenuOpen((value) => !value)} type="button"><Ellipsis size={18} /></button>{menuOpen ? <div className="communications-menu">
       <button onClick={() => { setMenuOpen(false); onResults(campaign); }} type="button"><BarChart3 size={14} /> Статистика</button>
       <button onClick={() => { setMenuOpen(false); onClone(campaign); }} type="button"><Copy size={14} /> Дублировать</button>
+      {Number(campaign.deliverySummary?.failed ?? 0) > 0 ? <button onClick={() => { setMenuOpen(false); onExecute(campaign, "retry"); }} type="button"><RefreshCw size={14} /> Повторить ошибки</button> : null}
       {campaign.status === "sending" ? <button onClick={() => { setMenuOpen(false); onExecute(campaign, "pause"); }} type="button"><Pause size={14} /> Поставить на паузу</button> : null}
       {campaign.status === "paused" ? <button onClick={() => { setMenuOpen(false); onExecute(campaign, "resume"); }} type="button"><Play size={14} /> Продолжить</button> : null}
     </div> : null}</td>

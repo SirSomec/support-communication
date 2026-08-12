@@ -227,7 +227,11 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
   async function toggleChannelRestriction(channel, blocked) {
     if (!selected || restrictionSavingChannel) return;
     const normalizedChannel = String(channel).toLowerCase();
+    const previousRestrictions = marketingRestrictions;
     setRestrictionSavingChannel(normalizedChannel);
+    setMarketingRestrictions((current) => blocked
+      ? [...current.filter((item) => String(item.channel).toLowerCase() !== normalizedChannel), { blocked: true, channel: normalizedChannel, clientId: getClientMutationProfileId(selected) }]
+      : current.filter((item) => String(item.channel).toLowerCase() !== normalizedChannel));
     const response = await marketingService.updateClientChannelRestriction(getClientMutationProfileId(selected), {
       blocked,
       channel: normalizedChannel,
@@ -235,6 +239,7 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     });
     setRestrictionSavingChannel("");
     if (response.status !== "ok") {
+      setMarketingRestrictions(previousRestrictions);
       onToast(response.error?.message ?? "Не удалось изменить запрет коммуникаций.");
       return;
     }

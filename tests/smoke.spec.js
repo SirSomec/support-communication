@@ -268,11 +268,11 @@ test("audience file import accepts Russian spreadsheet headers and numeric phone
   expect(activation.ok()).toBeTruthy();
 
   await selectRole(page, "Администратор");
-  await openSection(page, "Коммуникации");
+  await openSection(page, "Рассылки");
   await page.getByRole("button", { name: "Аудитории", exact: true }).click();
   await page.getByRole("button", { name: "Создать аудиторию", exact: true }).first().click();
 
-  const dialog = page.getByRole("dialog", { name: "Кого включить в коммуникацию" });
+  const dialog = page.getByRole("dialog", { name: "Кого включить в рассылку" });
   await dialog.getByLabel("Название аудитории").fill("Импорт с русскими колонками");
   await dialog.locator('input[type="file"]').setInputFiles({
     name: "clients.csv",
@@ -327,10 +327,10 @@ test("audience import asks which client profile to use for duplicate phone match
   });
 
   await selectRole(page, "Администратор");
-  await openSection(page, "Коммуникации");
+  await openSection(page, "Рассылки");
   await page.getByRole("button", { name: "Аудитории", exact: true }).click();
   await page.getByRole("button", { name: "Создать аудиторию", exact: true }).first().click();
-  const dialog = page.getByRole("dialog", { name: "Кого включить в коммуникацию" });
+  const dialog = page.getByRole("dialog", { name: "Кого включить в рассылку" });
   await dialog.getByLabel("Название аудитории").fill("Дубликаты по телефону");
   await dialog.locator('input[type="file"]').setInputFiles({ name: "clients.csv", mimeType: "text/csv", buffer: Buffer.from("phone\r\n79162818330", "utf8") });
   await dialog.getByRole("button", { name: "Создать аудиторию" }).click();

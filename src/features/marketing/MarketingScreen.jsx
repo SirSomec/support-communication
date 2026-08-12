@@ -50,7 +50,7 @@ export function MarketingScreen({ onBack, onToast }) {
     }
     const response = await marketingService.fetchWorkspace();
     if (response.status !== "ok") {
-      setError(response.error?.message ?? "Не удалось загрузить коммуникации.");
+      setError(response.error?.message ?? "Не удалось загрузить рассылки.");
       setStatus("error");
       return;
     }
@@ -263,13 +263,13 @@ export function MarketingScreen({ onBack, onToast }) {
       onToast?.(response.error?.message ?? "Не удалось подключить модуль.");
       return;
     }
-    onToast?.("Модуль коммуникаций подключён. Тариф можно изменить в настройках модуля.");
+    onToast?.("Модуль рассылок подключён. Тариф можно изменить в настройках модуля.");
     void loadWorkspace();
   };
 
   const updateUserAccess = async (user) => {
     const response = await marketingService.updateAccess(user.id, !user.marketingEnabled);
-    onToast?.(response.status === "ok" ? `Доступ к коммуникациям ${user.marketingEnabled ? "отозван" : "выдан"}.` : response.error?.message ?? "Не удалось изменить доступ.");
+    onToast?.(response.status === "ok" ? `Доступ к рассылкам ${user.marketingEnabled ? "отозван" : "выдан"}.` : response.error?.message ?? "Не удалось изменить доступ.");
     if (response.status === "ok") void loadWorkspace();
   };
 
@@ -303,38 +303,38 @@ export function MarketingScreen({ onBack, onToast }) {
       quietHoursEnd: Number(settingsDraft.quietHoursEnd),
       quietHoursStart: Number(settingsDraft.quietHoursStart)
     });
-    onToast?.(response.status === "ok" ? "Настройки маркетинговых коммуникаций сохранены." : response.error?.message ?? "Не удалось сохранить настройки.");
+    onToast?.(response.status === "ok" ? "Настройки маркетинговых рассылок сохранены." : response.error?.message ?? "Не удалось сохранить настройки.");
     if (response.status === "ok") void loadWorkspace();
   };
 
   return (
-    <ProductScreen title="Коммуникации" subtitle="Персональные и массовые маркетинговые кампании" onBack={onBack} backLabel="Диалоги" actions={<div className="marketing-header-actions">{workspace.access?.isOwner ? <button aria-label="Открыть настройки коммуникаций" className="marketing-icon-button" onClick={() => setSettingsOpen(true)} title="Настройки" type="button"><Settings2 size={18} /></button> : null}<button className="primary-action" onClick={loadWorkspace} type="button"><RefreshCw size={16} /> Обновить</button></div>}>
+    <ProductScreen title="Рассылки" subtitle="Персональные и массовые маркетинговые кампании" onBack={onBack} backLabel="Диалоги" actions={<div className="marketing-header-actions">{workspace.access?.isOwner ? <button aria-label="Открыть настройки рассылок" className="marketing-icon-button" onClick={() => setSettingsOpen(true)} title="Настройки" type="button"><Settings2 size={18} /></button> : null}<button className="primary-action" onClick={loadWorkspace} type="button"><RefreshCw size={16} /> Обновить</button></div>}>
       {status === "loading" ? <WorkspaceState tone="loading" title="Загружаем кампании" /> : null}
-      {status === "error" ? <WorkspaceState tone="error" title="Коммуникации недоступны" description={error} actionLabel="Повторить" onAction={loadWorkspace} /> : null}
+      {status === "error" ? <WorkspaceState tone="error" title="Рассылки недоступны" description={error} actionLabel="Повторить" onAction={loadWorkspace} /> : null}
       {status === "inactive" ? <section className="marketing-activation">
-        <div><span className="marketing-eyebrow">Платный модуль</span><h2>Маркетинговые коммуникации</h2><p>Создавайте персональные и массовые кампании только для клиентов с согласием в выбранном канале. Включены статические аудитории, импорт с сопоставлением существующих профилей, тихие часы, шаблоны и статистика.</p><small>Тестовые и сообщения для запроса согласия не тарифицируются. Повторные попытки доставки бесплатны.</small></div>
-        {accessInfo?.isOwner ? <div className="marketing-plan-grid">{marketingPlans.map((plan) => <article key={plan.key}><strong>{plan.name}</strong><b>{plan.price}</b><span>{plan.included}</span><small>{plan.overage}</small><button className="primary-action" disabled={Boolean(activatingPlan)} onClick={() => activateModule(plan.key)} type="button">{activatingPlan === plan.key ? "Подключаем…" : "Подключить"}</button></article>)}</div> : <WorkspaceState tone="empty" title="Модуль не подключён" description="Попросите владельца организации подключить тариф и выдать вам доступ к коммуникациям." />}
+        <div><span className="marketing-eyebrow">Платный модуль</span><h2>Маркетинговые рассылки</h2><p>Создавайте персональные и массовые кампании только для клиентов с согласием в выбранном канале. Включены статические аудитории, импорт с сопоставлением существующих профилей, тихие часы, шаблоны и статистика.</p><small>Тестовые и сообщения для запроса согласия не тарифицируются. Повторные попытки доставки бесплатны.</small></div>
+        {accessInfo?.isOwner ? <div className="marketing-plan-grid">{marketingPlans.map((plan) => <article key={plan.key}><strong>{plan.name}</strong><b>{plan.price}</b><span>{plan.included}</span><small>{plan.overage}</small><button className="primary-action" disabled={Boolean(activatingPlan)} onClick={() => activateModule(plan.key)} type="button">{activatingPlan === plan.key ? "Подключаем…" : "Подключить"}</button></article>)}</div> : <WorkspaceState tone="empty" title="Модуль не подключён" description="Попросите владельца организации подключить тариф и выдать вам доступ к рассылкам." />}
       </section> : null}
       {status === "ready" ? <div className={`marketing-workspace marketing-view-${activeView}`}>
         <section className="marketing-commandbar">
-          <div><span className="marketing-eyebrow">Центр коммуникаций</span><h2>Кампании без лишнего шума</h2><p>Создавайте, запускайте и проверяйте рассылки в одном рабочем пространстве.</p></div>
+          <div><span className="marketing-eyebrow">Центр рассылок</span><h2>Кампании без лишнего шума</h2><p>Создавайте, запускайте и проверяйте рассылки в одном рабочем пространстве.</p></div>
           <div className="marketing-commandbar-meta"><span><Check size={15} /> Согласия и тихие часы учитываются автоматически</span></div>
         </section>
-        <nav aria-label="Разделы коммуникаций" className="marketing-tabs">
+        <nav aria-label="Разделы рассылок" className="marketing-tabs">
           <button aria-current={activeView === "campaigns" ? "page" : undefined} className={activeView === "campaigns" ? "is-active" : ""} onClick={() => setActiveView("campaigns")} type="button"><Megaphone size={16} /> Кампании</button>
           <button aria-current={activeView === "audiences" ? "page" : undefined} className={activeView === "audiences" ? "is-active" : ""} onClick={() => setActiveView("audiences")} type="button"><UsersRound size={16} /> Аудитории</button>
           <button aria-current={activeView === "templates" ? "page" : undefined} className={activeView === "templates" ? "is-active" : ""} onClick={() => setActiveView("templates")} type="button"><Copy size={16} /> Шаблоны</button>
           <button aria-current={activeView === "analytics" ? "page" : undefined} className={activeView === "analytics" ? "is-active" : ""} onClick={() => setActiveView("analytics")} type="button"><BarChart3 size={16} /> Аналитика</button>
         </nav>
-        {activeView === "analytics" ? <section className="marketing-analytics"><div><span className="marketing-eyebrow">Обзор периода</span><h2>Результаты коммуникаций</h2><p>Следите за объёмом отправок и быстрее находите кампании, которым нужно внимание.</p></div><div className="marketing-analytics-grid"><article><span>Сообщений отправлено</span><strong>{workspace.usage?.messages ?? 0}</strong></article><article><span>Кампаний в работе</span><strong>{campaignRows.filter((campaign) => ["scheduled", "sending", "paused"].includes(campaign.status)).length}</strong></article><article><span>Ошибок доставки</span><strong>{campaignRows.reduce((total, campaign) => total + Number(campaign.deliverySummary?.failed ?? 0), 0)}</strong></article></div></section> : null}
-        <section className="marketing-summary" aria-label="Сводка коммуникаций" hidden={activeView !== "campaigns"}>
+        {activeView === "analytics" ? <section className="marketing-analytics"><div><span className="marketing-eyebrow">Обзор периода</span><h2>Результаты рассылок</h2><p>Следите за объёмом отправок и быстрее находите кампании, которым нужно внимание.</p></div><div className="marketing-analytics-grid"><article><span>Сообщений отправлено</span><strong>{workspace.usage?.messages ?? 0}</strong></article><article><span>Кампаний в работе</span><strong>{campaignRows.filter((campaign) => ["scheduled", "sending", "paused"].includes(campaign.status)).length}</strong></article><article><span>Ошибок доставки</span><strong>{campaignRows.reduce((total, campaign) => total + Number(campaign.deliverySummary?.failed ?? 0), 0)}</strong></article></div></section> : null}
+        <section className="marketing-summary" aria-label="Сводка рассылок" hidden={activeView !== "campaigns"}>
           <article><Megaphone size={20} /><span>Кампании</span><strong>{campaignRows.length}</strong></article>
           <article><UsersRound size={20} /><span>Статические аудитории</span><strong>{audiences.length}</strong></article>
           <article><SendHorizontal size={20} /><span>Тариф</span><strong>{workspace.settings?.planKey ?? "Не подключён"}</strong></article>
           <article><SendHorizontal size={20} /><span>Расход за период</span><strong>{workspace.usage?.messages ?? 0}</strong><small>{formatRoubles(workspace.usage?.overageKopeks ?? 0)} сверх лимита</small></article>
         </section>
         <section className="marketing-settings-workspace" hidden={activeView !== "settings"}>
-          <header><span className="marketing-eyebrow">Настройки коммуникаций</span><h2>Доступы, API и правила отправки</h2><p>Управляйте участниками, интеграциями и политикой согласий в отдельном рабочем разделе.</p></header>
+          <header><span className="marketing-eyebrow">Настройки рассылок</span><h2>Доступы, API и правила отправки</h2><p>Управляйте участниками, интеграциями и политикой согласий в отдельном рабочем разделе.</p></header>
         {workspace.access?.isOwner ? <section className="marketing-access-panel"><div><h2>Доступ и API</h2><p>Владелец выдаёт полный доступ к модулю индивидуально. Роли и другие права не меняются.</p><button onClick={createApiKey} type="button">Создать API-ключ</button>{apiSecret ? <code className="marketing-api-secret">{apiSecret}</code> : null}<form className="marketing-settings-form" onSubmit={saveSettings}><strong>Тихие часы и согласие</strong><label>С <select value={settingsDraft.quietHoursStart} onChange={(event) => setSettingsDraft((value) => ({ ...value, quietHoursStart: event.target.value }))}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>)}</select></label><label>До <select value={settingsDraft.quietHoursEnd} onChange={(event) => setSettingsDraft((value) => ({ ...value, quietHoursEnd: event.target.value }))}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>)}</select></label><label>Текст согласия<textarea value={settingsDraft.consentText} onChange={(event) => setSettingsDraft((value) => ({ ...value, consentText: event.target.value }))} /></label><button type="submit">Сохранить</button></form></div><div className="marketing-access-list">{users.map((user) => <article key={user.id}><span><strong>{user.name}</strong><small>{user.email} · {user.role}</small></span><button className={user.marketingEnabled ? "danger-action" : "primary-action"} disabled={String(user.role).toLowerCase() === "owner"} onClick={() => updateUserAccess(user)} type="button">{user.marketingEnabled ? "Отозвать доступ" : "Выдать доступ"}</button></article>)}</div></section> : null}
         {workspace.access?.isOwner ? <section className="marketing-api-key-list"><div><h2>{"\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 API-\u043a\u043b\u044e\u0447\u0438"}</h2><p>{"\u0421\u0435\u043a\u0440\u0435\u0442 \u0432\u044b\u0434\u0430\u0451\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u043e\u0434\u0438\u043d \u0440\u0430\u0437. \u041e\u0442\u0437\u044b\u0432 \u043d\u0435\u043c\u0435\u0434\u043b\u0435\u043d\u043d\u043e \u043f\u0440\u0435\u043a\u0440\u0430\u0449\u0430\u0435\u0442 API-\u0434\u043e\u0441\u0442\u0443\u043f."}</p></div>{apiKeys.length ? <div className="marketing-api-key-rows">{apiKeys.map((apiKey) => <article key={apiKey.id}><span><strong>mk_live_…{apiKey.keyLastFour}</strong><small>{apiKey.revokedAt ? "\u043e\u0442\u043e\u0437\u0432\u0430\u043d" : "\u0430\u043a\u0442\u0438\u0432\u0435\u043d"} · {apiKey.lastUsedAt ? new Date(apiKey.lastUsedAt).toLocaleString("ru-RU") : "\u0435\u0449\u0451 \u043d\u0435 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043b\u0441\u044f"}</small></span>{!apiKey.revokedAt ? <button className="danger-action" onClick={() => revokeApiKey(apiKey.id)} type="button">{"\u041e\u0442\u043e\u0437\u0432\u0430\u0442\u044c"}</button> : null}</article>)}</div> : <small>{"\u041a\u043b\u044e\u0447\u0435\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442."}</small>}</section> : null}
         </section>
@@ -391,9 +391,9 @@ function MarketingSettingsDialog({ apiKeys, apiSecret, onClose, onCopyApiSecret,
   const [section, setSection] = useState("general");
   const closeOnBackdrop = (event) => { if (event.target === event.currentTarget) onClose(); };
   return <div className="marketing-dialog-backdrop" onMouseDown={closeOnBackdrop}>
-    <section aria-label="Настройки коммуникаций" aria-modal="true" className="marketing-dialog" role="dialog">
+    <section aria-label="Настройки рассылок" aria-modal="true" className="marketing-dialog" role="dialog">
       <header className="marketing-dialog-header">
-        <div><span className="marketing-eyebrow">Настройки</span><h2>Коммуникации</h2><p>Доступы, интеграции и правила отправки собраны в одном месте.</p></div>
+        <div><span className="marketing-eyebrow">Настройки</span><h2>Рассылки</h2><p>Доступы, интеграции и правила отправки собраны в одном месте.</p></div>
         <button aria-label="Закрыть настройки" className="marketing-icon-button" onClick={onClose} type="button"><X size={18} /></button>
       </header>
       <div className="marketing-settings-layout">
@@ -409,7 +409,7 @@ function MarketingSettingsDialog({ apiKeys, apiSecret, onClose, onCopyApiSecret,
             <label>Текст согласия<textarea value={settingsDraft.consentText} onChange={(event) => setSettingsDraft((value) => ({ ...value, consentText: event.target.value }))} /></label>
             <footer><button className="primary-action" type="submit"><Check size={16} /> Сохранить изменения</button></footer>
           </form> : null}
-          {section === "access" ? <div className="marketing-settings-section"><div><h3>Доступ к коммуникациям</h3><p>Владелец выдаёт доступ каждому пользователю отдельно. Остальные роли не меняются.</p></div><div className="marketing-access-list marketing-access-list-modern">{users.map((user) => <article key={user.id}><span><strong>{user.name}</strong><small>{user.email} · {user.role}</small></span><button className={user.marketingEnabled ? "danger-action" : "primary-action"} disabled={String(user.role).toLowerCase() === "owner"} onClick={() => onUpdateUserAccess(user)} type="button">{user.marketingEnabled ? "Отозвать доступ" : "Выдать доступ"}</button></article>)}</div></div> : null}
+          {section === "access" ? <div className="marketing-settings-section"><div><h3>Доступ к рассылкам</h3><p>Владелец выдаёт доступ каждому пользователю отдельно. Остальные роли не меняются.</p></div><div className="marketing-access-list marketing-access-list-modern">{users.map((user) => <article key={user.id}><span><strong>{user.name}</strong><small>{user.email} · {user.role}</small></span><button className={user.marketingEnabled ? "danger-action" : "primary-action"} disabled={String(user.role).toLowerCase() === "owner"} onClick={() => onUpdateUserAccess(user)} type="button">{user.marketingEnabled ? "Отозвать доступ" : "Выдать доступ"}</button></article>)}</div></div> : null}
           {section === "api" ? <div className="marketing-settings-section"><div className="marketing-api-intro"><div><h3>API-ключи</h3><p>Секрет показывается только после создания. Отзыв ключа сразу блокирует API-доступ.</p></div><button className="primary-action" onClick={onCreateApiKey} type="button"><KeyRound size={16} /> Создать ключ</button></div>{apiSecret ? <div className="marketing-api-secret-card"><span>Новый секрет — сохраните его сейчас</span><code>{apiSecret}</code><button onClick={onCopyApiSecret} type="button"><Copy size={16} /> Скопировать</button></div> : null}<div className="marketing-api-key-rows marketing-api-key-rows-modern">{apiKeys.length ? apiKeys.map((apiKey) => <article key={apiKey.id}><span><strong>mk_live_…{apiKey.keyLastFour}</strong><small>{apiKey.revokedAt ? "отозван" : "активен"} · {apiKey.lastUsedAt ? new Date(apiKey.lastUsedAt).toLocaleString("ru-RU") : "ещё не использовался"}</small></span>{!apiKey.revokedAt ? <button className="danger-action" onClick={() => onRevokeApiKey(apiKey.id)} type="button">Отозвать</button> : null}</article>) : <div className="marketing-settings-empty"><KeyRound size={22} /><span>Активных ключей пока нет.</span></div>}</div></div> : null}
         </div>
       </div>

@@ -31,7 +31,7 @@ const navGroups = [
     id: "control",
     label: "Контроль",
     items: [
-      { id: "marketing", label: "Коммуникации", hint: "Доступы, API-ключи и согласия", icon: KeyRound },
+      { id: "marketing", label: "Рассылки", hint: "Доступы, API-ключи и согласия", icon: KeyRound },
       { id: "rules", label: "Правила", hint: "Ограничения обработки обращений", icon: ListChecks },
       { id: "security", label: "Безопасность", hint: "Сессии, 2FA и диагностика", icon: ShieldCheck }
     ]

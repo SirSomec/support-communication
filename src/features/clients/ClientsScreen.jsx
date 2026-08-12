@@ -211,9 +211,9 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
       title: `Персонально · ${selected.name}`
     });
     setMarketingSending(false);
-    if (response.status !== "ok") { onToast(response.error?.message ?? "Не удалось создать персональную коммуникацию."); return; }
+    if (response.status !== "ok") { onToast(response.error?.message ?? "Не удалось создать персональную кампанию."); return; }
     setMarketingDraft("");
-    onToast("Персональная коммуникация создана в черновиках раздела «Коммуникации».");
+    onToast("Персональная кампания создана в черновиках раздела «Рассылки».");
   }
 
   async function withdrawMarketingConsent() {
@@ -241,13 +241,13 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
     setRestrictionSavingChannel("");
     if (response.status !== "ok") {
       setMarketingRestrictions(previousRestrictions);
-      onToast(response.error?.message ?? "Не удалось изменить запрет коммуникаций.");
+      onToast(response.error?.message ?? "Не удалось изменить запрет рассылок.");
       return;
     }
     setMarketingRestrictions((current) => blocked
       ? [...current.filter((item) => String(item.channel).toLowerCase() !== normalizedChannel), response.data?.restriction].filter(Boolean)
       : current.filter((item) => String(item.channel).toLowerCase() !== normalizedChannel));
-    onToast(blocked ? `Коммуникации в канале ${channel} запрещены.` : `Коммуникации в канале ${channel} снова разрешены.`);
+    onToast(blocked ? `Рассылки в канале ${channel} запрещены.` : `Рассылки в канале ${channel} снова разрешены.`);
   }
 
   return (
@@ -338,17 +338,17 @@ export function ClientsScreen({ conversations, onBack, onToast, access }) {
           </section>
 
           <section className="work-panel">
-            <SectionTitle title="Маркетинговая коммуникация" action={selected.channel} />
+            <SectionTitle title="Персональная рассылка" action={selected.channel} />
             <form className="client-marketing-form" onSubmit={createPersonalMarketingDraft}>
               <p>Создаёт персональный черновик для этого клиента. Перед запуском будут проверены канал и согласие.</p>
               <textarea maxLength={4000} onChange={(event) => setMarketingDraft(event.target.value)} placeholder="Текст сообщения, эмодзи и переменные" value={marketingDraft} />
-              <button className="primary-action" disabled={marketingSending || selectedChannelRestricted || !marketingDraft.trim()} title={selectedChannelRestricted ? "Для этого клиента запрещены коммуникации в выбранном канале" : undefined} type="submit"><Megaphone size={16} /> {marketingSending ? "Создаём…" : "Создать черновик"}</button>
+              <button className="primary-action" disabled={marketingSending || selectedChannelRestricted || !marketingDraft.trim()} title={selectedChannelRestricted ? "Для этого клиента запрещены рассылки в выбранном канале" : undefined} type="submit"><Megaphone size={16} /> {marketingSending ? "Создаём…" : "Создать черновик"}</button>
             </form>
             <div className="client-marketing-consent"><strong>{"\u0421\u043e\u0433\u043b\u0430\u0441\u0438\u0435 \u0432 \u043a\u0430\u043d\u0430\u043b\u0435"}</strong><span>{marketingConsents.find((consent) => consent.channel === selected.channel)?.status ?? "\u043d\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u0438"}</span><button className="danger-action" onClick={withdrawMarketingConsent} type="button">{"\u041e\u0442\u043e\u0437\u0432\u0430\u0442\u044c \u0441\u043e\u0433\u043b\u0430\u0441\u0438\u0435"}</button><small>{"\u041e\u0442\u0437\u044b\u0432 \u0432\u044b\u043f\u043e\u043b\u043d\u044f\u0435\u0442\u0441\u044f \u0432\u0440\u0443\u0447\u043d\u0443\u044e \u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u0435\u0442\u0441\u044f \u0432 \u0436\u0443\u0440\u043d\u0430\u043b\u0435."}</small></div>
             <div className="client-channel-restrictions">
               <div className="client-channel-restrictions-head">
                 <span className="client-channel-restrictions-icon"><Ban size={17} /></span>
-                <span><strong>Запрет коммуникаций</strong><small>Запрет имеет приоритет над согласием и настройкой рассылок без согласия.</small></span>
+                <span><strong>Запрет рассылок</strong><small>Запрет имеет приоритет над согласием и настройкой рассылок без согласия.</small></span>
               </div>
               <div className="client-channel-restriction-list">
                 {(marketingChannels.length ? marketingChannels : [selected.channel]).map((channel) => {

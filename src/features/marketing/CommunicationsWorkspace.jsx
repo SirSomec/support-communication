@@ -68,7 +68,7 @@ export function MarketingScreen({ onBack, onToast }) {
     setError("");
     const accessResponse = await marketingService.getAccessStatus();
     if (accessResponse.status !== "ok") {
-      setError(accessResponse.error?.message ?? "Не удалось проверить доступ к коммуникациям.");
+      setError(accessResponse.error?.message ?? "Не удалось проверить доступ к рассылкам.");
       setStatus("error");
       return;
     }
@@ -80,7 +80,7 @@ export function MarketingScreen({ onBack, onToast }) {
     }
     const response = await marketingService.fetchWorkspace();
     if (response.status !== "ok") {
-      setError(response.error?.message ?? "Не удалось загрузить коммуникации.");
+      setError(response.error?.message ?? "Не удалось загрузить рассылки.");
       setStatus("error");
       return;
     }
@@ -98,7 +98,7 @@ export function MarketingScreen({ onBack, onToast }) {
       onToast?.(response.error?.message ?? "Не удалось подключить модуль.");
       return;
     }
-    onToast?.("Модуль коммуникаций подключён.");
+    onToast?.("Модуль рассылок подключён.");
     void loadWorkspace();
   };
 
@@ -131,16 +131,16 @@ export function MarketingScreen({ onBack, onToast }) {
   return (
     <ProductScreen
       actions={status === "ready" ? <div className="communications-page-actions">
-        <button aria-label="Обновить коммуникации" className="communications-icon-button" onClick={loadWorkspace} title="Обновить" type="button"><RefreshCw size={17} /></button>
+        <button aria-label="Обновить рассылки" className="communications-icon-button" onClick={loadWorkspace} title="Обновить" type="button"><RefreshCw size={17} /></button>
         <button className="primary-action communications-primary-action" onClick={() => setCampaignDialog({ campaign: null })} type="button"><Plus size={17} /> Создать кампанию</button>
       </div> : null}
       backLabel="Диалоги"
       onBack={onBack}
       subtitle="Планируйте сообщения по нужным каналам и отслеживайте результат"
-      title="Коммуникации"
+      title="Рассылки"
     >
       {status === "loading" ? <WorkspaceState tone="loading" title="Загружаем рабочее пространство" /> : null}
-      {status === "error" ? <WorkspaceState actionLabel="Повторить" description={error} onAction={loadWorkspace} tone="error" title="Коммуникации недоступны" /> : null}
+      {status === "error" ? <WorkspaceState actionLabel="Повторить" description={error} onAction={loadWorkspace} tone="error" title="Рассылки недоступны" /> : null}
       {status === "inactive" ? <ActivationScreen accessInfo={accessInfo} activatingPlan={activatingPlan} onActivate={activateModule} /> : null}
       {status === "ready" ? <CommunicationsHome
         activeTab={activeTab}
@@ -170,7 +170,7 @@ function CommunicationsHome({ activeTab, onActiveTabChange, onArchiveAudience, o
   const audiences = Array.isArray(workspace.audiences) ? workspace.audiences : [];
   const templates = Array.isArray(workspace.templates) ? workspace.templates : [];
   return <div className="communications-workspace">
-    <nav aria-label="Разделы коммуникаций" className="communications-tabs">
+    <nav aria-label="Разделы рассылок" className="communications-tabs">
       {TABS.map(({ id, label, icon: Icon }) => <button aria-current={activeTab === id ? "page" : undefined} className={activeTab === id ? "is-active" : ""} key={id} onClick={() => onActiveTabChange(id)} type="button"><Icon size={16} />{label}</button>)}
     </nav>
     {activeTab === "campaigns" ? <CampaignsView audiences={audiences} campaigns={campaigns} onClone={onCloneCampaign} onCreate={() => onCreate("campaign")} onExecute={onExecuteCampaign} onOpen={onOpenCampaign} onResults={onOpenCampaignResults} usage={workspace.usage} /> : null}
@@ -262,7 +262,7 @@ function AnalyticsView({ campaigns, usage }) {
   const failed = campaigns.reduce((sum, campaign) => sum + Number(campaign.deliverySummary?.failed ?? 0), 0);
   const rate = delivered + failed ? Math.round(delivered / (delivered + failed) * 1000) / 10 : 0;
   const topCampaigns = campaigns.toSorted((a, b) => Number(b.deliverySummary?.delivered ?? 0) - Number(a.deliverySummary?.delivered ?? 0)).slice(0, 6);
-  return <section className="communications-section-view"><header><div><h2>Эффективность коммуникаций</h2><p>Фактическая доставка и динамика кампаний за текущий расчётный период.</p></div></header>
+  return <section className="communications-section-view"><header><div><h2>Эффективность рассылок</h2><p>Фактическая доставка и динамика кампаний за текущий расчётный период.</p></div></header>
     <div className="communications-analytics-summary"><Metric icon={Send} label="Сообщений за период" tone="blue" value={formatNumber(usage?.messages ?? 0)} /><Metric icon={Check} label="Успешно доставлено" tone="green" value={formatNumber(delivered)} /><Metric icon={TrendingUp} label="Доставляемость" tone="violet" value={`${rate}%`} /></div>
     <div className="communications-performance-list"><header><span>Кампания</span><span>Доставлено</span><span>Ошибки</span><span>Эффективность</span></header>{topCampaigns.map((campaign) => { const metric = deliveryMetric(campaign.deliverySummary); return <article key={campaign.id}><strong>{campaign.title}</strong><span>{formatNumber(campaign.deliverySummary?.delivered ?? 0)}</span><span>{formatNumber(campaign.deliverySummary?.failed ?? 0)}</span><div><span><i style={{ width: metric.width }} /></span><strong>{metric.label}</strong></div></article>; })}</div>
   </section>;
@@ -464,7 +464,7 @@ function CampaignDialog({ campaign, onClose, onToast, onWorkspaceChange, workspa
     void onWorkspaceChange?.();
   };
 
-  return <Modal className="communications-campaign-dialog" eyebrow={campaignId ? campaignStatusLabel(campaignStatus) : "Новая кампания"} onClose={onClose} title={campaignId ? "Кампания" : "Создайте коммуникацию"}>
+  return <Modal className="communications-campaign-dialog" eyebrow={campaignId ? campaignStatusLabel(campaignStatus) : "Новая кампания"} onClose={onClose} title={campaignId ? "Кампания" : "Создайте рассылку"}>
     <form className="communications-campaign-form" onSubmit={submit}>
       {campaignId ? <div className={`communications-campaign-state ${editable ? "is-editable" : "is-locked"}`}><CampaignStatus status={campaignStatus} /><p>{editable ? "Кампанию можно редактировать, тестировать и запускать." : "Кампания уже запущена. Поля доступны только для просмотра."}</p></div> : null}
       <fieldset className="communications-editor-pane" disabled={!editable}>
@@ -652,7 +652,7 @@ function AudienceDialog({ onClose, onCreated, onToast }) {
     onToast?.(`Аудитория создана: сопоставлено ${response.data?.matchedCount ?? 0} клиентов.`);
     onCreated();
   };
-  return <Modal eyebrow="Новая аудитория" onClose={onClose} title="Кого включить в коммуникацию">
+  return <Modal eyebrow="Новая аудитория" onClose={onClose} title="Кого включить в рассылку">
     <form className="communications-simple-form" onSubmit={submit}>
       <label><span>Название аудитории</span><input autoFocus required onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Например, Активные клиенты" value={draft.name} /></label>
       <div className="communications-import-zone"><Upload size={23} /><div><strong>Импортировать внешний список</strong><p>CSV, XLSX или JSON · поддерживаются Телефон, Почта, clientId и externalId</p></div><label><input accept=".csv,.xlsx,.json" onChange={importFile} type="file" />Выбрать файл</label>{draft.records.length ? <span><Check size={14} /> {draft.fileName} · {draft.records.length} строк готово к сверке</span> : null}</div>
@@ -691,7 +691,7 @@ function Modal({ children, className = "", eyebrow, onClose, title }) {
 }
 
 function ActivationScreen({ accessInfo, activatingPlan, onActivate }) {
-  return <section className="communications-activation"><div><Megaphone size={28} /><h2>Маркетинговые коммуникации</h2><p>Кампании, аудитории, шаблоны и аналитика во всех подключённых каналах.</p></div>{accessInfo?.isOwner ? <div className="communications-plan-grid">{PLANS.map((plan) => <article key={plan.key}><strong>{plan.name}</strong><b>{plan.price}</b><span>{plan.included}</span><button className="primary-action" disabled={Boolean(activatingPlan)} onClick={() => onActivate(plan.key)} type="button">{activatingPlan === plan.key ? "Подключаем…" : "Подключить"}</button></article>)}</div> : <WorkspaceState description="Попросите владельца подключить модуль и выдать вам индивидуальный доступ." tone="empty" title="Модуль пока недоступен" />}</section>;
+  return <section className="communications-activation"><div><Megaphone size={28} /><h2>Маркетинговые рассылки</h2><p>Кампании, аудитории, шаблоны и аналитика во всех подключённых каналах.</p></div>{accessInfo?.isOwner ? <div className="communications-plan-grid">{PLANS.map((plan) => <article key={plan.key}><strong>{plan.name}</strong><b>{plan.price}</b><span>{plan.included}</span><button className="primary-action" disabled={Boolean(activatingPlan)} onClick={() => onActivate(plan.key)} type="button">{activatingPlan === plan.key ? "Подключаем…" : "Подключить"}</button></article>)}</div> : <WorkspaceState description="Попросите владельца подключить модуль и выдать вам индивидуальный доступ." tone="empty" title="Модуль пока недоступен" />}</section>;
 }
 
 function Metric({ icon: Icon, label, tone, value }) { return <article className={`communications-metric is-${tone}`}><span><Icon size={19} /></span><div><small>{label}</small><strong>{value}</strong></div></article>; }
@@ -699,7 +699,7 @@ function ChannelStack({ channels = [] }) { return <span className="communication
 function ChannelIcon({ channel, size = 16 }) { const normalized = String(channel).toLowerCase(); const Icon = normalized.includes("email") || normalized.includes("mail") ? Mail : normalized.includes("telegram") ? Send : normalized.includes("whatsapp") ? MessageCircle : MessageSquareText; return <Icon size={size} />; }
 function CampaignStatus({ status }) { return <span className={`communications-status is-${status || "draft"}`}>{["completed"].includes(status) ? <Check size={13} /> : status === "sending" ? <Play size={12} /> : status === "paused" ? <Pause size={12} /> : <Clock3 size={13} />}{campaignStatusLabel(status)}</span>; }
 function SyncStatus({ sync }) { if (!sync) return <span className="communications-sync is-neutral">Не запускалась</span>; if (sync.status === "failed" || sync.lastError) return <span className="communications-sync is-error"><CircleAlert size={13} /> Требует внимания</span>; return <span className="communications-sync is-success"><Check size={13} /> Синхронизирована</span>; }
-function EmptyCampaigns({ hasFilters, onCreate }) { return <div className="communications-empty"><Megaphone size={23} /><strong>{hasFilters ? "Ничего не найдено" : "Кампаний пока нет"}</strong><p>{hasFilters ? "Измените фильтры или поисковый запрос." : "Создайте первую коммуникацию для выбранной аудитории."}</p>{!hasFilters ? <button className="primary-action" onClick={onCreate} type="button"><Plus size={16} /> Создать кампанию</button> : null}</div>; }
+function EmptyCampaigns({ hasFilters, onCreate }) { return <div className="communications-empty"><Megaphone size={23} /><strong>{hasFilters ? "Ничего не найдено" : "Кампаний пока нет"}</strong><p>{hasFilters ? "Измените фильтры или поисковый запрос." : "Создайте первую рассылку для выбранной аудитории."}</p>{!hasFilters ? <button className="primary-action" onClick={onCreate} type="button"><Plus size={16} /> Создать кампанию</button> : null}</div>; }
 function MessagePreview({ blocks, text }) {
   const headings = blocks.filter((block) => block.type === "heading" && block.text);
   const attachments = blocks.filter((block) => block.type !== "heading");

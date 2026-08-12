@@ -75,6 +75,43 @@ describe("official VK/MAX outbound connectors", () => {
     assert.deepEqual(JSON.parse(call?.init.body ?? "{}"), { text: "Operator reply" });
   });
 
+  it("sends campaign tests through an existing VK or MAX provider conversation", async () => {
+    const calls: Array<{ body: string; url: string }> = [];
+    const fetcher = async (url: string, init: WorkerHttpRequestInit) => {
+      calls.push({ body: String(init.body ?? ""), url });
+      return url.includes("api.vk.com")
+        ? { ok: true, status: 200, text: async () => JSON.stringify({ response: 93 }) }
+        : { ok: true, status: 200, text: async () => JSON.stringify({ message: { body: { mid: "mid-test" } } }) };
+    };
+    const vk = createTenantVkChannelConnector({
+      apiBaseUrl: "https://api.vk.com",
+      fetcher,
+      resolveCredential: async () => ({ accessToken: "vk-secret-token", apiVersion: "5.199", externalAccountId: "group-1" })
+    });
+    const max = createTenantMaxChannelConnector({
+      apiBaseUrl: "https://platform-api2.max.ru",
+      fetcher,
+      resolveCredential: async () => ({ accessToken: "max-secret-token", externalAccountId: "bot-1" })
+    });
+
+    await vk.startConversation({
+      channel: "VK", channelConnectionId: "conn-vk", conversationId: "peer-7", descriptorId: "vk-test",
+      idempotencyKey: "vk-test-key", message: "Campaign test", outboxEventId: "outbox-vk-test",
+      phone: "+79990000000", tenantId: "tenant-a", traceId: "trace-vk-test"
+    });
+    await max.startConversation({
+      channel: "MAX", channelConnectionId: "conn-max", conversationId: "chat-7", descriptorId: "max-test",
+      idempotencyKey: "max-test-key", message: "Campaign test", outboxEventId: "outbox-max-test",
+      phone: "+79990000000", tenantId: "tenant-a", traceId: "trace-max-test"
+    });
+
+    const vkForm = new URLSearchParams(calls[0].body);
+    assert.equal(vkForm.get("peer_id"), "peer-7");
+    assert.equal(vkForm.get("message"), "Campaign test");
+    assert.equal(calls[1].url, "https://platform-api2.max.ru/messages?chat_id=chat-7");
+    assert.deepEqual(JSON.parse(calls[1].body), { text: "Campaign test" });
+  });
+
   it("uploads a MAX attachment once and reuses its durable token", async () => {
     const calls: string[] = [];
     let transfer: any = null;

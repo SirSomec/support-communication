@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
+import { DEFAULT_MARKETING_CONSENT_TEXT, hashMarketingApiKey, inboundMarketingDeliveryAddress, inboundMarketingProfileIdentity, isLegacyMarketingConsentText, marketingConsentAllowsDelivery, marketingConsentPolicy, marketingDestinationKey, marketingTestRecipientSearchTerms, maskMarketingTestRecipientEmail, maskMarketingTestRecipientPhone, normalizeConsentReply, normalizePhone, quietHoursEnd } from "../apps/api-gateway/src/marketing/marketing.service.ts";
 
 describe("marketing API key contract", () => {
   it("stores a deterministic hash instead of the organization API key", () => {
@@ -81,6 +81,11 @@ describe("marketing import identifiers", () => {
 });
 
 describe("marketing test recipient search", () => {
+  it("matches a saved provider destination by phone and normalized channel", () => {
+    assert.equal(marketingDestinationKey("+79991234567", "Telegram"), marketingDestinationKey("+79991234567", "telegram"));
+    assert.notEqual(marketingDestinationKey("+79991234567", "telegram"), marketingDestinationKey("+79991234567", "vk"));
+  });
+
   it("normalizes surname, phone, and email search terms", () => {
     assert.deepEqual(marketingTestRecipientSearchTerms("  Самойлов  "), { phone: "", query: "Самойлов" });
     assert.deepEqual(marketingTestRecipientSearchTerms("8 (999) 123-45-67"), { phone: "79991234567", query: "8 (999) 123-45-67" });

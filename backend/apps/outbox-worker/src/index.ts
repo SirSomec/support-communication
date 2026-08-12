@@ -1356,8 +1356,7 @@ export function createMaxChannelConnector({
 }
 
 export function createTenantVkChannelConnector({ apiBaseUrl, fetcher, providerAttachmentTransferStore, resolveCredential, timeoutMs = 5_000 }: TenantProviderChannelConnectorOptions): ChannelConnector {
-  return {
-    async deliverMessage(request) {
+  const sendMessage = async (request: ChannelConnectorRequest, message: string): Promise<ChannelConnectorDeliveryResult> => {
       const credential = await resolveCredential({
         channelConnectionId: requireString(request.channelConnectionId, "vk_channel_connection_id_required"),
         provider: "vk",
@@ -1377,7 +1376,7 @@ export function createTenantVkChannelConnector({ apiBaseUrl, fetcher, providerAt
       });
       const params = new URLSearchParams({
         access_token: requireString(credential.accessToken, "vk_access_token_required"),
-        message: requireString(request.text, "vk_text_required"),
+        message,
         peer_id: requireString(request.conversationId, "vk_peer_id_required"),
         random_id: stableProviderRandomId(request.idempotencyKey),
         v: credential.apiVersion?.trim() || "5.199"
@@ -1396,14 +1395,15 @@ export function createTenantVkChannelConnector({ apiBaseUrl, fetcher, providerAt
         traceId: request.traceId
       });
       return { providerMessageId: requireProviderMessageId(response.response, "vk_provider_message_id_required") };
-    },
-    async startConversation() { throw new Error("vk_proactive_delivery_unsupported"); }
+  };
+  return {
+    deliverMessage: (request) => sendMessage(request, requireString(request.text, "vk_text_required")),
+    startConversation: (request) => sendMessage(request, requireString(request.message, "vk_text_required"))
   };
 }
 
 export function createTenantMaxChannelConnector({ apiBaseUrl, fetcher, providerAttachmentTransferStore, resolveCredential, timeoutMs = 5_000 }: TenantProviderChannelConnectorOptions): ChannelConnector {
-  return {
-    async deliverMessage(request) {
+  const sendMessage = async (request: ChannelConnectorRequest, messageText: string): Promise<ChannelConnectorDeliveryResult> => {
       const credential = await resolveCredential({
         channelConnectionId: requireString(request.channelConnectionId, "max_channel_connection_id_required"),
         provider: "max",
@@ -1424,7 +1424,7 @@ export function createTenantMaxChannelConnector({ apiBaseUrl, fetcher, providerA
       const chatId = encodeURIComponent(requireString(request.conversationId, "max_chat_id_required"));
       const response = await postOfficialProviderRequest({
         authorization: requireString(credential.accessToken, "max_access_token_required"),
-        body: JSON.stringify({ text: requireString(request.text, "max_text_required"), ...(messageAttachments.length ? { attachments: messageAttachments } : {}) }),
+        body: JSON.stringify({ text: messageText, ...(messageAttachments.length ? { attachments: messageAttachments } : {}) }),
         contentType: "application/json",
         endpoint: `${apiBaseUrl.replace(/\/+$/, "")}/messages?chat_id=${chatId}`,
         errorPrefix: "max",
@@ -1436,8 +1436,10 @@ export function createTenantMaxChannelConnector({ apiBaseUrl, fetcher, providerA
       const message = objectValue(response.message);
       const body = objectValue(message?.body);
       return { providerMessageId: requireProviderMessageId(body?.mid ?? message?.id, "max_provider_message_id_required") };
-    },
-    async startConversation() { throw new Error("max_proactive_delivery_unsupported"); }
+  };
+  return {
+    deliverMessage: (request) => sendMessage(request, requireString(request.text, "max_text_required")),
+    startConversation: (request) => sendMessage(request, requireString(request.message, "max_text_required"))
   };
 }
 
@@ -2313,7 +2315,9 @@ function toOutboundConversationRequest(event: StoredOutboxEvent, descriptor: Wor
   return {
     ...(attachments ? { attachments } : {}),
     channel,
+    ...(stringValue(descriptor.payload.channelConnectionId) ? { channelConnectionId: stringValue(descriptor.payload.channelConnectionId) } : {}),
     ...(stringValue(descriptor.payload.clientName) ? { clientName: stringValue(descriptor.payload.clientName) } : {}),
+    ...(stringValue(descriptor.payload.providerConversationId) ? { conversationId: stringValue(descriptor.payload.providerConversationId) } : {}),
     descriptorId: descriptor.id,
     idempotencyKey: descriptor.idempotencyKey || descriptor.id,
     message: requireString(descriptor.payload.message, "message_required"),

@@ -1983,9 +1983,11 @@ describe("outbox worker runtime contracts", () => {
         kind: "outbound_conversation",
         messageId: null,
         payload: {
+          channelConnectionId: "telegram-connection-1",
           clientName: "Runtime Client",
           message: "Hello from descriptor",
           phone: "+7 900 000-00-00",
+          providerConversationId: "telegram-chat-42",
           topic: "Delivery / Status"
         },
         tenantId: "tenant-volga"
@@ -2021,6 +2023,8 @@ describe("outbox worker runtime contracts", () => {
     assert.deepEqual(connectorCalls.map((call) => call.request.idempotencyKey), ["reply-key-002", "outbound-key-002"]);
     assert.deepEqual(connectorCalls.map((call) => call.request.outboxEventId), [delivery.id, outbound.id]);
     assert.deepEqual(connectorCalls.map((call) => call.request.text ?? call.request.message), ["Reply from descriptor", "Hello from descriptor"]);
+    assert.equal(connectorCalls[1].request.channelConnectionId, "telegram-connection-1");
+    assert.equal(connectorCalls[1].request.conversationId, "telegram-chat-42");
     assert.deepEqual(connectorCalls.map((call) => call.request.traceId), ["trc_connector_delivery", "trc_connector_outbound"]);
   });
 

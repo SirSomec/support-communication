@@ -236,19 +236,21 @@ test("client channel communication restrictions are persisted and reversible", a
   const blockResponse = page.waitForResponse((response) =>
     response.url().includes("/channel-restriction") && response.request().method() === "PATCH"
   );
-  await checkbox.check();
+  await checkbox.click();
   const blockedPayload = await (await blockResponse).json();
   expect(blockedPayload.status).toBe("ok");
   expect(blockedPayload.data.restriction.blocked).toBe(true);
+  await expect(checkbox).toBeChecked();
   await expect(restriction).toContainText("Рассылки запрещены");
 
   const allowResponse = page.waitForResponse((response) =>
     response.url().includes("/channel-restriction") && response.request().method() === "PATCH"
   );
-  await checkbox.uncheck();
+  await checkbox.click();
   const allowedPayload = await (await allowResponse).json();
   expect(allowedPayload.status).toBe("ok");
   expect(allowedPayload.data.restriction.blocked).toBe(false);
+  await expect(checkbox).not.toBeChecked();
   await expect(restriction).toContainText("Рассылки разрешены");
   await expectHealthyPage(page);
 });

@@ -344,7 +344,12 @@ describe("invite mail delivery contracts", () => {
       await settingsService.save({ ...validSettingsInput, port });
 
       const delivery = createInviteMailDeliveryFromEnv(
-        { ...secureEnvironment, NODE_ENV: "staging", SERVICE_MAIL_DELIVERY_MODE: "smtp" },
+        {
+          ...secureEnvironment,
+          NODE_ENV: "staging",
+          PUBLIC_APP_BASE_URL: "https://app.example.test",
+          SERVICE_MAIL_DELIVERY_MODE: "smtp"
+        },
         { repository: () => repository }
       );
       const result = await delivery.sendInvite(inviteInput);
@@ -355,8 +360,9 @@ describe("invite mail delivery contracts", () => {
       assert.match(message, /Subject: =\?UTF-8\?B\?/);
       assert.match(message, /Content-Type: multipart\/alternative/);
       assert.match(message, /invite_12345678-1234-1234-1234-123456789abc/);
+      assert.match(message, /https:\/\/app\.example\.test\/#\/invite\/invite_12345678-1234-1234-1234-123456789abc/);
       assert.match(message, /<html lang=\"ru\">/);
-      assert.match(message, /font-size:24px/);
+      assert.match(message, /font-size:28px/);
       assert.match(message, /To: employee@volga\.example/);
       assert.match(message, /From: =\?UTF-8\?B\?[^\r\n]+ <noreply@service\.example>/);
     } finally {

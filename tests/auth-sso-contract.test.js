@@ -11,3 +11,12 @@ test("SSO form sends domain and a distinct supported OIDC provider id", () => {
   assert.match(page, /Okta[\s\S]*oidc-okta/);
   assert.doesNotMatch(model, /"SAML"/);
 });
+
+test("invite links open a password-only activation form", () => {
+  const page = readFileSync(new URL("../src/features/auth/AuthPage.jsx", import.meta.url), "utf8");
+
+  assert.match(page, /inviteCodeFromLocationHash/);
+  assert.match(page, /#\\\/invite\\\//);
+  assert.match(page, /inviteFromLink \? \(/);
+  assert.match(page, /\.\.\.\(email \? \{ email \} : \{\}\)/);
+});

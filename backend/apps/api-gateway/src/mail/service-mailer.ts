@@ -229,6 +229,7 @@ function buildInviteMail(
   source: NodeJS.ProcessEnv
 ): { bodyLines: string[]; subject: string; to: string } {
   const appBaseUrl = applicationBaseUrl(source);
+  const inviteUrl = appBaseUrl ? `${appBaseUrl}/#/invite/${encodeURIComponent(input.code)}` : null;
   const greeting = input.inviteeName ? `Здравствуйте, ${input.inviteeName}!` : "Здравствуйте!";
 
   return {
@@ -237,12 +238,10 @@ function buildInviteMail(
       "",
       "Вас пригласили присоединиться к рабочему пространству службы поддержки.",
       "",
-      `Код приглашения: ${input.code}`,
-      `Email для активации: ${input.email}`,
       `Приглашение действует до: ${input.expiresAt}`,
       "",
-      appBaseUrl
-        ? `Чтобы принять приглашение, откройте ${appBaseUrl}, выберите «Активировать invite», введите код с email и задайте пароль.`
+      inviteUrl
+        ? `Чтобы принять приглашение, откройте ссылку и задайте пароль: ${inviteUrl}`
         : "Чтобы принять приглашение, откройте приложение поддержки, выберите «Активировать invite», введите код с email и задайте пароль.",
       "",
       "Если вы не ожидали это письмо, просто проигнорируйте его."

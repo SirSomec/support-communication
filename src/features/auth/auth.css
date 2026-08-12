@@ -217,6 +217,17 @@
   gap: 6px;
 }
 
+.auth-form-hint {
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid #b9d7ff;
+  border-radius: 8px;
+  background: #f1f7ff;
+  color: #28517d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .auth-field span {
   color: var(--auth-muted);
   font-size: 12px;

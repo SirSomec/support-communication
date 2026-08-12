@@ -1418,7 +1418,7 @@ export class AuthService {
 
   async acceptInvite({ code, email, mfaChallengeId, otp, password }: AcceptInvitePayload = {}) {
     const traceId = identityTraceId(SERVICE, "acceptInvite");
-    const normalizedEmail = String(email ?? "").trim().toLowerCase();
+    let normalizedEmail = String(email ?? "").trim().toLowerCase();
     const inviteCode = String(code ?? "").trim();
 
     if (mfaChallengeId && otp) {
@@ -1429,7 +1429,7 @@ export class AuthService {
       });
     }
 
-    if (!normalizedEmail || !inviteCode || !password) {
+    if (!inviteCode || !password) {
       return createEnvelope({
         service: SERVICE,
         operation: "acceptInvite",
@@ -1437,13 +1437,18 @@ export class AuthService {
         status: "invalid",
         meta: apiMeta(),
         data: { authenticated: false },
-        error: { code: "invite_payload_required", message: "Invite code, email, and password are required." }
+        error: { code: "invite_payload_required", message: "Invite code and password are required." }
       });
     }
 
     await seedDefaultAuthFlowFixtures(this.identityRepository);
 
     const invite = await this.identityRepository.findInviteToken(inviteCode);
+    // A link carries the invite's single-use bearer token. Its recipient email
+    // remains bound to the persisted token rather than being exposed in the URL.
+    if (!normalizedEmail && invite) {
+      normalizedEmail = invite.email;
+    }
     const invitedUser = invite && invite.email === normalizedEmail
       ? (await this.identityRepository.findTenantUsersByEmail(normalizedEmail))
         .find((user) => user.tenantId === invite.tenantId)

@@ -37,6 +37,19 @@ const defaultTenantMfaContext = {
   tenantId: ""
 };
 
+function inviteCodeFromLocationHash() {
+  if (typeof window === "undefined") return "";
+
+  const match = window.location.hash.match(/^#\/invite\/([^/?#]+)$/);
+  if (!match) return "";
+  try {
+    const code = decodeURIComponent(match[1]);
+    return /^[A-Za-z0-9._~-]{8,512}$/.test(code) ? code : "";
+  } catch {
+    return "";
+  }
+}
+
 function getLocalMailboxUrl() {
   if (typeof window === "undefined") {
     return "";
@@ -56,7 +69,8 @@ export function AuthPage({
   onNavigateLanding = noop,
   onStartOnboarding = noop
 }) {
-  const [mode, setMode] = useState(() => getInitialMode(initialMode));
+  const [inviteFromLink, setInviteFromLink] = useState(() => Boolean(inviteCodeFromLocationHash()));
+  const [mode, setMode] = useState(() => inviteFromLink ? "invite" : getInitialMode(initialMode));
   const [login, setLogin] = useState({ email: "", password: "", remember: true });
   const [sso, setSso] = useState({ provider: ssoProviders[0], domain: "" });
   const [twoFactorCode, setTwoFactorCode] = useState("");
@@ -65,7 +79,7 @@ export function AuthPage({
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [recoveryToken, setRecoveryToken] = useState("");
   const [recoveryPassword, setRecoveryPassword] = useState("");
-  const [invite, setInvite] = useState({ code: "", email: "", password: "" });
+  const [invite, setInvite] = useState(() => ({ code: inviteCodeFromLocationHash(), email: "", password: "" }));
   const [memberships, setMemberships] = useState([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [error, setError] = useState("");
@@ -119,7 +133,9 @@ export function AuthPage({
           setMessage("");
         } else {
           setError("");
-          setMessage(`Код подтверждения отправлен на ${contextEmail}.`);
+          setMessage(contextEmail
+            ? `Код подтверждения отправлен на ${contextEmail}.`
+            : "Код подтверждения отправлен на рабочий email.");
           setTwoFactorCode("");
         }
         return;
@@ -346,7 +362,7 @@ export function AuthPage({
     const code = invite.code.trim();
     const email = invite.email.trim().toLowerCase();
 
-    if (!hasEmailShape(email)) {
+    if (!inviteFromLink && !hasEmailShape(email)) {
       setError("Введите email из приглашения.");
       return;
     }
@@ -367,7 +383,7 @@ export function AuthPage({
     try {
       const response = await authService.acceptInvite({
         code,
-        email,
+        ...(email ? { email } : {}),
         password: invite.password
       });
 
@@ -652,6 +668,10 @@ export function AuthPage({
 
           {mode === "invite" ? (
             <form className="auth-form" onSubmit={handleInviteSubmit}>
+              {inviteFromLink ? (
+                <p className="auth-form-hint">Ссылка приглашения подтверждена. Задайте пароль для входа.</p>
+              ) : (
+                <>
               <label className="auth-field">
                 <span>Email из приглашения</span>
                 <div className="auth-input-with-icon">
@@ -673,6 +693,8 @@ export function AuthPage({
                   value={invite.code}
                 />
               </label>
+                </>
+              )}
               <label className="auth-field">
                 <span>Пароль</span>
                 <input
@@ -743,7 +765,11 @@ export function AuthPage({
               actionLabel="Запросить новое приглашение"
               detail="Старый invite token удален из активных сессий. Новый администратор может отправить повторное приглашение или начать onboarding организации."
               icon={<Clock3 size={30} />}
-              onAction={() => transition("invite", "Введите новый invite code из письма.")}
+              onAction={() => {
+                setInviteFromLink(false);
+                setInvite({ code: "", email: "", password: "" });
+                transition("invite", "Введите новый invite code из письма.");
+              }}
               secondaryActionLabel="Начать onboarding"
               onSecondaryAction={() => onStartOnboarding({ source: "expired-invite" })}
               tone="warn"

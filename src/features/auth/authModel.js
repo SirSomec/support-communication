@@ -17,7 +17,7 @@ export const authModes = {
   },
   invite: {
     title: "Активация приглашения",
-    description: "Подтвердите invite code и email, чтобы войти в организацию."
+    description: "Перейдите по ссылке из письма и задайте пароль. Если ссылки нет, введите invite code и email."
   },
   organizationSelect: {
     title: "Выбор организации",

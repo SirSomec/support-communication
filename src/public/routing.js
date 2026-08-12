@@ -11,7 +11,7 @@ const legacyPublicPathByHash = Object.freeze({
   "#/docs": "/docs/"
 });
 
-const privateWorkspaceHashes = ["#/app", "#/login", "#/auth", "#/onboarding"];
+const privateWorkspaceHashes = ["#/app", "#/login", "#/auth", "#/invite", "#/onboarding"];
 
 export function resolvePublicRoute(pathname = "/") {
   return getPublicRoute(normalizePublicPathname(pathname));

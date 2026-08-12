@@ -296,6 +296,27 @@ describe("phase 1 identity, tenant and RBAC backend contracts", () => {
     assert.equal(persisted?.consumedAt, null);
   });
 
+  it("accepts an invite-link token without requiring the recipient email in the request", async () => {
+    const repository = IdentityRepository.inMemory();
+    const settings = new SettingsEmployeeService(repository);
+    const email = "invite-link@volga.example";
+    const invitation = await settings.inviteEmployee({
+      email,
+      groupId: "group-line-1",
+      name: "Invite Link",
+      roleKey: "employee"
+    }, { tenantId: "tenant-volga" });
+
+    const accepted = await new AuthService(repository).acceptInvite({
+      code: invitation.data.inviteDescriptor?.code,
+      password: "Invite-Link-2026!"
+    });
+
+    assert.equal(accepted.status, "ok");
+    assert.equal(accepted.data.authenticated, true);
+    assert.equal(accepted.data.operator?.email, email);
+  });
+
   it("continues invite acceptance MFA without replaying the consumed invite token", async () => {
     const originalNodeEnv = process.env.NODE_ENV;
     const originalPilotSkipMfa = process.env.PILOT_SKIP_MFA;

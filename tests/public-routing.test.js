@@ -51,6 +51,7 @@ describe("public pathname routing", () => {
   it("keeps workspace, login and onboarding on private hashes", () => {
     assert.equal(isPrivateWorkspaceHash("#/app"), true);
     assert.equal(isPrivateWorkspaceHash("#/login"), true);
+    assert.equal(isPrivateWorkspaceHash("#/invite/invite_12345678"), true);
     assert.equal(isPrivateWorkspaceHash("#/onboarding"), true);
     assert.equal(isPrivateWorkspaceHash("#/pricing"), false);
   });

@@ -23,7 +23,7 @@ describe("frontend Content-Security-Policy", () => {
       ["object-src", ["'none'"]],
       ["frame-ancestors", ["'none'"]],
       ["form-action", ["'self'"]],
-      ["script-src", ["'self'", "https://mc.yandex.ru", "https://yastatic.net"]]
+      ["script-src", ["'self'", "https://mc.yandex.ru", "https://yastatic.net", "https://www.googletagmanager.com"]]
     ]) {
       assert.deepEqual(directives.get(name), expected, `${name} must stay fail-closed`);
     }

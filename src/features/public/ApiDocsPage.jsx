@@ -562,6 +562,12 @@ export function ApiDocsPage() {
               <ExternalLink size={17} />
             </a>
           </section>
+          <nav className="api-docs-related" aria-label="Связанные страницы">
+            <a href="/website-support-chat/">Чат поддержки для сайта</a>
+            <a href="/ai-support-bot/">AI-бот для поддержки</a>
+            <a href="/support-sla/">Управление SLA</a>
+            <a href="/pricing/">Тарифы и запуск</a>
+          </nav>
         </div>
       </div>
     </main>

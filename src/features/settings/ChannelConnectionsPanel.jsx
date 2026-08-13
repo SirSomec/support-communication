@@ -5,6 +5,11 @@ import { FieldHint, InlineHint, SettingsModal, SettingsSectionHeader } from "./S
 import { submitSettingsChannelStatusToggle } from "../../app/settingsChannelActions.js";
 import { integrationService } from "../../services/integrationService.js";
 import { routingService } from "../../services/routingService.js";
+import {
+  initializePublicAnalyticsFromConsent,
+  PUBLIC_ANALYTICS_GOALS,
+  trackPublicAnalyticsGoal
+} from "../../public/analytics/publicAnalytics.js";
 
 const typeLabels = {
   max: "MAX",
@@ -243,6 +248,9 @@ export function ChannelConnectionsPanel({ access, canEditSettings, focusChannelT
 
     setForm({ ...initialForm, type: form.type });
     setCreateOpen(false);
+    if (!connections.length && initializePublicAnalyticsFromConsent()) {
+      trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.firstChannelConnected);
+    }
     await loadConnections();
     setSelectedConnectionId(response.data.connection.id);
     onToast?.(`${response.data.connection.name}: подключение создано. Аудит ${response.data.auditId}.`);

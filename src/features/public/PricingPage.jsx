@@ -22,6 +22,13 @@ const featureLabels = {
 };
 const formatPrice = (amount) => new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(Number(amount ?? 0) / 100);
 
+const pricingFaq = [
+  { question: "Можно ли начать без оплаты?", answer: "Да. Free-тариф создан для проверки сервиса одним владельцем. Банковская карта для старта не требуется." },
+  { question: "Как выбрать тариф для команды?", answer: "Сначала определите количество операторов, нужные каналы и правила обработки обращений. После этого сравните состав тарифов и ограничения в карточках выше." },
+  { question: "Входит ли AI-бот в тариф?", answer: "Пакеты обработанных AI-диалогов приобретаются отдельно. Перед запуском настройте источники знаний, границы ответов и передачу оператору." },
+  { question: "Где посмотреть интеграции до начала работы?", answer: "В документации доступны Web SDK, публичный API, Open Channel и webhooks. Это поможет проверить технический сценарий до подключения в production." }
+];
+
 export function PricingPage({ onNavigateAuth = () => {}, onRequestDemo = () => {}, onStartFree = () => {} }) {
   const [tariffs, setTariffs] = React.useState([]);
   const [aiDialogPackages, setAiDialogPackages] = React.useState([]);
@@ -47,6 +54,14 @@ export function PricingPage({ onNavigateAuth = () => {}, onRequestDemo = () => {
     })}</section>
     <section className="pricing-hero"><span>AI-бот</span><h2>Пакеты обработанных диалогов</h2><p>AI-бот оплачивается отдельно от операторов. Диалог списывается один раз — после первого успешного ответа бота. Бесплатных AI-ответов нет.</p></section>
     <section className="pricing-grid" aria-label="Пакеты AI-диалогов">{aiDialogPackages.map((item) => <article className="pricing-card" key={item.id}><header><strong>{item.dialogCount.toLocaleString("ru-RU")} диалогов</strong><span>{item.discountPercent ? `Скидка ${item.discountPercent}%` : "Базовая стоимость 20 ₽ за диалог"}</span></header><div className="pricing-price">{formatPrice(item.priceKopeks)}</div><p>{formatPrice(Math.round(item.priceKopeks / item.dialogCount))} за обработанный диалог</p><button className="public-btn secondary" onClick={() => onStartFree({ plan: "free", source: `pricing-${item.id}` })} type="button">Начать работу<ArrowRight size={16} /></button></article>)}</section>
+    <section className="pricing-guidance" aria-labelledby="pricing-guidance-title">
+      <div><span>Выбор тарифа и запуск</span><h2 id="pricing-guidance-title">Проверьте сценарий до масштабирования</h2><p>Начните с одного канала и небольшой команды, затем подключайте правила SLA, автоматизацию и дополнительные интеграции по мере готовности процесса.</p></div>
+      <nav aria-label="Материалы для выбора тарифа"><a href="/helpdesk-small-business/">Helpdesk для малого бизнеса</a><a href="/website-support-chat/">Чат поддержки для сайта</a><a href="/ai-support-bot/">AI-бот для поддержки</a><a href="/support-sla/">Управление SLA</a><a href="/docs/">Документация API и Web SDK</a></nav>
+    </section>
+    <section className="pricing-faq" aria-labelledby="pricing-faq-title">
+      <div><span>FAQ</span><h2 id="pricing-faq-title">Вопросы о тарифах Support Communication</h2></div>
+      <div>{pricingFaq.map((item, index) => <details key={item.question} open={index === 0}><summary>{item.question}</summary><p>{item.answer}</p></details>)}</div>
+    </section>
   </main>;
 }
 

@@ -128,6 +128,15 @@ function normalizeMetrikaId(value = "") {
   return normalized;
 }
 
+function normalizeGa4MeasurementId(value = "") {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (!normalized) return "";
+  if (!/^G-[A-Z0-9]{6,12}$/.test(normalized)) {
+    throw new Error("PUBLIC_SITE_GA4_MEASUREMENT_ID must look like G-XXXXXXXX");
+  }
+  return normalized;
+}
+
 function absoluteUrl(origin, pathname) {
   return new URL(pathname.replace(/^\//, ""), `${origin}/`).href;
 }
@@ -138,6 +147,7 @@ export function getPublicSiteConfig(env = embeddedPublicSiteEnv) {
     origin,
     indexable: readBoolean(env.PUBLIC_SITE_INDEXABLE, defaultPublicSiteIndexable),
     metrikaId: normalizeMetrikaId(env.PUBLIC_SITE_METRIKA_ID),
+    ga4MeasurementId: normalizeGa4MeasurementId(env.PUBLIC_SITE_GA4_MEASUREMENT_ID),
     googleSiteVerification: env.PUBLIC_SITE_GOOGLE_VERIFICATION || env.GOOGLE_SITE_VERIFICATION || "",
     yandexSiteVerification: env.PUBLIC_SITE_YANDEX_VERIFICATION || env.YANDEX_SITE_VERIFICATION || ""
   });

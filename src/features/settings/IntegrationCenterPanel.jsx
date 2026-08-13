@@ -23,6 +23,11 @@ import {
   validateIntegrationSetup
 } from "./integrationCenterModel.js";
 import { integrationService } from "../../services/integrationService.js";
+import {
+  initializePublicAnalyticsFromConsent,
+  PUBLIC_ANALYTICS_GOALS,
+  trackPublicAnalyticsGoal
+} from "../../public/analytics/publicAnalytics.js";
 import { routingService } from "../../services/routingService.js";
 
 const productIcons = {
@@ -205,6 +210,9 @@ export function IntegrationCenterPanel({ access, canEditSettings, onManage, onSu
       type: wizard.kind
     });
     setWizardStep(3);
+    if (!connections.length && !externalApps.length && initializePublicAnalyticsFromConsent()) {
+      trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.firstChannelConnected);
+    }
     await loadCenter();
     onToast?.(`${item.name}: подключение создано.`);
   }

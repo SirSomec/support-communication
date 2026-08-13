@@ -35,29 +35,30 @@ function PublicToast({ message, onClose }) {
 }
 
 function PublicAnalyticsConsent({ route }) {
-  const { metrikaId } = getPublicSiteConfig();
+  const { ga4MeasurementId, metrikaId } = getPublicSiteConfig();
+  const analyticsConfigured = Boolean(metrikaId || ga4MeasurementId);
   const [consent, setConsent] = useState("loading");
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
-    if (!metrikaId) return;
+    if (!analyticsConfigured) return;
     const storedConsent = readPublicAnalyticsConsent();
     setConsent(storedConsent ?? "unset");
     if (storedConsent === "granted") {
-      initializePublicAnalytics({ counterId: metrikaId });
+      initializePublicAnalytics({ counterId: metrikaId, ga4MeasurementId });
       trackPublicRouteView(route.analyticsGoal);
     } else if (storedConsent === "denied") {
       disablePublicAnalytics({ counterId: metrikaId });
     }
-  }, [metrikaId, route.analyticsGoal]);
+  }, [analyticsConfigured, ga4MeasurementId, metrikaId, route.analyticsGoal]);
 
-  if (!metrikaId || consent === "loading") return null;
+  if (!analyticsConfigured || consent === "loading") return null;
 
   function grantConsent() {
     writePublicAnalyticsConsent("granted");
     setConsent("granted");
     setSettingsOpen(false);
-    initializePublicAnalytics({ counterId: metrikaId });
+    initializePublicAnalytics({ counterId: metrikaId, ga4MeasurementId });
     trackPublicRouteView(route.analyticsGoal);
   }
 
@@ -81,7 +82,7 @@ function PublicAnalyticsConsent({ route }) {
     <aside aria-labelledby="public-analytics-title" className="public-analytics-consent" role="dialog">
       <div>
         <strong id="public-analytics-title">Помогите улучшать сайт</strong>
-        <p>С вашего согласия Яндекс Метрика собирает обезличенную статистику посещений и конверсий. Вебвизор выключен, данные полей форм не передаются.</p>
+        <p>С вашего согласия Яндекс Метрика и Google Analytics 4 собирают обезличенную статистику посещений и конверсий. Вебвизор выключен, данные полей форм не передаются.</p>
       </div>
       <div className="public-analytics-actions">
         <button className="public-btn secondary" onClick={denyConsent} type="button">Отказаться</button>

@@ -3,6 +3,11 @@ import { setTenantSession } from "../../app/sessionStore.js";
 import { authService } from "../../services/authService.js";
 import { publicCatalogService } from "../../services/publicCatalogService.js";
 import {
+  initializePublicAnalyticsFromConsent,
+  PUBLIC_ANALYTICS_GOALS,
+  trackPublicAnalyticsGoal
+} from "../../public/analytics/publicAnalytics.js";
+import {
   mapOnboardingFormToProvisionPayload,
   tenantProvisionService
 } from "../../services/tenantProvisionService.js";
@@ -65,6 +70,12 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
     termsAccepted: false
   });
   const [notice, setNotice] = useState({ tone: "info", text: "" });
+
+  useEffect(() => {
+    if (initializePublicAnalyticsFromConsent()) {
+      trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.onboardingStart);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,6 +180,8 @@ export function OrganizationOnboarding({ onFinish = noop, onBack = noop }) {
           operator: operator ?? provisionResponse.data.admin
         });
       }
+
+      trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.onboardingComplete);
 
       onFinish({
         tenant: provisionedTenant,

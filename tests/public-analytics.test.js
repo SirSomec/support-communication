@@ -43,8 +43,10 @@ describe("public analytics", () => {
 
   it("validates the optional build-time Metrika counter ID", () => {
     assert.equal(getPublicSiteConfig({ PUBLIC_SITE_METRIKA_ID: "12345678" }).metrikaId, "12345678");
+    assert.equal(getPublicSiteConfig({ PUBLIC_SITE_GA4_MEASUREMENT_ID: "G-TEST1234" }).ga4MeasurementId, "G-TEST1234");
     assert.equal(getPublicSiteConfig({ PUBLIC_SITE_METRIKA_ID: "" }).metrikaId, "");
     assert.throws(() => getPublicSiteConfig({ PUBLIC_SITE_METRIKA_ID: "12-example" }), /PUBLIC_SITE_METRIKA_ID/);
+    assert.throws(() => getPublicSiteConfig({ PUBLIC_SITE_GA4_MEASUREMENT_ID: "UA-123" }), /PUBLIC_SITE_GA4_MEASUREMENT_ID/);
   });
 
   it("stores only an explicit, versioned consent decision", () => {
@@ -75,6 +77,17 @@ describe("public analytics", () => {
       trackLinks: true,
       webvisor: false
     });
+  });
+
+  it("loads GA4 only when an explicit measurement ID is supplied and mirrors allowlisted events", () => {
+    const fixture = createBrowserFixture();
+    assert.equal(initializePublicAnalytics({ ga4MeasurementId: "G-TEST1234", ...fixture }), true);
+    assert.equal(fixture.appended.length, 1);
+    assert.equal(fixture.appended[0].src, "https://www.googletagmanager.com/gtag/js?id=G-TEST1234");
+    assert.deepEqual(fixture.windowRef.dataLayer.slice(1), [["config", "G-TEST1234", { send_page_view: true }]]);
+
+    assert.equal(trackPublicAnalyticsGoal(PUBLIC_ANALYTICS_GOALS.onboardingStart), true);
+    assert.deepEqual(fixture.windowRef.dataLayer.at(-1), ["event", "onboarding_start"]);
   });
 
   it("fails closed without a counter ID or browser document", () => {

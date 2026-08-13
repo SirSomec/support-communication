@@ -6,9 +6,9 @@ import { createPublicRouteManifest } from "../src/public/seo/publicRouteManifest
 
 describe("commercial SEO page content contract", () => {
   it("keeps metadata, H1s, analytics goals and related routes unique", () => {
-    assert.equal(commercialPageDefinitions.length, 3);
+    assert.equal(commercialPageDefinitions.length, 7);
     for (const field of ["pathname", "outputFile", "title", "description", "h1", "analyticsGoal"]) {
-      assert.equal(new Set(commercialPageDefinitions.map((page) => page[field])).size, 3, `${field} must be unique`);
+      assert.equal(new Set(commercialPageDefinitions.map((page) => page[field])).size, 7, `${field} must be unique`);
     }
 
     for (const page of commercialPageDefinitions) {
@@ -23,7 +23,7 @@ describe("commercial SEO page content contract", () => {
     }
 
     for (const heading of ["capabilities", "workflow", "faq", "related"]) {
-      assert.equal(new Set(commercialPageDefinitions.map((page) => page.sectionHeadings[heading])).size, 3, `${heading} must be page-specific`);
+      assert.equal(new Set(commercialPageDefinitions.map((page) => page.sectionHeadings[heading])).size, 7, `${heading} must be page-specific`);
     }
   });
 

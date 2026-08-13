@@ -42,7 +42,11 @@ describe("public SEO build contract", () => {
       "/legal/",
       "/website-support-chat/",
       "/ai-support-bot/",
-      "/support-sla/"
+      "/support-sla/",
+      "/helpdesk-small-business/",
+      "/usedesk-alternative/",
+      "/jivo-alternative/",
+      "/webim-alternative/"
     ]);
     assert.equal(new Set(routes.map((route) => route.title)).size, routes.length);
     assert.equal(new Set(routes.map((route) => route.description)).size, routes.length);
@@ -57,7 +61,7 @@ describe("public SEO build contract", () => {
   });
 
   it("keeps analytics disabled unless a valid build-time counter ID is supplied", () => {
-    assert.equal(createPublicRouteManifest({ PUBLIC_SITE_METRIKA_ID: "" }).length, 7);
+    assert.equal(createPublicRouteManifest({ PUBLIC_SITE_METRIKA_ID: "" }).length, 11);
     assert.throws(
       () => createPublicRouteManifest({ PUBLIC_SITE_METRIKA_ID: "counter-from-runtime" }),
       /PUBLIC_SITE_METRIKA_ID/
@@ -67,7 +71,7 @@ describe("public SEO build contract", () => {
   it("generates and verifies indexable prerendered documents", async () => {
     const env = { PUBLIC_SITE_ORIGIN: "https://supportcom.ru", PUBLIC_SITE_INDEXABLE: "true" };
     const { distDir, routes } = await createFixture(env);
-    assert.deepEqual(await verifyPublicSeo({ distDir, env }), { routeCount: 7, indexable: true });
+    assert.deepEqual(await verifyPublicSeo({ distDir, env }), { routeCount: 11, indexable: true });
     const sitemap = await readFile(join(distDir, "sitemap.xml"), "utf8");
     assert.deepEqual([...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]), routes.map((route) => route.canonical));
   });
@@ -75,7 +79,7 @@ describe("public SEO build contract", () => {
   it("makes an explicitly non-indexable environment fail closed", async () => {
     const env = { PUBLIC_SITE_ORIGIN: "https://staging.example.test", PUBLIC_SITE_INDEXABLE: "false" };
     const { distDir } = await createFixture(env);
-    assert.deepEqual(await verifyPublicSeo({ distDir, env }), { routeCount: 7, indexable: false });
+    assert.deepEqual(await verifyPublicSeo({ distDir, env }), { routeCount: 11, indexable: false });
     assert.equal(await readFile(join(distDir, "robots.txt"), "utf8"), "User-agent: *\nDisallow: /\n");
     assert.doesNotMatch(await readFile(join(distDir, "sitemap.xml"), "utf8"), /<loc>/);
     assert.doesNotMatch(await readFile(join(distDir, "index.html"), "utf8"), /https:\/\/supportcom\.ru/);

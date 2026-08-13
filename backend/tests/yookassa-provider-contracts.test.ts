@@ -139,8 +139,14 @@ describe("YooKassa checkout provider", () => {
     const replay = await billing.chargeTenantDailySubscription("tenant-lumen", date);
     assert.equal(replay.status, "ok");
     assert.equal(replay.data.duplicate, true);
+    const nextDay = await billing.chargeTenantDailySubscription("tenant-lumen", new Date("2026-08-06T12:00:00.000Z"));
+    assert.equal(nextDay.status, "ok");
+    const dailyInvoices = (await billing.fetchTenantInvoices("tenant-lumen")).data.items
+      .filter((invoice) => invoice.provider === "internal-daily-charge");
+    assert.equal(dailyInvoices.length, 2);
+    assert.notEqual(dailyInvoices[0]?.id, dailyInvoices[1]?.id);
     const overview = await billing.fetchTenantBillingOverview("tenant-lumen");
-    assert.equal(overview.data.balance?.amountKopeks, 469807);
+    assert.equal(overview.data.balance?.amountKopeks, 439613);
   });
 
   it("shows the service-admin entitlement tariff while provider reconciliation is pending", async () => {

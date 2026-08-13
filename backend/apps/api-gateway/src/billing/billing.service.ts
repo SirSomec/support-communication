@@ -2030,7 +2030,11 @@ function normalizeInvoiceSync(
     return undefined;
   }
 
-  const id = stringOrDefault(invoice.id, `inv_${tenant.id}_${provider}`);
+  const providerInvoiceId = stringOrDefault(invoice.providerInvoiceId, `inv_${tenant.id}_${provider}`);
+  // An invoice id is the Prisma primary key, whereas providerInvoiceId is only
+  // unique per provider. Derive the fallback from both so recurring daily
+  // charges do not try to create every day's invoice under one primary key.
+  const id = stringOrDefault(invoice.id, `inv_${provider}_${providerInvoiceId}`);
   const amountDue = nonNegativeIntegerOrDefault(invoice.amountDue, subscription?.unitAmountMonthly ?? tenant.monthlyRevenue);
   const amountPaid = nonNegativeIntegerOrDefault(invoice.amountPaid, 0);
 
@@ -2045,7 +2049,7 @@ function normalizeInvoiceSync(
     paidAt: invoice.paidAt ? isoOrDefault(invoice.paidAt, now) : null,
     paymentStatus: normalizePaymentStatus(invoice.paymentStatus),
     provider,
-    providerInvoiceId: stringOrDefault(invoice.providerInvoiceId, id),
+    providerInvoiceId,
     status: normalizeInvoiceStatus(invoice.status),
     subscriptionId: stringOrNull(invoice.subscriptionId) ?? subscription?.id ?? null,
     tenantId: tenant.id,

@@ -20,9 +20,9 @@ describe("public pathname routing", () => {
     assert.equal(resolvePublicRoute("/ai-support-bot/")?.view, "commercial");
     assert.equal(resolvePublicRoute("/support-sla/")?.view, "commercial");
     assert.equal(resolvePublicRoute("/helpdesk-small-business/")?.view, "commercial");
-    assert.equal(resolvePublicRoute("/usedesk-alternative/")?.view, "commercial");
-    assert.equal(resolvePublicRoute("/jivo-alternative/")?.view, "commercial");
-    assert.equal(resolvePublicRoute("/webim-alternative/")?.view, "commercial");
+    assert.equal(resolvePublicRoute("/helpdesk-migration/")?.view, "commercial");
+    assert.equal(resolvePublicRoute("/omnichannel-support/")?.view, "commercial");
+    assert.equal(resolvePublicRoute("/customer-support-platform/")?.view, "commercial");
     assert.equal(resolvePublicRoute("/unknown/"), null);
   });
 

@@ -44,12 +44,17 @@ describe("public SEO build contract", () => {
       "/ai-support-bot/",
       "/support-sla/",
       "/helpdesk-small-business/",
-      "/usedesk-alternative/",
-      "/jivo-alternative/",
-      "/webim-alternative/"
+      "/helpdesk-migration/",
+      "/omnichannel-support/",
+      "/customer-support-platform/"
     ]);
     assert.equal(new Set(routes.map((route) => route.title)).size, routes.length);
     assert.equal(new Set(routes.map((route) => route.description)).size, routes.length);
+    assert.doesNotMatch(
+      routes.flatMap((route) => [route.pathname, route.title, route.description, route.h1]).join("\n"),
+      /usedesk|jivo|webim|альтернатива/i,
+      "public routes must not contain competitor brands or comparative positioning"
+    );
     for (const route of routes) {
       assert.match(route.canonical, /^https:\/\/supportcom\.ru\//);
       assert.doesNotMatch(route.canonical, /[#?]/);

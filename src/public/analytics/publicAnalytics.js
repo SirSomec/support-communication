@@ -14,15 +14,15 @@ export const PUBLIC_ANALYTICS_GOALS = Object.freeze({
   docsView: "docs_view",
   firstChannelConnected: "first_channel_connected",
   helpdeskSmallBusinessView: commercialPageDefinitions.find((page) => page.id === "helpdesk-small-business").analyticsGoal,
-  jivoAlternativeView: commercialPageDefinitions.find((page) => page.id === "jivo-alternative").analyticsGoal,
+  helpdeskMigrationView: commercialPageDefinitions.find((page) => page.id === "helpdesk-migration").analyticsGoal,
   loginClick: "login_click",
   onboardingComplete: "onboarding_complete",
   onboardingStart: "onboarding_start",
   pricingView: "pricing_view",
   registrationStart: "registration_start",
   supportSlaView: commercialPageDefinitions.find((page) => page.id === "support-sla").analyticsGoal,
-  usedeskAlternativeView: commercialPageDefinitions.find((page) => page.id === "usedesk-alternative").analyticsGoal,
-  webimAlternativeView: commercialPageDefinitions.find((page) => page.id === "webim-alternative").analyticsGoal,
+  omnichannelSupportView: commercialPageDefinitions.find((page) => page.id === "omnichannel-support").analyticsGoal,
+  customerSupportPlatformView: commercialPageDefinitions.find((page) => page.id === "customer-support-platform").analyticsGoal,
   websiteSupportChatView: commercialPageDefinitions.find((page) => page.id === "website-support-chat").analyticsGoal
 });
 

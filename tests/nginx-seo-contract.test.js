@@ -27,9 +27,9 @@ describe("nginx public SEO HTTP contract", () => {
         assert.match(exactLocation(config, "/ai-support-bot/"), /try_files\s+\/ai-support-bot\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/support-sla/"), /try_files\s+\/support-sla\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/helpdesk-small-business/"), /try_files\s+\/helpdesk-small-business\/index\.html\s+=404;/);
-        assert.match(exactLocation(config, "/usedesk-alternative/"), /try_files\s+\/usedesk-alternative\/index\.html\s+=404;/);
-        assert.match(exactLocation(config, "/jivo-alternative/"), /try_files\s+\/jivo-alternative\/index\.html\s+=404;/);
-        assert.match(exactLocation(config, "/webim-alternative/"), /try_files\s+\/webim-alternative\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/helpdesk-migration/"), /try_files\s+\/helpdesk-migration\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/omnichannel-support/"), /try_files\s+\/omnichannel-support\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/customer-support-platform/"), /try_files\s+\/customer-support-platform\/index\.html\s+=404;/);
       });
 
       it("permanently canonicalizes public and private legacy paths", () => {
@@ -48,12 +48,12 @@ describe("nginx public SEO HTTP contract", () => {
           ["/support-sla/index.html", "/support-sla/"],
           ["/helpdesk-small-business", "/helpdesk-small-business/"],
           ["/helpdesk-small-business/index.html", "/helpdesk-small-business/"],
-          ["/usedesk-alternative", "/usedesk-alternative/"],
-          ["/usedesk-alternative/index.html", "/usedesk-alternative/"],
-          ["/jivo-alternative", "/jivo-alternative/"],
-          ["/jivo-alternative/index.html", "/jivo-alternative/"],
-          ["/webim-alternative", "/webim-alternative/"],
-          ["/webim-alternative/index.html", "/webim-alternative/"],
+          ["/helpdesk-migration", "/helpdesk-migration/"],
+          ["/helpdesk-migration/index.html", "/helpdesk-migration/"],
+          ["/omnichannel-support", "/omnichannel-support/"],
+          ["/omnichannel-support/index.html", "/omnichannel-support/"],
+          ["/customer-support-platform", "/customer-support-platform/"],
+          ["/customer-support-platform/index.html", "/customer-support-platform/"],
           ["/app", '"/#/app"'],
           ["/login", '"/#/login"'],
           ["/auth", '"/#/login"'],

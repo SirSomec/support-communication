@@ -280,7 +280,7 @@ const solutionPageDefinitions = [
   }
 ];
 
-function createComparisonPage({ competitor, id, pathname, title, description }) {
+function createImplementationPage({ id, pathname, title, description, h1, breadcrumbLabel, eyebrow, heroText }) {
   return {
     id,
     pathname,
@@ -288,10 +288,10 @@ function createComparisonPage({ competitor, id, pathname, title, description }) 
     analyticsGoal: `${id.replaceAll("-", "_")}_view`,
     title,
     description,
-    h1: `Альтернатива ${competitor}: как выбрать сервис поддержки`,
-    breadcrumbLabel: `Альтернатива ${competitor}`,
-    eyebrow: "Нейтральный сценарий выбора helpdesk",
-    heroText: `Эта страница помогает оценить Support Communication как альтернативу ${competitor} по вашему процессу поддержки: каналам, очередям, SLA, автоматизации и запуску команды.`,
+    h1,
+    breadcrumbLabel,
+    eyebrow,
+    heroText,
     primaryCta: {
       kind: "start_free",
       label: "Начать бесплатно",
@@ -302,18 +302,18 @@ function createComparisonPage({ competitor, id, pathname, title, description }) 
       href: "/pricing/"
     },
     sectionHeadings: {
-      capabilities: `Что проверить при сравнении с ${competitor}`,
-      capabilitiesIntro: "Сравнивайте не список маркетинговых функций, а реальный путь обращения: от входящего сообщения до ответа, контроля срока и разбора результата.",
-      workflow: `Как провести пилот вместо формального сравнения ${competitor}`,
-      faq: `Альтернатива ${competitor}: частые вопросы`,
-      related: `Сценарии Support Communication для выбора вместо ${competitor}`
+      capabilities: "Что проверить перед запуском",
+      capabilitiesIntro: "Оцените реальный путь обращения: от входящего сообщения до ответа, контроля срока и разбора результата.",
+      workflow: "Как провести пилотный запуск",
+      faq: "Запуск клиентской поддержки: частые вопросы",
+      related: "Связанные сценарии клиентской поддержки"
     },
     visual: {
       title: "Маршрут проверки на пилоте",
       steps: ["Канал", "Очередь", "Правило", "Оператор", "Отчёт"]
     },
     summary: {
-      title: "Сравнение по рабочему сценарию",
+      title: "Проверка по рабочему сценарию",
       text: "Подключите один тестовый канал, задайте очередь и правила, проведите несколько обращений и проверьте, достаточно ли команде прозрачности для ежедневной работы."
     },
     capabilities: [
@@ -349,12 +349,12 @@ function createComparisonPage({ competitor, id, pathname, title, description }) 
       }
     ],
     caveat: {
-      title: "Неофициальное сравнение",
-      text: `Страница не описывает цены, условия или функции ${competitor}. Перед выбором сверяйте актуальные условия и документацию каждого сервиса самостоятельно.`
+      title: "Проверьте сценарий до запуска",
+      text: "Перед расширением запуска убедитесь, что выбранные каналы, роли, правила SLA и интеграции соответствуют процессу вашей команды."
     },
     faq: [
       {
-        question: `Можно ли начать переход с ${competitor} с одного канала?`,
+        question: "Можно ли начать запуск с одного канала?",
         answer: "Да. Пилот с одним каналом и ограниченным числом операторов помогает проверить рабочий процесс до переноса остальных сценариев."
       },
       {
@@ -414,34 +414,43 @@ const additionalSolutionPages = [
   }
 ];
 
-const comparisonPageDefinitions = [
-  createComparisonPage({
-    competitor: "Usedesk",
-    id: "usedesk-alternative",
-    pathname: "/usedesk-alternative/",
-    title: "Альтернатива Usedesk для поддержки клиентов | Support Communication",
-    description: "Рассмотрите Support Communication как альтернативу Usedesk: проверьте на пилоте каналы, очереди, SLA, API и сценарии поддержки без непроверяемых сравнений."
+const implementationPageDefinitions = [
+  createImplementationPage({
+    id: "helpdesk-migration",
+    pathname: "/helpdesk-migration/",
+    title: "Переход на helpdesk: план запуска поддержки | Support Communication",
+    description: "Переход на helpdesk без хаоса: начните с одного канала, настройте очередь и роли, проверьте SLA на пилоте и подключайте остальные сценарии по мере готовности команды.",
+    h1: "Переход на helpdesk с контролируемым пилотным запуском",
+    breadcrumbLabel: "Переход на helpdesk",
+    eyebrow: "План запуска клиентской поддержки",
+    heroText: "Соберите понятный процесс работы с обращениями: начните с одного канала, проверьте роли, очередь и сроки ответа, а затем расширяйте контур поддержки."
   }),
-  createComparisonPage({
-    competitor: "Jivo",
-    id: "jivo-alternative",
-    pathname: "/jivo-alternative/",
-    title: "Альтернатива Jivo для клиентской поддержки | Support Communication",
-    description: "Рассмотрите Support Communication как альтернативу Jivo: проверьте на пилоте работу с обращениями, маршрутизацию, SLA, API и подключение сайта."
+  createImplementationPage({
+    id: "omnichannel-support",
+    pathname: "/omnichannel-support/",
+    title: "Омниканальный сервис обработки обращений | Support Communication",
+    description: "Омниканальная поддержка объединяет обращения из подключённых каналов в одном рабочем месте: назначайте операторов, настраивайте очереди и контролируйте сроки ответа.",
+    h1: "Омниканальная поддержка клиентов в одном рабочем месте",
+    breadcrumbLabel: "Омниканальная поддержка",
+    eyebrow: "Единый контур обращений",
+    heroText: "Подключайте нужные каналы постепенно, чтобы операторы видели историю диалога, ответственного и правила обработки в едином рабочем процессе."
   }),
-  createComparisonPage({
-    competitor: "Webim",
-    id: "webim-alternative",
-    pathname: "/webim-alternative/",
-    title: "Альтернатива Webim для поддержки клиентов | Support Communication",
-    description: "Рассмотрите Support Communication как альтернативу Webim: сравните на пилоте работу каналов, очередей, контроля SLA, API и сценариев с операторами."
+  createImplementationPage({
+    id: "customer-support-platform",
+    pathname: "/customer-support-platform/",
+    title: "Платформа клиентской поддержки для команды | Support Communication",
+    description: "Платформа клиентской поддержки для команды: собирайте обращения, распределяйте диалоги, контролируйте SLA, подключайте сайт и развивайте автоматизацию в своём темпе.",
+    h1: "Платформа клиентской поддержки для управляемой работы команды",
+    breadcrumbLabel: "Платформа поддержки",
+    eyebrow: "Инструменты для клиентского сервиса",
+    heroText: "Support Communication помогает выстроить работу с обращениями вокруг очередей, ролей, сроков и подключённых каналов без лишней сложности на старте."
   })
 ];
 
 export const commercialPageDefinitions = deepFreeze([
   ...solutionPageDefinitions,
   ...additionalSolutionPages,
-  ...comparisonPageDefinitions
+  ...implementationPageDefinitions
 ]);
 
 const commercialPageById = new Map(commercialPageDefinitions.map((page) => [page.id, page]));

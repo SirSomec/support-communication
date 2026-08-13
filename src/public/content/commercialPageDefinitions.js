@@ -280,7 +280,7 @@ const solutionPageDefinitions = [
   }
 ];
 
-function createImplementationPage({ id, pathname, title, description, h1, breadcrumbLabel, eyebrow, heroText }) {
+function createImplementationPage({ id, pathname, title, description, h1, breadcrumbLabel, eyebrow, heroText, sectionHeadings }) {
   return {
     id,
     pathname,
@@ -301,13 +301,7 @@ function createImplementationPage({ id, pathname, title, description, h1, breadc
       label: "Посмотреть тарифы",
       href: "/pricing/"
     },
-    sectionHeadings: {
-      capabilities: "Что проверить перед запуском",
-      capabilitiesIntro: "Оцените реальный путь обращения: от входящего сообщения до ответа, контроля срока и разбора результата.",
-      workflow: "Как провести пилотный запуск",
-      faq: "Запуск клиентской поддержки: частые вопросы",
-      related: "Связанные сценарии клиентской поддержки"
-    },
+    sectionHeadings,
     visual: {
       title: "Маршрут проверки на пилоте",
       steps: ["Канал", "Очередь", "Правило", "Оператор", "Отчёт"]
@@ -423,7 +417,14 @@ const implementationPageDefinitions = [
     h1: "Переход на helpdesk с контролируемым пилотным запуском",
     breadcrumbLabel: "Переход на helpdesk",
     eyebrow: "План запуска клиентской поддержки",
-    heroText: "Соберите понятный процесс работы с обращениями: начните с одного канала, проверьте роли, очередь и сроки ответа, а затем расширяйте контур поддержки."
+    heroText: "Соберите понятный процесс работы с обращениями: начните с одного канала, проверьте роли, очередь и сроки ответа, а затем расширяйте контур поддержки.",
+    sectionHeadings: {
+      capabilities: "Что подготовить для перехода на helpdesk",
+      capabilitiesIntro: "Оцените путь обращения: от входящего сообщения до ответа, контроля срока и разбора результата.",
+      workflow: "Как провести пилотный переход на helpdesk",
+      faq: "Переход на helpdesk: частые вопросы",
+      related: "Сценарии для запуска helpdesk"
+    }
   }),
   createImplementationPage({
     id: "omnichannel-support",
@@ -433,7 +434,14 @@ const implementationPageDefinitions = [
     h1: "Омниканальная поддержка клиентов в одном рабочем месте",
     breadcrumbLabel: "Омниканальная поддержка",
     eyebrow: "Единый контур обращений",
-    heroText: "Подключайте нужные каналы постепенно, чтобы операторы видели историю диалога, ответственного и правила обработки в едином рабочем процессе."
+    heroText: "Подключайте нужные каналы постепенно, чтобы операторы видели историю диалога, ответственного и правила обработки в едином рабочем процессе.",
+    sectionHeadings: {
+      capabilities: "Что настроить для омниканальной поддержки",
+      capabilitiesIntro: "Проверьте маршрут обращения между каналом, очередью и оператором до расширения подключения.",
+      workflow: "Как подключать каналы в омниканальный контур",
+      faq: "Омниканальная поддержка: частые вопросы",
+      related: "Сценарии для единого окна обращений"
+    }
   }),
   createImplementationPage({
     id: "customer-support-platform",
@@ -443,7 +451,14 @@ const implementationPageDefinitions = [
     h1: "Платформа клиентской поддержки для управляемой работы команды",
     breadcrumbLabel: "Платформа поддержки",
     eyebrow: "Инструменты для клиентского сервиса",
-    heroText: "Support Communication помогает выстроить работу с обращениями вокруг очередей, ролей, сроков и подключённых каналов без лишней сложности на старте."
+    heroText: "Support Communication помогает выстроить работу с обращениями вокруг очередей, ролей, сроков и подключённых каналов без лишней сложности на старте.",
+    sectionHeadings: {
+      capabilities: "Из чего состоит платформа клиентской поддержки",
+      capabilitiesIntro: "Оцените ключевые элементы процесса: каналы, роли, очереди, сроки и контроль работы команды.",
+      workflow: "Как запустить платформу поддержки для команды",
+      faq: "Платформа клиентской поддержки: частые вопросы",
+      related: "Сценарии для развития клиентского сервиса"
+    }
   })
 ];
 

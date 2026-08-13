@@ -26,6 +26,10 @@ describe("nginx public SEO HTTP contract", () => {
         assert.match(exactLocation(config, "/website-support-chat/"), /try_files\s+\/website-support-chat\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/ai-support-bot/"), /try_files\s+\/ai-support-bot\/index\.html\s+=404;/);
         assert.match(exactLocation(config, "/support-sla/"), /try_files\s+\/support-sla\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/helpdesk-small-business/"), /try_files\s+\/helpdesk-small-business\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/usedesk-alternative/"), /try_files\s+\/usedesk-alternative\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/jivo-alternative/"), /try_files\s+\/jivo-alternative\/index\.html\s+=404;/);
+        assert.match(exactLocation(config, "/webim-alternative/"), /try_files\s+\/webim-alternative\/index\.html\s+=404;/);
       });
 
       it("permanently canonicalizes public and private legacy paths", () => {
@@ -42,6 +46,14 @@ describe("nginx public SEO HTTP contract", () => {
           ["/ai-support-bot/index.html", "/ai-support-bot/"],
           ["/support-sla", "/support-sla/"],
           ["/support-sla/index.html", "/support-sla/"],
+          ["/helpdesk-small-business", "/helpdesk-small-business/"],
+          ["/helpdesk-small-business/index.html", "/helpdesk-small-business/"],
+          ["/usedesk-alternative", "/usedesk-alternative/"],
+          ["/usedesk-alternative/index.html", "/usedesk-alternative/"],
+          ["/jivo-alternative", "/jivo-alternative/"],
+          ["/jivo-alternative/index.html", "/jivo-alternative/"],
+          ["/webim-alternative", "/webim-alternative/"],
+          ["/webim-alternative/index.html", "/webim-alternative/"],
           ["/app", '"/#/app"'],
           ["/login", '"/#/login"'],
           ["/auth", '"/#/login"'],
@@ -102,6 +114,15 @@ describe("nginx public SEO HTTP contract", () => {
     assert.match(config, /location\s+\/s3\/\s*\{/);
     assert.match(config, /proxy_request_buffering\s+off;/);
     assert.match(config, /rewrite\s+\^\/s3\/\(\.\*\)\$\s+\/\$1\s+break;/);
+  });
+
+  it("allows the configured analytics script providers through CSP", () => {
+    for (const path of ["deploy/caddy/Caddyfile", "deploy/caddy/Caddyfile.vps"]) {
+      const caddyfile = readFileSync(path, "utf8");
+      assert.match(caddyfile, /script-src 'self' https:\/\/mc\.yandex\.ru https:\/\/yastatic\.net https:\/\/www\.googletagmanager\.com;/);
+    }
+
+    assert.match(configs.get("docker/nginx.conf"), /script-src 'self' https:\/\/mc\.yandex\.ru https:\/\/yastatic\.net https:\/\/www\.googletagmanager\.com;/);
   });
 
   it("ships a lightweight, noindex 404 document with recovery links", () => {

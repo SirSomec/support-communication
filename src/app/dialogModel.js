@@ -77,7 +77,7 @@ export function isAssignedToOperator(conversation, operatorId) {
     return false;
   }
 
-  if (conversation.operatorId === operatorId) {
+  if (conversation.status !== "closed" && conversation.operatorId === operatorId) {
     return true;
   }
 
@@ -97,7 +97,7 @@ export function isBotHandledConversation(conversation) {
     appeal.status !== "closed" && botSessionActiveStatuses.includes(appeal.botSession?.status));
 }
 
-// «Оценки»: последняя клиентская оценка среди обращений треда.
+// «Оценки»: закрытые диалоги, ожидающие или уже получившие оценку клиента.
 export function getConversationQualityAssessment(conversation) {
   let latest = null;
   for (const appeal of conversationAppeals(conversation)) {
@@ -127,7 +127,7 @@ export function matchesQueueTab(conversation, filter, { operatorId } = {}) {
     case "bot":
       return isBotHandledConversation(conversation);
     case "quality":
-      return Boolean(getConversationQualityAssessment(conversation));
+      return conversation.status === "closed" || Boolean(getConversationQualityAssessment(conversation));
     default:
       return true;
   }

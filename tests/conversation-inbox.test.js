@@ -994,13 +994,23 @@ describe("queue tab logic", () => {
     const mine = { id: "c-1", status: "active", operatorId: "op-1" };
     const foreign = { id: "c-2", status: "active", operatorId: "op-2" };
     const unassigned = { id: "c-3", status: "queued" };
+    const closedMine = {
+      id: "c-4",
+      status: "closed",
+      operatorId: "op-1",
+      qualityAssessment: { createdAt: "2026-08-14T12:00:00.000Z", scale: "CSAT", score: 5 }
+    };
 
     assert.equal(isAssignedToOperator(mine, "op-1"), true);
     assert.equal(isAssignedToOperator(foreign, "op-1"), false);
     assert.equal(isAssignedToOperator(unassigned, "op-1"), false);
+    assert.equal(isAssignedToOperator(closedMine, "op-1"), false);
     assert.equal(isAssignedToOperator(mine, ""), false);
     assert.equal(matchesQueueTab(foreign, "mine", { operatorId: "op-1" }), false);
+    assert.equal(matchesQueueTab(closedMine, "mine", { operatorId: "op-1" }), false);
+    assert.equal(matchesQueueTab(closedMine, "quality", { operatorId: "op-1" }), true);
     assert.equal(matchesQueueTab(foreign, "all", { operatorId: "op-1" }), true);
+    assert.equal(matchesQueueTab(closedMine, "all", { operatorId: "op-1" }), true);
   });
 
   it("counts new unassigned appeals as waiting so bot returns are visible", () => {
@@ -1061,7 +1071,7 @@ describe("queue tab logic", () => {
     assert.equal(matchesQueueTab(handedOff, "bot", {}), false);
   });
 
-  it("keeps the Ratings tab scoped to client-rated dialogs and picks the latest score", () => {
+  it("keeps closed dialogs in the Ratings tab and picks the latest score", () => {
     const rated = {
       id: "current",
       status: "closed",
@@ -1070,6 +1080,7 @@ describe("queue tab logic", () => {
         { id: "current", status: "closed", qualityAssessment: { createdAt: "2026-07-15T10:00:00.000Z", scale: "CSAT", score: 2 } }
       ]
     };
+    const closedWithoutRating = { id: "c-1", status: "closed" };
     const tagged = { id: "c-2", status: "active", tags: ["жалоба"] };
 
     assert.deepEqual(getConversationQualityAssessment(rated), {
@@ -1078,6 +1089,7 @@ describe("queue tab logic", () => {
       score: 2
     });
     assert.equal(matchesQueueTab(rated, "quality", {}), true);
+    assert.equal(matchesQueueTab(closedWithoutRating, "quality", {}), true);
     assert.equal(matchesQueueTab(tagged, "quality", {}), false);
   });
 });

@@ -1031,7 +1031,7 @@
 }
 
 .bot-handoff-summary header,
-.bot-handoff-summary > div {
+.bot-handoff-summary-details {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -1039,6 +1039,7 @@
 }
 
 .bot-handoff-summary header {
+  justify-content: space-between;
   color: #17233a;
 }
 
@@ -1048,7 +1049,7 @@
   font-weight: 750;
 }
 
-.bot-handoff-summary > div span {
+.bot-handoff-summary-details span {
   display: grid;
   min-width: min(220px, 100%);
   gap: 3px;
@@ -1059,6 +1060,45 @@
   color: #33445c;
   font-size: 12px;
   line-height: 1.35;
+}
+
+.bot-handoff-summary-controls {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.bot-handoff-summary-controls button,
+.bot-handoff-summary--hidden button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  border: 1px solid #dce8f8;
+  border-radius: 6px;
+  background: var(--surface);
+  color: #46546b;
+}
+
+.bot-handoff-summary-controls button:hover,
+.bot-handoff-summary-controls button:focus-visible,
+.bot-handoff-summary--hidden button:hover,
+.bot-handoff-summary--hidden button:focus-visible {
+  border-color: #98c5ff;
+  background: #eef6ff;
+  color: var(--blue);
+}
+
+.bot-handoff-summary--hidden {
+  padding-block: 6px;
+}
+
+.bot-handoff-summary--hidden button {
+  gap: 7px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .bot-handoff-summary b {

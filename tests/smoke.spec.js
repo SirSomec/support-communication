@@ -701,7 +701,17 @@ test("topbar notifications and live bot handoff summary are actionable", async (
   await selectRole(page, "Администратор");
   await page.locator(".queue-row").filter({ hasText: "Vladimir B." }).click();
 
-  await expect(page.locator(".bot-handoff-summary")).toContainText("Handoff summary");
+  const handoffSummary = page.locator(".bot-handoff-summary");
+  await expect(handoffSummary).toContainText("Handoff summary");
+  await handoffSummary.getByRole("button", { name: "Свернуть Handoff summary" }).click();
+  await expect(handoffSummary.getByRole("button", { name: "Развернуть Handoff summary" })).toHaveAttribute("aria-expanded", "false");
+  await expect(handoffSummary.locator(".bot-handoff-summary-content")).toHaveCount(0);
+  await handoffSummary.getByRole("button", { name: "Развернуть Handoff summary" }).click();
+  await expect(handoffSummary.locator(".bot-handoff-summary-content")).toBeVisible();
+  await handoffSummary.getByRole("button", { name: "Скрыть Handoff summary" }).click();
+  await expect(handoffSummary.getByRole("button", { name: "Показать Handoff summary" })).toBeVisible();
+  await handoffSummary.getByRole("button", { name: "Показать Handoff summary" }).click();
+  await expect(handoffSummary.getByRole("button", { name: "Свернуть Handoff summary" })).toBeVisible();
   await page.getByRole("button", { name: "Уведомления" }).click();
   const channelErrorsSubscription = page.locator(".notification-settings label").filter({ hasText: "Channel errors" }).locator("input");
   const channelSoundRule = page.locator(".notification-sound-rules label").filter({ hasText: "Ошибки каналов" }).locator("input");

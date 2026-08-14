@@ -10,7 +10,15 @@ describe("dialog-local state reset contracts", () => {
 
     assert.match(toolbar, /useEffect\(\(\) => \{\s*setResolutionOutcome\("resolved"\);\s*\}, \[conversationId\]\)/);
     assert.match(pane, /<TranscriptToolbar[\s\S]*conversationId=\{conversation\.id\}/);
-    assert.match(handoff, /useEffect\(\(\) => \{\s*setSelected\(null\);\s*setStatus\("idle"\);\s*setError\(""\);\s*\}, \[conversationId\]\)/);
+    assert.match(handoff, /useEffect\(\(\) => \{\s*setSelected\(null\);\s*setStatus\("idle"\);\s*setError\(""\);\s*setCollapsed\(false\);\s*setHidden\(false\);\s*\}, \[conversationId\]\)/);
+  });
+
+  it("lets the operator collapse, hide, and restore the handoff summary", () => {
+    const handoff = readFileSync("src/features/dialogs/BotHandoffSummary.jsx", "utf8");
+
+    assert.match(handoff, /aria-label=\{collapsed \? "Развернуть Handoff summary" : "Свернуть Handoff summary"\}/);
+    assert.match(handoff, /aria-label="Скрыть Handoff summary"/);
+    assert.match(handoff, /aria-label="Показать Handoff summary"/);
   });
 
   it("marks client history as fetched only after a successful response", () => {

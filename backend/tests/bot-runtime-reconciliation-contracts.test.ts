@@ -234,12 +234,50 @@ describe("bot runtime side-effect reconciliation", () => {
     const automationRepository = automation("handoff");
     const conversationRepository = conversations();
     await createStep(automationRepository);
-    const result = await runBotRuntimeReconciliationOnce({ automationRepository, conversationRepository, now: "2026-07-11T11:00:01.000Z" });
+    const routed: Array<{ conversationId: string; tenantId: string }> = [];
+    const result = await runBotRuntimeReconciliationOnce({
+      automationRepository,
+      autoAssignConversation: async (conversationId, tenantId) => {
+        routed.push({ conversationId, tenantId });
+        return { data: { assigned: true }, status: "ok" };
+      },
+      conversationRepository,
+      now: "2026-07-11T11:00:01.000Z"
+    });
     assert.equal(result.delivered, 1);
+    assert.deepEqual(routed, [{ conversationId: "conv-1", tenantId: "tenant-1" }]);
     const conversation = await conversationRepository.findConversation("conv-1");
     assert.equal(conversation?.status, "queued");
     assert.equal(conversation?.queueId, "queue-priority");
     assert.equal(conversation?.operatorId, undefined);
+    const events = await conversationRepository.listLifecycleEvents({ conversationId: "conv-1", tenantId: "tenant-1" });
+    assert.equal(events.filter((event) => event.eventType === "bot.handoff.created").length, 1);
+  });
+
+  it("retries routing after a crash without duplicating the durable handoff", async () => {
+    const automationRepository = automation("handoff");
+    const conversationRepository = conversations();
+    await createStep(automationRepository);
+    let routeAttempts = 0;
+    const input = {
+      automationRepository,
+      autoAssignConversation: async () => {
+        routeAttempts += 1;
+        if (routeAttempts === 1) throw new Error("routing_temporarily_unavailable");
+        return { data: { assigned: true }, status: "ok" };
+      },
+      conversationRepository,
+      maxAttempts: 3,
+      retryBackoffMs: 1_000
+    };
+
+    const first = await runBotRuntimeReconciliationOnce({ ...input, now: "2026-07-11T11:00:01.000Z" });
+    assert.equal(first.failed, 1);
+    assert.equal((await conversationRepository.findConversation("conv-1"))?.status, "queued");
+
+    const second = await runBotRuntimeReconciliationOnce({ ...input, now: "2026-07-11T11:00:03.000Z" });
+    assert.equal(second.delivered, 1);
+    assert.equal(routeAttempts, 2);
     const events = await conversationRepository.listLifecycleEvents({ conversationId: "conv-1", tenantId: "tenant-1" });
     assert.equal(events.filter((event) => event.eventType === "bot.handoff.created").length, 1);
   });

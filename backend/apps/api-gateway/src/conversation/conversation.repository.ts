@@ -116,8 +116,10 @@ export interface ConversationRealtimeRetentionFilter {
 export interface ConversationListFilter {
   cursor?: string;
   messageTake?: number;
+  statuses?: string[];
   take?: number;
   tenantId: string;
+  unassigned?: boolean;
 }
 
 export interface ConversationOutboundDescriptorRecordInput {
@@ -402,7 +404,11 @@ interface PrismaConversationFindManyInput {
   orderBy: Array<{ updatedAt: "desc" } | { id: "desc" }>;
   skip?: number;
   take: number;
-  where: { tenantId: string };
+  where: {
+    operatorId?: null;
+    status?: { in: string[] };
+    tenantId: string;
+  };
 }
 
 interface PrismaConversationFindUniqueInput {
@@ -1097,6 +1103,8 @@ function createDurableConversationRepository(store: DurableStore<ConversationSta
       const messageTake = boundedTake(filter?.messageTake, 50, 200);
       const rows = store.read().conversations
         .filter((conversation) => conversation.tenantId === tenantId)
+        .filter((conversation) => !filter.statuses?.length || filter.statuses.includes(conversation.status))
+        .filter((conversation) => !filter.unassigned || !conversation.operatorId)
         .sort(compareConversationsForList);
       const cursorIndex = filter?.cursor ? rows.findIndex((conversation) => conversation.id === filter.cursor) : -1;
       const start = cursorIndex >= 0 ? cursorIndex + 1 : 0;
@@ -1619,7 +1627,11 @@ function conversationWithMessagesQuery(filter: ConversationListFilter): PrismaCo
     },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     take: boundedTake(filter?.take, 100, 500),
-    where: { tenantId: requireConversationTenantId(filter?.tenantId) }
+    where: {
+      ...(filter.statuses?.length ? { status: { in: filter.statuses } } : {}),
+      tenantId: requireConversationTenantId(filter?.tenantId),
+      ...(filter.unassigned ? { operatorId: null } : {})
+    }
   };
 }
 

@@ -6,9 +6,16 @@ import { ConversationService } from "../conversation/conversation.service.js";
 import { configureAutomationRepository } from "./bootstrap.js";
 import { configureBillingRepository } from "../billing/bootstrap.js";
 import { BillingService } from "../billing/billing.service.js";
+import { configureIdentityRepository } from "../identity/bootstrap.js";
+import { TeamDirectoryRepository } from "../identity/team-directory.repository.js";
+import { configureOperatorPresenceRepository } from "../presence/bootstrap.js";
+import { configureRoutingRepository } from "../routing/bootstrap.js";
+import { CanonicalRoutingConversationRepository } from "../routing/canonical-routing-conversation.repository.js";
+import { CanonicalRoutingWorkloadAdapter } from "../routing/canonical-routing-workload.adapter.js";
 import { runBotRuntimeReconciliationOnce } from "./bot-runtime-reconciliation.worker.js";
 import { runBotRuntimeRetryOnce } from "./bot-runtime-retry.worker.js";
 import { QueueDirectoryRepository } from "../routing/queue-directory.repository.js";
+import { RoutingService } from "../routing/routing.service.js";
 
 export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessEnv = process.env, argv: string[] = process.argv): Promise<void> {
   const intervalMs = positive(source.BOT_RUNTIME_RECONCILIATION_INTERVAL_MS, 5_000);
@@ -19,9 +26,29 @@ export async function runBotRuntimeReconciliationFromEnv(source: NodeJS.ProcessE
   const conversationService = new ConversationService(conversationRepository, { realtimeFanout });
   const automationRepository = configureAutomationRepository(source);
   const billingService = new BillingService(configureBillingRepository(source));
+  configureIdentityRepository(source);
+  const routingService = new RoutingService(
+    configureRoutingRepository(source),
+    new CanonicalRoutingWorkloadAdapter(),
+    new CanonicalRoutingConversationRepository(conversationRepository),
+    TeamDirectoryRepository.default(),
+    configureOperatorPresenceRepository(source)
+  );
   const queueDirectoryRepository = new QueueDirectoryRepository();
   const input = {
     automationRepository,
+    autoAssignConversation: async (conversationId: string, tenantId: string) => {
+      const routed = await routingService.autoAssignConversation(conversationId, { tenantId });
+      writeStructuredLog(routed.status === "ok" ? "info" : "warn", "Bot handoff routing completed", {
+        assigned: routed.data?.assigned === true,
+        conversationId,
+        operation: "bot-runtime.handoff.route",
+        outcome: routed.status,
+        service: "bot-runtime-reconciliation-worker",
+        tenantId
+      });
+      return routed;
+    },
     closeConversation: (payload: { conversationId: string; reason: string; resolutionOutcome: string; topic?: string }, scope: { tenantId: string }) =>
       conversationService.transitionConversationStatus({ ...payload, nextStatus: "closed" }, scope),
     conversationRepository,

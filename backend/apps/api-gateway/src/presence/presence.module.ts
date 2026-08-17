@@ -4,6 +4,7 @@ import { RoutingModule } from "../routing/routing.module.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { PresenceController } from "./presence.controller.js";
 import { OperatorPresenceService } from "./presence.service.js";
+import { listUnassignedQueueConversationIds } from "./queue-drain.js";
 
 @Module({
   imports: [RoutingModule],
@@ -15,10 +16,9 @@ import { OperatorPresenceService } from "./presence.service.js";
       autoAssignQueuedConversations: async (tenantId: string) => {
         // Routing owns the eligibility checks. Process sequentially so each
         // assignment observes the capacity consumed by the previous one.
-        const conversations = await ConversationRepository.default().listConversations({ take: 200, tenantId });
-        for (const conversation of conversations) {
-          if (conversation.status !== "queued" || conversation.operatorId) continue;
-          await routingService.autoAssignConversation(conversation.id, { tenantId });
+        const conversationIds = await listUnassignedQueueConversationIds(ConversationRepository.default(), tenantId);
+        for (const conversationId of conversationIds) {
+          await routingService.autoAssignConversation(conversationId, { tenantId });
         }
       }
     })

@@ -12,6 +12,16 @@ import type { AutomationBotRuntimeSideEffect, AutomationRepository } from "./aut
 import { recordBotDeliveryFailure } from "./bot-observability.js";
 
 export interface BotRuntimeReconciliationWorkerInput {
+  /**
+   * Routes a dialog immediately after a durable bot handoff. The callback is
+   * idempotent: reconciliation may invoke it again after a crash between the
+   * conversation commit and side-effect acknowledgement.
+   */
+  autoAssignConversation?: (conversationId: string, tenantId: string) => Promise<{
+    data?: Record<string, unknown>;
+    error?: { code?: string } | null;
+    status: string;
+  }>;
   automationRepository: AutomationRepository;
   /**
    * Штатное закрытие обращения (ConversationService.transitionConversationStatus):
@@ -209,7 +219,7 @@ async function reconcileEffect(
       limit: 1_000,
       tenantId: effect.tenantId
     });
-    if (prior.some((event) => event.source === "bot-runtime-reconciliation" && event.sourceEventId === sourceEventId)) return;
+    const handoffAlreadyPersisted = prior.some((event) => event.source === "bot-runtime-reconciliation" && event.sourceEventId === sourceEventId);
 
     const conversation = await repository.findConversation(effect.conversationId);
     if (!conversation || conversation.tenantId !== effect.tenantId) {
@@ -256,8 +266,17 @@ async function reconcileEffect(
       tenantId: effect.tenantId,
       traceId
     };
-    const persisted = await repository.saveConversationMutation({ conversation: updated, lifecycleEvent, realtimeEvent });
-    await input.realtimeFanout?.publish(persisted.realtimeEvent);
+    if (!handoffAlreadyPersisted) {
+      const persisted = await repository.saveConversationMutation({ conversation: updated, lifecycleEvent, realtimeEvent });
+      await input.realtimeFanout?.publish(persisted.realtimeEvent);
+    }
+
+    if (input.autoAssignConversation) {
+      const routed = await input.autoAssignConversation(effect.conversationId, effect.tenantId);
+      if (routed.status !== "ok") {
+        throw new Error(`bot_runtime_handoff_auto_assignment_failed:${routed.error?.code ?? routed.status}`);
+      }
+    }
     return;
   }
 

@@ -10,6 +10,7 @@ import {
   presenceAcceptsManualAssignment
 } from "../apps/api-gateway/src/presence/operator-presence.types.ts";
 import { OperatorPresenceService } from "../apps/api-gateway/src/presence/presence.service.ts";
+import { listUnassignedQueueConversationIds } from "../apps/api-gateway/src/presence/queue-drain.ts";
 import { bootstrapRoutingState } from "../apps/api-gateway/src/routing/seed.ts";
 import { RoutingRepository } from "../apps/api-gateway/src/routing/routing.repository.ts";
 import { RoutingService } from "../apps/api-gateway/src/routing/routing.service.ts";
@@ -233,6 +234,25 @@ describe("operator presence contracts (FR §9.4, §12.3)", () => {
       const repeated = await service.setMyPresence({ status: "online" }, operatorContext("operator-anna"));
       assert.equal(repeated.data.autoAssignmentTriggered, false);
       assert.deepEqual(routedTenants, [TENANT]);
+    });
+
+    it("collects every unassigned operator-waiting dialog before draining the queue", async () => {
+      const pages = [
+        Array.from({ length: 200 }, (_, index) => ({ id: `conversation-${index}` })),
+        [{ id: "conversation-200" }]
+      ];
+      const filters: Array<Record<string, unknown>> = [];
+      const conversationIds = await listUnassignedQueueConversationIds({
+        async listConversations(filter) {
+          filters.push(filter);
+          return (pages.shift() ?? []) as any;
+        }
+      }, TENANT);
+
+      assert.equal(conversationIds.length, 201);
+      assert.deepEqual(filters[0]?.statuses, ["new", "queued", "waiting_operator"]);
+      assert.equal(filters[0]?.unassigned, true);
+      assert.equal(filters[1]?.cursor, "conversation-199");
     });
 
     it("marks an operator unavailable on disconnect only when their current status is online", async () => {

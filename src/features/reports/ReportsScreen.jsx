@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useRef, useState } from "react";
-import { CalendarDays, CheckCircle2, ClipboardList, Clock3, Download, Gauge, PlayCircle } from "lucide-react";
+import { CalendarDays, CheckCircle2, ClipboardList, Clock3, Download, FileSpreadsheet, Filter, Gauge, PlayCircle, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import { statusLabels } from "../../app/dialogModel.js";
 import { createScreenStateItems } from "../../app/screenState.js";
 import { reportService } from "../../services/reportService.js";
@@ -101,6 +101,8 @@ export function ReportsScreen({ onBack, onToast, access }) {
   const [routingEventType, setRoutingEventType] = useState("all");
   const [routingOperatorId, setRoutingOperatorId] = useState("all");
   const [routingOperatorOptions, setRoutingOperatorOptions] = useState([]);
+  const [customRangeOpen, setCustomRangeOpen] = useState(false);
+  const [customRange, setCustomRange] = useState({ from: localDateInputValue(29), to: localDateInputValue(0) });
 
   useEffect(() => {
     let ignore = false;
@@ -110,6 +112,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
       setError("");
       const response = await reportService.fetchReportWorkspace({
         channel,
+        ...(period === "Свой период" ? { dateFrom: customRange.from, dateTo: customRange.to } : {}),
         ...reportFilters,
         period,
         timezoneOffsetMinutes: -new Date().getTimezoneOffset()
@@ -147,7 +150,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
     return () => {
       ignore = true;
     };
-  }, [channel, period, reportFilters.operatorId, reportFilters.outcome, reportFilters.queueId, reportFilters.resolutionOutcome, reportFilters.status, reportFilters.teamId, reportFilters.topic]);
+  }, [channel, customRange.from, customRange.to, period, reportFilters.operatorId, reportFilters.outcome, reportFilters.queueId, reportFilters.resolutionOutcome, reportFilters.status, reportFilters.teamId, reportFilters.topic]);
 
   const hasPendingExports = reportExportJobs.some((job) => job.statusKey === "queued" || job.statusKey === "running");
 
@@ -248,6 +251,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
       columns: exportColumns,
       filters: {
         ...reportFilters,
+        ...(period === "Свой период" ? { dateFrom: customRange.from, dateTo: customRange.to } : {}),
         snapshotAt: reportSnapshotAt,
         timezoneOffsetMinutes: -new Date().getTimezoneOffset()
       },
@@ -459,7 +463,7 @@ export function ReportsScreen({ onBack, onToast, access }) {
       actions={
         <>
           <select className="inline-select" value={period} onChange={(event) => setPeriod(event.target.value)} aria-label="Период отчета">
-            {["Сегодня", "Вчера", "7 дней", "30 дней"].map((option) => <option key={option}>{option}</option>)}
+            {["Сегодня", "Вчера", "7 дней", "30 дней", "Свой период"].map((option) => <option key={option}>{option}</option>)}
           </select>
           <button className="primary-action" disabled={!access.canExportReports} onClick={handleCreateExport} title={access.canExportReports ? "Экспорт XLSX" : access.reason}>
             <Download size={17} />
@@ -484,7 +488,36 @@ export function ReportsScreen({ onBack, onToast, access }) {
         ]} />
       ) : null}
 
-      <div className="metric-strip">
+      <section className="report-command-center" aria-label="Операционный обзор поддержки">
+        <header className="report-command-header">
+          <div>
+            <span>Операционный обзор</span>
+            <h2>Контроль работы поддержки</h2>
+            <p>Наблюдайте за нагрузкой, SLA и качеством в одном отчёте.</p>
+          </div>
+          <div className="report-command-actions">
+            <button className="report-filter-button" onClick={() => { setCustomRangeOpen((value) => !value); setPeriod("Свой период"); }} type="button">
+              <CalendarDays size={16} /> Свой период
+            </button>
+            <button className="report-filter-button" onClick={() => document.querySelector(".report-toolbar")?.scrollIntoView({ behavior: "smooth", block: "center" })} type="button">
+              <Filter size={16} /> Фильтры
+            </button>
+            <button className="primary-action" disabled={!access.canExportReports} onClick={handleCreateExport} type="button">
+              <FileSpreadsheet size={17} /> Экспорт
+            </button>
+          </div>
+        </header>
+        {customRangeOpen ? <div className="report-custom-range">
+          <label>С даты<input type="date" value={customRange.from} max={customRange.to} onChange={(event) => setCustomRange((value) => ({ ...value, from: event.target.value }))} /></label>
+          <label>По дату<input type="date" value={customRange.to} min={customRange.from} onChange={(event) => setCustomRange((value) => ({ ...value, to: event.target.value }))} /></label>
+          <p>Графики и KPI пересчитываются для выбранного диапазона; предыдущий период используется для сравнения.</p>
+        </div> : null}
+        <div className="report-kpi-strip">
+          {buildOperationalKpis(headlineMetrics, reportRows, reportChartBlocks).map((metric) => <OperationalKpi {...metric} key={metric.label} />)}
+        </div>
+      </section>
+
+      <div className="metric-strip report-legacy-metrics">
         {headlineMetrics.slice(0, 4).map((metric, index) => {
           const icons = [ClipboardList, CheckCircle2, Clock3, Gauge];
           const Icon = icons[index] ?? ClipboardList;
@@ -889,6 +922,38 @@ export function ReportsScreen({ onBack, onToast, access }) {
         </div>
       </section>
     </ProductScreen>
+  );
+}
+
+function buildOperationalKpis(metrics, rows, chartBlocks) {
+  const byLabel = new Map(metrics.map((item) => [String(item.label).toLocaleLowerCase("ru-RU"), item]));
+  const byRow = new Map(rows.map((item) => [String(item.metric).toLocaleLowerCase("ru-RU"), item]));
+  const find = (...terms) => terms.map((term) => byLabel.get(term) ?? byRow.get(term)).find(Boolean);
+  const metric = (label, fallback, trend = "neutral") => {
+    const source = find(...fallback.terms);
+    return { label, value: source?.value ?? source?.today ?? fallback.value, detail: source?.detail ?? source?.delta ?? fallback.detail, trend };
+  };
+  const response = metric("Первый ответ", { terms: ["первый ответ"], value: "—", detail: "нет данных" }, "good");
+  const sla = metric("SLA", { terms: ["sla без нарушения", "sla"], value: "—", detail: "нет данных" }, "good");
+  const incoming = metric("Входящие", { terms: ["новых", "новые диалоги"], value: "—", detail: "нет данных" }, "up");
+  const resolved = metric("Решено", { terms: ["закрыто", "закрытые диалоги"], value: "—", detail: "нет данных" }, "good");
+  const extra = chartBlocks[0];
+  return [incoming, resolved, response, sla, {
+    label: "Динамика",
+    value: extra?.value ?? "—",
+    detail: extra?.delta ?? "нет данных",
+    trend: extra?.tone === "warn" || extra?.tone === "danger" ? "down" : "neutral"
+  }];
+}
+
+function OperationalKpi({ detail, label, trend, value }) {
+  const Icon = trend === "good" || trend === "up" ? TrendingUp : trend === "down" ? TrendingDown : RefreshCw;
+  return (
+    <article className={`report-kpi ${trend}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small><Icon size={13} /> {detail}</small>
+    </article>
   );
 }
 

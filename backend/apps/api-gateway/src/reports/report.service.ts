@@ -51,6 +51,8 @@ const REPORT_SERVICE = "reportService";
 
 interface ReportWorkspaceFilters extends ConversationReportFilters {
   channel?: string;
+  dateFrom?: string;
+  dateTo?: string;
   period?: string;
   reportType?: string;
   timezoneOffsetMinutes?: number | string;
@@ -342,6 +344,8 @@ export class ReportService {
   }> {
     const options: LiveReportWorkspaceOptions = {
       channel: filters.channel,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
       now: snapshotAt,
       period: filters.period as LiveReportWorkspaceOptions["period"],
       timezoneOffsetMinutes: normalizeTimezoneOffset(filters.timezoneOffsetMinutes)

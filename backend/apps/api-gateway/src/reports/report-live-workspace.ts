@@ -1,6 +1,6 @@
 import type { ConversationMessage, ConversationRecord } from "../conversation/conversation.types.js";
 
-export type LiveReportPeriod = "today" | "yesterday" | "7days" | "30days";
+export type LiveReportPeriod = "today" | "yesterday" | "7days" | "30days" | "custom";
 export type LiveReportTone = "danger" | "ok" | "warn";
 
 export type LiveReportMessage = ConversationMessage;
@@ -19,8 +19,10 @@ export interface LiveReportConversation extends Pick<ConversationRecord, "channe
 
 export interface LiveReportWorkspaceOptions {
   channel?: string;
+  dateFrom?: string;
+  dateTo?: string;
   now?: Date | number | string;
-  period?: LiveReportPeriod | "7_days" | "30_days" | "Сегодня" | "Вчера" | "7 дней" | "30 дней";
+  period?: LiveReportPeriod | "7_days" | "30_days" | "Сегодня" | "Вчера" | "7 дней" | "30 дней" | "Свой период";
   timezoneOffsetMinutes?: number;
 }
 
@@ -115,6 +117,7 @@ const CLOSED_STATUSES = new Set(["closed", "done", "resolved", "completed", "з�
 const PERIOD_LABELS: Record<LiveReportPeriod, string> = {
   "30days": "30 дней",
   "7days": "7 дней",
+  custom: "Свой период",
   today: "Сегодня",
   yesterday: "Вчера"
 };
@@ -134,7 +137,7 @@ export function buildLiveReportWorkspace(
   const period = normalizePeriod(input.period);
   const now = validTimestamp(input.now ?? Date.now(), "now");
   const timezoneOffsetMinutes = finiteOffset(input.timezoneOffsetMinutes);
-  const windows = reportWindows(period, now, timezoneOffsetMinutes);
+  const windows = reportWindows(period, now, timezoneOffsetMinutes, input.dateFrom, input.dateTo);
   const selectedChannel = normalizeChannel(input.channel);
   const facts = input.conversations
     .filter((conversation) => selectedChannel === "all" || sameChannel(conversation.channel, selectedChannel))
@@ -166,6 +169,7 @@ function normalizePeriod(period: LiveReportWorkspaceOptions["period"]): LiveRepo
   if (normalized === "yesterday" || normalized === "вчера") return "yesterday";
   if (normalized === "7days" || normalized === "7 дней") return "7days";
   if (normalized === "30days" || normalized === "30 дней") return "30days";
+  if (normalized === "custom" || normalized === "свой период") return "custom";
   throw new RangeError(`Unsupported report period: ${String(period)}`);
 }
 
@@ -186,9 +190,19 @@ function sameChannel(left: string, right: string): boolean {
   return left.trim().toLocaleLowerCase("ru-RU") === right.toLocaleLowerCase("ru-RU");
 }
 
-function reportWindows(period: LiveReportPeriod, now: number, offsetMinutes: number): { current: DateWindow; previous: DateWindow } {
+function reportWindows(period: LiveReportPeriod, now: number, offsetMinutes: number, dateFrom?: string, dateTo?: string): { current: DateWindow; previous: DateWindow } {
   const today = startOfDay(now, offsetMinutes);
-  const current = period === "today"
+  const customFrom = period === "custom" ? reportDateStart(dateFrom, offsetMinutes) : undefined;
+  const customTo = period === "custom" ? reportDateStart(dateTo, offsetMinutes) : undefined;
+  if (period === "custom" && (customFrom === undefined || customTo === undefined || customTo < customFrom || customTo - customFrom > 365 * DAY_MS)) {
+    throw new RangeError("Custom report date range is invalid.");
+  }
+  const customWindow: DateWindow | undefined = customFrom === undefined || customTo === undefined
+    ? undefined
+    : { from: customFrom, to: customTo + DAY_MS };
+  const current: DateWindow = period === "custom"
+    ? customWindow!
+    : period === "today"
     ? { from: today, to: today + DAY_MS }
     : period === "yesterday"
       ? { from: today - DAY_MS, to: today }
@@ -197,6 +211,12 @@ function reportWindows(period: LiveReportPeriod, now: number, offsetMinutes: num
         : { from: today - 29 * DAY_MS, to: today + DAY_MS };
   const duration = current.to - current.from;
   return { current, previous: { from: current.from - duration, to: current.from } };
+}
+
+function reportDateStart(value: string | undefined, offsetMinutes: number): number | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value ?? "")) return undefined;
+  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(timestamp) ? timestamp - offsetMinutes * 60_000 : undefined;
 }
 
 function startOfDay(timestamp: number, offsetMinutes: number): number {

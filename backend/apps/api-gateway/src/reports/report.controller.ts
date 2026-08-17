@@ -18,6 +18,8 @@ export class ReportController {
   @ApiOkResponse({ description: "Report workspace read model envelope" })
   fetchReportWorkspace(@Query() query: {
     channel?: string;
+    dateFrom?: string;
+    dateTo?: string;
     operatorId?: string;
     outcome?: string;
     period?: string;
